@@ -1,52 +1,114 @@
-# AGENTS.md — shared-db cross-app coordination playbook
+> ⚠️ **Auto-synced — do not hand-edit the copies.**
+>
+> [`u2giants/shared-db`](https://github.com/u2giants/shared-db) is the **single source of truth**. Its entire contents are mirrored into the **`shared-db/` folder** of every consumer repo (CRM, DAM, PM, Directus) on each push to `main`.
+>
+> **Reading this inside a consumer repo's `shared-db/` folder?** It's a read-only copy — edits here are overwritten on the next sync. Change the canonical repo instead.
 
-This repo (`u2giants/shared-db`) is the **single source of truth** for the unified
-POP Supabase database used by four apps: CRM (`popcrm-web`), PM/PIM (`poppim-web`),
-DAM (`popdam3`), and the `popcre/designflow-*` services. Its contents are
-auto-mirrored into each consumer repo's read-only `shared-db/` folder by
-`.github/workflows/sync.yml` on every push to `main`.
+---
 
-Read this before making any shared database, schema, migration, or cross-app
-change. Detailed steps live in [`docs/contribution-workflow.md`](docs/contribution-workflow.md).
+# AGENTS.md — cross-app coordination playbook
 
-## Non-negotiable rules
+This is the operating contract for **every AI session working on any of the four
+apps that share one Supabase database** (PM/PIM `poppim-web`, CRM `popcrm-web`,
+DAM `popdam-web`, and the `directus` backend). Read it before touching code or
+the database. It exists to stop four apps — often driven by separate AI sessions
+— from breaking each other through the one database they all depend on.
 
-1. **All database changes live here**, under `supabase/migrations/` — schemas,
-   tables, columns, RLS, `api` views, RPCs, triggers, indexes, realtime. Never
-   keep permanent DDL only in an app repo, and never hand-write production SQL in
-   the Supabase dashboard.
-2. **One shared project.** Do not create an app-specific Supabase project. Apps
-   share `core` identity/reference objects (company, contact, factory, project,
-   taxonomy). Do not create duplicate `crm.company` / `pim.company` etc. — add a
-   nullable column (or `metadata`) on the canonical table instead, with a comment.
-3. **Branch + PR, never commit straight to `main`.** Use
-   `git checkout -b <app>-<short-description>`, add timestamped
-   `YYYYMMDDHHMMSS_<app>_<desc>.sql` migrations, open a PR.
-4. **The AI owns the merge.** Unlike the consumer app repos (which are `main`-only,
-   no branches), `shared-db` changes go through a branch + PR that the AI author
-   reviews and merges. Merging `main` triggers the sync workflow that propagates
-   the change to every consumer's `shared-db/` folder — so merge deliberately,
-   only after the migrations are validated and (where reachable) applied to the
-   preview branch.
-5. **Preview first, never develop against production.** Apply to the shared
-   preview branch (`tcscehehgeiijilylezv`); production (`qsllyeztdwjgirsysgai`,
-   live PopDAM) is promoted only by replaying committed migration files during an
-   approved window.
-6. **Keep changes additive** (nullable columns, `add column if not exists`, new
-   views) so the shared preview and the other apps stay safe.
-7. **Leave a handoff** under `docs/app-migration-notes/<app>-YYYYMMDD.md`.
+## 0. The owner is not a programmer
 
-## Schema ownership
+The repository owner directs the work and judges results, but does **not** review
+code, manage branches, or merge pull requests. Therefore:
 
-`app` (identity/profiles/files/activity) · `core` (shared companies, contacts,
-factories, taxonomy, SKU refs) · `crm` · `pim` · `dam` · `plm` · `ingest` ·
-`api` (browser-facing views + RPC contracts). Browser code only reaches schemas
-in the PostgREST exposed list (`alter role authenticator set pgrst.db_schemas`);
-today: `public, graphql_public, api, crm, pim, core`.
+- **The AI owns all git mechanics.** Branches, commits, pull requests, and merges
+  are the AI's job from start to finish. Never leave an open PR for the owner to
+  deal with — open it *and* merge it within the same piece of work, once it is
+  safe (see §4).
+- **The owner reviews behavior, not code.** Their feedback is "the board doesn't
+  load," "the dropdown is empty." Translate that into changes yourself.
+- **Surface risk in plain English.** Before anything hard to undo (dropping a
+  column, applying to production, deleting data), explain the risk in one or two
+  plain sentences and ask. Approval for one change does not extend to the next.
 
-## Where to look
+## 1. Two workflows — choose by where you are working
 
-- [`docs/contribution-workflow.md`](docs/contribution-workflow.md) — the exact clone → branch → migrate → validate → preview → PR → merge steps.
-- [`docs/ai-session-instructions/`](docs/ai-session-instructions/) — per-app rewrite guides (CRM, PM/PIM) and the shared branch workflow.
-- [`docs/unified-supabase-schema-map.md`](docs/unified-supabase-schema-map.md) — canonical entity/table ownership.
-- [`supabase/migrations/`](supabase/migrations/) — the migration package itself.
+| Where | Workflow | Why |
+|---|---|---|
+| **An app repo** (`poppim-web`, `popcrm-web`, `popdam-web`, `directus`) | Commit straight to **`main`. No branches.** Build must pass, then push; CI deploys. | One app, one owner, a deploy you can watch. Branches add ceremony with no safety gain. Fix-forward or revert on `main`. |
+| **This repo** (`shared-db`) | **Branch + PR, and the AI merges it** once the §4 checklist passes. | All four apps read these tables. A bad change breaks everyone at once. The PR is a safety checkpoint and an undo button — not paperwork for the owner. |
+
+## 2. Why `shared-db` is the dangerous one
+
+Every app reads and writes the **same tables in the same Supabase project**. A
+single schema change here can break an app that a different session built months
+ago. The database has no "just this app" — it is always shared. That is why the
+four rules below are non-negotiable for any database change.
+
+## 3. The four anti-collision rules (shared database)
+
+1. **One schema change in flight at a time.** Before starting database work,
+   check whether another change is already in progress (§5). If so, finish or
+   land that one first, or coordinate with the owner. Two simultaneous schema
+   edits are the number-one cause of a broken shared database.
+2. **Preview database first. Production never receives untested schema.** Apply
+   every migration to the preview branch (`tcscehehgeiijilylezv`), prove it
+   works, *then* promote to production (`qsllyeztdwjgirsysgai`).
+3. **Additive by default (expand, then contract).** Adding a column or table
+   cannot break another app. **Renaming or dropping** one that another app reads
+   *will*. Default to additive changes. Only rename/drop after explicit owner
+   sign-off and a checked deprecation across all four apps.
+4. **New timestamped migration files only.** Each change is a new
+   `YYYYMMDDHHMMSS_*.sql` file. Never edit a migration that has already been
+   applied anywhere — that is how two sessions silently clobber each other.
+
+## 4. The `shared-db` merge protocol (the checklist the AI runs)
+
+Merge a `shared-db` PR **only when every item is true**:
+
+1. `scripts/check-sql.sh` passes.
+2. `supabase db push --dry-run` against the preview branch is clean (only the
+   intended changes, no surprise drops/renames).
+3. The migration is applied to the **preview** branch and works there.
+4. Every app that depends on the change has been tested against preview and the
+   owner has confirmed the behavior is correct.
+5. The change is additive, or any removal was explicitly approved.
+
+Then: merge to `main` (this auto-syncs the `shared-db/` folder into all apps) and
+promote to **production only in an approved window**. Docs-only PRs (no schema
+change) need just items 1 and "it reads correctly" — merge them promptly.
+
+## 5. How to tell if a change is already in flight
+
+Before starting database work, run these and read the result:
+
+```bash
+gh pr list                      # open shared-db PRs
+git branch -a && git ls-remote  # in-progress branches
+ls supabase/migrations          # files not yet applied to production
+git status --short              # uncommitted migration files in the working tree
+```
+
+If anything looks like in-progress database work, **stop and serialize** — land
+it (or ask the owner) before adding your own schema change.
+
+## 6. When two apps need conflicting database changes
+
+Serialize, do not parallelize. Land one change, let it sync, test it, then start
+the next. Where possible, prefer one **additive** change that satisfies both apps
+rather than two competing edits. If they genuinely conflict, explain the trade-off
+to the owner in plain English and let them choose order.
+
+## 7. Project references
+
+```text
+Preview project ref:  tcscehehgeiijilylezv   (Supabase branch "shared-db-schema-rehearsal")
+Production project ref: qsllyeztdwjgirsysgai
+```
+
+Never commit anon keys, service-role keys, database passwords, or `.env` files.
+
+## 8. Where to read more
+
+- App rewrite guides: [`docs/ai-session-instructions/`](docs/ai-session-instructions/README.md)
+- Shared branch workflow: [`docs/ai-session-instructions/shared-supabase-branch-workflow.md`](docs/ai-session-instructions/shared-supabase-branch-workflow.md)
+- Schema ownership map: [`docs/unified-supabase-schema-map.md`](docs/unified-supabase-schema-map.md)
+- Migration risks: [`docs/unified-supabase-migration-gaps.md`](docs/unified-supabase-migration-gaps.md)

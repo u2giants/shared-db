@@ -4,7 +4,6 @@ Use these instructions when separate AI sessions are rewriting app frontends fro
 
 Start with:
 
-- [Contribution workflow](../contribution-workflow.md) — the rule for **all** apps: database changes live in this repo, contributed via branch + PR, applied to preview first. Read this before adding any migration.
 - [Shared database vision](../shared-database-vision.md)
 - [Shared Supabase branch workflow](shared-supabase-branch-workflow.md)
 
@@ -12,6 +11,7 @@ Then use the app-specific guide:
 
 - [CRM / `popcrm-web`](popcrm-web-supabase-migration.md)
 - [PM/PIM / `poppim-web`](poppim-web-supabase-migration.md)
+  - Full execution plan (phased, standalone): [poppim-web-supabase-migration-plan.md](poppim-web-supabase-migration-plan.md)
 
 The shared preview branch is:
 
