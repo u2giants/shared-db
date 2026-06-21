@@ -12,8 +12,21 @@ Planning and migration repo for the unified POP shared database on Supabase.
 
 This repo holds schema mapping, relationship design, migration gaps, Supabase migrations, branch verification notes, and cutover preparation for consolidating DAM, CRM, PM, and the operational PLM data needed by those apps into one Supabase project.
 
+## Database Changes — Read This First
+
+**Every app puts its database changes here, never in the app repo.** Schemas,
+tables, columns, RLS, `api` views, RPCs, triggers, indexes, and realtime config
+all live in `supabase/migrations/` in this repo, contributed via a branch + Pull
+Request, applied to the shared **preview branch** first, and promoted to
+production only by replaying the committed migration files.
+
+See **[Contribution workflow](docs/contribution-workflow.md)** for the exact
+clone → branch → migrate → validate → preview → PR steps that all four apps
+(CRM, PM/PIM, DAM, and the `designflow-*` services) must follow.
+
 ## Current Documents
 
+- [Contribution workflow](docs/contribution-workflow.md) - how every app contributes database changes (branch + PR; migrations live here).
 - [Unified Supabase schema map](docs/unified-supabase-schema-map.md) - canonical entity/table ownership map across DAM, CRM, PM, and PLM.
 - [Shared database vision](docs/shared-database-vision.md) - the grander intention: one shared Supabase database for DAM, CRM, PM/PIM, and PLM.
 - [Unified Supabase relationships](docs/unified-supabase-relationships.md) - crossover relationships, join strategy, realtime boundaries, and browser-facing API contracts.
