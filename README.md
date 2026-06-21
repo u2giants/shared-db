@@ -10,6 +10,18 @@ This repo holds schema mapping, relationship design, migration gaps, and cutover
 - [Unified Supabase relationships](docs/unified-supabase-relationships.md) - crossover relationships, join strategy, realtime boundaries, and browser-facing API contracts.
 - [Unified Supabase migration gaps](docs/unified-supabase-migration-gaps.md) - duplicates, conflicts, risky tables, missing links, and migration-order risks.
 - [Supabase migration preparation](docs/supabase-migration-prep.md) - rehearsal plan for moving the current Directus-owned Postgres data into Supabase.
+- [Schema implementation notes](docs/implementation/schema-implementation-notes.md) - what the migration package implements and what remains intentionally unresolved.
+
+## Migration Package
+
+The first-pass DDL package lives in [`supabase/migrations`](supabase/migrations):
+
+- `20260621000100_foundation.sql`
+- `20260621000200_app_core.sql`
+- `20260621000300_domain_tables.sql`
+- `20260621000400_api_rls_realtime.sql`
+
+These migrations are for disposable rehearsal targets first. Do not apply them to the live project until source dumps, dedupe rules, RLS tests, and cutover order are approved.
 
 ## Target
 
