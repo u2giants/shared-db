@@ -1,8 +1,8 @@
 # Shared DB
 
-Planning repo for the unified POP shared database on Supabase.
+Planning and migration repo for the unified POP shared database on Supabase.
 
-This repo holds schema mapping, relationship design, migration gaps, and cutover preparation notes for consolidating DAM, CRM, PM, and the operational PLM data needed by those apps into one Supabase project.
+This repo holds schema mapping, relationship design, migration gaps, Supabase migrations, branch verification notes, and cutover preparation for consolidating DAM, CRM, PM, and the operational PLM data needed by those apps into one Supabase project.
 
 ## Current Documents
 
@@ -11,6 +11,7 @@ This repo holds schema mapping, relationship design, migration gaps, and cutover
 - [Unified Supabase migration gaps](docs/unified-supabase-migration-gaps.md) - duplicates, conflicts, risky tables, missing links, and migration-order risks.
 - [Supabase migration preparation](docs/supabase-migration-prep.md) - rehearsal plan for moving the current Directus-owned Postgres data into Supabase.
 - [Schema implementation notes](docs/implementation/schema-implementation-notes.md) - what the migration package implements and what remains intentionally unresolved.
+- [AI session instructions](docs/ai-session-instructions/README.md) - handoff guides for CRM and PM rewrite sessions using the shared preview branch.
 
 ## Migration Package
 
@@ -35,6 +36,8 @@ Preview project ref: tcscehehgeiijilylezv
 
 Verification notes are in [docs/verification/preview-branch-20260621.md](docs/verification/preview-branch-20260621.md).
 
+AI sessions migrating CRM and PM should use [docs/ai-session-instructions/shared-supabase-branch-workflow.md](docs/ai-session-instructions/shared-supabase-branch-workflow.md), then their app-specific guide.
+
 ## Target
 
 Supabase project:
@@ -43,4 +46,4 @@ Supabase project:
 https://qsllyeztdwjgirsysgai.supabase.co
 ```
 
-No migrations or production writes are represented by these documents. They are planning artifacts for later implementation.
+The shared schema migrations have been applied to the preview branch only. They have not been applied to the production/default project.
