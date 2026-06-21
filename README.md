@@ -23,6 +23,18 @@ The first-pass DDL package lives in [`supabase/migrations`](supabase/migrations)
 
 These migrations are for disposable rehearsal targets first. Do not apply them to the live project until source dumps, dedupe rules, RLS tests, and cutover order are approved.
 
+## Preview Branch
+
+The migration package has been applied to a persistent Supabase preview branch for review:
+
+```text
+Parent project: qsllyeztdwjgirsysgai
+Branch name: shared-db-schema-rehearsal
+Preview project ref: tcscehehgeiijilylezv
+```
+
+Verification notes are in [docs/verification/preview-branch-20260621.md](docs/verification/preview-branch-20260621.md).
+
 ## Target
 
 Supabase project:
