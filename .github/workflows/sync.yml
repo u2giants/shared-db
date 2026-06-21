@@ -1,0 +1,80 @@
+# Syncs the entire root of this repo (u2giants/shared-db) into the
+# `shared-db/` subfolder of each consumer repo, on every push to main.
+#
+# - Mirror semantics: the destination subfolder becomes an exact copy of this
+#   repo's root (files deleted here are deleted there). `.git` and `.github`
+#   are never copied.
+# - Direct push to each target's default branch (main or develop, auto-detected
+#   by `git clone`).
+# - Auth: a classic PAT with `repo` scope, stored as the `SYNC_TOKEN` secret.
+#
+# To change the destination folder, edit DEST_SUBDIR below.
+# To add/remove a consumer, edit the matrix.target list.
+
+name: Sync shared-db to consumers
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-shared-db
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - u2giants/popcrm-web
+          - u2giants/directus
+          - u2giants/popdam3
+          - u2giants/poppim-web
+          - popcre/designflow-bff
+          - popcre/designflow-frontend
+          - popcre/designflow-backend
+          - popcre/designflow-item-master
+          - popcre/designflow-tracking
+          - popcre/designflow-data-syncing
+    env:
+      DEST_SUBDIR: shared-db
+    steps:
+      - name: Checkout canonical source
+        uses: actions/checkout@v4
+        with:
+          path: source
+          fetch-depth: 1
+
+      - name: Clone target repo
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          git clone --depth 1 \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ matrix.target }}.git" \
+            target
+
+      - name: Mirror source root into destination subfolder
+        run: |
+          mkdir -p "target/${DEST_SUBDIR}"
+          rsync -a --delete \
+            --exclude='.git' \
+            --exclude='.github' \
+            source/ "target/${DEST_SUBDIR}/"
+
+      - name: Commit and push if changed
+        working-directory: target
+        run: |
+          git config user.name "shared-db-sync[bot]"
+          git config user.email "shared-db-sync@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes for ${{ matrix.target }} — already up to date."
+            exit 0
+          fi
+          git commit -m "chore: sync shared-db @ ${{ github.repository }}@${GITHUB_SHA::7}"
+          git push
