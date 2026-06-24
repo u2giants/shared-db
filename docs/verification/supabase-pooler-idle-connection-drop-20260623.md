@@ -32,9 +32,22 @@ reintroduces the stall.
 - Confirmed: **designflow-tracking** (PM/PIM tracking service). Implementation:
   `models/db.js`; guarded by `tests/unit/db.migration.test.js`; app commit `6d22d93` on
   `sandbox-albert`.
-- Likely applicable to any other app backend using a persistent Sequelize/`pg` pool against the
-  shared Supabase (CRM, DAM, Directus/PLM workers). **Unverified** for those — check their pool
-  config if they exhibit first-request-after-idle latency spikes.
+- Audited 2026-06-23:
+  - `u2giants/popcrm-web` is a static browser app. It uses `@supabase/supabase-js` in
+    `src/lib/supabase.ts` and has no Sequelize/`pg` dependency or server-side Postgres pool in
+    the app repo.
+  - `u2giants/poppim-web` is a static browser app. It uses `@supabase/supabase-js` in
+    `src/lib/supabase.ts` and has no Sequelize/`pg` dependency or server-side Postgres pool in
+    the app repo.
+  - `u2giants/popdam3` uses `@supabase/supabase-js` for the browser, Railway worker, bridge
+    agent, Realtime watcher, and Supabase Edge Functions. No Sequelize/`pg` dependency or
+    persistent direct-Postgres pool was found in the scanned PopDAM runtime packages.
+  - `u2giants/directus` has one direct `pg` caller in `pm-system/sync-plm-masters.mjs`, but it
+    creates a single `pg.Client`, connects to the local Directus Postgres URL from
+    `pm-system/run-plm-sync.sh`, runs one transaction, and calls `client.end()`. It is not a
+    long-lived shared-Supabase pool and is not exposed to this specific idle pooler failure mode.
+- Still applicable to any future backend that uses a persistent Sequelize/`pg` pool against the
+  shared Supabase pooler. Audit new workers/services against the settings above before deploying.
 
 ## Verification
 - Diagnosed from Cloud Run `httpRequest.latency` logs (bimodal warm/cold pattern) on
@@ -42,6 +55,10 @@ reintroduces the stall.
 - Fix deployed to sandbox tracking revision `…-00020-89v`; full unit suite green (89/89).
 - Not yet observed in production for tracking because the `/sample` backend is not on `develop`
   yet (separate prod-merge handoff in the app repo).
+- Cross-app audit performed from fresh local clones under `.audit-repos/` on 2026-06-23:
+  `u2giants/popcrm-web`, `u2giants/poppim-web`, `u2giants/popdam3`, and `u2giants/directus`.
+  Searches covered `sequelize`, `pg`, `new Pool`, `new Client`, `DATABASE_URL`, pool settings,
+  keep-alive/timeouts, and Supabase clients in runtime source paths and package manifests.
 
 ## How to verify elsewhere
 Pull the service's Cloud Run request logs and look for a rarely-hit endpoint whose latency is
