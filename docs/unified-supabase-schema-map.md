@@ -53,7 +53,7 @@ Status values:
 |---|---|---|---|---|
 | People and auth | PopDAM `profiles`, `user_roles`, `invitations`, `app_access`; PM/CRM `directus_users`; PLM `users`, `Roles`, `RolePermissions`, `UIElements`, `auth_token`, `quote_auth_token` | `app.profile`, `app.role`, `app.user_role`, `app.app_access` | shared | Supabase Auth should own identity. PLM and Directus users need cross-reference tables, not copied auth systems. |
 | Companies and customers | PM/CRM `retailer`, `ingested_domains`; PLM `customers`, `externalCustomer`; DAM `style_groups.customer`, `assets.customer`, `prod_order_headers_current.customer_*` | `core.company`, `core.company_source_ref` | shared | One canonical company/customer model. Preserve PLM customer ids, Directus ids, and DAM path customer strings as source refs. |
-| Contacts and buyers | PM/CRM `buyer`, `ingested_contact`; CRM department primary buyers; PLM users/vendors where acting as contacts | `core.contact`, `core.contact_company` | shared | Buyer/contact should be unified. Keep role/scope/title fields as CRM attributes. CRM browser reads use `api.crm_contact_list`; segmented Contacts tabs use `api.crm_contact_segment_list` / `api.crm_contact_segment_counts` so the CRM can load customer, department, and triage contacts independently. |
+| Contacts and buyers | PM/CRM `buyer`, `ingested_contact`; CRM department primary buyers; PLM users/vendors where acting as contacts | `core.contact`, `core.contact_company` | shared | Buyer/contact should be unified. Contact identity fields live on `core.contact`; CRM account relationship fields such as department, contact type, and scope live on `core.contact_company` and are edited through `api.crm_update_contact` clear flags. CRM browser reads use `api.crm_contact_list`; segmented Contacts tabs use `api.crm_contact_segment_list` / `api.crm_contact_segment_counts` so the CRM can load customer, department, and triage contacts independently. |
 | Departments/accounts | CRM `crm_department`; PM project/buyer context; PLM customer divisions where relevant | `crm.department` plus FK to `core.company` | app-owned with shared FK | CRM owns operational departments. PM may read department context through `api` views later. |
 | Licensors, properties, characters | DAM `licensors`, `properties`, `characters`; PM `licensor`, `property`; PLM `licenseList`, `properties_and_characters`, `property_character_associations`, `item_character_associations` | `core.licensor`, `core.property`, `core.character`, `core.character_ref` | shared | This is one of the biggest duplicate areas. DAM's existing taxonomy should be matched to PLM/PM by external ids/codes/name aliases. |
 | Product taxonomy | DAM `product_categories`, `product_types`, `product_subtypes`, `product_category_predictions`; PM `product_type`; PLM `ProductCategory`, `itemType`, `merchGroup`, `merchGroupHeaders`, MG fields | `core.product_category`, `core.product_type`, `core.product_subtype`, `core.merch_group` | shared | Keep PLM MG hierarchy and DAM category predictions. Predictions remain audit/support data. |
@@ -134,6 +134,14 @@ every `core.contact` row merely to decide which tab a row belongs in:
 This is a shared database contract. If another app needs different contact
 classification, add a separate documented API view instead of changing these CRM
 segment meanings in place.
+
+CRM contact writes are also a shared database contract. The browser should use
+`api.crm_update_contact` for relationship edits because the RPC owns the split
+between `core.contact` fields and `core.contact_company` fields. After migration
+`20260623024500_crm_update_contact_clear_relationship_fields.sql`, clearing
+company, department, contact type, or scope requires the corresponding
+`p_clear_*` flag; passing `null` alone means "leave unchanged" for backward
+compatibility.
 
 ## Current PM Inventory
 

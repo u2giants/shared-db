@@ -22,6 +22,8 @@ This repo holds schema mapping, relationship design, migration gaps, Supabase mi
 - [Supabase migration preparation](docs/supabase-migration-prep.md) - rehearsal plan for moving the current Directus-owned Postgres data into Supabase.
 - [Schema implementation notes](docs/implementation/schema-implementation-notes.md) - what the migration package implements and what remains intentionally unresolved.
 - [AI session instructions](docs/ai-session-instructions/README.md) - handoff guides for CRM and PM rewrite sessions using the shared preview branch.
+- [CRM migration note](docs/app-migration-notes/popcrm-web-20260621.md) - CRM frontend Supabase wiring, contact segment API, and the pending contact relationship clear-flag RPC migration.
+- [PM/PIM migration follow-up note](docs/app-migration-notes/poppim-web-20260623.md) - 2026-06-23 production cutover follow-up: PM frontend Supabase wiring, schemas/tables used by screen, and the `app` PostgREST exposure fix.
 
 ## Migration Package
 

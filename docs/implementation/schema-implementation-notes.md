@@ -13,6 +13,8 @@ These migrations implement the first migration-ready version of the unified Supa
 | `supabase/migrations/20260621151024_domain_tables.sql` | DAM, CRM, PIM/PM, PLM, ingest, and cross-domain bridge tables. |
 | `supabase/migrations/20260621151155_api_rls_realtime.sql` | Browser-facing `api` views, RLS scaffolding, grants, and selected realtime publication tables. |
 | `supabase/migrations/20260622043000_crm_contact_segments.sql` | CRM Contacts segmented API: preserves `api.crm_contact_list`, adds `api.crm_contact_segment_list`, adds `api.crm_contact_segment_counts`, and indexes the primary contact-company relationship lookup. |
+| `supabase/migrations/20260623024500_crm_update_contact_clear_relationship_fields.sql` | Replaces `api.crm_update_contact` with explicit clear flags for CRM relationship fields on `core.contact_company`; preserves the guarded core-contact update path. |
+| `supabase/migrations/20260623082005_expose_app_schema_to_postgrest.sql` | Codifies the production PostgREST exposed-schema fix so browser clients can query `app.*` support tables through Supabase REST. |
 
 ## Production Migration History
 
@@ -47,6 +49,11 @@ the production ledger.
 - Stable first-pass `api` views for frontend contracts.
 - CRM-specific contact segment contracts so popcrm-web can fetch customer,
   department, and triage contacts separately while lazy-loading All.
+- CRM contact relationship edit semantics in `api.crm_update_contact`: name,
+  email, phone, title, LinkedIn, and salesperson update `core.contact`, while
+  company, department, contact type, and scope update the primary
+  `core.contact_company` buyer relationship and can be intentionally cleared
+  through explicit `p_clear_*` flags.
 - RLS enabled across app/domain tables, with conservative policies.
 - Realtime publication candidates for user-facing movement, not worker/admin queues.
 
@@ -84,3 +91,30 @@ The policies are a scaffold, not final authorization.
 - Worker queues, raw ingest, source refs, and admin helper tables are admin-only or service-role-only.
 
 Before production use, add field-safe views for pricing/cost data and implement user-to-factory/vendor mapping before granting vendor product/order access.
+
+## Operational Config Notes
+
+### Browser-exposed schemas must include `app`
+
+What changed:
+The 2026-06-23 PM frontend production follow-up found production PostgREST
+configured with `pgrst.db_schemas=public, graphql_public, api, crm, pim, core`.
+That made `app` invisible to browser Supabase clients even though PM uses
+`app.comment`, `app.activity`, `app.notification`, and `app.profile` as shared
+collaboration/support tables. Production was manually updated to include `app`
+and PostgREST was reloaded. The durable follow-up migration is
+`20260623082005_expose_app_schema_to_postgrest.sql`.
+
+Why:
+The shared schema intentionally keeps collaboration records in `app`, and the PM
+frontend now reads those records directly through the authenticated browser
+client. Schema usage grants and RLS do not help if PostgREST rejects the schema
+before the query reaches PostgreSQL policies.
+
+Future sessions should:
+Keep `scripts/check-sql.sh` enforcing that the latest migration touching
+`pgrst.db_schemas` includes `public, graphql_public, api, crm, pim, core, app`.
+When a frontend starts using another non-`public` schema, update the migration
+and static check together. Do not grant `anon` schema usage just to fix
+visibility; PM is auth-gated, and the verified production state kept `anon`
+denied while `authenticated` and `service_role` had usage.

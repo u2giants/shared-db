@@ -26,6 +26,30 @@ Do not connect the rewritten PM frontend to production until the preview branch 
 
 The target is one shared enterprise database for DAM, CRM, PM/PIM, and PLM, not a PM-specific Supabase backend.
 
+## 2026-06-23 Production Follow-Up
+
+What changed:
+`poppim-web` has been cut over to the production shared Supabase project and no
+longer uses Directus for runtime PM data/auth. The 2026-06-23 follow-up finished
+frontend wiring for generated `pim` types, removed `pim()` type escape hatches,
+backed Schedule/Notes/People with Supabase data, and verified build, TypeScript,
+lint, and whitespace checks in the app repo.
+
+Why:
+The first Supabase cutover left a few frontend screens and generated types short
+of the real production schema. It also revealed that `app` support tables were
+not exposed through production PostgREST, so direct browser reads of
+`app.comment`, `app.activity`, `app.notification`, and `app.profile` failed
+before RLS could evaluate them.
+
+Future sessions should:
+Use [the dated app note](../app-migration-notes/poppim-web-20260623.md) as the
+current PM frontend contract summary. If PM needs additional joined board/detail
+fields, prefer improving `api` views/RPCs in this repo over adding more
+frontend-side stitching. The current frontend temporarily merges
+`api.pm_product_board` rows with `pim.product.metadata` because the API view does
+not expose all metadata needed by the migrated UI.
+
 ## Database Source Of Truth
 
 All PM database changes go in:
@@ -171,6 +195,16 @@ Supabase anon key: get from the preview branch dashboard or approved secret stor
 ```
 
 Do not commit Supabase anon keys, service-role keys, or `.env` files.
+
+Generate PM frontend types from all schemas the app may reference:
+
+```bash
+supabase gen types typescript --project-id qsllyeztdwjgirsysgai --schema app,core,pim,crm,dam,plm,ingest,api > /worksp/poppim-web/src/lib/database.types.ts
+```
+
+Do not hand-write or locally patch generated database types. If the generated
+types are missing a schema, regenerate with the schema list above before adding
+casts in app code.
 
 ## PM Production Promotion
 

@@ -36,6 +36,7 @@ This document lists conflicts, missing links, risky tables, and decisions requir
 | Service-role functions | DAM workers and PLM sync jobs use privileged operations. | Browser clients must never call worker/admin RPCs directly unless RLS and role checks are explicit. |
 | Queue tables | DAM render/processing queues and helper tokens are operational state. | Keep admin/service-only. Do not put queues in shared `api` views except status summaries. |
 | Auth migration | Directus, PopDAM Supabase Auth, and PLM JWT users differ. | Supabase Auth should be the target identity layer; import app profiles and source refs separately. |
+| PostgREST exposed schemas | Browser clients can have valid grants/RLS but still fail with `Invalid schema` if the target schema is not in `pgrst.db_schemas`. This broke PM reads of `app.*` support tables during the 2026-06-23 production follow-up. | Treat exposed schemas as deployment/config contract. Verify `api`, app domain schemas, `core`, and `app` are exposed where frontends call them, then reload PostgREST config/schema cache. |
 | Object storage | DAM and PLM use DigitalOcean Spaces; PM has Spaces URLs from Directus migrations. | Do not move storage during schema migration. Preserve URLs and bucket metadata first. |
 | Realtime | Cross-app instant updates require one project, but not every table should be realtime-enabled. | Enable realtime only for user-facing state: PM board/workflow, CRM opportunity/task, DAM asset/style-group linking, selected progress/status tables. |
 
@@ -95,4 +96,4 @@ Before migration SQL is written:
 - Define exact RLS roles and pricing/vendor field exposure rules.
 - Define source-reference table structures and matching rules for company/contact/taxonomy/SKU/factory/order.
 - Run dry-run dedupe reports before merging any shared rows.
-
+- Verify PostgREST exposed schemas for every browser-facing schema, including `app` when frontend screens read comments, activity, notifications, or profiles directly.

@@ -139,6 +139,26 @@ Use these schemas:
 
 Do not create duplicate customer/contact/product/factory/taxonomy tables inside `crm` or `pim`. Use `core` FKs.
 
+## PostgREST Exposed Schema Checks
+
+Any schema queried by browser code through `supabase.schema('<schema>')` must be
+present in PostgREST's exposed schema list for the target project. For the
+current CRM/PM cutover, browser-facing schemas include `api`, `crm`, `pim`,
+`core`, and `app`.
+
+Before declaring an app rewrite ready, verify both preview and production:
+
+```sql
+select rolconfig
+from pg_roles
+where rolname = 'authenticator';
+```
+
+Then probe the REST contract with the matching profile header, for example
+`Accept-Profile: app` for `app.comment` or `app.profile`. If a schema is missing,
+fix the durable Supabase/PostgREST config path and reload PostgREST; do not hide
+the problem with frontend casts or table-specific workarounds.
+
 ## Cross-App Realtime Rule
 
 For one frontend action to instantly affect another frontend, write to canonical shared rows in this one Supabase project.

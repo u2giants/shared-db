@@ -15,10 +15,14 @@ branch is the one remaining step (see Known Gaps).
 | `20260621151359_crm_api_rpcs.sql` | `current_user_profile()` identity contract; guarded `crm_update_account` / `crm_update_contact` (core writes) and `crm_set_opportunity_stage`. |
 | `20260621151419_crm_rls_realtime.sql` | `profile_select_staff` policy (assignee/owner display); realtime for meeting_note/department/approval; **exposes `api, crm, pim, core` schemas to PostgREST**. |
 | `20260622043000_crm_contact_segments.sql` | Preserves `api.crm_contact_list`, adds explicit CRM access gating, and adds `api.crm_contact_segment_list` / `api.crm_contact_segment_counts` so the Contacts page can load Customer, Department, and Triage slices without eager-loading All contacts. |
+| `20260623024500_crm_update_contact_clear_relationship_fields.sql` | Replaces `api.crm_update_contact` with explicit clear flags for relationship-owned fields (`company`, `crm_department`, `contact_type`, `scope`) so browser edits can clear values instead of relying on `coalesce` semantics. |
 
-Validated by applying the full chain (4 baseline + these 5) to a throwaway
-Postgres 15 with Supabase auth stubs: all apply cleanly; integrity trigger,
-views, and RPC guards verified functionally.
+The original CRM chain through `20260622043000_crm_contact_segments.sql` was
+validated by applying it to a throwaway Postgres 15 with Supabase auth stubs:
+integrity trigger, views, and RPC guards verified functionally. The
+`20260623024500_crm_update_contact_clear_relationship_fields.sql` follow-up was
+created after that validation run and passed `scripts/check-sql.sh`; preview or
+production apply verification remains pending.
 
 ## Tables / views / RPCs per CRM screen
 
@@ -27,7 +31,7 @@ views, and RPC guards verified functionally.
 | Overview | `api.crm_account_overview`, derived from the lists below | — |
 | Accounts (triage) | `api.crm_account_list` (all companies) | `api.crm_update_account` RPC |
 | Accounts pickers (customers) | `api.crm_account_list` filtered `customer_status in (ACTIVE_CUSTOMER, POTENTIAL_CUSTOMER)` | — |
-| Contacts | `api.crm_contact_segment_list`, `api.crm_contact_segment_counts`; `api.crm_contact_list` remains the generic contact contract | `api.crm_update_contact` RPC |
+| Contacts | `api.crm_contact_segment_list`, `api.crm_contact_segment_counts`; `api.crm_contact_list` remains the generic contact contract | `api.crm_update_contact` RPC. After `20260623024500_crm_update_contact_clear_relationship_fields.sql`, relationship edits must send account context plus explicit `p_clear_*` booleans when clearing relationship-owned fields. |
 | Departments | `api.crm_department_list` | `crm.department` (direct) |
 | Pipeline / Programs | `api.crm_opportunity_list` | `crm.opportunity` (direct), `api.crm_set_opportunity_stage` |
 | Email Routing | `api.crm_email_routing_queue` | `crm.email_message` (direct), `crm.ignore_rule` |
@@ -71,6 +75,30 @@ Do not add server-side ordering by derived fields such as contact `name` to thes
 views or frontend queries. The previous Supabase cutover incident timed out on a
 paged browser load when derived-field ordering/filtering was pushed through
 PostgREST. Fetch the segment slice and sort/filter within the browser table.
+
+## Contact relationship edit contract
+
+What changed:
+On 2026-06-23, `popcrm-web` commit `5e2622a` changed Contacts relationship edits
+to send the current or inferred account id to `api.crm_update_contact`, and to
+send explicit clear flags for relationship fields. The matching shared-db
+migration is `20260623024500_crm_update_contact_clear_relationship_fields.sql`.
+
+Why:
+The Directus `buyer` collection collapsed into `core.contact` plus
+`core.contact_company`. Name/email/phone/title/LinkedIn/salesperson are contact
+attributes, but company, CRM department, contact type, and scope are relationship
+attributes. The old RPC used `coalesce`, so `null` meant "leave unchanged" and
+the frontend could not clear department/type/scope or remove a primary account
+relationship.
+
+Future sessions should:
+Keep relationship edits on `api.crm_update_contact` instead of direct
+`core.contact` writes. When changing `crm_department_id` without an account, infer
+the account from `crm.department.retailer_id`. When clearing a relationship-owned
+field, send the matching `p_clear_*` flag; sending only `null` is not enough.
+Until the migration is applied to an environment, the frontend fallback can still
+call the older RPC signature, but clear behavior will remain unavailable there.
 
 ## RLS changes
 
@@ -135,6 +163,18 @@ These migrations are present in the production Supabase migration ledger:
 20260622043000_crm_contact_segments.sql    (Contacts segmented API)
 ```
 
+Pending as of the 2026-06-23 CRM follow-up:
+
+```text
+20260623024500_crm_update_contact_clear_relationship_fields.sql
+```
+
+That migration exists in this repo and passed `scripts/check-sql.sh`, but it was
+not verified as applied to production in the session that created it. The
+popcrm-web frontend commit `5e2622a` is backward compatible with the old RPC
+signature; production clear behavior for contact relationship fields starts only
+after this migration is applied and PostgREST has reloaded its schema cache.
+
 The production project also has older PopDAM migration versions. This repo keeps
 no-op marker files for those legacy versions so Supabase CLI can run future
 `supabase db push --dry-run` checks normally.
@@ -145,7 +185,7 @@ no-op marker files for those legacy versions so Supabase CLI can run future
 - **Phase 5 identity**: configure the Azure provider in Supabase Auth and seed `app.profile` / `app.user_role` / `app.app_access` for CRM users — without a provisioned profile a signed-in user has no CRM access and lists come back empty.
 - **Data import + reconciliation** (Phase 7) and **role-based RLS tests** (Phase 6) still to run against preview.
 - `crm.note.opportunity_id` is `on delete cascade` (baseline) and `crm.note` has no `factory`; meeting attendees have no shared table (stored in `meeting_note.metadata`).
-- RPC `coalesce` semantics mean passing `null` does not clear a contact field (edge case).
+- Contact relationship clear behavior depends on pending migration `20260623024500_crm_update_contact_clear_relationship_fields.sql`; without it, the frontend falls back to the old RPC signature and clear flags are ignored.
 - No CRM screen or worker command still depends on Directus; the Directus worker/backend remain only as read-only rollback.
 
 ## Verification checklist for contact segments

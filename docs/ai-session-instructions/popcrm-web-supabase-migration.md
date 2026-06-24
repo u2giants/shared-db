@@ -55,6 +55,26 @@ Do not create production SQL by hand in the Supabase dashboard. Do not keep perm
 
 If a missing CRM field is needed, add it to the appropriate canonical table with a migration. Do not create a second customer, buyer, project, or factory table in `crm`.
 
+### Contact relationship fields
+
+What changed:
+The CRM migration stores buyer/contact identity in `core.contact`, while account
+membership and CRM relationship attributes live on `core.contact_company`.
+
+Why:
+Directus exposed `buyer` as one collection, but the shared Supabase model splits
+the person from each account relationship. CRM relationship-owned fields include
+company/account, CRM department, contact type, and scope.
+
+Future sessions should:
+Use `api.crm_update_contact` for browser contact edits. Pass the current or
+inferred account id when editing relationship-owned fields, infer the account from
+`crm.department.retailer_id` when a department is chosen first, and use the
+explicit `p_clear_company`, `p_clear_crm_department`, `p_clear_contact_type`, and
+`p_clear_scope` flags from
+`20260623024500_crm_update_contact_clear_relationship_fields.sql` when clearing
+values.
+
 ## Preferred Frontend Contracts
 
 Use browser-facing views/RPCs in `api` when a screen needs joined data.

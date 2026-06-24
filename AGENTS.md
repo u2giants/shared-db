@@ -106,7 +106,49 @@ Production project ref: qsllyeztdwjgirsysgai
 
 Never commit anon keys, service-role keys, database passwords, or `.env` files.
 
-## 8. Where to read more
+## 8. PostgREST exposed schemas are part of the app contract
+
+What changed:
+On 2026-06-23, the PM frontend cutover follow-up verified that production
+PostgREST exposed `api`, `crm`, `pim`, and `core`, but not `app`. Browser reads
+against `app.comment`, `app.activity`, `app.notification`, and `app.profile`
+failed with `Invalid schema: app` until production `pgrst.db_schemas` was
+updated to include `app` and the PostgREST config/schema cache was reloaded.
+
+Why:
+RLS policies and table grants are not enough. Any schema used through
+`supabase.schema('<schema>')` from a browser app must also be listed in
+PostgREST's exposed schemas for that Supabase project.
+
+Future sessions should:
+When adding browser reads/writes to a non-`public` schema, verify
+`pg_roles.authenticator.rolconfig` includes the schema in `pgrst.db_schemas`,
+test the REST contract with the matching `Accept-Profile`, and capture durable
+config changes in `shared-db` migrations/docs instead of relying on app-only
+workarounds. `scripts/check-sql.sh` intentionally checks the latest
+`pgrst.db_schemas` migration so future changes cannot silently drop `app` again.
+
+## 9. CRM contact relationship writes are not plain contact writes
+
+What changed:
+On 2026-06-23, popcrm-web commit `5e2622a` changed contact relationship edits to
+send the current account context and explicit clear flags to
+`api.crm_update_contact`. The matching shared-db migration is
+`20260623024500_crm_update_contact_clear_relationship_fields.sql`.
+
+Why:
+CRM fields such as account, department, contact type, and scope live on
+`core.contact_company`, not only on `core.contact`. A null value can mean "leave
+unchanged" or "clear this relationship field", so the RPC contract needs explicit
+booleans for clears.
+
+Future sessions should:
+Do not replace `api.crm_update_contact` with direct `core.contact` writes for CRM
+relationship edits. Preserve the account context and clear-flag contract, and
+verify the migration is applied before expecting browser edits to clear
+department/type/scope or remove the primary buyer relationship.
+
+## 10. Where to read more
 
 - App rewrite guides: [`docs/ai-session-instructions/`](docs/ai-session-instructions/README.md)
 - Shared branch workflow: [`docs/ai-session-instructions/shared-supabase-branch-workflow.md`](docs/ai-session-instructions/shared-supabase-branch-workflow.md)

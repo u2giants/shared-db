@@ -1,5 +1,19 @@
 # PM/PIM Directus To Shared Supabase Backend Migration Plan
 
+## 2026-06-23 Status Note
+
+This document is the original phased migration plan. `poppim-web` has since
+been cut over to the production shared Supabase project for runtime data/auth.
+Before treating any step here as current work, read the dated follow-up note:
+
+```text
+docs/app-migration-notes/poppim-web-20260623.md
+```
+
+Future sessions should use this plan for historical context, parity checklists,
+and hardening ideas. Do not reintroduce a Directus/Supabase dual-path frontend
+just because earlier phases describe one.
+
 This document is a standalone execution plan for migrating `u2giants/poppim-web`
 from the current Directus backend to the shared enterprise-wide Supabase.com
 database.
@@ -1437,4 +1451,3 @@ The PM migration is complete only when:
 - DAM/PLM/CRM cross-links use canonical shared rows or source refs;
 - Directus is no longer needed for PM runtime;
 - rollback/read-only Directus plan has been executed or retired.
-

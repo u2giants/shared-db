@@ -21,6 +21,14 @@ rg --quiet "create table pim.product" "$migration_dir/20260621151024_domain_tabl
 rg --quiet "create or replace view api.pm_product_board" "$migration_dir/20260621151155_api_rls_realtime.sql"
 rg --quiet "enable row level security" "$migration_dir/20260621151155_api_rls_realtime.sql"
 
+latest_postgrest_schema_migration="$(rg -l "pgrst\\.db_schemas" "$migration_dir" | sort | tail -n 1)"
+if [[ -z "$latest_postgrest_schema_migration" ]]; then
+  echo "No migration configures pgrst.db_schemas." >&2
+  exit 1
+fi
+
+rg --quiet "public, graphql_public, api, crm, pim, core, app" "$latest_postgrest_schema_migration"
+
 if [[ -n "${DATABASE_URL:-}" ]]; then
   command -v psql >/dev/null
   for file in "${required_files[@]}"; do

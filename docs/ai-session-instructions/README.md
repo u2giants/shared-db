@@ -13,6 +13,12 @@ Then use the app-specific guide:
 - [PM/PIM / `poppim-web`](poppim-web-supabase-migration.md)
   - Full execution plan (phased, standalone): [poppim-web-supabase-migration-plan.md](poppim-web-supabase-migration-plan.md)
 
+Session-derived app notes live under [`../app-migration-notes/`](../app-migration-notes/).
+For PM/PIM, read [poppim-web-20260623.md](../app-migration-notes/poppim-web-20260623.md)
+before using the older phased plan, because production has already been cut over
+and the remaining work is follow-up hardening, not an initial Directus dual-path
+rewrite.
+
 The shared preview branch is:
 
 ```text
