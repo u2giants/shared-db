@@ -48,7 +48,10 @@ need to be moved when the customer graduates into ColdLion. The canonical
 rationale and cross-app rules live in `shared-db/docs/shared-database-vision.md`
 → "Customer vs. Company vs. Ingested Domain".
 
-> Migration note: the shared hub was renamed `core.company` → `core.customer`. A
-> temporary `core.company` compatibility view keeps existing reads working, so
-> migrate `src/features/crm/api.ts` references to `core.customer` opportunistically
-> rather than all at once.
+> Migration note: the shared hub was **hard-renamed** `core.company` →
+> `core.customer` (no compatibility view). The CRM frontend is unaffected at
+> runtime because it reads through `api.*` views and RPCs (unchanged names), not
+> `core.company` directly. After the migration lands, regenerate
+> `src/lib/database.types.ts`; fix any compile-time references to the old
+> `core.company` type, and use `is_potential` from `api.crm_account_list` to tell
+> potential from active customers.

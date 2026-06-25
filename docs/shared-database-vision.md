@@ -159,12 +159,15 @@ creating a duplicate. When PLM's full database lands in this Supabase project, t
 ERP customer mirror (`plm.customer_import` today) becomes the authoritative
 `plm.customer` table and the same source-ref linkage carries over unchanged.
 
-> Naming note: the satellite tables `core.company_source_ref` and the
-> `company_id` FK columns keep their names for now to limit rename churn; only the
-> hub table was renamed `core.company` → `core.customer`. A temporary
-> `security_invoker` view named `core.company` exists as a compatibility shim so
-> the four apps can migrate to `core.customer` on their own schedule; it is
-> dropped in a later owner-approved contract migration.
+> Naming note: this was a **hard rename** — there is no object named
+> `core.company` anymore, not even a compatibility view. The table rename carries
+> its FKs, indexes, RLS, grants, and rowtype automatically; views that referenced
+> it follow by object id; only the two PL/pgSQL functions that named it
+> (`api.crm_update_account`, `plm.import_master_data`) were recreated against
+> `core.customer`. Apps keep working because they read through `api.*` views and
+> RPCs (names unchanged), not `core.company` directly. The satellite table
+> `core.company_source_ref` and the `company_id` FK columns keep their names for
+> now to limit churn; only the hub table was renamed.
 
 ## Realtime Intention
 
