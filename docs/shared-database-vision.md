@@ -52,8 +52,10 @@ These objects should have one canonical owner:
 
 | Business object | Canonical owner |
 |---|---|
-| Shared account (customer or prospect) | `core.company` |
-| CRM ingested email domain (NOT a company) | `crm.ingested_domain` |
+| Customer (potential or active) | `core.customer` |
+| CRM ingested email domain (NOT a customer) | `crm.ingested_domain` |
+| Factory / vendor (a company, but not a customer) | `core.factory` |
+| Licensor (a company, but not a customer) | `core.licensor` |
 | Contact/buyer/person | `core.contact` |
 | Company-contact relationship | `core.contact_company` |
 | Licensor | `core.licensor` |
@@ -69,83 +71,100 @@ These objects should have one canonical owner:
 
 Apps can own workflows, but they should not duplicate shared identity tables.
 
-## Company vs. Customer vs. Ingested Domain
+## Customer vs. Company vs. Ingested Domain
 
 This distinction is easy to get wrong, and getting it wrong pollutes the shared
 database, so it is spelled out here as the rule for all four apps.
+
+**"Company" is not a useful shared bucket.** A factory is a company. A licensor is
+a company. A spammer is a company. None of those belong in a list of customers.
+So there is no `core.company`; the shared hub is **`core.customer`**, and the
+other kinds of company have their own homes (`core.factory`, `core.licensor`).
 
 **There are three different concepts. They are not the same thing.**
 
 | Concept | What it is | Where it lives | Who sees it |
 |---|---|---|---|
-| **Ingested domain** | A domain that merely *appeared in an ingested email*. We receive email from ~1000 kinds of companies — recruiters, vendors, spam, partners. This is email **noise** / a CRM triage inbox, not a business relationship. | `crm.ingested_domain` | **CRM only.** No other app reads it or FKs to it. |
-| **Prospect** | A company we have **not yet done business with** but are tracking and may transact with in the future. CRM/PM care about these; PLM/DAM do not yet. | `core.company` with **no ERP/PLM source ref** | Shared, but it is a `core.company` row like any other. |
-| **Customer** | A company we **have actually done business with**. Authoritative source is PLM/ERP (ColdLion). | `core.company` **with** a `designflow_plm` / `coldlion` source ref in `core.company_source_ref` | Shared (CRM, PM, PLM, DAM). |
+| **Ingested domain** | A domain that merely *appeared in an ingested email*. We receive email from ~1000 kinds of companies — recruiters, vendors, spam, partners. Email **noise** / a CRM triage inbox, not a business relationship. | `crm.ingested_domain` | **CRM only.** No other app reads it or FKs to it. |
+| **Potential customer** | A company we have **not yet done business with** but are tracking and may transact with in the future. | `core.customer` with `is_potential = true` (no ERP/PLM source ref) | Shared, but it is a `core.customer` row. |
+| **Active customer** | A company we **have actually done business with**. Authoritative source is PLM/ERP (ColdLion) only. | `core.customer` with `is_potential = false` **and** a `designflow_plm` / `coldlion` source ref | Shared (CRM, PM, PLM, DAM). |
 
 Key rules:
 
-- **An ingested domain is not a customer and not a company.** It must never be
-  written into `core.company` by the email worker. The worker calls
-  `crm.record_ingested_domain(...)` instead. Other apps must never join to
-  `crm.ingested_domain` — it is a CRM-private table.
-- **`core.company` is the shared identity hub**, not "the customer list." It
-  holds prospects *and* confirmed customers. Every app FKs here, so it must only
-  ever contain real entities — never email noise.
-- **PLM/ERP is the system of record for "is this a real customer."** A
-  `core.company` is a confirmed customer **iff** it has an ERP source ref. That
-  fact is authoritative and factual; the CRM `customer_status` column
-  (`ACTIVE_CUSTOMER` / `POTENTIAL_CUSTOMER` / `OTHER` / `UNASSIGNED`) is CRM's
-  *subjective* triage opinion and is a different axis.
+- **An ingested domain is not a customer.** It must never be written into
+  `core.customer` by the email worker. The worker calls
+  `crm.record_ingested_domain(...)`, which only touches `crm.ingested_domain`.
+  Other apps must never join to `crm.ingested_domain` — it is CRM-private.
+- **Garbage never enters the important table.** A domain becomes a `core.customer`
+  row **only** when a human upgrades it via `crm.promote_ingested_domain(...)`,
+  which inserts a *potential* customer. This is the **front-door / additive**
+  model: we never dump noise into `core.customer` and wait to clean it up later.
+- **Active customers come only from PLM/ERP.** `crm.promote_ingested_domain` and
+  any CRM/PM-created row are always `is_potential = true`. A customer becomes
+  active only when ColdLion confirms the relationship and an ERP source ref is
+  attached. The `is_potential` flag is the shared signal every app uses; it is
+  kept authoritative by the `core.sync_customer_potential` trigger, which flips it
+  to `false` the moment a `designflow_plm`/`coldlion` source ref lands.
+- The CRM `customer_status` column (`ACTIVE_CUSTOMER` / `POTENTIAL_CUSTOMER` /
+  `OTHER` / `UNASSIGNED`) is CRM's *subjective* triage opinion and is a different
+  axis from the factual `is_potential` (owned by ERP).
 
-### Lifecycle: domain → prospect → customer (one identity, never re-pointed)
+### Lifecycle: domain → potential → active (one identity, never re-pointed)
 
 ```txt
 crm.ingested_domain (email noise)
-   │  crm.promote_ingested_domain()   — CRM decides this is worth tracking
+   │  crm.promote_ingested_domain()   — a human upgrades it (additive insert)
    ▼
-core.company  (prospect: no ERP source ref)
-   │  plm.import_master_data()        — ERP confirms we transacted with them
+core.customer  (potential: is_potential = true, no ERP source ref)
+   │  plm.import_master_data()        — ColdLion confirms we transacted
    ▼
-core.company  (customer: SAME row, now with a designflow_plm source ref)
+core.customer  (active: SAME row, is_potential = false, now has an ERP source ref)
 ```
 
-The critical property: **a prospect and the customer it becomes are the same
-`core.company` row.** Promotion to customer is a metadata change — attach an ERP
-source ref and (optionally) flip a status — **not** a move between tables. So
-nothing that already points at the company (opportunities, projects, emails, PLM
-items, DAM assets) ever has to be re-pointed.
+The critical property: **a potential customer and the active customer it becomes
+are the same `core.customer` row.** Going active is a metadata change — attach an
+ERP source ref, the trigger flips `is_potential` — **not** a move between tables.
+So nothing that already points at the customer (opportunities, projects, emails,
+PLM items, DAM assets) ever has to be re-pointed.
 
 ### Do NOT build a separate "CRM/PM customer" table to union with PLM's
 
-A tempting design is: prospects in their own `crm`/`pim` customer table, ERP
-customers in PLM's canonical table, joined by a union view, with a dedupe job
-that re-points everything when a prospect graduates into the ERP list. **Don't.**
-That recreates the exact pain it tries to avoid: when a prospect becomes a real
-customer you must re-point every FK across CRM/PM from the prospect id to the ERP
-id, and you can never have a single FK column that means "either table."
+A tempting design is: potential customers in their own `crm`/`pim` table, ERP
+customers in PLM's canonical table, joined by a union view, with a dedupe job that
+re-points everything when a potential customer graduates into the ERP list.
+**Don't.** That recreates the exact pain it tries to avoid: when a potential
+customer becomes active you must re-point every FK across CRM/PM from the old id
+to the ERP id, and you can never have a single FK column that means "either
+table."
 
-Instead, the shared model uses **one hub (`core.company`) + source refs +
+Instead, the shared model uses **one hub (`core.customer`) + source refs +
 entity-resolution on ERP import** — and this is already implemented:
 `plm.import_master_data()` (in `20260624173000_plm_master_data_import.sql`), for
 each incoming ERP customer:
 
 1. **Already linked?** Look up `core.company_source_ref` for the ERP id → update
    in place.
-2. **Not linked → match** against existing `core.company` (today by normalized
-   name; should also match on `domain`). A match is almost always a prospect
-   CRM/PM already created.
-3. **Match found → promote in place:** attach the ERP source ref to that existing
-   `core.company`. No FK re-pointing — every existing reference already points at
-   this row.
-4. **No match → create** a new `core.company` with the ERP source ref.
+2. **Not linked → match** against existing `core.customer` (today by normalized
+   name; should also match on `domain`). A match is almost always a potential
+   customer CRM/PM already created.
+3. **Match found → activate in place:** attach the ERP source ref to that existing
+   `core.customer`. The trigger flips `is_potential` to false. No FK re-pointing —
+   every existing reference already points at this row.
+4. **No match → create** a new active `core.customer` with the ERP source ref.
 
 Refinements still to do on that matcher (tracked as follow-ups, not yet built):
-match on `domain` as well as name; consider prospect rows (not just rows already
-typed `customer`); and route **ambiguous** matches to `ingest.dedupe_candidate`
-for human review instead of silently auto-merging or creating a duplicate. When
-PLM's full database lands in this Supabase project, the ERP customer mirror
-(`plm.customer_import` today) becomes the authoritative `plm.customer` table and
-the same source-ref linkage carries over unchanged.
+match on `domain` as well as name, and route **ambiguous** matches to
+`ingest.dedupe_candidate` for human review instead of silently auto-merging or
+creating a duplicate. When PLM's full database lands in this Supabase project, the
+ERP customer mirror (`plm.customer_import` today) becomes the authoritative
+`plm.customer` table and the same source-ref linkage carries over unchanged.
+
+> Naming note: the satellite tables `core.company_source_ref` and the
+> `company_id` FK columns keep their names for now to limit rename churn; only the
+> hub table was renamed `core.company` → `core.customer`. A temporary
+> `security_invoker` view named `core.company` exists as a compatibility shim so
+> the four apps can migrate to `core.customer` on their own schedule; it is
+> dropped in a later owner-approved contract migration.
 
 ## Realtime Intention
 
