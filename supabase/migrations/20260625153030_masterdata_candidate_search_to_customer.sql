@@ -243,8 +243,7 @@ begin
     return;
   end if;
 end;
-$function$
-
+$function$;
 
 revoke all on function public.search_style_tracker_link_candidates(text, text, integer, text) from public;
 grant execute on function public.search_style_tracker_link_candidates(text, text, integer, text) to anon, authenticated, service_role;
