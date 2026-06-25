@@ -72,10 +72,13 @@ Validated against preview branch `xjcyeuvzkhtzsheknaiu` on 2026-06-24:
 - `scripts/check-sql.sh` static checks passed via Git Bash.
 - `supabase branches list --project-ref qsllyeztdwjgirsysgai` confirmed preview branch
   `shared-db-schema-rehearsal` with project ref `xjcyeuvzkhtzsheknaiu`.
-- `supabase db push --dry-run` reached preview but is blocked by pre-existing
-  preview migration-ledger drift: remote-only versions
-  `20260621105831` through `20260621110336`, plus local-only shared-db baseline
-  migrations. Do not repair this ledger casually; it predates this PLM import.
+- Pre-existing preview migration-ledger drift was resolved by adding local no-op
+  marker files for preview-only remote versions `20260621105831` through
+  `20260621110336`, then repairing the preview ledger to mark already-present
+  local shared-db baseline migrations as applied.
+- `20260622043000_crm_contact_segments.sql` was genuinely missing on preview,
+  so it was applied with `supabase db push --include-all`.
+- A normal `supabase db push --dry-run` now reports: `Remote database is up to date.`
 - The additive migration was applied to preview with `supabase db query --linked`
   for validation only.
 - `node tools/sync-plm-master-data.mjs --apply --linked` imported the live API
