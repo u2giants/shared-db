@@ -144,20 +144,25 @@ each incoming ERP customer:
 
 1. **Already linked?** Look up `core.company_source_ref` for the ERP id → update
    in place.
-2. **Not linked → match** against existing `core.customer` (today by normalized
-   name; should also match on `domain`). A match is almost always a potential
-   customer CRM/PM already created.
-3. **Match found → activate in place:** attach the ERP source ref to that existing
-   `core.customer`. The trigger flips `is_potential` to false. No FK re-pointing —
-   every existing reference already points at this row.
-4. **No match → create** a new active `core.customer` with the ERP source ref.
+2. **Not linked → fuzzy match** (`core.match_customer`). ERP and CRM spell the
+   same company differently, so this is **not** an exact match. Strongest signal
+   first: exact normalized name → exact domain (from the ERP email) → trigram
+   name similarity ≥ 0.85. A match is almost always a potential customer CRM/PM
+   already created.
+3. **Confident match → activate in place:** attach the ERP source ref to that
+   existing `core.customer`. The trigger flips `is_potential` to false. No FK
+   re-pointing — every existing reference already points at this row.
+4. **Ambiguous match (similarity 0.55–0.85) → do NOT auto-merge.** Create the ERP
+   customer as its own row and file an `ingest.dedupe_candidate` for a human to
+   confirm/merge. Silent auto-merge on a weak match would corrupt the shared hub.
+5. **No match → create** a new active `core.customer` with the ERP source ref.
 
-Refinements still to do on that matcher (tracked as follow-ups, not yet built):
-match on `domain` as well as name, and route **ambiguous** matches to
-`ingest.dedupe_candidate` for human review instead of silently auto-merging or
-creating a duplicate. When PLM's full database lands in this Supabase project, the
-ERP customer mirror (`plm.customer_import` today) becomes the authoritative
-`plm.customer` table and the same source-ref linkage carries over unchanged.
+The matcher uses `pg_trgm` similarity with a trigram index on
+`core.customer.normalized_name`; thresholds are parameters on
+`core.match_customer` so they can be tuned without touching the import. When PLM's
+full database lands in this Supabase project, the ERP customer mirror
+(`plm.customer_import` today) becomes the authoritative `plm.customer` table and
+the same source-ref linkage carries over unchanged.
 
 > Naming note: this was a **hard rename** — there is no object named
 > `core.company` anymore, not even a compatibility view. The table rename carries
