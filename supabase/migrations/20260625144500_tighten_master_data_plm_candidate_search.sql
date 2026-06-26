@@ -34,7 +34,7 @@ begin
     with candidates as (
       select
         'core'::text as target_schema,
-        'company'::text as target_table,
+        'customer'::text as target_table,
         c.id as target_id,
         coalesce(nullif(csr.source_name, ''), c.name) as target_label,
         greatest(
@@ -51,7 +51,7 @@ begin
           end
         )::real as score,
         c.status
-      from core.company c
+      from core.customer c
       join core.company_source_ref csr on csr.company_id = c.id
       where csr.source_system = 'designflow_plm'
         and csr.source_table = 'customers'

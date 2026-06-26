@@ -29,10 +29,10 @@ score real
 
 Customer, licensor, and property candidates must come from PLM-backed canonical identities:
 
-- customers: `core.company` joined through `core.company_source_ref` with `source_system = 'designflow_plm'` and `source_table = 'customers'`
+- customers: `core.customer` joined through `core.company_source_ref` with `source_system = 'designflow_plm'` and `source_table = 'customers'`
 - licensors/properties: `core.licensor` / `core.property` joined through `core.taxonomy_source_ref` with `source_system = 'designflow_plm'` and `source_table = 'merchGroup'`
 
-This prevents noisy non-PLM imports in `core.company`, such as CRM/Directus/Twenty-derived rows, from appearing as canonical Master Data matches.
+This prevents noisy non-PLM imports from appearing as canonical Master Data matches.
 
 ## Browser Boundary
 
