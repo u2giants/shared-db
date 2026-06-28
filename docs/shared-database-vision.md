@@ -3,7 +3,7 @@
 This repo exists to move POP from several overlapping app backends into one shared Supabase database that powers four enterprise applications:
 
 - DAM: digital asset management, style groups, style guides, render/processing work, and asset-to-product links.
-- CRM: companies, contacts, departments, opportunities, communication workflow, approvals, notes, and tasks.
+- CRM: customers, contacts, departments, opportunities, communication workflow, approvals, notes, and tasks.
 - PM/PIM: projects, products, designs, design collections, licensing workflow, samples, revisions, orders, assignments, and saved views.
 - PLM: operational item master, production orders, factories/vendors, licensing status, RFQ/ERP references, and production-facing workflow data.
 
@@ -13,8 +13,8 @@ The intention is not four separate databases that sync occasionally. The intenti
 
 The four apps overlap heavily:
 
-- CRM accounts are PM customers and PLM customers.
-- CRM contacts are PM buyers and account stakeholders.
+- CRM customers are PM customers and PLM customers.
+- CRM contacts are PM buyers and customer stakeholders.
 - PM products become DAM style groups/assets and PLM items.
 - DAM assets should appear inside PM product/design workflows without file duplication.
 - PM orders and PLM production orders need to describe the same operational reality.
