@@ -25,6 +25,17 @@ Migration:
 
 - `supabase/migrations/20260628165000_crm_customer_contracts.sql`
 
+Production status:
+
+- Applied on 2026-06-28 with `supabase db push` against linked project
+  `qsllyeztdwjgirsysgai`.
+- Verification returned:
+  - `api.crm_customer_list`: 3,777 rows
+  - `api.crm_account_list`: 3,777 rows
+  - `api.crm_customer_overview`: 3,777 rows
+  - `api.crm_account_overview`: 3,777 rows
+  - `api.crm_update_customer`: exists
+
 Adds:
 
 - `api.crm_customer_list`
