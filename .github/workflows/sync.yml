@@ -6,6 +6,9 @@
 #   are never copied.
 # - Direct push to each target's default branch (main or develop, auto-detected
 #   by `git clone`).
+# - Deploy suppression is handled by consumer CI/CD path filters, not by
+#   removing consumers from this matrix. The popcre sandbox Cloud Build triggers
+#   should ignore `shared-db/**`.
 # - Auth: a classic PAT with `repo` scope, stored as the `SYNC_TOKEN` secret.
 #
 # To change the destination folder, edit DEST_SUBDIR below.
