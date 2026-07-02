@@ -1,0 +1,107 @@
+name: Shared Supabase Migrations
+
+on:
+  pull_request:
+    paths:
+      - "supabase/migrations/**"
+      - "scripts/check-sql.sh"
+      - ".github/workflows/shared-supabase-migrations.yml"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Supabase project to check or apply"
+        type: choice
+        required: true
+        default: preview
+        options:
+          - preview
+          - production
+      mode:
+        description: "Run a dry-run or apply migrations"
+        type: choice
+        required: true
+        default: dry-run
+        options:
+          - dry-run
+          - apply
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shared-supabase-migrations
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_PROJECT_REF: xjcyeuvzkhtzsheknaiu
+      PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SQL check dependencies
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Run SQL checks
+        run: bash scripts/check-sql.sh
+
+      - name: Stop after static checks on pull requests
+        if: github.event_name == 'pull_request'
+        run: echo "Pull request validation complete. Use workflow_dispatch for Supabase dry-runs/applies."
+
+      - name: Set target project
+        if: github.event_name == 'workflow_dispatch'
+        id: target
+        run: |
+          if [ "${{ inputs.target }}" = "preview" ]; then
+            echo "project_ref=${PREVIEW_PROJECT_REF}" >> "$GITHUB_OUTPUT"
+            echo "db_password_secret=SUPABASE_DB_PASSWORD_PREVIEW" >> "$GITHUB_OUTPUT"
+          else
+            echo "project_ref=${PRODUCTION_PROJECT_REF}" >> "$GITHUB_OUTPUT"
+            echo "db_password_secret=SUPABASE_DB_PASSWORD_PRODUCTION" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Supabase CLI
+        if: github.event_name == 'workflow_dispatch'
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link Supabase project
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase link --project-ref "${{ steps.target.outputs.project_ref }}"
+
+      - name: Dry-run migrations
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD_PREVIEW: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
+          SUPABASE_DB_PASSWORD_PRODUCTION: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
+        run: |
+          if [ "${{ inputs.target }}" = "preview" ]; then
+            export SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD_PREVIEW"
+          else
+            export SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD_PRODUCTION"
+          fi
+          supabase db push --dry-run
+
+      - name: Apply migrations
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'apply'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD_PREVIEW: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
+          SUPABASE_DB_PASSWORD_PRODUCTION: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
+        run: |
+          if [ "${{ inputs.target }}" = "production" ]; then
+            echo "Applying to production. Confirm the preview checklist is complete before running this workflow." >&2
+          fi
+          if [ "${{ inputs.target }}" = "preview" ]; then
+            export SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD_PREVIEW"
+          else
+            export SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD_PRODUCTION"
+          fi
+          supabase db push
