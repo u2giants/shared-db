@@ -113,15 +113,16 @@ Customer-logo contract:
   assign customer logos from `crm.ingested_domain`; those rows are email evidence
   only and must not be promoted into `core.customer`.
 - `plm.customer_import.logo_url` carries the PLM/ERP `customers_logo` value when
-  the source provides one. That stored URL is the intended source for full-width
-  customer logos.
+  the source provides one. CRM can override the full-width logo per customer by
+  storing `core.customer.metadata.crm_logo_url`; customer APIs should prefer that
+  manual override, then fall back to the PLM-imported URL.
 - Domain-derived logo services such as logo.dev are only a convenience fallback
   for compact token marks keyed on `core.customer.domain`. They are not a
   substitute for the stored full-width logo, because resizing the same provider
   image can show the same mark in both slots.
 - Browser apps that need full logos should read a stable customer-named API
-  field, e.g. `api.crm_customer_list.logo_url`, sourced from
-  `plm.customer_import.logo_url`.
+  field, e.g. `api.crm_customer_list.logo_url`, resolved from the CRM override
+  plus `plm.customer_import.logo_url`.
   CRM-specific customer screens should use `api.crm_customer_list`, not legacy
   account-named compatibility views.
 
