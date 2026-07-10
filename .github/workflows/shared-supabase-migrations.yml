@@ -73,7 +73,13 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase link --project-ref "${{ steps.target.outputs.project_ref }}"
+        # `supabase link`/`db push` authenticate via `supabase login`, not the
+        # SUPABASE_ACCESS_TOKEN env var alone — env-only returns "Unauthorized"
+        # on the installed CLI (see 1Password "Supabase CLI Personal Access
+        # Token" notes). Run `login --token` first so a valid PAT actually works.
+        run: |
+          supabase login --token "$SUPABASE_ACCESS_TOKEN"
+          supabase link --project-ref "${{ steps.target.outputs.project_ref }}"
 
       - name: Dry-run migrations
         if: github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'
