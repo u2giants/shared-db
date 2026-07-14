@@ -55,10 +55,25 @@ sort, and pagination queries.
   tooling extensions (`pg_stat_statements`, `index_advisor`/`hypopg`), pgvector
   storage for 384-dimensional `gte-small` embeddings, and compatibility wrappers
   for the existing PopDAM frontend search RPCs.
+- `dam_search_documents` is now the canonical DAM search projection. It is
+  refreshed by triggers from asset, style-group, and PDF text changes. When
+  document content changes, the stored embedding is cleared so semantic search
+  cannot return stale vector matches.
+- `search_dam_documents(...)` is the canonical hybrid-capable RPC. The existing
+  app-facing `search_assets_full_text(...)` and
+  `search_style_groups_full_text(...)` wrappers remain intentionally in place so
+  PopDAM can keep applying its existing visibility, filter, sort, and pagination
+  logic after receiving a capped set of indexed IDs.
 - The PopDAM frontend caps RPC result handoff at 500 IDs and keeps using that
   capped indexed set for broad matches. If the RPC is temporarily unavailable
   during deploy ordering, the frontend falls back to the older metadata
   substring predicate.
+- The `dam-search-ai` Edge Function in the PopDAM app repo uses Supabase native
+  `gte-small` embeddings with the helper RPCs from this migration. It is app
+  code, not shared-db schema, but it depends on
+  `claim_dam_search_embedding_documents`, `upsert_dam_search_embedding`,
+  `mark_dam_search_embedding_error`, and
+  `get_dam_search_embedding_status`.
 
 ### Verified
 
@@ -72,6 +87,15 @@ sort, and pagination queries.
   - `search_style_groups_full_text('lenticular', 1000)` returned `373` groups.
   - All three GIN indexes existed in `pg_indexes`.
 - PopDAM app checks passed: `npm test` and `npm run build`.
+- Later production smoke tests after `20260713221518`:
+  - `search_assets_full_text('3fz', 500)` returned the capped result set in
+    under 1 second.
+  - `search_style_groups_full_text('3fz', 500)` returned the expected few
+    hundred style groups in a few hundred milliseconds.
+  - `search_dam_documents('lenticular', 25, null, null)` returned matches in a
+    few hundred milliseconds.
+  - `claim_dam_search_embedding_documents(3)` returned documents, proving the
+    embedding queue was claimable.
 
 ### Risks / watchouts
 
@@ -86,6 +110,9 @@ sort, and pagination queries.
 - The extracted PDF text search depends on `pdf_text_samples` coverage. Missing
   or failed PDF extraction means the raw text will not be searchable for that
   asset.
+- Do not treat Supabase Read Replicas as a substitute for indexed query shape.
+  They may be useful later for read-load isolation, but library search should
+  stay on indexed projections/RPCs first.
 
 ## Packaging Type Reference Data Editor
 
