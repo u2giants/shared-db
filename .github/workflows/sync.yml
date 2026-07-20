@@ -35,7 +35,6 @@ jobs:
       matrix:
         target:
           - u2giants/popcrm-web
-          - u2giants/directus
           - u2giants/popdam3
           - u2giants/poppim-web
           - popcre/designflow-bff
