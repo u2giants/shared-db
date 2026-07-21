@@ -21,6 +21,7 @@ begin
   values ('coldlion', 'merch_group_headers', 'running', now(), jsonb_build_object('endpoint', '/merchGroupHeaders'))
   returning id into sync_id;
 
+  drop table if exists item_taxonomy_headers;
   create temporary table item_taxonomy_headers on commit drop as
   select
     nullif(btrim(x ->> 'companyCode'), '') as company_code,
@@ -151,6 +152,7 @@ begin
 
   select count(*) into inserted_count from plm.item_import_staging s left join plm.item_import i
     using(company_code,division_code,item_no) where s.sweep_id=sync_id and i.item_no is null;
+  drop table if exists item_taxonomy_changed_rows;
   create temporary table item_taxonomy_changed_rows (
     company_code text not null,
     division_code text not null,
@@ -186,6 +188,7 @@ begin
   delete from plm.item_import i where not exists(select 1 from plm.item_import_staging s where s.sweep_id=sync_id
     and (s.company_code,s.division_code,s.item_no)=(i.company_code,i.division_code,i.item_no));
 
+  drop table if exists item_taxonomy_resolution;
   create temporary table item_taxonomy_resolution on commit drop as
   with base as (
     select i.*,
