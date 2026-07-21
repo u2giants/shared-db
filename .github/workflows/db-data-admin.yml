@@ -71,3 +71,29 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VITE_BUILD_SHA=${{ github.sha }}
+
+  deploy-development:
+    if: github.event_name == 'push'
+    needs: container
+    runs-on: ubuntu-latest
+    env:
+      COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+      COOLIFY_APP_UUID: ${{ vars.COOLIFY_APP_UUID }}
+      COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+    steps:
+      - name: Point Coolify at the verified immutable image
+        run: |
+          image_tag="sha-${GITHUB_SHA::7}"
+          curl --fail-with-body --silent --show-error \
+            --request PATCH \
+            --header "Authorization: Bearer ${COOLIFY_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "{\"docker_registry_image_tag\":\"${image_tag}\"}" \
+            "${COOLIFY_URL}/api/v1/applications/${COOLIFY_APP_UUID}"
+
+      - name: Deploy through Coolify
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${COOLIFY_TOKEN}" \
+            "${COOLIFY_URL}/api/v1/deploy?uuid=${COOLIFY_APP_UUID}&force=false"
