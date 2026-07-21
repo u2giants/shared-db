@@ -1,9 +1,9 @@
-# Syncs the entire root of this repo (u2giants/shared-db) into the
+# Syncs the shareable root of this repo (u2giants/shared-db) into the
 # `shared-db/` subfolder of each consumer repo, on every push to main.
 #
 # - Mirror semantics: the destination subfolder becomes an exact copy of this
-#   repo's root (files deleted here are deleted there). `.git` and `.github`
-#   are never copied.
+#   repo's root (files deleted here are deleted there). `.git`, `.github`, and
+#   the top-level `apps/` application workspace are never copied.
 # - Direct push to each target's default branch (main or develop, auto-detected
 #   by `git clone`).
 # - Deploy suppression is handled by consumer CI/CD path filters, not by
@@ -62,11 +62,22 @@ jobs:
 
       - name: Mirror source root into destination subfolder
         run: |
+          # Keep this probe so the exclusion remains tested even before an app
+          # exists in the canonical apps/ workspace.
+          mkdir -p source/apps
+          touch source/apps/.sync-exclusion-probe
+
           mkdir -p "target/${DEST_SUBDIR}"
-          rsync -a --delete \
+          rsync -a --delete --delete-excluded \
             --exclude='.git' \
             --exclude='.github' \
+            --exclude='/apps/' \
             source/ "target/${DEST_SUBDIR}/"
+
+      - name: Verify mirror boundary
+        run: |
+          test ! -e "target/${DEST_SUBDIR}/apps"
+          cmp source/AGENTS.md "target/${DEST_SUBDIR}/AGENTS.md"
 
       - name: Commit and push if changed
         working-directory: target
