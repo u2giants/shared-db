@@ -36,7 +36,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     env:
-      PREVIEW_PROJECT_REF: xjcyeuvzkhtzsheknaiu
+      PREVIEW_PROJECT_REF: rjyboqwcdzcocqgmsyel
       PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
     steps:
       - uses: actions/checkout@v4
