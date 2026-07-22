@@ -8,6 +8,10 @@ export type UpdateInput = {
 }
 export type UpdateResult = { success: boolean; code?: string; message?: string; row?: AdminRow; current?: AdminRow; audit_id?: string; idempotent_replay?: boolean }
 export type AuditEvent = { id: string; action: string; reason: string; actor_label?: string; occurred_at: string; succeeded: boolean; error_code?: string; old_snapshot?: Record<string, unknown>; new_snapshot?: Record<string, unknown> }
+export type MergeConflict = { key: string; app: string; field: string; survivor: unknown; loser: unknown }
+export type MergePreview = { entity_type: EntityKind; survivor: AdminRow; loser: AdminRow; affected_counts: Record<string, number>; conflicts: MergeConflict[] }
+export type MergePreviewResult = { success: boolean; code?: string; message?: string; preview?: MergePreview; preview_token?: string }
+export type MergeResult = { success: boolean; code?: string; message?: string; survivor?: AdminRow; audit_id?: string; idempotent_replay?: boolean; current_preview?: MergePreviewResult }
 export type QueryState = {
   search: string; status: string; app: string; appStatus: string; includeInactive: boolean
   channelId: string; sort: string; sortDir: 'asc' | 'desc'; cursor: string | null; pageSize: number
@@ -88,6 +92,21 @@ export async function loadAudit(client: ApiClient, kind: EntityKind, id: string)
   })
   if (error) throw error
   return ((data as { rows?: AuditEvent[] } | null)?.rows ?? [])
+}
+
+export async function previewMerge(client: ApiClient, kind: EntityKind, survivorId: string, loserId: string) {
+  const { data, error } = await client.rpc(`db_data_admin_preview_${kind}_merge`, { p_survivor_id: survivorId, p_loser_id: loserId })
+  if (error) throw error
+  return data as MergePreviewResult
+}
+
+export async function executeMerge(client: ApiClient, kind: EntityKind, survivorId: string, loserId: string, previewToken: string, reason: string, resolutions: Record<string, 'survivor' | 'loser'>) {
+  const { data, error } = await client.rpc(`db_data_admin_merge_${kind}`, {
+    p_survivor_id: survivorId, p_loser_id: loserId, p_preview_token: previewToken,
+    p_operation_id: crypto.randomUUID(), p_reason: reason, p_resolutions: resolutions,
+  })
+  if (error) throw error
+  return data as MergeResult
 }
 
 export async function loadGridState(client: ApiClient, kind: EntityKind) {

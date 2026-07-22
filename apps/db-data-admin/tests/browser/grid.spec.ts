@@ -18,6 +18,8 @@ async function mockAdmin(page: Page) {
     if (name === 'db_data_admin_audit_list') return route.fulfill({ json: { rows: [{ id: 'audit-1', action: 'update', reason: 'Curated correction', actor_label: 'Albert', occurred_at: '2026-07-22T12:30:00Z', succeeded: true }], next_cursor: null } })
     if (name === 'db_data_admin_update_customer') return route.fulfill({ json: { success: true, audit_id: 'audit-1', row: { ...customers[0], display_name: 'Acme Retail Group' } } })
     if (name === 'db_data_admin_update_vendor') return route.fulfill({ json: { success: true, audit_id: 'audit-2', row: vendors[0] } })
+    if (name === 'db_data_admin_preview_customer_merge') return route.fulfill({ json: { success: true, preview_token: 'preview-token', preview: { entity_type: 'customer', survivor: customers[0], loser: customers[1], affected_counts: { 'core.company_source_ref.company_id': 3, 'crm.department.company_id': 2 }, conflicts: [{ key: 'crm.status', app: 'crm', field: 'status', survivor: 'active', loser: 'inactive' }] } } })
+    if (name === 'db_data_admin_merge_customer') return route.fulfill({ json: { success: true, audit_id: 'audit-merge', survivor: customers[0] } })
     if (name.endsWith('_detail')) return route.fulfill({ json: { id: body?.p_id, aliases: [{ alias: 'Legacy name', source_system: 'ERP' }], source_refs: [{ source_system: 'Coldlion', source_id: 'C-100' }] } })
     if (name === 'db_data_admin_customer_list') return route.fulfill({ json: { rows: customers, next_cursor: null, page_size: 200 } })
     if (name === 'db_data_admin_vendor_list') return route.fulfill({ json: { rows: vendors, next_cursor: null, page_size: 200 } })
@@ -49,6 +51,22 @@ test('renders persistent customer and vendor grids with lazy details', async ({ 
   await expect(page.getByRole('button', { name: 'Vendors' })).toHaveClass(/active/)
   await expect(page.getByText('Atlas Manufacturing')).toBeVisible()
   await page.screenshot({ path: '../../docs/verification/db-data-admin-step7-vendor-wide.png', fullPage: true })
+})
+
+test('previews and explicitly confirms a protected duplicate merge', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await mockAdmin(page); await page.goto('/')
+  await page.getByText('Acme Retail').click()
+  await page.getByRole('button', { name: 'Merge duplicate' }).click()
+  await page.getByLabel('Duplicate to absorb').selectOption(customers[1].id)
+  await expect(page.getByText('Resolve every conflict')).toBeVisible()
+  await expect(page.getByText('core.company_source_ref.company_id')).toBeVisible()
+  await page.getByLabel('Keep: active').check()
+  await page.getByPlaceholder(/permanent audit/i).fill('Confirmed duplicate company')
+  await page.getByLabel(/I confirm/).check()
+  await page.screenshot({ path: '../../docs/verification/db-data-admin-step9-merge-preview.png', fullPage: true })
+  await page.getByRole('button', { name: 'Merge records' }).click()
+  await expect(page.getByRole('gridcell', { name: 'Northwind Stores' })).not.toBeVisible()
 })
 
 test('keeps the admin grid usable at a narrow viewport', async ({ page }) => {
