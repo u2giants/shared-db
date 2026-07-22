@@ -1,9 +1,10 @@
-import { Database, LogIn, LogOut, ShieldCheck } from 'lucide-react'
+import { Database, LogIn, ShieldCheck } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { readConfig } from './lib/config'
 import { formatBuildLabel, readOAuthCallbackError } from './lib/presentation'
 import { createSupabase } from './lib/supabase'
+import { DataAdmin } from './DataAdmin'
 import './styles.css'
 
 export function App() {
@@ -42,10 +43,10 @@ export function App() {
         <div className="brand"><Database aria-hidden="true" /><span>DB Data Admin</span></div>
         <span className="build" title={`Full commit ${__BUILD_SHA__}`}>Build {buildLabel}</span>
       </header>
-      <section className="hero" aria-labelledby="page-title">
-        <div className="eyebrow"><ShieldCheck aria-hidden="true" /> Shared data control room</div>
+      <section className={session ? 'admin-surface' : 'hero'} aria-labelledby="page-title">
+        {!session && <><div className="eyebrow"><ShieldCheck aria-hidden="true" /> Shared data control room</div>
         <h1 id="page-title">Canonical data, with guardrails.</h1>
-        <p>Review Customers, Vendors, Licensors, and Properties shared across POP applications.</p>
+        <p>Review Customers and Vendors shared across POP applications.</p></>}
 
         {!config && (
           <div className="notice" role="alert">
@@ -70,17 +71,7 @@ export function App() {
           </button>
         )}
 
-        {config && !loading && session && (
-          <div className="signed-in">
-            <div>
-              <strong>Signed in as {session.user.email}</strong>
-              <p>The read contracts are installed in the next preview-first database phase.</p>
-            </div>
-            <button className="secondary" type="button" onClick={() => void supabase?.auth.signOut()}>
-              <LogOut aria-hidden="true" /> Sign out
-            </button>
-          </div>
-        )}
+        {config && !loading && session && supabase && <DataAdmin client={supabase} email={session.user.email} onSignOut={() => void supabase.auth.signOut()} />}
       </section>
     </main>
   )
