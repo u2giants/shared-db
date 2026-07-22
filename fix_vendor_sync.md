@@ -4,8 +4,8 @@
 **Status:** 📋 PLAN (not yet built). This is the design a future session implements as one or more
 additive shared-db migrations plus a Supabase **Edge Function + `pg_cron`** sync (§6). Read it top to
 bottom before writing any code.
-**Prereq done:** OPEN #1 (mirror `plm.erp_vendor` reconciled to the corrected 97) —
-migration `20260722170000_refresh_erp_vendor_mirror_to_corrected_vendors.sql`.
+**Prereq done:** OPEN #1 (mirror `plm.erp_vendor` reconciled to the corrected 97, applied to prod) —
+migration `20260722171500_refresh_erp_vendor_mirror_to_corrected_vendors.sql`.
 
 ---
 
@@ -23,12 +23,44 @@ sync.** If someone later wires a naive recurring pull, it will silently undo tha
 records humans marked inactive, re-add records humans purged, re-split merged duplicates, and inject
 nameless placeholder rows. This document specifies a recurring sync that **cannot** do any of those.
 
+### The end goal (why any of this matters)
+`core.factory` is the **single curated vendor/factory hub** every POP app shares. The end state this
+sync serves:
+- **One clean, deduped, human-curated factory list** that the **DB Data Admin** app
+  (`https://data.designflow.app`, code in `apps/db-data-admin/`) manages and that PopCRM/PopDAM/PopPIM
+  read for vendor pickers — never showing service-providers, dead vendors, or duplicate rows.
+- **Curation that survives forever.** Human decisions (status, merges, exclusions, `display_name`,
+  aliases) are **app-owned** and must outlive every future ERP re-pull. Coldlion is upstream of the
+  *vocabulary*, never of the *curation*.
+- **App-specific vendor attributes live in per-app extension tables**, not on `core.factory`
+  (AGENTS §4.1 / `docs/per-app-extension-tables-plan.md`: `crm/pim/dam.factory_ext`). This sync only
+  ever touches the shared canonical hub + its provenance; it must not learn about per-app fields.
+- **A recurring sync so the hub stays fresh without a human in the loop** — picking up genuinely new
+  factories and refreshed contact/address data automatically, while the guards below make it impossible
+  for that automation to erode curation.
+
+### The layered data model this sync moves data through
+This follows the same bronze→silver→gold→serving pattern as the customer and item pipelines
+(`docs/unified-supabase-schema-map.md`, `fix_schema_for_api.md`):
+- **Bronze** `ingest.raw_record` — every pulled row, exact payload, keyed
+  `(source_system, source_table, source_id)`. Immutable landing; nothing is ever lost here.
+- **Silver** `plm.erp_vendor` — typed faithful mirror of the Coldlion `/vendors` snapshot.
+- **Gold** `core.factory` (+ `core.factory_source_ref`, `core.factory_alias`) — the curated canonical
+  hub. **Curation lives only here and is app-owned.**
+- **Serving** the DB Data Admin app + each app's picker read `core.factory` (and their own
+  `*.factory_ext`). This sync writes bronze/silver freely and gold **only through the guards**.
+
 ### Current live state (measured 2026-07-22)
 - `core.factory`: **93 rows** (91 active / 2 inactive). Factories only.
 - `plm.erp_vendor` (silver mirror): **97 rows** after OPEN #1 (was 539).
 - Corrected Coldlion `/vendors`: **97 records, all `active='Y'`**. Verified live 2026-07-22.
 - The 97 codes collapse to fewer `core.factory` rows because `core.merge_factory` merged exact-name
   duplicates; a survivor carries **multiple** codes as `core.factory_source_ref` rows.
+- **8 pre-existing mislabeled provenance rows** exist: `core.factory_source_ref` rows tagged
+  `source_system='coldlion'` but holding **numeric legacy IDs** (415, 99, 147, 403, 244, 457, 476, 472)
+  that were never real Coldlion vendorCodes. They are harmless duplicates on factories that also carry
+  their real alphanumeric code, and they will never match an incoming Coldlion payload. Cleanup is
+  HANDOFF OPEN #5; the importer must not be confused by them (it keys on the real `source_id`).
 
 ---
 
@@ -75,6 +107,31 @@ table the importer consults on **every** run, so a re-pull can **never** reactiv
 4. **Silver mirror is a faithful replica.** `plm.erp_vendor` mirrors every pulled row (including
    blank/excluded ones) and `factory_id` is set only when a canonical link exists. Refreshing the
    mirror must never promote a curated-inactive/excluded row.
+
+### 3a. Snapshot semantics — upstream removal & deactivation must NOT erode gold
+`/vendors` is a **full snapshot** (~97 rows, no `modifiedFrom` incremental), so each run must reconcile
+the snapshot against the mirror, but the effect on **curation** is strictly bounded:
+
+- **A code that DISAPPEARS from Coldlion** (dropped upstream, as the 442 service-providers were):
+  - Silver: its `plm.erp_vendor` row is removed so the mirror stays a faithful snapshot.
+  - Gold: **`core.factory` is NOT deleted or inactivated.** Status is app-owned; upstream disappearance
+    is not a human de-curation decision. The `factory_source_ref` may go dangling (that is exactly the
+    benign state OPEN #1 produced) — acceptable, and cleaned by a human, never by the sync.
+- **A code that returns as `active='N'`** (Coldlion deactivates it): the importer **must not** flip a
+  curated `core.factory.status`. The upstream active flag drives the canonical status **only on the
+  initial INSERT of a brand-new factory**; after that, status is app-owned (Guard 2). Record the
+  upstream flag in silver/metadata for visibility, but never let it overwrite gold.
+- **Net rule:** the sync may freely ADD new factories and REFRESH non-status fields, but it can only
+  ever *propose* removals/deactivations to a human — it never enacts them on gold. This is the single
+  most important safety property: an upstream data change can never silently shrink or deactivate the
+  curated hub.
+
+> **Same flaw exists on the customer side.** `plm.import_coldlion_customers` (migration `20260715234500`)
+> also force-sets `status='active'` and `is_potential=false` on matched rows — the identical
+> curation-clobbering pattern. Customers are marked "done" in the handoff but run on this flawed
+> importer. When the guarded vendor importer lands, open a twin fix for customers (out of scope here,
+> but record it so it is not forgotten): HANDOFF should carry a "customer sync has the same status-
+> clobbering bug" note.
 
 ---
 
@@ -194,8 +251,11 @@ Before enabling the `pg_cron` schedule, run the Edge Function in a **dry-run** m
 3. **0 blank inserts** — `CNWAH` lands in `plm.vendor_quarantine`, not `core.factory`; `rows_failed ≥ 1`.
 4. **0 re-splits** — merged survivors still carry both codes; `core.factory` row count unchanged (93).
 5. **No re-add of purged rows** — nothing in the old 442 service-provider set reappears.
-6. A **forced failure** (bad key / unreachable DB) writes a committed `status='failed'` `sync_run` row
-   and fires the alert.
+6. **Upstream-removal safety** — feed the importer a payload with one existing code *removed* and one
+   flipped to `active='N'`; confirm the matching `core.factory` rows are **unchanged** (not deleted, not
+   inactivated) while the silver mirror reflects the change.
+7. A **forced failure** (bad key / unreachable DB) writes a committed `status='failed'` `sync_run` row,
+   and an **overdue run** (no successful run within the cadence window) also fires the alert.
 
 ---
 
