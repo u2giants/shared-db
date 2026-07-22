@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { initialQuery, loadAllRows, loadGridState, saveGridState, toRpcParams, updateRecord } from './data-admin'
+import { executeMerge, initialQuery, loadAllRows, loadGridState, previewMerge, saveGridState, toRpcParams, updateRecord } from './data-admin'
 
 describe('DB Data Admin query contracts', () => {
   it('maps the customer-only channel without changing the vendor signature', () => {
@@ -41,5 +41,17 @@ describe('DB Data Admin query contracts', () => {
       p_vendor_id: 'vendor-1', p_app: 'pm',
     }))
     expect(rpc.mock.calls[0]?.[1]).not.toHaveProperty('p_channel_ids')
+  })
+
+  it('maps merge preview and execution to the protected contracts', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: { success: true }, error: null })
+    await previewMerge({ rpc } as never, 'customer', 'keep', 'absorb')
+    expect(rpc).toHaveBeenCalledWith('db_data_admin_preview_customer_merge', { p_survivor_id: 'keep', p_loser_id: 'absorb' })
+    rpc.mockClear()
+    await executeMerge({ rpc } as never, 'vendor', 'keep', 'absorb', 'token', 'Duplicate', { 'crm.status': 'survivor' })
+    expect(rpc).toHaveBeenCalledWith('db_data_admin_merge_vendor', expect.objectContaining({
+      p_survivor_id: 'keep', p_loser_id: 'absorb', p_preview_token: 'token',
+      p_reason: 'Duplicate', p_resolutions: { 'crm.status': 'survivor' },
+    }))
   })
 })
