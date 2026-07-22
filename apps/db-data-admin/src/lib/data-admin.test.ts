@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { initialQuery, loadAllRows, loadGridState, saveGridState, toRpcParams } from './data-admin'
+import { initialQuery, loadAllRows, loadGridState, saveGridState, toRpcParams, updateRecord } from './data-admin'
 
 describe('DB Data Admin query contracts', () => {
   it('maps the customer-only channel without changing the vendor signature', () => {
@@ -22,5 +22,24 @@ describe('DB Data Admin query contracts', () => {
     expect(getRpc).toHaveBeenCalledWith('db_data_admin_grid_state_get', { p_entity_type: 'customer', p_view_key: 'default' })
     const saveRpc = vi.fn().mockResolvedValue({ data: { ok: false, code: 'version_conflict', current_version: 3 }, error: null })
     await expect(saveGridState({ rpc: saveRpc } as never, 'vendor', initialQuery, 2)).rejects.toThrow('version 3')
+  })
+
+  it('maps single-record updates to the protected customer and vendor contracts', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: { success: true }, error: null })
+    const input = {
+      expectedUpdatedAt: '2026-07-22T12:00:00Z', reason: 'Verified by operations',
+      app: 'pm' as const, appStatus: 'active' as const, channelIds: ['channel-1'],
+    }
+    await updateRecord({ rpc } as never, 'customer', 'customer-1', input)
+    expect(rpc).toHaveBeenCalledWith('db_data_admin_update_customer', expect.objectContaining({
+      p_customer_id: 'customer-1', p_app: 'pm', p_channel_ids: ['channel-1'],
+    }))
+
+    rpc.mockClear()
+    await updateRecord({ rpc } as never, 'vendor', 'vendor-1', input)
+    expect(rpc).toHaveBeenCalledWith('db_data_admin_update_vendor', expect.objectContaining({
+      p_vendor_id: 'vendor-1', p_app: 'pm',
+    }))
+    expect(rpc.mock.calls[0]?.[1]).not.toHaveProperty('p_channel_ids')
   })
 })
