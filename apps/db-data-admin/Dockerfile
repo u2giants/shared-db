@@ -1,7 +1,9 @@
 FROM node:24-alpine AS build
 WORKDIR /app
 ARG VITE_BUILD_SHA=unknown
+ARG VITE_BUILD_DATE=unknown
 ENV VITE_BUILD_SHA=$VITE_BUILD_SHA
+ENV VITE_BUILD_DATE=$VITE_BUILD_DATE
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .

@@ -36,11 +36,11 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npm run lint
       - run: npm test
-      - run: npm run build
+      - run: VITE_BUILD_DATE="$(date -u +%Y-%m-%d)" npm run build
         env:
           VITE_BUILD_SHA: ${{ github.sha }}
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:browser
+      - run: VITE_BUILD_DATE="$(date -u +%Y-%m-%d)" npm run test:browser
         env:
           VITE_BUILD_SHA: ${{ github.sha }}
 
@@ -56,6 +56,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Record build date
+        id: build-date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
       - uses: docker/metadata-action@v5
         id: meta
         with:
@@ -71,6 +74,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VITE_BUILD_SHA=${{ github.sha }}
+            VITE_BUILD_DATE=${{ steps.build-date.outputs.date }}
 
   deploy-development:
     if: github.event_name == 'push'

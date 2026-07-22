@@ -2,6 +2,7 @@ import { Database, LogIn, LogOut, ShieldCheck } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { readConfig } from './lib/config'
+import { formatBuildLabel, readOAuthCallbackError } from './lib/presentation'
 import { createSupabase } from './lib/supabase'
 import './styles.css'
 
@@ -10,6 +11,8 @@ export function App() {
   const supabase = useMemo(() => (config ? createSupabase(config) : null), [config])
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(Boolean(supabase))
+  const [authError, setAuthError] = useState(() => readOAuthCallbackError(window.location))
+  const buildLabel = formatBuildLabel(__BUILD_SHA__, __BUILD_DATE__)
 
   useEffect(() => {
     if (!supabase) return
@@ -23,17 +26,21 @@ export function App() {
 
   const signIn = async () => {
     if (!supabase || !config) return
-    await supabase.auth.signInWithOAuth({
+    setAuthError(null)
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: 'azure',
       options: { redirectTo: config.authRedirectUrl, scopes: 'email' },
     })
+    if (error) {
+      setAuthError({ code: 'sign_in_failed', description: error.message })
+    }
   }
 
   return (
     <main className="app-shell">
       <header className="topbar">
         <div className="brand"><Database aria-hidden="true" /><span>DB Data Admin</span></div>
-        <span className="build">Build {__BUILD_SHA__}</span>
+        <span className="build" title={`Full commit ${__BUILD_SHA__}`}>Build {buildLabel}</span>
       </header>
       <section className="hero" aria-labelledby="page-title">
         <div className="eyebrow"><ShieldCheck aria-hidden="true" /> Shared data control room</div>
@@ -48,6 +55,14 @@ export function App() {
         )}
 
         {config && loading && <div className="notice" aria-live="polite">Checking your session…</div>}
+
+        {config && authError && (
+          <div className="notice error-notice" role="alert">
+            <strong>Microsoft sign-in could not be completed.</strong>
+            <p>{authError.description}</p>
+            <small>Error code: {authError.code}</small>
+          </div>
+        )}
 
         {config && !loading && !session && (
           <button className="primary" type="button" onClick={() => void signIn()}>

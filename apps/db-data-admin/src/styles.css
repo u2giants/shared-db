@@ -18,6 +18,9 @@ button { font: inherit; }
 h1 { margin: 18px 0 12px; font-size: clamp(36px, 6vw, 62px); line-height: 1; letter-spacing: -.055em; }
 .hero > p { max-width: 620px; color: #59657a; font-size: 18px; line-height: 1.55; }
 .notice, .signed-in { margin-top: 28px; padding: 18px; background: #f5f7fb; border: 1px solid #dbe2ee; border-radius: 14px; }
+.error-notice { color: #8a1c1c; background: #fff5f5; border-color: #efc7c7; }
+.error-notice p { margin: 6px 0; }
+.error-notice small { color: #a23a3a; }
 .signed-in { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .signed-in p { margin: 5px 0 0; color: #667085; }
 .primary, .secondary { display: inline-flex; align-items: center; gap: 9px; padding: 12px 16px; border-radius: 11px; cursor: pointer; }
