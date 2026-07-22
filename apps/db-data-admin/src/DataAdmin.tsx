@@ -1,7 +1,7 @@
 import { RevoGrid, Template, type ColumnRegular, type ColumnTemplateProp } from '@revolist/react-datagrid'
 import { ChevronRight, GitMerge, History, LogOut, Pencil, RefreshCw, Search, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { executeMerge, initialQuery, loadAllRows, loadAudit, loadDetail, loadGridState, loadRows, previewMerge, probeAccess, saveGridState, updateRecord, type AdminRow, type ApiClient, type AuditEvent, type EntityKind, type MergeResult, type QueryState, type UpdateInput } from './lib/data-admin'
+import { executeMerge, initialQuery, loadAllRows, loadAudit, loadDetail, loadGridState, loadRows, previewMerge, probeAccess, saveGridState, searchMergeCandidates, updateRecord, type AdminRow, type ApiClient, type AuditEvent, type EntityKind, type MergeResult, type QueryState, type UpdateInput } from './lib/data-admin'
 import { RecordEditor } from './RecordEditor'
 import { MergeDialog } from './MergeDialog'
 import { LicensorTree } from './LicensorTree'
@@ -49,6 +49,7 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
   const [detailLoading, setDetailLoading] = useState(false)
   const [audit, setAudit] = useState<AuditEvent[]>([])
   const [editing, setEditing] = useState(false)
+  const [editorReloadKey, setEditorReloadKey] = useState(0)
   const [merging, setMerging] = useState(false)
   const [channels, setChannels] = useState<Array<{ id: string; name: string }>>([])
   const [dataMode, setDataMode] = useState<'client' | 'server'>('client')
@@ -127,10 +128,20 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
     return result
   }
 
+  // Stale-token recovery: re-fetch the record's fresh detail (new updated_at)
+  // and remount the editor so the next save carries the current concurrency
+  // token instead of the stale one that was loudly rejected.
+  const reloadRecord = async () => {
+    if (!detail) return
+    await openDetail(detail as AdminRow)
+    setEditorReloadKey(key => key + 1)
+  }
+
+  // Refresh grid/detail/audit but leave the MergeDialog open so its persistent
+  // success receipt (audit ID + final survivor) stays visible until dismissed.
   const mergeComplete = (result: MergeResult, loserId: string) => {
     setRows(current => current.filter(row => row.id !== loserId).map(row => row.id === result.survivor?.id ? { ...row, ...result.survivor } : row))
     setDetail(current => current && result.survivor ? { ...current, ...result.survivor, name: result.survivor.display_name ?? result.survivor.name } : current)
-    setMerging(false)
     if (detail) void loadAudit(client, kind, String(detail.id)).then(setAudit)
   }
 
@@ -163,8 +174,8 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
     </div>
     <footer className="grid-footer"><span>{visibleRows.length} loaded</span>{nextCursor && <button className="secondary" disabled={loading} onClick={() => { const next = { ...query, cursor: nextCursor }; setQuery(next); void fetchRows(true, next) }}>Load more <ChevronRight /></button>}</footer>
     {detail && <aside className="detail-panel" aria-label={`${kind} details`}><button className="close" aria-label="Close details" onClick={() => { setDetail(null); setEditing(false); setMerging(false) }}><X /></button><h2>{String(detail.name ?? 'Details')}</h2><div className="detail-actions"><button className="primary edit-button" onClick={() => setEditing(true)}><Pencil /> Edit record</button><button className="secondary" onClick={() => setMerging(true)}><GitMerge /> Merge duplicate</button></div>{detailLoading ? <p>Loading details…</p> : <><h3>Aliases</h3><pre>{JSON.stringify(detail.aliases ?? [], null, 2)}</pre><h3>Source references</h3><pre>{JSON.stringify(detail.source_refs ?? [], null, 2)}</pre><h3 className="history-heading"><History /> Audit history</h3>{audit.length === 0 ? <p className="muted">No audited changes yet.</p> : <ol className="audit-list">{audit.map(event => <li key={event.id} className={event.succeeded ? '' : 'failed'}><strong>{event.succeeded ? event.action === 'merge' ? 'Records merged' : 'Change saved' : `Failed: ${event.error_code}`}</strong><span>{new Date(event.occurred_at).toLocaleString()} · {event.actor_label ?? 'Administrator'}</span><p>{event.reason}</p></li>)}</ol>}</>}</aside>}
-    {editing && detail && <RecordEditor kind={kind} row={detail as AdminRow} channels={channels} onCancel={() => setEditing(false)} onSave={saveRecord} />}
-    {merging && detail && <MergeDialog kind={kind} survivor={detail as AdminRow} candidates={rows.filter(row => row.id !== detail.id)} onCancel={() => setMerging(false)} onPreview={loserId => previewMerge(client, kind, String(detail.id), loserId)} onMerge={(loserId, token, reason, resolutions) => executeMerge(client, kind, String(detail.id), loserId, token, reason, resolutions)} onMerged={mergeComplete} />}
+    {editing && detail && <RecordEditor key={editorReloadKey} kind={kind} row={detail as AdminRow} channels={channels} onCancel={() => setEditing(false)} onSave={saveRecord} onReload={() => void reloadRecord()} />}
+    {merging && detail && <MergeDialog kind={kind} survivor={detail as AdminRow} candidates={rows.filter(row => row.id !== detail.id)} onCancel={() => setMerging(false)} onPreview={loserId => previewMerge(client, kind, String(detail.id), loserId)} onMerge={(loserId, token, reason, resolutions) => executeMerge(client, kind, String(detail.id), loserId, token, reason, resolutions)} onMerged={mergeComplete} onSearchCandidates={term => searchMergeCandidates(client, kind, term, String(detail.id))} />}
     </>}
   </section>
 }

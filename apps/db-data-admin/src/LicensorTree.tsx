@@ -4,7 +4,12 @@ import { loadLicensorTree, type ApiClient, type LoadedTree, type PlmContextEntry
 
 type Props = { client: ApiClient }
 
-const VISIBLE_PROPERTIES = 4
+// Initial disclosure cap per node. Every property/orphan beyond this stays
+// reachable through an accessible "show all" control that names the exact hidden
+// count — never silently truncated. Kept high enough that most licensors render
+// fully, low enough to bound DOM for a very large licensor.
+const INITIAL_VISIBLE = 50
+const ORPHAN_KEY = '__orphans__'
 
 function StatusBadge({ status }: { status: string }) {
   const tone = status === 'active' ? 'ok' : status === 'potential' ? 'warn' : 'off'
@@ -44,6 +49,10 @@ export function LicensorTree({ client }: Props) {
   const [term, setTerm] = useState('')
   const [includeInactive, setIncludeInactive] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  // Per-node "show every item" toggles (licensor id, plus ORPHAN_KEY).
+  const [showAllItems, setShowAllItems] = useState<Record<string, boolean>>({})
+  const showAllFor = useCallback((id: string) => Boolean(showAllItems[id]), [showAllItems])
+  const toggleShowAll = (id: string) => setShowAllItems(current => ({ ...current, [id]: !current[id] }))
 
   const load = useCallback(async () => {
     setLoading(true); setError(null); setDenied(false)
@@ -137,12 +146,23 @@ export function LicensorTree({ client }: Props) {
       <div className="orphan-alert" role="alert">
         <h2><AlertTriangle aria-hidden="true" /> {orphans.length} orphan propert{orphans.length === 1 ? 'y' : 'ies'} — no Licensor</h2>
         <p>Every canonical Property is expected to sit under exactly one Licensor. These have a null <code>licensor_id</code>. The relationship is DesignFlow-owned; do not repair it here.</p>
-        <ul className="orphan-list">
-          {orphans.slice(0, VISIBLE_PROPERTIES * 2).map(orphan => (
-            <li key={orphan.id}><strong>{orphan.name}</strong>{orphan.code ? <span className="muted"> · {orphan.code}</span> : null}<StatusBadge status={orphan.status} /></li>
-          ))}
-        </ul>
-        {orphans.length > VISIBLE_PROPERTIES * 2 && <p className="muted">+ {orphans.length - VISIBLE_PROPERTIES * 2} more in the reconciliation count above.</p>}
+        {(() => {
+          const showingAll = showAllFor(ORPHAN_KEY)
+          const visible = showingAll ? orphans : orphans.slice(0, INITIAL_VISIBLE)
+          const hidden = orphans.length - visible.length
+          return <>
+            <ul className="orphan-list">
+              {visible.map(orphan => (
+                <li key={orphan.id}><strong>{orphan.name}</strong>{orphan.code ? <span className="muted"> · {orphan.code}</span> : null}<StatusBadge status={orphan.status} /></li>
+              ))}
+            </ul>
+            {(hidden > 0 || showingAll) && orphans.length > INITIAL_VISIBLE && (
+              <button className="link-button show-all" onClick={() => toggleShowAll(ORPHAN_KEY)}>
+                {hidden > 0 ? `Show all ${orphans.length} orphans (${hidden} hidden)` : 'Show fewer orphans'}
+              </button>
+            )}
+          </>
+        })()}
       </div>
     )}
 
@@ -161,10 +181,16 @@ export function LicensorTree({ client }: Props) {
                 <span className="count">{licensor.property_count} propert{licensor.property_count === 1 ? 'y' : 'ies'}</span>
               </button>
               <div className="tree-context"><SourceContext entries={licensor.plm_context} /><SourceRefs refs={licensor.source_refs} /></div>
-              {open && (
-                <ul role="group" aria-label={`Properties of ${licensor.name}`} className="tree tree-properties">
+              {open && (() => {
+                // When searching, properties are already narrowed to matches, so
+                // show them all; otherwise cap at INITIAL_VISIBLE with a
+                // reachable, count-disclosing "show all" control.
+                const showingAll = Boolean(term) || showAllFor(licensor.id)
+                const visibleProps = showingAll ? licensor.properties : licensor.properties.slice(0, INITIAL_VISIBLE)
+                const hiddenProps = licensor.properties.length - visibleProps.length
+                return <ul role="group" aria-label={`Properties of ${licensor.name}`} className="tree tree-properties">
                   {licensor.properties.length === 0 && <li className="muted tree-empty">No visible properties.</li>}
-                  {licensor.properties.slice(0, VISIBLE_PROPERTIES * 6).map(property => (
+                  {visibleProps.map(property => (
                     <li role="treeitem" key={property.id} className="tree-property">
                       <div className="tree-row tree-row-property">
                         <span className="tree-bullet" aria-hidden="true">•</span>
@@ -176,8 +202,15 @@ export function LicensorTree({ client }: Props) {
                       <div className="tree-context"><SourceContext entries={property.plm_context} /><SourceRefs refs={property.source_refs} /></div>
                     </li>
                   ))}
+                  {!term && licensor.properties.length > INITIAL_VISIBLE && (
+                    <li className="tree-show-all">
+                      <button className="link-button show-all" onClick={() => toggleShowAll(licensor.id)}>
+                        {hiddenProps > 0 ? `Show all ${licensor.properties.length} properties (${hiddenProps} hidden)` : 'Show fewer properties'}
+                      </button>
+                    </li>
+                  )}
                 </ul>
-              )}
+              })()}
             </li>
           })}
         </ul>}

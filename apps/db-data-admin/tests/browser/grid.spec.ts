@@ -40,7 +40,7 @@ async function mockAdmin(page: Page) {
     if (name === 'db_data_admin_audit_list') return route.fulfill({ json: { rows: [{ id: 'audit-1', action: 'update', reason: 'Curated correction', actor_label: 'Albert', occurred_at: '2026-07-22T12:30:00Z', succeeded: true }], next_cursor: null } })
     if (name === 'db_data_admin_update_customer') return route.fulfill({ json: { success: true, audit_id: 'audit-1', row: { ...customers[0], display_name: 'Acme Retail Group' } } })
     if (name === 'db_data_admin_update_vendor') return route.fulfill({ json: { success: true, audit_id: 'audit-2', row: vendors[0] } })
-    if (name === 'db_data_admin_preview_customer_merge') return route.fulfill({ json: { success: true, preview_token: 'preview-token', preview: { entity_type: 'customer', survivor: customers[0], loser: customers[1], affected_counts: { 'core.company_source_ref.company_id': 3, 'crm.department.company_id': 2 }, conflicts: [{ key: 'crm.status', app: 'crm', field: 'status', survivor: 'active', loser: 'inactive' }] } } })
+    if (name === 'db_data_admin_preview_customer_merge') return route.fulfill({ json: { success: true, preview_token: 'preview-token', preview: { entity_type: 'customer', survivor: customers[0], loser: customers[1], affected_counts: { 'core.company_source_ref.company_id': 3, 'crm.department.company_id': 2 }, conflicts: [{ key: 'crm.status', app: 'crm', field: 'status', survivor: 'active', loser: 'inactive' }], moving_aliases: [{ alias: 'Northwind Retail Co', alias_type: 'legacy', source_system: 'coldlion', origin: 'existing_alias' }, { alias: 'Northwind Stores', alias_type: 'merged_name', source_system: 'db_data_admin_merge', origin: 'loser_name' }], moving_source_refs: [{ source_system: 'coldlion', source_table: 'customers', source_id: 'C-201', source_code: 'NW-201', source_name: 'Northwind' }] } } })
     if (name === 'db_data_admin_merge_customer') return route.fulfill({ json: { success: true, audit_id: 'audit-merge', survivor: customers[0] } })
     if (name.endsWith('_detail')) return route.fulfill({ json: { id: body?.p_id, aliases: [{ alias: 'Legacy name', source_system: 'ERP' }], source_refs: [{ source_system: 'Coldlion', source_id: 'C-100' }] } })
     if (name === 'db_data_admin_customer_list') return route.fulfill({ json: { rows: customers, next_cursor: null, page_size: 200 } })
@@ -77,19 +77,68 @@ test('renders persistent customer and vendor grids with lazy details', async ({ 
 })
 
 test('previews and explicitly confirms a protected duplicate merge', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 1000 })
+  // The corrected preview contains the complete moving-detail contract. Use a
+  // tall evidence viewport so the screenshot captures the dialog from its
+  // title through confirmation without recording an internally scrolled state.
+  await page.setViewportSize({ width: 1280, height: 1400 })
   await mockAdmin(page); await page.goto('/')
   await page.getByText('Acme Retail').click()
   await page.getByRole('button', { name: 'Merge duplicate' }).click()
   await page.getByLabel('Duplicate to absorb').selectOption(customers[1].id)
   await expect(page.getByText('Resolve every conflict')).toBeVisible()
   await expect(page.getByText('core.company_source_ref.company_id')).toBeVisible()
+  // Step 9 correction: the preview must show the exact aliases and source
+  // references that will move, not only affected counts.
+  await expect(page.getByText('Aliases that will move to the survivor')).toBeVisible()
+  await expect(page.getByText('Northwind Retail Co')).toBeVisible()
+  await expect(page.getByText("duplicate's current name")).toBeVisible()
+  await expect(page.getByText('Source references that will move to the survivor')).toBeVisible()
+  await expect(page.getByText('coldlion/customers')).toBeVisible()
   await page.getByLabel('Keep: active').check()
   await page.getByPlaceholder(/permanent audit/i).fill('Confirmed duplicate company')
   await page.getByLabel(/I confirm/).check()
-  await page.screenshot({ path: '../../docs/verification/db-data-admin-step9-merge-preview.png', fullPage: true })
+  await page.screenshot({ path: '../../docs/verification/db-data-admin-step9-moving-detail-preview.png', fullPage: true })
   await page.getByRole('button', { name: 'Merge records' }).click()
+  // Step 9 correction: an accessible success receipt with the final survivor and
+  // audit/operation ID persists until dismissed.
+  await expect(page.getByRole('heading', { name: 'Merge complete' })).toBeVisible()
+  const receipt = page.getByRole('status').filter({ hasText: 'was absorbed' })
+  await expect(receipt).toBeVisible()
+  await expect(page.getByText('audit-merge')).toBeVisible()
+  await page.screenshot({ path: '../../docs/verification/db-data-admin-step9-merge-receipt.png', fullPage: true })
+  await page.getByRole('button', { name: 'Done' }).click()
   await expect(page.getByRole('gridcell', { name: 'Northwind Stores' })).not.toBeVisible()
+})
+
+test('surfaces a stale concurrency-token save failure and recovers after reloading the record', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await mockAdmin(page)
+  // The first save races a concurrent edit and is loudly rejected as stale; the
+  // second save (after the editor reloads fresh data) succeeds. Registered after
+  // mockAdmin so this exact-URL route takes precedence over its catch-all.
+  let updateAttempts = 0
+  await page.route('https://preview.supabase.co/rest/v1/rpc/db_data_admin_update_customer', async (route: Route) => {
+    updateAttempts += 1
+    if (updateAttempts === 1) return route.fulfill({ json: { success: false, code: 'stale_token', current: { ...customers[0], updated_at: '2026-07-22T13:00:00Z' } } })
+    return route.fulfill({ json: { success: true, audit_id: 'audit-recovered', row: { ...customers[0], display_name: 'Acme Retail Group' } } })
+  })
+  await page.goto('/')
+  await page.getByText('Acme Retail').click()
+  await page.getByRole('button', { name: 'Edit record' }).click()
+  await page.getByLabel('Curated display name').fill('Acme Retail Group')
+  await page.getByLabel('Reason').fill('Curated correction')
+  await page.getByRole('button', { name: 'Save change' }).click()
+  // Loud, accessible failure — never a silent overwrite.
+  await expect(page.getByRole('alert')).toContainText('changed elsewhere')
+  await page.screenshot({ path: '../../docs/verification/db-data-admin-step8-stale-token.png', fullPage: true })
+  // One-click recovery: reload re-fetches the record and remounts the editor.
+  await page.getByRole('button', { name: 'Reload record' }).click()
+  await expect(page.getByRole('dialog', { name: 'Edit Customer' })).toBeVisible()
+  await page.getByLabel('Curated display name').fill('Acme Retail Group')
+  await page.getByLabel('Reason').fill('Curated correction after reload')
+  await page.getByRole('button', { name: 'Save change' }).click()
+  await expect(page.getByRole('status')).toContainText('Saved and audited')
+  await page.screenshot({ path: '../../docs/verification/db-data-admin-step8-stale-token-recovered.png', fullPage: true })
 })
 
 test('keeps the admin grid usable at a narrow viewport', async ({ page }) => {

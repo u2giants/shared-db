@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { executeMerge, initialQuery, loadAllRows, loadGridState, previewMerge, saveGridState, toRpcParams, updateRecord } from './data-admin'
+import { executeMerge, initialQuery, loadAllRows, loadGridState, previewMerge, saveGridState, searchMergeCandidates, toRpcParams, updateRecord } from './data-admin'
 
 describe('DB Data Admin query contracts', () => {
   it('maps the customer-only channel without changing the vendor signature', () => {
@@ -41,6 +41,18 @@ describe('DB Data Admin query contracts', () => {
       p_vendor_id: 'vendor-1', p_app: 'pm',
     }))
     expect(rpc.mock.calls[0]?.[1]).not.toHaveProperty('p_channel_ids')
+  })
+
+  it('searches the full entity for a merge candidate beyond the loaded grid page', async () => {
+    // A legitimate duplicate may not be on the loaded grid page. The dialog must
+    // be able to reach it through a bounded, inactive-inclusive name search that
+    // excludes the survivor itself.
+    const rpc = vi.fn().mockResolvedValue({ data: { rows: [{ id: 'keep' }, { id: 'dupe' }], next_cursor: null }, error: null })
+    const found = await searchMergeCandidates({ rpc } as never, 'customer', 'north', 'keep')
+    expect(rpc).toHaveBeenCalledWith('db_data_admin_customer_list', expect.objectContaining({
+      p_search: 'north', p_include_inactive: true, p_page_size: 25,
+    }))
+    expect(found.map(row => row.id)).toEqual(['dupe'])
   })
 
   it('maps merge preview and execution to the protected contracts', async () => {
