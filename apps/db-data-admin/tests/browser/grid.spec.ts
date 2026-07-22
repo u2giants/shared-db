@@ -6,6 +6,28 @@ const customers = [
 ]
 const vendors = [{ id: '33333333-3333-3333-3333-333333333333', display_name: 'Atlas Manufacturing', status: 'active', crm_status: 'active', pm_status: 'active', dam_status: 'active', plm_status: null, erp_active: true, alias_count: 3, updated_at: '2026-07-20T12:00:00Z' }]
 
+// Step 10 read-only Licensor -> Property tree fixture. The collide property
+// carries mg_code "DNY" (Disney's code) but is parented to Marvel by its
+// canonical licensor_id, proving the edge never comes from mg_code.
+const licensorTree = {
+  snapshot: { snapshot_at: '2026-07-22T12:00:00Z', store: 'core.licensor / core.property (Supabase canonical mirror)', source_system: 'designflow_plm', feeder_last_sync_at: '2026-07-08T03:30:00Z', feeder_last_run_status: 'succeeded', feeder_days_stale: 14, feeder_available: false, live_upstream_reconciliation: false, note: 'Snapshot of the canonical Supabase mirror. The edge is DesignFlow-owned and mirrored via core.property.licensor_id; never inferred from mgTypeCode or mg_code.' },
+  reconciliation: { licensor_count: 3, active_licensor_count: 3, property_count: 4, active_property_count: 4, properties_with_licensor: 3, orphan_property_count: 1, expected_orphan_count_is_zero: false, partition_reconciles: true },
+  licensors: [
+    { id: '44444444-0001-4000-8000-000000000001', name: 'Marvel', code: 'MRV', status: 'active', property_count: 2, updated_at: '2026-07-22T10:00:00Z', source_refs: [{ source_system: 'designflow_plm', source_table: 'merchGroup', source_id: 'mg-mrv', source_code: 'MRV', source_name: 'Marvel' }], plm_context: [{ plm_id: 'li-cw', division_code: 'CW001', mg_code: 'MRV', mg_type: 'licensor', mg_category: 'licensed' }, { plm_id: 'li-sp', division_code: 'SP001', mg_code: 'MRV', mg_type: 'licensor', mg_category: 'licensed' }], properties: [
+      { id: '44444444-0002-4000-8000-000000000002', name: 'Avengers', code: 'AVG', status: 'active', character_count: 6, source_refs: [{ source_system: 'designflow_plm', source_table: 'merchGroup', source_id: 'mg-avg', source_code: 'AVG', source_name: 'Avengers' }], plm_context: [{ plm_id: 'pr-avg', division_code: 'CW001', mg_code: 'AVG', mg_type: 'property', mg_category: 'licensed' }] },
+      { id: '44444444-0003-4000-8000-000000000003', name: 'Spider-Man', code: 'SPD', status: 'active', character_count: 2, source_refs: [], plm_context: [{ plm_id: 'pr-spd', division_code: 'CW001', mg_code: 'DNY', mg_type: 'property', mg_category: 'licensed' }] },
+    ] },
+    { id: '44444444-0004-4000-8000-000000000004', name: 'Disney', code: 'DNY', status: 'active', property_count: 1, updated_at: '2026-07-22T10:00:00Z', source_refs: [], plm_context: [{ plm_id: 'li-dny', division_code: 'CW001', mg_code: 'DNY', mg_type: 'licensor', mg_category: 'licensed' }], properties: [
+      { id: '44444444-0005-4000-8000-000000000005', name: 'Frozen', code: 'FRZ', status: 'active', character_count: 0, source_refs: [], plm_context: [{ plm_id: 'pr-frz', division_code: 'CW001', mg_code: 'FRZ', mg_type: 'property', mg_category: 'licensed' }] },
+    ] },
+    { id: '44444444-0006-4000-8000-000000000006', name: 'Warner Bros', code: 'WB', status: 'inactive', property_count: 0, updated_at: '2026-07-22T10:00:00Z', source_refs: [], plm_context: [], properties: [] },
+  ],
+  orphan_properties: [
+    { id: '44444444-0007-4000-8000-000000000007', name: 'Unassigned IP', code: 'UNA', status: 'active', licensor_id: null, character_count: 0, source_refs: [], plm_context: [] },
+  ],
+  next_cursor: null, page_size: 200,
+}
+
 async function mockAdmin(page: Page) {
   await page.addInitScript(() => localStorage.setItem('sb-preview-auth-token', JSON.stringify({ access_token: 'mock-token', refresh_token: 'mock-refresh', expires_at: 4102444800, expires_in: 3600, token_type: 'bearer', user: { id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', email: 'albert@popcre.com', aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: '2026-07-22T00:00:00Z' } })))
   await page.route('**/config.js', route => route.fulfill({ contentType: 'application/javascript', body: "window.__DB_DATA_ADMIN_CONFIG__={supabaseUrl:'https://preview.supabase.co',supabaseAnonKey:'mock-anon',authRedirectUrl:'http://127.0.0.1:4173'}" }))
@@ -23,6 +45,7 @@ async function mockAdmin(page: Page) {
     if (name.endsWith('_detail')) return route.fulfill({ json: { id: body?.p_id, aliases: [{ alias: 'Legacy name', source_system: 'ERP' }], source_refs: [{ source_system: 'Coldlion', source_id: 'C-100' }] } })
     if (name === 'db_data_admin_customer_list') return route.fulfill({ json: { rows: customers, next_cursor: null, page_size: 200 } })
     if (name === 'db_data_admin_vendor_list') return route.fulfill({ json: { rows: vendors, next_cursor: null, page_size: 200 } })
+    if (name === 'db_data_admin_licensor_property_tree') return route.fulfill({ json: licensorTree })
     return route.fulfill({ json: {} })
   })
 }
@@ -74,4 +97,22 @@ test('keeps the admin grid usable at a narrow viewport', async ({ page }) => {
   await expect(page.locator('revo-grid')).toBeVisible()
   await expect(page.getByText('Acme Retail')).toBeVisible()
   await page.screenshot({ path: '../../docs/verification/db-data-admin-step7-narrow.png', fullPage: true })
+})
+
+test('renders the read-only Licensor -> Property tree with counts, source context, and a loud orphan', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await mockAdmin(page); await page.goto('/')
+  await page.getByRole('button', { name: 'Licensors' }).click()
+  await page.getByLabel('Include inactive').check()
+  await expect(page.getByText('3 licensors')).toBeVisible()
+  await expect(page.getByText('4 properties')).toBeVisible()
+  await expect(page.getByText(/upstream feeder unavailable/i)).toBeVisible()
+  // Orphan surfaced loudly and separately.
+  await expect(page.getByRole('alert').filter({ hasText: 'Unassigned IP' })).toBeVisible()
+  // Expand a licensor to reveal a property; Spider-Man (mg_code DNY) nests
+  // under Marvel, not Disney.
+  await page.getByRole('button', { name: /expand licensor marvel/i }).click()
+  await expect(page.getByText('Spider-Man')).toBeVisible()
+  await expect(page.locator('[aria-label="Properties of Marvel"]')).toContainText('Spider-Man')
+  await page.screenshot({ path: '../../docs/verification/db-data-admin-step10-licensor-tree.png', fullPage: true })
 })

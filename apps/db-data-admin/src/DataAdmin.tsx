@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { executeMerge, initialQuery, loadAllRows, loadAudit, loadDetail, loadGridState, loadRows, previewMerge, probeAccess, saveGridState, updateRecord, type AdminRow, type ApiClient, type AuditEvent, type EntityKind, type MergeResult, type QueryState, type UpdateInput } from './lib/data-admin'
 import { RecordEditor } from './RecordEditor'
 import { MergeDialog } from './MergeDialog'
+import { LicensorTree } from './LicensorTree'
 
 type Props = { client: ApiClient; email?: string; onSignOut: () => void }
 type HeaderProps = (ColumnTemplateProp | ColumnRegular) & { filters?: Record<string, string>; onFilter?: (prop: string, value: string) => void; scope?: string }
@@ -35,6 +36,7 @@ function textMatch(row: AdminRow, filters: Record<string, string>) {
 
 export function DataAdmin({ client, email, onSignOut }: Props) {
   const [kind, setKind] = useState<EntityKind>('customer')
+  const [section, setSection] = useState<'entity' | 'taxonomy'>('entity')
   const [query, setQuery] = useState<QueryState>(initialQuery)
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
@@ -137,9 +139,13 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
   return <section className="workspace">
     <div className="workspace-bar"><div><strong>{email}</strong><span>Preview database</span></div><button className="secondary" onClick={onSignOut}><LogOut /> Sign out</button></div>
     <nav className="tabs" aria-label="Data type">
-      <button className={kind === 'customer' ? 'active' : ''} onClick={() => setKind('customer')}>Customers</button>
-      <button className={kind === 'vendor' ? 'active' : ''} onClick={() => setKind('vendor')}>Vendors</button>
+      <button className={section === 'entity' && kind === 'customer' ? 'active' : ''} onClick={() => { setSection('entity'); setKind('customer') }}>Customers</button>
+      <button className={section === 'entity' && kind === 'vendor' ? 'active' : ''} onClick={() => { setSection('entity'); setKind('vendor') }}>Vendors</button>
+      <button className={section === 'taxonomy' ? 'active' : ''} onClick={() => setSection('taxonomy')}>Licensors</button>
     </nav>
+    {section === 'taxonomy'
+      ? <LicensorTree client={client} />
+      : <>
     <div className="controls">
       <label className="search"><Search /><span className="sr-only">Search</span><input placeholder={`Search ${kind}s`} value={query.search} onChange={e => updateQuery({ search: e.target.value })} onKeyDown={e => e.key === 'Enter' && void fetchRows()} /></label>
       <select aria-label="Canonical status" value={query.status} onChange={e => updateQuery({ status: e.target.value })}><option value="">All statuses</option><option>active</option><option>inactive</option></select>
@@ -159,5 +165,6 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
     {detail && <aside className="detail-panel" aria-label={`${kind} details`}><button className="close" aria-label="Close details" onClick={() => { setDetail(null); setEditing(false); setMerging(false) }}><X /></button><h2>{String(detail.name ?? 'Details')}</h2><div className="detail-actions"><button className="primary edit-button" onClick={() => setEditing(true)}><Pencil /> Edit record</button><button className="secondary" onClick={() => setMerging(true)}><GitMerge /> Merge duplicate</button></div>{detailLoading ? <p>Loading details…</p> : <><h3>Aliases</h3><pre>{JSON.stringify(detail.aliases ?? [], null, 2)}</pre><h3>Source references</h3><pre>{JSON.stringify(detail.source_refs ?? [], null, 2)}</pre><h3 className="history-heading"><History /> Audit history</h3>{audit.length === 0 ? <p className="muted">No audited changes yet.</p> : <ol className="audit-list">{audit.map(event => <li key={event.id} className={event.succeeded ? '' : 'failed'}><strong>{event.succeeded ? event.action === 'merge' ? 'Records merged' : 'Change saved' : `Failed: ${event.error_code}`}</strong><span>{new Date(event.occurred_at).toLocaleString()} · {event.actor_label ?? 'Administrator'}</span><p>{event.reason}</p></li>)}</ol>}</>}</aside>}
     {editing && detail && <RecordEditor kind={kind} row={detail as AdminRow} channels={channels} onCancel={() => setEditing(false)} onSave={saveRecord} />}
     {merging && detail && <MergeDialog kind={kind} survivor={detail as AdminRow} candidates={rows.filter(row => row.id !== detail.id)} onCancel={() => setMerging(false)} onPreview={loserId => previewMerge(client, kind, String(detail.id), loserId)} onMerge={(loserId, token, reason, resolutions) => executeMerge(client, kind, String(detail.id), loserId, token, reason, resolutions)} onMerged={mergeComplete} />}
+    </>}
   </section>
 }

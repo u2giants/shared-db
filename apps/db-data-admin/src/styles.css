@@ -53,4 +53,41 @@ h1 { margin: 18px 0 12px; font-size: clamp(36px, 6vw, 62px); line-height: 1; let
   .signed-in { flex-direction: column; align-items: flex-start; }
   .workspace { padding: 14px; }.workspace-bar { align-items: flex-start; }.search { min-width: 100%; }.grid-wrap { height: 58vh; }.build { display: none; }
   .editor-split { flex-direction: column; align-items: stretch; gap: 0; }
+  .tree-meta-row { flex-wrap: wrap; }
 }
+
+/* Step 10 — read-only Licensor -> Property tree */
+.taxonomy .tree-controls { padding: 14px 0; }
+.tree-meta { margin-bottom: 14px; padding: 14px 16px; background: #fff; border: 1px solid #ccd5e3; border-radius: 12px; }
+.tree-meta-row { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; font-size: 13px; }
+.tree-meta-row + .tree-meta-row { margin-top: 8px; }
+.tree-meta-row strong { display: inline-flex; align-items: center; gap: 7px; color: #204dbd; }.tree-meta-row strong svg { width: 16px; }
+.tree-meta .loud { color: #8a1c1c; font-weight: 700; }
+.orphan-alert { margin-bottom: 14px; padding: 16px 18px; background: #fff5f5; border: 1px solid #e6b3b3; border-radius: 12px; }
+.orphan-alert h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 17px; color: #8a1c1c; }.orphan-alert h2 svg { width: 19px; }
+.orphan-alert p { margin: 0 0 8px; color: #5a3a3a; font-size: 13px; line-height: 1.5; }
+.orphan-alert code { font: 12px ui-monospace, monospace; background: #fdeaea; padding: 1px 5px; border-radius: 4px; }
+.orphan-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.orphan-list li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.tree-wrap { min-height: 240px; background: #fff; border: 1px solid #ccd5e3; border-radius: 12px; padding: 8px 6px; }
+.tree, .tree-properties { list-style: none; margin: 0; padding: 0; }
+.tree-licensor { border-bottom: 1px solid #eef1f6; padding: 2px 0; }
+.tree-licensor:last-child { border-bottom: 0; }
+.tree-properties { padding-left: 30px; margin: 2px 0 6px; border-left: 2px solid #eef1f6; }
+.tree-row { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; background: transparent; border: 0; padding: 7px 8px; border-radius: 8px; cursor: pointer; font: inherit; }
+.tree-row:hover { background: #f5f7fb; }
+.tree-row:focus-visible { outline: 2px solid #2955c8; outline-offset: -2px; }
+.tree-row-licensor { font-weight: 680; }.tree-row-property { font-weight: 500; padding-left: 4px; cursor: default; }
+.tree-row svg { width: 17px; color: #667085; flex: none; }
+.tree-bullet { color: #9aa4b6; padding-left: 4px; }
+.tree-label { flex: none; max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mono { font: 12px ui-monospace, monospace; color: #8a18b0; }
+.count { margin-left: auto; color: #667085; font-size: 12px; font-weight: 650; flex: none; }
+.badge { flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: capitalize; }
+.badge-ok { background: #e6f6ec; color: #176137; }.badge-warn { background: #fff4e2; color: #9a5b12; }.badge-off { background: #eef1f6; color: #667085; }
+.tree-context { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 0 8px 8px 34px; font-size: 11px; }
+.ctx-chips { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+.ctx-chip { background: #f1f4fb; border: 1px solid #e1e7f2; border-radius: 6px; padding: 1px 7px; font: 11px ui-monospace, monospace; color: #475067; }
+.ctx-chip.muted { background: #f6f7fb; color: #838da0; }
+.tree-empty { padding: 18px 24px; }
+@media (max-width: 620px) { .tree-context { padding-left: 8px; } .tree-label { max-width: 60vw; } }
