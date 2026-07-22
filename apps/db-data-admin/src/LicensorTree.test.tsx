@@ -66,7 +66,45 @@ const feederUpFixture: LicensorTreeResult = {
   },
 }
 
+// A licensor with 60 properties (> the 50 initial cap and far past the old
+// 24-item hard slice) proves every property stays reachable via "show all".
+const bigLicensorProps = Array.from({ length: 60 }, (_, i) => ({
+  id: `bp-${i}`, name: `Property ${String(i).padStart(2, '0')}`, code: `P${i}`,
+  status: 'active', character_count: 0, source_refs: [], plm_context: [],
+}))
+const bigFixture: LicensorTreeResult = {
+  ...fixture,
+  reconciliation: { ...fixture.reconciliation, licensor_count: 1, property_count: 60, active_property_count: 60, properties_with_licensor: 60, orphan_property_count: 0, expected_orphan_count_is_zero: true, partition_reconciles: true },
+  licensors: [
+    { id: 'l-big', name: 'Bigco', code: 'BIG', status: 'active', property_count: 60, updated_at: '2026-07-22T12:00:00Z', source_refs: [], plm_context: [], properties: bigLicensorProps },
+  ],
+  orphan_properties: [],
+}
+
 describe('Licensor / Property tree (Step 10)', () => {
+  it('discloses the exact hidden count and makes every property reachable past the cap', async () => {
+    render(<LicensorTree client={makeClient(bigFixture)} />)
+    await screen.findByText('Bigco')
+    fireEvent.click(screen.getByRole('button', { name: /expand licensor bigco/i }))
+    // The 50th property (index 49) is within the initial cap and visible.
+    expect(await screen.findByText('Property 49')).toBeInTheDocument()
+    // The last property (index 59) is hidden until "show all" is used.
+    expect(screen.queryByText('Property 59')).not.toBeInTheDocument()
+    const showAll = screen.getByRole('button', { name: /show all 60 properties \(10 hidden\)/i })
+    fireEvent.click(showAll)
+    expect(await screen.findByText('Property 59')).toBeInTheDocument()
+    // And it collapses back without losing reachability.
+    fireEvent.click(screen.getByRole('button', { name: /show fewer properties/i }))
+    expect(screen.queryByText('Property 59')).not.toBeInTheDocument()
+  })
+
+  it('search reaches a property beyond the initial cap without needing show-all', async () => {
+    render(<LicensorTree client={makeClient(bigFixture)} />)
+    await screen.findByText('Bigco')
+    fireEvent.change(screen.getByPlaceholderText(/search licensors or properties/i), { target: { value: 'Property 59' } })
+    expect(await screen.findByText('Property 59')).toBeInTheDocument()
+  })
+
   it('renders reconciliation counts, a dated snapshot, and the feeder-down notice', async () => {
     render(<LicensorTree client={makeClient(fixture)} />)
     expect(await screen.findByText(/2 licensors/i)).toBeInTheDocument()

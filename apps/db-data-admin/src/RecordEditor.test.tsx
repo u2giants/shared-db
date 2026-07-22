@@ -14,11 +14,26 @@ describe('RecordEditor', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
-  it('shows a loud conflict state for a stale token', async () => {
+  it('shows a loud conflict state for a stale token and offers reload recovery', async () => {
     const onSave = vi.fn().mockResolvedValue({ success: false, code: 'stale_token' })
-    render(<RecordEditor kind="vendor" row={row} channels={[]} onCancel={() => undefined} onSave={onSave} />)
+    const onReload = vi.fn()
+    render(<RecordEditor kind="vendor" row={row} channels={[]} onCancel={() => undefined} onSave={onSave} onReload={onReload} />)
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Correct the name' } })
     fireEvent.click(screen.getByRole('button', { name: /save change/i }))
     expect(await screen.findByRole('alert')).toHaveTextContent('changed elsewhere')
+    fireEvent.click(screen.getByRole('button', { name: /reload record/i }))
+    expect(onReload).toHaveBeenCalledTimes(1)
+  })
+
+  it('reflects an application’s current status instead of silently defaulting to Active', () => {
+    // Selecting PM must adopt the record's current PM status (inactive), so a
+    // save never accidentally reactivates a currently-inactive application.
+    const inactivePm = { ...row, pm_status: 'inactive' }
+    render(<RecordEditor kind="customer" row={inactivePm} channels={[]} onCancel={() => undefined} onSave={vi.fn()} />)
+    const appStatus = screen.getByLabelText('Application status') as HTMLSelectElement
+    expect(appStatus.value).toBe('active')
+    fireEvent.change(screen.getByLabelText('Application'), { target: { value: 'pm' } })
+    expect(appStatus.value).toBe('inactive')
+    expect(screen.getByText(/currently inactive in pm/i)).toBeInTheDocument()
   })
 })

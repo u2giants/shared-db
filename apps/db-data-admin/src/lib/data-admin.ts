@@ -9,7 +9,9 @@ export type UpdateInput = {
 export type UpdateResult = { success: boolean; code?: string; message?: string; row?: AdminRow; current?: AdminRow; audit_id?: string; idempotent_replay?: boolean }
 export type AuditEvent = { id: string; action: string; reason: string; actor_label?: string; occurred_at: string; succeeded: boolean; error_code?: string; old_snapshot?: Record<string, unknown>; new_snapshot?: Record<string, unknown> }
 export type MergeConflict = { key: string; app: string; field: string; survivor: unknown; loser: unknown }
-export type MergePreview = { entity_type: EntityKind; survivor: AdminRow; loser: AdminRow; affected_counts: Record<string, number>; conflicts: MergeConflict[] }
+export type MergeMovingAlias = { alias: string; alias_type?: string | null; source_system?: string | null; origin: 'existing_alias' | 'loser_name' }
+export type MergeMovingSourceRef = { source_system: string; source_table?: string | null; source_id?: string | null; source_code?: string | null; source_name?: string | null }
+export type MergePreview = { entity_type: EntityKind; survivor: AdminRow; loser: AdminRow; affected_counts: Record<string, number>; conflicts: MergeConflict[]; moving_aliases?: MergeMovingAlias[]; moving_source_refs?: MergeMovingSourceRef[] }
 export type MergePreviewResult = { success: boolean; code?: string; message?: string; preview?: MergePreview; preview_token?: string }
 export type MergeResult = { success: boolean; code?: string; message?: string; survivor?: AdminRow; audit_id?: string; idempotent_replay?: boolean; current_preview?: MergePreviewResult }
 export type QueryState = {
@@ -60,6 +62,16 @@ export async function loadAllRows(client: ApiClient, kind: EntityKind, query: Qu
     rows.push(...page.rows); cursor = page.nextCursor
   } while (cursor && rows.length < limit)
   return { rows, nextCursor: cursor }
+}
+
+// Bounded candidate search for the merge dialog: a legitimate duplicate may not
+// be in the currently loaded grid page (server mode, or beyond the client-mode
+// cap), so the dialog can search the full entity by name through the same
+// protected list RPC. Bounded to a single small page — never an unbounded scan.
+export async function searchMergeCandidates(client: ApiClient, kind: EntityKind, term: string, excludeId: string) {
+  const query: QueryState = { ...initialQuery, search: term, includeInactive: true, pageSize: 25 }
+  const { rows } = await loadRows(client, kind, query)
+  return rows.filter(row => row.id !== excludeId)
 }
 
 export async function loadDetail(client: ApiClient, kind: EntityKind, id: string) {
