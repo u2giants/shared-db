@@ -1,12 +1,18 @@
 # DesignFlow Sample Tracking — Shared Database Implementation Plan
 
-**Status:** Authoritative shared-db plan; implementation has not started  
-**Created:** 2026-07-22  
-**Repository:** [`u2giants/shared-db`](https://github.com/u2giants/shared-db)  
-**Owning schema:** `dflow` in the shared Supabase project  
-**Production project:** `qsllyeztdwjgirsysgai`  
-**Preview project:** `rjyboqwcdzcocqgmsyel` (`shared-db-schema-rehearsal`; re-verify against `AGENTS.md` before use)  
-**Consumer services:** `popcre/designflow-tracking` and `popcre/designflow-frontend`  
+**Status:** Authoritative shared-db plan; implementation has not started
+
+**Created:** 2026-07-22
+
+**Repository:** [`u2giants/shared-db`](https://github.com/u2giants/shared-db)
+
+**Owning schema:** `dflow` in the shared Supabase project
+
+**Production project:** `qsllyeztdwjgirsysgai`
+
+**Preview project:** `rjyboqwcdzcocqgmsyel` (`shared-db-schema-rehearsal`; re-verify against `AGENTS.md` before use)
+
+**Consumer services:** `popcre/designflow-tracking` and `popcre/designflow-frontend`
 **Database rule:** all DDL, constraints, indexes, views, backfills, and database tests for this feature are authored here first. No DesignFlow application repository may add its own migration or startup DDL.
 
 ---
