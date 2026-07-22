@@ -2,6 +2,12 @@ import type { createSupabase } from './supabase'
 
 export type EntityKind = 'customer' | 'vendor'
 export type AdminRow = Record<string, unknown> & { id: string; display_name?: string; name?: string }
+export type UpdateInput = {
+  expectedUpdatedAt: string; reason: string; displayName?: string | null; status?: string | null
+  app?: 'crm' | 'pm' | 'dam' | null; appStatus?: 'active' | 'inactive' | null; channelIds?: string[] | null
+}
+export type UpdateResult = { success: boolean; code?: string; message?: string; row?: AdminRow; current?: AdminRow; audit_id?: string; idempotent_replay?: boolean }
+export type AuditEvent = { id: string; action: string; reason: string; actor_label?: string; occurred_at: string; succeeded: boolean; error_code?: string; old_snapshot?: Record<string, unknown>; new_snapshot?: Record<string, unknown> }
 export type QueryState = {
   search: string; status: string; app: string; appStatus: string; includeInactive: boolean
   channelId: string; sort: string; sortDir: 'asc' | 'desc'; cursor: string | null; pageSize: number
@@ -56,6 +62,32 @@ export async function loadDetail(client: ApiClient, kind: EntityKind, id: string
   const { data, error } = await client.rpc(`db_data_admin_${kind}_detail`, { p_id: id })
   if (error) throw error
   return data as Record<string, unknown>
+}
+
+export async function updateRecord(client: ApiClient, kind: EntityKind, id: string, input: UpdateInput) {
+  const params = {
+    [`p_${kind === 'customer' ? 'customer' : 'vendor'}_id`]: id,
+    p_expected_updated_at: input.expectedUpdatedAt,
+    p_operation_id: crypto.randomUUID(),
+    p_reason: input.reason,
+    p_display_name: input.displayName ?? null,
+    p_status: input.status ?? null,
+    p_app: input.app ?? null,
+    p_app_status: input.appStatus ?? null,
+    ...(kind === 'customer' ? { p_channel_ids: input.channelIds ?? null } : {}),
+  }
+  const { data, error } = await client.rpc(`db_data_admin_update_${kind}`, params)
+  if (error) throw error
+  return data as UpdateResult
+}
+
+export async function loadAudit(client: ApiClient, kind: EntityKind, id: string) {
+  const { data, error } = await client.rpc('db_data_admin_audit_list', {
+    p_entity_type: kind, p_entity_id: id, p_action: null, p_actor_profile_id: null,
+    p_since: null, p_until: null, p_cursor: null, p_page_size: 50,
+  })
+  if (error) throw error
+  return ((data as { rows?: AuditEvent[] } | null)?.rows ?? [])
 }
 
 export async function loadGridState(client: ApiClient, kind: EntityKind) {

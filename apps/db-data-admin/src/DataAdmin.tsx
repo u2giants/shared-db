@@ -1,7 +1,8 @@
 import { RevoGrid, Template, type ColumnRegular, type ColumnTemplateProp } from '@revolist/react-datagrid'
-import { ChevronRight, LogOut, RefreshCw, Search, X } from 'lucide-react'
+import { ChevronRight, History, LogOut, Pencil, RefreshCw, Search, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { initialQuery, loadAllRows, loadDetail, loadGridState, loadRows, probeAccess, saveGridState, type AdminRow, type ApiClient, type EntityKind, type QueryState } from './lib/data-admin'
+import { initialQuery, loadAllRows, loadAudit, loadDetail, loadGridState, loadRows, probeAccess, saveGridState, updateRecord, type AdminRow, type ApiClient, type AuditEvent, type EntityKind, type QueryState, type UpdateInput } from './lib/data-admin'
+import { RecordEditor } from './RecordEditor'
 
 type Props = { client: ApiClient; email?: string; onSignOut: () => void }
 type HeaderProps = (ColumnTemplateProp | ColumnRegular) & { filters?: Record<string, string>; onFilter?: (prop: string, value: string) => void; scope?: string }
@@ -43,6 +44,8 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
   const [denied, setDenied] = useState(false)
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [audit, setAudit] = useState<AuditEvent[]>([])
+  const [editing, setEditing] = useState(false)
   const [channels, setChannels] = useState<Array<{ id: string; name: string }>>([])
   const [dataMode, setDataMode] = useState<'client' | 'server'>('client')
   const version = useRef(0)
@@ -100,10 +103,24 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
   const visibleRows = useMemo(() => rows.filter(row => textMatch(row, activeFilters)).map(row => ({ ...row, plm_display: row.plm_linked === false ? 'Not linked' : row.plm_status == null ? 'Unknown' : row.plm_status === 'ACTIVE' ? 'Active' : 'Inactive' })), [rows, activeFilters])
 
   const openDetail = async (row: AdminRow) => {
-    setDetailLoading(true); setDetail({ id: row.id, name: row.display_name ?? row.name })
-    try { setDetail({ ...(await loadDetail(client, kind, row.id)), name: row.display_name ?? row.name }) }
+    setDetailLoading(true); setAudit([]); setDetail({ ...row, name: row.display_name ?? row.name })
+    try {
+      const [loadedDetail, loadedAudit] = await Promise.all([loadDetail(client, kind, row.id), loadAudit(client, kind, row.id)])
+      setDetail({ ...row, ...loadedDetail, name: row.display_name ?? row.name }); setAudit(loadedAudit)
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Details could not be loaded.') }
     finally { setDetailLoading(false) }
+  }
+
+  const saveRecord = async (input: UpdateInput) => {
+    if (!detail) throw new Error('No record is selected.')
+    const result = await updateRecord(client, kind, String(detail.id), input)
+    if (result.success && result.row) {
+      setRows(current => current.map(row => row.id === result.row?.id ? { ...row, ...result.row } : row))
+      setDetail(current => current ? { ...current, ...result.row, name: result.row?.display_name ?? result.row?.name } : current)
+      setAudit(await loadAudit(client, kind, String(detail.id)))
+    }
+    return result
   }
 
   if (denied) return <section className="access-denied" role="alert"><h1>Access denied</h1><p>You are signed in, but DB Data Admin requires an active Administrator grant.</p><button className="secondary" onClick={onSignOut}><LogOut /> Sign out</button></section>
@@ -117,7 +134,7 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
     <div className="controls">
       <label className="search"><Search /><span className="sr-only">Search</span><input placeholder={`Search ${kind}s`} value={query.search} onChange={e => updateQuery({ search: e.target.value })} onKeyDown={e => e.key === 'Enter' && void fetchRows()} /></label>
       <select aria-label="Canonical status" value={query.status} onChange={e => updateQuery({ status: e.target.value })}><option value="">All statuses</option><option>active</option><option>inactive</option></select>
-      <select aria-label="Application" value={query.app} onChange={e => updateQuery({ app: e.target.value })}><option value="">All apps</option><option value="crm">CRM</option><option value="pim">PM/PIM</option><option value="dam">DAM</option>{kind === 'customer' && <option value="plm">PLM</option>}</select>
+      <select aria-label="Application" value={query.app} onChange={e => updateQuery({ app: e.target.value })}><option value="">All apps</option><option value="crm">CRM</option><option value="pm">PM/PIM</option><option value="dam">DAM</option>{kind === 'customer' && <option value="plm">PLM</option>}</select>
       <select aria-label="Application status" value={query.appStatus} onChange={e => updateQuery({ appStatus: e.target.value })}><option value="">Any app status</option><option value="active">Active</option><option value="inactive">Inactive</option></select>
       {kind === 'customer' && <select aria-label="Channel" value={query.channelId} onChange={e => updateQuery({ channelId: e.target.value })}><option value="">All channels</option>{channels.map(channel => <option key={channel.id} value={channel.id}>{channel.name}</option>)}</select>}
       <select aria-label="Data mode" value={dataMode} onChange={e => setDataMode(e.target.value as 'client' | 'server')}><option value="client">Client mode (&lt;5,000)</option><option value="server">Server mode</option></select>
@@ -130,6 +147,7 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
       {loading && <div className="grid-loading">Loading…</div>}
     </div>
     <footer className="grid-footer"><span>{visibleRows.length} loaded</span>{nextCursor && <button className="secondary" disabled={loading} onClick={() => { const next = { ...query, cursor: nextCursor }; setQuery(next); void fetchRows(true, next) }}>Load more <ChevronRight /></button>}</footer>
-    {detail && <aside className="detail-panel" aria-label={`${kind} details`}><button className="close" aria-label="Close details" onClick={() => setDetail(null)}><X /></button><h2>{String(detail.name ?? 'Details')}</h2>{detailLoading ? <p>Loading details…</p> : <><h3>Aliases</h3><pre>{JSON.stringify(detail.aliases ?? [], null, 2)}</pre><h3>Source references</h3><pre>{JSON.stringify(detail.source_refs ?? [], null, 2)}</pre></>}</aside>}
+    {detail && <aside className="detail-panel" aria-label={`${kind} details`}><button className="close" aria-label="Close details" onClick={() => { setDetail(null); setEditing(false) }}><X /></button><h2>{String(detail.name ?? 'Details')}</h2><button className="primary edit-button" onClick={() => setEditing(true)}><Pencil /> Edit record</button>{detailLoading ? <p>Loading details…</p> : <><h3>Aliases</h3><pre>{JSON.stringify(detail.aliases ?? [], null, 2)}</pre><h3>Source references</h3><pre>{JSON.stringify(detail.source_refs ?? [], null, 2)}</pre><h3 className="history-heading"><History /> Audit history</h3>{audit.length === 0 ? <p className="muted">No audited changes yet.</p> : <ol className="audit-list">{audit.map(event => <li key={event.id} className={event.succeeded ? '' : 'failed'}><strong>{event.succeeded ? 'Change saved' : `Failed: ${event.error_code}`}</strong><span>{new Date(event.occurred_at).toLocaleString()} · {event.actor_label ?? 'Administrator'}</span><p>{event.reason}</p></li>)}</ol>}</>}</aside>}
+    {editing && detail && <RecordEditor kind={kind} row={detail as AdminRow} channels={channels} onCancel={() => setEditing(false)} onSave={saveRecord} />}
   </section>
 }
