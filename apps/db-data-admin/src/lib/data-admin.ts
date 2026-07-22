@@ -59,15 +59,17 @@ export async function loadDetail(client: ApiClient, kind: EntityKind, id: string
 }
 
 export async function loadGridState(client: ApiClient, kind: EntityKind) {
-  const { data, error } = await client.rpc('db_data_admin_grid_state_get', { p_grid_key: kind, p_view_key: 'default' })
+  const { data, error } = await client.rpc('db_data_admin_grid_state_get', { p_entity_type: kind, p_view_key: 'default' })
   if (error) throw error
   return data as { state?: Partial<QueryState>; version?: number } | null
 }
 
 export async function saveGridState(client: ApiClient, kind: EntityKind, state: QueryState, version: number) {
   const { data, error } = await client.rpc('db_data_admin_grid_state_upsert', {
-    p_grid_key: kind, p_view_key: 'default', p_state: state, p_expected_version: version,
+    p_entity_type: kind, p_view_key: 'default', p_state: state, p_expected_version: version || null,
   })
   if (error) throw error
-  return data as { version?: number } | null
+  const result = data as { ok?: boolean; code?: string; current_version?: number; version?: number } | null
+  if (result?.ok === false) throw new Error(result.code === 'version_conflict' ? `Saved view conflict at version ${result.current_version ?? 'unknown'}` : 'Saved view could not be updated')
+  return result
 }

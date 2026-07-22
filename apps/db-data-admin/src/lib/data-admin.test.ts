@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { initialQuery, loadAllRows, toRpcParams } from './data-admin'
+import { initialQuery, loadAllRows, loadGridState, saveGridState, toRpcParams } from './data-admin'
 
 describe('DB Data Admin query contracts', () => {
   it('maps the customer-only channel without changing the vendor signature', () => {
@@ -14,5 +14,13 @@ describe('DB Data Admin query contracts', () => {
     const result = await loadAllRows({ rpc } as never, 'customer', initialQuery)
     expect(result.rows.map(row => row.id)).toEqual(['1', '2'])
     expect(rpc).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses the exact saved-view contract and surfaces optimistic conflicts', async () => {
+    const getRpc = vi.fn().mockResolvedValue({ data: { found: false }, error: null })
+    await loadGridState({ rpc: getRpc } as never, 'customer')
+    expect(getRpc).toHaveBeenCalledWith('db_data_admin_grid_state_get', { p_entity_type: 'customer', p_view_key: 'default' })
+    const saveRpc = vi.fn().mockResolvedValue({ data: { ok: false, code: 'version_conflict', current_version: 3 }, error: null })
+    await expect(saveGridState({ rpc: saveRpc } as never, 'vendor', initialQuery, 2)).rejects.toThrow('version 3')
   })
 })
