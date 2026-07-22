@@ -124,3 +124,75 @@ export async function saveGridState(client: ApiClient, kind: EntityKind, state: 
   if (result?.ok === false) throw new Error(result.code === 'version_conflict' ? `Saved view conflict at version ${result.current_version ?? 'unknown'}` : 'Saved view could not be updated')
   return result
 }
+
+// ---- Step 10: read-only Licensor -> Property tree ---------------------------
+
+export type TaxonomySourceRef = {
+  source_system: string; source_table: string; source_id: string
+  source_code: string | null; source_name: string | null
+}
+export type PlmContextEntry = {
+  plm_id: string | null; division_code: string | null; mg_code: string | null
+  mg_type: string | null; mg_category: string | null
+}
+export type TaxonomyNode = {
+  id: string; name: string; code: string | null; status: string
+  character_count?: number; licensor_id?: string | null
+  source_refs: TaxonomySourceRef[]; plm_context: PlmContextEntry[]
+  updated_at?: string
+}
+export type PropertyNode = TaxonomyNode
+export type LicensorNode = TaxonomyNode & { property_count: number; properties: PropertyNode[] }
+export type TreeSnapshot = {
+  snapshot_at: string; store: string; source_system: string
+  feeder_last_sync_at: string | null; feeder_last_run_status: string | null
+  feeder_days_stale: number | null; feeder_available: boolean
+  live_upstream_reconciliation: boolean; note: string
+}
+export type TreeReconciliation = {
+  licensor_count: number; active_licensor_count: number
+  property_count: number; active_property_count: number
+  properties_with_licensor: number; orphan_property_count: number
+  expected_orphan_count_is_zero: boolean; partition_reconciles: boolean
+}
+export type LicensorTreeResult = {
+  snapshot: TreeSnapshot; reconciliation: TreeReconciliation
+  licensors: LicensorNode[]; orphan_properties: PropertyNode[]
+  next_cursor: string | null; page_size: number
+}
+export type LoadedTree = {
+  snapshot: TreeSnapshot; reconciliation: TreeReconciliation
+  licensors: LicensorNode[]; orphanProperties: PropertyNode[]
+}
+
+// Fully read-only in v1 (DesignFlow owns the Licensor->Property edge). Pages
+// over licensors by name; orphan_properties is always complete per page, so it
+// is captured once and licensors are accumulated.
+export async function loadLicensorTree(client: ApiClient, params: { includeInactive?: boolean } = {}) {
+  const licensors: LicensorNode[] = []
+  let cursor: string | null = null
+  let snapshot: TreeSnapshot | undefined
+  let reconciliation: TreeReconciliation | undefined
+  let orphanProperties: PropertyNode[] = []
+  do {
+    const { data, error } = await client.rpc('db_data_admin_licensor_property_tree', {
+      p_search: null,
+      p_include_inactive: !!params.includeInactive,
+      p_cursor: cursor,
+      p_page_size: 200,
+    })
+    if (error) throw error
+    const payload = (data ?? {}) as Partial<LicensorTreeResult>
+    if (!snapshot && payload.snapshot) snapshot = payload.snapshot
+    if (!reconciliation && payload.reconciliation) reconciliation = payload.reconciliation
+    if (payload.orphan_properties) orphanProperties = payload.orphan_properties
+    licensors.push(...(payload.licensors ?? []))
+    cursor = payload.next_cursor ?? null
+  } while (cursor)
+  return {
+    snapshot: snapshot as TreeSnapshot,
+    reconciliation: reconciliation as TreeReconciliation,
+    licensors,
+    orphanProperties,
+  }
+}
