@@ -38,6 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Enforce DB Data Admin domain ownership
+        working-directory: .
         run: |
           node --test scripts/check-domain-ownership.test.mjs
           node scripts/check-domain-ownership.mjs
