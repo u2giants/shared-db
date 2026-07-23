@@ -14,13 +14,31 @@
 --   are actually Ford's (CAA/Ford/*), and seafile-ignore.txt (1) is another
 --   application's canary file, now filtered at crawl time.
 --
+-- Upstream source, verified live 2026-07-23 (do not assume ColdLion here):
+--   core.customer  -> coldlion (830 rows)   ] already cut over to direct ColdLion
+--   core.factory   -> coldlion (104 rows)   ]
+--   core.licensor  -> designflow_plm (20/20)  ] NOT cut over; still DesignFlow PLM
+--   core.property  -> designflow_plm (256/256)]
+-- core.taxonomy_source_ref is 505/505 designflow_plm, and there is no
+-- plm.erp_licensor / plm.erp_property mirror — only plm.licensor_import (37) and
+-- plm.property_import (468), last imported 2026-07-08. The taxonomy stays on
+-- DesignFlow because ColdLion exposes no licensor->property parent relationship
+-- and no active/inactive flag; DesignFlow supplies parent_id, which is what makes
+-- core.property.licensor_id trustworthy.
+--
 -- Code choice: core.licensor has UNIQUE NULLS NOT DISTINCT (code), so every row
--- needs a distinct non-null code. PLM merch-group codes are short (AA, WB, 1P),
--- so these use an "X-" namespaced placeholder that a PLM code can never collide
--- with. plm.import_master_data() matches by code first and then by lower(name);
--- because these codes cannot match, a future PLM record for the same brand will
--- match by NAME and update the row in place, adopting the real merch-group code.
--- That makes these rows durable now and self-correcting later.
+-- needs a distinct non-null code. Merch-group codes are short (AA, WB, 1P), so
+-- these use an "X-" namespaced placeholder that a real merch-group code can never
+-- collide with. The importer matches by code first and then by lower(name);
+-- because these codes cannot match, a future upstream record for the same brand
+-- (whether it arrives via DesignFlow today or ColdLion after a taxonomy cutover,
+-- e.g. once a license is signed) will match by NAME and update the row in place,
+-- adopting the real merch-group code. Durable now, self-correcting later.
+--
+-- NOTE on NASA: shared-db docs flag NASA as a LAPSED license that a naive direct
+-- ColdLion pull would wrongly resurrect. It is included here by explicit owner
+-- request and is tagged 'manual_popsg_backfill' in metadata so it stays
+-- distinguishable from feed-sourced rows.
 --
 -- Idempotent: skips any brand whose name already exists (case-insensitive).
 
@@ -32,7 +50,7 @@ select
   jsonb_build_object(
     'source', 'manual_popsg_backfill',
     'reason', 'present in PopSG style-guide library, absent from PLM/ColdLion feed',
-    'added_migration', '20260723210000'
+    'added_migration', '20260723233000'
   )
 from (values
   ('Miller Coors',   'X-MILLERCOORS'),
