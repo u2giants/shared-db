@@ -1,21 +1,161 @@
 import { RevoGrid, Template, type ColumnRegular, type ColumnTemplateProp } from '@revolist/react-datagrid'
-import { ChevronRight, GitMerge, History, LogOut, Pencil, RefreshCw, Search, X } from 'lucide-react'
+import { ChevronRight, Filter, GitMerge, History, LogOut, Pencil, RefreshCw, Search, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { executeMerge, initialQuery, loadAllRows, loadAudit, loadDetail, loadGridState, loadRows, previewMerge, probeAccess, saveGridState, searchMergeCandidates, updateRecord, type AdminRow, type ApiClient, type AuditEvent, type EntityKind, type MergeResult, type QueryState, type UpdateInput } from './lib/data-admin'
+import {
+  formatFilterOptionLabel,
+  getCellDisplayValue,
+  getDistinctColumnValues,
+  rowMatchesFilters,
+  toggleSetFilterValue,
+} from './lib/grid-filters'
 import { RecordEditor } from './RecordEditor'
 import { MergeDialog } from './MergeDialog'
 import { LicensorTree } from './LicensorTree'
 
 type Props = { client: ApiClient; email?: string; onSignOut: () => void }
-type HeaderProps = (ColumnTemplateProp | ColumnRegular) & { filters?: Record<string, string>; onFilter?: (prop: string, value: string) => void; scope?: string }
 
+export type HeaderProps = (ColumnTemplateProp | ColumnRegular) & {
+  filters?: Record<string, string>
+  onFilter?: (prop: string, value: string) => void
+  setFilters?: Record<string, ReadonlySet<string> | undefined | null>
+  onSetFilter?: (prop: string, selected: Set<string> | null) => void
+  distinctValues?: Record<string, string[]>
+  scope?: string
+}
+
+/**
+ * Multi-filter column header: Text Filter (controlled input) + Set Filter (popover).
+ * Props `filters` / `onFilter` keep the existing text-filter contract used by tests.
+ */
 export function FilterHeader(props: HeaderProps) {
   const key = String(props.prop)
-  return <div className="filter-header">
-    <span>{String(props.name ?? key)}</span>
-    <input aria-label={`Filter ${String(props.name ?? key)}`} value={props.filters?.[key] ?? ''}
-      onClick={(event) => event.stopPropagation()} onChange={(event) => props.onFilter?.(key, event.target.value)} />
-  </div>
+  const label = String(props.name ?? key)
+  const [open, setOpen] = useState(false)
+  const [listSearch, setListSearch] = useState('')
+  const rootRef = useRef<HTMLDivElement>(null)
+  const allValues = useMemo(() => props.distinctValues?.[key] ?? [], [props.distinctValues, key])
+  const selected = props.setFilters?.[key]
+  const isSetActive = selected != null
+  const checked = selected == null ? null : selected
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false)
+        setListSearch('')
+      }
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false)
+        setListSearch('')
+      }
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
+  const filteredValues = useMemo(() => {
+    const q = listSearch.trim().toLowerCase()
+    if (!q) return allValues
+    return allValues.filter(value => formatFilterOptionLabel(value).toLowerCase().includes(q))
+  }, [allValues, listSearch])
+
+  const isChecked = (value: string) => (checked == null ? true : checked.has(value))
+
+  const applyToggle = (value: string) => {
+    props.onSetFilter?.(key, toggleSetFilterValue(selected, allValues, value))
+  }
+
+  return (
+    <div className="filter-header" ref={rootRef}>
+      <div className="filter-header-title">
+        <span>{label}</span>
+        <button
+          type="button"
+          className={`set-filter-btn${isSetActive ? ' active' : ''}`}
+          aria-label={`Set filter ${label}`}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          onClick={(event) => {
+            event.stopPropagation()
+            setOpen(current => !current)
+            if (open) setListSearch('')
+          }}
+        >
+          <Filter aria-hidden="true" />
+        </button>
+      </div>
+      <input
+        aria-label={`Filter ${label}`}
+        value={props.filters?.[key] ?? ''}
+        onClick={(event) => event.stopPropagation()}
+        onChange={(event) => props.onFilter?.(key, event.target.value)}
+      />
+      {open && (
+        <div
+          className="set-filter-popover"
+          role="dialog"
+          aria-label={`Set filter options for ${label}`}
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <input
+            type="search"
+            className="set-filter-search"
+            aria-label={`Search ${label} values`}
+            placeholder="Search values…"
+            value={listSearch}
+            onChange={(event) => setListSearch(event.target.value)}
+            onClick={(event) => event.stopPropagation()}
+          />
+          <div className="set-filter-actions">
+            <button
+              type="button"
+              className="set-filter-action"
+              onClick={() => props.onSetFilter?.(key, null)}
+            >
+              Select all
+            </button>
+            <button
+              type="button"
+              className="set-filter-action"
+              onClick={() => props.onSetFilter?.(key, new Set())}
+            >
+              Clear
+            </button>
+          </div>
+          <ul className="set-filter-list" role="listbox" aria-label={`${label} values`} aria-multiselectable="true">
+            {filteredValues.length === 0 ? (
+              <li className="set-filter-empty">No values</li>
+            ) : (
+              filteredValues.map(value => {
+                const optionId = value === '' ? `${key}__blank__` : `${key}__${value}`
+                return (
+                  <li key={optionId} role="option" aria-selected={isChecked(value)}>
+                    <label className="set-filter-option">
+                      <input
+                        type="checkbox"
+                        checked={isChecked(value)}
+                        onChange={() => applyToggle(value)}
+                      />
+                      <span>{formatFilterOptionLabel(value)}</span>
+                    </label>
+                  </li>
+                )
+              })
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
 }
 
 const baseColumns: ColumnRegular[] = [
@@ -30,16 +170,13 @@ const baseColumns: ColumnRegular[] = [
   { prop: 'updated_at', name: 'Updated', size: 175, sortable: true },
 ]
 
-function textMatch(row: AdminRow, filters: Record<string, string>) {
-  return Object.entries(filters).every(([key, value]) => !value || String(row[key] ?? '').toLowerCase().includes(value.toLowerCase()))
-}
-
 export function DataAdmin({ client, email, onSignOut }: Props) {
   const [kind, setKind] = useState<EntityKind>('customer')
   const [section, setSection] = useState<'entity' | 'taxonomy'>('entity')
   const [query, setQuery] = useState<QueryState>(initialQuery)
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
+  const [setFiltersState, setSetFiltersState] = useState<Record<string, Set<string> | null>>({})
   const [rows, setRows] = useState<AdminRow[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -69,7 +206,7 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
 
   useEffect(() => {
     let active = true
-    setDenied(false); setRows([]); setFilters({}); setActiveFilters({}); setDetail(null); setLoading(true)
+    setDenied(false); setRows([]); setFilters({}); setActiveFilters({}); setSetFiltersState({}); setDetail(null); setLoading(true)
     void (async () => {
       try {
         const allowedChannels = await probeAccess(client)
@@ -104,8 +241,44 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
     filterTimer.current = setTimeout(() => setActiveFilters(next), 300)
     return next
   }), [])
-  const columns = useMemo(() => baseColumns.filter(column => kind === 'customer' || column.prop !== 'plm_display').map(column => ({ ...column, columnTemplate: Template(FilterHeader, { filters, onFilter: updateFilter, scope: kind, key: `${kind}-${String(column.prop)}` }) })), [filters, kind, updateFilter])
-  const visibleRows = useMemo(() => rows.filter(row => textMatch(row, activeFilters)).map(row => ({ ...row, plm_display: row.plm_linked === false ? 'Not linked' : row.plm_status == null ? 'Unknown' : row.plm_status === 'ACTIVE' ? 'Active' : 'Inactive' })), [rows, activeFilters])
+
+  const updateSetFilter = useCallback((prop: string, selected: Set<string> | null) => {
+    setSetFiltersState(current => ({ ...current, [prop]: selected }))
+  }, [])
+
+  const distinctValues = useMemo(() => {
+    const map: Record<string, string[]> = {}
+    for (const column of baseColumns) {
+      const prop = String(column.prop)
+      map[prop] = getDistinctColumnValues(rows, prop)
+    }
+    return map
+  }, [rows])
+
+  const columns = useMemo(
+    () => baseColumns
+      .filter(column => kind === 'customer' || column.prop !== 'plm_display')
+      .map(column => ({
+        ...column,
+        columnTemplate: Template(FilterHeader, {
+          filters,
+          onFilter: updateFilter,
+          setFilters: setFiltersState,
+          onSetFilter: updateSetFilter,
+          distinctValues,
+          scope: kind,
+          key: `${kind}-${String(column.prop)}`,
+        }),
+      })),
+    [distinctValues, filters, kind, setFiltersState, updateFilter, updateSetFilter],
+  )
+
+  const visibleRows = useMemo(
+    () => rows
+      .filter(row => rowMatchesFilters(row, activeFilters, setFiltersState))
+      .map(row => ({ ...row, plm_display: getCellDisplayValue(row, 'plm_display') })),
+    [rows, activeFilters, setFiltersState],
+  )
 
   const openDetail = async (row: AdminRow) => {
     setDetailLoading(true); setAudit([]); setDetail({ ...row, name: row.display_name ?? row.name })
