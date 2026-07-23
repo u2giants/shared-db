@@ -66,6 +66,7 @@ function main() {
   }).split('\0').filter(Boolean)
 
   const textFiles = files.filter((file) =>
+    file !== 'scripts/check-domain-ownership.test.mjs' &&
     /\.(?:md|mdc|txt|ya?ml|json|mjs|cjs|js|jsx|ts|tsx|html|css|env|example)$/i.test(file),
   )
   const failures = checkOwnership(
