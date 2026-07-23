@@ -13,6 +13,9 @@ export function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(Boolean(supabase))
   const [authError, setAuthError] = useState(() => readOAuthCallbackError(window.location))
+  const [testEmail, setTestEmail] = useState('')
+  const [testPassword, setTestPassword] = useState('')
+  const [passwordPending, setPasswordPending] = useState(false)
   const buildLabel = formatBuildLabel(__BUILD_SHA__, __BUILD_DATE__)
 
   useEffect(() => {
@@ -34,6 +37,20 @@ export function App() {
     })
     if (error) {
       setAuthError({ code: 'sign_in_failed', description: error.message })
+    }
+  }
+
+  // Development-only internal sign-in. Rendered only when the deployment sets
+  // allowPasswordLogin; production leaves it unset and stays Microsoft SSO-only.
+  const signInWithPassword = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!supabase) return
+    setAuthError(null)
+    setPasswordPending(true)
+    const { error } = await supabase.auth.signInWithPassword({ email: testEmail, password: testPassword })
+    setPasswordPending(false)
+    if (error) {
+      setAuthError({ code: 'password_sign_in_failed', description: error.message })
     }
   }
 
@@ -69,6 +86,38 @@ export function App() {
           <button className="primary" type="button" onClick={() => void signIn()}>
             <LogIn aria-hidden="true" /> Sign in with Microsoft
           </button>
+        )}
+
+        {config && !loading && !session && config.allowPasswordLogin && (
+          <form className="password-login" onSubmit={(event) => void signInWithPassword(event)}>
+            <h2>Internal testing sign-in</h2>
+            <p className="muted">
+              Development environment only. Use the tester credentials stored in 1Password.
+            </p>
+            <label>
+              <span>Email</span>
+              <input
+                type="email"
+                autoComplete="username"
+                required
+                value={testEmail}
+                onChange={(event) => setTestEmail(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>Password</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                required
+                value={testPassword}
+                onChange={(event) => setTestPassword(event.target.value)}
+              />
+            </label>
+            <button className="secondary" type="submit" disabled={passwordPending}>
+              <LogIn aria-hidden="true" /> {passwordPending ? 'Signing in…' : 'Sign in with email'}
+            </button>
+          </form>
         )}
 
         {config && !loading && session && supabase && <DataAdmin client={supabase} email={session.user.email} onSignOut={() => void supabase.auth.signOut()} />}

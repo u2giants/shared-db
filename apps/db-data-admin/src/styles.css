@@ -115,3 +115,9 @@ h1 { margin: 18px 0 12px; font-size: clamp(36px, 6vw, 62px); line-height: 1; let
 .ctx-chip.muted { background: #f6f7fb; color: #838da0; }
 .tree-empty { padding: 18px 24px; }
 @media (max-width: 620px) { .tree-context { padding-left: 8px; } .tree-label { max-width: 60vw; } }
+
+.password-login { margin-top: 24px; padding: 16px; border: 1px solid #ccd5e3; border-radius: 8px; background: #fff; display: flex; flex-direction: column; gap: 10px; max-width: 340px; text-align: left; }
+.password-login h2 { font-size: 14px; margin: 0; }
+.password-login p { margin: 0; font-size: 12px; }
+.password-login label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; }
+.password-login input { height: 32px; border: 1px solid #cbd4e2; border-radius: 4px; padding: 4px 8px; }
