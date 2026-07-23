@@ -6,7 +6,7 @@ export interface AppConfig {
    * Enables the internal email + password sign-in form alongside Microsoft SSO.
    * Intended for the development deployment ONLY so automated/AI testers can reach
    * the grid without Microsoft SSO. Production must leave this unset so
-   * data.designflow.app stays SSO-only. Opt-in: anything other than the exact
+   * DB Data Admin at data.designflow.app stays SSO-only. Opt-in: anything other than the exact
    * string 'true' (or boolean true) is treated as disabled.
    */
   allowPasswordLogin: boolean
