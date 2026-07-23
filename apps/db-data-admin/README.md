@@ -3,6 +3,13 @@
 Administrator application for the shared Customer, Vendor, Licensor, and Property hubs.
 The authoritative product and delivery requirements are in [`../../DB_Data_Admin.md`](../../DB_Data_Admin.md).
 
+Production is `https://data.designflow.app`; development is
+`https://data-dev.designflow.app`. The production hostname belongs exclusively
+to DB Data Admin. A retired application once used the same DNS name, but no
+code, API, credential, database connection, import path, rollback path, or
+runtime is shared. See the
+[domain-ownership contract](../../docs/db-data-admin-domain-ownership.md).
+
 ## Local preview shell
 
 1. Copy `.env.example` to `.env.local`.

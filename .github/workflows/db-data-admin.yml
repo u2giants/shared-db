@@ -4,11 +4,21 @@ on:
   pull_request:
     paths:
       - "apps/db-data-admin/**"
+      - "AGENTS.md"
+      - "DB_Data_Admin.md"
+      - "README.md"
+      - "docs/db-data-admin-domain-ownership.md"
+      - "scripts/check-domain-ownership.mjs"
       - ".github/workflows/db-data-admin.yml"
   push:
     branches: [main]
     paths:
       - "apps/db-data-admin/**"
+      - "AGENTS.md"
+      - "DB_Data_Admin.md"
+      - "README.md"
+      - "docs/db-data-admin-domain-ownership.md"
+      - "scripts/check-domain-ownership.mjs"
       - ".github/workflows/db-data-admin.yml"
 
 permissions:
@@ -27,6 +37,11 @@ jobs:
         working-directory: apps/db-data-admin
     steps:
       - uses: actions/checkout@v4
+      - name: Enforce DB Data Admin domain ownership
+        working-directory: .
+        run: |
+          node --test scripts/check-domain-ownership.test.mjs
+          node scripts/check-domain-ownership.mjs
       - uses: actions/setup-node@v4
         with:
           node-version: 24
