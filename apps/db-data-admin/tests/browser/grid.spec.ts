@@ -67,7 +67,7 @@ test('renders persistent customer and vendor grids with lazy details', async ({ 
   await expect(page.getByRole('status')).toContainText('Saved and audited')
   await page.getByRole('button', { name: 'Close editor' }).click()
   await page.getByRole('button', { name: 'Close details' }).click()
-  const filter = page.getByRole('textbox', { name: 'Filter Name' })
+  const filter = page.getByRole('combobox', { name: 'Filter Name' })
   await filter.fill('Acme'); await page.waitForTimeout(350)
   await expect(filter).toBeFocused(); await expect(filter).toHaveValue('Acme')
   await page.getByRole('button', { name: 'Vendors' }).click()
