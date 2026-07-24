@@ -107,7 +107,8 @@ header sync that writes `last_seen_at` / `last_sync_run_id` proves a pull.
 - ColdLion fetch / runner / schedule / public write wrapper
 - Canonical promotion or source-ref linking importer
 - DesignFlow staging disablement
-- Preview/production apply, commit, PR
+- Production apply (requires a separately approved production window)
+- Phase 2 importer, scheduler, canonical linking, and DesignFlow cutover
 
 ## Tests
 

@@ -2,7 +2,8 @@
 
 **Date:** 2026-07-24
 **Scope:** additive mirror/review schema + enforced scalar NOT NULL parent FK
-**No apply, no fetch, no credentials in this worktree task**
+**Preview applied:** `rjyboqwcdzcocqgmsyel`
+**Production:** not applied; separate approval required
 
 ## Files
 
@@ -82,14 +83,54 @@ node tools/item-taxonomy-phase2.test.mjs
 ```
 
 Repository SQL static checks: `scripts/check-sql.sh` content verified; on this
-Windows worktree the script file is CRLF and WSL `rg` may not run — report the
-exact attempt honestly rather than claiming a clean bash pass.
+Windows worktree, the verified path is Git Bash:
+
+```text
+C:\Program Files\Git\bin\bash.exe scripts/check-sql.sh
+```
+
+Result: `Static checks passed`.
 
 SQL contracts (after migration apply on disposable/preview only):
 
 ```text
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/coldlion_licensor_property_phase1_contracts.sql
 ```
+
+Because `psql` is not installed on this Windows machine, the same SQL file was
+executed through Node `pg` against the preview transaction pooler. Result:
+`Preview SQL contracts passed and rolled back.`
+
+## Real preview evidence
+
+The first preview apply failed transactionally at the unqualified
+`COMMENT ON INDEX` described above. No migration state was retained. Grok then
+schema-qualified all three index comments and added a static regression check.
+
+The corrected retry on 2026-07-24:
+
+1. `supabase db push --dry-run` listed only
+   `20260724030000_coldlion_licensor_property_phase1_mirror_schema.sql`.
+2. Preview preflight reported 0 null property parents.
+3. Migration `20260724030000` applied successfully and is recorded in
+   `supabase_migrations.schema_migrations`.
+4. The rollback-safe SQL contracts passed against preview.
+5. Catalog verification returned:
+
+| Evidence | Result |
+|---|---:|
+| `core.property` rows | 256 |
+| Null `licensor_id` rows | 0 |
+| `licensor_id` is `NOT NULL` | true |
+| FK delete action | `r` (`RESTRICT`) |
+| Three `plm` tables exist | true |
+| Three `api` reconciliation views exist | true |
+| Authenticated insert/update/delete probes | false |
+| Phase 1 write policies | 0 |
+| Licensor/property mirror rows | 0 / 0 |
+
+Zero mirror rows is expected: Phase 1 creates the neutral storage and review
+contract only. It intentionally does not fetch ColdLion data.
 
 ## Object inventory (after apply)
 
