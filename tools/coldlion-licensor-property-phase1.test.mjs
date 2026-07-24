@@ -89,6 +89,34 @@ assert.match(
   "canonical property uidx must use active-status predicate"
 );
 
+// COMMENT ON INDEX must be schema-qualified: indexes are created in schema plm
+// (table plm.taxonomy_resolution_review), but migration search_path does not
+// include plm. Unqualified names failed preview apply with:
+//   ERROR: relation "plm_taxonomy_resolution_review_source_uidx" does not exist (42P01)
+const reviewPartialUniqueIndexNames = [
+  "plm_taxonomy_resolution_review_source_uidx",
+  "plm_taxonomy_resolution_review_canonical_licensor_uidx",
+  "plm_taxonomy_resolution_review_canonical_property_uidx",
+];
+for (const indexName of reviewPartialUniqueIndexNames) {
+  assert.match(
+    migration,
+    new RegExp(
+      String.raw`comment\s+on\s+index\s+plm\.${indexName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\s+is`,
+      "i"
+    ),
+    `COMMENT ON INDEX for ${indexName} must be schema-qualified as plm.${indexName}`
+  );
+  assert.doesNotMatch(
+    migration,
+    new RegExp(
+      String.raw`comment\s+on\s+index\s+${indexName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\s+is`,
+      "i"
+    ),
+    `COMMENT ON INDEX for ${indexName} must not use an unqualified index name`
+  );
+}
+
 // approved_link package: resolution + typed id + nonblank by + nonnull at
 assert.match(
   migration,

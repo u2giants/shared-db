@@ -41,6 +41,19 @@ WHERE finding_scope = 'source'
 
 Same active-status predicate on canonical-only unique indexes.
 
+Indexes are created **in schema `plm`**. `COMMENT ON INDEX` must use
+schema-qualified identities (`plm.plm_taxonomy_resolution_review_*_uidx`).
+Unqualified names failed real preview apply transactionally with:
+
+```text
+ERROR: relation "plm_taxonomy_resolution_review_source_uidx" does not exist (SQLSTATE 42P01)
+At: comment on index plm_taxonomy_resolution_review_source_uidx ...
+```
+
+Root cause: migration `search_path` does not include `plm`, so bare index names
+resolved under `public`. Static smoke asserts every comment on the three partial
+unique indexes is `plm.`-qualified.
+
 ### 2) Status / resolution / resolved-\* CHECK matrix
 
 | status | resolution allowed | resolved package |

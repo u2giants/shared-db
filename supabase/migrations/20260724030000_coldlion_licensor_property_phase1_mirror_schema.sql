@@ -543,13 +543,16 @@ create unique index plm_taxonomy_resolution_review_canonical_property_uidx
     and proposed_property_id is not null
     and status in ('open', 'quarantined', 'conflict');
 
-comment on index plm_taxonomy_resolution_review_source_uidx is
+-- Indexes live in schema plm (same as the table). COMMENT ON INDEX must be
+-- schema-qualified: migration search_path does not include plm, so bare names
+-- resolve as public.* and fail with SQLSTATE 42P01 (preview apply evidence).
+comment on index plm.plm_taxonomy_resolution_review_source_uidx is
   'PARTIAL unique: at most one ACTIVE source finding per (entity_type, company_code, division_code, mg_type_code, mg_code). Predicate status IN (open, quarantined, conflict). Terminal rows (approved_link, ignored, dismissed) are history and do not participate — a later active finding is allowed after close-out.';
 
-comment on index plm_taxonomy_resolution_review_canonical_licensor_uidx is
+comment on index plm.plm_taxonomy_resolution_review_canonical_licensor_uidx is
   'PARTIAL unique: at most one ACTIVE canonical_only licensor finding per proposed_licensor_id. Same active-status predicate as source_uidx.';
 
-comment on index plm_taxonomy_resolution_review_canonical_property_uidx is
+comment on index plm.plm_taxonomy_resolution_review_canonical_property_uidx is
   'PARTIAL unique: at most one ACTIVE canonical_only property finding per proposed_property_id. Same active-status predicate as source_uidx.';
 
 comment on table plm.taxonomy_resolution_review is
