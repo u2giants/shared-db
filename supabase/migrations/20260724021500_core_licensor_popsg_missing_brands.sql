@@ -66,3 +66,22 @@ where not exists (
 and not exists (
   select 1 from core.licensor l where l.code = v.code
 );
+
+-- Preview briefly recorded this change under a colliding migration version.
+-- Keep the durable audit metadata aligned with this migration when replaying
+-- against rows created by that earlier preview-only run.
+update core.licensor
+set metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object(
+  'source', 'manual_popsg_backfill',
+  'reason', 'present in PopSG style-guide library, absent from PLM/ColdLion feed',
+  'added_migration', '20260724021500'
+)
+where code in (
+  'X-MILLERCOORS',
+  'X-ANHEUSERBUSCH',
+  'X-NASA',
+  'X-NFL',
+  'X-FORD',
+  'X-NCAA'
+)
+and metadata ->> 'added_migration' is distinct from '20260724021500';
