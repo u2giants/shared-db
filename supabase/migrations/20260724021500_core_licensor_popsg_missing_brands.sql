@@ -50,7 +50,7 @@ select
   jsonb_build_object(
     'source', 'manual_popsg_backfill',
     'reason', 'present in PopSG style-guide library, absent from PLM/ColdLion feed',
-    'added_migration', '20260723233000'
+    'added_migration', '20260724021500'
   )
 from (values
   ('Miller Coors',   'X-MILLERCOORS'),
