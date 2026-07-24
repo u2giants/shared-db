@@ -1,6 +1,7 @@
 import { RevoGrid, Template, type ColumnRegular, type ColumnTemplateProp } from '@revolist/react-datagrid'
 import { ChevronRight, Filter, GitMerge, History, LogOut, Pencil, RefreshCw, Search, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { executeMerge, initialQuery, loadAllRows, loadAudit, loadDetail, loadGridState, loadRows, previewMerge, probeAccess, saveGridState, searchMergeCandidates, updateRecord, type AdminRow, type ApiClient, type AuditEvent, type EntityKind, type MergeResult, type QueryState, type UpdateInput } from './lib/data-admin'
 import {
   formatFilterOptionLabel,
@@ -33,33 +34,47 @@ export function FilterHeader(props: HeaderProps) {
   const label = String(props.name ?? key)
   const [open, setOpen] = useState(false)
   const [listSearch, setListSearch] = useState('')
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const popoverRef = useRef<HTMLDivElement>(null)
   const allValues = useMemo(() => props.distinctValues?.[key] ?? [], [props.distinctValues, key])
   const selected = props.setFilters?.[key]
   const isSetActive = selected != null
   const checked = selected == null ? null : selected
 
+  const closePopover = useCallback(() => { setOpen(false); setListSearch('') }, [])
+
+  // The popover is portalled to document.body so RevoGrid's header overflow
+  // cannot clip it; position it under the funnel button from its screen rect.
+  const positionPopover = useCallback(() => {
+    const rect = buttonRef.current?.getBoundingClientRect()
+    if (rect) setPopoverPos({ top: rect.bottom + 2, left: rect.left })
+  }, [])
+
   useEffect(() => {
     if (!open) return
+    // Because the popover lives outside rootRef (in a portal), test both the
+    // header root and the popover element before treating a click as "outside".
     const onPointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
-        setOpen(false)
-        setListSearch('')
-      }
+      const target = event.target as Node
+      if (rootRef.current?.contains(target) || popoverRef.current?.contains(target)) return
+      closePopover()
     }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setOpen(false)
-        setListSearch('')
-      }
-    }
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') closePopover() }
+    // A scroll or resize would leave the portalled popover detached from its
+    // button, so reposition (capture:true also catches RevoGrid's inner scroll).
     document.addEventListener('mousedown', onPointerDown)
     document.addEventListener('keydown', onKeyDown)
+    window.addEventListener('resize', positionPopover)
+    window.addEventListener('scroll', positionPopover, true)
     return () => {
       document.removeEventListener('mousedown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('resize', positionPopover)
+      window.removeEventListener('scroll', positionPopover, true)
     }
-  }, [open])
+  }, [open, closePopover, positionPopover])
 
   const filteredValues = useMemo(() => {
     const q = listSearch.trim().toLowerCase()
@@ -78,6 +93,7 @@ export function FilterHeader(props: HeaderProps) {
       <div className="filter-header-title">
         <span>{label}</span>
         <button
+          ref={buttonRef}
           type="button"
           className={`set-filter-btn${isSetActive ? ' active' : ''}`}
           aria-label={`Set filter ${label}`}
@@ -85,8 +101,9 @@ export function FilterHeader(props: HeaderProps) {
           aria-haspopup="dialog"
           onClick={(event) => {
             event.stopPropagation()
-            setOpen(current => !current)
-            if (open) setListSearch('')
+            if (open) { closePopover(); return }
+            positionPopover() // measure the button now, in the user event
+            setOpen(true)
           }}
         >
           <Filter aria-hidden="true" />
@@ -98,11 +115,13 @@ export function FilterHeader(props: HeaderProps) {
         onClick={(event) => event.stopPropagation()}
         onChange={(event) => props.onFilter?.(key, event.target.value)}
       />
-      {open && (
+      {open && popoverPos && createPortal(
         <div
+          ref={popoverRef}
           className="set-filter-popover"
           role="dialog"
           aria-label={`Set filter options for ${label}`}
+          style={{ top: popoverPos.top, left: popoverPos.left }}
           onClick={(event) => event.stopPropagation()}
           onMouseDown={(event) => event.stopPropagation()}
         >
@@ -152,7 +171,8 @@ export function FilterHeader(props: HeaderProps) {
               })
             )}
           </ul>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

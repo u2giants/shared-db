@@ -90,6 +90,29 @@ describe('RevoGrid public header filter adapter', () => {
     expect(within(dialog).queryByText('charlie')).not.toBeInTheDocument()
   })
 
+  // Regression guard: the popover must be portalled to document.body, not nested
+  // inside .filter-header. When it lived in the header, RevoGrid's header overflow
+  // clipped it so only the first checkbox row was visible (found in live testing,
+  // invisible to jsdom which has no real layout/clipping).
+  it('portals the popover out of the header so the grid cannot clip it', () => {
+    const { container } = render(
+      <FilterHeader
+        prop="status"
+        name="Status"
+        filters={{}}
+        distinctValues={{ status: ['active', 'inactive'] }}
+        setFilters={{}}
+        onSetFilter={() => undefined}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Set filter Status' }))
+    const dialog = screen.getByRole('dialog', { name: 'Set filter options for Status' })
+    // Not a descendant of the rendered header subtree…
+    expect(container.querySelector('.filter-header')?.contains(dialog)).toBe(false)
+    // …and attached under document.body instead.
+    expect(document.body.contains(dialog)).toBe(true)
+  })
+
   it('toggles a set-filter value through onSetFilter', () => {
     const onSetFilter = vi.fn()
     render(
