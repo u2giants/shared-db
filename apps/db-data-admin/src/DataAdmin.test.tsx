@@ -23,7 +23,8 @@ describe('RevoGrid public header filter adapter', () => {
       )
     }
     render(<Harness />)
-    const input = screen.getByRole('textbox', { name: 'Filter Name' }) as HTMLInputElement
+    // The header input is a combobox (autocomplete); it still behaves as a text input.
+    const input = screen.getByRole('combobox', { name: 'Filter Name' }) as HTMLInputElement
     input.focus()
     fireEvent.change(input, { target: { value: 'Acme' } })
     input.setSelectionRange(2, 2)
@@ -35,7 +36,7 @@ describe('RevoGrid public header filter adapter', () => {
   it('exposes the text-filter callback with the same prop signature', () => {
     const onFilter = vi.fn()
     render(<FilterHeader prop="status" name="Status" filters={{}} onFilter={onFilter} />)
-    fireEvent.change(screen.getByRole('textbox', { name: 'Filter Status' }), { target: { value: 'act' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter Status' }), { target: { value: 'act' } })
     expect(onFilter).toHaveBeenCalledWith('status', 'act')
   })
 
@@ -88,6 +89,52 @@ describe('RevoGrid public header filter adapter', () => {
     expect(within(dialog).getByText('alpha')).toBeInTheDocument()
     expect(within(dialog).queryByText('bravo')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('charlie')).not.toBeInTheDocument()
+  })
+
+  it('suggests matching distinct values as you type in the header text input', () => {
+    const onFilter = vi.fn()
+    function Harness() {
+      const [filters, setFilters] = useState<Record<string, string>>({})
+      return (
+        <FilterHeader
+          prop="display_name"
+          name="Name"
+          filters={filters}
+          onFilter={(k, v) => { onFilter(k, v); setFilters({ [k]: v }) }}
+          distinctValues={{ display_name: ['', 'Acme Corp', 'Acme West', 'Globex'] }}
+        />
+      )
+    }
+    render(<Harness />)
+    const input = screen.getByRole('combobox', { name: 'Filter Name' })
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'acme' } })
+
+    const listbox = screen.getByRole('listbox', { name: 'Name suggestions' })
+    expect(within(listbox).getByRole('option', { name: 'Acme Corp' })).toBeInTheDocument()
+    expect(within(listbox).getByRole('option', { name: 'Acme West' })).toBeInTheDocument()
+    // Non-matches and the blank sentinel are excluded from suggestions.
+    expect(within(listbox).queryByText('Globex')).not.toBeInTheDocument()
+
+    // Clicking a suggestion sets the text filter to that full value.
+    fireEvent.click(within(listbox).getByRole('button', { name: 'Acme West' }))
+    expect(onFilter).toHaveBeenLastCalledWith('display_name', 'Acme West')
+  })
+
+  it('portals the autocomplete out of the header so the grid cannot clip it', () => {
+    const { container } = render(
+      <FilterHeader
+        prop="display_name"
+        name="Name"
+        filters={{ display_name: 'ac' }}
+        onFilter={() => undefined}
+        distinctValues={{ display_name: ['Acme Corp'] }}
+      />,
+    )
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Filter Name' }))
+    const listbox = screen.getByRole('listbox', { name: 'Name suggestions' })
+    expect(container.querySelector('.filter-header')?.contains(listbox)).toBe(false)
+    expect(document.body.contains(listbox)).toBe(true)
   })
 
   // Regression guard: the popover must be portalled to document.body, not nested

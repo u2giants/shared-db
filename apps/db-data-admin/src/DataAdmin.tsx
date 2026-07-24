@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { executeMerge, initialQuery, loadAllRows, loadAudit, loadDetail, loadGridState, loadRows, previewMerge, probeAccess, saveGridState, searchMergeCandidates, updateRecord, type AdminRow, type ApiClient, type AuditEvent, type EntityKind, type MergeResult, type QueryState, type UpdateInput } from './lib/data-admin'
 import {
+  BLANK_VALUE,
   formatFilterOptionLabel,
   getCellDisplayValue,
   getDistinctColumnValues,
@@ -35,15 +36,38 @@ export function FilterHeader(props: HeaderProps) {
   const [open, setOpen] = useState(false)
   const [listSearch, setListSearch] = useState('')
   const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null)
+  const [acOpen, setAcOpen] = useState(false)
+  const [acPos, setAcPos] = useState<{ top: number; left: number; width: number } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const acRef = useRef<HTMLUListElement>(null)
   const allValues = useMemo(() => props.distinctValues?.[key] ?? [], [props.distinctValues, key])
   const selected = props.setFilters?.[key]
   const isSetActive = selected != null
   const checked = selected == null ? null : selected
+  const textValue = props.filters?.[key] ?? ''
 
   const closePopover = useCallback(() => { setOpen(false); setListSearch('') }, [])
+  const closeAutocomplete = useCallback(() => setAcOpen(false), [])
+
+  // Typeahead suggestions for the header text input: the column's distinct
+  // values (blanks excluded — those belong to the Set Filter) that contain the
+  // typed text. Portalled like the popover so RevoGrid cannot clip it.
+  const suggestions = useMemo(() => {
+    const q = textValue.trim().toLowerCase()
+    if (!q) return []
+    return allValues
+      .filter(value => value !== BLANK_VALUE)
+      .filter(value => value.toLowerCase().includes(q) && value.toLowerCase() !== q)
+      .slice(0, 8)
+  }, [allValues, textValue])
+
+  const positionAutocomplete = useCallback(() => {
+    const rect = inputRef.current?.getBoundingClientRect()
+    if (rect) setAcPos({ top: rect.bottom + 2, left: rect.left, width: rect.width })
+  }, [])
 
   // The popover is portalled to document.body so RevoGrid's header overflow
   // cannot clip it; position it under the funnel button from its screen rect.
@@ -75,6 +99,26 @@ export function FilterHeader(props: HeaderProps) {
       window.removeEventListener('scroll', positionPopover, true)
     }
   }, [open, closePopover, positionPopover])
+
+  useEffect(() => {
+    if (!acOpen) return
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (inputRef.current?.contains(target) || acRef.current?.contains(target)) return
+      closeAutocomplete()
+    }
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') closeAutocomplete() }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    window.addEventListener('resize', positionAutocomplete)
+    window.addEventListener('scroll', positionAutocomplete, true)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('resize', positionAutocomplete)
+      window.removeEventListener('scroll', positionAutocomplete, true)
+    }
+  }, [acOpen, closeAutocomplete, positionAutocomplete])
 
   const filteredValues = useMemo(() => {
     const q = listSearch.trim().toLowerCase()
@@ -110,11 +154,39 @@ export function FilterHeader(props: HeaderProps) {
         </button>
       </div>
       <input
+        ref={inputRef}
         aria-label={`Filter ${label}`}
-        value={props.filters?.[key] ?? ''}
+        value={textValue}
+        role="combobox"
+        aria-expanded={acOpen && suggestions.length > 0}
+        aria-autocomplete="list"
         onClick={(event) => event.stopPropagation()}
-        onChange={(event) => props.onFilter?.(key, event.target.value)}
+        onFocus={() => { positionAutocomplete(); setAcOpen(true) }}
+        onChange={(event) => { props.onFilter?.(key, event.target.value); positionAutocomplete(); setAcOpen(true) }}
       />
+      {acOpen && acPos && suggestions.length > 0 && createPortal(
+        <ul
+          ref={acRef}
+          className="filter-autocomplete"
+          role="listbox"
+          aria-label={`${label} suggestions`}
+          style={{ top: acPos.top, left: acPos.left, minWidth: acPos.width }}
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          {suggestions.map(value => (
+            <li key={value} role="option" aria-selected={false}>
+              <button
+                type="button"
+                className="filter-autocomplete-option"
+                onClick={() => { props.onFilter?.(key, value); closeAutocomplete() }}
+              >
+                {value}
+              </button>
+            </li>
+          ))}
+        </ul>,
+        document.body,
+      )}
       {open && popoverPos && createPortal(
         <div
           ref={popoverRef}
