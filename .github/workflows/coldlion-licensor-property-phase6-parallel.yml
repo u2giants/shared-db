@@ -136,6 +136,7 @@ jobs:
           node --test \
             tools/phase6-preview-guards.test.mjs \
             tools/phase6-schedule-map.test.mjs \
+            tools/phase6-cli-result-parse.test.mjs \
             tools/coldlion-licensor-property-phase6.test.mjs \
             tools/compare-coldlion-designflow-daily.test.mjs \
             tools/check-coldlion-designflow-sync-health.test.mjs \
