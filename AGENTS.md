@@ -116,6 +116,20 @@ copy-pasting it a third time.
 Do not "add set filters later" — they shipped. Older text in `DB_Data_Admin.md`
 that described set filters as future work refers to the pre-2026-07-23 design.
 
+## 0.4 You can log into DB Data Admin without Microsoft SSO (development only)
+
+To verify DB Data Admin work in a real browser, `data-dev.designflow.app` has an
+email/password tester login (production stays SSO-only). Credential is in 1Password
+(`vibe_coding` → "DB Data Admin AI tester login (data-dev.designflow.app) - non-SSO").
+Read [`docs/db-data-admin-tester-login.md`](docs/db-data-admin-tester-login.md) first —
+it covers the **two** grants required (administrator role AND an explicit
+`app_access('admin')` row; missing the second yields HTTP 403 and an empty grid) and the
+invitation-only signup trigger you must not disable.
+
+Grid overlays (filter popovers, dropdowns) must be verified in a **real browser** — jsdom
+has no layout, so unit tests cannot catch clipping. A shipped popover was clipped by
+RevoGrid's header overflow and only live testing found it.
+
 ## Session wrap-up convention
 
 When the user says **"wrap up"**, that means finish the session safely: update
