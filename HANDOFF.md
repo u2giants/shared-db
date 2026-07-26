@@ -105,6 +105,62 @@ Phase 1 migration/contracts, and the related architecture/API routers:
    smoke tests, and Phases 3–8. Stale sections below are explicitly subordinate
    to this router.
 
+## BLOCKED — `npm audit` fails CI for apps/db-data-admin (found 2026-07-26)
+
+Status: **blocked, not started.** Affects **every** PR that touches
+`apps/db-data-admin/**`, `AGENTS.md`, `README.md`, or `DB_Data_Admin.md` — i.e. the
+whole app pipeline, not one branch.
+
+### Symptom
+
+The `verify` job's `npm audit --audit-level=high` step exits 1 with
+**5 high-severity vulnerabilities**. Last green run was 2026-07-24; the advisory was
+published after that, so this is environmental, not caused by any code change.
+Example failing run: PR #238 (a **markdown-only** change, zero dependency edits).
+
+### Root cause
+
+Advisory **GHSA-mh99-v99m-4gvg** — `brace-expansion` DoS via unbounded expansion.
+Vulnerable range is **`<=5.0.7`**, reached transitively:
+
+```
+eslint@9.39.2      -> minimatch@3.1.5  -> brace-expansion@1.1.16  (vulnerable)
+typescript-eslint  -> minimatch@10.2.5 -> brace-expansion@5.0.7   (vulnerable)
+```
+
+`npm audit` reports exactly one fix: **eslint `10.8.0`, `isSemVerMajor: true`** (a 9 → 10
+major upgrade). Note this is a **dev dependency only** — eslint is not in the shipped
+bundle, so there is no runtime exposure for the deployed app.
+
+### What was tried and did NOT work (do not repeat)
+
+Adding an npm `overrides` entry pinning `brace-expansion` to `^5.0.8` (the patched
+version). Result: `npm audit --audit-level=high` **passed**, but **eslint itself broke** —
+`minimatch@3.1.5` cannot consume brace-expansion 5.x:
+
+```
+TypeError ... at new Minimatch (node_modules/minimatch/minimatch.js:156:8)
+  at doMatch (@eslint/config-array/dist/cjs/index.cjs:422:13)
+```
+
+That trade is a band-aid — it turns a visible CI failure into a silently broken linter.
+It was reverted, not shipped. **Do not re-apply this override.**
+
+### Recommended fix (needs its own session)
+
+Upgrade **eslint 9.39.2 → 10.x** in `apps/db-data-admin/package.json`, migrate
+`eslint.config.js` for any v10 breaking changes, and re-run `npm run lint` /
+`npm test` / `npm run build` until clean. Check whether `typescript-eslint` and
+`eslint-plugin-react-hooks` need matching majors. Done when
+`npm audit --audit-level=high` exits 0 **and** `npm run lint` still runs.
+
+### If something must merge before that
+
+The failure is provably independent of markdown/doc changes. A docs-only PR may be
+merged despite the red `verify` check — but confirm the diff really is docs-only
+(`git diff --name-only origin/main...HEAD`) first, and never bypass it for a change
+that touches code or dependencies.
+
 ## Historical Stage 0 — Safe DAM core licensor/property cutover (COMPLETED/SUPERSEDED)
 
 This section preserves the pre-cutover failure history. Its local-worktree and
