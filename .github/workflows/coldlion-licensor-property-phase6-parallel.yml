@@ -7,7 +7,12 @@
 #   2) forced-failure health+comparison drills succeeded
 #   3) at least one successful manual DesignFlow + ColdLion + compare run
 #
-# This workflow does NOT claim the 14-day observation window is complete.
+# Readiness is INVARIANT-BASED, never elapsed-time-based. The old 14-day / 2026-08-09
+# waiting rule was retired on 2026-07-26 and is not an exit condition anywhere. These
+# scheduled runs are supporting evidence; the exit gate is the readiness command
+# (tools/evaluate-coldlion-licensor-property-cutover-readiness.mjs), which proves the
+# 542-row mapping identity, a closed circuit breaker, and green health/comparison.
+# Counting days proves nothing about slow-moving source data.
 # Production project qsllyeztdwjgirsysgai is hard-refused.
 #
 # Required GitHub secrets (names only — values from 1Password vibe_coding):
@@ -141,7 +146,9 @@ jobs:
             tools/compare-coldlion-designflow-daily.test.mjs \
             tools/check-coldlion-designflow-sync-health.test.mjs \
             tools/sync-plm-master-data.test.mjs \
-            tools/sync-coldlion-licensors-properties.test.mjs
+            tools/sync-coldlion-licensors-properties.test.mjs \
+            tools/evaluate-coldlion-licensor-property-cutover-readiness.test.mjs \
+            tools/dispatch-coldlion-taxonomy-alerts.test.mjs
 
       - name: Setup Supabase CLI
         if: env.skip != 'true' && steps.plan.outputs.apply == 'true'
