@@ -276,13 +276,13 @@ Measured preview evidence under `statement_timeout='8s'`:
 | Account/design/collection/order pages | 0 rows in current preview data |
 
 The zero-row probes completed successfully and describe preview data, not
-absence in production. A Poppim-specific safe login was not present in the
-`vibe_coding` vault, so authenticated browser and real JWT/RLS verification is
-an explicit remaining gate. No sibling-app credential was borrowed.
+absence in production. The later authenticated gate below supersedes the
+original missing-login note; no sibling-app credential was borrowed.
 
 ## Authenticated browser gate finding
 
-Status on 2026-07-27: blocked safely before PR/production promotion.
+Status on 2026-07-27: correction applied and authenticated matrix passed on
+preview; ready for PR and bounded production promotion.
 
 A dedicated preview-only Poppim Auth user was provisioned through the canonical
 invitation/auth-trigger path, with canonical PM app access and an administrator
@@ -297,7 +297,7 @@ permission and valid RLS, but `authenticated` lacked the underlying table
 grant. The earlier database-owner verification had masked this browser-role
 boundary.
 
-Unapplied correction
+Correction
 `20260727200500_poppim_authenticated_app_record_grants.sql` grants the narrow
 table privileges used by these invoker functions and existing Poppim
 collaboration/operating-record writes, plus an own-profile/administrator
@@ -305,25 +305,32 @@ notification insert policy. A rollback-only authenticated SQL probe with those
 statements temporarily active verified all secondary functions:
 department report/handoffs, projects, people, notes, schedule, accounts,
 designs, collections, orders, My Work products, revisions, and reminders. The
-transaction rolled back; preview was not persistently changed.
+transaction rolled back.
 
-This correction is deliberately committed but unapplied. The original owner
-approval named exactly the 17 migrations through `20260727024300`, so production
-promotion cannot silently expand to an eighteenth file. Also, rehearsal preview
-currently contains DAM migration ledger versions `20260727190000` and
-`20260727191000` from the separate unmerged branch
-`codex/dam-customer-forward-20260727`; those files are absent from shared-db
-`main`. The Supabase CLI correctly refuses an ordinary dry-run. No migration
-repair, `db pull`, `--include-all`, PM preview apply, PR, merge, or production
-mutation was performed after finding that drift.
+The owner then explicitly expanded the approved Poppim set from 17 to 18
+migrations and authorized serialization of the separate DAM branch. DAM PR
+#269 and its evidence PR #270 landed first; production and preview both contain
+its `20260727190000` and `20260727191000` ledger versions and verified objects.
+The Poppim branch was then updated from shared-db `main`.
 
-Exact resume gate:
+A bounded Poppim preview checkout removed only the three unrelated historical
+files that the rehearsal ledger intentionally lacks. Its dry run listed only
+`20260727200500_poppim_authenticated_app_record_grants.sql`; that one migration
+was applied successfully. No `--include-all`, ledger repair, or unrelated apply
+was used.
 
-1. Serialize/land or explicitly coordinate the DAM customer-forward branch so
-   shared-db `main` and the rehearsal ledger agree.
-2. Obtain explicit approval to include
-   `20260727200500_poppim_authenticated_app_record_grants.sql` in the Poppim
-   promotion set.
-3. Apply only that correction to preview through a bounded checkout, repeat the
-   authenticated browser matrix, then proceed through the normal PR/production
-   gates.
+The genuine email/password browser matrix then passed:
+
+- 16 screen navigations, including all three pipeline departments;
+- 26 authenticated API checks covering pipeline page/count/facets, invalid
+  mixed-department rejection, Reports/Control Room contracts, all secondary
+  pages, and all three My Work contracts;
+- zero browser console errors and zero failed network responses;
+- desktop evidence for Control Room, Pipeline, and Reports plus a narrow/mobile
+  Reports capture.
+
+The first repeat found one frontend-only mismatch: `current_user_profile`
+returns role slugs such as `administrator`, while legacy `next_owner_role` and
+`pm_my_work_page.p_role_id` accept UUIDs. Poppim now passes the role only when
+it is a UUID; current preview data has no `next_owner_role` metadata rows. After
+that narrow caller correction, the matrix passed cleanly.
