@@ -279,3 +279,51 @@ The zero-row probes completed successfully and describe preview data, not
 absence in production. A Poppim-specific safe login was not present in the
 `vibe_coding` vault, so authenticated browser and real JWT/RLS verification is
 an explicit remaining gate. No sibling-app credential was borrowed.
+
+## Authenticated browser gate finding
+
+Status on 2026-07-27: blocked safely before PR/production promotion.
+
+A dedicated preview-only Poppim Auth user was provisioned through the canonical
+invitation/auth-trigger path, with canonical PM app access and an administrator
+role. Its credential is stored only in the `vibe_coding` 1Password item
+`Poppim preview test login - Codex (shared-db-schema-rehearsal)`.
+
+The real browser session passed all three pipeline page/count/facet groups,
+rejected the invalid mixed `All` department, and loaded the screen navigation
+matrix. It then proved that `api.pm_department_report(...)` returned
+`42501 permission denied for table activity`: the invoker function had execute
+permission and valid RLS, but `authenticated` lacked the underlying table
+grant. The earlier database-owner verification had masked this browser-role
+boundary.
+
+Unapplied correction
+`20260727200500_poppim_authenticated_app_record_grants.sql` grants the narrow
+table privileges used by these invoker functions and existing Poppim
+collaboration/operating-record writes, plus an own-profile/administrator
+notification insert policy. A rollback-only authenticated SQL probe with those
+statements temporarily active verified all secondary functions:
+department report/handoffs, projects, people, notes, schedule, accounts,
+designs, collections, orders, My Work products, revisions, and reminders. The
+transaction rolled back; preview was not persistently changed.
+
+This correction is deliberately committed but unapplied. The original owner
+approval named exactly the 17 migrations through `20260727024300`, so production
+promotion cannot silently expand to an eighteenth file. Also, rehearsal preview
+currently contains DAM migration ledger versions `20260727190000` and
+`20260727191000` from the separate unmerged branch
+`codex/dam-customer-forward-20260727`; those files are absent from shared-db
+`main`. The Supabase CLI correctly refuses an ordinary dry-run. No migration
+repair, `db pull`, `--include-all`, PM preview apply, PR, merge, or production
+mutation was performed after finding that drift.
+
+Exact resume gate:
+
+1. Serialize/land or explicitly coordinate the DAM customer-forward branch so
+   shared-db `main` and the rehearsal ledger agree.
+2. Obtain explicit approval to include
+   `20260727200500_poppim_authenticated_app_record_grants.sql` in the Poppim
+   promotion set.
+3. Apply only that correction to preview through a bounded checkout, repeat the
+   authenticated browser matrix, then proceed through the normal PR/production
+   gates.
