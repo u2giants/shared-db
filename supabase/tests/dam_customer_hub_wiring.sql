@@ -19,7 +19,6 @@ declare
   v_kohls      uuid;
   v_tjx        uuid;
   v_rooms      uuid;
-  v_facets     jsonb;
 begin
   -- FK columns present
   perform 1 from information_schema.columns
@@ -72,12 +71,7 @@ begin
   if (select coalesce(display_name,'') from core.customer where name='HOBBY LOBBY LLC') <> 'Hobby Lobby' then
     raise exception 'Hobby Lobby display_name not set'; end if;
 
-  -- Curated facet RPC
-  v_facets := public.get_dam_customer_facets();
-  if jsonb_typeof(v_facets) <> 'array' or jsonb_array_length(v_facets) = 0 then
-    raise exception 'get_dam_customer_facets returned empty/non-array'; end if;
-
-  raise notice 'dam_customer_hub_wiring verification passed (% facet customers)', jsonb_array_length(v_facets);
+  raise notice 'dam_customer_hub_wiring resolver verification passed';
 end $$;
 
 select set_config(
@@ -94,6 +88,8 @@ select set_config(
 set local role authenticated;
 
 do $$
+declare
+  v_facets jsonb;
 begin
   if auth.uid() is null then
     raise exception 'no signed-in PopDAM preview user available for picker test';
@@ -101,6 +97,12 @@ begin
   if (select count(*) from api.dam_customer_list where name in ('CVS','Costco','Meijer')) <> 3 then
     raise exception 'CVS/Costco/Meijer not all visible to signed-in PopDAM user';
   end if;
+  v_facets := public.get_dam_customer_facets();
+  if jsonb_typeof(v_facets) <> 'array' or jsonb_array_length(v_facets) = 0 then
+    raise exception 'get_dam_customer_facets returned empty/non-array';
+  end if;
+  raise notice 'signed-in DAM customer picker verification passed (% facet customers)',
+    jsonb_array_length(v_facets);
 end $$;
 
 reset role;
