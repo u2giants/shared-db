@@ -1,7 +1,7 @@
 # DAM customer hub bounded production forward
 
-Date: 2026-07-27  
-Preview project: `rjyboqwcdzcocqgmsyel`  
+Date: 2026-07-27
+Preview project: `rjyboqwcdzcocqgmsyel`
 Production project: `qsllyeztdwjgirsysgai`
 
 ## Goal and rollout boundary
