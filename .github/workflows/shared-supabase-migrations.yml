@@ -64,7 +64,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.105.0
       - name: Link preview
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -97,21 +97,26 @@ jobs:
           echo "BLOCKED: the general workflow can never apply to production." >&2
           exit 1
       - name: Check exact confirmation
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+          REQUESTED_CONFIRMATION: ${{ inputs.confirmation }}
         run: |
-          test -n "${{ inputs.commit_sha }}"
-          test "${{ inputs.confirmation }}" = "DRY-RUN ${{ inputs.commit_sha }}"
+          test -n "$REQUESTED_SHA"
+          test "$REQUESTED_CONFIRMATION" = "DRY-RUN $REQUESTED_SHA"
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 0
       - name: Verify exact main commit
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
         run: |
           git fetch origin main
-          test "$(git rev-parse HEAD)" = "${{ inputs.commit_sha }}"
-          test "$(git rev-parse origin/main)" = "${{ inputs.commit_sha }}"
+          test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
+          test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.105.0
       - name: Capture production migration record
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -121,17 +126,21 @@ jobs:
           supabase link --project-ref "$PRODUCTION_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
           supabase migration list --linked | tee "$RUNNER_TEMP/production-ledger-before.txt"
       - name: Build bounded checkout
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
         run: |
           python scripts/production_migration_guard.py prepare \
             --repo "$GITHUB_WORKSPACE" \
             --output "$RUNNER_TEMP/bounded-production" \
-            --commit-sha "${{ inputs.commit_sha }}" \
-            --allowlist "${{ inputs.production_allowlist }}" \
+            --commit-sha "$REQUESTED_SHA" \
+            --allowlist "$PRODUCTION_ALLOWLIST" \
             --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
       - name: Run and verify bounded dry-run
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
         run: |
           cd "$RUNNER_TEMP/bounded-production"
           supabase link --project-ref "$PRODUCTION_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
@@ -139,7 +148,7 @@ jobs:
           supabase db push --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
           python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
             --dry-run-output "$RUNNER_TEMP/production-dry-run.txt" \
-            --allowlist "${{ inputs.production_allowlist }}"
+            --allowlist "$PRODUCTION_ALLOWLIST"
       - name: Save dry-run evidence
         uses: actions/upload-artifact@v4
         with:
