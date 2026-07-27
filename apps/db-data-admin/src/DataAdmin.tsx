@@ -298,6 +298,10 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
 
   useEffect(() => {
     let active = true
+    // Resets every tab-scoped piece of state before the new tab loads. React's
+    // preferred alternative is remounting via a `key`, which this screen cannot
+    // use yet because the cursor/grid-state refs must survive a tab switch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDenied(false); setRows([]); setFilters({}); setActiveFilters({}); setSetFiltersState({}); setDetail(null); setLoading(true)
     void (async () => {
       try {
