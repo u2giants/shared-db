@@ -68,6 +68,9 @@ export function LicensorTree({ client }: Props) {
     }
   }, [client, includeInactive])
 
+  // `load` flips the loading/error flags synchronously so the spinner appears on
+  // the same render as the request; the alternative leaves stale rows on screen.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load() }, [load])
 
   useEffect(() => {
