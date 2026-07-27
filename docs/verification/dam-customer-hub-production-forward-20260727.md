@@ -6,8 +6,8 @@ Production project: `qsllyeztdwjgirsysgai`
 
 ## Goal and rollout boundary
 
-Clear the two already-live DAM source migrations from production's migration
-backlog without `--include-all` and without touching PopSG or ColdLion taxonomy:
+Safely verify and clear the two already-live DAM source migrations, then correct
+the Rooms-to-Go matching defect without touching ColdLion taxonomy:
 
 - `20260722210100_dam_customer_hub_wiring.sql`
 - `20260722222000_dam_path_facets_by_customer_id.sql`
@@ -16,6 +16,12 @@ Their original effects reached production through
 `20260723183000_step11_bounded_production_forward.sql`. The compatible PopDAM
 frontend commit is `23f9335e0f39af2980cc0693456edb8bc8fc55e5`; it is an ancestor
 of deployed frontend SHA `b4bf454bd7d660dcc375001549324f418667663d`.
+
+While this correction was in preview, shared-db PR #268 recorded a concurrent,
+separately approved production promotion of both old DAM source versions plus
+`20260724050000`. Their ledger cleanup is therefore already complete. This
+work will not rerun or repair those versions; production scope is now only the
+new correction.
 
 ## Finding and permanent correction
 
@@ -134,13 +140,11 @@ Pending Claude review. Production must not proceed until Claude returns `PASS`.
 4. Apply it.
 5. Verify real functions, columns, aliases, customer links, trigger state,
    signed-in DAM facets/programs, and CRM/PM picker contracts.
-6. Only after object/data verification, mark these already-realized versions
-   applied in the production ledger:
-   - `20260722210100`
-   - `20260722222000`
-   - `20260727190000`
-7. Recompute the exact production backlog. ColdLion and other taxonomy versions
-   must remain untouched.
+6. Mark only preview-rehearsal version `20260727190000` applied after the
+   production-safe `20260727191000` effects are verified. Do not rerun or repair
+   `20260722210100` or `20260722222000`; PR #268 already cleared them.
+7. Recompute the exact production backlog. It must remain exactly the six held
+   ColdLion versions.
 
 ## Production evidence
 
