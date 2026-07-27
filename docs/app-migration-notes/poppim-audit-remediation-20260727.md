@@ -213,3 +213,69 @@ Rollback is additive: revert the app caller to its previous deployed SHA and
 leave unused functions/indexes in place. If database removal becomes necessary,
 author a new migration that revokes/drops only these six functions and the
 `pim_product_pipeline_keyset_idx`; never edit an applied migration.
+
+## Phase 3 secondary-screen contracts
+
+Status: applied to preview `rjyboqwcdzcocqgmsyel` only on 2026-07-27.
+Production, PR, and merge remain unauthorized until the app browser gate.
+
+Migrations `20260727023000` through `20260727024300` add:
+
+- exact `api.pm_department_report(...)` metrics and an independently fallible
+  30-day `api.pm_department_handoffs(...)` window;
+- keyset pages for projects, people workload, department notes, schedule
+  windows, accounts, designs, design collections, orders, and signed-in
+  profile My Work;
+- measured department and relationship indexes.
+
+Decision / Evidence / Date:
+
+- **Decision:** records with no direct department and no traceable
+  product/project relationship are excluded, not put into the selected
+  department.
+- **Evidence:** submissions, samples, revisions, and stage history have product
+  FKs; orders have product/project FKs; activity/notification targets identify
+  product/project. Mixing any other row would make department totals false.
+- **Date:** 2026-07-27.
+
+All contracts apply mandatory department and search/window predicates before
+the limit and order by a business field plus UUID tie-breaker. Paged lists
+request `limit + 1`, remove the sentinel row, and expose load-more. Intentionally
+bounded Schedule/My Work supporting lists disclose their first-100 limit and
+Schedule exposes explicit date-window controls. Reports return `as_of`; recent
+handoff failure cannot blank exact totals.
+
+Preview findings were corrected immutably:
+
+1. `20260727023000` materialized `p.*`; restored ClickUp metadata caused an
+   8-second timeout. `20260727023100` narrowed the shape.
+2. `20260727023400` corrected the historical `core.company` name to canonical
+   `core.customer`.
+3. `20260727023500` cast `citext` profile email to declared text.
+4. `20260727023600` parses each selected product metadata document once.
+5. `20260727023900` names the schedule UNION columns used by its cursor.
+6. `20260727024300` closes the review-discovered My Work scope gap: it drops
+   the old unscoped overload and requires a department for products, revisions,
+   and PM reminders while continuing to derive the profile from `auth.uid()`.
+
+Preview ledger verification after the correction reported all 14 migrations
+from `20260727023000` through `20260727024300` applied. The exposed Phase 3
+functions revoke `anon` execution and grant only `authenticated`; underlying
+table RLS remains in force because every function is `SECURITY INVOKER`.
+
+Measured preview evidence under `statement_timeout='8s'`:
+
+| Probe | Result |
+|---|---:|
+| Licensed exact report before single-pass metadata | 7,422 ms / 606,463 shared hits |
+| Licensed exact report after `20260727023600` | 1,262 ms / 62,144 shared hits |
+| Project page | 51 `limit + 1` rows |
+| People workload | 25 rows |
+| Notes, 30-day current preview window | 0 rows |
+| Schedule, current preview window | 0 rows |
+| Account/design/collection/order pages | 0 rows in current preview data |
+
+The zero-row probes completed successfully and describe preview data, not
+absence in production. A Poppim-specific safe login was not present in the
+`vibe_coding` vault, so authenticated browser and real JWT/RLS verification is
+an explicit remaining gate. No sibling-app credential was borrowed.
