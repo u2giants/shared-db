@@ -5,6 +5,8 @@ on:
     paths:
       - "supabase/migrations/**"
       - "scripts/check-sql.sh"
+      - "scripts/production_migration_guard.py"
+      - "scripts/test_production_migration_guard.py"
       - ".github/workflows/shared-supabase-migrations.yml"
   workflow_dispatch:
     inputs:
@@ -13,17 +15,25 @@ on:
         type: choice
         required: true
         default: preview
-        options:
-          - preview
-          - production
+        options: [preview, production]
       mode:
-        description: "Run a dry-run or apply migrations"
+        description: "Preview may apply. Production is dry-run only here."
         type: choice
         required: true
         default: dry-run
-        options:
-          - dry-run
-          - apply
+        options: [dry-run, apply]
+      production_allowlist:
+        description: "Production only: comma-separated exact migration versions"
+        type: string
+        required: false
+      commit_sha:
+        description: "Production only: exact origin/main commit SHA"
+        type: string
+        required: false
+      confirmation:
+        description: "Production only: type DRY-RUN followed by the commit SHA"
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -35,79 +45,106 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    env:
-      PREVIEW_PROJECT_REF: rjyboqwcdzcocqgmsyel
-      PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
     steps:
       - uses: actions/checkout@v4
-
       - name: Install SQL check dependencies
         run: sudo apt-get update && sudo apt-get install -y ripgrep
-
       - name: Run SQL checks
         run: bash scripts/check-sql.sh
+      - name: Test production guard
+        run: python -m unittest scripts/test_production_migration_guard.py
 
-      - name: Stop after static checks on pull requests
-        if: github.event_name == 'pull_request'
-        run: echo "Pull request validation complete. Use workflow_dispatch for Supabase dry-runs/applies."
-
-      - name: Set target project
-        if: github.event_name == 'workflow_dispatch'
-        id: target
-        run: |
-          if [ "${{ inputs.target }}" = "preview" ]; then
-            echo "project_ref=${PREVIEW_PROJECT_REF}" >> "$GITHUB_OUTPUT"
-            echo "db_password_secret=SUPABASE_DB_PASSWORD_PREVIEW" >> "$GITHUB_OUTPUT"
-          else
-            echo "project_ref=${PRODUCTION_PROJECT_REF}" >> "$GITHUB_OUTPUT"
-            echo "db_password_secret=SUPABASE_DB_PASSWORD_PRODUCTION" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Setup Supabase CLI
-        if: github.event_name == 'workflow_dispatch'
-        uses: supabase/setup-cli@v1
+  preview:
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'preview'
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_PROJECT_REF: rjyboqwcdzcocqgmsyel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
         with:
           version: latest
-
-      - name: Link Supabase project
-        if: github.event_name == 'workflow_dispatch'
+      - name: Link preview
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        # `supabase link`/`db push` authenticate via `supabase login`, not the
-        # SUPABASE_ACCESS_TOKEN env var alone — env-only returns "Unauthorized"
-        # on the installed CLI (see 1Password "Supabase CLI Personal Access
-        # Token" notes). Run `login --token` first so a valid PAT actually works.
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
         run: |
           supabase login --token "$SUPABASE_ACCESS_TOKEN"
-          supabase link --project-ref "${{ steps.target.outputs.project_ref }}"
+          supabase link --project-ref "$PREVIEW_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+      - name: Dry-run preview
+        if: inputs.mode == 'dry-run'
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
+        run: supabase db push --dry-run
+      - name: Apply preview
+        if: inputs.mode == 'apply'
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
+        run: supabase db push
 
-      - name: Dry-run migrations
-        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'
+  production-dry-run:
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'production'
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
+    steps:
+      - name: Refuse production apply
+        if: inputs.mode == 'apply'
+        run: |
+          echo "BLOCKED: the general workflow can never apply to production." >&2
+          exit 1
+      - name: Check exact confirmation
+        run: |
+          test -n "${{ inputs.commit_sha }}"
+          test "${{ inputs.confirmation }}" = "DRY-RUN ${{ inputs.commit_sha }}"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+      - name: Verify exact main commit
+        run: |
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "${{ inputs.commit_sha }}"
+          test "$(git rev-parse origin/main)" = "${{ inputs.commit_sha }}"
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Capture production migration record
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD_PREVIEW: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
-          SUPABASE_DB_PASSWORD_PRODUCTION: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
         run: |
-          if [ "${{ inputs.target }}" = "preview" ]; then
-            export SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD_PREVIEW"
-          else
-            export SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD_PRODUCTION"
-          fi
-          supabase db push --dry-run
-
-      - name: Apply migrations
-        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'apply'
+          supabase login --token "$SUPABASE_ACCESS_TOKEN"
+          supabase link --project-ref "$PRODUCTION_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          supabase migration list --linked | tee "$RUNNER_TEMP/production-ledger-before.txt"
+      - name: Build bounded checkout
+        run: |
+          python scripts/production_migration_guard.py prepare \
+            --repo "$GITHUB_WORKSPACE" \
+            --output "$RUNNER_TEMP/bounded-production" \
+            --commit-sha "${{ inputs.commit_sha }}" \
+            --allowlist "${{ inputs.production_allowlist }}" \
+            --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
+      - name: Run and verify bounded dry-run
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD_PREVIEW: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
-          SUPABASE_DB_PASSWORD_PRODUCTION: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
         run: |
-          if [ "${{ inputs.target }}" = "production" ]; then
-            echo "Applying to production. Confirm the preview checklist is complete before running this workflow." >&2
-          fi
-          if [ "${{ inputs.target }}" = "preview" ]; then
-            export SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD_PREVIEW"
-          else
-            export SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD_PRODUCTION"
-          fi
-          supabase db push
+          cd "$RUNNER_TEMP/bounded-production"
+          supabase link --project-ref "$PRODUCTION_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          set -o pipefail
+          supabase db push --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
+          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
+            --dry-run-output "$RUNNER_TEMP/production-dry-run.txt" \
+            --allowlist "${{ inputs.production_allowlist }}"
+      - name: Save dry-run evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-migration-dry-run-${{ inputs.commit_sha }}
+          path: |
+            ${{ runner.temp }}/production-ledger-before.txt
+            ${{ runner.temp }}/production-dry-run.txt
+          retention-days: 90
