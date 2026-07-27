@@ -264,7 +264,7 @@ core.character (id, property_id → core.property, name, code, status, …)
 
 -- AXIS 2 — style. Does not exist yet; must be added.
 core.style_guide            (id, licensor_id → core.licensor,
-                             property_id → core.property NULL,  -- see open question 3
+                             property_id → core.property NULL,  -- null for never-designed/multiple
                              parent_style_guide_id → core.style_guide NULL,  -- sub-style guides
                              name, code, status, …)
 
@@ -384,7 +384,25 @@ The legacy tables record `licensor` for both, never `property`. §5A.0 supplies 
 resolution rules. Clear existing MG06 name matches are automatic, including harmless wording
 differences and obvious franchise members. The generator covers all 335 style guides:
 21 accepted direct parents, 153 clear MG06 name matches, five confirmed Classics, three
-confirmed no-code titles, and 153 uncertain rows requiring review.
+confirmed no-code titles, and 153 rows that were sent to licensing for review.
+
+### 5A.1a Licensing review result (2026-07-27)
+
+Licensing returned all 153 uncertain style-guide rows:
+
+- 32 map to an existing MG06 code.
+- 118 are `NEVER_DESIGNED`: art exists, but POP never designed a product using that property.
+- 3 are `MULTIPLE`: property classification depends on the character in the art and can vary.
+
+This confirms why `core.style_guide.property_id` must stay nullable. Never-designed style guides
+have no canonical property because `core.property` mirrors what POP has designed/holds a code
+for. Multiple style guides cannot carry one property because their characters span properties.
+
+The three multiple style guides contain 338 appearances. The final read-only character/franchise
+rules map 248 appearances to the closest specific existing MG06 franchise, preserve 13 unique
+same-licensor historical matches, map 66 to the existing `MV` Marvel Assorted Styles catch-all,
+and exclude nine non-character labels plus two royalty sentinels. No licensing follow-up remains. Evidence:
+[`verification/style-guide-licensing-review-20260727/`](verification/style-guide-licensing-review-20260727/README.md).
 
 ### 5A.2 "Everything licensed" vs "only what Coldlion produces" — decided
 

@@ -1,9 +1,8 @@
 # HANDOFF — characters and style guides, canonical migration
 
-**Written:** 2026-07-26 · **Updated:** 2026-07-26 · **Repo:** `u2giants/shared-db` ·
-**Branch:** `main` · **Next action:** wait for the licensing team's completed 153-row review
-sheet, expected in 24–48 hours. Phase 2 needs separate approval because the owner previously
-said not to write a migration yet.
+**Written:** 2026-07-26 · **Updated:** 2026-07-27 · **Repo:** `u2giants/shared-db` ·
+**Branch:** `main` · **Next action:** Phase 2 needs separate approval because the owner previously
+said not to write a migration yet. Licensing has no remaining character review.
 
 **No database has been changed.** Every session to date has been read-only investigation plus
 documentation. `core.character` is still **0 rows**.
@@ -117,11 +116,15 @@ produced documentation and a plan rather than DDL: **the model had to be right f
 - `public.style_guide_files` — 279,783 · `public.asset_characters` — 117,012
 - `dam.style_guide_file`, `dam.asset_character`, `dam.style_group`, `dam.asset` — all **0 rows**
 
-**Deliverable for the licensing team:** a 153-row uncertainty-only review sheet at
-`docs/verification/style-guide-property-mapping-20260726/style-guide-property-mapping.csv`, sent
-2026-07-26, **not yet returned** and expected in 24–48 hours. The generator accounts for all
-335 style guides but keeps 182 clear decisions out of the team's sheet. Regenerate with
-`node tools/generate-style-guide-property-mapping.mjs` — no database or network needed.
+**Returned licensing review:** all 153 rows were answered on 2026-07-27. The normalized result,
+raw returned file, and read-only `MULTIPLE` character reconciliation are under
+`docs/verification/style-guide-licensing-review-20260727/`.
+
+Results: 32 existing MG06 codes, 118 never designed, and three multiple. Of 338 character
+appearances under the multiple style guides, 248 use specific existing franchise rules, 13 keep
+one unique same-licensor historical match, 66 use `MV` Marvel Assorted Styles, nine
+non-character labels are excluded, and two royalty sentinels are excluded. No licensing
+follow-up remains.
 
 ## 7. Constraints and gotchas recorded nowhere else
 
@@ -168,7 +171,7 @@ checklist passes. Not main-only.
 **Phase 0 decision (approved 2026-07-26):** use the hybrid source. Accept the 367 DAM
 appearances whose 21 parents directly agree with a canonical property, apply the five settled
 Classics → `CP`, three settled no-code rules, and 153 clear existing MG06 name matches. The
-remaining 153 uncertain rows need licensing-team review.
+remaining 153 uncertain rows were returned on 2026-07-27.
 
 Phase 1 proved that wholesale DAM promotion is unsafe: 9,255 of 9,622 appearances sit under
 licensing/style-guide catalogue parents that do not directly exist in `core.property`.
@@ -197,8 +200,8 @@ Evidence is in
 4. **Colliding with the ColdLion cutover.** Its 14-day gate was retired on 2026-07-26, but Phase 7
    remains unauthorized and production untouched. Our Phase 5 must not land in the actual approved
    ColdLion production window. **Re-read their status header before scheduling.**
-5. **The licensing team's sheet is pending.** It is expected in 24–48 hours. Phase 3 cannot
-   complete without those family/bucket decisions.
+5. **The first character-level pass overused licensing.** Name history alone left 305 rows.
+   Specific franchise rules plus existing catch-all properties now leave zero licensing rows.
 6. **The old 174-row sheet was incomplete when combined with the 367 path.** Grok found that
    the two numbers came from different matching tracks. The corrected 335-row sheet removes
    that gap and returns unapproved Classics/no-code guesses to review.
@@ -219,11 +222,11 @@ session will find).
 1. *Could a brand-new developer with no project knowledge pick this up without asking a question?*
    **Yes.** §1 defines the business, the apps and the schemas; §8 gives every access path; §3 gives
    exact live row counts and merge SHAs; the plan doc's Phases 0–7 give ordered steps with exit
-   gates. Phase 0 is recorded as approved, Phase 1 evidence is linked, and the next input is the
-   licensing team's completed sheet.
+   gates. Phase 0 is recorded as approved, Phase 1 evidence is linked, and both the style-guide
+   review and the `MULTIPLE` character classification are complete.
 2. *Could they continue as effectively as this session could right now?* **Yes.** The non-obvious
    knowledge is written down: the naming trap (§2), the two axes and the three corrections (model
-   doc §1/§6), the eight approaches that failed (plan §10), the environment traps that each cost
+   doc §1/§6), the eleven approaches that failed (plan §10), the environment traps that each cost
    real time (§7), and the two reuse opportunities that could remove work entirely (plan §2).
 3. *Is every relevant detail included — background, goals, state, failures, decisions, constraints,
    risks, next actions, verification?* **Yes.** Decisions are dated in §9 so a later session cannot

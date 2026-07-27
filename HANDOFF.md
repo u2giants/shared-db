@@ -1,6 +1,282 @@
 # HANDOFF — shared-db current state
 
-## FRESH-SESSION BOUNDARY — PopSG Property reconciliation PSG-1 COMPLETE
+## FRESH-SESSION BOUNDARY — PopSG Property reconciliation PSG-3 UI SHELL
+
+**Date:** 2026-07-27
+**Status:** PSG-3 pending-only UI shell deployed and healthy; stop before PSG-4
+**Shared-db remote:** `main` contains the verified closeout through direct GitHub commit
+`a4a99fa266ea6ea6ba070b3a67bf762d35bdb3b7`
+**Shared-db local checkout:** `C:\repos\shared-db` still has stale read-only Git metadata at
+`78d0130` and therefore reports the three closeout files as modified even though their clean
+bytes match remote; this restricted session could not create `.git/index.lock`
+**PopDAM checkout:** `C:\repos\popdam3`, `main`, clean at `b4bf454b`
+**Database writes / migrations / rebuilds / activation:** none
+
+### What this work is
+
+PopSG is POP's internal licensor style-guide library. Folder-derived Licensor and Property names
+currently drive deterministic tags. This workstream reconciles those observed names to canonical
+master data without cross-Licensor matches or silent tag loss. PSG-3 is the administrator review
+screen only. PSG-5 owns future database contracts and preview rebuild behavior.
+
+### Exact owner approval
+
+Albert approved only `batch-01-exact-existing`, 51 rows covering 44,331 files, SHA-256
+`f59118aa0eac1772473ec21b427b6b79ad923c16328d5e8318015fd53a46643e`.
+The immutable record is
+`docs/verification/popsg-property-reconciliation-20260727-psg3/approval.json`.
+
+This approval does not cover batch 02, canonical creates, the 6,961 at-risk removals, schema or
+mapping activation, database writes, migrations, rebuilds, deployment, production, PSG-4, or any
+later phase.
+
+### Current state
+
+PopDAM has the frozen 372-row / 216,417-file pending-only UI shell at Settings → File Tags →
+Property reconciliation. It shows five separate business queues, filters, bounded redacted
+path evidence, canonical candidate/parent proof, exact owner hash and exclusions, affected-file
+preview, and a stable pending-decision export. Administrator preparation is restricted to
+same-parent exact-existing rows in the approved batch. Viewer/designer cannot prepare or export.
+All proposals stay in browser memory and disappear on refresh or role downgrade. No activate
+action or backend adapter exists.
+
+Verification passed: 19 focused tests, all 93 PopDAM tests, production build, seven
+headed-Chromium screenshots, and zero browser console errors. The screenshots and complete
+evidence are under `docs/verification/popsg-property-reconciliation-20260727-psg3/`.
+
+Albert approved the pending-only UI deployment after the evidence PR merged. PopDAM commits are:
+
+- `e72ec107`: PSG-3 pending-only UI shell;
+- `8d8ce361`: direct `@testing-library/dom` test dependency;
+- `b4bf454b`: Bun 1.3.14 lockfile regeneration.
+
+CI run `30263977784` passed. Final publish/deploy run `30264180552` passed from
+`b4bf454bd7d660dcc375001549324f418667663d`. The running Coolify container was healthy and used
+image digest `sha256:a850c64f3a5ead1c26f5a20b405e1bb22697507516e333c10b628b26721a6684`,
+which exactly matched the published GHCR `latest` digest. Both `https://dam.designflow.app` and
+`https://sg.designflow.app` returned HTTP 200.
+
+Two Grok reviews required corrections. The final Grok follow-up returned PASS with no Critical,
+High, or Medium findings.
+
+### Failed paths that must not be repeated
+
+1. Windows CRLF made raw PSG-0/1 hashes look wrong. Canonical LF bytes match every signed manifest.
+2. A no-write scan over the data fixture matched ordinary text. Scan executable source only.
+3. The dev role switcher initially retained administrator memory after switching to designer.
+   Pending memory now clears on downgrade and export disables.
+4. The first create screenshot retained a search filter. The final screenshot shows both locked
+   ColdLion Phase 5 candidates.
+5. The first Grok review found overclaimed phase status, a dead ambiguity filter, unsafe
+   mixed-Licensor export, incomplete signed-key enforcement, thin security tests, and hidden rows.
+   The code now fails closed, derives the signed key set, tests the boundaries, and exposes all
+   rows through paging.
+6. The second Grok review found a stale prepare-dialog screenshot plus three hardening gaps.
+   The screenshot now starts empty on Winnie the Pooh / 6,887 files; synthetic off-key rows fail
+   closed; parent proof text is conditional; and a started set immediately locks other Licensors.
+7. The first GitHub CI run failed because npm had supplied `@testing-library/dom` indirectly but
+   Bun's frozen install did not. Declaring it directly fixed dependency ownership.
+8. Hand-editing only the Bun root dependency was insufficient. Bun rejected the missing package
+   record. Regenerating `bun.lock` with the same Bun 1.3.14 used by CI fixed the lock permanently.
+
+### Exact next steps
+
+1. In a normal-authority session, reconcile the stale local shared-db Git metadata with remote
+   `main` after confirming the three local file bytes match GitHub. Do not discard unrelated work.
+   **Pass when:** `C:\repos\shared-db` is clean at the remote closeout head.
+2. Obtain Albert's explicit instruction to start PSG-4.
+   **Pass when:** the current chat says to start PSG-4.
+3. Execute PSG-4 as decision-package work only: preserve the frozen proposal hash, add reviewer
+   and timestamp evidence, and keep canonical creates at zero unless separately named.
+   **Pass when:** every proposed approved row has disposition, reason, parent evidence, reviewer,
+   and timestamp, with no changed proposal bytes.
+4. Do not activate mappings or write either database in PSG-4. Database contracts, RLS, RPCs,
+   persistence, and preview rebuild proof remain PSG-5 work under separate authority.
+   **Pass when:** PSG-4 produces no migration, database write, rebuild, or deployment.
+5. Stop at PSG-4's exact-hash owner decision gate.
+   **Pass when:** Albert receives one business-readable package and no later phase has started.
+
+### Constraints and moving state
+
+- The accelerated ColdLion plan still shows Steps 1–10 open. Production Phase 7 is forbidden.
+- CHEERS and THE EXORCIST remain locked and routed to ColdLion Phase 5.
+- `the lion king` remains ambiguous and locked.
+- The 6,961-row signed risk file remains evidence only.
+- PSG-5 must decide all eight hard-coded Licensor aliases and take a fresh worker behavior baseline.
+- PSG-6 still needs the moving ColdLion checkpoint, Albert sign-off, and a named production window.
+- ColdLion Phase 6 does not block PSG-4 decision-package work. It blocks later preview/production
+  cutover gates.
+- The PSG-3 plan text names RLS/RPC/preview proof in its full gate, while PSG-5 owns those objects.
+  Treat that proof as a PSG-5 entry/exit obligation, not permission to add backend work to PSG-4.
+
+### Access and environment
+
+No new secret value was encountered. GitHub and Coolify used their existing stored credentials.
+Canonical database refs remain preview `rjyboqwcdzcocqgmsyel` and production
+`qsllyeztdwjgirsysgai`; PSG-3 did not connect to either.
+
+### Self-audit
+
+The fresh-developer handoff audit passes:
+
+1. A newcomer can continue with no questions because this section records the application,
+   approval, deployed commits, CI/deploy evidence, current gate, and exact next action.
+2. A newcomer can continue as effectively as this session because the frozen hashes, role and
+   activation limits, ColdLion boundary, and every PSG-4 verification condition are explicit.
+3. Failed attempts are preserved with causes and permanent fixes, including both Grok correction
+   rounds and the two Bun/CI dependency failures.
+4. Every next step is concrete and has a pass condition.
+5. Every path, URL, phase boundary, commit, run, and digest needed to resume is named.
+
+---
+
+## FRESH-SESSION BOUNDARY — PopSG Property reconciliation PSG-2 AT OWNER GATE
+
+### 1. What this application is
+
+PopSG is the style-guide library at `https://sg.designflow.app`, served by
+`u2giants/popdam3`. NAS crawlers record folder-derived Licensor and Property observations in the
+shared Supabase production project. `u2giants/shared-db` owns the canonical Licensor and Property
+catalogue used by PopSG and every other POP application.
+
+### 2. What this session set out to do, and why
+
+The session executed PSG-2 only from
+[`fix_popsg_property_taxonomy_reconciliation.md`](fix_popsg_property_taxonomy_reconciliation.md).
+It had to turn every signed PSG-1 observation into one deterministic proposal, preserve the
+6,961-row at-risk set unchanged, prove parent scoping and strict rule order, prepare an immutable
+owner decision package, and stop before schema, UI, activation, or PSG-3.
+
+### 3. Current state
+
+The corrected proposal package passed its second Grok review with no Critical, High, or Medium
+findings. PSG-2 remains draft and incomplete at Albert's exact-hash gate:
+
+[`docs/verification/popsg-property-reconciliation-20260727-psg2/`](docs/verification/popsg-property-reconciliation-20260727-psg2/README.md)
+
+- All eight PSG-1 artifact Git blobs match their signed manifest.
+- The immutable at-risk input remains 6,961 rows with SHA-256
+  `f3274213ad55c983e12f174bffc9cc693772f11d578a2ae78e4f99b4a5bf03b6`.
+- Every one of 372 inventory rows has exactly one proposed disposition.
+- All 216,417 active file occurrences are represented exactly once.
+- Proposed rows/files are: exact existing 51/44,331; non-Property 36/20,309; create candidate
+  2/293; ambiguous 43/33,416; deferred 239/118,067; Licensor unresolved 1/1.
+- Approved-alias, Disney Classics, and documented no-code exact proposals are each zero.
+- There are zero cross-parent proposals, fuzzy-selected targets, unresolved-Licensor Property
+  proposals, and activated/effective decisions.
+- Every proposal requires owner activation. Automatic classification is recorded separately.
+- Every existing target is checked against authoritative parent edges and includes canonical code
+  and parent ID. Missing or wrong parent/name/code proof fails closed.
+- Proposal ledger SHA-256:
+  `cc036567653c69801b089fae1443f4323321ec9dc3f7d874e4ee80f8e11347d4`.
+- Owner batch-index SHA-256:
+  `78afa12f5edf4ac56f00d8fad592b6c6c2bcb128730ed5c837ad29270931976d`.
+- Recommended first bounded decision:
+  `batch-01-exact-existing`, 51 rows / 44,331 files, SHA-256
+  `f59118aa0eac1772473ec21b427b6b79ad923c16328d5e8318015fd53a46643e`.
+- The owner index includes non-approvable `batch-06-at-risk-observation`, which points to the
+  immutable 6,961-row PSG-1 risk file and signed hash. It cannot approve removals.
+- Two proposed create candidates, `CHEERS` / `CHR` and `THE EXORCIST` / `EX`, are exact
+  overlaps with the existing ColdLion Phase 5 ledger. No create is approved.
+- `the lion king` affects 521 files but remains open because the approved owner-list text is
+  `lion king`; it also has multiple same-parent reviewer candidates, so it is `ambiguous`.
+- ColdLion Phase 6 remains IN PROGRESS on preview. Accelerated readiness Steps 1–10 remain open.
+- PSG-1's PopDAM worker hash used raw CRLF working-tree bytes:
+  `1fe0f7214cabf15bd0cd5035c95897d40f18c8990172fa394bfb654c796f2ce3`.
+  The current canonical LF hash is
+  `76579ecba08ae1a5207bbe2f2d3a4e23a8979ad050ceb69cff11dba29c75d255`;
+  reconstructed CRLF reproduces PSG-1 exactly, so no behavior drift is present.
+- PSG-2 made no database query/write, migration, rebuild, deployment, canonical creation,
+  proposal activation, fuzzy automatic mapping, or PopDAM UI/code change.
+
+### 4. Everything tried that did not work
+
+- Direct working-tree hashes failed because Git checked text files out with Windows CRLF endings.
+  The exact Git blobs matched every PSG-1 hash. The final engine canonicalizes CRLF to LF before
+  verifying immutable inputs.
+- The first summary inferred at-risk removals from an inventory aggregate and got 7,182 instead
+  of 6,961. That aggregate includes accepted relationships beyond the signed removal set. The
+  final engine counts rows in the immutable at-risk CSV.
+- The first deterministic rerun test used the wrong in-memory shape. The corrected test reruns
+  the generator from the signed files and compares output bytes.
+- The first Grok review found that parent safety was asserted as a constant, create candidates
+  accepted bare codes, the copied normalizer changed ampersand behavior, activation authority was
+  unclear, and fixture/hash coverage was too weak. All are corrected in the current draft.
+- After PR #256 merged, a clean Windows checkout exposed a test-only CRLF mismatch: the source
+  comparison normalized PSG-1 but not the loaded normalizer. The follow-up canonicalizes both
+  strings. Proposal rows, owner batches, and their frozen hashes did not change.
+
+### 5. Root causes and key findings
+
+- Same-parent deterministic evidence settles only 51 rows. Similarity hints cannot settle the
+  remaining observations.
+- The strict approved Classics list produces no exact proposal. Owner review must decide whether
+  `the lion king` is the same approved title as `lion king`; code must not assume it.
+- Fifteen blank Property observations are explicit non-Property candidates rather than silent
+  gaps. Twenty-one more rows came from PSG-1 structural-pattern evidence.
+- The two PopSG create candidates already exist in ColdLion's Phase 5 candidate set. A separate
+  PopSG create ledger would duplicate authority and violate the plan.
+- Phase 5 create candidates now match exact normalized names only. Codes are metadata.
+- None of the 6,961 at-risk removals is approved. The signed file remains risk evidence only.
+- The eight hard-coded Licensor aliases remain unresolved future authority work for PSG-5.
+- PSG-5 must take a new worker behavior baseline if the canonical content hash changes.
+
+### 6. Exact next steps
+
+1. Present the exact owner batch index to Albert.
+   **Pass when:** he names an exact batch ID and SHA-256 and explicitly approves or rejects it.
+2. Recommended first decision: review `batch-01-exact-existing.csv`.
+   **Pass when:** Albert accepts or rejects SHA-256
+   `f59118aa0eac1772473ec21b427b6b79ad923c16328d5e8318015fd53a46643e`.
+3. Keep `batch-02-non-property` separate because it needs business review.
+   **Pass when:** each approved row is covered by an unchanged human-approved hash.
+4. Route `batch-03-create-candidates` through ColdLion Phase 5 only.
+   **Pass when:** no second ledger exists and no create occurs without separate owner approval
+   plus an approved parent.
+5. Do not start PSG-3 until the plan's owner gate passes.
+   **Pass when:** approval is durable and bound to an unchanged batch hash.
+
+### 7. Constraints and gotchas
+
+No proposal activation, schema, migration, canonical creation, preview/production write, rebuild,
+deployment, fuzzy automatic mapping, or PopDAM UI change is authorized. Do not treat
+`batch-04-open-review` as mappings. Do not approve mixed dispositions in one bulk action. PSG-5
+still needs the Licensor-alias decisions. PSG-6 cannot overlap ColdLion Phase 7.
+
+### 8. Access and environment
+
+Shared-db branch: `codex/popsg-property-psg2-20260727`. Phase-start shared-db base:
+`f530c424b00ddd91eef4c0f8d172eeb451551f82`. PopDAM main was clean and fast-forwarded to
+`c8ce9624`; PSG-2 changed no PopDAM source. Production ref: `qsllyeztdwjgirsysgai`. Preview ref:
+`rjyboqwcdzcocqgmsyel`. No secret was read, printed, or committed.
+
+### 9. Open questions and risks
+
+Albert has not approved any PSG-2 batch. The most important open title is `the lion king`
+(521 files). The 36 non-Property candidates need business confirmation. Cheers and The Exorcist
+need the existing ColdLion Phase 5 create/parent decision if they are ever to become canonical.
+ColdLion accelerated readiness remains a moving parallel workstream and must be rechecked before
+every later PSG phase.
+
+### PSG-3 through PSG-7 forward-impact audit
+
+- PSG-3 must show the five immutable queues separately, route create candidates to Phase 5, and
+  keep `the lion king` ambiguous. It must separate automatic classification from owner activation.
+- PSG-4 must approve exact unchanged hashes.
+- PSG-5 has no approved at-risk removal subset, must keep batch-06 non-approvable, and still owns
+  all eight Licensor aliases. It must rebaseline if PopDAM worker behavior changes.
+- PSG-6 remains blocked by ColdLion checkpoint/sign-off and a production window.
+- PSG-7 must report zero alias/Classics/no-code proposal categories honestly.
+- No other later-phase assumption, sequence, rollback, or production boundary drifted.
+
+### Handoff self-audit
+
+Passed after the second Grok review on 2026-07-27. Residual notes are non-blocking owner/phase
+gates, not code findings. A developer with no chat context can identify the application, goal,
+signed inputs, exact proposal state, failed attempts, root findings, owner gate, constraints,
+access boundary, downstream impact, and next verifiable action.
+
+## Prior boundary — PopSG Property reconciliation PSG-1 COMPLETE
 
 ### 1. What this application is
 

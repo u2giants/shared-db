@@ -1,7 +1,7 @@
 # Characters and style guides — canonical migration plan
 
-**Status (2026-07-26): PHASES 0–1 COMPLETE. Waiting for the licensing team's
-153-row uncertainty-only review sheet, expected in 24–48 hours.**
+**Status (2026-07-27): PHASES 0–1 COMPLETE. Licensing review and the three
+`MULTIPLE` style guides are fully reconciled. No licensing follow-up remains.**
 No schema change has been written. No database has been modified. All work so far is
 read-only investigation and documentation.
 
@@ -88,9 +88,23 @@ The approved hybrid rules are:
 3. Automatically accept 153 clear existing MG06 name matches.
 4. Use the licensing team's **153-row** sheet only for uncertain choices.
 
-The licensing-team sheet is expected in **24–48 hours**. Its delay blocks the Phase 3 backfill,
-not the additive Phase 2 schema design. The owner's earlier instruction not to write a migration
-remains in force until new approval is given.
+The licensing team returned all 153 answers on 2026-07-27:
+
+- **32** style guides received an existing MG06 code; every code validates against Coldlion.
+- **118** are `NEVER_DESIGNED`; keep the style guide, leave `property_id` null, and never create
+  a placeholder property.
+- **3** are `MULTIPLE`; leave the style guide's `property_id` null because property depends on
+  the character: Marvel Cross-Franchise Art Packs, DC Super Friends Collection Comics, DC Women Core.
+
+Read-only character and franchise rules classify all 338 `MULTIPLE` appearances:
+248 by the closest specific existing MG06 franchise, 13 by one unique same-licensor historical
+match, and 66 by the existing `MV` Marvel Assorted Styles catch-all. Nine non-character labels
+and two royalty sentinels are excluded. **No licensing follow-up remains.** Evidence:
+[`docs/verification/style-guide-licensing-review-20260727/`](docs/verification/style-guide-licensing-review-20260727/README.md).
+
+This remaining character review blocks the Phase 3 backfill, not the additive Phase 2 schema
+design. The owner's earlier instruction not to write a migration remains in force until new
+approval is given.
 
 **Merge rule:** the 367 figure counts appearances under 21 accepted parents. It is not combined
 arithmetically with the old 149/8/4/174 suggestion buckets. The generator is the single
@@ -150,6 +164,17 @@ values for this spine, never `merchGroup`.
 must map to one canonical character, or the duplication is recreated. Distinct normalized names
 cap at 8,307, but names carry qualifiers (`ROBIN AKA DICK GRAYSON`) so this needs an explicit
 rule — see model doc §7 question 4. **This is the single most likely place to get it wrong.**
+
+**Property rules from licensing review (2026-07-27):**
+
+- `EXISTING_MG06`: map the style guide and its appearances to the answered property code.
+- `NEVER_DESIGNED`: keep the style guide with null `property_id`; do not use that appearance
+  alone to assign a character property and do not invent a property.
+- `MULTIPLE`: keep the style guide with null `property_id`; resolve property per character.
+- For `MULTIPLE`, use the closest specific existing MG06 franchise code first.
+- If there is no specific rule, preserve one unique same-licensor historical match.
+- If neither exists, use the current licensor catch-all: `MV` for Marvel or `DC` for DC.
+- Never create a property code, and never use a code outside the captured Coldlion MG06 list.
 
 **Reconciliation checks (all must pass, all recorded):**
 - row counts in vs out, with every exclusion explained by number
@@ -240,10 +265,9 @@ production approval. Phase 7 production execution remains unauthorized and produ
 | Licensing-team decision sheet (153 uncertain rows) + full 335-row generator + capture notes | [`docs/verification/style-guide-property-mapping-20260726/`](docs/verification/style-guide-property-mapping-20260726/README.md) |
 | Regenerator for that sheet | `tools/generate-style-guide-property-mapping.mjs` |
 
-The original 174-row sheet was replaced after independent review found a coverage gap. A first
-correction overreacted and sent 306 rows to review. The final sheet automatically settles 153
-clear existing MG06 name matches and contains only **153 uncertain rows**. It is not yet returned
-by the licensing team. Expected in 24–48 hours.
+The final 153-row sheet was returned by licensing on 2026-07-27 and is preserved with normalized
+results under
+[`docs/verification/style-guide-licensing-review-20260727/`](docs/verification/style-guide-licensing-review-20260727/README.md).
 
 ## 10. What was tried that did NOT work
 
@@ -269,6 +293,17 @@ model doc §6.
 8. **The old 174-row-only sheet.** It hid the automatic rows and made two different matching
    tracks look complete when they were not. The generator now covers all 335 rows while the
    delivered sheet contains only the 153 uncertain decisions.
+9. **Treating the automatic `NONE` marker as an MG06 code.** `NONE` means the earlier audit
+   intentionally assigned no code. The returned-sheet processor now keeps that as a no-code
+   outcome instead of failing code validation.
+10. **Loading `pg` as a normal ESM package on Windows.** The read-only processor could not see
+    the shared package path through ESM resolution. It now uses `createRequire`, which honors the
+    supplied package path without installing anything in this repository.
+11. **Using name history alone for `MULTIPLE`.** Same-licensor character names resolved only 18
+    of 338 appearances and produced an unacceptable 305-row licensing follow-up. The corrected
+    approach uses specific existing franchise codes, preserves unique history, then uses the
+    existing licensor catch-all. It resolves all 336 non-sentinel appearances without inventing
+    a code or asking licensing to repeat known franchise classification.
 
 ## 11. Document history
 
@@ -277,3 +312,6 @@ model doc §6.
 | 2026-07-26 | Created. Phases 0–7 defined; Phase 0 open pending owner decision. |
 | 2026-07-26 | Phases 0–1 completed. Owner approved the hybrid source: accept 367 direct agreements, apply Classics/no-code rules, and wait for the 174-row licensing review for the residual mapping. |
 | 2026-07-26 | Grok review found the 367 and 174 tracks did not cover the same population. Replaced the sheet with one 335-row list: 21 accepted direct parents, 5 confirmed Classics, 3 confirmed no-code titles, 306 review rows. |
+| 2026-07-27 | Licensing returned all 153 uncertainty rows: 32 existing codes, 118 never designed, 3 multiple. Read-only character reconciliation reduced the 338 multiple appearances to 305 distinct licensing exceptions. |
+| 2026-07-27 | Replaced the 305-row follow-up with character/franchise rules: 256 specific franchise, 18 unique history, 62 Marvel catch-all, 2 sentinels excluded, 0 licensing rows. |
+| 2026-07-27 | Grok review corrected four DC alias mappings, moved six weak franchise guesses to `MV`, excluded nine non-character labels, and expanded tests. Final: 248 specific, 13 unique history, 66 Marvel catch-all, 9 non-character labels, 2 sentinels, 0 licensing rows. |
