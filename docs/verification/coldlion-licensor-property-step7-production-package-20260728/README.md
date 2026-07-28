@@ -7,7 +7,7 @@
 **Human response owner:** Albert Hazan
 
 This document is the complete package Step 9 would execute **if and only if** Albert grants
-the Step 8 approval naming the exact migrations, modes, secret action, window, and rollback.
+the Step 8 approval naming the exact migrations, modes, window, and rollback.
 A general "go ahead" is explicitly **not** that approval.
 
 Everything below was derived from an **owner-authorized read-only** production inspection on
@@ -15,7 +15,7 @@ Everything below was derived from an **owner-authorized read-only** production i
 
 ---
 
-## 1. Bounded migration manifest — exactly 9 files
+## 1. Bounded migration manifest — 10 files (9 + the hardening)
 
 Production had **354** migrations applied, highest version `20260727213000`, and **zero**
 ledger rows without a matching local file (no corruption, no repair temptation). Ten
@@ -75,17 +75,18 @@ production from Phase 1 `20260724030000`; `plm.taxonomy_parallel_observation`,
 
 ---
 
-## 3. Proposed GitHub secret — named only, NOT created
+## 3. No production GitHub secret is needed — REMOVED from this request
 
-| Item | Value |
-|---|---|
-| GitHub Actions secret | `SUPABASE_DB_PASSWORD_PRODUCTION` |
-| Source | 1Password vault `vibe_coding`, item `Supabase DB Password - shared POP database` |
-| Status | **Does not exist. Not created. Creating and using it is a named production action requiring Step 8 approval.** |
+The earlier draft asked to create GitHub Actions secret `SUPABASE_DB_PASSWORD_PRODUCTION`.
+**That was wrong, and it is withdrawn.** A Codex review on 2026-07-28 asked why a *workflow*
+secret was needed when **no production workflow exists** — and it does not. Every step below runs
+from an operator's linked Supabase CLI session, using the production password read directly from
+1Password vault `vibe_coding`, item `Supabase DB Password - shared POP database`.
 
-No secret value appears in this document, in any command below, or in any log.
-
----
+Creating a long-lived production database password inside GitHub Actions for a one-time,
+hand-watched cutover would have widened the blast radius for no benefit. **Nothing you approve
+here creates a secret.** If recurring production automation is built later, that becomes its own
+request.
 
 ## 4. Exact commands Step 9 would run
 
@@ -126,11 +127,27 @@ select jsonb_pretty(jsonb_build_object(
                     from (select id,status::text from core.licensor
                           union all select id,status::text from core.property) s),
   'parent_edge_hash', (select md5(coalesce(string_agg(id::text||'|'||licensor_id::text,'|' order by id::text),'')) from core.property),
-  'source_ref_hash', (select md5(coalesce(string_agg(source_system||'|'||source_table||'|'||source_id,'|'
-                        order by source_system,source_table,source_id),'')) from core.taxonomy_source_ref)));
+  -- STRENGTHENED 2026-07-28 (Codex review): the earlier hash covered only
+  -- system|table|source_id, so a ref silently REPOINTED to a different canonical row
+  -- or entity type would not have changed it. Include entity type and target UUID,
+  -- and hash the two source systems separately so a ColdLion change cannot mask a
+  -- DesignFlow change (or vice versa).
+  'coldlion_ref_hash', (select md5(coalesce(string_agg(
+        entity_table||'|'||entity_id::text||'|'||source_id||'|'||coalesce(source_code,''),
+        '|' order by source_id),'')) from core.taxonomy_source_ref where source_system='coldlion'),
+  'designflow_ref_hash', (select md5(coalesce(string_agg(
+        entity_table||'|'||entity_id::text||'|'||source_id||'|'||coalesce(source_code,''),
+        '|' order by source_id),'')) from core.taxonomy_source_ref where source_system='designflow_plm'),
+  'coldlion_ref_count', (select count(*) from core.taxonomy_source_ref where source_system='coldlion'),
+  'designflow_ref_count', (select count(*) from core.taxonomy_source_ref where source_system='designflow_plm'),
+  'licensor_code_name_hash', (select md5(coalesce(string_agg(id::text||'|'||coalesce(code,'')||'|'||coalesce(name,''),'|' order by id::text),'')) from core.licensor),
+  'property_code_name_hash', (select md5(coalesce(string_agg(id::text||'|'||coalesce(code,'')||'|'||coalesce(name,''),'|' order by id::text),'')) from core.property)));
 ```
 
-Save the output. It is the comparison basis for §4.7 and the rollback decision.
+Save the output. It is the comparison basis for §4.8 and the rollback decision.
+
+**The DesignFlow ref hash and count must be identical afterwards.** The ColdLion ref hash and
+count are the only values expected to move, and only from 0 to exactly 542.
 
 ### 4.4 Dry run — must list ONLY the approved manifest
 
@@ -163,19 +180,59 @@ select jsonb_pretty(jsonb_build_object(
 
 `breaker_enforcement.all_enforced` must be **true** with **9/9** triggers.
 
-### 4.7 Guarded snapshot, then the approved link, then re-hash
+### 4.7 DesignFlow PLM read-only smoke — BEFORE any link is written
+
+**Reordered on 2026-07-28 following the Codex review.** The earlier draft checked DesignFlow only
+after linking. DesignFlow is the one fully live application and it was never exercised on preview
+(`plm.item` is empty there), so it is the largest untested risk in this cutover. Checking it now —
+after the migrations, before a single link row exists — means a failure here needs **no data
+cleanup at all**: nothing has been added yet, and the migrations are inert additive objects that
+no application reads.
+
+Read-only. Do not create or modify any production record.
+
+- Licensor and Property selectors populate
+- An existing item displays correctly
+- Tracking references resolve
+- A saved UUID deep-link opens the expected record
+- No new application errors in the named log sources
+
+**If anything looks wrong here, STOP and report to Albert. Do not proceed to 4.8.** Rolling back
+at this point is simply "do nothing further".
+
+### 4.8 Guarded snapshot, then the approved link, then re-hash
+
+Both runners now take a **four-part production authorization**. Before 2026-07-28 they were
+hard-coded preview-only and would have **aborted mid-window** on these exact commands — the defect
+Codex caught. All four parts are required; any one missing refuses with a message naming what is
+absent.
 
 ```bash
-node tools/sync-coldlion-licensors-properties.mjs --apply --linked          # mirror_only
-node tools/run-coldlion-licensor-property-phase4.mjs --apply --linked       # link_approved, 542 only
+export COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED=true
+
+# 1. Guarded ColdLion snapshot (mirror_only — writes no canonical row)
+node tools/sync-coldlion-licensors-properties.mjs --apply --linked \
+  --production --production-authorized --project-ref qsllyeztdwjgirsysgai
+
+# 2. The approved link — exactly the frozen 542
+node tools/run-coldlion-licensor-property-phase4.mjs --apply --linked \
+  --production --production-authorized --project-ref qsllyeztdwjgirsysgai
 ```
 
-Expected: `rows_seen 542`, licensor 38 / property 504, snapshot hash
-`1230f5a12d0f2a3029f1d3df17fc5b5f`. Re-run §4.3 and compare: **licensor UUID, property UUID,
-status, and parent-edge hashes must be UNCHANGED.** Only `source_ref_hash` and the ColdLion ref
-count may change, and only by the addition of exactly 542 ColdLion rows.
+Each run prints `"authorized_target": "PRODUCTION qsllyeztdwjgirsysgai (explicitly authorized)"`.
+**If it prints preview, stop** — you are not where you think you are.
 
-### 4.8 Readiness, in explicitly production-authorized mode
+Expected: `rows_seen 542`, `rows_unchanged`/`rows_inserted` totalling 542, licensor 38 /
+property 504, snapshot hash `1230f5a12d0f2a3029f1d3df17fc5b5f`. Re-run §4.3 and compare:
+**licensor UUID, property UUID, status, and parent-edge hashes must be UNCHANGED.** Only the
+source-ref hash and the ColdLion ref count may change, and only by exactly 542 added rows.
+
+### 4.9 Repeat the DesignFlow smoke, now with links present
+
+Same read-only checks as §4.7. This is the one that proves the cutover itself changed nothing
+DesignFlow depends on.
+
+### 4.10 Readiness, in explicitly production-authorized mode
 
 ```bash
 COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED=true \
@@ -236,33 +293,79 @@ the source lane.
 2. **Leave mirrors, alerts, observations, and failed runs intact.** Evidence is append-only.
 3. **Confirm the curated path still works** — DesignFlow refs, statuses, and parents are
    untouched by design and must be verified as such.
-4. **Compare protected hashes** against the §4.3 capture.
-5. **If, and only if, the 542 ColdLion refs must be withdrawn** (canonical rows are never
-   touched):
-   ```sql
-   -- Requires the breaker CLOSED, since the delete guard refuses while tripped.
-   delete from core.taxonomy_source_ref
-    where source_system = 'coldlion' and source_table = 'merchGroupDetails';
-   update plm.erp_licensor set licensor_id = null where licensor_id is not null;
-   update plm.erp_property set property_id = null where property_id is not null;
-   ```
-   This removes only ColdLion provenance and mirror links. It **never** touches
-   `core.licensor`, `core.property`, statuses, or parents. Re-run §4.3 and confirm the
-   canonical hashes are still identical to the pre-cutover capture.
-6. **Fix forward through `shared-db`.** Reproduce on preview first. Re-enable only after a
-   green readiness evaluation and an authorized
-   `plm.reset_taxonomy_circuit_breaker(...)`.
+4. **Compare protected hashes** against the §4.3 capture. In most incidents the rollback ends
+   here: the lane is stopped, nothing canonical moved, and the 542 refs are harmless additive
+   provenance that can safely stay while the defect is fixed forward.
+5. **Only if the links must actually be withdrawn** — reset under authorization, withdraw
+   **exactly the frozen 542**, then immediately re-arm:
 
-Note the ordering trap: the breaker's delete guard refuses step 5 while the breaker is
-tripped. That is deliberate — withdrawing approved links is a considered act, not an
-incident reflex. Reset under authorization first, or the guard will stop you.
+   ```sql
+   -- 5a. The delete guard refuses while tripped, by design. Reset deliberately.
+   select plm.reset_taxonomy_circuit_breaker(jsonb_build_object(
+     'authorized_by', '<named human>',
+     'readiness_pass', true,
+     'readiness_evidence', 'production rollback <date>: withdrawing the approved 542 links'));
+
+   -- 5b. Withdraw ONLY the exact approved source identities.
+   -- CORRECTED 2026-07-28 (Codex review): the earlier draft deleted EVERY coldlion
+   -- merchGroupDetails row. That is broader than what was approved and would remove
+   -- any future ColdLion taxonomy lane's rows too. Bind to the frozen set instead.
+   with approved(source_id) as (
+     select concat_ws('/', m->>'company_code', m->>'division_code',
+                           m->>'mg_type_code', m->>'mg_code')
+     from jsonb_array_elements(:approved_mapping_json -> 'mappings') m
+   )
+   delete from core.taxonomy_source_ref r
+    using approved a
+    where r.source_system = 'coldlion'
+      and r.source_table  = 'merchGroupDetails'
+      and r.source_id     = a.source_id;
+
+   -- 5c. Null ONLY the mirror links for those same composite keys.
+   update plm.erp_licensor e set licensor_id = null
+    where e.licensor_id is not null
+      and concat_ws('/', e.company_code, e.division_code, e.mg_type_code, e.mg_code)
+          in (select source_id from approved);
+   update plm.erp_property e set property_id = null
+    where e.property_id is not null
+      and concat_ws('/', e.company_code, e.division_code, e.mg_type_code, e.mg_code)
+          in (select source_id from approved);
+   ```
+
+   `:approved_mapping_json` is the frozen artifact
+   `docs/verification/coldlion-licensor-property-phase4-20260725/approved-mapping.json`
+   (md5 `1230f5a12d0f2a3029f1d3df17fc5b5f`). Binding the delete to that file means the rollback
+   can only ever remove what was approved.
+
+   This touches **no** `core.licensor` or `core.property` row, no status, and no parent.
+
+6. **Re-arm immediately.** Leaving the breaker closed after a rollback would leave the lane open
+   for the next scheduled run to re-create exactly what was just withdrawn:
+   ```sql
+   select plm.trip_taxonomy_circuit_breaker(
+     'post-rollback hold: lane intentionally stopped pending fix-forward',
+     'post_rollback_hold', 'coldlion_licensor_property', null,
+     'production qsllyeztdwjgirsysgai', '<operator>', false, '{}'::jsonb);
+   ```
+7. **Re-check hashes and re-run the DesignFlow read-only smoke** (§4.7).
+8. **Fix forward through `shared-db`.** Reproduce on preview first. Re-open the lane only after a
+   green readiness evaluation and a fresh authorized `plm.reset_taxonomy_circuit_breaker(...)`.
+
+Two deliberate frictions, both corrected or confirmed in the 2026-07-28 Codex review: the delete
+guard refuses while tripped (withdrawing approved links is a considered act, not an incident
+reflex), and the rollback re-arms rather than finishing in an open state.
+
+**Known limitation, stated rather than hidden:** the breaker stops the *next* attempt. The
+material does not prove it can abort a ColdLion write that began in the same instant the trip
+landed. In practice these runs are manual and serialized by an advisory lock, so the window is
+very small — but it is not zero, and it should not be described as if it were.
 
 ---
 
 ## 8. What this package does NOT do
 
 - It does **not** authorize any production write.
-- It does **not** create `SUPABASE_DB_PASSWORD_PRODUCTION`.
+- It does **not** create any GitHub secret. That request was withdrawn (§3).
 - It does **not** enable any production schedule.
 - It does **not** start Phase 7, or Phase 8 (DesignFlow deprecation).
 - It does **not** promote `20260727230000_core_style_guide_axis.sql`.
@@ -270,5 +373,13 @@ incident reflex. Reset under authorization first, or the guard will stop you.
   exclusions.
 
 **Next gate:** Step 8 — Albert's explicit, durable approval naming the exact project, the exact
-migration list, the data modes, the secret action, the window, the monitoring, and this
-rollback.
+migration list, the data modes, the window, the monitoring, and this rollback.
+
+---
+
+## 9. Revision history
+
+| Date | Change |
+|---|---|
+| 2026-07-28 (first draft) | Original package written from the owner-authorized read-only production inventory |
+| 2026-07-28 (revised) | **Codex review found the package could not be executed**: both write runners were hard preview-only, so §4.8 would have aborted mid-window. Added four-part production authorization to both runners (`tools/coldlion-production-authorization.mjs`, 7 new tests) and proved the refusals. Also: DesignFlow smoke moved **before** linking so a failure needs no cleanup; rollback bound to the **exact frozen 542** instead of every ColdLion row, and now re-arms the breaker; pre/post hashes strengthened to include entity type, canonical UUID and code, with ColdLion and DesignFlow hashed separately; the production GitHub secret request **withdrawn** as unnecessary |
