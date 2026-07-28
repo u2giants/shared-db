@@ -1,7 +1,8 @@
 import type { AdminRow, EntityKind, UpdateInput, UpdateResult } from './data-admin'
 
 export const INLINE_EDIT_REASON = 'Edited in table'
-export const INLINE_EDITABLE_PROPS = new Set(['name_display', 'status', 'crm_status', 'pm_status', 'dam_status'])
+export const INLINE_UNDO_REASON = 'Undid table edit'
+export const INLINE_EDITABLE_PROPS = new Set(['status', 'crm_status', 'pm_status', 'dam_status'])
 
 const GLOBAL_STATUSES = new Set(['active', 'potential', 'inactive'])
 const APP_STATUSES = new Set(['active', 'inactive'])
@@ -21,7 +22,6 @@ export function buildInlineUpdate(
   const text = value == null ? '' : String(value).trim()
   const base = { expectedUpdatedAt: String(row.updated_at), reason }
 
-  if (prop === 'name_display') return { ...base, displayName: text }
   if (prop === 'status') {
     if (!GLOBAL_STATUSES.has(text)) throw new Error('Status must be active, potential, or inactive.')
     return { ...base, status: text }
@@ -48,16 +48,15 @@ export async function saveInlineRow(
   row: AdminRow,
   changes: Record<string, unknown>,
   update: InlineUpdateCall,
+  reason = INLINE_EDIT_REASON,
 ): Promise<AdminRow> {
   let current = row
   for (const [prop, value] of Object.entries(changes)) {
     if (!INLINE_EDITABLE_PROPS.has(prop)) continue
-    const displayedCurrent = prop === 'name_display'
-      ? String(current.display_name ?? current.name ?? '')
-      : String(current[prop] ?? '')
+    const displayedCurrent = String(current[prop] ?? '')
     if (displayedCurrent === String(value ?? '').trim()) continue
 
-    const result = await update(kind, current.id, buildInlineUpdate(current, prop, value))
+    const result = await update(kind, current.id, buildInlineUpdate(current, prop, value, reason))
     if (!result.success || !result.row) {
       throw new Error(result.code === 'stale_token'
         ? 'This row changed elsewhere. Refresh the table, then try again.'

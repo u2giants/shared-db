@@ -120,8 +120,16 @@ test('enables in-table editing and saves RevoGrid drag-fill changes', async ({ p
   await expect.poll(() => grid.evaluate(element => (element as HTMLElement & { readonly: boolean }).readonly)).toBe(true)
   await page.getByRole('button', { name: 'Edit table' }).click()
   await expect(page.getByRole('button', { name: 'Done editing' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Refresh table' })).toHaveAttribute('title', 'Refresh table')
+  const undo = page.getByRole('button', { name: 'Undo last table edit' })
+  await expect(undo).toBeDisabled()
+  await expect(undo).toHaveAttribute('title', 'Undo last table edit')
   await expect.poll(() => grid.evaluate(element => (element as HTMLElement & { readonly: boolean }).readonly)).toBe(false)
   await expect(page.getByRole('status')).toContainText('Edit mode is on')
+
+  // Name is display-only even while the rest of the approved table fields are editable.
+  await page.getByRole('gridcell', { name: 'Acme Retail' }).dblclick()
+  await expect(page.locator('revogr-edit input')).toHaveCount(0)
 
   // Opening a status cell uses a strict select editor, not RevoGrid's default
   // free-text input.
@@ -138,6 +146,8 @@ test('enables in-table editing and saves RevoGrid drag-fill changes', async ({ p
     p_status: 'potential',
   })
   await expect(page.getByRole('status')).toContainText('1 row saved')
+  await expect(undo).toBeEnabled()
+  await expect(undo).toHaveAttribute('title', 'Undo last table edit (1 available)')
 
   // RevoGrid emits beforerangeedit for drag-to-copy/autofill. Dispatch the same
   // public event shape here so the test covers our persistence adapter without
@@ -164,6 +174,26 @@ test('enables in-table editing and saves RevoGrid drag-fill changes', async ({ p
     p_app_status: 'inactive',
   })
   await expect(page.getByRole('status')).toContainText('1 row saved')
+  await expect(undo).toHaveAttribute('title', 'Undo last table edit (2 available)')
+
+  // A drag-fill is one undo step, followed by the earlier single-cell edit.
+  await undo.click()
+  await expect.poll(() => updates.length).toBe(3)
+  expect(updates[2]).toMatchObject({
+    p_customer_id: customers[1].id,
+    p_reason: 'Undid table edit',
+    p_app: 'crm',
+    p_app_status: 'active',
+  })
+  await expect(undo).toHaveAttribute('title', 'Undo last table edit (1 available)')
+  await undo.click()
+  await expect.poll(() => updates.length).toBe(4)
+  expect(updates[3]).toMatchObject({
+    p_customer_id: customers[0].id,
+    p_reason: 'Undid table edit',
+    p_status: 'active',
+  })
+  await expect(undo).toBeDisabled()
   await page.screenshot({ path: '../../docs/verification/db-data-admin-inline-edit.png', fullPage: true })
 })
 

@@ -55,11 +55,13 @@ without baking environment-specific configuration into it.
 ## In-table editing
 
 Customers and Vendors have an **Edit table** button. While edit mode is on,
-administrators can edit the curated Name, global Status, CRM, PM/PIM, and DAM
-status cells directly. Name remains a text editor. Global Status is strictly
-limited to Active, Potential, or Inactive; each application status is strictly
-limited to Active or Inactive. RevoGrid's native copy, paste, and drag-fill
-behavior is enabled for those cells. ERP, PLM, alias count, and timestamp
+administrators can edit global Status, CRM, PM/PIM, and DAM status cells
+directly. Name is read-only. Global Status is strictly limited to Active,
+Potential, or Inactive; each application status is strictly limited to Active
+or Inactive. RevoGrid's native copy, paste, and drag-fill behavior is enabled
+for those cells. The Undo button reverses up to the last 10 edit actions; one
+multi-row drag-fill counts as one action. Refresh clears local undo history.
+ERP, PLM, alias count, and timestamp
 columns remain read-only. Every changed row is saved immediately through the existing guarded
 single-record RPC with optimistic-concurrency checks and the audit reason
 `Edited in table`; a failed or stale save reloads the grid instead of leaving an
