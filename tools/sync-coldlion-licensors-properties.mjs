@@ -490,6 +490,7 @@ async function main() {
 
   process.stdout.write(`${JSON.stringify({
     target,
+    authorized_target: describeAuthorizedTarget(process.argv.slice(2), process.env),
     mode: apply ? "apply" : "dry-run (no DB write)",
     source_name: SOURCE_NAME,
     config: CONFIG,

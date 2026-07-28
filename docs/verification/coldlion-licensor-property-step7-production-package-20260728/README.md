@@ -88,6 +88,20 @@ hand-watched cutover would have widened the blast radius for no benefit. **Nothi
 here creates a secret.** If recurring production automation is built later, that becomes its own
 request.
 
+## 3A. Pre-window prerequisites — prove each ONE BEFORE starting
+
+Every one of these has to work before the first migration is applied. A missing
+credential discovered mid-window, with production half-changed, is exactly the
+pressure that produces improvisation.
+
+| Prerequisite | Prove it with | Needed for |
+|---|---|---|
+| Supabase CLI authenticated | `supabase projects list` | everything |
+| Production DB password | `op read` from vault `vibe_coding`, item `Supabase DB Password - shared POP database` | `supabase link` |
+| **`COLDLION_API_KEY`** | `op read 'op://vibe_coding/Coldlion ERP API key x5.coldlion.com/credential'` — **added 2026-07-28 (Grok review); the earlier draft named only the DB password, and the ColdLion snapshot in §4.8 would have failed after the migrations were already applied** | the `mirror_only` snapshot |
+| The apply checkout contains the production-auth tooling | `test -f tools/coldlion-production-authorization.mjs` in the temp worktree | §4.8 and §4.10 |
+| DesignFlow PLM test login | 1Password `designflow PLM frontend gui access credentials` | §4.7 / §4.9 smoke |
+
 ## 4. Exact commands Step 9 would run
 
 Every command names `qsllyeztdwjgirsysgai` explicitly. Run from a **detached temp worktree**,
@@ -96,8 +110,8 @@ never the shared checkout — other sessions churn it between turns.
 ### 4.1 Bounded checkout
 
 ```bash
-git worktree add --detach /tmp/coldlion-prod-apply origin/main
-cd /tmp/coldlion-prod-apply
+git worktree add --detach C:/repos/shared-db-prod-apply-<date> <PINNED_SHA>
+cd C:/repos/shared-db-prod-apply-<date>
 rm supabase/migrations/20260727230000_core_style_guide_axis.sql
 ```
 
@@ -299,43 +313,37 @@ the source lane.
 5. **Only if the links must actually be withdrawn** — reset under authorization, withdraw
    **exactly the frozen 542**, then immediately re-arm:
 
+   ```bash
+   # 5a. Generate the withdrawal SQL FROM the frozen approval artifact, so the
+   #     rollback can only ever remove what was approved.
+   node tools/emit-coldlion-rollback-sql.mjs > rollback-542.sql
+
+   # 5b. READ IT. It must contain exactly 542 source ids and a guard that aborts
+   #     if the count is anything else.
+   grep -c "^    ('" rollback-542.sql     # must print 542
+   ```
+
    ```sql
-   -- 5a. The delete guard refuses while tripped, by design. Reset deliberately.
+   -- 5c. The delete guard refuses while tripped, by design. Reset deliberately.
    select plm.reset_taxonomy_circuit_breaker(jsonb_build_object(
      'authorized_by', '<named human>',
      'readiness_pass', true,
      'readiness_evidence', 'production rollback <date>: withdrawing the approved 542 links'));
-
-   -- 5b. Withdraw ONLY the exact approved source identities.
-   -- CORRECTED 2026-07-28 (Codex review): the earlier draft deleted EVERY coldlion
-   -- merchGroupDetails row. That is broader than what was approved and would remove
-   -- any future ColdLion taxonomy lane's rows too. Bind to the frozen set instead.
-   with approved(source_id) as (
-     select concat_ws('/', m->>'company_code', m->>'division_code',
-                           m->>'mg_type_code', m->>'mg_code')
-     from jsonb_array_elements(:approved_mapping_json -> 'mappings') m
-   )
-   delete from core.taxonomy_source_ref r
-    using approved a
-    where r.source_system = 'coldlion'
-      and r.source_table  = 'merchGroupDetails'
-      and r.source_id     = a.source_id;
-
-   -- 5c. Null ONLY the mirror links for those same composite keys.
-   update plm.erp_licensor e set licensor_id = null
-    where e.licensor_id is not null
-      and concat_ws('/', e.company_code, e.division_code, e.mg_type_code, e.mg_code)
-          in (select source_id from approved);
-   update plm.erp_property e set property_id = null
-    where e.property_id is not null
-      and concat_ws('/', e.company_code, e.division_code, e.mg_type_code, e.mg_code)
-          in (select source_id from approved);
    ```
 
-   `:approved_mapping_json` is the frozen artifact
-   `docs/verification/coldlion-licensor-property-phase4-20260725/approved-mapping.json`
-   (md5 `1230f5a12d0f2a3029f1d3df17fc5b5f`). Binding the delete to that file means the rollback
-   can only ever remove what was approved.
+   ```bash
+   # 5d. Apply the generated, reviewed SQL.
+   supabase db query --linked --file rollback-542.sql
+   ```
+
+   **This SQL has actually been executed**, against preview inside a rolled-back
+   transaction on 2026-07-28, and it reported `coldlion_refs_remaining 0`,
+   `mirror_licensor_links_remaining 0`, `mirror_property_links_remaining 0` before
+   rolling back. That run is how a real defect was found: nulling the mirror link
+   without also resetting `resolution_status` violates
+   `plm_erp_licensor_resolution_link_ck` and aborts the whole rollback with `23514`.
+   The emitter now clears both together. **Rollback SQL that nobody has run is not a
+   rollback plan** — this one has been run.
 
    This touches **no** `core.licensor` or `core.property` row, no status, and no parent.
 
