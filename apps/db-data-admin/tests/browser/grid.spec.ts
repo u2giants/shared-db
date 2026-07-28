@@ -92,6 +92,59 @@ test('shows the canonical name when no display_name override is set', async ({ p
   await expect(page.getByRole('gridcell', { name: 'Acme Retail' })).toHaveCount(0)
 })
 
+test('enables in-table editing and saves RevoGrid drag-fill changes', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await mockAdmin(page)
+  const updates: Record<string, unknown>[] = []
+  await page.route('https://preview.supabase.co/rest/v1/rpc/db_data_admin_update_customer', async (route: Route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>
+    updates.push(body)
+    return route.fulfill({
+      json: {
+        success: true,
+        audit_id: 'audit-inline',
+        row: { ...customers[1], crm_status: 'inactive', updated_at: '2026-07-28T14:00:00Z' },
+      },
+    })
+  })
+  await page.goto('/')
+
+  const grid = page.locator('revo-grid')
+  await expect(grid).toBeVisible()
+  await expect.poll(() => grid.evaluate(element => (element as HTMLElement & { readonly: boolean }).readonly)).toBe(true)
+  await page.getByRole('button', { name: 'Edit table' }).click()
+  await expect(page.getByRole('button', { name: 'Done editing' })).toBeVisible()
+  await expect.poll(() => grid.evaluate(element => (element as HTMLElement & { readonly: boolean }).readonly)).toBe(false)
+  await expect(page.getByRole('status')).toContainText('Edit mode is on')
+
+  // RevoGrid emits beforerangeedit for drag-to-copy/autofill. Dispatch the same
+  // public event shape here so the test covers our persistence adapter without
+  // relying on pixel-sensitive pointer movement inside the grid's shadow DOM.
+  await grid.evaluate((element, fixtureRows) => {
+    element.dispatchEvent(new CustomEvent('beforerangeedit', {
+      bubbles: true,
+      cancelable: true,
+      detail: {
+        data: { 1: { crm_status: 'inactive' } },
+        models: { 1: fixtureRows[1] },
+        type: 'rgRow',
+        oldRange: { x: 2, x1: 2, y: 0, y1: 0 },
+        newRange: { x: 2, x1: 2, y: 0, y1: 1 },
+      },
+    }))
+  }, customers)
+
+  await expect.poll(() => updates.length).toBe(1)
+  expect(updates[0]).toMatchObject({
+    p_customer_id: customers[1].id,
+    p_reason: 'Edited in table',
+    p_app: 'crm',
+    p_app_status: 'inactive',
+  })
+  await expect(page.getByRole('status')).toContainText('1 row saved')
+  await page.screenshot({ path: '../../docs/verification/db-data-admin-inline-edit.png', fullPage: true })
+})
+
 test('previews and explicitly confirms a protected duplicate merge', async ({ page }) => {
   // The corrected preview contains the complete moving-detail contract. Use a
   // tall evidence viewport so the screenshot captures the dialog from its
