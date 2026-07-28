@@ -16,6 +16,30 @@ runtime is shared. See the
 2. Put only the preview project's public Supabase URL/anon key in that ignored file.
 3. Run `npm install`, then `npm run dev`.
 
+## Running the browser tests — check port 4173 first
+
+`npx playwright test` starts its own preview server, but `playwright.config.ts`
+sets `reuseExistingServer: !process.env.CI` against the **hardcoded port 4173**.
+If anything else is already listening there, Playwright silently reuses it and
+the whole suite runs against **the wrong application**.
+
+This is not hypothetical: on 2026-07-28 a POP PIM preview server held 4173, and
+all 7 tests failed with locator-not-found errors that looked like real UI
+regressions. Nothing was wrong with the code.
+
+Before trusting a red run, confirm what is actually serving the port:
+
+```bash
+curl -s http://127.0.0.1:4173/ | grep -o '<title>[^<]*</title>'
+```
+
+If it is not DB Data Admin, either stop that server (it may belong to another
+session — check before killing) or re-run against an isolated port with a
+throwaway config that sets `reuseExistingServer: false` and a free port on both
+`use.baseURL` and `webServer.url`. A red suite where **`shell.spec.ts` also
+fails** is the tell: that test touches almost nothing, so a failure there means
+the environment is wrong, not the app.
+
 Never use production credentials for local development. Microsoft login uses Supabase Auth's
 existing Azure provider and the exact `VITE_AUTH_REDIRECT_URL` allowlisted for the environment.
 Production access stays disabled until the preview delivery gates in the specification pass.
