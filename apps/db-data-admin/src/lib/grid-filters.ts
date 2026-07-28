@@ -9,8 +9,18 @@ export const BLANK_LABEL = '(Blanks)'
 /**
  * Display value for a grid cell — matches what the RevoGrid row source shows.
  * PLM uses the same linked/status mapping applied when building visible rows.
+ * Name falls back to the canonical `name` when no `display_name` override is
+ * set, mirroring the list RPC's `coalesce(display_name, name)` sort key — most
+ * records carry only `name`, so rendering the raw override left them blank.
  */
 export function getCellDisplayValue(row: AdminRow, prop: string): string {
+  if (prop === 'name_display') {
+    // An override that is present but empty must still fall through to `name`,
+    // so this cannot use `??` — only a non-empty override wins.
+    const override = row.display_name == null ? '' : String(row.display_name)
+    if (override !== '') return override
+    return row.name == null ? BLANK_VALUE : String(row.name)
+  }
   if (prop === 'plm_display') {
     if (row.plm_linked === false) return 'Not linked'
     if (row.plm_status == null) return 'Unknown'

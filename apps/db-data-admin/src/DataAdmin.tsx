@@ -251,7 +251,7 @@ export function FilterHeader(props: HeaderProps) {
 }
 
 const baseColumns: ColumnRegular[] = [
-  { prop: 'display_name', name: 'Name', size: 260, sortable: true },
+  { prop: 'name_display', name: 'Name', size: 260, sortable: true },
   { prop: 'status', name: 'Status', size: 105, sortable: true },
   { prop: 'crm_status', name: 'CRM', size: 105 },
   { prop: 'pm_status', name: 'PM/PIM', size: 105 },
@@ -372,7 +372,11 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
   const visibleRows = useMemo(
     () => rows
       .filter(row => rowMatchesFilters(row, activeFilters, setFiltersState))
-      .map(row => ({ ...row, plm_display: getCellDisplayValue(row, 'plm_display') })),
+      .map(row => ({
+        ...row,
+        name_display: getCellDisplayValue(row, 'name_display'),
+        plm_display: getCellDisplayValue(row, 'plm_display'),
+      })),
     [rows, activeFilters, setFiltersState],
   )
 

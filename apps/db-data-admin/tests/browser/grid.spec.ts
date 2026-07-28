@@ -3,6 +3,10 @@ import { expect, test, type Page, type Route } from '@playwright/test'
 const customers = [
   { id: '11111111-1111-1111-1111-111111111111', display_name: 'Acme Retail', status: 'active', crm_status: 'active', pm_status: 'active', dam_status: 'inactive', plm_status: 'ACTIVE', erp_active: true, alias_count: 2, updated_at: '2026-07-22T12:00:00Z' },
   { id: '22222222-2222-2222-2222-222222222222', display_name: 'Northwind Stores', status: 'active', crm_status: 'active', pm_status: 'inactive', dam_status: 'active', plm_status: null, erp_active: true, alias_count: 1, updated_at: '2026-07-21T12:00:00Z' },
+  // The common shape in production: no curated display_name override, only the
+  // canonical name. The Name column must still show it (regression: the column
+  // read display_name directly and left these rows blank).
+  { id: '55555555-5555-5555-5555-555555555555', name: 'Zeta Imports', display_name: null, status: 'active', crm_status: 'active', pm_status: 'active', dam_status: 'active', plm_status: null, erp_active: true, alias_count: 0, updated_at: '2026-07-19T12:00:00Z' },
 ]
 const vendors = [{ id: '33333333-3333-3333-3333-333333333333', display_name: 'Atlas Manufacturing', status: 'active', crm_status: 'active', pm_status: 'active', dam_status: 'active', plm_status: null, erp_active: true, alias_count: 3, updated_at: '2026-07-20T12:00:00Z' }]
 
@@ -74,6 +78,18 @@ test('renders persistent customer and vendor grids with lazy details', async ({ 
   await expect(page.getByRole('button', { name: 'Vendors' })).toHaveClass(/active/)
   await expect(page.getByText('Atlas Manufacturing')).toBeVisible()
   await page.screenshot({ path: '../../docs/verification/db-data-admin-step7-vendor-wide.png', fullPage: true })
+})
+
+test('shows the canonical name when no display_name override is set', async ({ page }) => {
+  await mockAdmin(page); await page.goto('/')
+  await expect(page.locator('revo-grid')).toBeVisible()
+  await expect(page.getByRole('gridcell', { name: 'Zeta Imports' })).toBeVisible()
+  // The Name filter reads the same effective value, so it matches too. Scope to
+  // the grid: the filter's autocomplete dropdown repeats the name as an option.
+  const filter = page.getByRole('combobox', { name: 'Filter Name' })
+  await filter.fill('Zeta'); await page.waitForTimeout(350)
+  await expect(page.getByRole('gridcell', { name: 'Zeta Imports' })).toBeVisible()
+  await expect(page.getByRole('gridcell', { name: 'Acme Retail' })).toHaveCount(0)
 })
 
 test('previews and explicitly confirms a protected duplicate merge', async ({ page }) => {
