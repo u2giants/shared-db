@@ -99,11 +99,17 @@ test('enables in-table editing and saves RevoGrid drag-fill changes', async ({ p
   await page.route('https://preview.supabase.co/rest/v1/rpc/db_data_admin_update_customer', async (route: Route) => {
     const body = route.request().postDataJSON() as Record<string, unknown>
     updates.push(body)
+    const source = customers.find(row => row.id === body.p_customer_id) ?? customers[0]
     return route.fulfill({
       json: {
         success: true,
         audit_id: 'audit-inline',
-        row: { ...customers[1], crm_status: 'inactive', updated_at: '2026-07-28T14:00:00Z' },
+        row: {
+          ...source,
+          ...(body.p_status ? { status: body.p_status } : {}),
+          ...(body.p_app ? { [`${body.p_app}_status`]: body.p_app_status } : {}),
+          updated_at: '2026-07-28T14:00:00Z',
+        },
       },
     })
   })
@@ -116,6 +122,22 @@ test('enables in-table editing and saves RevoGrid drag-fill changes', async ({ p
   await expect(page.getByRole('button', { name: 'Done editing' })).toBeVisible()
   await expect.poll(() => grid.evaluate(element => (element as HTMLElement & { readonly: boolean }).readonly)).toBe(false)
   await expect(page.getByRole('status')).toContainText('Edit mode is on')
+
+  // Opening a status cell uses a strict select editor, not RevoGrid's default
+  // free-text input.
+  await page.getByRole('gridcell', { name: 'active', exact: true }).first().dblclick()
+  const globalStatus = page.getByRole('combobox', { name: 'Edit Status' })
+  await expect(globalStatus).toBeVisible()
+  await expect(globalStatus.locator('option')).toHaveText(['Active', 'Potential', 'Inactive'])
+  await page.screenshot({ path: '../../docs/verification/db-data-admin-status-dropdown.png', fullPage: true })
+  await globalStatus.selectOption('potential')
+  await expect.poll(() => updates.length).toBe(1)
+  expect(updates[0]).toMatchObject({
+    p_customer_id: customers[0].id,
+    p_reason: 'Edited in table',
+    p_status: 'potential',
+  })
+  await expect(page.getByRole('status')).toContainText('1 row saved')
 
   // RevoGrid emits beforerangeedit for drag-to-copy/autofill. Dispatch the same
   // public event shape here so the test covers our persistence adapter without
@@ -134,8 +156,8 @@ test('enables in-table editing and saves RevoGrid drag-fill changes', async ({ p
     }))
   }, customers)
 
-  await expect.poll(() => updates.length).toBe(1)
-  expect(updates[0]).toMatchObject({
+  await expect.poll(() => updates.length).toBe(2)
+  expect(updates[1]).toMatchObject({
     p_customer_id: customers[1].id,
     p_reason: 'Edited in table',
     p_app: 'crm',
