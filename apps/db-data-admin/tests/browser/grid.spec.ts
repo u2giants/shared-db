@@ -256,3 +256,18 @@ test('renders the read-only Licensor -> Property tree with counts, source contex
   await expect(page.locator('[aria-label="Properties of Marvel"]')).toContainText('Spider-Man')
   await page.screenshot({ path: '../../docs/verification/db-data-admin-step10-licensor-tree.png', fullPage: true })
 })
+
+test('renders the flat Properties table with each property parented to its licensor', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await mockAdmin(page); await page.goto('/')
+  await page.getByRole('button', { name: 'Properties' }).click()
+  // 3 nested properties + 1 orphan; nothing silently dropped.
+  await expect(page.getByText('4 of 4 properties')).toBeVisible()
+  await expect(page.locator('revo-grid')).toBeVisible()
+  // Spider-Man carries mg_code DNY but belongs to Marvel: the flat table must
+  // take the licensor from the tree edge, never from the PLM code.
+  await expect(page.getByText('Spider-Man')).toBeVisible()
+  await expect(page.getByRole('gridcell', { name: '(no licensor)' })).toHaveCount(1)
+  await expect(page.getByRole('status')).toContainText('1 property has no licensor')
+  await page.screenshot({ path: '../../docs/verification/db-data-admin-properties-table.png', fullPage: true })
+})
