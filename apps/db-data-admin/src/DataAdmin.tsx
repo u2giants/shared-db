@@ -1,5 +1,5 @@
 import { Editor, RevoGrid, Template, type BeforeRangeSaveDataDetails, type BeforeSaveDataDetails, type ColumnRegular, type Editors, type EditorType } from '@revolist/react-datagrid'
-import { Check, ChevronRight, GitMerge, History, LogOut, Pencil, RefreshCw, Search, X } from 'lucide-react'
+import { Check, ChevronRight, GitMerge, History, LogOut, Pencil, RefreshCw, Search, Undo2, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { executeMerge, initialQuery, loadAllRows, loadAudit, loadDetail, loadGridState, loadRows, previewMerge, probeAccess, saveGridState, searchMergeCandidates, updateRecord, type AdminRow, type ApiClient, type AuditEvent, type EntityKind, type MergeResult, type QueryState, type UpdateInput } from './lib/data-admin'
 import {
@@ -11,7 +11,7 @@ import { RecordEditor } from './RecordEditor'
 import { MergeDialog } from './MergeDialog'
 import { LicensorTree } from './LicensorTree'
 import { PropertyTable } from './PropertyTable'
-import { INLINE_EDITABLE_PROPS, saveInlineRow } from './lib/inline-edit'
+import { INLINE_EDITABLE_PROPS, INLINE_EDIT_REASON, INLINE_UNDO_REASON, saveInlineRow } from './lib/inline-edit'
 import { FilterHeader, type HeaderProps } from './FilterHeader'
 
 // Re-exported so existing imports (and tests) can keep reaching these here.
@@ -19,6 +19,7 @@ export { FilterHeader }
 export type { HeaderProps }
 
 type Props = { client: ApiClient; email?: string; onSignOut: () => void }
+type UndoStep = Array<{ id: string; changes: Record<string, unknown> }>
 
 export function StatusDropdownEditor({ column, val, save, close }: EditorType) {
   const isGlobalStatus = String(column.prop) === 'status'
@@ -86,6 +87,7 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
   const [inlineEditing, setInlineEditing] = useState(false)
   const [inlineSaving, setInlineSaving] = useState(0)
   const [inlineMessage, setInlineMessage] = useState<string | null>(null)
+  const [undoStack, setUndoStack] = useState<UndoStep[]>([])
   const version = useRef(0)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const filterTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -106,7 +108,7 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
     // preferred alternative is remounting via a `key`, which this screen cannot
     // use yet because the cursor/grid-state refs must survive a tab switch.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDenied(false); setRows([]); setFilters({}); setActiveFilters({}); setSetFiltersState({}); setDetail(null); setLoading(true)
+    setDenied(false); setRows([]); setFilters({}); setActiveFilters({}); setSetFiltersState({}); setDetail(null); setUndoStack([]); setLoading(true)
     void (async () => {
       try {
         const allowedChannels = await probeAccess(client)
@@ -223,22 +225,68 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
     if (detail) void loadAudit(client, kind, String(detail.id)).then(setAudit)
   }
 
-  const persistInlineChanges = async (pending: Array<{ row: AdminRow; changes: Record<string, unknown> }>) => {
-    if (!inlineEditing || pending.length === 0) return
+  const persistInlineChanges = async (
+    pending: Array<{ row: AdminRow; changes: Record<string, unknown> }>,
+    options: { recordHistory?: boolean; reason?: string; allowOutsideEditMode?: boolean } = {},
+  ) => {
+    if ((!inlineEditing && !options.allowOutsideEditMode) || pending.length === 0) return false
+    const inverse: UndoStep = pending.map(({ row, changes }) => ({
+      id: row.id,
+      changes: Object.fromEntries(
+        Object.keys(changes)
+          .filter(prop => INLINE_EDITABLE_PROPS.has(prop))
+          .map(prop => [prop, row[prop]]),
+      ),
+    })).filter(entry => Object.keys(entry.changes).length > 0)
     setInlineSaving(count => count + pending.length)
     setInlineMessage(null)
     try {
       const savedRows = await Promise.all(pending.map(({ row, changes }) =>
-        saveInlineRow(kind, row, changes, (entityKind, id, input) => updateRecord(client, entityKind, id, input)),
+        saveInlineRow(
+          kind,
+          row,
+          changes,
+          (entityKind, id, input) => updateRecord(client, entityKind, id, input),
+          options.reason ?? INLINE_EDIT_REASON,
+        ),
       ))
       const byId = new Map(savedRows.map(row => [row.id, row]))
       setRows(current => current.map(row => byId.has(row.id) ? { ...row, ...byId.get(row.id) } : row))
+      if (options.recordHistory !== false && inverse.length > 0) {
+        setUndoStack(current => [...current, inverse].slice(-10))
+      }
       setInlineMessage(`${savedRows.length} ${savedRows.length === 1 ? 'row' : 'rows'} saved`)
+      return true
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The table change was not saved.')
       await fetchRows()
+      setUndoStack([])
+      return false
     } finally {
       setInlineSaving(count => Math.max(0, count - pending.length))
+    }
+  }
+
+  const undoLastInlineEdit = async () => {
+    const step = undoStack.at(-1)
+    if (!step) return
+    const pending = step.flatMap(({ id, changes }) => {
+      const row = rows.find(candidate => candidate.id === id)
+      return row ? [{ row, changes }] : []
+    })
+    if (pending.length !== step.length) {
+      setError('Undo history no longer matches the loaded rows. Refresh the table.')
+      setUndoStack([])
+      return
+    }
+    const restored = await persistInlineChanges(pending, {
+      recordHistory: false,
+      reason: INLINE_UNDO_REASON,
+      allowOutsideEditMode: true,
+    })
+    if (restored) {
+      setUndoStack(current => current.slice(0, -1))
+      setInlineMessage(`Last edit undone. ${Math.max(0, undoStack.length - 1)} undo ${undoStack.length - 1 === 1 ? 'step' : 'steps'} left`)
     }
   }
 
@@ -296,7 +344,23 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
         {inlineEditing ? <Check /> : <Pencil />}
         {inlineEditing ? 'Done editing' : 'Edit table'}
       </button>
-      <button className="icon-button" aria-label="Refresh" onClick={() => void fetchRows()}><RefreshCw /></button>
+      <button
+        className="icon-button"
+        aria-label="Undo last table edit"
+        title={`Undo last table edit${undoStack.length ? ` (${undoStack.length} available)` : ''}`}
+        disabled={undoStack.length === 0 || inlineSaving > 0}
+        onClick={() => void undoLastInlineEdit()}
+      >
+        <Undo2 />
+      </button>
+      <button
+        className="icon-button"
+        aria-label="Refresh table"
+        title="Refresh table"
+        onClick={() => { setUndoStack([]); void fetchRows() }}
+      >
+        <RefreshCw />
+      </button>
     </div>
     {error && <div className="inline-error" role="alert">{error}</div>}
     {(inlineMessage || inlineSaving > 0) && <div className="inline-edit-message" role="status">{inlineSaving ? 'Saving changes…' : inlineMessage}</div>}
