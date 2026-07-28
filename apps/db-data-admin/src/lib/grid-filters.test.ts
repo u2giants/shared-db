@@ -35,6 +35,41 @@ describe('getCellDisplayValue / plm_display', () => {
   })
 })
 
+// Most records carry only the canonical `name`; `display_name` is an optional
+// override. The Name column renders `name_display`, which must coalesce the two
+// exactly as the list RPC's sort key does.
+const nameRows: AdminRow[] = [
+  { id: 'a', name: 'Aldi', display_name: 'Aldi Süd' },
+  { id: 'b', name: '4SGM', display_name: null as unknown as string },
+  { id: 'c', name: 'Zeta Imports' },
+  { id: 'd', name: 'Blank Co', display_name: '' },
+  { id: 'e', name: null as unknown as string },
+]
+
+describe('getCellDisplayValue / name_display', () => {
+  it('prefers the display_name override when one is set', () => {
+    expect(getCellDisplayValue(nameRows[0]!, 'name_display')).toBe('Aldi Süd')
+  })
+
+  it('falls back to the canonical name when the override is null or empty', () => {
+    expect(getCellDisplayValue(nameRows[1]!, 'name_display')).toBe('4SGM')
+    expect(getCellDisplayValue(nameRows[2]!, 'name_display')).toBe('Zeta Imports')
+    expect(getCellDisplayValue(nameRows[3]!, 'name_display')).toBe('Blank Co')
+  })
+
+  it('is blank only when neither name is present', () => {
+    expect(getCellDisplayValue(nameRows[4]!, 'name_display')).toBe(BLANK_VALUE)
+  })
+
+  it('filters and lists distinct values on the effective name', () => {
+    expect(getDistinctColumnValues(nameRows, 'name_display')).toEqual([
+      BLANK_VALUE, '4SGM', 'Aldi Süd', 'Blank Co', 'Zeta Imports',
+    ])
+    expect(textMatch(nameRows[1]!, { name_display: '4sg' })).toBe(true)
+    expect(setMatch(nameRows[2]!, { name_display: new Set(['Zeta Imports']) })).toBe(true)
+  })
+})
+
 describe('getDistinctColumnValues', () => {
   it('derives sorted distinct display values including an explicit blank entry', () => {
     const names = getDistinctColumnValues(rows, 'display_name')
