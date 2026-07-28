@@ -19,7 +19,7 @@ runtime is shared. See the
 ## Running the browser tests — check port 4173 first
 
 `npx playwright test` starts its own preview server, but `playwright.config.ts`
-sets `reuseExistingServer: !process.env.CI` against the **hardcoded port 4173**.
+sets `reuseExistingServer: !process.env.CI` against port 4173 by default.
 If anything else is already listening there, Playwright silently reuses it and
 the whole suite runs against **the wrong application**.
 
@@ -33,12 +33,15 @@ Before trusting a red run, confirm what is actually serving the port:
 curl -s http://127.0.0.1:4173/ | grep -o '<title>[^<]*</title>'
 ```
 
-If it is not DB Data Admin, either stop that server (it may belong to another
-session — check before killing) or re-run against an isolated port with a
-throwaway config that sets `reuseExistingServer: false` and a free port on both
-`use.baseURL` and `webServer.url`. A red suite where **`shell.spec.ts` also
-fails** is the tell: that test touches almost nothing, so a failure there means
-the environment is wrong, not the app.
+If it is not DB Data Admin, do not stop another session's server. Re-run on an
+isolated free port, for example:
+
+```bash
+PLAYWRIGHT_PORT=4187 npm run test:browser
+```
+
+A red suite where **`shell.spec.ts` also fails** is the tell: that test touches
+almost nothing, so a failure there means the environment is wrong, not the app.
 
 Never use production credentials for local development. Microsoft login uses Supabase Auth's
 existing Azure provider and the exact `VITE_AUTH_REDIRECT_URL` allowlisted for the environment.
@@ -48,3 +51,14 @@ Deployed containers receive `DB_DATA_ADMIN_SUPABASE_URL`,
 `DB_DATA_ADMIN_SUPABASE_ANON_KEY`, and `DB_DATA_ADMIN_AUTH_REDIRECT_URL` from Coolify.
 They are rendered at container startup through `/config.js`; GitHub builds one immutable image
 without baking environment-specific configuration into it.
+
+## In-table editing
+
+Customers and Vendors have an **Edit table** button. While edit mode is on,
+administrators can edit the curated Name, global Status, CRM, PM/PIM, and DAM
+status cells directly. RevoGrid's native copy, paste, and drag-fill behavior is
+enabled for those cells. ERP, PLM, alias count, and timestamp columns remain
+read-only. Every changed row is saved immediately through the existing guarded
+single-record RPC with optimistic-concurrency checks and the audit reason
+`Edited in table`; a failed or stale save reloads the grid instead of leaving an
+unsaved value visible.

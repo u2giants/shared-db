@@ -1,5 +1,5 @@
-import { RevoGrid, Template, type ColumnRegular, type ColumnTemplateProp } from '@revolist/react-datagrid'
-import { ChevronRight, Filter, GitMerge, History, LogOut, Pencil, RefreshCw, Search, X } from 'lucide-react'
+import { RevoGrid, Template, type BeforeRangeSaveDataDetails, type BeforeSaveDataDetails, type ColumnRegular, type ColumnTemplateProp } from '@revolist/react-datagrid'
+import { Check, ChevronRight, Filter, GitMerge, History, LogOut, Pencil, RefreshCw, Search, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { executeMerge, initialQuery, loadAllRows, loadAudit, loadDetail, loadGridState, loadRows, previewMerge, probeAccess, saveGridState, searchMergeCandidates, updateRecord, type AdminRow, type ApiClient, type AuditEvent, type EntityKind, type MergeResult, type QueryState, type UpdateInput } from './lib/data-admin'
@@ -14,6 +14,7 @@ import {
 import { RecordEditor } from './RecordEditor'
 import { MergeDialog } from './MergeDialog'
 import { LicensorTree } from './LicensorTree'
+import { INLINE_EDITABLE_PROPS, saveInlineRow } from './lib/inline-edit'
 
 type Props = { client: ApiClient; email?: string; onSignOut: () => void }
 
@@ -282,6 +283,9 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
   const [merging, setMerging] = useState(false)
   const [channels, setChannels] = useState<Array<{ id: string; name: string }>>([])
   const [dataMode, setDataMode] = useState<'client' | 'server'>('client')
+  const [inlineEditing, setInlineEditing] = useState(false)
+  const [inlineSaving, setInlineSaving] = useState(0)
+  const [inlineMessage, setInlineMessage] = useState<string | null>(null)
   const version = useRef(0)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const filterTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -356,6 +360,7 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
       .filter(column => kind === 'customer' || column.prop !== 'plm_display')
       .map(column => ({
         ...column,
+        readonly: !INLINE_EDITABLE_PROPS.has(String(column.prop)),
         columnTemplate: Template(FilterHeader, {
           filters,
           onFilter: updateFilter,
@@ -418,6 +423,42 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
     if (detail) void loadAudit(client, kind, String(detail.id)).then(setAudit)
   }
 
+  const persistInlineChanges = async (pending: Array<{ row: AdminRow; changes: Record<string, unknown> }>) => {
+    if (!inlineEditing || pending.length === 0) return
+    setInlineSaving(count => count + pending.length)
+    setInlineMessage(null)
+    try {
+      const savedRows = await Promise.all(pending.map(({ row, changes }) =>
+        saveInlineRow(kind, row, changes, (entityKind, id, input) => updateRecord(client, entityKind, id, input)),
+      ))
+      const byId = new Map(savedRows.map(row => [row.id, row]))
+      setRows(current => current.map(row => byId.has(row.id) ? { ...row, ...byId.get(row.id) } : row))
+      setInlineMessage(`${savedRows.length} ${savedRows.length === 1 ? 'row' : 'rows'} saved`)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The table change was not saved.')
+      await fetchRows()
+    } finally {
+      setInlineSaving(count => Math.max(0, count - pending.length))
+    }
+  }
+
+  const handleInlineCellEdit = (event: CustomEvent<BeforeSaveDataDetails>) => {
+    event.preventDefault()
+    if (!inlineEditing) return
+    const row = event.detail.model as AdminRow
+    void persistInlineChanges([{ row, changes: { [String(event.detail.prop)]: event.detail.val } }])
+  }
+
+  const handleInlineRangeEdit = (event: CustomEvent<BeforeRangeSaveDataDetails>) => {
+    event.preventDefault()
+    if (!inlineEditing) return
+    const pending = Object.entries(event.detail.data).flatMap(([index, changes]) => {
+      const row = event.detail.models[Number(index)] as AdminRow | undefined
+      return row ? [{ row, changes: changes as Record<string, unknown> }] : []
+    })
+    void persistInlineChanges(pending)
+  }
+
   if (denied) return <section className="access-denied" role="alert"><h1>Access denied</h1><p>You are signed in, but DB Data Admin requires an active Administrator grant.</p><button className="secondary" onClick={onSignOut}><LogOut /> Sign out</button></section>
 
   return <section className="workspace">
@@ -438,11 +479,42 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
       {kind === 'customer' && <select aria-label="Channel" value={query.channelId} onChange={e => updateQuery({ channelId: e.target.value })}><option value="">All channels</option>{channels.map(channel => <option key={channel.id} value={channel.id}>{channel.name}</option>)}</select>}
       <select aria-label="Data mode" value={dataMode} onChange={e => setDataMode(e.target.value as 'client' | 'server')}><option value="client">Client mode (&lt;5,000)</option><option value="server">Server mode</option></select>
       <label className="check"><input type="checkbox" checked={query.includeInactive} onChange={e => updateQuery({ includeInactive: e.target.checked })} /> Include inactive</label>
+      <button
+        className={inlineEditing ? 'primary inline-edit-toggle active' : 'secondary inline-edit-toggle'}
+        onClick={() => {
+          setInlineEditing(current => {
+            const next = !current
+            setInlineMessage(next ? 'Edit mode is on. Double-click a cell, paste, or drag the fill handle.' : null)
+            if (next) { setDetail(null); setEditing(false); setMerging(false) }
+            return next
+          })
+        }}
+      >
+        {inlineEditing ? <Check /> : <Pencil />}
+        {inlineEditing ? 'Done editing' : 'Edit table'}
+      </button>
       <button className="icon-button" aria-label="Refresh" onClick={() => void fetchRows()}><RefreshCw /></button>
     </div>
     {error && <div className="inline-error" role="alert">{error}</div>}
-    <div className="grid-wrap" aria-busy={loading}>
-      <RevoGrid theme="material" readonly accessible resize columns={columns} source={visibleRows} rowHeaders onBeforecellfocus={(event) => { const row = visibleRows[event.detail.rowIndex]; if (row) void openDetail(row) }} />
+    {(inlineMessage || inlineSaving > 0) && <div className="inline-edit-message" role="status">{inlineSaving ? 'Saving changes…' : inlineMessage}</div>}
+    <div className={`grid-wrap${inlineEditing ? ' editing' : ''}`} aria-busy={loading || inlineSaving > 0}>
+      <RevoGrid
+        theme="material"
+        readonly={!inlineEditing || inlineSaving > 0}
+        accessible
+        resize
+        range
+        columns={columns}
+        source={visibleRows}
+        rowHeaders
+        onBeforeedit={handleInlineCellEdit}
+        onBeforerangeedit={handleInlineRangeEdit}
+        onBeforecellfocus={(event) => {
+          if (inlineEditing) return
+          const row = visibleRows[event.detail.rowIndex]
+          if (row) void openDetail(row)
+        }}
+      />
       {loading && <div className="grid-loading">Loading…</div>}
     </div>
     <footer className="grid-footer"><span>{visibleRows.length} loaded</span>{nextCursor && <button className="secondary" disabled={loading} onClick={() => { const next = { ...query, cursor: nextCursor }; setQuery(next); void fetchRows(true, next) }}>Load more <ChevronRight /></button>}</footer>
