@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { FilterHeader } from './DataAdmin'
+import { FilterHeader, StatusDropdownEditor } from './DataAdmin'
 
 afterEach(cleanup)
 
@@ -177,5 +177,38 @@ describe('RevoGrid public header filter adapter', () => {
     const inactive = within(dialog).getByText('inactive').closest('label')!
     fireEvent.click(within(inactive).getByRole('checkbox'))
     expect(onSetFilter).toHaveBeenCalledWith('status', new Set(['active']))
+  })
+})
+
+describe('strict in-table status editor', () => {
+  it('gates global status to the three allowed values', () => {
+    render(
+      <StatusDropdownEditor
+        column={{ prop: 'status', name: 'Status' } as never}
+        val="active"
+        save={vi.fn()}
+        close={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('combobox', { name: 'Edit Status' })).toHaveTextContent('ActivePotentialInactive')
+  })
+
+  it('gates app status to active or inactive and saves the selected value', () => {
+    const save = vi.fn()
+    const close = vi.fn()
+    render(
+      <StatusDropdownEditor
+        column={{ prop: 'crm_status', name: 'CRM' } as never}
+        val="active"
+        save={save}
+        close={close}
+      />,
+    )
+    const dropdown = screen.getByRole('combobox', { name: 'Edit CRM' })
+    expect(dropdown).toHaveTextContent('ActiveInactive')
+    expect(dropdown).not.toHaveTextContent('Potential')
+    fireEvent.change(dropdown, { target: { value: 'inactive' } })
+    expect(save).toHaveBeenCalledWith('inactive')
+    expect(close).toHaveBeenCalledWith(true)
   })
 })

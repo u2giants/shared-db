@@ -1,4 +1,4 @@
-import { RevoGrid, Template, type BeforeRangeSaveDataDetails, type BeforeSaveDataDetails, type ColumnRegular, type ColumnTemplateProp } from '@revolist/react-datagrid'
+import { Editor, RevoGrid, Template, type BeforeRangeSaveDataDetails, type BeforeSaveDataDetails, type ColumnRegular, type ColumnTemplateProp, type Editors, type EditorType } from '@revolist/react-datagrid'
 import { Check, ChevronRight, Filter, GitMerge, History, LogOut, Pencil, RefreshCw, Search, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -251,12 +251,43 @@ export function FilterHeader(props: HeaderProps) {
   )
 }
 
+export function StatusDropdownEditor({ column, val, save, close }: EditorType) {
+  const isGlobalStatus = String(column.prop) === 'status'
+  const options = isGlobalStatus
+    ? [['active', 'Active'], ['potential', 'Potential'], ['inactive', 'Inactive']]
+    : [['active', 'Active'], ['inactive', 'Inactive']]
+
+  return (
+    <select
+      className="grid-status-editor"
+      aria-label={`Edit ${String(column.name ?? column.prop)}`}
+      autoFocus
+      defaultValue={String(val ?? 'active')}
+      onBlur={() => close()}
+      onKeyDown={event => {
+        if (event.key === 'Escape') close()
+      }}
+      onChange={event => {
+        save(event.target.value)
+        close(true)
+      }}
+    >
+      {options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+    </select>
+  )
+}
+
+const gridEditors: Editors = {
+  'global-status': Editor(StatusDropdownEditor),
+  'app-status': Editor(StatusDropdownEditor),
+}
+
 const baseColumns: ColumnRegular[] = [
   { prop: 'name_display', name: 'Name', size: 260, sortable: true },
-  { prop: 'status', name: 'Status', size: 105, sortable: true },
-  { prop: 'crm_status', name: 'CRM', size: 105 },
-  { prop: 'pm_status', name: 'PM/PIM', size: 105 },
-  { prop: 'dam_status', name: 'DAM', size: 105 },
+  { prop: 'status', name: 'Status', size: 105, sortable: true, editor: 'global-status' },
+  { prop: 'crm_status', name: 'CRM', size: 105, editor: 'app-status' },
+  { prop: 'pm_status', name: 'PM/PIM', size: 105, editor: 'app-status' },
+  { prop: 'dam_status', name: 'DAM', size: 105, editor: 'app-status' },
   { prop: 'plm_display', name: 'PLM', size: 115 },
   { prop: 'erp_active', name: 'ERP active', size: 105 },
   { prop: 'alias_count', name: 'Aliases', size: 85 },
@@ -504,6 +535,7 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
         accessible
         resize
         range
+        editors={gridEditors}
         columns={columns}
         source={visibleRows}
         rowHeaders
