@@ -51,10 +51,11 @@ on:
     - cron: "30 3 * * *"   # DesignFlow lane candidate
     - cron: "0 4 * * *"    # ColdLion mirror_only candidate
     - cron: "0 5 * * *"    # Daily comparison candidate
-    - cron: "15 */6 * * *" # Health check candidate
+    - cron: "15 * * * *"   # Health check candidate (HOURLY since 2026-07-28)
 
 permissions:
   contents: read
+  issues: write   # required so a failing lane can deliver its own alert immediately
 
 concurrency:
   group: coldlion-phase6-parallel-preview
@@ -117,7 +118,7 @@ jobs:
               "30 3 * * *") JOB=designflow ;;
               "0 4 * * *") JOB=coldlion ;;
               "0 5 * * *") JOB=compare ;;
-              "15 */6 * * *") JOB=health ;;
+              "15 * * * *") JOB=health ;;
               *)
                 echo "Unknown github.event.schedule expression: [$SCHEDULE]" >&2
                 exit 1
@@ -235,6 +236,37 @@ jobs:
           else
             node tools/check-coldlion-designflow-sync-health.mjs
           fi
+
+      # INSTANT DELIVERY. Waiting for the */10 alert-monitor cron was the wrong
+      # design: GitHub throttled it to 57-201 minute gaps on 2026-07-27/28, so a
+      # failure could sit unseen for over three hours. The run that DETECTS the
+      # failure is already awake and already knows, so it delivers the alert
+      # itself here — seconds, not hours. The alert-monitor cron stays as a slow
+      # backstop for anything that fails outside a GitHub run.
+      - name: Deliver alert immediately on failure (naming the human response owner)
+        if: failure() && env.skip != 'true' && steps.plan.outputs.apply == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          node tools/dispatch-coldlion-taxonomy-alerts.mjs --apply --linked --out alert-plan.json
+          CODE=$?
+          if [ "$CODE" -ne 1 ]; then
+            echo "::warning::No undelivered alert row found for this failure (dispatcher exit $CODE); the job still failed and is visible in Actions."
+            exit 0
+          fi
+          TITLE=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('alert-plan.json','utf8')).title)")
+          node -e "require('fs').writeFileSync('alert-body.md', JSON.parse(require('fs').readFileSync('alert-plan.json','utf8')).body)"
+          {
+            echo ""
+            echo "Delivered immediately by the detecting run ${{ github.run_id }} (job: ${{ steps.plan.outputs.job }}) at $(date -u +%Y-%m-%dT%H:%M:%SZ) UTC."
+            echo ""
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } >> alert-body.md
+          gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body-file alert-body.md \
+            --label "coldlion-taxonomy-alert" \
+            || gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body-file alert-body.md
+          echo "::error::ColdLion taxonomy alert delivered immediately. Human response owner: Albert Hazan."
 
       - name: Forced-failure health drill (safe; no canonical mutation)
         if: env.skip != 'true' && steps.plan.outputs.job == 'force-fail-health'
