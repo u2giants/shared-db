@@ -9,7 +9,12 @@
 -- forbids editing a migration that has been applied anywhere — two sessions silently
 -- clobber each other that way, and Supabase's ledger keys on the timestamp, so an edited
 -- file would never re-run. The fix therefore lands here, as a NEW forward migration that
--- replaces the function bodies and re-runs the corrected backfill.
+-- replaces the function bodies.
+--
+-- This file itself has NEVER been applied to any database (it was first added on the
+-- unpushed branch fix/clickup-importer-correctness), so it is edited in place rather than
+-- chained behind yet another migration. AGENTS.md §4.4 only forbids editing a migration
+-- that has already been applied somewhere.
 --
 -- This migration is a pure forward fix. It does NOT re-declare or alter the columns, index,
 -- comments, or api.clickup_task_sync_run_list() created by 20260728160000 — those objects
@@ -36,10 +41,10 @@
 --   Defect 3 — the backfill claimed external_id from the UNTRIMMED clickup_task_id, so a
 --     legacy row holding '123 ' was claimed as ('clickup','123 ') while the importer writes
 --     ('clickup','123'). The importer would then INSERT a second product row and strand the
---     curated links (project/licensor/property/stage/cover) on the orphan. Fixed: the
---     backfill trims, resolves ambiguity on the trimmed key, and skips ids already owned by
---     another row instead of failing the unique constraint. Section 1 below also repairs any
+--     curated links (project/licensor/property/stage/cover) on the orphan. Fixed: every
+--     comparison is on the TRIMMED id — the importer trims, and section 1 below repairs any
 --     untrimmed external_id that a previous run of the broken backfill left behind.
+--     (The backfill itself is gone; see defect 6.)
 --
 --   Defect 4 — every run rewrote every row, bumping updated_at even when nothing in ClickUp
 --     changed. pim.product carries a BEFORE UPDATE set_updated_at() trigger, so the churn
@@ -47,9 +52,45 @@
 --     (clickup_list_id, updated_at) index. Fixed: the ON CONFLICT DO UPDATE now carries a
 --     WHERE that skips the write entirely when the clickup_source_hash is unchanged.
 --
---   Defect 5 — skipped rows were dropped silently. Fixed: the backfill now records BOTH the
---     ambiguous ids and the already-claimed ids into the ingest.sync_run metadata, and the
---     importer records skipped_task_ids per run.
+--   Defect 5 — skipped rows were dropped silently. Fixed: the importer records
+--     skipped_task_ids per run and the trim repair records collisions it could not fix.
+--
+--   Defect 6 — THE BIG ONE (found 2026-07-29 by querying the real preview database).
+--     Both 20260728160000 and the first draft of this file assumed legacy pim.product rows
+--     carry `external_source IS NULL`, so a backfill could "claim" them onto
+--     ('clickup', clickup_task_id) and let ON CONFLICT (external_source, external_id) find
+--     them. The real data says otherwise:
+--
+--       external_source = 'directus_product' : 17,859 rows. EVERY one has clickup_task_id
+--                                              set, and external_id is a Directus id —
+--                                              0 of them equal clickup_task_id.
+--       external_source = 'clickup'          :     50 rows (external_id = clickup_task_id).
+--       external_source IS NULL              :      0 rows.
+--
+--     So the backfill claimed NOTHING, the ON CONFLICT key could not see the 17,859
+--     Directus-keyed rows, and the importer would have INSERTED A DUPLICATE PRODUCT ROW
+--     FOR EVERY ONE OF THEM on a database three live apps read.
+--
+--     Fix (owner's decision): MATCH ON clickup_task_id FIRST and LEAVE THE DIRECTUS KEY
+--     INTACT. Legacy rows are NOT re-keyed. Resolution order per incoming task:
+--       1. a row whose btrim(clickup_task_id) equals the incoming trimmed id -> UPDATE IN
+--          PLACE, and never touch its external_source / external_id;
+--       2. otherwise the ('clickup', <task id>) upsert, for genuinely new tasks.
+--     Step 1 rows are unreachable by ON CONFLICT, so the per-task logic is now an explicit
+--     lookup + UPDATE-by-id, with the ON CONFLICT insert kept only for the step-2 path (it
+--     also still guards against a race inserting the same new task twice).
+--
+--     Because that made clickup_task_id a real import key, section 2 adds the guard that
+--     was missing: a UNIQUE INDEX on btrim(clickup_task_id). See section 2 for the
+--     cross-app implications — this is a shared-schema change.
+--
+--     The old backfill is GONE. It is not merely a no-op on preview; claiming legacy rows
+--     is exactly what the owner rejected. Nothing in this migration rewrites a product key.
+--
+--     Counters: the run records rows_matched_by_clickup_task_id vs
+--     rows_matched_by_clickup_key vs rows_matched_foreign_source (plus a per-source
+--     breakdown), and each imported row carries metadata.clickup_match, so a reviewer can
+--     see that legacy matching actually happened instead of a mass insert.
 --
 -- Contract tests: supabase/tests/clickup_task_import_contracts.sql.
 -- Runner: tools/sync-clickup-tasks.mjs (sends fetch_started_at and skip_task_ids).
@@ -113,96 +154,70 @@ end;
 $repair$;
 
 -- =====================================================================================
--- 2. Re-run the CORRECTED backfill (defects 3 and 5).
+-- 2. GUARD: make clickup_task_id a real, unique import key (defect 6).
 --
---    Safe to re-run anywhere, including a database where the original backfill already
---    ran: it only touches rows where external_source IS NULL, so an already-claimed row is
---    invisible to it and nothing is claimed twice. Three guards:
---      a. only un-sourced rows (never stomp a row claimed by another source system);
---      b. ids ambiguous on the TRIMMED key are skipped and recorded;
---      c. ids already owned as ('clickup', <trimmed id>) by another row are skipped and
---         recorded, so the unique constraint can never be violated.
+--    *** SHARED-SCHEMA CHANGE — read this before merging. ***
+--    This adds a UNIQUE INDEX on btrim(clickup_task_id) over pim.product, for non-null,
+--    non-blank ids. pim.product is read and written by PopPIM and read by other POP apps,
+--    so any app that inserts a pim.product row carrying a clickup_task_id already used by
+--    another row will now get a unique-violation instead of silently forking the product.
+--    That is the intended behaviour: the importer resolves a task to a product BY this
+--    column, and two rows sharing an id would make the match non-deterministic and would
+--    re-open exactly the duplicate-row bug this migration exists to close.
+--
+--    Verified safe on the real preview data on 2026-07-29: 17,909 rows carry a
+--    clickup_task_id and there are 17,909 distinct values — zero duplicates — and no id
+--    appears under more than one external_source.
+--
+--    Blank/whitespace-only ids are excluded from the index. They are not usable import
+--    keys (the importer nullifs a blank id and fails the task), and without the exclusion
+--    two blank rows would collide and fail this migration for no benefit.
+--
+--    FAIL LOUDLY, NEVER SKIP SILENTLY: the pre-check below raises with the offending ids if
+--    duplicates exist, and the post-check raises if the index is not present afterwards. So
+--    `if not exists` can only mean "already correct", never "quietly skipped".
 -- =====================================================================================
-do $backfill$
+do $guard_pre$
 declare
-  v_ambiguous text[];  -- trimmed id on >1 un-sourced row -> skip; reconcile by hand
-  v_claimed   text[];  -- trimmed id already owned as (clickup, id) by another row -> skip
-  v_updated   integer := 0;
+  v_dupes text[];
 begin
-  -- Ambiguity is resolved on the TRIMMED id so '123 ' and '123' are one key. An ambiguous
-  -- id cannot be claimed without choosing which row owns it, so it is skipped.
   select coalesce(array_agg(task_id order by task_id), '{}'::text[])
-    into v_ambiguous
+    into v_dupes
   from (
     select btrim(clickup_task_id) as task_id
-    from pim.product
-    where clickup_task_id is not null
-      and btrim(clickup_task_id) <> ''
-      and external_source is null
-    group by btrim(clickup_task_id)
+      from pim.product
+     where clickup_task_id is not null
+       and btrim(clickup_task_id) <> ''
+     group by btrim(clickup_task_id)
     having count(*) > 1
-  ) dup;
+     limit 50
+  ) d;
 
-  -- Already-claimed ids: some other row already owns (clickup, <trimmed id>), so claiming
-  -- this legacy row would collide on the unique constraint. Record them for human
-  -- reconciliation instead of dropping them silently (defect 3).
-  select coalesce(array_agg(task_id order by task_id), '{}'::text[])
-    into v_claimed
-  from (
-    select distinct btrim(p.clickup_task_id) as task_id
-    from pim.product p
-    where p.external_source is null
-      and p.clickup_task_id is not null
-      and btrim(p.clickup_task_id) <> ''
-      and btrim(p.clickup_task_id) <> all (v_ambiguous)
-      and exists (
-        select 1 from pim.product other
-        where other.external_source = 'clickup'
-          and other.external_id = btrim(p.clickup_task_id)
-          and other.id <> p.id
-      )
-  ) taken;
-
-  -- Claim the rest. external_id is the TRIMMED id (defect 3): the importer writes
-  -- ('clickup', '123'), so a legacy row whose clickup_task_id is '123 ' must match it
-  -- instead of forking a second product row with curated links stranded on the orphan.
-  update pim.product p
-     set external_source = 'clickup',
-         external_id     = btrim(p.clickup_task_id),
-         updated_at      = now()
-   where p.external_source is null
-     and p.clickup_task_id is not null
-     and btrim(p.clickup_task_id) <> ''
-     and btrim(p.clickup_task_id) <> any (v_ambiguous)
-     and not exists (
-       select 1 from pim.product other
-       where other.external_source = 'clickup'
-         and other.external_id = btrim(p.clickup_task_id)
-         and other.id <> p.id
-     );
-
-  get diagnostics v_updated = row_count;
-
-  insert into ingest.sync_run
-    (source_system, source_name, status, started_at, finished_at,
-     rows_seen, rows_inserted, rows_updated, rows_failed, metadata)
-  values
-    ('clickup', 'clickup_external_id_backfill', 'succeeded', now(), now(),
-     v_updated + coalesce(array_length(v_ambiguous, 1), 0) + coalesce(array_length(v_claimed, 1), 0),
-     0, v_updated,
-     coalesce(array_length(v_ambiguous, 1), 0) + coalesce(array_length(v_claimed, 1), 0),
-     jsonb_build_object(
-       'migration', '20260728181500_clickup_incremental_task_import_fixes',
-       'stage', 'backfill',
-       'rows_claimed', v_updated,
-       'ambiguous_clickup_task_ids', to_jsonb(v_ambiguous),
-       'already_claimed_clickup_task_ids', to_jsonb(v_claimed),
-       'note', 'Ambiguous ids appear on more than one un-sourced row; already_claimed ids are owned by another (clickup, id) row. Both were skipped and must be reconciled by hand before they can be synced.'));
-
-  raise notice 'ClickUp backfill: % row(s) claimed, % ambiguous id(s) skipped, % already-claimed id(s) skipped',
-    v_updated, coalesce(array_length(v_ambiguous, 1), 0), coalesce(array_length(v_claimed, 1), 0);
+  if coalesce(array_length(v_dupes, 1), 0) > 0 then
+    raise exception
+      'cannot make clickup_task_id unique: % duplicate id(s) exist on pim.product (first 50: %). Reconcile the duplicate product rows by hand, then re-apply.',
+      coalesce(array_length(v_dupes, 1), 0), v_dupes
+      using errcode = 'P0001';
+  end if;
 end;
-$backfill$;
+$guard_pre$;
+
+create unique index if not exists pim_product_clickup_task_id_uidx
+  on pim.product (btrim(clickup_task_id))
+  where clickup_task_id is not null and btrim(clickup_task_id) <> '';
+
+comment on index pim.pim_product_clickup_task_id_uidx is
+'One product row per ClickUp task. pim.sync_clickup_tasks resolves an incoming task to an existing product by btrim(clickup_task_id) FIRST (legacy rows are keyed on external_source=''directus_product'' and are unreachable via the (external_source, external_id) ClickUp key), so this uniqueness is what makes that match deterministic. Do not drop it without changing the importer.';
+
+do $guard_post$
+begin
+  if to_regclass('pim.pim_product_clickup_task_id_uidx') is null then
+    raise exception 'pim_product_clickup_task_id_uidx was not created — refusing to continue'
+      using errcode = 'P0001';
+  end if;
+  raise notice 'ClickUp guard: unique index on btrim(clickup_task_id) present';
+end;
+$guard_post$;
 
 -- =====================================================================================
 -- 3. Internal importer.
@@ -211,9 +226,19 @@ $backfill$;
 --      * ADVISORY LOCK (pg_try_advisory_xact_lock, not the blocking form) so two runs
 --        cannot race each other. If another run holds it we return a 'locked' result
 --        cleanly instead of queueing behind it or corrupting the watermark.
---      * PER-ROW ON CONFLICT upsert inside a loop, each row wrapped in its own
+--      * PER-ROW resolve-then-write inside a loop, each row wrapped in its own
 --        exception block. One malformed task fails and is counted in rows_failed; it
 --        does NOT roll back the rest of the batch. A single bulk statement would.
+--
+--    Row resolution (defect 6) — the incoming trimmed task id is matched in this order:
+--      1. an existing pim.product whose btrim(clickup_task_id) equals it. This is how the
+--         17,859 legacy rows keyed ('directus_product', <directus id>) are found. They are
+--         UPDATED IN PLACE by id; their external_source and external_id are NEVER touched.
+--         The unique index from section 2 makes this match single-valued.
+--      2. otherwise the ('clickup', <task id>) key, via an INSERT ... ON CONFLICT. This
+--         path is for genuinely new tasks; the ON CONFLICT also absorbs a concurrent
+--         insert of the same new task.
+--    Both paths write ClickUp-owned fields only and both honour the unchanged-hash skip.
 --
 --    Watermark contract: the caller captures a PRE-FETCH timestamp (before any ClickUp API
 --    call) and passes it as snapshot.fetch_started_at. The function stores/returns THAT
@@ -260,6 +285,12 @@ declare
   v_existing      uuid;
   v_hash          text;
   v_old_hash      text;
+  v_match_kind    text;          -- 'clickup_task_id' | 'clickup_key' | 'new' (defect 6)
+  v_match_source  text;          -- external_source of the row matched by clickup_task_id
+  v_by_task_id    integer := 0;  -- matched via btrim(clickup_task_id)
+  v_by_clickup_key integer := 0; -- matched via (external_source='clickup', external_id)
+  v_foreign_match integer := 0;  -- subset of v_by_task_id owned by a NON-clickup source
+  v_src_counts    jsonb := '{}'::jsonb;  -- external_source -> rows matched, for review
   v_meta          jsonb;
   v_seen          integer := 0;
   v_ins           integer := 0;
@@ -377,9 +408,38 @@ begin
 
       v_hash := md5(coalesce(v_task -> 'raw', v_task)::text);
 
+      -- ---- Row resolution (defect 6) ------------------------------------------------
+      -- STEP 1: match on the trimmed clickup_task_id, whatever the row's external_source
+      -- is. This is the only way to reach the legacy rows keyed on Directus ids. Section
+      -- 2's unique index guarantees at most one match.
+      v_existing     := null;
+      v_old_hash     := null;
+      v_match_source := null;
+
+      select p.id, p.metadata ->> 'clickup_source_hash', p.external_source
+        into v_existing, v_old_hash, v_match_source
+        from pim.product p
+       where p.clickup_task_id is not null
+         and btrim(p.clickup_task_id) = v_task_id
+       limit 1;
+
+      if v_existing is not null then
+        v_match_kind := 'clickup_task_id';
+      else
+        -- STEP 2: fall back to the ClickUp import key for genuinely new tasks.
+        select p.id, p.metadata ->> 'clickup_source_hash', p.external_source
+          into v_existing, v_old_hash, v_match_source
+          from pim.product p
+         where p.external_source = 'clickup'
+           and p.external_id = v_task_id
+         limit 1;
+        v_match_kind := case when v_existing is null then 'new' else 'clickup_key' end;
+      end if;
+
       -- Metadata keys the existing api.pm_* views still read from. Kept in sync with
       -- the new columns so no view has to change in this migration.
       v_meta := jsonb_strip_nulls(jsonb_build_object(
+        'clickup_match',            v_match_kind,
         'clickup_status_type',      v_task ->> 'clickup_status_type',
         'clickup_status_color',     v_task ->> 'clickup_status_color',
         'clickup_status_order',     v_task ->> 'clickup_status_order',
@@ -398,13 +458,6 @@ begin
         'clickup_date_closed',      v_task ->> 'clickup_date_closed',
         'clickup_source_hash',      v_hash));
 
-      select p.id, p.metadata ->> 'clickup_source_hash'
-        into v_existing, v_old_hash
-        from pim.product p
-       where p.external_source = 'clickup'
-         and p.external_id = v_task_id
-       limit 1;
-
       -- Bronze: keep the raw ClickUp payload for audit/replay.
       insert into ingest.raw_record
         (sync_run_id, source_system, source_table, source_id, record_hash, payload, imported_at)
@@ -417,6 +470,38 @@ begin
         payload     = excluded.payload,
         imported_at = excluded.imported_at;
 
+      if v_existing is not null then
+        -- ---- STEP 1/2 WRITE: update the resolved row IN PLACE, by id. -----------------
+        -- external_source and external_id are deliberately absent from this SET list: a
+        -- legacy row keeps its Directus key forever. So are the curated Poppim fields
+        -- (project_id, licensor_id, property_id, factory_id, company_id, stage,
+        -- cover_url). The WHERE carries defect 4's unchanged-hash skip, so an unchanged
+        -- task performs no write at all and the BEFORE UPDATE set_updated_at() trigger
+        -- never fires.
+        update pim.product p set
+          name                     = coalesce(nullif(btrim(coalesce(v_task ->> 'name', '')), ''),
+                                              'Untitled ClickUp task ' || v_task_id),
+          status                   = v_task ->> 'clickup_status',
+          clickup_task_id          = v_task_id,
+          clickup_parent_id        = nullif(v_task ->> 'clickup_parent_id', ''),
+          clickup_status           = v_task ->> 'clickup_status',
+          clickup_status_type      = v_task ->> 'clickup_status_type',
+          clickup_status_color     = v_task ->> 'clickup_status_color',
+          clickup_status_order     = nullif(v_task ->> 'clickup_status_order', '')::numeric,
+          clickup_space_id         = v_task ->> 'clickup_space_id',
+          clickup_space_name       = v_task ->> 'clickup_space_name',
+          clickup_folder_id        = v_task ->> 'clickup_folder_id',
+          clickup_list_id          = v_task ->> 'clickup_list_id',
+          clickup_creator_id       = v_task ->> 'clickup_creator_id',
+          clickup_creator_name     = v_task ->> 'clickup_creator_name',
+          clickup_time_estimate_ms = nullif(v_task ->> 'clickup_time_estimate_ms', '')::bigint,
+          clickup_orderindex       = v_task ->> 'clickup_orderindex',
+          -- Merge, do not replace: non-ClickUp metadata keys must survive.
+          metadata                 = p.metadata || v_meta,
+          updated_at               = now()
+        where p.id = v_existing
+          and p.metadata ->> 'clickup_source_hash' is distinct from v_hash;
+      else
       insert into pim.product (
         external_source, external_id, name, status,
         clickup_task_id, clickup_parent_id, clickup_status,
@@ -475,6 +560,7 @@ begin
       -- "hash unchanged" == "every ClickUp field identical" == safe to no-op the conflict.
       where pim.product.metadata ->> 'clickup_source_hash'
             is distinct from excluded.metadata ->> 'clickup_source_hash';
+      end if;
 
       if v_existing is null then
         v_ins := v_ins + 1;
@@ -482,6 +568,23 @@ begin
         v_upd := v_upd + 1;
       else
         v_unch := v_unch + 1;
+      end if;
+
+      -- Match accounting (defect 6). A reviewer must be able to see that legacy rows were
+      -- MATCHED rather than duplicated: on the first real run against production-shaped
+      -- data, rows_matched_by_clickup_task_id should be ~17.9k and rows_inserted ~0.
+      if v_match_kind = 'clickup_task_id' then
+        v_by_task_id := v_by_task_id + 1;
+        if v_match_source is distinct from 'clickup' then
+          v_foreign_match := v_foreign_match + 1;
+        end if;
+        v_src_counts := jsonb_set(
+          v_src_counts,
+          array[coalesce(v_match_source, '(null)')],
+          to_jsonb(coalesce((v_src_counts ->> coalesce(v_match_source, '(null)'))::int, 0) + 1),
+          true);
+      elsif v_match_kind = 'clickup_key' then
+        v_by_clickup_key := v_by_clickup_key + 1;
       end if;
 
     exception when others then
@@ -534,6 +637,10 @@ begin
            'outcome', case when v_failed > 0 then 'succeeded_with_failures' else 'succeeded_clean' end,
            'partial_failure', (v_failed > 0),
            'rows_unchanged', v_unch,
+           'rows_matched_by_clickup_task_id', v_by_task_id,
+           'rows_matched_by_clickup_key', v_by_clickup_key,
+           'rows_matched_foreign_source', v_foreign_match,
+           'matched_external_sources', v_src_counts,
            'rows_skipped', v_skipped,
            'skipped_task_ids', to_jsonb(v_skipped_ids),
            'snapshot_hash', v_snapshot_hash,
@@ -557,7 +664,7 @@ end;
 $$;
 
 comment on function pim.sync_clickup_tasks(jsonb, text) is
-'Guarded incremental importer for ClickUp tasks into pim.product. Upserts on (external_source=''clickup'', external_id=<clickup task id>) — the app-wide import key — one row at a time with ON CONFLICT so a single malformed task is counted in rows_failed instead of discarding the batch, and only writes a row when its source hash actually changed (unchanged rows do not bump updated_at). Serializes on pg_try_advisory_xact_lock (returns locked=true rather than queueing). Writes ONLY ingest.raw_record, ingest.sync_run, and ClickUp-owned fields on pim.product; never touches curated links (project/licensor/property/factory/company) or non-clickup metadata keys. Returns watermark_at = the caller''s PRE-FETCH timestamp (snapshot.fetch_started_at) minus a 60s overlap, which is the next run''s date_updated_gt cutoff; when rows_failed > 0 the watermark does NOT advance so the failed rows are retried. snapshot.skip_task_ids is the escape hatch for acknowledged permanently-bad ids.';
+'Guarded incremental importer for ClickUp tasks into pim.product. Resolves each task to a product by btrim(clickup_task_id) FIRST — that is how the ~17.9k legacy rows keyed (external_source=''directus_product'', external_id=<directus id>) are matched, and those rows are updated IN PLACE with their external_source/external_id left untouched — and only falls back to the (external_source=''clickup'', external_id=<task id>) upsert for genuinely new tasks. One row at a time, each in its own exception block, so a single malformed task is counted in rows_failed instead of discarding the batch, and a row is written only when its source hash actually changed (unchanged rows do not bump updated_at). Serializes on pg_try_advisory_xact_lock (returns locked=true rather than queueing). Writes ONLY ingest.raw_record, ingest.sync_run, and ClickUp-owned fields on pim.product; never touches curated links (project/licensor/property/factory/company) or non-clickup metadata keys. Returns watermark_at = the caller''s PRE-FETCH timestamp (snapshot.fetch_started_at) minus a 60s overlap, which is the next run''s date_updated_gt cutoff; when rows_failed > 0 the watermark does NOT advance so the failed rows are retried. snapshot.skip_task_ids is the escape hatch for acknowledged permanently-bad ids.';
 
 -- =====================================================================================
 -- 4. public wrapper (AGENTS §8.1) so a service-role caller needs no raw DB password.

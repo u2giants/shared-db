@@ -16,6 +16,12 @@
 --   3. A failed row does NOT advance the watermark (defect 2).
 --   4. An unchanged row does NOT bump updated_at (defect 4).
 --   5. The advisory-lock path returns locked=true with no side effects (defect 2 lock).
+--   6. THE PRODUCTION SHAPE (defect 6): a legacy row keyed
+--      ('directus_product', <directus id>) that carries a clickup_task_id is MATCHED by
+--      clickup_task_id and updated in place — not duplicated — and keeps its Directus key.
+--      17,859 preview rows look exactly like this. This case FAILS against the pre-fix
+--      logic, which could only find rows via (external_source='clickup', external_id) and
+--      would therefore insert a second product row for every one of them.
 
 -- ---------------------------------------------------------------------------
 -- Session-local helpers (temp schema; live across the per-case transactions).
@@ -324,6 +330,102 @@ begin
 
   raise notice 'C5 PASS: advisory-lock path returns locked=true with no side effects';
 end $c5$;
+rollback;
+
+-- ===========================================================================
+-- Case 6: the REAL production shape — a Directus-keyed legacy row is matched by
+--   clickup_task_id, updated in place, and NOT duplicated (defect 6).
+--
+--   Preview holds 17,859 rows shaped exactly like this fixture: external_source =
+--   'directus_product', external_id = a Directus id that never equals clickup_task_id,
+--   clickup_task_id populated. The pre-fix importer could only resolve a task through
+--   (external_source='clickup', external_id), so it would have INSERTED a duplicate
+--   product row for every one of them and stranded the curated links on the original.
+-- ===========================================================================
+begin;
+do $c6$
+declare
+  v_r    jsonb;
+  v_md   jsonb;
+  v_id   uuid;
+  v_cnt  int;
+  v_row  record;
+begin
+  insert into pim.product (external_source, external_id, name, clickup_task_id, stage, metadata)
+  values ('directus_product', 'd-9001', 'Directus Legacy', 'dir9001', 'legacy',
+          jsonb_build_object('note', 'legacy row'))
+  returning id into v_id;
+
+  select to_jsonb(t) into v_r from public.sync_clickup_tasks(pg_temp.mk_snap(
+    jsonb_build_array(pg_temp.mk_task('dir9001', 'open', 'L1', 1)),
+    null, '2026-07-28T11:00:00+00'), 'incremental') t;
+
+  if coalesce((v_r ->> 'locked')::boolean, true) then raise exception 'C6: run unexpectedly locked'; end if;
+
+  -- THE assertion: exactly one product row carries this ClickUp task id.
+  select count(*) into v_cnt from pim.product where btrim(clickup_task_id) = 'dir9001';
+  if v_cnt <> 1 then
+    raise exception 'C6: DUPLICATE PRODUCT — expected exactly 1 row for clickup_task_id dir9001, got %', v_cnt; end if;
+
+  if coalesce((v_r ->> 'rows_inserted')::int, -1) <> 0 then
+    raise exception 'C6: importer INSERTED instead of matching (rows_inserted=%)', v_r ->> 'rows_inserted'; end if;
+  if coalesce((v_r ->> 'rows_updated')::int, -1) <> 1 then
+    raise exception 'C6: expected rows_updated=1 got %', v_r ->> 'rows_updated'; end if;
+
+  select id, external_source, external_id, status, clickup_status, clickup_list_id, stage,
+         metadata ->> 'note'          as note,
+         metadata ->> 'clickup_match' as match_kind
+    into v_row
+    from pim.product where btrim(clickup_task_id) = 'dir9001';
+
+  if v_row.id is distinct from v_id then raise exception 'C6: a different row was written'; end if;
+  if v_row.external_source is distinct from 'directus_product' then
+    raise exception 'C6: external_source was re-keyed to %', v_row.external_source; end if;
+  if v_row.external_id is distinct from 'd-9001' then
+    raise exception 'C6: external_id was re-keyed to %', v_row.external_id; end if;
+  if v_row.stage is distinct from 'legacy' then raise exception 'C6: curated stage clobbered'; end if;
+  if v_row.note is distinct from 'legacy row' then raise exception 'C6: non-clickup metadata key lost'; end if;
+  if v_row.clickup_status is distinct from 'open' then raise exception 'C6: row was not actually updated'; end if;
+  if v_row.clickup_list_id is distinct from 'L1' then raise exception 'C6: clickup field not updated'; end if;
+  if v_row.match_kind is distinct from 'clickup_task_id' then
+    raise exception 'C6: expected metadata.clickup_match=clickup_task_id got %', v_row.match_kind; end if;
+
+  -- Counters must show legacy matching, not mass inserts.
+  select metadata into v_md from ingest.sync_run where id = (v_r ->> 'sync_run_id')::uuid;
+  if coalesce((v_md ->> 'rows_matched_by_clickup_task_id')::int, -1) <> 1 then
+    raise exception 'C6: rows_matched_by_clickup_task_id=% (expected 1)', v_md ->> 'rows_matched_by_clickup_task_id'; end if;
+  if coalesce((v_md ->> 'rows_matched_foreign_source')::int, -1) <> 1 then
+    raise exception 'C6: rows_matched_foreign_source=% (expected 1)', v_md ->> 'rows_matched_foreign_source'; end if;
+  if coalesce((v_md -> 'matched_external_sources' ->> 'directus_product')::int, -1) <> 1 then
+    raise exception 'C6: matched_external_sources missing directus_product (%)', v_md ->> 'matched_external_sources'; end if;
+
+  raise notice 'C6 PASS: Directus-keyed legacy row matched in place, no duplicate, key intact';
+end $c6$;
+rollback;
+
+-- ===========================================================================
+-- Case 7: the section-2 guard exists — one product row per ClickUp task id.
+-- ===========================================================================
+begin;
+do $c7$
+declare
+  v_ok boolean := false;
+begin
+  if to_regclass('pim.pim_product_clickup_task_id_uidx') is null then
+    raise exception 'C7: unique index on btrim(clickup_task_id) is missing'; end if;
+
+  insert into pim.product (external_source, external_id, name, clickup_task_id)
+  values ('directus_product', 'd-7001', 'First', 'dup7001');
+  begin
+    insert into pim.product (external_source, external_id, name, clickup_task_id)
+    values ('clickup', 'dup7001', 'Second', ' dup7001 ');
+  exception when unique_violation then
+    v_ok := true;
+  end;
+  if not v_ok then raise exception 'C7: a second row reused clickup_task_id dup7001'; end if;
+
+  raise notice 'C7 PASS: btrim(clickup_task_id) is unique on pim.product';
+end $c7$;
 rollback;
 
 do $$
