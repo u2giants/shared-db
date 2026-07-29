@@ -18,7 +18,7 @@ const licensorTree = {
   reconciliation: { licensor_count: 3, active_licensor_count: 3, property_count: 4, active_property_count: 4, properties_with_licensor: 3, orphan_property_count: 1, expected_orphan_count_is_zero: false, partition_reconciles: true },
   licensors: [
     { id: '44444444-0001-4000-8000-000000000001', name: 'Marvel', code: 'MRV', status: 'active', property_count: 2, updated_at: '2026-07-22T10:00:00Z', source_refs: [{ source_system: 'designflow_plm', source_table: 'merchGroup', source_id: 'mg-mrv', source_code: 'MRV', source_name: 'Marvel' }], plm_context: [{ plm_id: 'li-cw', division_code: 'CW001', mg_code: 'MRV', mg_type: 'licensor', mg_category: 'licensed' }, { plm_id: 'li-sp', division_code: 'SP001', mg_code: 'MRV', mg_type: 'licensor', mg_category: 'licensed' }], properties: [
-      { id: '44444444-0002-4000-8000-000000000002', name: 'Avengers', code: 'AVG', status: 'active', character_count: 6, source_refs: [{ source_system: 'designflow_plm', source_table: 'merchGroup', source_id: 'mg-avg', source_code: 'AVG', source_name: 'Avengers' }], plm_context: [{ plm_id: 'pr-avg', division_code: 'CW001', mg_code: 'AVG', mg_type: 'property', mg_category: 'licensed' }] },
+      { id: '44444444-0002-4000-8000-000000000002', name: 'Avengers', code: 'AVG', status: 'active', character_count: 6, source_refs: [{ source_system: 'designflow_plm', source_table: 'merchGroup', source_id: 'mg-avg', source_code: 'AVG', source_name: 'Avengers' }], plm_context: [{ plm_id: 'pr-avg', division_code: '1', division_name: 'POP Lic', division_external_code: 'CW001', mg_code: 'AVG', mg_type: 'property', mg_category: 'licensed' }, { plm_id: 'pr-avg-sp', division_code: '8', division_name: 'Spruce Lic', division_external_code: 'SP001', mg_code: 'AVG', mg_type: 'property', mg_category: 'licensed' }] },
       { id: '44444444-0003-4000-8000-000000000003', name: 'Spider-Man', code: 'SPD', status: 'active', character_count: 2, source_refs: [], plm_context: [{ plm_id: 'pr-spd', division_code: 'CW001', mg_code: 'DNY', mg_type: 'property', mg_category: 'licensed' }] },
     ] },
     { id: '44444444-0004-4000-8000-000000000004', name: 'Disney', code: 'DNY', status: 'active', property_count: 1, updated_at: '2026-07-22T10:00:00Z', source_refs: [], plm_context: [{ plm_id: 'li-dny', division_code: 'CW001', mg_code: 'DNY', mg_type: 'licensor', mg_category: 'licensed' }], properties: [
@@ -299,5 +299,9 @@ test('renders the flat Properties table with each property parented to its licen
   await expect(page.getByText('Spider-Man')).toBeVisible()
   await expect(page.getByRole('gridcell', { name: '(no licensor)' })).toHaveCount(1)
   await expect(page.getByRole('status')).toContainText('1 property has no licensor')
+  // PLM divisions read as names, not raw ids, and never repeat the fixed
+  // mg_type literal that made every row say "· property ·".
+  await expect(page.getByRole('gridcell', { name: 'POP Lic (CW001) · AVG, Spruce Lic (SP001) · AVG' })).toHaveCount(1)
+  await expect(page.getByRole('gridcell', { name: /· property ·/ })).toHaveCount(0)
   await page.screenshot({ path: '../../docs/verification/db-data-admin-properties-table.png', fullPage: true })
 })
