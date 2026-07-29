@@ -81,40 +81,61 @@ create index if not exists pim_product_clickup_list_updated_idx
 -- =====================================================================================
 do $backfill$
 declare
-  v_ambiguous text[];
+  v_ambiguous text[];  -- trimmed id on >1 un-sourced row -> skip; reconcile by hand
+  v_claimed   text[];  -- trimmed id already owned as (clickup, id) by another row -> skip
   v_updated   integer := 0;
 begin
-  select coalesce(array_agg(clickup_task_id order by clickup_task_id), '{}'::text[])
+  -- Ambiguity is resolved on the TRIMMED id so '123 ' and '123' are one key. An ambiguous
+  -- id cannot be claimed without choosing which row owns it, so it is skipped.
+  select coalesce(array_agg(task_id order by task_id), '{}'::text[])
     into v_ambiguous
   from (
-    select clickup_task_id
+    select btrim(clickup_task_id) as task_id
     from pim.product
     where clickup_task_id is not null
       and btrim(clickup_task_id) <> ''
       and external_source is null
-    group by clickup_task_id
+    group by btrim(clickup_task_id)
     having count(*) > 1
   ) dup;
 
-  with claimable as (
-    select p.id, p.clickup_task_id
+  -- Already-claimed ids: some other row already owns (clickup, <trimmed id>), so claiming
+  -- this legacy row would collide on the unique constraint. Record them for human
+  -- reconciliation instead of dropping them silently (defect 3).
+  select coalesce(array_agg(task_id order by task_id), '{}'::text[])
+    into v_claimed
+  from (
+    select distinct btrim(p.clickup_task_id) as task_id
     from pim.product p
-    where p.clickup_task_id is not null
+    where p.external_source is null
+      and p.clickup_task_id is not null
       and btrim(p.clickup_task_id) <> ''
-      and p.external_source is null
-      and not (p.clickup_task_id = any (v_ambiguous))
-      and not exists (
+      and btrim(p.clickup_task_id) <> all (v_ambiguous)
+      and exists (
         select 1 from pim.product other
         where other.external_source = 'clickup'
-          and other.external_id = p.clickup_task_id
+          and other.external_id = btrim(p.clickup_task_id)
+          and other.id <> p.id
       )
-  )
+  ) taken;
+
+  -- Claim the rest. external_id is the TRIMMED id (defect 3): the importer writes
+  -- ('clickup', '123'), so a legacy row whose clickup_task_id is '123 ' must match it
+  -- instead of forking a second product row with curated links stranded on the orphan.
   update pim.product p
      set external_source = 'clickup',
-         external_id     = c.clickup_task_id,
+         external_id     = btrim(p.clickup_task_id),
          updated_at      = now()
-    from claimable c
-   where p.id = c.id;
+   where p.external_source is null
+     and p.clickup_task_id is not null
+     and btrim(p.clickup_task_id) <> ''
+     and btrim(p.clickup_task_id) <> any (v_ambiguous)
+     and not exists (
+       select 1 from pim.product other
+       where other.external_source = 'clickup'
+         and other.external_id = btrim(p.clickup_task_id)
+         and other.id <> p.id
+     );
 
   get diagnostics v_updated = row_count;
 
@@ -123,17 +144,19 @@ begin
      rows_seen, rows_inserted, rows_updated, rows_failed, metadata)
   values
     ('clickup', 'clickup_external_id_backfill', 'succeeded', now(), now(),
-     v_updated + coalesce(array_length(v_ambiguous, 1), 0), 0, v_updated,
-     coalesce(array_length(v_ambiguous, 1), 0),
+     v_updated + coalesce(array_length(v_ambiguous, 1), 0) + coalesce(array_length(v_claimed, 1), 0),
+     0, v_updated,
+     coalesce(array_length(v_ambiguous, 1), 0) + coalesce(array_length(v_claimed, 1), 0),
      jsonb_build_object(
        'migration', '20260728160000_clickup_incremental_task_import',
        'stage', 'backfill',
        'rows_claimed', v_updated,
        'ambiguous_clickup_task_ids', to_jsonb(v_ambiguous),
-       'note', 'Ambiguous ids appear on more than one un-sourced pim.product row and were skipped; reconcile by hand before they can be synced.'));
+       'already_claimed_clickup_task_ids', to_jsonb(v_claimed),
+       'note', 'Ambiguous ids appear on more than one un-sourced row; already_claimed ids are owned by another (clickup, id) row. Both were skipped and must be reconciled by hand before they can be synced.'));
 
-  raise notice 'ClickUp backfill: % row(s) claimed, % ambiguous id(s) skipped',
-    v_updated, coalesce(array_length(v_ambiguous, 1), 0);
+  raise notice 'ClickUp backfill: % row(s) claimed, % ambiguous id(s) skipped, % already-claimed id(s) skipped',
+    v_updated, coalesce(array_length(v_ambiguous, 1), 0), coalesce(array_length(v_claimed, 1), 0);
 end;
 $backfill$;
 
@@ -148,10 +171,13 @@ $backfill$;
 --        exception block. One malformed task fails and is counted in rows_failed; it
 --        does NOT roll back the rest of the batch. A single bulk statement would.
 --
---    Watermark contract: the caller uses THIS run's started_at (returned as
---    watermark_at) as the next run's `date_updated_gt` cutoff — never finished_at.
---    Using finished_at would silently drop any task edited in ClickUp between the API
---    query and the commit.
+--    Watermark contract: the caller captures a PRE-FETCH timestamp (before any ClickUp API
+--    call) and passes it as snapshot.fetch_started_at. The function stores/returns THAT
+--    (minus a 60s overlap) as watermark_at, the next run's date_updated_gt cutoff — never
+--    started_at/finished_at, which would silently drop a task edited while the run was
+--    still pulling lists. On partial failure (rows_failed > 0) the watermark does NOT
+--    advance, so failed rows are retried next run; acknowledged permanently-bad ids
+--    (snapshot.skip_task_ids) are skipped wholesale so they cannot wedge the advance.
 -- =====================================================================================
 create or replace function pim.sync_clickup_tasks(
   p_snapshot jsonb,
@@ -179,9 +205,14 @@ declare
   v_tasks         jsonb;
   v_lists         jsonb;
   v_watermark_in  timestamptz;
-  v_started_at    timestamptz;
+  v_fetch_started timestamptz;   -- caller-captured PRE-FETCH timestamp (defect 1)
+  v_started_at    timestamptz;   -- run accounting: when this run began fetching
+  v_watermark_out timestamptz;   -- watermark the NEXT run must use as date_updated_gt
   v_task          jsonb;
   v_task_id       text;
+  v_skip_ids      text[];        -- acknowledged permanently-bad ids (escape hatch, defect 2)
+  v_skipped       integer := 0;
+  v_skipped_ids   text[] := '{}';
   v_existing      uuid;
   v_hash          text;
   v_old_hash      text;
@@ -236,6 +267,23 @@ begin
   end if;
 
   v_watermark_in := nullif(p_snapshot ->> 'watermark', '')::timestamptz;
+  -- Defect 1: the watermark stored for the next run is the caller's PRE-FETCH timestamp
+  -- (captured before any ClickUp API call), never now()/finished_at. Fall back to now()
+  -- only so a hand-built snapshot cannot hard-fail; the runner always sends it.
+  v_fetch_started := coalesce(nullif(p_snapshot ->> 'fetch_started_at', '')::timestamptz, now());
+  v_started_at    := v_fetch_started;
+
+  -- Defect 2 escape hatch: ids the operator has acknowledged as permanently bad. They are
+  -- skipped before the upsert (counted in rows_skipped, NOT rows_failed), so they neither
+  -- poison rows_failed nor wedge the watermark. Removing an id from the list re-enables it.
+  v_skip_ids := case
+    when jsonb_typeof(coalesce(p_snapshot -> 'skip_task_ids', 'null'::jsonb)) = 'array'
+    then coalesce(
+      (select array_agg(nullif(btrim(s.value), ''))
+         from jsonb_array_elements_text(p_snapshot -> 'skip_task_ids') s(value)),
+      '{}'::text[])
+    else '{}'::text[]
+  end;
 
   -- ------------------------------------------------------------------
   -- 3.1 Concurrency. try, not blocking: a second run returns cleanly rather than
@@ -248,9 +296,9 @@ begin
   end if;
 
   -- ------------------------------------------------------------------
-  -- 3.2 Open run accounting. started_at IS the next run's watermark.
+  -- 3.2 Open run accounting. started_at is the run-accounting "fetch began at" time; it
+  --     is NOT the watermark (the watermark is computed at close, see 3.5).
   -- ------------------------------------------------------------------
-  v_started_at := now();
   insert into ingest.sync_run (source_system, source_name, status, started_at, metadata)
   values ('clickup', 'clickup_tasks_api', 'running', v_started_at,
           jsonb_build_object(
@@ -258,6 +306,7 @@ begin
             'mode', v_mode,
             'stage', 'running',
             'watermark_in', v_watermark_in,
+            'fetch_started_at', v_fetch_started,
             'lists', v_lists))
   returning id into v_sync_id;
 
@@ -268,6 +317,15 @@ begin
   for v_task in select value from jsonb_array_elements(v_tasks) loop
     v_seen := v_seen + 1;
     v_task_id := nullif(btrim(coalesce(v_task ->> 'clickup_task_id', '')), '');
+
+    -- Escape hatch (defect 2): acknowledged bad ids are skipped wholesale — not attempted,
+    -- not failed — so a permanently malformed task cannot wedge the watermark forever.
+    if v_task_id is not null and v_task_id = any (v_skip_ids) then
+      v_skipped := v_skipped + 1;
+      v_skipped_ids := v_skipped_ids || v_task_id;
+      continue;
+    end if;
+
     begin
       if v_task_id is null then
         raise exception 'task is missing clickup_task_id';
@@ -366,7 +424,13 @@ begin
         clickup_orderindex       = excluded.clickup_orderindex,
         -- Merge, do not replace: non-ClickUp metadata keys must survive.
         metadata                 = pim.product.metadata || excluded.metadata,
-        updated_at               = now();
+        updated_at               = now()
+      -- Defect 4: only write when the ClickUp source hash actually changed. An unchanged
+      -- task must not bump updated_at (it poisons anything sorting/filtering on it and the
+      -- new (clickup_list_id, updated_at) index). The hash is the full raw-task digest, so
+      -- "hash unchanged" == "every ClickUp field identical" == safe to no-op the conflict.
+      where pim.product.metadata ->> 'clickup_source_hash'
+            is distinct from excluded.metadata ->> 'clickup_source_hash';
 
       if v_existing is null then
         v_ins := v_ins + 1;
@@ -394,11 +458,21 @@ begin
     from jsonb_array_elements(v_tasks) t(value);
 
   -- ------------------------------------------------------------------
-  -- 3.5 Close run accounting. Status stays 'succeeded' even with a few failed rows —
-  --     partial failure is expected behaviour here, and rows_failed carries it. The
-  --     watermark still advances, so a permanently malformed task cannot wedge the
-  --     sync; the failure detail lives in metadata.errors for a human.
+  -- 3.5 Watermark + close run accounting (defects 1 and 2). On a clean run the watermark
+  --     advances to just before this run's fetch started (minus a 60s overlap, since
+  --     date_updated_gt is strict and the upsert is idempotent). When rows_failed > 0 the
+  --     watermark does NOT advance (the failed rows are retried next run); the run stays
+  --     'succeeded' (ingest.sync_status has no 'partial' value) but is marked unmistakably
+  --     via outcome='succeeded_with_failures' and partial_failure=true. Acknowledged bad
+  --     ids (skip_task_ids) never reach rows_failed; they are the escape hatch for a task
+  --     that would otherwise wedge the watermark.
   -- ------------------------------------------------------------------
+  if v_failed > 0 then
+    v_watermark_out := v_watermark_in;
+  else
+    v_watermark_out := v_fetch_started - interval '60 second';
+  end if;
+
   update ingest.sync_run
      set status      = 'succeeded',
          finished_at = now(),
@@ -410,14 +484,20 @@ begin
            'stage', 'succeeded',
            'mode', v_mode,
            'watermark_in', v_watermark_in,
-           'watermark_at', v_started_at,
+           'fetch_started_at', v_fetch_started,
+           'watermark_at', v_watermark_out,
+           'watermark_advanced', (v_failed = 0),
+           'outcome', case when v_failed > 0 then 'succeeded_with_failures' else 'succeeded_clean' end,
+           'partial_failure', (v_failed > 0),
            'rows_unchanged', v_unch,
+           'rows_skipped', v_skipped,
+           'skipped_task_ids', to_jsonb(v_skipped_ids),
            'snapshot_hash', v_snapshot_hash,
            'errors', v_errors)
    where id = v_sync_id;
 
   return query select v_sync_id, v_mode, false, v_seen, v_ins, v_upd, v_unch,
-                      v_failed, v_started_at, v_snapshot_hash;
+                      v_failed, v_watermark_out, v_snapshot_hash;
 
 exception when others then
   -- Rolls back with the caller's transaction. The RUNNER records the durable failed
@@ -433,7 +513,7 @@ end;
 $$;
 
 comment on function pim.sync_clickup_tasks(jsonb, text) is
-'Guarded incremental importer for ClickUp tasks into pim.product. Upserts on (external_source=''clickup'', external_id=<clickup task id>) — the app-wide import key — one row at a time with ON CONFLICT so a single malformed task is counted in rows_failed instead of discarding the batch. Serializes on pg_try_advisory_xact_lock (returns locked=true rather than queueing). Writes ONLY ingest.raw_record, ingest.sync_run, and ClickUp-owned fields on pim.product; never touches curated links (project/licensor/property/factory/company) or non-clickup metadata keys. Returns watermark_at = this run started_at, which is the next run''s date_updated_gt cutoff.';
+'Guarded incremental importer for ClickUp tasks into pim.product. Upserts on (external_source=''clickup'', external_id=<clickup task id>) — the app-wide import key — one row at a time with ON CONFLICT so a single malformed task is counted in rows_failed instead of discarding the batch, and only writes a row when its source hash actually changed (unchanged rows do not bump updated_at). Serializes on pg_try_advisory_xact_lock (returns locked=true rather than queueing). Writes ONLY ingest.raw_record, ingest.sync_run, and ClickUp-owned fields on pim.product; never touches curated links (project/licensor/property/factory/company) or non-clickup metadata keys. Returns watermark_at = the caller''s PRE-FETCH timestamp (snapshot.fetch_started_at) minus a 60s overlap, which is the next run''s date_updated_gt cutoff; when rows_failed > 0 the watermark does NOT advance so the failed rows are retried. snapshot.skip_task_ids is the escape hatch for acknowledged permanently-bad ids.';
 
 -- =====================================================================================
 -- 4. public wrapper (AGENTS §8.1) so a service-role caller needs no raw DB password.
