@@ -1,6 +1,7 @@
 import { AlertTriangle, ChevronDown, ChevronRight, Network, RefreshCw, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { loadLicensorTree, type ApiClient, type LoadedTree, type PlmContextEntry, type TaxonomyNode } from './lib/data-admin'
+import { formatDivision } from './lib/property-rows'
 
 type Props = { client: ApiClient }
 
@@ -20,7 +21,7 @@ function SourceContext({ entries }: { entries: PlmContextEntry[] }) {
   if (!entries.length) return <span className="muted">No PLM source row</span>
   return <span className="ctx-chips">{entries.map((entry, i) => (
     <span className="ctx-chip" key={`${entry.plm_id ?? i}-${entry.division_code ?? ''}-${entry.mg_code ?? ''}`}>
-      {entry.division_code ?? '—'}{entry.mg_type ? ` · ${entry.mg_type}` : ''}{entry.mg_code ? ` · ${entry.mg_code}` : ''}
+      {formatDivision(entry)}{entry.mg_code ? ` · ${entry.mg_code}` : ''}
     </span>
   ))}</span>
 }

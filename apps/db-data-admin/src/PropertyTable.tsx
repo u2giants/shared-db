@@ -15,7 +15,7 @@ const propertyColumns: ColumnRegular[] = [
   { prop: 'licensor_code', name: 'Licensor code', size: 130, sortable: true },
   { prop: 'status', name: 'Status', size: 105, sortable: true },
   { prop: 'character_count', name: 'Characters', size: 105, sortable: true },
-  { prop: 'plm_display', name: 'PLM context', size: 220 },
+  { prop: 'plm_display', name: 'PLM divisions', size: 260 },
   { prop: 'source_display', name: 'Source', size: 280 },
 ]
 

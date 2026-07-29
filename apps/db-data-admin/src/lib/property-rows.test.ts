@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { flattenProperties, formatPlmContext, formatSourceRefs } from './property-rows'
+import { flattenProperties, formatDivision, formatPlmContext, formatSourceRefs } from './property-rows'
 import type { LoadedTree } from './data-admin'
 
 const tree: Pick<LoadedTree, 'licensors' | 'orphanProperties'> = {
@@ -11,7 +11,10 @@ const tree: Pick<LoadedTree, 'licensors' | 'orphanProperties'> = {
         {
           id: 'p-avengers', name: 'Avengers', code: 'AVG', status: 'active', character_count: 5,
           source_refs: [{ source_system: 'designflow_plm', source_table: 'merchGroup', source_id: 'x', source_code: 'AVG', source_name: null }],
-          plm_context: [{ plm_id: 'pa', division_code: 'CW001', mg_code: 'AVG', mg_type: 'property', mg_category: 'licensed' }],
+          plm_context: [
+            { plm_id: 'pa', division_code: '1', division_name: 'POP Lic', division_external_code: 'CW001', mg_code: 'AVG', mg_type: 'property', mg_category: 'licensed' },
+            { plm_id: 'pa8', division_code: '8', division_name: 'Spruce Lic', division_external_code: 'SP001', mg_code: 'AVG', mg_type: 'property', mg_category: 'licensed' },
+          ],
         },
         {
           id: 'p-spider', name: 'Spider-Man', code: null, status: 'potential', character_count: 0,
@@ -62,12 +65,37 @@ describe('provenance formatting', () => {
     expect(formatSourceRefs(tree.licensors[0].properties[0])).toBe('designflow_plm/merchGroup · AVG')
   })
 
-  it('summarises PLM context', () => {
-    expect(formatPlmContext(tree.licensors[0].properties[0])).toBe('CW001 · property · AVG')
+  it('names each PLM division instead of printing its raw id', () => {
+    expect(formatPlmContext(tree.licensors[0].properties[0])).toBe('POP Lic (CW001) · AVG, Spruce Lic (SP001) · AVG')
+  })
+
+  it('never prints the fixed mg_type literal', () => {
+    expect(formatPlmContext(tree.licensors[0].properties[0])).not.toContain('property')
   })
 
   it('renders empty provenance as an empty string, not "undefined"', () => {
     expect(formatSourceRefs(tree.licensors[0].properties[1])).toBe('')
     expect(formatPlmContext(tree.licensors[0].properties[1])).toBe('')
+  })
+})
+
+describe('formatDivision', () => {
+  const base = { plm_id: 'p', mg_code: 'X', mg_type: 'property', mg_category: null }
+
+  it('pairs the division name with its external company code', () => {
+    expect(formatDivision({ ...base, division_code: '1', division_name: 'POP Lic', division_external_code: 'CW001' })).toBe('POP Lic (CW001)')
+  })
+
+  it('falls back to the raw PLM id when the division has no lookup row', () => {
+    expect(formatDivision({ ...base, division_code: '99', division_name: null, division_external_code: null })).toBe('99')
+  })
+
+  it('shows whichever label exists when only one is present', () => {
+    expect(formatDivision({ ...base, division_code: '1', division_name: 'POP Lic', division_external_code: null })).toBe('POP Lic')
+    expect(formatDivision({ ...base, division_code: '1', division_name: null, division_external_code: 'CW001' })).toBe('CW001')
+  })
+
+  it('renders an em dash rather than nothing when the entry names no division at all', () => {
+    expect(formatDivision({ ...base, division_code: null, division_name: null, division_external_code: null })).toBe('—')
   })
 })

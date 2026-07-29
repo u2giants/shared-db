@@ -146,6 +146,10 @@ export type TaxonomySourceRef = {
 export type PlmContextEntry = {
   plm_id: string | null; division_code: string | null; mg_code: string | null
   mg_type: string | null; mg_category: string | null
+  // Added by migration 20260728171500 so the UI can name a division instead of
+  // printing its raw PLM id. Optional because a division id with no lookup row
+  // yields nulls rather than dropping the entry.
+  division_name?: string | null; division_external_code?: string | null
 }
 export type TaxonomyNode = {
   id: string; name: string; code: string | null; status: string

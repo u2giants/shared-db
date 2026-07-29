@@ -1,4 +1,4 @@
-import type { AdminRow, LoadedTree, PropertyNode, TaxonomyNode } from './data-admin'
+import type { AdminRow, LoadedTree, PlmContextEntry, PropertyNode, TaxonomyNode } from './data-admin'
 
 /**
  * Flat Property grid rows built from the Licensor -> Property tree contract.
@@ -37,10 +37,29 @@ export function formatSourceRefs(node: TaxonomyNode): string {
     .join(', ')
 }
 
-/** `EDGEHOME · MG06 · MV` style PLM context summary, one entry per row. */
+/**
+ * Which PLM divisions carry this record, and under which merch-group code:
+ * `POP Lic (CW001) · GS, Spruce Lic (SP001) · GS`.
+ *
+ * `mg_type` is deliberately not shown. It is a fixed literal per branch of the
+ * tree contract ('property' on every property, 'licensor' on every licensor),
+ * so printing it added the same dead word to every row.
+ *
+ * A division with no lookup row falls back to its raw PLM id rather than
+ * rendering an empty chip, so an unmapped division stays visible.
+ */
+export function formatDivision(entry: PlmContextEntry): string {
+  const name = entry.division_name?.trim()
+  const external = entry.division_external_code?.trim()
+  if (name && external) return `${name} (${external})`
+  if (name) return name
+  if (external) return external
+  return entry.division_code ?? '—'
+}
+
 export function formatPlmContext(node: TaxonomyNode): string {
   return node.plm_context
-    .map(entry => [entry.division_code ?? '—', entry.mg_type ?? '', entry.mg_code ?? ''].filter(Boolean).join(' · '))
+    .map(entry => [formatDivision(entry), entry.mg_code ?? ''].filter(Boolean).join(' · '))
     .join(', ')
 }
 
