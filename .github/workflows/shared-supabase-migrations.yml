@@ -5,6 +5,7 @@ on:
     paths:
       - "supabase/migrations/**"
       - "scripts/check-sql.sh"
+      - "scripts/check-sql.test.mjs"
       - "scripts/production_migration_guard.py"
       - "scripts/test_production_migration_guard.py"
       - ".github/workflows/shared-supabase-migrations.yml"
@@ -46,11 +47,19 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 so check-sql.sh Guard B can compare this branch's
+      # migration versions against the newest version on the base branch.
+      # Without full history there is no origin/<base> ref and Guard B degrades
+      # to a warning-only skip instead of actually guarding.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Install SQL check dependencies
         run: sudo apt-get update && sudo apt-get install -y ripgrep
       - name: Run SQL checks
         run: bash scripts/check-sql.sh
+      - name: Test SQL migration guards
+        run: node --test scripts/check-sql.test.mjs
       - name: Test production guard
         run: python -m unittest scripts/test_production_migration_guard.py
 
