@@ -189,7 +189,7 @@ There are **no** rows with a null `external_source`. The backfill claimed nothin
 
 Data quality made the fix safe: **17,909 distinct `clickup_task_id` values over 17,909 rows, zero duplicates, and no id appearing under more than one `external_source`.**
 
-**Fix (commit `0783254`):** resolve each incoming task by trimmed `clickup_task_id` **first** and update that row in place, leaving `external_source`/`external_id` untouched (the Directus key stays as the historical record). The ClickUp-key upsert remains but only as the new-task path. The dead backfill is removed. New counters `rows_matched_by_clickup_task_id`, `rows_matched_by_clickup_key`, `rows_matched_foreign_source` plus a per-source breakdown make legacy matching **visible** rather than inferred.
+**Fix (commit `0783254`):** resolve each incoming task by trimmed `clickup_task_id` **first** and update that row in place, leaving `external_source`/`external_id` untouched (the legacy identifier written by the one-time, long-since-decommissioned Directus import is left in place on the row as historical data). The ClickUp-key upsert remains but only as the new-task path. The dead backfill is removed. New counters `rows_matched_by_clickup_task_id`, `rows_matched_by_clickup_key`, `rows_matched_foreign_source` plus a per-source breakdown make legacy matching **visible** rather than inferred.
 
 Also adds a **unique index on `btrim(clickup_task_id)`** (non-null, non-blank) so this cannot silently recur. **This is a shared-schema change affecting all four apps** — see §7.
 
@@ -212,7 +212,7 @@ Also adds a **unique index on `btrim(clickup_task_id)`** (non-null, non-blank) s
 
 Note that exit **1** is shared with the top-level `catch` (any thrown fetch/SQL/validation error). That predates this work; codes 2 and 3 are unambiguous.
 
-**Grok-4.5 review of #324 (read-only)** returned PASS WITH CONCERN — no correctness hole on the real `--apply` path, locked-vs-partial precedence preserved from #311, and no in-repo consumer of these exit codes to break. Its three low-severity items were all fixed in the follow-up PR #325: the file-header and "two outcomes" comments now list all three non-zero codes; `classifyApplyOutcome` now *positively confirms* clean instead of treating "nothing matched above" as success (so a half-shaped row like `{}` or `rows_failed: null` exits 3, not 0), with both `locked === true` and `locked === false` compared strictly; and tests now cover locked-over-`rows_failed` precedence plus nine half-shaped inputs. 44 tests pass.
+**Grok-4.5 review of #324 (read-only)** returned PASS WITH CONCERN — no correctness hole on the real `--apply` path, locked-vs-partial precedence preserved from #311, and no in-repo consumer of these exit codes to break. Its three low-severity items were all fixed in the follow-up [#330](https://github.com/u2giants/shared-db/pull/330): the file-header and "two outcomes" comments now list all three non-zero codes; `classifyApplyOutcome` now *positively confirms* clean instead of treating "nothing matched above" as success (so a half-shaped row like `{}` or `rows_failed: null` exits 3, not 0), with both `locked === true` and `locked === false` compared strictly; and tests now cover locked-over-`rows_failed` precedence plus nine half-shaped inputs. 44 tests pass.
 
 #### 5.3 Duplicate migration timestamps silently skip a migration
 
