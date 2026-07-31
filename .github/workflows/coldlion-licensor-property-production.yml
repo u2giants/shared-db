@@ -279,11 +279,27 @@ jobs:
         env:
           COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          # NOT `set -e` here, on purpose: this runner has THREE meaningful outcomes, and
+          # `set -e` would collapse two of them into "the job failed".
+          #   0 = promoted (or a clean no-op)
+          #   3 = SKIPPED — another promotion already held advisory lock 720260729, so this
+          #       cycle read and wrote nothing. That is a normal overlap between the
+          #       schedule and a manual drill. Failing the job here would page a human for
+          #       a healthy race, and a red scheduled run is exactly the noise that gets
+          #       alerting muted. The skip is already durably recorded as a CANCELLED
+          #       ingest.sync_run row, so it is visible without a red check.
+          #   anything else = a real refusal/failure, which must still fail the job.
           node tools/promote-coldlion-source-owned.mjs \
             --apply --linked \
             --production --production-authorized \
             --project-ref "$PRODUCTION_PROJECT_REF"
+          promote_status=$?
+          if [ "$promote_status" -eq 3 ]; then
+            echo "::notice::ColdLion promotion SKIPPED — another promotion already holds advisory lock 720260729. Nothing was read or written; the next scheduled cycle promotes whatever this one deferred."
+            exit 0
+          fi
+          exit "$promote_status"
 
       - name: compare — ColdLion vs DesignFlow daily comparison
         if: env.LANE == 'compare'
