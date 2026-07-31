@@ -1,0 +1,58 @@
+# Every `### B<n>` item in HANDOFF.md's `## BACKLOG` must be visible to a fresh
+# coordinator via the `## REQUEST QUEUE` of COORDINATOR_INTAKE.md.
+# See scripts/check-backlog-queue-sync.mjs for the full rationale.
+#
+# WHY THIS IS ITS OWN WORKFLOW WITH NO `paths:` FILTER — read AGENTS.md §5.2.
+#
+#   The check reads BOTH HANDOFF.md and COORDINATOR_INTAKE.md, so any trigger
+#   must cover both. Two wrong options were rejected:
+#
+#   1. Widening the `DB Data Admin` workflow's `paths:` filter. That filter also
+#      gates a Docker image build, the Playwright browser tests and the Coolify
+#      `deploy-development` job, so adding HANDOFF.md to it would fire a full
+#      build-and-deploy on every documentation PR. This is exactly the mistake
+#      AGENTS.md §5.2 names, and §5.2's own recommendation is the separate
+#      cheap workflow used here.
+#
+#   2. Giving THIS workflow `paths: [HANDOFF.md, COORDINATOR_INTAKE.md]`. It
+#      would catch drift as it is created, but a PR touching neither file could
+#      never surface pre-existing drift, and — the actual §5.2 failure — once a
+#      run went red, fixing an unwatched file would not re-run it and `main`
+#      would display a stale verdict forever. The job is a few seconds of Node
+#      with no checkout cost worth optimising, so it runs unconditionally.
+#
+#   Same design rule as .github/workflows/tools-offline-tests.yml.
+#
+# NO DATABASE CONTACT: this job reads two committed Markdown files and nothing
+# else. It needs no secrets and must never be given any.
+
+name: Backlog / Queue Sync
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backlog-queue-sync-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Unit-test the checker itself
+        run: node --test scripts/check-backlog-queue-sync.test.mjs
+
+      - name: Every HANDOFF.md BACKLOG item has a COORDINATOR_INTAKE.md queue entry
+        run: node scripts/check-backlog-queue-sync.mjs
