@@ -36,16 +36,29 @@ import { parseHealthResult, parseComparisonResult } from "./phase6-cli-result-pa
 // The fake `supabase` executable
 // ---------------------------------------------------------------------------------------
 
+// The stub's canned response is passed through FILES, never through the environment. Linux caps
+// a single environment variable at 128 KiB (MAX_ARG_STRLEN), so handing the 2 MiB maxBuffer
+// fixture over as an env var fails with E2BIG on the Ubuntu CI runner while working fine on
+// Windows — and it poisons the NEXT spawn too, which then reports E2BIG instead of the ENOENT
+// the spawn-fault test is asserting on. Files behave identically on both platforms.
 const PRELOAD = `
 const fs = require("node:fs");
 fs.writeFileSync(process.env.FAKE_SUPABASE_ARGV, JSON.stringify(process.argv.slice(1)));
-if (process.env.FAKE_SUPABASE_STDOUT) process.stdout.write(process.env.FAKE_SUPABASE_STDOUT);
-if (process.env.FAKE_SUPABASE_STDERR) process.stderr.write(process.env.FAKE_SUPABASE_STDERR);
+const emit = (envVar, stream) => {
+  const file = process.env[envVar];
+  if (!file) return;
+  const buf = fs.readFileSync(file);
+  if (buf.length) fs.writeSync(stream, buf);
+};
+emit("FAKE_SUPABASE_STDOUT_FILE", 1);
+emit("FAKE_SUPABASE_STDERR_FILE", 2);
 process.exit(Number(process.env.FAKE_SUPABASE_EXIT || 0));
 `;
 
 let stubDir = null;
 let argvFile = null;
+let stdoutFile = null;
+let stderrFile = null;
 
 const SAVED = {};
 function saveEnv(...names) {
@@ -61,6 +74,8 @@ function restoreEnv() {
 before(() => {
   stubDir = mkdtempSync(join(tmpdir(), "runsql-stub-"));
   argvFile = join(stubDir, "argv.json");
+  stdoutFile = join(stubDir, "stdout.bin");
+  stderrFile = join(stubDir, "stderr.bin");
   const preloadPath = join(stubDir, "fake-supabase-preload.cjs");
   writeFileSync(preloadPath, PRELOAD, "utf8");
 
@@ -79,8 +94,8 @@ before(() => {
     "DATABASE_URL",
     "SUPABASE_DB_URL",
     "FAKE_SUPABASE_ARGV",
-    "FAKE_SUPABASE_STDOUT",
-    "FAKE_SUPABASE_STDERR",
+    "FAKE_SUPABASE_STDOUT_FILE",
+    "FAKE_SUPABASE_STDERR_FILE",
     "FAKE_SUPABASE_EXIT",
   );
 
@@ -93,6 +108,9 @@ before(() => {
   // written with forward slashes — accepted by Node on Windows as well as POSIX.
   process.env.NODE_OPTIONS = `--require "${preloadPath.replace(/\\/g, "/")}"`;
   process.env.FAKE_SUPABASE_ARGV = argvFile;
+  process.env.FAKE_SUPABASE_STDOUT_FILE = stdoutFile;
+  process.env.FAKE_SUPABASE_STDERR_FILE = stderrFile;
+  stubResponds();
 });
 
 after(() => {
@@ -102,8 +120,8 @@ after(() => {
 
 /** Configure the stub's response for the next runSql call. */
 function stubResponds({ stdout = "", stderr = "", exit = 0 } = {}) {
-  process.env.FAKE_SUPABASE_STDOUT = stdout;
-  process.env.FAKE_SUPABASE_STDERR = stderr;
+  writeFileSync(stdoutFile, stdout, "utf8");
+  writeFileSync(stderrFile, stderr, "utf8");
   process.env.FAKE_SUPABASE_EXIT = String(exit);
 }
 
