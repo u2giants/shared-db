@@ -1,0 +1,93 @@
+# Offline contract tests for everything under tools/.
+#
+# Why this workflow exists (added 2026-07-31):
+# PR #331 (Step 7A recurring production Licensor/Property feed) added four test
+# files that never ran in CI. Three were referenced ONLY by the `gate` job of
+# coldlion-licensor-property-production.yml, which no-ops for as long as the
+# production lane stays disabled, and the fourth
+# (tools/coldlion-production-lane-readiness.test.mjs) was referenced by no
+# workflow at all. The tests passed locally, so nothing was broken — but nothing
+# was being guarded either.
+#
+# Design rules for this workflow:
+#   1. NO `paths:` filter. A narrow paths filter on a repo-wide guard reports a
+#      stale green: a change outside the filter silently skips the job and the
+#      PR still shows all-checks-passed. This job runs on every pull request and
+#      every push to main, unconditionally.
+#   2. It globs tools/*.test.mjs rather than listing filenames, so a new tools
+#      test is wired into CI the moment it is committed. That is what failed with
+#      PR #331 — an explicit list that nobody remembered to extend.
+#   3. Every test here must pass OFFLINE with NO secrets and NO database contact.
+#      These are pure contract/unit tests. Do not add a step that needs
+#      SUPABASE_*, COLDLION_API_KEY, DESIGNFLOW_API_KEY, or any project ref, and
+#      never set COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED here — enabling the
+#      production lane is a separate, deliberately gated decision.
+#
+# The per-lane workflows (production, phase6-parallel, alert-monitor) still run
+# their own subsets right before doing real work. That redundancy is intentional:
+# this workflow proves the tests are green on every commit; those re-run them as a
+# last check immediately before a write.
+
+name: Tools Offline Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tools-offline-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Refuse to run with any production authorization present
+        run: |
+          set -euo pipefail
+          if [ -n "${COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED:-}" ]; then
+            echo "::error::These are offline contract tests. The production lane flag must never be set in this workflow." >&2
+            exit 1
+          fi
+
+      - name: Run every tools/*.test.mjs
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          FILES=(tools/*.test.mjs)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "::error::No tools/*.test.mjs files found — the glob or the checkout is wrong." >&2
+            exit 1
+          fi
+          echo "Running ${#FILES[@]} test files:"
+          printf '  %s\n' "${FILES[@]}"
+          node --test "${FILES[@]}"
+
+      - name: Prove the four Step 7A test files were actually executed
+        run: |
+          set -euo pipefail
+          # Named explicitly so that deleting or renaming one of them fails this job
+          # loudly instead of silently shrinking coverage back to the PR #331 state.
+          for f in \
+            tools/coldlion-production-lane-readiness.test.mjs \
+            tools/coldlion-production-schedule-map.test.mjs \
+            tools/coldlion-recurring-promotion.test.mjs \
+            tools/coldlion-licensor-property-production-workflow.test.mjs
+          do
+            if [ ! -f "$f" ]; then
+              echo "::error::Expected Step 7A test file is missing: $f" >&2
+              exit 1
+            fi
+          done
+          echo "All four Step 7A test files present and covered by the glob above."
