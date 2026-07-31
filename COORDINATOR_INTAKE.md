@@ -532,6 +532,37 @@ after it is filed. Only the coordinator moves a block out of here.
 
 ---
 
+### REQUEST — Establish what the 3 UNATTRIBUTED worktrees are before anyone sweeps — 2026-07-31 — session: outgoing coordinator (t16)
+
+**1. What outcome is needed, and why.** `git worktree list` returns 34 entries. 31
+are attributed to a named agent or session; **3 are not, and no PR has ever existed
+for any of their branches** (`nbc-alias-work`, `worktree-agent-a9b9b048681d1744f`,
+`claude/elastic-babbage-df8f2e`). They are clean, but **clean is not finished** —
+that is exactly backlog **B11**. Establish what they are before any sweep touches
+them. This supersedes the counts in the older "Sweep the 22 worktrees" block below.
+
+**2. Which application(s) depend on this.** None — repository hygiene, but with a
+real data-loss failure mode.
+
+**3. Is it blocking anything, and how urgently?** Not blocking. **But it blocks the
+sweep**, and a sweep run without it repeats the B11 incident (a sweep already
+deleted a live agent's workspace today).
+
+**4. Deadline, if any.** None. **Do not rush it — an honest unknown is safe, a
+wrong "safe to clean" is not.**
+
+**5. What I already know about the current schema.** N/A — no schema involved. All
+34 worktrees verified CLEAN at 2026-07-31 ~23:20 UTC; merged-ness established via
+`gh pr view`/`gh pr list --state all`, **not branch-tip ancestry** (this repo
+squash-merges, so ancestry gives the wrong answer). Full ledger: handover §3.8.
+
+**6. Confirmation of what I have NOT done. [MANDATORY]** **No worktree removed, no
+branch deleted, no prune, no force — nothing was cleaned.** No branch created beyond
+this handover's own, no migration, no preview or production push, no `supabase` CLI,
+no Supabase MCP call, no psql, no chip, no database call of any kind.
+
+---
+
 ### REQUEST — ⚠️ FIRST ACTION: un-park the shared checkout `C:\repos\shared-db` from an intake branch — 2026-07-31 — session: outgoing coordinator (t16)
 
 **1. What outcome is needed, and why.** The shared checkout is sitting on branch

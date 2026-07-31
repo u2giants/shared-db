@@ -255,6 +255,111 @@ its `sync_run_id` matches one of the failed rehearsal runs, and only then decide
   worktree at `.claude/worktrees/coord-handover-2330`, opened as a PR and **not
   merged** — this session does not merge on the way out.
 
+### 3.8 WORKTREE LEDGER — ⚠️ NO SWEEP WAS PERFORMED, AND THAT WAS A DECISION
+
+> **READ THIS BEFORE YOU TIDY ANYTHING.**
+>
+> **No worktree or branch sweep was performed this session. This was a DELIBERATE
+> DECISION, not an oversight, and not laziness at the end of a long session.**
+>
+> **The reason is backlog item `B11`: a paused agent is indistinguishable from a
+> finished one.** A sweep earlier today **deleted a live agent's workspace**. That
+> is not a hypothetical — it happened, in this repo, on this date, and B11 exists
+> because of it.
+>
+> The worktrees below are **documented, not deleted.** The table exists so that a
+> session doing cleanup has one place to look, and so that nobody has to infer a
+> verdict from silence — the `shared-db-handover` skill is explicit that an
+> **unexplained worktree gets treated as abandoned and deleted**, which is exactly
+> how B11 recurs.
+>
+> **If you do sweep:** use the **`cleanup-worktree` skill** — never ad-hoc
+> `git worktree remove`. Sweep **only when the repo is quiet** (no live agents).
+> **Never** remove a worktree that is dirty, locked, or held by a live process.
+> Delete **local branch labels only**, with `git branch -d` (**never** `-D`), and
+> **never** delete a remote branch by hand. And **do not touch the three
+> `unattributed` rows** without first establishing what they are.
+
+**Coverage:** `git worktree list` returns **34 entries** — the shared checkout plus
+**33 worktrees**. (The coordinator's register said 33 registered worktrees; that
+count was taken *before* this handover agent created its own, so both numbers are
+right at their respective moments. 33 pre-existed this handover; the 34th is mine.)
+
+- **31 of 34 are attributed** to a specific agent or session.
+- **3 of 34 are honestly marked `unattributed`** — an honest unknown is safe; a
+  wrong "safe to clean" is not.
+- **All 34 are CLEAN** — `git status --porcelain` returned zero lines in every one.
+  **Clean is NOT the same as finished.** A paused agent's worktree is also clean.
+  That is precisely the B11 trap.
+
+**How merged-ness was established:** `gh pr list --head <branch> --state all` per
+branch, reading the PR's own `state` field. **Branch-tip ancestry was NOT used and
+must not be used here — this repo squash-merges, so a merged branch still shows
+commits ahead of `main` and an ancestry check returns the wrong answer.**
+
+| # | Path | Branch | Attributed agent / session | Live or finished | Dirty? | Merged to `origin/main`? |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `C:/repos/shared-db` | `intake/coldlion-comparison-handover-20260731` | ⚠️ **the SHARED CHECKOUT, parked** (§3.2) | **LIVE — do not touch** | clean | **No — PR #365 OPEN** |
+| 2 | `.claude/worktrees/coord-handover-2330` | `agent/coordinator-handover-20260731-2330` | this handover (part b, all blocks) | **LIVE (resumable)** | clean | **No — PR #371 OPEN** |
+| 3 | `C:/Users/ahazan2/AppData/Local/Temp/claude/intake-mg07` | `intake/coldlion-mg07-styleguide-readonly-20260731` | MG07 style-guide intake session | **LIVE — un-ingested** | clean | **No — PR #366 OPEN** |
+| 4 | `.claude/worktrees/b8-rollback` | `test/b8-rollback-sql-tests` | **block 2** — B8 rollback-lever tests | finished (safe to clean) | clean | Yes — PR #358 MERGED |
+| 5 | `.claude/worktrees/c2-manifest` | `agent/c2-migration-manifest` | **block 3** — C2 production manifest | finished (safe to clean) | clean | Yes — PR #360 MERGED |
+| 6 | `.claude/worktrees/coldlion-rehearsal-20260731` | `rehearsal/coldlion-recurring-20260731` | **blocks 5, 7, 8** — rehearsal + conditions + queue entry | finished (safe to clean) | clean | Yes — PR #362 MERGED |
+| 7 | `C:/tmp/shared-db-rfq-groups` | `feat/style-tracker-rfq-groups` | **blocks 9, 11, 12, 13** — Grok 4.5 RFQ groups | finished (safe to clean) | clean | Yes — PR #363 MERGED |
+| 8 | `.claude/worktrees/b14` | `fix/b14-coldlion-probe-bounded` | **block 18** — B14 root-cause fix | finished (safe to clean) | clean | Yes — PR #367 MERGED |
+| 9 | `.claude/worktrees/agent-licensor-gap-66` | `agent/licensor-gap-66` | **block 17** — 33-code licensor table | finished (safe to clean) | clean | Yes — PR #369 MERGED |
+| 10 | `.claude/worktrees/canonical-ruling` | `docs/coldlion-canonical-ruling-20260731` | **block 19** — owner-ruling recorder | finished (safe to clean) | clean | Yes — PR #370 MERGED |
+| 11 | `.claude/worktrees/agent-ab8e546d9a1273e79` | `docs/seed-coordinator-queue-20260731` | earlier session — queue seeding | finished (safe to clean) | clean | Yes — PR #356 MERGED |
+| 12 | `.claude/worktrees/agent-a5f6c7633e4399261` | `docs/handoff-intake-queue-sync-20260731` | earlier session | finished (safe to clean) | clean | Yes — PR #357 MERGED |
+| 13 | `.claude/worktrees/agent-ae3201aad36f02585` | `feat/ci-backlog-queue-sync-guard` | earlier session — B13 queue-sync guard | finished (safe to clean) | clean | Yes — PR #359 MERGED |
+| 14 | `.claude/worktrees/agent-a471c39b395fb07f4` | `docs/coordinator-final-handover-20260731` | earlier session | finished (safe to clean) | clean | Yes — PR #355 MERGED |
+| 15 | `.claude/worktrees/agent-licensor-approve` | `feat/licensor-alias-owner-approval-20260731` | earlier session — the six alias rulings | finished (safe to clean) | clean | Yes — PR #352 MERGED |
+| 16 | `.claude/worktrees/agent-a34d0b857a86a8e5a` | `backlog/paused-agent-worktree-sweep` | earlier session — **this is where B11 was recorded** | finished (safe to clean) | clean | Yes — PR #353 MERGED |
+| 17 | `.claude/worktrees/agent-a89327b8bdc3cad66` | `docs/coordinator-intake-lifecycle-20260731` | earlier session — Part B2 lifecycle | finished (safe to clean) | clean | Yes — PR #351 MERGED |
+| 18 | `.claude/worktrees/agent-a7c7145b2908491b5` | `docs/coordinator-handover-20260731-1755` | earlier session — the 17:55 handover | finished (safe to clean) | clean | Yes — PR #350 MERGED |
+| 19 | `.claude/worktrees/agent-a2209c948a524d76a` | `docs/handoff-corrections-20260731` | earlier session | finished (safe to clean) | clean | Yes — PR #349 MERGED |
+| 20 | `.claude/worktrees/agent-a18e8dbd5e9f2a218` | `docs/coordinator-intake-20260731` | earlier session — created `COORDINATOR_INTAKE.md` | finished (safe to clean) | clean | Yes — PR #348 MERGED |
+| 21 | `.claude/worktrees/agent-aed50174cbc6255a3` | `docs/handoff-improvement-plan-20260731` | earlier session — added `## BACKLOG` | finished (safe to clean) | clean | Yes — PR #347 MERGED |
+| 22 | `.claude/worktrees/agent-ae7a53ae600b5b683` | `feat/core-licensor-alias-20260731` | earlier session | finished (safe to clean) | clean | Yes — PR #345 MERGED |
+| 23 | `.claude/worktrees/adoring-bose-f6e5ef` | `claude/adoring-bose-f6e5ef` | earlier session | finished (safe to clean) | clean | Yes — PR #343 MERGED |
+| 24 | `.claude/worktrees/intelligent-benz-f7502b` | `claude/intelligent-benz-f7502b` | earlier session | finished (safe to clean) | clean | Yes — PR #342 MERGED |
+| 25 | `.claude/worktrees/happy-proskuriakova-a20b47` | `claude/coldlion-promotion-dead-failure-update-20260731` | earlier session | finished (safe to clean) | clean | Yes — PR #341 MERGED |
+| 26 | `.claude/worktrees/intelligent-bhabha-81eb99` | `fix/wire-coldlion-step7a-tests-ci` | earlier session | finished (safe to clean) | clean | Yes — PR #340 MERGED |
+| 27 | `.claude/worktrees/agent-a9b5bd066c13f571c` | `docs/psg5-entry-record-slot-blocked-20260731` | earlier session — PSG-5 | finished (safe to clean) | clean | Yes — PR #338 MERGED |
+| 28 | `.claude/worktrees/agent-acdee405d4b4b9701` | `docs/ci-stale-verdict-paths-filter-20260731` | earlier session — related to B2 | finished (safe to clean) | clean | Yes — PR #336 MERGED |
+| 29 | `.claude/worktrees/wizardly-montalcini-ffdabe` | `docs/handoff-public-schema-anon-lockdown` | earlier session | finished (safe to clean) | clean | Yes — PR #333 MERGED |
+| 30 | `.claude/worktrees/admiring-mestorf-037019` | `fix/clickup-runner-confirm-clean-run` | earlier session | finished (safe to clean) | clean | Yes — PR #330 MERGED |
+| 31 | `.claude/worktrees/cool-morse-9da2b5` | `fix/duplicate-migration-version-20260728160000` | earlier session — duplicate-version fix | finished (safe to clean) | clean | Yes — PR #322 MERGED |
+| 32 | `.claude/worktrees/agent-a8fd75e9b517885c6` | `nbc-alias-work` | ❓ **unattributed** | **UNKNOWN — do not clean** | clean | **No PR has ever existed for this branch** |
+| 33 | `.claude/worktrees/agent-a9b9b048681d1744f` | `worktree-agent-a9b9b048681d1744f` | ❓ **unattributed** | **UNKNOWN — do not clean** | clean | **No PR has ever existed for this branch** |
+| 34 | `.claude/worktrees/elastic-babbage-df8f2e` | `claude/elastic-babbage-df8f2e` | ❓ **unattributed** | **UNKNOWN — do not clean** | clean | **No PR has ever existed for this branch** |
+
+**About the three `unattributed` rows (32–34).** They are clean, but **no PR has
+ever been opened for any of their branches**. That means either (a) an agent
+finished exploratory work and never shipped it, or (b) **an agent is paused
+mid-task and its work exists nowhere else.** Those two look identical from outside
+— that IS B11. Deleting them could destroy the only copy of unmerged work. **Treat
+them as live until someone establishes otherwise**, by inspecting the branch's
+commits and asking Albert whether the work is wanted — not by assuming.
+
+`nbc-alias-work` in particular sounds related to the licensor-alias workstream that
+was settled in PR #352; it may be a superseded fork of it, but that is a guess and
+is recorded here **as a guess, not a finding**.
+
+**Two worktrees are NOT under `.claude/worktrees/`** and are easy to miss in a
+manual sweep: `C:/tmp/shared-db-rfq-groups` (row 7, the RFQ workstream) and
+`C:/Users/ahazan2/AppData/Local/Temp/claude/intake-mg07` (row 3, an OPEN intake PR).
+Row 3 must **not** be cleaned — its PR is open.
+
+**Two agents removed their own worktrees** and therefore do not appear above at
+all: the **C2 verifier** (part b, block 4) and the **production truth verifier**
+(part b, block 16). Both were read-only. Nothing is outstanding for either.
+
+**Also noted by the production truth verifier (block 16):** the surviving RFQ
+worktree (row 7) is on the feature branch, not `origin/main`. That is a process gap,
+not a fault — but it means a session that opens that directory expecting `main`
+gets `feat/style-tracker-rfq-groups`. The same trap as §3.2, in a second location.
+
 ---
 
 ## 4. Everything we tried that did NOT work — MANDATORY SECTION
@@ -760,7 +865,7 @@ B14 is fixed, but Step 8 remains blocked on **all** of:
 - **No worktree or branch sweep was performed.** 33 worktrees are registered. **This
   was a decision, not neglect.** B11 is unresolved — a paused agent is
   indistinguishable from a finished one, and a sweep earlier today already deleted a
-  live agent's workspace. The worktrees are **documented, not deleted**. If you
+  live agent's workspace. The worktrees are **documented, not deleted** — full ledger of all 34 in **§3.8**. If you
   sweep, use the `cleanup-worktree` skill, only when the repo is quiet, and never
   remove a worktree that is dirty, locked, or held by a live process.
 - **PRs #365 and #366 were left OPEN and un-ingested deliberately** — other sessions'
@@ -802,7 +907,13 @@ B14 is fixed, but Step 8 remains blocked on **all** of:
 
 # PART (b) — ONE BLOCK PER SUB-AGENT (19 blocks)
 
-Format for each: **asked / did / found / PR / worktree / deliberately did NOT do.**
+Every block carries the same six fields: **Asked · Did · Found · PR / branch ·
+Worktree · Deliberately did NOT.** Where a field is genuinely empty it says
+**"none"** explicitly — so the reader can tell the difference between *nothing* and
+*not recorded*. Every block carries an explicit **worktree verdict**:
+**live (resumable)**, **finished (safe to clean)**, **removed by the agent itself**,
+or **none created**. The consolidated ledger for all 34 registered worktrees is
+**§3.8**, which also explains why **no sweep was performed**.
 
 ---
 
@@ -815,8 +926,11 @@ Format for each: **asked / did / found / PR / worktree / deliberately did NOT do
 - **Found:** the queue sections were empty **only because nobody had seeded them** —
   not because there was no work. This is the finding that made queue-seeding a
   required handover criterion.
-- **PR:** none. **Worktree:** none.
-- **Deliberately did NOT:** sweep anything.
+- **PR / branch:** none — read-only, nothing to ship.
+- **Worktree:** **none created.** Read-only agent, ran in the coordinator's context.
+  Nothing to clean.
+- **Deliberately did NOT:** sweep anything — it counted and reported the worktrees
+  and stray directories rather than removing them, which was correct under B11.
 
 ---
 
@@ -831,8 +945,13 @@ Format for each: **asked / did / found / PR / worktree / deliberately did NOT do
   yielding a safe-looking key with a hole in it. Cannot occur against the frozen
   artifact, so it was **pinned as current behaviour, NOT fixed**. Also flagged 2
   local test failures that are the **Windows CRLF defect (B1)** — green on Linux CI.
-- **Deliberately did NOT:** fix the tool under test. Correct call — a test PR that
-  also changes behaviour cannot prove either.
+- **PR / branch:** **#358 MERGED** / `test/b8-rollback-sql-tests`.
+- **Worktree:** `.claude/worktrees/b8-rollback` — **finished (safe to clean)**.
+  Clean; PR merged (ledger row 4).
+- **Deliberately did NOT:** fix the tool under test, and did not "fix" the
+  empty-segment behaviour it found. Correct call — a test PR that also changes
+  behaviour cannot prove either. **If you fix `compositeKeyOf` later, expect the
+  pinned test to fail; that is the test doing its job, not a regression.**
 
 ---
 
@@ -846,7 +965,14 @@ Format for each: **asked / did / found / PR / worktree / deliberately did NOT do
   had mutated anything.
 - **Found:** the plan claimed **4** pending migrations. **The truth is 27** (18
   ColdLion + 9 unrelated). **The "~15 unrelated" figure in the docs is WRONG.**
-- **Worktree/branch:** `agent/c2-migration-manifest` — **finished**.
+- **PR / branch:** **#360 MERGED** / `agent/c2-migration-manifest`.
+- **Worktree:** `.claude/worktrees/c2-manifest` — **finished (safe to clean)**.
+  Clean; PR merged (ledger row 5). It survived the agent's two deaths, which is
+  exactly why a dead agent's worktree must never be assumed abandoned on sight.
+- **Deliberately did NOT:** **none recorded.** This agent died twice and did not
+  report any deliberate omission — treat its scope as "the manifest only", and note
+  that it could not account for its own database contact, which is why block 4
+  exists.
 
 ---
 
@@ -864,7 +990,12 @@ Format for each: **asked / did / found / PR / worktree / deliberately did NOT do
   real** (unguarded grant on functions absent from production → `undefined_function`
   42883). **Cleared two false alarms:** a function name appearing only as a string
   literal in an allowlist, and a migration version referenced only in a prose comment.
-- **Worktree:** removed by itself.
+- **PR / branch:** none — read-only verification, nothing to ship.
+- **Worktree:** **removed by the agent itself.** It does not appear in
+  `git worktree list` and there is nothing outstanding to clean.
+- **Deliberately did NOT:** author anything, correct #360 in place, or touch
+  production. It reported a verdict and left the fix (there was none needed) to the
+  coordinator — the right separation for a verifier.
 
 ---
 
@@ -886,15 +1017,21 @@ Format for each: **asked / did / found / PR / worktree / deliberately did NOT do
 - **⚠️ EXCEEDED ITS ALLOWED FILE LIST** — edited `coldlion-sync-common.mjs` and
   `phase6-cli-result-parse.mjs` — **and disclosed it.** The rehearsal was unrunnable
   otherwise. The disclosure is why this was acceptable.
-- **Deliberately did NOT:** touch production, author a migration, or merge.
+- **PR / branch:** **#362 MERGED** / `rehearsal/coldlion-recurring-20260731`.
+- **Worktree:** `.claude/worktrees/coldlion-rehearsal-20260731` — **finished (safe to
+  clean)**. Clean; PR merged (ledger row 6). **Shared with blocks 7 and 8**, which
+  worked the same branch — so this worktree carries three agents' output, and
+  cleaning it retires all three at once.
+- **Deliberately did NOT:** touch production, author a migration, or merge. It also
+  did not fix the ENOBUFS cliff properly — it raised the buffer, which became B14.
 
 ---
 
 ## Block 6 — Independent review of #362 (read-only)
 
 - **Asked:** independently review PR #362.
-- **Verdict: APPROVE WITH CONDITIONS.** Zero Critical, **one High** — zero tests
-  added on the file the production feed depends on.
+- **Did:** full review. **Verdict: APPROVE WITH CONDITIONS.** Zero Critical,
+  **one High** — zero tests added on the file the production feed depends on.
 - **Found:** confirmed defect 1 **IS a production risk**, by tracing `runSql` →
   `promote-coldlion-source-owned.mjs` → the production workflow and establishing
   **there is no separate production client**. Also established the fix **moves the
@@ -904,6 +1041,12 @@ Format for each: **asked / did / found / PR / worktree / deliberately did NOT do
   no `record(...)` assertion was touched; the fixture was broadened so the guard is
   actually reached. This is the right way to answer "did you weaken the tests to make
   them pass?".
+- **PR / branch:** none — read-only reviewer on #362.
+- **Worktree:** **none created.** Reviewed the PR diff; no worktree in
+  `git worktree list` is attributable to it. Nothing to clean.
+- **Deliberately did NOT:** fix anything it found, or approve outright. It raised the
+  High condition and handed the fix to a separate agent (block 7) — reviewer and
+  implementer kept separate on purpose.
 
 ---
 
@@ -915,10 +1058,16 @@ Format for each: **asked / did / found / PR / worktree / deliberately did NOT do
   via a fake `supabase` on PATH** — a clean technique worth reusing.
   **16 tests, 12 mutations, every one watched fail, all three sources restored
   byte-identical with SHA-256 proof.** Added **B14** to `HANDOFF.md`.
-- **Self-corrected a false-negative byte comparison** — it had compared a character
-  index against byte offsets in a file full of em dashes (§4.8).
+- **Found:** **self-corrected a false-negative byte comparison** — it had compared a
+  character index against byte offsets in a file full of em dashes (§4.8).
+- **PR / branch:** **#362 MERGED** (same PR as block 5) /
+  `rehearsal/coldlion-recurring-20260731`.
+- **Worktree:** `.claude/worktrees/coldlion-rehearsal-20260731` — **shared with
+  blocks 5 and 8; finished (safe to clean)** (ledger row 6).
 - **Deliberately did NOT:** use the `no-queue-entry-needed:` opt-out. Correct — the
-  opt-out exists for genuinely queue-irrelevant work, not for convenience.
+  opt-out exists for genuinely queue-irrelevant work, not for convenience. It also
+  did not attempt the real B14 fix, recording it as backlog instead of scope-creeping
+  a conditions PR.
 
 ---
 
@@ -929,6 +1078,13 @@ Format for each: **asked / did / found / PR / worktree / deliberately did NOT do
 - **Did:** added exactly one block to the `## REQUEST QUEUE`. **Purely additive and
   byte-proven: 58,805 original bytes all intact, 2,379 bytes inserted at a single
   point.** That is the standard for editing a shared file.
+- **Found:** nothing beyond the edit — narrow task, executed narrowly.
+- **PR / branch:** **#362 MERGED** (same PR as blocks 5 and 7) /
+  `rehearsal/coldlion-recurring-20260731`.
+- **Worktree:** `.claude/worktrees/coldlion-rehearsal-20260731` — **shared with
+  blocks 5 and 7; finished (safe to clean)** (ledger row 6).
+- **Deliberately did NOT:** touch any other block in `COORDINATOR_INTAKE.md`, tidy
+  the file, or reorder anything — Part B2.1 forbids it, and it complied.
 
 ---
 
@@ -948,85 +1104,134 @@ Format for each: **asked / did / found / PR / worktree / deliberately did NOT do
   **pre-aggregate join ~118 ms — shipped, no index.**
 - Preview results: 15,533 rows, 2,015 linked, 11 multi-group — matching the brief's
   sanity targets exactly.
+- **PR / branch:** **#363 MERGED** / `feat/style-tracker-rfq-groups`.
+- **Worktree:** `C:/tmp/shared-db-rfq-groups` — **finished (safe to clean)**. Clean;
+  PR merged (ledger row 7). ⚠️ **It is NOT under `.claude/worktrees/`** and is easy to
+  miss in a manual sweep. **Shared with blocks 11, 12 and 13.**
+- **Deliberately did NOT:** promote to production on its own authority (that was
+  blocks 12 and 13, after Albert delegated the timing), and did not add an index —
+  it proved one was unnecessary rather than adding it "to be safe".
 
 ---
 
 ## Block 10 — Kimi K3 review of #363 (read-only)
 
-- **Verdict: MERGE WITH CHANGES.**
-- **Proved from the SQL — not from a row count — that the pre-aggregate join cannot
-  change the view's row count under ANY data condition:** `GROUP BY` guarantees a
-  unique join key, `LEFT JOIN` preserves unmatched rows, blank/NULL codes excluded on
-  both sides. This is the standard of proof a view change deserves.
-- **Four findings, all confirmed by the coordinator against the file:**
+- **Asked:** independently review PR #363.
+- **Did:** full review. **Verdict: MERGE WITH CHANGES.**
+- **Found:** **proved from the SQL — not from a row count — that the pre-aggregate
+  join cannot change the view's row count under ANY data condition:** `GROUP BY`
+  guarantees a unique join key, `LEFT JOIN` preserves unmatched rows, blank/NULL
+  codes excluded on both sides. This is the standard of proof a view change deserves.
+  **Four findings, all confirmed by the coordinator against the file:**
   1. **Dead assertion** — a second `v_fuzzy_hit` computed and never asserted.
   2. **Hard-coded 1900–2200 count bounds** that would abort a production apply on
      ordinary data drift.
   3. **Missing `notify pgrst, 'reload schema'`.**
   4. **The definer-rights view extends `dflow` readability to all authenticated users
      across all four apps** — a cross-app data-contract question, not a code nit.
+- **PR / branch:** none — read-only reviewer on #363.
+- **Worktree:** **none created.** No worktree in `git worktree list` is attributable
+  to it. Nothing to clean.
+- **Deliberately did NOT:** fix any of the four findings itself, and did not block
+  the merge. It escalated finding 4 as an **owner question for Albert** rather than
+  deciding a cross-app visibility policy on its own — the right call.
 
 ---
 
 ## Block 11 — Grok 4.5 — #363 fixes
 
-- **Did:** all four findings fixed on the same branch. Fuzzy check now **raises**;
-  bounds replaced with a **sanity floor** instead of hard-coded values;
-  `notify pgrst` restored; the `dflow` exposure documented in the PR body.
-- Re-applied to preview, re-verified, and **proved the new assertion fires by
-  deliberately inverting it** — the negative-path proof B7 asks for.
+- **Asked:** close all four findings from block 10.
+- **Did:** all four fixed on the same branch. Fuzzy check now **raises**; bounds
+  replaced with a **sanity floor** instead of hard-coded values; `notify pgrst`
+  restored; the `dflow` exposure documented in the PR body. Re-applied to preview and
+  re-verified.
+- **Found:** **proved the new assertion fires by deliberately inverting it** — the
+  negative-path proof B7 asks for, done voluntarily.
 - **Albert approved the `dflow` visibility question** (RFQ group names visible to all
   signed-in users across all four apps; `anon` stays closed).
+- **PR / branch:** **#363 MERGED** / `feat/style-tracker-rfq-groups`.
+- **Worktree:** `C:/tmp/shared-db-rfq-groups` — **shared with blocks 9, 12, 13;
+  finished (safe to clean)** (ledger row 7).
+- **Deliberately did NOT:** replace the removed hard-coded bounds with new hard-coded
+  bounds — it used a sanity floor, which is why the promotion survived the 15,533 →
+  15,534 drift hours later.
 
 ---
 
 ## Block 12 — Grok 4.5 — promotion recommendation (read-only)
 
-- **Albert delegated the timing judgement to Grok.** **Verdict: PROMOTE TONIGHT.**
-- **Critically:** read the **LIVE production view definition** and confirmed it
-  matched base migration `20260721143000` **exactly (48 columns, exact match)** —
+- **Asked:** recommend whether to promote `20260731230000` to production tonight.
+  **Albert delegated this timing judgement to Grok**, not to the coordinator.
+- **Did:** read-only assessment. **Verdict: PROMOTE TONIGHT.**
+- **Found — critically:** read the **LIVE production view definition** and confirmed
+  it matched base migration `20260721143000` **exactly (48 columns, exact match)** —
   **this is what closed the silent-column-loss risk.** Do this before any view
-  replacement.
-- Measured production assertion values: **15,534 rows vs preview's 15,533**. The data
-  had **already drifted**, which vindicated removing the hard-coded bounds hours
-  after the decision was made.
+  replacement. Also measured production assertion values: **15,534 rows vs preview's
+  15,533** — the data had **already drifted**, vindicating the removal of the
+  hard-coded bounds within hours of the decision.
+- **PR / branch:** none — read-only recommendation on the existing #363 branch.
+- **Worktree:** `C:/tmp/shared-db-rfq-groups` — **no separate worktree created;
+  shared with blocks 9, 11, 13; finished (safe to clean)** (ledger row 7).
+- **Deliberately did NOT:** perform the promotion itself. Recommendation and
+  execution were kept in separate blocks (12 and 13) so the decision could be
+  reviewed before it was acted on.
 
 ---
 
 ## Block 13 — Grok 4.5 — bounded production promotion
 
-- **Did:** promoted **ONLY** `20260731230000` to production. The dry run listed
-  **exactly one file** — that is the bound, and it was checked before applying.
-- **Post-apply verification:** ledger row present; live view has `rfq_groups`;
+- **Asked:** promote `20260731230000` to production, bounded to that one migration.
+- **Did:** promoted **ONLY** `20260731230000`. The dry run listed **exactly one
+  file** — that is the bound, and it was checked before applying.
+- **Found / verified post-apply:** ledger row present; live view has `rfq_groups`;
   **48 → 49 columns with nothing lost**; `MFZ88KMSC01` → "Family Dollar July 2023";
   multi-group deduped newest-first; unmatched `[]`; row count 15,534 unchanged;
   **`anon` denied via `has_table_privilege`** — it correctly noticed that
   **`SET LOCAL ROLE anon` lies** over a superuser pooler connection (§4.3); and the
   **mirror sync reached all 9 consumer repos.**
+- **PR / branch:** **#363 MERGED** / `feat/style-tracker-rfq-groups`.
+- **Worktree:** `C:/tmp/shared-db-rfq-groups` — **shared with blocks 9, 11, 12;
+  finished (safe to clean)** (ledger row 7). ⚠️ **It is left on the feature branch,
+  not `origin/main`** — flagged by block 16 as a process gap. A session opening that
+  directory expecting `main` gets `feat/style-tracker-rfq-groups`.
+- **Deliberately did NOT:** apply any of the other 26 pending migrations, and did not
+  pass `--include-all`. The bound is the entire safety property here.
 
 ---
 
 ## Block 14 — Backlog reader (read-only)
 
-- **Did:** read all **5,982 lines** of `HANDOFF.md`. Produced the B1–B14 status list.
-- **Found ~19 live items the coordinator's matrix was missing.**
-- **Corrected a documented error: `ai-devops` PR #1 is MERGED, not open.**
-  `HANDOFF.md` says open **in two places** and is **WRONG**.
+- **Asked:** produce an accurate B1–B14 status list from `HANDOFF.md`.
+- **Did:** read all **5,982 lines** of `HANDOFF.md`.
+- **Found: ~19 live items the coordinator's matrix was missing.** Also **corrected a
+  documented error: `ai-devops` PR #1 is MERGED, not open** — `HANDOFF.md` says open
+  **in two places** and is **WRONG**.
+- **PR / branch:** none — read-only; its output was consumed by the coordinator and
+  is carried in this handover (§5.10, §6 step 9).
+- **Worktree:** **none created.** Nothing to clean.
+- **Deliberately did NOT:** edit `HANDOFF.md` to correct the two wrong statements
+  about `ai-devops` PR #1 — it reported them instead. **They are therefore STILL
+  WRONG in `HANDOFF.md` right now.** Do not be misled by them; see §6 step 9.
 
 ---
 
 ## Block 15 — Matrix refresher (read-only)
 
-- **Did:** read both `HANDOFF.md` and `COORDINATOR_INTAKE.md` in full.
-- **Surfaced:** the two open intake PRs; the hourly alert-monitor failure; the parked
-  shared checkout; and **two NEW Step 8 blockers**, the important one being that
-  **the production lane cannot produce a plan today** — 6 of 14 promotable ColdLion
-  migrations sort older than production's ledger head, so Supabase refuses them
-  without `--include-all`, **which the workflow does not pass**. This needs a
+- **Asked:** refresh the coordinator's status matrix against both documents.
+- **Did:** read `HANDOFF.md` and `COORDINATOR_INTAKE.md` in full.
+- **Found / surfaced:** the two open intake PRs; the hourly alert-monitor failure;
+  the parked shared checkout; and **two NEW Step 8 blockers**, the important one being
+  that **the production lane cannot produce a plan today** — 6 of 14 promotable
+  ColdLion migrations sort older than production's ledger head, so Supabase refuses
+  them without `--include-all`, **which the workflow does not pass**. This needs a
   **WORKFLOW CHANGE** (§5.3).
 - **Also correctly challenged the RFQ promotion claim.** Its evidence was
   pre-promotion and therefore mistimed. **The challenge was right to make** even
   though the promotion turned out to be real — that is how a reviewer should behave.
+- **PR / branch:** none — read-only.
+- **Worktree:** **none created.** Nothing to clean.
+- **Deliberately did NOT:** resolve the promotion dispute itself. It escalated rather
+  than adjudicating, which is why block 16 was dispatched.
 
 ---
 
@@ -1034,17 +1239,19 @@ Format for each: **asked / did / found / PR / worktree / deliberately did NOT do
 
 Settled both disputes. This is the most evidentially careful block of the session.
 
-- **CLAIM 1 — the RFQ promotion: CONFIRMED.** Ledger head `20260731230000`;
-  `pg_get_viewdef` shows the column; 49 columns; exactly 27 still pending.
-  **Route sanctioned:** `.github/workflows/shared-supabase-migrations.yml` contains a
-  step literally named **"Refuse production apply"** which BLOCKS production applies,
-  so **"no Actions run" is the expected state for every production promotion this
-  repo has ever done**; `AGENTS.md` §5.1 prescribes exactly the local procedure used.
-  **Two process gaps flagged:** no Actions bounded dry-run artifact exists for this
-  promotion (only a local one, which §5.1 permits), and the surviving worktree is on
-  the feature branch, not `origin/main`.
-- **CLAIM 2 — the 442-row `DELETE FROM ingest.raw_record` hit PRODUCTION**, proved
-  three ways: 97 survivors matching the reported post-delete count;
+- **Asked:** settle (1) whether the RFQ promotion actually happened, and (2) which
+  database the 442-row `DELETE FROM ingest.raw_record` hit.
+- **Did / found — CLAIM 1, the RFQ promotion: CONFIRMED.** Ledger head
+  `20260731230000`; `pg_get_viewdef` shows the column; 49 columns; exactly 27 still
+  pending. **Route sanctioned:** `.github/workflows/shared-supabase-migrations.yml`
+  contains a step literally named **"Refuse production apply"** which BLOCKS
+  production applies, so **"no Actions run" is the expected state for every
+  production promotion this repo has ever done**; `AGENTS.md` §5.1 prescribes exactly
+  the local procedure used. **Two process gaps flagged:** no Actions bounded dry-run
+  artifact exists for this promotion (only a local one, which §5.1 permits), and the
+  surviving worktree is on the feature branch, not `origin/main` (ledger row 7).
+- **Did / found — CLAIM 2: the 442-row DELETE hit PRODUCTION**, proved three ways:
+  97 survivors matching the reported post-delete count;
   `pg_stat_all_tables.n_tup_del` = **exactly 442**; and migration `20260722171500`
   **explicitly states it left `raw_record` untouched**. The deleted rows are raw
   payloads from the pre-2026-07-22 buggy `/vendors` endpoint and are **NOT
@@ -1056,12 +1263,19 @@ Settled both disputes. This is the most evidentially careful block of the sessio
   evidence is what makes the rest of it trustworthy.
 - **Cleared PR #337:** merged uncoordinated, but it is docs-only, +21/−6, and merged
   at **13:49 UTC** — outside tonight's window.
+- **PR / branch:** none — read-only verification.
+- **Worktree:** **removed by the agent itself.** It does not appear in
+  `git worktree list`; nothing outstanding to clean.
+- **Deliberately did NOT:** propose any remediation for the 442 deleted rows. It
+  established the facts and stopped — correctly, because Albert then ruled the delete
+  intended (§9 decision 1). It also did not clean the RFQ worktree it flagged.
 
 ---
 
 ## Block 17 — 66-code licensor table → **PR #369 MERGED**
 
 - **Asked:** enumerate the unmatched ColdLion property codes grouped by licensor.
+- **Did:** produced `docs/coldlion-unmatched-properties-by-licensor-20260731.md`.
 - **Found the premise stale: it is 33 codes, not 66** — ColdLion now offers 285
   property codes, not 322.
 - **27 of the 33 were created in ColdLion on 2026-07-30 — a licence created yesterday
@@ -1072,25 +1286,30 @@ Settled both disputes. This is the most evidentially careful block of the sessio
 - **Recommends admitting all 33; only 5 rows genuinely need Albert** — `AM1`/`AM2`
   (Anchorman), `MGM` (Mighty Mouse), `WND` (It's a Wonderful Life), `EP` (Emily in
   Paris).
-- **Discarded PopDAM asset counts** because PopDAM's property codes are a **colliding
-  code space** — its `BB` is Big Bird, not The Brady Bunch. Presenting them as volume
-  would have misled Albert. This was the right call and cost it its headline number.
-- **Flagged:** PopDAM files **8 Exorcist assets under NBC when Warner Bros is
-  correct.**
-- **Output:** `docs/coldlion-unmatched-properties-by-licensor-20260731.md`.
+- **Flagged:** PopDAM files **8 Exorcist assets under NBCUniversal when Warner Bros
+  is correct.**
+- **PR / branch:** **#369 MERGED** / `agent/licensor-gap-66` (branch name preserves
+  the stale "66" premise it disproved — do not read the count off the branch name).
+- **Worktree:** `.claude/worktrees/agent-licensor-gap-66` — **finished (safe to
+  clean)**. Clean; PR merged (ledger row 9).
+- **Deliberately did NOT:** include PopDAM asset counts. **Discarded on purpose**
+  because PopDAM's property codes are a **colliding code space** — its `BB` is Big
+  Bird, not The Brady Bunch. Presenting them as volume would have silently misled
+  Albert about which properties matter. This cost it its headline number and was the
+  right call. **Do not "restore" those counts.** It also did not admit any of the 33
+  codes — that needs Albert's ruling on 5 of them first.
 
 ---
 
 ## Block 18 — B14 root-cause fix → **PR #367 MERGED**
 
 - **Asked:** remove the ENOBUFS cliff rather than raise it.
-- **Chose** paging + spawn-fault classification. **Rejected the aggregate/hash option
-  WITH EVIDENCE** — the planner decides row by row and consumes all 14 probe keys, so
-  no aggregate preserves what it needs. Do not re-propose it.
+- **Did / chose** paging + spawn-fault classification. **Rejected the aggregate/hash
+  option WITH EVIDENCE** — the planner decides row by row and consumes all 14 probe
+  keys, so no aggregate preserves what it needs. Do not re-propose it.
 - **Round 1 reviewed by Kimi: MERGE WITH CHANGES**, two Mediums, **both confirmed by
-  the coordinator**:
-  (a) it had **removed one healthy-race breaker trip and installed another** — a
-  benign snapshot overlap was still being recorded as a failure; and
+  the coordinator**: (a) it had **removed one healthy-race breaker trip and installed
+  another** — a benign snapshot overlap was still being recorded as a failure; and
   (b) `maxBuffer` was applied to **ONE of two spawn paths**, leaving the **psql path
   at the original 1 MiB cliff**, while the page size rested on an **unverified
   ~700 B/row estimate**.
@@ -1107,7 +1326,14 @@ Settled both disputes. This is the most evidentially careful block of the sessio
   distinct by SHA, no cross-contamination, every named function on main still present
   on the branch. An apparent "missing function" was a **grep artifact caused by the
   file's deliberate NUL separators** (§4.4).
-- **B14 is RESOLVED and no longer a Step 8 blocker.**
+- **Found:** **B14 is RESOLVED and no longer a Step 8 blocker.**
+- **PR / branch:** **#367 MERGED** / `fix/b14-coldlion-probe-bounded`.
+- **Worktree:** `.claude/worktrees/b14` — **finished (safe to clean)**. Clean; PR
+  merged (ledger row 8). **Note:** this is the worktree in which the harness incident
+  happened; the recovery is committed and verified, so nothing is pending there.
+- **Deliberately did NOT:** touch production, or take the aggregate/hash route it
+  rejected. It also did not silently absorb its own harness incident — it disclosed
+  it, which is the behaviour to reward.
 
 ---
 
@@ -1115,20 +1341,23 @@ Settled both disputes. This is the most evidentially careful block of the sessio
 
 - **Asked:** record Albert's "ColdLion ERP data is canonical, follow it" ruling.
 - **Did:** recorded it in `AGENTS.md` §6.3.
-- **Added a scope guard the coordinator had not thought of:** "follow the ERP" could
-  be read as licence to **delete audit and evidence tables**, so the ruling
-  **explicitly excludes** `plm.coldlion_promotion_audit`,
+- **Found / added a scope guard the coordinator had not thought of:** "follow the
+  ERP" could be read as licence to **delete audit and evidence tables**, so the
+  ruling **explicitly excludes** `plm.coldlion_promotion_audit`,
   `plm.coldlion_promotion_quarantine`, `plm.taxonomy_parallel_observation`,
   `plm.taxonomy_circuit_breaker_event`, `app.db_data_admin_audit_event`.
 - **Found 5 more places** beyond the 2 already known that still assert the bronze
   layer is immutable. **Two are LIVE documents a future session could act on and
   still need the supersession pointer: `HANDOFF.md:5381` and
   `fix_schema_for_api.md:40,159`.**
-- **Deliberately did NOT** edit the two applied migrations carrying stale comments
+- **PR / branch:** **#370 MERGED** / `docs/coldlion-canonical-ruling-20260731`.
+- **Worktree:** `.claude/worktrees/canonical-ruling` — **finished (safe to clean)**.
+  Clean; PR merged (ledger row 10).
+- **Deliberately did NOT:** edit the two applied migrations carrying stale comments
   (`20260722171500`, `20260722213000`) — editing an applied migration changes nothing
-  in the DB and desynchronises file from ledger. Correct call.
+  in the DB and desynchronises file from ledger. Correct call. It also did not fix
+  the 5 remaining stale assertions it found; 2 of those are now a queued request.
 
----
 ---
 
 ## SELF-AUDIT (handoff-writer gate)
