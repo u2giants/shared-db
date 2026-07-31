@@ -2037,6 +2037,48 @@ and was forbidden from adding scripts or workflows.
 > the code under test each made a test fail, and both source files were restored byte-identical
 > (verified by SHA-256).
 >
+> **REVIEW ROUND 2 (Kimi K3, MERGE WITH CHANGES) — three further corrections, all real.**
+>
+> An independent review confirmed the primary safety property (no path to a wrong canonical
+> write; the total ordering holds, the joins cannot drop a page row, a short page is a sound
+> termination signal, and the NUL separator in the duplicate-key guard is injective at byte
+> level). It also found three defects in the first version of the fix:
+>
+> 1. **The fix had installed a NEW healthy-race breaker trip.** A snapshot change or a duplicate
+>    key threw a plain `Error`, which the catch recorded as a durable failed row plus a critical
+>    alert — so two unlucky overlaps with the mirror lane in consecutive cycles would auto-trip
+>    the breaker on a healthy feed. That is the same defect class B14 exists to fix, arriving
+>    through another door. Now: the read **restarts from page 0 once**
+>    (`CYCLE_STATE_MAX_ATTEMPTS` = 2; the collected pages are discarded whole, never stitched,
+>    never partial). A snapshot race that survives the retry is tagged `CYCLE_STATE_RACE` and
+>    exits **5**, recording nothing. A DUPLICATE that survives a clean restart is deliberately
+>    treated differently — it stays a real, recorded fault, because the snapshot held still and
+>    the window shifted anyway, which means the read itself is broken and a row was silently
+>    skipped.
+> 2. **The psql path still had the original 1 MiB cliff.** `maxBuffer` had been applied only to
+>    the Supabase-CLI spawn, so wherever `DATABASE_URL` is set the ENOBUFS cliff was completely
+>    untouched. Both spawns now take the same `SPAWN_MAX_BUFFER_BYTES` constant, and a test
+>    asserts it appears on both and that no hand-written literal returns. An asymmetry between
+>    two branches doing the same job is how this defect survived in the first place.
+> 3. **The page size rested on a GUESS.** It was derived from an estimated "~700 bytes/row".
+>    It is now **measured**: the test rebuilds the exact probe row shape from the 570 REAL
+>    ColdLion rows committed under
+>    `docs/verification/coldlion-licensor-property-phase2b-20260724/` — mean **496 B**, p95 536,
+>    **max 581**. That mean independently reproduces the incident figure (1,305,075 / 496 =
+>    ~2,630 mirror rows), which is what makes it evidence rather than another guess. The budget
+>    is `CYCLE_STATE_MAX_ROW_BYTES` = 2048 (~3.5x the largest real row) and
+>    `CYCLE_STATE_PAGE_SIZE` = 256 is **derived** from it, never hand-tuned. CI re-measures on
+>    every run, so growth in the real data fails the test before it can be wrong in production.
+>
+> A Low finding was also corrected: the comments claimed a killed process is tagged a client
+> fault. On Linux — which CI and the production lane both run on — an external SIGKILL leaves
+> `error` undefined and takes the ordinary recorded-failure path. The comments now say so
+> rather than manufacturing false confidence.
+>
+> **22 mutations** were watched to fail across the two rounds (12 for the round-2 behaviour, 10
+> re-verifying the round-1 guards after the restructure), with both sources restored
+> byte-identical each time.
+>
 > **No existing test was weakened or deleted.** `tools/coldlion-sync-common-runsql.test.mjs`
 > still passes unchanged: the argv, `--output json`, the raised `maxBuffer` and the diagnosable
 > spawn-fault message are all preserved.
