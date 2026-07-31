@@ -192,6 +192,7 @@ jobs:
             tools/coldlion-production-authorization.test.mjs \
             tools/coldlion-recurring-promotion.test.mjs \
             tools/coldlion-promotion-failure-recording.test.mjs \
+            tools/promote-coldlion-source-owned.test.mjs \
             tools/coldlion-licensor-property-production-workflow.test.mjs \
             tools/phase6-cli-result-parse.test.mjs \
             tools/evaluate-coldlion-licensor-property-cutover-readiness.test.mjs
