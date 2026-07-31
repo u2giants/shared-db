@@ -1377,3 +1377,225 @@ No secret was read or created. **Neither Supabase project was contacted** — pr
 `rjyboqwcdzcocqgmsyel` and production `qsllyeztdwjgirsysgai` were both untouched, and no Supabase
 MCP tool was called (those tools are bound to production in these sessions). This session ran in an
 isolated git worktree at `origin/main` tip `75066fe`. Its only change is documentation.
+
+---
+
+## 22. PSG-5 preview implementation record — contracts applied and proven — 2026-07-31
+
+**Status:** PSG-5 database contracts COMPLETE and proven on preview. **PSG-5 as a whole is NOT
+complete** — it is stopped at an owner gate (section 22.6) and at the PopDAM worker boundary
+(section 22.7). **PSG-6 not started. Production untouched.**
+
+Supersedes section 21's blocking status. Section 21's four findings all carried into the
+implementation and all four proved load-bearing; section 21 remains valid history.
+
+### 22.1 The slot opened
+
+ColdLion Step 7A PR #331 merged as `0798c095a84dbd6bb80465ce1981a1a63cd80218`. Its four migrations
+are on `main`, raising the version floor to `20260730000500`. This session then owned the
+one-schema-change-in-flight slot.
+
+### 22.2 What was applied to preview
+
+Two migrations, applied to `rjyboqwcdzcocqgmsyel` **only**. Each was preceded by a `--dry-run` that
+listed exactly one file — its own — and by re-reading `supabase/.temp/project-ref`.
+
+| Migration | Purpose |
+|---|---|
+| `20260731150000_popsg_property_resolution_contracts.sql` | The section 6.1/6.2/6.3/6.4 contracts |
+| `20260731153000_popsg_property_alias_redundancy_trigger_fix.sql` | Corrective fix for the bug in section 22.5 |
+
+Objects created (verified with `to_regclass` / `pg_proc` / `pg_constraint`, **never by ledger row**):
+
+- `core.normalize_popsg_property_observation(text)` — the single canonical normalizer, an exact SQL
+  implementation of the frozen `popsg-property-observation-v1` contract.
+- `core.property_alias` — shared alias truth, **0 rows**.
+- `dam.popsg_property_resolution` — append-only PopSG decisions, **0 rows**.
+- `public.propose_popsg_property_resolution(...)`, `public.activate_popsg_property_decision_batch(...)`,
+  `public.promote_property_alias_batch(...)` — three separately named RPCs at three authority
+  levels, as section 6.1 requires.
+- `core.reject_redundant_property_alias()`, `dam.enforce_popsg_resolution_append_only()` triggers.
+- **`core.property (id, licensor_id)` unique index** — see the note in section 22.4; this is the one
+  change touching a pre-existing shared table.
+
+**No canonical Property was created, no mapping activated, no tag written or removed, and no
+decision row seeded.** Both new tables are empty on preview.
+
+### 22.3 How the four required properties are proven
+
+`supabase/tests/popsg_property_resolution_contracts.sql` — 27 assertions, all passing against
+preview, wrapped in `begin … rollback` so it leaves nothing behind.
+
+| Required property | Assertions |
+|---|---|
+| Exact same-parent behaviour | B1–B7: same-parent decision accepted; cross-parent decision refused by the composite FK; identical alias text under two Licensors both accepted; duplicate normalized alias refused within one Licensor; alias parent mismatch refused; tagging dispositions must carry a target and non-tagging ones must not; `ambiguous` carries none |
+| Role limits | C1–C7: one active decision per tuple; activation must name actor and time; activation refuses a wrong row count and an unapproved hash; both tables carry **zero non-SELECT policies**; `authenticated` holds **no INSERT/UPDATE/DELETE**; uncertified shared-alias promotion refused |
+| Manual/rejected preservation, zero silent loss | D1–D4: decision rows cannot be deleted; active decision content is immutable; supersede preserves the row; superseded rows are retained |
+| The lockdown did not orphan the RPCs | E1–E6: `authenticated` and `service_role` really can EXECUTE all three RPCs; `anon` can execute none and cannot read alias truth |
+| Normalizer parity | A: **all 21 frozen fixtures reproduce byte-for-byte**, plus NULL-in/NULL-out |
+
+### 22.4 Design decisions worth knowing before changing any of this
+
+- **The cross-parent guard is structural, not application logic.** A CHECK cannot read another
+  table, so both tables carry a composite FK `(property_id, licensor_id) → core.property (id,
+  licensor_id)`. That required adding a unique index on `core.property (id, licensor_id)`. It is
+  purely additive and can never fail (`id` is already the primary key), but it **is** a change to a
+  shared `core` table and PSG-6 must promote it in the same bounded set. The payoff: plan rule 3 —
+  a Property decision may never cross the canonical parent edge — is now enforced by Postgres and
+  survives any application bug, any future worker, and any direct `service_role` write.
+- **`MATCH SIMPLE` makes the guard skip NULL targets automatically**, which is exactly right: the
+  non-tagging dispositions have `property_id IS NULL` and must not be constrained.
+- **Neither table has a write policy for `authenticated` at all.** Section 6.1 requires RLS and
+  GRANTs to enforce read-only *independently*, so writes go only through the SECURITY DEFINER RPCs.
+  An administrator cannot write shared alias truth directly.
+- **The normalizer is `IMMUTABLE`** because generated columns depend on it. It must stay
+  collation- and locale-independent. Changing its body silently rebaselines every stored
+  `normalized_alias` / `normalized_observed_value`; that is a re-freeze of the contract, not a patch.
+- **Activation checks the hash AND the expected row count.** "51 rows" is half of what Albert
+  approved; a batch that no longer has exactly 51 pending rows under the approved hash is not the
+  approved batch. Activation also takes an advisory lock so two callers cannot both pass the check.
+
+### 22.5 The bug the tests caught (record this — it is a whole class)
+
+The first apply passed `check-sql.sh`, applied cleanly, and reported success. Test case **F3 then
+failed: every redundant alias was being accepted.**
+
+Root cause: `core.reject_redundant_property_alias()` is a **BEFORE** row trigger that read
+`new.normalized_alias`. That column is `GENERATED ALWAYS … STORED`, and Postgres computes generated
+columns **after** all BEFORE-row triggers run. So the value was always NULL, `NULL IN (...)`
+evaluated to NULL, the guard never fired, and nothing raised an error.
+
+**This is a silent failure of exactly the shape AGENTS.md section 10.2 warns about** — the object
+existed, was attached, and looked correct. Only a behavioural test could reveal it.
+
+Fixed forward in `20260731153000` by computing from `new.alias` directly. The applied
+`20260731150000` was **not** edited (AGENTS.md section 4 rule 4).
+
+**Generalised rule for this repo: never read a generated column inside a BEFORE trigger.** Compute
+it from the source column using the same function the generated column uses.
+
+### 22.6 OWNER GATE — the eight Licensor aliases are NOT resolved, and must not be resolved by an AI
+
+Plan section 7 step 6 and section 13 decision 7 require settling all eight hard-coded
+`LICENSOR_ALIASES`. Section 21.5 established this is a **prerequisite**: 26 of the 51 approved rows
+(15,816 of 44,331 files, 35.7%) sit under a Licensor the alias list feeds.
+
+Re-derived from the frozen PSG-1 `licensor-alias-blast-radius.csv` (production measurement; preview
+holds no comparable PopSG population, so this frozen evidence is the authority — it was **not**
+re-measured live, and no session should claim otherwise):
+
+| Alias | Resolves to | Active files | Accepted relationships | At-risk |
+|---|---|---:|---:|---:|
+| NBC Universal | NBC | 25,731 | 14,931 | 0 |
+| Marvel Style Guide | Marvel | 14,636 | 7,474 | 0 |
+| One Piece | TOEI - ONE PIECE | 8,383 | 2,471 | 0 |
+| Peanuts | Peanuts Worldwide | 3,509 | 3,705 | 0 |
+| Sesame Workshop | Sesame Street | 1,630 | 77 | 0 |
+| Paramount | Viacom Multi | 9,052 | 5,524 | 0 |
+| **Nickelodeon** | Viacom Multi | **0** | **0** | 0 |
+| **Viacom** | Viacom Multi | **0** | **0** | 0 |
+
+**Which canonical Licensor is correct for each alias is a business judgement about POP's licensing
+relationships. It is Albert's call and an AI session must not make it.** The evidence and the
+options are presented; nothing was decided, and no alias was migrated, retired, or re-pointed.
+
+Albert's decision, per alias, is between:
+
+- **(a) migrate it into a durable approved contract** — the mechanism now exists; a
+  `core.licensor_alias` table mirroring `core.property_alias` would be a small additive migration; or
+- **(b) retain it in worker code with recorded owner sign-off plus a test**, per plan section 7 step 6.
+
+Two facts that narrow the decision without making it:
+
+1. **`Nickelodeon` and `Viacom` are dead** — zero files, zero relationships. Whatever is decided for
+   the live six, these two are no-ops today. Retiring them changes no current behaviour.
+2. Consequently the "three-to-one Viacom mapping" that section 13 decision 7 flagged for particular
+   scrutiny **is effectively one-to-one**: `Paramount → Viacom Multi` carries all 9,052 files and
+   5,524 relationships by itself.
+
+**Until Albert decides, the preview rebuild must not run**, because a later alias change would
+silently re-parent 26 of his 51 approved decisions.
+
+### 22.7 What remains in PSG-5, and where it lives
+
+The database half of PSG-5 is done. The rest is **PopDAM worker code in `u2giants/popdam3`, not
+this repository**, and is therefore untouched here:
+
+- worker loads canonical name/code + `core.property_alias` + `dam.popsg_property_resolution`,
+  all scoped by resolved canonical Licensor (plan section 7 step 4);
+- remove reliance on the frozen-empty `PROPERTY_ALIASES` array (step 5);
+- prove `normalizePopSGTag` is byte-identical to `core.normalize_popsg_property_observation`
+  against the same 21 fixtures (plan test 20 — the SQL side is now proven; the parity assertion
+  needs both);
+- preserve manual/rejected tags (step 7);
+- full deterministic rebuild on preview with the pre-rebuild snapshot taken **from preview at
+  rebuild time** (step 9 and section 21.7).
+
+Seeding and activating the 51 approved decisions is deliberately **not** baked into the migration.
+It is a data step performed through `activate_popsg_property_decision_batch()` with the exact
+approved hash, so activation stays auditable and the migration stays reusable for production.
+
+### 22.8 Residual risk honestly stated
+
+The normalizer's steps 1–2 (NFKC, then the lowercase→uppercase boundary insertion) run before
+lowercasing, so an exotic character whose case-folding differs between PostgreSQL `lower()` and
+JavaScript `String.prototype.toLowerCase()` — Turkish dotted `İ`, German `ß` — could in principle
+diverge. **The frozen 21-fixture corpus does not cover those**, and every non-ASCII character is
+stripped by step 6 anyway, so no known input diverges. This is recorded as a known limit, not a
+proven equivalence: PSG-5's worker-side parity test should add those cases to the corpus.
+
+### 22.9 Preview baseline changes (relay to other sessions)
+
+Preview `rjyboqwcdzcocqgmsyel` gained exactly: migrations `20260731150000` and `20260731153000`;
+tables `core.property_alias` and `dam.popsg_property_resolution` (**both empty**); the normalizer
+and two trigger functions; three `public` RPCs; and a unique index on `core.property (id,
+licensor_id)`. The contract-test suite ran inside a transaction and **rolled back**, so it left no
+rows. **No existing table's data was read, modified, or deleted.** ColdLion's audit/quarantine
+tables and the ClickUp importer rows were not touched.
+
+**Operational fact worth keeping:** the preview branch's pooler is
+**`aws-0-us-east-1.pooler.supabase.com`** (user `postgres.rjyboqwcdzcocqgmsyel`, port 5432).
+AGENTS.md section 9 documents `aws-1-us-east-1` for *production*; that host rejects the preview
+tenant with `FATAL: (ENOTFOUND) tenant/user … not found`. Preview is a Supabase **branch**, so it
+also does not appear in `supabase projects list`.
+
+### 22.10 Forward-impact reread of PSG-6 and PSG-7 (required before closing PSG-5)
+
+- **PSG-6 step 5 (bounded production runner):** must promote **both** `20260731150000` and
+  `20260731153000`, in that order, in the same bounded set. Promoting only the first ships the
+  silently-broken redundancy trigger from section 22.5.
+- **PSG-6 step 6 (verify objects, not the ledger):** now has a concrete worked example. Section 22.5
+  proves an object can exist, be attached, and still do nothing. **Re-run
+  `supabase/tests/popsg_property_resolution_contracts.sql` against production after the apply** —
+  it is rollback-safe and is the only thing that would catch a repeat.
+- **PSG-6 gate additions:** the section 22.6 owner decision on the eight aliases is now a hard
+  blocker for PSG-6 as well as for the PSG-5 rebuild, because it can re-parent 26 approved rows.
+- **PSG-6 also inherits a `core.*` change** (the new unique index) — the first time this workstream
+  touches a pre-existing shared table. It is additive and cannot fail, but it must be named in the
+  production window request rather than smuggled in as an implementation detail.
+- **PSG-7:** acceptance criteria unchanged. Additions: its Licensor precision audit must explicitly
+  cover the 26 alias-dependent Batch 01 rows (section 21.5), and it should assert the two empty
+  tables became non-empty **only** through the audited activation path.
+- No other later-phase assumption, sequencing, identifier, rollback, or production-safety rule
+  drifted.
+
+### 22.11 Exact next steps
+
+1. **Put the section 22.6 alias table in front of Albert and get a per-alias decision.**
+   **Pass when:** each of the eight has a recorded (a)/(b) ruling. Do not proceed without it.
+2. Implement the PopDAM worker changes in `u2giants/popdam3` (section 22.7), including the
+   byte-parity test against `core.normalize_popsg_property_observation`.
+   **Pass when:** all 21 fixtures agree across SQL and TypeScript, plus the section 22.8 additions.
+3. Seed the 51 approved decisions as `pending` under batch id `batch-01-exact-existing` and hash
+   `f59118aa…643e`, then activate via `activate_popsg_property_decision_batch(..., 51)`.
+   **Pass when:** it returns exactly 51 and a deliberate wrong-count call is refused.
+4. Take the pre-rebuild snapshot **from preview**, rebuild, and prove every section 7 assertion,
+   above all **zero unexplained accepted-tag loss**.
+5. **Stop at the PSG-6 production-approval gate.**
+
+### 22.12 Access and environment
+
+The Supabase PAT and the preview DB password were read from 1Password vault `vibe_coding`
+(serially, never in parallel) and used only to authenticate the CLI and psql. **No secret value was
+written to any file, doc, or commit.** Production `qsllyeztdwjgirsysgai` was never linked, queried,
+or pushed to, and no Supabase MCP tool was called at any point.

@@ -391,14 +391,151 @@ Yes. Background §1–2; current state §3; failures §4; root causes with evide
 ---
 
 
-## FRESH-SESSION BOUNDARY — PopSG Property reconciliation PSG-5 NON-SCHEMA WORK COMPLETE, SLOT STILL OCCUPIED (2026-07-31)
+## FRESH-SESSION BOUNDARY — PopSG PSG-5 DATABASE CONTRACTS APPLIED AND PROVEN ON PREVIEW (2026-07-31)
 
-**This is the newest PopSG/PSG section. Read it before the 2026-07-29 PSG-5 section below, which it
-updates but does not replace.** Full record: `fix_popsg_property_taxonomy_reconciliation.md` §21.
+**This is the newest PopSG/PSG section.** Full record:
+`fix_popsg_property_taxonomy_reconciliation.md` §22 (§21 below is the earlier same-day entry record
+and remains valid history).
 
-**Status:** PSG-5 authorized (Albert, 2026-07-29) but still NOT started as an implementation phase.
-**Database writes / migrations / preview access / rebuilds / activation / deployment: none.**
-No secret was read. Neither Supabase project was contacted. No Supabase MCP tool was called.
+**Status:** the PSG-5 **database half is COMPLETE and proven on preview**. PSG-5 as a whole is NOT
+complete — it is stopped at a business-decision gate (§4 below) and at the PopDAM worker boundary.
+**PSG-6 not started. Production `qsllyeztdwjgirsysgai` never linked, queried, or pushed to. No
+Supabase MCP tool was called.**
+
+### What this application is
+
+PopSG is POP's internal style-guide library at `https://sg.designflow.app`, served by
+`u2giants/popdam3`. A NAS crawler derives Licensor and Property names from folder paths into
+`public.style_guide_files`; a deterministic worker resolves them against the shared canonical
+catalogue (`core.licensor`, `core.property`) and writes accepted tags to
+`public.style_guide_file_tags`. This workstream reconciles folder text to the canonical catalogue
+with no fuzzy matching, no cross-Licensor links, and no silent tag loss. The schema lives here.
+
+### 1. What was applied to preview
+
+ColdLion PR #331 merged (`0798c095`), freeing the one-schema-change-in-flight slot and raising the
+version floor to `20260730000500`. Two migrations were then applied to `rjyboqwcdzcocqgmsyel` only,
+each preceded by a `--dry-run` that listed exactly one file (its own) and by re-reading
+`supabase/.temp/project-ref`:
+
+- `20260731150000_popsg_property_resolution_contracts.sql`
+- `20260731153000_popsg_property_alias_redundancy_trigger_fix.sql`
+
+Created, and verified by `to_regclass` / `pg_proc` / `pg_constraint` rather than by ledger row:
+`core.normalize_popsg_property_observation(text)`; `core.property_alias` (**0 rows**);
+`dam.popsg_property_resolution` (**0 rows**); the three guarded RPCs
+`public.propose_popsg_property_resolution`, `public.activate_popsg_property_decision_batch`,
+`public.promote_property_alias_batch`; two trigger functions; and a unique index on
+**`core.property (id, licensor_id)`** — the one change to a pre-existing shared table.
+
+**No canonical Property created, no mapping activated, no tag written or removed, no decision row
+seeded.** `supabase/tests/popsg_property_resolution_contracts.sql` — **27 assertions, all passing**
+— runs inside `begin … rollback` and left nothing behind.
+
+### 2. The bug the tests caught — a whole class, remember it
+
+The first migration passed `check-sql.sh`, applied cleanly, and reported success. Test F3 then
+failed: **every redundant alias was being accepted.** `core.reject_redundant_property_alias()` is a
+**BEFORE** row trigger that read `new.normalized_alias`, a `GENERATED ALWAYS … STORED` column —
+which Postgres populates *after* BEFORE-row triggers run. The value was always NULL, the guard never
+fired, and nothing errored.
+
+**Never read a generated column inside a BEFORE trigger.** Compute it from the source column with
+the same function. Fixed forward in `20260731153000`; the applied `20260731150000` was not edited.
+
+### 3. Everything that did NOT work / was deliberately declined
+
+1. **Reading `new.normalized_alias` in a BEFORE trigger** — see §2. Silent, not an error.
+2. **`aws-1-us-east-1.pooler.supabase.com` for preview** — rejects the preview tenant with
+   `FATAL: (ENOTFOUND) tenant/user postgres.rjyboqwcdzcocqgmsyel not found`. **Preview's pooler is
+   `aws-0-us-east-1.pooler.supabase.com`**, port 5432, user `postgres.rjyboqwcdzcocqgmsyel`.
+   AGENTS.md §9 documents `aws-1-…` for *production* only. Preview is a Supabase **branch**, so it
+   also does not appear in `supabase projects list`.
+3. **`op_run` with `shell: "wsl"`** — mangles arguments into UTF-16 and fails with
+   `Invalid command line argument`. Use the `argv` form
+   `["wsl","-e","bash","-lc", "..."]` with `forwardEnvToWsl: true`.
+4. **Deciding the eight Licensor aliases** — deliberately not done; it is a business judgement (§4).
+5. **Editing the already-applied migration** to fix §2 — forbidden by AGENTS.md §4 rule 4; a
+   corrective forward migration was landed instead.
+
+### 4. BLOCKING OWNER GATE — the eight Licensor aliases (Albert's call, not an AI's)
+
+26 of Albert's 51 approved rows — **15,816 of 44,331 files (35.7%)** — sit under a Licensor that the
+eight hard-coded worker aliases feed. From the frozen PSG-1 blast-radius evidence (a production
+measurement; **not** re-measured live, and no session should claim it was):
+
+| Alias | Resolves to | Active files | Accepted relationships |
+|---|---|---:|---:|
+| NBC Universal | NBC | 25,731 | 14,931 |
+| Marvel Style Guide | Marvel | 14,636 | 7,474 |
+| One Piece | TOEI - ONE PIECE | 8,383 | 2,471 |
+| Peanuts | Peanuts Worldwide | 3,509 | 3,705 |
+| Sesame Workshop | Sesame Street | 1,630 | 77 |
+| Paramount | Viacom Multi | 9,052 | 5,524 |
+| **Nickelodeon** | Viacom Multi | **0** | **0** |
+| **Viacom** | Viacom Multi | **0** | **0** |
+
+Per alias Albert chooses **(a)** migrate into a durable approved contract, or **(b)** retain in
+worker code with recorded sign-off plus a test. Two facts narrow it without deciding it:
+`Nickelodeon` and `Viacom` are **dead** (retiring them changes nothing today), so the
+"three-to-one Viacom mapping" flagged in plan §13 decision 7 **is effectively one-to-one** via
+`Paramount`.
+
+**The preview rebuild must not run until this is decided** — a later alias change would silently
+re-parent 26 of the 51 approved decisions.
+
+### 5. Exact next steps
+
+1. Get Albert's per-alias ruling on the eight (§4). **Pass when:** all eight have a recorded (a)/(b).
+2. Do the PopDAM worker work in `u2giants/popdam3` — load the new tables scoped by Licensor, drop
+   the frozen-empty `PROPERTY_ALIASES`, and prove `normalizePopSGTag` is byte-identical to
+   `core.normalize_popsg_property_observation` across all 21 frozen fixtures.
+3. Seed the 51 as `pending` under `batch-01-exact-existing` / `f59118aa…643e`, then activate via
+   `activate_popsg_property_decision_batch(..., 51)`. **Pass when:** it returns exactly 51 and a
+   deliberate wrong-count call is refused.
+4. Pre-rebuild snapshot **from preview at rebuild time**, rebuild, prove zero unexplained tag loss.
+5. **Stop at the PSG-6 production gate.** PSG-6 must promote **both** migrations in order — shipping
+   only the first ships the silently-broken trigger from §2 — and must re-run the contract suite
+   against production, since an object can exist, be attached, and still do nothing.
+
+### 6. Constraints in force
+
+Only `batch-01-exact-existing` (51 rows / 44,331 files / `f59118aa…643e`) is approved. **Not
+approved:** Batch 02, canonical creates, the 6,961 at-risk removals, all ambiguous rows including
+`the lion king`, all deferred rows, CHEERS and THE EXORCIST (ColdLion Phase 5 gate, zero approved
+creates). Production holds ~15 deliberately unpromoted migrations from other workstreams — never
+`--include-all` against the full repo set.
+
+### 7. Preview baseline changes (relay to other sessions)
+
+Preview gained exactly the two migrations and the objects in §1. Both new tables are **empty**. The
+test suite rolled back. **No existing table's data was read, modified, or deleted**; ColdLion's
+audit/quarantine tables and the ClickUp importer rows were untouched.
+
+### 8. Open questions and risks
+
+- The eight-alias decision (§4) blocks both the rebuild and PSG-6.
+- Normalizer parity is proven on the SQL side only; the TypeScript side is worker work. Exotic
+  case-folding (`İ`, `ß`) is not in the frozen corpus — recorded as a known limit, not a proven
+  equivalence.
+- No at-risk removal subset has owner approval and none should be inferred.
+
+### Self-audit
+
+A developer with zero prior context can identify the application, what is now in preview and how it
+was verified, the exact test evidence, five failed/declined paths with root causes, the blocking
+owner gate with its evidence table, numbered next steps with pass conditions, the standing
+exclusions, and the open risks — without reading any chat.
+
+---
+
+## PRIOR — PopSG PSG-5 non-schema entry record, slot occupied (2026-07-31, earlier the same day)
+
+**Superseded by the section above; kept because it records the ColdLion checkpoint and the four
+findings that shaped the implementation.** Full record: plan §21.
+
+**Status at the time:** PSG-5 authorized (Albert, 2026-07-29) but not started as an implementation
+phase. No database writes, migrations, preview access, or secrets.
 
 ### What this application is
 
