@@ -59,6 +59,7 @@ let stubDir = null;
 let argvFile = null;
 let stdoutFile = null;
 let stderrFile = null;
+let emptyDir = null;
 
 const SAVED = {};
 function saveEnv(...names) {
@@ -76,6 +77,7 @@ before(() => {
   argvFile = join(stubDir, "argv.json");
   stdoutFile = join(stubDir, "stdout.bin");
   stderrFile = join(stubDir, "stderr.bin");
+  emptyDir = mkdtempSync(join(tmpdir(), "runsql-empty-"));
   const preloadPath = join(stubDir, "fake-supabase-preload.cjs");
   writeFileSync(preloadPath, PRELOAD, "utf8");
 
@@ -116,6 +118,7 @@ before(() => {
 after(() => {
   restoreEnv();
   if (stubDir) rmSync(stubDir, { recursive: true, force: true });
+  if (emptyDir) rmSync(emptyDir, { recursive: true, force: true });
 });
 
 /** Configure the stub's response for the next runSql call. */
@@ -231,8 +234,12 @@ test("a spawn-level fault reports its error code instead of the empty generic me
   // the branch, and the message it produces, are identical for every spawn fault.
   const origPath = process.env.PATH;
   const origWinPath = process.env.Path;
-  process.env.PATH = "";
-  if (process.platform === "win32") process.env.Path = "";
+  // An EMPTY DIRECTORY, not an empty PATH string. With PATH="" glibc's execvp falls back to a
+  // built-in default search path, which found something unexecutable and produced EACCES on the
+  // Ubuntu CI runner while producing ENOENT on Windows. Searching a directory that exists and
+  // contains nothing is ENOENT on both.
+  process.env.PATH = emptyDir;
+  if (process.platform === "win32") process.env.Path = emptyDir;
   delete process.env.DATABASE_URL;
   try {
     assert.throws(
