@@ -1124,3 +1124,256 @@ No secret was read or created. Neither Supabase project (preview `rjyboqwcdzcocq
 production `qsllyeztdwjgirsysgai`) was accessed or written to. This session ran in an isolated
 git worktree (`.claude/worktrees/agent-adc3dd20d3ac74d92`) fast-forwarded to `origin/main`
 (`fa890ae`); it made no push and created no branch.
+
+---
+
+## 21. PSG-5 second entry record — non-schema work complete, schema slot still occupied — 2026-07-31
+
+**Status:** PSG-5 NOT STARTED as an implementation phase. All PSG-5 *non-schema* preparation is
+complete and recorded below. **No migration authored, no branch carrying SQL, no preview access,
+no database read or write, no secret read.** Stop here and re-enter when the schema slot is free.
+
+This record supersedes §20's *blocking reason* (that blocker is resolved) but preserves every
+approval limit §20 recorded. §20 remains valid history.
+
+### 21.1 What changed since §20
+
+The §20 blocker — the duplicate migration version `20260728160000` — **is resolved.**
+PR #322 deleted the never-applied ClickUp copy; `20260728160000_popdam_user_tables_foreign_keys.sql`
+correctly keeps the version because the production ledger row belongs to it. Verified on the
+current `origin/main` tip `75066fe`:
+
+```text
+ls supabase/migrations | cut -c1-14 | sort | uniq -d   → prints nothing
+```
+
+§20's forward-drift note that "the ClickUp/foreign-keys collision must be resolved before a PSG-6
+bounded checkout can safely enumerate its own migrations" is therefore **now discharged**. The
+underlying lesson it recorded is retained and restated in §21.10: a bounded production dry run must
+be verified object-by-object (`to_regclass`, `pg_proc`, `pg_policy`), never by ledger row alone.
+
+### 21.2 ColdLion checkpoint recorded before any preview work (required by §7 and §11)
+
+Read 2026-07-31 from `plan_coldlion_licensor_property_accelerated_cutover.md` STATUS table at
+`origin/main` `75066fe`, **cross-checked against live PR state** because the STATUS table lags:
+
+| Item | Recorded state |
+|---|---|
+| Steps 0–6 | Complete or preview-proven |
+| Step 7 (production change package) | Complete but **not applied**; production still holds zero ColdLion Licensor/Property mirror rows |
+| Step 7A (recurring production feed) | STATUS table still reads "⬜ Open, blocked by another schema workstream" and names the now-stale PR #311/#314 context. **Ground truth: Step 7A is built and is in open PR #331** (`codex/coldlion-step7a-recurring-production-feed`), `MERGEABLE`, carrying four migrations already applied to preview |
+| Steps 8–10 (production approval, cutover, monitoring) | Open / blocked pending Albert's approval. No production write has occurred |
+| ColdLion Phase 7 (production source cutover) | Not started. §11's "PSG-6 must not overlap ColdLion Phase 7" is therefore not yet triggered |
+
+The four Step 7A migrations in PR #331, all preview-applied and all sorting after `main`'s current
+maximum `20260729210000`:
+
+```text
+20260729230000_coldlion_licensor_property_recurring_promotion.sql
+20260729234500_coldlion_recurring_promotion_collision_rule_fix.sql
+20260729235500_coldlion_recurring_promotion_ambiguous_column_fix.sql
+20260730000500_coldlion_recurring_promotion_absence_detection_fix.sql
+```
+
+**Note for the next session:** Step 7A is a *preview* workstream. It does not by itself forbid
+PSG-5 (which is also preview-only). What forbids PSG-5 right now is the separate
+one-schema-change-in-flight rule in §21.3.
+
+### 21.3 Why this session again stopped before schema work
+
+`AGENTS.md` §4 rule 1 permits **one schema change in flight at a time**. PR #331 is open and holds
+four migrations that are **already applied to the shared preview branch but not merged to `main`**.
+That is precisely the persistent-preview-ledger hazard `AGENTS.md` §4 rule 1 describes: a second
+workstream pushing to preview now would interleave two unmerged rehearsals in one ledger, and a
+`main`-based checkout could no longer dry-run cleanly against preview.
+
+Authoring the PSG-5 migrations would also require choosing 14-digit versions **now** that must
+still satisfy CI Guard B **at PR-open time** — and `main`'s maximum version will jump from
+`20260729210000` to `20260730000500` the moment PR #331 merges. Timestamps chosen today would be
+stale-by-construction. This is a second, independent reason to defer authoring.
+
+Accordingly this session authored **no SQL and no migration**, took **no preview action**, and read
+**no credential**. The schema slot was left to PR #331.
+
+### 21.4 PSG-5 non-schema work that IS complete (re-verified 2026-07-31)
+
+Every frozen input PSG-5 depends on was independently re-hashed from the current checkout. The
+Windows CRLF caveat recorded in §17 still applies: hash the LF-canonical bytes
+(`tr -d '\r' < FILE | sha256sum`), not the working-tree bytes.
+
+| Artifact | LF-canonical SHA-256 | Matches frozen value |
+|---|---|---|
+| `docs/verification/…-psg2/batch-01-exact-existing.csv` | `f59118aa0eac1772473ec21b427b6b79ad923c16328d5e8318015fd53a46643e` | ✅ PSG-4 approved source |
+| `docs/verification/…-psg2/proposals.csv` (372-row ledger) | `cc036567653c69801b089fae1443f4323321ec9dc3f7d874e4ee80f8e11347d4` | ✅ §17 |
+| `docs/verification/…-psg1/currently-tagged-at-risk.csv` (6,961 rows) | `f3274213ad55c983e12f174bffc9cc693772f11d578a2ae78e4f99b4a5bf03b6` | ✅ §16 — **evidence only, NOT approval** |
+
+Reproducible tests re-run and passing on the current tip:
+
+```text
+node scripts/popsg-property-psg4-decision-package.test.cjs
+  → PSG-4 decision package: PASS
+    source=f59118aa…643e  package=e4ad02fd…0f68
+    rows=51 active_files=44331 parent_edges=51/51 exclusions=11 approval=recorded
+
+node scripts/popsg-property-psg2-proposals.test.cjs
+  → PSG-2 proposal tests passed
+```
+
+Batch 01 shape re-derived directly from the CSV (independent of the generator):
+
+- 51 data rows, `sum(active_file_count) = 44,331` — exactly the approved scope;
+- `currently_tagged_at_risk = false` on **all 51** rows;
+- `cross_parent_proposal = false` on **all 51** rows.
+
+Batch 01 rows by resolved canonical Licensor:
+
+| Licensor | Rows |
+|---|---:|
+| NBC | 19 |
+| WARNER BROS | 12 |
+| DISNEY | 10 |
+| VIACOM MULTI | 6 |
+| SEGA / MARVEL / COCA COLA / AARDMAN ANIMATIONS | 1 each |
+
+### 21.5 NEW finding — the eight hard-coded Licensor aliases are load-bearing for a third of Batch 01
+
+§7 PSG-5 step 6 ("resolve the future of all eight hard-coded `LICENSOR_ALIASES`") has always read
+like an independent tidy-up task. It is not. Cross-referencing the Batch 01 rows against
+`docs/verification/…-psg1/licensor-alias-blast-radius.csv` shows:
+
+**26 of the 51 approved rows — 15,816 of the 44,331 approved files (35.7%) — resolve under a
+canonical Licensor that the hard-coded alias list feeds** (NBC 19 rows, VIACOM MULTI 6, MARVEL 1).
+
+Therefore the alias decision is a **prerequisite** for activating Batch 01 correctly, not a
+follow-up. If an alias is retired or re-pointed after activation, those 26 decisions silently
+change parent. PSG-5 must settle the aliases **before** the preview rebuild, and the rebuild
+assertions must include a parent-stability check for these 26 rows specifically.
+
+Second new finding from the same file: **two of the eight aliases are dead.** `Nickelodeon` and
+`Viacom` both measure 0 active files, 0 Property observations, and 0 accepted relationships; the
+entire three-to-one Viacom mapping's blast radius comes from `Paramount` alone (9,052 active files,
+5,524 accepted relationships). §13 open decision 7 says "the three-to-one Viacom mapping needs
+particular scrutiny" — the scrutiny result is that it is effectively a one-to-one
+`Paramount → Viacom Multi` mapping plus two no-op entries. That materially simplifies the owner
+decision Albert must make.
+
+### 21.6 NEW constraint — the 2026-07-29 `public`-schema lockdown changes PSG-5's DDL
+
+`AGENTS.md` §10.2 records a behaviour change that landed on **both preview and production on
+2026-07-29**, *after* §6.1 of this plan was written. An event trigger,
+`lock_down_new_public_function_execute_trg`, fires on every `CREATE FUNCTION` / `CREATE PROCEDURE`
+in schema `public` and immediately revokes EXECUTE from **PUBLIC and `anon`**; the `public` default
+privileges no longer grant EXECUTE to `anon`/`authenticated` either.
+
+§6.1 and §6.2 require exactly such functions in `public` — the plan's provisional
+`public.propose_popsg_property_resolution(...)`,
+`public.activate_popsg_property_decision_batch(...)`, and
+`public.promote_property_alias_batch(...)`, plus the `SECURITY DEFINER` bridge §6.2 mandates
+because `dam` is deliberately not exposed through PostgREST (`AGENTS.md` §8.1).
+
+**Consequence for the PSG-5 migration author:** every one of those functions is reachable by
+nobody except `postgres` and `service_role` unless the migration states its grants explicitly, and
+because `create or replace` re-reports the `CREATE FUNCTION` tag, any later patch re-strips `anon`.
+Each function must therefore end with an explicit block, and §9 test 14
+("viewer/designer approval is denied") must be proven against the *granted* state, not the default:
+
+```sql
+revoke execute on function public.<fn>(...) from public, anon, authenticated;
+grant  execute on function public.<fn>(...) to service_role;   -- and/or authenticated
+```
+
+The same section also warns that **views ignore RLS unless created with `security_invoker = true`**.
+If PSG-5 adds any reporting view over `core.property_alias` or `dam.popsg_property_resolution`,
+it must set `security_invoker = true` or revoke `anon`/PUBLIC explicitly, and verify with the anon
+key. This does not change any PSG-5 decision or approval limit — it changes the DDL that must be
+written, and it is a silent failure mode if forgotten.
+
+### 21.7 NEW constraint — preview is no longer a clean baseline
+
+§7 PSG-5 step 9 ("run a full deterministic rebuild on preview") and its required assertions were
+written assuming preview approximated production. As of 2026-07-31 preview additionally holds:
+
+- the four Step 7A ColdLion migrations of PR #331 (applied, unmerged);
+- rows in `pim.product` and `ingest.sync_run` from two ClickUp importer runs;
+- 180 rows in `plm.coldlion_promotion_quarantine`.
+
+None of these touch `public.style_guide_files` or `public.style_guide_file_tags`, so the PopSG
+signed-delta arithmetic is not corrupted. **But the PSG-5 pre-rebuild snapshot must be taken from
+preview at the moment of the rebuild** — it must not reuse the 2026-07-26 production baseline in
+§15, and the evidence README must state which project each number came from. Comparing a preview
+rebuild against a production baseline would manufacture a false delta.
+
+### 21.8 CI Guard B — new versioning rule affecting PSG-5 and PSG-6
+
+CI now **rejects any migration whose 14-digit version sorts earlier than `main`'s newest.** Two
+consequences:
+
+1. **PSG-5:** pick migration timestamps at the moment the PR is opened, verifying with
+   `ls supabase/migrations | cut -c1-14 | sort | tail -3`. Today that maximum is `20260729210000`;
+   it becomes `20260730000500` when PR #331 merges.
+2. **If Guard B ever flags a migration already applied to preview, do NOT rename it.** Renaming
+   re-applies the DDL under a new version and orphans the original ledger row. Keep the applied
+   version and land a corrective forward migration on top.
+
+### 21.9 Preserved PSG-4 limits (unchanged, re-verified)
+
+Only `batch-01-exact-existing` — 51 same-parent `exact_existing` decisions / 44,331 active files,
+SHA-256 `f59118aa0eac1772473ec21b427b6b79ad923c16328d5e8318015fd53a46643e` — is approved.
+
+**Still NOT approved and NOT activated:** Batch 02 (`non_property`), canonical creates, the
+**6,961-row `currently-tagged-at-risk.csv` removals** (evidence only — `batch-06` is explicitly
+non-approvable), all `ambiguous` rows **including `the lion king`** (521 files, locked),
+all `deferred` rows, and `CHEERS` / `THE EXORCIST` (routed to the ColdLion Phase 5 gate, which
+still has zero approved creates). Nothing in this session activated, wrote, or perturbed any of
+these.
+
+### 21.10 Forward-impact reread of PSG-6 and PSG-7 through plan end
+
+- **PSG-6 step 5 (bounded production runner):** §20's ClickUp-collision blocker is discharged
+  (§21.1). The bounded-checkout recipe in `AGENTS.md` §5.1 remains correct, including its
+  correction that you delete only the *pending* files you are not promoting, never the applied
+  ones. Object-level verification (`pg_constraint`/`pg_proc`/`pg_policy`/`to_regclass`) remains
+  mandatory over ledger-row counting.
+- **PSG-6 step 3 (ColdLion checkpoint):** unchanged in requirement, but the checkpoint it must read
+  has moved — Step 7A is now built and in PR #331, and Steps 8–10 await Albert. PSG-6 must re-read
+  it again; the value recorded in §20 is stale.
+- **PSG-6 step 6 (schema before app deploy):** now additionally constrained by §21.6 — verifying
+  "SQL grants and policies, not just the migration ledger" is no longer optional prudence, because
+  the `public` lockdown trigger can silently leave a function ungranted and its failures are
+  `raise warning` only, visible in the Postgres log and nowhere else.
+- **PSG-6 §11 overlap rule:** ColdLion Phase 7 has not started, so the no-overlap rule is not yet
+  triggered — but Steps 8–10 could start at any time once Albert approves, so PSG-6 must re-check.
+- **PSG-7:** acceptance criteria unchanged. One addition: §21.5 means PSG-7's Licensor precision
+  audit must explicitly cover the 26 alias-dependent Batch 01 rows rather than sampling generally.
+- No other later-phase assumption, sequencing, identifier, rollback, or production-safety rule
+  drifted.
+
+### 21.11 Exact next steps
+
+1. Confirm PR #331 has merged: `gh pr view 331 --json state,mergedAt`.
+   **Pass when:** `state` is `MERGED`, and `gh pr list` shows no other open PR carrying a
+   migration. Docs-only PRs do not occupy the slot.
+2. Re-read the ColdLion STATUS table again — it is a moving target and §21.2 will be stale.
+   **Pass when:** the new PSG-5 evidence README names the then-current Step 7A/8 state.
+3. Re-check the version floor (`ls supabase/migrations | cut -c1-14 | sort | tail -3`) and only
+   then author the `core.property_alias` and `dam.popsg_property_resolution` migrations, restricted
+   to `batch-01-exact-existing`, with the explicit grants required by §21.6.
+   **Pass when:** `scripts/check-sql.sh` passes and `supabase db push --dry-run --linked` against
+   `rjyboqwcdzcocqgmsyel` lists **only** those files.
+4. Settle the eight `LICENSOR_ALIASES` **before** the preview rebuild, using §21.5 — two are dead
+   no-ops and the Viacom mapping is effectively one-to-one.
+   **Pass when:** each alias is either migrated into an approved contract or retained with recorded
+   owner sign-off plus a test, and the 26 alias-dependent Batch 01 rows have a parent-stability
+   assertion.
+5. Take the pre-rebuild snapshot **from preview** per §21.7, then run the rebuild and prove all of
+   §7's required preview assertions, above all **zero unexplained accepted-tag loss**.
+   **Pass when:** the accepted-tag signed delta equals the owner-approved expectation and the
+   unexplained partition is zero.
+6. Stop at the PSG-6 production-approval gate. Do not begin PSG-6.
+
+### 21.12 Access and environment
+
+No secret was read or created. **Neither Supabase project was contacted** — preview
+`rjyboqwcdzcocqgmsyel` and production `qsllyeztdwjgirsysgai` were both untouched, and no Supabase
+MCP tool was called (those tools are bound to production in these sessions). This session ran in an
+isolated git worktree at `origin/main` tip `75066fe`. Its only change is documentation.
