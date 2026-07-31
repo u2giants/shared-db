@@ -1,5 +1,6 @@
 -- core.licensor_alias — the eight hard-coded PopSG Licensor aliases, moved out of
--- application code and into recorded, auditable data.
+-- application code and into recorded, auditable data, PLUS the two extra NBC name
+-- variants Albert ruled on, and the owner approval of the whole NBC family.
 --
 -- Plan: fix_popsg_property_taxonomy_reconciliation.md section 22.6 (the "OWNER GATE")
 -- and section 7 step 6 / section 13 decision 7.
@@ -18,6 +19,58 @@
 -- table refuses to call anything owner_approved without a named approver, a timestamp
 -- and an approval-evidence reference. Flipping a row to owner_approved is a separate,
 -- deliberate act through public.approve_licensor_alias().
+--
+-- THE ONE EXCEPTION: THE NBC FAMILY  (owner ruling, 2026-07-31)
+-- -------------------------------------------------------------
+-- On 2026-07-31, in session, Albert ruled, verbatim:
+--
+--     "NBC Universal really means NBC, really means NBCU, really means NBCUniversal"
+--
+-- So four observed strings denote the one canonical Licensor `NBC`:
+--   `NBC Universal`, `NBC`, `NBCU`, `NBCUniversal`.
+--
+-- That ruling does two things this migration must implement, and NOTHING else. The
+-- other seven inherited aliases (Marvel Style Guide, One Piece, Peanuts, Sesame
+-- Workshop, Paramount, Nickelodeon, Viacom) are UNTOUCHED and stay
+-- `inherited_unverified` — Albert ruled on the NBC family only.
+--
+--   (1) TWO VARIANTS WERE MISSING, AND ARE NOT MATCHED BY TODAY'S CODE AT ALL.
+--       The normalizer splits camel case only on a lower/digit -> UPPER boundary, so an
+--       ALL-CAPS run followed by a capitalised word does not split. Measured against the
+--       frozen JS `normalize()` in scripts/popsg-property-psg1-inventory.cjs:
+--
+--           'NBC Universal'  ->  'nbc universal'    <- the one alias the code array has
+--           'NBC'            ->  'nbc'              <- the CANONICAL Licensor's own name
+--           'NBCU'           ->  'nbcu'             <- NOT matched by anything today
+--           'NBCUniversal'   ->  'nbcuniversal'     <- NOT matched by anything today
+--
+--       Four strings, four DIFFERENT normalized forms. `NBCU` and `NBCUniversal` do not
+--       collapse into `nbc universal`, so before this migration they resolved to nothing.
+--       Those two forms are pinned as test fixtures in
+--       supabase/tests/core_licensor_alias_contracts.sql section G precisely so that a
+--       later "fix" to the normalizer cannot silently change what these rows match.
+--
+--       `NBC` is deliberately NOT added as an alias row: it is already the canonical
+--       Licensor's own name, the resolver tries a direct canonical name/code match
+--       BEFORE consulting aliases (frozen script lines 261-263), and the redundancy
+--       trigger in section 2 below correctly refuses an alias equal to its own target's
+--       name. Albert's ruling is satisfied for `NBC` by the canonical record itself.
+--
+--   (2) THE NBC FAMILY IS OWNER-APPROVED. This is the FIRST use of the owner-approved
+--       path. It is performed in section 7 through public.approve_licensor_alias() —
+--       the table's own single sanctioned approval mechanism — not by writing the
+--       approval columns directly.
+--
+-- BLAST RADIUS OF THE TWO NEW VARIANTS: ZERO TODAY, by measurement, not by assumption.
+-- The frozen PSG-1 corpus (docs/verification/popsg-property-reconciliation-20260727-psg1/
+-- inventory.csv, 372 observation rows) contains exactly 21 distinct normalized
+-- folder-level Licensor strings. `nbc universal` appears in 55 rows. `nbcu` and
+-- `nbcuniversal` appear in ZERO. (The single 'NBCU' string anywhere in that corpus is a
+-- PROPERTY folder, `_NBCU CLEARED EDITORIAL`, sitting under licensor `NBC UNIVERSAL` —
+-- already resolved, and not a Licensor-level observation.) So these two rows re-route
+-- nothing that exists today; they are recorded insurance against a folder that has not
+-- been created yet, and are therefore flagged `is_dormant` with that measurement as
+-- evidence, exactly like Nickelodeon and Viacom.
 --
 -- BLAST RADIUS (frozen PSG-1 production measurement 2026-07-26/27, NOT re-measured;
 -- see plan section 22.6 and docs/verification/popsg-property-reconciliation-20260727-psg1/):
@@ -42,6 +95,16 @@
 --
 -- THIS MIGRATION CHANGES NO WORKER BEHAVIOUR. The code array in popdam3 stays as-is
 -- until the table is proven in production; see the cutover in the plan section 22.8.
+--
+-- READ THAT SENTENCE AGAIN BEFORE ASSUMING `NBCU` NOW WORKS. It does not, yet. The
+-- PopDAM worker still resolves Licensor strings from its OWN hard-coded
+-- `LICENSOR_ALIASES` array in u2giants/popdam3 apps/worker/src/handlers/popsg-tags.ts.
+-- It does not read core.licensor_alias, and nothing in this repository can make it.
+-- Until that worker is changed to call public.resolve_licensor_alias() (plan section
+-- 22.8), the two new rows below are a RECORDED DECISION ONLY and have no runtime
+-- effect. Adding rows to this table is necessary for `NBCU`/`NBCUniversal` to take
+-- effect; it is NOT sufficient. The popdam3 change is a separate PR in a separate
+-- repository and is deliberately not made here.
 --
 -- GRANTS ARE STATED EXPLICITLY ON EVERY `public` FUNCTION BELOW. Since 2026-07-29 an
 -- event trigger (`lock_down_new_public_function_execute_trg`, AGENTS.md section 10.2)
@@ -354,7 +417,7 @@ revoke execute on function public.approve_licensor_alias(text,text,text) from pu
 grant  execute on function public.approve_licensor_alias(text,text,text) to authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
--- 6. Seed the eight -- ALL as inherited_unverified
+-- 6. Seed the eight FROM CODE -- ALL as inherited_unverified
 -- ---------------------------------------------------------------------------
 -- Each target is resolved by normalized canonical NAME or CODE, which is exactly how
 -- the frozen inventory script resolved them. The insert is written so that a target
@@ -417,5 +480,158 @@ begin
       || 'Behaviour-preserving only. See plan section 22.6.'
     );
   end loop;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 6b. The two MISSING NBC name variants  (owner ruling, 2026-07-31)
+-- ---------------------------------------------------------------------------
+-- These two did NOT come from the worker code array -- they came from Albert. Their
+-- provenance is therefore `owner_ruling`, not `popdam_worker_code`, so a later reader
+-- can tell at a glance which rows are inherited folklore and which ones a human
+-- actually decided.
+--
+-- They are seeded here as `inherited_unverified` and promoted in section 7, rather than
+-- being written straight in as `owner_approved`. That is deliberate: it forces the
+-- approval to travel through public.approve_licensor_alias(), which is the table's only
+-- sanctioned approval path, so this migration exercises the real mechanism instead of
+-- quietly reaching around it.
+--
+-- Both are dormant BY MEASUREMENT (0 observations in the frozen PSG-1 corpus), not by
+-- guess. `NBC` itself is intentionally absent -- see the header: it is the canonical
+-- Licensor's own name, and the section-2 trigger correctly refuses it as redundant.
+do $$
+declare
+  v_seed        record;
+  v_licensor_id uuid;
+  v_matches     integer;
+begin
+  for v_seed in
+    select * from (values
+      ('NBCU',         'NBC'),
+      ('NBCUniversal', 'NBC')
+    ) as s(alias, target)
+  loop
+    select count(*), min(l.id::text)::uuid into v_matches, v_licensor_id
+      from core.licensor l
+     where core.normalize_popsg_property_observation(l.name)
+             = core.normalize_popsg_property_observation(v_seed.target)
+        or core.normalize_popsg_property_observation(coalesce(l.code, ''))
+             = core.normalize_popsg_property_observation(v_seed.target);
+
+    if v_matches <> 1 then
+      raise exception
+        'core.licensor_alias NBC-family seed: target Licensor % for alias % resolved to % rows, '
+        'expected exactly 1. Refusing to guess.',
+        v_seed.target, v_seed.alias, v_matches;
+    end if;
+
+    insert into core.licensor_alias (
+      licensor_id, alias, approval_status, is_dormant, dormancy_evidence,
+      source_system, evidence_notes
+    ) values (
+      v_licensor_id,
+      v_seed.alias,
+      'inherited_unverified',   -- promoted to owner_approved in section 7 below
+      true,
+      'Frozen PSG-1 corpus docs/verification/popsg-property-reconciliation-20260727-psg1/'
+      || 'inventory.csv (372 observation rows, 21 distinct normalized folder-level Licensor '
+      || 'strings): normalized form of this alias appears in 0 rows. Not re-measured live; '
+      || 'production was deliberately not queried. Recorded as insurance against a folder '
+      || 'spelling that does not exist yet.',
+      'owner_ruling',
+      'Added on Albert Hazan''s owner ruling of 2026-07-31, given in session: '
+      || '"NBC Universal really means NBC, really means NBCU, really means NBCUniversal". '
+      || 'This variant was MISSING from the inherited LICENSOR_ALIASES code array and, '
+      || 'because the normalizer splits camel case only on a lower/digit -> UPPER boundary, '
+      || 'it does not collapse into "nbc universal" -- so nothing matched it before now.'
+    );
+  end loop;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 7. Record the owner approval of the NBC family -- THE FIRST ONE
+-- ---------------------------------------------------------------------------
+-- Everything above this line is behaviour-preserving bookkeeping. This block is the
+-- one place in the migration where a human decision is recorded as ratified.
+--
+-- WHY THE RPC AND NOT A DIRECT UPDATE. public.approve_licensor_alias() is documented in
+-- section 5 as the ONLY way a row becomes owner_approved. Writing the four approval
+-- columns directly would have worked -- the table's CHECK constraints would still have
+-- demanded approver + timestamp + evidence, so the provenance could not have been faked
+-- either way -- but it would have left the sanctioned path unexercised on its very first
+-- real use, which is exactly when a latent defect in it would be cheapest to find.
+--
+-- WHY THE JWT CLAIM IS SET. The RPC guards itself with
+--   `if not (app.has_role('administrator') or auth.role() = 'service_role')`.
+-- In a migration there is no JWT, so auth.role() returns NULL and that expression
+-- evaluates to NULL -- and `if NULL then` does not fire, so the guard would let this
+-- call through BY ACCIDENT rather than by right. Relying on that would be building on a
+-- null hole. Instead the transaction-local claim below asserts, explicitly and
+-- truthfully, that this migration runs with service-level authority. It is reset
+-- immediately afterwards. (The null hole itself is not exploitable through PostgREST --
+-- anon has no EXECUTE and a real `authenticated` caller always has a role claim -- but it
+-- is logged as a backlog item in HANDOFF.md rather than fixed here, because tightening a
+-- security guard is not this migration's job.)
+do $$
+declare
+  v_evidence constant text :=
+    'OWNER RULING, verbatim, given by Albert Hazan in session on 2026-07-31: '
+    || '"NBC Universal really means NBC, really means NBCU, really means NBCUniversal". '
+    || 'Albert is the owner of POP Creations and the sole authority on licensor identity '
+    || 'for this data set. The ruling establishes that the four observed strings '
+    || '"NBC Universal", "NBC", "NBCU" and "NBCUniversal" all denote the one canonical '
+    || 'Licensor "NBC". Recorded by migration '
+    || '20260731210000_core_licensor_alias.sql (shared-db PR #345). Scope: the NBC family '
+    || 'ONLY -- Albert did not rule on any other alias in this table.';
+  v_alias text;
+  v_id    uuid;
+  v_count integer;
+begin
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+  foreach v_alias in array array['NBC Universal', 'NBCU', 'NBCUniversal']
+  loop
+    v_id := public.approve_licensor_alias(v_alias, 'Albert Hazan', v_evidence);
+    if v_id is null then
+      raise exception 'NBC family approval: approve_licensor_alias(%) returned no row', v_alias;
+    end if;
+  end loop;
+
+  perform set_config('request.jwt.claims', '', true);
+
+  -- approved_at is pinned to the DATE OF THE RULING, not to whenever this migration
+  -- happens to run. The RPC can only stamp now(), which would make preview say
+  -- 2026-07-31 and production say whatever day it was promoted -- two different
+  -- "when did Albert decide this" answers for one decision. The ruling has exactly one
+  -- date. Giving the RPC an optional approval timestamp is a backlog item in HANDOFF.md.
+  --
+  -- MIDDAY UTC, NOT MIDNIGHT, AND THIS IS NOT COSMETIC. This database's session
+  -- TimeZone is America/New_York (verified on preview 2026-07-31). Storing the ruling
+  -- as '2026-07-31 00:00:00+00' makes `approved_at::date` render as 2026-07-30 for any
+  -- reader on local time -- i.e. the audit trail would state the wrong day for Albert's
+  -- decision, which is precisely the thing an approval record exists to get right. This
+  -- was caught by contract test G3 during the preview rehearsal, not in review.
+  -- 12:00 UTC reads as 2026-07-31 in every timezone from UTC-11 through UTC+12.
+  update core.licensor_alias
+     set approved_at = timestamptz '2026-07-31 12:00:00+00'
+   where alias in ('NBC Universal', 'NBCU', 'NBCUniversal')
+     and approval_status = 'owner_approved';
+
+  -- Fail loudly if this did not land exactly as intended: 3 approved, 7 untouched.
+  select count(*) into v_count
+    from core.licensor_alias where approval_status = 'owner_approved';
+  if v_count <> 3 then
+    raise exception 'NBC family approval: expected exactly 3 owner_approved rows, found %', v_count;
+  end if;
+
+  select count(*) into v_count
+    from core.licensor_alias where approval_status = 'inherited_unverified';
+  if v_count <> 7 then
+    raise exception
+      'NBC family approval: expected exactly 7 rows still inherited_unverified, found %. '
+      'Albert ruled on the NBC family ONLY.', v_count;
+  end if;
 end;
 $$;

@@ -5,8 +5,9 @@
 -- Every fixture rolls back. Do not run as a long-lived production session.
 --
 -- Proves, in order:
---   A. The eight seeded aliases exist, resolve to the intended canonical Licensor,
---      and are ALL recorded as inherited_unverified -- not owner-approved.
+--   A. The ten seeded aliases exist, resolve to the intended canonical Licensor, and
+--      carry exactly the provenance they are supposed to: the seven inherited from the
+--      worker code array are inherited_unverified, and ONLY the NBC family is approved.
 --   B. Normalization matches the frozen popsg-property-observation-v1 behaviour that
 --      produced the blast-radius corpus (same function as core.property_alias).
 --   C. Conflicting/duplicate aliases are rejected: one normalized string may never
@@ -36,25 +37,31 @@ declare
   v_id        uuid;
 begin
   -- ==========================================================================
-  -- A. The eight seeds
+  -- A. The ten seeds
   -- ==========================================================================
+  -- Eight inherited from the PopDAM worker code array, plus the two NBC name variants
+  -- added on Albert's 2026-07-31 ruling. `expected_status` is asserted per row rather
+  -- than globally, so this loop pins WHICH rows are approved -- not merely how many.
   select count(*) into v_count from core.licensor_alias;
-  if v_count < 8 then
-    raise exception 'A0. FAIL - expected at least the 8 seeded aliases, found %', v_count;
+  if v_count < 10 then
+    raise exception 'A0. FAIL - expected at least the 10 seeded aliases, found %', v_count;
   end if;
   raise notice 'A0. PASS - % alias rows present', v_count;
 
   for v_seed in
     select * from (values
-      ('NBC Universal',      'NBC',               false),
-      ('Marvel Style Guide', 'Marvel',            false),
-      ('One Piece',          'TOEI - ONE PIECE',  false),
-      ('Peanuts',            'Peanuts Worldwide', false),
-      ('Sesame Workshop',    'Sesame Street',     false),
-      ('Paramount',          'Viacom Multi',      false),
-      ('Nickelodeon',        'Viacom Multi',      true),
-      ('Viacom',             'Viacom Multi',      true)
-    ) as s(alias, target, dormant)
+      -- alias,             canonical target,    dormant, expected approval_status
+      ('NBC Universal',      'NBC',               false,  'owner_approved'),
+      ('NBCU',               'NBC',               true,   'owner_approved'),
+      ('NBCUniversal',       'NBC',               true,   'owner_approved'),
+      ('Marvel Style Guide', 'Marvel',            false,  'inherited_unverified'),
+      ('One Piece',          'TOEI - ONE PIECE',  false,  'inherited_unverified'),
+      ('Peanuts',            'Peanuts Worldwide', false,  'inherited_unverified'),
+      ('Sesame Workshop',    'Sesame Street',     false,  'inherited_unverified'),
+      ('Paramount',          'Viacom Multi',      false,  'inherited_unverified'),
+      ('Nickelodeon',        'Viacom Multi',      true,   'inherited_unverified'),
+      ('Viacom',             'Viacom Multi',      true,   'inherited_unverified')
+    ) as s(alias, target, dormant, expected_status)
   loop
     -- the canonical Licensor the alias is SUPPOSED to point at
     select l.id into v_target
@@ -75,13 +82,15 @@ begin
         v_seed.alias, v_resolved, v_target, v_seed.target;
     end if;
 
-    -- provenance: inherited, NOT approved
+    -- A2. provenance is EXACTLY what it is supposed to be, row by row. An inherited
+    -- mapping must not drift into looking ratified, and an approved one must not
+    -- silently lose its ratification.
     select approval_status into v_status
       from core.licensor_alias where alias = v_seed.alias;
-    if v_status <> 'inherited_unverified' then
+    if v_status <> v_seed.expected_status then
       raise exception
-        'A2. FAIL - alias % is recorded as %, but nobody has ratified these mappings',
-        v_seed.alias, v_status;
+        'A2. FAIL - alias % is recorded as %, expected %. Only the NBC family was ruled on.',
+        v_seed.alias, v_status, v_seed.expected_status;
     end if;
 
     -- E1. dormancy flag matches the frozen measurement
@@ -95,17 +104,37 @@ begin
         v_seed.alias, v_seed.dormant;
     end if;
   end loop;
-  raise notice 'A1. PASS - all 8 aliases resolve to their intended canonical Licensor';
-  raise notice 'A2. PASS - all 8 are inherited_unverified; none claims owner approval';
-  raise notice 'E1. PASS - Nickelodeon and Viacom are flagged dormant with evidence';
+  raise notice 'A1. PASS - all 10 aliases resolve to their intended canonical Licensor';
+  raise notice 'A2. PASS - provenance is exact per row: NBC family approved, the rest inherited';
+  raise notice 'E1. PASS - dormant rows are flagged with evidence';
 
-  -- A3. Nothing in the table claims owner approval yet.
+  -- A3. NOTHING outside the NBC family claims owner approval. This is the guard against
+  -- a later session quietly ratifying Marvel or Paramount on the back of Albert's NBC
+  -- ruling, which covered the NBC family and nothing else.
   select count(*) into v_count
-    from core.licensor_alias where approval_status = 'owner_approved';
+    from core.licensor_alias
+   where approval_status = 'owner_approved'
+     and alias not in ('NBC Universal', 'NBCU', 'NBCUniversal');
   if v_count <> 0 then
-    raise exception 'A3. FAIL - % row(s) already claim owner approval', v_count;
+    raise exception
+      'A3. FAIL - % row(s) outside the NBC family claim owner approval. Albert ruled only on NBC.',
+      v_count;
   end if;
-  raise notice 'A3. PASS - zero owner-approved rows';
+  raise notice 'A3. PASS - only the NBC family is owner-approved';
+
+  -- A4. The seven inherited aliases are all still present and all still unverified,
+  -- by name. A count alone would not notice a swap.
+  select count(*) into v_count
+    from core.licensor_alias
+   where approval_status = 'inherited_unverified'
+     and alias in ('Marvel Style Guide', 'One Piece', 'Peanuts', 'Sesame Workshop',
+                   'Paramount', 'Nickelodeon', 'Viacom');
+  if v_count <> 7 then
+    raise exception
+      'A4. FAIL - expected all 7 non-NBC inherited aliases to remain inherited_unverified, found %',
+      v_count;
+  end if;
+  raise notice 'A4. PASS - all 7 non-NBC aliases remain inherited_unverified';
 
   -- ==========================================================================
   -- B. Normalization matches the frozen corpus behaviour
@@ -379,6 +408,147 @@ begin
     raise exception 'F4. FAIL - RLS is not enabled on core.licensor_alias';
   end if;
   raise notice 'F4. PASS - RLS enabled, SELECT-only policy set';
+
+  -- ==========================================================================
+  -- G. The NBC family -- Albert's owner ruling of 2026-07-31
+  -- ==========================================================================
+  --     "NBC Universal really means NBC, really means NBCU, really means NBCUniversal"
+  --
+  -- Four strings, ONE canonical Licensor. This section exists because the four do NOT
+  -- share a normalized form -- if anyone ever assumes they do, these tests fail.
+
+  -- G1. THE NORMALIZED FORMS ARE PINNED. This is the load-bearing fixture. The camel-
+  -- case rule splits only on a lower/digit -> UPPER boundary, so an ALL-CAPS run
+  -- followed by a capitalised word does NOT split: 'NBCUniversal' stays one token. If a
+  -- later session "fixes" the normalizer to split NBCUniversal into 'nbc universal',
+  -- these four rows would collapse onto one normalized key, the global unique index on
+  -- normalized_alias would start rejecting them, and 25,731 files' worth of routing
+  -- would change meaning. Pinning the exact strings makes that impossible to do quietly.
+  for v_fixture in
+    select * from (values
+      ('nbc_spaced',       'NBC Universal', 'nbc universal'),
+      ('nbc_bare',         'NBC',           'nbc'),
+      ('nbc_initialism',   'NBCU',          'nbcu'),
+      ('nbc_capsrun',      'NBCUniversal',  'nbcuniversal')
+    ) as f(label, input, expected)
+  loop
+    v_norm := core.normalize_popsg_property_observation(v_fixture.input);
+    if v_norm <> v_fixture.expected then
+      raise exception
+        'G1. FAIL - normalize(%) = %, expected %. The four NBC strings have four DISTINCT '
+        'normalized forms; do not let them merge.',
+        quote_literal(v_fixture.input), quote_literal(v_norm), quote_literal(v_fixture.expected);
+    end if;
+  end loop;
+
+  -- G1b. ...and they really are four distinct keys, stated as its own assertion so the
+  -- reason for G1 cannot be lost if someone edits the fixture table.
+  if (select count(distinct core.normalize_popsg_property_observation(s))
+        from unnest(array['NBC Universal','NBC','NBCU','NBCUniversal']) as s) <> 4 then
+    raise exception 'G1b. FAIL - the four NBC strings no longer normalize to four distinct keys';
+  end if;
+  raise notice 'G1. PASS - the four NBC normalized forms are pinned and distinct';
+
+  -- G2. ALL FOUR STRINGS REACH THE SAME CANONICAL LICENSOR.
+  -- Resolution mirrors the PopDAM worker and the frozen inventory script
+  -- (scripts/popsg-property-psg1-inventory.cjs lines 261-263): try a DIRECT canonical
+  -- name/code match first, and fall back to the alias table only if that misses. That
+  -- order is why 'NBC' has no alias row and must not have one -- it hits the canonical
+  -- record directly, and the section-2 redundancy trigger refuses aliases that duplicate
+  -- their own target's name (asserted in G4).
+  select l.id into v_target from core.licensor l where l.name = 'NBC';
+  if v_target is null then
+    raise exception 'G2. FAIL - canonical Licensor NBC does not exist';
+  end if;
+
+  foreach v_norm in array array['NBC Universal', 'NBC', 'NBCU', 'NBCUniversal']
+  loop
+    select l.id into v_resolved
+      from core.licensor l
+     where core.normalize_popsg_property_observation(l.name)
+             = core.normalize_popsg_property_observation(v_norm)
+        or core.normalize_popsg_property_observation(coalesce(l.code, ''))
+             = core.normalize_popsg_property_observation(v_norm);
+
+    if v_resolved is null then
+      v_resolved := public.resolve_licensor_alias(v_norm);
+    end if;
+
+    if v_resolved is distinct from v_target then
+      raise exception
+        'G2. FAIL - NBC-family string % resolved to %, expected the canonical NBC (%). '
+        'Albert ruled that all four denote the one Licensor NBC.',
+        quote_literal(v_norm), v_resolved, v_target;
+    end if;
+  end loop;
+  raise notice 'G2. PASS - all four NBC strings resolve to the one canonical Licensor NBC';
+
+  -- G3. The three NBC ALIAS rows are owner_approved with ALL THREE approval fields
+  -- populated, attributed to Albert, dated to the ruling, and carrying his words
+  -- verbatim. An approval with a missing or vague evidence note is not an approval.
+  select count(*) into v_count
+    from core.licensor_alias
+   where alias in ('NBC Universal', 'NBCU', 'NBCUniversal')
+     and approval_status = 'owner_approved'
+     and approved_by = 'Albert Hazan'
+     and approved_at is not null
+     -- Asserted in EXPLICIT UTC, and separately in the server's own local timezone.
+     -- A bare `approved_at::date` is timezone-dependent: this database runs
+     -- America/New_York, so a ruling stored at midnight UTC would read back as
+     -- 2026-07-30 and the audit trail would name the wrong day. Both assertions must
+     -- hold, which is what forces the stored value away from a midnight boundary.
+     and (approved_at at time zone 'UTC')::date = date '2026-07-31'
+     and approved_at::date = date '2026-07-31'
+     and approval_evidence like
+         '%NBC Universal really means NBC, really means NBCU, really means NBCUniversal%'
+     and approval_evidence like '%2026-07-31%';
+  if v_count <> 3 then
+    raise exception
+      'G3. FAIL - expected 3 NBC alias rows owner_approved by Albert Hazan, dated 2026-07-31, '
+      'quoting the ruling verbatim; found %', v_count;
+  end if;
+  raise notice 'G3. PASS - the NBC family is owner_approved with approver, date and verbatim evidence';
+
+  -- G4. 'NBC' must NOT be an alias row, and must be refused if anyone tries -- it is the
+  -- canonical name itself. This pins the reason the ruling's four strings map to only
+  -- three rows, so nobody "fixes" the apparent off-by-one by inserting it.
+  if exists (select 1 from core.licensor_alias where alias = 'NBC') then
+    raise exception
+      'G4. FAIL - NBC is stored as an alias. It is the canonical Licensor name and resolves directly.';
+  end if;
+  begin
+    insert into core.licensor_alias (licensor_id, alias) values (v_target, 'NBC');
+    raise exception 'G4. FAIL - an alias equal to the canonical name NBC was accepted';
+  exception
+    when check_violation then
+      raise notice 'G4. PASS - NBC has no alias row and is refused as redundant';
+  end;
+
+  -- G5. The two new variants carry owner_ruling provenance, not worker-code provenance,
+  -- and are flagged dormant on the frozen measurement (zero PSG-1 observations).
+  select count(*) into v_count
+    from core.licensor_alias
+   where alias in ('NBCU', 'NBCUniversal')
+     and source_system = 'owner_ruling'
+     and is_dormant
+     and dormancy_evidence is not null
+     and evidence_notes like '%2026-07-31%';
+  if v_count <> 2 then
+    raise exception
+      'G5. FAIL - the two new NBC variants must be source_system=owner_ruling and dormant '
+      'with evidence; found % matching', v_count;
+  end if;
+  raise notice 'G5. PASS - NBCU/NBCUniversal are owner_ruling provenance, dormant with evidence';
+
+  -- G6. The read path actually returns NBC for the two variants that matched NOTHING
+  -- before this migration. This is the behaviour change the ruling bought.
+  if public.resolve_licensor_alias('NBCU') is distinct from v_target then
+    raise exception 'G6. FAIL - resolve_licensor_alias(''NBCU'') does not return canonical NBC';
+  end if;
+  if public.resolve_licensor_alias('NBCUniversal') is distinct from v_target then
+    raise exception 'G6. FAIL - resolve_licensor_alias(''NBCUniversal'') does not return canonical NBC';
+  end if;
+  raise notice 'G6. PASS - NBCU and NBCUniversal now resolve through the alias table';
 
   raise notice '';
   raise notice 'ALL core.licensor_alias CONTRACT TESTS PASSED';
