@@ -1,0 +1,63 @@
+name: ColdLion Promotion Contract Tests
+
+# WHY THIS WORKFLOW EXISTS
+# ------------------------
+# The ColdLion recurring-promotion contract tests existed but NEVER RAN on a pull request.
+# `tools/coldlion-recurring-promotion.test.mjs` was listed only inside
+# .github/workflows/coldlion-licensor-property-production.yml, and every job in that file is
+# gated on repository variable COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED — which does not
+# exist and must not be created before Step 8 approval. So the tests that prove the promotion
+# contract were, in practice, dead: a change could break them and no check would ever go red.
+#
+# These tests are the runner half of the Step 5.6 plan cross-check — the assertion that the
+# changes the promotion applies match the plan computed independently beforehand. That guard
+# is only worth anything if the two implementations stay in step, and nothing keeps them in
+# step except these tests actually running on the pull request that changes one of them.
+#
+# NO `paths:` FILTER, ON PURPOSE (AGENTS.md §5.2).
+# ------------------------------------------------
+# The tests read across tools/** AND supabase/migrations/** — they assert that the SQL
+# migration's 5.6 predicate still matches its 5.8 predicate, and that the accent-fold map is
+# identical on both sides. A narrow filter over a checker that reads more than the filter
+# watches produces STALE VERDICTS: a file outside the filter breaks the check, and fixing it
+# never re-runs it, so `main` displays the old result forever. That has already bitten this
+# repository once. This job is a few seconds of Node with no services, no secrets and no
+# database, so running it on every pull request costs nothing worth optimising away.
+#
+# It is READ-ONLY. No Supabase CLI, no project ref, no credentials, no network. It cannot
+# touch preview or production, and it does not enable the production lane.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coldlion-promotion-contract-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract-tests:
+    name: Promotion contract tests (offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run the ColdLion promotion contract tests
+        run: |
+          node --test \
+            tools/coldlion-recurring-promotion.test.mjs \
+            tools/promote-coldlion-source-owned.test.mjs \
+            tools/coldlion-promotion-failure-recording.test.mjs \
+            tools/coldlion-promotion-serialization-lock.test.mjs \
+            tools/coldlion-production-authorization.test.mjs \
+            tools/coldlion-production-schedule-map.test.mjs \
+            tools/coldlion-licensor-property-production-workflow.test.mjs \
+            tools/phase6-preview-guards.test.mjs \
+            tools/phase6-cli-result-parse.test.mjs
