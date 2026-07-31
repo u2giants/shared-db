@@ -1,0 +1,354 @@
+# ColdLion Licensor/Property RECURRING PRODUCTION feed (accelerated plan Step 7A item 1).
+#
+# THIS IS NOT A RELAXED COPY OF THE PREVIEW WORKFLOW.
+# ---------------------------------------------------
+# .github/workflows/coldlion-licensor-property-phase6-parallel.yml is preview-only and
+# HARD-REFUSES production. This workflow is its mirror image: it hard-refuses PREVIEW and
+# every other project ref, and it is the only lane allowed to name qsllyeztdwjgirsysgai.
+# Neither file may ever be edited into the other. Two opposite guards are auditable; one
+# guard with an environment switch is not — a single wrong variable would silently retarget
+# a write lane, which is exactly the failure this pair of workflows exists to prevent.
+#
+# WHY IT EXISTS
+# -------------
+# Steps 1-7 of plan_coldlion_licensor_property_accelerated_cutover.md built a safe ONE-TIME
+# mirror + 542-link package. GLM-5.2 found on 2026-07-28 that a one-time link is not the
+# routine feed switch the plan's §1 goal states. Albert chose the real recurring feed on
+# 2026-07-29. This workflow IS that recurring lane. A one-time 542-link run does NOT
+# complete the feed switch.
+#
+# DISABLED BY DEFAULT — AND IT STAYS DISABLED UNTIL STEP 8.
+# ---------------------------------------------------------
+# Every path in this file is gated on repository variable
+#   COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED=true
+# which does not exist yet and must NOT be created before Albert's Step 8 approval names
+# the exact project, migrations, modes, schedules, secrets, window, and rollback. While the
+# variable is absent or not exactly "true" this workflow SKIPS LOUDLY (a ::warning:: on
+# every trigger) and stops. It NEVER falls back to preview, NEVER downgrades a write job to
+# a dry run, and NEVER "does something harmless instead" — a silent degradation would let an
+# operator believe the production feed is running when it is not.
+#
+# REQUIRED GitHub Actions secrets — NAMES ONLY. No value appears in this file, in any log,
+# or in any command line. Values live in 1Password vault vibe_coding.
+#   SUPABASE_ACCESS_TOKEN          — Supabase CLI Personal Access Token
+#   SUPABASE_DB_PASSWORD_PRODUCTION — production DB password
+#                                     (1Password: "Supabase DB Password - shared POP database").
+#                                     Creating this secret is itself a named production action
+#                                     that requires Step 8 approval.
+#   COLDLION_API_KEY               — Coldlion ERP API key x5.coldlion.com
+#
+# REQUIRED repository variable:
+#   COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED=true   (absent today, by design)
+#
+# Scheduled sequence (exact cron strings are the ONLY lane selector — see
+# tools/coldlion-production-schedule-map.mjs; never wall-clock time):
+#   0 6 * * *   coldlion  full ColdLion snapshot (mirror_only)
+#   30 6 * * *  promote   approved source-owned promotion
+#   0 7 * * *   compare   ColdLion vs DesignFlow comparison
+#   45 * * * *  health    hourly health
+# `readiness` is deliberately dispatch-only: it is an operator gate, not a cron job.
+#
+# Human response owner for every failure: Albert Hazan.
+
+name: ColdLion Licensor/Property Recurring Feed (PRODUCTION)
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Which production lane to run"
+        type: choice
+        required: true
+        default: readiness
+        options:
+          - coldlion
+          - promote
+          - compare
+          - health
+          - readiness
+      confirm_production:
+        description: "Type the production project ref to confirm: qsllyeztdwjgirsysgai"
+        type: string
+        required: true
+        default: ""
+  schedule:
+    - cron: "0 6 * * *" # coldlion  — daily full snapshot
+    - cron: "30 6 * * *" # promote   — approved source-owned promotion
+    - cron: "0 7 * * *" # compare   — daily comparison
+    - cron: "45 * * * *" # health    — hourly
+
+permissions:
+  contents: read
+  issues: write # so the DETECTING run delivers its own alert immediately
+
+# ONE non-cancelling group for the whole workflow. Snapshot, promotion, comparison and
+# health can never overlap, and a queued run is never cancelled — cancel-in-progress on a
+# write lane would abandon a half-finished promotion window.
+concurrency:
+  group: coldlion-licensor-property-production
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
+  PREVIEW_PROJECT_REF: rjyboqwcdzcocqgmsyel
+  PHASE6_MAX_SUCCESS_AGE: "36 hours"
+  COLDLION_HUMAN_RESPONSE_OWNER: Albert Hazan
+
+jobs:
+  # ---------------------------------------------------------------------------------
+  # GATE — runs with NO production environment and NO production secret. Its only jobs
+  # are to decide whether the lane is enabled, resolve the lane deterministically, and
+  # prove the offline contracts. Nothing production-facing happens here.
+  # ---------------------------------------------------------------------------------
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.enabled.outputs.enabled }}
+      job: ${{ steps.plan.outputs.job }}
+      writes: ${{ steps.plan.outputs.writes }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse any ref that is not production
+        run: |
+          set -euo pipefail
+          if [ "${PRODUCTION_PROJECT_REF}" != "qsllyeztdwjgirsysgai" ]; then
+            echo "::error::Hard-coded production ref mismatch: ${PRODUCTION_PROJECT_REF}" >&2
+            exit 1
+          fi
+          if [ "${PRODUCTION_PROJECT_REF}" = "${PREVIEW_PROJECT_REF}" ]; then
+            echo "::error::PRODUCTION and PREVIEW refs must differ" >&2
+            exit 1
+          fi
+          echo "This workflow targets ONLY ${PRODUCTION_PROJECT_REF}."
+
+      - name: Refuse a workflow_dispatch that does not spell out the production ref
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          GIVEN='${{ inputs.confirm_production }}'
+          if [ "$GIVEN" != "${PRODUCTION_PROJECT_REF}" ]; then
+            echo "::error::confirm_production must be exactly ${PRODUCTION_PROJECT_REF} (got '${GIVEN}'). Refusing a production run that was not explicitly confirmed." >&2
+            exit 1
+          fi
+
+      - name: Enable gate (SKIPS LOUDLY while disabled; never falls back to preview)
+        id: enabled
+        run: |
+          set -euo pipefail
+          if [ "${{ vars.COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED }}" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Production recurring lane is ENABLED for ${PRODUCTION_PROJECT_REF}."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=ColdLion production feed is DISABLED::COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED is not 'true', so this ${{ github.event_name }} trigger performed NO work against ${PRODUCTION_PROJECT_REF}. This is the intended pre-Step-8 state. There is deliberately NO preview fallback and NO dry-run fallback: nothing ran. Enabling this variable is a named production action that requires Albert Hazan's Step 8 approval naming the exact project, migrations, modes, schedules, secrets, window and rollback."
+            echo "SKIPPED LOUDLY: disabled. No preview fallback. No dry-run fallback. Nothing ran."
+          fi
+
+      - name: Resolve the lane from the exact cron string (never wall-clock time)
+        id: plan
+        if: steps.enabled.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            JOB="${{ inputs.job }}"
+          else
+            # Keep in lockstep with tools/coldlion-production-schedule-map.mjs. A delayed
+            # runner still resolves the lane it was scheduled for, because the decision
+            # comes from github.event.schedule and nothing else.
+            SCHEDULE='${{ github.event.schedule }}'
+            case "$SCHEDULE" in
+              "0 6 * * *") JOB=coldlion ;;
+              "30 6 * * *") JOB=promote ;;
+              "0 7 * * *") JOB=compare ;;
+              "45 * * * *") JOB=health ;;
+              *)
+                echo "::error::Unknown github.event.schedule expression for the production lane: [$SCHEDULE]" >&2
+                exit 1
+                ;;
+            esac
+          fi
+          case "$JOB" in
+            coldlion|promote) WRITES=true ;;
+            compare|health|readiness) WRITES=true ;;
+            *) echo "::error::Unknown production job: $JOB" >&2; exit 1 ;;
+          esac
+          echo "job=$JOB" >> "$GITHUB_OUTPUT"
+          echo "writes=$WRITES" >> "$GITHUB_OUTPUT"
+          echo "Resolved production job=$JOB (schedule='${{ github.event.schedule }}')"
+
+      - uses: actions/setup-node@v4
+        if: steps.enabled.outputs.enabled == 'true'
+        with:
+          node-version: 22
+
+      - name: Offline contract tests (must pass before any production write)
+        if: steps.enabled.outputs.enabled == 'true'
+        run: |
+          node --test \
+            tools/phase6-preview-guards.test.mjs \
+            tools/phase6-schedule-map.test.mjs \
+            tools/coldlion-production-schedule-map.test.mjs \
+            tools/coldlion-production-authorization.test.mjs \
+            tools/coldlion-recurring-promotion.test.mjs \
+            tools/coldlion-licensor-property-production-workflow.test.mjs \
+            tools/phase6-cli-result-parse.test.mjs \
+            tools/evaluate-coldlion-licensor-property-cutover-readiness.test.mjs
+
+  # ---------------------------------------------------------------------------------
+  # PRODUCTION — the only job with the `production` environment and the production DB
+  # password. It cannot start unless the gate says the lane is enabled.
+  # ---------------------------------------------------------------------------------
+  production:
+    needs: gate
+    if: needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      # The four-part production authorization. Part 4 is this variable; parts 1-3 are the
+      # flags spelled out on every runner invocation below. All four, every time.
+      COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED: "true"
+      LANE: ${{ needs.gate.outputs.job }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify every required secret NAME is wired (values never printed)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD_PRODUCTION: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
+          COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
+        run: |
+          set -euo pipefail
+          MISSING=""
+          [ -n "${SUPABASE_ACCESS_TOKEN:-}" ] || MISSING="$MISSING SUPABASE_ACCESS_TOKEN"
+          [ -n "${SUPABASE_DB_PASSWORD_PRODUCTION:-}" ] || MISSING="$MISSING SUPABASE_DB_PASSWORD_PRODUCTION"
+          [ -n "${COLDLION_API_KEY:-}" ] || MISSING="$MISSING COLDLION_API_KEY"
+          if [ -n "$MISSING" ]; then
+            echo "::error title=Missing production secret::Refusing the production lane; missing secret(s):$MISSING. This fails LOUDLY rather than degrading to preview or a dry run. Human response owner: ${COLDLION_HUMAN_RESPONSE_OWNER}." >&2
+            exit 1
+          fi
+          echo "All three required secret names are populated."
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link the production project only, and prove it
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
+        run: |
+          set -euo pipefail
+          supabase login --token "$SUPABASE_ACCESS_TOKEN"
+          supabase link --project-ref "$PRODUCTION_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          LINKED=$(cat supabase/.temp/project-ref)
+          echo "Linked project: $LINKED"
+          if [ "$LINKED" = "$PREVIEW_PROJECT_REF" ]; then
+            echo "::error::Refusing: the production workflow linked PREVIEW ${PREVIEW_PROJECT_REF}." >&2
+            exit 1
+          fi
+          if [ "$LINKED" != "$PRODUCTION_PROJECT_REF" ]; then
+            echo "::error::Refusing: linked project $LINKED is not production ${PRODUCTION_PROJECT_REF}." >&2
+            exit 1
+          fi
+
+      # Every write runner below carries ALL FOUR authorization parts:
+      #   --production  --production-authorized  --project-ref qsllyeztdwjgirsysgai
+      #   + COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED=true (job env)
+      # and --apply --linked against the project proven above. There is no dry-run
+      # variant of these steps: a production lane that quietly dry-runs is a lie.
+
+      - name: coldlion — daily full ColdLion snapshot (mirror_only)
+        if: env.LANE == 'coldlion'
+        env:
+          COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
+        run: |
+          set -euo pipefail
+          node tools/sync-coldlion-licensors-properties.mjs \
+            --apply --linked \
+            --production --production-authorized \
+            --project-ref "$PRODUCTION_PROJECT_REF"
+
+      - name: promote — approved source-owned promotion (guarded, audited)
+        if: env.LANE == 'promote'
+        env:
+          COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
+        run: |
+          set -euo pipefail
+          node tools/promote-coldlion-source-owned.mjs \
+            --apply --linked \
+            --production --production-authorized \
+            --project-ref "$PRODUCTION_PROJECT_REF"
+
+      - name: compare — ColdLion vs DesignFlow daily comparison
+        if: env.LANE == 'compare'
+        run: |
+          set -euo pipefail
+          node tools/compare-coldlion-designflow-daily.mjs \
+            --apply --linked \
+            --production --production-authorized \
+            --project-ref "$PRODUCTION_PROJECT_REF"
+
+      - name: health — hourly health check
+        if: env.LANE == 'health'
+        run: |
+          set -euo pipefail
+          node tools/check-coldlion-designflow-sync-health.mjs \
+            --apply --linked \
+            --production --production-authorized \
+            --project-ref "$PRODUCTION_PROJECT_REF"
+
+      - name: readiness — operator gate (dispatch only)
+        if: env.LANE == 'readiness'
+        run: |
+          set -euo pipefail
+          node tools/evaluate-coldlion-licensor-property-cutover-readiness.mjs \
+            --apply --linked \
+            --production --production-authorized \
+            --project-ref "$PRODUCTION_PROJECT_REF"
+
+      # The detecting run delivers its own alert. Waiting for the */10 alert-monitor cron
+      # was the wrong design: GitHub throttled it to 57-201 minute gaps on 2026-07-27/28.
+      # This run is already awake and already knows, so it files the issue in seconds.
+      # If alert delivery itself fails, the step fails and the workflow stays RED.
+      - name: Deliver the production alert immediately on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          set +e
+          node tools/dispatch-coldlion-taxonomy-alerts.mjs --apply --linked \
+            --production --production-authorized \
+            --project-ref "$PRODUCTION_PROJECT_REF" --out alert-plan.json
+          CODE=$?
+          set -e
+          if [ "$CODE" -eq 1 ] && [ -f alert-plan.json ]; then
+            TITLE=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('alert-plan.json','utf8')).title)")
+            node -e "require('fs').writeFileSync('alert-body.md', JSON.parse(require('fs').readFileSync('alert-plan.json','utf8')).body)"
+          else
+            TITLE="ColdLion PRODUCTION licensor/property lane FAILED (${LANE}) - run ${{ github.run_id }}"
+            printf '%s\n' \
+              "The ColdLion **production** recurring lane failed and no durable alert row was readable (dispatcher exit ${CODE})." \
+              "" \
+              "* Environment: PRODUCTION \`${PRODUCTION_PROJECT_REF}\`" \
+              "* Lane: \`${LANE}\`" \
+              "* Human response owner: **${COLDLION_HUMAN_RESPONSE_OWNER}**" \
+              "" \
+              "First response: set repository variable \`COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED\` to \`false\` to stop the recurring lane, leave mirrors and evidence intact, compare the protected UUID/status/parent hashes, then reproduce and fix forward on preview via shared-db." \
+              > alert-body.md
+          fi
+          {
+            echo ""
+            echo "Delivered immediately by the detecting run ${{ github.run_id }} (lane: ${LANE}) at $(date -u +%Y-%m-%dT%H:%M:%SZ) UTC."
+            echo ""
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } >> alert-body.md
+          gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body-file alert-body.md \
+            --label "coldlion-taxonomy-alert" \
+            || gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body-file alert-body.md
+          echo "::error::ColdLion PRODUCTION alert delivered. Human response owner: ${COLDLION_HUMAN_RESPONSE_OWNER}."
