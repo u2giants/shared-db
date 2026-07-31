@@ -218,25 +218,45 @@ begin
     raise exception 'ASSERT: % rows have NULL rfq_groups (must be [])', v_null_rfq;
   end if;
 
-  -- 4. Sanity targets from 2026-07-31 production evidence (preview is a full clone)
+  -- 4. Sanity floors only (no upper bound — linkage drifts/grows between preview
+  --    rehearsal and production promotion; no high floor — empty/minimal envs
+  --    must still apply). Intent: a broken exact-match join returns 0 linked
+  --    rows while both sides have data; historically ~2015 linked / ≥11 multi
+  --    on a full clone (2026-07-31).
   select count(*) into v_linked_rows
   from public.style_tracker_rows_with_bridge
   where rfq_groups <> '[]'::jsonb;
 
-  if v_linked_rows not between 1900 and 2200 then
+  if v_linked_rows < 1
+     and exists (
+       select 1
+       from public.style_tracker_rows
+       where nullif(trim(row_data ->> 'rfq_code'), '') is not null
+       limit 1
+     )
+     and exists (
+       select 1
+       from dflow."RFQItem"
+       where "rfqItem_rfq_group" is not null
+         and nullif(trim("rfqItem_style_number"), '') is not null
+       limit 1
+     )
+  then
     raise exception
-      'ASSERT: linked Master Data rows = % (expected ~2015 ±100). Match rule may be wrong — stop and report.',
-      v_linked_rows;
+      'ASSERT: linked Master Data rows = 0 despite RFQ codes and RFQItem rows existing — match rule is broken.';
   end if;
 
   select count(*) into v_multi_group_rows
   from public.style_tracker_rows_with_bridge
   where jsonb_array_length(rfq_groups) > 1;
 
-  if v_multi_group_rows < 5 then
+  -- When linkage is substantial, at least one multi-group row is expected
+  -- (full clone historically has ≥11). Floor of 1 only when linked ≥ 100 so
+  -- sparse environments are not failed for lacking multi-group history.
+  if v_linked_rows >= 100 and v_multi_group_rows < 1 then
     raise exception
-      'ASSERT: only % multi-group rows (expected ≥11 historically). Dedup/join may be wrong.',
-      v_multi_group_rows;
+      'ASSERT: 0 multi-group rows with % linked — dedup/join may have collapsed groups incorrectly.',
+      v_linked_rows;
   end if;
 
   -- 5. Confirmed example: SKU MFZ88KMSC01 / RFQ Code MFZ88-309 → Family Dollar July 2023
@@ -322,7 +342,9 @@ begin
       raise exception 'ASSERT: case/trim match failed for code %', v_code;
     end if;
 
-    -- 9. Matching does NOT use prefix/suffix/SKU fuzzy comparison
+    -- 9. Matching does NOT use prefix/suffix/SKU fuzzy comparison.
+    --    Count groups the VIEW attached that are only reachable via a stripped
+    --    prefix of the code (not an exact match). Must be zero — raise if not.
     select count(*) into v_fuzzy_hit
     from dflow."RFQItem" i
     where upper(trim(i."rfqItem_style_number")) = upper(trim(left(v_code, greatest(length(v_code) - 1, 1))))
@@ -341,7 +363,11 @@ begin
               and i2."rfqItem_rfq_group" = i."rfqItem_rfq_group"
           )
       );
-    -- The above is a negative proof path; if zero, good.
+    if v_fuzzy_hit > 0 then
+      raise exception
+        'ASSERT: view linked % group(s) for code % that are only reachable via prefix/fuzzy match (exact match required)',
+        v_fuzzy_hit, v_code;
+    end if;
   end if;
 
   -- 10. Multi-group: latest first (linked_at desc), deterministic id desc tie-break
@@ -415,3 +441,7 @@ $$;
 -- post-apply (see PR body). Measured 2026-07-31 on preview: pre-aggregate join
 -- ~112ms for full Master Data (15,533 rows); correlated alternative was ~91s
 -- without an expression index — no index added.
+
+-- PostgREST must reload its schema cache so consumers (PopDAM) see the new
+-- rfq_groups column. Matches 20260721143000_dam_master_data_customer_id.sql.
+notify pgrst, 'reload schema';
