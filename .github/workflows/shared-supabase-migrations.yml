@@ -8,6 +8,8 @@ on:
       - "scripts/check-sql.test.mjs"
       - "scripts/production_migration_guard.py"
       - "scripts/test_production_migration_guard.py"
+      - "tools/coldlion-promotion-failure-recording.test.mjs"
+      - "tools/promote-coldlion-source-owned.mjs"
       - ".github/workflows/shared-supabase-migrations.yml"
   workflow_dispatch:
     inputs:
@@ -60,6 +62,12 @@ jobs:
         run: bash scripts/check-sql.sh
       - name: Test SQL migration guards
         run: node --test scripts/check-sql.test.mjs
+      # Asserts that the live plm.promote_coldlion_source_owned migration carries no
+      # in-function failure recording (it can never work) AND that the runner keeps the
+      # out-of-band path that actually does the job. Runs here because it reads
+      # supabase/migrations, which is what this workflow's paths filter watches.
+      - name: Test ColdLion promotion failure-recording ownership
+        run: node --test tools/coldlion-promotion-failure-recording.test.mjs
       - name: Test production guard
         run: python -m unittest scripts/test_production_migration_guard.py
 
