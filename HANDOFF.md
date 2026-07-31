@@ -1983,7 +1983,63 @@ testable offline against the two committed files. **Explicitly not implemented i
 that assessed it** — that session's scope was limited to `HANDOFF.md` and `COORDINATOR_INTAKE.md`
 and was forbidden from adding scripts or workflows.
 
-### B14 — The ENOBUFS fix MOVES the cliff, it does not remove it — and it still auto-trips the breaker (HIGH — recorded 2026-07-31, NOT implemented; **must be resolved BEFORE the production lane is enabled at Step 8**)
+### B14 — The ENOBUFS fix MOVES the cliff, it does not remove it — and it still auto-trips the breaker (**RESOLVED 2026-07-31** — no longer a Step 8 blocker)
+
+> **RESOLVED 2026-07-31 in PR `fix/b14-coldlion-probe-bounded`.** Both halves were implemented;
+> the item below is kept in full because it is the reasoning that produced the design, and
+> because a future reader must be able to see WHY the cheap fix was not enough.
+>
+> **Half 1 — the probe no longer returns the whole mirror.** `buildCycleStateSql` in
+> `tools/promote-coldlion-source-owned.mjs` now takes `{ offset, limit }` and applies an
+> explicit `order by … offset … limit …` window **inside the `mirror` CTE**, before the lateral
+> and provenance joins. That placement is the whole reason the change is small: the selection
+> predicate uses only `mirror` columns, so the window can sit there without touching a single
+> pinned expression in the outer `jsonb_build_object`. The new `readCycleState()` reads
+> successive pages of `CYCLE_STATE_PAGE_SIZE` (1000) rows and stops on the first short page,
+> so the payload is bounded by a constant instead of by the row count. At roughly 700 bytes of
+> JSON per row a full page is ~0.7 MB — it would fit **even under Node's 1 MiB default**, which
+> makes the 256 MiB `maxBuffer` a second line of defence rather than the only one. It is kept
+> for that reason, and because `runSql` is generic.
+>
+> **Server-side aggregation was considered and REJECTED, with evidence.** The "aggregates and a
+> hash" option in the list below cannot work here: `planRecurringPromotion` in
+> `tools/coldlion-recurring-promotion.mjs` decides **row by row** (curated-name equivalence,
+> quarantine reasons, per-row provenance fields), and `splitCycleState` consumes **every key**
+> the probe emits. There is no aggregate that preserves what the planner needs. Paging is the
+> smallest change that actually removes the cliff.
+>
+> **Offset paging is only safe if you check the window did not move**, so `readCycleState` fails
+> CLOSED on two conditions: every page must report the **same `snapshot_run_id`** (a change means
+> a new mirror snapshot landed mid-read and the pages describe different cycles), and **no typed
+> key may appear twice** (a duplicate is the observable symptom of a shifted window, which means
+> some other row was skipped entirely — and a skipped row looks to the planner exactly like a
+> record ColdLion stopped sending). There is also a max-page guard so a database handing back
+> endlessly full pages cannot spin forever.
+>
+> **Half 2 — a client-side fault can no longer trip the breaker.** `runSql` now tags every
+> spawn-boundary fault (ENOBUFS, ENOENT, EACCES, a kill) with `code = "CLIENT_SPAWN_FAULT"` via
+> `clientSpawnFaultError()`, and the runner's catch block checks `isClientSpawnFault(error)`
+> **first**, printing a loud `CLIENT TOOLING FAULT` and returning the new
+> `EXIT_CLIENT_TOOLING_FAULT` = **4** — distinct from success (0), failure (1), unparseable (2)
+> and lane skip (3). It records **no** durable failed `ingest.sync_run` row and **no** critical
+> alert, so it cannot contribute to the two-consecutive-failure autotrip. If the CLI could not
+> be executed, the database was never asked anything and cannot have failed. The same tagging
+> was applied to the `psql` branch, where a non-ENOENT spawn error previously surfaced as the
+> undiagnosable `"psql failed"`.
+>
+> **Proof, all offline.** `tools/coldlion-cycle-state-paging.test.mjs` (14 tests) pins both
+> halves. The breaker half is proved against the **real** `main()` across the **real** spawn
+> boundary: with `PATH` pointing at an empty directory the CLI genuinely ENOENTs, and the test
+> asserts exit 4, the absence of the two `could not record …` warnings, and that **zero** SQL
+> statements of any kind were sent — with a contrast test that a genuine non-zero CLI exit
+> still attempts both `record_taxonomy_sync_alert` and the failed `ingest.sync_run` insert, so
+> the new guard is not too wide. Every assertion was mutation-tested: 12 separate mutations of
+> the code under test each made a test fail, and both source files were restored byte-identical
+> (verified by SHA-256).
+>
+> **No existing test was weakened or deleted.** `tools/coldlion-sync-common-runsql.test.mjs`
+> still passes unchanged: the argv, `--output json`, the raised `maxBuffer` and the diagnosable
+> spawn-fault message are all preserved.
 
 **Read this as a correction to the defect-1 fix in PR #362, not as a complaint about it.** The
 fix is right and should stay. What it is NOT is a resolution of the underlying problem, and the

@@ -50,6 +50,38 @@ from consecutive where failures >= 2;
 `;
 }
 
+/**
+ * The `code` carried by an error that represents a CLIENT-SIDE tooling fault — the child
+ * process could not be run to completion at all (ENOENT, ENOBUFS, EACCES, a kill/timeout).
+ *
+ * This is deliberately NOT a database failure and must never be recorded as one. A spawn
+ * fault says nothing about the data or the database: recording it as a durable failed
+ * `ingest.sync_run` row lets two of them in a row auto-trip the coldlion_licensor_property
+ * circuit breaker and shut down a HEALTHY production feed, blaming the database for a
+ * defect in this repo's own tooling. Callers branch on `isClientSpawnFault(error)`.
+ */
+export const CLIENT_SPAWN_FAULT_CODE = "CLIENT_SPAWN_FAULT";
+
+/** True when the error came from the spawn boundary rather than from SQL. */
+export function isClientSpawnFault(error) {
+  return error?.code === CLIENT_SPAWN_FAULT_CODE;
+}
+
+/**
+ * Build the tagged error for a spawn-level fault. `status` is null and `stderr` is EMPTY for
+ * every one of these, so the underlying `error.code` is the only diagnostic that exists.
+ */
+export function clientSpawnFaultError(what, spawnError) {
+  const error = new Error(
+    `${what} could not be executed (${spawnError?.code ?? "spawn error"}): ${spawnError?.message ?? spawnError}` +
+      " — this is a CLIENT-SIDE tooling fault, not a database failure.",
+  );
+  error.code = CLIENT_SPAWN_FAULT_CODE;
+  error.spawnErrorCode = spawnError?.code ?? null;
+  error.cause = spawnError;
+  return error;
+}
+
 export function runSql(sql, { linked = false } = {}) {
   const databaseUrl = process.env.DATABASE_URL ?? process.env.SUPABASE_DB_URL;
   if (!databaseUrl && !linked) {
@@ -67,7 +99,12 @@ export function runSql(sql, { linked = false } = {}) {
       { input: sql, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
     );
     if (!psql.error && psql.status === 0) return psql.stdout;
-    if (psql.error?.code !== "ENOENT") throw new Error(psql.stderr || "psql failed");
+    // ENOENT means psql is simply not installed — the documented fall-through to the Supabase
+    // CLI below. Any OTHER spawn error (ENOBUFS, EACCES, a kill) is a client-side tooling
+    // fault: `stderr` is empty for those, so the old `psql.stderr || "psql failed"` produced an
+    // undiagnosable message that the caller then recorded as a database failure.
+    if (psql.error && psql.error.code !== "ENOENT") throw clientSpawnFaultError("psql", psql.error);
+    if (!psql.error) throw new Error(psql.stderr || "psql failed");
   }
 
   const dir = mkdtempSync(join(tmpdir(), "coldlion-sync-"));
@@ -83,19 +120,20 @@ export function runSql(sql, { linked = false } = {}) {
     const result = spawnSync("supabase", args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      // The cycle-state probe returns the WHOLE ColdLion mirror as one JSON document — over
-      // 1.3 MB on the preview clone. Node's default spawnSync maxBuffer is exactly 1 MiB, so
-      // the read was killed with ENOBUFS, `status` came back null, `stderr` came back EMPTY,
-      // and the error below reported the generic "supabase db query failed". That misreads a
-      // client-side buffer overflow as a database failure, and two of them in a row AUTO-TRIP
-      // the coldlion_licensor_property circuit breaker. Sized well above any plausible payload.
+      // Node's default spawnSync maxBuffer is exactly 1 MiB. The cycle-state probe used to
+      // return the WHOLE ColdLion mirror as one JSON document — 1,305,075 bytes on preview —
+      // which overflowed it with ENOBUFS, null `status` and EMPTY `stderr`.
+      //
+      // This ceiling is now the SECOND line of defence, not the first: the probe itself is
+      // paged (CYCLE_STATE_PAGE_SIZE in tools/promote-coldlion-source-owned.mjs), so no single
+      // response scales with the mirror any more. The ceiling stays because runSql is generic
+      // and other callers issue whole-result queries.
       maxBuffer: 256 * 1024 * 1024,
     });
     if (result.error) {
       // Never let a spawn-level fault (ENOBUFS, ENOENT, timeout) masquerade as a SQL failure.
-      throw new Error(
-        `supabase db query could not be executed (${result.error.code ?? "spawn error"}): ${result.error.message}`,
-      );
+      // Tagged CLIENT_SPAWN_FAULT so a caller cannot record it as a durable sync failure.
+      throw clientSpawnFaultError("supabase db query", result.error);
     }
     if (result.status !== 0) throw new Error(result.stderr || "supabase db query failed");
     return result.stdout;
