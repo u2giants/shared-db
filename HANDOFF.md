@@ -688,7 +688,62 @@ holds ~15 deliberately unpromoted migrations from other workstreams — never `-
 
 - PSG-5 implementation remains authorized but unstarted; it is gated only on PR #331 merging.
 - Albert must still decide the fate of the eight Licensor aliases (plan §13 decision 7).
+  **UPDATE 2026-07-31 — half-answered, see PSG-5a below.** Albert chose to MIGRATE them into
+  `core.licensor_alias` (plan §22.13). He did NOT ratify that any individual mapping is correct;
+  all eight are recorded `inherited_unverified`. The correctness question is still open.
 - No at-risk removal subset has owner approval, and none should be inferred.
+
+### PSG-5a (2026-07-31) — the eight `LICENSOR_ALIASES` moved from code into `core.licensor_alias`
+
+**What it is.** Migration `20260731210000_core_licensor_alias.sql` on branch
+`feat/core-licensor-alias-20260731` (PR left OPEN, not merged) creates `core.licensor_alias` and
+seeds the eight aliases that until now lived only in a hard-coded array in the PopDAM worker
+(`u2giants/popdam3`, `apps/worker/src/handlers/popsg-tags.ts`; frozen mirror at
+`scripts/popsg-property-psg1-inventory.cjs` lines 8-17). Full design rationale: plan §22.13.
+
+**The distinction that matters.** Albert approved MOVING these into the database. He did NOT
+approve that each mapping is factually correct — nobody knows who wrote the original eight, when,
+or on what authority. Every seeded row is `approval_status = 'inherited_unverified'`, and the table
+makes `owner_approved` structurally unrepresentable without a named approver, a timestamp AND an
+evidence reference (enforced by CHECK constraints, so even a `service_role` write cannot fake it).
+`public.approve_licensor_alias()` is the only promotion path. **Do not read the existence of these
+rows as owner sign-off.**
+
+**Shape.** Mirrors `core.customer_alias` / `core.factory_alias` / `core.property_alias`. Uses the
+PSG-5 normalizer `core.normalize_popsg_property_observation`, not the simple `lower()` one. One
+deliberate divergence from `core.property_alias`: **uniqueness is GLOBAL on `normalized_alias`**
+because a Licensor alias is the top-level lookup key with no parent scope to disambiguate it. A
+trigger also refuses any alias that would shadow a real canonical Licensor's name or code.
+`Nickelodeon` and `Viacom` are flagged `is_dormant` (0 files in the frozen measurement) — recorded
+as insurance, not live behaviour.
+
+**Read path:** `public.resolve_licensor_alias(text)`, `public.list_licensor_aliases()`,
+`public.approve_licensor_alias(text,text,text)` — all with grants stated explicitly against the
+§10.2 lockdown event trigger, and all asserted `auth_exec=t`/`svc_exec=t`/`anon_exec=f`.
+
+**All six target names resolved to exactly one `core.licensor` row each** (NBC, MARVEL,
+TOEI - ONE PIECE, PEANUTS WORLDWIDE, SESAME STREET, VIACOM MULTI). No licensor was created or
+guessed.
+
+**PREVIEW WAS NOT TOUCHED — read this before you push anything.** `supabase db push --dry-run
+--linked` against `rjyboqwcdzcocqgmsyel` wanted to apply FOUR foreign ColdLion migrations
+(`20260731163000`, `20260731180000`, `20260731190000`, `20260731200000`) ahead of this one. They are
+merged to `main` but were never pushed to preview. That push was REFUSED rather than silently
+moving another session's baseline. Verification was done instead by running the migration plus its
+26-assertion test suite against preview inside a single `BEGIN … ROLLBACK` — all passed, nothing
+committed. **Preview's baseline is unchanged. Whoever serializes next must push those four ColdLion
+migrations before this one.**
+
+**popdam3 is UNCHANGED and the code array is still live.** Cutover steps are in plan §22.13: worker
+reads the table, asserts parity with the frozen array and fails loudly on mismatch, runs both paths
+in parallel for a full production sync cycle, and only then may the array be deleted — never in the
+same release that introduces the table read. Until that happens this migration is additive and
+inert; it changes no worker behaviour.
+
+**Sharp edge now locked by test:** camel-case splitting fires only on a lower/digit -> UPPER
+boundary, so `NBCUniversal` normalizes to `nbcuniversal`, NOT `nbc universal`. Fixture
+`caps_run_no_split` in `supabase/tests/core_licensor_alias_contracts.sql` prevents anyone
+"fixing" this and silently re-parenting 25,731 files.
 
 ### Self-audit
 

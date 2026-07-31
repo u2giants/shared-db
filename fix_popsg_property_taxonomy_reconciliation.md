@@ -1599,3 +1599,110 @@ The Supabase PAT and the preview DB password were read from 1Password vault `vib
 (serially, never in parallel) and used only to authenticate the CLI and psql. **No secret value was
 written to any file, doc, or commit.** Production `qsllyeztdwjgirsysgai` was never linked, queried,
 or pushed to, and no Supabase MCP tool was called at any point.
+
+### 22.13 PSG-5a — the eight Licensor aliases are now DATA, not code (`core.licensor_alias`)
+
+Albert ruled option **(a)** from section 22.6: migrate the eight into a durable recorded contract.
+Migration `20260731210000_core_licensor_alias.sql` (branch `feat/core-licensor-alias-20260731`).
+
+**This is a recording, not a ratification.** Albert approved MOVING the eight mappings into the
+database. He did NOT rule that any individual mapping is factually correct. Origin, author and
+authority of the original array remain unknown — no memo, contract reference or sign-off exists in
+either repository. The table therefore refuses to blur the two states.
+
+#### What was built
+
+- **`core.licensor_alias`** — shape follows the three proven siblings (`core.customer_alias`
+  20260716143231, `core.factory_alias` 20260717192922, `core.property_alias` 20260731150000).
+  The normalizer is `core.normalize_popsg_property_observation` — the SAME one `core.property_alias`
+  uses, and a SQL restatement of the JS `normalize()` in the frozen inventory script that produced
+  the section 22.6 blast-radius numbers. The simple `lower()`+whitespace normalizer used by
+  `customer_alias`/`factory_alias` is deliberately NOT copied (section 6.4 forbids it here).
+- **Provenance columns:** `approval_status` (`inherited_unverified` | `owner_approved`),
+  `approved_by`, `approved_at`, `approval_evidence`. CHECK constraints make `owner_approved`
+  unrepresentable without all three of approver, timestamp and evidence, and make an
+  `inherited_unverified` row unable to carry approval fields that would make it LOOK approved.
+  A direct `service_role` write cannot bypass either.
+- **Dormancy:** `is_dormant` + `dormancy_evidence`. `Nickelodeon` and `Viacom` are seeded dormant
+  against the frozen 2026-07-26/27 measurement (0 files, 0 relationships). Claiming dormancy
+  without a measurement reference is refused.
+- **Uniqueness is GLOBAL on `normalized_alias`**, not parent-scoped. This is the one deliberate
+  divergence from `core.property_alias`: a Property alias is disambiguated by its Licensor parent,
+  but a Licensor alias IS the top-level lookup key with no outer scope. Two live aliases can never
+  resolve the same normalized string to different Licensors.
+- **Shadowing guard:** trigger `core.reject_shadowing_licensor_alias()` refuses any alias that
+  normalizes to the canonical name or code of ANY Licensor — redundant against its own target, and
+  file-re-routing sabotage against a different one. It computes from `new.alias` and never reads the
+  generated column (the 20260731153000 lesson).
+- **FK is `on delete restrict`**, matching `core.property_alias`'s licensor edge. There is no
+  `core.merge_licensor()`, so nothing legitimately needs to delete a parent, and a 25,731-file
+  routing rule must never disappear silently.
+- **RLS:** SELECT-only policy for the standard shared role set; no write policy for `authenticated`
+  at all. `revoke all` then `grant select` to `authenticated`, `grant all` to `service_role`.
+
+#### Read path (grants stated explicitly — AGENTS.md section 10.2)
+
+- `public.resolve_licensor_alias(text) -> uuid` — observed string to canonical Licensor id, NULL
+  when nothing matches (the `licensor_unresolved` case the worker already handles).
+- `public.list_licensor_aliases()` — every alias with its resolved Licensor and full provenance.
+- `public.approve_licensor_alias(alias, approved_by, approval_evidence)` — the ONLY way a row
+  becomes `owner_approved`; administrator/`service_role` only, and refuses to approve anonymously
+  or without an evidence reference.
+
+All three are `revoke ... from public, anon` then `grant execute to authenticated, service_role`,
+and the test suite asserts `auth_exec=t`, `svc_exec=t`, `anon_exec=f`, `PUBLIC=f` both from the raw
+ACL and from `has_function_privilege()`.
+
+#### Target resolution
+
+All six distinct target names resolved to EXACTLY ONE `core.licensor` row each (26 licensors in
+preview): `NBC` [NB], `MARVEL` [MV], `TOEI - ONE PIECE` [1P], `PEANUTS WORLDWIDE` [PN],
+`SESAME STREET` [SM], `VIACOM MULTI` [VM]. None of the eight ALIAS strings collides with an existing
+canonical Licensor name or code, so no alias shadows a real record. The seed loop raises and aborts
+the migration if any target ever resolves to other than exactly one row — it does not guess,
+fuzzy-match, or create a Licensor.
+
+#### Verification
+
+Tests: `supabase/tests/core_licensor_alias_contracts.sql` — 26 assertions covering seed resolution,
+provenance, normalization against the frozen corpus, conflict rejection, dormancy, grants and RLS.
+ALL PASSED. `scripts/check-sql.sh` passes, including Guard B.
+
+**Nothing was applied to preview.** `supabase db push --dry-run --linked` wanted to apply FOUR
+foreign ColdLion migrations (`20260731163000`, `20260731180000`, `20260731190000`, `20260731200000`)
+ahead of this one — they are merged to `main` but were never pushed to `rjyboqwcdzcocqgmsyel`.
+Pushing would have silently moved another session's preview baseline, so it was refused. Instead the
+migration and its full test suite were run against preview inside a single `BEGIN … ROLLBACK`, which
+proves the DDL, the seeds, the constraints and the post-lockdown grants against the real instance
+while leaving preview byte-for-byte unchanged. **Preview's baseline was NOT modified.** Whoever
+serializes next must push those four ColdLion migrations before this one.
+
+One normalization sharp edge was found and is now asserted permanently: camel-case splitting fires
+only on a lower/digit -> UPPER boundary, so `NBCUniversal` normalizes to `nbcuniversal`, NOT
+`nbc universal`. Fixture `caps_run_no_split` locks this in so nobody "fixes" the normalizer and
+silently re-parents 25,731 files.
+
+#### popdam3 cutover — REQUIRED, and NOT done here
+
+The `LICENSOR_ALIASES` array in `u2giants/popdam3` (`apps/worker/src/handlers/popsg-tags.ts`) is
+**deliberately left in place**. It is a different repository and was not modified. To cut over:
+
+1. Worker loads the aliases at startup via `public.list_licensor_aliases()` (or resolves per
+   observation with `public.resolve_licensor_alias()`), using its `service_role` credential.
+2. Worker asserts on load that every entry in the frozen code array is present in the table and
+   points at the same Licensor id. **A mismatch must fail loudly, never fall back silently.**
+3. Run BOTH paths in parallel in production for at least one full sync cycle and prove they produce
+   identical Licensor resolutions for every observed folder string.
+4. **Only after step 3 passes in production** may the code array be deleted. Removing it before the
+   table is proven puts 63,000+ file-to-Licensor resolutions on an unverified read path.
+5. The array must NOT be deleted in the same release that introduces the table read.
+
+Until then the table is additive and inert: it changes no worker behaviour whatsoever.
+
+#### What is still NOT decided
+
+Whether each of the eight mappings is factually correct remains an open business question for
+Albert. The mechanism to record his answer now exists (`public.approve_licensor_alias`), and until
+he uses it every row correctly reads `inherited_unverified`. Section 22.6's owner gate is
+**narrowed, not closed**: the aliases are now durable, auditable and impossible to change by
+accident, but the 26 alias-dependent Batch 01 rows still rest on mappings nobody has ratified.
