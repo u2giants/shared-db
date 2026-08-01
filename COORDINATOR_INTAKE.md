@@ -1464,6 +1464,73 @@ Newest first. Copy the template from Part A and fill it in. The block below is
 an empty example showing the required format — **leave it in place, do not
 overwrite it.**
 
+### INTAKE — ColdLion Licensor/Property preview monitor — 2026-08-01 — automation monitor-coldlion-phase-6-preview
+
+**1. What I was doing and why.**
+I was monitoring the preview-only ColdLion Licensor/Property parallel feed. The goal was to
+preserve every scheduled and manual result, check each complete source cycle against section
+9.4 and the accelerated deterministic gates, and report new blockers without touching
+production or starting Phase 7.
+
+**2. What I have actually DONE.**
+The last completed monitoring pass merged PR **#354** into `main` as merge commit
+`768594e762c09ff2beb19902289608c4842572ff`. It updated only
+`docs/verification/coldlion-licensor-property-phase6-20260726/README.md` and preserved all 24
+scheduled runs from 2026-07-30 through 2026-07-31, including one failed run. Both offline CI
+checks and the consumer-repo sync passed for that merge. No monitoring work for the current
+2026-08-01 heartbeat was started after the new coordinator rule was discovered.
+
+**3. What I applied to PREVIEW (`rjyboqwcdzcocqgmsyel`).**
+No migration, schema change, deletion, or canonical-data update was applied. During the prior
+monitoring pass, I ran the approved readiness evaluator on preview. Its health function appended
+one normal evidence row, health run `75c15b95-2fa2-4b83-b160-f7cae7130c66`, at
+2026-07-31T18:56:08Z. It returned `ready:true`, exact typed mapping 542/542, zero identity
+differences, unchanged protected hashes, breaker enforcement 11/11, a closed breaker, and no
+open critical database alert. Production `qsllyeztdwjgirsysgai` was not accessed.
+
+**4. What is half-finished or abandoned mid-way.**
+The recurring heartbeat remains active, but this session must no longer execute it outside the
+coordinator. New GitHub Actions runs and preview observations after 2026-07-31T18:56:08Z have
+not been inspected or recorded here. The pre-link alert-delivery gap is still open: scheduled
+run `30639230244` failed when Supabase returned a 502 during `supabase link`, and the immediate
+alert also failed because no project link existed. Later green runs proved service recovery but
+did not close that alert gap.
+
+**5. What I own right now.**
+Branch `intake/coldlion-monitor-20260801` in worktree
+`C:\repos\shared-db-intake-coldlion-monitor-20260801`, containing only this intake addition.
+The original `C:\repos\shared-db` checkout is clean on local `main`, but local `main` is 13
+commits behind `origin/main`; it was fetched, not merged, because the new Part A rule forbids
+this non-coordinator session from continuing repo work.
+
+**6. What I was ABOUT to do next.**
+The coordinator should first ingest this block, then dispatch a preview-only monitoring agent in
+an isolated worktree. That agent should read the current priority and ColdLion plans from the
+current `origin/main`, inspect only the named Phase 6 workflow and preview project, collect every
+new run after the evidence cutoff, append evidence only when new facts exist, and leave
+production and Phase 7 untouched. Verification succeeds when every new run and observation is
+accounted for and the alert gap is either fixed and proven on preview or remains plainly listed
+as blocking.
+
+**7. What I am blocked on.**
+Blocked on another workstream and process owner: only the active shared-db coordinator may
+dispatch or continue this monitoring. Step 8 also remains blocked on Albert's separate durable
+production approval. This intake is not that approval.
+
+**8. What I tried that did NOT work, and why. [MANDATORY — do not skip]**
+In the prior pass, a direct Node one-liner intended to read preview health IDs failed before
+opening a database connection because PowerShell stripped quotes around `require("pg")`. I did
+not retry that approach. The approved readiness tool worked instead. Scheduled run
+`30639230244` also failed before preview linking because the Supabase management service returned
+a Cloudflare 502. Its database-backed alert fallback could not run without the link, which is
+the unresolved design gap. No failure was erased or reclassified.
+
+**9. Facts I believe that may already be stale.**
+Everything after 2026-07-31T18:56:08Z may be stale, including workflow runs, preview rows,
+breaker state, open alerts, current readiness, plan status, and whether another coordinator has
+already assigned the alert-gap fix. PR #354 and merge commit `768594e...` were verified when
+merged, but the coordinator must recheck live GitHub and preview state before acting.
+
 ### INTAKE — EXAMPLE TEMPLATE BLOCK (not real work — do not action, do not delete) — YYYY-MM-DD — <session identifier>
 
 **1. What I was doing and why.**
