@@ -1,0 +1,208 @@
+// Negative-path first: HANDOFF.md backlog item B7 -- "every guard ships with a
+// test that COMMITS THE VIOLATION and asserts the observable consequence". So
+// the first tests here construct real colliding pull requests and assert the
+// guard FAILS on them; only then do we assert it passes on the innocent cases.
+
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import test from 'node:test'
+import { fileURLToPath } from 'node:url'
+
+import {
+  extractObjects,
+  findCollisions,
+  formatReport,
+  normalizeSql,
+} from './check-pr-object-collisions.mjs'
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const readMigration = (name) =>
+  readFileSync(path.join(repoRoot, 'supabase', 'migrations', name), 'utf8')
+
+// ---------------------------------------------------------------------------
+// THE HISTORICAL CASE (2026-07-31): four independent sessions each authored a
+// forward migration doing `create or replace function
+// plm.promote_coldlion_source_owned`. Each passed CI alone. These are the real
+// migration files that came out of that incident, replayed as four separate
+// pull requests -- exactly the shape the guard must reject.
+// ---------------------------------------------------------------------------
+const HISTORICAL = [
+  '20260731163000_coldlion_recurring_promotion_drop_dead_failure_recording.sql',
+  '20260731180000_coldlion_recurring_promotion_serialization_lock.sql',
+  '20260731190000_coldlion_promotion_crosscheck_provenance_coverage.sql',
+  '20260731200000_coldlion_recurring_promotion_fanin_name_tiebreak.sql',
+]
+
+test('FIRES: the real 2026-07-31 four-way collision is detected', () => {
+  const sources = HISTORICAL.map((name, i) => ({
+    label: `PR #${100 + i}`,
+    files: [
+      { path: `supabase/migrations/${name}`, sql: readMigration(name) },
+    ],
+  }))
+
+  const result = findCollisions(sources)
+  const hit = result.collisions.find(
+    (c) => c.object === 'function plm.promote_coldlion_source_owned',
+  )
+  assert.ok(hit, 'expected plm.promote_coldlion_source_owned to be flagged')
+  assert.equal(hit.sources.length, 4, 'all four pull requests must be named')
+
+  const report = formatReport(result)
+  assert.match(report, /^ERROR: cross-PR database object collision detected\./)
+  assert.match(report, /plm\.promote_coldlion_source_owned/)
+  for (const name of HISTORICAL) assert.match(report, new RegExp(name))
+})
+
+test('FIRES: a pair is enough -- two PRs replacing one function', () => {
+  const sql = (body) =>
+    `create or replace function plm.f(a int) returns void language sql as $$ ${body} $$;`
+  const result = findCollisions([
+    { label: 'PR #1', files: [{ path: 'supabase/migrations/1_a.sql', sql: sql('select 1') }] },
+    { label: 'PR #2', files: [{ path: 'supabase/migrations/2_b.sql', sql: sql('select 2') }] },
+  ])
+  assert.deepEqual(
+    result.collisions.map((c) => c.object),
+    ['function plm.f'],
+  )
+})
+
+test('FIRES: the base branch counts as a source (the B6 stale-base rule)', () => {
+  // The precise form of "a stale base is a failure": it matters when the base
+  // moved in a way that touched an object this PR also replaces.
+  const result = findCollisions([
+    {
+      label: 'PR #7 (this PR)',
+      files: [{ path: 'supabase/migrations/a.sql', sql: 'create or replace view api.x as select 1;' }],
+    },
+    {
+      label: 'main (merged since this PR branched)',
+      files: [{ path: 'supabase/migrations/b.sql', sql: 'CREATE OR REPLACE VIEW api.x AS SELECT 2;' }],
+    },
+  ])
+  assert.deepEqual(result.collisions.map((c) => c.object), ['view api.x'])
+})
+
+test('FIRES: triggers and policies collide per (name, table)', () => {
+  const trigger = (when) =>
+    `create trigger touch ${when} update on public.assets for each row execute function public.f();`
+  const t = findCollisions([
+    { label: 'A', files: [{ path: 'a.sql', sql: trigger('before') }] },
+    { label: 'B', files: [{ path: 'b.sql', sql: trigger('after') }] },
+  ])
+  assert.deepEqual(t.collisions.map((c) => c.object), ['trigger touch on public.assets'])
+
+  const p = findCollisions([
+    { label: 'A', files: [{ path: 'a.sql', sql: 'create policy p on core.customer for select using (true);' }] },
+    { label: 'B', files: [{ path: 'b.sql', sql: 'create policy p on core.customer for all using (false);' }] },
+  ])
+  assert.deepEqual(p.collisions.map((c) => c.object), ['policy p on core.customer'])
+})
+
+// ---------------------------------------------------------------------------
+// DOES NOT FIRE -- the false-positive side. A guard that blocks every pull
+// request is worse than the bug it prevents.
+// ---------------------------------------------------------------------------
+
+test('does NOT fire on a single pull request replacing one object four times', () => {
+  const sources = [
+    {
+      label: 'PR #1 (this PR)',
+      files: HISTORICAL.map((name) => ({
+        path: `supabase/migrations/${name}`,
+        sql: readMigration(name),
+      })),
+    },
+  ]
+  assert.deepEqual(findCollisions(sources).collisions, [])
+})
+
+test('does NOT fire on unrelated PRs touching different objects', () => {
+  const result = findCollisions([
+    { label: 'PR #1', files: [{ path: 'a.sql', sql: 'create or replace function crm.a() returns void language sql as $$ select $$;' }] },
+    { label: 'PR #2', files: [{ path: 'b.sql', sql: 'create or replace function crm.b() returns void language sql as $$ select $$;' }] },
+    { label: 'PR #3', files: [{ path: 'c.sql', sql: 'create or replace view api.c as select 1;' }] },
+  ])
+  assert.deepEqual(result.collisions, [])
+  assert.equal(formatReport(result), 'No cross-PR object collisions detected.')
+})
+
+test('does NOT fire on a same-named trigger attached to different tables', () => {
+  const result = findCollisions([
+    { label: 'A', files: [{ path: 'a.sql', sql: 'create trigger touch before update on public.assets for each row execute function f();' }] },
+    { label: 'B', files: [{ path: 'b.sql', sql: 'create trigger touch before update on public.style_groups for each row execute function f();' }] },
+  ])
+  assert.deepEqual(result.collisions, [])
+})
+
+test('does NOT fire on a same-named function in different schemas', () => {
+  const result = findCollisions([
+    { label: 'A', files: [{ path: 'a.sql', sql: 'create or replace function crm.f() returns void language sql as $$ select $$;' }] },
+    { label: 'B', files: [{ path: 'b.sql', sql: 'create or replace function pim.f() returns void language sql as $$ select $$;' }] },
+  ])
+  assert.deepEqual(result.collisions, [])
+})
+
+test('does NOT fire on a commented-out create or replace', () => {
+  const result = findCollisions([
+    { label: 'A', files: [{ path: 'a.sql', sql: 'create or replace function plm.real() returns void language sql as $$ select $$;' }] },
+    { label: 'B', files: [{ path: 'b.sql', sql: '-- create or replace function plm.real() -- historical note\nselect 1;' }] },
+  ])
+  assert.deepEqual(result.collisions, [])
+})
+
+// ---------------------------------------------------------------------------
+// Extraction details.
+// ---------------------------------------------------------------------------
+
+test('extraction is case-insensitive, whitespace- and newline-tolerant', () => {
+  assert.deepEqual(
+    extractObjects('CREATE   OR\n  REPLACE\tFUNCTION  Plm . Promote_X ( a int )'),
+    ['function plm.promote_x'],
+  )
+})
+
+test('CRLF comments are still stripped (backlog item B1 trap)', () => {
+  const crlf = '-- create or replace function plm.ghost()\r\ncreate or replace view api.v as select 1;\r\n'
+  assert.deepEqual(extractObjects(crlf), ['view api.v'])
+  assert.ok(!normalizeSql(crlf).includes('ghost'))
+})
+
+test('quoted identifiers are unquoted, unquoted ones lower-cased', () => {
+  assert.deepEqual(
+    extractObjects('create or replace function "Plm"."Weird Name"() returns void;'),
+    ['function Plm.Weird Name'],
+  )
+  assert.deepEqual(
+    extractObjects('create or replace function PLM.Mixed() returns void;'),
+    ['function plm.mixed'],
+  )
+})
+
+test('overloads collapse to one key -- deliberately coarse', () => {
+  const result = findCollisions([
+    { label: 'A', files: [{ path: 'a.sql', sql: 'create or replace function plm.f(a int) returns void;' }] },
+    { label: 'B', files: [{ path: 'b.sql', sql: 'create or replace function plm.f(a text, b int) returns void;' }] },
+  ])
+  assert.deepEqual(result.collisions.map((c) => c.object), ['function plm.f'])
+})
+
+test('materialized views and procedures are recognised', () => {
+  assert.deepEqual(extractObjects('create materialized view if not exists rep.m as select 1;'), [
+    'materialized view rep.m',
+  ])
+  assert.deepEqual(extractObjects('create or replace procedure app.p() language sql as $$ select $$;'), [
+    'procedure app.p',
+  ])
+})
+
+test('DOCUMENTED BLIND SPOT: plain `create table`/`alter` is not modelled', () => {
+  // Asserted so the limitation stays honest and visible rather than drifting
+  // into an assumption that the guard covers it. See the header comment.
+  assert.deepEqual(extractObjects('alter table core.customer add column x int;'), [])
+  assert.deepEqual(extractObjects('create table core.thing (id int);'), [])
+  assert.deepEqual(extractObjects("execute 'create or replace function plm.hidden()';"), [
+    'function plm.hidden', // string-built DDL happens to match here; it is not guaranteed
+  ])
+})
