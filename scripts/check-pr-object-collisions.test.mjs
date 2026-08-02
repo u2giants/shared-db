@@ -10,6 +10,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import {
+  baseCompareSpec,
   extractObjects,
   findCollisions,
   formatReport,
@@ -98,6 +99,50 @@ test('FIRES: triggers and policies collide per (name, table)', () => {
     { label: 'B', files: [{ path: 'b.sql', sql: 'create policy p on core.customer for all using (false);' }] },
   ])
   assert.deepEqual(p.collisions.map((c) => c.object), ['policy p on core.customer'])
+})
+
+test('FIRES: `drop` + `create` collides with `create or replace` (Kimi K3 finding)', () => {
+  // The repo's other house idiom. Only the create-or-replace side was modelled
+  // in the first version of this guard, so this pair -- just as much a lost
+  // overwrite -- passed silently.
+  const result = findCollisions([
+    {
+      label: 'PR #1',
+      files: [{ path: 'a.sql', sql: 'create or replace function plm.promote_coldlion_source_owned(m text) returns void;' }],
+    },
+    {
+      label: 'PR #2',
+      files: [{
+        path: 'b.sql',
+        sql: 'drop function if exists plm.promote_coldlion_source_owned(text);\n'
+          + 'create function plm.promote_coldlion_source_owned(m text) returns void;',
+      }],
+    },
+  ])
+  assert.deepEqual(
+    result.collisions.map((c) => c.object),
+    ['function plm.promote_coldlion_source_owned'],
+  )
+})
+
+test('FIRES: two PRs dropping the same view collide', () => {
+  const result = findCollisions([
+    { label: 'A', files: [{ path: 'a.sql', sql: 'drop view api.v;' }] },
+    { label: 'B', files: [{ path: 'b.sql', sql: 'drop view if exists api.v; create view api.v as select 2;' }] },
+  ])
+  assert.deepEqual(result.collisions.map((c) => c.object), ['view api.v'])
+})
+
+test('the base-branch compare uses the MERGE BASE, not pull_request.base.sha', () => {
+  // Kimi K3's sharpest finding, confirmed against the live GitHub API: three-dot
+  // compare `<headSha>...<baseRef>` starts at merge-base(head, base) -- the real
+  // branch point -- while `base.sha` is the base branch's tip at event time, so
+  // `base.sha...baseRef` compares the base branch to itself and returns nothing.
+  // That made the entire stale-base leg dead code in the first version.
+  assert.equal(
+    baseCompareSpec('u2giants/shared-db', 'HEADSHA', 'main'),
+    'repos/u2giants/shared-db/compare/HEADSHA...main',
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -223,6 +268,17 @@ test('materialized views and procedures are recognised', () => {
   assert.deepEqual(extractObjects('create or replace procedure app.p() language sql as $$ select $$;'), [
     'procedure app.p',
   ])
+})
+
+test('DOCUMENTED BLIND SPOT: an UNQUALIFIED name does not collide with a qualified one', () => {
+  // Pinned as intended behaviour, not left to be rediscovered. There is no safe
+  // static resolution of `set search_path`; migrations here schema-qualify by
+  // convention and this guard depends on that convention holding.
+  const result = findCollisions([
+    { label: 'A', files: [{ path: 'a.sql', sql: 'create or replace function plm.promote_x() returns void;' }] },
+    { label: 'B', files: [{ path: 'b.sql', sql: 'set search_path to plm; create or replace function promote_x() returns void;' }] },
+  ])
+  assert.deepEqual(result.collisions, [], 'documented miss -- change this test if it is ever fixed')
 })
 
 test('DOCUMENTED BLIND SPOT: plain `create table`/`alter` is not modelled', () => {

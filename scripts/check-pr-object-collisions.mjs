@@ -59,9 +59,19 @@
 // than no guard.
 //
 //   * Two pull requests that change the SAME object through DIFFERENT syntax it
-//     does not model: `alter table`/`alter function`, `drop` + `create`,
-//     `create ... if not exists`, `grant`/`revoke`, `comment on`, column-level
-//     edits, or DDL built as a string and run through `execute`.
+//     does not model: `alter table`/`alter function`, `alter ... rename to`,
+//     `create ... if not exists` on a table, `grant`/`revoke`, `comment on`,
+//     `create rule`, column-level edits, or DDL assembled with `format()` /
+//     string concatenation and run through `execute`. (`drop` + `create` IS
+//     modelled -- the drop patterns emit the same keys as the create ones. A
+//     plain `execute 'create or replace function ...'` string literal is also
+//     matched, because string bodies are not stripped.)
+//   * A function referred to UNQUALIFIED behind `set search_path`:
+//     `create or replace function promote_x()` keys differently from
+//     `create or replace function plm.promote_x()`, so those two do NOT
+//     collide. There is no safe way to resolve a search_path statically.
+//     Migrations in this repo schema-qualify by convention; this guard depends
+//     on that convention holding.
 //   * Two pull requests that touch DIFFERENT objects which are nonetheless
 //     semantically coupled (a view and the function it calls, two migrations
 //     rewriting the same table's data).
@@ -157,6 +167,52 @@ const PATTERNS = [
     kind: 'policy',
     re: new RegExp(
       String.raw`\bcreate\s+policy\s+(${IDENT})\s+on\s+(${QUALIFIED})`,
+      'gi',
+    ),
+  },
+  // `drop ... ; create ...` is the other half of the same hazard, and in
+  // migration practice it is MORE common than `create or replace` for views
+  // (which cannot change a view's column list) . A pull request that drops an
+  // object another pull request replaces is just as much a lost overwrite.
+  // Added after Kimi K3's review of this pull request pointed out that only one
+  // side of that pair was modelled. Keys are identical to the create side, so
+  // drop-vs-replace and drop-vs-drop both collide.
+  {
+    kind: 'function',
+    re: new RegExp(
+      String.raw`\bdrop\s+function\s+(?:if\s+exists\s+)?(${QUALIFIED})`,
+      'gi',
+    ),
+  },
+  {
+    kind: 'procedure',
+    re: new RegExp(
+      String.raw`\bdrop\s+procedure\s+(?:if\s+exists\s+)?(${QUALIFIED})`,
+      'gi',
+    ),
+  },
+  {
+    kind: 'view',
+    re: new RegExp(String.raw`\bdrop\s+view\s+(?:if\s+exists\s+)?(${QUALIFIED})`, 'gi'),
+  },
+  {
+    kind: 'materialized view',
+    re: new RegExp(
+      String.raw`\bdrop\s+materialized\s+view\s+(?:if\s+exists\s+)?(${QUALIFIED})`,
+      'gi',
+    ),
+  },
+  {
+    kind: 'trigger',
+    re: new RegExp(
+      String.raw`\bdrop\s+trigger\s+(?:if\s+exists\s+)?(${IDENT})\s+on\s+(${QUALIFIED})`,
+      'gi',
+    ),
+  },
+  {
+    kind: 'policy',
+    re: new RegExp(
+      String.raw`\bdrop\s+policy\s+(?:if\s+exists\s+)?(${IDENT})\s+on\s+(${QUALIFIED})`,
       'gi',
     ),
   },
@@ -339,12 +395,26 @@ function fetchFiles(repo, number, ref) {
   }))
 }
 
-function baseBranchSource(repo, baseRef, baseSha) {
-  // Everything that landed on the base branch since this PR branched off it.
-  const compare = ghJson([
-    'api',
-    `repos/${repo}/compare/${baseSha}...${baseRef}`,
-  ])
+/**
+ * The compare endpoint that answers "what landed on the base branch since this
+ * pull request branched off it".
+ *
+ * MUST be `<headSha>...<baseRef>`, never `<base.sha>...<baseRef>`. GitHub's
+ * three-dot compare starts from merge-base(head, base) -- the real branch point.
+ * `pull_request.base.sha` is NOT the branch point: it is the base branch's tip
+ * at the time of the event, so `base.sha...baseRef` compares the base branch to
+ * (very nearly) itself and returns an empty file list. The first version of this
+ * script used exactly that, which made the whole base-branch leg dead code; the
+ * defect was found by Kimi K3's review of this pull request and confirmed
+ * against the live API (`merge_base_commit.sha` of `<headSha>...main` returns
+ * the branch point, `base.sha` does not).
+ */
+export function baseCompareSpec(repo, headSha, baseRef) {
+  return `repos/${repo}/compare/${headSha}...${baseRef}`
+}
+
+function baseBranchSource(repo, baseRef, headSha) {
+  const compare = ghJson(['api', baseCompareSpec(repo, headSha, baseRef)])
   const files = (compare.files ?? []).filter(isMigration)
   if (files.length === 0) return null
   return {
@@ -409,8 +479,8 @@ export function gatherSources(env = process.env) {
     })
   }
 
-  if (baseRef && baseSha) {
-    const base = baseBranchSource(repo, baseRef, baseSha)
+  if (baseRef && headSha) {
+    const base = baseBranchSource(repo, baseRef, headSha)
     if (base) sources.push(base)
   }
 
