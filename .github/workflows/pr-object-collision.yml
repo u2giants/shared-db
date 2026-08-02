@@ -1,0 +1,65 @@
+# CROSS-PR OBJECT COLLISION GUARD — HANDOFF.md backlog item B6.
+#
+# WHY IT EXISTS: on 2026-07-31 four independent sessions each authored a
+# migration doing `create or replace function plm.promote_coldlion_source_owned`.
+# `create or replace` is last-writer-wins, so merging any two would have silently
+# erased the other. All four passed CI, because scripts/check-sql.sh only ever
+# sees one branch at a time. This workflow is the only check that looks across
+# open pull requests.
+#
+# WHY THERE IS NO `paths:` FILTER — read AGENTS.md §5.2 before adding one.
+#
+#   The checker inspects OTHER pull requests' migration files, not just this
+#   one's. There is therefore no set of paths in THIS pull request that
+#   determines whether the check is relevant: PR #A can become a collision the
+#   moment PR #B is opened, without PR #A changing at all. A `paths:` filter
+#   would produce exactly the §5.2 failure — a stale verdict that cannot be
+#   re-run, because the fix (or the collision) lives in a different branch.
+#   Same design rule as .github/workflows/backlog-queue-sync.yml and
+#   .github/workflows/tools-offline-tests.yml. The job is a few seconds of Node
+#   plus a handful of read-only API calls; there is nothing to optimise.
+#
+# LIMITS OF THE TRIGGER, stated honestly: `pull_request` fires on this PR's own
+# events (opened/synchronize/reopened) and `workflow_dispatch` allows a manual
+# re-run. GitHub will NOT re-run a green check because a SIBLING pull request
+# appeared afterwards. The last member of a colliding set to merge is therefore
+# the one that must be re-checked — which is what branch protection's "require
+# branches to be up to date before merging" enforces. This guard complements
+# that setting; it does not replace it.
+#
+# NO DATABASE CONTACT: this job reads GitHub pull-request metadata and committed
+# .sql text. It needs no database credentials and must never be given any.
+
+name: Cross-PR Object Collision
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-object-collision-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # B7: the guard ships with a test that COMMITS THE VIOLATION (a replay of
+      # the real four-way collision) and asserts the guard fails on it.
+      - name: Unit-test the checker itself (includes the negative path)
+        run: node --test scripts/check-pr-object-collisions.test.mjs
+
+      - name: No other open PR replaces the same database object
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/check-pr-object-collisions.mjs
