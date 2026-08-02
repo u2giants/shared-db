@@ -4,6 +4,7 @@
 // guard FAILS on them; only then do we assert it passes on the innocent cases.
 
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
@@ -223,6 +224,19 @@ test('does NOT fire on a commented-out create or replace', () => {
     { label: 'B', files: [{ path: 'b.sql', sql: '-- create or replace function plm.real() -- historical note\nselect 1;' }] },
   ])
   assert.deepEqual(result.collisions, [])
+})
+
+test('SKIP POSTURE: no pull-request context warns loudly and exits 0', () => {
+  // The guard's core promise (a false positive blocking every PR is worse than
+  // the bug it prevents) had no test until Kimi K3's review said so.
+  const script = path.join(repoRoot, 'scripts', 'check-pr-object-collisions.mjs')
+  const run = spawnSync(process.execPath, [script], {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot }, // no GITHUB_* at all
+  })
+  assert.equal(run.status, 0, run.stderr)
+  assert.match(run.stderr, /SKIPPED/)
+  assert.match(run.stderr, /No collision checking was performed/)
 })
 
 // ---------------------------------------------------------------------------
