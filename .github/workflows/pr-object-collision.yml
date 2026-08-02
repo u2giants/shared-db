@@ -62,4 +62,5 @@ jobs:
       - name: No other open PR replaces the same database object
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_OBJECT_COLLISION_PATH_PREFIX: scripts/fixtures/cross-pr-collision-drill/
         run: node scripts/check-pr-object-collisions.mjs
