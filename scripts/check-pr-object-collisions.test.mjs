@@ -118,6 +118,34 @@ test('does NOT fire on a single pull request replacing one object four times', (
   assert.deepEqual(findCollisions(sources).collisions, [])
 })
 
+test('does NOT fire on an INNOCENT PR when two OTHER PRs collide', () => {
+  // Found by the live drill, not by reasoning: three real pull requests were
+  // opened, two colliding on plm.promote_coldlion_source_owned and one touching
+  // an unrelated view, and the first version of this guard FAILED the innocent
+  // one. Blocking an unrelated author over someone else's collision is the
+  // false positive the design posture forbids.
+  const collide = 'create or replace function plm.promote_coldlion_source_owned(m text) returns void;'
+  const sources = [
+    { label: 'PR #401 (this PR)', files: [{ path: 'c.sql', sql: 'create or replace view api.unrelated as select 1;' }] },
+    { label: 'PR #398', files: [{ path: 'a.sql', sql: collide }] },
+    { label: 'PR #399', files: [{ path: 'b.sql', sql: collide }] },
+  ]
+  const result = findCollisions(sources, 'PR #401 (this PR)')
+  assert.deepEqual(result.collisions, [], 'the innocent PR must not be failed')
+  assert.deepEqual(
+    result.bystanderCollisions.map((c) => c.object),
+    ['function plm.promote_coldlion_source_owned'],
+    'the other two must still be reported as a note',
+  )
+  const report = formatReport(result)
+  assert.match(report, /^No cross-PR object collisions detected involving this pull request\./)
+  assert.match(report, /NOTE \(not a failure for this pull request\)/)
+
+  // ...and the guilty parties are still failed when THEY are the primary.
+  assert.equal(findCollisions(sources, 'PR #398').collisions.length, 1)
+  assert.equal(findCollisions(sources, 'PR #399').collisions.length, 1)
+})
+
 test('does NOT fire on unrelated PRs touching different objects', () => {
   const result = findCollisions([
     { label: 'PR #1', files: [{ path: 'a.sql', sql: 'create or replace function crm.a() returns void language sql as $$ select $$;' }] },
@@ -125,7 +153,7 @@ test('does NOT fire on unrelated PRs touching different objects', () => {
     { label: 'PR #3', files: [{ path: 'c.sql', sql: 'create or replace view api.c as select 1;' }] },
   ])
   assert.deepEqual(result.collisions, [])
-  assert.equal(formatReport(result), 'No cross-PR object collisions detected.')
+  assert.match(formatReport(result), /^No cross-PR object collisions detected involving this pull request.$/)
 })
 
 test('does NOT fire on a same-named trigger attached to different tables', () => {

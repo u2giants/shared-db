@@ -196,10 +196,21 @@ export function extractObjects(sql) {
 /**
  * @param {{label: string, files: {path: string, sql: string}[]}[]} sources
  *   One entry per pull request (plus, optionally, one for the base branch).
- * @returns {{collisions: {object: string, sources: {label: string, files: string[]}[]}[],
- *            objectsBySource: Record<string, string[]>}}
+ * @param {string} [primaryLabel] The label of THIS pull request. When given,
+ *   only collisions that INVOLVE this pull request are `collisions` (i.e. can
+ *   fail the build); collisions purely between two OTHER pull requests are
+ *   returned separately as `bystanderCollisions` and reported as a note.
+ *
+ *   This distinction is not theoretical: the live drill for this guard opened
+ *   three pull requests -- two colliding on plm.promote_coldlion_source_owned
+ *   and one innocent one touching a different view -- and the first version of
+ *   this function failed the INNOCENT one, because it saw the other two collide.
+ *   Blocking an unrelated author over someone else's collision is exactly the
+ *   false positive the design posture forbids.
+ *
+ * @returns {{collisions: ..., bystanderCollisions: ..., objectsBySource: Record<string, string[]>}}
  */
-export function findCollisions(sources) {
+export function findCollisions(sources, primaryLabel) {
   /** @type {Map<string, Map<string, Set<string>>>} object -> label -> files */
   const index = new Map()
   const objectsBySource = {}
@@ -219,20 +230,35 @@ export function findCollisions(sources) {
   }
 
   const collisions = []
+  const bystanderCollisions = []
   for (const [object, bySource] of [...index.entries()].sort()) {
     if (bySource.size < 2) continue
-    collisions.push({
+    const entry = {
       object,
       sources: [...bySource.entries()]
         .map(([label, files]) => ({ label, files: [...files].sort() }))
         .sort((a, b) => a.label.localeCompare(b.label)),
-    })
+    }
+    if (primaryLabel === undefined || bySource.has(primaryLabel)) collisions.push(entry)
+    else bystanderCollisions.push(entry)
   }
-  return { collisions, objectsBySource }
+  return { collisions, bystanderCollisions, objectsBySource }
 }
 
-export function formatReport({ collisions }) {
-  if (collisions.length === 0) return 'No cross-PR object collisions detected.'
+export function formatReport({ collisions, bystanderCollisions = [] }) {
+  if (collisions.length === 0) {
+    const lines = ['No cross-PR object collisions detected involving this pull request.']
+    for (const { object, sources } of bystanderCollisions) {
+      lines.push(
+        '',
+        `NOTE (not a failure for this pull request): ${object} is replaced by more than`,
+        'one OTHER in-flight change. Whichever of those merges second must re-derive its',
+        'body on top of the first; this pull request is not involved.',
+      )
+      for (const { label, files } of sources) lines.push(`    - ${label}: ${files.join(', ')}`)
+    }
+    return lines.join('\n')
+  }
   const lines = [
     'ERROR: cross-PR database object collision detected.',
     '',
@@ -403,7 +429,8 @@ function main() {
     return 0
   }
 
-  const result = findCollisions(sources)
+  // Only a collision that INVOLVES this pull request may fail it.
+  const result = findCollisions(sources, sources[0].label)
   console.log('Sources inspected:')
   for (const source of sources) {
     const objects = result.objectsBySource[source.label] ?? []
