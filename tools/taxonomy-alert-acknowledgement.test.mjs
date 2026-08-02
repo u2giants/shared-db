@@ -55,6 +55,31 @@ function newestMigrationDefining(signature) {
   return { name: newest, sql: readFileSync(path.join(migrationsDir, newest), "utf8") };
 }
 
+/**
+ * The wrapper and the GRANTs are declared once, in the migration that first created them,
+ * and are NOT repeated by later `create or replace` migrations that only patch the plm
+ * function body. So they must be searched for across the whole migration set, not in
+ * whichever file happens to define the RPC today. (This distinction is exactly what these
+ * tests caught when 20260802150000 was added.)
+ */
+function allMigrationSql() {
+  return readdirSync(migrationsDir)
+    .filter((name) => /^\d{14}.*\.sql$/.test(name))
+    .sort()
+    .map((name) => readFileSync(path.join(migrationsDir, name), "utf8"))
+    .join("\n");
+}
+
+/** Every migration that defines or redefines the acknowledgement RPC, concatenated. */
+function ackMigrationSql() {
+  return readdirSync(migrationsDir)
+    .filter((name) => /^\d{14}.*\.sql$/.test(name))
+    .sort()
+    .map((name) => readFileSync(path.join(migrationsDir, name), "utf8"))
+    .filter((sql) => sql.includes(`create or replace function ${ACK_FUNCTION}`))
+    .join("\n");
+}
+
 /** Body of the acknowledgement function only, so header prose cannot satisfy a guard. */
 function ackBody() {
   const { sql } = newestMigrationDefining(ACK_FUNCTION);
@@ -78,29 +103,35 @@ function authorityBody() {
 // An acknowledgement path exists at all
 // ---------------------------------------------------------------------------------------
 
-test("an acknowledgement RPC exists and is the only thing that writes acknowledged_at", () => {
+test("acknowledged_at is written ONLY from inside the acknowledgement RPC", () => {
   const { name } = newestMigrationDefining(ACK_FUNCTION);
   assert.match(name, /^\d{14}_/);
 
-  const writers = readdirSync(migrationsDir)
-    .filter((f) => /^\d{14}.*\.sql$/.test(f))
-    .filter((f) => {
-      const sql = readFileSync(path.join(migrationsDir, f), "utf8");
-      // Any statement that assigns acknowledged_at outside the RPC would be an unaudited
-      // second path — exactly what the diagnosis forbids.
-      return /set\s+acknowledged_at\s*=/i.test(sql) || /acknowledged_at\s*=\s*now\(\)/i.test(sql);
-    });
-  assert.deepEqual(
-    writers,
-    [name],
-    `acknowledged_at is written by more than one migration: ${writers.join(", ")}`,
+  const all = readdirSync(migrationsDir).filter((f) => /^\d{14}.*\.sql$/.test(f)).sort();
+  const definers = all.filter((f) =>
+    readFileSync(path.join(migrationsDir, f), "utf8").includes(
+      `create or replace function ${ACK_FUNCTION}`,
+    ),
   );
+  // Any statement assigning acknowledged_at OUTSIDE a migration that defines the RPC would be
+  // an unaudited second write path — exactly what the diagnosis forbids. Migrations that
+  // redefine the RPC legitimately contain the assignment, because it is in the function body.
+  const writers = all.filter((f) => {
+    const sql = readFileSync(path.join(migrationsDir, f), "utf8");
+    return /set\s+acknowledged_at\s*=/i.test(sql) || /acknowledged_at\s*=\s*now\(\)/i.test(sql);
+  });
+  const rogue = writers.filter((f) => !definers.includes(f));
+  assert.deepEqual(
+    rogue,
+    [],
+    `acknowledged_at is written outside the RPC by: ${rogue.join(", ")}`,
+  );
+  assert.ok(writers.length > 0, "nothing writes acknowledged_at at all");
 });
 
 test("the public wrapper exists so service_role can reach it without schema plm in the API", () => {
-  const { sql } = newestMigrationDefining(ACK_FUNCTION);
   assert.ok(
-    sql.includes("create or replace function public.acknowledge_taxonomy_sync_alert("),
+    allMigrationSql().includes("create or replace function public.acknowledge_taxonomy_sync_alert("),
     "no public wrapper for the acknowledgement RPC",
   );
 });
@@ -150,6 +181,26 @@ test("the authority check is a POSITIVE allow-list match, not a deny-list", () =
   );
 });
 
+// 20260802150000 adopted GLM 5.2's machine-credential binding, but it tested a value that
+// does not follow SET ROLE, so it never fired — a service_role caller successfully recorded
+// `human:John Smith` on preview. Caught by behavioural assertion, not by reading the SQL.
+// Fixed by 20260802160000.
+test("the effective role is resolved from current_user, which follows SET ROLE", () => {
+  const body = authorityBody();
+  assert.match(
+    body,
+    /v_effective\s*:=\s*coalesce\(\s*v_jwt_role\s*,\s*nullif\(btrim\(current_user::text\)/i,
+    "the effective role is not resolved from current_user — session_user does not follow SET ROLE, so the machine-credential binding silently never fires",
+  );
+  assert.doesNotMatch(
+    body,
+    /v_effective\s*:=\s*coalesce\(\s*v_jwt_role\s*,\s*nullif\(btrim\(session_user/i,
+    "regressed to session_user for the authority decision",
+  );
+  // session_user must still be RECORDED — it is forensic evidence, just not the decision.
+  assert.match(ackBody(), /'session_user'\s*,\s*session_user::text/i);
+});
+
 test("the RPC calls the authority assertion before doing anything else", () => {
   const body = ackBody();
   const assertIdx = body.indexOf("plm.assert_taxonomy_alert_ack_authority()");
@@ -166,13 +217,13 @@ test("the RPC is SECURITY INVOKER so the table GRANT is the real guard", () => {
     /security\s+definer/i,
     "security definer would bypass the UPDATE grant that is the primary guard",
   );
-  const { sql } = newestMigrationDefining(ACK_FUNCTION);
-  const wrapper = sql.slice(sql.indexOf("create or replace function public.acknowledge_taxonomy_sync_alert("));
+  const all = allMigrationSql();
+  const wrapper = all.slice(all.indexOf("create or replace function public.acknowledge_taxonomy_sync_alert("));
   assert.match(wrapper, /security\s+invoker/i, "the public wrapper must also be security invoker");
 });
 
 test("browser roles are explicitly revoked from the public wrapper", () => {
-  const { sql } = newestMigrationDefining(ACK_FUNCTION);
+  const sql = allMigrationSql();
   assert.match(
     sql,
     /revoke\s+all\s+on\s+function\s+public\.acknowledge_taxonomy_sync_alert\(uuid,\s*jsonb\)\s+from\s+anon,\s*authenticated;/i,
@@ -190,7 +241,7 @@ test("browser roles are explicitly revoked from the public wrapper", () => {
 // ---------------------------------------------------------------------------------------
 
 test("no BEFORE trigger and no generated column are involved in the acknowledgement path", () => {
-  const { sql } = newestMigrationDefining(ACK_FUNCTION);
+  const sql = ackMigrationSql();
   assert.doesNotMatch(sql, /\bbefore\s+(insert|update|delete)\b/i, "installs a BEFORE trigger");
   assert.doesNotMatch(sql, /generated\s+always\s+as/i, "introduces a generated column");
 });
@@ -250,6 +301,75 @@ test("the record carries server-observed connection facts the caller cannot forg
   assert.match(body, /'session_user'\s*,\s*session_user::text/i);
   assert.match(body, /'current_user'\s*,\s*current_user::text/i);
   assert.match(body, /'effective_role'\s*,\s*v_role/i);
+  // Added after GLM 5.2's review: the JWT subject, so a 'human' record minted through a
+  // JWT-bearing path can be checked against a real identity.
+  assert.match(body, /'jwt_sub'\s*,\s*v_uid/i, "the JWT subject is not recorded");
+});
+
+// GLM 5.2 review, question 4: without this, a service_role/CI caller could mint
+// actor_type='human' with any name that evades the regex. The role binding turns the weakest
+// link from a name heuristic into a structural property.
+test("a machine credential may NOT record itself as a human", () => {
+  const body = ackBody();
+  assert.match(
+    body,
+    /v_actor_type\s*=\s*'human'\s+and\s+v_role\s+in\s*\(\s*'service_role'\s*,\s*'supabase_admin'\s*\)/i,
+    "actor_type='human' is not bound to the effective database role — a service key could claim to be a person",
+  );
+  // postgres must stay exempt: a direct admin connection is the human operator path.
+  assert.doesNotMatch(
+    body,
+    /v_actor_type\s*=\s*'human'\s+and\s+v_role\s+in\s*\([^)]*'postgres'/i,
+    "postgres must remain able to record actor_type='human'",
+  );
+});
+
+// Found by exercising the function on preview, and independently by GLM 5.2: the original
+// regex rejected real surnames. Fail-closed, but it pushed a human towards recording a FALSE
+// automation label, which is worse than no guard.
+test("the automation-name heuristic is word-anchored so real names are not rejected", () => {
+  const heuristic = readdirSync(migrationsDir)
+    .filter((f) => /^\d{14}.*\.sql$/.test(f))
+    .sort()
+    .filter((f) =>
+      readFileSync(path.join(migrationsDir, f), "utf8").includes(
+        "create or replace function plm.taxonomy_alert_actor_looks_automated(",
+      ),
+    )
+    .pop();
+  assert.ok(heuristic, "the automation-name heuristic no longer exists");
+  const sql = readFileSync(path.join(migrationsDir, heuristic), "utf8");
+  // Bound to the function STATEMENT. The trailing `comment on function` prose names Abbot,
+  // Talbot, Scriptor and Cronin, and would otherwise satisfy the substring guards below.
+  const start = sql.indexOf("create or replace function plm.taxonomy_alert_actor_looks_automated(");
+  const end = sql.indexOf("$$;", start);
+  assert.ok(end > start, "could not find the end of the heuristic function body");
+  const body = sql.slice(start, end);
+
+  // The tokens that collided with Abbot / Talbot / Botany / Cronin / Scriptor must now be
+  // inside a whole-word group, never bare substrings.
+  assert.match(body, /\\m\(bot\|/i, "the short-token group is not word-anchored at the start");
+  assert.match(body, /\)\\M/, "the short-token group is not word-anchored at the end");
+  for (const bare of ["bot\\M|", "|\\mbot", "\\mai\\M", "job\\M", "\\mci\\M"]) {
+    assert.ok(!body.includes(bare), `bare token ${bare} is back — it matches real human names`);
+  }
+
+  // Tier 2 matches ANYWHERE in the string, so the name-colliding tokens must never appear
+  // there — only in the word-anchored tier 1 group.
+  const tier2 = body.slice(body.indexOf("or coalesce(p_name"));
+  // Note `sub[_ -]?agent` IS allowed in tier 2 — a compound, unambiguous marker. What must
+  // not appear is a BARE alternation branch that matches inside ordinary words.
+  for (const mustNotBeSubstring of ["script", "cron", "bot", "|agent|", "(agent|", "worker"]) {
+    assert.ok(
+      !tier2.includes(mustNotBeSubstring),
+      `tier 2 matches '${mustNotBeSubstring}' as a bare substring — that is how 'Scriptor' and 'Cronin' were rejected`,
+    );
+  }
+
+  // The machine markers that actually matter must survive somewhere.
+  for (const kept of ["agent", "automation", "github[_ -]?actions", "service[_ -]?role", "workflow"]) {
+    assert.ok(body.includes(kept), `machine marker ${kept} was lost`);
+  }
 });
 
 test("a reason is mandatory and cannot be a token character", () => {
@@ -266,7 +386,7 @@ test("a reason is mandatory and cannot be a token character", () => {
 // ---------------------------------------------------------------------------------------
 
 test("the acknowledgement is append-only and never deletes the alert row", () => {
-  const { sql } = newestMigrationDefining(ACK_FUNCTION);
+  const sql = ackMigrationSql();
   assert.doesNotMatch(sql, /delete\s+from\s+plm\.taxonomy_sync_alert/i, "deletes alert rows");
   const body = ackBody();
   assert.match(
