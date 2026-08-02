@@ -84,6 +84,16 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 export const MIGRATION_PREFIX = 'supabase/migrations/'
 
+// PR_OBJECT_COLLISION_PATH_PREFIX is a TEST SEAM ONLY, in the same spirit as
+// CHECK_SQL_MIGRATION_DIR in scripts/check-sql.sh. It repoints the guard at a
+// fixture directory so the fires/does-not-fire behaviour can be rehearsed
+// end-to-end against REAL GitHub pull requests without anyone having to author
+// throwaway files under supabase/migrations/. CI sets it nowhere; unset, the
+// guard watches supabase/migrations/ exactly as documented above.
+function pathPrefix(env = process.env) {
+  return env.PR_OBJECT_COLLISION_PATH_PREFIX || MIGRATION_PREFIX
+}
+
 // ---------------------------------------------------------------------------
 // Pure extraction -- unit-tested offline, no GitHub, no database.
 // ---------------------------------------------------------------------------
@@ -280,7 +290,7 @@ function ghJson(args) {
 function isMigration(file) {
   return (
     typeof file.filename === 'string' &&
-    file.filename.startsWith(MIGRATION_PREFIX) &&
+    file.filename.startsWith(pathPrefix()) &&
     file.filename.endsWith('.sql') &&
     file.status !== 'removed'
   )
