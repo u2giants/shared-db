@@ -1645,6 +1645,230 @@ Newest first. Copy the template from Part A and fill it in. The block below is
 an empty example showing the required format — **leave it in place, do not
 overwrite it.**
 
+### INTAKE — ColdLion Phase 6 baseline drift diagnosis + one preview ColdLion mirror run — 2026-08-03 — session: unnamed Claude Code session (Opus 5), machine t16, shared checkout `C:\repos\shared-db`
+
+> **READ §3 FIRST. I WROTE TO PREVIEW.** I dispatched the Phase 6 ColdLion mirror
+> lane with `apply=true`, which opened an `ingest.sync_run` row on preview. It
+> changed **0** canonical rows, but it is a real write and a real audit-trail
+> entry, and it happened **today, 2026-08-03 at 17:43 UTC**, without coordinator
+> authorisation. I also ran one **read-only** `SELECT` against **PRODUCTION**.
+
+**1. What I was doing and why.**
+Albert asked a plain question: *"how do I pull the latest data from ColdLion API
+into whatever feeds `data-dev.designflow.app`'s tables?"* I established that
+`data-dev.designflow.app` reads **preview** `rjyboqwcdzcocqgmsyel` (per
+`apps/db-data-admin/.env.example`), and that the thing feeding its
+licensor/property tables is the preview-only workflow
+`.github/workflows/coldlion-licensor-property-phase6-parallel.yml`. I reported
+that the schedule is already enabled and the nightly ColdLion lane had succeeded
+that morning, and I flagged that the **hourly health lane was failing and the
+circuit breaker was tripped**. Albert then asked me to (a) find out what the
+health check was flagging and (b) run the refresh for him. I did both. He then
+asked me to have Kimi CLI critique the fix I proposed and debate it to agreement,
+which I also did. **I was not started as the coordinator and did not know this
+single-coordinator protocol existed** until Albert told me to stop.
+
+**2. What I have actually DONE.**
+- **Nothing committed** other than this intake block. No migration was written,
+  no schema change authored, no code changed, nothing merged or pushed to `main`.
+- **Dispatched one GitHub Actions run that writes to preview** — see §3. Run
+  [30837667151](https://github.com/u2giants/shared-db/actions/runs/30837667151),
+  `workflow_dispatch`, `job=coldlion`, `apply=true`, concluded **success**.
+- **Ran one read-only `SELECT` against PRODUCTION `qsllyeztdwjgirsysgai`** via
+  the Supabase MCP: `select code, name, status, metadata ? 'owner_ruling' …
+  from core.licensor where code in ('FR','WB')`. Read-only, no write, no DDL.
+  **This produced the single most important finding in this block — see §7.**
+- **Read-only inspection** of workflow run logs via `gh run view --log`, of
+  `supabase/migrations/20260726180000_coldlion_licensor_property_phase6_parallel_run.sql`,
+  `supabase/migrations/20260802171000_owner_ruling_friends_tv_frida_kahlo.sql`,
+  `tools/check-coldlion-designflow-sync-health.mjs`,
+  `tools/evaluate-coldlion-licensor-property-cutover-readiness.mjs`,
+  `docs/coldlion-preview-alert-diagnosis-20260802.md`, and the two ColdLion
+  workflows. Plus `gh variable list` and `gh run list`.
+- **Delegated an adversarial critique to Kimi Code CLI** (sessions
+  `session_277736fe-b718-4107-ac35-40b518ad2b3c`). Kimi was instructed read-only
+  and modified no file in this repo. Briefs live **outside** the repo, in this
+  session's scratchpad
+  (`…\Temp\claude\C--repos-shared-db\fa3b1b0e-…\scratchpad\kimi-brief-baseline-drift.md`
+  and `kimi-round2.md`). They are **not** in the repo and will be lost when the
+  scratchpad is cleaned; the substance of both is reproduced in §6 and §8 below.
+
+**3. What I applied to PREVIEW (`rjyboqwcdzcocqgmsyel`).**
+**One write, disclosed in full:**
+
+- Workflow run **30837667151**, dispatched by me at **2026-08-03 17:38 UTC**,
+  ran `node tools/sync-coldlion-licensors-properties.mjs --apply --linked`
+  against preview at **17:43–17:44 UTC**. Reported result, verbatim from the log:
+
+      "mode": "mirror_only", "rows_seen": 614, "rows_inserted": 0, "rows_updated": 0
+      "sync_run_id": "f73b91fc-0507-4c9a-8153-1c69b8673ef9"
+
+- **What that means concretely:** a new row exists in `ingest.sync_run` with id
+  `f73b91fc-0507-4c9a-8153-1c69b8673ef9`, `source_name =
+  coldlion_licensors_properties_api`, `status = succeeded`. **Zero** canonical
+  licensor/property rows were inserted or updated — the preview mirror was
+  already current from the scheduled 04:00 UTC run. I did **not** run the
+  `designflow`, `compare`, `promote`, or either forced-failure drill lane.
+- **Why this matters despite 0 row changes:** it advances the "most recent
+  successful ColdLion sync" timestamp that `check_taxonomy_sync_health()` reads
+  via its `PHASE6_MAX_SUCCESS_AGE` (36 hours) freshness window. Any rehearsal or
+  readiness evaluation that assumed the last ColdLion run was the 04:00 scheduled
+  one will now see mine instead. **If a rehearsal is counting runs or reasoning
+  about run provenance, treat `f73b91fc-…` as an unauthorised extra data point
+  and exclude it.**
+- **PRODUCTION:** one read-only `SELECT` (§2). **No write of any kind to
+  production.** No migration promoted, no DDL, no DML, no workflow dispatched
+  against the production lane.
+
+**4. What is half-finished or abandoned mid-way.**
+- **Nothing is half-applied.** No migration was written, so there is no
+  partially-applied migration, no partial backfill, and no half-edited script.
+  The one preview write (§3) either happened completely or not at all, and it
+  completed with an exit-0 workflow run.
+- **The proposed fix was never built.** It exists only as the plan in §6. No
+  file for it exists anywhere.
+- **The 14 stacked alerts and the tripped circuit breaker are untouched.** I did
+  not acknowledge, reset, silence, or clear anything, and I did not close any of
+  the duplicate GitHub issues.
+
+**5. What I own right now.**
+- **Branch `intake/coldlion-baseline-drift-20260803`** — created off `main` at
+  `b8503be`, holds only this block. This is the only branch I created.
+- **No worktree.** I worked directly in the shared checkout `C:\repos\shared-db`,
+  which was on `main` at `b8503be` when I started. **I am leaving the shared
+  checkout on this intake branch** — the next session must return it to `main`
+  (this is exactly the "un-park the shared checkout" problem already in the
+  REQUEST QUEUE from 2026-07-31; I have re-created it and I am sorry).
+- **Untracked `.ai/deepseek-sessions/`** was present in the working tree
+  **before my session started** (it is in my session's opening git status). It is
+  **not mine**, I did not create it, and I have not touched it.
+- Nothing else is dirty. No files outside `COORDINATOR_INTAKE.md` are modified.
+
+**6. What I was ABOUT to do next.**
+I had just asked Albert for a decision and had NOT started any of it. The plan
+Kimi and I converged on, in this order — **none of it has been done**:
+
+1. **Promote the owner-ruling pair to production** — migrations
+   `20260802170000_plm_import_preserve_curated_licensor_property_status.sql`
+   and `20260802171000_owner_ruling_friends_tv_frida_kahlo.sql` — because
+   production does not have them (§7). Needs Albert's approval; it is a
+   production change.
+2. **Author a re-pin migration** setting the expected `licensor_status_hash`
+   from `d9b07759bf80ff227e2fa9bd635d2138` to `00bf7069fff79b9deab1d14dbd9112b2`
+   in **both** `check_taxonomy_sync_health()` (constants ~line 816-827) and
+   `record_taxonomy_parallel_observation()` (constants ~line 361-372) of
+   `20260726180000`, citing the ruling migration as authority, **plus**: a
+   live-hash guard that raises if the live hash matches neither old nor new
+   value; re-assertion of the revoke/grant block after `create or replace` (the
+   public-schema anon lockdown re-strips EXECUTE on replace); and per-field
+   old/new values added to the `prior_nondrill_drift` diff object, which
+   currently records only a prior observation id.
+3. **Dispatch the compare lane** (`-f job=compare -f apply=true`) to record a
+   fresh passing observation — health will NOT clear on its own after the re-pin,
+   because `check_taxonomy_sync_health()` also fails on
+   `recent_nondrill_observation_failed` until a newer passing observation exists.
+4. **Acknowledge only the specifically-identified alerts** via
+   `20260802140000_acknowledge_taxonomy_sync_alert_rpc.sql`, never a blanket
+   `acknowledged_at is null` sweep, and **reset the circuit breaker** under the
+   authorised-reset procedure.
+5. **Promote the re-pin to production last**, only after step 1 is verified live.
+6. **Adopt the durable rule** that any migration changing a pinned field must
+   advance the pin in the same transaction, and record a trigger condition for
+   building a baseline-revision table (at the FRIDA KAHLO follow-up ruling or
+   Phase 7 entry, whichever comes first).
+
+**7. What I am blocked on.**
+- **(b) — a decision only Albert can make.** Two, actually:
+  1. *Should the 2026-08-02 FRIENDS TV ruling be promoted to production?*
+     **I verified by direct read-only query that production still has
+     `core.licensor FR "FRIENDS TV" status = 'active'` with no `owner_ruling`
+     key in its metadata.** The ruling is merged to `main` and applied to
+     **preview only**. Albert's decision is therefore not in force in the system
+     of record, and preview and production now disagree about master data. He
+     has not yet answered.
+  2. *Proceed with the re-pin at all, or do something else about the permanently
+     red health lane?* Also unanswered.
+- **(a) — blocked on this coordinator protocol.** Everything above is database
+  work in this repo, so it belongs to the coordinator, not to me.
+
+**8. What I tried that did NOT work, and why. [MANDATORY]**
+- **The Supabase MCP points at PRODUCTION, not preview.** I assumed it was
+  preview and queried `plm.taxonomy_comparison_observation`, then
+  `plm.taxonomy_parallel_observation` — both returned
+  `ERROR: 42P01: relation … does not exist`. The tables genuinely do not exist on
+  production (Phase 6 is preview-only), so **the "missing table" error was
+  telling me which database I was on, not that anything was wrong.** Anyone
+  needing preview data must NOT use the Supabase MCP; use the workflow lanes or
+  the Management API route instead. This cost me several minutes and could cost
+  the next session much more — it looks like a schema problem and is not one.
+- **`plm.taxonomy_comparison_observation` does not exist under that name.** The
+  real table is **`plm.taxonomy_parallel_observation`** (created in
+  `20260726180000`). Do not guess this name.
+- **The alert payload does not say which field drifted.** The
+  `phase4_baseline_drift` diff object records only `coldlion_source_ref_count`,
+  `linked_licensor_count` and `linked_property_count` — and **all three of those
+  matched their expected values**, so the alert appears to contradict itself. I
+  wasted time on that apparent contradiction. The actual differing field is only
+  visible in the **comparison** lane's full log output (`"expected"` vs
+  `"actual"` blocks), not in the health lane's issue summary and not in the alert
+  row. Go straight to the compare run's log.
+- **Finding the compare run is not trivial.** `gh run list` does not show which
+  lane a scheduled run executed; every run has the same name. I had to loop over
+  run ids and grep each log for `Resolved job=`. Today's compare run was
+  **30797074811**; the ColdLion lane was **30793542376**; the rest were hourly
+  health runs.
+- **A `sed`-range extraction over `gh run view --log` output returned nothing**
+  (the log lines carry a `phase6\t<step>\t<timestamp>` prefix that broke my
+  range anchors). Grepping for specific keys worked; range extraction did not.
+- **My first framing of the fix was wrong and Kimi was right to reject it.** I
+  proposed "re-pin the constant and clear the alarms." That plan omitted: the
+  circuit-breaker authorised reset; re-asserting grants after
+  `create or replace`; a guard against applying to a wrong-state database; the
+  fact that health will not self-clear without a fresh comparison; and the need
+  to scope the acknowledgement rather than sweeping every unacknowledged row.
+  **Do not re-derive that plan from scratch — it is corrected in §6.**
+- **Two of Kimi's own claims did NOT survive checking, so do not inherit them:**
+  (i) it suggested the readiness evaluator may also hard-code these hashes — it
+  does not; `APPROVED_HASH` in
+  `tools/evaluate-coldlion-licensor-property-cutover-readiness.mjs` is the frozen
+  542-row **mapping** hash and is unaffected, so that file needs no re-pin;
+  (ii) it argued a baseline-revision table would solve preview/production skew —
+  it would not, because the table's rows would arrive via the same migrations at
+  the same staggered times, and Kimi conceded the point in full.
+- **A claim I doubted and which turned out to be correct:** production runs
+  **no** health or comparison lane. The production workflow
+  `coldlion-licensor-property-production.yml` registers those crons, but
+  `COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED` is **absent** from
+  `gh variable list`, so its recent "success" runs are deliberate no-ops that do
+  nothing. A wrong constant promoted to production today would be **latent**, not
+  actively alarming. Do not read those green production runs as evidence that the
+  production feed is working.
+
+**9. Facts I believe that may already be stale.**
+- **`origin/main` = `b8503be`**, checked **2026-08-03 ~18:30 UTC**. My branch is
+  cut from it.
+- **The "14 unacknowledged critical alerts" and "circuit breaker tripped"** come
+  from the alert payload of run **30836142200** at **17:18 UTC today**. Both
+  numbers move: the hourly lane keeps firing, and the dispatcher's 48-hour
+  lookback means alerts silently age out of its window (documented as a defect in
+  `docs/coldlion-preview-alert-diagnosis-20260802.md` §5). Re-count before acting.
+- **The hash values** `d9b07759bf80ff227e2fa9bd635d2138` (expected) and
+  `00bf7069fff79b9deab1d14dbd9112b2` (actual) are copied by hand from run
+  30797074811's log at **08:21 UTC today**. **Recompute them
+  live before pinning anything.** Do not trust my transcription.
+- **Production `FR` status = `active`** was true at **~18:15 UTC today**. If
+  another session promotes the ruling pair, this flips and the whole ordering in
+  §6 changes.
+- **The line numbers I cite** for the constant blocks (~361-372 and ~816-827 in
+  `20260726180000`) came from grep today; confirm before editing.
+- **I did not verify** whether observation `5452800d-9fe6-4f6a-a7ef-f390f33f3272`
+  has `prior_source_ref_hash` equal to `source_ref_hash`. Kimi flagged that a
+  same-count-different-content source-ref change would show up **only** as
+  `prior_nondrill_drift`, which is the second of the two reported diffs. My claim
+  that both diffs share one root cause is therefore **well-supported but not
+  fully proven**, and that one query would close it. It needs preview access,
+  which I do not have and did not seek.
+
 ### INTAKE — ColdLion MG07 "Style Guide" doc lookup (read-only) — 2026-07-31 — session: unnamed Claude Code session, machine t16, shared checkout `C:\repos\shared-db`
 
 **1. What I was doing and why.**
