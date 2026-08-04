@@ -46,6 +46,41 @@ the database. The trip function gained `p_provenance` as a ninth parameter with 
 default, so all nine existing call sites work unchanged, and the two auto-trip
 functions now call it with **named** arguments.
 
+## These pins are PREVIEW values. Production must not use them.
+
+AGENTS.md §6.5 (owner ruling, 2026-08-03): "production has `FR` active, preview has `FR`
+inactive. This divergence is KNOWN, EXPECTED and ACCEPTED [...] do not re-report it as
+drift." `20260802171000` is held off production until the FR removal work ships, so
+production's live licensor status hash is **not** `00bf7069…`, and production is out of
+bounds for this session to measure.
+
+If these pins simply became active on promotion, production's first observation would
+report `baseline_ok = false`, raise a **critical** alert, and the auto-trip trigger would
+trip the **production** ColdLion breaker — over a divergence the owner has ruled is not a
+bug.
+
+**The gate:** a baseline governs nothing until it is explicitly activated, and the
+migration activates nothing. `plm.taxonomy_baseline_activation` starts empty everywhere.
+Where no baseline is active, both detectors **refuse**: a failed `ingest.sync_run` plus a
+**warning** alert (deduplicated to one standing warning), no observation row, no breaker
+trip. Not a false green, not a false red. The refusal does not depend on the environment
+being named, which matters because production reads `unconfigured` until someone names it.
+
+`plm.activate_taxonomy_baseline()` additionally refuses in an unnamed database, refuses a
+baseline declared for a different environment, and refuses an incomplete baseline.
+
+When the FR removal work ships: derive production's twelve values **from production**, seed
+them under `phase4_production` in a new migration, and activate that.
+
+## Blind detector leaves evidence
+
+`plm.taxonomy_baseline_pin_set()` raises when a metric has no live pin, and the append-only
+trigger permits stamping `superseded_at` without a replacement — so one permitted UPDATE
+could blind both detectors. The baseline is therefore resolved in the function **body**, not
+the DECLARE block, and the raise is caught: each detector records a failed `sync_run` and a
+**critical** alert (fail closed) and returns, instead of raising out and rolling back every
+trace that it ran.
+
 ## Required post-apply step, once per environment
 
 No in-database value distinguishes preview from production (probed 2026-08-04: no
@@ -69,7 +104,18 @@ update plm.taxonomy_circuit_breaker
  where environment is null;
 ```
 
-Already done on preview. **Production has not been touched.**
+Then, and **only** where a baseline derived from *that* database exists:
+
+```sql
+select plm.activate_taxonomy_baseline(
+  'phase4_preview',                      -- production: its own key, e.g. 'phase4_production'
+  'preview rjyboqwcdzcocqgmsyel',
+  'Albert Hazan (owner)',
+  'Phase 6 parallel run is a preview exercise; pins derived from preview on 2026-08-04.');
+```
+
+Already done on preview. **Production has not been touched, and must NOT be activated
+until the FR removal work ships.**
 
 ## Evidence (preview, 2026-08-04)
 
@@ -79,6 +125,11 @@ Already done on preview. **Production has not been touched.**
 | Negative: forced drill | alert `27fb2a02-…`, `severity = critical`, `is_drill = true` |
 | Wrong pin injected (rolled back) | `baseline_ok` flips to false — the gate reads the table |
 | Grants before / after | `postgres=X/postgres ; service_role=X/postgres` on every replaced function — unchanged |
+| Production simulation: unnamed database, no activation | both detectors refuse — `pass=false`/`ok=false`, **warning** alerts only, trip events unchanged at 6, **zero** observation rows written |
+| Activation in an unnamed database | refused |
+| Activation of a preview baseline declared for production | refused |
+| Blind detector (pin superseded, no replacement) | failed `sync_run` + **critical** alert survive; no observation row |
+| TRUNCATE of the pin table | refused |
 
 The 23 pre-existing alerts were **not** acknowledged and the breaker was **not**
 reset. Clearing them is a separate step that must happen after this lands, or the
