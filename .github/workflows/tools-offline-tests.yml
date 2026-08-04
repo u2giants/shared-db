@@ -45,6 +45,7 @@ concurrency:
 
 jobs:
   verify:
+    name: Tools offline tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
