@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
+import itertools
 import sys
 import tempfile
 import unittest
@@ -10,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from production_migration_guard import (  # noqa: E402
     HARD_BLOCKED,
-    UNBLOCKED_20260804,
+    BUNDLE_20260804,
     GuardError,
     local_migrations,
     parse_allowlist,
@@ -43,8 +44,19 @@ BATCH_14 = [
 ]
 # 18-file ordering: the four unblocked 2026-08-04 inserted at positions 3-6,
 # ahead of 20260727221500 (position 7) and 20260728134500 (position 10).
-BATCH_18 = sorted(BATCH_14 + sorted(UNBLOCKED_20260804))
+BATCH_18 = sorted(BATCH_14 + sorted(BUNDLE_20260804))
 
+# !! HAND-ENTERED OFFLINE RECONSTRUCTION -- NOT READ FROM PRODUCTION !!
+# PRODUCTION_LEDGER_HEAD, PRODUCTION_LEDGER_ROWS and PENDING_9_UNRELATED below
+# were copied from docs/production-migration-lane-design-20260802.md, which
+# recorded them from a read of production on 2026-08-02. Nothing in this test
+# file has ever contacted the production database, and the agent that wrote
+# these tests was forbidden from doing so. Production moves independently of
+# this repo, so these constants go stale silently.
+# THEY MUST BE RE-VERIFIED AGAINST THE LIVE PRODUCTION LEDGER IMMEDIATELY BEFORE
+# ANY PROMOTION. A green test here is evidence that the SCANNER works, never
+# evidence about production's current state.
+#
 # The 27 versions pending on production at the 2026-08-02 lane design
 # (docs/production-migration-lane-design-20260802.md sections 1.1 and 4):
 # the 18 ColdLion above plus 9 unrelated. Used to reconstruct production's
@@ -112,7 +124,7 @@ class GuardTests(unittest.TestCase):
         # Owner ruling 2026-08-04, AGENTS.md section 6.8: unblocked as ONE
         # bundle, never individually.
         self.assertEqual(
-            UNBLOCKED_20260804,
+            BUNDLE_20260804,
             {
                 "20260726030000",
                 "20260726031000",
@@ -120,16 +132,57 @@ class GuardTests(unittest.TestCase):
                 "20260726180000",
             },
         )
-        self.assertFalse(UNBLOCKED_20260804 & HARD_BLOCKED)
+        self.assertFalse(BUNDLE_20260804 & HARD_BLOCKED)
         self.assertEqual(
-            parse_allowlist(",".join(sorted(UNBLOCKED_20260804))),
-            sorted(UNBLOCKED_20260804),
+            parse_allowlist(",".join(sorted(BUNDLE_20260804))),
+            sorted(BUNDLE_20260804),
         )
 
     def test_local_migration_versions_are_unique(self) -> None:
         # A duplicate 14-digit version silently SKIPS a migration: the ledger
-        # keys on the version alone. local_migrations raises on duplicates.
-        self.assertGreater(len(local_migrations(REPO)), 300)
+        # keys on the version alone.
+        versions = [path.name[:14] for path in (REPO / "supabase" / "migrations").glob("*.sql")]
+        self.assertGreater(len(versions), 300)
+        duplicates = sorted({v for v in versions if versions.count(v) > 1})
+        self.assertEqual(duplicates, [], f"duplicate migration versions: {duplicates}")
+        # And the loader must refuse them rather than silently keeping one.
+        with tempfile.TemporaryDirectory() as directory:
+            repo = write_migrations(
+                Path(directory),
+                {
+                    "20260101000000_one.sql": "select 1;",
+                    "20260101000000_two.sql": "select 2;",
+                },
+            )
+            with self.assertRaises(GuardError):
+                local_migrations(repo)
+
+    def test_the_bundle_cannot_be_promoted_in_parts(self) -> None:
+        # AGENTS.md 6.8: all four or none. Every proper non-empty subset must be
+        # rejected, including the single-version case a future session would
+        # most plausibly try (20260726180000, the one that creates the two
+        # missing tables).
+        ordered = sorted(BUNDLE_20260804)
+        for size in range(1, len(ordered)):
+            for subset in itertools.combinations(ordered, size):
+                with self.subTest(subset=subset), self.assertRaises(GuardError) as caught:
+                    parse_allowlist(",".join(subset))
+                self.assertIn("6.8", str(caught.exception))
+        # The complete bundle is accepted, and so is an allowlist with none of it.
+        parse_allowlist(",".join(ordered))
+        parse_allowlist("20260731163000,20260731180000")
+
+    def test_a_partial_bundle_inside_the_real_batch_is_rejected(self) -> None:
+        # The exact composition the reviewer proved slipped through: the 14-file
+        # batch plus 20260726180000 only. It fixes the 42P01 abort while leaving
+        # phase 4 behind, which is the half-composable batch 6.8 forbids.
+        partial = sorted(BATCH_14 + ["20260726180000"])
+        with self.assertRaises(GuardError) as caught:
+            parse_allowlist(",".join(partial))
+        message = str(caught.exception)
+        self.assertIn("20260726030000", message)
+        self.assertIn("20260726031000", message)
+        self.assertIn("20260726032000", message)
 
     def test_remote_parser_uses_remote_column(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -273,6 +326,19 @@ class PreflightNegativeTests(unittest.TestCase):
         self.assertIn("plm.taxonomy_parallel_observation", message)
         # And it names the excluded creator.
         self.assertIn("20260726180000", message)
+
+    def test_lone_clickup_grant_migration_is_rejected(self) -> None:
+        # AGENTS.md 10.2: 20260729120000 revokes/grants EXECUTE on
+        # public.sync_clickup_tasks(jsonb, text), which is created by the pending
+        # 20260728174500 / 20260728181500. Promoted alone it aborts with
+        # undefined_function 42883.
+        migrations = local_migrations(REPO)
+        remote = production_ledger_versions()
+        with self.assertRaises(GuardError) as caught:
+            preflight_batch(migrations, ["20260729120000"], remote)
+        message = str(caught.exception)
+        self.assertIn("public.sync_clickup_tasks", message)
+        self.assertIn("grant/revoke target", message)
 
     def test_real_18_file_batch_passes(self) -> None:
         migrations = local_migrations(REPO)

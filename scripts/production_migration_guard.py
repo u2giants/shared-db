@@ -42,6 +42,19 @@ MIGRATION_LINE_RE = re.compile(r"^\s*(?:[•*\-]\s*)?(\d{14})_[^\s]+\.sql\s*$")
 # STILL BLOCKED, PERMANENTLY -- these two are a different animal. They are
 # already applied to production and are listed to stop anyone re-running a known
 # mistake. Do not "tidy" them out of this set.
+#
+# PROVENANCE OF "already applied", stated so nobody launders it into a fact I
+# checked. The agent that unblocked the four (2026-08-04) was forbidden to read
+# production and did NOT verify this itself. It rests on two independent
+# production ledger reads recorded on 2026-08-02:
+#   - docs/production-migration-lane-design-20260802.md section 3.2, whose
+#     ledger query over all six versions returned only 20260724030000,
+#     20260726190000 and 20260726200000; and
+#   - docs/hard-blocked-migrations-dossier-20260802.md section 7, "20260726190000
+#     and 20260726200000 are applied; the other four are not".
+# Re-verify against the live production ledger before any promotion. If either
+# ever turns out NOT to be applied, that changes the count in AGENTS.md 6.8 and
+# this set must be revisited before anything is promoted.
 HARD_BLOCKED = {
     # Master Data lockdown: restricted editing of public.style_tracker_rows to
     # admins. WRONG -- it locked all 33 plain 'user' accounts out of the Styles
@@ -53,9 +66,13 @@ HARD_BLOCKED = {
     "20260726200000",
 }
 
-# The four unblocked above, kept as an explicit set so tests can assert the
-# UNBLOCK is deliberate rather than an accidental deletion.
-UNBLOCKED_20260804 = {
+# The four unblocked above. This is ENFORCED, not documentary: `parse_allowlist`
+# requires an allowlist to contain either ALL FOUR or NONE of them. AGENTS.md
+# section 6.8 forbids unblocking them "one at a time, a few at a time, or just
+# the safe ones -- there is no size of subset that makes it allowed", because a
+# partial set hands a half-composable batch to a forward-only lane and leaves
+# production PARTIALLY PROMOTED with no undo.
+BUNDLE_20260804 = {
     "20260726030000",
     "20260726031000",
     "20260726032000",
@@ -80,6 +97,19 @@ def parse_allowlist(raw: str) -> list[str]:
         raise GuardError(f"general production lane blocks: {', '.join(blocked)}")
     if values != sorted(values):
         raise GuardError("production allowlist must be in migration order")
+    # AGENTS.md section 6.8: all four or none. Enforced here, in the one function
+    # every entry point (`prepare`, `preflight`, `verify-dry-run`) must call, so
+    # it cannot be bypassed by choosing a different subcommand.
+    present = BUNDLE_20260804 & set(values)
+    if present and present != BUNDLE_20260804:
+        missing = sorted(BUNDLE_20260804 - present)
+        raise GuardError(
+            "AGENTS.md 6.8 forbids promoting the 2026-08-04 ColdLion bundle in "
+            "parts: this allowlist has "
+            f"{', '.join(sorted(present))} but is missing {', '.join(missing)}. "
+            "Include all four (20260726030000, 20260726031000, 20260726032000, "
+            "20260726180000) or none."
+        )
     return values
 
 
@@ -139,9 +169,22 @@ def validate_candidates(
 # ---------------------------------------------------------------------------
 # Whole-batch preflight (AGENTS.md section 6.8 requirement 2)
 #
-# Proves the ENTIRE ordered batch can run end to end BEFORE anything is applied,
-# instead of proving each file applies on its own. The failure it exists to
-# catch is real and live: the 14-file ColdLion batch aborts at file 3
+# WHAT THIS IS, STATED HONESTLY UP FRONT. It is a whole-BATCH check rather than a
+# per-file one: it walks the ordered batch and rejects it when a file would run
+# before something it needs. It does NOT "prove the batch can run end to end" --
+# no static scanner can, and an earlier version of this header claimed it could,
+# which was wrong. It is a fast pre-filter that may REJECT but must never be read
+# as APPROVAL. The authoritative gate is the rehearsal of the whole batch against
+# a production-shaped scratch database (lane design section 2.3, Change C).
+#
+# Concretely it knows about the reference positions listed in REFERENCE_RES
+# below. Positions it does NOT model -- most obviously anything reached only
+# through dynamic `execute format(...)`, and any object whose creator is not a
+# local migration file -- pass silently by design. A pass means "nothing known to
+# be broken", never "safe".
+#
+# The failure it exists to catch is real and live: the 14-file ColdLion batch
+# aborts at file 3
 # (20260727221500) with SQLSTATE 42P01, because that file's
 # `create table if not exists plm.taxonomy_circuit_breaker` carries
 # `references plm.taxonomy_sync_alert(id)` and the referenced table is created
@@ -199,10 +242,56 @@ REFERENCE_RES = (
         re.compile(r"\balter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?" + IDENT),
     ),
     (
+        # Both the named and the nameless `create index [name] on sch.tab` forms.
         "index target",
         re.compile(
             r"\bcreate\s+(?:unique\s+)?index\s+(?:concurrently\s+)?"
-            r"(?:if\s+not\s+exists\s+)?[^\s(]+\s+on\s+(?:only\s+)?" + IDENT
+            r"(?:if\s+not\s+exists\s+)?(?:[^\s(]+\s+)?on\s+(?:only\s+)?" + IDENT
+        ),
+    ),
+    (
+        # GRANT/REVOKE resolve their target immediately. This is the
+        # `20260729120000` trap recorded in AGENTS.md 10.2: it revokes EXECUTE on
+        # public.sync_clickup_tasks(jsonb, text), created by the pending
+        # 20260728174500, and aborts with undefined_function if promoted first.
+        "grant/revoke target",
+        re.compile(
+            r"\b(?:grant|revoke)\b[\s\S]{0,300}?\bon\s+"
+            r"(?:function|procedure|routine|table|sequence|view|type)\s+" + IDENT
+        ),
+    ),
+    (
+        "comment target",
+        re.compile(r"\bcomment\s+on\s+[a-z ]+?\s+" + IDENT),
+    ),
+    (
+        "policy target",
+        re.compile(r"\bcreate\s+policy\b[\s\S]{0,200}?\bon\s+" + IDENT),
+    ),
+    (
+        "partition parent",
+        re.compile(r"\bpartition\s+of\s+" + IDENT),
+    ),
+    (
+        # `default nextval('plm.s'::regclass)` and every other regclass literal.
+        "regclass literal",
+        re.compile(r"'" + IDENT + r"'\s*::\s*regclass"),
+    ),
+    (
+        # A view body is resolved when the view is created, and a top-level
+        # INSERT/UPDATE/SELECT is resolved when the migration runs. Function
+        # bodies are already stripped, so what is left here is apply-time.
+        "query target",
+        re.compile(r"\b(?:from|join|into|update)\s+(?:only\s+)?" + IDENT),
+    ),
+    (
+        # A function called inside a CHECK constraint or a GENERATED expression
+        # is resolved at DDL time, not at first call.
+        "check/generated expression",
+        re.compile(
+            r"\b(?:check|generated\s+always\s+as)\s*\([^;]{0,400}?\b"
+            + IDENT
+            + r"\s*\("
         ),
     ),
 )
@@ -274,7 +363,8 @@ def preflight_batch(
             problems.append(
                 f"{version} references missing {obj} ({reason}); "
                 f"created by {', '.join(known)} which is not applied and not "
-                f"earlier in the batch -- would fail 42P01"
+                f"earlier in the batch -- would abort the batch "
+                f"(42P01 undefined_table / 42883 undefined_function)"
             )
     if problems:
         raise GuardError(
