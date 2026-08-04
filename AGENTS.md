@@ -1000,11 +1000,12 @@ by the owner. **It is settled — do not re-ask it, do not treat it as an AI's p
 weaken it.**
 
 **The verified fact, not a claim.** Read back live at 2026-08-04 12:00 UTC with
-`gh api repos/u2giants/shared-db/branches/main/protection`:
+`gh api repos/u2giants/shared-db/branches/main/protection`, after PR #442 (agent `ci-check-names`)
+gave every job a unique `name:` and the coordinator added the newly-disambiguated contexts:
 
 | Setting | Value |
 | --- | --- |
-| `required_status_checks.contexts` | `["Promotion contract tests (offline)"]` |
+| `required_status_checks.contexts` | `["Promotion contract tests (offline)", "Backlog / queue sync", "Cross-PR object collision", "Tools offline tests"]` |
 | `required_status_checks.strict` | `false` |
 | `enforce_admins.enabled` | **`true`** |
 | `allow_force_pushes.enabled` | `false` |
@@ -1024,19 +1025,26 @@ weaken it.**
    deadline is **not** approval. If a required check is wrong, fix the check — never the protection.
    This mirrors the standing production-infrastructure rule: an AI session does not relax a control
    in order to get past it.
-4. **Every PR to `main` — including a docs-only PR — must now pass
-   `Promotion contract tests (offline)` before it is mergeable.** Confirm with `gh pr checks` before
-   reporting a PR as ready. A green PR page is not the same as a satisfied required context.
+4. **Every PR to `main` — including a docs-only PR — must now pass all FOUR required contexts
+   before it is mergeable:** `Promotion contract tests (offline)`, `Backlog / queue sync`,
+   `Cross-PR object collision`, `Tools offline tests`. Confirm with `gh pr checks` before reporting
+   a PR as ready, and check the run's `head_sha` — a green tick can be a **stale verdict from an
+   older commit**. A green PR page is not the same as a satisfied required context.
 
-**KNOWN LIMITATION — state this honestly, do not claim full coverage.** Exactly **ONE** check is
-required today. It is not one because one is enough; it is one because **three separate workflows —
-`backlog-queue-sync`, `pr-object-collision`, and `tools-offline-tests` — all expose a check whose
-name is literally `verify`.** GitHub identifies a required context by name, so it cannot
-disambiguate three identical `verify` contexts, and none of the three can be added to the required
-list while the collision stands. **Those three guards remain ADVISORY right now.** Agent
-`ci-check-names` is giving them unique names so they can be added afterwards. Until that lands and
-the contexts are actually added, do not tell anyone this repository has full mechanical CI coverage
-— it has one enforced check and three that a merge can still walk past.
+**KNOWN LIMITATION — state this honestly, do not claim protection is complete. The gap is the
+migrations lane itself.** The two workflows that actually **touch the database** —
+`.github/workflows/shared-supabase-migrations.yml` and `.github/workflows/db-data-admin.yml` — are
+**`paths:`-filtered**, and a path-filtered workflow reports **NO check at all** on a PR that misses
+its paths. GitHub treats a required context that never reports as *pending forever*, so making
+either one required would **deadlock every unrelated PR** in the repository. Neither can therefore
+join the required list as things stand.
+
+Say the consequence plainly, because it is the opposite of reassuring: **the riskiest path in this
+repository — migrations — is currently the one guard that CANNOT block a merge.** The four required
+contexts above are the cheap, always-run guards; the expensive, genuinely dangerous one is advisory.
+This is **backlog item B2** ("repo-wide checkers gated behind narrow `paths:` filters") and it is
+**UNFIXED**. Until it is fixed, do not describe branch protection on this repository as complete,
+and do not let "protection is on" stand in for "a bad migration cannot be merged" — it can.
 
 ### 6.8 OWNER RULING — the six HARD_BLOCKED ColdLion migrations are NOT unblocked individually (Albert Hazan, 2026-08-04)
 
