@@ -1,16 +1,12 @@
 name: Shared Supabase Migrations
 
 on:
+  # DELIBERATELY NO `paths:` FILTER. A path-filtered workflow creates NO check run
+  # at all on a PR that misses its paths, so a required status context stays pending
+  # forever and the guard can never block a merge (see HANDOFF.md B2, PR #328/#307).
+  # Only the cheap `validate` job runs on a PR; `preview` and `production-dry-run`
+  # are gated on `github.event_name == 'workflow_dispatch'`.
   pull_request:
-    paths:
-      - "supabase/migrations/**"
-      - "scripts/check-sql.sh"
-      - "scripts/check-sql.test.mjs"
-      - "scripts/production_migration_guard.py"
-      - "scripts/test_production_migration_guard.py"
-      - "tools/coldlion-promotion-failure-recording.test.mjs"
-      - "tools/promote-coldlion-source-owned.mjs"
-      - ".github/workflows/shared-supabase-migrations.yml"
   workflow_dispatch:
     inputs:
       target:
@@ -42,11 +38,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: shared-supabase-migrations
+  # Pull requests get a PER-REF group so PR validations run in parallel and can never
+  # queue behind (or ahead of) a production `workflow_dispatch`. Every non-PR event —
+  # i.e. every `workflow_dispatch` against preview or production — keeps the SINGLE
+  # global group it has always had, so dispatch serialisation is unchanged.
+  group: ${{ github.event_name == 'pull_request' && format('shared-supabase-migrations-{0}', github.ref) || 'shared-supabase-migrations' }}
   cancel-in-progress: false
 
 jobs:
   validate:
+    name: SQL migration guards
     runs-on: ubuntu-latest
     steps:
       # fetch-depth: 0 so check-sql.sh Guard B can compare this branch's
@@ -65,7 +66,7 @@ jobs:
       # Asserts that the live plm.promote_coldlion_source_owned migration carries no
       # in-function failure recording (it can never work) AND that the runner keeps the
       # out-of-band path that actually does the job. Runs here because it reads
-      # supabase/migrations, which is what this workflow's paths filter watches.
+      # supabase/migrations, which is what this workflow guards.
       - name: Test ColdLion promotion failure-recording ownership
         run: node --test tools/coldlion-promotion-failure-recording.test.mjs
       - name: Test production guard

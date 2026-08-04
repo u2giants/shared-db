@@ -1,0 +1,36 @@
+name: Domain Ownership
+
+# scripts/check-domain-ownership.mjs scans the WHOLE tracked tree via `git ls-files`.
+# It also runs inside `db-data-admin.yml`, but that workflow is `paths:`-filtered, so a
+# PR touching an unwatched file (e.g. HANDOFF.md) could TRIP the guard while firing no
+# run that could ever clear it (HANDOFF.md B2; PR #328 fixed the file and fired nothing,
+# PR #307 cleared main only by accident). This workflow has DELIBERATELY NO `paths:`
+# filter so the repo-wide guard runs on every pull request and every push to main.
+# The duplicate invocation in db-data-admin.yml is intentionally left in place: it is
+# cheap, and removing it would weaken that workflow's own self-check.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: domain-ownership-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  domain-ownership:
+    name: Domain ownership
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Enforce DB Data Admin domain ownership
+        run: |
+          node --test scripts/check-domain-ownership.test.mjs
+          node scripts/check-domain-ownership.mjs
