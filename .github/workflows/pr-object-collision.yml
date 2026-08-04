@@ -46,6 +46,7 @@ concurrency:
 
 jobs:
   verify:
+    name: Cross-PR object collision
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
