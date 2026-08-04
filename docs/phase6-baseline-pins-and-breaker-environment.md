@@ -121,8 +121,8 @@ until the FR removal work ships.**
 
 | Proof | Result |
 |---|---|
-| Positive: new observation `7665e5dc-…` | `baseline_ok = true`, `pass = true`, hash `00bf7069…` |
-| Negative: forced drill | alert `27fb2a02-…`, `severity = critical`, `is_drill = true` |
+| Positive: new observation  `0b92e36a-…` | `baseline_ok = true`, `pass = true`, hash `00bf7069…` |
+| Negative: forced drill | alert `fba552fa-…`, `severity = critical`, `is_drill = true` |
 | Wrong pin injected (rolled back) | `baseline_ok` flips to false — the gate reads the table |
 | Grants before / after | `postgres=X/postgres ; service_role=X/postgres` on every replaced function — unchanged |
 | Production simulation: unnamed database, no activation | both detectors refuse — `pass=false`/`ok=false`, **warning** alerts only, trip events unchanged at 6, **zero** observation rows written |
