@@ -226,6 +226,17 @@ four rules below are non-negotiable for any database change.
    This runs BEFORE the work. The `Cross-PR object collision` CI check is the
    backstop AFTER it, and by the time that one fires, somebody's session is
    already wasted — on 2026-07-31, three of four were.
+
+   ⚠️ **KNOWN LIMIT, being fixed — read this before trusting a clear result.**
+   The SQL parser behind both checks models only `function`, `procedure`,
+   `view`, `materialized view`, `trigger` and `policy`. It is **blind to
+   `alter table`, `create table`, `create index`, `grant`, `comment on` and
+   `create type`** — about 1,921 statements in `supabase/migrations/` versus 754
+   it can see. Two agents both running `alter table core.licensor …` are
+   reported as no-overlap. The fix, its reasoning, and the two live experiments
+   that settled the design are in
+   [`plan_dispatch-collision-hardening.md`](plan_dispatch-collision-hardening.md)
+   — **read its STATUS table first; do not re-plan or re-derive it.**
    **The concrete symptom when this rule is broken:** the preview branch is
    persistent, so its ledger holds every branch that ever ran `db push` —
    including unmerged ones. A `main`-based checkout then cannot dry-run against
