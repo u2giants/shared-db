@@ -679,6 +679,74 @@ after it is filed. Only the coordinator moves a block out of here.
 > ⚠️ **That session could not reach GitHub. Five branches are unpushed and
 > coordinator marker issue #453 is still OPEN — it is NOT a dead coordinator.**
 
+### REQUEST — Store the Disney OPA property→character list as a lookup table — 2026-08-06 — requester: Albert Hazan (via session: opa-scrape, t16)
+
+**1. What outcome is needed, and why.** Albert needs Disney's authoritative
+property-and-character list available in the shared database as a lookup, instead
+of living only in the OPA web portal behind MFA. Today the only way to see which
+characters are approvable under which Disney property is to open OPA and expand a
+tree by hand. Having it queryable lets the character/style-guide reconciliation
+work stop guessing at Disney's canonical spellings and IDs, and lets apps validate
+a character against the licensor's own list.
+
+The extract is attached in this same PR as a source artifact so it cannot be lost:
+`docs/verification/opa-characters-20260806/opa-characters.csv` — 10,262 rows,
+1,445 Disney properties, 9,591 distinct character names. Columns as OPA supplies
+them: `property`, `licensedPropertyID`, `optionSourceID`, `character`,
+`characterID`, `brandPropertyID`. The IDs are Disney's own keys, not ours.
+
+**Design is the coordinator's to choose, not the requester's.** Two points worth
+weighing: (a) OPA scopes characters *per property*, so the same character name
+recurs across properties — the natural key is the pair, not the name, and 670-odd
+names appear under more than one property; (b) this is **vendor source data from
+Disney**, so it likely belongs alongside the other vendor/source-owned material
+rather than being merged into `core.property` / character identities directly.
+Whether it becomes a raw landing table plus a view, or is reconciled against the
+existing character identity work, is a design call.
+
+**2. Which application(s) depend on this.** PopDAM primarily (character and
+style-guide taxonomy). PopCRM and DesignFlow both read licensor/property data, so
+if this is joined to `core.property` in any way it becomes a **cross-app data
+contract**. Also directly relevant to the DB Data Admin curation screen already in
+this queue.
+
+**3. Is it blocking anything, and how urgently?** Not blocking. Nobody is idle.
+It unblocks nothing that is currently stopped, but it is directly useful to the
+in-flight characters / style-guides workstream, which has repeatedly had to ask
+Laura questions that Disney's own list may answer outright.
+
+**4. Deadline, if any.** None.
+
+**5. What I already know about the current schema.** **Almost nothing, and I did
+not verify any of it live** — I made no database call of any kind. The one schema
+fact I have is second-hand from this very file: `core.property` is declared
+`unique (licensor_id, code)` and licensor→property is parent-child, so property
+codes are **not** globally unique (recorded at `COORDINATOR_INTAKE.md` line ~3000,
+citing `supabase/migrations/20260621150815_app_core.sql:200`). I have **not**
+checked whether a character table already exists, whether the existing character
+identity work in `docs/verification/character-identity-rules-20260728/` already
+covers some of this, or how Disney appears as a licensor. **The coordinator should
+assume overlap with the existing characters / style-guides workstream and dedupe
+before dispatching** — see the related blocks in this file for "Characters /
+style-guides Phase 1" and the Laura round-2/round-3 licensing answers.
+
+**6. Confirmation of what I have NOT done. [MANDATORY]** No migration file
+written. No push to preview or production. No `supabase` CLI command run. No
+Supabase MCP call. No `psql`. No background task chip. No schema, RLS, view, RPC,
+function, trigger, grant, or seed touched. The only branch created is this one,
+`request/opa-character-lookup`, and it contains exactly two things: this request
+block and the source CSV. Nothing in `supabase/` is touched.
+
+**Provenance of the CSV, so it can be reproduced or challenged.** Pulled
+2026-08-06 from `opa.disney.com` product-create screen, under Albert's own
+authenticated OPA session in his Chrome (he completed the MFA himself; no
+credential passed through the AI session). OPA loads the whole
+property-and-character tree into the page at once, so the data was read out of the
+page's own loaded state — no crawling, no pagination, no submitted form, nothing
+created in OPA. It reflects **what Albert's licensee account is entitled to see**,
+which is not necessarily all of Disney's catalog. Retired and "No Likeness"
+variants were **not** filtered out.
+
 ### REQUEST — ⚠️ FIRST ACTION: push and merge FIVE unpushed local branches, then close coordinator marker issue #453 — 2026-08-06 — session: outgoing coordinator (al8960ofc)
 
 **1. What outcome is needed, and why.** GitHub was unreachable from `al8960ofc` on
