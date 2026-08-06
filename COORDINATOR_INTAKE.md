@@ -679,6 +679,76 @@ after it is filed. Only the coordinator moves a block out of here.
 > ⚠️ **That session could not reach GitHub. Five branches are unpushed and
 > coordinator marker issue #453 is still OPEN — it is NOT a dead coordinator.**
 
+### REQUEST — `AGENTS.md` §6.7 is STALE on branch protection (verified live), plus fresh evidence the shared checkout is still colliding, plus a CI trap — 2026-08-06 — session: opa-scrape (t16)
+
+Three findings from one session. Full detail:
+`HANDOFF.d/2026-08-06T1755Z-t16-claude-opa-character-extract.md` §5, §6, §7.
+
+**1. What outcome is needed, and why.**
+
+**(a) `AGENTS.md` §6.7 no longer describes reality.** Verified live 2026-08-06
+~17:45Z with `gh api repos/u2giants/shared-db/branches/main/protection`:
+
+| Fact | §6.7 / this queue says | **Live** |
+| --- | --- | --- |
+| Required checks | **ONE** (`Promotion contract tests (offline)`), because three workflows all exposed a check named `verify` | **ALL SIX** — `Promotion contract tests (offline)`, `Backlog / queue sync`, `Cross-PR object collision`, `Tools offline tests`, `SQL migration guards`, `Domain ownership` |
+| `strict` | `false` | **`true`** |
+| `enforce_admins` | `true` | `true` |
+
+The `ci-check-names` work has evidently landed. Two consequences: the documented
+caveat that "a check can pass against a `main` that has since moved" is largely
+**closed** by `strict: true` and should stop being repeated unexamined; and
+**every open PR must now be current with `main` to merge**, which with ~15 open
+branches will bite.
+
+**This session did NOT edit `AGENTS.md`** — it is single-writer and the live
+session behind PR #467 is editing it right now (commit `60dcec3` touches it).
+Handing it over rather than causing a conflict.
+
+**(b) The shared checkout is STILL colliding — fresh evidence, today.** Mid-session
+another session switched `C:\repos\shared-db` from this session's branch to
+`docs/plan-dispatch-collision-hardening` and committed on top. A commit landed on
+the wrong branch and was pushed there before it was noticed. It was recovered
+**non-destructively** (cherry-picked to the right branch through a temporary
+worktree; their branch was never rewritten, reverted or force-pushed).
+
+⚠️ **Residual damage needing a decision: [PR #467](https://github.com/u2giants/shared-db/pull/467) currently contains all four of this session's OPA files**, because its branch was cut from this one.
+**The clean fix is to merge PR #466 FIRST** — once those files are on `main` they
+drop out of #467's diff by themselves. **No history rewriting, no risk to the
+other session's work.** Do that before anyone attempts to rebase or force-push
+#467.
+
+The queue already carries items about this checkout being unsafe. This is
+evidence they are still live. The durable fix is that **no session works directly
+in the shared checkout — worktrees only.**
+
+**(c) A CI trap worth documenting next to `AGENTS.md` §5.2.** `Cross-PR object
+collision` on PR #466 went **red after 44 minutes without ever running**. The
+annotation: *"The job was not acquired by Runner of type hosted even after
+multiple attempts."* That is **GitHub hosted-runner starvation, not a collision.**
+`gh run rerun --failed` cleared it. This is a second, distinct flavour of the
+false-verdict problem §5.2 already covers for `paths:` filters. **Before believing
+a red X, check the job annotations for that runner message.**
+
+**2. Which application(s) depend on this.** None directly — this is repo/CI
+hygiene. It affects every session that merges anything.
+
+**3. Is it blocking anything, and how urgently?** (a) and (c) are documentation
+only, not blocking. (b) blocks a clean merge of PR #467 until PR #466 merges.
+
+**4. Deadline, if any.** None.
+
+**5. What I already know about the current schema.** Nothing — no database call
+was made by this session.
+
+**6. Confirmation of what I have NOT done. [MANDATORY]** No migration, no preview
+or production push, no `supabase` CLI, no Supabase MCP call, no `psql`, no chip,
+**no edit to `AGENTS.md`**, and no rewrite/revert/force-push of any other
+session's branch. Only `COORDINATOR_INTAKE.md`, `HANDOFF.md`, my own
+`HANDOFF.d/` file and the two files under
+`docs/verification/opa-characters-20260806/`, all on branch
+`request/opa-character-lookup` (PR #466).
+
 ### REQUEST — SUPPLEMENT to the OPA lookup-table request below: a full background doc now exists, and it needs a `HANDOFF.md` pointer — 2026-08-06 — requester: Albert Hazan (via session: opa-scrape, t16)
 
 **1. What outcome is needed, and why.** Two things, both small.
