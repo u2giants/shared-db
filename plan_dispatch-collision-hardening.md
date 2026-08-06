@@ -16,20 +16,45 @@
 | 3a | **Historical noise gate** — reconstruct concurrently-open PR sets; fix the acceptance rule BEFORE seeing results | B | ⬜ open | — |
 | 3b | Return **structured operations** `{action, kind, target}`; separate dispatch policy from merge policy | B | ⬜ open | — |
 | 4 | Default object derivation to `--sql`; make bare `--objects` warn | B | ⬜ open | — |
-| 5 | Harden `parseClaimBlock`; reject empty/wildcard claims | B | ⬜ open | — |
-| 6 | Add `--reserve-version` (atomic create-ref); refs are **kept permanently** | C | ⬜ open | — |
-| 7 | Add `branch`/`pr` binding to the claim block | C | ⬜ open | — |
+| 5 | **`--claim`: acquire OBJECT refs atomically.** Check and claim become one operation | B | ⬜ open | — |
+| 5b | Release object refs on merge (CI) + a staleness rule for abandoned holds | B | ⬜ open | — |
+| 6 | Add `--reserve-version` (atomic create-ref); version refs are **kept permanently** | C | ⬜ open | — |
+| 7 | ~~Add `branch`/`pr` binding to the claim block~~ — **SUPERSEDED by step 5**; the ref's target commit *is* the binding | — | ✂️ cut | 2026-08-06 |
 | 8 | Update `AGENTS.md` §4 rule 1 and the orchestrator skill to match | C | ⬜ open | — |
 
 **A fresh session starts at Step 1.** Phase A is the urgent set: it removes the live
 false-clear message, disables an allocator that does not allocate, and fixes four
 gatherer defects that each produce their own false-clear.
 
-> **This plan was reviewed by GPT-5.6 (Codex) on 2026-08-06 and revised as a result.**
-> The review found four scheduled-nowhere bugs, a better architecture for step 3, and a
-> sequencing error. What changed and why is recorded in §7 (R7–R9) and §8 (D11–D13).
-> **Do not "restore" the earlier simpler shape of steps 1, 3 or 6** — it was reviewed and
-> found wrong.
+> **Reviewed twice and revised twice.** GPT-5.6 (Codex) found four scheduled-nowhere bugs,
+> a better architecture for step 3, and a sequencing error. Grok 4.5 then found that **the
+> lock was on the wrong thing** and the design changed materially as a result — see the
+> box below. What changed and why is in §7 (R7–R12) and §8 (D11–D18). **Do not "restore"
+> the earlier shape of steps 1, 3, 5 or 6** — each was reviewed and found wrong.
+
+> ## ⚠️ THE CENTRAL DESIGN CHANGE — read before touching step 5 or 6
+>
+> The first two drafts made **version** reservation atomic and left **object** claiming as
+> "run a check, then paste a command later." Grok 4.5 pointed out that this is backwards:
+>
+> - The 2026-07-31 four-way incident was **the same object**, not the same version.
+> - Duplicate versions are **already blocked at merge** by `scripts/check-sql.sh`.
+> - Two coordinators could both get exit 0 for `plm.promote_coldlion_source_owned`, both
+>   print a claim command, and both dispatch. Nothing serialised them. In its words, the
+>   tool was *"a race reporter with extra steps, not a lock."*
+>
+> **The fix, and the shape of the whole tool now: do not check-then-claim. Just claim.**
+> Acquiring an object is `POST /git/refs` on `refs/db-claims/objects/<kind>/<key>` — it
+> succeeds or returns `422 Reference already exists`. Acquisition **is** the check, so the
+> time-of-check/time-of-use gap does not exist, and an agent can never collide with its own
+> claim on a re-run.
+>
+> **Verified live on 2026-08-06** (refs created, second attempt rejected, then deleted):
+> object-encoding ref names are legal; the second `POST` returns 422; every holder is
+> listable in one call via `git/matching-refs/db-claims/objects`.
+>
+> This **deletes** work the earlier drafts scheduled: the claim-issue mini-language, its
+> heredoc recipe, most of `parseClaimBlock` hardening, and the separate binding step.
 
 **Out of this plan entirely:** the enforcement CI check, the scaffold tool, and the
 auto-draft bot. See §4.
@@ -295,6 +320,26 @@ cheaper and keeps the value. **Reconsider only if a real `alter table`/`grant` c
 occurs that this tool's output abetted** — that would be evidence, and B would become
 correct retroactively.
 
+**R10 — Object claims as GitHub-issue bodies parsed with a mini-language (drafts 1 and 2).**
+Rejected after Grok review. An issue body is not create-if-absent, so it cannot serialise
+anything: two coordinators could both read "no claim exists", both file one, and both
+dispatch. It also required a hand-rolled parser that produced four reproduced defects in a
+day, and a shell recipe that did not work on this machine's shell. Atomic refs give
+exclusivity, binding and listing for free and delete all of that code. **Do not reintroduce
+issue-parsing as the lock.** An issue as *optional human commentary* is fine (D15).
+
+**R11 — Check first, then claim in a separate step.** Rejected: that is a
+time-of-check/time-of-use race, and it was the actual hole in the merged tool — the
+motivating 2026-07-31 incident is precisely the case where both agents pass the check
+before either claims. Acquisition must **be** the check.
+
+**R12 — Releasing object refs on the same "never release" rule as version refs (D13).**
+Rejected as a category error, and called out because the two rules sit side by side and
+look contradictory. A version ref reserves an integer from an unbounded space, so keeping
+it forever is free and *safer* (the preview ledger is persistent). An object ref is a lock
+on a real thing; never releasing it freezes that object permanently. **Version refs:
+permanent. Object refs: released.** See D13 and D16.
+
 **R7 — One flat `PATTERNS` list shared by both checks (the first draft of step 3).**
 Rejected after Codex review. It couples extraction to policy: the merge guard is a required
 check built around whole-object replacement, and making it report every table touched would
@@ -328,11 +373,11 @@ verdict must be *removed*, not qualified.
 
 | # | Decision | Status | Reasoning / date |
 |---|---|---|---|
-| D1 | Claims live in **GitHub issues** labelled `db-claim`, not a repo file | **LOCKED** | R1. 2026-08-06 |
+| D1 | ~~Claims live in GitHub issues~~ — **SUPERSEDED by D15.** The lock is an atomic object ref; an issue is optional commentary. The *reason* still stands: claims are not a repo file (R1). | ⤴️ superseded | R1, then R10. 2026-08-06 |
 | D2 | The dispatch tool makes **no database calls** | **LOCKED** | R2, `AGENTS.md` §4.2. 2026-08-06 |
 | D3 | Advisory output carries **no verdict word** — report only | **LOCKED** | R6, GLM 5.2. 2026-08-06 |
 | D4 | Version reservation uses the **GitHub create-ref REST endpoint**, never `git push` | **LOCKED** | Tested; R3. 2026-08-06 |
-| D5 | Claims carry **branch/PR binding**; dispatch and enforcement share one claim format | **LOCKED** | Kimi K3 found the enforcement false-pass; GLM agreed binding costs dispatch nothing and *reduces* over-blocking. 2026-08-06 |
+| D5 | ~~Claims carry branch/PR binding in the issue body~~ — **SUPERSEDED by D17.** The requirement stands and is now free: a ref's target commit *is* the binding. | ⤴️ superseded | Kimi K3 found the enforcement false-pass; refs satisfy it without a parsed field. 2026-08-06 |
 | D6 | Reuse one SQL parser (`extractObjects`) — never grow a second | **LOCKED** | Two parsers drift. 2026-08-06 |
 | D7 | "Cannot declare objects → dispatch READ-ONLY" stays as brief-quality guidance | **LOCKED** | Both models agree it is sound taxonomy and **useless as a control**. Keep it; **never cite it as a reason enforcement is unnecessary.** 2026-08-06 |
 | D8 | Exact ref namespace (`refs/db-claims/*` vs `refs/heads/db-claims/*`) | **OPEN** | Both work. Prefer `refs/db-claims/*`: invisible in the branch list, so it cannot add to the 131-branch clutter. Implementer's call. |
@@ -341,7 +386,11 @@ verdict must be *removed*, not qualified.
 | D11 | Parser returns **structured operations**; dispatch and merge apply **different policies** over them | **LOCKED** | R7, Codex 2026-08-06. One parser, two policies. |
 | D12 | The required merge guard's policy does not widen without the §3a historical evidence | **LOCKED** | Codex 2026-08-06. Prevents trading a false-clear for alarm fatigue. |
 | D13 | Reservation refs are **kept permanently**; no release, no reconciliation | **LOCKED** | R8, Codex 2026-08-06. The preview ledger is persistent, so a reused version can collide with something already recorded there. |
-| D14 | Draft PRs **count as in flight** for dispatch (but not for the merge guard) | **LOCKED** | Codex 2026-08-06. Draft work is still work; over-blocking fails safe. |
+| D14 | Draft PRs **count as in flight** for dispatch (but not for the merge guard) | **LOCKED** | Codex 2026-08-06. Draft work is still work; over-blocking fails safe. Needs a stale-draft rule or abandoned drafts become permanent locks. |
+| D15 | **The lock is an atomic object ref. Claim issues are optional commentary and nothing may parse them.** | **LOCKED** | R10, Grok 2026-08-06. Supersedes D1. |
+| D16 | **Object refs are RELEASED** (on merge, or when found stale) — unlike version refs | **LOCKED** | R12. Never conflate with D13; confusing them freezes the schema. |
+| D17 | Acquisition **is** the check — there is no separate check-then-claim step | **LOCKED** | R11, Grok 2026-08-06. Removes the TOCTOU race and self-collision together. |
+| D18 | Any command the tool prints must use `--body-file`/JSON, **never a bash heredoc** | **LOCKED** | Grok 2026-08-06: this machine is PowerShell-first and the heredoc recipe never worked here. |
 
 ---
 
@@ -401,6 +450,17 @@ places that callers actually read:
 Do all four in this step. A caller reading `--json` for `"safe": true` must not be able to
 keep the old semantics after the printed sentence changes.
 
+**And the exit code still means "go" — decide this deliberately.** Grok's point: grepping
+for "SAFE" stops working, but `if ($LASTEXITCODE -eq 0)` does not. Renaming a field does
+not change what a script does. Two acceptable resolutions; **pick one and write it into
+the docs, do not leave it implicit:**
+
+- **Preferred, and it falls out of step 5:** exit 0 stops meaning "cleared to dispatch" and
+  starts meaning **"the claim succeeded — you now hold these objects."** That is a fact
+  about state, not a judgement, so a caller acting on it is doing the right thing.
+- If step 5 is deferred, document exit 0 as *"completed; no overlap found in the classes it
+  can see"* and say plainly that it is evidence, not clearance.
+
 **Behaviour when done.** No output path, field name, or doc line asserts safety. Exit codes
 are unchanged (0 / 1 / 2), so nothing that consumes the exit code breaks.
 
@@ -434,10 +494,16 @@ test('an alter table in an open PR collides with a proposal naming that table', 
 
 Add sibling cases for `create table`, `create index … on`, and `grant … on`.
 
-**This must be committed in a state where it FAILS**, run, and the failure observed and
-recorded, before step 3 makes it pass. That is this repo's B7 standard — a guard is proven
-by watching it fire, not by watching it pass. (`.github/workflows/pr-object-collision.yml`
-lines 55–57 document the same discipline for the merge guard.)
+**Watch it fail before you make it pass** — the B7 standard; a guard is proven by watching
+it fire (`.github/workflows/pr-object-collision.yml` lines 55–57 document the same
+discipline for the merge guard).
+
+> ⚠️ **Do NOT open a PR containing only the red tests.** Grok caught this: that suite runs
+> inside the **required** job `Cross-PR object collision`, so a PR whose tip is red can
+> never merge — an implementer following the earlier wording would create a permanently
+> stuck PR. The procedure is: run the tests red **locally**, paste the failing output into
+> the PR body as the evidence, and land the tests together with the step-3 fix so the
+> mergeable tip is green.
 
 **Dependencies.** None; can run in parallel with step 1.
 
@@ -484,12 +550,21 @@ and **were scheduled by no step** — a real gap in the plan, not just in the co
    `findDispatchConflicts` and `formatReport`, and compare every version against every
    version.
 3. **Deleted migration files** are fetched anyway. Skip entries whose status is `removed`.
-4. **The filename is not URL-encoded** (line 335) where the sibling guard uses
-   `encodeURI` (`check-pr-object-collisions.mjs:393,428`). Encode it.
+4. **The filename is not URL-encoded** (line 335). ⚠️ **Do not simply copy the sibling's
+   `encodeURI` (`check-pr-object-collisions.mjs:393,428`) — Grok is right that it does not
+   encode `#`,** so a path containing `#` still truncates at the fragment. Encode each path
+   *segment* with `encodeURIComponent` and rejoin with `/`.
+5. **The content fetch is weaker than the sibling's** (lines 335–336): dispatch uses the
+   JSON Contents API and base64-decodes, while the merge guard uses
+   `Accept: application/vnd.github.raw`. For a large file the JSON form can return a null
+   or truncated `content` **without an error**, yielding an empty object set and a false
+   clear for that PR's DDL. Align on the raw fetch, and **fail loudly** if the body is
+   empty for a migration whose status is not `removed`.
 
 **Verification gate.** A unit test per defect: a draft PR collides; a PR whose *second*
 migration carries the colliding version is detected; a removed file does not throw; a
-filename with a space or `#` resolves.
+filename containing a space **and one containing `#`** both resolve; an empty body for a
+present file raises rather than returning `[]`.
 
 ---
 
@@ -621,26 +696,111 @@ from supabase/migrations/>` lists that migration's tables and functions.
 
 ---
 
-### Step 5 — Harden `parseClaimBlock`
+### Step 5 — `--claim`: acquire object refs atomically (THE CORE CHANGE)
 
-**File:** `scripts/check-dispatch-collision.mjs:102–139`.
+**File:** `scripts/check-dispatch-collision.mjs`. Replaces `claimCommand` (237–268) and
+most of `parseClaimBlock` (102–139) and `gatherClaims` (296–321).
 
-**What to change.** Fix all four reproduced defects from §6:
-- Strip `#` comment lines **and** trailing inline comments before parsing; a comment must
-  never terminate the object list (currently line 130 sets `inObjects = false`).
-- Anchor the version regex to tolerate trailing content: match the first token after
-  `version:`.
-- Treat `null`, `nil`, `none`, `n/a` (case-insensitive) as "no version".
-- Accept the compact form `objects: [a, b]` as well as the list form.
-- **New, from GLM:** a claim declaring zero objects **or** a wildcard (`*`, `all`, `any`)
-  must be rejected as malformed, not accepted as an empty claim. Today an empty claim
-  quietly collides with nothing. `gatherClaims` (line 296) already throws `Unknown` for an
-  unparseable block; extend that to content-free ones.
+**The primitive.** One object = one ref. Acquire with:
 
-**Dependencies.** None; parallel with steps 3–4.
+```bash
+gh api -X POST repos/u2giants/shared-db/git/refs \
+  -f ref=refs/db-claims/objects/<kind>/<key> -f sha=<claiming branch's head>
+```
 
-**Verification gate.** New unit tests for each of the five cases; the four reproductions in
-§6 now return the correct parse.
+Success = you hold it. `422 Reference already exists` = someone else does. **Verified live
+2026-08-06**, including that a second `POST` is refused and that all holds are readable in
+one call:
+
+```bash
+gh api repos/u2giants/shared-db/git/matching-refs/db-claims/objects --jq '.[]|"\(.ref) -> \(.object.sha[0:7])"'
+```
+
+**Ref naming — must be deterministic AND injective.** The canonical key
+`function plm.promote_coldlion_source_owned` becomes
+`refs/db-claims/objects/function/plm.promote_coldlion_source_owned`. Rules:
+
+- Space between kind and target becomes `/`. Lowercase (matching `canonical()`).
+- Any character outside `[a-z0-9._/-]` is percent-encoded. Git forbids space, `~^:?*[\`,
+  `..`, a trailing `.lock`, and control characters — reject or encode all of them.
+- **If sanitising changed the key at all, append `--<first 8 hex of sha256(canonical key)>`.**
+  Without this, two distinct quoted identifiers could sanitise to one ref name: harmless
+  when it over-blocks, but it would also let one claim silently *satisfy* another. The hash
+  guarantees one key ↔ one ref.
+- Unit-test the mapping both ways: same key ⇒ same ref, different keys ⇒ different refs.
+
+**Acquire-all-or-nothing.** A task usually needs several objects. Acquire in sorted order;
+on the first 422, **release everything already acquired in this attempt**, then report the
+conflict and exit 1.
+
+> **This rollback is required, and it does NOT contradict R9.** R9 rejected rollback for
+> *version* refs because an orphaned version wastes one integer from an unbounded space.
+> An orphaned **object** ref is the opposite: it locks a real object against everyone.
+> Different lifetimes, different rules — see D13 vs D16.
+
+**The tool now performs the claim itself.** No printed shell recipe.
+
+> **Why this matters more than it looks (Grok, 2026-08-06):** the old `claimCommand`
+> emitted a **bash heredoc**, and this is a **PowerShell-first** machine. Pasting it into
+> `pwsh` mangles the body. "Zero claims have ever been filed" was not purely a discipline
+> failure — the prescribed path did not work on the host it was prescribed for. Any
+> fallback that still prints a command must use `gh issue create --body-file <path>` or
+> `gh api` with a JSON body, **never** a heredoc.
+
+**Read-only tasks claim nothing.** This resolves the contradiction Grok found between the
+old design (empty object lists deliberately valid, `check-dispatch-collision.test.mjs:46–49`)
+and the earlier step 5 (reject zero-object claims): with refs there is no empty claim to
+reject — a read-only task simply acquires no refs. Delete the `# none — read-only task`
+emission at line 242 along with `claimCommand`.
+
+**Self-collision disappears by construction.** Because acquisition *is* the check, an agent
+can never be blocked by its own claim on a re-run — the earlier design's undefined
+everyday flow (Grok finding D) no longer exists.
+
+**Open PRs are still consulted.** Refs only cover work that claimed; `gatherOpenPrObjects`
+still covers work that did not (nine PRs merged outside coordinator control). If an open PR
+touches a requested object, release what you acquired and report the conflict.
+
+**Optional human context.** A `db-claim` issue may still be filed for readability, but it
+is **not the lock** and nothing may depend on parsing it. D1 is demoted accordingly (D15).
+
+**Dependencies.** Step 3b (needs accurate objects to claim). Do not start before it.
+
+**Verification gate.**
+```bash
+# acquire, then prove the second attempt is refused, then release
+node scripts/check-dispatch-collision.mjs --task t --objects "table core.zz_test" --claim   # exit 0
+node scripts/check-dispatch-collision.mjs --task u --objects "table core.zz_test" --claim   # exit 1, names the holder
+node scripts/check-dispatch-collision.mjs --release --objects "table core.zz_test"
+gh api repos/u2giants/shared-db/git/matching-refs/db-claims/objects --jq '.[].ref'          # empty
+```
+Plus unit tests for the key→ref mapping and for partial-acquisition rollback.
+
+---
+
+### Step 5b — Release object refs, and define staleness
+
+**Why this is not optional.** An object ref that is never released locks that object
+**forever**. This is the exact inverse of version refs (D13, kept permanently), and
+confusing the two would freeze the schema.
+
+**Automatic release on merge.** A workflow on `push: branches: [main]` that, for every
+migration in the merged commit, deletes the matching object refs. That makes release
+mechanical rather than another written rule — the thing this whole workstream keeps
+learning.
+
+**Staleness for abandoned work.** The ref's target commit is the binding (this is why
+step 7 was cut): from it you can tell whether the claiming work landed or died.
+
+- Target commit is an ancestor of `origin/main` ⇒ the work merged; release.
+- Target commit is on no open PR and no remote branch ⇒ abandoned; release.
+- Otherwise ⇒ live; leave it and name it in the coordinator's register.
+
+This replaces D10's issue-staleness question for objects. **D10 remains open only if
+optional claim issues are used at all.**
+
+**Verification gate.** Merge a PR carrying a claimed migration and confirm the ref is gone
+without anyone running a command; plus a unit test per staleness branch.
 
 ---
 
@@ -706,36 +866,21 @@ fast-forwards over an existing ref and steals the lock silently.
 
 ---
 
-### Step 7 — Add `branch`/`pr` binding to the claim block
+### Step 7 — CUT (superseded by step 5)
 
-**File:** `scripts/check-dispatch-collision.mjs` — `parseClaimBlock` (102), `claimCommand`
-(237), `gatherClaims` (296).
+**Do not implement this. It is kept as a heading so the numbering in the STATUS table and
+in older commit messages still resolves.**
 
-**What to change.** Extend the block to:
+The original step added `branch:` and `pr:` fields to the `db-claim` issue body so a claim
+could be matched to its work. **Atomic object refs give that for free:** a ref points at a
+commit, and that commit *is* the binding — it tells you which branch holds the object,
+whether the work merged (ancestor of `origin/main`), or whether it was abandoned (on no
+open PR and no remote branch). That is exactly what step 5b's staleness rule reads.
 
-```
-```db-claim
-version: 20260806120000
-branch: agent/rewrite-promotion-fn
-pr: none
-objects:
-  - function plm.promote_coldlion_source_owned
-```
-```
-
-Dispatch continues to compare **objects only** — binding does not change that computation
-(GLM's point: it costs dispatch nothing). Binding exists so a claim can be matched to its
-work and released, and so the future enforcement check can require a claim bound to *this*
-PR rather than any claim naming the object (Kimi's false-pass).
-
-Treat missing `branch`/`pr` as valid-but-unbound for backward compatibility; warn.
-
-**Dependencies.** Step 5.
-
-**Verification gate.** Round-trip test: `claimCommand` → `bodyFromClaimCommand` →
-`parseClaimBlock` preserves `branch` and `pr`.
-
----
+Kimi's original reason for wanting binding — that an unbound claim would let a stale claim
+satisfy coverage for an unrelated future PR in the *enforcement* check — still holds, and
+is still satisfied: the enforcement check (deferred, R4) will resolve a claim through its
+ref target rather than through a parsed issue body.
 
 ### Step 8 — Update the two documents that describe the gate
 
