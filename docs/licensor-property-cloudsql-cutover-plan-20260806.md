@@ -14,6 +14,11 @@ gets a short plain-English tag in brackets the first time it appears.
 > Seven held exactly as written. **One (blocker 8) is materially mis-stated in both the handover and
 > the intake**, and one (the "almost entirely independent" claim used to justify working them in
 > parallel) **is false**. Both findings change the order of work. They are new as of 2026-08-06.
+>
+> **This plan was independently reviewed by Grok 4.5 and revised as a result.** Two material defects
+> it found — a wrong rollback story after phase 4, and a missing write-authority model for the
+> dual-write window — are fixed in phase 5 and the new §5A. The full debate, including one Grok
+> finding rejected as factually wrong and one it withdrew after challenge, is recorded at the end.
 
 ---
 
@@ -220,6 +225,24 @@ can correct.
 **Edge 8 — B8 → B1, but only for DesignFlow.** Closing the type-blind write endpoint matters at the
 moment DesignFlow stops being the owner of the edge, not before.
 
+**Edge 9 — B3's *representation decision* (not merely its measurement) → B1. NON-NEGOTIABLE.**
+*(Added after Grok review; this plan originally understated it as "B3 → B1".)* Measuring the orphans
+changes nothing on its own. Until the schema can **hold** an ownerless property — sentinel or
+nullable — 51 active properties fall out of every cascading picker the moment an app is told the
+shared copy is authoritative. The decision, not the count, is the gate.
+
+**Edge 10 — P4 (data correction) → the *limits* of every P5 rollback. STRUCTURAL, and it changes
+what "rollback" means.** *(Added after Grok review.)* Once the shared copy holds corrected parents
+and `FR` is gone, the Cloud SQL copy is **no longer a clean mirror** — it still holds the known-bad
+parents. Repointing back therefore reinstates data we deliberately fixed. See §5, phase 5.
+
+**Edge 11 — the owner ruling on Harry Potter / NASA → B7 *execution*, though not its
+evidence-gathering.** Desk research parallelises; the write does not.
+
+**Edge 12 — the `FR`-removal window couples P2 and P4 as a delivery constraint.** PR #408 must ship
+in the same production window as the `FR` removal (`AGENTS.md` §6.5). This is a scheduling edge, not
+a design edge, but it is hard.
+
 ### 4.3 What genuinely runs in parallel
 
 | Can run at the same time | Why it is safe |
@@ -256,8 +279,9 @@ moment DesignFlow stops being the owner of the edge, not before.
                         PopDAM → poppim → popcrm → DesignFlow
 ```
 
-**Verdict on the "independent" claim:** of the 36 possible pairs among nine blockers, **seven are
-hard-ordered** and one blocker (B9) gates the production delivery of four others. That is not
+**Verdict on the "independent" claim:** of the 36 possible pairs among nine blockers, **eight are
+hard-ordered** (edges 1–5, 7, 9, plus 6 as a delivery gate) and one blocker (B9) gates the
+production delivery of four others. That is not
 "almost entirely independent". The accurate statement is: **the design and authoring work
 parallelises across three or four agents; the delivery is a single-file queue behind a lane that
 does not currently work.**
@@ -280,6 +304,27 @@ object existence, not by the ledger.
 | 1.2 | Resolve the `20260726180000` predecessor problem. Files `20260727221500` and `20260728134500` need `20260726180000`, which is in `HARD_BLOCKED`. Either the owner unblocks phase4/phase6 (making it an 18-version list, `20260726030000`, `20260726031000`, `20260726032000`, `20260726180000` inserted at positions 3–6) or those two versions come out of the list. **This is an Albert decision — see §8, decision 1.** |
 | 1.3 | Clean the preview database first: unacknowledged alerts to zero each with a stated reason, circuit breaker closed with an authorised reset recorded, a fresh health observation passing on its own merits and not on a pinned hash. (Lifted from `docs/age-group-cloudsql-migration-plan-20260804.md` step B1 — this gate is table-independent and applies here unchanged.) |
 | 1.4 | Optionally run the `age_group` rehearsal (`docs/age-group-cloudsql-migration-plan-20260804.md`) **time-boxed to one afternoon.** See the honesty note below. |
+| 1.5 | **Write the mid-promote failure runbook.** *(Added after Grok review — this was the thinnest part of the first draft.)* See below; this is a deliverable, not a note. |
+| 1.6 | **Run track 3B in parallel here, not in phase 3.** *(Moved after Grok review.)* The orphan measurement and the representation decision (§8, decision 3) gate app cutover design, not just the health view, and they cost two `SELECT`s plus one owner ruling. Start them on day one. |
+
+**Note on current production state.** Production is **clean**. Files 1 and 2 of the fourteen are
+**not** applied. `docs/production-migration-lane-design-20260802.md:303-311` describes what *would*
+happen **if** the lane were run to apply today — it is the hazard the closure check exists to
+prevent, not a condition to be repaired. There is no partial state to reconcile before phase 1.
+*(Recorded because a reviewer misread it as current state; see the review section.)*
+
+**Step 1.5 — the mid-promote failure runbook.** Required content, because the usual answer is
+forbidden here:
+- **PITR is excluded, explicitly and in writing.** Restoring production would discard every
+  application write across all four apps since the restore point.
+- **Forward repair only.** A migration that fails mid-batch is corrected by a new migration with a
+  later version, never by editing or re-running the failed one.
+- **Object-level verification, not ledger verification.** After every promotion, assert each
+  expected object with `to_regclass` / a `pg_proc` count. A ledger row is a statement about the
+  list, not about the database.
+- **Stated stop rules.** On the first failure the operator stops, publishes the exact set of applied
+  versions, and does not attempt the remainder. A half-applied batch that someone keeps pushing
+  through is how a recoverable failure becomes an unrecoverable one.
 
 **Exact versions in scope of the current 14-version list:** `20260724060000`, `20260724061000`,
 `20260727221500`, `20260727223000`, `20260727224500`, `20260728134500`, `20260729230000`,
@@ -328,9 +373,27 @@ carried forward:** do not put any curation record in `core.licensor.metadata` /
 `core.property.metadata` — the import stamps that jsonb on every matched row and would overwrite the
 very marker meant to restrain it.
 
+**Standing rule to state in the migration comment — "the feed is not authoritative for absence."**
+*(Adopted from the Grok review; it is a stronger and more general statement of the rule than
+anything currently written down in this programme.)* **A row being omitted from the feed does not
+mean delete, does not mean deactivate, and does not mean re-parent.** The importer must not touch
+rows it did not match. This matters more here than anywhere else, because the feed *structurally
+cannot* send an unparented property — so under any absence-implies-something rule, every orphan the
+curation path creates would be destroyed by the next successful import.
+
 **Acceptance test.** Run the importer twice in preview against a row whose `licensor_id`, `status`,
 `name`, `code` and `confidence` have each been deliberately set to a value the feed disagrees with.
 All five survive both runs. A quarantine row exists for each disagreement. Paste the rows.
+
+**Three additional regression cases, added after the Grok review.** Making `licensor_id`
+INSERT-only is not sufficient on its own; these are the paths that would silently reinstate the
+overwrite, and each must have a test that fails against the old function:
+1. **A leftover `UPDATE` of `licensor_id`** anywhere in the function — including in a branch the
+   happy path does not reach.
+2. **A DELETE-then-re-INSERT path**, which changes the parent without ever issuing an `UPDATE` and
+   therefore passes a naive "no UPDATE" assertion.
+3. **Any auto-apply from quarantine.** A quarantine row that promotes itself is the overwrite
+   wearing a review queue as a disguise — the same trap already named for the proposal table.
 
 **Rollback.** Every step here **removes a write**. None adds one. None can break a reading
 application. Rollback is reverting to the prior function definition, which is strictly *more*
@@ -424,10 +487,21 @@ audit row with a named decider and non-blank evidence. A snapshot of all propert
 **before** 4.2 started and is stored — there is no history table, so without it "go back and
 inactivate again" is guesswork.
 
+**⚠️ The `FR` snapshot is a mandatory gate, not a note.** *(Raised after Grok review.)* Before step
+4.2 begins, a snapshot of the status of all 256 properties must be **taken, timestamped, stored at a
+named path, and verified readable by a second person.** There is no history table; without the
+snapshot, "go back and inactivate the ones we had turned off" is guesswork. A step 4.2 that starts
+without a verified snapshot is a step that has no rollback at all.
+
 **Rollback.** 4.1 and 4.5 are reversible: the audit table records `previous_licensor_id`, so the
 prior state is recoverable row by row. **4.2 is NOT reversible** — removing `FR` destroys a row, and
 the correct rollback is the pre-taken snapshot, not a database restore. Take the snapshot or do not
-start. 4.4 is reversible by disabling the feed again.
+start.
+
+**⚠️ What this phase does to every later rollback.** From the moment 4.1 and 4.2 land, the Cloud SQL
+copy still holds the known-bad parents and the `FR` row. It has stopped being a clean mirror of the
+truth. **Every rollback in phase 5 is therefore a connection rollback, not a data rollback** — see
+phase 5. 4.4 is reversible by disabling the feed again.
 
 ---
 
@@ -451,9 +525,16 @@ row 2), and both repositories **do** exist on this machine now (`C:\repos\poppim
 | # | App | Coupling today | Why here |
 |---|---|---|---|
 | 1 | **popcrm-web** | Weakest. Reaches the edge only through `api.global_search`. | Cheapest possible real cutover. One query surface. If it breaks, one search result set is wrong and nobody's data moves. Proves the read path with near-zero blast radius. |
-| 2 | **poppim-web** | Reads via `api.pm_product_board` / `api.pm_product_assets`. `pim.product`, `pim.product_submission` and `pim.project` all carry **real FKs** to `core.licensor` / `core.property`, but `pim.product.property_id` currently holds **0 rows** — the coupling exists and is unused. | The FKs mean this is a genuine structural test, but the zero row count means a mistake costs nothing today. Cut over **before** those rows exist, not after. This is a closing window. |
+| 2 | **poppim-web** | Reads via `api.pm_product_board` / `api.pm_product_assets`. `pim.product`, `pim.product_submission` and `pim.project` all carry **real FKs** to `core.licensor` / `core.property` — i.e. they **already reference the shared tables**, not Cloud SQL. `pim.product.property_id` currently holds **0 rows**. | ⚠️ **This may not be a cutover at all.** If the FKs already target `core.*`, poppim is structurally on the shared copy already and there is no Cloud SQL dependency to sever — only read paths to confirm. **Phase 5.0 must settle this.** If it confirms, poppim drops out of the sequence and becomes a read-path verification, and the order becomes popcrm → PopDAM → DesignFlow. |
 | 3 | **PopDAM** | **Highest data exposure.** Hard FKs on `dam.asset.licensor_id/property_id` and `dam.style_guide.licensor_id/property_id`, populated. | Every re-parent makes a stored `(licensor_id, property_id)` pair potentially stale. Requires the phase 3A stale-pair consequence list to be live and the DB Data Admin panel to warn on it. ⚠️ **PopDAM Master Data open writes are INTENTIONAL — never restrict them** (`AGENTS.md` §0.4). |
 | 4 | **DesignFlow** | It *is* the current source. Cutting it over is the actual retirement of `dflow.*` (owner ruling R5). | Last, deliberately. Three things must land with it, all app-team work: (a) `PATCH /api/admin/updateMerchGroup` rejects `mgTypeCode` `'05'`/`'06'` outright or is retired — **this is blocker 8**; (b) the client-side cascade at `newItem-dialog.component.ts:1227-1228` repoints at `api.licensor_property_picker`; (c) `itemReferenceGuard.js:123-130` starts validating that the property actually belongs to the licensor, which it has never done. |
+
+**Where the "closing window" actually belongs.** *(Corrected after Grok review — the first draft used
+it as a phase 5 ordering argument, and both parties agreed that was wrong.)* `pim.product.property_id`
+holding zero rows is a **phase 4 deadline, not a phase 5 ordering argument**: finish the Harry
+Potter / NASA and `FR` corrections **before** poppim starts writing `property_id` rows, so that
+product rows never accumulate against a tree still known to be wrong. It says nothing about which
+app to cut over first.
 
 **The dual-writer window is the real risk of phase 5.** Between steps 1 and 4, DesignFlow still
 writes `merchGroup.parent_id` and shared-db holds the curated edge. Two writers of one fact is the
@@ -465,12 +546,104 @@ exact condition that produces silent drift. Two mitigations, both required:
   accident because nothing recorded it.
 - Keep the window short. Do not park between step 2 and step 3 for weeks.
 
-**Rollback, per step.** Each of steps 1–3 is a configuration/read-path repoint with the Cloud SQL
-copy left **completely untouched** — the same shape as the `age_group` rehearsal. Rollback is
-repointing back, and it is available at any time because nothing was migrated, copied or deleted.
-Step 4 is the same, with one addition: if DesignFlow's endpoint was already retired, restoring it is
-a code revert on the app team's release train, not an instant switch — so **retire the endpoint in a
-separate, later release than the read repoint**, so the two rollbacks are independent.
+**Rollback, per step — and the correction that matters most in this document.**
+Each of steps 1–4 is a configuration/read-path repoint with the Cloud SQL copy left **completely
+untouched**, so repointing back is always mechanically available. **But after phase 4, repointing
+back is a CONNECTION rollback, not a DATA rollback.** *(This was wrong in the first draft and is the
+sharpest finding of the independent review.)*
+
+Concretely: Cloud SQL still holds Harry Potter and NASA under DISNEY, and still holds `FR`. Rolling
+an app back onto it therefore **reinstates the exact data we deliberately corrected.** So:
+
+- **Valid reason to roll back:** the app cannot read the shared copy — a connection, permission,
+  view-shape or performance failure. Roll back freely.
+- **NOT a valid reason to roll back:** the data looks wrong. Rolling back makes it *more* wrong, not
+  less. A data-quality failure after phase 4 is fixed **forward**, through the curation RPC.
+- **State this in the runbook and in each cutover PR**, because "roll it back" is the reflex, and
+  here the reflex is harmful.
+
+Step 4 carries one addition: if DesignFlow's endpoint was already retired, restoring it is a code
+revert on the app team's release train, not an instant switch — so **retire the endpoint in a
+separate, later release than the read repoint**, so the two rollbacks stay independent.
+
+---
+
+### 5A. The dual-write authority model
+
+*(This section did not exist in the first draft. The independent review identified its absence as
+the single largest unaddressed risk in the plan, and the model below is adopted from that review.)*
+
+Between the first app cutover and the DesignFlow cutover, two databases hold the same fact and both
+are being written. The plan previously named that risk and stopped. This is the missing model.
+
+**Who may change a parent, during the window**
+
+| Actor | May change `core.property.licensor_id`? |
+|---|---|
+| A curator, via `core.set_property_licensor` | **Yes**, for existing rows. Always audited. |
+| The PLM feed, after phase 2 | **INSERT of new rows only. Never an UPDATE of a parent.** |
+| Direct SQL / any non-RPC write | Physically possible for `service_role`; the trigger tags it `out_of_band`. **Treat as an incident, not a process.** |
+| DesignFlow UI / the `PATCH` endpoint | Cloud SQL only. **Not authority** for any app already cut over. |
+
+**Shared is the parent authority** for every app already on the shared copy. Cloud SQL remains
+DesignFlow's working copy until its own cutover. **The consequence is accepted deliberately:
+DesignFlow users may see a different parent than the other three apps, for the duration of the
+window.** Albert should be told this in advance rather than discovering it as a bug report.
+
+**What wins on conflict**
+
+1. **Existing shared row vs the next import:** the shared parent wins, always. The import never
+   overwrites; it writes a quarantine row recording the shared parent, the feed parent, the match
+   keys and the import run id.
+2. **Quarantine vs a human:** only a human, via `core.set_property_licensor`, can promote a
+   quarantined disagreement into a change. **No auto-accept, ever.**
+3. **Cloud SQL vs shared:** shared wins for cut-over apps. Do not "fix" the shared copy to match
+   DesignFlow without a ruled curation.
+4. **The drift alarm:** silence it only for channels that are trusted by construction —
+   `owner_ruling`, the curator RPC, and `plm_feed_insert` for genuinely new rows. It must still
+   alarm on an unruled `out_of_band` write, on quarantine growth, and on any feed `UPDATE` of
+   `licensor_id` (which after phase 2 should be impossible, and therefore means phase 2 regressed).
+
+**Kill criteria — any one of these stops the feed and freezes parent writes except emergency curation**
+
+- Any import run that **updates** `licensor_id` at all (a phase 2 regression).
+- Quarantine open count above an agreed number, or rising across consecutive imports with nothing
+  being cleared.
+- `parent_edge_hash` drift that cannot be matched to an audit row.
+- The window running past an agreed wall-clock date with DesignFlow still not cut over. **Pick the
+  date before the window opens, not during it.**
+- Properties active in DesignFlow but absent from the shared copy rising above a threshold — the
+  feed cannot carry unparented rows, so this gap grows silently by design.
+- A business check failing: a royalty or licensee report mismatch beyond an agreed tolerance.
+
+**How orphans survive a feed that structurally cannot represent them**
+
+This is the hardest part of the window, and the plan had no answer for it before the review.
+The rule, in one line:
+
+> **`UNASSIGNED` is a shared-side holding pen. The feed can only ever *propose to leave* it, via
+> quarantine. The feed can never *assert* it and never *clear* it by omission.**
+
+Which unpacks to six rules:
+
+1. `UNASSIGNED` is a real `core.licensor` row, used **only** in the shared copy. Do not attempt to
+   round-trip it through the feed.
+2. **The feed is not authoritative for absence.** Omitted from the feed does not mean delete,
+   deactivate or re-parent. The importer must not touch rows it did not match. (Also stated as a
+   standing rule in phase 2.)
+3. **Match, then disagree — never twin.** If the feed later sends a property that already exists
+   under `UNASSIGNED`, match it on its durable keys. `UNASSIGNED` versus the feed's nested licensor
+   is a **quarantine**, not an INSERT and not a silent UPDATE.
+4. **New DesignFlow orphans will never appear in the feed at all**, because the payload structure
+   cannot express them. They stay DesignFlow-only until either someone parents them in DesignFlow
+   (at which point the feed delivers them on its next run) or a human creates and links them in the
+   shared copy. Monitor the gap explicitly: "active in DesignFlow, absent from shared".
+5. **Every app on the shared copy must show `UNASSIGNED`** — as a bucket in the cascading picker or
+   an explicit "unassigned" filter — so the 51 active orphans do not silently vanish. No app may
+   assume every property has a real brand parent.
+6. **Exit criteria for the window:** quarantine at zero (or each remaining row waived by a named
+   owner), the `UNASSIGNED` policy signed off, and DesignFlow's read path switched — so that exactly
+   one tree remains.
 
 ---
 
@@ -495,7 +668,7 @@ in the PR.
 | 5 | `import_master_data()` overwrites `licensor_id`, forces `status='active'` | **Live in production.** Scoped proposal at `…import-authority-20260803.md:286-366`; nothing implemented. `20260802170000` is merged but absent from production. | Phase 2.1–2.2. | Production window only. | Deliberately-set `licensor_id` and `status` survive two importer runs. |
 | 6 | Three further overwrite paths | §2.6 `confidence` force-set (structural, all 505 rows already `verified`, nothing destroyed today); §2.8 duplicate INSERT (**latent and closer than it looks — 6 of 26 `core.licensor` rows have no `designflow_plm` ref**); §2.9 `lower(name)` false match. | Phase 2.3–2.5, shipped with 2.2. | Choice between the two `name` options — recommend normalized-equivalent. | Each of the three has a preview test that fails against the old function and passes against the new. |
 | 7 | 9 properties under the wrong licensor | **One-line stub only** (`COORDINATOR_INTAKE.md:1837-1860`). No evidence gathered, no correct parent identified. Wording is ambiguous: 34 and 38 are product counts. | Phase 4.1, after evidence-gathering (parallelisable now). | **Yes** — decision 4. | The 9 rows point at the ruled licensor; each has an audit row with named decider and evidence; product counts under DISNEY drop by 34 and 38. |
-| 8 | Unvalidated write endpoint open to 5 roles | **Mis-stated everywhere — see §2.** Correct citation `designflow-backend/routes/admin.router.js:87`. The endpoint is type-blind and reachable, but is **not proven** to be the writer of the 503 edges; its own source doc marks that NOT VERIFIED. | Phase 5.4(a), DesignFlow app work. Plus a documentation correction owned by the stale-sweep agent. | No. | A direct API call passing an MG06 as `productSubType` returns a rejection. |
+| 8 | Unvalidated write endpoint open to 5 roles | **Mis-stated everywhere — see §2.** Correct citation `designflow-backend/routes/admin.router.js:87`. The endpoint is type-blind and reachable, but is **not proven** to be the writer of the 503 edges; its own source doc marks that NOT VERIFIED. | Phase 5.4(a), DesignFlow app work. Plus a documentation correction owned by the stale-sweep agent. **Residual risk after the feed is revived (4.4):** because phase 2 makes `licensor_id` INSERT-only, this path can no longer re-parent an **existing** shared row — a disagreement quarantines instead. What survives is that a **new** property's *first* parent can still enter the shared copy unaudited via Cloud SQL. Mitigate by tagging feed-originated INSERTs `source_channel = 'plm_feed_insert'`, not by blocking the revive. | No. | A direct API call passing an MG06 as `productSubType` returns a rejection. |
 | 9 | Promotion lane aborts at file 3 of 14 | Designed in full, not implemented. Aborts **after** applying and recording files 1 and 2 — a partial production database. | Phase 1.1–1.2. | **Yes** — decision 1. | The lane applies an approved list end to end, and every object is verified to exist by `to_regclass` / `pg_proc`, not by the ledger. |
 
 ---
@@ -504,11 +677,12 @@ in the PR.
 
 | Phase | Name | Deliverable | Gated by |
 |---|---|---|---|
-| **1** | Make production reachable | A promotion run that completes and is proven by object existence | Albert decision 1 |
+| **1** | Make production reachable | A promotion run that completes and is proven by object existence, **plus a mid-promote failure runbook** | Albert decision 1 |
+| **1 (parallel)** | Orphan measurement + representation decision (track 3B) | A live orphan count and a signed decision on how an ownerless property is stored | Albert decision 3 |
 | **2** | Stop the overwrites | An importer that cannot destroy a human decision | Phase 1 |
-| **3** | Build the curation path | A named human can change a parent, with evidence, recorded structurally | Phase 2 (delivery); decision 3 for track 3B |
+| **3** | Build the curation path | A named human can change a parent, with evidence, recorded structurally | Phase 2 (delivery); track 3B decision |
 | **4** | Correct the data | A complete, correct shared copy | Phase 3 audit table; decisions 2 and 4 |
-| **5** | App-by-app cutover | Four apps reading the shared copy | Phases 2, 3, 4 |
+| **5** | App-by-app cutover | Four apps reading the shared copy, under the §5A authority model | Phases 2, 3, 4 |
 | **6** | Retire the old copy | `dflow.*` decommissioned | Phase 5 stable |
 
 ---
@@ -592,4 +766,59 @@ reorder it.
 
 ## Independent review (Grok 4.5)
 
-*(recorded below)*
+**Reviewer:** Grok 4.5 (`grok-4.5-build`) via Grok CLI 0.2.112, session
+`019fd4ee-49a3-7ae2-b805-155055b32196`, three turns, read-only (`--deny Edit --deny Bash
+--deny Read`). It was given a compact self-contained brief with the plan inline and **no repository
+access** — every finding below is a judgement on the stated design, not on the code.
+**Cost:** 98,223 total tokens across three turns, $0.190 USD.
+
+**Outcome: converged.** Grok raised nine substantive points. **Six accepted**, two of which changed
+the plan materially. **One rejected as factually wrong** and withdrawn by Grok. **One conceded by
+Grok after challenge.** **One narrowed** by agreement. Grok's closing turn: *"no remaining
+objection."*
+
+### Points Grok raised, and the disposition of each
+
+| # | Grok's point | Disposition | Why |
+|---|---|---|---|
+| 1 | **The plan has no write-authority model for the dual-write window.** It names dual-write and drift, then stops — it never says who may change a parent, what wins on conflict, what the kill criteria are, or how orphans survive a feed that cannot represent them. Grok called this "the single largest risk not addressed" and "a multi-week split brain with four live apps, not a cutover." | **ACCEPTED — largest single change.** Adopted essentially verbatim as new §5A. | It is simply true. The first draft named the risk and then moved on. The `UNASSIGNED`-versus-feed problem in particular is one this agent raised as unsolved and could not answer; Grok's "the feed can only propose to leave the holding pen, never assert or clear it by omission" is a genuinely better formulation than anything in the existing documentation. |
+| 2 | **The phase 5 rollback is wrong after phase 4.** Once shared holds corrected parents and `FR` is gone, "repoint back to Cloud SQL" reinstates the known-bad parents. Rollback is valid for connection failures, not data-quality failures. | **ACCEPTED — sharpest finding.** Rewrote the phase 5 rollback; added edge 10; added a warning at the end of phase 4. | Correct and load-bearing. The first draft said "the Cloud SQL copy is left untouched, so rollback is repointing back" without noticing that *untouched* is exactly the problem once the shared copy has been deliberately corrected. |
+| 3 | **A mid-promote failure runbook is missing.** "Prove by object existence" is a success check, not a recovery plan, and PITR is banned. | **ACCEPTED.** Added as step 1.5 with required content. | True. The source design excludes PITR but never says what replaces it. |
+| 4 | **Missed edge: B3's *representation decision*, not just its measurement, gates cutover.** | **ACCEPTED.** Added as edge 9. | Correct — the plan had it as "B3 → B1", which lets someone satisfy it by producing a count. |
+| 5 | **Move 3B (orphan measurement + decision) to run parallel with P1**, not inside P3. | **ACCEPTED.** Added as step 1.6. | Cheap, and it gates cutover design rather than only the health view. |
+| 6 | **The `FR` snapshot must be a mandatory, timed, verified gate, not a note.** Also: state phase 2's forward-only rollback in the runbook so nobody "rolls back" by re-enabling the overwrites. | **ACCEPTED.** Both added. | Fair. A rollback that exists only as prose is not a rollback. |
+| 7 | **"Partial promotion state (files 1–2 already applied) → all of P1. Reconcile before any new promote; not optional cleanup."** | **REJECTED — factually wrong. Grok withdrew it.** | Verified against `docs/production-migration-lane-design-20260802.md:303-311`. That passage is headed *"What actually happens **if** the fixed lane is run to apply today"* and is a **hypothetical** describing why the closure check must land first. Production is clean; nothing has been promoted. Grok's reply: *"I accept the correction. I misread a hypothetical as current production state."* A note recording this was added to phase 1, because the misreading is an easy one to repeat. |
+| 8 | **Flip the cutover order to poppim first** — its `property_id` is empty today, a closing window, whereas popcrm has no clock. | **CHALLENGED, and Grok conceded.** Order stays popcrm → poppim → PopDAM → DesignFlow, with a new caveat. | The counter-argument: poppim's FKs from `pim.product` / `product_submission` / `project` **already point at `core.licensor` / `core.property`** — the shared tables. So poppim has no Cloud SQL dependency to sever, and putting it first would make the first rehearsal a non-rehearsal, the same trap the `age_group` rehearsal already fell into. Grok conceded both halves: the empty-`property_id` window is a **phase 4 data-correctness deadline**, not a phase 5 ordering argument. Both changes are in the plan. Grok's caveat, which is fair and recorded: weak *technical* coupling is not the same as low *business* pain — a broken tree in `global_search` still hurts sales, it just fails more safely than a hard FK. |
+| 9 | **Escalate blocker 8 to medium-high after the feed is revived**, because the unvalidated `PATCH` path can feed the shared tree through sync and bypass the curation RPC and its audit trail. | **NARROWED by agreement.** Blocker 8 stays sequenced at DesignFlow cutover. | The narrowing put to Grok: phase 2 makes `licensor_id` **INSERT-only**, so for a property that already exists in the shared copy the revived feed cannot change its parent regardless of what the `PATCH` endpoint wrote into Cloud SQL — the disagreement quarantines. What survives is only a **new** property's *first* parent entering unaudited on INSERT. Grok agreed: *"the narrowing holds for existing rows … no path in the stated design where the revived feed updates an existing property's parent after P2, unless P2 is incomplete."* Mitigation is therefore tagging feed INSERTs `plm_feed_insert`, **not** blocking the revive on a DesignFlow app change. Grok added a valuable rider — the **logical-twin** risk, where a failed match creates a new row under the feed's parent alongside the curated original — and correctly noted that phase 2's match-key fix, not the endpoint, is what closes it. That is already step 2.3. |
+
+### Things Grok contributed that were not corrections
+
+- Three named regression cases for phase 2 that a naive "no `UPDATE`" assertion would miss: a
+  leftover `UPDATE` in an unreached branch, a DELETE-then-re-INSERT path, and auto-apply from
+  quarantine. Added as explicit acceptance tests.
+- The formulation **"the feed is not authoritative for absence — omitted from the feed does not mean
+  delete, deactivate or re-parent."** Adopted as a standing rule in phase 2. It is a stronger and
+  more general statement of the rule than anything currently written down in this programme, and it
+  is the rule that protects orphans from the next successful import.
+
+### Where this agent and Grok still disagree
+
+**Nothing substantive.** Grok's final turn was *"no remaining objection"* against the full list of
+changes above.
+
+One residual difference of emphasis, recorded rather than resolved: after conceding the poppim
+point, Grok suggested the first cutover should be *"the first app that actually changes authority"*
+and was non-committal about whether popcrm qualifies. This plan keeps popcrm first while flagging in
+phase 5 that **the phase 5.0 survey may show poppim needs no cutover at all**, in which case the
+order becomes popcrm → PopDAM → DesignFlow. Neither position can be settled without the survey, and
+both agents agree the survey is the deciding evidence. That is recorded honestly in §9 as the reason
+phase 5 remains the lowest-confidence part of this document.
+
+### Reviewer limitations worth stating
+
+Grok had **no repository access** and worked entirely from the inline brief. It therefore could not
+independently verify any citation, any row count, or the blocker 8 source reading — it accepted this
+agent's account of the code. Its value was in the design reasoning, which is where it found the two
+real defects. **Point 7 is a live demonstration that a second-opinion model can state a false fact
+confidently**, and it was caught only because the underlying document was re-read rather than
+trusted. Do not accept a Grok finding into this programme without checking it against the source.
