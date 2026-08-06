@@ -7,19 +7,29 @@
 
 ## STATUS — read this first
 
-| # | Step | State | Date |
-|---|---|---|---|
-| 1 | Remove the "SAFE TO DISPATCH" verdict; report what was and was NOT checked | ⬜ open | — |
-| 2 | Add the failing test that routes real DDL through the parser | ⬜ open | — |
-| 3 | Broaden `PATTERNS` to model table/column/index/grant/type DDL | ⬜ open | — |
-| 4 | Default object derivation to `--sql`; make bare `--objects` warn | ⬜ open | — |
-| 5 | Harden `parseClaimBlock` against comments, inline values, compact lists | ⬜ open | — |
-| 6 | Replace `--allocate-version` with an atomic API ref reservation | ⬜ open | — |
-| 7 | Add `branch`/`pr` binding to the claim block | ⬜ open | — |
-| 8 | Update `AGENTS.md` §4 rule 1 and the orchestrator skill to match | ⬜ open | — |
+| # | Step | Phase | State | Date |
+|---|---|---|---|---|
+| 1 | Remove the verdict — message **and** the internal `safe` name **and** the exit-code docs | A | ⬜ open | — |
+| 1b | **Disable `--allocate-version`** (fail with an explanation) — it reserves nothing | A | ⬜ open | — |
+| 2 | Add the failing tests that route real DDL through the parser | A | ⬜ open | — |
+| 2b | Fix the four gatherer defects: **draft PRs excluded**, one-version-per-PR, deleted files, unencoded path | A | ⬜ open | — |
+| 3a | **Historical noise gate** — reconstruct concurrently-open PR sets; fix the acceptance rule BEFORE seeing results | B | ⬜ open | — |
+| 3b | Return **structured operations** `{action, kind, target}`; separate dispatch policy from merge policy | B | ⬜ open | — |
+| 4 | Default object derivation to `--sql`; make bare `--objects` warn | B | ⬜ open | — |
+| 5 | Harden `parseClaimBlock`; reject empty/wildcard claims | B | ⬜ open | — |
+| 6 | Add `--reserve-version` (atomic create-ref); refs are **kept permanently** | C | ⬜ open | — |
+| 7 | Add `branch`/`pr` binding to the claim block | C | ⬜ open | — |
+| 8 | Update `AGENTS.md` §4 rule 1 and the orchestrator skill to match | C | ⬜ open | — |
 
-**A fresh session starts at Step 1.** Steps 1–2 are the urgent pair: step 1 removes a
-live false-safe message, step 2 is the regression test that proves the whole class.
+**A fresh session starts at Step 1.** Phase A is the urgent set: it removes the live
+false-clear message, disables an allocator that does not allocate, and fixes four
+gatherer defects that each produce their own false-clear.
+
+> **This plan was reviewed by GPT-5.6 (Codex) on 2026-08-06 and revised as a result.**
+> The review found four scheduled-nowhere bugs, a better architecture for step 3, and a
+> sequencing error. What changed and why is recorded in §7 (R7–R9) and §8 (D11–D13).
+> **Do not "restore" the earlier simpler shape of steps 1, 3 or 6** — it was reviewed and
+> found wrong.
 
 **Out of this plan entirely:** the enforcement CI check, the scaffold tool, and the
 auto-draft bot. See §4.
@@ -285,6 +295,28 @@ cheaper and keeps the value. **Reconsider only if a real `alter table`/`grant` c
 occurs that this tool's output abetted** — that would be evidence, and B would become
 correct retroactively.
 
+**R7 — One flat `PATTERNS` list shared by both checks (the first draft of step 3).**
+Rejected after Codex review. It couples extraction to policy: the merge guard is a required
+check built around whole-object replacement, and making it report every table touched would
+render its own failure messages inaccurate. Structured operations with per-consumer policy
+keep D6 (one parser) without forcing D-one-policy. **Do not collapse this back.**
+
+**R8 — Deleting reservation refs when work merges or is abandoned.** Rejected on Codex's
+argument, which beat mine: preview is a persistent database whose ledger holds every
+version that ever ran `db push`, including from abandoned branches, so a released number
+could collide with something preview already recorded. Refs are kept permanently. This also
+deletes an entire class of machinery (rollback, ownership, reconciliation) that would
+otherwise need building and maintaining.
+
+**R9 — A two-phase transaction (ref + issue) with rollback, ownership metadata, idempotent
+retry and a reconciliation command.** Codex initially required this before shipping
+reservation; **I argued it was over-engineered and Codex withdrew it.** The reasoning: an
+orphaned ref wastes one integer from an unbounded, monotonic space and is invisible in the
+branch list, whereas the proposed machinery is new state to maintain in a repo whose
+defining pathology is process machinery outgrowing the work. The one real hazard —
+continuing after the *issue* fails to file — is handled by a loud non-zero exit (step 6,
+point 4) rather than by a transaction.
+
 **R6 — Keep "SAFE TO DISPATCH" but add caveats after it.** Rejected on GLM's argument,
 which is the sharpest point of the review: an advisory tool that prints "SAFE" invites
 overtrust regardless of what follows, because agents grep for the word and act on it. The
@@ -305,15 +337,25 @@ verdict must be *removed*, not qualified.
 | D7 | "Cannot declare objects → dispatch READ-ONLY" stays as brief-quality guidance | **LOCKED** | Both models agree it is sound taxonomy and **useless as a control**. Keep it; **never cite it as a reason enforcement is unnecessary.** 2026-08-06 |
 | D8 | Exact ref namespace (`refs/db-claims/*` vs `refs/heads/db-claims/*`) | **OPEN** | Both work. Prefer `refs/db-claims/*`: invisible in the branch list, so it cannot add to the 131-branch clutter. Implementer's call. |
 | D9 | Whether broadened `PATTERNS` should distinguish column-level from table-level | **OPEN** | Table-level granularity (`table core.licensor`) is simpler and over-blocks slightly. Column-level is precise and more code. **Start table-level**; note it. |
-| D10 | Exact staleness definition for claim release | **OPEN** | Needs a rule before the release step can be automated. Suggested: bound PR merged/closed, **or** no bound PR and age > 7 days. |
+| D10 | Exact staleness definition for **claim issue** release | **OPEN** | Needs a rule before release can be automated. Suggested: bound PR merged/closed, **or** no bound PR and age > 7 days. Applies to issues only — refs are never released (D13). |
+| D11 | Parser returns **structured operations**; dispatch and merge apply **different policies** over them | **LOCKED** | R7, Codex 2026-08-06. One parser, two policies. |
+| D12 | The required merge guard's policy does not widen without the §3a historical evidence | **LOCKED** | Codex 2026-08-06. Prevents trading a false-clear for alarm fatigue. |
+| D13 | Reservation refs are **kept permanently**; no release, no reconciliation | **LOCKED** | R8, Codex 2026-08-06. The preview ledger is persistent, so a reused version can collide with something already recorded there. |
+| D14 | Draft PRs **count as in flight** for dispatch (but not for the merge guard) | **LOCKED** | Codex 2026-08-06. Draft work is still work; over-blocking fails safe. |
 
 ---
 
 ## 9. The plan — ordered, executable steps
 
-> **Phase A = steps 1–2** (urgent; removes the live false-safe and pins the class).
-> **Phase B = steps 3–5** (the real parser work).
-> **Phase C = steps 6–8** (allocation, binding, docs).
+> **Read the STATUS table for the execution order — it, not the order of headings below,
+> is authoritative.** Steps 1b and 2b were inserted after review and appear out of
+> numerical sequence in this document.
+>
+> **Phase A = steps 1, 1b, 2, 2b** — urgent. Removes the live false-clear, disables an
+> allocator that allocates nothing, and fixes four gatherer defects that each produce
+> their own false-clear.
+> **Phase B = steps 3a, 3b, 4, 5** — the historical gate, then the real parser work.
+> **Phase C = steps 6, 7, 8** — reservation, binding, docs.
 > Context cut points after Phase A and after Phase B. **Re-read the remaining steps at the
 > start of each phase** — this plan may have been updated by whoever did the previous phase.
 
@@ -346,8 +388,21 @@ items" is a statement about having found nothing to compare, not about safety.
 Keep the collision branch's wording as-is; `DO NOT DISPATCH` is a correct, actionable
 negative and does not invite overtrust.
 
-**Behaviour when done.** No output path contains the word "SAFE". Exit codes are unchanged
-(0 / 1 / 2) — this is a message change only, so nothing that consumes the exit code breaks.
+**⚠️ The message alone is not enough — Codex's finding, and it is correct.** Changing only
+the printed sentence is partly cosmetic, because the old meaning survives in three other
+places that callers actually read:
+
+- `result.safe` at line 177 → rename to **`overlapFound`** (inverted sense), and update
+  `findDispatchConflicts`, `formatReport` and the `--json` output together.
+- The `USAGE` text at line 400 says "Exit 0 = safe to dispatch" → reword to
+  **"Exit 0 = the check completed and found no overlap in the classes it can see."**
+- Any doc repeating the old gloss (see step 8).
+
+Do all four in this step. A caller reading `--json` for `"safe": true` must not be able to
+keep the old semantics after the printed sentence changes.
+
+**Behaviour when done.** No output path, field name, or doc line asserts safety. Exit codes
+are unchanged (0 / 1 / 2), so nothing that consumes the exit code breaks.
 
 **Dependencies.** None. Do this first.
 
@@ -392,12 +447,124 @@ step 3, the same command reports them passing.
 
 ---
 
-### Step 3 — Broaden `PATTERNS`
+### Step 1b — Disable `--allocate-version`
+
+**File:** `scripts/check-dispatch-collision.mjs:444–447`, `USAGE` at 397.
+
+**Why now, not in Phase C.** The flag is live and its own header comment claims it "kills
+the duplicate-timestamp class." It does not — it reads, then prints, reserving nothing
+(§6). Leaving a tool that overstates its guarantee active for two more phases is
+indefensible. Note that duplicate versions **are** already blocked at merge by
+`scripts/check-sql.sh`, so disabling this loses no real protection.
+
+**What to change.** Make `--allocate-version` exit 2 with: "this flag never reserved
+anything and has been withdrawn; use `--reserve-version` (step 6), or pick a version
+manually and rely on the `SQL migration guards` check." Correct the false comment on
+`nextFreeVersion` (line 190). Keep `nextFreeVersion` itself — step 6 reuses it to pick the
+candidate before attempting the atomic reservation.
+
+**Verification gate.** `node scripts/check-dispatch-collision.mjs --task t --objects "table core.a" --allocate-version; echo $?` → prints the explanation, exits `2`.
+
+---
+
+### Step 2b — Fix the four gatherer defects
+
+**File:** `scripts/check-dispatch-collision.mjs`, `gatherOpenPrObjects` at 322–349.
+
+All four were found by Codex; all four are documented in §6 of the first draft of this plan
+and **were scheduled by no step** — a real gap in the plan, not just in the code.
+
+1. **Draft PRs are excluded** (`if (pr.draft) continue`, line 326). This is correct for the
+   merge guard — a draft is not competing to merge — and **wrong for dispatch**, where
+   draft work is absolutely work in flight. It is a false-clear in its own right. Include
+   drafts; label them as drafts in the report. Including them over-blocks, which fails safe.
+2. **Only the first migration's version is captured** (`version ??= stamp`, line 334). A PR
+   with three migrations exposes one version to collision checking. Replace the scalar
+   `version` with `versions[]` through `gatherClaims`, `gatherOpenPrObjects`,
+   `findDispatchConflicts` and `formatReport`, and compare every version against every
+   version.
+3. **Deleted migration files** are fetched anyway. Skip entries whose status is `removed`.
+4. **The filename is not URL-encoded** (line 335) where the sibling guard uses
+   `encodeURI` (`check-pr-object-collisions.mjs:393,428`). Encode it.
+
+**Verification gate.** A unit test per defect: a draft PR collides; a PR whose *second*
+migration carries the colliding version is detected; a removed file does not throw; a
+filename with a space or `#` resolves.
+
+---
+
+### Step 3a — The historical noise gate (do this BEFORE step 3b)
+
+**Why this is a gate, not a risk note.** Broadening the parser also strengthens
+`check-pr-object-collisions.mjs`, a **required** check on `main`. If concurrent PRs
+routinely touch the same table, that check becomes noisy — which is precisely the
+alarm-fatigue disease this workstream exists to cure. The first draft of this plan left
+this as a mitigation in §13; Codex is right that it must gate the change, and right that
+"test the last ten PRs" is the wrong test.
+
+**What to do.**
+1. Reconstruct sets of PRs that were **open at the same time** (from `gh pr list --state
+   merged` with created/merged timestamps) — not the last ten in isolation. Overlap is the
+   only thing that matters.
+2. Run the proposed extraction and the proposed dispatch/merge policies over those sets.
+3. Classify every new failure: **useful** / **harmless but worth serializing** / **noise**.
+4. **Fix the acceptance rule before looking at the results.** Suggested: if more than 20%
+   of historical concurrent sets produce a new merge-guard failure classified as noise, the
+   merge guard keeps its current narrow policy and only the dispatch policy broadens.
+
+**Verification gate.** A short written artefact under `docs/verification/` recording the
+sets tested, the classification, the pre-registered rule, and the resulting decision. This
+artefact is the evidence for D12 and must exist before step 3b merges.
+
+---
+
+### Step 3b — Return structured operations, and split the two policies
 
 **File:** `scripts/check-pr-object-collisions.mjs`, `PATTERNS` at lines 128–220.
 
-**What to change.** Add pattern entries producing canonical keys in the existing
-`"<kind> <schema>.<name>"` shape, reusing `canonical()` (line 221) verbatim:
+**The design changed after review. Read this before writing code.** The first draft said
+"broaden `PATTERNS`" — one flat list of canonical strings, shared by both checks. Codex
+showed that conflates two separate things: **one parser** (good, D6) and **one collision
+policy** (wrong). The merge guard is built around whole-object replacement and its failure
+messages say so; making it report every table touched would make its own explanations
+false.
+
+**So the parser returns structured operations, not flat strings:**
+
+```js
+{ action: 'create_or_replace', kind: 'function', target: 'plm.foo' }
+{ action: 'alter',             kind: 'table',    target: 'core.licensor' }
+{ action: 'grant',             kind: 'table',    target: 'core.licensor' }
+```
+
+Each consumer then picks its own policy over the same operations:
+
+- **Dispatch policy:** any write to the same target collides. Broad, over-blocks, fails safe.
+- **Merge-guard policy:** only the classes it intentionally supports fail the build; table-
+  level conflicts are reported under their own, accurate explanation. Its current behaviour
+  is preserved unless step 3a's evidence says to widen it.
+
+Keep `extractObjects` as a thin wrapper returning the old flat strings so existing callers
+and tests keep working; add `extractOperations` as the new primary.
+
+**Operation-specific handling Codex flagged — do not skip these:**
+
+- `GRANT` can target tables, sequences, schemas or functions — not always a table.
+- `COMMENT ON COLUMN core.t.c` must collide with changes to `core.t`.
+- `ALTER POLICY n ON t` needs **both** the policy and the table identity.
+- `RENAME` and `SET SCHEMA` need **both** the old and new identity.
+- `CREATE INDEX` should emit both the index and its table; `DROP INDEX` often cannot
+  recover the owning table from the SQL alone — emit the index only and say so.
+
+Note the existing extractor only has special multi-target output for triggers and policies
+(`check-pr-object-collisions.mjs:242`); this generalises that.
+
+**Add a coverage-inventory test.** Codex's point: nothing today would notice a *new* large
+blind class. Add a test that scans `supabase/migrations/` for leading DDL verbs, subtracts
+the ones the parser models, and fails if any unmodelled verb exceeds a threshold count.
+That is what prevents a repeat of this whole defect.
+
+Canonical keys still come from `canonical()` (line 221). Target mapping:
 
 | DDL | Emit |
 |---|---|
@@ -477,7 +644,7 @@ from supabase/migrations/>` lists that migration's tables and functions.
 
 ---
 
-### Step 6 — Replace `--allocate-version` with an atomic reservation
+### Step 6 — Add `--reserve-version`, an atomic reservation
 
 **Files:** `scripts/check-dispatch-collision.mjs:190` (`nextFreeVersion`, and its incorrect
 header comment), `:444–447` (the allocate path).
@@ -491,9 +658,39 @@ gh api -X POST repos/u2giants/shared-db/git/refs \
 
 `422 Reference already exists` ⇒ that version is taken; increment and retry (bounded, e.g.
 60 attempts). Success ⇒ the version is now **yours**, reserved server-side, with no
-read-then-write window. Release with
-`gh api -X DELETE repos/u2giants/shared-db/git/refs/db-claims/<version>` when the work
-merges or is abandoned.
+read-then-write window. Target the ref at the current `main` commit; **never create a
+special commit for a reservation.**
+
+**Name it `--reserve-version`, not `--allocate-version`.** Codex's point: the old flag
+meant "print a suggestion" and was read-only. Reusing the name for something that mutates
+remote state is a surprising behaviour change, and this repo's rule is that public
+repository content is not created without the owner's say-so — so the mutation must be
+visible in the name.
+
+**Refs are created once and KEPT PERMANENTLY. There is no release step, and that is
+deliberate.** Reservations were originally going to be deleted on merge; Codex argued the
+opposite and is right: the preview database is persistent and its ledger holds **every**
+version that ever ran `db push`, including from abandoned branches. Releasing a number for
+reuse could therefore collide with a version preview has already recorded. A kept ref costs
+one 14-digit integer out of an effectively unbounded space, and `refs/db-claims/*` does not
+appear in the branch list, so it cannot add to the 131-branch clutter.
+
+This removes, deliberately, the need for ref rollback, ref ownership metadata, ownership
+checks on release, stale-ref reconciliation, and routine ref deletion. **Do not add them.**
+
+The exact flow (agreed with Codex after debate):
+
+1. Create `refs/db-claims/<version>` via the API.
+2. On 422, increment and retry.
+3. Create the claim issue carrying that version.
+4. **If issue creation fails, exit non-zero and say loudly "reserved <version> but the
+   claim was NOT filed — do not dispatch."** This is the one genuinely dangerous state:
+   the version is reserved while the object work is invisible to everyone else.
+5. Do not dispatch until the claim issue exists.
+
+**Note the asymmetry, because it drives the whole design:** an orphaned *ref* wastes an
+integer; an orphaned *claim issue* blocks an object and genuinely needs a release rule —
+that is D10, and it remains open.
 
 **Correct the false comment** on `nextFreeVersion` — it currently claims to kill the
 duplicate-timestamp class, which is only true once reservation is atomic.
