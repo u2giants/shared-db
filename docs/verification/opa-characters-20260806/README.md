@@ -249,6 +249,41 @@ https://opa.disney.com/ProdApp/createEditProduct.spring
 
 ---
 
+## 6a. ⚠️ Check this first: we may already hold this data
+
+`HANDOFF.md` records these legacy row counts for the characters workstream:
+
+| Source | Rows |
+| --- | --- |
+| **This OPA extract** | **10,262** property→character rows, **9,591** distinct character names |
+| `dflow.properties_and_characters` | 10,122 |
+| `public.characters` | 9,622 |
+| `core.character` | 0 (empty) |
+
+Those are within ~1.4% and ~0.3% of the OPA numbers. **The hypothesis — not
+verified by anyone — is that `dflow.properties_and_characters` is a stale import
+of this same OPA list.**
+
+If that holds, this file is not a new dataset. It is a **refresh of data we
+already have, carrying Disney's authoritative IDs**, and `characterID` /
+`licensedPropertyID` may be the join key the reconciliation work has been
+missing. The ~140-row difference would then be Disney's additions and retirements
+since whenever the legacy import ran, which is itself useful.
+
+**Verify before designing anything.** It is a read-only comparison and cheap. Two
+outcomes, both worth recording:
+
+- **Confirmed** → the design question changes from "where does new data land?" to
+  "how do we reconcile and re-key what we have?"
+- **Disproved** → say so explicitly here and in `HANDOFF.md`, and delete the
+  claim. A disproved lead left standing is worse than no lead at all.
+
+⚠️ **The counts above were read from `HANDOFF.md`, not from the live database.**
+The session that wrote this made zero database calls. Both sides need
+re-deriving before anyone acts.
+
+---
+
 ## 7. Open design questions for whoever implements this
 
 These are deliberately unanswered. They are the coordinator's to decide, not the

@@ -4279,6 +4279,26 @@ change written, no database modified.**
 - **Handoff:** [`fix_characters_style_guides_handoff.md`](fix_characters_style_guides_handoff.md)
 - **Model (read before touching anything):** [`docs/style-guides-characters-and-royalties.md`](docs/style-guides-characters-and-royalties.md)
 - **Licensing-team review sheet + regenerator:** [`docs/verification/style-guide-property-mapping-20260726/`](docs/verification/style-guide-property-mapping-20260726/README.md)
+- **Disney's OWN property→character list, captured from the OPA portal (2026-08-06):** [`docs/verification/opa-characters-20260806/README.md`](docs/verification/opa-characters-20260806/README.md) — 10,262 rows, 1,445 properties, 9,591 distinct character names, carrying Disney's own IDs. **Requested as a lookup table; NOT built.** Request + supplement in `COORDINATOR_INTAKE.md` `## REQUEST QUEUE`, PR #466. Reproducible in ~2 minutes (Albert's MFA login is the only manual step); the snippet is in that README.
+
+> ### ⚠️ UNVERIFIED BUT HIGH-VALUE LEAD — the OPA extract and `dflow.properties_and_characters` are suspiciously the same size
+>
+> The OPA capture is **10,262 property→character rows / 9,591 distinct character
+> names**. The legacy copies named above are **`dflow.properties_and_characters`
+> 10,122** and **`public.characters` 9,622**. Those are within ~1.4% and ~0.3%.
+>
+> **The hypothesis — NOT verified, and nobody has checked it — is that
+> `dflow.properties_and_characters` IS a stale import of this same OPA list.** If
+> that is true it changes the shape of this workstream substantially: the OPA file
+> is a *refresh with authoritative IDs* of data we already hold, not a new dataset,
+> and `characterID` / `licensedPropertyID` may be the join key that has been
+> missing.
+>
+> **Check this before designing anything.** It is a read-only comparison and it
+> is cheap. If the hypothesis is wrong, say so here and delete this block — a
+> disproved lead left standing is worse than no lead. No session has made any
+> database call to test it; the counts above were read from this document, not
+> from the live database, and both sides need re-deriving.
 
 Merged: PRs #197 `db97cd9`, #203 `31e6583`, #215 `f9c8758`, #236 `5bd2f5f`, #237 `1a9a4b1`.
 
