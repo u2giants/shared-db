@@ -679,6 +679,51 @@ after it is filed. Only the coordinator moves a block out of here.
 > ⚠️ **That session could not reach GitHub. Five branches are unpushed and
 > coordinator marker issue #453 is still OPEN — it is NOT a dead coordinator.**
 
+### REQUEST — SUPPLEMENT to the OPA lookup-table request below: a full background doc now exists, and it needs a `HANDOFF.md` pointer — 2026-08-06 — requester: Albert Hazan (via session: opa-scrape, t16)
+
+**1. What outcome is needed, and why.** Two things, both small.
+
+(a) The OPA request immediately below was filed before its background document
+existed, so that block points only at the CSV. The full document is
+`docs/verification/opa-characters-20260806/README.md` — read **that**, not just
+the request block, before dispatching the OPA work. It carries the data shape,
+the reproduction snippet, six caveats, six open design questions, and a
+what-did-NOT-work table.
+
+(b) **`HANDOFF.md` does not mention this work at all** (verified 2026-08-06:
+zero matches for `OPA` across all 6,280 lines). It should, because `HANDOFF.md`
+is this repo's authoritative record of outstanding work and already references
+`docs/verification/` folders in 43 places. The natural home is the existing
+section *"Active workstream — Characters and style guides → canonical
+(2026-07-26)"* (~line 4269), since the OPA data bears directly on it.
+
+**This requester did not make that edit, deliberately.** `HANDOFF.md` is a
+single-writer file owned by the coordinator; a requester writing to it is exactly
+the uncoordinated write this file exists to prevent. Handing it over rather than
+doing it.
+
+⚠️ One caveat from the README worth surfacing at dispatch time, because it may
+change the answer rather than just annotate it: the extract was taken from a URL
+scoped to the **Home** line of business (`lobName=Option.Lob.Home`). Whether other
+lines of business expose a different or larger property set is **unverified**. If
+they do, 1,445 properties is a subset, not the whole picture.
+
+**2. Which application(s) depend on this.** Same as the block below: PopDAM
+primarily; cross-app if joined to `core.property`.
+
+**3. Is it blocking anything, and how urgently?** Not blocking.
+
+**4. Deadline, if any.** None.
+
+**5. What I already know about the current schema.** Nothing further. Still zero
+database calls made by this session.
+
+**6. Confirmation of what I have NOT done. [MANDATORY]** No migration file, no
+preview or production push, no `supabase` CLI, no Supabase MCP call, no `psql`,
+no background task chip, no edit to `HANDOFF.md`. Only `COORDINATOR_INTAKE.md`
+and the two files under `docs/verification/opa-characters-20260806/`, all on
+branch `request/opa-character-lookup` (PR #466).
+
 ### REQUEST — Store the Disney OPA property→character list as a lookup table — 2026-08-06 — requester: Albert Hazan (via session: opa-scrape, t16)
 
 **1. What outcome is needed, and why.** Albert needs Disney's authoritative
