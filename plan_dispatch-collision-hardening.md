@@ -1018,7 +1018,40 @@ bash scripts/check-sql.sh
 
 ---
 
-## Self-audit (mandatory gate — completed before this plan was shown)
+## Self-audit (mandatory gate — re-run after each revision)
+
+### Re-audit 3 — after the atomic-object-ref rebuild (2026-08-06, post-Grok 4.5)
+
+The design changed, so the audit was re-run rather than assumed to still hold.
+
+**New gaps found by this re-audit and fixed before committing:**
+- D1 and D5 were still marked **LOCKED** while D15 and D17 contradicted them. Two locked
+  decisions in direct conflict is precisely the "provably impossible rule pair" that this
+  repo has already shown teaches models that rules are decorative. Both are now marked
+  **superseded**, with their original reasoning preserved rather than deleted.
+- Step 7's body still described the abandoned issue-body binding. A cut step whose body
+  still reads as instructions is worse than a deleted one — an implementer skimming
+  headings would build it. Replaced with an explicit CUT notice that says what replaced it
+  and why, and confirms Kimi's original concern is still satisfied.
+- The partial-acquisition rollback in step 5 superficially contradicts R9, which rejected
+  rollback for version refs. Called out inline, because the next reader will otherwise
+  "simplify" it away.
+
+**Still true after the rebuild:** the goal in §1 is unchanged and still governs; every step
+still names files and a verification gate; the out-of-scope list in §4 still holds (the
+rebuild *removed* scope rather than adding it).
+
+**One thing a fresh session must know that the plan cannot fix:** every live experiment in
+this document was run against the real repository and cleaned up. Re-running them is cheap
+and is the right move if anything here looks doubtful — the commands are all inline.
+
+### Re-audit 2 — after the Codex review
+
+Four defects were documented in §6 and scheduled by no step; that is the exact failure the
+13-section format exists to catch, and it was caught only by an external reviewer. Fixed by
+adding steps 1b, 2b, 3a and splitting 3b.
+
+### Audit 1 — original
 
 **1. Could a brand-new AI session with no project knowledge execute this without asking
 anything?** Yes. §2 defines the repo, the five dependent apps, the branch model and the
