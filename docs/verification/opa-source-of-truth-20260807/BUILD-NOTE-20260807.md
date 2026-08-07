@@ -1,6 +1,6 @@
 # OPA property→character — BUILD NOTE
 
-**Status: BUILT (schema + loader + contract tests). NOT YET APPLIED ANYWHERE.**
+**Status: BUILT and APPLIED TO PREVIEW (`rjyboqwcdzcocqgmsyel`). Both contract test files pass. ONE OPEN DEFECT needs a fix-forward migration — see section 8.5.**
 
 This records what was actually built from
 [`README.md`](./README.md) (the authoritative design, PR #485, which supersedes
@@ -366,34 +366,186 @@ path for a decision that has not been made.
 
 ---
 
-## 8. Verification status — read this before merging
+## 8. Verification — APPLIED TO PREVIEW AND TESTED
 
-**No SQL in this branch has been executed anywhere.** The build machine has
-**neither Docker nor a local PostgreSQL**, so there was no disposable database to
-run against, and this agent was **not pre-authorised to push to preview**
-(`rjyboqwcdzcocqgmsyel`). Reported as it stands rather than dressed up:
+**Status: applied to preview `rjyboqwcdzcocqgmsyel` on 2026-08-07 and verified.
+One real defect was found by running the tests; it is NOT yet fixed (see §8.5).**
 
-| Claim | Status |
+Authorised by the coordinator (session `697b5b87`, marker #491). Production
+`qsllyeztdwjgirsysgai` was never contacted.
+
+### 8.1 How preview was reached, and a target-safety finding
+
+`supabase/.temp/project-ref` read `rjyboqwcdzcocqgmsyel` before every push. **But
+the CLI link state in the shared checkout is internally inconsistent:**
+
+```
+supabase/.temp/project-ref         -> rjyboqwcdzcocqgmsyel                        (PREVIEW)
+supabase/.temp/pooler-url          -> ...rjyboqwcdzcocqgmsyel@aws-0-us-east-1...  (PREVIEW)
+supabase/.temp/linked-project.json -> {"ref":"qsllyeztdwjgirsysgai","name":"popdam"}  (PRODUCTION)
+```
+
+The prescribed check (`cat supabase/.temp/project-ref`) **passes while the same
+directory also names production.** Rather than trust which file the CLI would
+pick, every operation used an **explicit target with the ref in it** — the pooler
+URL for `db push`, and the Management API `/v1/projects/<ref>/database/query`
+endpoint for every query. Both carry `rjyboqwcdzcocqgmsyel` literally, so drift is
+impossible. **This is a standing hazard for the next agent, not a one-off.**
+
+### 8.2 The apply
+
+```
+$ supabase db push --db-url <preview pooler, ref in URL> --dry-run
+Connecting to remote database...
+Would push these migrations:
+ - 20260807170000_opa_property_character_landing.sql
+ - 20260807170100_opa_property_character_importer.sql
+
+$ supabase db push --db-url <preview pooler, ref in URL>
+Applying migration 20260807170000_opa_property_character_landing.sql...
+Applying migration 20260807170100_opa_property_character_importer.sql...
+Finished supabase db push.
+```
+
+Exactly two migrations pending, both mine. Ledger went **400 → 402**; both
+versions present. Server timezone confirmed **`America/New_York`**, so the date
+hazard the design guards against is live on this database.
+
+### 8.3 Objects exist — proved against the catalog, not the ledger
+
+`to_regclass`, `to_regprocedure`, `pg_constraint`, `pg_indexes`, `pg_policies`,
+`pg_proc.prosecdef`, `pg_class.reloptions`. **Every declared object is present:**
+
+- 4 relations: `plm.opa_property_character`, `core.property_character`,
+  `api.opa_property_character`, `api.opa_property_reconciliation`
+- 3 functions, all resolvable by signature. `plm.sync_opa_property_character` and
+  `public.sync_opa_property_character` are `prosecdef = true`;
+  `plm.opa_loader_privilege_ok` is `prosecdef = false` (correct — a pure predicate)
+- 11 constraints under the **names actually declared** (`property_character_pkey`,
+  `property_character_{property,character}_id_fkey`, `property_character_source_chk`,
+  and the 7 on the plm mirror)
+- 10 indexes (7 declared on the mirror + both PK indexes + the junction index)
+- 3 policies: `opa_property_character_read` (SELECT), `shared_read` (SELECT),
+  `admin_write` (ALL)
+- **both api views report `security_invoker=true`**
+
+### 8.4 Contract tests — both files run, both pass
+
+Run verbatim against preview; each wraps in `begin; … rollback;` and a rollback
+probe confirmed the endpoint honours it.
+
+| File | Result |
 | --- | --- |
-| Runner parses, validates and rejects correctly | **PROVED** — executed under Node against invented CSV fixtures; reproduces the name-pair collision (4 rows → 3 distinct name pairs → 1 collision), accepts negative sentinels, handles quoted/embedded-comma fields, and rejects `optionSourceID <> 1007`, duplicate ID pairs and a missing `captured_at`. |
-| Migrations apply cleanly | **NOT PROVED** — needs a database. |
-| Every declared object exists | **NOT PROVED** — the assertions are written (`to_regclass`, `pg_constraint`, `pg_indexes`, `pg_policies`, `pg_proc`, `reloptions`); they have not been run. |
-| Guards reject behaviourally | **NOT PROVED** — written and not run. |
-| Neutralise-and-observe on the privilege guard | **CONSTRUCTED, NOT RUN** — the demonstration is real code inside the test, but it has not executed. |
+| `opa_property_character_landing_contracts.sql` | **PASS** |
+| `opa_property_character_importer_contracts.sql` | **PASS**, but only with the §8.5 fix applied transiently |
 
-> **"It applied successfully" would prove nothing anyway.** The ledger can record
-> a migration whose object does not exist, and this repo has already shipped a
-> syntactically perfect trigger that was permanently dead (a `BEFORE` trigger read
-> a `GENERATED … STORED` column, which Postgres populates *after* before-triggers,
-> so the value was always NULL and the guard never fired). **The two contract test
-> files must be run and seen to pass before anyone treats this as done.**
+Running them found **two real bugs that static review had missed**:
 
-**Next step is the coordinator's:** authorise a preview dry-run and apply against
-`rjyboqwcdzcocqgmsyel` (confirming `supabase/.temp/project-ref` reads it
-immediately before **every** push), then run both contract test files and record
-the output here.
+1. **In the test** — `array_agg(a.attname)` yields `name[]`, compared against
+   `text[]`: `operator does not exist: name[] = text[]`. Fixed with explicit
+   casts. That assertion (no unique index on the name pair) had never actually
+   executed.
+2. **In the migration** — see §8.5.
 
----
+### 8.5 OPEN DEFECT: the importer is not re-entrant within a transaction
+
+`20260807170100` creates its staging table as:
+
+```sql
+create temporary table _opa_incoming on commit drop as ...
+```
+
+**`ON COMMIT DROP` only fires at COMMIT.** A second call to
+`plm.sync_opa_property_character` **inside the same transaction** therefore fails:
+
+```
+ERROR: 42P07: relation "_opa_incoming" already exists
+```
+
+Proved with a minimal two-call probe: call 1 succeeds, call 2 in the same
+transaction fails. Real single-call runner use is unaffected, which is exactly
+why static review missed it — but it means the function cannot be tested for
+idempotence in one transaction, and any caller that loads two snapshots or
+retries in-transaction hits a confusing error.
+
+**Fix (verified, not yet committed):** `drop table if exists _opa_incoming;`
+immediately before the `create temporary table`. With that one line applied
+**transiently inside a rolled-back transaction**, the entire importer contract
+suite passes. Preview was not modified by that probe.
+
+**This must be fixed FORWARD in a NEW migration version, never by editing the
+applied `20260807170100`** — preview's ledger already records that version, and
+editing it would leave the ledger and the repo disagreeing. **The coordinator
+allocates the version; this agent did not pick one.**
+
+### 8.6 Neutralise-and-observe — done for real, per guard
+
+Method: for each guard G protecting against bad input B, prove **both** directions
+— with G present B is rejected (the passing suite), and with G **removed** B is
+**accepted**. If B were still rejected with G gone, the test would be passing
+vacuously. All neutralisations ran inside transactions and rolled back.
+
+**Schema guards** — every one proven load-bearing:
+
+| Guard | Neutralised | Result |
+| --- | --- | --- |
+| `opa_property_character_option_source_chk` | dropped | `optionSourceID = 1008` **accepted** |
+| `opa_property_character_lob_chk` | dropped | `line_of_business = 'Apparel'` **accepted** |
+| `opa_property_character_resolution_status_chk` | dropped | bogus status **accepted** |
+| `opa_property_character_property_name_chk` | dropped | blank name **accepted** |
+| `opa_property_character_character_name_chk` | dropped | blank name **accepted** |
+| `opa_property_character_property_id_fkey` | RESTRICT → CASCADE | referenced `core.property` **became deletable** |
+| *absence* of a unique index on the name pair | index **added** | the two legitimate collision rows were **rejected** — i.e. 22 real rows would be lost |
+| `security_invoker` on `api.opa_property_character` | set false | view **no longer invoker-security** |
+
+**Behavioural guards** — the real test file was run against a deliberately broken
+function and **failed with the intended message** each time:
+
+| Guard | Neutralised by | Test failure observed |
+| --- | --- | --- |
+| privilege predicate | replaced with the forbidden `if not ( … or … )` shape | `GUARD IS NULL-PERMISSIVE: opa_loader_privilege_ok(null, null) returned TRUE` |
+| resolution preservation | resolution columns added to the upsert `SET` list | `a re-import WIPED a human resolution (status=unresolved, property_id=<NULL>)` |
+| absence-never-removes | a `delete` of rows absent from the snapshot added | `a held row absent from the snapshot was not REPORTED as missing (rows_missing=0)` |
+
+One honest nuance on the last: because the injected `delete` runs *before* the
+missing-row count, the suite trips on the count assertion rather than the
+"ABSENCE REMOVED A ROW" assertion. It still detects the regression, but via the
+adjacent assertion — worth knowing if that message is ever seen for real.
+
+**No guard resisted neutralisation, so none is a formality.**
+
+### 8.7 Preview left clean
+
+`plm.opa_property_character` **0 rows**, `core.property_character` **0 rows**, no
+probe table, no leftover index, privilege predicate rejects `(null, null)`, max
+version `20260807170100`. Every fixture rolled back. The one `ZZ`-prefixed
+licensor present (`DTR - NO LICENSE`, created 2026-06-25) is **real
+production-clone data, not a test leftover**.
+
+**No Disney data was loaded, and none exists in this repo.** The tables are empty
+by design.
+
+### 8.8 Owner rulings that constrain the FUTURE resolve/promote work
+
+Recorded here so the next agent does not have to rediscover them. **Neither
+belongs in these migrations, and neither is implemented:** this work resolves
+nothing and deletes nothing, which is what makes it shippable ahead of both.
+
+- **Deletions — RULED, 2026-08-07.** Albert has ruled: **do NOT delete. Mark
+  inactive instead.** This binds any future resolve/promote migration and any
+  future refresh semantics. Note the consequence: the current importer already
+  never deletes, so it is *compatible* with the ruling — but "mark inactive"
+  implies a lifecycle column that **does not exist yet** on
+  `plm.opa_property_character`. Adding one is a schema change belonging to the
+  resolve/promote work, not something to retrofit into an applied migration.
+  Until it exists, absence continues to be reported as `rows_missing` and nothing
+  more.
+- **Name overwrite — STILL OPEN.** How far Disney may overwrite our curated names
+  has gone to **Laura at the licensing company** and has not come back. README §8
+  Decision 2 (options A–D) is the live question. **No resolution logic may be
+  written until it is answered**, which is precisely why `resolution_status`
+  defaults to `'unresolved'` on every row and the five resolution columns are
+  absent from the importer's upsert.
 
 ## 9. Follow-ups
 

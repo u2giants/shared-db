@@ -158,10 +158,10 @@ begin
     where n.nspname = 'plm' and rel.relname = 'opa_property_character'
       and i.indisunique
       and (
-        select array_agg(a.attname order by a.attname)
+        select array_agg(a.attname::text order by a.attname::text)
         from unnest(i.indkey::smallint[]) u(attnum)
         join pg_attribute a on a.attrelid = i.indrelid and a.attnum = u.attnum
-      ) = array['character_name','property_name']
+      ) = array['character_name','property_name']::text[]
   ) then
     raise exception 'a UNIQUE index exists on (property_name, character_name). That key '
       'is NOT unique in Disney''s data and would drop 22 rows.';
