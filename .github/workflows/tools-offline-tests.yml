@@ -92,3 +92,14 @@ jobs:
             fi
           done
           echo "All four Step 7A test files present and covered by the glob above."
+
+      - name: Check the shared-db skills do not contradict AGENTS.md
+        # SKIPS cleanly in CI, where u2giants/ai-devops is not checked out, and says so
+        # loudly rather than printing a green tick it has not earned. It runs for real on a
+        # developer or agent machine, which is where the skills actually live.
+        #
+        # It exists because shared-db-change told sessions to apply DDL through an MCP that
+        # AGENTS.md says may be bound to PRODUCTION. It drifted for weeks and THREE separate
+        # adversarial model reviews missed it, because the skills live in a different
+        # repository and nobody's CI could see both files at once.
+        run: node scripts/check-skill-drift.mjs
