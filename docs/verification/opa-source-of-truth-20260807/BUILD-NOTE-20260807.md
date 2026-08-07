@@ -947,3 +947,56 @@ Both are narrower than what was fixed and are recorded in the session handoff.
 - Raise the Morbius block (README §5.3 — 30 Disney+ TV characters mis-filed under
   a film **in Disney's own portal**) with Laura or Disney. It is the clearest
   counter-example to "Disney is always right".
+
+---
+
+## Runner hardening, 2026-08-07 (post-#497) — the runner is now safe to invoke
+
+PR #497 landed `tools/sync-opa-property-character.mjs` **unreviewable**: it was
+committed with literal NUL bytes, so git classified it as binary, `git diff`
+printed only "Binary files differ", and GitHub reported `additions: 0`. Two Codex
+rounds and two reviewer passes all ran while the file's contents were invisible.
+The merge was allowed **on the explicit condition that this hardening land before
+the runner is ever invoked with `--apply`.** This is that work. The runner has
+still never been executed against any database.
+
+### What was hardened
+
+| # | Was | Now |
+|---|---|---|
+| W1 | `SUPABASE_URL` read from the environment, project ref **printed**, then POSTed. Printing is not a gate — nobody may be watching and CI cannot read a warning. One wrong env var loaded the whole confidential extract into the wrong project, and **no database-side guard can catch that** because every one of them runs inside whichever project you reached. | The expected project ref is a **required, explicit input** (`--expect-ref=<ref>` or `OPA_EXPECTED_PROJECT_REF`), compared against the ref parsed from `SUPABASE_URL`. A mismatch **aborts before the first byte is sent** (`resolveSupabaseTarget`, called by `applySnapshot` before it touches `fetch`). No default ref exists, and none is hard-coded. |
+| W2 | `SUPABASE_URL` unvalidated — no scheme or host check. A malformed value sent the **service-role key** (in `apikey` and `Authorization`) and the full snapshot to whatever host it named. | https only, no port, no path, no query, no fragment, and the host must be exactly `<project-ref>.supabase.co`. |
+| W3 | `buildSnapshot` required only `rows.length >= 2`. The database shrink band only fires when rows are **already** stored (`v_before > 0`, migration `20260807190000`), so the **first** load into an empty mirror would accept a one-row snapshot in silence. | `OPA_MIN_ROWS` — an expected-minimum row count, **mandatory for `--apply`** — enforced client-side before anything is sent. |
+| W4 | A comment claimed the database "coalesces the parameter". **It does not — it rejects NULL**, and migration `20260807190000:347-350` warns that wrapping `coalesce()` around the clamp does *not* fix the hole (`coalesce(greatest(0, least(1, null)), 0.10)` returns `1`, because LEAST/GREATEST ignore NULLs). A maintainer trusting that comment would have reintroduced the exact bug the migration removed. | Comment corrected and the trap spelled out. Treated as a defect, not a typo: a comment falsely claiming a safety property is how the wide-open RLS policy survived review earlier the same day. |
+| W5 | `parseCsv` accepted malformed quoting silently: text after a closing quote was appended; a bare quote in an unquoted field flipped quote mode and **swallowed the following commas, merging fields** (a name can slide into an ID column); a file ending mid-quoted-field was pushed as a complete row — **a truncated download ends exactly that way**; rows with the wrong field count were accepted; and `readFile(path, "utf8")` silently substituted U+FFFD for invalid bytes. | All five now **fail loudly**. Silent repair of licensor data is how a wrong name reaches a licensing decision. Strict UTF-8 decoding via `decodeUtf8Strict`. |
+| low | Any digit string passed through `Number()` — beyond 2^53 two distinct IDs round together. | `Number.isSafeInteger` check. Latent, not active: Disney's largest observed ID is 9 digits. |
+| low | Auto-run fired whenever `argv[1]` merely **ended with** the filename, so a neighbouring `test-sync-opa-property-character.mjs` importing the module would have triggered a real run. | Resolved-path comparison against `import.meta.url`. Proven by a test that spawns exactly such a file. |
+| low | `OPA_CAPTURED_AT` regex accepted impossible dates (`2026-99-99`). | Real-date validation locally, so it fails before anything is sent rather than at the database. |
+| low | A `sourceUrl` carrying a session token would be stored verbatim as provenance on **every row**. | Refused, and the offending value is never echoed. |
+| doc | Header listed 2 migrations. | Lists all **five** (`170000`, `170100`, `180000`, `190000`, `200000`). |
+
+### Proof
+
+37 tests (was 18; all 18 originals still pass). **Every** guard was proven to
+fire by neutralising it, observing the suite FAIL, restoring it and observing it
+PASS — 18 mutants, 18 killed. For W1 specifically, the test injects a `fetch`
+that throws on any call and asserts the mismatch error is raised with the fetch
+**never reached**, so the abort is proven to happen before the network, not
+after. All fixtures are invented; no Disney data appears anywhere.
+
+### Deliberately NOT changed
+
+- The client-side messages that echo extract field values (`row N: <col> is not
+  an integer (<value>)`, and the duplicate-key example list) remain. They were
+  deferred earlier on the reasoning that only numeric junk is echoed. **That
+  reasoning is weaker than it looked:** if a column shift puts a character name
+  into the numeric ID field, the message prints that name. Left in place as
+  instructed, but the case for closing it is now stronger.
+- Nothing under `supabase/`. All five migrations are applied; editing an applied
+  migration changes nothing in the database and desynchronises file from ledger.
+
+### Status
+
+The runner is now safe to invoke with `--apply`, provided the operator sets
+`OPA_EXPECTED_PROJECT_REF` (or `--expect-ref=`) and `OPA_MIN_ROWS`. It will
+refuse to run without them.

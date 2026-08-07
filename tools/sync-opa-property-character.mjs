@@ -27,7 +27,12 @@
  * of defence, by design):
  *     plm.sync_opa_property_character(jsonb, text, numeric)
  *     public.sync_opa_property_character(jsonb, text, numeric)   <- called here
- * Migrations: 20260807170000 (landing), 20260807170100 (importer).
+ * Migrations (all five, applied 2026-08-07):
+ *     20260807170000  landing tables
+ *     20260807170100  importer function
+ *     20260807180000  re-entrancy fix
+ *     20260807190000  security + view corrections (parameter validation)
+ *     20260807200000  comment corrections
  *
  * ----------------------------------------------------------------------------
  * USAGE
@@ -35,12 +40,31 @@
  *   OPA_CSV_PATH=/path/to/licensor-source-data/disney-opa/opa-characters.csv \
  *   OPA_CAPTURED_AT=2026-08-06 \
  *   OPA_SOURCE_URL='https://opa.disney.com/...' \
+ *   OPA_MIN_ROWS=<how many data rows you expect AT MINIMUM> \
  *   SUPABASE_URL=https://<project-ref>.supabase.co \
+ *   OPA_EXPECTED_PROJECT_REF=<the project ref you MEANT to write> \
  *   SUPABASE_SERVICE_ROLE_KEY=<from 1Password vault vibe_coding> \
  *   node tools/sync-opa-property-character.mjs --apply
  *
+ * (`--expect-ref=<ref>` on the command line is equivalent to, and overrides,
+ * OPA_EXPECTED_PROJECT_REF.)
+ *
  * Without --apply it runs a DRY RUN: it parses, validates and prints counts,
  * and contacts no database at all.
+ *
+ * ----------------------------------------------------------------------------
+ * WRONG-TARGET SAFETY -- READ THIS BEFORE CHANGING THE APPLY PATH
+ * ----------------------------------------------------------------------------
+ * Every guard in the database runs INSIDE whichever project you reached, so no
+ * database guard can tell you that you reached the WRONG project. One mistyped
+ * environment variable would load the whole confidential extract into the wrong
+ * Supabase project. Printing the ref is not a gate -- nobody may be watching,
+ * and CI cannot read a warning.
+ *
+ * So the ref is a REQUIRED, EXPLICIT input, it is compared against the ref
+ * parsed out of SUPABASE_URL, and a mismatch ABORTS BEFORE THE FIRST BYTE IS
+ * SENT (see resolveSupabaseTarget, which applySnapshot calls before it touches
+ * fetch). Do not "simplify" this into a warning.
  *
  * Refresh is a MANUAL, one-off operation. There is no OPA API, no change feed
  * and no webhook; a refresh requires Albert to complete MFA in his own browser
@@ -52,6 +76,11 @@
  */
 
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { resolve as resolvePath } from "node:path";
+
+/** A Supabase project ref: 20 lowercase letters/digits. No ref is hard-coded here. */
+const PROJECT_REF = /^[a-z0-9]{20}$/;
 
 const REQUIRED_COLUMNS = [
   "licensedPropertyID",
@@ -70,18 +99,61 @@ const NUMERIC_COLUMNS = [
 ];
 
 /**
+ * Decode a file as STRICT UTF-8.
+ *
+ * WHY NOT `readFile(path, "utf8")`. Node's "utf8" decoding is lenient: an invalid
+ * byte is silently replaced with U+FFFD. A licensor name would come through
+ * corrupted, pass every check below, and land in the mirror as if it were correct.
+ * Silent repair of licensor data is how a wrong name reaches a licensing decision,
+ * so a bad byte must be an error, not a substitution.
+ */
+export function decodeUtf8Strict(buffer) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    throw new Error(
+      "CSV is not valid UTF-8. Node's default decoding would have silently replaced the " +
+        "bad bytes with U+FFFD and corrupted a name without any error. Re-export the CSV " +
+        "as UTF-8; do not load this file."
+    );
+  }
+}
+
+/**
  * Minimal RFC4180 CSV parser. Handles quoted fields, embedded commas, embedded
  * newlines and doubled quotes. Deliberately dependency-free: this file must be
  * runnable from a bare checkout without installing anything.
+ *
+ * IT REJECTS MALFORMED QUOTING RATHER THAN REPAIRING IT. Every one of these was
+ * previously accepted in silence, and each corrupts data in a way that reads as
+ * success downstream:
+ *   - text after a closing quote (`"Name"junk` used to become `Namejunk`);
+ *   - a bare `"` inside an unquoted field, which flipped quote mode and then
+ *     SWALLOWED THE FOLLOWING COMMAS, MERGING FIELDS -- the worst of the set,
+ *     because a name can slide into an ID column and vice versa;
+ *   - end-of-file in the middle of a quoted field, which used to be pushed as a
+ *     complete row. A TRUNCATED DOWNLOAD ENDS EXACTLY THAT WAY.
+ * Field-count agreement with the header is checked in buildSnapshot, which is
+ * where the header is known.
  */
 export function parseCsv(text) {
   const rows = [];
   let row = [];
   let field = "";
   let inQuotes = false;
+  let quoted = false; // this field opened with a quote
+  let closed = false; // this field's closing quote has been consumed
+  let line = 1;
 
   // Strip a UTF-8 BOM; Disney's export carries one and it corrupts the first header.
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+
+  const endField = () => {
+    row.push(field);
+    field = "";
+    quoted = false;
+    closed = false;
+  };
 
   for (let i = 0; i < text.length; i += 1) {
     const c = text[i];
@@ -93,34 +165,142 @@ export function parseCsv(text) {
           i += 1;
         } else {
           inQuotes = false;
+          closed = true;
         }
       } else {
+        if (c === "\n") line += 1;
         field += c;
       }
       continue;
     }
 
-    if (c === '"') {
+    if (c === '"' && field === "" && !quoted) {
+      // A quote is only legal at the very start of a field: it OPENS it.
       inQuotes = true;
+      quoted = true;
+    } else if (c === '"') {
+      throw new Error(
+        `line ${line}, field ${row.length + 1}: an unescaped '"' inside an unquoted field. ` +
+          "In CSV a quote may only open a field, and inside a quoted field it must be " +
+          "doubled (\"\"). Accepting this flips quote mode and MERGES the following " +
+          "fields, which moves values between columns. Fix the extract."
+      );
     } else if (c === ",") {
-      row.push(field);
-      field = "";
+      endField();
     } else if (c === "\n") {
-      row.push(field);
+      endField();
       rows.push(row);
       row = [];
-      field = "";
-    } else if (c !== "\r") {
+      line += 1;
+    } else if (c === "\r") {
+      continue;
+    } else {
+      if (closed) {
+        throw new Error(
+          `line ${line}, field ${row.length + 1}: text after a closing quote. The old parser ` +
+            "appended it silently, so `\"Name\"junk` became `Namejunk`. Fix the extract."
+        );
+      }
       field += c;
     }
   }
 
-  if (field !== "" || row.length > 0) {
+  if (inQuotes) {
+    throw new Error(
+      `CSV ends inside a quoted field that opened on line ${line}. The file is TRUNCATED -- ` +
+        "an interrupted download ends exactly like this, and the old parser pushed the " +
+        "partial field as if it were a complete row. Re-download the extract."
+    );
+  }
+
+  if (field !== "" || quoted || row.length > 0) {
     row.push(field);
     rows.push(row);
   }
 
-  return rows.filter((r) => r.some((v) => v.trim() !== ""));
+  // Drop only a genuinely empty line (a lone empty field). Anything else that
+  // looks blank is now a blank-value or field-count error in buildSnapshot,
+  // rather than a row that quietly disappears.
+  return rows.filter((r) => !(r.length === 1 && r[0] === ""));
+}
+
+/**
+ * The capture date must be a REAL date, not merely a date-SHAPED string. The old
+ * regex accepted `2026-99-99`; the database rejects it, so the run failed late
+ * instead of never. Fail before anything is sent.
+ */
+export function assertIsoDate(capturedAt) {
+  const s = String(capturedAt ?? "");
+  const shaped = /^\d{4}-\d{2}-\d{2}$/.test(s);
+  let real = false;
+  if (shaped) {
+    const d = new Date(`${s}T00:00:00Z`);
+    // Invalid Date makes toISOString THROW, and a rolled-over date (2026-02-30
+    // becomes 2026-03-02) comes back different. Both must be rejected.
+    real = !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  }
+  if (!real) {
+    throw new Error(
+      `OPA_CAPTURED_AT must be an explicit, REAL ISO date (YYYY-MM-DD), got ${JSON.stringify(capturedAt)}. ` +
+        "It is never derived from the clock: the database runs America/New_York and a " +
+        "UTC-midnight timestamp reads back one day early."
+    );
+  }
+  return s;
+}
+
+/** The expected-minimum row count. Must be a positive whole number. */
+export function resolveMinRows(raw) {
+  const n = Number(String(raw).trim());
+  if (!Number.isSafeInteger(n) || n < 1) {
+    throw new Error(
+      `OPA_MIN_ROWS must be a whole number of at least 1, got ${JSON.stringify(raw)}. ` +
+        "It is the floor that stops a truncated extract loading into an empty mirror."
+    );
+  }
+  return n;
+}
+
+/**
+ * The source URL is stored VERBATIM as provenance on EVERY row, so a portal URL
+ * that still carries a session token would persist that token into the database
+ * and into anything that later reads provenance. Refuse it.
+ */
+export function assertSourceUrlIsNotACredential(sourceUrl) {
+  const s = String(sourceUrl ?? "");
+  let parsed;
+  try {
+    parsed = new URL(s);
+  } catch {
+    return s; // shape is the caller's business; only credential leakage is checked here
+  }
+
+  const SUSPICIOUS = new Set([
+    "token", "key", "apikey", "secret", "sig", "signature", "password", "passwd",
+    "pwd", "auth", "authorization", "session", "sessionid", "sid", "jwt",
+    "bearer", "credential", "credentials", "access",
+  ]);
+  // Split camelCase and snake/kebab case alike, so apiKey, api_key and API-KEY
+  // are all caught.
+  const words = (k) =>
+    k.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+  const names = [...parsed.searchParams.keys()];
+  const hit = names.find((k) => words(k).some((w) => SUSPICIOUS.has(w)));
+  if (hit) {
+    throw new Error(
+      `OPA_SOURCE_URL carries a query parameter named ${JSON.stringify(hit)}, which looks ` +
+        "like a credential. This URL is stored verbatim as provenance on every row. Strip " +
+        "the query string and pass the plain page URL. (The value is deliberately not shown.)"
+    );
+  }
+  if (parsed.hash && parsed.hash.length > 40) {
+    throw new Error(
+      "OPA_SOURCE_URL has a long URL fragment, which is how portals return session tokens. " +
+        "This URL is stored verbatim on every row. Strip the fragment."
+    );
+  }
+  return s;
 }
 
 /**
@@ -130,20 +310,37 @@ export function parseCsv(text) {
  * these independently (defence in depth) -- a guard here is a fast, readable
  * failure, not the security boundary.
  */
-export function buildSnapshot(rows, { capturedAt, sourceUrl, lineOfBusiness = "Home" }) {
+export function buildSnapshot(
+  rows,
+  { capturedAt, sourceUrl, lineOfBusiness = "Home", minRows = undefined }
+) {
   if (!Array.isArray(rows) || rows.length < 2) {
     throw new Error("CSV has no data rows. A failed extract must not look like a success.");
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(capturedAt ?? ""))) {
-    throw new Error(
-      `OPA_CAPTURED_AT must be an explicit ISO date (YYYY-MM-DD), got ${JSON.stringify(capturedAt)}. ` +
-        "It is never derived from the clock: the database runs America/New_York and a " +
-        "UTC-midnight timestamp reads back one day early."
-    );
+
+  // THE FIRST LOAD HAS NO FLOOR WITHOUT THIS. The database's shrink band only
+  // fires when rows are ALREADY stored (`v_before > 0`, migration 20260807190000),
+  // so importing a one-row snapshot into an EMPTY mirror passes every database
+  // guard. That is precisely the "a failed extract must not look like a success"
+  // case, and only the caller knows how many rows to expect.
+  if (minRows !== undefined && minRows !== null) {
+    const floor = resolveMinRows(minRows);
+    const dataRows = rows.length - 1;
+    if (dataRows < floor) {
+      throw new Error(
+        `extract has ${dataRows} data row(s), fewer than the expected minimum of ${floor}. ` +
+          "A truncated or partly-scraped extract looks exactly like this, and on a FIRST " +
+          "load into an empty mirror no database guard would catch it. Re-extract, or lower " +
+          "OPA_MIN_ROWS deliberately if the source really did shrink."
+      );
+    }
   }
+
+  assertIsoDate(capturedAt);
   if (!String(sourceUrl ?? "").trim()) {
     throw new Error("OPA_SOURCE_URL is required; every row must carry its own provenance.");
   }
+  assertSourceUrlIsNotACredential(sourceUrl);
 
   const header = rows[0].map((h) => h.trim());
   const missing = REQUIRED_COLUMNS.filter((c) => !header.includes(c));
@@ -163,6 +360,16 @@ export function buildSnapshot(rows, { capturedAt, sourceUrl, lineOfBusiness = "H
     const r = rows[i];
     const rec = {};
 
+    // A row with the wrong number of fields means the columns have SHIFTED.
+    // Extra columns used to be ignored, so a shift could put a character name
+    // into an ID column and never be noticed.
+    if (r.length !== header.length) {
+      throw new Error(
+        `row ${i + 1}: has ${r.length} field(s) but the header has ${header.length}. ` +
+          "The columns are misaligned; values would land in the wrong columns."
+      );
+    }
+
     for (const col of REQUIRED_COLUMNS) {
       const raw = (r[idx[col]] ?? "").trim();
 
@@ -172,7 +379,17 @@ export function buildSnapshot(rows, { capturedAt, sourceUrl, lineOfBusiness = "H
         if (!/^-?\d+$/.test(raw)) {
           throw new Error(`row ${i + 1}: ${col} is not an integer (${JSON.stringify(raw)})`);
         }
-        rec[col] = Number(raw);
+        const n = Number(raw);
+        // Beyond 2^53 two DIFFERENT id strings round to the SAME Number, which
+        // would silently merge two distinct rows onto one natural key. Disney's
+        // ids are far below that today, so this is latent, not active.
+        if (!Number.isSafeInteger(n)) {
+          throw new Error(
+            `row ${i + 1}: ${col} is outside the safe integer range, so it cannot be ` +
+              "represented exactly and two distinct ids could collide."
+          );
+        }
+        rec[col] = n;
       } else {
         if (raw === "") {
           throw new Error(`row ${i + 1}: ${col} is blank`);
@@ -229,8 +446,17 @@ export function buildSnapshot(rows, { capturedAt, sourceUrl, lineOfBusiness = "H
  * truncated-extract guard is silently disabled. A one-row extract would then
  * overwrite a 10,262-row mirror without a word of complaint.
  *
- * The database also defends itself against this (it coalesces the parameter), but a
- * typo in an env var must fail HERE, loudly, before anything is sent.
+ * WHAT THE DATABASE ACTUALLY DOES -- DO NOT "SIMPLIFY" THIS. The database does NOT
+ * coalesce the parameter: migration 20260807190000 (lines 351-357) REJECTS a NULL
+ * fraction with an exception. That is deliberate, and the same migration warns at
+ * lines 347-350 that wrapping `coalesce()` around the clamp DOES NOT FIX THE HOLE --
+ * `coalesce(greatest(0, least(1, null)), 0.10)` returns 1, not NULL, because
+ * LEAST/GREATEST ignore NULLs, so the guard stays disabled while looking corrected.
+ * An earlier version of this comment claimed the opposite; a maintainer trusting it
+ * would have reintroduced exactly the bug that migration removed.
+ *
+ * The database rejecting NULL is the boundary. This check exists so a typo in an
+ * env var fails HERE, loudly, before anything is sent.
  */
 export function resolveShrinkFraction(raw) {
   if (raw === undefined || raw === null || String(raw).trim() === "") return 0.1;
@@ -251,6 +477,139 @@ export function resolveShrinkFraction(raw) {
   return n;
 }
 
+/**
+ * THE WRONG-TARGET GATE. Validates SUPABASE_URL and proves it names the project
+ * the operator explicitly said they meant. Throws on ANY doubt.
+ *
+ * Two separate hazards, both operator error rather than hostile input:
+ *   1. Wrong project. No database-side guard can catch this -- they all run
+ *      inside whichever project you reached. This is the only place it can be
+ *      caught, and it must ABORT, not warn.
+ *   2. Wrong host. An unvalidated URL sends the SERVICE-ROLE KEY (in the apikey
+ *      and Authorization headers) plus the whole confidential extract to whatever
+ *      host it names. So: https only, no port, no path, no query, no fragment,
+ *      and the host must be exactly <project-ref>.supabase.co.
+ *
+ * Returns { ref, origin }. Callers MUST call this BEFORE constructing any request.
+ */
+export function resolveSupabaseTarget(rawUrl, expectedRef) {
+  const expected = String(expectedRef ?? "").trim();
+  if (!expected) {
+    throw new Error(
+      "The target project ref must be stated EXPLICITLY for --apply: pass --expect-ref=<ref> " +
+        "or set OPA_EXPECTED_PROJECT_REF. It is compared against the ref in SUPABASE_URL so a " +
+        "mistyped environment variable cannot load confidential data into the wrong project. " +
+        "No default is provided on purpose."
+    );
+  }
+  if (!PROJECT_REF.test(expected)) {
+    throw new Error(
+      `The expected project ref ${JSON.stringify(expected)} is not shaped like a Supabase ` +
+        "project ref (20 lowercase letters or digits)."
+    );
+  }
+
+  const raw = String(rawUrl ?? "");
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`SUPABASE_URL is not a valid URL (${JSON.stringify(raw)}).`);
+  }
+
+  if (parsed.protocol !== "https:") {
+    throw new Error(
+      `SUPABASE_URL must use https (got ${JSON.stringify(parsed.protocol)}). The service-role ` +
+        "key travels in the request headers."
+    );
+  }
+  if (parsed.port) {
+    throw new Error(`SUPABASE_URL must not specify a port (got ${JSON.stringify(parsed.port)}).`);
+  }
+  if (parsed.search || parsed.hash) {
+    throw new Error("SUPABASE_URL must be a bare origin: no query string and no fragment.");
+  }
+  if (parsed.pathname !== "" && parsed.pathname !== "/") {
+    throw new Error(
+      `SUPABASE_URL must be a bare origin, with no path (got ${JSON.stringify(parsed.pathname)}).`
+    );
+  }
+
+  const host = /^([a-z0-9]{20})\.supabase\.co$/.exec(parsed.hostname);
+  if (!host) {
+    throw new Error(
+      `SUPABASE_URL host ${JSON.stringify(parsed.hostname)} is not a Supabase project host. ` +
+        "It must be exactly <project-ref>.supabase.co, or the service-role key and the whole " +
+        "confidential extract would be sent to that host."
+    );
+  }
+
+  const ref = host[1];
+  if (ref !== expected) {
+    throw new Error(
+      `REFUSING TO SEND: SUPABASE_URL points at project ${ref}, but the expected project is ` +
+        `${expected}. NOTHING HAS BEEN SENT. No database-side guard can catch a wrong-project ` +
+        "load, because every one of them runs inside whichever project you reached. Fix " +
+        "SUPABASE_URL or the expected ref -- do not bypass this check."
+    );
+  }
+
+  return { ref, origin: parsed.origin };
+}
+
+/**
+ * POST the snapshot to the guarded database importer.
+ *
+ * `fetchImpl` is injectable ONLY so tests can prove the wrong-target gate aborts
+ * BEFORE any network call is attempted. Production callers must not pass it.
+ */
+export async function applySnapshot(
+  snapshot,
+  { url, key, expectedRef, maxShrinkFraction, fetchImpl = fetch, log = console.log } = {}
+) {
+  if (!url || !key) {
+    throw new Error(
+      "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for --apply. Fetch the key " +
+        "from 1Password (vault vibe_coding) into the environment; never hard-code it."
+    );
+  }
+
+  // Validate EVERYTHING before the request exists. Order is load-bearing.
+  const shrink = resolveShrinkFraction(maxShrinkFraction);
+  const target = resolveSupabaseTarget(url, expectedRef);
+
+  log(`\nApplying to Supabase project ref: ${target.ref} (matches the expected ref).`);
+
+  const res = await fetchImpl(`${target.origin}/rest/v1/rpc/sync_opa_property_character`, {
+    method: "POST",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      p_snapshot: snapshot,
+      p_mode: "mirror_only",
+      p_max_shrink_fraction: shrink,
+    }),
+  });
+
+  const body = await res.text();
+  if (!res.ok) {
+    // DO NOT print the response body. The database's own guards are diagnostic, but a
+    // malformed extract can put row content into an error message, and this output
+    // lands in terminals and CI logs. Same rule as the summarise() call above:
+    // counts and status only, NEVER a row. Read the full error from the database
+    // session if you need it.
+    throw new Error(
+      `import failed (HTTP ${res.status}). The response body is deliberately NOT printed: ` +
+        "it can contain extract content, and this repository and its CI logs are public. " +
+        `Response length: ${body.length} bytes.`
+    );
+  }
+  return { ref: target.ref, status: res.status, body };
+}
+
 export function summarise(snapshot) {
   const properties = new Set(snapshot.rows.map((r) => r.licensedPropertyID));
   const characters = new Set(snapshot.rows.map((r) => r.characterID));
@@ -269,7 +628,20 @@ export function summarise(snapshot) {
 }
 
 async function main() {
-  const apply = process.argv.slice(2).includes("--apply");
+  const args = process.argv.slice(2);
+  const apply = args.includes("--apply");
+  const refArg = args.find((a) => a.startsWith("--expect-ref="));
+  const expectedRef = (refArg ? refArg.slice("--expect-ref=".length) : process.env.OPA_EXPECTED_PROJECT_REF) ?? "";
+
+  // The row floor is MANDATORY for --apply: on a first load into an empty mirror
+  // it is the only thing standing between a truncated extract and the database.
+  if (apply && !String(process.env.OPA_MIN_ROWS ?? "").trim()) {
+    throw new Error(
+      "OPA_MIN_ROWS is required for --apply. State how many data rows you expect AT MINIMUM. " +
+        "The database's shrink band only fires once rows are already stored, so the FIRST " +
+        "load into an empty mirror has no floor without this."
+    );
+  }
 
   const csvPath = process.env.OPA_CSV_PATH;
   if (!csvPath) {
@@ -280,10 +652,12 @@ async function main() {
     );
   }
 
-  const snapshot = buildSnapshot(parseCsv(await readFile(csvPath, "utf8")), {
+  const minRowsEnv = String(process.env.OPA_MIN_ROWS ?? "").trim();
+  const snapshot = buildSnapshot(parseCsv(decodeUtf8Strict(await readFile(csvPath))), {
     capturedAt: process.env.OPA_CAPTURED_AT,
     sourceUrl: process.env.OPA_SOURCE_URL,
     lineOfBusiness: process.env.OPA_LINE_OF_BUSINESS ?? "Home",
+    minRows: minRowsEnv === "" ? undefined : minRowsEnv,
   });
 
   // Counts only. NEVER print a row: this output lands in CI logs and terminals.
@@ -294,52 +668,30 @@ async function main() {
     return;
   }
 
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error(
-      "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for --apply. Fetch the key " +
-        "from 1Password (vault vibe_coding) into the environment; never hard-code it."
-    );
-  }
-
-  // The project ref is IN THE URL and therefore cannot drift the way an MCP
-  // connection can. Print it so the operator can see which project was written.
-  const ref = new URL(url).hostname.split(".")[0];
-  console.log(`\nApplying to Supabase project ref: ${ref}`);
-
-  const res = await fetch(`${url.replace(/\/$/, "")}/rest/v1/rpc/sync_opa_property_character`, {
-    method: "POST",
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      p_snapshot: snapshot,
-      p_mode: "mirror_only",
-      p_max_shrink_fraction: resolveShrinkFraction(process.env.OPA_MAX_SHRINK_FRACTION),
-    }),
+  const result = await applySnapshot(snapshot, {
+    url: process.env.SUPABASE_URL,
+    key: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    expectedRef,
+    maxShrinkFraction: process.env.OPA_MAX_SHRINK_FRACTION,
   });
-
-  const body = await res.text();
-  if (!res.ok) {
-    // DO NOT print the response body. The database's own guards are diagnostic, but a
-    // malformed extract can put row content into an error message, and this output
-    // lands in terminals and CI logs. Same rule as the summarise() call above:
-    // counts and status only, NEVER a row. Read the full error from the database
-    // session if you need it.
-    throw new Error(
-      `import failed (HTTP ${res.status}). The response body is deliberately NOT printed: ` +
-        "it can contain extract content, and this repository and its CI logs are public. " +
-        `Response length: ${body.length} bytes.`
-    );
-  }
-  console.log(body);
+  console.log(result.body);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`.replace(/\\/g, "/")
-    || process.argv[1]?.endsWith("sync-opa-property-character.mjs")) {
+// Run only when THIS file is the entry point. The old check fired whenever
+// argv[1] merely ENDED WITH the filename, so a neighbouring file such as
+// `test-sync-opa-property-character.mjs` importing this module would have
+// triggered a real run.
+function isEntryPoint() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return resolvePath(fileURLToPath(import.meta.url)) === resolvePath(entry);
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint()) {
   main().catch((err) => {
     console.error(String(err.message ?? err));
     process.exit(1);
