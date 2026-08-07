@@ -327,6 +327,26 @@ begin
       'OPEN OWNER GATE and has no code path.', v_count;
   end if;
 
+  -- 6d. RE-ENTRANCY WITHIN ONE TRANSACTION (regression guard for the defect fixed by
+  --     migration 20260807180000). The staging table is created ON COMMIT DROP, which
+  --     fires only at COMMIT -- so before the fix a SECOND call in the SAME transaction
+  --     raised 42P07 'relation "_opa_incoming" already exists'. Section 7 below depends
+  --     on this working; asserted explicitly here so a regression names itself instead
+  --     of surfacing as a confusing failure three assertions later.
+  v_caught := false;
+  begin
+    perform * from plm.sync_opa_property_character(v_snapshot);
+  exception when others then
+    v_caught := true;
+    v_status := sqlerrm;
+  end;
+  if v_caught then
+    raise exception 'NOT RE-ENTRANT: a second call to plm.sync_opa_property_character in '
+      'the same transaction failed with: %. Migration 20260807180000 adds the required '
+      '"drop table if exists _opa_incoming" before the staging create; it appears to be '
+      'missing or reverted.', v_status;
+  end if;
+
   -- ==================================================================================
   -- 7. IDEMPOTENCE, and a human resolution must SURVIVE a re-import.
   -- ==================================================================================

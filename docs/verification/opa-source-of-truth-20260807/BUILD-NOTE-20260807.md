@@ -1,6 +1,6 @@
 # OPA property→character — BUILD NOTE
 
-**Status: BUILT and APPLIED TO PREVIEW (`rjyboqwcdzcocqgmsyel`). Both contract test files pass. ONE OPEN DEFECT needs a fix-forward migration — see section 8.5.**
+**Status: BUILT, APPLIED TO PREVIEW (`rjyboqwcdzcocqgmsyel`) and VERIFIED. All three migrations applied; both contract test files pass unmodified. No open defects.**
 
 This records what was actually built from
 [`README.md`](./README.md) (the authoritative design, PR #485, which supersedes
@@ -16,12 +16,31 @@ This records what was actually built from
 
 ---
 
+## 0. PROMOTION LIST — all THREE migrations, in order
+
+> **Promote all three or none.** A previous session shipped a partial fix because
+> three of four correction migrations were named nowhere. These are the complete,
+> exact, 14-digit versions this work consists of:
+>
+> | # | Version | File |
+> | ---: | --- | --- |
+> | 1 | **`20260807170000`** | `opa_property_character_landing.sql` |
+> | 2 | **`20260807170100`** | `opa_property_character_importer.sql` |
+> | 3 | **`20260807180000`** | `opa_sync_reentrancy_fix.sql` |
+>
+> Order matters: 2 creates the functions, **3 replaces one of them and must be
+> promoted after it**, and 1 creates the table both write. **Promoting 1+2 without
+> 3 ships a loader that raises `42P07` on any second call within a transaction.**
+> All three are applied to preview `rjyboqwcdzcocqgmsyel`; none has been promoted
+> to production.
+
 ## 1. What was built
 
 | File | Purpose |
 | --- | --- |
 | `supabase/migrations/20260807170000_opa_property_character_landing.sql` | Landing schema (§7.1) + the junction (§7.2) + both `api` views (§7.5, §7.6) |
 | `supabase/migrations/20260807170100_opa_property_character_importer.sql` | Privilege predicate + guarded `SECURITY DEFINER` loader + `public.*` wrapper |
+| `supabase/migrations/20260807180000_opa_sync_reentrancy_fix.sql` | Forward fix making the loader re-entrant within a transaction (§8.5) |
 | `supabase/tests/opa_property_character_landing_contracts.sql` | Contract tests for the landing |
 | `supabase/tests/opa_property_character_importer_contracts.sql` | Contract tests for the loader |
 | `tools/sync-opa-property-character.mjs` | Runner — **logic only, no data** |
@@ -36,6 +55,7 @@ This records what was actually built from
 | `20260724060000` | `coldlion_licensor_property_phase2a_mirror_importer.sql` | The `SECURITY DEFINER` + thin `public.*` wrapper + advisory-lock + guarded-snapshot pattern that the importer copies. |
 | `20260727230000` | `core_style_guide_axis.sql` | Creates `core.style_guide` and `core.style_guide_character` — the axis-2 sibling. The junction's RLS posture is copied from it, and the reconciliation invariant is asserted against it. |
 | `20260807170000` | *(this work)* `opa_property_character_landing.sql` | Required by `20260807170100`, which writes the table it creates. |
+| `20260807170100` | *(this work)* `opa_property_character_importer.sql` | Superseded in behaviour by `20260807180000`, but still the migration that CREATES the functions. Must be promoted BEFORE it. |
 
 The highest migration version on `origin/main` when these were authored was
 **`20260807030000`**. Both new versions were **allocated by the coordinator**, not
@@ -447,36 +467,68 @@ Running them found **two real bugs that static review had missed**:
    executed.
 2. **In the migration** — see §8.5.
 
-### 8.5 OPEN DEFECT: the importer is not re-entrant within a transaction
+### 8.5 FIXED FORWARD: the importer was not re-entrant within a transaction
 
-`20260807170100` creates its staging table as:
+**Found by running the suite; fixed by migration `20260807180000`. Both directions
+proved. Closed.**
+
+`20260807170100` staged incoming rows as:
 
 ```sql
 create temporary table _opa_incoming on commit drop as ...
 ```
 
 **`ON COMMIT DROP` only fires at COMMIT.** A second call to
-`plm.sync_opa_property_character` **inside the same transaction** therefore fails:
+`plm.sync_opa_property_character` **inside the same transaction** therefore failed:
 
 ```
 ERROR: 42P07: relation "_opa_incoming" already exists
 ```
 
-Proved with a minimal two-call probe: call 1 succeeds, call 2 in the same
-transaction fails. Real single-call runner use is unaffected, which is exactly
-why static review missed it — but it means the function cannot be tested for
-idempotence in one transaction, and any caller that loads two snapshots or
-retries in-transaction hits a confusing error.
+Single-call runner use is unaffected, which is exactly why static review missed
+it — but the idempotence test calls the importer twice in one transaction and so
+**could never have passed**, and any caller loading two snapshots, or retrying
+in-transaction, hit a confusing internal error instead of a guarded failure.
 
-**Fix (verified, not yet committed):** `drop table if exists _opa_incoming;`
-immediately before the `create temporary table`. With that one line applied
-**transiently inside a rolled-back transaction**, the entire importer contract
-suite passes. Preview was not modified by that probe.
+**The fix** (`20260807180000_opa_sync_reentrancy_fix.sql`) is one line —
+`drop table if exists _opa_incoming;` immediately before the staging create.
+Temp tables are session-local, so it cannot affect a concurrent session. Same
+signature, same guards, same field-ownership contract; still resolves nothing,
+still deletes nothing, still writes only `plm.opa_property_character`.
 
-**This must be fixed FORWARD in a NEW migration version, never by editing the
-applied `20260807170100`** — preview's ledger already records that version, and
-editing it would leave the ledger and the repo disagreeing. **The coordinator
-allocates the version; this agent did not pick one.**
+**Fixed FORWARD, not by editing `20260807170100`.** That version is applied and
+already in `supabase_migrations.schema_migrations`; the CLI will never re-run it,
+so editing the file would desynchronise the repo from the ledger while changing
+nothing in any database. **Never edit an applied migration.**
+
+**Both directions proved, transiently and rolled back:**
+
+| Variant | Call 1 | Call 2 (same transaction) | Error |
+| --- | --- | --- | --- |
+| fix **removed** (neutralised) | succeeds | **FAILS** | `relation "_opa_incoming" already exists` |
+| fix **present** | succeeds | **succeeds** | — |
+
+So the fix is load-bearing and the regression guard is not vacuous. A dedicated
+assertion (`6d`) was added to the importer suite so a reversion names itself
+rather than surfacing three assertions later as a confusing failure.
+
+**Applied to preview and both suites re-run in full, unmodified:**
+
+```
+$ supabase db push --db-url <preview pooler, ref in URL> --dry-run
+Would push these migrations:
+ - 20260807180000_opa_sync_reentrancy_fix.sql
+
+$ supabase db push --db-url <preview pooler, ref in URL>
+Applying migration 20260807180000_opa_sync_reentrancy_fix.sql...
+Finished supabase db push.
+```
+
+Ledger **402 → 403**, max version `20260807180000`. `pg_proc.prosrc` confirms the
+`drop table if exists` is live in the deployed function. Landing suite **PASS**,
+importer suite **PASS** — the importer suite now passes with **no transient
+patch**, unlike before. Privilege predicate still rejects `(null, null)`.
+`plm.opa_property_character` **0 rows**, `core.property_character` **0 rows**.
 
 ### 8.6 Neutralise-and-observe — done for real, per guard
 
