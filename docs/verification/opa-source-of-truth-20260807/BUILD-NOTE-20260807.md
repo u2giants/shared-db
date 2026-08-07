@@ -947,3 +947,313 @@ Both are narrower than what was fixed and are recorded in the session handoff.
 - Raise the Morbius block (README §5.3 — 30 Disney+ TV characters mis-filed under
   a film **in Disney's own portal**) with Laura or Disney. It is the clearest
   counter-example to "Disney is always right".
+
+---
+
+## Runner hardening, 2026-08-07 (post-#497) — the runner is now safe to invoke
+
+PR #497 landed `tools/sync-opa-property-character.mjs` **unreviewable**: it was
+committed with literal NUL bytes, so git classified it as binary, `git diff`
+printed only "Binary files differ", and GitHub reported `additions: 0`. Two Codex
+rounds and two reviewer passes all ran while the file's contents were invisible.
+The merge was allowed **on the explicit condition that this hardening land before
+the runner is ever invoked with `--apply`.** This is that work. The runner has
+still never been executed against any database.
+
+### What was hardened
+
+| # | Was | Now |
+|---|---|---|
+| W1 | `SUPABASE_URL` read from the environment, project ref **printed**, then POSTed. Printing is not a gate — nobody may be watching and CI cannot read a warning. One wrong env var loaded the whole confidential extract into the wrong project, and **no database-side guard can catch that** because every one of them runs inside whichever project you reached. | The expected project ref is a **required, explicit input** (`--expect-ref=<ref>` or `OPA_EXPECTED_PROJECT_REF`), compared against the ref parsed from `SUPABASE_URL`. A mismatch **aborts before the first byte is sent** (`resolveSupabaseTarget`, called by `applySnapshot` before it touches `fetch`). No default ref exists, and none is hard-coded. |
+| W2 | `SUPABASE_URL` unvalidated — no scheme or host check. A malformed value sent the **service-role key** (in `apikey` and `Authorization`) and the full snapshot to whatever host it named. | https only, no port, no path, no query, no fragment, and the host must be exactly `<project-ref>.supabase.co`. |
+| W3 | `buildSnapshot` required only `rows.length >= 2`. The database shrink band only fires when rows are **already** stored (`v_before > 0`, migration `20260807190000`), so the **first** load into an empty mirror would accept a one-row snapshot in silence. | `OPA_MIN_ROWS` — an expected-minimum row count, **mandatory for `--apply`** — enforced client-side before anything is sent. |
+| W4 | A comment claimed the database "coalesces the parameter". **It does not — it rejects NULL**, and migration `20260807190000:347-350` warns that wrapping `coalesce()` around the clamp does *not* fix the hole (`coalesce(greatest(0, least(1, null)), 0.10)` returns `1`, because LEAST/GREATEST ignore NULLs). A maintainer trusting that comment would have reintroduced the exact bug the migration removed. | Comment corrected and the trap spelled out. Treated as a defect, not a typo: a comment falsely claiming a safety property is how the wide-open RLS policy survived review earlier the same day. |
+| W5 | `parseCsv` accepted malformed quoting silently: text after a closing quote was appended; a bare quote in an unquoted field flipped quote mode and **swallowed the following commas, merging fields** (a name can slide into an ID column); a file ending mid-quoted-field was pushed as a complete row — **a truncated download ends exactly that way**; rows with the wrong field count were accepted; and `readFile(path, "utf8")` silently substituted U+FFFD for invalid bytes. | All five now **fail loudly**. Silent repair of licensor data is how a wrong name reaches a licensing decision. Strict UTF-8 decoding via `decodeUtf8Strict`. |
+| low | Any digit string passed through `Number()` — beyond 2^53 two distinct IDs round together. | `Number.isSafeInteger` check. Latent, not active: Disney's largest observed ID is 9 digits. |
+| low | Auto-run fired whenever `argv[1]` merely **ended with** the filename, so a neighbouring `test-sync-opa-property-character.mjs` importing the module would have triggered a real run. | Resolved-path comparison against `import.meta.url`. Proven by a test that spawns exactly such a file. |
+| low | `OPA_CAPTURED_AT` regex accepted impossible dates (`2026-99-99`). | Real-date validation locally, so it fails before anything is sent rather than at the database. |
+| low | A `sourceUrl` carrying a session token would be stored verbatim as provenance on **every row**. | Refused, and the offending value is never echoed. |
+| doc | Header listed 2 migrations. | Lists all **five** (`170000`, `170100`, `180000`, `190000`, `200000`). |
+
+### Proof
+
+45 tests (was 18; all 18 originals still pass). **Every** guard was proven to
+fire by neutralising it, observing the suite FAIL, restoring it and observing it
+PASS — 28 mutants, 28 killed. For W1 specifically, the test injects a `fetch`
+that throws on any call and asserts the mismatch error is raised with the fetch
+**never reached**, so the abort is proven to happen before the network, not
+after. All fixtures are invented; no Disney data appears anywhere.
+
+### Deliberately NOT changed
+
+- Nothing under `supabase/`. All five migrations are applied; editing an applied
+  migration changes nothing in the database and desynchronises file from ledger.
+- The runner was never executed against any database. All testing is offline unit
+  tests against invented fixtures.
+
+### Also closed: the two value-echoing messages (owner-approved follow-up)
+
+Two client-side messages echoed extract field content into terminals and CI logs
+for a **public** repository, against this file's own "counts and status only"
+rule. They had been deferred on the reasoning that only numeric junk could be
+echoed. **That reasoning fails on exactly the failure W5 now detects:** if the
+columns SHIFT, a character name lands in a numeric column and gets printed. The
+two findings are the same scenario seen from opposite ends. Both now report the
+**row ordinal and column name, never the value** — matching what the database
+side does after the G6 fix.
+
+| Site | Was | Now |
+|---|---|---|
+| non-integer id | `row N: <col> is not an integer ("<value>")` | `row N: <col> is not an integer.` plus a note that the value is deliberately withheld |
+| duplicate natural key | listed the colliding `<licensedPropertyID>,<characterID>` values | `row 3 repeats the ID pair first seen at row 2` |
+
+Each has a canary test asserting the message does **not** contain the value, and
+each was proven by neutralising it back to its old form: 39 tests, baseline
+`pass=39 fail=0`, each mutant `pass=38 fail=1`, restored `pass=39 fail=0` (the
+counts as they stood at that round; both mutants were re-run and re-killed in
+the final 28-mutant set below).
+
+One nearby message was reviewed and left alone: `row N: optionSourceID is <v>,
+not 1007` echoes a value that has already passed integer **and** safe-integer
+validation, so it cannot carry a name.
+
+### Status
+
+The runner is now safe to invoke with `--apply`, provided the operator sets
+`OPA_EXPECTED_PROJECT_REF` (or `--expect-ref=`) and `OPA_MIN_ROWS`. It will
+refuse to run without them.
+
+### Review round: one MEDIUM and three LOWs, all in guards this work introduced
+
+Found by independent review of the hardening itself. Worth recording that the
+review found a hole in a **security guard added to close a hole** — new code is
+not safer than old code merely because it is newer.
+
+**MEDIUM — the credential guard failed OPEN.** `assertSourceUrlIsNotACredential`
+parsed with `new URL()` and, when that threw, **returned the string unchecked**.
+Measured: `assertSourceUrlIsNotACredential("opa.example/x?session_token=SECRET")`
+did not throw. A scheme-less URL is exactly what a hurried operator pastes out of
+a browser address bar, and the token would then be stored verbatim as provenance
+on **every one of ~10,262 rows**, readable by anyone the mirror's RLS admits. An
+unparseable value is now a hard error.
+
+**Contract tightening, deliberate:** the query string and the fragment are now
+refused **outright** rather than inspected for suspicious parameter names. Name
+matching is a blocklist, and a blocklist guarding a value persisted 10,262 times
+is the wrong shape — a parameter called `t`, or a 12-character fragment, went
+straight through (the old fragment rule only fired above 40 characters). Also
+now refused: userinfo (`user:pass@host`), non-http(s) schemes, and a path segment
+that is either named like a credential or shaped like an opaque token. Provenance
+needs to say *where* the extract came from, and a bare page URL does that.
+
+> **Operator impact:** if your OPA page URL has a query string or a `#fragment`,
+> the runner will refuse it. Pass the plain page URL. This is intentional.
+
+**LOWs.** A bare `\r` not part of a CRLF was still swallowed silently (`a,b\r1,2`
+parsed as one row `["a","b1","2"]`, joining two lines) — the last lenient path in
+a parser that advertises rejecting silent repair; now rejected. And the expected
+project ref is compared case-insensitively, since `new URL` lowercases the
+hostname: an uppercase host was already accepted while an uppercase
+`OPA_EXPECTED_PROJECT_REF` was rejected as malformed, sending the operator after
+the wrong problem.
+
+**Proof for this round.** 45 tests. **28 mutants across the whole branch, 28
+killed, 0 survived**, baseline and restored both `pass=45 fail=0`. The
+credential fixes carry canary assertions proving the secret does not survive into
+the error message.
+
+**Parser behaviour re-measured after the tightening** (25 shapes): 19 realistic
+export shapes ACCEPTED — plain LF, CRLF, trailing CRLF, BOM+CRLF, unquoted
+fields, embedded commas, embedded newlines, embedded CRLF inside quotes, doubled
+quotes, **properly quoted inch marks**, backtick and real apostrophes, blank
+lines mid-file, trailing blank lines, negative sentinels, `& / ( )` in names,
+accented characters, emoji, and padded numeric fields. 6 genuinely malformed
+shapes REJECTED. Nothing legitimate became collateral.
+
+---
+
+## RUNBOOK — read this before the first `--apply`
+
+### 1. A dry run against the real CSV is REQUIRED, not suggested
+
+A dry run parses and validates everything and **contacts no database at all**, so
+it carries zero risk. It is also the only way to turn the parser-strictness
+question from reasoning into fact.
+
+```
+OPA_CSV_PATH=/path/to/licensor-source-data/disney-opa/opa-characters.csv \
+OPA_CAPTURED_AT=<YYYY-MM-DD> \
+OPA_SOURCE_URL='https://<the plain OPA page URL, no query, no fragment>' \
+node tools/sync-opa-property-character.mjs
+```
+
+Expect a JSON block of counts and `DRY RUN. No database was contacted.`
+
+**If the dry run REJECTS the file, the bare-quote rule is the first suspect** —
+the rule that refuses an unescaped `"` inside an *unquoted* field. The plausible
+real-world case is an **inch mark** in a product name that Disney's exporter
+emitted without quoting the field. Properly quoted inch marks (`"12"" Figure"`)
+pass and were measured passing. Do not weaken the rule reflexively: confirm from
+the reported line and field number which case you actually have.
+
+### 2. W1 catches a MISMATCH, not a wrong intention
+
+The wrong-target guard compares `SUPABASE_URL` against the ref you state
+explicitly. If an operator puts the **production** ref in *both*, it proceeds —
+by design, because promotion to production must be possible, and hard-coding the
+production ref would violate this file's own "never hard-code a project ref"
+rule. **W1 is not a production interlock.** It catches the mistyped variable and
+the copy-paste from the wrong terminal; it cannot catch a deliberate or
+mistaken decision to target production.
+
+### 3. The first apply
+
+```
+OPA_CSV_PATH=... OPA_CAPTURED_AT=... OPA_SOURCE_URL=... \
+OPA_MIN_ROWS=<the minimum row count you expect> \
+SUPABASE_URL=https://<project-ref>.supabase.co \
+OPA_EXPECTED_PROJECT_REF=<the same ref, stated deliberately> \
+SUPABASE_SERVICE_ROLE_KEY=<from 1Password, vault vibe_coding> \
+node tools/sync-opa-property-character.mjs --apply
+```
+
+`OPA_MIN_ROWS` and the expected ref have **no defaults** and the runner refuses
+to start without them. Take `OPA_MIN_ROWS` from the dry-run count, not from
+memory.
+
+---
+
+## 10. The required dry run against the REAL extract — done, PASSES
+
+Section 9.1 called a dry run against the genuine CSV **required** before any
+`--apply`. It has now been run. **The hardened parser accepts Disney's real
+extract unmodified.** Nothing was changed to make it pass, and no database was
+contacted (the dry-run path returns before `applySnapshot`).
+
+The CSV was fetched from the PRIVATE repo `u2giants/licensor-source-data` to a
+scratch directory **outside this repository**, via the raw API. Note the trap:
+`gh api .../contents/...` returns `encoding: "none"` and an **empty body** for
+files over 1 MB, and this file is 1,069,881 bytes — without
+`Accept: application/vnd.github.raw` you analyse zero rows and do not notice.
+
+```
+$ gh api -H "Accept: application/vnd.github.raw" \
+    repos/u2giants/licensor-source-data/contents/disney-opa/opa-characters.csv \
+    > <scratch>/opa-characters.csv
+
+bytes: 1069881          (matches the recorded size exactly)
+lines: 10263            (1 header + 10262 data rows)
+sha256: 333a1c04ea2da5a678da3527ee9a28b503cb6c16af94dbd902e10fbe776a5d69
+line endings: CRLF on all 10263 lines, consistently — no bare CR
+```
+
+### 10.1 The dry run
+
+```
+$ OPA_CSV_PATH=<scratch>/opa-characters.csv \
+  OPA_CAPTURED_AT=2026-08-06 \
+  OPA_SOURCE_URL='https://opa.disney.com/ProdApp/createEditProduct.spring' \
+  node tools/sync-opa-property-character.mjs
+{
+  "rows": 10262,
+  "distinct_licensed_property_id": 1445,
+  "distinct_character_id": 9613,
+  "distinct_name_pairs": 10240,
+  "name_pair_collisions": 22,
+  "captured_at": "2026-08-06",
+  "line_of_business": "Home"
+}
+
+DRY RUN. No database was contacted. Re-run with --apply to load.
+```
+
+Exit 0. No warnings. Every number the design predicted from the 2026-08-06
+measurement is reproduced **exactly**: 10,262 rows, 10,240 distinct name pairs,
+**22 name-pair collisions**. Re-run with `OPA_MIN_ROWS=10262` — identical output,
+so the row floor is satisfied at the true count.
+
+### 10.2 The ID-pair key holds — the table design is sound
+
+`buildSnapshot` throws on any duplicate `(licensedPropertyID, characterID)`. It
+did not throw, which is itself the proof. Cross-checked with a **separately
+written, regex-based RFC4180 tokenizer** (not the runner's parser), which agrees
+on every figure:
+
+| Measure | Value |
+| --- | --- |
+| data rows | 10,262 |
+| rows with a field count ≠ 6 | **0** |
+| distinct `(licensedPropertyID, characterID)` | **10,262 — unique, one per row** |
+| distinct `(property, character)` | 10,240 (**22 collisions**) |
+| distinct `licensedPropertyID` | 1,445 |
+| distinct `characterID` | 9,613 |
+| distinct `optionSourceID` values | `1007` only |
+
+Two independent parsers agreeing to the row means the counts are a property of
+the file, not of one parser's quirks.
+
+### 10.3 Why the bare-quote rule never fired — and why that is luck, not design
+
+The predicted first suspect was the unescaped `"` inside an *unquoted* field
+(the inch-mark case). Measured on the real file:
+
+- The **header line carries zero quote characters** — it is unquoted.
+- The **10,262 data lines carry 123,144 quote characters — exactly 10,262 × 12**,
+  i.e. every one of the 6 fields on every data row is fully quoted.
+- **Zero occurrences of a doubled `""`** anywhere in the file.
+
+So Disney's exporter quotes every data field unconditionally, and this particular
+extract contains no embedded quote character at all. An inch mark could not have
+tripped the rule here because there is no inch mark, and if one appeared it would
+arrive **inside an already-quoted field**, which is the case the runbook records
+as measured-passing. The strict rule costs this extract nothing.
+
+**This is a property of the observed export, not a guarantee.** Only the fully
+quoted, zero-embedded-quote shape was proven; a future extract that quotes
+selectively is untested. That is an argument for repeating this dry run on every
+refresh, not for weakening the rule.
+
+### 10.4 `OPA_SOURCE_URL` — the tightened contract REJECTS the natural URL
+
+This is the one contract that does not survive first contact unaided. The page
+the extract actually comes from — the URL recorded in the scrape procedure — is
+the OPA product page **with its full query string** (`?do=createEdit&lob=200&…`).
+Passed verbatim, the run aborts:
+
+```
+OPA_SOURCE_URL must not carry a query string. It is stored verbatim as
+provenance on every row, and a query string is where portals return session
+tokens and other credentials. Strip it and pass the plain page URL.
+(The value is deliberately not shown.)
+```
+
+Exit 1, before anything else runs. The guard behaves exactly as written, refuses
+outright rather than inspecting names, and does not echo the value.
+
+**The operator must strip the query string by hand.** Both of these pass:
+
+- `https://opa.disney.com/ProdApp/createEditProduct.spring` (recommended — names
+  the actual page)
+- `https://opa.disney.com`
+
+**The cost is real and should be recorded rather than shrugged off.** Those OPA
+query parameters are not decoration: `lob=200`, `lobName=Option.Lob.Home`,
+`regionName=Option.Region.4`, `templateId`, `workflowId` are what *select the
+extract*. Stripping them makes provenance say which page, not which slice — two
+different extracts from two different LOBs would store an identical
+`source_url`. `line_of_business` is captured separately, so the LOB itself is not
+lost; region and template are not captured anywhere.
+
+No session token was present in this URL. The rule is still the right default —
+a blocklist on a value persisted 10,262 times is the wrong shape — but the
+selecting parameters now have nowhere to live. **A decision for the owner**, not
+something to fix by loosening the guard: either accept the loss, or add a
+separate structured provenance field for the extract selectors. Do not put them
+back in `source_url`.
+
+### 10.5 What this dry run does NOT establish
+
+It parses and validates. It contacted no database and loaded nothing. The
+`--apply` path, the wrong-target gate against a live project, the shrink band and
+every database-side guard remain proven only against invented fixtures. Loading
+the real extract to preview, and any promotion to production, stay owner-gated.
