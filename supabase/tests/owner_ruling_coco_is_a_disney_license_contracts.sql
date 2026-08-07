@@ -32,13 +32,35 @@
 --     statements around each DO block. That is why the structure below looks the way it
 --     does.
 --
--- HONEST LIMIT, STATED SO NOBODY MISREADS A GREEN RUN: as of 2026-08-07 this file has
--- NOT been executed end to end. No CI job runs supabase/tests/*.sql against any database,
--- and the authoring environment had no psql, no Docker and no local Postgres. The
--- assertions below are written to be executable and to fail loudly, but "written to fail
--- loudly" is not the same as "observed to fail". Whoever first runs this must treat a
--- green result as the first real evidence, and must confirm each Section E control case
--- genuinely reports its expected NOTICE.
+-- EXECUTION RECORD -- 2026-08-07, and what it does and does not prove.
+--
+-- This file WAS run end to end, twice, against a DISPOSABLE local PostgreSQL 18.4
+-- database loaded with a minimal fixture that reproduces the real production UUIDs,
+-- the (licensor_id, code) unique constraint, and the measured row counts (COCO under
+-- ZZ; COCA COLA's own CCC/CCZ properties; 15 assets on COCO all carrying DISNEY).
+-- Run once WITHOUT core.taxonomy_owner_ruling (mirroring production, where 20260802171000
+-- is held) and once WITH it (mirroring preview). All cases passed in both; G skipped in
+-- the first and passed in the second.
+--
+-- Each negative case was then MUTATION-TESTED -- the guard was neutralised in a copy of
+-- the migration and the suite re-run, to prove the case can actually fail:
+--   * name guard removed        -> E1 FAILED ("the migration COMPLETED against a row
+--                                  named COCA COLA CLASSIC")
+--   * unique-key guard removed  -> E2 FAILED ("aborted, but not on its own unique-key
+--                                  precondition")
+--   * parent guard removed      -> E3 FAILED ("COMPLETED and silently overwrote an
+--                                  unexpected parent")
+--   * auth.role() injected      -> E4 FAILED (the pg_proc version it replaced could NEVER
+--                                  fail, which is why it was replaced)
+--   * ruled_at re-stamped to midnight UTC
+--                               -> G FAILED ("reads 2026-08-05 in America/New_York")
+--
+-- WHAT THIS DOES NOT PROVE. The fixture is NOT the production schema -- it contains only
+-- the objects this migration touches. It exercises the migration's GUARD LOGIC, which is
+-- what Sections E and F are for. Sections A-D, G and H are state assertions whose value
+-- comes from running them against a REAL database (preview, or production after
+-- promotion) where the full schema, RLS and the true row counts exist. Running this
+-- against the disposable fixture is necessary evidence, not sufficient evidence.
 
 \set ON_ERROR_STOP on
 
