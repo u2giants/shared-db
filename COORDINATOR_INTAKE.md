@@ -679,6 +679,30 @@ after it is filed. Only the coordinator moves a block out of here.
 > ⚠️ **That session could not reach GitHub. Five branches are unpushed and
 > coordinator marker issue #453 is still OPEN — it is NOT a dead coordinator.**
 
+### CLOSING NOTE — all three findings in the block below are now RESOLVED; the OPA request itself is still OPEN — 2026-08-07 — session: opa-scrape (t16)
+
+Appended rather than edited in place, per this file's log rule. Verified against
+`origin/main`, not from memory.
+
+| Finding in the block below | State |
+| --- | --- |
+| (a) `AGENTS.md` §6.7 stale on branch protection | ✅ **FIXED on `main`** by PR #467 (`53bc3f0`). §6.7 now reads `strict: true` and is dated. It was fixed on that branch hours before it reached `main` — this session marked it closed too early on branch-level evidence. Verify against `main`, never a branch. |
+| (b) PR #467 carrying this session's four OPA files | ✅ **RESOLVED.** The other session merged `main` into its branch and took `main`'s version in all three conflicts. **Verified: the retraction in §4 of the OPA README survived — the disproved claim is gone from `main` and the corrected block is present.** ⚠️ Note the prediction in the block below that "merging #466 first clears #467 automatically" was **WRONG**: the rescue used `git cherry-pick`, which creates new commit IDs, so git never saw the two copies as the same commits. |
+| (c) Hosted-runner starvation reading as a failed check | ✅ **CLEARED** with the 2026-08-06 GitHub Actions outage. `Cross-PR object collision` later passed in **28 seconds**. Dropped push events were **not** replayed — closing and reopening the PR was what fired fresh runs. The documentation value stands: **check job annotations before believing a red X.** |
+
+**Still OPEN and unstarted: the OPA lookup table itself.** Both the original
+request and its supplement remain live below. Nothing has been dispatched, no
+database call has been made, and `HANDOFF.d/` no longer carries an OPA file
+because this session's own work is complete — **the queue is now the only record
+of the outstanding work.**
+
+⚠️ **Two sessions independently hit the shared-checkout problem on 2026-08-06**
+(this one had commits land on another branch twice; the other silently inherited
+a commit and nearly landed a retracted claim on `main`). That is two findings,
+not one, and nothing currently guards it. The durable fix is a hard rule: **no
+session works in the shared checkout `C:/repos/shared-db` directly — worktrees only.** Belongs in
+`AGENTS.md`, which is single-writer and was deliberately not touched here.
+
 ### REQUEST — `AGENTS.md` §6.7 is STALE on branch protection (verified live), plus fresh evidence the shared checkout is still colliding, plus a CI trap — 2026-08-06 — session: opa-scrape (t16)
 
 Three findings from one session. Full detail:
@@ -2925,7 +2949,86 @@ Requests the coordinator has verified and dispatched. Each block is annotated
 with the branch name and the sub-agent handling it. Moved here and out again by
 the coordinator only.
 
-_(none yet)_
+### IN PROGRESS — Store the Disney OPA property→character list as a lookup table — dispatched 2026-08-07 — coordinator session 774f5010 (t16), marker issue #473
+
+Covers the `## REQUEST QUEUE` block "Store the Disney OPA property→character list
+as a lookup table" (2026-08-06), its SUPPLEMENT, and its 2026-08-07 CLOSING NOTE.
+Those three blocks stay in the REQUEST QUEUE until the work merges.
+
+**Dispatched to (phase 1 of 2, READ-ONLY DESIGN):**
+
+| | |
+| --- | --- |
+| Branch | `agent/opa-lookup-design-20260807` |
+| Worktree | `C:/Users/ahazan2/AppData/Local/Temp/claude/opa-design-20260807` |
+| Base | `origin/main` `105c2ecfb39363f23353216a9cc0d805b58260eb` |
+| Owns | new files under `docs/verification/opa-characters-20260806/` ONLY |
+| Does NOT own | `HANDOFF.md`, `AGENTS.md`, `COORDINATOR_INTAKE.md`, `supabase/**` |
+| Migration version | none allocated — phase 1 writes no migration |
+| Deliverable | `docs/verification/opa-characters-20260806/DESIGN.md` + PR |
+
+**Collision check run before dispatch** (`scripts/check-dispatch-collision.mjs`,
+objects `core.character, core.property, ingest.raw_record,
+plm.opa_property_character`): exit 0, **0 in-flight items to compare against**.
+The tool reports it does NOT check tables, indexes, grants or any `ALTER` form —
+the coordinator confirmed those separately: no open `db-claim` issues, and both
+open PRs (#468, #472) are single-file docs-only appends to this file with no SQL.
+**No `db-claim` was filed**, because phase 1 is read-only and cannot collide. A
+claim IS required before phase 2, using the exact object names phase 1 returns.
+
+**Why the work was split.** The coordinator could not confidently declare the
+objects phase 2 will write without first reading the live schema (the vendor
+landing-schema home is not established from repo docs alone). Per the
+orchestrator skill, a task that cannot declare its objects is dispatched
+read-only rather than guessed at — a wrong declaration reads as safety.
+
+**Dedupe performed before dispatch (do not redo).** PR #468
+("characters/style-guides findings — `core.character` is EMPTY") **OVERLAPS but
+does not duplicate** this request. #468's diff is one file, +188/−0, prose only,
+with no DDL and no table design; its finding is that `core.character` has 0 rows.
+The OPA request is a proposal for what fills it. The datasets count different
+things — OPA holds 10,262 distinct (property, character) **pairs**, the legacy
+tables hold ~9,622 **appearances** — so neither is redundant. #468 states in its
+own block that it never opened the OPA file. Also deduped against the wider
+characters / style-guides workstream (`docs/style-guides-characters-and-royalties.md`,
+`docs/verification/character-identity-rules-20260728/`): that workstream has
+already settled the `core.character` **shape**; what it lacks is the **input**,
+which is exactly what this request supplies.
+
+**The disproved lineage claim in README §6a was NOT re-derived.** The agent is
+explicitly instructed not to re-raise it or to cite row-count similarity as
+evidence of shared lineage.
+
+**Owner decisions obtained from Albert 2026-08-07 (§7 of the OPA README):**
+
+| §7 question | Ruling | By |
+| --- | --- | --- |
+| 5. Refresh policy | **One-off snapshot.** No schedule. Stamp the capture date; document the manual two-minute refresh ritual. Automation impossible (MFA, no API). | Albert |
+| Line-of-business scope (README §5 caveat) | **Build from the Home extract we have.** Do not ask Albert to re-log into OPA. The design must record plainly that it is Home-only and entitlement-scoped. | Albert |
+| 6. `- No Likeness` / `- With Likeness` | **Base name plus a likeness flag.** Coordinator ruling on HOW: raw table keeps Disney's exact string untouched; the split lives in the **view**, marked as our interpretation. | Albert (what) + coordinator (how) |
+| 1. Where does it land? | **Raw vendor source table + consumable view**, following the repo's existing vendor/source-owned pattern. The agent must find and name that pattern, not invent one. | Coordinator |
+| 2. Does it join to `core.property`? | **No — not in this landing.** A join makes it a cross-app data contract (PopCRM + DesignFlow read licensor/property data). Land standalone; reconciliation is separate, later work. | Coordinator |
+| 4. Overlap with existing character identity work? | **Deduped, see above.** Agent must report disagreements with `canonical-character-identities.csv` as findings, not resolve them. | Coordinator |
+| 3. How is Disney identified as a licensor? | **STILL OPEN — reserved for Albert.** Agent looks it up read-only and presents options; picking the canonical licensor value is an owner gate. Note history: a property was filed under a licensor named `NO LICENSE`, and Albert ruled 2026-08-06 that "Coco IS a Disney license." | pending |
+
+**Standing session facts recorded in the brief:** all work in a git worktree,
+never in the shared checkout `C:/repos/shared-db` (two sessions collided there
+2026-08-06); and before believing a red CI check, read its job annotations —
+hosted-runner starvation shows up as a failure that never ran.
+
+**Tooling note for the next coordinator.** `gh issue list --label <label>` returns
+EMPTY in this repo even for issues that demonstrably carry the label (verified
+against marker issue #473). Use the REST path instead:
+`gh api "repos/u2giants/shared-db/issues?labels=coordinator-marker&state=open"`.
+Trusting the empty `gh issue list` result would let a second coordinator claim a
+marker while one is already live. The same caveat applies to `db-claim` lookups.
+Separately, `check-dispatch-collision.mjs --allocate-version` is **WITHDRAWN** and
+now refuses; pick the migration version manually.
+
+**Phase 2 (BUILD) is NOT dispatched.** It must not be dispatched until phase 1's
+design is reviewed, Albert has answered §7 Q3, a `db-claim` is filed with phase
+1's exact object names, and the collision check is re-run against a re-derived
+`origin/main`.
 
 ---
 
@@ -3520,6 +3623,193 @@ things deliberately **not** done:
   2026-08-07 ~01:35 UTC and may already have moved.
 - I did **not** re-verify the two REQUEST-QUEUE sweep items' wording against
   their current text; I read them from the file's headings.
+### INTAKE — Characters/style-guides: `core.character` is EMPTY, Laura's round-2 answers, and a defect in the question generator — 2026-08-06 — session: unnamed Claude Code session (Opus 5), machine t16, shared checkout `C:\repos\shared-db`
+
+> **This is the SECOND block from the same session.** The first is the ColdLion
+> Phase 6 baseline-drift block filed as **PR #426, now MERGED**. This block
+> covers work Albert asked for AFTER that handover, and it also discloses
+> further read-only production queries that the merged block does not mention.
+> Nothing was written to any database.
+
+**1. What I was doing and why.**
+After the PR #426 handover, Albert returned with two things. (a) Three rulings he
+wanted recorded and acted on. (b) Laura's round-2 answers to the licensing
+questions (`licensingquestionsforlauraround220260731.xlsx`), against the
+Characters / style-guides workstream. He then challenged my reading of the
+characters data, and that challenge turned out to be right and to expose a
+genuine gap in a canonical document. **I executed none of the rulings** — see §4.
+
+**Albert's three rulings, recorded verbatim, NOT acted on:**
+1. **Enable branch protection** on `u2giants/shared-db`.
+2. **Do not unblock the HARD_BLOCKED migrations on their own.**
+3. **Do not admit the codes until the attachment logic is fixed first.**
+
+I told him branch protection is safer as the coordinator's own action, because
+turning on required reviews/checks mid-flight starts rejecting pushes from
+sessions that do not know why. He has not overridden that. **Ruling 1 is
+therefore outstanding and is a live instruction to whoever holds this repo.**
+
+**2. What I have actually DONE.**
+- **Nothing committed** except this block. No migration, no schema change, no
+  code change, no workflow dispatch, nothing merged.
+- **Read Laura's spreadsheet** (an upload, outside the repo) and analysed all 166
+  open rows with `openpyxl`. Results in §6.
+- **Ran read-only `SELECT`s against PRODUCTION `qsllyeztdwjgirsysgai`** via the
+  Supabase MCP — roughly eight queries against `core.character`,
+  `core.properties_and_characters`, `core.property`, `core.licensor` and
+  `information_schema`. **All read-only. No write, no DDL, no DML.** PR #426
+  disclosed one such query; this block covers the rest.
+- **No preview contact at all** in this phase. The only preview write from this
+  session is the one already disclosed in PR #426 (`ingest.sync_run`
+  `f73b91fc-0507-4c9a-8153-1c69b8673ef9`).
+
+**3. What I applied to PREVIEW (`rjyboqwcdzcocqgmsyel`).**
+**Nothing in this phase.** See PR #426 for the single earlier preview write.
+Production: read-only queries only, listed in §2.
+
+**4. What is half-finished or abandoned mid-way.**
+- **All three of Albert's rulings are unexecuted.** Ruling 1 (branch protection)
+  is a concrete outstanding action. Rulings 2 and 3 are standing constraints that
+  need to reach whoever owns the migration lane and the ColdLion code admission.
+- **Laura's answers are analysed but not applied anywhere.** No row was written,
+  no character created, no mapping updated. The analysis exists only in §6 of
+  this block and in the source spreadsheet.
+- **Nothing is half-applied to any database.**
+
+**5. What I own right now.**
+- **Branch `intake/characters-table-findings-20260806`**, holding only this
+  block, worked in a **temporary worktree** at
+  `C:\Users\ahazan2\AppData\Local\Temp\claude\intake-chars-0806`, cut from
+  `origin/main` at `700f08f`. **Safe to remove once this PR is merged.**
+- **I deliberately did NOT work in the shared checkout `C:\repos\shared-db`.**
+  When I checked it, it was on branch `docs/plan-dispatch-collision-hardening`
+  with **another session's uncommitted work**: modified `HANDOFF.md`,
+  `plan_dispatch-collision-hardening.md`,
+  `docs/verification/opa-characters-20260806/README.md`, plus untracked
+  `.ai/reviews/glm-shared-db-collision-architecture-*.md` (×2) and
+  `.ai/deepseek-sessions/`. **I touched none of it.** Whoever owns that work
+  still owns it; it is not abandoned as far as I know.
+
+**6. Laura's round-2 answers — the analysis, so nobody re-derives it.**
+166 open rows; she answered 157. Her cover sheet confirms our MG06 codes were
+right and that she kept all of them, and that 25 of the 36 character questions
+are now closed.
+
+| Answer | Rows |
+|---|---:|
+| `REAL CHARACTERS - I LISTED THEM` | 126 |
+| `NOT CHARACTERS - DROP THE ROW` | 20 |
+| `NONE` (all 11 dual-code rows) | 11 |
+| left blank | 9 |
+
+Three things a future session needs and cannot get from the file quickly:
+
+- **The 11 dual-code rows all came back `NONE` with a consistent reason:** the
+  character genuinely belongs to more than one property. Marvel's Boom Boom,
+  Cannonball, Domino, Headpool, Lady Deadpool, Negasonic Teenage Warhead,
+  Shatterstar and Warpath — *"it can be a part of two properties cause the
+  character appears on both universes"*; Blade and Warner's "Other Related
+  Characters" and Maxwell Lord — *"depends on the asset used."* This is evidence
+  FOR the M:N style axis in
+  `docs/style-guides-characters-and-royalties.md` §5A, not a data error.
+- **The names cannot be parsed mechanically.** The sheet asked for
+  semicolon-separated names. Across the 125 filled entries she used commas in 77,
+  slashes in 24, semicolons in 7 and colons in 2, frequently mixed inside one
+  cell, and **21 entries pair an actor with a character** —
+  `"Joe Jonas - Shane Gray; Nick Jonas - Nate Gray, Kevin Jonas - Jason Gray"`.
+  A decision is owed on whether actor names are stored at all.
+- **The 9 blanks are OUR fault, not hers** — see §8.
+
+**7. What I am blocked on.**
+- **(b) Decisions only Albert can make**, none yet answered:
+  1. Are actor names stored, or character only with the actor in a note?
+  2. Do we parse her 125 name entries and send a read-back list to confirm, or
+     run a round 3 on formatting? (I recommend read-back; a third formatting
+     round costs goodwill.)
+  3. Do the three Ant-Man & Wasp **Logo** rows (B039–B041) become characters, or
+     are logo rows excluded from character extraction? I recommend excluded.
+  4. `A005` — Coco. She confirms `CC` is the code POP actually used, with item
+     `MBZ80DYCC01` as evidence, but in our data `CC` sits under a licensor
+     called **"DTR - NO LICENSE"** while the style guide is Disney. Re-parent to
+     Disney, or is "DTR - NO LICENSE" a real bucket? Same shape as the FRIENDS TV
+     ruling.
+  5. Does "drop the row" mean delete, or mark inactive? I recommend inactive,
+     consistent with the FR precedent.
+- **(a) Blocked on the coordinator protocol** for everything above, plus ruling 1.
+
+**8. What I tried that did NOT work, and why. [MANDATORY]**
+- **I told Albert the characters table "would reject Mickey Mouse". That was
+  WRONG and he caught it.** I had probed the bare token `Mickey` (0 exact
+  matches) because that is how the question generator had split the row.
+  `Mickey Mouse` is present and typed `CHARACTER`. **Do not repeat this error:
+  probe the full name, never the tokenised fragment.**
+- **My follow-up conclusion was also wrong, and this one matters more.** I told
+  Albert the fix was to "de-junk the 9,622 `CHARACTER` rows, dropping combination
+  labels and logos and keeping the atomic characters." That is **incorrect and
+  would destroy data.** `docs/style-guides-characters-and-royalties.md` §4 and
+  §5A already establish that those 9,622 rows are **character *appearances*, one
+  per style guide**, and that they are meant to become the M:N bridge
+  `core.style_guide_character`. `Avengers Logo ( Marvel Games )` is a legitimate
+  appearance row, not junk. **Read that document before touching this data — it
+  is correct, it is more precise than my analysis, and I verified its live counts
+  still hold (below).**
+- **The question generator has a real defect.** It tokenises style-guide
+  qualifiers as unknown character names and then asks Laura to adjudicate them.
+  `Moon Girl & Devil Dinosaur - Gen` produced the question *"Unknown names:
+  gen"*; `Mickey & Pluto - Back To School` produced *"Unknown names: back to
+  school"*; the three Ant-Man rows produced mangled fragments like *"wasp logo ms
+  ant man wasp quantumania"*. **All 7 affected rows are rows Laura left blank** —
+  the blanks correlate 100% with malformed questions. Albert confirmed directly
+  that "Gen" means "General". **Before any round 3, strip a qualifier vocabulary
+  (`Gen`, `Logo`, `Core`, `With/No Likeness`, title words) and split on the real
+  separators, or the same unanswerable questions go back out.**
+- **A cheap check that settles most of these rows without asking anyone:** the
+  atomic characters usually already exist. `Moon Girl (…)`, `Devil Dinosaur (…)`
+  and `Lunella Lafayette (…)` are all present as `CHARACTER` rows under
+  `Marvel's Moon Girl and Devil Dinosaur`, so B042 needs nothing created — the
+  `- Gen` row is a combination label sitting alongside correct rows. Same for
+  `Mickey & Pluto - Back To School`.
+
+**9. Facts I believe that may already be stale, and the NEW live findings.**
+
+Live production readings, taken **2026-08-06**, `qsllyeztdwjgirsysgai`:
+
+| Measurement | Value |
+|---|---:|
+| `core.licensor` | 26 |
+| `core.property` | 256 |
+| **`core.character`** | **0** |
+| `core.properties_and_characters` typed `CHARACTER` | 9,622 |
+| `core.properties_and_characters` typed `PROPERTY` | 500 |
+| distinct character names among them | 8,370 |
+| appearance rows carrying a `( style guide )` scope suffix | 4,519 |
+| appearance rows with **no** scope suffix | 5,103 |
+
+- **`core.character` is EMPTY (0 rows).** This is the finding I most want the
+  coordinator to see. `docs/style-guides-characters-and-royalties.md` §5A
+  describes ownership axis 1 as *"Already correct in the canonical schema
+  today."* That is true of `core.licensor` (26) and `core.property` (256) and
+  **false of `core.character`**, which exists but has never been populated. The
+  ownership chain stops one level short of characters. **That sentence should be
+  corrected — I did not edit the file, because it belongs to another workstream.**
+- **The 500 / 9,622 / 8,370 counts in §4 of that document still hold exactly**
+  as measured on 2026-07-23. Its analysis is current; treat it as authoritative.
+- **New hazard nobody has recorded:** only **4,519 of 9,622** appearance rows
+  carry the `( style guide )` suffix in their name. For the other **5,103** the
+  style guide **cannot be recovered by parsing the name**, so building
+  `core.style_guide_character` will need `source_licensed_property_id` or the
+  association table, not string parsing. Anyone scoping that migration should
+  know this before estimating it.
+- **`Marvel's Moon Girl and Devil Dinosaur` exists twice** — once typed
+  `CHARACTER` and once typed `PROPERTY` — differing only by a curly vs straight
+  apostrophe. Expect apostrophe-variant duplicates across this data.
+- **Possibly relevant and NOT verified by me:** `docs/verification/opa-characters-20260806/`
+  holds an `opa-characters.csv` extract and there is a `disney_opa_character_scrape`
+  skill. If that is Disney's authoritative character list it may resolve a large
+  share of the Disney questions without another round to Laura. **I did not open
+  or verify it** — it was being actively modified by another session while I
+  looked.
+- `origin/main` was `700f08f` when I cut my branch, checked 2026-08-06.
 
 ### INTAKE — The worktree sweep is DONE: all 51 removed, all 3 unattributed ones identified — 2026-08-05 — session: unnamed Claude Code session (Opus 5), machine t16, shared checkout `C:\repos\shared-db`
 

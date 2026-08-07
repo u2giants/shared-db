@@ -8,6 +8,10 @@
 
 # AGENTS.md — cross-app coordination playbook
 
+## Active implementation plan
+
+- PopDAM OrderList linked to Master Data: [`plan_popdam_order_list.md`](plan_popdam_order_list.md). Read its STATUS table first. Do not re-derive or re-plan completed steps.
+
 This is the operating contract for **every AI session working on any app that
 shares the Supabase database**: PM/PIM `poppim-web`, CRM `popcrm-web`, DAM
 `popdam-web`, and the six `popcre/designflow-*` PLM repos. Read it before
@@ -213,13 +217,21 @@ four rules below are non-negotiable for any database change.
    ```bash
    node scripts/check-dispatch-collision.mjs \
      --task "<what you are about to do>" \
-     --objects "<every object you will WRITE, comma-separated>" \
-     --allocate-version
+     --objects "<every object you will WRITE, comma-separated>"
    ```
 
-   Exit `0` safe (file the claim it prints, then start), `1` collision (**stop**),
-   `2` undetermined (**stop**, or proceed READ-ONLY). **If you cannot list the
-   objects up front, your task is read-only** — and read-only work cannot
+   Exit `0` means **the check completed and found no overlap in the object
+   classes it can read** — that is evidence, not clearance; read the CHECKED /
+   NOT CHECKED lists it prints and judge the rest yourself. `1` collision
+   (**stop**), `2` undetermined (**stop**, or proceed READ-ONLY).
+
+   ⚠️ **`--allocate-version` was withdrawn on 2026-08-07 and now exits `2`.** It
+   never reserved anything — it read the versions in use and printed a
+   suggestion, so two coordinators running it in the same minute were handed the
+   same number. Pick a version manually; duplicates are already blocked at merge
+   by the `SQL migration guards` check. An atomic reservation is plan step 6.
+
+   **If you cannot list the objects up front, your task is read-only** — and read-only work cannot
    collide. Close your claim when the work merges or is abandoned; an open claim
    is a lock on those objects, not a note.
 
@@ -1227,6 +1239,64 @@ Recorded so nobody re-measures it, and so nobody quotes the one number that is *
    (`designflow-backend/routes/admin.router.js:87`), and its real defect is that it is **type-blind**.
    Detail: `docs/licensor-property-cloudsql-cutover-plan-20260806.md` (branch
    `docs/licensor-property-cutover-plan-20260806`).
+
+### 6.11 `DY` and `DS` are ONE company — the Disney licensor has two spellings (added 2026-08-07)
+
+**`DY` in `core.licensor` is the canonical Disney licensor code. `DS` in the legacy
+`public.licensors` table is the RETIRED spelling of the SAME COMPANY. They must never be treated as
+two companies, and no session should re-open the question.**
+
+This is not an inference. `supabase/migrations/20260723113000_dam_core_licensor_property_cutover.sql`
+— merged and **already applied to production** — hard-codes the mapping in its own SQL:
+
+```sql
+case legacy.external_id
+  when 'DS' then 'DY'
+  when 'WWE' then 'WW'
+  else legacy.external_id
+end
+```
+
+That migration aborts loudly if any legacy licensor fails to map, and it did not abort. **136,697
+`public.assets` rows and 10,618 `public.style_groups` rows were rewritten onto canonical
+`core.licensor` UUIDs on that basis.** Current production data depends on `DS` = `DY` being right.
+
+The full census — every Disney-related row in both licensor lists, the per-licensor child counts, the
+4,048 `plm.style_tracker_item_bridge` rows that already carry the `DY` and `DS` UUIDs *on the same
+row*, and the read/write map per application — is in
+[`docs/verification/disney-licensor-identity-20260807/README.md`](docs/verification/disney-licensor-identity-20260807/README.md).
+**Read it there; do not duplicate or re-measure those numbers here.**
+
+**The same shape exists for WWE, and nobody has documented it.** `public.licensors` spells it `WWE`;
+`core.licensor` spells it `WW`. Identical class of duplicate, mapped by the same `case` expression
+above, still undocumented and unfixed. Treat it the same way: one company, two spellings, `WW`
+canonical.
+
+**What this section does NOT authorise.** It is paperwork, not surgery (Albert chose "Option 2" of
+that document on 2026-08-07). Retiring `public.licensors`, moving the ~500 legacy property records,
+or re-parenting MARVEL and STAR WARS under DISNEY are all explicitly **out of scope and declined** —
+ColdLion pays royalties off Marvel and Star Wars being separate licensors.
+
+### 6.12 CORRECTION to §6.6 rule 5 — there is NO parentage-durability migration (added 2026-08-07)
+
+**§6.6 rule 5 above says `20260802170000` is "the migration that stops `plm.import_master_data`
+force-setting `core.property.licensor_id`". That sentence is WRONG.** Verified against the file on
+2026-08-07; its own header block says the opposite:
+
+> "The property UPDATE still sets `licensor_id = parent_core_licensor_id`. Whether our curated
+> parentage should outrank DesignFlow PLM's is an owner decision nobody has made."
+
+`20260802170000` preserves curated **`status` only**. **No parentage-durability migration exists
+anywhere in this repository — not merged, not held.** So promoting `20260802170000` would not make
+curated parentage durable, and §6.5's hold is not what is blocking durability. Any curated
+`core.property.licensor_id` — set by DB Data Admin, by DesignFlow, or by a migration — is reverted by
+the next **successful** `plm.import_master_data()` run.
+
+The exposure is currently **dormant, not fixed**: the PLM master-data lane has not succeeded since
+2026-07-08 (§6.4, §6.10-A), which is why every `core.property` row still carries that `updated_at`.
+**Parentage durability must be built before the lane is repaired**, or every curated parent edge
+silently reverts the moment it comes back. Do not treat "we have a durability migration" as "curated
+parentage is durable".
 
 ## 7. When two apps need conflicting database changes
 
