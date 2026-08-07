@@ -3,7 +3,7 @@
 # Why this workflow exists (added 2026-08-07, plan_coordinator-queue-to-github-issues.md).
 #
 # Step 5 of that plan requires the updated skills to reach EVERY machine before step 8
-# reduces the coordinator queue to a pointer. The failure it guards is silent: a machine
+# reduces the orchestrator queue to a pointer. The failure it guards is silent: a machine
 # still running the old skill appends its handover to the pointer, the file grows a body,
 # and the queue this migration deletes is rebuilt live, mid-migration, with nothing raising
 # a hand.
@@ -63,5 +63,5 @@ jobs:
         # guard whose own tests are not run is a guard nobody has proven fires.
         run: node --test scripts/check-intake-pointer.test.mjs
 
-      - name: Check the coordinator queue has not grown back
+      - name: Check the orchestrator queue has not grown back
         run: node scripts/check-intake-pointer.mjs
