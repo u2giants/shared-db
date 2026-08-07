@@ -16,9 +16,9 @@ This records what was actually built from
 
 ---
 
-## 0. PROMOTION LIST — all THREE migrations, in order
+## 0. PROMOTION LIST — all FOUR migrations, in order
 
-> **Promote all three or none.** A previous session shipped a partial fix because
+> **Promote all four or none.** A previous session shipped a partial fix because
 > three of four correction migrations were named nowhere. These are the complete,
 > exact, 14-digit versions this work consists of:
 >
@@ -49,9 +49,11 @@ This records what was actually built from
 | `supabase/migrations/20260807170000_opa_property_character_landing.sql` | Landing schema (§7.1) + the junction (§7.2) + both `api` views (§7.5, §7.6) |
 | `supabase/migrations/20260807170100_opa_property_character_importer.sql` | Privilege predicate + guarded `SECURITY DEFINER` loader + `public.*` wrapper |
 | `supabase/migrations/20260807180000_opa_sync_reentrancy_fix.sql` | Forward fix making the loader re-entrant within a transaction (§8.5) |
+| `supabase/migrations/20260807190000_opa_security_and_view_corrections.sql` | Review round: closes the read policy, NULL-safe shrink band, pg_temp staging, node-grain view, leak-free diagnostics (§8.9) |
 | `supabase/tests/opa_property_character_landing_contracts.sql` | Contract tests for the landing |
 | `supabase/tests/opa_property_character_importer_contracts.sql` | Contract tests for the loader |
 | `tools/sync-opa-property-character.mjs` | Runner — **logic only, no data** |
+| `tools/sync-opa-property-character.test.mjs` | 18 offline runner tests — **invented fixtures only** |
 
 ### Migration versions this work depends on — all 14 digits, in full
 
@@ -67,7 +69,7 @@ This records what was actually built from
 | `20260807180000` | *(this work)* `opa_sync_reentrancy_fix.sql` | Superseded in behaviour by `20260807190000`, which replaces the function again. Must be promoted BEFORE it. |
 
 The highest migration version on `origin/main` when these were authored was
-**`20260807030000`**. Both new versions were **allocated by the coordinator**, not
+**`20260807030000`**. All four versions were **allocated by the coordinator**, not
 derived from `now()` — two agents dispatched in the same minute pick the same
 number, and a duplicate version means one migration is **silently skipped**,
 because Supabase's ledger keys on the version alone and not on the filename.
