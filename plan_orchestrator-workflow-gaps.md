@@ -8,13 +8,20 @@ on 2026-08-07. They are independent of each other and are listed worst-first.
 
 | # | Gap | Phase | State |
 |---|---|---|---|
-| A | Production migrations have no apply path, and the dry-run path has never been exercised | 1 | ⬜ open |
+| A | Production migrations: the lane is **built but never exercised**, and there is no apply path | 1 | ⬜ open |
+| E | **The 14 `HANDOFF.md` backlog items are a SECOND tracker** — added after review | 1 | ⬜ open |
 | B | Nothing mechanically stops two orchestrators running at once | 2 | ⬜ open |
 | C | A session already running never learns of a new owner ruling | 3 | ⬜ open |
 | D | 71 open issues with no ordering — no single "what is next" | 3 | ⬜ open |
 
-> **Do A first.** B, C and D are process quality. A is the reason the database five
-> applications share has not received a migration since **2026-08-02**.
+> **Do A and E first.** A is why the database five applications share has not received a
+> migration since **2026-08-02**. E is the unfinished half of the migration that just
+> shipped, and Kimi K3 was right that it outranks B, C and D.
+
+**Reviewed by Kimi K3, 2026-08-07.** ⚠️ **The plan file was on an unmerged branch and it
+could not read it**, so that round reviewed the design as described, not the text. It read
+the *code* directly, which is where its most valuable answers came from. Its findings are
+folded in below and attributed. A second round against the actual file is still owed.
 
 ---
 
@@ -90,10 +97,31 @@ production. Output: a committed table under `docs/verification/`, one row per mi
 with the evidence. **No promotion decision can be trusted until this exists**, because
 "pending" currently means "not in the ledger", which is not the same as "not applied".
 
-*Gate:* all 33 classified with evidence a stranger can re-derive. Any UNKNOWN stays UNKNOWN
-— an honest unknown is safe, a guessed "already applied" is not.
+⚠️ **Object existence alone is NOT sufficient, and treating it as sufficient is dangerous.**
+Kimi K3, 2026-08-07, and it is right. It cannot see:
+- a migration whose job was to **DROP** something — absence is exactly what success looks
+  like, so "object absent" reads as "never applied" when the opposite is true;
+- **DML, grants and revokes**, which create no object at all;
+- **`create or replace` drift** — the object exists, but as some other migration left it;
+- **partial application**, where a migration got halfway.
 
-**A2 — Exercise the existing dry-run for the first time.** `workflow_dispatch`, `target:
+So A1 needs **per-statement** checks, not per-object, and a **third bucket**:
+**APPLIED OUT-OF-BAND → record it in the ledger, never re-run it.** Re-running an applied
+migration is how this repo corrupts things. The two-bucket version of A1 would have pushed
+every such migration into "apply it".
+
+*Gate:* all 33 classified into applied-out-of-band / never-applied-and-wanted /
+never-applied-and-unwanted, with per-statement evidence a stranger can re-derive. Any
+UNKNOWN stays UNKNOWN — an honest unknown is safe, a guessed "already applied" is not.
+
+**A2 — Exercise the existing dry-run for the first time.** ✅ **Kimi verified the mechanism
+in code and it holds:** `production_migration_guard.py` **deletes** anything outside the
+allowlist from the bounded checkout, and `verify-dry-run` then demands an exact match
+against the allowlist. So the 33 orphans below the head do not silently ride along — this
+was the question I was least sure of, and the answer is that the design already handles it.
+⚠️ Note the verifier is coupled to the CLI's **output wording** (`:417`); a Supabase CLI
+upgrade can break it, and the failure would look like a migration problem rather than a
+parsing one. `workflow_dispatch`, `target:
 production`, `mode: dry-run`, the exact `main` SHA, confirmation `DRY-RUN <sha>`, and
 `production_allowlist` set to the **11** versions above and nothing else.
 This writes nothing. It proves the allowlist mechanism, the guard script and the
@@ -109,9 +137,15 @@ appearing, and it is the reason for the allowlist.**
   fresh dry-run in the same run whose output must match the allowlist before apply.
 - **(ii) A documented manual window** — a human-run, recorded procedure, no new automation.
 
-**Recommendation: (i).** (ii) puts the most dangerous operation this project performs into
-a hand-typed sequence, which is precisely what this repo's rules exist to prevent. But (i)
-adds an apply path to production, so it is an owner decision, not an engineering one.
+**Recommendation: (i), but ONLY behind the `production` GitHub environment with required
+reviewers naming Albert.** Kimi's condition, and it is the right one: without a human
+approval gate on the environment, (i) is just an apply button, and an apply button reachable
+by any session with `workflow_dispatch` is worse than the manual window. **If the required
+reviewer cannot be configured, take (ii).**
+
+(ii) otherwise puts the most dangerous operation this project performs into a hand-typed
+sequence, which is what this repo's rules exist to prevent. But (i) adds an apply path to
+production, so it is an owner decision, not an engineering one.
 
 *Gate:* Albert has chosen, in writing.
 
@@ -121,6 +155,65 @@ before A1, A2 and A3 are complete.**
 
 **A5 — Apply, verify, record.** Ledger before and after, object existence checked for each
 of the 11, and the `20260807190000` policy verified as role-gated rather than `using (true)`.
+
+---
+
+## E. The `HANDOFF.md` backlog is a SECOND tracker — finish the migration
+
+**Added after review. Kimi K3, 2026-08-07, ranked it above B, C and D, and it is right.**
+
+`HANDOFF.md` still carries **14** `### B<n>` backlog items as their own tracker, while all
+other work now lives in issues. That is two tracking systems for one project.
+
+**This is not a new problem — it is the unfinished half of the migration that just shipped.**
+`plan_coordinator-queue-to-github-issues.md` §1 says, in its own words:
+
+> *If a step would leave us maintaining **both** the file and Issues, do not do it. Two
+> tracking systems is strictly worse than the one bad system we have, because "which is
+> right?" stops being rhetorical.*
+
+The migration then closed B10 and B13 — the two that would have rebuilt the queue — and
+**left the other twelve exactly where they were.** Defensible at the time, because B10 and
+B13 were the dangerous ones. Not defensible as an end state.
+
+⚠️ **It is already producing the ambiguity the goal warned about.** The retired pointer file
+tells a reader that an empty issue list is not proof there is no work, and to *also* read
+`HANDOFF.md ## BACKLOG`. So the answer to "what is outstanding?" is currently two places,
+by written instruction.
+
+**E1** — Classify all 14 the way step 1 of the migration classified the queue: MIGRATE /
+CLOSED-with-a-checked-reason / NOISE, with the same arithmetic assertion. Several are
+already done or superseded — B6 and B7 shipped in PR #397, B8 landed in #358, B2 in #445 —
+and those must be closed, not migrated.
+
+**E2** — Open an issue per surviving item, labelled `db-work`, with the `B<n>` number kept
+in the title so existing references still resolve.
+
+**E3** — Replace the `## BACKLOG` section with a pointer, exactly as the queue file was, and
+**update the retired pointer's "also read" list** so it no longer sends readers to a section
+that has become a pointer to the issues they are already reading.
+
+⚠️ **Do NOT delete the B-number history.** Several documents and issue bodies reference items
+by `B<n>`. Keep the numbers in issue titles and leave the originals under `<details>`, the
+same treatment B10 and B13 received.
+
+*Gate:* the arithmetic balances; `HANDOFF.md ## BACKLOG` is a pointer under ~20 lines; and
+searching the repo for "also read HANDOFF.md ## BACKLOG" returns nothing that implies a
+second tracker.
+
+---
+
+## F. Stale `AGENTS.md` KNOWN LIMITATION — small, and it misleads item A
+
+Found by Kimi in the same round. `AGENTS.md:1130-1136` states that
+`shared-supabase-migrations.yml` is `paths:`-filtered and therefore cannot be a required
+check without deadlocking every unrelated PR.
+
+**Verify it against the workflow before acting on either.** If the workflow is no longer
+path-filtered, that limitation is stale and has been discouraging exactly the hardening item
+A needs. If it is still accurate, item A must not propose making that workflow required.
+
+**Either way one of the two documents is wrong, and this is cheap to settle.**
 
 ---
 
@@ -134,7 +227,12 @@ migrations on one function.
 **B1** — `scripts/check-orchestrator-marker.mjs`: fails when **more than one**
 `orchestrator-marker` issue is open, and fails when a `gh` call errors rather than treating
 an error as zero. Wire it as a **required** check with no `paths:` filter, like the intake
-pointer guard.
+pointer guard, **and on a schedule** — Kimi's point: a PR-only check sees nothing during the
+hours when two orchestrators are actually colliding, because neither may open a PR.
+
+**B1a** — Add an **old-label tripwire**: fail if any issue still carries `coordinator-marker`,
+or if that label is ever recreated. Querying the retired label returns empty, and step 0
+treats empty as permission to start.
 
 ⚠️ **This does not prevent a second orchestrator from starting** — nothing in CI can, since
 a session claims its marker outside any pull request. It makes the collision **visible on
@@ -158,10 +256,20 @@ to invent one.** What it can do is make the next thing that session *does* fail 
 ruling's PR must also close or retitle every issue it invalidates, in the same PR. Today
 that happened by hand and only because someone noticed.
 
-**C2** — `scripts/check-cancelled-work.mjs`: reads a small committed table of
-`(cancelled instruction, ruling reference)` and fails a PR that reintroduces a cancelled
-instruction. Seed it with the two known ones: the R-SEC-1 history scrub, and making the
-repo private.
+**C2** — `scripts/check-cancelled-work.mjs`: a committed table of
+`(cancelled instruction, ruling reference, reason)` — **per-row reasons, not a bare list** —
+that fails a PR reintroducing a cancelled instruction. Seed it with the two known ones: the
+R-SEC-1 history scrub, and making the repo private.
+
+⚠️ **Kimi's objection, accepted: a hand-maintained table is a rot trap.** Two mitigations,
+both required or do not build it:
+- **The table lives only where the check consumes it.** No second copy in prose. A list
+  nothing reads is a list nothing updates.
+- **A rot-valve test:** the check must fail if the table is empty or if a row lacks a
+  reason, so silently gutting it is not a quiet way to make the check pass.
+
+**The model already exists in this repo** — the `HARD_BLOCKED` mechanism — so follow it
+rather than inventing a new shape.
 
 **C3** — Add to the handover skill: an orchestrator re-reads `AGENTS.md` §6 owner rulings
 **at handover**, not only at session start, and states in its handover which rulings post-date
@@ -178,9 +286,11 @@ regression and should be named as one.
 Anything unlabelled is "later". Three tiers, not five: a five-tier scheme becomes a
 lifecycle, and design decision D7 of the migration plan rejected exactly that.
 
-**D2 — One pinned issue, `THE BOARD`**, holding the ordered `now` list and nothing else.
-It is a pointer, not a second tracker — if it starts carrying detail it has become the old
-file again, and that should be written into the issue itself.
+**D2 — GENERATED, not hand-maintained.** Kimi: a hand-kept `THE BOARD` issue is the old
+file in miniature and will rot identically. Either a scheduled job regenerates its body from
+`--label now` on every change, **or it is not built at all** and `gh issue list --label now`
+is the board. **Recommendation: do not build it.** The command is the board; a rendered copy
+of a query is a cache, and a stale cache here is exactly the failure being fixed.
 
 **D3** — The orchestrator skill's session-start step reads `--label now` first.
 
@@ -198,6 +308,8 @@ is small enough to re-derive from scratch in minutes.
    > production Supabase project `qsllyeztdwjgirsysgai`, in version order, using the
    > allowlist and **without** `--include-all`.
 3. **D1** — are two priority labels enough, or do you want a third?
+4. **E** — the 14 backlog items become issues like everything else. Say yes and it just
+   happens; it needs no decision beyond confirming you want one list, not two.
 
 ---
 
