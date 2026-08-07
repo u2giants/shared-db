@@ -190,11 +190,23 @@ begin
 
   -- ---------------------------------------------------------------------
   -- IDEMPOTENCE. Already applied -> say so out loud and stop. Never a silent no-op.
+  --
+  -- THIS `return` SITS BEFORE THE AUDIT BLOCK AT THE BOTTOM, AND THAT IS INTENDED.
+  -- An already-correct row therefore does NOT get a core.taxonomy_owner_ruling row
+  -- written by this run. Reviewed 2026-08-07 and deliberately left as is, because moving
+  -- the audit block earlier could not achieve the backfill it looks like it would:
+  -- core.taxonomy_owner_ruling does not exist on production (20260802171000 is held by
+  -- AGENTS.md 6.5), and by the time it IS created there, THIS migration will already be
+  -- recorded in the ledger and will never re-run whatever its body says. The backfill can
+  -- only ever be done by a SEPARATE forward migration authored after the held one is
+  -- promoted. Reordering here would buy nothing and would make the already-applied path
+  -- do work its NOTICE says it is not doing.
   -- ---------------------------------------------------------------------
   if v_current_lic = c_licensor_disney then
     raise notice
       'Coco ruling: ALREADY APPLIED. core.property COCO (%) is already parented to '
-      'DISNEY (%). No row changed.', c_property_coco, c_licensor_disney;
+      'DISNEY (%). No row changed, and no audit row written -- see the comment above.',
+      c_property_coco, c_licensor_disney;
     return;
   end if;
 
@@ -230,7 +242,9 @@ begin
   end if;
 
   -- ---------------------------------------------------------------------
-  -- Apply the ruling. ONE column, ONE row.
+  -- Apply the ruling. ONE ROW. Two columns are written: `licensor_id`, which IS the
+  -- ruling, and `metadata`, which records the provenance and the reversal pointer.
+  -- (An earlier revision of this comment said "ONE column"; that was wrong.)
   -- The previous licensor UUID is preserved in metadata so the change is reversible
   -- without reading this file, and so a later reader can tell a curated value from an
   -- imported one (which is exactly what AGENTS.md 6.6 rule 4(b) asks a migration to record).
@@ -288,8 +302,22 @@ begin
   -- there. An unconditional insert would make this migration fail on production while
   -- succeeding on preview: a promotion-time break that preview could never catch.
   --
-  -- So the insert is guarded by to_regclass and executed dynamically (a plain static
-  -- INSERT would fail to PARSE on a database lacking the table, guard or no guard).
+  -- So the insert is guarded by to_regclass AND executed dynamically.
+  --
+  -- WHY DYNAMICALLY -- the reason corrected 2026-08-07. An earlier revision of this
+  -- comment claimed a static INSERT "would fail to PARSE on a database lacking the table,
+  -- guard or no guard". That reasoning is WRONG: PL/pgSQL plans an embedded SQL statement
+  -- lazily, the first time execution actually reaches it, so a static INSERT inside an
+  -- IF branch that is never entered would not be planned and would not fail.
+  --
+  -- The real reasons to keep EXECUTE are about later runs, not this one:
+  --   1. Plan caching. Once the branch IS entered on a database where the table exists,
+  --      the plan is cached against that relation OID for the session. Dynamic EXECUTE
+  --      keeps the statement re-planned and keeps this block's behaviour dependent only
+  --      on the to_regclass check that immediately precedes it.
+  --   2. It keeps the guard and the statement honest as a pair: nothing about this INSERT
+  --      is resolved until the guard has already said the table is there.
+  -- The to_regclass guard is what actually makes this safe on production, and it stays.
   -- When the held migration is promoted, this record can be backfilled; the parent edge
   -- above is applied either way and does not depend on the audit row.
   -- ---------------------------------------------------------------------
@@ -314,7 +342,8 @@ begin
         'public.properties row for Coco was already filed under Disney (DS), so this '
         'ends a self-contradiction between the two taxonomies rather than creating one.',
         'APPLIED: core.property COCO.licensor_id changed from ZZ DTR - NO LICENSE to DY '
-        'DISNEY. Exactly one column on one row. NOT APPLIED, deliberately: no '
+        'DISNEY, and metadata gained the provenance/reversal record. Exactly one ROW. '
+        'NOT APPLIED, deliberately: no '
         'public.assets row was written (all 15 already read DISNEY); the legacy '
         'public.licensors / public.properties tables were not touched or retired '
         '(Option 3, declined); MARVEL and STAR WARS were not re-parented under DISNEY '
