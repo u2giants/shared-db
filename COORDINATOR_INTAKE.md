@@ -679,6 +679,213 @@ after it is filed. Only the coordinator moves a block out of here.
 > ⚠️ **That session could not reach GitHub. Five branches are unpushed and
 > coordinator marker issue #453 is still OPEN — it is NOT a dead coordinator.**
 
+### CLOSING NOTE — all three findings in the block below are now RESOLVED; the OPA request itself is still OPEN — 2026-08-07 — session: opa-scrape (t16)
+
+Appended rather than edited in place, per this file's log rule. Verified against
+`origin/main`, not from memory.
+
+| Finding in the block below | State |
+| --- | --- |
+| (a) `AGENTS.md` §6.7 stale on branch protection | ✅ **FIXED on `main`** by PR #467 (`53bc3f0`). §6.7 now reads `strict: true` and is dated. It was fixed on that branch hours before it reached `main` — this session marked it closed too early on branch-level evidence. Verify against `main`, never a branch. |
+| (b) PR #467 carrying this session's four OPA files | ✅ **RESOLVED.** The other session merged `main` into its branch and took `main`'s version in all three conflicts. **Verified: the retraction in §4 of the OPA README survived — the disproved claim is gone from `main` and the corrected block is present.** ⚠️ Note the prediction in the block below that "merging #466 first clears #467 automatically" was **WRONG**: the rescue used `git cherry-pick`, which creates new commit IDs, so git never saw the two copies as the same commits. |
+| (c) Hosted-runner starvation reading as a failed check | ✅ **CLEARED** with the 2026-08-06 GitHub Actions outage. `Cross-PR object collision` later passed in **28 seconds**. Dropped push events were **not** replayed — closing and reopening the PR was what fired fresh runs. The documentation value stands: **check job annotations before believing a red X.** |
+
+**Still OPEN and unstarted: the OPA lookup table itself.** Both the original
+request and its supplement remain live below. Nothing has been dispatched, no
+database call has been made, and `HANDOFF.d/` no longer carries an OPA file
+because this session's own work is complete — **the queue is now the only record
+of the outstanding work.**
+
+⚠️ **Two sessions independently hit the shared-checkout problem on 2026-08-06**
+(this one had commits land on another branch twice; the other silently inherited
+a commit and nearly landed a retracted claim on `main`). That is two findings,
+not one, and nothing currently guards it. The durable fix is a hard rule: **no
+session works in the shared checkout `C:/repos/shared-db` directly — worktrees only.** Belongs in
+`AGENTS.md`, which is single-writer and was deliberately not touched here.
+
+### REQUEST — `AGENTS.md` §6.7 is STALE on branch protection (verified live), plus fresh evidence the shared checkout is still colliding, plus a CI trap — 2026-08-06 — session: opa-scrape (t16)
+
+Three findings from one session. Full detail:
+`HANDOFF.d/2026-08-06T1755Z-t16-claude-opa-character-extract.md` §5, §6, §7.
+
+**1. What outcome is needed, and why.**
+
+**(a) `AGENTS.md` §6.7 no longer describes reality.** Verified live 2026-08-06
+~17:45Z with `gh api repos/u2giants/shared-db/branches/main/protection`:
+
+| Fact | §6.7 / this queue says | **Live** |
+| --- | --- | --- |
+| Required checks | **ONE** (`Promotion contract tests (offline)`), because three workflows all exposed a check named `verify` | **ALL SIX** — `Promotion contract tests (offline)`, `Backlog / queue sync`, `Cross-PR object collision`, `Tools offline tests`, `SQL migration guards`, `Domain ownership` |
+| `strict` | `false` | **`true`** |
+| `enforce_admins` | `true` | `true` |
+
+The `ci-check-names` work has evidently landed. Two consequences: the documented
+caveat that "a check can pass against a `main` that has since moved" is largely
+**closed** by `strict: true` and should stop being repeated unexamined; and
+**every open PR must now be current with `main` to merge**, which with ~15 open
+branches will bite.
+
+**This session did NOT edit `AGENTS.md`** — it is single-writer and the live
+session behind PR #467 is editing it right now (commit `60dcec3` touches it).
+Handing it over rather than causing a conflict.
+
+**(b) The shared checkout is STILL colliding — fresh evidence, today.** Mid-session
+another session switched `C:\repos\shared-db` from this session's branch to
+`docs/plan-dispatch-collision-hardening` and committed on top. A commit landed on
+the wrong branch and was pushed there before it was noticed. It was recovered
+**non-destructively** (cherry-picked to the right branch through a temporary
+worktree; their branch was never rewritten, reverted or force-pushed).
+
+⚠️ **Residual damage needing a decision: [PR #467](https://github.com/u2giants/shared-db/pull/467) currently contains all four of this session's OPA files**, because its branch was cut from this one.
+**The clean fix is to merge PR #466 FIRST** — once those files are on `main` they
+drop out of #467's diff by themselves. **No history rewriting, no risk to the
+other session's work.** Do that before anyone attempts to rebase or force-push
+#467.
+
+The queue already carries items about this checkout being unsafe. This is
+evidence they are still live. The durable fix is that **no session works directly
+in the shared checkout — worktrees only.**
+
+**(c) A CI trap worth documenting next to `AGENTS.md` §5.2.** `Cross-PR object
+collision` on PR #466 went **red after 44 minutes without ever running**. The
+annotation: *"The job was not acquired by Runner of type hosted even after
+multiple attempts."* That is **GitHub hosted-runner starvation, not a collision.**
+`gh run rerun --failed` cleared it. This is a second, distinct flavour of the
+false-verdict problem §5.2 already covers for `paths:` filters. **Before believing
+a red X, check the job annotations for that runner message.**
+
+**2. Which application(s) depend on this.** None directly — this is repo/CI
+hygiene. It affects every session that merges anything.
+
+**3. Is it blocking anything, and how urgently?** (a) and (c) are documentation
+only, not blocking. (b) blocks a clean merge of PR #467 until PR #466 merges.
+
+**4. Deadline, if any.** None.
+
+**5. What I already know about the current schema.** Nothing — no database call
+was made by this session.
+
+**6. Confirmation of what I have NOT done. [MANDATORY]** No migration, no preview
+or production push, no `supabase` CLI, no Supabase MCP call, no `psql`, no chip,
+**no edit to `AGENTS.md`**, and no rewrite/revert/force-push of any other
+session's branch. Only `COORDINATOR_INTAKE.md`, `HANDOFF.md`, my own
+`HANDOFF.d/` file and the two files under
+`docs/verification/opa-characters-20260806/`, all on branch
+`request/opa-character-lookup` (PR #466).
+
+### REQUEST — SUPPLEMENT to the OPA lookup-table request below: a full background doc now exists, and it needs a `HANDOFF.md` pointer — 2026-08-06 — requester: Albert Hazan (via session: opa-scrape, t16)
+
+**1. What outcome is needed, and why.** Two things, both small.
+
+(a) The OPA request immediately below was filed before its background document
+existed, so that block points only at the CSV. The full document is
+`docs/verification/opa-characters-20260806/README.md` — read **that**, not just
+the request block, before dispatching the OPA work. It carries the data shape,
+the reproduction snippet, six caveats, six open design questions, and a
+what-did-NOT-work table.
+
+(b) **`HANDOFF.md` does not mention this work at all** (verified 2026-08-06:
+zero matches for `OPA` across all 6,280 lines). It should, because `HANDOFF.md`
+is this repo's authoritative record of outstanding work and already references
+`docs/verification/` folders in 43 places. The natural home is the existing
+section *"Active workstream — Characters and style guides → canonical
+(2026-07-26)"* (~line 4269), since the OPA data bears directly on it.
+
+**This requester did not make that edit, deliberately.** `HANDOFF.md` is a
+single-writer file owned by the coordinator; a requester writing to it is exactly
+the uncoordinated write this file exists to prevent. Handing it over rather than
+doing it.
+
+⚠️ One caveat from the README worth surfacing at dispatch time, because it may
+change the answer rather than just annotate it: the extract was taken from a URL
+scoped to the **Home** line of business (`lobName=Option.Lob.Home`). Whether other
+lines of business expose a different or larger property set is **unverified**. If
+they do, 1,445 properties is a subset, not the whole picture.
+
+**2. Which application(s) depend on this.** Same as the block below: PopDAM
+primarily; cross-app if joined to `core.property`.
+
+**3. Is it blocking anything, and how urgently?** Not blocking.
+
+**4. Deadline, if any.** None.
+
+**5. What I already know about the current schema.** Nothing further. Still zero
+database calls made by this session.
+
+**6. Confirmation of what I have NOT done. [MANDATORY]** No migration file, no
+preview or production push, no `supabase` CLI, no Supabase MCP call, no `psql`,
+no background task chip, no edit to `HANDOFF.md`. Only `COORDINATOR_INTAKE.md`
+and the two files under `docs/verification/opa-characters-20260806/`, all on
+branch `request/opa-character-lookup` (PR #466).
+
+### REQUEST — Store the Disney OPA property→character list as a lookup table — 2026-08-06 — requester: Albert Hazan (via session: opa-scrape, t16)
+
+**1. What outcome is needed, and why.** Albert needs Disney's authoritative
+property-and-character list available in the shared database as a lookup, instead
+of living only in the OPA web portal behind MFA. Today the only way to see which
+characters are approvable under which Disney property is to open OPA and expand a
+tree by hand. Having it queryable lets the character/style-guide reconciliation
+work stop guessing at Disney's canonical spellings and IDs, and lets apps validate
+a character against the licensor's own list.
+
+The extract is attached in this same PR as a source artifact so it cannot be lost:
+`docs/verification/opa-characters-20260806/opa-characters.csv` — 10,262 rows,
+1,445 Disney properties, 9,591 distinct character names. Columns as OPA supplies
+them: `property`, `licensedPropertyID`, `optionSourceID`, `character`,
+`characterID`, `brandPropertyID`. The IDs are Disney's own keys, not ours.
+
+**Design is the coordinator's to choose, not the requester's.** Two points worth
+weighing: (a) OPA scopes characters *per property*, so the same character name
+recurs across properties — the natural key is the pair, not the name, and 670-odd
+names appear under more than one property; (b) this is **vendor source data from
+Disney**, so it likely belongs alongside the other vendor/source-owned material
+rather than being merged into `core.property` / character identities directly.
+Whether it becomes a raw landing table plus a view, or is reconciled against the
+existing character identity work, is a design call.
+
+**2. Which application(s) depend on this.** PopDAM primarily (character and
+style-guide taxonomy). PopCRM and DesignFlow both read licensor/property data, so
+if this is joined to `core.property` in any way it becomes a **cross-app data
+contract**. Also directly relevant to the DB Data Admin curation screen already in
+this queue.
+
+**3. Is it blocking anything, and how urgently?** Not blocking. Nobody is idle.
+It unblocks nothing that is currently stopped, but it is directly useful to the
+in-flight characters / style-guides workstream, which has repeatedly had to ask
+Laura questions that Disney's own list may answer outright.
+
+**4. Deadline, if any.** None.
+
+**5. What I already know about the current schema.** **Almost nothing, and I did
+not verify any of it live** — I made no database call of any kind. The one schema
+fact I have is second-hand from this very file: `core.property` is declared
+`unique (licensor_id, code)` and licensor→property is parent-child, so property
+codes are **not** globally unique (recorded at `COORDINATOR_INTAKE.md` line ~3000,
+citing `supabase/migrations/20260621150815_app_core.sql:200`). I have **not**
+checked whether a character table already exists, whether the existing character
+identity work in `docs/verification/character-identity-rules-20260728/` already
+covers some of this, or how Disney appears as a licensor. **The coordinator should
+assume overlap with the existing characters / style-guides workstream and dedupe
+before dispatching** — see the related blocks in this file for "Characters /
+style-guides Phase 1" and the Laura round-2/round-3 licensing answers.
+
+**6. Confirmation of what I have NOT done. [MANDATORY]** No migration file
+written. No push to preview or production. No `supabase` CLI command run. No
+Supabase MCP call. No `psql`. No background task chip. No schema, RLS, view, RPC,
+function, trigger, grant, or seed touched. The only branch created is this one,
+`request/opa-character-lookup`, and it contains exactly two things: this request
+block and the source CSV. Nothing in `supabase/` is touched.
+
+**Provenance of the CSV, so it can be reproduced or challenged.** Pulled
+2026-08-06 from `opa.disney.com` product-create screen, under Albert's own
+authenticated OPA session in his Chrome (he completed the MFA himself; no
+credential passed through the AI session). OPA loads the whole
+property-and-character tree into the page at once, so the data was read out of the
+page's own loaded state — no crawling, no pagination, no submitted form, nothing
+created in OPA. It reflects **what Albert's licensee account is entitled to see**,
+which is not necessarily all of Disney's catalog. Retired and "No Likeness"
+variants were **not** filtered out.
+
 ### REQUEST — ⚠️ FIRST ACTION: push and merge FIVE unpushed local branches, then close coordinator marker issue #453 — 2026-08-06 — session: outgoing coordinator (al8960ofc)
 
 **1. What outcome is needed, and why.** GitHub was unreachable from `al8960ofc` on
@@ -2742,7 +2949,86 @@ Requests the coordinator has verified and dispatched. Each block is annotated
 with the branch name and the sub-agent handling it. Moved here and out again by
 the coordinator only.
 
-_(none yet)_
+### IN PROGRESS — Store the Disney OPA property→character list as a lookup table — dispatched 2026-08-07 — coordinator session 774f5010 (t16), marker issue #473
+
+Covers the `## REQUEST QUEUE` block "Store the Disney OPA property→character list
+as a lookup table" (2026-08-06), its SUPPLEMENT, and its 2026-08-07 CLOSING NOTE.
+Those three blocks stay in the REQUEST QUEUE until the work merges.
+
+**Dispatched to (phase 1 of 2, READ-ONLY DESIGN):**
+
+| | |
+| --- | --- |
+| Branch | `agent/opa-lookup-design-20260807` |
+| Worktree | `C:/Users/ahazan2/AppData/Local/Temp/claude/opa-design-20260807` |
+| Base | `origin/main` `105c2ecfb39363f23353216a9cc0d805b58260eb` |
+| Owns | new files under `docs/verification/opa-characters-20260806/` ONLY |
+| Does NOT own | `HANDOFF.md`, `AGENTS.md`, `COORDINATOR_INTAKE.md`, `supabase/**` |
+| Migration version | none allocated — phase 1 writes no migration |
+| Deliverable | `docs/verification/opa-characters-20260806/DESIGN.md` + PR |
+
+**Collision check run before dispatch** (`scripts/check-dispatch-collision.mjs`,
+objects `core.character, core.property, ingest.raw_record,
+plm.opa_property_character`): exit 0, **0 in-flight items to compare against**.
+The tool reports it does NOT check tables, indexes, grants or any `ALTER` form —
+the coordinator confirmed those separately: no open `db-claim` issues, and both
+open PRs (#468, #472) are single-file docs-only appends to this file with no SQL.
+**No `db-claim` was filed**, because phase 1 is read-only and cannot collide. A
+claim IS required before phase 2, using the exact object names phase 1 returns.
+
+**Why the work was split.** The coordinator could not confidently declare the
+objects phase 2 will write without first reading the live schema (the vendor
+landing-schema home is not established from repo docs alone). Per the
+orchestrator skill, a task that cannot declare its objects is dispatched
+read-only rather than guessed at — a wrong declaration reads as safety.
+
+**Dedupe performed before dispatch (do not redo).** PR #468
+("characters/style-guides findings — `core.character` is EMPTY") **OVERLAPS but
+does not duplicate** this request. #468's diff is one file, +188/−0, prose only,
+with no DDL and no table design; its finding is that `core.character` has 0 rows.
+The OPA request is a proposal for what fills it. The datasets count different
+things — OPA holds 10,262 distinct (property, character) **pairs**, the legacy
+tables hold ~9,622 **appearances** — so neither is redundant. #468 states in its
+own block that it never opened the OPA file. Also deduped against the wider
+characters / style-guides workstream (`docs/style-guides-characters-and-royalties.md`,
+`docs/verification/character-identity-rules-20260728/`): that workstream has
+already settled the `core.character` **shape**; what it lacks is the **input**,
+which is exactly what this request supplies.
+
+**The disproved lineage claim in README §6a was NOT re-derived.** The agent is
+explicitly instructed not to re-raise it or to cite row-count similarity as
+evidence of shared lineage.
+
+**Owner decisions obtained from Albert 2026-08-07 (§7 of the OPA README):**
+
+| §7 question | Ruling | By |
+| --- | --- | --- |
+| 5. Refresh policy | **One-off snapshot.** No schedule. Stamp the capture date; document the manual two-minute refresh ritual. Automation impossible (MFA, no API). | Albert |
+| Line-of-business scope (README §5 caveat) | **Build from the Home extract we have.** Do not ask Albert to re-log into OPA. The design must record plainly that it is Home-only and entitlement-scoped. | Albert |
+| 6. `- No Likeness` / `- With Likeness` | **Base name plus a likeness flag.** Coordinator ruling on HOW: raw table keeps Disney's exact string untouched; the split lives in the **view**, marked as our interpretation. | Albert (what) + coordinator (how) |
+| 1. Where does it land? | **Raw vendor source table + consumable view**, following the repo's existing vendor/source-owned pattern. The agent must find and name that pattern, not invent one. | Coordinator |
+| 2. Does it join to `core.property`? | **No — not in this landing.** A join makes it a cross-app data contract (PopCRM + DesignFlow read licensor/property data). Land standalone; reconciliation is separate, later work. | Coordinator |
+| 4. Overlap with existing character identity work? | **Deduped, see above.** Agent must report disagreements with `canonical-character-identities.csv` as findings, not resolve them. | Coordinator |
+| 3. How is Disney identified as a licensor? | **STILL OPEN — reserved for Albert.** Agent looks it up read-only and presents options; picking the canonical licensor value is an owner gate. Note history: a property was filed under a licensor named `NO LICENSE`, and Albert ruled 2026-08-06 that "Coco IS a Disney license." | pending |
+
+**Standing session facts recorded in the brief:** all work in a git worktree,
+never in the shared checkout `C:/repos/shared-db` (two sessions collided there
+2026-08-06); and before believing a red CI check, read its job annotations —
+hosted-runner starvation shows up as a failure that never ran.
+
+**Tooling note for the next coordinator.** `gh issue list --label <label>` returns
+EMPTY in this repo even for issues that demonstrably carry the label (verified
+against marker issue #473). Use the REST path instead:
+`gh api "repos/u2giants/shared-db/issues?labels=coordinator-marker&state=open"`.
+Trusting the empty `gh issue list` result would let a second coordinator claim a
+marker while one is already live. The same caveat applies to `db-claim` lookups.
+Separately, `check-dispatch-collision.mjs --allocate-version` is **WITHDRAWN** and
+now refuses; pick the migration version manually.
+
+**Phase 2 (BUILD) is NOT dispatched.** It must not be dispatched until phase 1's
+design is reviewed, Albert has answered §7 Q3, a `db-claim` is filed with phase
+1's exact object names, and the collision check is re-run against a re-derived
+`origin/main`.
 
 ---
 
