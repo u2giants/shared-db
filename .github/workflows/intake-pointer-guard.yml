@@ -1,0 +1,67 @@
+# Guard: COORDINATOR_INTAKE.md must not grow a queue back once it is a pointer.
+#
+# Why this workflow exists (added 2026-08-07, plan_coordinator-queue-to-github-issues.md).
+#
+# Step 5 of that plan requires the updated skills to reach EVERY machine before step 8
+# reduces the orchestrator queue to a pointer. The failure it guards is silent: a machine
+# still running the old skill appends its handover to the pointer, the file grows a body,
+# and the queue this migration deletes is rebuilt live, mid-migration, with nothing raising
+# a hand.
+#
+# The precondition "propagation confirmed on every machine" cannot be verified by any
+# single session — a session can hash its own installed skills against the hub, but it
+# cannot see the other four machines. Raised in review by Kimi K3 on 2026-08-07, and
+# correct: a precondition nobody can check is a precondition nobody checks.
+#
+# So this inverts the gate. Rather than proving every machine is current BEFORE the
+# cutover, it DETECTS the single behaviour a stale machine produces, on the very next pull
+# request, and fails. An unverifiable precondition becomes a verifiable detector.
+#
+# Design rules, same as the other repo-wide guards here:
+#   1. NO `paths:` filter. With one, the docs-only PR that carries the rebuild is exactly
+#      the PR that skips the job, and the PR still shows all-checks-passed. AGENTS.md §5.2
+#      records this false-verdict pattern happening in this repo already.
+#   2. A UNIQUE check-run name. Three workflows once all exposed a check named `verify`,
+#      which is why only one could be made a required context (AGENTS.md §6.7).
+#   3. It must be a REQUIRED status check. As an advisory check it detects the rebuild and
+#      nobody notices, which is the same class of defect as the check it replaces.
+#   4. Offline and deterministic. No secrets, no network, no database.
+#
+# It is deliberately merged and made required BEFORE step 8, while dormant
+# (POINTER_MODE = false in the script). If the context does not already exist and pass,
+# step 8's own PR is blocked by the gate step 8 introduces.
+
+name: Intake Pointer Guard
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: intake-pointer-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Intake pointer guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Prove the guard refuses a rebuilt queue
+        # The negative-path tests run FIRST and in the same job. Backlog B7 is standing
+        # policy here: an existence check is worthless against this defect class, and a
+        # guard whose own tests are not run is a guard nobody has proven fires.
+        run: node --test scripts/check-intake-pointer.test.mjs
+
+      - name: Check the orchestrator queue has not grown back
+        run: node scripts/check-intake-pointer.mjs

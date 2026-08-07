@@ -60,6 +60,13 @@ jobs:
       - name: Unit-test the checker itself (includes the negative path)
         run: node --test scripts/check-pr-object-collisions.test.mjs
 
+      # The DISPATCH-time checker imports extractObjects from the script above,
+      # so a change to that parser can silently break it. Both suites run in
+      # this one job precisely so they cannot drift apart. This step adds no new
+      # required status context -- the job name is unchanged.
+      - name: Unit-test the dispatch-time collision checker (shares the parser)
+        run: node --test scripts/check-dispatch-collision.test.mjs
+
       - name: No other open PR replaces the same database object
         env:
           GH_TOKEN: ${{ github.token }}

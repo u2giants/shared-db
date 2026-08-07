@@ -8,20 +8,27 @@
 
 # AGENTS.md — cross-app coordination playbook
 
+## Active implementation plan
+
+- PopDAM OrderList linked to Master Data: [`plan_popdam_order_list.md`](plan_popdam_order_list.md). Read its STATUS table first. Do not re-derive or re-plan completed steps.
+
 This is the operating contract for **every AI session working on any app that
 shares the Supabase database**: PM/PIM `poppim-web`, CRM `popcrm-web`, DAM
 `popdam-web`, and the six `popcre/designflow-*` PLM repos. Read it before
 touching code or the database. It exists to stop separate
 AI sessions from breaking each other through the one database they all depend on.
 
-> **Started in `shared-db` and you are not the coordinator? Stop and hand over.**
-> This repo runs **one coordinator session**, which dispatches every task to
-> sub-agents in isolated worktrees. Any other session writes its handover into
-> the intake queue in [`COORDINATOR_INTAKE.md`](COORDINATOR_INTAKE.md) and stops.
-> That file also carries the standing facts an incoming session needs (silent
-> duplicate-version skips, the production-bound Supabase MCP, preview as a shared
-> mutable resource) and the ban on background task chips in this repo. Skills:
-> `shared-db-orchestrator` to run a coordinator session, `shared-db-handover` to
+> **Started in `shared-db` and you are not the orchestrator? Stop and hand over.**
+> This repo runs **one orchestrator session**, which dispatches every task to
+> sub-agents in isolated worktrees. **Any other session opens a GitHub issue and stops:**
+> `gh issue create --repo u2giants/shared-db --label db-work --title "HANDOVER: …" --body-file <file>`.
+> ⚠️ **`COORDINATOR_INTAKE.md` is RETIRED** (2026-08-07) and is now a 37-line pointer.
+> Do not write into it — a required check fails any PR that regrows it.
+> **The standing facts an incoming session needs — silent duplicate-version skips, the
+> production-bound Supabase MCP, preview as a shared mutable resource, and the ban on
+> background task chips — are now §12 of THIS file**, re-homed 2026-08-07 ahead of the
+> queue file being retired. Skills:
+> `shared-db-orchestrator` to run a orchestrator session, `shared-db-handover` to
 > close one out.
 
 ## 0. Shared-db gatekeeper rule for consumer repos
@@ -206,6 +213,45 @@ four rules below are non-negotiable for any database change.
    check whether another change is already in progress (§6). If so, finish or
    land that one first, or coordinate with the owner. Two simultaneous schema
    edits are the number-one cause of a broken shared database.
+
+   **Do not judge this by reading documents — run the check.** It compares what
+   you intend to write against every open `db-claim` and every open pull request:
+
+   ```bash
+   node scripts/check-dispatch-collision.mjs \
+     --task "<what you are about to do>" \
+     --objects "<every object you will WRITE, comma-separated>"
+   ```
+
+   Exit `0` means **the check completed and found no overlap in the object
+   classes it can read** — that is evidence, not clearance; read the CHECKED /
+   NOT CHECKED lists it prints and judge the rest yourself. `1` collision
+   (**stop**), `2` undetermined (**stop**, or proceed READ-ONLY).
+
+   ⚠️ **`--allocate-version` was withdrawn on 2026-08-07 and now exits `2`.** It
+   never reserved anything — it read the versions in use and printed a
+   suggestion, so two orchestrators running it in the same minute were handed the
+   same number. Pick a version manually; duplicates are already blocked at merge
+   by the `SQL migration guards` check. An atomic reservation is plan step 6.
+
+   **If you cannot list the objects up front, your task is read-only** — and read-only work cannot
+   collide. Close your claim when the work merges or is abandoned; an open claim
+   is a lock on those objects, not a note.
+
+   This runs BEFORE the work. The `Cross-PR object collision` CI check is the
+   backstop AFTER it, and by the time that one fires, somebody's session is
+   already wasted — on 2026-07-31, three of four were.
+
+   ⚠️ **KNOWN LIMIT, being fixed — read this before trusting a clear result.**
+   The SQL parser behind both checks models only `function`, `procedure`,
+   `view`, `materialized view`, `trigger` and `policy`. It is **blind to
+   `alter table`, `create table`, `create index`, `grant`, `comment on` and
+   `create type`** — about 1,921 statements in `supabase/migrations/` versus 754
+   it can see. Two agents both running `alter table core.licensor …` are
+   reported as no-overlap. The fix, its reasoning, and the two live experiments
+   that settled the design are in
+   [`plan_dispatch-collision-hardening.md`](plan_dispatch-collision-hardening.md)
+   — **read its STATUS table first; do not re-plan or re-derive it.**
    **The concrete symptom when this rule is broken:** the preview branch is
    persistent, so its ledger holds every branch that ever ran `db push` —
    including unmerged ones. A `main`-based checkout then cannot dry-run against
@@ -339,7 +385,7 @@ rule closes that evidence gap, not a mistake.
    "preview". Any tool call, environment change, reconnect, or turn boundary between the
    check and the statement invalidates the check — redo it.
 3. **The proof must be stated in the agent's report** — the message it gives the owner (or
-   the coordinator) at the end of the turn — quoting the value it actually
+   the orchestrator) at the end of the turn — quoting the value it actually
    observed (the project ref or URL) and the statement it authorised. A report of a
    destructive statement without a quoted, immediately-preceding target proof is an
    incomplete report.
@@ -965,9 +1011,9 @@ never by rewriting history.
   parent for a human to look at; it may never set one. A curation *screen* is exactly what a
   hand-curated link requires, so the hand-curation ruling and this section point the same way.
   (Recorded in the
-  coordinator intake as ruling 4.)
+  orchestrator intake as ruling 4.)
 - **`dflow.*` is being retired; `core.*` becomes the source of truth for all applications**, fed
-  from ColdLion as the ultimate upstream. (Recorded in the coordinator intake as ruling 6.)
+  from ColdLion as the ultimate upstream. (Recorded in the orchestrator intake as ruling 6.)
   **§6.6 is the direct consequence of this.** If `core.*` serves every app, the surface on which
   humans curate `core.*` must not be locked inside one application — which is precisely Albert's
   "it should not be only in 1 particular application". Building further curation into DesignFlow
@@ -995,27 +1041,74 @@ it.
 
 ### 6.7 OWNER RULING — branch protection on `main` is ON, and CI guards are no longer advisory (Albert Hazan, 2026-08-04)
 
+> ### ⛔ READ THIS FIRST — two owner rulings on 2026-08-07 that change everything below
+>
+> **(1) `u2giants/shared-db` is PUBLIC, and it stays public.** It was made private at
+> ~15:10 UTC on 2026-08-07 and **public again at ~16:5x UTC the same day, on Albert's
+> explicit and twice-repeated instruction.** Do **not** make it private again, and do not
+> re-raise the question.
+>
+> **(2) OWNER RULING — the Disney OPA property/character extract is NOT sensitive
+> (Albert Hazan, 2026-08-07).** `docs/verification/opa-characters-20260806/opa-characters.csv`
+> — 10,262 rows of Disney property and character names with Disney's own IDs — may stay in
+> this public repository. Albert was told plainly, twice, that making the repo public
+> republishes that file and that it had never been moved to `licensor-source-data`. He
+> ruled: *"that data is not sensitive."* **He owns the Disney licensee relationship and
+> this is his call to make. It is settled.**
+>
+> **What this supersedes.** Request **R-SEC-1** in `COORDINATOR_INTAKE.md` asks for that
+> CSV to be moved out and scrubbed from git history before the repo can go public. **Its
+> premise is overruled.** Parts (a) and (b) — move the file, leave a pointer — are now
+> optional tidying, not a blocker. Part (c), the git-history rewrite, is **cancelled**;
+> do not rewrite this repository's history for that reason. Part (d) is done.
+> The private repo `u2giants/licensor-source-data` exists and holds only a README.
+>
+> **Why this is written here and not only in the queue.** A future session reading R-SEC-1
+> on its own would make the repo private again, which silently destroys branch protection
+> (see the note below). This ruling is the stop.
+>
+> **⚠️ The trap that caused it, worth keeping.** Going private **silently removed all
+> branch protection**, because a private repository on this account's plan cannot have it.
+> `gh api …/branches/main/protection` returned `403 "Upgrade to GitHub Pro or make this
+> repository public"` and `…/branches/main` reported `protected: false`. Nobody noticed for
+> about two hours. Protection was **restored in full** at 2026-08-07 after the repo went
+> public again, and read back live to the exact table below. **Visibility and protection
+> are coupled on this plan. Never change one without checking the other.**
+
 Albert turned branch protection **ON** for `main` on 2026-08-04. This is a standing decision, ruled
 by the owner. **It is settled — do not re-ask it, do not treat it as an AI's preference, and do not
 weaken it.**
 
-**The verified fact, not a claim.** Read back live at 2026-08-04 12:00 UTC with
-`gh api repos/u2giants/shared-db/branches/main/protection`, after PR #442 (agent `ci-check-names`)
-gave every job a unique `name:` and the coordinator added the newly-disambiguated contexts:
+**The verified fact, not a claim.** Read back live at **2026-08-06 16:00 UTC** with
+`gh api repos/u2giants/shared-db/branches/main/protection`:
 
 | Setting | Value |
 | --- | --- |
-| `required_status_checks.contexts` | `["Promotion contract tests (offline)", "Backlog / queue sync", "Cross-PR object collision", "Tools offline tests"]` |
-| `required_status_checks.strict` | `false` |
+| `required_status_checks.contexts` | `["Promotion contract tests (offline)", "Cross-PR object collision", "Tools offline tests", "SQL migration guards", "Domain ownership", "Intake pointer guard"]` (**six**) — updated 2026-08-07: `Backlog / queue sync` removed, `Intake pointer guard` added, both named by the owner |
+| `required_status_checks.strict` | **`true`** (changed 2026-08-06 — see below) |
 | `enforce_admins.enabled` | **`true`** |
 | `allow_force_pushes.enabled` | `false` |
 | `allow_deletions.enabled` | `false` |
+
+> **`strict` was turned ON on 2026-08-06, by the owner's explicit instruction.** It had
+> been `false`, which left a real hole: `.github/workflows/pr-object-collision.yml` says in
+> its own header that it cannot re-run when a *sibling* PR appears later, so the last
+> member of a colliding set must be re-checked — and *"require branches to be up to date
+> before merging"* is what forces that. With `strict: false`, two PRs could both pass every
+> check and both merge, silently erasing one another. That is the 2026-07-31 four-way
+> incident's exact mechanism. **Do not turn it back off.**
+>
+> ⚠️ **This table was stale for two days** — it still read `strict: false` and four
+> contexts after both had changed. A reviewing model (Grok 4.5, 2026-08-06) read it and
+> concluded a *correct* document was wrong. **Verify branch protection with the `gh api`
+> command above rather than trusting this table**, and re-read it back whenever you change
+> it. Prose asserting mutable state goes stale; the command does not.
 
 **The rule.**
 
 1. **CI guards on this repository are no longer advisory.** Merging through a red *required* check
    is now **mechanically impossible**, including for admins — `enforce_admins` is `true`, so there
-   is no "coordinator override". The event that motivated this ruling was real: on 2026-08-03 PR
+   is no "orchestrator override". The event that motivated this ruling was real: on 2026-08-03 PR
    #431 was merged through a **red** `verify` check (run `30846938009`, job `91797438635`). That
    route is closed.
 2. **`main` cannot be force-pushed or deleted.** Any recovery plan that assumes a rewrite of `main`
@@ -1025,9 +1118,12 @@ gave every job a unique `name:` and the coordinator added the newly-disambiguate
    deadline is **not** approval. If a required check is wrong, fix the check — never the protection.
    This mirrors the standing production-infrastructure rule: an AI session does not relax a control
    in order to get past it.
-4. **Every PR to `main` — including a docs-only PR — must now pass all FOUR required contexts
-   before it is mergeable:** `Promotion contract tests (offline)`, `Backlog / queue sync`,
-   `Cross-PR object collision`, `Tools offline tests`. Confirm with `gh pr checks` before reporting
+4. **Every PR to `main` — including a docs-only PR — must now pass all SIX required contexts
+   before it is mergeable:** `Promotion contract tests (offline)`, `Cross-PR object collision`,
+   `Tools offline tests`, `SQL migration guards`, `Domain ownership`, `Intake pointer guard`.
+   *(Corrected 2026-08-07. This line said FOUR and listed four for days after there were six —
+   re-derive the list with `gh api`, never from this sentence. `Backlog / queue sync` was
+   removed and `Intake pointer guard` added on 2026-08-07 by owner instruction naming both.)* Confirm with `gh pr checks` before reporting
    a PR as ready, and check the run's `head_sha` — a green tick can be a **stale verdict from an
    older commit**. A green PR page is not the same as a satisfied required context.
 
@@ -1104,6 +1200,183 @@ it as an AI's preference, and do not reorder it.**
 2026-07-31 handover and is recorded as **33** now. That reduction has **not** been independently
 re-verified. Re-derive the real count at the time of the work; do not build the admission list from
 this section's number.
+
+### 6.10 OWNER RULINGS — the licensor/property model, and "the feed should not drop anything" (Albert Hazan, 2026-08-06)
+
+Five rulings, all given the same day, all **settled**. Do not re-ask them, do not treat them as an
+AI's preference, and do not reorder ruling 5.
+
+**1. Coco IS a Disney license.** This closes the long-open question of whether `Coco` sitting under a
+"NO LICENSE" licensor was deliberate. It was not. Detail and the resulting open technical question
+live in [`fix_characters_style_guides.md`](fix_characters_style_guides.md).
+
+**2. The CODE alone is meaningless — the DESCRIPTION decides the licensor.**
+
+> "If the CC is connected to a description that says Coco, it's Disney. If it says Coca Cola, it's
+> under the Coca Cola licensor."
+> — Albert Hazan, 2026-08-06
+
+Never resolve a licensor from a property/item code by itself. Read the description that travels with
+the row.
+
+**3. Licensor → Property is parent-child, and property codes are NOT globally unique.** The same code
+may exist under many licensors. `core.property` is keyed `(licensor_id, code)`
+(`20260724030000_coldlion_licensor_property_phase1_mirror_schema.sql`, and see
+[`docs/licensor-property-parent-child-design-20260802.md`](docs/licensor-property-parent-child-design-20260802.md) §2.1).
+
+> **This corrected a wrong assumption the orchestrator held on 2026-08-06, and that assumption is
+> baked into at least one committed tool.** `tools/validate-licensing-answers.mjs` (the property
+> lookup around lines 86–92) resolves a property with `where p.code = any($1)` — no licensor scope.
+> It selects the licensor name and then discards it; only `r.code` is used. It is safe **only**
+> because today's `core.property` copy is crippled (256 rows, one row per code). **Repairing the feed
+> before fixing that query would introduce silent wrong-licensor binding.** Fix the scoping FIRST.
+> This is the same ordering principle as §6.9.
+>
+> Phrases like *"re-parent CC to Disney"* are not meaningful instructions and must not be planned in
+> those words — say which `(licensor_id, code)` row you mean.
+
+**4. "The feed should not drop anything."** The master-data feed must stop silently discarding rows.
+There must be a **licensor/property triage page in DB Data Admin** (the app that serves
+`data-dev.designflow.app`) where Albert fixes the problems the feed finds, instead of the feed
+throwing them away. Requirement:
+`docs/licensor-property-triage-page-requirement-20260806.md` (added 2026-08-06 on branch
+`docs/licensor-property-triage-page-20260806`).
+
+**5. STOP THE DATA LOSS FIRST — ordering ruling.** Asked whether to settle the storage question for
+an ownerless property (nullable FK vs. a holding licensor vs. a quarantine table) before shipping, or
+to stop the loss first, Albert chose **stop the loss first**. Ship quarantine/triage before settling
+the model.
+
+#### 6.10-A What was measured on 2026-08-06 (production `qsllyeztdwjgirsysgai`, read-only)
+
+Recorded so nobody re-measures it, and so nobody quotes the one number that is **not** verified.
+
+| Finding | Value |
+|---|---|
+| Supabase `core.*` vs DesignFlow | 26 licensors / 256 properties / 256 parent edges **vs** 82 / 614 / 503 |
+| Why roughly half the tree never arrives | **By design** — the feed drops inactive properties, unparented properties, and childless licensors. This is the loss ruling 4 forbids |
+| Parent data staleness | Every property row carries the same `updated_at`, **2026-07-08** — the day the PLM sync died. **29 days stale** as of 2026-08-06 |
+| Sync ledger | All 15 sync runs recorded **"succeeded"**. The 502 is invisible in the ledger — never trust `sync_run` status as proof of freshness |
+| Unparented properties in DesignFlow | 111, of which 51 active — VERIFIED live, matches the docs |
+| `core.character` | **EMPTY on production** (0 rows) |
+| `plm.item` | **EMPTY** (0 rows) — the modeled item master was built and never populated |
+| `public.erp_items_current` vs `plm."itemHeader"` | 17,703 vs 19,563 rows; **14 items exist only in `plm."itemHeader"`** |
+| The `CC` case | `core.property` holds one `CC` row named `COCO` under licensor `ZZ` (DTR - NO LICENSE). All **14** items filed there are Coca-Cola merchandise **by description**. Seven items under licensor `DY` (Disney) + property `CC` are genuinely Coco. The real COCA COLA licensor exists but is **INACTIVE with zero items** |
+| Item numbering | `AAA00LLPP00` — chars 6-7 licensor, 8-9 property — holds for **~77%** of items |
+| Parent edges pointing at a non-active licensor | **499 of 503.** Nobody knows what "inactive" means in this data — do not infer it |
+| ⚠️ "241 of 322 property codes (75%) under more than one licensor" | **UNVERIFIED.** This figure has been quoted verbally but is recorded **nowhere** in the repo and was not reproduced on 2026-08-06. **Do not state 75% as fact.** Re-measure before using it |
+
+#### 6.10-B Three corrections to statements already in this repo (2026-08-06)
+
+1. **DB Data Admin lives in THIS repo**, at `apps/db-data-admin/`, despite serving a
+   `designflow.app` hostname. Only the feed **endpoint** change is DesignFlow work. (Verified: the
+   directory exists here.)
+2. **The `NOT NULL` on `core.property.licensor_id` came from
+   `20260724030000_coldlion_licensor_property_phase1_mirror_schema.sql` lines 71–72**, not from the
+   original `20260621150815` migration. (Verified against the file.)
+3. **Blocker 8 was mis-stated across the handover docs.** The endpoint they cite is a **READ**
+   endpoint. The real writer is `PATCH /api/admin/updateMerchGroup`
+   (`designflow-backend/routes/admin.router.js:87`), and its real defect is that it is **type-blind**.
+   Detail: `docs/licensor-property-cloudsql-cutover-plan-20260806.md` (branch
+   `docs/licensor-property-cutover-plan-20260806`).
+
+### 6.11 `DY` and `DS` are ONE company — the Disney licensor has two spellings (added 2026-08-07)
+
+**`DY` in `core.licensor` is the canonical Disney licensor code. `DS` in the legacy
+`public.licensors` table is the RETIRED spelling of the SAME COMPANY. They must never be treated as
+two companies, and no session should re-open the question.**
+
+This is not an inference. `supabase/migrations/20260723113000_dam_core_licensor_property_cutover.sql`
+— merged and **already applied to production** — hard-codes the mapping in its own SQL:
+
+```sql
+case legacy.external_id
+  when 'DS' then 'DY'
+  when 'WWE' then 'WW'
+  else legacy.external_id
+end
+```
+
+That migration aborts loudly if any legacy licensor fails to map, and it did not abort. **136,697
+`public.assets` rows and 10,618 `public.style_groups` rows were rewritten onto canonical
+`core.licensor` UUIDs on that basis.** Current production data depends on `DS` = `DY` being right.
+
+The full census — every Disney-related row in both licensor lists, the per-licensor child counts, the
+4,048 `plm.style_tracker_item_bridge` rows that already carry the `DY` and `DS` UUIDs *on the same
+row*, and the read/write map per application — is in
+[`docs/verification/disney-licensor-identity-20260807/README.md`](docs/verification/disney-licensor-identity-20260807/README.md).
+**Read it there; do not duplicate or re-measure those numbers here.**
+
+**The same shape exists for WWE, and nobody has documented it.** `public.licensors` spells it `WWE`;
+`core.licensor` spells it `WW`. Identical class of duplicate, mapped by the same `case` expression
+above, still undocumented and unfixed. Treat it the same way: one company, two spellings, `WW`
+canonical.
+
+**What this section does NOT authorise.** It is paperwork, not surgery (Albert chose "Option 2" of
+that document on 2026-08-07). Retiring `public.licensors`, moving the ~500 legacy property records,
+or re-parenting MARVEL and STAR WARS under DISNEY are all explicitly **out of scope and declined** —
+ColdLion pays royalties off Marvel and Star Wars being separate licensors.
+
+### 6.12 CORRECTION to §6.6 rule 5 — there is NO parentage-durability migration (added 2026-08-07)
+
+**§6.6 rule 5 above says `20260802170000` is "the migration that stops `plm.import_master_data`
+force-setting `core.property.licensor_id`". That sentence is WRONG.** Verified against the file on
+2026-08-07; its own header block says the opposite:
+
+> "The property UPDATE still sets `licensor_id = parent_core_licensor_id`. Whether our curated
+> parentage should outrank DesignFlow PLM's is an owner decision nobody has made."
+
+`20260802170000` preserves curated **`status` only**. **No parentage-durability migration exists
+anywhere in this repository — not merged, not held.** So promoting `20260802170000` would not make
+curated parentage durable, and §6.5's hold is not what is blocking durability. Any curated
+`core.property.licensor_id` — set by DB Data Admin, by DesignFlow, or by a migration — is reverted by
+the next **successful** `plm.import_master_data()` run.
+
+The exposure is currently **dormant, not fixed**: the PLM master-data lane has not succeeded since
+2026-07-08 (§6.4, §6.10-A), which is why every `core.property` row still carries that `updated_at`.
+**Parentage durability must be built before the lane is repaired**, or every curated parent edge
+silently reverts the moment it comes back. Do not treat "we have a durability migration" as "curated
+parentage is durable".
+
+### 6.13 OWNER RULINGS — Paramount landing tables and sub-licensors (Albert Hazan, 2026-08-07)
+
+Five rulings, all made the same evening, all **settled**. Full record with the reasoning and the
+costs: [`docs/verification/owner-rulings-20260807/README.md`](docs/verification/owner-rulings-20260807/README.md).
+Read that file before acting on any of them.
+
+1. **Per-licensor landing tables, not one shared table.** Each licensor's raw scrape data gets its
+   own `plm.*` tables. No shared multi-licensor landing table with a discriminator column. A shared
+   table would force Disney's hard `CHECK`s to be softened for a licensor they have nothing to do
+   with, and the importer's shrink-band guard counts rows in its own table — unscoped, a
+   **completely truncated Paramount extract would pass by being measured against Disney's ~10,262
+   rows**. Silent wrong answer, not a loud one.
+
+2. **Paramount release 1 is FIVE tables, not fifteen.** Ships `plm.pmt_capture`, `pmt_property`,
+   `pmt_character`, `pmt_property_character`, `pmt_asset`, plus importer, RLS/grants, one `api` view
+   and contract tests. Eleven further tables, four views and the collection trigger are deferred —
+   they model structure no capture has proven. **Known consequence: release 1 loads assets that
+   connect to nothing.** It can answer which characters a property owns, but not which asset shows a
+   character.
+
+3. **The Paramount authorized-title list is 26, and the count is CLOSED.** The removed `902010`
+   entry was a duplicate. Do not re-open it and do not hunt for a 27th title. The *"Viacom Multi
+   (Paramount) — 27 codes"* section of
+   [`docs/coldlion-unmatched-properties-by-licensor-20260731.md`](docs/coldlion-unmatched-properties-by-licensor-20260731.md)
+   is a **different population** (unmatched ColdLion property codes) — do not reconcile the two.
+
+4. **Build waits for the second Paramount recon.** The five tables are designed, reviewed, revised
+   and approved, but implementation is **held** until a targeted second recon returns. Each of its
+   four open questions can move a primary key, and a wrong key with rows already in it costs a
+   migration **plus** a data repair. Do not start the migration because "the design is approved".
+
+5. **Sub-licensors stay FLAT.** ColdLion produced 19 new `- DESPERATE` records (5 licensors, 14
+   properties). Desperate is a **sub-licensor, not the brand owner**: POP reports sales to Desperate,
+   who files royalty reports upward to the real owner. FanCreations is the same shape for NCAA and
+   NFL. `core.licensor` will **NOT** model this; Desperate is stored as an ordinary licensor.
+   **Consequence, invisible in the data: any report answering "who is the licensor" for those 14
+   properties returns Desperate, not the ultimate brand owner.** Also: `ANHEUSER BUSCH - DESPERATE`
+   and the existing `potential` `Anheuser Busch` record are **NOT duplicates** — brand owner vs
+   sub-licensed route. A future dedupe pass must not merge them.
 
 ## 7. When two apps need conflicting database changes
 
@@ -1233,7 +1506,7 @@ Item IDs can be re-keyed by 1Password, so if that ID 404s, re-resolve it with
 - **`public` schema anon lockdown (2026-07-29) — read before creating a function or a view in `public`:** [`docs/security/public-schema-execute-audit.md`](docs/security/public-schema-execute-audit.md) (EXECUTE grants; 88 of 99 SECURITY DEFINER functions were anon-callable) and [`docs/security/public-schema-anon-read-audit.md`](docs/security/public-schema-anon-read-audit.md) (table/view reads; ~27,000 rows were anon-readable). Summarised as a standing rule in §10.2 above.
 - **PopDAM access — read before granting/revoking/debugging a user's access:** [`docs/popdam-access-provisioning.md`](docs/popdam-access-provisioning.md). Permissions run on **three independent axes across two schemas**. `public.app_access('popdam')` alone lets someone log in and **see nothing**: every `core.*`/`api.*` policy is **app-schema** gated (`app.has_any_role(...)`), so a user with no active `app.user_role` gets `HTTP 200` with an empty array — success-shaped and data-free. On 2026-07-26, **18 of 35 PopDAM users** were in exactly that state.
 
-- **Cross-workflow take-over (2026-07-31):** [`coordinator_take_over.md`](coordinator_take_over.md).
+- **Cross-workflow take-over (2026-07-31):** [`orchestrator_take_over.md`](orchestrator_take_over.md).
   Splits four in-flight threads — characters/style guides, ColdLion source-of-truth, licensing
   coordination, shared-db hygiene — into what is done, what is verified vs merely documented, what
   blocks each, and the failed paths not to repeat. **Read its §1 table before picking up any of
@@ -1356,6 +1629,116 @@ production yet. Promote it **together with or after** the ClickUp migrations
 (`20260728174500...`), never before, or the apply aborts with `undefined_function`. Its
 production-safe equivalent (`20260729130000`) is already applied, so nothing is exposed in
 the meantime.
+
+## 11b. The role is called ORCHESTRATOR (renamed 2026-08-07)
+
+**One word for the role, and the word is orchestrator.** Owner instruction, Albert Hazan,
+2026-08-07. Renamed throughout this file, `HANDOFF.md`, the plans, the tooling, the three
+`shared-db-*` skills, and the marker label.
+
+**"Coordinator" is the OLD word for exactly the same role.** It survives in three places,
+all deliberately:
+
+1. **Older GitHub issues and their titles**, including any open marker issue.
+2. **`HANDOFF.d/` files.** These are write-once records of what past sessions did. This
+   repo's own rule is that you never edit another session's handover — rewriting them to
+   change a word would falsify the record of who said what.
+3. **Git history and merged PR titles**, which cannot be rewritten.
+
+**Both words mean the same thing, and both still load the `shared-db-orchestrator` skill.**
+Do not go looking for a separate coordinator skill; there has never been one.
+
+⚠️ **The marker label was renamed `coordinator-marker` → `orchestrator-marker`.** GitHub
+carried the existing issues across. **If `gh issue list --label coordinator-marker` returns
+empty, that is the rename, not an empty board** — query `orchestrator-marker`. This matters:
+step 0 of the orchestrator skill treats an empty result as permission to start, so reading
+the old label would let a second orchestrator start while one is already live.
+
+⚠️ **Two filenames deliberately keep the old spelling**, because renaming them would break
+links from the 63 migrated issues and from merged PR bodies:
+`COORDINATOR_INTAKE.md` (now a retired pointer) and
+`plan_coordinator-queue-to-github-issues.md` (a completed plan).
+
+---
+
+## 12. Standing facts an incoming session must know
+
+> **Re-homed from `COORDINATOR_INTAKE.md` on 2026-08-07, verbatim.** These ten rules
+> used to live in the orchestrator queue file, and `AGENTS.md` §2 pointed at that file for
+> them. The queue is being retired
+> ([`plan_coordinator-queue-to-github-issues.md`](plan_coordinator-queue-to-github-issues.md)
+> step 8), so they moved here first — otherwise retiring the file would have deleted live
+> safety rules, **including the background-task-chip ban**, which is the rule that stopped
+> a repeat of the 2026-07-31 four-way migration collision. Caught in adversarial review by
+> Kimi K3 and ranked BLOCKING; it was correct.
+>
+> **This is a relocation, not a rewrite.** The text below is byte-identical to its last
+> revision in `COORDINATOR_INTAKE.md`. Do not tidy it here.
+
+Read these before you write anything. Several of them describe failures that
+have already happened in this repo, more than once.
+
+1. **One orchestrator.** All work is dispatched to sub-agents in isolated
+   worktrees. If you were not started as the orchestrator, you are not it.
+2. **One schema change in flight at a time.** Two simultaneous schema edits are
+   the number-one cause of a broken shared database here.
+3. **Never edit a migration that has already been applied.** The migration
+   ledger already records that version as run, so editing the file changes
+   nothing on any database that has seen it — it only makes the repo lie. Fix
+   forward with a new migration.
+4. **Duplicate 14-digit migration versions cause a SILENT SKIP.** Two files with
+   the same version prefix: one applies, the other is quietly ignored with no
+   error. This has happened twice — `20260722220000` and `20260728160000`. CI
+   now blocks duplicate versions and backdated versions, but do not rely on CI
+   to save you; pick a version above the current maximum in
+   `supabase/migrations/`.
+5. **Never create background task chips for this repo — banned.** Four
+   chip-spawned sessions recently authored competing `CREATE OR REPLACE`
+   migrations against the *same* database function, three of them sharing
+   version `20260731170000`. Because of rule 4 those would have silently erased
+   each other. Chips spawn sessions that cannot see each other; this repo cannot
+   survive that.
+6. **The Supabase MCP server may be bound to PRODUCTION, and it takes no
+   project parameter.** There is no way to aim it at preview. Call
+   `get_project_url` FIRST and confirm which project you are actually pointed at
+   before any other MCP call. All preview work goes through the Supabase CLI /
+   psql, and you must verify `cat supabase/.temp/project-ref` immediately before
+   every push.
+7. **Preview (`rjyboqwcdzcocqgmsyel`) is a SHARED, MUTABLE resource** holding a
+   full clone of production data. It is currently **NOT a clean baseline** —
+   other sessions have written to it. Never assume it is empty, never assume it
+   matches production, and treat anything you apply there as visible to everyone
+   else.
+8. **Documents in this repo go stale within the hour.** Verify against the live
+   repo, not against what a Markdown file says.
+9. **Property codes are NOT globally unique — never resolve a property by code
+   alone.** Licensor → Property is a **parent-child** relationship and the *same*
+   code can exist as separate property rows under many different licensors at
+   once. The schema enforces exactly this:
+   `core.property … unique nulls not distinct (licensor_id, code)`
+   (`supabase/migrations/20260621150815_app_core.sql:200`). **`core.licensor` is
+   different** — it *is* `unique nulls not distinct (code)` (`:188`), so
+   **licensor** codes are global. The two are routinely confused, and confusing
+   them produces instructions like *"re-parent code `CC` under Disney"* that are
+   not meaningful. Owner-confirmed by Albert Hazan, **2026-08-06**. See also
+   `AGENTS.md` §6 (merch-group codes are unique only within
+   `(division, mgTypeCode)`) and `fix_item_taxonomy_wiring.md:147`.
+10. **Worktree counts in this repo are per-MACHINE and go stale immediately — always
+    re-measure, never quote.** Measured on **`al8960ofc`, 2026-08-06**:
+    **3 worktrees** — the `C:\repos\shared-db` main checkout plus two live
+    sub-agent worktrees (`.claude/worktrees/cutover-plan`,
+    `.claude/worktrees/stale-sweep`), both **held by running agents**. Verified
+    with `git worktree list`. **Every earlier count is SUPERSEDED as a statement
+    of today's state** — 18 and 22 (2026-07-31), 23, 33/34 (2026-07-31 late),
+    51/52 (2026-08-03/05), 16 (2026-08-05), and 1 (2026-08-06 01:49Z). They were
+    each true when written, on the machine that wrote them; they are history, not
+    inventory. The drop from 51 to 1 was an **authorised sweep**, not a mystery —
+    resolved by intake PR #455 (`9a933c8`) and recorded in
+    `HANDOFF.d/2026-08-06T0149Z-al8960ofc-orchestrator-skill-repair.md` §4. **Do
+    not sweep or remove any worktree on the strength of a number in a document**,
+    and never remove one that is dirty, locked, or held by a live agent (B2.3).
+
+---
 
 ## 11. Hosted-Supabase gotchas (do not relearn these the hard way)
 
