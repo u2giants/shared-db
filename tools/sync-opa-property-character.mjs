@@ -193,6 +193,18 @@ export function parseCsv(text) {
       row = [];
       line += 1;
     } else if (c === "\r") {
+      // CRLF is fine -- skip the \r and let the \n end the row. A BARE \r is not:
+      // it used to be swallowed in silence, so `a,b\r1,2` parsed as the single row
+      // ["a","b1","2"], joining the end of one line to the start of the next. The
+      // field-count check catches that downstream, but this parser advertises
+      // rejecting silent repair, and this was the last lenient path left in it.
+      if (text[i + 1] !== "\n") {
+        throw new Error(
+          `line ${line}, field ${row.length + 1}: a bare carriage return that is not part of ` +
+            "a CRLF line ending. It used to be swallowed silently, which JOINED two lines " +
+            "into one row. Re-export the CSV with consistent line endings."
+        );
+      }
       continue;
     } else {
       if (closed) {
@@ -261,45 +273,130 @@ export function resolveMinRows(raw) {
   return n;
 }
 
+const CREDENTIAL_WORDS = new Set([
+  "token", "key", "apikey", "secret", "sig", "signature", "password", "passwd",
+  "pwd", "auth", "authorization", "session", "sessionid", "sid", "jwt",
+  "bearer", "credential", "credentials", "access",
+]);
+
+/** Split camelCase and snake/kebab case alike, so apiKey, api_key and API-KEY all match. */
+function credentialWords(text) {
+  return text
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+function safeDecode(segment) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 /**
- * The source URL is stored VERBATIM as provenance on EVERY row, so a portal URL
- * that still carries a session token would persist that token into the database
- * and into anything that later reads provenance. Refuse it.
+ * Does this look like an opaque secret rather than a readable path segment?
+ * Tuned to catch tokens without tripping on ordinary slugs -- a false positive
+ * costs the operator one edit and is loud, so it errs toward strict.
+ */
+function looksLikeAToken(segment) {
+  if (/^eyJ/.test(segment)) return true; // a JWT always starts with the base64 of '{"'
+  if (segment.length >= 32 && /^[0-9a-f]+$/i.test(segment)) return true; // hex digest
+  if (segment.length >= 40 && /^[A-Za-z0-9._~+/=-]+$/.test(segment)) return true; // long opaque
+  // Short-but-opaque: no separators at all, yet mixed case AND digits. Ordinary
+  // slugs use hyphens or underscores ("licensed-properties-2026"), so they miss this.
+  return (
+    segment.length >= 20 &&
+    /^[A-Za-z0-9]+$/.test(segment) &&
+    /[0-9]/.test(segment) &&
+    /[a-z]/.test(segment) &&
+    /[A-Z]/.test(segment)
+  );
+}
+
+/**
+ * The source URL is stored VERBATIM as provenance on EVERY row -- ~10,262 of them --
+ * so a portal URL that still carries a session token persists that token into the
+ * database and into anything that later reads provenance. Refuse it.
+ *
+ * THIS CHECK FAILS CLOSED. An earlier version parsed with `new URL()` and, when that
+ * threw, RETURNED THE STRING UNCHECKED. A scheme-less paste out of a browser address
+ * bar -- `opa.example.invalid/x?session_token=SECRET` -- is not a parseable absolute
+ * URL, so it skipped the check entirely and the token was stored. That is exactly
+ * what a hurried operator produces. An unparseable value is now a hard error.
+ *
+ * DELIBERATE CONTRACT TIGHTENING: the query string and the fragment are refused
+ * OUTRIGHT rather than inspected for suspicious names. Name-matching is a
+ * blocklist, and a blocklist on a value that is persisted 10,262 times is the wrong
+ * shape -- a parameter called `t` or a 12-character fragment slipped straight
+ * through. Provenance needs to say WHERE the extract came from, which a bare page
+ * URL does. Nothing here echoes the offending value.
  */
 export function assertSourceUrlIsNotACredential(sourceUrl) {
   const s = String(sourceUrl ?? "");
+
   let parsed;
   try {
     parsed = new URL(s);
   } catch {
-    return s; // shape is the caller's business; only credential leakage is checked here
-  }
-
-  const SUSPICIOUS = new Set([
-    "token", "key", "apikey", "secret", "sig", "signature", "password", "passwd",
-    "pwd", "auth", "authorization", "session", "sessionid", "sid", "jwt",
-    "bearer", "credential", "credentials", "access",
-  ]);
-  // Split camelCase and snake/kebab case alike, so apiKey, api_key and API-KEY
-  // are all caught.
-  const words = (k) =>
-    k.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-
-  const names = [...parsed.searchParams.keys()];
-  const hit = names.find((k) => words(k).some((w) => SUSPICIOUS.has(w)));
-  if (hit) {
     throw new Error(
-      `OPA_SOURCE_URL carries a query parameter named ${JSON.stringify(hit)}, which looks ` +
-        "like a credential. This URL is stored verbatim as provenance on every row. Strip " +
-        "the query string and pass the plain page URL. (The value is deliberately not shown.)"
+      "OPA_SOURCE_URL must be an absolute URL including the scheme, e.g. " +
+        "https://portal.example/page. A scheme-less value (the sort pasted straight out " +
+        "of a browser) used to SKIP the credential check entirely and could carry a " +
+        "session token into every stored row. (The value is deliberately not shown.)"
     );
   }
-  if (parsed.hash && parsed.hash.length > 40) {
+
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     throw new Error(
-      "OPA_SOURCE_URL has a long URL fragment, which is how portals return session tokens. " +
-        "This URL is stored verbatim on every row. Strip the fragment."
+      `OPA_SOURCE_URL must be an http(s) URL, got scheme ${JSON.stringify(parsed.protocol)}.`
     );
   }
+  if (parsed.username || parsed.password) {
+    throw new Error(
+      "OPA_SOURCE_URL contains userinfo (user:password@host). It is stored verbatim as " +
+        "provenance on every row. Strip the credentials and pass the plain page URL."
+    );
+  }
+  if (parsed.search) {
+    throw new Error(
+      "OPA_SOURCE_URL must not carry a query string. It is stored verbatim as provenance " +
+        "on every row, and a query string is where portals return session tokens and other " +
+        "credentials. Strip it and pass the plain page URL. (The value is deliberately not " +
+        "shown.)"
+    );
+  }
+  if (parsed.hash) {
+    throw new Error(
+      "OPA_SOURCE_URL must not carry a URL fragment. It is stored verbatim as provenance " +
+        "on every row, and a fragment is where portals return session tokens and other " +
+        "credentials. Strip it and pass the plain page URL. (The value is deliberately not " +
+        "shown.)"
+    );
+  }
+
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  for (let i = 0; i < segments.length; i += 1) {
+    const seg = safeDecode(segments[i]);
+    // Report the POSITION, never the content -- the content may be the secret.
+    if (credentialWords(seg).some((w) => CREDENTIAL_WORDS.has(w))) {
+      throw new Error(
+        `OPA_SOURCE_URL path segment ${i + 1} is named like a credential. This URL is stored ` +
+          "verbatim as provenance on every row. Pass the plain page URL. (The segment is " +
+          "deliberately not shown.)"
+      );
+    }
+    if (looksLikeAToken(seg)) {
+      throw new Error(
+        `OPA_SOURCE_URL path segment ${i + 1} looks like an opaque token rather than a page ` +
+          "path. This URL is stored verbatim as provenance on every row. Pass the plain page " +
+          "URL. (The segment is deliberately not shown.)"
+      );
+    }
+  }
+
   return s;
 }
 
@@ -510,7 +607,11 @@ export function resolveShrinkFraction(raw) {
  * Returns { ref, origin }. Callers MUST call this BEFORE constructing any request.
  */
 export function resolveSupabaseTarget(rawUrl, expectedRef) {
-  const expected = String(expectedRef ?? "").trim();
+  // Lowercase before testing. `new URL` lowercases the hostname, so an UPPERCASE
+  // host was already accepted, while an UPPERCASE expected ref was rejected with a
+  // confusing "not shaped like a Supabase project ref". Fails safe either way, but
+  // the asymmetry would send an operator hunting the wrong problem.
+  const expected = String(expectedRef ?? "").trim().toLowerCase();
   if (!expected) {
     throw new Error(
       "The target project ref must be stated EXPLICITLY for --apply: pass --expect-ref=<ref> " +

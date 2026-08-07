@@ -977,9 +977,9 @@ still never been executed against any database.
 
 ### Proof
 
-39 tests (was 18; all 18 originals still pass). **Every** guard was proven to
+45 tests (was 18; all 18 originals still pass). **Every** guard was proven to
 fire by neutralising it, observing the suite FAIL, restoring it and observing it
-PASS — 20 mutants, 20 killed. For W1 specifically, the test injects a `fetch`
+PASS — 28 mutants, 28 killed. For W1 specifically, the test injects a `fetch`
 that throws on any call and asserts the mismatch error is raised with the fetch
 **never reached**, so the abort is proven to happen before the network, not
 after. All fixtures are invented; no Disney data appears anywhere.
@@ -1009,7 +1009,9 @@ side does after the G6 fix.
 
 Each has a canary test asserting the message does **not** contain the value, and
 each was proven by neutralising it back to its old form: 39 tests, baseline
-`pass=39 fail=0`, each mutant `pass=38 fail=1`, restored `pass=39 fail=0`.
+`pass=39 fail=0`, each mutant `pass=38 fail=1`, restored `pass=39 fail=0` (the
+counts as they stood at that round; both mutants were re-run and re-killed in
+the final 28-mutant set below).
 
 One nearby message was reviewed and left alone: `row N: optionSourceID is <v>,
 not 1007` echoes a value that has already passed integer **and** safe-integer
@@ -1020,3 +1022,101 @@ validation, so it cannot carry a name.
 The runner is now safe to invoke with `--apply`, provided the operator sets
 `OPA_EXPECTED_PROJECT_REF` (or `--expect-ref=`) and `OPA_MIN_ROWS`. It will
 refuse to run without them.
+
+### Review round: one MEDIUM and three LOWs, all in guards this work introduced
+
+Found by independent review of the hardening itself. Worth recording that the
+review found a hole in a **security guard added to close a hole** — new code is
+not safer than old code merely because it is newer.
+
+**MEDIUM — the credential guard failed OPEN.** `assertSourceUrlIsNotACredential`
+parsed with `new URL()` and, when that threw, **returned the string unchecked**.
+Measured: `assertSourceUrlIsNotACredential("opa.example/x?session_token=SECRET")`
+did not throw. A scheme-less URL is exactly what a hurried operator pastes out of
+a browser address bar, and the token would then be stored verbatim as provenance
+on **every one of ~10,262 rows**, readable by anyone the mirror's RLS admits. An
+unparseable value is now a hard error.
+
+**Contract tightening, deliberate:** the query string and the fragment are now
+refused **outright** rather than inspected for suspicious parameter names. Name
+matching is a blocklist, and a blocklist guarding a value persisted 10,262 times
+is the wrong shape — a parameter called `t`, or a 12-character fragment, went
+straight through (the old fragment rule only fired above 40 characters). Also
+now refused: userinfo (`user:pass@host`), non-http(s) schemes, and a path segment
+that is either named like a credential or shaped like an opaque token. Provenance
+needs to say *where* the extract came from, and a bare page URL does that.
+
+> **Operator impact:** if your OPA page URL has a query string or a `#fragment`,
+> the runner will refuse it. Pass the plain page URL. This is intentional.
+
+**LOWs.** A bare `\r` not part of a CRLF was still swallowed silently (`a,b\r1,2`
+parsed as one row `["a","b1","2"]`, joining two lines) — the last lenient path in
+a parser that advertises rejecting silent repair; now rejected. And the expected
+project ref is compared case-insensitively, since `new URL` lowercases the
+hostname: an uppercase host was already accepted while an uppercase
+`OPA_EXPECTED_PROJECT_REF` was rejected as malformed, sending the operator after
+the wrong problem.
+
+**Proof for this round.** 45 tests. **28 mutants across the whole branch, 28
+killed, 0 survived**, baseline and restored both `pass=45 fail=0`. The
+credential fixes carry canary assertions proving the secret does not survive into
+the error message.
+
+**Parser behaviour re-measured after the tightening** (25 shapes): 19 realistic
+export shapes ACCEPTED — plain LF, CRLF, trailing CRLF, BOM+CRLF, unquoted
+fields, embedded commas, embedded newlines, embedded CRLF inside quotes, doubled
+quotes, **properly quoted inch marks**, backtick and real apostrophes, blank
+lines mid-file, trailing blank lines, negative sentinels, `& / ( )` in names,
+accented characters, emoji, and padded numeric fields. 6 genuinely malformed
+shapes REJECTED. Nothing legitimate became collateral.
+
+---
+
+## RUNBOOK — read this before the first `--apply`
+
+### 1. A dry run against the real CSV is REQUIRED, not suggested
+
+A dry run parses and validates everything and **contacts no database at all**, so
+it carries zero risk. It is also the only way to turn the parser-strictness
+question from reasoning into fact.
+
+```
+OPA_CSV_PATH=/path/to/licensor-source-data/disney-opa/opa-characters.csv \
+OPA_CAPTURED_AT=<YYYY-MM-DD> \
+OPA_SOURCE_URL='https://<the plain OPA page URL, no query, no fragment>' \
+node tools/sync-opa-property-character.mjs
+```
+
+Expect a JSON block of counts and `DRY RUN. No database was contacted.`
+
+**If the dry run REJECTS the file, the bare-quote rule is the first suspect** —
+the rule that refuses an unescaped `"` inside an *unquoted* field. The plausible
+real-world case is an **inch mark** in a product name that Disney's exporter
+emitted without quoting the field. Properly quoted inch marks (`"12"" Figure"`)
+pass and were measured passing. Do not weaken the rule reflexively: confirm from
+the reported line and field number which case you actually have.
+
+### 2. W1 catches a MISMATCH, not a wrong intention
+
+The wrong-target guard compares `SUPABASE_URL` against the ref you state
+explicitly. If an operator puts the **production** ref in *both*, it proceeds —
+by design, because promotion to production must be possible, and hard-coding the
+production ref would violate this file's own "never hard-code a project ref"
+rule. **W1 is not a production interlock.** It catches the mistyped variable and
+the copy-paste from the wrong terminal; it cannot catch a deliberate or
+mistaken decision to target production.
+
+### 3. The first apply
+
+```
+OPA_CSV_PATH=... OPA_CAPTURED_AT=... OPA_SOURCE_URL=... \
+OPA_MIN_ROWS=<the minimum row count you expect> \
+SUPABASE_URL=https://<project-ref>.supabase.co \
+OPA_EXPECTED_PROJECT_REF=<the same ref, stated deliberately> \
+SUPABASE_SERVICE_ROLE_KEY=<from 1Password, vault vibe_coding> \
+node tools/sync-opa-property-character.mjs --apply
+```
+
+`OPA_MIN_ROWS` and the expected ref have **no defaults** and the runner refuses
+to start without them. Take `OPA_MIN_ROWS` from the dry-run count, not from
+memory.

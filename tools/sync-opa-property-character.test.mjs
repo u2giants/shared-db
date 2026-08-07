@@ -376,26 +376,91 @@ test("assertIsoDate rejects a date-SHAPED string that is not a real date", () =>
   assert.equal(assertIsoDate("2026-08-06"), "2026-08-06");
 });
 
-test("assertSourceUrlIsNotACredential refuses a provenance URL carrying a token", () => {
+test("assertSourceUrlIsNotACredential FAILS CLOSED on a scheme-less URL", () => {
+  // THE BUG THIS REPLACES: `new URL()` throws on a scheme-less string, and the old
+  // code returned it UNCHECKED. A paste straight out of a browser address bar is
+  // exactly that shape, and the token then landed on every one of ~10,262 rows.
+  const SECRET = "CANARY-SESSION-SECRET";
   for (const bad of [
-    "https://example.invalid/x?session_token=abc",
-    "https://example.invalid/x?apiKey=abc",
-    "https://example.invalid/x?sig=abc",
+    `opa.example.invalid/x?session_token=${SECRET}`,
+    `//opa.example.invalid/x?session_token=${SECRET}`,
+    "not a url at all",
+    "",
   ]) {
-    assert.throws(() => assertSourceUrlIsNotACredential(bad), /looks/, `expected ${bad} rejected`);
+    assert.throws(
+      () => assertSourceUrlIsNotACredential(bad),
+      /absolute URL/,
+      `expected ${JSON.stringify(bad)} to be rejected, not silently accepted`
+    );
   }
-  assert.throws(
-    () => assertSourceUrlIsNotACredential(`https://example.invalid/x#${"a".repeat(60)}`),
-    /fragment/
-  );
-  // The error must not echo the secret value itself.
+  // Canary: the secret must not survive into the message.
   try {
-    assertSourceUrlIsNotACredential("https://example.invalid/x?session_token=SUPERSECRET");
+    assertSourceUrlIsNotACredential(`opa.example.invalid/x?session_token=${SECRET}`);
     assert.fail("should have thrown");
   } catch (err) {
-    assert.ok(!err.message.includes("SUPERSECRET"));
+    assert.ok(!err.message.includes(SECRET), `secret leaked into the message: ${err.message}`);
   }
-  assert.doesNotThrow(() => assertSourceUrlIsNotACredential("https://example.invalid/page"));
+});
+
+test("assertSourceUrlIsNotACredential refuses ANY query string or fragment, however named", () => {
+  const SECRET = "CANARY-QUERY-SECRET";
+  // Named like a credential...
+  assert.throws(() => assertSourceUrlIsNotACredential("https://x.invalid/p?session_token=a"), /query string/);
+  assert.throws(() => assertSourceUrlIsNotACredential("https://x.invalid/p?apiKey=a"), /query string/);
+  // ...and NOT named like one. A blocklist missed these; refusing the whole class does not.
+  assert.throws(() => assertSourceUrlIsNotACredential("https://x.invalid/p?t=a"), /query string/);
+  assert.throws(() => assertSourceUrlIsNotACredential("https://x.invalid/p?page=2"), /query string/);
+  // A SHORT fragment used to pass: the old check only fired above 40 characters.
+  assert.throws(() => assertSourceUrlIsNotACredential("https://x.invalid/p#abc123"), /fragment/);
+  assert.throws(() => assertSourceUrlIsNotACredential(`https://x.invalid/p#${"a".repeat(60)}`), /fragment/);
+  // Userinfo.
+  assert.throws(() => assertSourceUrlIsNotACredential("https://u:p@x.invalid/page"), /userinfo/);
+  // Non-http scheme.
+  assert.throws(() => assertSourceUrlIsNotACredential("ftp://x.invalid/page"), /http\(s\)/);
+
+  for (const url of [
+    `https://x.invalid/p?session_token=${SECRET}`,
+    `https://x.invalid/p#${SECRET}`,
+  ]) {
+    try {
+      assertSourceUrlIsNotACredential(url);
+      assert.fail("should have thrown");
+    } catch (err) {
+      assert.ok(!err.message.includes(SECRET), `secret leaked: ${err.message}`);
+    }
+  }
+});
+
+test("assertSourceUrlIsNotACredential refuses a token in the PATH, and reports position not content", () => {
+  // A token in the path passed the old check entirely -- only query NAMES were read.
+  const cases = [
+    ["https://x.invalid/session/abc", /path segment 1/],          // credential-ish word
+    ["https://x.invalid/p/eyJhbGciOiJIUzI1NiJ9", /path segment 2/], // a JWT
+    [`https://x.invalid/p/${"a1b2c3d4".repeat(4)}`, /path segment 2/], // 32-char hex digest
+    [`https://x.invalid/p/${"Ab1".repeat(20)}`, /path segment 2/],  // long opaque
+  ];
+  for (const [url, re] of cases) {
+    assert.throws(() => assertSourceUrlIsNotACredential(url), re, `expected ${url} rejected`);
+  }
+  // The offending segment must never be echoed.
+  try {
+    assertSourceUrlIsNotACredential("https://x.invalid/p/eyJhbGciOiJIUzI1NiJ9");
+    assert.fail("should have thrown");
+  } catch (err) {
+    assert.ok(!err.message.includes("eyJhbGciOiJIUzI1NiJ9"), `token leaked: ${err.message}`);
+  }
+});
+
+test("assertSourceUrlIsNotACredential still accepts ordinary page URLs", () => {
+  for (const ok of [
+    "https://example.invalid/page",
+    "https://example.invalid",
+    "https://example.invalid/licensing/licensed-properties-2026",
+    "https://example.invalid/OPA-Characters-Export2026",
+    "http://example.invalid/a/b/c",
+  ]) {
+    assert.doesNotThrow(() => assertSourceUrlIsNotACredential(ok), `expected ${ok} accepted`);
+  }
 });
 
 test("buildSnapshot refuses a snapshot whose provenance URL carries a credential", () => {
@@ -476,4 +541,29 @@ test("the duplicate-pair message reports row ordinals but NEVER the id values", 
     assert.ok(!err.message.includes("123454321"), `licensedPropertyID leaked: ${err.message}`);
     assert.ok(!err.message.includes("987656789"), `characterID leaked: ${err.message}`);
   }
+});
+
+test("parseCsv rejects a BARE carriage return that is not part of a CRLF", () => {
+  // Measured on the old parser: 'a,b\r1,2' parsed to the single row ["a","b1","2"],
+  // joining the end of one line to the start of the next.
+  assert.throws(() => parseCsv("a,b\r1,2"), /bare carriage return/);
+  assert.throws(() => parseCsv([HEADER, '1,101,"A","B",1,1007\r'].join("\n")), /bare carriage return/);
+});
+
+test("parseCsv still accepts CRLF line endings unchanged", () => {
+  const rows = parseCsv([HEADER, '1,101,"A","B",1,1007'].join("\r\n"));
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows[1], ["1", "101", "A", "B", "1", "1007"]);
+});
+
+test("resolveSupabaseTarget treats the expected ref case-insensitively", () => {
+  // `new URL` lowercases the hostname, so an UPPERCASE host was already accepted
+  // while an UPPERCASE expected ref was rejected as malformed. Same answer now.
+  const t = resolveSupabaseTarget(`https://${REF_A.toUpperCase()}.supabase.co`, REF_A.toUpperCase());
+  assert.equal(t.ref, REF_A);
+  // and a genuine mismatch is still refused regardless of case
+  assert.throws(
+    () => resolveSupabaseTarget(`https://${REF_B}.supabase.co`, REF_A.toUpperCase()),
+    /REFUSING TO SEND/
+  );
 });
