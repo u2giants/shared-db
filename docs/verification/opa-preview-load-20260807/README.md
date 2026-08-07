@@ -1,354 +1,338 @@
 # Disney OPA extract — FIRST REAL `--apply` INTO PREVIEW
 
 **Date (UTC):** 2026-08-07
-**Issue:** [#581](https://github.com/u2giants/shared-db/issues/581) — "HANDOVER: load the
-Disney OPA extract into preview — tables exist, 0 rows, dry run PASSES"
-**Claim issue:** #589 · **Orchestrator marker:** #587
-**Target:** PREVIEW `rjyboqwcdzcocqgmsyel` — **production `qsllyeztdwjgirsysgai` was never
-contacted for any write.**
+**Issue:** [#581](https://github.com/u2giants/shared-db/issues/581) · **Claim:** #589 · **Orchestrator marker:** #587
+**Follow-up opened:** [#593](https://github.com/u2giants/shared-db/issues/593) (wire the link-state check into the remaining 14 call sites)
+**Target:** PREVIEW `rjyboqwcdzcocqgmsyel`. **Production `qsllyeztdwjgirsysgai` was never contacted.**
 **Machine:** al8960ofc · **Agent:** Claude (Opus 5) sub-agent
-**Repo state at start of work:** `origin/main` = `dc1b760`, 405 migration files.
 
-> **NO MIGRATION WAS CREATED BY THIS WORK.** Preview's ledger is 405 rows before and 405
-> rows after, max version `20260807200000` before and after. This task was a *data load*
-> and a *tooling* change, nothing else. No table, view, function, policy, constraint,
-> index or grant was altered.
+> **NO MIGRATION WAS CREATED.** Preview's ledger is 405 rows / max `20260807200000` before
+> and after — see `evidence/07`. This was a *data load* plus *tooling*. No table, view,
+> function, policy, constraint, index or grant was altered.
+
+**Every figure below is backed by captured command output in `evidence/`.** Nothing in
+this document is typed from memory. Where a number here disagrees with an evidence file,
+**the evidence file wins.**
+
+| Evidence file | What it captures |
+|---|---|
+| `01-source-file.txt` | byte count, line count, sha256 of the extract |
+| `02-dry-run.txt` | dry run against the real extract |
+| `03-runner-guards.txt` | the two runner-side guards, provoked |
+| `04-wrong-target-gate.txt` | the wrong-target gate, provoked |
+| `05-load-before-and-after.txt` | **mirror cleared → reloaded**: genuine 0 → 10,261 |
+| `06-idempotence-and-shrink-band.txt` | re-entrancy, and the database shrink band rejecting a truncated extract |
+| `07-object-and-negative-assertions.txt` | objects, ledger, and every negative assertion |
+| `08-which-file-does-the-cli-follow.txt` | the three experiments that decided which `.temp` file the CLI obeys |
+| `09-checker-behaviour.txt` | the committed check run against the real trap bytes |
+| `10-tests.txt` | 90/90 tests |
 
 ---
 
-## 1. What this proves, in one line
+## 1. What this proves
 
 The `--apply` path — the one thing issue #581 listed as **NOT proven**, because it had
-only ever run against invented fixtures — now works against the real Disney extract, and
-**all three of its previously-unexercised safety guards were made to fire for real
-before and after the load.**
+only ever run against invented fixtures. All four of its previously-unexercised guards
+were made to **fire for real**, and the mirror was **cleared and reloaded from empty** so
+the before/after is measured rather than remembered.
 
 ---
 
-## 2. Exact versions in effect
+## 2. OWNER RULING, 2026-08-07 — the sentinel row is FILTERED OUT
 
-Every OPA migration below was **already applied** to preview before this work and was
-**not modified**. These are the 14-digit versions the loaded data depends on:
+Albert's ruling: Disney's sentinel row must **not land in the mirror at all**.
 
-| Version | File | Role |
-|---|---|---|
-| `20260807170000` | `opa_property_character_landing.sql` | landing table `plm.opa_property_character`, view `api.opa_property_character` |
-| `20260807170100` | `opa_property_character_importer.sql` | `plm.sync_opa_property_character(jsonb, text, numeric)` |
-| `20260807180000` | `opa_sync_reentrancy_fix.sql` | re-entrancy fix |
-| `20260807190000` | `opa_security_and_view_corrections.sql` | RLS to the `erp_` posture; `api.opa_property_reconciliation` regrouped to node grain; NULL-safe shrink band; `pg_temp`-qualified staging |
-| `20260807200000` | `opa_comment_corrections.sql` | `coalesce(...,'{}')` + stable `ORDER BY` on the view's arrays; comment corrections |
+**What it is.** The 2026-08-06 extract contains exactly one row whose IDs are negative —
+`licensedPropertyID = -9999`, `characterID = -9998`, at **file line 8640**. Every other ID
+runs from 38 to 1,159,383,366. It is not a real licensed property.
 
-Ledger check against preview, before and after: `405` rows,
-`max(version) = 20260807200000`, and all five versions above present
-(`opa_migs_applied = 5`).
+**The rule implemented — general, not the specific pair.** A row is rejected when
+**`licensedPropertyID < 0` OR `characterID < 0`**. The specific values are *not*
+hard-coded: a magic-number test would rot the moment Disney picks different sentinels,
+and this shop's standing rule is that nothing is hard-coded which should be a rule.
+The comparison is strictly `< 0`, so **ID `0` — the smallest legitimate ID — is kept**.
 
-## 3. Exact source file
+**Filtered at load time, in the loader** (`tools/sync-opa-property-character.mjs`), not by
+a one-off `DELETE`. A `DELETE` would fix today's rows and let the next refresh
+re-introduce the sentinel; this is now a permanent property of the loader.
+
+**Counted and reported loudly.** Silent filtering is a silent failure. The runner prints
+both the JSON counts and a plain-language line, and warns explicitly if more than one
+sentinel appears, since the 2026-08-06 extract had exactly one:
+
+```
+"rows_read": 10262,
+"rows_rejected_sentinel": 1,
+"rejected_row_ordinals": [8640],
+"rows": 10261,
+
+SENTINEL ROWS DROPPED: 1 of 10262 data row(s) had a NEGATIVE licensedPropertyID or
+characterID and were NOT loaded (owner ruling 2026-08-07). Row ordinal(s): 8640.
+10261 row(s) will load.
+```
+
+Only **row ordinals** are reported, never IDs or names — the same rule as everywhere else
+in this loader, because its output reaches public CI logs.
+
+**One deliberate non-change.** The CSV parser still **accepts** negative integers. That is
+load-bearing: if parsing rejected a leading minus, the sentinel would abort the entire run
+instead of being counted, and a future change in Disney's sentinel scheme would be
+invisible. Parse permissively, reject deliberately, count what was rejected.
+
+**A prior design decision was reversed here, deliberately.** The loader previously carried
+the comment *"Disney uses NEGATIVE SENTINELS (the 'Special Projects' node). Integers here
+must accept them; any unsigned parsing silently drops that row"*, and a test asserted the
+sentinel **must survive**. That test has been replaced. The parse-level acceptance was
+kept for the reason above; only the *loading* of the row was reversed.
+
+**The row floor now counts rows that LOAD, not rows that were READ.** `OPA_MIN_ROWS` is
+compared against survivors. Otherwise the sentinel rule would silently consume one row of
+the operator's safety margin. A floor of 10,262 now correctly fails; 10,261 is the true
+count.
+
+### Effect on the numbers
+
+| | Before ruling | After ruling |
+|---|---:|---:|
+| Rows loaded | 10,262 | **10,261** |
+| Distinct properties / reconciliation nodes | 1,445 | **1,444** |
+| Distinct characters | 9,613 | **9,612** |
+| Distinct name pairs | 10,240 | 10,239 |
+| Name-pair collisions | 22 | **22** (unchanged) |
+| Rows with a negative ID in the mirror | 1 | **0** |
+
+**1,444 nodes — exactly the predicted figure.** `evidence/05` and `evidence/07`.
+
+---
+
+## 3. Exact versions in effect
+
+All five were **already applied** to preview and were **not modified**:
+
+| Version | Role |
+|---|---|
+| `20260807170000` | landing table `plm.opa_property_character`, view `api.opa_property_character` |
+| `20260807170100` | `plm.sync_opa_property_character(jsonb, text, numeric)` |
+| `20260807180000` | re-entrancy fix |
+| `20260807190000` | RLS to the `erp_` posture; reconciliation view regrouped to node grain; NULL-safe shrink band |
+| `20260807200000` | `coalesce(...,'{}')` + stable `ORDER BY` on the view's arrays |
+
+Ledger before and after: **405 rows, max `20260807200000`, all five present**
+(`evidence/07b`).
+
+## 4. Exact source file (`evidence/01`)
 
 | Property | Value |
 |---|---|
-| Repository | `u2giants/licensor-source-data` (**PRIVATE**) |
-| Path | `disney-opa/opa-characters.csv` |
-| Fetch | `gh api -H "Accept: application/vnd.github.raw" repos/.../contents/...` |
+| Repository | `u2giants/licensor-source-data` (**PRIVATE**), `disney-opa/opa-characters.csv` |
 | **Bytes** | **1,069,881** — matches the recorded size exactly |
 | **SHA-256** | **`333a1c04ea2da5a678da3527ee9a28b503cb6c16af94dbd902e10fbe776a5d69`** — matches `BUILD-NOTE-20260807.md` exactly |
-| Lines | 10,263 (1 header + 10,262 data rows) |
+| Lines | 10,263 (1 header + 10,262 data). `wc -l` reports 10,262 because it counts newlines and the final line has none — both describe the same file. |
 
-The `Accept: application/vnd.github.raw` header is **required**: `gh api` on a `contents/`
-path returns an empty body for files over 1 MB. The file was fetched to a scratchpad
-directory outside the repo and **was never written into `shared-db`**, which is PUBLIC.
-
-### Invocation actually used
-
-```
-OPA_CSV_PATH=<scratch>/opa-characters.csv
-OPA_CAPTURED_AT=2026-08-06
-OPA_SOURCE_URL='https://opa.disney.com/ProdApp/createEditProduct.spring'
-OPA_MIN_ROWS=10262
-OPA_EXPECTED_PROJECT_REF=rjyboqwcdzcocqgmsyel
-SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY  <- 1Password vibe_coding, injected via `op run`
-node tools/sync-opa-property-character.mjs --apply
-```
-
-No credential value was written to any file, commit, log or report.
+`Accept: application/vnd.github.raw` is **required**: `gh api` returns an empty body for
+`contents/` files over 1 MB. Fetched to scratch, **never written into this PUBLIC repo**.
 
 ---
 
-## 4. Row counts — BEFORE and AFTER
+## 5. Row counts — BEFORE and AFTER (`evidence/05`)
 
-All measured against `rjyboqwcdzcocqgmsyel` via the Management API
-`/v1/projects/rjyboqwcdzcocqgmsyel/database/query`, with the ref **named in the request
-path** so the target could not drift (see §7).
+The mirror was **cleared and reloaded** so this is a genuine measurement:
 
-| Table / view | BEFORE | AFTER | Note |
-|---|---:|---:|---|
-| `plm.opa_property_character` | **0** | **10,262** | the load |
-| `api.opa_property_character` (view) | 0 | 10,262 | passthrough |
-| `api.opa_property_reconciliation` (view) | 0 | **1,445** | one row per node — see §5.1 |
-| `core.property_character` | **0** | **0** | untouched, as designed |
-| `core.character` | **0** | **0** | untouched, as designed |
-| `supabase_migrations.schema_migrations` | 405 | 405 | **no migration created** |
-
-Importer return value on the real load:
-
-```json
-{"mode":"mirror_only","captured_at":"2026-08-06","rows_seen":10262,
- "rows_inserted":10262,"rows_updated":0,"rows_unchanged":0,"rows_missing":0,
- "distinct_property":1445,"distinct_character":9613,
- "snapshot_hash":"f8d229505c0767fa3afaa18e7c768d70"}
+```
+5a. before clearing (pre-ruling load):  rows 10262, props 1445, chars 9613, negative_id_rows 1
+5b. after DELETE:                       rows_now 0
+5c. load:  rows_seen 10261, rows_inserted 10261, rows_updated 0, rows_unchanged 0
+5d. after: rows 10261, props 1444, chars 9612, negative_id_rows 0, recon_nodes 1444,
+           core_pc 0, core_char 0
 ```
 
-Independently re-measured in the database (not taken from the importer's own report):
-`count(*) = 10262`, `count(distinct licensed_property_id) = 1445`,
-`count(distinct character_id) = 9613`. Every figure issue #581 predicted is reproduced
-exactly: **10,262 rows / 1,445 properties / 9,613 characters / 10,240 distinct name pairs
-/ 22 name-pair collisions.**
-
----
-
-## 5. Behavioural assertions
-
-Per the repo's standard, "it applied successfully" proves nothing. Each item below
-asserts **behaviour** or **the object itself**, not an exit code or a ledger row.
-
-### 5.1 The node-grain fix (`20260807190000`) actually holds
-
-`api.opa_property_reconciliation` returns **exactly 1,445 rows** against 1,445 distinct
-`licensed_property_id` values. The bug that migration fixed produced *more* rows than
-nodes by grouping on per-row resolution columns. With 10,262 rows now loaded across
-1,445 nodes, a regression could not hide: it would show as a row count above 1,445.
-
-`sum(opa_character_count) = 10262` — the view accounts for every loaded row exactly once,
-with none double-counted and none dropped.
-
-### 5.2 The object, not just the data
-
-- `to_regclass('plm.opa_property_character')` → `plm.opa_property_character` (not null).
-- `to_regclass('api.opa_property_reconciliation')` → not null.
-- `pg_class.relrowsecurity` on the landing table → **`true`**; `pg_policies` count → **1**.
-- `pg_get_viewdef('api.opa_property_reconciliation', true)` was fetched and compared
-  against migration `20260807200000`. It matches: `coalesce(array_agg(DISTINCT ... ORDER
-  BY ...) FILTER (...), '{}')` on all three array columns, `GROUP BY
-  o.licensed_property_id` alone. **No schema drift between repo and preview.**
-
-### 5.3 Primary key = the ID pair, and it survived a real 10,262-row load
-
-`pg_get_constraintdef` → `PRIMARY KEY (licensed_property_id, character_id)`.
-The load inserted all 10,262 rows with **zero** conflicts, which is the live proof that
-the ID pair is unique across the real extract. The **name** pair is not: 10,240 distinct
-`(property_name, character_name)` pairs measured in the database → **22 collisions**,
-matching the dry run. This is exactly why the key is the ID pair.
-
-### 5.4 Idempotence / re-entrancy (`20260807180000`)
-
-The identical extract was applied a **second** time:
-
-```json
-{"rows_seen":10262,"rows_inserted":0,"rows_updated":0,"rows_unchanged":10262,
- "rows_missing":0,"snapshot_hash":"f8d229505c0767fa3afaa18e7c768d70"}
-```
-
-Zero inserts, zero updates, 10,262 unchanged, **identical snapshot hash**. Re-running the
-loader is safe.
-
----
-
-## 6. NEGATIVE assertions — proving it says NO when it should
-
-A view that returns the right answer for a matching row proves half of nothing. These
-assert the *absence* of what must be absent, and the *refusal* of what must be refused.
-
-### 6.1 The reconciliation view
-
-| Assertion | Expected | Measured |
+| Table / view | BEFORE | AFTER |
 |---|---:|---:|
-| Rows for a `licensed_property_id` that does not exist (`-999999`) | 0 | **0** |
-| Nodes claiming a `core.property` match (`matched_core_property_count <> 0`) | 0 | **0** |
-| Nodes with `resolution_status <> 'unresolved'` | 0 | **0** |
-| Nodes with a non-null `last_resolved_at` | 0 | **0** |
-| Nodes where `unresolved_character_count <> opa_character_count` | 0 | **0** |
-| Landing rows with a non-null `property_id` | 0 | **0** |
-
-The loader **resolves nothing**, exactly as documented. Every one of the 1,445 nodes is
-`unresolved` with no core match — the correct state for a raw mirror with
-`core.property_character` still at 0 rows.
-
-### 6.2 The array contract of `20260807200000` — verified in both directions
-
-`matched_core_property_ids`, `core_property_names` and `core_licensor_codes` are
-**`'{}'` (empty array) for all 1,445 nodes and NULL for none** — measured as
-`is null` → 0 rows, `= '{}'` → 1,445 rows.
-
-This confirms the corrected comment on the view rather than contradicting it. The
-discriminator it documents remains sound: *"an empty name array beside a **NON-EMPTY**
-`matched_core_property_ids` means RLS suppression, not an unresolved node."* A genuinely
-unresolved node has an **empty** `matched_core_property_ids`, so it cannot be mistaken for
-RLS suppression. Had `20260807190000`'s original wording survived (which said "non-null"
-rather than "non-empty"), every one of these 1,445 unresolved nodes would have satisfied
-the RLS-suppression test and the discriminator would have been useless. **The
-`20260807200000` correction is load-bearing, and this load is the first evidence of it.**
-
-### 6.3 The three guards that had never fired outside fixtures
-
-| Guard | How it was provoked | Result |
-|---|---|---|
-| **Wrong-target gate** | `SUPABASE_URL` → preview, `OPA_EXPECTED_PROJECT_REF` → the **production** ref | **Exit 1.** `REFUSING TO SEND ... NOTHING HAS BEEN SENT.` Aborted before the first byte. Deliberately arranged so the only possible failure mode still wrote to preview. |
-| **`OPA_MIN_ROWS` floor** | `OPA_MIN_ROWS=10263` against a 10,262-row extract | **Exit 1.** `extract has 10262 data row(s), fewer than the expected minimum of 10263.` |
-| **`OPA_MIN_ROWS` mandatory** | `--apply` with `OPA_MIN_ROWS` unset | **Exit 1.** `OPA_MIN_ROWS is required for --apply.` No default, as issue #581 states. |
-
-### 6.4 The database shrink band — the strongest test performed
-
-With 10,262 rows already stored, a **deliberately truncated** extract (first 1,000 data
-rows, 104,101 bytes) was applied with `OPA_MIN_ROWS=1000` so the *runner-side* floor
-passed and **only the database guard could catch it**.
-
-- Result: **HTTP 400 from `plm.sync_opa_property_character`. Rejected.**
-- The runner refused to print the response body (correct — it can contain extract
-  content, and this repo and its CI logs are public).
-- **The mirror survived intact**, re-measured immediately afterwards:
-  `plm.opa_property_character = 10,262`, 1,445 properties, 9,613 characters,
-  `api.opa_property_reconciliation = 1,445`. The rejecting transaction rolled back
-  cleanly and destroyed nothing.
-
-This is the guard that protects against a truncated or partly-scraped refresh. It had
-never run against a real database before today.
+| `plm.opa_property_character` | **0** | **10,261** |
+| `api.opa_property_reconciliation` | 0 | **1,444** |
+| `core.property_character` | **0** | **0** |
+| `core.character` | **0** | **0** |
+| migration ledger | 405 | 405 |
 
 ---
 
-## 7. The link-state trap — found, proven, and repaired
+## 6. Behavioural, object and NEGATIVE assertions (`evidence/06`, `evidence/07`)
 
-### 7.1 What was wrong
+**Objects, not just data** — `to_regclass` → both present; `relrowsecurity` → **true**;
+policies → **1**; PK → `PRIMARY KEY (licensed_property_id, character_id)`.
+`pg_get_viewdef` was compared against `20260807200000` and matches: **no schema drift.**
 
-`supabase/.temp/` held two records of "which project am I linked to", and they
-**disagreed** on the working checkout:
+**Node grain holds.** 1,444 distinct nodes → view returns **exactly 1,444 rows**, and
+`sum(opa_character_count) = 10,261` — every loaded row accounted for exactly once.
+
+**The ID pair is the real key.** 10,261 rows inserted with zero conflicts. The *name* pair
+is not unique: 10,239 distinct pairs → **22 collisions**.
+
+**Idempotence.** A second identical apply: `rows_inserted 0, rows_unchanged 10261`,
+identical `snapshot_hash 87247b59…`.
+
+**Every negative assertion returned 0** (`evidence/07c`): non-existent node
+`-999999` → 0 rows; **sentinel rows surviving → 0**; nodes claiming a core match → 0;
+nodes not `unresolved` → 0; nodes with `last_resolved_at` → 0; count mismatches → 0;
+resolved rows → 0.
+
+**The array contract of `20260807200000`** (`evidence/07e`): `'{}'` for all 1,444, NULL for
+none. This *confirms* the corrected view comment. Its discriminator stays sound — an
+unresolved node has an **empty** `matched_core_property_ids`, so it cannot be mistaken for
+RLS suppression. Under the pre-`20260807200000` wording ("non-null") all 1,444 unresolved
+nodes would have satisfied the RLS-suppression test. **That correction is load-bearing.**
+
+### The four guards, provoked for real
+
+| Guard | Provocation | Result | Evidence |
+|---|---|---|---|
+| Wrong-target gate | expected ref = **production**, URL = preview | exit 1, `NOTHING HAS BEEN SENT` | `04` |
+| `OPA_MIN_ROWS` floor | demand 10,263 | exit 1 | `03a` |
+| `OPA_MIN_ROWS` mandatory | omitted with `--apply` | exit 1 | `03b` |
+| **Database shrink band** | truncated 1,000-row extract, runner floor lowered so **only the database** could catch it | **HTTP 400, rolled back, mirror intact at 10,261** | `06b`, `06c` |
+
+The wrong-target test was arranged so the only possible failure mode still wrote to
+preview. The shrink-band test is the strongest: it is the guard protecting against a
+truncated refresh, and it had never run against a real database before today.
+
+---
+
+## 7. The link-state inconsistency — CORRECTED ACCOUNT
+
+> **An earlier version of this document said the old check "passed while the CLI would
+> have targeted production." THAT WAS WRONG.** It was an inference, not a measurement.
+> It is corrected here by experiment (`evidence/08`). The lesson is recorded rather than
+> quietly edited away, because this file is the canonical record of the incident.
+
+### 7.1 What was actually observed
 
 ```
 supabase/.temp/project-ref          ->  rjyboqwcdzcocqgmsyel   (PREVIEW)
 supabase/.temp/linked-project.json  ->  qsllyeztdwjgirsysgai   (PRODUCTION)
 ```
 
-The documented safety check was `cat supabase/.temp/project-ref`. **It passed** — while
-the CLI would have targeted **production**. A green check over the wrong database is worse
-than no check, because it converts caution into confidence.
+### 7.2 What was measured (`evidence/08`)
 
-### 7.2 The root cause, measured — not guessed
+Three experiments, all against preview or a non-existent ref, **never production**:
 
-Running `supabase link --project-ref rjyboqwcdzcocqgmsyel` and inspecting the directory
-afterwards shows that **`supabase link` writes only `project-ref`. It never creates,
-refreshes or deletes `linked-project.json`.** That file is written by a *different* tool
-(the Supabase editor extension / MCP tooling).
+| # | Setup | Result |
+|---|---|---|
+| A | real `project-ref` (preview) + **bogus** `pooler-url` | CLI tried `db.rjyboqwcdzcocqgmsyel.supabase.co` — **ignored the pooler URL** |
+| B | **bogus** `project-ref` + real preview `pooler-url` | CLI tried `db.zzzz…zzzz.supabase.co` — the valid pooler URL **did not redirect it** |
+| C | both consistent (preview) | connected; migration list returned |
 
-That is the whole incident: `linked-project.json` was **orphaned, stale state pointing at
-production, and no amount of re-linking would ever have corrected it.** It simply sat
-there looking authoritative.
+**Conclusion, measured:**
 
-This also corrected the checker's design mid-build. An earlier draft treated a missing
-`linked-project.json` as "half-present link state = error". That would have **failed on
-every correctly linked checkout**, and a check that cries wolf is one people learn to
-skip. The rule is now: **`project-ref` is required; `linked-project.json` is optional but
-must agree when present.**
+- **`project-ref` DECIDES THE PROJECT.**
+- `pooler-url` is the connection **route**, used when it agrees. The ref hides in its
+  **username** (`postgres.<ref>`), not its host — a reader scanning the host finds nothing.
+- `linked-project.json` is **not written by `supabase link` at all**. `supabase link`
+  creates `project-ref` and `pooler-url` only.
 
-### 7.3 The repair
+**Therefore the old `cat supabase/.temp/project-ref` check was RIGHT about where the CLI
+would go**, and the production-named `linked-project.json` was **orphaned state from a
+different tool** — not a CLI wrong-target trap.
 
-Neither file is in git — `.gitignore` line 1 excludes `supabase/.temp/`. **So the fix
-could not be a committed file. It had to be a committed check.**
+### 7.3 The risk is real anyway, and it is CROSS-TOOL
 
-1. **Local state repaired.** `supabase/.temp/` in the shared checkout was deleted and
-   re-linked explicitly to `rjyboqwcdzcocqgmsyel`. The contradictory
-   `linked-project.json` is gone. Verified: the checker now PASSES against the shared
-   checkout naming preview.
-2. **`tools/check-supabase-link-state.mjs`** (new) — a fail-closed gate. The expected ref
-   is a **required input with no default**, because a default is indistinguishable from
-   an unset variable at the moment it matters.
-3. **`tools/check-supabase-link-state.test.mjs`** (new) — 24 tests. Picked up
-   automatically by `.github/workflows/tools-offline-tests.yml`, which globs
-   `tools/*.test.mjs` with no `paths:` filter, so it runs on every PR and every push to
-   main. Offline, no secrets, no database contact.
+The tool that *does* read `linked-project.json` is the Supabase editor extension / MCP
+tooling — and on this machine `get_project_url` returned the **production** project and
+accepts no project parameter. So the two halves of one checkout genuinely pointed at two
+different databases: **the CLI at preview, the MCP at production.** An agent that checks
+one and acts through the other is the hazard, and **no single-file check can see it**.
+Because `supabase link` never touches that JSON file, **no amount of re-linking would ever
+have corrected it** — any future "just re-link to fix the link state" instruction is wrong.
 
-### 7.4 Proof the check catches the real thing
+### 7.4 What was done — and what is NOT yet fixed
 
-Replayed against the **actual bytes of the two contradictory files** as they were found:
+**NOT "repaired".** Deleting one untracked `supabase/.temp/` fixed one directory on one
+machine at one moment. It is gitignored and will not survive a fresh clone, and nothing
+stops the editor extension from writing a stale `linked-project.json` again tomorrow.
+**Treat this as OPEN, not handled.**
 
-```
-SUPABASE LINK STATE IS INCONSISTENT -- THIS IS THE 2026-08-07 TRAP.
-  supabase/.temp/project-ref says      rjyboqwcdzcocqgmsyel
-  supabase/.temp/linked-project.json says  qsllyeztdwjgirsysgai
-```
+What actually exists now:
 
-It fails **even though `project-ref` matches the expected ref** — which is the precise
-situation that produced a green check over a wrong target. The headline test encodes
-exactly this case. CLI paths verified end-to-end:
+1. **`tools/check-supabase-link-state.mjs`** — a fail-closed gate over **all three** files.
+   The expected ref is a **required input with no default**. `linked-project.json` and
+   `pooler-url` are **optional but must agree when present** — failing on their absence
+   would cry wolf on every correctly linked checkout, and a check that cries wolf gets
+   skipped. It **never prints the pooler URL**, which can carry the database password
+   (proved in `evidence/09b`).
+2. **`--root=<path>`** — this repo runs an agent-per-worktree model, so several checkouts
+   exist side by side, each with its own `supabase/.temp/`. Without this, invoking the
+   script by absolute path from another worktree silently validates the **wrong** checkout
+   and prints a confident green. The checkout actually validated is always printed.
+3. **`tools/check-supabase-link-state.test.mjs`** — 39 tests, auto-wired into CI by the
+   existing `tools/*.test.mjs` glob in `tools-offline-tests.yml` (no `paths:` filter).
+4. **One call site wired**: the production target gate in
+   `coldlion-licensor-property-production.yml`, immediately after its `supabase link`.
 
-| Invocation | Result |
-|---|---|
-| `--expect-ref=rjyboqwcdzcocqgmsyel` (repaired state) | exit **0**, both files reported |
-| `--expect-ref=qsllyeztdwjgirsysgai` | exit **1**, `WRONG PROJECT` |
-| no ref given | exit **1**, `REQUIRED and has no default` |
+**Still unwired — 14 call sites, tracked in [#593](https://github.com/u2giants/shared-db/issues/593):**
+2 workflows, 11 tools, and `AGENTS.md` (2 places) still use the single-file
+`cat supabase/.temp/project-ref`. A guard nobody calls protects nothing; the issue exists
+so this cannot be forgotten.
 
-### 7.5 The Supabase MCP is bound to PRODUCTION
-
-`get_project_url` returned **`https://qsllyeztdwjgirsysgai.supabase.co`**. The MCP takes
-no project parameter, so it **cannot** be aimed at preview. It was **not used for any
-read or write in this task.** Every database call went through the Management API with the
-preview ref **named in the request path**, so the target could not drift.
+**Not established:** whether a **valid** `pooler-url` naming a different project can
+actually redirect the CLI. Testing that would have required pointing a connection at
+production, so it was **not done**. The checker rejects a mismatched `pooler-url` anyway,
+as defence in depth.
 
 ---
 
-## 8. Test results
+## 8. Tests (`evidence/10`)
 
 | Suite | Result |
 |---|---|
-| `tools/sync-opa-property-character.test.mjs` | **45 / 45 pass** (unchanged; matches issue #581) |
-| `tools/check-supabase-link-state.test.mjs` | **24 / 24 pass** (new) |
-| Combined run | **69 / 69 pass**, 0 fail |
+| `tools/sync-opa-property-character.test.mjs` | **51 / 51** (45 before, +6 for the sentinel rule and the row floor) |
+| `tools/check-supabase-link-state.test.mjs` | **39 / 39** |
+| **Combined** | **90 / 90 pass, 0 fail** |
+
+Sentinel coverage is deliberately **both directions**, because the obvious way to get a
+threshold rule wrong is at its boundary:
+
+- **positive** — a sentinel row is dropped, counted, and located by ordinal;
+- **negative (boundary)** — **ID `0` is NOT dropped**;
+- **negative** — a row is dropped if *either* ID is negative, not only when both are;
+- **rule not magic number** — a different sentinel pair (`-4242`/`-777`) is also dropped;
+- the parser still **accepts** negatives, so a sentinel is filtered rather than fatal;
+- the row floor counts **loadable** rows, not rows read.
 
 ---
 
 ## 9. What was NOT done — deliberately
 
-- **No production contact.** Nothing was read from or written to `qsllyeztdwjgirsysgai`.
-  It remains 44 migrations behind preview; that is somebody else's task.
-- **No migration created.** Preview's ledger is unchanged at 405 / `20260807200000`. The
-  brief allocated no version and none was invented.
-- **No promotion, no `main` push, no self-merge.** Delivered as a PR.
-- **No resolution run.** `core.property_character`, `core.character`,
-  `core.style_guide` and `core.style_guide_character` are all still **0 rows**. Mapping
-  OPA nodes onto `core.property` is separate work.
-- **No CSV committed.** The extract never entered this PUBLIC repo. No row of Disney data
-  appears in this document, in the loader output, or in any error message.
-- **`OPA_SOURCE_URL` snag NOT resolved** (issue #581 snag 1). The load used the bare page
-  URL `https://opa.disney.com/ProdApp/createEditProduct.spring`, so `source_url` records
-  *which page*, not *which slice*. All 10,262 rows carry one identical `source_url` and
-  one `line_of_business` (`Home`). **A second LOB extract would be indistinguishable by
-  `source_url` alone.** This still needs the owner decision issue #581 calls for; it is
-  not blocked by anything technical here.
-- **Bare-quote CSV rule still unexercised** (issue #581 snag 2). Disney's exporter quotes
-  every field and the file has zero embedded quotes, so that branch did not fire. Still
-  luck, still untested. Re-run the dry run on every refresh — it contacts no database.
+- **No production contact.** Nothing read from or written to `qsllyeztdwjgirsysgai`. The
+  Supabase MCP is bound to production and takes no project parameter, so it was **not
+  used**; every database call went through the Management API with the preview ref **named
+  in the request path**.
+- **No migration**, no promotion, no `main` push, no self-merge.
+- **No resolution run.** `core.property_character` and `core.character` are still **0**.
+  Mapping OPA nodes onto `core.property` is separate work.
+- **No CSV committed.** No row of Disney data appears in this document, in `evidence/`, in
+  any loader output, or in any error message. All evidence files were scanned against the
+  live credential values and the common secret shapes: **no leaks**.
+- **`OPA_SOURCE_URL` snag NOT resolved** (#581 snag 1). The load used the bare page URL, so
+  `source_url` records *which page*, not *which slice*. All 10,261 rows carry one identical
+  `source_url` and one `line_of_business` (`Home`); **a second LOB extract would be
+  indistinguishable by `source_url` alone.** Still needs the owner decision #581 calls for.
+- **Bare-quote CSV rule still unexercised** (#581 snag 2). Disney's exporter quotes every
+  field and the file has zero embedded quotes. Still luck, still untested. Re-run the dry
+  run on every refresh — it contacts no database.
 
 ---
 
-## 10. Findings that ADD to issue #581
+## 10. Findings
 
-1. **`supabase link` does not write `linked-project.json`** (§7.2). This is the root cause
-   of the trap and it is not recorded anywhere else. Any future instruction of the form
-   "re-link to fix the link state" is **wrong** — re-linking cannot touch that file.
+1. **`supabase link` does not write `linked-project.json`** (§7.2). Root cause of the
+   inconsistency, recorded nowhere else, and it invalidates any "re-link to fix it" advice.
+2. **The ref in `pooler-url` hides in the username**, not the host (§7.2). A third file
+   that names a project and that a host-scanning reader would miss entirely.
+3. **The sentinel row is real and was silently inflating counts** — now filtered by owner
+   ruling (§2). Anyone who had counted "Disney properties" off the pre-ruling mirror would
+   have been off by one.
+4. **The `20260807200000` array `coalesce` is load-bearing, not cosmetic** (§6).
+5. **A prior deliberate decision was reversed** (§2): the loader used to be documented and
+   tested to *keep* the "Special Projects" sentinel.
 
-2. **A sentinel row exists in Disney's extract.** One row carries
-   `licensed_property_id = -9999` and `character_id = -9998` — the only negative IDs in
-   the file (all other IDs run from 38 to 1,159,383,366). It is loaded as a legitimate
-   node, so **`api.opa_property_reconciliation`'s 1,445 rows include 1 sentinel; there are
-   1,444 real property nodes.** Nothing rejects it today, and any consumer counting
-   "Disney properties" off this mirror will be off by one. Recommend an owner decision on
-   whether to filter negative IDs at the `api` view or reject them at the importer.
-
-3. **The `20260807200000` array `coalesce` is load-bearing, not cosmetic** (§6.2). With
-   real data it is what keeps the view's RLS-suppression discriminator meaningful. Under
-   the pre-`20260807200000` wording all 1,445 unresolved nodes would have looked like RLS
-   suppression.
-
-4. **Issue #581 says `core.style_guide` and `core.style_guide_character` are 0 rows.**
-   Confirmed for `core.character` (0) and `core.property_character` (0); the style-guide
-   tables were not re-measured in this task and are outside its scope.
-
-Nothing measured in this task **contradicts** issue #581. Every figure it predicted was
-reproduced exactly.
+Nothing measured **contradicts** issue #581's predictions; the row/property/character
+totals differ from it only by the one sentinel row the owner ruled must be removed.

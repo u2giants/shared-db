@@ -258,6 +258,22 @@ jobs:
             exit 1
           fi
 
+      # Defence in depth over the check above, which reads ONE of the three files in
+      # supabase/.temp/ that can each name a project.
+      #
+      # Measured 2026-08-07 on a developer checkout: supabase/.temp/project-ref said
+      # PREVIEW while supabase/.temp/linked-project.json in the same directory said
+      # PRODUCTION. Direct measurement (see tools/check-supabase-link-state.mjs) showed
+      # the CLI follows project-ref, so the check above was right about the CLI -- but a
+      # DIFFERENT tool reading linked-project.json (the Supabase MCP / editor extension)
+      # would have acted on the other project entirely. `supabase link` never writes or
+      # refreshes that JSON file, so no re-link can correct it.
+      #
+      # This step asserts all three files agree AND name production. It is offline, needs
+      # no secret, and cannot itself reach a database.
+      - name: Prove ALL Supabase link files agree on production
+        run: node tools/check-supabase-link-state.mjs --expect-ref="$PRODUCTION_PROJECT_REF"
+
       # Every write runner below carries ALL FOUR authorization parts:
       #   --production  --production-authorized  --project-ref qsllyeztdwjgirsysgai
       #   + COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED=true (job env)

@@ -3,23 +3,50 @@
  * Prove the Supabase CLI link state is HONEST before anyone trusts it.
  *
  * ============================================================================
- * WHY THIS EXISTS -- a real, measured near-miss on 2026-08-07
+ * WHY THIS EXISTS -- a real, measured inconsistency on 2026-08-07
  * ============================================================================
- * `supabase/.temp/` holds TWO independent records of "which project am I linked
- * to", written at different times by different CLI code paths:
+ * `supabase/.temp/` holds THREE files that can each name a project:
  *
  *     supabase/.temp/project-ref          -> a bare ref, e.g. rjyboqwcdzcocqgmsyel
+ *     supabase/.temp/pooler-url           -> ref hidden in the USERNAME: postgres.<ref>
  *     supabase/.temp/linked-project.json  -> {"ref": "...", "name": ..., ...}
  *
- * On 2026-08-07 they DISAGREED on a working checkout:
+ * On 2026-08-07 two of them DISAGREED on a working checkout:
  *
  *     project-ref          said  rjyboqwcdzcocqgmsyel   (PREVIEW)
  *     linked-project.json  said  qsllyeztdwjgirsysgai   (PRODUCTION)
  *
- * The safety check documented at the time was `cat supabase/.temp/project-ref`.
- * That check PASSED -- it read the preview file -- while the CLI would have
- * targeted PRODUCTION. A green check that points at the wrong database is worse
- * than no check at all, because it converts caution into false confidence.
+ * WHAT WAS MEASURED, AND WHAT THE FIRST WRITE-UP GOT WRONG
+ * --------------------------------------------------------
+ * The first version of this comment claimed the CLI "would have targeted
+ * PRODUCTION". THAT WAS WRONG, and it was corrected by direct measurement rather
+ * than argument. Three experiments, all against preview and a non-existent ref,
+ * never against production:
+ *
+ *   A. real project-ref (preview) + BOGUS pooler-url
+ *        -> CLI tried db.<project-ref value>.supabase.co. It IGNORED the pooler URL.
+ *   B. BOGUS project-ref + real preview pooler-url
+ *        -> CLI tried db.<bogus>.supabase.co. The valid pooler URL did NOT redirect it.
+ *   C. both consistent (preview)
+ *        -> connected, and the migration list came back.
+ *
+ * So: `project-ref` DECIDES THE PROJECT. `pooler-url` is the connection route used
+ * when it agrees. `linked-project.json` is not written by `supabase link` at all --
+ * `supabase link --project-ref <ref>` creates `project-ref` and `pooler-url` and
+ * never creates or refreshes the JSON file.
+ *
+ * THEREFORE the old `cat supabase/.temp/project-ref` check was RIGHT about where the
+ * CLI would go, and the production-named `linked-project.json` was ORPHANED state
+ * left by a different tool -- not a CLI wrong-target trap.
+ *
+ * THE RISK IS REAL ANYWAY, AND IT IS A CROSS-TOOL RISK
+ * ----------------------------------------------------
+ * The tool that DOES read `linked-project.json` is the Supabase editor extension /
+ * MCP tooling -- and on this machine the Supabase MCP `get_project_url` returns the
+ * PRODUCTION project and accepts no project parameter. So the two halves of one
+ * checkout genuinely pointed at two different databases: the CLI at preview, the MCP
+ * at production. An agent that checks one and acts through the other is the hazard,
+ * and no single-file check can see it.
  *
  * Neither file is in git (`.gitignore` line 1 excludes `supabase/.temp/`), so
  * the fix CANNOT be a committed file. It has to be a committed CHECK. This is it.
@@ -37,14 +64,19 @@
  * never reported as "fine".
  *
  * ONE DELIBERATE EXCEPTION, measured on 2026-08-07:
- * `supabase link --project-ref <ref>` writes ONLY `project-ref`. It does not
- * create, refresh or delete `linked-project.json` -- that file comes from a
+ * `supabase link --project-ref <ref>` writes `project-ref` and `pooler-url`. It does
+ * not create, refresh or delete `linked-project.json` -- that file comes from a
  * DIFFERENT tool (the Supabase editor extension / MCP tooling). That is the root
  * cause of the incident above: the JSON file was stale leftovers pointing at
  * production, and NO amount of re-linking would ever have corrected it.
- * So `linked-project.json` is OPTIONAL here: absent is normal and passes, but if
- * it is present it MUST agree. Failing on its absence would make this check cry
- * wolf on every freshly linked checkout, and a check that cries wolf gets skipped.
+ * So `linked-project.json` and `pooler-url` are OPTIONAL here: absent is normal and
+ * passes, but if present they MUST agree with `project-ref`. Failing on their absence
+ * would make this check cry wolf on every freshly linked checkout, and a check that
+ * cries wolf gets skipped.
+ *
+ * USAGE NOTE: `--root=<path>` selects WHICH checkout to inspect. It defaults to the
+ * checkout containing this script, which is wrong when the script is invoked by
+ * absolute path from a different worktree -- see resolveRoot below.
  *
  * This file contacts NO database, reads NO credential, and needs NO secret. It is
  * pure text handling so it can run in CI offline (tools-offline-tests.yml).
@@ -74,6 +106,54 @@ export const PROJECT_REF = /^[a-z0-9]{20}$/;
 
 export const PROJECT_REF_FILE = "supabase/.temp/project-ref";
 export const LINKED_PROJECT_FILE = "supabase/.temp/linked-project.json";
+export const POOLER_URL_FILE = "supabase/.temp/pooler-url";
+
+/**
+ * The ref hides in the USERNAME of the pooler URL, as `postgres.<ref>` -- the host is
+ * a shared regional endpoint (aws-0-us-east-1.pooler.supabase.com) and names no project
+ * at all. A reader scanning the host for a ref finds nothing and wrongly concludes the
+ * file is project-agnostic.
+ */
+const POOLER_USERNAME_REF = /^postgres\.([a-z0-9]{20})$/;
+
+/**
+ * Extract the project ref from `supabase/.temp/pooler-url`, or null when the file is
+ * absent or names no project.
+ *
+ * ============================================================================
+ * THIS FUNCTION MUST NEVER PUT THE URL, OR ANY PART OF IT, IN AN ERROR MESSAGE.
+ * ============================================================================
+ * The pooler URL is a full libpq connection string and its password field CAN carry the
+ * database password. Errors from this file reach terminals, CI logs and agent
+ * transcripts, and this repository is PUBLIC. Every throw below reports only the FILE
+ * and WHAT IS WRONG -- never a value. (The checkout measured on 2026-08-07 happened to
+ * have an empty password field, which is luck, not a guarantee.)
+ */
+export function parsePoolerUrlRef(raw) {
+  if (raw === null || raw === undefined) return null;
+  const text = String(raw).trim();
+  if (text === "") {
+    throw new Error(
+      `${POOLER_URL_FILE} exists but is EMPTY. Delete supabase/.temp/ and re-link ` +
+        "naming the project explicitly."
+    );
+  }
+  let parsed;
+  try {
+    parsed = new URL(text);
+  } catch {
+    throw new Error(
+      `${POOLER_URL_FILE} is not a valid URL. Its content is deliberately NOT printed: ` +
+        "it is a connection string and can carry the database password."
+    );
+  }
+  const username = decodeURIComponent(parsed.username ?? "");
+  const match = POOLER_USERNAME_REF.exec(username);
+  // A username of plain `postgres` is a direct (non-pooled) connection string that
+  // asserts no project. Absence of a claim is not a conflicting claim.
+  if (!match) return null;
+  return match[1];
+}
 
 /**
  * Validate the ref the caller SAYS they mean.
@@ -170,10 +250,16 @@ export function parseLinkedProjectFile(raw) {
  * two disagree, here is each value" -- rather than a bare mismatch against the
  * expectation that leaves the second file unmentioned and the trap undiscovered.
  */
-export function evaluateLinkState({ projectRefRaw, linkedProjectRaw, expectedRef } = {}) {
+export function evaluateLinkState({
+  projectRefRaw,
+  linkedProjectRaw,
+  poolerUrlRaw,
+  expectedRef,
+} = {}) {
   const expected = resolveExpectedRef(expectedRef);
   const fromRefFile = parseProjectRefFile(projectRefRaw);
   const fromJsonFile = parseLinkedProjectFile(linkedProjectRaw);
+  const fromPoolerUrl = parsePoolerUrlRef(poolerUrlRaw);
 
   // `project-ref` is the file the CLI actually maintains, so its ABSENCE means
   // unlinked. `linked-project.json` alone is not a link -- it is leftovers.
@@ -201,21 +287,44 @@ export function evaluateLinkState({ projectRefRaw, linkedProjectRaw, expectedRef
   if (fromJsonFile !== null && fromRefFile !== fromJsonFile) {
     throw new Error(
       "SUPABASE LINK STATE IS INCONSISTENT -- THIS IS THE 2026-08-07 TRAP.\n" +
-        `  ${PROJECT_REF_FILE} says      ${fromRefFile}\n` +
+        `  ${PROJECT_REF_FILE} says      ${fromRefFile}   <- the CLI follows THIS one\n` +
         `  ${LINKED_PROJECT_FILE} says  ${fromJsonFile}\n` +
-        "Checking only one of these produces a GREEN result while the CLI targets the " +
-        "other project. Do not proceed and do not pick a winner by hand: delete " +
-        "supabase/.temp/ and re-link naming the project explicitly."
+        "The CLI targets the project-ref value (measured 2026-08-07), so the risk here is " +
+        "NOT that the CLI goes astray -- it is that a DIFFERENT tool reading " +
+        "linked-project.json (the Supabase MCP / editor extension) acts on the other " +
+        "project while you believe you are working on this one. Do not pick a winner by " +
+        "hand: delete supabase/.temp/ and re-link naming the project explicitly."
+    );
+  }
+
+  // pooler-url carries the ref in its USERNAME (postgres.<ref>) and is the route the CLI
+  // actually connects THROUGH when it agrees. Measured 2026-08-07: a pooler-url naming a
+  // different ref did NOT redirect the CLI -- it fell back to the direct host derived
+  // from project-ref. So this is defence in depth, not a known live hole. It is checked
+  // anyway because a disagreeing pooler-url means the link state is not trustworthy, and
+  // because whether a VALID mismatched pooler URL can redirect was NOT tested (doing so
+  // would have required pointing a connection at production).
+  if (fromPoolerUrl !== null && fromRefFile !== fromPoolerUrl) {
+    throw new Error(
+      "SUPABASE LINK STATE IS INCONSISTENT.\n" +
+        `  ${PROJECT_REF_FILE} says  ${fromRefFile}\n` +
+        `  ${POOLER_URL_FILE} names  ${fromPoolerUrl} (in its username, as postgres.<ref>)\n` +
+        "The URL itself is deliberately NOT printed: it can carry the database password. " +
+        "Delete supabase/.temp/ and re-link naming the project explicitly."
     );
   }
 
   if (fromRefFile !== expected) {
+    const agreeing = [
+      fromJsonFile === null ? null : LINKED_PROJECT_FILE,
+      fromPoolerUrl === null ? null : POOLER_URL_FILE,
+    ].filter(Boolean);
     throw new Error(
       `WRONG PROJECT: link state names ${fromRefFile}, but the expected project is ` +
         `${expected}. ` +
-        (fromJsonFile === null
-          ? `${PROJECT_REF_FILE} is the only link file present and it does not agree with YOU, `
-          : "Both link files agree with each other and disagree with YOU, ") +
+        (agreeing.length === 0
+          ? `${PROJECT_REF_FILE} is the only link file naming a project, and it does not agree with YOU, `
+          : `${PROJECT_REF_FILE} agrees with ${agreeing.join(" and ")} and they all disagree with YOU, `) +
         "so this is a real target mismatch, not file drift. Re-link, or correct the " +
         "expected ref -- do not bypass this check."
     );
@@ -223,7 +332,12 @@ export function evaluateLinkState({ projectRefRaw, linkedProjectRaw, expectedRef
 
   // linkedProjectFile is null when the JSON file is absent, which is the normal
   // post-`supabase link` state. Callers must not treat null as "unknown target".
-  return { ref: expected, projectRefFile: fromRefFile, linkedProjectFile: fromJsonFile };
+  return {
+    ref: expected,
+    projectRefFile: fromRefFile,
+    linkedProjectFile: fromJsonFile,
+    poolerUrlFile: fromPoolerUrl,
+  };
 }
 
 /** Read a file, mapping "not found" to null and letting every other error through. */
@@ -241,28 +355,64 @@ export function repoRootFrom(moduleUrl) {
   return resolvePath(dirname(fileURLToPath(moduleUrl)), "..");
 }
 
-async function main() {
-  const args = process.argv.slice(2);
-  const refArg = args.find((a) => a.startsWith("--expect-ref="));
-  const expectedRef = refArg
-    ? refArg.slice("--expect-ref=".length)
-    : process.env.SUPABASE_EXPECTED_PROJECT_REF;
+/**
+ * Resolve which CHECKOUT to inspect.
+ *
+ * WHY `--root` EXISTS. This repository runs an agent-per-git-worktree model, so several
+ * checkouts of shared-db exist side by side, each with its OWN `supabase/.temp/`.
+ * Defaulting to the directory containing THIS SCRIPT means that invoking it by absolute
+ * path from another worktree silently validates the WRONG checkout's link state and
+ * prints a confident green. That is the same class of bug this file exists to kill, so
+ * the root is selectable and is always reported in the output.
+ */
+export function resolveRoot({ rootArg, cwd, moduleUrl } = {}) {
+  if (rootArg !== undefined && rootArg !== null && String(rootArg).trim() !== "") {
+    return resolvePath(String(rootArg).trim());
+  }
+  // `--root=.` and `--root=$PWD` are the explicit ways to check the current directory.
+  // The default stays "the checkout this script lives in", which is right for the common
+  // `node tools/check-supabase-link-state.mjs` invocation from a repo root.
+  return repoRootFrom(moduleUrl);
+}
 
-  const root = repoRootFrom(import.meta.url);
+export async function runCli({ argv = [], env = {}, log = console.log, moduleUrl } = {}) {
+  const valueOf = (flag) => {
+    const hit = argv.find((a) => a.startsWith(`${flag}=`));
+    return hit ? hit.slice(flag.length + 1) : undefined;
+  };
+
+  const expectedRef = valueOf("--expect-ref") ?? env.SUPABASE_EXPECTED_PROJECT_REF;
+  const root = resolveRoot({
+    rootArg: valueOf("--root") ?? env.SHARED_DB_ROOT,
+    moduleUrl,
+  });
+
   const result = evaluateLinkState({
     projectRefRaw: await readOptional(joinPath(root, PROJECT_REF_FILE)),
     linkedProjectRaw: await readOptional(joinPath(root, LINKED_PROJECT_FILE)),
+    poolerUrlRaw: await readOptional(joinPath(root, POOLER_URL_FILE)),
     expectedRef,
   });
 
-  console.log(
+  log(
     `Supabase link state is consistent and matches the expected project: ${result.ref}\n` +
+      `  checkout: ${root}\n` +
       `  ${PROJECT_REF_FILE}: ${result.projectRefFile}\n` +
       `  ${LINKED_PROJECT_FILE}: ` +
       (result.linkedProjectFile === null
         ? "absent (normal -- `supabase link` does not write this file)"
-        : result.linkedProjectFile)
+        : result.linkedProjectFile) +
+      `\n  ${POOLER_URL_FILE}: ` +
+      (result.poolerUrlFile === null
+        ? "absent or naming no project"
+        : `${result.poolerUrlFile} (from its username; URL not printed)`)
   );
+
+  return result;
+}
+
+async function main() {
+  await runCli({ argv: process.argv.slice(2), env: process.env, moduleUrl: import.meta.url });
 }
 
 function isEntryPoint() {

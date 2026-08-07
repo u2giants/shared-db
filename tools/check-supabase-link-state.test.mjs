@@ -5,11 +5,15 @@ import {
   PROJECT_REF,
   PROJECT_REF_FILE,
   LINKED_PROJECT_FILE,
+  POOLER_URL_FILE,
   resolveExpectedRef,
   parseProjectRefFile,
   parseLinkedProjectFile,
+  parsePoolerUrlRef,
   evaluateLinkState,
   readOptional,
+  resolveRoot,
+  runCli,
 } from "./check-supabase-link-state.mjs";
 
 // Refs used ONLY as test fixtures. They are shaped like real refs (20 lowercase
@@ -19,6 +23,10 @@ const REF_A = "aaaaaaaaaaaaaaaaaaaa";
 const REF_B = "bbbbbbbbbbbbbbbbbbbb";
 
 const json = (ref) => JSON.stringify({ ref, name: "example", organization_id: "x" });
+
+/** A pooler URL shaped exactly like the CLI writes: the ref lives in the USERNAME. */
+const pooler = (ref, password = "") =>
+  `postgresql://postgres.${ref}:${password}@aws-0-us-east-1.pooler.supabase.com:5432/postgres`;
 
 // ---------------------------------------------------------------------------
 // THE HEADLINE CASE: the exact 2026-08-07 trap.
@@ -86,6 +94,7 @@ test("passes ONLY when both files exist, agree, and match the expected ref", () 
     ref: REF_A,
     projectRefFile: REF_A,
     linkedProjectFile: REF_A,
+    poolerUrlFile: null,
   });
 });
 
@@ -144,6 +153,7 @@ test("linked-project.json ABSENT is the NORMAL post-`supabase link` state and mu
     ref: REF_A,
     projectRefFile: REF_A,
     linkedProjectFile: null,
+    poolerUrlFile: null,
   });
 });
 
@@ -294,6 +304,217 @@ test("readOptional returns the file text unchanged", async () => {
 // ---------------------------------------------------------------------------
 // The shared ref pattern.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// pooler-url -- the THIRD file that names a project.
+// ---------------------------------------------------------------------------
+
+test("parsePoolerUrlRef finds the ref in the USERNAME, not the host", () => {
+  // The host is a shared regional endpoint and names no project at all.
+  assert.equal(parsePoolerUrlRef(pooler(REF_A)), REF_A);
+  assert.equal(parsePoolerUrlRef(`  ${pooler(REF_A, "somepassword")}  \n`), REF_A);
+});
+
+test("a pooler-url naming a DIFFERENT project fails the gate", () => {
+  assert.throws(
+    () =>
+      evaluateLinkState({
+        projectRefRaw: REF_A,
+        poolerUrlRaw: pooler(REF_B),
+        expectedRef: REF_A,
+      }),
+    (err) => {
+      assert.match(err.message, /INCONSISTENT/);
+      assert.match(err.message, new RegExp(REF_A));
+      assert.match(err.message, new RegExp(REF_B));
+      assert.match(err.message, new RegExp(POOLER_URL_FILE.replace(/[.]/g, "\\.")));
+      return true;
+    }
+  );
+});
+
+test("the pooler-url error NEVER prints the URL, because it can carry the password", () => {
+  const secret = "sup3r-s3cret-db-password";
+  assert.throws(
+    () =>
+      evaluateLinkState({
+        projectRefRaw: REF_A,
+        poolerUrlRaw: pooler(REF_B, secret),
+        expectedRef: REF_A,
+      }),
+    (err) => {
+      assert.ok(!err.message.includes(secret), "the password must never reach an error message");
+      assert.ok(!err.message.includes("pooler.supabase.com"), "the URL must not be echoed");
+      return true;
+    }
+  );
+});
+
+test("an unparseable pooler-url errors WITHOUT echoing its content", () => {
+  const secret = "leaked-password-should-not-appear";
+  assert.throws(
+    () => parsePoolerUrlRef(`not a url ${secret}`),
+    (err) => {
+      assert.match(err.message, /not a valid URL/);
+      assert.ok(!err.message.includes(secret));
+      return true;
+    }
+  );
+});
+
+test("a pooler-url that asserts NO project is not treated as a conflicting claim", () => {
+  // A plain `postgres` username is a direct connection string naming no project.
+  assert.equal(
+    parsePoolerUrlRef("postgresql://postgres:pw@db.example.supabase.co:5432/postgres"),
+    null
+  );
+  const result = evaluateLinkState({
+    projectRefRaw: REF_A,
+    poolerUrlRaw: "postgresql://postgres:pw@db.example.supabase.co:5432/postgres",
+    expectedRef: REF_A,
+  });
+  assert.equal(result.poolerUrlFile, null);
+});
+
+test("an absent pooler-url is normal and passes", () => {
+  const result = evaluateLinkState({
+    projectRefRaw: REF_A,
+    poolerUrlRaw: null,
+    expectedRef: REF_A,
+  });
+  assert.equal(result.poolerUrlFile, null);
+});
+
+test("an empty pooler-url is an error, not a shrug", () => {
+  assert.throws(() => parsePoolerUrlRef("   \n"), /EMPTY/);
+});
+
+test("all three files agreeing on the WRONG project still fails, and names all three", () => {
+  assert.throws(
+    () =>
+      evaluateLinkState({
+        projectRefRaw: REF_B,
+        linkedProjectRaw: json(REF_B),
+        poolerUrlRaw: pooler(REF_B),
+        expectedRef: REF_A,
+      }),
+    (err) => {
+      assert.match(err.message, /WRONG PROJECT/);
+      assert.match(err.message, new RegExp(LINKED_PROJECT_FILE.replace(/[.]/g, "\\.")));
+      assert.match(err.message, new RegExp(POOLER_URL_FILE.replace(/[.]/g, "\\.")));
+      return true;
+    }
+  );
+});
+
+test("the happy path reports all three files", () => {
+  const result = evaluateLinkState({
+    projectRefRaw: REF_A,
+    linkedProjectRaw: json(REF_A),
+    poolerUrlRaw: pooler(REF_A),
+    expectedRef: REF_A,
+  });
+  assert.deepEqual(result, {
+    ref: REF_A,
+    projectRefFile: REF_A,
+    linkedProjectFile: REF_A,
+    poolerUrlFile: REF_A,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveRoot / runCli -- the entry point, and WHICH checkout gets validated.
+// ---------------------------------------------------------------------------
+
+test("resolveRoot defaults to the checkout containing the script", () => {
+  const root = resolveRoot({ moduleUrl: import.meta.url });
+  // tools/<file> -> repo root, so the tools directory must NOT be the answer.
+  assert.ok(!root.endsWith("tools"), `unexpected root: ${root}`);
+});
+
+test("resolveRoot honours an explicit --root, which is what makes it worktree-safe", () => {
+  const chosen = resolveRoot({ rootArg: "  /some/other/checkout  ", moduleUrl: import.meta.url });
+  assert.match(chosen.replace(/\\/g, "/"), /some\/other\/checkout$/);
+  // An empty or whitespace --root must NOT silently become the filesystem root.
+  assert.equal(
+    resolveRoot({ rootArg: "   ", moduleUrl: import.meta.url }),
+    resolveRoot({ moduleUrl: import.meta.url })
+  );
+});
+
+test("runCli reads all three files from the chosen root and reports the checkout", async () => {
+  const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const root = await mkdtemp(join(tmpdir(), "linkstate-"));
+  await mkdir(join(root, "supabase", ".temp"), { recursive: true });
+  await writeFile(join(root, PROJECT_REF_FILE), REF_A);
+  await writeFile(join(root, POOLER_URL_FILE), pooler(REF_A, "pw"));
+
+  const lines = [];
+  const result = await runCli({
+    argv: [`--root=${root}`, `--expect-ref=${REF_A}`],
+    env: {},
+    log: (m) => lines.push(m),
+    moduleUrl: import.meta.url,
+  });
+
+  assert.equal(result.ref, REF_A);
+  assert.equal(result.poolerUrlFile, REF_A);
+  const out = lines.join("\n");
+  assert.match(out, new RegExp(REF_A));
+  assert.ok(out.includes(root), "the output must name the checkout it actually validated");
+  assert.ok(!out.includes("pw@"), "the CLI must not print the pooler URL");
+});
+
+test("runCli VALIDATES THE CHOSEN ROOT, not the one holding the script", async () => {
+  // This is the worktree-per-agent bug M1 describes: without --root, running the
+  // script by absolute path from another checkout validates the wrong .temp.
+  const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const root = await mkdtemp(join(tmpdir(), "linkstate-wrong-"));
+  await mkdir(join(root, "supabase", ".temp"), { recursive: true });
+  await writeFile(join(root, PROJECT_REF_FILE), REF_B); // the OTHER project
+
+  await assert.rejects(
+    () =>
+      runCli({
+        argv: [`--root=${root}`, `--expect-ref=${REF_A}`],
+        env: {},
+        log: () => {},
+        moduleUrl: import.meta.url,
+      }),
+    /WRONG PROJECT/
+  );
+});
+
+test("runCli takes the expected ref from the environment when no flag is given", async () => {
+  const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const root = await mkdtemp(join(tmpdir(), "linkstate-env-"));
+  await mkdir(join(root, "supabase", ".temp"), { recursive: true });
+  await writeFile(join(root, PROJECT_REF_FILE), REF_A);
+
+  const result = await runCli({
+    argv: [],
+    env: { SHARED_DB_ROOT: root, SUPABASE_EXPECTED_PROJECT_REF: REF_A },
+    log: () => {},
+    moduleUrl: import.meta.url,
+  });
+  assert.equal(result.ref, REF_A);
+});
+
+test("runCli still refuses when no expected ref is supplied anywhere", async () => {
+  await assert.rejects(
+    () => runCli({ argv: [], env: {}, log: () => {}, moduleUrl: import.meta.url }),
+    /REQUIRED and has no default/
+  );
+});
 
 test("PROJECT_REF accepts exactly 20 lowercase alphanumerics and nothing else", () => {
   assert.ok(PROJECT_REF.test(REF_A));
