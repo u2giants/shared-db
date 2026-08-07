@@ -2071,6 +2071,8 @@ testable offline against the two committed files. **Explicitly not implemented i
 that assessed it** — that session's scope was limited to `HANDOFF.md` and `COORDINATOR_INTAKE.md`
 and was forbidden from adding scripts or workflows.
 
+</details>
+
 ### B14 — The ENOBUFS fix MOVES the cliff, it does not remove it — and it still auto-trips the breaker (**RESOLVED 2026-07-31** — no longer a Step 8 blocker)
 
 > **RESOLVED 2026-07-31 in PR `fix/b14-coldlion-probe-bounded`.** Both halves were implemented;
