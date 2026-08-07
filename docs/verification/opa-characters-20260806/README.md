@@ -249,38 +249,50 @@ https://opa.disney.com/ProdApp/createEditProduct.spring
 
 ---
 
-## 6a. ⚠️ Check this first: we may already hold this data
+## 6a. How this relates to the tables we already have
 
-`HANDOFF.md` records these legacy row counts for the characters workstream:
+### ❌ First, a disproved claim — do not re-raise it
 
-| Source | Rows |
-| --- | --- |
-| **This OPA extract** | **10,262** property→character rows, **9,591** distinct character names |
-| `dflow.properties_and_characters` | 10,122 |
-| `public.characters` | 9,622 |
-| `core.character` | 0 (empty) |
+An earlier revision of this document (same day, 2026-08-06) suggested that
+`dflow.properties_and_characters` might be a stale import of this same OPA list,
+on the strength of the row counts being within ~1%. **That was wrong.** It is
+kept here, struck, so nobody re-derives it.
 
-Those are within ~1.4% and ~0.3% of the OPA numbers. **The hypothesis — not
-verified by anyone — is that `dflow.properties_and_characters` is a stale import
-of this same OPA list.**
+| Source | Rows | What a row actually IS |
+| --- | --- | --- |
+| **This OPA extract** | **10,262** (9,591 distinct names) | a distinct **(property, character) pair** |
+| `dflow.properties_and_characters` | 10,122 | `type='PROPERTY'` → a **style guide**; `type='CHARACTER'` → a character **appearance**, one per style guide |
+| `public.characters` | 9,622 | a character **appearance**, but carrying `property_id` |
+| `core.character` | **0** | intended home for distinct characters — never populated |
 
-If that holds, this file is not a new dataset. It is a **refresh of data we
-already have, carrying Disney's authoritative IDs**, and `characterID` /
-`licensedPropertyID` may be the join key the reconciliation work has been
-missing. The ~140-row difference would then be Disney's additions and retirements
-since whenever the legacy import ran, which is itself useful.
+The counts are close but they **count different things**, so the closeness is a
+coincidence. `AGENTS.md` §6.1 warns explicitly that
+`dflow.properties_and_characters` is misleadingly named and that "two AI sessions
+have already corrupted their understanding by reading those column names
+literally." Numeric similarity between these tables is **not** evidence of shared
+lineage.
 
-**Verify before designing anything.** It is a read-only comparison and cheap. Two
-outcomes, both worth recording:
+### The two axes (read `AGENTS.md` §6.1 and `docs/style-guides-characters-and-royalties.md` before designing)
 
-- **Confirmed** → the design question changes from "where does new data land?" to
-  "how do we reconcile and re-key what we have?"
-- **Disproved** → say so explicitly here and in `HANDOFF.md`, and delete the
-  claim. A disproved lead left standing is worse than no lead at all.
+- **Ownership is linear:** licensor → property → character. A character has
+  exactly one property. `public.characters` is on this axis.
+- **Style is many-to-many:** a style guide holds many characters, and a character
+  appears in many style guides. `dflow.properties_and_characters` is on this axis.
+- **A style guide is NOT a level between property and character.** Chaining the
+  two axes is the documented classic bug in this workstream.
 
-⚠️ **The counts above were read from `HANDOFF.md`, not from the live database.**
-The session that wrote this made zero database calls. Both sides need
-re-deriving before anyone acts.
+### What actually survives, and why it matters
+
+**`core.character` is 0 rows, and it wants distinct characters parented to a
+property. Neither legacy table supplies that shape — this OPA file does.** Both
+legacy tables hold *appearances*; OPA holds *identities scoped to a property*.
+That is the gap, and it is a stronger argument for landing this file than the
+disproved lineage claim ever was.
+
+**Still unverified, and worth testing early:** whether OPA's `characterID` is
+stable enough to serve as the identity key `core.character` needs, and how OPA's
+property names line up with `core.property`. No session in this thread has made
+any database call; every count above is read from repo documents, not measured.
 
 ---
 

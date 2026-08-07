@@ -147,9 +147,15 @@ The `ci-check-names` work that was going to make those names unique has evidentl
    ~15 open branches this will bite.
 
 **I did NOT edit `AGENTS.md`.** It is a single-writer file, and the other live
-session (PR #467) is editing it **right now** — its commit `60dcec3` touches
-`AGENTS.md`. Editing it would have caused a guaranteed conflict. **This is handed
-to the coordinator to record.**
+session (PR #467) is editing it **right now**. Editing it would have caused a
+guaranteed conflict.
+
+> ### ✅ ALREADY FIXED by the other session — do not redo
+> Their commit **`0a5b7c6` "docs(agents): correct the stale branch-protection
+> table in §6.7"** (+18/-5 on `AGENTS.md`) landed while this handover was being
+> written. **§6.7 is corrected; item 2 in §10 is CLOSED.** The finding is kept
+> here for its evidence and because the queue block filed alongside it still
+> reads as open. Verify against `AGENTS.md` on `main`, not against this file.
 
 ## 7. 🟡 OPEN — CI on PR #466, and a runner-capacity trap
 
