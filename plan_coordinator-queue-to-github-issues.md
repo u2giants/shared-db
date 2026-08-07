@@ -262,7 +262,7 @@ Propagation itself remains an owner task, tracked as work item **WI-63**.
 
 1. Reads the step-1 inventory, never the raw file.
 2. **`--dry-run` by default.** Creates nothing without an explicit flag.
-3. **Idempotent** — searches for an existing open issue with the same title and skips if found, so a half-finished run is safely re-runnable. `gh issue list --label` **works correctly in this repo**; a claim in `COORDINATOR_INTAKE.md:3019` that it returns empty is **false**, verified live 2026-08-07 (`--label coordinator-marker` correctly returned issue #473).
+3. **Idempotent** — see item 8 below for how. *(The original wording here described a title-based check over open issues only; that was replaced after review because it duplicated on both a closed issue and a renamed one.)* `gh issue list --label` **works correctly in this repo**; a claim in `COORDINATOR_INTAKE.md:3019` that it returns empty is **false**, verified live 2026-08-07 (`--label coordinator-marker` correctly returned issue #473).
 4. Uses `gh issue create --body-file`, never a heredoc — this is a PowerShell-first machine and heredoc recipes have silently failed here before.
 5. Writes a **temporary** mapping file (block → issue number). Summarise it in the PR body; do not commit it. A permanent artefact for a one-time event is the leftover this repo accumulates.
 6. **Fails loudly and stops on the first error.** A partial migration reporting success is the worst available outcome.
@@ -353,7 +353,7 @@ Ask both together, verbatim:
 
 ⚠️ **Step 7b.3 must not be bundled into a PR that merges before 7b.1 has run.** Step 7b.1 is a standalone `gh api` action, not part of any PR. *(Found by GLM.)*
 
-**Verification gate.** Protection lists five contexts and a throwaway PR reaches mergeable state.
+**Verification gate.** Protection lists **six** contexts — the five that survive plus `Intake pointer guard` — and a throwaway PR reaches mergeable state. *(This gate said "five" until step 5c added a required context; a stale count here would read as a failed change.)*
 
 ### Step 8 — Reduce the file to a pointer
 

@@ -143,7 +143,6 @@ const RULES = [
       /\boptionSourceID\b/g,
       /\bopa-characters\.csv\b/g,
     ],
-    note: 'This is the R-SEC-1 material. A licensor\'s own ID space is the licensor\'s data, not ours.',
   },
   {
     id: 'live-weakness',
@@ -359,7 +358,7 @@ function renderReport(r) {
 export function buildRedactionMap(result) {
   const byValue = new Map();
   for (const h of result.hits) {
-    const key = `${h.rule} ${h.value}`;
+    const key = `${h.rule} ${h.value}`;
     if (!byValue.has(key)) {
       byValue.set(key, {
         rule: h.rule,

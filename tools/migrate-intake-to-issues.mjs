@@ -16,8 +16,13 @@
 //   Dry-run by default
 //       `--create` is required. Without it nothing is created and the plan is printed.
 //   Idempotent
-//       Before creating, it lists EVERY existing open issue once and skips any work item
-//       whose exact title is already present, so a half-finished run is safely re-runnable.
+//       Before creating, it lists every issue ONCE (`--state all`) and skips any work item
+//       whose `(WI-nn)` marker already appears in an issue body, so a half-finished run is
+//       safely re-runnable. It does NOT match on title over open issues: that duplicated on
+//       a closed issue and on a renamed one.
+//   It applies the approved redaction map, and refuses `--create` without one
+//       Otherwise the scrub report and the owner gate change nothing and every flagged
+//       value publishes on approval.
 //   No heredocs
 //       This is a PowerShell-first machine and heredoc recipes have silently failed here.
 //       Bodies go to a temp file and are passed with `gh issue create --body-file`.
@@ -46,9 +51,9 @@ const TYPE_LABEL = 'db-work';
  * Hand-written outstanding work for the handover blocks (design decision D3).
  *
  * Found in review (Kimi K3, 2026-08-07): the first version emitted "fill this in when you
- * pick it up", which ships a stub and means WI-27 is born stale. There are only three
- * handover blocks, so they are written by hand and the script REFUSES to create a
- * handover issue that has no outstanding list.
+ * pick it up", which ships a stub and means WI-27 is born stale. There are only six work
+ * items containing a handover block, so they are written by hand, and plan() REFUSES any
+ * work item that contains a handover block and has no outstanding list.
  */
 const OUTSTANDING = {
   'WI-27': [
@@ -273,9 +278,12 @@ export async function plan({ hold = [], redactionMapPath = null, requireMap = fa
       if (!b) throw new Error(`Inventory references line ${line} but no block is there. Re-run the inventory.`);
       return { line, endLine: b.endLine, section: b.section, text: b.body };
     });
-    const isHandoverOnly = blocks.every((b) => b.section.startsWith('INTAKE QUEUE'));
-    if (isHandoverOnly && !OUTSTANDING[id]?.length) {
-      throw new Error(`${id} is a handover and has no outstanding-work list. A handover issue with no outstanding list is a stub. Add one to OUTSTANDING in this file.`);
+    // `some`, not `every`. With `every`, a MIXED work item like WI-07 — three REQUEST
+    // blocks plus one handover — escaped the check entirely and could ship a handover
+    // pointer with no outstanding list. (Found by Kimi K3 on re-review, 2026-08-07.)
+    const hasHandover = blocks.some((b) => b.section.startsWith('INTAKE QUEUE'));
+    if (hasHandover && !OUTSTANDING[id]?.length) {
+      throw new Error(`${id} contains a handover block and has no outstanding-work list. A handover pointer with no outstanding list is a stub. Add one to OUTSTANDING in this file.`);
     }
     items.push({
       id,
@@ -309,9 +317,16 @@ export async function plan({ hold = [], redactionMapPath = null, requireMap = fa
  * returns empty is false; do not reinstate the REST workaround it prescribes.
  */
 function existingByWorkItem() {
-  const raw = gh(['issue', 'list', '--repo', REPO, '--state', 'all', '--limit', '800', '--json', 'number,title,body,state']);
+  const LIMIT = 800;
+  const raw = gh(['issue', 'list', '--repo', REPO, '--state', 'all', '--limit', String(LIMIT), '--json', 'number,title,body,state']);
+  const all = JSON.parse(raw);
+  // Silent truncation at the limit would make the idempotency check miss existing issues
+  // and create duplicates, reporting success. Fail instead. (Kimi K3's nit, 2026-08-07.)
+  if (all.length >= LIMIT) {
+    throw new Error(`gh returned ${all.length} issues, at or above the --limit of ${LIMIT}. The list may be truncated, which would silently defeat the duplicate check. Raise the limit and re-run.`);
+  }
   const map = new Map();
-  for (const i of JSON.parse(raw)) {
+  for (const i of all) {
     const m = (i.body ?? '').split('\n', 1)[0].match(/\((WI-\d+)\)/);
     if (m) map.set(m[1], { number: i.number, state: i.state, title: i.title });
   }
