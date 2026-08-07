@@ -1,7 +1,7 @@
 # Implementation plan — three gaps in the orchestrator workflow
 
 **File:** `plan_orchestrator-workflow-gaps.md` · **Repo:** `u2giants/shared-db` · **Created:** 2026-08-07
-**Status:** WRITTEN, NOT STARTED. Not yet reviewed.
+**Status:** WRITTEN, NOT STARTED. **Reviewed by Kimi K3 over two rounds** (2026-08-07); round 2 read the file itself and its one blocking finding — E creating duplicate issues — is fixed. Its verdict: executable, A and E first.
 
 Three gaps Albert asked to have fixed, found while finishing the intake-to-Issues migration
 on 2026-08-07. They are independent of each other and are listed worst-first.
@@ -18,10 +18,10 @@ on 2026-08-07. They are independent of each other and are listed worst-first.
 > migration since **2026-08-02**. E is the unfinished half of the migration that just
 > shipped, and Kimi K3 was right that it outranks B, C and D.
 
-**Reviewed by Kimi K3, 2026-08-07.** ⚠️ **The plan file was on an unmerged branch and it
-could not read it**, so that round reviewed the design as described, not the text. It read
-the *code* directly, which is where its most valuable answers came from. Its findings are
-folded in below and attributed. A second round against the actual file is still owed.
+**Reviewed by Kimi K3, two rounds, 2026-08-07.** Round 1 could not read the file — it was on
+an unmerged branch — so it reviewed the design as described and, more usefully, read the
+**code** directly. Round 2 read the file. Its findings are folded in below and attributed.
+**Its one blocking finding, that E would create duplicate issues, is fixed.**
 
 ---
 
@@ -89,7 +89,7 @@ authenticated account — including `vendor` and `viewer` — read the entire Di
 ## A. Production migrations: prove the lane, explain the 33, then define an apply path
 
 **A1 — Explain the 33 orphans before anything else. Read-only.**
-For each of the 33, establish which of three things it is: (a) applied to production by
+For each of the 33, establish which it is — (a) applied to production by
 some other route and never recorded; (b) genuinely never applied and no longer wanted;
 (c) genuinely never applied and still wanted. **The method must be object existence, not
 inference from the filename** — check whether the objects the migration creates exist on
@@ -181,25 +181,47 @@ tells a reader that an empty issue list is not proof there is no work, and to *a
 `HANDOFF.md ## BACKLOG`. So the answer to "what is outstanding?" is currently two places,
 by written instruction.
 
-**E1** — Classify all 14 the way step 1 of the migration classified the queue: MIGRATE /
-CLOSED-with-a-checked-reason / NOISE, with the same arithmetic assertion. Several are
-already done or superseded — B6 and B7 shipped in PR #397, B8 landed in #358, B2 in #445 —
-and those must be closed, not migrated.
+> ## ⚠️ E IS MUCH SMALLER THAN I FIRST WROTE. Read this before doing anything.
+>
+> My first draft of E said "open an issue per surviving item". **That would have created
+> duplicates.** Kimi K3 caught it; checking live, it is worse than it flagged — **eight** of
+> the 14 already have issues, not six:
+>
+> | Already an issue | | Closed or resolved |
+> |---|---|---|
+> | B1 #545 · B3 #546 · B5 #547 · B6 #529 | | B2 (PR #445) · B4 (nothing to do) |
+> | B8 #520 · B9 #548 · B11 #549 · B12 #550 | | B7 (standing policy) · B10 · B13 · B14 |
+>
+> **That is all 14.** The migration already carried the backlog across as work items
+> WI-43 to WI-48 and closed the rest. **Nothing needs migrating.**
+>
+> **E is therefore a documentation task, not a migration.** The tracker duality is real —
+> `HANDOFF.md` still *presents* `## BACKLOG` as a place to read outstanding work — but the
+> work itself is already in one place. Sizing it as a migration would have produced eight
+> duplicate issues and made the sprawl worse while claiming to fix it.
 
-**E2** — Open an issue per surviving item, labelled `db-work`, with the `B<n>` number kept
-in the title so existing references still resolve.
+**E1 — Verify, do not create.** For each of the 14, record one of: **ALREADY-TRACKED**
+(with the issue number), or **CLOSED** (with the PR or reason). The table above is the
+starting draft and **must be re-derived live**, not copied — it was true at the moment it
+was written and this repo's standing rule is that no document wins by date.
 
-**E3** — Replace the `## BACKLOG` section with a pointer, exactly as the queue file was, and
-**update the retired pointer's "also read" list** so it no longer sends readers to a section
-that has become a pointer to the issues they are already reading.
+**E2 — Link, retitle if needed. Create nothing.** Confirm each existing issue keeps its
+`B<n>` in the title so old references resolve. `migrate-intake-to-issues.mjs` already
+produced that title shape, so this is a check rather than an edit.
 
-⚠️ **Do NOT delete the B-number history.** Several documents and issue bodies reference items
-by `B<n>`. Keep the numbers in issue titles and leave the originals under `<details>`, the
-same treatment B10 and B13 received.
+**E3 — Replace `## BACKLOG` with a pointer** to `gh issue list --label db-work`, listing
+the `B<n>` → issue-number mapping and nothing else.
 
-*Gate:* the arithmetic balances; `HANDOFF.md ## BACKLOG` is a pointer under ~20 lines; and
-searching the repo for "also read HANDOFF.md ## BACKLOG" returns nothing that implies a
-second tracker.
+⚠️ **The pointer MUST keep the word "backlog".** `scripts/check-intake-pointer.mjs:123-125`
+is a **required** check and it fails the retired intake pointer if the word disappears — and
+that pointer's "empty is not idle" warning names `HANDOFF.md ## BACKLOG` as a place to look.
+Removing the section without updating that warning breaks a required check. *(Kimi K3.)*
+
+⚠️ **Do NOT delete the B-number history.** Keep the originals under `<details>`, the same
+treatment B10 and B13 received.
+
+*Gate:* all 14 accounted for as ALREADY-TRACKED or CLOSED with evidence; **zero new issues
+created**; `HANDOFF.md ## BACKLOG` is a pointer; and both required checks still pass.
 
 ---
 
@@ -229,6 +251,14 @@ migrations on one function.
 an error as zero. Wire it as a **required** check with no `paths:` filter, like the intake
 pointer guard, **and on a schedule** — Kimi's point: a PR-only check sees nothing during the
 hours when two orchestrators are actually colliding, because neither may open a PR.
+⚠️ **The scheduled leg needs an alarm path that reaches a human.** A failed scheduled run
+mails the commit author, and the mandated committer identity is a `noreply` address, so by
+default nobody is told. Use a throttled, deduplicated issue — **not** an unthrottled one:
+this repo has already produced 25 duplicate issues from a monitor with no dedupe. *(Kimi.)*
+
+**B1b** — ⚠️ **Neither leg can see a second orchestrator that never claims a marker at all.**
+If the old-label create errors, a session may simply proceed unmarked. This is detection of
+the *marked* collision only, and the limit must be stated wherever the check is documented.
 
 **B1a** — Add an **old-label tripwire**: fail if any issue still carries `coordinator-marker`,
 or if that label is ever recreated. Querying the retired label returns empty, and step 0
