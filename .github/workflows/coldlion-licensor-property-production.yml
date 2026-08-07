@@ -267,7 +267,10 @@ jobs:
       # the CLI follows project-ref, so the check above was right about the CLI -- but a
       # DIFFERENT tool reading linked-project.json (the Supabase MCP / editor extension)
       # would have acted on the other project entirely. `supabase link` never writes or
-      # refreshes that JSON file, so no re-link can correct it.
+      # refreshes that JSON file, so no re-link can correct it -- isolated by a
+      # before/after experiment in
+      # docs/verification/opa-preview-load-20260807/evidence/11-what-supabase-link-writes.txt
+      # (a planted linked-project.json survived a `supabase link` byte-for-byte).
       #
       # This step asserts all three files agree AND name production. It is offline, needs
       # no secret, and cannot itself reach a database.

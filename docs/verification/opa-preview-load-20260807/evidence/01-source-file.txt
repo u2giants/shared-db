@@ -1,5 +1,7 @@
 # 01 -- source file identity
-# Captured 2026-08-07T23:29:03Z on al8960ofc. Real command output.
+# Captured 2026-08-07T23:29:03Z on al8960ofc. TRANSCRIBED: the commands were really run and these are their real
+#   outputs, but the `$ ` prompt lines are hand-written labels -- this is not a
+#   verbatim terminal capture. Files 04-08, 10 and 11 ARE verbatim captures.
 
 $ gh api -H 'Accept: application/vnd.github.raw' repos/u2giants/licensor-source-data/contents/disney-opa/opa-characters.csv > opa-characters.csv
 $ wc -c < opa-characters.csv

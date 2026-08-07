@@ -33,7 +33,10 @@
  * So: `project-ref` DECIDES THE PROJECT. `pooler-url` is the connection route used
  * when it agrees. `linked-project.json` is not written by `supabase link` at all --
  * `supabase link --project-ref <ref>` creates `project-ref` and `pooler-url` and
- * never creates or refreshes the JSON file.
+ * never creates or refreshes the JSON file. That last point was ISOLATED by its own
+ * before/after experiment: a `linked-project.json` planted with an unrelated ref
+ * survived a `supabase link` BYTE-FOR-BYTE. See
+ * docs/verification/opa-preview-load-20260807/evidence/11-what-supabase-link-writes.txt.
  *
  * THEREFORE the old `cat supabase/.temp/project-ref` check was RIGHT about where the
  * CLI would go, and the production-named `linked-project.json` was ORPHANED state

@@ -10,22 +10,31 @@
 > and after — see `evidence/07`. This was a *data load* plus *tooling*. No table, view,
 > function, policy, constraint, index or grant was altered.
 
-**Every figure below is backed by captured command output in `evidence/`.** Nothing in
-this document is typed from memory. Where a number here disagrees with an evidence file,
+**Every figure below is backed by command output in `evidence/`.** Nothing in this
+document is typed from memory. Where a number here disagrees with an evidence file,
 **the evidence file wins.**
 
-| Evidence file | What it captures |
-|---|---|
-| `01-source-file.txt` | byte count, line count, sha256 of the extract |
-| `02-dry-run.txt` | dry run against the real extract |
-| `03-runner-guards.txt` | the two runner-side guards, provoked |
-| `04-wrong-target-gate.txt` | the wrong-target gate, provoked |
-| `05-load-before-and-after.txt` | **mirror cleared → reloaded**: genuine 0 → 10,261 |
-| `06-idempotence-and-shrink-band.txt` | re-entrancy, and the database shrink band rejecting a truncated extract |
-| `07-object-and-negative-assertions.txt` | objects, ledger, and every negative assertion |
-| `08-which-file-does-the-cli-follow.txt` | the three experiments that decided which `.temp` file the CLI obeys |
-| `09-checker-behaviour.txt` | the committed check run against the real trap bytes |
-| `10-tests.txt` | 90/90 tests |
+Two kinds of file, labelled honestly because precision about one's own evidence is the
+point of the artifact:
+
+- **Verbatim** — the file is the redirected output of the session, prompts and all.
+- **Transcribed** — the commands were really run and the outputs are their real outputs,
+  but the `$ ` prompt lines are hand-written labels, so the file is not a raw terminal
+  capture.
+
+| Evidence file | Kind | What it shows |
+|---|---|---|
+| `01-source-file.txt` | transcribed | byte count, line count, sha256 of the extract |
+| `02-dry-run.txt` | transcribed | dry run against the real extract |
+| `03-runner-guards.txt` | transcribed | the two runner-side guards, provoked |
+| `04-wrong-target-gate.txt` | **verbatim** | the wrong-target gate, provoked |
+| `05-load-before-and-after.txt` | **verbatim** | **mirror cleared → reloaded**: genuine 0 → 10,261 |
+| `06-idempotence-and-shrink-band.txt` | **verbatim** | re-entrancy, and the database shrink band rejecting a truncated extract |
+| `07-object-and-negative-assertions.txt` | **verbatim** | objects, ledger, and every negative assertion |
+| `08-which-file-does-the-cli-follow.txt` | **verbatim** | the three experiments that decided which `.temp` file the CLI obeys |
+| `09-checker-behaviour.txt` | transcribed | the committed check run against the real trap bytes |
+| `10-tests.txt` | **verbatim** | the test suites |
+| `11-what-supabase-link-writes.txt` | **verbatim** | before/after proving `supabase link` never touches `linked-project.json` |
 
 ---
 
@@ -227,7 +236,10 @@ Three experiments, all against preview or a non-existent ref, **never production
 - `pooler-url` is the connection **route**, used when it agrees. The ref hides in its
   **username** (`postgres.<ref>`), not its host — a reader scanning the host finds nothing.
 - `linked-project.json` is **not written by `supabase link` at all**. `supabase link`
-  creates `project-ref` and `pooler-url` only.
+  creates `project-ref` and `pooler-url` only. **Isolated by its own before/after
+  experiment** (`evidence/11`): a `linked-project.json` planted with an unrelated ref
+  survived a `supabase link` **byte-for-byte**, so a stale one outlives any number of
+  re-links.
 
 **Therefore the old `cat supabase/.temp/project-ref` check was RIGHT about where the CLI
 would go**, and the production-named `linked-project.json` was **orphaned state from a
@@ -267,6 +279,32 @@ What actually exists now:
 4. **One call site wired**: the production target gate in
    `coldlion-licensor-property-production.yml`, immediately after its `supabase link`.
 
+### 7.5 Wiring it in opened a bypass, which review caught before it shipped
+
+The production workflow has a contract requiring **every** `node tools/*.mjs` call to
+carry the four-part write authorization. The link-state checker is a read-only guard, so
+it legitimately cannot carry those flags. The first fix exempted it — and the exemption
+itself was exploitable:
+
+- the call matcher ran **greedily to end of line** and `matchAll` does not overlap, so
+  **two invocations on one line collapsed into a single "call"**;
+- the exemption was a **substring test** over that combined text.
+
+Together: `node tools/check-supabase-link-state.mjs … && node tools/sync-coldlion-licensors-properties.mjs --apply`
+parsed as **one** call containing the guard's name, so the **write runner inherited the
+read-only exemption** and skipped authorization entirely. **A single `&&` would have
+defeated the gate.** Verified directly — under the old matcher that input yields
+1 parsed call, all of it exempt; under the new one it yields 2, with the write runner
+correctly non-exempt.
+
+Fixed by parsing **per invocation** and keying the exemption on the **script name
+actually invoked**, never on surrounding text. Pinned by regression tests in both the
+contract test and the runtime readiness checker, plus a decoy case where the guard's name
+merely appears nearby in an `echo`. The exemption remains paired with a hard refusal of
+`--apply`, so it cannot become a hole in the other direction.
+
+Nothing here ever ran against production: the production lane is gated off pending Step 8.
+
 **Still unwired — 14 call sites, tracked in [#593](https://github.com/u2giants/shared-db/issues/593):**
 2 workflows, 11 tools, and `AGENTS.md` (2 places) still use the single-file
 `cat supabase/.temp/project-ref`. A guard nobody calls protects nothing; the issue exists
@@ -284,8 +322,10 @@ as defence in depth.
 | Suite | Result |
 |---|---|
 | `tools/sync-opa-property-character.test.mjs` | **51 / 51** (45 before, +6 for the sentinel rule and the row floor) |
-| `tools/check-supabase-link-state.test.mjs` | **39 / 39** |
-| **Combined** | **90 / 90 pass, 0 fail** |
+| `tools/check-supabase-link-state.test.mjs` | **39 / 39** (new) |
+| `tools/coldlion-licensor-property-production-workflow.test.mjs` | **17 / 17** (+2: the exemption-bypass regression and a decoy-text case) |
+| `tools/coldlion-production-lane-readiness.test.mjs` | **17 / 17** (+3: the same bypass at runtime, `--apply` abuse, and the real workflow passing) |
+| **Whole `tools/*.test.mjs` glob (what CI runs)** | **591 / 591 pass, 0 fail** |
 
 Sentinel coverage is deliberately **both directions**, because the obvious way to get a
 threshold rule wrong is at its boundary:

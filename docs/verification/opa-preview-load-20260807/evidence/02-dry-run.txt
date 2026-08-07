@@ -1,5 +1,7 @@
 # 02 -- DRY RUN against the real extract (contacts no database)
-# Captured 2026-08-07T23:29:21Z. Real command output.
+# Captured 2026-08-07T23:29:21Z. TRANSCRIBED: the commands were really run and these are their real
+#   outputs, but the `$ ` prompt lines are hand-written labels -- this is not a
+#   verbatim terminal capture. Files 04-08, 10 and 11 ARE verbatim captures.
 
 $ OPA_CSV_PATH=<scratch>/opa-characters.csv OPA_CAPTURED_AT=2026-08-06 \
   OPA_SOURCE_URL=https://opa.disney.com/ProdApp/createEditProduct.spring \
