@@ -410,6 +410,88 @@ begin
   end if;
 
   -- ==================================================================================
+  -- 6b. THE READ POLICY MUST BE CLOSED — proved by EVALUATING RLS as real principals,
+  --     not by reading the DDL. The DDL is exactly what was wrong before migration
+  --     20260807190000: it said `using (true)` under a comment claiming it matched
+  --     plm.erp_property, so every authenticated account — including vendor and
+  --     viewer — could read the entire confidential Disney extract.
+  -- ==================================================================================
+  foreach v_obj in array array['vendor', 'viewer', 'designer'] loop
+    execute 'set local role authenticated';
+    perform set_config('request.jwt.claims',
+      format('{"app_metadata":{"roles":["%s"]}}', v_obj), true);
+    select count(*) into v_count from plm.opa_property_character
+      where licensed_property_id = 900000001;
+    execute 'reset role';
+    if v_count <> 0 then
+      raise exception 'DISNEY EXTRACT IS READABLE BY %: it saw % row(s). The read policy '
+        'must match the plm.erp_property posture (administrator / plm app access / '
+        'sales / licensing) and must NOT be open to every authenticated account.',
+        v_obj, v_count;
+    end if;
+  end loop;
+
+  -- A principal with NO role at all must also see nothing.
+  execute 'set local role authenticated';
+  perform set_config('request.jwt.claims', '{"app_metadata":{"roles":[]}}', true);
+  select count(*) into v_count from plm.opa_property_character
+    where licensed_property_id = 900000001;
+  execute 'reset role';
+  if v_count <> 0 then
+    raise exception 'a principal with NO app role read % OPA row(s)', v_count;
+  end if;
+
+  -- The api view is security_invoker, so it must inherit the restriction rather than
+  -- become a way around it.
+  execute 'set local role authenticated';
+  perform set_config('request.jwt.claims', '{"app_metadata":{"roles":["vendor"]}}', true);
+  select count(*) into v_count from api.opa_property_character
+    where licensed_property_id = 900000001;
+  execute 'reset role';
+  if v_count <> 0 then
+    raise exception 'vendor read % row(s) THROUGH api.opa_property_character — the view '
+      'is escalating around the base-table RLS', v_count;
+  end if;
+
+  -- And the roles that SHOULD have access must actually have it, or the policy is
+  -- merely broken in the other direction.
+  foreach v_obj in array array['administrator', 'sales', 'licensing'] loop
+    execute 'set local role authenticated';
+    perform set_config('request.jwt.claims',
+      format('{"app_metadata":{"roles":["%s"]}}', v_obj), true);
+    select count(*) into v_count from plm.opa_property_character
+      where licensed_property_id = 900000001;
+    execute 'reset role';
+    if v_count <> 1 then
+      raise exception '% could NOT read the OPA mirror (saw % rows, expected 1); the '
+        'policy is too restrictive', v_obj, v_count;
+    end if;
+  end loop;
+
+  -- ==================================================================================
+  -- 6c. api.opa_property_reconciliation must be EXACTLY one row per OPA property node.
+  --     Before 20260807190000 it grouped on the PER-ROW resolution columns, so a
+  --     partially resolved node split into several rows with its character count
+  --     divided between them. Fixture 900000001 was resolved above and 900000002 was
+  --     not, and they share a property name — so a regression shows up here.
+  -- ==================================================================================
+  select count(*) into v_count from api.opa_property_reconciliation
+    where licensed_property_id in (900000001, 900000002);
+  if v_count <> 2 then
+    raise exception 'api.opa_property_reconciliation returned % rows for 2 distinct OPA '
+      'property nodes (expected exactly 2). It is grouping on per-row columns again.',
+      v_count;
+  end if;
+
+  -- The resolved node must report its single character exactly once, not split.
+  select opa_character_count into v_count from api.opa_property_reconciliation
+    where licensed_property_id = 900000001;
+  if v_count <> 1 then
+    raise exception 'node 900000001 reports opa_character_count=% (expected 1); the '
+      'character count is being divided across duplicate rows', v_count;
+  end if;
+
+  -- ==================================================================================
   -- 7. BOTH api VIEWS MUST BE security_invoker. A definer view over an RLS table is a
   --    privilege-escalation path around that RLS.
   -- ==================================================================================

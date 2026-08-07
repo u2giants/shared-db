@@ -1,6 +1,6 @@
 # OPA property→character — BUILD NOTE
 
-**Status: BUILT, APPLIED TO PREVIEW (`rjyboqwcdzcocqgmsyel`) and VERIFIED. All three migrations applied; both contract test files pass unmodified. No open defects.**
+**Status: BUILT, APPLIED TO PREVIEW (`rjyboqwcdzcocqgmsyel`) and VERIFIED. All FOUR migrations applied; both contract test files pass unmodified. Independent review round closed — see section 8.9. No open defects.**
 
 This records what was actually built from
 [`README.md`](./README.md) (the authoritative design, PR #485, which supersedes
@@ -27,12 +27,20 @@ This records what was actually built from
 > | 1 | **`20260807170000`** | `opa_property_character_landing.sql` |
 > | 2 | **`20260807170100`** | `opa_property_character_importer.sql` |
 > | 3 | **`20260807180000`** | `opa_sync_reentrancy_fix.sql` |
+> | 4 | **`20260807190000`** | `opa_security_and_view_corrections.sql` |
 >
-> Order matters: 2 creates the functions, **3 replaces one of them and must be
-> promoted after it**, and 1 creates the table both write. **Promoting 1+2 without
-> 3 ships a loader that raises `42P07` on any second call within a transaction.**
-> All three are applied to preview `rjyboqwcdzcocqgmsyel`; none has been promoted
-> to production.
+> Order matters and is strict: 1 creates the table, 2 creates the functions, 3
+> replaces one of them, and 4 replaces the read policy, the reconciliation view and
+> the function again.
+>
+> **Promoting a subset is dangerous, not merely incomplete:**
+> - 1+2 without 3 ships a loader that raises `42P07` on any second in-transaction call.
+> - **Anything without 4 ships a read policy that lets EVERY authenticated account —
+>   including `vendor` and `viewer` — read the entire confidential Disney extract.**
+>   4 is a security fix. It is not optional.
+>
+> All four are applied to preview `rjyboqwcdzcocqgmsyel`; none has been promoted to
+> production.
 
 ## 1. What was built
 
@@ -56,6 +64,7 @@ This records what was actually built from
 | `20260727230000` | `core_style_guide_axis.sql` | Creates `core.style_guide` and `core.style_guide_character` — the axis-2 sibling. The junction's RLS posture is copied from it, and the reconciliation invariant is asserted against it. |
 | `20260807170000` | *(this work)* `opa_property_character_landing.sql` | Required by `20260807170100`, which writes the table it creates. |
 | `20260807170100` | *(this work)* `opa_property_character_importer.sql` | Superseded in behaviour by `20260807180000`, but still the migration that CREATES the functions. Must be promoted BEFORE it. |
+| `20260807180000` | *(this work)* `opa_sync_reentrancy_fix.sql` | Superseded in behaviour by `20260807190000`, which replaces the function again. Must be promoted BEFORE it. |
 
 The highest migration version on `origin/main` when these were authored was
 **`20260807030000`**. Both new versions were **allocated by the coordinator**, not
@@ -598,6 +607,172 @@ nothing and deletes nothing, which is what makes it shippable ahead of both.
   written until it is answered**, which is precisely why `resolution_status`
   defaults to `'unresolved'` on every row and the five resolution columns are
   absent from the importer's upsert.
+
+## 8.9 Independent review round (PR #497) — five fixes in `20260807190000`
+
+Codex gpt-5.6-sol at medium effort, 13 findings, verdict REQUEST CHANGES (2 High).
+Three findings were refuted in this work's favour, including a claim that the
+privilege predicate was null-permissive — `plm.opa_loader_privilege_ok` is
+`language sql` returning strict booleans and cannot return NULL. The
+`session_user`-not-`current_user` reasoning, the reentrancy fix and the
+`dflow.property_character_associations` analysis were all upheld.
+
+### 8.9.1 ⚠️ THE MOST IMPORTANT THING IN THIS DOCUMENT FOR FUTURE WORK
+
+> ### `LEAST`/`GREATEST` IGNORE NULL — and the obvious fix does not work
+>
+> The shrink band was written as:
+>
+> ```sql
+> v_seen < v_before * (1 - greatest(0::numeric, least(1::numeric, p_max_shrink_fraction)))
+> ```
+>
+> **Postgres `LEAST`/`GREATEST` ignore NULL arguments.** A NULL fraction collapses
+> the expression to `1`, the threshold becomes `v_before * 0`, and `v_seen < 0` can
+> never be true. **The truncated-extract guard was silently disabled while still
+> reading as a bounded, careful check.** A one-row extract could have overwritten a
+> 10,262-row mirror without a word of complaint.
+>
+> **Measured on this database — not reasoned about:**
+>
+> ```
+> greatest(0::numeric, least(1::numeric, null::numeric))  =>  1
+> 1 - that                                                =>  0
+> ```
+>
+> **AND THE OBVIOUS FIX IS WRONG.** Wrapping `coalesce(...)` around the *outside* of
+> `greatest(...)` does **not** help — it returns `1`, not NULL, so the guard stays
+> disabled while looking corrected:
+>
+> ```
+> coalesce(greatest(0::numeric, least(1::numeric, null::numeric)), 0.10)  =>  1
+> ```
+>
+> **This is this repository's recurring failure mode in one line: a correction that
+> reads as safety and behaves as nothing.** It is the same shape as the
+> null-permissive `if not ( … or … )` guard, the `BEFORE` trigger reading a
+> `GENERATED … STORED` column, and the test assertion that had never executed.
+>
+> **Validate the PARAMETER, not the expression.** `20260807190000` rejects NULL
+> outright and range-checks explicitly. NULL is rejected rather than defaulted
+> because it usually means the caller sent `NaN` — `JSON.stringify(NaN)` is
+> `null` — and silently defaulting would hide a broken caller.
+>
+> **I only caught this by measuring it.** Reading the code, the `greatest(0, least(1, x))`
+> form looks like a textbook clamp. Whoever writes the next bounds check in this
+> repo should measure it too.
+
+### 8.9.2 The five fixes
+
+| # | Severity | Fix |
+| --- | --- | --- |
+| 1 | **HIGH** | The read policy on `plm.opa_property_character` was `using (true)` — wide open to every `authenticated` principal — under a comment claiming it matched `plm.erp_property`. It did not. Now carries the erp_ predicate. |
+| 2 | **HIGH** | The `LEAST`/`GREATEST` NULL hole above. |
+| 3 | MEDIUM | The staging temp table was referenced unqualified. `pg_temp` resolves first *when a temp table exists*, but with none present resolution continued through `search_path = plm, core, public, extensions`, and the `SECURITY DEFINER` function runs as owner — so a permanent table of that name could have been dropped. Latent, never live. Now `pg_temp._opa_incoming` throughout. |
+| 4 | MEDIUM | `api.opa_property_reconciliation` claimed one row per property node while grouping on the four **per-row** resolution columns, so a partially resolved node split into several rows with its character count divided between them. The **view** was fixed, not the comment — the comment stated the correct intent. |
+| 5 | MEDIUM | The row-shape guard embedded the first offending row's full JSON in its error, which reaches terminals, CI logs and the runner. It now reports the row **ordinal** and **which check failed**, never content. The runner also no longer prints the response body at all. |
+
+**On fix 1 — the exposure was real, not theoretical.** Every `authenticated`
+account across all four applications, including `vendor` and `viewer`, could read
+the whole Disney extract — property names, character names, Disney's own IDs, the
+source URL — through `api.opa_property_character`. This repository is **public**
+and is recovering from exactly this class of exposure. The same migration had
+role-gated `core.property_character` correctly 100 lines later, so it was an
+internal inconsistency rather than a deliberate posture.
+
+**On fix 4 — a deliberate column-list change.** `create or replace view` cannot
+add, remove or rename columns, so this needed `DROP` + `CREATE`. Per-row
+`resolution_reason` and `resolved_by` were dropped as meaningless at node grain
+and replaced with per-node aggregates (`matched_core_property_ids`,
+`unresolved_character_count`, `last_resolved_at`, and a `resolution_status` that
+reports `'mixed'` when a node disagrees with itself). Nothing consumes the view —
+it was created hours earlier on an unmerged branch — so no consumer breaks.
+
+### 8.9.3 Proof — both new guards, both directions
+
+**The read policy, proved by EVALUATING RLS as real principals** (`set local role
+authenticated` plus a JWT `app_metadata.roles` claim), **not by reading the DDL —
+the DDL is what was wrong in the first place:**
+
+| Principal | Rows visible | Required |
+| --- | ---: | ---: |
+| no app role at all | **0** | 0 |
+| `vendor` | **0** | 0 |
+| `viewer` | **0** | 0 |
+| `designer` | **0** | 0 |
+| `administrator` | **1** | 1 |
+| `sales` | **1** | 1 |
+| `licensing` | **1** | 1 |
+| `vendor` via `api.opa_property_character` | **0** | 0 |
+| `vendor` via `api.opa_property_reconciliation` | **0** | 0 |
+| **NEUTRALISED back to `using (true)`: `vendor`** | **1** | 1 — proves the test detects the leak |
+
+The live predicate was then read back from `pg_policies` on preview, not from the
+migration file:
+
+```
+(app.has_role('administrator'::app.app_role)
+ OR app.has_app_access('plm'::app.app_name)
+ OR app.has_any_role(ARRAY['sales'::app.app_role, 'licensing'::app.app_role]))
+```
+
+**The shrink band, both directions**, against 5 held rows and a 1-row snapshot
+(an 80% shrink) with a NULL fraction:
+
+| Variant | Result |
+| --- | --- |
+| **neutralised** (old `LEAST`/`GREATEST` form) | **ACCEPTED** — the guard was off, bug reproduced live |
+| **fixed** | **REJECTED** — `p_max_shrink_fraction is NULL. …` |
+
+### 8.9.4 Applied and re-verified
+
+`cat supabase/.temp/project-ref` confirmed `rjyboqwcdzcocqgmsyel` before the push;
+explicit ref-in-URL targeting throughout, because `linked-project.json` in that
+same directory names **production** (§8.1). Dry run showed exactly one pending
+migration. Ledger **403 → 404**, max version `20260807190000`.
+
+Confirmed from `pg_proc.prosrc` on the deployed function, not from the file:
+`pg_temp._opa_incoming` present, the NULL rejection present, and the
+`left(v_sample, 400)` row-echo **gone**.
+
+**Both suites re-run in full and pass unmodified.** The landing suite now carries
+the role-based policy assertions and the node-grain view assertions permanently,
+so neither can silently regress. `plm.opa_property_character` **0 rows**,
+`core.property_character` **0 rows**.
+
+### 8.9.5 The reviewer's UNRESOLVED item — settled by measurement, premise was wrong
+
+The reviewer could not find a `create policy` on `core.property` in any migration
+and left open whether the reconciliation view's LEFT JOINs would silently degrade.
+**They do have policies.** Measured on preview:
+
+| table | policy | predicate |
+| --- | --- | --- |
+| `core.property`, `core.licensor` | `shared_read` (SELECT) | `app.has_any_role([administrator, sales, licensing, designer, viewer, vendor])` |
+| both | `admin_write` (ALL) | `app.has_role('administrator')` |
+
+So for ordinary roles there is no degradation: anyone who passes the mirror's
+policy also passes `shared_read`. **One real edge case survives** and is now
+documented on the view itself: a principal reading via `app.has_app_access('plm')`
+while holding **no** `app_role` passes the mirror's policy and **fails**
+`core.property`'s, so `core_property_names` and `core_licensor_codes` come back
+**empty rather than raising**. Empty name arrays beside a non-null
+`matched_core_property_ids` means RLS suppression, **not** an unresolved node.
+Quiet wrong is worse than loud wrong, hence the comment.
+
+### 8.9.6 Not fixed here, deliberately
+
+- **The missing write GRANT behind `admin_write`** on `core.property_character`.
+  The identical omission exists on its sibling `core.style_guide_character`
+  (`20260727230000`), so it is pre-existing and repo-wide. It belongs to a separate
+  sweep, not to this PR.
+- **Illustrative Disney character names in comments** in the design README. Real,
+  but already on `main` from PR #485 — pre-existing, not introduced here.
+- **The `supabase/.temp/linked-project.json` inconsistency** (§8.1). A shared-checkout
+  change outside this worktree's scope; touching it could disrupt another session.
+- **The misleading RLS comment inside `20260807170000`.** That migration is applied;
+  editing it — even a comment — would desynchronise the file from the ledger. It is
+  corrected in `20260807190000`'s header, in the table's `COMMENT ON`, and here.
 
 ## 9. Follow-ups
 
