@@ -353,7 +353,7 @@ export function buildSnapshot(
 
   const idx = Object.fromEntries(REQUIRED_COLUMNS.map((c) => [c, header.indexOf(c)]));
   const out = [];
-  const seen = new Set();
+  const seen = new Map(); // natural key -> the row ordinal it was first seen on
   const duplicates = [];
 
   for (let i = 1; i < rows.length; i += 1) {
@@ -377,7 +377,18 @@ export function buildSnapshot(
         // Disney uses NEGATIVE SENTINELS (the "Special Projects" node). Integers
         // here must accept them; any unsigned parsing silently drops that row.
         if (!/^-?\d+$/.test(raw)) {
-          throw new Error(`row ${i + 1}: ${col} is not an integer (${JSON.stringify(raw)})`);
+          // ROW ORDINAL AND COLUMN NAME ONLY -- NEVER THE VALUE. This message used
+          // to echo the offending field, on the reasoning that a non-integer in a
+          // numeric column could only be numeric junk. That reasoning fails on
+          // exactly the failure the parser now detects: if the columns SHIFT, a
+          // character name lands in a numeric column and this line prints it --
+          // into a terminal and into CI logs, for a PUBLIC repository. The operator
+          // has the CSV; a row number is enough to find the field.
+          throw new Error(
+            `row ${i + 1}: ${col} is not an integer. The offending value is deliberately ` +
+              "NOT printed -- it can be extract content, and this output lands in public " +
+              "CI logs. Look the row up in your own copy of the CSV."
+          );
         }
         const n = Number(raw);
         // Beyond 2^53 two DIFFERENT id strings round to the SAME Number, which
@@ -413,8 +424,14 @@ export function buildSnapshot(
     // 2026-08-06 extract, the name pair yields 10,240 distinct values across
     // 10,262 rows -- 22 collisions -- so keying on names silently drops 22 rows.
     const key = `${rec.licensedPropertyID}\0${rec.characterID}`;
-    if (seen.has(key)) duplicates.push(key.replace("\0", ","));
-    seen.add(key);
+    // ROW ORDINALS ONLY -- NEVER THE ID PAIR ITSELF. This used to list the
+    // colliding key values. Same rule as above: counts, ordinals and status, never
+    // extract content. Two row numbers tell the operator exactly where to look.
+    if (seen.has(key)) {
+      duplicates.push(`row ${i + 1} repeats the ID pair first seen at row ${seen.get(key)}`);
+    } else {
+      seen.set(key, i + 1);
+    }
 
     out.push(rec);
   }
@@ -422,7 +439,7 @@ export function buildSnapshot(
   if (duplicates.length > 0) {
     throw new Error(
       `${duplicates.length} duplicate (licensedPropertyID, characterID) pair(s) in the CSV, ` +
-        `e.g. ${duplicates.slice(0, 3).join(" | ")}. The ID pair is the natural key; a ` +
+        `e.g. ${duplicates.slice(0, 3).join("; ")}. The ID pair is the natural key; a ` +
         "duplicate means the extract is wrong, not that a winner should be picked."
     );
   }

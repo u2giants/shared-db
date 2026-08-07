@@ -437,3 +437,43 @@ test("importing from a file named *sync-opa-property-character.mjs does NOT star
     "main() ran on import -- the entry-point check is too broad"
   );
 });
+
+// ---------------------------------------------------------------------------
+// COUNTS, ORDINALS AND STATUS -- NEVER A VALUE. These two messages used to echo
+// extract field content into terminals and CI logs for a PUBLIC repository. The
+// old defence was that a non-integer in a numeric column could only be numeric
+// junk -- which fails on exactly the failure parseCsv now detects: if the columns
+// SHIFT, a character name lands in a numeric column and gets printed. Each test
+// uses a canary value and asserts the message does NOT contain it.
+// ---------------------------------------------------------------------------
+const CANARY = "CANARY-LEAKED-VALUE";
+
+test("the non-integer message reports row and column but NEVER the value", () => {
+  const csv = [HEADER, `1,${CANARY},"A","B",1,1007`].join("\n");
+  try {
+    buildSnapshot(parseCsv(csv), opts);
+    assert.fail("should have thrown");
+  } catch (err) {
+    assert.match(err.message, /row 2/, "the row ordinal must be reported");
+    assert.match(err.message, /characterID/, "the column name must be reported");
+    assert.ok(
+      !err.message.includes(CANARY),
+      `the offending value must never appear in the message: ${err.message}`
+    );
+  }
+});
+
+test("the duplicate-pair message reports row ordinals but NEVER the id values", () => {
+  // Distinctive ids so a leak is unmistakable.
+  const row = '123454321,987656789,"A","B",1,1007';
+  const csv = [HEADER, row, row].join("\n");
+  try {
+    buildSnapshot(parseCsv(csv), opts);
+    assert.fail("should have thrown");
+  } catch (err) {
+    assert.match(err.message, /duplicate/i);
+    assert.match(err.message, /row 3 repeats the ID pair first seen at row 2/);
+    assert.ok(!err.message.includes("123454321"), `licensedPropertyID leaked: ${err.message}`);
+    assert.ok(!err.message.includes("987656789"), `characterID leaked: ${err.message}`);
+  }
+});

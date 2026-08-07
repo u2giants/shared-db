@@ -977,23 +977,43 @@ still never been executed against any database.
 
 ### Proof
 
-37 tests (was 18; all 18 originals still pass). **Every** guard was proven to
+39 tests (was 18; all 18 originals still pass). **Every** guard was proven to
 fire by neutralising it, observing the suite FAIL, restoring it and observing it
-PASS — 18 mutants, 18 killed. For W1 specifically, the test injects a `fetch`
+PASS — 20 mutants, 20 killed. For W1 specifically, the test injects a `fetch`
 that throws on any call and asserts the mismatch error is raised with the fetch
 **never reached**, so the abort is proven to happen before the network, not
 after. All fixtures are invented; no Disney data appears anywhere.
 
 ### Deliberately NOT changed
 
-- The client-side messages that echo extract field values (`row N: <col> is not
-  an integer (<value>)`, and the duplicate-key example list) remain. They were
-  deferred earlier on the reasoning that only numeric junk is echoed. **That
-  reasoning is weaker than it looked:** if a column shift puts a character name
-  into the numeric ID field, the message prints that name. Left in place as
-  instructed, but the case for closing it is now stronger.
 - Nothing under `supabase/`. All five migrations are applied; editing an applied
   migration changes nothing in the database and desynchronises file from ledger.
+- The runner was never executed against any database. All testing is offline unit
+  tests against invented fixtures.
+
+### Also closed: the two value-echoing messages (owner-approved follow-up)
+
+Two client-side messages echoed extract field content into terminals and CI logs
+for a **public** repository, against this file's own "counts and status only"
+rule. They had been deferred on the reasoning that only numeric junk could be
+echoed. **That reasoning fails on exactly the failure W5 now detects:** if the
+columns SHIFT, a character name lands in a numeric column and gets printed. The
+two findings are the same scenario seen from opposite ends. Both now report the
+**row ordinal and column name, never the value** — matching what the database
+side does after the G6 fix.
+
+| Site | Was | Now |
+|---|---|---|
+| non-integer id | `row N: <col> is not an integer ("<value>")` | `row N: <col> is not an integer.` plus a note that the value is deliberately withheld |
+| duplicate natural key | listed the colliding `<licensedPropertyID>,<characterID>` values | `row 3 repeats the ID pair first seen at row 2` |
+
+Each has a canary test asserting the message does **not** contain the value, and
+each was proven by neutralising it back to its old form: 39 tests, baseline
+`pass=39 fail=0`, each mutant `pass=38 fail=1`, restored `pass=39 fail=0`.
+
+One nearby message was reviewed and left alone: `row N: optionSourceID is <v>,
+not 1007` echoes a value that has already passed integer **and** safe-integer
+validation, so it cannot carry a name.
 
 ### Status
 
