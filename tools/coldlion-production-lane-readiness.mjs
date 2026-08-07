@@ -116,7 +116,24 @@ export function evaluateProductionLaneReadiness({
     // --- 4. every write runner call carries the four-part authorization ---------------
     const folded = workflowText.replace(/\\\r?\n\s*/g, " ");
     const calls = [...folded.matchAll(/node tools\/[a-z0-9-]+\.mjs[^\n]*/g)].map((m) => m[0]);
-    const unauthorized = calls.filter(
+
+    // READ-ONLY GUARDS ARE EXEMPT FROM THE WRITE AUTHORIZATION, AND ONLY THESE.
+    //
+    // The four-part authorization exists to stop an UNAUTHORISED WRITE. A script that
+    // cannot write has nothing to authorise, and demanding `--production-authorized`
+    // from a guard would mean either weakening the guard or bolting write-shaped flags
+    // onto something that must never write -- both worse than an explicit exemption.
+    //
+    // The list is deliberately TINY and matched on the exact script name. Adding to it
+    // is a real decision: a script named here MUST be incapable of writing, which is why
+    // the exemption is paired below with a hard refusal of `--apply`. Without that
+    // pairing this list would be a hole -- "call it a guard, then pass --apply".
+    const READ_ONLY_GUARD_SCRIPTS = ["check-supabase-link-state.mjs"];
+    const isReadOnlyGuard = (c) =>
+      READ_ONLY_GUARD_SCRIPTS.some((s) => c.includes(`node tools/${s}`));
+
+    const writeCalls = calls.filter((c) => !isReadOnlyGuard(c));
+    const unauthorized = writeCalls.filter(
       (c) =>
         !/--production\b/.test(c) ||
         !/--production-authorized\b/.test(c) ||
@@ -125,9 +142,20 @@ export function evaluateProductionLaneReadiness({
     checks.push(
       check(
         "every_production_runner_call_has_four_part_authorization",
-        calls.length > 0 && unauthorized.length === 0,
-        { runner_calls: calls.length },
+        writeCalls.length > 0 && unauthorized.length === 0,
+        { runner_calls: writeCalls.length, read_only_guard_calls: calls.length - writeCalls.length },
         `${unauthorized.length} production runner call(s) are missing part of the four-part authorization`,
+      ),
+    );
+
+    // The exemption above is only safe while an exempt script cannot write. Enforce that.
+    const guardCallsThatApply = calls.filter((c) => isReadOnlyGuard(c) && /--apply\b/.test(c));
+    checks.push(
+      check(
+        "read_only_guard_calls_never_apply",
+        guardCallsThatApply.length === 0,
+        { read_only_guard_scripts: [...READ_ONLY_GUARD_SCRIPTS] },
+        `${guardCallsThatApply.length} call(s) claim the read-only guard exemption while passing --apply`,
       ),
     );
 

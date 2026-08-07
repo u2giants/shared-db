@@ -89,15 +89,41 @@ test("all production runner calls carry the four authorization parts", () => {
   // Part 4 (the env variable) is set once on the production job.
   assert.match(workflow, /COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED: "true"/);
 
-  const runnerCalls = [...folded.matchAll(/node tools\/[a-z0-9-]+\.mjs[^\n]*/g)].map((m) =>
+  const allCalls = [...folded.matchAll(/node tools\/[a-z0-9-]+\.mjs[^\n]*/g)].map((m) =>
     m[0].replace(/\s+/g, " ").trim(),
   );
+
+  // READ-ONLY GUARDS ARE EXEMPT, AND ONLY THESE. The four-part authorization exists to
+  // stop an unauthorised WRITE; a script that cannot write has nothing to authorise.
+  // Kept identical to READ_ONLY_GUARD_SCRIPTS in tools/coldlion-production-lane-readiness.mjs.
+  const READ_ONLY_GUARD_SCRIPTS = ["check-supabase-link-state.mjs"];
+  const isReadOnlyGuard = (c) =>
+    READ_ONLY_GUARD_SCRIPTS.some((s) => c.includes(`node tools/${s}`));
+
+  const runnerCalls = allCalls.filter((c) => !isReadOnlyGuard(c));
   assert.ok(runnerCalls.length >= 6, `expected the five lanes plus the alert dispatcher, got ${runnerCalls.length}`);
   for (const call of runnerCalls) {
     assert.match(call, /--production\b/, `missing --production in: ${call}`);
     assert.match(call, /--production-authorized\b/, `missing --production-authorized in: ${call}`);
     assert.match(call, /--project-ref "\$PRODUCTION_PROJECT_REF"/, `missing exact --project-ref in: ${call}`);
   }
+
+  // THE EXEMPTION MUST NOT BECOME A HOLE. An exempt script may never be handed --apply,
+  // or "call it a guard, then pass --apply" would route a write around the authorization.
+  for (const call of allCalls.filter(isReadOnlyGuard)) {
+    assert.doesNotMatch(call, /--apply\b/, `a read-only guard must never be given --apply: ${call}`);
+  }
+});
+
+test("the link-state guard runs in the production job, and names the production ref", () => {
+  // Added 2026-08-07. The workflow's own gate reads ONE of the three files in
+  // supabase/.temp/ that can name a project. This step asserts all three agree.
+  // If this step is ever dropped, the production lane silently loses that check.
+  assert.match(
+    folded,
+    /node tools\/check-supabase-link-state\.mjs --expect-ref="\$PRODUCTION_PROJECT_REF"/,
+    "the production job must prove ALL Supabase link files agree on production",
+  );
 });
 
 test("both write lanes run --apply --linked; there is no silent read-only variant", () => {
