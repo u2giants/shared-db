@@ -39,6 +39,8 @@ declare
   v_policies        integer;
   v_anon            integer;
   v_missing         text;
+  v_uuids           uuid[];
+  v_names           text[];
   v_lic             uuid;
   v_prop            uuid;
   v_err             text;
@@ -470,25 +472,110 @@ begin
 
   -- ==================================================================================
   -- 6c. api.opa_property_reconciliation must be EXACTLY one row per OPA property node.
-  --     Before 20260807190000 it grouped on the PER-ROW resolution columns, so a
-  --     partially resolved node split into several rows with its character count
-  --     divided between them. Fixture 900000001 was resolved above and 900000002 was
-  --     not, and they share a property name — so a regression shows up here.
+  --
+  --     THE FIXTURE MUST BE ONE NODE WITH SEVERAL CHARACTERS IN DIFFERENT RESOLUTION
+  --     STATES. That is the only shape that can tell the two view versions apart:
+  --       old (grouped on licensed_property_id AND the per-row resolution columns)
+  --           -> 2 rows, opa_character_count 1 and 1
+  --       new (grouped on licensed_property_id alone)
+  --           -> 1 row, opa_character_count 2, resolution_status 'mixed'
+  --     Two DIFFERENT nodes with one character each cannot detect the regression,
+  --     because different ids land in different groups under BOTH versions.
   -- ==================================================================================
+  insert into plm.opa_property_character (
+    licensed_property_id, character_id, property_name, character_name,
+    brand_property_id, option_source_id, captured_at, source_url, raw, source_hash)
+  values
+    (900000010, 900000110, 'Contract Test Node Grain', 'Contract Test Char A',
+     900000010, 1007, date '2026-08-06', 'https://example.invalid/contract-test',
+     '{"fixture":true}'::jsonb, 'grainhash1'),
+    (900000010, 900000111, 'Contract Test Node Grain', 'Contract Test Char B',
+     900000010, 1007, date '2026-08-06', 'https://example.invalid/contract-test',
+     '{"fixture":true}'::jsonb, 'grainhash2');
+
+  -- Resolve exactly ONE of the two, so the node disagrees with itself.
+  update plm.opa_property_character
+     set property_id = v_prop,
+         resolution_status = 'matched',
+         resolution_reason = 'contract test node-grain fixture',
+         resolved_at = timestamptz '2026-08-06 12:00:00+00',
+         resolved_by = 'contract-test'
+   where licensed_property_id = 900000010 and character_id = 900000110;
+
   select count(*) into v_count from api.opa_property_reconciliation
-    where licensed_property_id in (900000001, 900000002);
-  if v_count <> 2 then
-    raise exception 'api.opa_property_reconciliation returned % rows for 2 distinct OPA '
-      'property nodes (expected exactly 2). It is grouping on per-row columns again.',
+    where licensed_property_id = 900000010;
+  if v_count <> 1 then
+    raise exception 'api.opa_property_reconciliation returned % rows for ONE partially '
+      'resolved OPA property node (expected exactly 1). It is grouping on the per-row '
+      'resolution columns again, which splits a node and divides its character count.',
       v_count;
   end if;
 
-  -- The resolved node must report its single character exactly once, not split.
-  select opa_character_count into v_count from api.opa_property_reconciliation
-    where licensed_property_id = 900000001;
-  if v_count <> 1 then
-    raise exception 'node 900000001 reports opa_character_count=% (expected 1); the '
+  select opa_character_count, unresolved_character_count, resolution_status,
+         matched_core_property_count, matched_core_property_ids, core_property_names
+    into v_count, v_missing, v_status, v_policies, v_uuids, v_names
+  from api.opa_property_reconciliation
+  where licensed_property_id = 900000010;
+
+  if v_count <> 2 then
+    raise exception 'node 900000010 reports opa_character_count=% (expected 2); the '
       'character count is being divided across duplicate rows', v_count;
+  end if;
+
+  if v_status is distinct from 'mixed' then
+    raise exception 'node 900000010 reports resolution_status=%L (expected ''mixed''); a '
+      'node whose characters disagree must say so rather than splitting into rows',
+      v_status;
+  end if;
+
+  if v_missing::integer <> 1 then
+    raise exception 'node 900000010 reports unresolved_character_count=% (expected 1)',
+      v_missing;
+  end if;
+
+  -- The aggregates must actually carry the resolution, not just be present.
+  if v_policies <> 1 then
+    raise exception 'node 900000010 reports matched_core_property_count=% (expected 1)',
+      v_policies;
+  end if;
+  if v_uuids is null or not (v_prop = any(v_uuids)) then
+    raise exception 'matched_core_property_ids does not contain the resolved property';
+  end if;
+  if v_names is null or not ('Contract Test Property OPA' = any(v_names)) then
+    raise exception 'core_property_names does not contain the joined core.property name '
+      '(got %). If this is NULL the LEFT JOIN is being suppressed by RLS.',
+      coalesce(v_names::text, '<null>');
+  end if;
+
+  -- A fully unresolved node must report a concrete status, not 'mixed'.
+  select resolution_status into v_status from api.opa_property_reconciliation
+    where licensed_property_id = 900000002;
+  if v_status is distinct from 'unresolved' then
+    raise exception 'a fully unresolved node reports resolution_status=%L (expected '
+      '''unresolved'')', v_status;
+  end if;
+
+  -- 6c-bis. THE ARRAYS MUST BE EMPTY, NEVER NULL (migration 20260807200000).
+  --     array_agg(...) filter (...) over zero matching rows returns NULL, not '{}'.
+  --     The view comment promised "empty", so a consumer testing `= '{}'` would have
+  --     misread RLS suppression or a no-match as something else. coalesce makes the
+  --     promise true; this asserts it stays true.
+  select matched_core_property_ids, core_property_names
+    into v_uuids, v_names
+  from api.opa_property_reconciliation
+  where licensed_property_id = 900000002;   -- an unmatched node
+
+  if v_uuids is null then
+    raise exception 'matched_core_property_ids is NULL for an unmatched node; it must be '
+      'an EMPTY array. The comment promises empty and consumers will test = ''{}''.';
+  end if;
+  if v_names is null then
+    raise exception 'core_property_names is NULL for an unmatched node; it must be an '
+      'EMPTY array.';
+  end if;
+  if array_length(v_uuids, 1) is not null or array_length(v_names, 1) is not null then
+    raise exception 'an unmatched node reported non-empty arrays (ids=%, names=%)',
+      v_uuids::text, v_names::text;
   end if;
 
   -- ==================================================================================

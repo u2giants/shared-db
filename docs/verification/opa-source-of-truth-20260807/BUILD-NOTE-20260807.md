@@ -1,6 +1,6 @@
 # OPA property→character — BUILD NOTE
 
-**Status: BUILT, APPLIED TO PREVIEW (`rjyboqwcdzcocqgmsyel`) and VERIFIED. All FOUR migrations applied; both contract test files pass unmodified. Independent review round closed — see section 8.9. No open defects.**
+**Status: BUILT, APPLIED TO PREVIEW (`rjyboqwcdzcocqgmsyel`) and VERIFIED. All FIVE migrations applied; both contract test files pass unmodified. Two review rounds closed — sections 8.9 and 8.10. No open defects.**
 
 This records what was actually built from
 [`README.md`](./README.md) (the authoritative design, PR #485, which supersedes
@@ -16,9 +16,9 @@ This records what was actually built from
 
 ---
 
-## 0. PROMOTION LIST — all FOUR migrations, in order
+## 0. PROMOTION LIST — all FIVE migrations, in order
 
-> **Promote all four or none.** A previous session shipped a partial fix because
+> **Promote all five or none.** A previous session shipped a partial fix because
 > three of four correction migrations were named nowhere. These are the complete,
 > exact, 14-digit versions this work consists of:
 >
@@ -28,6 +28,7 @@ This records what was actually built from
 > | 2 | **`20260807170100`** | `opa_property_character_importer.sql` |
 > | 3 | **`20260807180000`** | `opa_sync_reentrancy_fix.sql` |
 > | 4 | **`20260807190000`** | `opa_security_and_view_corrections.sql` |
+> | 5 | **`20260807200000`** | `opa_comment_corrections.sql` |
 >
 > Order matters and is strict: 1 creates the table, 2 creates the functions, 3
 > replaces one of them, and 4 replaces the read policy, the reconciliation view and
@@ -39,7 +40,7 @@ This records what was actually built from
 >   including `vendor` and `viewer` — read the entire confidential Disney extract.**
 >   4 is a security fix. It is not optional.
 >
-> All four are applied to preview `rjyboqwcdzcocqgmsyel`; none has been promoted to
+> All five are applied to preview `rjyboqwcdzcocqgmsyel`; none has been promoted to
 > production.
 
 ## 1. What was built
@@ -50,6 +51,7 @@ This records what was actually built from
 | `supabase/migrations/20260807170100_opa_property_character_importer.sql` | Privilege predicate + guarded `SECURITY DEFINER` loader + `public.*` wrapper |
 | `supabase/migrations/20260807180000_opa_sync_reentrancy_fix.sql` | Forward fix making the loader re-entrant within a transaction (§8.5) |
 | `supabase/migrations/20260807190000_opa_security_and_view_corrections.sql` | Review round: closes the read policy, NULL-safe shrink band, pg_temp staging, node-grain view, leak-free diagnostics (§8.9) |
+| `supabase/migrations/20260807200000_opa_comment_corrections.sql` | Re-review round: comment corrections plus non-null, stably-ordered view arrays (§8.10) |
 | `supabase/tests/opa_property_character_landing_contracts.sql` | Contract tests for the landing |
 | `supabase/tests/opa_property_character_importer_contracts.sql` | Contract tests for the loader |
 | `tools/sync-opa-property-character.mjs` | Runner — **logic only, no data** |
@@ -67,6 +69,7 @@ This records what was actually built from
 | `20260807170000` | *(this work)* `opa_property_character_landing.sql` | Required by `20260807170100`, which writes the table it creates. |
 | `20260807170100` | *(this work)* `opa_property_character_importer.sql` | Superseded in behaviour by `20260807180000`, but still the migration that CREATES the functions. Must be promoted BEFORE it. |
 | `20260807180000` | *(this work)* `opa_sync_reentrancy_fix.sql` | Superseded in behaviour by `20260807190000`, which replaces the function again. Must be promoted BEFORE it. |
+| `20260807190000` | *(this work)* `opa_security_and_view_corrections.sql` | Its comments and view are corrected by `20260807200000`. Must be promoted BEFORE it. |
 
 The highest migration version on `origin/main` when these were authored was
 **`20260807030000`**. All four versions were **allocated by the coordinator**, not
@@ -775,6 +778,157 @@ Quiet wrong is worse than loud wrong, hence the comment.
 - **The misleading RLS comment inside `20260807170000`.** That migration is applied;
   editing it — even a comment — would desynchronise the file from the ledger. It is
   corrected in `20260807190000`'s header, in the table's `COMMENT ON`, and here.
+
+## 8.10 Re-review round — `20260807200000`, plus two vacuous tests and a binary file
+
+Re-review verdict was **APPROVE, 0 Critical, 0 High** — all five fixes from §8.9
+independently confirmed, and the three earlier migrations confirmed **byte-identical**
+to the previous head, so fix-forward discipline held. The items below were caught
+anyway, and two of them are the same defect class this workstream has been bitten
+by twice: **a test that cannot fail.**
+
+Codex's one Critical — that `create temporary table pg_temp._opa_incoming` is
+invalid — was **refuted**: a temporary table may be `pg_temp`-qualified. Proof in
+§8.10.4.
+
+### 8.10.1 BLOCKER: the runner was committed as a BINARY file
+
+`tools/sync-opa-property-character.mjs` contained **three literal NUL bytes** —
+used as a key separator in template literals:
+
+```
+const key = `${rec.licensedPropertyID}<NUL>${rec.characterID}`;
+duplicates.push(key.replace("<NUL>", ","));
+new Set(snapshot.rows.map((r) => `${r.property}<NUL>${r.character}`));
+```
+
+Three bytes were enough. Git classified the whole file as binary:
+
+```
+$ git diff --numstat            ->   -   -   tools/sync-opa-property-character.mjs
+```
+
+`git diff` emitted only "Binary files differ", GitHub's PR view showed no diff, and
+`gh pr view --json files` reported **additions: 0**. **So no one — not either Codex
+round, not the reviewing agent, not the coordinator — had ever seen this file's
+contents in review, in a PR whose entire purpose was closing a confidential-data
+exposure.**
+
+The intent was sound: a NUL cannot occur inside a CSV field, so it is a safe
+composite-key separator. The mistake was writing the **byte** instead of the
+**escape**. Now `\0` in source — behaviour-identical, and the file is text:
+
+```
+$ git diff --numstat origin/main  ->  347  0  tools/sync-opa-property-character.mjs
+```
+
+**347 lines that have never been reviewed are now visible and need a real read.**
+All 18 runner tests still pass, unchanged.
+
+> **Lesson worth keeping: "the diff looked fine" is not the same as "the diff was
+> shown".** A file can be silently excluded from every review surface by three
+> bytes. `git diff --numstat` printing `-` `-` for a source file is the tell.
+
+### 8.10.2 Two tests that could not fail
+
+**The reconciliation test (landing §6c) was vacuous.** It used fixtures
+`900000001` and `900000002` — two *different* nodes with one character row each.
+The old buggy view grouped by `licensed_property_id` **and** the per-row resolution
+columns, so it would also have returned 2 rows with `opa_character_count = 1` each.
+**Neither assertion could distinguish the two view versions.** The stated rationale
+(that the fixtures share a property name) does not hold: different ids land in
+different groups under both versions.
+
+Replaced with the only shape that discriminates — **one** node
+(`900000010`) with **two** character rows in **different** `resolution_status`:
+
+| View version | Rows returned | `opa_character_count` |
+| --- | ---: | --- |
+| old (splitting) | **2** | 1 and 1 |
+| new (node grain) | **1** | **2**, status `mixed` |
+
+It now also exercises `mixed`, `unresolved_character_count`,
+`matched_core_property_count`, `matched_core_property_ids` and
+`core_property_names` — none of which anything touched before.
+
+**The two importer fixes from `20260807190000` had NO database test at all.** The
+importer suite was **byte-identical** to the previous head (20,162 bytes), so the
+NULL-rejecting shrink band and the ordinal-only diagnostic were proved only by a
+one-off apply-time check recorded in prose. **A later `create or replace` could have
+restored either defect and every committed test would have stayed green.** Added:
+
+- **§5k** — a NULL `p_max_shrink_fraction` must be rejected.
+- **§5l** — out-of-range values (`-0.5`, `2.0`) must be rejected.
+- **§5m** — the row-shape guard's message must contain the row **ordinal** and the
+  **failed check**, and must **not** contain the offending row's content. Asserted
+  with a "Leak Canary" name planted in the bad row.
+
+### 8.10.3 `20260807200000` — comment corrections, and the same failure one severity down
+
+**A wrong comment is what produced the HIGH finding in the previous round**:
+`20260807170000` claimed its RLS matched `plm.erp_property` while writing
+`using (true)`, and *the claim is what stopped anyone looking*. These are the same
+failure, milder, and worth a version to kill.
+
+1. **The table comment overstated the restriction.** It said "vendor and viewer are
+   excluded" absolutely. `app.has_app_access('plm')` is an **independent allow
+   path**, so a profile holding the vendor role **together with** PLM app access
+   **does** read the mirror. The predicate was right; the description was wrong.
+2. **`array_agg(...) filter (...)` returns NULL, not an empty array.** The view
+   comment promised "come back EMPTY" three times. A consumer testing `= '{}'`
+   would have misread RLS suppression. **Rather than document the NULL, the view now
+   genuinely returns `'{}'`** via `coalesce`, with a stable `ORDER BY` inside each
+   aggregate so two identical queries cannot disagree on element order. The comment's
+   promise is now true instead of merely explained. Asserted in landing §6c-bis.
+3. **`min(captured_at)` is now documented.** `min(property_name)` carried a
+   justification; this did not. After a **partial** refresh a node can hold rows from
+   two snapshots and the view silently reports the **oldest**. Stated plainly, with a
+   pointer to read `plm.opa_property_character` directly when freshness matters.
+
+Column names, types and order are unchanged, so `create or replace view` sufficed
+and grants were preserved.
+
+### 8.10.4 Proof
+
+**Applied:** `cat supabase/.temp/project-ref` confirmed `rjyboqwcdzcocqgmsyel`;
+explicit ref-in-URL targeting throughout (`linked-project.json` in that same
+directory still names **production** — §8.1). Dry run showed exactly one pending
+migration. Ledger **404 → 405**, max version `20260807200000`.
+
+**Both suites re-run in full and pass UNMODIFIED.**
+
+**Neutralise-and-observe — all three new assertions proved non-vacuous:**
+
+| Neutralisation | Suite | Observed failure |
+| --- | --- | --- |
+| old splitting `GROUP BY` restored | landing | `returned 2 rows for ONE partially resolved OPA property node (expected exactly 1)` |
+| `LEAST`/`GREATEST` NULL hole restored | importer | `a NULL p_max_shrink_fraction was ACCEPTED…` |
+| G6 row echo restored | importer | `THE GUARD LEAKS ROW CONTENT: its error message quoted the offending character name` |
+
+The third failure message literally displays the leak it prevents (invented fixture
+data only — no Disney content anywhere in this repository).
+
+**`pg_temp` executes, it does not merely parse.** plpgsql only raw-parses a function
+body at creation, so a clean apply proves parseability alone. Executed directly:
+
+```
+PG_TEMP PROOF: function returned rows_inserted=1, staging table lives in schema
+'pg_temp_47' (must start with pg_temp) and held 1 staged row(s).
+The statement EXECUTED, it did not merely parse.
+```
+
+Preview left clean: `plm.opa_property_character` **0 rows**,
+`core.property_character` **0 rows**.
+
+### 8.10.5 Deferred, recorded, not fixed tonight
+
+- **G6 can still echo a single field value on numeric overflow.** Reaching it needs a
+  malformed oversized number; it leaks one field, not a row; and the runner no longer
+  prints response bodies at all.
+- **Two client-side runner messages still echo field values** (the blank-field and
+  non-integer diagnostics). Same class, client side only.
+
+Both are narrower than what was fixed and are recorded in the session handoff.
 
 ## 9. Follow-ups
 

@@ -282,6 +282,69 @@ begin
     raise exception 'a duplicate (licensedPropertyID, characterID) pair was ACCEPTED';
   end if;
 
+  -- 5k. THE SHRINK BAND MUST REJECT A NULL FRACTION (migration 20260807190000).
+  --     The old form was `greatest(0, least(1, p_max_shrink_fraction))`. Postgres
+  --     LEAST/GREATEST IGNORE NULL, so a NULL collapsed it to 1, the threshold became
+  --     rows_held * 0, and `rows_seen < 0` could never fire — the truncated-extract
+  --     guard was SILENTLY DISABLED while still reading as a bounded clamp.
+  --     NOTE FOR ANYONE "FIXING" A SIMILAR CLAMP: wrapping coalesce() around the
+  --     OUTSIDE of greatest(...) does NOT help — it returns 1, not NULL, so the guard
+  --     stays off while looking corrected. Validate the PARAMETER, as the code does.
+  --     A NULL usually means the caller sent NaN (JSON serialises NaN as null).
+  v_caught := false;
+  begin
+    perform * from plm.sync_opa_property_character(v_snapshot, 'mirror_only', null::numeric);
+  exception when others then v_caught := true;
+  end;
+  if not v_caught then
+    raise exception 'a NULL p_max_shrink_fraction was ACCEPTED. LEAST/GREATEST ignore '
+      'NULL, so this silently disables the truncated-extract guard: a one-row extract '
+      'could overwrite the whole mirror without complaint.';
+  end if;
+
+  -- 5l. …and an out-of-range fraction.
+  for v_count in 1..2 loop
+    v_caught := false;
+    begin
+      perform * from plm.sync_opa_property_character(
+        v_snapshot, 'mirror_only', case when v_count = 1 then -0.5 else 2.0 end::numeric);
+    exception when others then v_caught := true;
+    end;
+    if not v_caught then
+      raise exception 'an out-of-range p_max_shrink_fraction (case %) was ACCEPTED', v_count;
+    end if;
+  end loop;
+
+  -- 5m. THE ROW-SHAPE GUARD MUST NOT ECHO ROW CONTENT (migration 20260807190000).
+  --     It previously embedded the first offending row's full JSON, which reaches
+  --     terminals, CI logs and the runner. The extract is confidential Disney data and
+  --     this repository is PUBLIC, so a diagnostic that quotes a row is a leak.
+  --     It must report the row ORDINAL and WHICH CHECK FAILED, and nothing else.
+  v_status := null;
+  begin
+    perform * from plm.sync_opa_property_character(
+      jsonb_set(
+        jsonb_set(v_snapshot, '{rows,1,character}', '"Leak Canary Character Name"'::jsonb),
+        '{rows,1,optionSourceID}', '1008'::jsonb));
+    raise exception 'the malformed-row guard did not fire at all';
+  exception when others then v_status := sqlerrm;
+  end;
+
+  if v_status like '%Leak Canary Character Name%' then
+    raise exception 'THE GUARD LEAKS ROW CONTENT: its error message quoted the offending '
+      'character name. It must report the row ordinal and the failed check only. '
+      'Message was: %', left(v_status, 200);
+  end if;
+  if v_status not like '%row 2%' then
+    raise exception 'the guard did not report the 1-based row ordinal (expected "row 2"). '
+      'Without it an operator cannot find the bad row without the content. Message: %',
+      left(v_status, 300);
+  end if;
+  if v_status not like '%optionSourceID is not 1007%' then
+    raise exception 'the guard did not report WHICH check failed. Message: %',
+      left(v_status, 300);
+  end if;
+
   -- ==================================================================================
   -- 6. THE HAPPY PATH. Counts must be honest.
   -- ==================================================================================
