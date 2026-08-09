@@ -1,7 +1,8 @@
 -- =====================================================================================
 -- PopDAM OrderList — Step 1 contract tests (issue #613, object claim #624)
 --
--- Covers migration 20260810010000_popdam_order_list_contract.sql.
+-- Covers migrations 20260810010000_popdam_order_list_contract.sql and
+--   20260810060000_popdam_order_list_source_pair_nulls_distinct.sql.
 --
 -- HOW TO RUN
 --   Against PREVIEW rjyboqwcdzcocqgmsyel ONLY, as the migration owner role:
@@ -11,7 +12,8 @@
 --   multi-statement batch through the transaction pooler (port 6543) wraps everything
 --   in one implicit transaction and stalls -- observed 2026-08-09 on the product
 --   size/depth tests. psql's -f does the right thing; a programmatic runner must split
---   on the `do $$` / `begin;` boundaries.
+--   on the PART 1 / PART 2 banners below, and must repeat the temp-table statement at
+--   the top of each half.
 --
 -- WHAT IT ASSERTS, AND WHY IT IS SHAPED THIS WAY
 --   Part 1 asserts OBJECTS exist, using to_regclass / pg_proc / pg_policy /
@@ -126,6 +128,31 @@ begin
       where conrelid = 'plm.production_order_line'::regclass and conname = v_name and convalidated
     ) then
       v_fail := v_fail + 1; raise notice 'FAIL missing or unvalidated constraint: %', v_name;
+    else
+      v_pass := v_pass + 1;
+    end if;
+  end loop;
+
+  -- 20260810060000: the legacy source pair on BOTH canonical tables must be NULLS
+  -- DISTINCT. Under the original NULLS NOT DISTINCT the whole table could hold only one
+  -- row without a source pair, so a second natively created order line was impossible.
+  foreach v_name in array array['plm.production_order', 'plm.production_order_line']
+  loop
+    if exists (
+      select 1
+      from pg_constraint c
+      join pg_index i on i.indexrelid = c.conindid
+      where c.conrelid = v_name::regclass
+        and c.contype = 'u'
+        and (
+          select array_agg(a.attname::text order by a.attname)
+          from unnest(c.conkey) k
+          join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k
+        ) = array['source_id', 'source_system']
+        and i.indnullsnotdistinct
+    ) then
+      v_fail := v_fail + 1;
+      raise notice 'FAIL %.(source_system, source_id) is still NULLS NOT DISTINCT; a second source-less row is impossible', v_name;
     else
       v_pass := v_pass + 1;
     end if;
@@ -321,14 +348,22 @@ begin
   insert into core.customer (name) values ('OrderList Contract Test Customer')
     returning id into v_cust;
 
-  insert into plm.item (item_number, style_number, name, description)
-    values ('TEST-NCV3SP1', 'NCV3SP1', 'Licensed test item', 'Licensed description v1')
+  -- Each fixture item needs its OWN legacy source pair. plm.item still carries
+  -- `unique nulls not distinct (source_system, source_id)`, so two source-less items
+  -- collide. That trap is real and is reported separately -- plm.item is outside this
+  -- workstream's object claim and is coordinated with fix_schema_for_api.md, so it is
+  -- worked around here rather than fixed here.
+  insert into plm.item (item_number, style_number, name, description, source_system, source_id)
+    values ('TEST-NCV3SP1', 'NCV3SP1', 'Licensed test item', 'Licensed description v1',
+            'dam_order_list_contract_test', 'ct-item-licensed')
     returning id into v_item_l;
-  insert into plm.item (item_number, style_number, name, description)
-    values ('TEST-BFC02GABB', 'BFC02GABB', 'Generic test item', 'Generic description v1')
+  insert into plm.item (item_number, style_number, name, description, source_system, source_id)
+    values ('TEST-BFC02GABB', 'BFC02GABB', 'Generic test item', 'Generic description v1',
+            'dam_order_list_contract_test', 'ct-item-generic')
     returning id into v_item_g;
-  insert into plm.item (item_number, style_number, name, description)
-    values ('TEST-DUPSKU', 'DUPSKU1', 'Ambiguous test item', 'Ambiguous description')
+  insert into plm.item (item_number, style_number, name, description, source_system, source_id)
+    values ('TEST-DUPSKU', 'DUPSKU1', 'Ambiguous test item', 'Ambiguous description',
+            'dam_order_list_contract_test', 'ct-item-ambiguous')
     returning id into v_item_d;
 
   insert into public.style_tracker_rows
@@ -400,6 +435,36 @@ begin
   select sku_normalized into v_txt from plm.production_order_line where id = v_line_l;
   if v_txt = 'ncv3sp1' then v_pass := v_pass + 1;
   else v_fail := v_fail + 1; raise notice 'FAIL sku_normalized = % (expected ncv3sp1)', v_txt; end if;
+
+  -- All four lines exist. This is the regression guard for the NULLS NOT DISTINCT bug:
+  -- before 20260810060000 the second line raised 23505 and no order survived at all.
+  select count(*) into v_n from plm.production_order_line where production_order_id = v_order;
+  if v_n = 4 then v_pass := v_pass + 1;
+  else v_fail := v_fail + 1; raise notice 'FAIL expected 4 created lines, got %', v_n; end if;
+
+  -- A natively created order carries its own identity rather than relying on NULLs, and
+  -- it is a DIFFERENT source system from the imported feeds so reconciliation cannot
+  -- confuse it with a spreadsheet row.
+  select count(*) into v_n from plm.production_order_line
+   where production_order_id = v_order and source_system = 'popdam_order_list';
+  if v_n = 4 then v_pass := v_pass + 1;
+  else v_fail := v_fail + 1; raise notice 'FAIL expected 4 natively stamped lines, got %', v_n; end if;
+
+  select count(distinct source_id) into v_n from plm.production_order_line
+   where production_order_id = v_order;
+  if v_n = 4 then v_pass := v_pass + 1;
+  else v_fail := v_fail + 1; raise notice 'FAIL native line source ids are not distinct (% of 4)', v_n; end if;
+
+  if exists (select 1 from plm.production_order
+              where id = v_order and source_system = 'popdam_order_list' and source_id is not null)
+  then v_pass := v_pass + 1;
+  else v_fail := v_fail + 1; raise notice 'FAIL the created order carries no native source pair'; end if;
+
+  if exists (select 1 from plm.production_order_source_ref
+              where production_order_id = v_order
+                and source_system = 'popdam_order_list' and is_primary)
+  then v_pass := v_pass + 1;
+  else v_fail := v_fail + 1; raise notice 'FAIL the created order has no primary source ref row'; end if;
 
   -- A new line starts with no product and says so.
   select count(*) into v_n from plm.production_order_line
@@ -500,7 +565,12 @@ begin
   if v_txt = 'Licensed MD description v1' then v_pass := v_pass + 1;
   else v_fail := v_fail + 1; raise notice 'FAIL view did not project live Master Data description (got %)', v_txt; end if;
 
+  -- style_tracker_rows stamps updated_by = auth.uid() and FKs it to auth.users, so the
+  -- synthetic test uid has to be out of scope for this one statement.
+  perform set_config('request.jwt.claims', '', true);
   update public.style_tracker_rows set description = 'Licensed MD description v2' where id = v_row_l;
+  perform set_config('request.jwt.claims',
+                     json_build_object('sub', v_user_a, 'role', 'authenticated')::text, true);
 
   select master_data_description into v_txt from api.dam_order_list where order_line_id = v_line_l;
   if v_txt = 'Licensed MD description v2' then v_pass := v_pass + 1;
@@ -599,8 +669,6 @@ begin
 end;
 $$;
 
-select * from dam_order_list_contract_result where part = 'part2';
-
 -- ---------------------------------------------------------------------------------
 -- Role-scoped checks. These need a real role switch, which cannot happen inside the
 -- do block above, so they run as their own statements in the same rolled-back
@@ -631,5 +699,7 @@ reset role;
 --   set local role anon; select public.link_dam_order_line(null, null);         -- expect 42501
 -- They are left commented because a raised error aborts this transaction and would
 -- skip the rollback below. Part 1 section H proves the same thing from the catalog.
+
+select * from dam_order_list_contract_result where part = 'part2';
 
 rollback;
