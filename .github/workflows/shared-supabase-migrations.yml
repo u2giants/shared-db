@@ -163,7 +163,25 @@ jobs:
           cd "$RUNNER_TEMP/bounded-production"
           supabase link --project-ref "$PRODUCTION_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
           set -o pipefail
-          supabase db push --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
+          # Re-prove the checkout is still bounded AT THE POINT OF USE, and keep
+          # this the LAST command before the push so nothing can run in between.
+          # The bound that makes --include-all safe below is the FILESYSTEM, not
+          # the flag: `prepare` keeps exactly `remote-ledger | allowlist` on disk
+          # and deletes everything else, so --include-all cannot reach a migration
+          # that is not on the allowlist. This re-check exists because `prepare`
+          # ran in an earlier step, and it sits after `supabase link` so that no
+          # question about what `link` may write can make it inert.
+          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" assert-bounded \
+            --dir "$RUNNER_TEMP/bounded-production" \
+            --allowlist "$PRODUCTION_ALLOWLIST" \
+            --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
+          # --include-all is REQUIRED here, and only here. Most of the pending
+          # production migrations sort BELOW the remote ledger head, and the CLI
+          # refuses to insert those without it. AGENTS.md 5.1(4) licenses this
+          # against a verified bounded set; the prohibition is on --include-all
+          # against the FULL repo set, which this is not. Never add this flag to
+          # a `supabase db push` that runs in $GITHUB_WORKSPACE.
+          supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
           python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
             --dry-run-output "$RUNNER_TEMP/production-dry-run.txt" \
             --allowlist "$PRODUCTION_ALLOWLIST"
