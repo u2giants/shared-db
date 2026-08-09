@@ -297,17 +297,88 @@ REFERENCE_RES = (
 )
 
 
+DOLLAR_OPEN_RE = re.compile(r"\$([A-Za-z_]\w*)?\$")
+
+
 def strip_sql(raw: str) -> str:
     """Lowercase SQL with comments and dollar-quoted bodies removed.
 
     Function bodies are stripped on purpose: names inside them resolve at CALL
     time, not at apply time, so they are deferrable and must not be treated as
     batch-ordering dependencies.
+
+    THIS IS A SINGLE LEFT-TO-RIGHT LEXER, AND IT MUST STAY ONE. The previous
+    implementation ran three independent regex passes -- dollar bodies first,
+    then block comments, then line comments. That is wrong, and it silently
+    destroyed real DDL in 8 of the 411 migrations in this repo:
+
+        -- `create index if not exists`, `create or replace function`, guarded
+        -- `do $$` block)          <-- a $$ inside a COMMENT
+
+    Postgres never sees that `$$`, but a dollar-first regex pass does. It became
+    the OPENING half of a pair, matched the next genuine `$$` hundreds of lines
+    later, and deleted every statement in between. For
+    20260728174500 that meant `created_objects` returned an EMPTY SET for a file
+    that creates `pim.sync_clickup_tasks`, `public.sync_clickup_tasks` and
+    `api.clickup_task_sync_run_list` -- so `preflight_batch` reported the file as
+    depending on a function that the very same file creates, and refused a batch
+    that is in fact correctly ordered. The same defect hid all 17 objects created
+    by 20260727154500, which is ALREADY APPLIED, so it also corrupted the
+    `available` set that every later file is judged against.
+
+    A false REJECT is the safe direction, but it is still a fault: it blocks
+    `prepare`, so the production lane could not be exercised at all.
+
+    Lexing order below is Postgres's own: at any point the next token decides.
+    Single-quoted string literals are SKIPPED OVER but KEPT -- `REFERENCE_RES`
+    matches `'plm.seq'::regclass` inside a literal on purpose.
     """
-    text = DOLLAR_QUOTE_RE.sub(" ", raw)
-    text = BLOCK_COMMENT_RE.sub(" ", text)
-    text = LINE_COMMENT_RE.sub(" ", text)
-    return text.lower()
+    out: list[str] = []
+    i, n = 0, len(raw)
+    while i < n:
+        ch = raw[i]
+        if raw.startswith("--", i):
+            end = raw.find("\n", i)
+            i = n if end == -1 else end
+            out.append(" ")
+        elif raw.startswith("/*", i):
+            # Postgres block comments nest.
+            depth, i = 1, i + 2
+            while i < n and depth:
+                if raw.startswith("/*", i):
+                    depth, i = depth + 1, i + 2
+                elif raw.startswith("*/", i):
+                    depth, i = depth - 1, i + 2
+                else:
+                    i += 1
+            out.append(" ")
+        elif ch == "'":
+            j = i + 1
+            while j < n:
+                if raw[j] == "'":
+                    if j + 1 < n and raw[j + 1] == "'":
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                j += 1
+            out.append(raw[i:j])
+            i = j
+        elif ch == "$" and (m := DOLLAR_OPEN_RE.match(raw, i)):
+            close = raw.find(m.group(0), m.end())
+            if close == -1:
+                # Unterminated: not a dollar quote at all (e.g. `$1`-adjacent
+                # text). Emit the character and carry on rather than eating the
+                # rest of the file.
+                out.append(ch)
+                i += 1
+            else:
+                out.append(" ")
+                i = close + len(m.group(0))
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out).lower()
 
 
 def created_objects(raw: str) -> set[str]:

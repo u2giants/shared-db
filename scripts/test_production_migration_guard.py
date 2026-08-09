@@ -13,6 +13,7 @@ from production_migration_guard import (  # noqa: E402
     HARD_BLOCKED,
     BUNDLE_20260804,
     GuardError,
+    created_objects,
     local_migrations,
     parse_allowlist,
     parse_remote_versions,
@@ -482,6 +483,74 @@ class PreflightPositiveTests(unittest.TestCase):
             preflight_batch(
                 local_migrations(repo), ["20260102000000"], {"20260101000000"}
             )
+
+class StripSqlLexingTests(unittest.TestCase):
+    """Regression tests for the `strip_sql` single-pass lexer.
+
+    The three-regex predecessor stripped dollar-quoted bodies BEFORE comments, so
+    a `$$` written inside a comment became the opening half of a pair and deleted
+    every statement up to the next real `$$`. It made `production-dry-run` run
+    31327934569 fail at "Build bounded checkout" on a correctly ordered batch.
+    """
+
+    def test_dollar_sign_inside_a_line_comment_does_not_eat_the_file(self) -> None:
+        sql = (
+            "-- guarded `do $$` block, mentioned only in prose\n"
+            "create or replace function pim.sync_clickup_tasks() returns void as $fn$\n"
+            "begin\n  return;\nend;\n$fn$ language plpgsql;\n"
+        )
+        self.assertEqual(created_objects(sql), {"pim.sync_clickup_tasks"})
+
+    def test_dollar_sign_inside_a_block_comment_does_not_eat_the_file(self) -> None:
+        sql = (
+            "/* a $$ inside a block comment */\n"
+            "create table plm.kept (id uuid);\n"
+        )
+        self.assertEqual(created_objects(sql), {"plm.kept"})
+
+    def test_the_real_migration_that_broke_the_lane_is_parsed(self) -> None:
+        path = (
+            REPO
+            / "supabase"
+            / "migrations"
+            / "20260728174500_clickup_incremental_task_import_reissue.sql"
+        )
+        created = created_objects(path.read_text(encoding="utf-8"))
+        # This file creates the very function the old scanner claimed it needed
+        # from a LATER migration.
+        self.assertIn("pim.sync_clickup_tasks", created)
+        self.assertIn("public.sync_clickup_tasks", created)
+        self.assertIn("api.clickup_task_sync_run_list", created)
+
+    def test_clickup_pair_in_version_order_is_accepted(self) -> None:
+        """The exact false rejection that failed run 31327934569."""
+        migrations = local_migrations(REPO)
+        preflight_batch(
+            migrations,
+            ["20260728174500", "20260728181500"],
+            set(migrations) - {"20260728174500", "20260728181500"},
+        )
+
+    def test_function_bodies_are_still_stripped(self) -> None:
+        sql = (
+            "create or replace function plm.f() returns void as $$\n"
+            "begin\n  create table plm.not_really (id uuid);\nend;\n$$ language plpgsql;"
+        )
+        self.assertEqual(created_objects(sql), {"plm.f"})
+
+    def test_string_literals_survive_for_the_regclass_probe(self) -> None:
+        from production_migration_guard import hard_references
+
+        sql = "alter table plm.t alter column id set default nextval('plm.t_id_seq'::regclass);"
+        self.assertIn(("plm.t_id_seq", "regclass literal"), hard_references(sql))
+
+    def test_apostrophe_in_a_comment_does_not_swallow_following_sql(self) -> None:
+        sql = "-- the loser's row is kept\ncreate table plm.after_comment (id uuid);\n"
+        self.assertEqual(created_objects(sql), {"plm.after_comment"})
+
+    def test_unterminated_dollar_tag_does_not_eat_the_rest_of_the_file(self) -> None:
+        sql = "select $1 $ from x;\ncreate table plm.still_seen (id uuid);\n"
+        self.assertEqual(created_objects(sql), {"plm.still_seen"})
 
 
 if __name__ == "__main__":
