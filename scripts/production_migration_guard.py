@@ -64,6 +64,30 @@ HARD_BLOCKED = {
     # The reversal of 20260726190000. Already applied to production, so listing
     # it is inert; kept so the pair stays legible together.
     "20260726200000",
+    # A THIRD KIND. Read this before assuming it matches either pair above.
+    #
+    # NEVER APPLIED, and must NEVER be applied: promoting it would REGRESS a
+    # security control that is live on production right now. It rewrites
+    # public.lock_down_new_public_function_execute back to a narrower body
+    # (`command_tag = 'CREATE FUNCTION'`, `revoke execute on function`) than the
+    # one production runs today (`command_tag in ('CREATE FUNCTION',
+    # 'CREATE PROCEDURE')`, `revoke execute on routine`), so newly created public
+    # PROCEDURES would stop being locked down. Its `create or replace` and
+    # `drop event trigger`/`create event trigger` overwrite unconditionally, and
+    # it sorts BELOW the already-applied 20260729180000, which will therefore
+    # never re-run to repair the damage.
+    #
+    # Its whole end state is already on production, from two migrations that ARE
+    # in the ledger: 20260729130000 (the identical `alter default privileges`)
+    # and 20260729180000 (the live event-trigger body, md5 735985606362e032...
+    # matched bit-exactly after CRLF normalisation).
+    #
+    # Do NOT reach for the old argument that it would abort anyway on a missing
+    # public/pim.sync_clickup_tasks. That is true only for a lone promotion. In
+    # the full 50-file backlog 20260728174500 creates those functions FIRST, so
+    # the file would succeed and regress production silently.
+    # Evidence: docs/verification/production-apply-set-and-rehearsal-20260809.md
+    "20260729120000",
 }
 
 # The four unblocked above. This is ENFORCED, not documentary: `parse_allowlist`
@@ -202,12 +226,10 @@ def validate_candidates(
 # known it stays silent rather than guessing.
 # ---------------------------------------------------------------------------
 
-# The tag group must ALWAYS participate (hence `|` rather than `?`): an
-# unmatched optional group makes the \1 backreference fail, which silently
-# leaves every `$$ ... $$` body in the text and produces false rejections.
-DOLLAR_QUOTE_RE = re.compile(r"\$([A-Za-z_]\w*|)\$.*?\$\1\$", re.DOTALL)
-LINE_COMMENT_RE = re.compile(r"--[^\n]*")
-BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+# DELIBERATELY REMOVED: DOLLAR_QUOTE_RE, LINE_COMMENT_RE, BLOCK_COMMENT_RE.
+# They were the three-pass stripper that `strip_sql` replaced, and they are gone
+# rather than left unused on purpose -- a dead regex named DOLLAR_QUOTE_RE is an
+# invitation to reintroduce the exact defect (see the `strip_sql` docstring).
 
 IDENT = r"([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)"
 
@@ -352,11 +374,36 @@ def strip_sql(raw: str) -> str:
                 else:
                     i += 1
             out.append(" ")
-        elif ch == "'":
-            j = i + 1
+        elif ch == "'" or (
+            ch in "eE" and raw.startswith("'", i + 1)
+        ):
+            # `E'...'` uses BACKSLASH escapes, so `E'it\'s'` does not end at the
+            # second quote. A plain `'...'` string does not honour backslashes;
+            # only `''` ends it. Getting this wrong mis-terminates the literal
+            # and desynchronises everything after it. (Kimi K3, 2026-08-09.)
+            escaped = ch in "eE"
+            start = i
+            j = i + (2 if escaped else 1)
             while j < n:
+                if escaped and raw[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
                 if raw[j] == "'":
                     if j + 1 < n and raw[j + 1] == "'":
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                j += 1
+            out.append(raw[start:j])
+            i = j
+        elif ch == '"':
+            # A double-quoted identifier is opaque: `"weird--name"` contains no
+            # comment and `"a$$b"` opens no dollar quote.
+            j = i + 1
+            while j < n:
+                if raw[j] == '"':
+                    if j + 1 < n and raw[j + 1] == '"':
                         j += 2
                         continue
                     j += 1

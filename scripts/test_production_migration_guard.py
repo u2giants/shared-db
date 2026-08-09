@@ -118,8 +118,21 @@ class GuardTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(GuardError):
                 parse_allowlist(value)
 
-    def test_master_data_pair_is_the_whole_block_list(self) -> None:
-        self.assertEqual(HARD_BLOCKED, {"20260726190000", "20260726200000"})
+    def test_the_block_list_is_exactly_these_three(self) -> None:
+        # Two kinds, deliberately together. 20260726190000/20260726200000 are the
+        # already-applied Master Data pair. 20260729120000 is the third kind:
+        # never applied, and applying it would REGRESS a live production security
+        # control (see the guard's own comment and
+        # docs/verification/production-apply-set-and-rehearsal-20260809.md).
+        self.assertEqual(
+            HARD_BLOCKED,
+            {"20260726190000", "20260726200000", "20260729120000"},
+        )
+
+    def test_the_retired_lockdown_migration_cannot_enter_an_allowlist(self) -> None:
+        """A2's RETIRE verdict must be mechanical, not prose. (Kimi K3.)"""
+        with self.assertRaises(GuardError):
+            parse_allowlist("20260728174500,20260729120000,20260729230000")
 
     def test_the_four_coldlion_versions_are_unblocked(self) -> None:
         # Owner ruling 2026-08-04, AGENTS.md section 6.8: unblocked as ONE
@@ -551,6 +564,15 @@ class StripSqlLexingTests(unittest.TestCase):
     def test_unterminated_dollar_tag_does_not_eat_the_rest_of_the_file(self) -> None:
         sql = "select $1 $ from x;\ncreate table plm.still_seen (id uuid);\n"
         self.assertEqual(created_objects(sql), {"plm.still_seen"})
+
+    def test_e_string_backslash_escape_does_not_mis_terminate(self) -> None:
+        """`E'it\\'s'` does not end at the second quote. (Kimi K3.)"""
+        sql = "select E'it\\'s -- not a comment';\ncreate table plm.after_estring (id uuid);\n"
+        self.assertEqual(created_objects(sql), {"plm.after_estring"})
+
+    def test_double_quoted_identifier_is_opaque(self) -> None:
+        sql = 'create table plm."weird--name$$x" (id uuid);\ncreate table plm.after_ident (id uuid);\n'
+        self.assertIn("plm.after_ident", created_objects(sql))
 
 
 if __name__ == "__main__":

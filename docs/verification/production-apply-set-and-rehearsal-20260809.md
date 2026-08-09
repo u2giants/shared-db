@@ -20,8 +20,13 @@ Three things, in order of how much they matter.
    actively wrong, and it is the single most valuable finding here.
 3. **The rehearsal could not reach the Supabase CLI. It failed on a defect in
    `scripts/production_migration_guard.py` — a parsing fault, not a migration fault.**
-   The defect is fixed in this PR with 8 regression tests. **A second, structural blocker
-   sits behind it** (§6) and is NOT fixed here.
+   The defect is fixed in this PR with regression tests. **A second, structural blocker
+   sits behind it** (§6.2) and is NOT fixed here.
+4. **Nothing here proves the batch can RUN.** A dry-run prints a plan; it executes no SQL, and
+   `supabase db push` wraps each *file*, not the batch — so a data-dependent assertion failing
+   at file 45 of 49 leaves production **partially promoted with no undo**. The whole-batch
+   rehearsal against a production-shaped scratch database (§7) is the real gate and has **not**
+   been done. Treat it as a hard precondition of A4, not a formality.
 
 ---
 
@@ -341,14 +346,126 @@ files without `--include-all`, and the workflow's dry-run step does not pass it.
 and it is a change to the production lane that belongs to A3 and to the owner. It is
 **recommended and flagged, not decided.**
 
-One caveat worth carrying into that decision: with an allowlist of 49, `prepare`'s
-`keep = remote | allowlist` covers all 411 files, so the bounded checkout deletes **nothing**.
-The "bounded" property here comes entirely from the fact that the allowlist happens to equal
-every unapplied file — not from the pruning. That is fine, but it means the safety argument
-for a bounded `--include-all` rests wholly on `verify-dry-run`'s exact-match check, and that
-should be said out loud before anyone relies on it.
+⚠️ **Correction, after review (§8).** My first draft of this section said two things that were
+wrong, and both are corrected here rather than quietly edited away:
 
-## 7. What was NOT done
+- I wrote that adding `--include-all` was an undecided policy question. **It is already decided
+  and written down.** `AGENTS.md` §5.1 step 4 says, verbatim, that in a bounded temp checkout
+  *"that flag is the correct and safe way to finish"* and that *"the §5.1 prohibition is on
+  `--include-all` against the **full repo set**, never against a verified bounded set."*
+  So A3 is **implementing existing repo policy in the workflow**, not making a new ruling.
+  I still did not implement it — that is outside this task's limits — but the framing
+  "flagged, not decided" understated how settled it is.
+- I wrote that the bounded checkout "deletes nothing". **Off by one, and the one matters.**
+  `keep = remote | allowlist` = 361 + 49 = **410 of 411**. The single file it deletes is
+  `20260729120000` — the retired one. So the pruning is doing exactly one job: enforcing the
+  retirement.
+
+That last point is why the retirement is no longer prose-only (§6.3).
+
+### 6.3 The retirement is now MECHANICAL, not prose
+
+**Kimi K3's blocking finding, accepted.** As first written, "RETIRE `20260729120000`" lived only
+in this document. Any future session that assembled the allowlist from the 50 missing versions —
+the obvious, natural thing to do — would have included it and regressed production.
+
+`20260729120000` is now in `HARD_BLOCKED` in `scripts/production_migration_guard.py`, so
+`parse_allowlist` refuses any allowlist containing it, from every entry point (`prepare`,
+`preflight`, `verify-dry-run`). It is a **third kind** of entry there and is commented as such:
+the existing pair is *already applied, never re-run*; this one is *never applied, and must never
+be applied*. Both kinds are "never put this in an allowlist", which is what the set enforces.
+
+This is a change to production-lane policy made by a sub-agent, so it is called out here and in
+PR #608 for the orchestrator and owner to accept or revert deliberately. It is **fail-closed**:
+it can only ever refuse more, never permit more.
+
+## 7. The whole-batch rehearsal has NOT been done, and it is the real gate
+
+**Kimi K3's second blocking finding, accepted in full — this is the most important open risk.**
+
+Nothing in this document proves the 49 can actually *run*. A dry-run prints a plan; it executes
+no SQL. The guard's own preflight says of itself that it "may REJECT but must never be read as
+APPROVAL", and names the authoritative gate: **a rehearsal of the whole batch against a
+production-shaped scratch database** (`production_migration_guard.py`, and
+`docs/production-migration-lane-design-20260802.md` §2.3, Change C).
+
+**Why this is not a formality.** `supabase db push` wraps each *file* in a transaction, not the
+batch. A failure at file 45 of 49 leaves **44 migrations applied and production partially
+promoted, with no undo.** Several files in this batch carry `do $$` blocks with `raise
+exception` guards and seeded DML (`20260731220000` approves five aliases; `20260802171000`
+performs an owner-ruling update; `20260809170100`/`20260809170200` seed from external sources)
+— assertions that pass or fail on *data*, which no static scan and no dry-run can predict.
+
+**Nothing may be applied to production until that rehearsal has been run and has passed.** It
+requires creating a scratch database, which this task was explicitly forbidden to do
+(no `--create`). It belongs to A3/A5 and it should be treated as a hard precondition of A4,
+not as a nice-to-have.
+
+## 7a. Corrections the plan file needs — for the orchestrator, who owns it
+
+This sub-agent may not edit `plan_orchestrator-workflow-gaps.md`. These are the specific places
+it now contradicts measured reality:
+
+| Where | Says | Should say |
+|---|---|---|
+| §A2 and its gate | allowlist = "the **11**"; gate = "lists exactly those 11" | the **49** (50 minus the retired one) |
+| §A4 owner-gate sentence | "Apply the **11** pending migrations … **without** `--include-all`" | the **49**; and *with* a bounded `--include-all`, which `AGENTS.md` §5.1(4) already sanctions. **As written, the owner would be authorising something that cannot run.** |
+| Constraint 4 | "Never `--include-all` against production" | never against the **full repo set**; permitted against a verified bounded set (`AGENTS.md` §5.1(4)) |
+| §A "Measured starting position" | 405 files, 44 behind | **411** files, **50** behind |
+| §A2 preamble | "nobody has ever run it" | it **has** been run: run 30660298837 (2026-07-31) failed structurally, and run 31327934569 (today) failed on the guard defect |
+| §A5 | verifies "each of the 11" | must verify the 49, and must include the post-apply checklist that `20260804120100` carries in its own text |
+
+## 8. The Kimi K3 review — where it moved me, and where it did not
+
+Continued in the warm session `intake-to-issues-plan`, which already held five rounds of this
+repo's context. It was asked "**what did I miss, and where is this ordering wrong?**" rather
+than "review this".
+
+**Where it changed the work (all accepted, all fixed in this PR):**
+
+1. **The retirement was prose-only.** Correct and blocking. → `HARD_BLOCKED` (§6.3).
+2. **The whole-batch rehearsal is unevidenced, and a mid-batch assertion failure leaves
+   production partially promoted.** Correct and blocking. → §7. I had treated "preflight OK +
+   dry-run" as most of the way there; it is not, and the guard's own header says so.
+3. **`AGENTS.md` §5.1(4) already licenses bounded `--include-all`.** I checked; it does,
+   verbatim. My "flagged, not decided" framing was too weak. → §6.2.
+4. **My "deletes nothing" caveat is off by one.** It deletes exactly one file: the retired one,
+   which is the only enforcement there was. → §6.2. This is what made finding 1 blocking rather
+   than tidy.
+5. **Lexer gaps: `E'...\'...'` backslash escapes and double-quoted identifiers.** Both real.
+   A plain `'...'` honours only `''`, but `E'...'` honours backslashes, so `E'it\'s'` was
+   mis-terminated. `"weird--name"` could inject a phantom comment. → both fixed, both tested.
+6. **Delete the dead regex constants.** Agreed — a leftover `DOLLAR_QUOTE_RE` is an invitation
+   to reintroduce the defect. Removed, with a note saying why they are gone.
+
+**Where we agreed from the start** (it called these "NO OBJECTION", having verified them against
+the files itself): RETIRE for `20260729120000`, including that my regression table is accurate
+and that my demolition of A1's "would abort" argument is correct in-batch; APPLY for
+`20260724060000`/`20260724061000`, on the convergent-replacement evidence at
+`20260726030000:673-674,1402-1421` and on 411-files/411-rows being the right end state; and the
+root-cause diagnosis of the rehearsal failure.
+
+**Where I did not follow it.**
+
+- It suggested **neutralising `20260729120000`'s body** in addition to blocking it. I declined:
+  editing `supabase/migrations/` is forbidden to this task, and rewriting a historical migration
+  file to make it inert is a heavier, more surprising act than refusing it at the gate. The
+  `HARD_BLOCKED` entry plus the bounded checkout's deletion are two independent enforcements
+  already. **Recorded as a live disagreement**, not as settled — if the owner prefers the
+  stronger form, it is a small change.
+- It asked for a **catalog-sweep scan** and a **phantom-creator diff-scan** over the 49. The
+  second I had already done and simply had not shown: it is the 8-file blast-radius measurement
+  in §6.1, produced by diffing `created_objects()` old-vs-new across all 411 files. Re-run after
+  the lexer changes, only the two whole-file `do $migration$`-wrapped migrations
+  (`20260707171500`, `20260708183000`) still yield an empty set, which is the documented
+  dynamic-`execute` blind spot and not a defect. The broader catalog sweep I did **not** do; it
+  is subsumed by §7's rehearsal, which is the honest gate, and I would rather name that than
+  add another static scan that also cannot approve.
+- It flagged `20260803200000`'s snapshot DML as unexamined. **True, and I am leaving it that
+  way** rather than pretending otherwise — it is exactly the class of data-dependent behaviour
+  that only §7's rehearsal can settle.
+
+## 9. What was NOT done
 
 - **No production apply, no DDL, no DML, no ledger insert, no `--include-all`, no `--create`.**
   Every production statement was a `select`. The only workflow run was `mode: dry-run`.
@@ -359,4 +476,14 @@ should be said out loud before anyone relies on it.
 - Preview (`rjyboqwcdzcocqgmsyel`) was not queried or modified.
 - **No PR was merged.**
 - **Blocker 2 (§6.2) was not fixed.** The lane still cannot complete a dry-run of this set.
+- **The whole-batch rehearsal (§7) was not run.** It needs a scratch database, which this task
+  was forbidden to create. It is a hard precondition of A4.
 - The A2 gate — "the dry-run output lists exactly the allowlist" — is **still unproven.**
+- **The rehearsal was not re-run after the Kimi fixes, and could not be.** The
+  `production-dry-run` job asserts `HEAD == origin/main == commit_sha`, so it can only ever
+  test `main`. It cannot test PR #608's branch. A re-run today would reproduce the same
+  failure byte for byte, because `main` still carries the guard defect. **The first action
+  after #608 merges must be to re-run the dispatch at the new `main` SHA with the 49-entry
+  allowlist** — at which point it should get past "Build bounded checkout" and fail instead
+  at the Supabase CLI on blocker 2 (§6.2). That prediction is recorded here so the next
+  session can falsify it.
