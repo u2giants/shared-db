@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from production_migration_guard import (  # noqa: E402
     HARD_BLOCKED,
     BUNDLE_20260804,
+    FR_HELD_20260803,
+    FR_REMOVAL_VERSIONS,
     GuardError,
     created_objects,
     local_migrations,
@@ -197,6 +199,51 @@ class GuardTests(unittest.TestCase):
         self.assertIn("20260726030000", message)
         self.assertIn("20260726031000", message)
         self.assertIn("20260726032000", message)
+
+    def test_the_fr_held_pair_is_refused_while_no_removal_migration_exists(self) -> None:
+        # AGENTS.md 6.5 (OWNER RULING 2026-08-03). This is the live state as of
+        # 2026-08-09: FR_REMOVAL_VERSIONS is empty because no removal migration
+        # exists, so EVERY allowlist touching either held version must ERROR.
+        self.assertEqual(FR_REMOVAL_VERSIONS, set())
+        for version in sorted(FR_HELD_20260803):
+            with self.subTest(version=version), self.assertRaises(GuardError) as caught:
+                parse_allowlist(version)
+            self.assertIn("6.5", str(caught.exception))
+        # The pair together is just as forbidden as either one alone.
+        with self.assertRaises(GuardError) as caught:
+            parse_allowlist(",".join(sorted(FR_HELD_20260803)))
+        self.assertIn("6.5", str(caught.exception))
+        # And inside a realistic batch, which is how it would actually arrive:
+        # the rehearsal document listed both as APPLY inside the 49.
+        batch = sorted(BATCH_18 + sorted(FR_HELD_20260803))
+        with self.assertRaises(GuardError) as caught:
+            parse_allowlist(",".join(batch))
+        message = str(caught.exception)
+        self.assertIn("6.5", message)
+        self.assertIn("20260802170000", message)
+        self.assertIn("20260802171000", message)
+        # An allowlist with neither held version still parses, so the rule is
+        # targeted and not a blanket refusal.
+        parse_allowlist(",".join(BATCH_18))
+
+    def test_the_fr_ship_set_must_be_complete_once_removal_migrations_exist(self) -> None:
+        # The future legal event: the two held versions promoted together WITH
+        # the FR removal work, in one bounded apply. Simulate registration of
+        # two removal versions and prove the co-presence rule both ACCEPTS the
+        # complete set and REJECTS every proper subset that still holds one of
+        # the two 6.5 versions.
+        removal = {"20260810010000", "20260810020000"}
+        full = sorted(FR_HELD_20260803 | removal)
+        with patch("production_migration_guard.FR_REMOVAL_VERSIONS", removal):
+            self.assertEqual(parse_allowlist(",".join(full)), full)
+            for size in range(1, len(full)):
+                for subset in itertools.combinations(full, size):
+                    if not (FR_HELD_20260803 & set(subset)):
+                        # Not a 6.5 allowlist at all; nothing to enforce.
+                        continue
+                    with self.subTest(subset=subset), self.assertRaises(GuardError) as caught:
+                        parse_allowlist(",".join(subset))
+                    self.assertIn("6.5", str(caught.exception))
 
     def test_remote_parser_uses_remote_column(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

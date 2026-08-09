@@ -12,7 +12,22 @@ rehearsal used the existing dry-run job, whose first step refuses `mode: apply`.
 
 Three things, in order of how much they matter.
 
-1. **The apply set is 50 migrations, not 11 and not 44.** 49 APPLY + 1 RETIRE.
+1. **The apply set is 50 migrations, not 11 and not 44.** **47 APPLY + 1 RETIRE + 2 HELD.**
+
+   ⚠️ **CORRECTED 2026-08-09 (second pass).** The first version of this document listed
+   `20260802170000` and `20260802171000` as **APPLY** and gave the promotable count as 49.
+   **That was policy-illegal and it is the most dangerous error this document ever
+   contained.** `AGENTS.md` **§6.5** is a standing OWNER RULING (Albert Hazan, 2026-08-03):
+   *neither of those two versions may reach production by ANY route* until the `FR`
+   "FRIENDS TV" removal work is ready to ship with them, as one bounded apply in dependency
+   order. No FR removal migration exists in the repository, so the one legal event cannot
+   currently be assembled at all. Anyone who pasted the 49-entry allowlist into the
+   production lane would have promoted a batch the owner has forbidden — and at the time
+   nothing in the code would have stopped them. **This is now enforced**, not documented:
+   `parse_allowlist` in `scripts/production_migration_guard.py` carries a §6.5 co-presence
+   rule (see §4.3), and it refuses the published 49-entry allowlist outright.
+
+   **The promotable allowlist is 47 entries.**
 2. **`20260729120000` must be RETIRED, and the reason is stronger than "superseded":
    applying it would REGRESS a security control that is live on production today.**
    It sorts *below* `20260729180000`, which is already in the ledger and will therefore
@@ -24,7 +39,7 @@ Three things, in order of how much they matter.
    sits behind it** (§6.2) and is NOT fixed here.
 4. **Nothing here proves the batch can RUN.** A dry-run prints a plan; it executes no SQL, and
    `supabase db push` wraps each *file*, not the batch — so a data-dependent assertion failing
-   at file 45 of 49 leaves production **partially promoted with no undo**. The whole-batch
+   at file 45 of 47 leaves production **partially promoted with no undo**. The whole-batch
    rehearsal against a production-shaped scratch database (§7) is the real gate and has **not**
    been done. Treat it as a hard precondition of A4, not a formality.
 
@@ -74,11 +89,13 @@ git ls-tree -r --name-only origin/main supabase/migrations | sed 's#.*/##' | cut
 **The plan's §A2 allowlist of 11 is wrong twice over:** it omits the 33 that several of the
 11 depend on, *and* it predates the 6 migrations merged today.
 
-## 3. The ordered apply set — 50 migrations
+## 3. The ordered apply set — 50 migrations, of which 47 are promotable
 
-Order is **version order**, and version order is correct for all 49 APPLY rows (proved in
-§5). The one row where version order would do damage is retired rather than reordered,
-because reordering cannot fix it (§4.1).
+**47 APPLY + 1 RETIRE + 2 HELD (§6.5).** Order is **version order**, and version order is
+correct for all 47 APPLY rows (proved in §5). The one row where version order would do damage
+is retired rather than reordered, because reordering cannot fix it (§4.1). The two HELD rows
+are not a technical judgement at all — they are an owner ruling, and the guard now enforces it
+(§4.3).
 
 | # | Version | vs head | Action | File |
 |---|---|---|---|---|
@@ -113,8 +130,8 @@ because reordering cannot fix it (§4.1).
 | 29 | `20260802141000` | below | APPLY | `taxonomy_alert_ack_comment_correction.sql` |
 | 30 | `20260802150000` | below | APPLY | `taxonomy_alert_actor_heuristic_word_anchors.sql` |
 | 31 | `20260802160000` | below | APPLY | `taxonomy_alert_ack_effective_role_is_current_user.sql` |
-| 32 | `20260802170000` | below | APPLY | `plm_import_preserve_curated_licensor_property_status.sql` |
-| 33 | `20260802171000` | below | APPLY | `owner_ruling_friends_tv_frida_kahlo.sql` |
+| **32** | **`20260802170000`** | below | **HELD (§6.5)** | `plm_import_preserve_curated_licensor_property_status.sql` |
+| **33** | **`20260802171000`** | below | **HELD (§6.5)** | `owner_ruling_friends_tv_frida_kahlo.sql` |
 | 34 | `20260803150000` | above | APPLY | `itemdetail_coldlion_item_identity_and_upc_contract.sql` |
 | 35 | `20260803200000` | above | APPLY | `temp_status_watch_snapshot_and_change_log.sql` |
 | 36 | `20260803201000` | above | APPLY | `temp_status_watch_hardening.sql` |
@@ -133,8 +150,50 @@ because reordering cannot fix it (§4.1).
 | 49 | `20260809170400` | above | APPLY | `api_product_size_and_depth_pickers.sql` |
 | 50 | `20260809170500` | above | APPLY | `db_data_admin_product_depth_mutations.sql` |
 
-**The allowlist string** (49 entries, `20260729120000` removed) is exactly rows 1–14 and
-16–50 above, comma-separated in this order.
+**The allowlist string** (**47 entries**) is rows 1–14, 16–31 and 34–50 above, comma-separated
+in this order — i.e. the 50 minus the RETIRED `20260729120000` and minus the two **HELD**
+versions `20260802170000` and `20260802171000`.
+
+⚠️ The earlier "49 entries, rows 1–14 and 16–50" string is **policy-illegal — do not use it.**
+It carries both §6.5-held versions. `parse_allowlist` now rejects it with a §6.5 error, and that
+rejection is covered by a negative-path test in `scripts/test_production_migration_guard.py`.
+
+### 4.3 `20260802170000` and `20260802171000` — **HELD, by owner ruling `AGENTS.md` §6.5.**
+
+Neither may reach production by ANY route until the `FR` "FRIENDS TV" removal work is ready to
+ship with them. The permitted event is exactly one: a single bounded production apply carrying
+`20260802170000`, `20260802171000` **and** the removal migrations together, in dependency order.
+
+Why holding matters more than it looks. `20260802171000` sets `core.licensor` `FR` to
+`status = 'inactive'`. The owner's later ruling is that `FR` was never a real licensor and must
+be **REMOVED**. Promoting the pair alone would therefore change production master data twice —
+first into `inactive`, a state the owner has explicitly rejected, and again later into removed —
+and every production change on this lane is forward-only with no undo. Inside the one combined
+push, `FR` passes through `inactive` without ever being an observable steady state.
+
+**Current status: the legal event cannot be assembled.** No FR removal migration exists anywhere
+in `supabase/migrations/` as of 2026-08-09. Until one does, any allowlist containing either
+version is refused.
+
+**This is enforced in code, not merely written down here.** `parse_allowlist` in
+`scripts/production_migration_guard.py` carries a **co-presence rule** in the same shape as the
+§6.8 all-four-or-none bundle rule: if either held version is present, the full FR ship set must
+be present too, or it raises a `GuardError` naming §6.5. It sits in `parse_allowlist` — the one
+function every entry point (`prepare`, `preflight`, `verify-dry-run`) must call — so no
+subcommand routes around it.
+
+**Deliberately NOT `HARD_BLOCKED`.** `HARD_BLOCKED` means *never, by any route*. §6.5 is not
+that: it names a legal future event. Putting these versions in `HARD_BLOCKED` would force a
+**guard edit** to perform a promotion the owner has already authorised, which is exactly the
+kind of edit that gets made carelessly under deadline. Unblocking is instead a **data** change:
+register the removal versions in `FR_REMOVAL_VERSIONS` in the same commit that adds the files,
+and the combined promotion parses. Never delete the co-presence check to unblock a push.
+
+**Negative-path tests** (`scripts/test_production_migration_guard.py`) prove the rule FIRES, not
+that it exists: either held version alone errors; the pair alone errors; the pair inside a
+realistic batch errors and the message names both versions; an allowlist with neither still
+parses; and with removal versions registered, the complete ship set is accepted while every
+proper subset that still holds a §6.5 version is rejected.
 
 ## 4. The three delegated decisions
 
@@ -245,7 +304,14 @@ files, granted to `service_role` only — and the live event trigger
 this is decided. **This is a preference for ledger fidelity, not a correctness requirement**,
 and it should be recorded as such.
 
-## 5. Dependency order vs version order — they agree, for all 49
+## 5. Dependency order vs version order — they agree
+
+⚠️ **Read with §4.3.** The preflight below was run over the **49** (50 minus the retired one),
+which is what this document proposed before the §6.5 correction. The promotable set is now
+**47**. The 47 is a prefix-and-suffix subset of the 49 — the two removed versions,
+`20260802170000` and `20260802171000`, are rows 32 and 33, and nothing later in the batch
+depends on either — so the ordering conclusion carries. **Re-run the preflight on the 47 before
+any promotion anyway; do not inherit this.**
 
 Run against the live ledger with the repo's own whole-batch checker (the same code path
 `prepare` uses), after the fix in §6.1:
@@ -269,7 +335,8 @@ script says so itself, and that framing is correct.
 **Run:** https://github.com/u2giants/shared-db/actions/runs/31327934569
 `workflow_dispatch` · `target: production` · `mode: dry-run` · `commit_sha`
 `77c15acf8840f275c56c2a2199b860f1776cafe7` · `confirmation: DRY-RUN 77c15ac…` ·
-`production_allowlist` = the 49.
+`production_allowlist` = the 49. **That allowlist is now known to be policy-illegal (§4.3) and
+must not be reused.** The record below is history, not a recipe.
 
 **Result: `validate` succeeded; `production-dry-run` FAILED at "Build bounded checkout".**
 The gate — "the dry-run output lists exactly the allowlist and nothing else" — was **not
@@ -283,6 +350,8 @@ What the run *does* prove, and it is not nothing:
   `supabase login`, and the `supabase link` all work. That was previously unproven.
 - `parse_allowlist` accepted the 49: no `HARD_BLOCKED` collision, correct order, and the
   AGENTS.md §6.8 four-version ColdLion bundle is present in full.
+  ⚠️ **It accepted the 49 because the §6.5 rule did not exist yet.** That acceptance is the
+  defect §4.3 fixes: the same allowlist is now rejected, and a test asserts it.
 
 ### 6.1 Blocker 1 — a PARSING fault, fixed in this PR
 
@@ -327,7 +396,7 @@ but it blocked the lane completely.
 ⚠️ **Even with §6.1 fixed, this rehearsal cannot pass as the workflow is written today**, and
 this should be stated plainly rather than discovered on the next attempt.
 
-33 of the 49 sort **below** the ledger head. `supabase db push --dry-run` refuses out-of-order
+31 of the 47 sort **below** the ledger head (33 of the 49 as originally run). `supabase db push --dry-run` refuses out-of-order
 files without `--include-all`, and the workflow's dry-run step does not pass it. This is
 **already documented and already observed**:
 `docs/coldlion-production-migration-manifest-20260731.md` §4.2 and §5 record run
@@ -357,9 +426,10 @@ wrong, and both are corrected here rather than quietly edited away:
   I still did not implement it — that is outside this task's limits — but the framing
   "flagged, not decided" understated how settled it is.
 - I wrote that the bounded checkout "deletes nothing". **Off by one, and the one matters.**
-  `keep = remote | allowlist` = 361 + 49 = **410 of 411**. The single file it deletes is
-  `20260729120000` — the retired one. So the pruning is doing exactly one job: enforcing the
-  retirement.
+  `keep = remote | allowlist` = 361 + 47 = **408 of 411**. The three files it deletes are
+  `20260729120000` (retired) and the two §6.5-HELD versions. So the pruning is doing exactly one
+  job: enforcing the retirement and the hold. (As originally written against the 49 it was
+  361 + 49 = 410 of 411, deleting only the retired file.)
 
 That last point is why the retirement is no longer prose-only (§6.3).
 
@@ -383,14 +453,14 @@ it can only ever refuse more, never permit more.
 
 **Kimi K3's second blocking finding, accepted in full — this is the most important open risk.**
 
-Nothing in this document proves the 49 can actually *run*. A dry-run prints a plan; it executes
+Nothing in this document proves the 47 can actually *run*. A dry-run prints a plan; it executes
 no SQL. The guard's own preflight says of itself that it "may REJECT but must never be read as
 APPROVAL", and names the authoritative gate: **a rehearsal of the whole batch against a
 production-shaped scratch database** (`production_migration_guard.py`, and
 `docs/production-migration-lane-design-20260802.md` §2.3, Change C).
 
 **Why this is not a formality.** `supabase db push` wraps each *file* in a transaction, not the
-batch. A failure at file 45 of 49 leaves **44 migrations applied and production partially
+batch. A failure at file 45 of 47 leaves **44 migrations applied and production partially
 promoted, with no undo.** Several files in this batch carry `do $$` blocks with `raise
 exception` guards and seeded DML (`20260731220000` approves five aliases; `20260802171000`
 performs an owner-ruling update; `20260809170100`/`20260809170200` seed from external sources)
@@ -408,12 +478,12 @@ it now contradicts measured reality:
 
 | Where | Says | Should say |
 |---|---|---|
-| §A2 and its gate | allowlist = "the **11**"; gate = "lists exactly those 11" | the **49** (50 minus the retired one) |
-| §A4 owner-gate sentence | "Apply the **11** pending migrations … **without** `--include-all`" | the **49**; and *with* a bounded `--include-all`, which `AGENTS.md` §5.1(4) already sanctions. **As written, the owner would be authorising something that cannot run.** |
+| §A2 and its gate | allowlist = "the **11**"; gate = "lists exactly those 11" | the **47** (50 minus the retired one and the two §6.5-HELD ones) |
+| §A4 owner-gate sentence | "Apply the **11** pending migrations … **without** `--include-all`" | the **47**; and *with* a bounded `--include-all`, which `AGENTS.md` §5.1(4) already sanctions. **As written, the owner would be authorising something that cannot run.** |
 | Constraint 4 | "Never `--include-all` against production" | never against the **full repo set**; permitted against a verified bounded set (`AGENTS.md` §5.1(4)) |
 | §A "Measured starting position" | 405 files, 44 behind | **411** files, **50** behind |
 | §A2 preamble | "nobody has ever run it" | it **has** been run: run 30660298837 (2026-07-31) failed structurally, and run 31327934569 (today) failed on the guard defect |
-| §A5 | verifies "each of the 11" | must verify the 49, and must include the post-apply checklist that `20260804120100` carries in its own text |
+| §A5 | verifies "each of the 11" | must verify the 47, and must include the post-apply checklist that `20260804120100` carries in its own text |
 
 ## 8. The Kimi K3 review — where it moved me, and where it did not
 
@@ -453,7 +523,7 @@ root-cause diagnosis of the rehearsal failure.
   `HARD_BLOCKED` entry plus the bounded checkout's deletion are two independent enforcements
   already. **Recorded as a live disagreement**, not as settled — if the owner prefers the
   stronger form, it is a small change.
-- It asked for a **catalog-sweep scan** and a **phantom-creator diff-scan** over the 49. The
+- It asked for a **catalog-sweep scan** and a **phantom-creator diff-scan** over the apply set. The
   second I had already done and simply had not shown: it is the 8-file blast-radius measurement
   in §6.1, produced by diffing `created_objects()` old-vs-new across all 411 files. Re-run after
   the lexer changes, only the two whole-file `do $migration$`-wrapped migrations
@@ -483,7 +553,48 @@ root-cause diagnosis of the rehearsal failure.
   `production-dry-run` job asserts `HEAD == origin/main == commit_sha`, so it can only ever
   test `main`. It cannot test PR #608's branch. A re-run today would reproduce the same
   failure byte for byte, because `main` still carries the guard defect. **The first action
-  after #608 merges must be to re-run the dispatch at the new `main` SHA with the 49-entry
+  after #608 merges must be to re-run the dispatch at the new `main` SHA with the **47**-entry
   allowlist** — at which point it should get past "Build bounded checkout" and fail instead
   at the Supabase CLI on blocker 2 (§6.2). That prediction is recorded here so the next
   session can falsify it.
+
+---
+
+## 10. Second pass, 2026-08-09 — what this revision changed
+
+A follow-up sub-agent of the same orchestrator session reviewed this document against two AI
+reviews (Kimi K3, folded in above; Grok 4.5, `.ai/reviews/20260809-pr608-apply-set-grok45.md`).
+
+**Changed here:**
+
+- `20260802170000` and `20260802171000` moved from **APPLY** to **HELD (§6.5)**; the promotable
+  count moved from 49 to **47**; every total, allowlist string and derived count restated (§0,
+  §3, §4.3, §5, §6, §7).
+- New **§4.3** records the ruling, why the hold is a co-presence rule rather than
+  `HARD_BLOCKED`, and how it is unblocked when the FR removal migrations exist.
+
+**Changed in code (same commit):** a §6.5 co-presence rule in `parse_allowlist`
+(`scripts/production_migration_guard.py`) with negative-path tests
+(`scripts/test_production_migration_guard.py`).
+
+**Considered and deliberately NOT done: neutralizing `20260729120000`'s body.** Grok argued the
+`HARD_BLOCKED` entry guards only one script, so the harmful body still sits on disk for an
+unguarded full-tree push, and that §4 rule 4 does not apply because the migration "was never
+applied". **The premise is wrong.** It was never applied to *production*, but it **was** applied
+to the hosted preview branch on 2026-07-29 —
+`docs/security/public-schema-execute-audit.md` §5 records a live preview measurement taken
+"immediately after `20260729120000`", and §9 says only production skipped it. Rule 4 says
+"applied **anywhere**". GLM 5.2 was asked to adjudicate
+(`.ai/reviews/glm-pr608-blocker2-neutralize-vs-gate-*.md`) and reached the same conclusion:
+neutralizing manufactures exactly the file/ledger desync rule 4 exists to prevent — the preview
+ledger row would point at on-disk text that never ran — while the threat it addresses
+(unbounded `--include-all`) is already banned outright by §5.1. **Refuse at the gate; keep the
+`HARD_BLOCKED` entry; do not edit the file.**
+
+**Open recommendation, not implemented here** (out of this task's scope, for the orchestrator to
+schedule): GLM's third point. The path-independent fix for "a harmful body sits on disk and only
+one code path refuses it" is a **new forward migration**, timestamped above `20260729180000`,
+that re-asserts the broad lockdown (`CREATE PROCEDURE` coverage, `revoke ... on routine`). Then
+`20260729120000` is inert on every path, including a replay, with no edit and no desync. The
+`HARD_BLOCKED` entry stays regardless — that is the gate defence; the new migration is the
+path-independent one.
