@@ -15,6 +15,7 @@ from production_migration_guard import (  # noqa: E402
     FR_HELD_20260803,
     FR_REMOVAL_VERSIONS,
     GuardError,
+    assert_bounded,
     created_objects,
     local_migrations,
     parse_allowlist,
@@ -302,7 +303,37 @@ class GuardTests(unittest.TestCase):
         production = workflow.split("production-dry-run:", 1)[1]
         self.assertIn("Refuse production apply", production)
         self.assertNotIn("supabase db push\n", production)
-        self.assertNotIn("--include-all", production)
+
+    def test_include_all_is_bounded_and_dry_run_only(self) -> None:
+        """--include-all is licensed ONLY against the pruned bounded checkout.
+
+        AGENTS.md 5.1(4). The bound is the filesystem, not the flag, so this
+        asserts (a) every --include-all use is a --dry-run, (b) it is preceded
+        by the assert-bounded re-check, and (c) it never runs in the full repo
+        checkout.
+        """
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github"
+            / "workflows"
+            / "shared-supabase-migrations.yml"
+        ).read_text(encoding="utf-8")
+        production = workflow.split("production-dry-run:", 1)[1]
+        uses = [
+            line.strip()
+            for line in production.splitlines()
+            if "--include-all" in line and not line.strip().startswith("#")
+        ]
+        self.assertEqual(len(uses), 1, uses)
+        self.assertIn("--dry-run", uses[0])
+        self.assertIn("assert-bounded", production)
+        # It must run inside the bounded checkout, after the re-check.
+        before_push = production.split(uses[0], 1)[0]
+        self.assertIn("assert-bounded", before_push)
+        self.assertIn('cd "$RUNNER_TEMP/bounded-production"', before_push)
+        # The rest of the repo must never carry the flag at all.
+        other_jobs = workflow.split("production-dry-run:", 1)[0]
+        self.assertNotIn("--include-all", other_jobs)
 
     def test_run_blocks_do_not_embed_dispatch_inputs(self) -> None:
         workflow = (
@@ -366,6 +397,50 @@ class GuardTests(unittest.TestCase):
                     "20260727020000_approved.sql",
                 ],
             )
+
+
+class AssertBoundedTests(unittest.TestCase):
+    """The re-check that licenses --include-all at the point of use."""
+
+    def _fixture(self, root: Path, names: tuple[str, ...]) -> tuple[Path, Path]:
+        migrations = root / "supabase" / "migrations"
+        migrations.mkdir(parents=True)
+        for name in names:
+            (migrations / name).write_text("select 1;\n", encoding="utf-8")
+        ledger = root / "ledger.txt"
+        ledger.write_text(
+            "Local | Remote | Time\n20260727010000 | 20260727010000 | x\n",
+            encoding="utf-8",
+        )
+        return root, ledger
+
+    def test_accepts_a_checkout_of_exactly_remote_union_allowlist(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root, ledger = self._fixture(
+                Path(directory),
+                ("20260727010000_applied.sql", "20260727020000_approved.sql"),
+            )
+            assert_bounded(root, "20260727020000", ledger)
+
+    def test_blocks_an_unpruned_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root, ledger = self._fixture(
+                Path(directory),
+                (
+                    "20260727010000_applied.sql",
+                    "20260727020000_approved.sql",
+                    "20260727030000_unapproved.sql",
+                ),
+            )
+            with self.assertRaises(GuardError) as caught:
+                assert_bounded(root, "20260727020000", ledger)
+            self.assertIn("20260727030000", str(caught.exception))
+
+    def test_blocks_an_empty_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root, ledger = self._fixture(Path(directory), ())
+            with self.assertRaises(GuardError):
+                assert_bounded(root, "20260727020000", ledger)
 
 
 class PreflightNegativeTests(unittest.TestCase):
