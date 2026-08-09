@@ -104,6 +104,51 @@ def write_migrations(root: Path, files: dict[str, str]) -> Path:
     return root
 
 
+STEP_START = "      - "
+
+
+def _steps(job: str) -> list[str]:
+    """Split a job body into its individual `steps:` entries.
+
+    Deliberately not PyYAML: this runs on the CI runner's default interpreter
+    and an ImportError must never be able to downgrade a production guard into
+    a skipped test. Steps in this workflow start at a fixed six-space indent.
+    """
+    steps: list[list[str]] = []
+    for line in job.splitlines():
+        if line.startswith(STEP_START):
+            steps.append([line])
+        elif steps:
+            steps[-1].append(line)
+    return ["\n".join(step) for step in steps]
+
+
+def _run_block_commands(step: str) -> list[str]:
+    """Return one step's `run:` script as a list of logical shell commands.
+
+    Blank lines and comments are dropped, and backslash continuations are
+    joined, so "the next command" means the next thing the shell actually
+    executes rather than the next line of text.
+    """
+    if "run: |" not in step:
+        return []
+    body = step.split("run: |", 1)[1]
+    commands: list[str] = []
+    pending = ""
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.endswith("\\"):
+            pending += line[:-1].strip() + " "
+            continue
+        commands.append((pending + line).strip())
+        pending = ""
+    if pending:
+        commands.append(pending.strip())
+    return commands
+
+
 class GuardTests(unittest.TestCase):
     def test_bad_allowlists_are_blocked(self) -> None:
         values = [
@@ -307,10 +352,17 @@ class GuardTests(unittest.TestCase):
     def test_include_all_is_bounded_and_dry_run_only(self) -> None:
         """--include-all is licensed ONLY against the pruned bounded checkout.
 
-        AGENTS.md 5.1(4). The bound is the filesystem, not the flag, so this
-        asserts (a) every --include-all use is a --dry-run, (b) it is preceded
-        by the assert-bounded re-check, and (c) it never runs in the full repo
-        checkout.
+        AGENTS.md 5.1(4). The bound is the FILESYSTEM, not the flag, so the
+        invariant that matters is not "these words appear somewhere earlier in
+        the job" -- it is that within the SAME `run:` block, the shell enters
+        the bounded checkout, then `assert-bounded` succeeds, and then the very
+        next command is the push. Anything weaker still passes if a later edit
+        splits the push into its own step, where the `cd` no longer applies and
+        the shell is back in $GITHUB_WORKSPACE.
+
+        Parsed without PyYAML on purpose: this test runs on the CI runner's
+        default interpreter, and a missing optional dependency must not be able
+        to turn a production guard into a silent skip.
         """
         workflow = (
             Path(__file__).resolve().parents[1]
@@ -319,19 +371,38 @@ class GuardTests(unittest.TestCase):
             / "shared-supabase-migrations.yml"
         ).read_text(encoding="utf-8")
         production = workflow.split("production-dry-run:", 1)[1]
-        uses = [
-            line.strip()
-            for line in production.splitlines()
-            if "--include-all" in line and not line.strip().startswith("#")
+
+        blocks = [
+            commands
+            for commands in (
+                _run_block_commands(step) for step in _steps(production)
+            )
+            if any("--include-all" in command for command in commands)
         ]
-        self.assertEqual(len(uses), 1, uses)
-        self.assertIn("--dry-run", uses[0])
-        self.assertIn("assert-bounded", production)
-        # It must run inside the bounded checkout, after the re-check.
-        before_push = production.split(uses[0], 1)[0]
-        self.assertIn("assert-bounded", before_push)
-        self.assertIn('cd "$RUNNER_TEMP/bounded-production"', before_push)
-        # The rest of the repo must never carry the flag at all.
+        self.assertEqual(len(blocks), 1, "exactly one step may use --include-all")
+        commands = blocks[0]
+
+        pushes = [i for i, c in enumerate(commands) if "--include-all" in c]
+        self.assertEqual(len(pushes), 1, commands)
+        push = pushes[0]
+        self.assertIn("supabase db push", commands[push])
+        self.assertIn("--dry-run", commands[push])
+
+        checks = [i for i, c in enumerate(commands) if "assert-bounded" in c]
+        self.assertEqual(len(checks), 1, commands)
+        check = checks[0]
+        # A real invocation, not a comment or a bare mention.
+        self.assertIn("production_migration_guard.py", commands[check])
+        self.assertIn('--dir "$RUNNER_TEMP/bounded-production"', commands[check])
+        # Nothing whatsoever may run between the re-check and the push.
+        self.assertEqual(push, check + 1, commands)
+
+        cds = [i for i, c in enumerate(commands) if c.startswith("cd ")]
+        self.assertEqual(cds, [0], commands)
+        self.assertEqual(commands[0], 'cd "$RUNNER_TEMP/bounded-production"')
+
+        # Every other job -- including the real `preview` apply -- must never
+        # carry the flag at all.
         other_jobs = workflow.split("production-dry-run:", 1)[0]
         self.assertNotIn("--include-all", other_jobs)
 
