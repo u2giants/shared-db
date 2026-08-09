@@ -19,8 +19,8 @@
 -- an admin tool.
 --
 -- But a live read of production on 2026-08-09 found **zero rows anywhere in
--- app.app_access with app = 'admin'** — not for Carlos, not for any of the three active
--- administrators, not for anyone. Active rows were crm 27, dam 3, pm 2, admin 0. So the
+-- app.app_access with app = 'admin'** — not for the designer maintainer, not for any of
+-- the three active administrators, not for anyone. Active rows were crm 27, dam 3, pm 2, admin 0. So the
 -- second arm has never been satisfiable and every DB Data Admin screen has been closed
 -- to every human user since 20260722005000 shipped.
 --
@@ -85,11 +85,19 @@ create temporary table admin_access_targets (
   reason     text not null
 ) on commit drop;
 
--- Role-derived: every profile that currently holds an active `administrator` role.
+-- Role-derived: every ACTIVE profile that currently holds an active `administrator` role.
+--
+-- The profile-status condition is a FILTER here, not an assertion. `user_role.revoked_at
+-- is null` and `profile.status = 'active'` are independent — a deactivated profile whose
+-- administrator role row was never revoked is an ordinary data state and nothing in the
+-- schema prevents it. Asserting instead of filtering would abort the whole bounded
+-- promotion run on a provisioning migration that had no business blocking it. An inactive
+-- administrator is simply not a target; it is not an error.
 insert into admin_access_targets (profile_id, reason)
 select distinct ur.profile_id, 'active administrator role'
 from app.user_role ur
 join app.role r on r.id = ur.role_id
+join app.profile p on p.id = ur.profile_id and p.status = 'active'
 where r.slug = 'administrator'
   and ur.revoked_at is null;
 
@@ -99,21 +107,26 @@ values ('a88e8c06-4787-47d9-a37a-2c3929f4c15a', 'designer maintainer for Product
 on conflict (profile_id) do nothing;
 
 -- -------------------------------------------------------------------------------------
--- Rail 1 — every target must exist and be an active profile.
+-- Rail 1 — the NAMED designer maintainer must exist and be active.
+--
+-- This one stays a hard refusal, and only for the named UUID. The administrator targets
+-- are already filtered to active profiles above, so they cannot trip it. But if the one
+-- profile this migration was written for is missing or deactivated, the migration itself
+-- is wrong and must not proceed quietly.
 -- -------------------------------------------------------------------------------------
 
 do $$
 declare
-  v_bad integer;
+  v_ok integer;
 begin
-  select count(*) into v_bad
-  from admin_access_targets t
-  left join app.profile p on p.id = t.profile_id
-  where p.id is null or p.status <> 'active';
+  select count(*) into v_ok
+  from app.profile p
+  where p.id = 'a88e8c06-4787-47d9-a37a-2c3929f4c15a'::uuid
+    and p.status = 'active';
 
-  if v_bad > 0 then
+  if v_ok <> 1 then
     raise exception
-      'refusing to provision admin app_access: % target profile(s) are missing or not active', v_bad
+      'refusing to provision admin app_access: the named designer maintainer profile is missing or not active'
       using errcode = 'P0001';
   end if;
 end
@@ -162,7 +175,22 @@ $$;
 
 -- -------------------------------------------------------------------------------------
 -- Grant. Idempotent: a re-run re-activates a revoked row and otherwise changes nothing.
+--
+-- RE-ACTIVATION IS NOT SILENT. The DO UPDATE clears `revoked_at`, which means it can undo
+-- a deliberate revocation. Rail 3 requires that behaviour — a target must end up with a
+-- live row — but it must never happen invisibly, so the affected profiles are captured
+-- first and named in the apply log. There are zero `admin` rows of any kind in production
+-- today, so today's impact is nil; this migration may run against states we have not seen.
 -- -------------------------------------------------------------------------------------
+
+create temporary table admin_access_reactivated (profile_id uuid primary key) on commit drop;
+
+insert into admin_access_reactivated (profile_id)
+select aa.profile_id
+from app.app_access aa
+join admin_access_targets t on t.profile_id = aa.profile_id
+where aa.app = 'admin'
+  and aa.revoked_at is not null;
 
 insert into app.app_access (profile_id, app, granted_at, revoked_at)
 select t.profile_id, 'admin'::app.app_name, now(), null
@@ -171,6 +199,23 @@ on conflict (profile_id, app) do update
   set revoked_at = null,
       granted_at = now()
   where app.app_access.revoked_at is not null;
+
+do $$
+declare
+  v_count integer;
+  v_ids   text;
+begin
+  select count(*), string_agg(profile_id::text, ', ' order by profile_id::text)
+    into v_count, v_ids
+  from admin_access_reactivated;
+
+  if v_count > 0 then
+    raise notice
+      'admin app_access provisioning: RE-ACTIVATED % previously revoked admin grant(s). Profile id(s): %. A revocation was undone — confirm that was intended.',
+      v_count, v_ids;
+  end if;
+end
+$$;
 
 -- -------------------------------------------------------------------------------------
 -- Rail 3 — the under-grant rail, and the one that matters. After the insert, every single
