@@ -6,8 +6,14 @@
 -- HOW TO RUN
 --   Against PREVIEW rjyboqwcdzcocqgmsyel ONLY, as the migration owner (`postgres`) on
 --   the SESSION pooler port 5432, NOT the transaction pooler port 6543:
---       psql "postgresql://postgres.rjyboqwcdzcocqgmsyel@aws-0-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require" \
+--       psql "$PREVIEW_SESSION_URL" \
 --            -v ON_ERROR_STOP=1 -f supabase/tests/dam_order_list_item_columns_contract.sql
+--
+--   $PREVIEW_SESSION_URL is the preview owner connection string on the SESSION pooler
+--   (port 5432, user `postgres.<preview-project-ref>`, sslmode=require) -- the same URL
+--   supabase/tests/wb_grants_rls_and_dam_order_list_invoker.sql documents in full. It is
+--   not repeated literally here because the PII forward guard reads `user@host` as an
+--   email address (AGENTS.md section 6.14).
 --
 --   The owner connection is required because section C builds a synthetic principal in
 --   auth.users behind `session_replication_role = replica` (auth's handle_new_user
