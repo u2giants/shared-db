@@ -2,7 +2,8 @@
 -- PopDAM OrderList — Step 1 contract tests (issue #613, object claim #624)
 --
 -- Covers migrations 20260810010000_popdam_order_list_contract.sql and
---   20260810060000_popdam_order_list_source_pair_nulls_distinct.sql.
+--   20260810060000_popdam_order_list_source_pair_nulls_distinct.sql and
+--   20260810100000_link_dam_order_line_cross_item_ambiguity.sql.
 --
 -- HOW TO RUN
 --   Against PREVIEW rjyboqwcdzcocqgmsyel ONLY, as the migration owner role:
@@ -334,6 +335,11 @@ declare
   v_row_g   uuid;
   v_row_d1  uuid;
   v_row_d2  uuid;
+  v_item_x1 uuid;
+  v_item_x2 uuid;
+  v_row_x1  uuid;
+  v_row_x2  uuid;
+  v_line_x  uuid;
   v_order   uuid;
   v_line_l  uuid;
   v_line_g  uuid;
@@ -365,6 +371,16 @@ begin
     values ('TEST-DUPSKU', 'DUPSKU1', 'Ambiguous test item', 'Ambiguous description',
             'dam_order_list_contract_test', 'ct-item-ambiguous')
     returning id into v_item_d;
+  -- The CROSS-ITEM tie: one SKU, one catalog, TWO different products. This is the shape
+  -- the original narrow candidate count could not see (PR #635 review, finding 1).
+  insert into plm.item (item_number, style_number, name, description, source_system, source_id)
+    values ('TEST-CROSS-A', 'CROSSSKU1', 'Cross-item A', 'Cross A',
+            'dam_order_list_contract_test', 'ct-item-cross-a')
+    returning id into v_item_x1;
+  insert into plm.item (item_number, style_number, name, description, source_system, source_id)
+    values ('TEST-CROSS-B', 'CROSSSKU1', 'Cross-item B', 'Cross B',
+            'dam_order_list_contract_test', 'ct-item-cross-b')
+    returning id into v_item_x2;
 
   insert into public.style_tracker_rows
     (source_workbook_id, source_sheet, source_row_number, tracker_type, sku, description, license_status)
@@ -384,6 +400,14 @@ begin
     (source_workbook_id, source_sheet, source_row_number, tracker_type, sku, description)
     values (v_wb, 'License.Style', 9004, 'licensed', 'dupsku1', 'Duplicate B')
     returning id into v_row_d2;
+  insert into public.style_tracker_rows
+    (source_workbook_id, source_sheet, source_row_number, tracker_type, sku, description)
+    values (v_wb, 'License.Style', 9005, 'licensed', 'CROSSSKU1', 'Cross tie A')
+    returning id into v_row_x1;
+  insert into public.style_tracker_rows
+    (source_workbook_id, source_sheet, source_row_number, tracker_type, sku, description)
+    values (v_wb, 'License.Style', 9006, 'licensed', ' crosssku1 ', 'Cross tie B')
+    returning id into v_row_x2;
 
   insert into plm.style_tracker_item_bridge
     (style_tracker_row_id, source_workbook_id, source_sheet, tracker_type, sku, plm_item_id)
@@ -391,7 +415,9 @@ begin
     (v_row_l,  v_wb, 'License.Style', 'licensed', 'NCV3SP1',   v_item_l),
     (v_row_g,  v_wb, 'Generic.Style', 'generic',  'BFC02GABB', v_item_g),
     (v_row_d1, v_wb, 'License.Style', 'licensed', 'DUPSKU1',   v_item_d),
-    (v_row_d2, v_wb, 'License.Style', 'licensed', 'dupsku1',   v_item_d);
+    (v_row_d2, v_wb, 'License.Style', 'licensed', 'dupsku1',   v_item_d),
+    (v_row_x1, v_wb, 'License.Style', 'licensed', 'CROSSSKU1', v_item_x1),
+    (v_row_x2, v_wb, 'License.Style', 'licensed', 'CROSSSKU1', v_item_x2);
 
   -- Act as a signed-in PopDAM user for every RPC call below.
   perform set_config('request.jwt.claims',
@@ -436,9 +462,16 @@ begin
   if v_txt = 'ncv3sp1' then v_pass := v_pass + 1;
   else v_fail := v_fail + 1; raise notice 'FAIL sku_normalized = % (expected ncv3sp1)', v_txt; end if;
 
-  -- All four lines exist. This is the regression guard for the NULLS NOT DISTINCT bug:
+  insert into plm.production_order_line
+    (production_order_id, line_number, sku, quantity_ordered, source_style_type, source_system, source_id)
+  values
+    (v_order, '5', 'CROSSSKU1', 3, 'licensed', 'dam_order_list_contract_test', 'ct-line-cross')
+  returning id into v_line_x;
+
+  -- All four RPC-created lines exist. This is the regression guard for the NULLS NOT DISTINCT bug:
   -- before 20260810060000 the second line raised 23505 and no order survived at all.
-  select count(*) into v_n from plm.production_order_line where production_order_id = v_order;
+  select count(*) into v_n from plm.production_order_line
+   where production_order_id = v_order and source_system = 'popdam_order_list';
   if v_n = 4 then v_pass := v_pass + 1;
   else v_fail := v_fail + 1; raise notice 'FAIL expected 4 created lines, got %', v_n; end if;
 
@@ -451,7 +484,7 @@ begin
   else v_fail := v_fail + 1; raise notice 'FAIL expected 4 natively stamped lines, got %', v_n; end if;
 
   select count(distinct source_id) into v_n from plm.production_order_line
-   where production_order_id = v_order;
+   where production_order_id = v_order and source_system = 'popdam_order_list';
   if v_n = 4 then v_pass := v_pass + 1;
   else v_fail := v_fail + 1; raise notice 'FAIL native line source ids are not distinct (% of 4)', v_n; end if;
 
@@ -469,7 +502,8 @@ begin
   -- A new line starts with no product and says so.
   select count(*) into v_n from plm.production_order_line
    where production_order_id = v_order and item_id is null
-     and master_data_match_status = 'not_applicable';
+     and master_data_match_status = 'not_applicable'
+     and source_system = 'popdam_order_list';
   if v_n = 4 then v_pass := v_pass + 1;
   else v_fail := v_fail + 1; raise notice 'FAIL expected 4 unlinked new lines, got %', v_n; end if;
 
@@ -479,21 +513,21 @@ begin
       jsonb_build_object('production_order_number','TEST-PO-REJECT'),
       jsonb_build_array(jsonb_build_object('sku','X','item_id', v_item_l)));
     v_fail := v_fail + 1; raise notice 'FAIL create_dam_order accepted a non-whitelisted field (item_id)';
-  exception when others then
+  exception when insufficient_privilege then
     v_pass := v_pass + 1;
   end;
 
   begin
     perform public.create_dam_order(jsonb_build_object('production_order_number','TEST-PO-X','nonsense_field','y'));
     v_fail := v_fail + 1; raise notice 'FAIL create_dam_order accepted an unknown header field';
-  exception when others then
+  exception when insufficient_privilege then
     v_pass := v_pass + 1;
   end;
 
   begin
     perform public.create_dam_order(jsonb_build_object('status','Open'));
     v_fail := v_fail + 1; raise notice 'FAIL create_dam_order accepted a missing production_order_number';
-  exception when others then
+  exception when check_violation then
     v_pass := v_pass + 1;
   end;
 
@@ -515,38 +549,78 @@ begin
   begin
     perform public.link_dam_order_line(v_line_l, v_item_g, 'manual');
     v_fail := v_fail + 1; raise notice 'FAIL wrong-type link was accepted';
-  exception when others then v_pass := v_pass + 1;
+  exception when check_violation then v_pass := v_pass + 1;
   end;
 
   -- Wrong SKU: the item exists and the type is right, but it is not this line's SKU.
   begin
     perform public.link_dam_order_line(v_line_u, v_item_l, 'manual');
     v_fail := v_fail + 1; raise notice 'FAIL wrong-SKU link was accepted';
-  exception when others then v_pass := v_pass + 1;
+  exception when check_violation then v_pass := v_pass + 1;
   end;
 
-  -- Ambiguous: two eligible Master Data rows. Must refuse, not pick one.
+  -- Duplicate Master Data rows that bridge to the SAME item are NOT an item-level tie:
+  -- the SKU still resolves to exactly one product, which is what item_id records. This
+  -- link is therefore allowed, and deliberately so. Before 20260810100000 the guard
+  -- counted bridge ROWS and refused this while admitting the genuinely dangerous
+  -- cross-item case below -- exactly backwards.
+  perform public.link_dam_order_line(v_line_d, v_item_d, 'matched');
+  select item_id, master_data_match_status into v_got, v_txt
+    from plm.production_order_line where id = v_line_d;
+  if v_got = v_item_d and v_txt = 'matched' then v_pass := v_pass + 1;
+  else v_fail := v_fail + 1; raise notice 'FAIL same-item duplicate rows blocked a unique item resolution'; end if;
+
+  -- CROSS-ITEM AMBIGUITY (PR #635 review, finding 1). One SKU, one catalog, two
+  -- different products. An AUTOMATIC match must refuse: there is no unique answer and
+  -- picking one would stamp a real order against an arbitrary product.
   begin
-    perform public.link_dam_order_line(v_line_d, v_item_d, 'manual');
-    v_fail := v_fail + 1; raise notice 'FAIL ambiguous link was accepted; a duplicate SKU was silently resolved';
-  exception when others then v_pass := v_pass + 1;
+    perform public.link_dam_order_line(v_line_x, v_item_x1, 'matched');
+    v_fail := v_fail + 1; raise notice 'FAIL a cross-item ambiguous SKU was auto-matched to an arbitrary product';
+  exception when check_violation then v_pass := v_pass + 1;
   end;
+
+  -- A HUMAN may break that tie, but only to an item the SKU genuinely resolves to.
+  perform public.link_dam_order_line(v_line_x, v_item_x2, 'manual');
+  select item_id, master_data_match_status into v_got, v_txt
+    from plm.production_order_line where id = v_line_x;
+  if v_got = v_item_x2 and v_txt = 'manual' then v_pass := v_pass + 1;
+  else v_fail := v_fail + 1; raise notice 'FAIL a human tie-break was refused'; end if;
+
+  -- ...and the tie is recorded, so a manual tie-break never looks like a clean link.
+  select (metadata ->> 'link_candidate_item_count')::integer into v_n
+    from plm.production_order_line where id = v_line_x;
+  if v_n = 2 then v_pass := v_pass + 1;
+  else v_fail := v_fail + 1; raise notice 'FAIL the tie was not recorded (link_candidate_item_count = %)', v_n; end if;
+
+  -- An item the SKU does NOT resolve to is refused even for a human.
+  begin
+    perform public.link_dam_order_line(v_line_x, v_item_l, 'manual');
+    v_fail := v_fail + 1; raise notice 'FAIL a human linked an item the SKU does not resolve to';
+  exception when check_violation then v_pass := v_pass + 1;
+  end;
+
+  -- An unambiguous link records a candidate count of exactly 1.
+  select (metadata ->> 'link_candidate_item_count')::integer into v_n
+    from plm.production_order_line where id = v_line_l;
+  if v_n = 1 then v_pass := v_pass + 1;
+  else v_fail := v_fail + 1; raise notice 'FAIL unambiguous link recorded candidate count %', v_n; end if;
 
   -- Honesty: an item link may not be recorded as unmatched, and clearing the item may
   -- not be recorded as matched.
   begin
     perform public.link_dam_order_line(v_line_g, v_item_g, 'unmatched');
     v_fail := v_fail + 1; raise notice 'FAIL item link accepted status unmatched';
-  exception when others then v_pass := v_pass + 1;
+  exception when check_violation then v_pass := v_pass + 1;
   end;
   begin
     perform public.link_dam_order_line(v_line_g, null, 'matched');
     v_fail := v_fail + 1; raise notice 'FAIL clearing the item accepted status matched';
-  exception when others then v_pass := v_pass + 1;
+  exception when check_violation then v_pass := v_pass + 1;
   end;
 
   -- The ambiguous and unmatched lines must still be recordable and readable.
-  update plm.production_order_line set master_data_match_status = 'ambiguous' where id = v_line_d;
+  -- Put the line back into the ambiguous state a reviewer would see.
+  perform public.link_dam_order_line(v_line_d, null, 'ambiguous');
   update plm.production_order_line set master_data_match_status = 'unmatched' where id = v_line_u;
   select count(*) into v_n from api.dam_order_list
    where order_id = v_order and master_data_match_status in ('ambiguous','unmatched');
@@ -596,8 +670,8 @@ begin
   else v_fail := v_fail + 1; raise notice 'FAIL void did not record actor/reason'; end if;
 
   select count(*) into v_n from plm.production_order_line where production_order_id = v_order;
-  if v_n = 4 then v_pass := v_pass + 1;
-  else v_fail := v_fail + 1; raise notice 'FAIL voiding destroyed lines (% remain)', v_n; end if;
+  if v_n = 5 then v_pass := v_pass + 1;
+  else v_fail := v_fail + 1; raise notice 'FAIL voiding destroyed lines (% of 5 remain)', v_n; end if;
 
   -- A partial patch must not blank fields it did not mention.
   perform public.update_dam_order(v_order, jsonb_build_object('mbl','MBL-123'), '[]'::jsonb);
@@ -610,7 +684,7 @@ begin
     perform public.update_dam_order(v_order, '{}'::jsonb,
       jsonb_build_array(jsonb_build_object('id', gen_random_uuid(), 'ship_to','X')));
     v_fail := v_fail + 1; raise notice 'FAIL update_dam_order patched a line outside the order';
-  exception when others then v_pass := v_pass + 1;
+  exception when no_data_found then v_pass := v_pass + 1;
   end;
 
   -- ------------------------------------------------- 5. source-ref identity rules ----
