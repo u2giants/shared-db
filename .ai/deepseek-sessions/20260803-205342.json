@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "Reply with exactly the model name you are and your version. One line."
+  },
+  {
+    "role": "assistant",
+    "content": "gpt-4o"
+  }
+]
