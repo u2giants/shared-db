@@ -441,3 +441,90 @@ test("POSITIVE: the migration is SCHEMA ONLY and seeds no source row", async () 
   assert.equal((stripped.match(/\b[0-9a-f]{40}\b/g) ?? []).length, 0,
     "a 40-hex literal in the migration would be a real asset ID");
 });
+
+// ---------------------------------------------------------------------------
+// The inert-guarantee bug. plm carries
+//     alter default privileges ... grant all on tables to service_role
+// so EVERY table created in that schema is handed TRUNCATE automatically at
+// CREATE TABLE time, before any GRANT in the migration runs. TRUNCATE does not
+// fire row triggers, so the completed-capture immutability triggers do not stop
+// it. Read from the preview catalog, service_role held TRUNCATE on all 23 tables
+// while every UPDATE and DELETE test passed. The follow-up migration revokes it.
+// ---------------------------------------------------------------------------
+test("POSITIVE: the follow-up migration revokes TRUNCATE on every one of the 23 tables", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const sql = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "supabase", "migrations",
+      "20260810090000_pmt_loader_target_guard_and_truncate_revoke.sql"),
+    "utf8"
+  );
+
+  assert.match(sql, /revoke truncate, trigger on plm\.%I from service_role/,
+    "TRUNCATE must be revoked; a row trigger cannot stop it");
+
+  // The revoke loop must name all 23 tables, or the ones it misses stay wipeable.
+  const tables = [
+    "pmt_capture", "pmt_capture_expectation", "pmt_capture_batch", "pmt_authorized_title",
+    "pmt_authorized_title_property", "pmt_property", "pmt_franchise", "pmt_character",
+    "pmt_collection", "pmt_brand", "pmt_asset", "pmt_asset_property", "pmt_asset_franchise",
+    "pmt_asset_character", "pmt_asset_collection", "pmt_asset_brand",
+    "pmt_property_character", "pmt_property_collection", "pmt_property_franchise_evidence",
+    "pmt_authorized_property_asset", "pmt_relationship_anomaly", "pmt_property_capture_log",
+    "pmt_shrink_override",
+  ];
+  assert.equal(tables.length, 23);
+  // The whole first do-block, so a long table list cannot fall outside the window.
+  const revokeBlock = sql.slice(sql.indexOf("do $$"), sql.indexOf("$$;") + 3);
+  for (const t of tables) {
+    assert.ok(revokeBlock.includes(`'${t}'`), `${t} is missing from the revoke loop`);
+  }
+
+  // It must NOT reach beyond this claim: no other schema, no other prefix, and not the
+  // schema-level default privileges, which the orchestrator is sequencing separately.
+  // Executable statements only. The header comment explains the schema-level default
+  // privilege on purpose; what matters is that the migration does not CHANGE it.
+  const executable = sql.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+  assert.ok(!/alter\s+default\s+privileges/i.test(executable),
+    "the schema-level default privilege fix is not this migration's to make");
+  assert.ok(!/plm\.erp_|plm\.opa_/.test(executable), "must not touch another workstream's tables");
+});
+
+test("POSITIVE: the follow-up migration checks the target BEFORE the empty-chunk shortcut", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const sql = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "supabase", "migrations",
+      "20260810090000_pmt_loader_target_guard_and_truncate_revoke.sql"),
+    "utf8"
+  );
+  const guardAt = sql.indexOf("not (p_target = any (c_targets))");
+  const emptyReturnAt = sql.indexOf("if v_n = 0 then");
+  assert.ok(guardAt > 0, "the allow-list guard must exist");
+  assert.ok(emptyReturnAt > 0, "the empty-chunk shortcut must exist");
+  assert.ok(guardAt < emptyReturnAt,
+    "the target guard must come FIRST, or a typo'd target with an empty chunk reads as success");
+});
+
+test("no RAISE statement uses %L, which is a format() specifier and prints a stray L", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const sql = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "supabase", "migrations",
+      "20260810090000_pmt_loader_target_guard_and_truncate_revoke.sql"),
+    "utf8"
+  );
+  // Only the executable RAISE statements matter; the header comments discuss %L on purpose.
+  const raiseLines = sql
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("--"))
+    .join("\n")
+    .match(/raise\s+exception[\s\S]*?using errcode/gi) ?? [];
+  assert.ok(raiseLines.length > 0, "there should be RAISE statements to check");
+  for (const r of raiseLines) {
+    assert.ok(!r.includes("%L"), `a RAISE still uses %L: ${r.slice(0, 80)}`);
+  }
+});
