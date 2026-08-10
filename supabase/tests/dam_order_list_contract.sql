@@ -22,11 +22,22 @@
 --   shipped a migration that recorded a clean ledger row while its object did nothing,
 --   so "it applied" is not accepted here as evidence of anything.
 --
---   Part 2 asserts BEHAVIOUR: every guard is made to FIRE, not merely to exist. The
---   most important cases are the four link refusals (wrong type, wrong SKU, ambiguous
---   SKU, unauthenticated) -- a link guard that silently admits everything is exactly
---   the failure this feature cannot survive, because it would attach a real order to
---   the wrong product.
+--   Part 2 asserts BEHAVIOUR: every guard is made to FIRE, not merely to exist, and
+--   each negative case catches its SPECIFIC condition (insufficient_privilege /
+--   check_violation / no_data_found / unique_violation) rather than `when others`, so a
+--   typo or a permission error cannot score as a passing guard.
+--
+--   The cases that matter most are the four link refusals executed here: wrong TYPE,
+--   wrong SKU, an item the SKU does not resolve to, and a CROSS-ITEM ambiguous SKU
+--   offered as an automatic match. A link guard that silently admits everything is the
+--   one failure this feature cannot survive, because it attaches a real order to the
+--   wrong product.
+--
+--   The UNAUTHENTICATED refusal is NOT executed in Part 2. Raising inside this
+--   transaction would abort it and skip the rollback that keeps preview clean, so it is
+--   proved from the catalog instead: Part 1 section H asserts that anon holds no EXECUTE
+--   on any of the three RPCs and no SELECT on the serving view. The commented recipe at
+--   the bottom of this file runs it by hand if you want the runtime proof too.
 --
 -- SIDE EFFECTS
 --   Part 1: none, read-only.
