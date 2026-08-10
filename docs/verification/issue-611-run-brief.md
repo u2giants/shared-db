@@ -140,7 +140,7 @@ Then six fixtures, run as separate pushes:
 | **Q3** | one file, two statements, second one raises | Does a file that dies *halfway through itself* roll back statement 1, and does it leave a ledger row? A half-applied file with **no** ledger row is the worst case: the re-push replays it and dies on "already exists". |
 | **Q1/Q2** | file A succeeds, file B fails | Does the earlier file stay applied, or is the batch one transaction? And does either file's SQL land without its ledger row? |
 | **Q4** | `create table` → `create index concurrently` → failure | **The top finding of the review, raised independently by all three models.** `CREATE INDEX CONCURRENTLY` (like `REINDEX`, `VACUUM`, `REFRESH MATERIALIZED VIEW … CONCURRENTLY`) *cannot* run inside a transaction block. A runner that detects one must either refuse the file or drop into statement-by-statement **autocommit** — and in autocommit a mid-file failure leaves SQL applied with **no ledger row**, exactly the state #611 fears. CLI 2.105.0's detection rule is unknown. **Measure it; do not assert it.** Real licensor/ColdLion batches plausibly contain a concurrent index, so this is not academic. |
-| **Q5** | perfectly valid SQL, but a trigger makes the **ledger insert** raise | **The only fixture that proves atomicity instead of inferring it.** Every other fixture fails on the SQL side, so it can never rule out "SQL in one transaction, ledger insert in another". Here the SQL is fine and the ledger insert is blocked. If the SQL is **gone** afterwards, they genuinely share one transaction. If the SQL **survives**, they do not. |
+| **Q5** | perfectly valid SQL, but a trigger makes the **ledger insert** raise | **The only fixture that proves atomicity instead of inferring it.** Every other fixture fails on the SQL side, so it can never rule out "SQL in one transaction, ledger insert in another". Here the SQL is fine and the ledger insert is blocked. If the SQL **survives**, they do not share a transaction. If the SQL is **gone** *and the log shows the trigger actually raised*, they genuinely do — the log check is not optional, see §7. |
 | **Q6** | version `20260601005500`, sorting into the **middle** of the ledger; four statements, all valid | Two things at once. First, **interspersed placement**: Q1–Q4 are versioned `2999-01-01`, later than every real migration, so they only ever test the plain *append* path — while the situation production actually faces is an out-of-order migration, which is the entire reason `--include-all` exists. Second, **multi-statement success**: a one-statement file is trivially atomic and proves nothing. |
 
 ---
@@ -160,8 +160,26 @@ The script prints its own `== HOW TO READ THIS ==` block. Read it. In summary:
 **Q4** — record all three lines, and record the exact error text if the CLI refuses the file
 outright. A refusal is a perfectly good, informative result. What you must not do is skip it.
 
-**Q5** — `q5 table present = f` proves atomicity. `= t` disproves it, and retroactively
-demotes every tidy result elsewhere in the run to an artefact (see §8).
+**Q5 — three lines, and you must read all three together.** This is the fixture whose whole
+purpose is *proof* rather than inference, so it is the one place a shortcut cannot stand.
+
+| exception in log | table present | verdict |
+| --- | --- | --- |
+| `t` | `f` (ledger row also `f`) | **ATOMIC — proven.** The ledger insert was reached, it raised, and the file's SQL went down with it. |
+| `t` | `t` | **NOT atomic.** SQL survived a failed ledger insert. This also retroactively demotes every tidy result elsewhere in the run to an artefact (see §8). |
+| `f` | anything | **INCONCLUSIVE — not atomic, not anything.** |
+
+The trap in the last row is the important one. It is tempting to read "the table is absent" as
+proof of rollback. It is not. An absent table is **equally consistent with the file's SQL never
+having executed at all** — the CLI may write the ledger row *before* running the file, or the
+push may have died on validation or on the connection before ever reaching it. In that world
+nothing whatsoever about a shared transaction was demonstrated.
+
+So the script greps its own captured push output for the trigger's exception text,
+`issue611 fixture: ledger insert deliberately blocked`, and prints it as the **first** Q5
+result line. If that line reads `f`, the run told you nothing about atomicity: read the push log,
+find out why the insert was never reached, fix it, and run again. **Do not report atomicity
+from a Q5 that never raised.**
 
 **Q6** — expect the table present, **2 rows**, and a ledger row. Also read the push log itself:
 it must list **only** `20260601005500` as applied. If it re-listed all 424 seeded versions,

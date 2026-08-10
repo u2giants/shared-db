@@ -135,9 +135,16 @@ SQL
 #
 # So: perfectly VALID SQL in the file, and a BEFORE INSERT trigger on
 # supabase_migrations.schema_migrations that raises for THIS version only.
-#   * SQL gone after the failure  -> SQL and ledger really are one transaction.
-#   * SQL still there             -> they are NOT. Wire-protocol masking was
-#                                    all we were ever seeing.
+#   * SQL still there             -> they are NOT one transaction. Wire-protocol
+#                                    masking was all we were ever seeing.
+#   * SQL gone AND the trigger's exception text appears in the push log
+#                                 -> SQL and ledger really are one transaction.
+#
+# THE LOG CHECK IS NOT OPTIONAL. An absent table on its own proves nothing: it is
+# equally consistent with the file's SQL NEVER HAVING RUN -- the CLI might write
+# the ledger row before executing the file, or the push might die on validation
+# or the connection first. So the block below greps its own captured push output
+# for the exception text, and "atomic" requires all three signals to line up.
 # ---------------------------------------------------------------------------
 cat > "$WORK/supabase/migrations/29990101000005_q5_ledger_insert_fails.sql" <<'SQL'
 create table public.q5_valid_sql (id int);
@@ -279,15 +286,37 @@ psql -c "drop trigger if exists q5_block_ledger on supabase_migrations.schema_mi
          create trigger q5_block_ledger before insert on
            supabase_migrations.schema_migrations
            for each row execute function supabase_migrations.q5_block_ledger();"
-run_push
+# Capture this push, because an ABSENT table is only meaningful if the ledger
+# insert was actually REACHED and actually RAISED -- see the third result line.
+run_push | tee "$WORK/q5_push.log"
 psql -c "drop trigger if exists q5_block_ledger on supabase_migrations.schema_migrations;"
 echo "--- Q5 RESULT ---"
-echo "q5 table present  (t = SQL SURVIVED a failed ledger insert => NOT one transaction;"
-echo "                   f = SQL and ledger really do commit together => ATOMIC, proven):"
+echo "trigger exception seen in the push log (MUST be t, or Q5 proves NOTHING):"
+if grep -q 'issue611 fixture: ledger insert deliberately blocked' "$WORK/q5_push.log"; then
+  echo "t"
+else
+  echo "f"
+  echo "  ^^ the fixture's ledger insert was never reached, or never raised."
+  echo "     Q5 is INCONCLUSIVE this run. Read the log above before concluding"
+  echo "     anything: the push may have died on validation or the connection,"
+  echo "     or never got as far as this file at all."
+fi
+echo "q5 table present  (t = SQL SURVIVED a failed ledger insert => NOT one transaction):"
 psql -tAc "select to_regclass('public.q5_valid_sql') is not null;"
 echo "ledger row for 29990101000005 present (expected f -- the trigger blocked it):"
 psql -tAc "select exists(select 1 from supabase_migrations.schema_migrations
                          where version = '29990101000005');"
+echo "READ THESE THREE TOGETHER -- 'ATOMIC' REQUIRES ALL THREE:"
+echo "  exception = t  AND  table = f  AND  ledger = f"
+echo "      -> the ledger insert was reached and failed, and the file's SQL went"
+echo "         with it. SQL and ledger ARE one transaction. This is the proof."
+echo "  exception = t  AND  table = t"
+echo "      -> SQL survived a failed ledger insert. They are NOT one transaction."
+echo "  exception = f  (whatever the other two say)"
+echo "      -> INCONCLUSIVE, NOT atomic. An absent table is equally consistent"
+echo "         with the SQL never having executed at all -- the CLI may write the"
+echo "         ledger row BEFORE running the file, or the push may have failed"
+echo "         earlier. Do not report atomicity from this. Fix the run and repeat."
 
 echo
 echo "########## Q6: INTERSPERSED placement, multi-statement success ##########"
