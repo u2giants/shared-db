@@ -16,7 +16,7 @@ on:
         default: preview
         options: [preview, production]
       mode:
-        description: "Preview may apply. Production is dry-run only here."
+        description: "Preview may apply. Production apply needs environment approval."
         type: choice
         required: true
         default: dry-run
@@ -30,7 +30,7 @@ on:
         type: string
         required: false
       confirmation:
-        description: "Production only: type DRY-RUN followed by the commit SHA"
+        description: "Production: type DRY-RUN <sha> for a dry run, or APPLY <sha> to apply"
         type: string
         required: false
 
@@ -101,19 +101,24 @@ jobs:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
         run: supabase db push
 
+  # ISSUE #646: this job deliberately has NO `environment:`.
+  #
+  # It used to carry `environment: production`, which meant Albert was asked to
+  # approve every PRACTICE RUN. A gate that fires on harmless events trains the
+  # person holding it to click approve without reading -- which is exactly the
+  # habit you do not want on the one run that writes to production. The gate now
+  # guards ONLY the real change (`production-apply` below).
+  #
+  # This job cannot write: it runs `supabase db push --dry-run` and nothing else.
+  # `supabase link` and `supabase migration list` are reads. If you ever add a
+  # mutating command to this job, put the environment back FIRST.
   production-dry-run:
-    if: github.event_name == 'workflow_dispatch' && inputs.target == 'production'
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'production' && inputs.mode == 'dry-run'
     needs: validate
     runs-on: ubuntu-latest
-    environment: production
     env:
       PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
     steps:
-      - name: Refuse production apply
-        if: inputs.mode == 'apply'
-        run: |
-          echo "BLOCKED: the general workflow can never apply to production." >&2
-          exit 1
       - name: Check exact confirmation
         env:
           REQUESTED_SHA: ${{ inputs.commit_sha }}
@@ -192,4 +197,194 @@ jobs:
           path: |
             ${{ runner.temp }}/production-ledger-before.txt
             ${{ runner.temp }}/production-dry-run.txt
+          retention-days: 90
+
+  # ===========================================================================
+  # PRODUCTION APPLY (issue #617). The only job in this repo that writes to
+  # qsllyeztdwjgirsysgai.
+  #
+  # THREE INDEPENDENT GATES, and none of them is sufficient alone:
+  #   1. `production-apply-review` -- deterministic, machine-checkable. The typed
+  #      confirmation string, the exact origin/main SHA, and the full guard chain
+  #      (parse_allowlist -> HARD_BLOCKED / 6.8 bundle / 6.5 hold / co-presence,
+  #      then validate_candidates, then whole-batch preflight). This job FAILS the
+  #      run on its own findings.
+  #   2. An automatic MODEL REVIEW that posts a technical verdict into the job
+  #      summary, where the human approver reads it.
+  #      ****** THE MODEL REVIEW IS ADVISORY AND MAY NEVER BE THE ONLY GATE. ******
+  #      It does not fail the run and it does not approve the run. It exists to put
+  #      a written technical opinion in front of the human, not to replace them. If
+  #      you ever make its verdict blocking, you have created a lane where a model
+  #      can wave a production write through. Do not.
+  #   3. `environment: production` -- Albert, as required reviewer, clicking
+  #      approve. This is the gate that actually holds. Nothing below it runs
+  #      until he does.
+  # ===========================================================================
+  production-apply-review:
+    name: Production apply review (advisory model verdict + hard guards)
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'production' && inputs.mode == 'apply'
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
+    steps:
+      # FIRST STEP ON PURPOSE. A wrong confirmation string must fail before any
+      # credential is used, any checkout happens, and any approval is requested.
+      - name: Check exact confirmation
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+          REQUESTED_CONFIRMATION: ${{ inputs.confirmation }}
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+        run: |
+          test -n "$REQUESTED_SHA"
+          test -n "$PRODUCTION_ALLOWLIST"
+          test "$REQUESTED_CONFIRMATION" = "APPLY $REQUESTED_SHA"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+      - name: Verify exact main commit
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+        run: |
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
+          test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.105.0
+      - name: Capture production migration record
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
+        run: |
+          supabase login --token "$SUPABASE_ACCESS_TOKEN"
+          supabase link --project-ref "$PRODUCTION_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          supabase migration list --linked | tee "$RUNNER_TEMP/production-ledger-before.txt"
+      - name: Hard guard preflight
+        env:
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+        run: |
+          python scripts/production_migration_guard.py preflight \
+            --repo "$GITHUB_WORKSPACE" \
+            --allowlist "$PRODUCTION_ALLOWLIST" \
+            --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
+      - name: Automatic model review (ADVISORY -- never blocking)
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+        run: python scripts/production_apply_model_review.py
+      - name: Upload pre-approval evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-apply-review-${{ inputs.commit_sha }}
+          path: |
+            ${{ runner.temp }}/production-ledger-before.txt
+            ${{ runner.temp }}/production-model-review.md
+          if-no-files-found: warn
+          retention-days: 90
+
+  production-apply:
+    name: Production apply (requires Albert's approval)
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'production' && inputs.mode == 'apply'
+    needs: [validate, production-apply-review]
+    runs-on: ubuntu-latest
+    # THE GATE. `production` must list Albert as a required reviewer. Nothing in
+    # this job runs until he approves. Do not remove this line, and do not move
+    # any writing step out of this job to get around it.
+    environment: production
+    env:
+      PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
+    steps:
+      - name: Check exact confirmation
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+          REQUESTED_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          test -n "$REQUESTED_SHA"
+          test "$REQUESTED_CONFIRMATION" = "APPLY $REQUESTED_SHA"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+      - name: Verify exact main commit
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+        run: |
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
+          test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.105.0
+      # Re-read the ledger IN THIS JOB. The review job's copy was taken before the
+      # approval wait, which can be hours; production moves independently of this
+      # repo, so a stale ledger would size the bounded checkout wrongly.
+      - name: Capture production migration record
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
+        run: |
+          supabase login --token "$SUPABASE_ACCESS_TOKEN"
+          supabase link --project-ref "$PRODUCTION_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          supabase migration list --linked | tee "$RUNNER_TEMP/production-ledger-before.txt"
+      - name: Build bounded checkout
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+        run: |
+          python scripts/production_migration_guard.py prepare \
+            --repo "$GITHUB_WORKSPACE" \
+            --output "$RUNNER_TEMP/bounded-production" \
+            --commit-sha "$REQUESTED_SHA" \
+            --allowlist "$PRODUCTION_ALLOWLIST" \
+            --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
+      - name: Fresh dry-run, then apply
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+        run: |
+          cd "$RUNNER_TEMP/bounded-production"
+          supabase link --project-ref "$PRODUCTION_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          set -o pipefail
+          # Re-prove the bound AT THE POINT OF USE. What makes --include-all safe
+          # is the FILESYSTEM (prepare kept exactly `remote-ledger | allowlist`),
+          # never the flag. Keep this the last check before the push.
+          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" assert-bounded \
+            --dir "$RUNNER_TEMP/bounded-production" \
+            --allowlist "$PRODUCTION_ALLOWLIST" \
+            --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
+          # A FRESH dry-run inside this same run, immediately before the real
+          # push. The earlier production-dry-run job was a different run against a
+          # different ledger snapshot; only this one describes the database we are
+          # about to write to.
+          supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
+          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
+            --dry-run-output "$RUNNER_TEMP/production-dry-run.txt" \
+            --allowlist "$PRODUCTION_ALLOWLIST"
+          # THE WRITE.
+          supabase db push --include-all 2>&1 | tee "$RUNNER_TEMP/production-apply.txt"
+      - name: Capture production migration record (after)
+        if: always()
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
+        run: |
+          cd "$RUNNER_TEMP/bounded-production"
+          supabase migration list --linked | tee "$RUNNER_TEMP/production-ledger-after.txt"
+      - name: Save apply evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-migration-apply-${{ inputs.commit_sha }}
+          path: |
+            ${{ runner.temp }}/production-ledger-before.txt
+            ${{ runner.temp }}/production-dry-run.txt
+            ${{ runner.temp }}/production-apply.txt
+            ${{ runner.temp }}/production-ledger-after.txt
+          if-no-files-found: warn
           retention-days: 90
