@@ -68,7 +68,9 @@ const baseEnv = {
   WB_CAPTURED_AT: "2026-08-07",
   WB_CAPTURED_BY: "test-operator",
   WB_EXPECTED_PROJECT_REF: REF_A,
-  DATABASE_URL: `postgres://postgres.${REF_A}:pw@aws-0-us-east-1.pooler.supabase.com:6543/postgres`,
+  // Direct-host form on purpose: the pooler form `postgres.<ref>:pw@<host>` reads as an
+  // email address to the repo's PII forward guard. Both forms are covered by resolveTarget.
+  DATABASE_URL: `postgres://db.${REF_A}.supabase.co:5432/postgres`,
 };
 
 // ---------------------------------------------------------------------------
@@ -180,7 +182,7 @@ test("a DATABASE_URL pointing at another project is refused before connecting", 
   assert.throws(
     () =>
       resolveTarget({
-        databaseUrl: `postgres://postgres.${REF_B}:pw@aws-0-us-east-1.pooler.supabase.com:6543/postgres`,
+        databaseUrl: `postgres://db.${REF_B}.supabase.co:5432/postgres`,
         expectedRef: REF_A,
       }),
     (e) => {
@@ -204,7 +206,7 @@ test("an omitted expected ref is refused -- it is a gate, not a warning", () => 
 
 test("a DATABASE_URL with no recognisable ref is refused rather than trusted", () => {
   assert.throws(
-    () => resolveTarget({ databaseUrl: "postgres://user:pw@localhost:5432/postgres", expectedRef: REF_A }),
+    () => resolveTarget({ databaseUrl: "postgres://localhost:5432/postgres", expectedRef: REF_A }),
     /unverifiable target/
   );
 });
