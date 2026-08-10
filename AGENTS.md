@@ -192,34 +192,56 @@ re-deriving it:
   `designflow` schema.
 - All **386 relations are owned by `postgres`**, so membership of `cloudsqlsuperuser` is not
   a route to that data.
-- What fails the proof is `rolcreatedb` / `rolcreaterole` / role membership — the power to
-  create **new** objects elsewhere, not the power to write DesignFlow.
+- For this account, what fails the proof is `rolcreatedb` / `rolcreaterole` / role membership,
+  plus `CREATE` on database `postgres` and `CREATE` on schema `public` — the power to create
+  **new** objects elsewhere, not the power to write DesignFlow. Those grants are a real
+  production-infrastructure exposure and #705 records them; they are simply not a write path
+  into `designflow`.
 - [`scripts/capture-postgres-schema.sql`](scripts/capture-postgres-schema.sql) line 66 sets
-  `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`, so the **server** refuses writes on
-  that connection regardless of what the role could do in principle.
+  `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`, which is why that particular run
+  could not have written. It is a session-scoped guard that the same session can reset to
+  `READ WRITE`, so it is **never** a substitute for the proof rule for any other credential.
 
 **Boundary. This permits a READ.** It does not permit writes, DDL, DML, creating a read
 replica, starting an export, restoring a backup, changing authorized networks, or any
 mutation in `lithe-breaker-323913`. It does not generalise to any other credential, any other
 database, or any other task. Everything under "Still forbidden" in §0.1-A is unchanged.
 
+**Closure rule — read this before assuming anything is allowed because it is not listed
+above.** This exception waives the read-only proof and **nothing else**. Every other condition
+in §0.1-A still binds — catalog-only `SELECT`s against `information_schema` and `pg_catalog`,
+no long or unbounded scans, and **no row contents read or reported**. Catalog-only is the
+scope Albert was asked about and the scope he approved. So a row count, a sample row, a
+`SELECT` queued by a migration plan (for example
+[`docs/parent-child-answers-20260803.md`](docs/parent-child-answers-20260803.md) or the
+age_group plan's Step D1), and a client-side `pg_dump` are all **outside** this exception and
+each needs its own owner authorisation. The list above enumerates; this sentence closes.
+
 **Do NOT fix #705.** Albert ruled the account is to be left alone. Stop proposing privilege
 changes for it and do not re-raise it as a blocker.
 
 **Operational specifics — do not rediscover these:**
 
-- The schema is **`designflow`, NOT `dflow`**. Supabase production also has a schema named
-  `designflow`; it is a different database and a real cutover trap. Confirm which host you
-  are on before reading (§4.2).
+- **On Cloud SQL the schema is `designflow`, NOT `dflow`.** The direction of the trap matters:
+  on **Supabase** production, DesignFlow lives in **`dflow`**, and Supabase *also* has a
+  separate schema named `designflow` — a 35-relation decoy. So do not "correct" either name to
+  the other. Confirm which host you are on before reading (§4.2).
 - Run with `exact_count_max_bytes=0` so the capture reads catalog only and touches no table
   data.
-- The 1Password item title contains parentheses, which are invalid in an `op://` reference —
-  address the item by **item ID**.
-- The password is in a **custom field named `DB_PASSWORD`**, not `credential`.
+- The credential is in vault `vibe_coding`, item **`tcaf3o3u2cx52g6ivvczxbhola`**
+  ("DesignFlow PRODUCTION Cloud SQL - read-only …"). Its title contains parentheses, which are
+  invalid in an `op://` reference, so address it by **item ID**:
+  `op read 'op://vibe_coding/tcaf3o3u2cx52g6ivvczxbhola/DB_PASSWORD'`. The password is in a
+  **custom field named `DB_PASSWORD`**, not `credential`. 1Password item IDs can be re-keyed
+  mid-session, so if that ID 404s, re-resolve by title with
+  `op item list --vault vibe_coding --format json` (same recovery as §9). Never write the
+  value anywhere.
 
 **Evidence.** The completed capture is at
 [`docs/verification/cloudsql-designflow-capture-2026-08-10/`](docs/verification/cloudsql-designflow-capture-2026-08-10/);
-the ruling and the privilege analysis are on issue **#705**.
+the ruling and the privilege analysis are on issue **#705**. That capture's README describes
+the waiver as "for this capture only" and "not a general waiver"; **this section supersedes
+that wording** — the exception is standing, on the terms above.
 
 ## 0.2 `data.designflow.app` means DB Data Admin — never the retired system
 
