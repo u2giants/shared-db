@@ -425,7 +425,6 @@ jobs:
             --allowlist "$PRODUCTION_ALLOWLIST" \
             --output-dir "$RUNNER_TEMP/catalog-verification" \
             --project-ref "$PRODUCTION_PROJECT_REF" \
-            --token "$SUPABASE_ACCESS_TOKEN" \
             --mode "$VERIFY_MODE" \
             | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Save apply evidence

@@ -138,6 +138,67 @@ class DeriveTargetsTests(unittest.TestCase):
         )
         self.assertEqual(t.tables, ["plm.widget"])
 
+    def test_alter_view_is_derived(self):
+        # 20260810110000's ONLY statement outside a `do $$` block is
+        # `alter view api.dam_order_list set (security_invoker = true)`, a real
+        # security fix. A table-only pattern derived nothing at all from it.
+        t = targets_for("alter view api.dam_order_list set (security_invoker = true);")
+        self.assertIn("api.dam_order_list", t.required_relations)
+
+    def test_alter_materialized_view_is_derived(self):
+        t = targets_for("alter materialized view plm.mv owner to postgres;")
+        self.assertIn("plm.mv", t.required_relations)
+
+    def test_alter_if_exists_is_optional_not_required(self):
+        # The migration itself tolerates absence, so hard-failing on it would be
+        # a false positive that blocks a correct promotion.
+        t = targets_for("alter table if exists plm.maybe add column x int;")
+        self.assertEqual(t.optional, ["plm.maybe"])
+        self.assertNotIn("plm.maybe", t.required_relations)
+        self.assertIn("plm.maybe", t.relations)
+
+    def test_alter_view_does_not_claim_row_level_security(self):
+        t = targets_for("alter view api.v set (security_invoker = true);")
+        self.assertNotIn("api.v", t.rls_relations)
+
+    # ------------------------------------------------------------------
+    # THE NON-CLAIMS. Each of these is something the report says it does NOT
+    # check. They are tested precisely because a future regex tweak could
+    # silently start claiming them, and a claim this module cannot stand behind
+    # is worse than no claim at all.
+    # ------------------------------------------------------------------
+
+    def test_execute_format_is_not_claimed(self):
+        t = targets_for(
+            "do $$ begin execute format('create table plm.dynamic (id int)'); end $$;"
+        )
+        self.assertEqual(t.tables, [])
+        self.assertTrue(t.is_empty())
+
+    def test_quoted_identifiers_are_not_claimed(self):
+        t = targets_for('create table "PLM"."Widget" (id int);')
+        self.assertEqual(t.tables, [])
+
+    def test_search_path_relative_names_are_not_claimed(self):
+        # An unqualified name depends on the session search_path, which this
+        # module does not model. Silence beats a guess at the schema.
+        t = targets_for("set search_path to plm;\ncreate table widget (id int);")
+        self.assertEqual(t.tables, [])
+
+    def test_alter_default_privileges_is_not_claimed(self):
+        # 20260710135975's `alter default privileges in schema plm grant all on
+        # tables to service_role` names no relation, and inventing the set of
+        # tables it will affect is exactly the mis-parse to avoid.
+        t = targets_for(
+            "alter default privileges in schema plm grant all on tables to service_role;"
+        )
+        self.assertEqual(t.tables, [])
+        self.assertTrue(t.is_empty())
+
+    def test_unqualified_grant_target_is_not_claimed(self):
+        t = targets_for("grant select on widget to anon;")
+        self.assertEqual(t.tables, [])
+
     def test_unknown_version_is_refused(self):
         with self.assertRaises(GuardError):
             derive_targets({}, ["20260810140000"])
@@ -217,6 +278,29 @@ class SqlBuildTests(unittest.TestCase):
         self.assertIn("aclexplode", sql)
         self.assertIn("pg_get_functiondef", sql)
 
+    def test_function_privileges_are_queried(self):
+        # H1: without these the report shows a function existing with a readable
+        # definition and says NOTHING about whether its revoke took.
+        sql = build_catalog_sql(
+            targets_for("create or replace function plm.f() returns int language sql as $$ select 1 $$;")
+        )
+        self.assertIn("aclexplode(p.proacl)", sql)
+        self.assertIn("has_function_privilege", sql)
+        self.assertIn("acl_is_default", sql)
+
+    def test_public_grantee_is_named_not_rendered_as_a_dash(self):
+        # aclexplode returns OID 0 for PUBLIC, never NULL, and 0::regrole::text
+        # renders as a bare `-`. A grant to PUBLIC is the drift class of
+        # #664/#649 and must be searchable by name in the artifact.
+        sql = build_catalog_sql(targets_for("create table plm.widget (id int);"))
+        self.assertIn("a.grantee = 0 then 'PUBLIC'", sql)
+        self.assertNotIn("coalesce(a.grantee::regrole::text", sql)
+
+    def test_reloptions_are_read(self):
+        # So `security_invoker` on an altered view is observable.
+        sql = build_catalog_sql(targets_for("alter view api.v set (security_invoker = true);"))
+        self.assertIn("reloptions", sql)
+
     def test_row_count_sql_is_empty_when_nothing_is_seeded(self):
         self.assertEqual(build_row_count_sql([]), "")
 
@@ -283,9 +367,89 @@ class RenderReportTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("NO evidence", failures[0])
 
-    def test_absent_evidence_with_nothing_to_check_is_not_a_failure(self):
+    def test_nothing_to_check_is_a_hard_failure(self):
+        # #697 exists because a green tick was mistaken for evidence. A run in
+        # which this step proved NOTHING must not report itself green.
         empty = Targets(set(), set(), set(), set(), set(), set())
         _, failures = self.render(None, targets=empty)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("proved nothing", failures[0])
+
+    def test_missing_function_is_a_hard_failure(self):
+        # The lane knows this expected answer identically to to_regclass: an
+        # applied `create or replace function` with nothing in pg_proc.
+        _, failures = self.render(
+            {
+                "relations": [{"name": "plm.widget", "to_regclass": "plm.widget"}],
+                "functions": [{"name": "plm.sync_wb_character", "overloads": []}],
+            }
+        )
+        self.assertEqual(len(failures), 1)
+        self.assertIn("pg_proc", failures[0])
+
+    def test_present_function_is_not_a_failure(self):
+        _, failures = self.render(
+            {
+                "relations": [{"name": "plm.widget", "to_regclass": "plm.widget"}],
+                "functions": [
+                    {
+                        "name": "plm.f",
+                        "overloads": [
+                            {
+                                "identity": "plm.f(uuid)",
+                                "prokind": "f",
+                                "has_definition": True,
+                                "acl_is_default": False,
+                                "acl": [],
+                                "execute_held_by": [],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(failures, [])
+
+    def test_function_privileges_are_rendered_and_never_failed(self):
+        markdown, failures = self.render(
+            {
+                "relations": [{"name": "plm.widget", "to_regclass": "plm.widget"}],
+                "functions": [
+                    {
+                        "name": "plm.load_pmt_capture_chunk",
+                        "overloads": [
+                            {
+                                "identity": "plm.load_pmt_capture_chunk(uuid,text,jsonb)",
+                                "prokind": "f",
+                                "has_definition": True,
+                                # proacl NULL == EXECUTE TO PUBLIC, i.e. the
+                                # revoke did NOT take. Reported, not enforced --
+                                # the lane has no expected value for it.
+                                "acl_is_default": True,
+                                "acl": [],
+                                "execute_held_by": ["anon", "authenticated", "public"],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("Function privileges", markdown)
+        self.assertIn("load_pmt_capture_chunk(uuid,text,jsonb)", markdown)
+        self.assertIn("EXECUTE` to `PUBLIC", markdown)
+
+    def test_optional_relation_absence_is_not_a_failure(self):
+        # `alter table if exists` says in the SQL that absence is tolerated.
+        targets = Targets(set(), set(), set(), set(), set(), set(), {"plm.maybe"})
+        _, failures = render_report(
+            ["20260810140000"],
+            targets,
+            {"relations": [{"name": "plm.maybe", "to_regclass": None}]},
+            None,
+            [],
+            True,
+        )
         self.assertEqual(failures, [])
 
     def test_privileges_are_recorded_never_failed(self):

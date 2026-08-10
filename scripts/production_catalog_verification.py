@@ -42,16 +42,24 @@ THE FAIL-vs-RECORD DECISION, AND WHY
 It is SPLIT, deliberately, and the split line is: FAIL only where the lane
 KNOWS the expected answer; RECORD where it does not.
 
-  * HARD FAIL -- a derived table or view whose `to_regclass` is NULL after a
+  * HARD FAIL -- a REQUIRED table or view whose `to_regclass` is NULL after a
     successful apply. There is exactly one correct answer here and the lane
     knows it. A migration that reported success and did not leave its table
-    behind is a catastrophe, not a matter of taste.
+    behind is a catastrophe, not a matter of taste. A relation named only by an
+    `alter ... if exists` is NOT required: the SQL itself says absence is
+    tolerated, and failing on it would be a false positive.
+  * HARD FAIL -- a derived function or procedure with NO overload in `pg_proc`.
+    The lane knows this expected answer identically to `to_regclass`; an applied
+    `create or replace function` whose routine is not there is the same
+    catastrophe as a missing table. (Warner derives 21 functions, Paramount 11.)
   * HARD FAIL -- the verification could not run at all (API error, empty result,
     unparseable payload) while there WAS something to verify. "No evidence" must
     never render as "evidence passed"; that is the precise failure mode #697 was
     opened about, and reproducing it inside the fix would be absurd.
-  * RECORD ONLY -- privileges, RLS flags, policy counts, function definitions,
-    row counts. The lane has no expected value for these. A grant may be
+  * HARD FAIL -- the derivation found NOTHING to check. A run in which this step
+    proved nothing must not report itself green, for the same reason.
+  * RECORD ONLY -- privileges (relation AND function), RLS flags, policy counts,
+    function definitions, reloptions, row counts. The lane has no expected value for these. A grant may be
     intended; a policy count of 3 may be exactly right. Inventing an expectation
     here would manufacture FALSE POSITIVES that block correct promotions, and a
     gate that cries wolf is how approvers are trained to click through. These are
@@ -75,14 +83,20 @@ WHAT THIS CANNOT PROVE -- read this before trusting it
   * It observes the state AFTER the apply. It does not attribute that state to
     the apply, and it cannot distinguish an object this batch created from one
     that already existed.
-  * The privilege matrix is effective privilege plus the raw ACL. It says what
-    production grants; it does not say what production SHOULD grant.
+  * The privilege matrix is effective privilege plus the raw ACL, for relations
+    AND for functions. It says what production grants; it does not say what
+    production SHOULD grant. For functions, `acl_is_default` (a NULL `proacl`)
+    means EXECUTE TO PUBLIC -- the state a missing revoke leaves behind -- and
+    is reported explicitly so it cannot be misread as "no grants". Argument
+    defaults, `security definer` status and the function BODY are not compared
+    against anything.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -139,8 +153,19 @@ CREATE_VIEW_RE = re.compile(
 CREATE_ROUTINE_RE = re.compile(
     rf"^\s*create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+{QUALIFIED}"
 )
-ALTER_TABLE_RE = re.compile(
-    rf"^\s*alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?{QUALIFIED}"
+# `alter view` matters as much as `alter table` here: `alter view
+# api.dam_order_list set (security_invoker = true)` (20260810110000) is a real
+# security fix and the ONLY statement in that file outside a `do $$` block, so a
+# table-only pattern derived nothing at all from it.
+#
+# `if exists` is CAPTURED SEPARATELY and the relation is NOT required to exist.
+# `alter table if exists` says in the SQL itself that the author accepts its
+# absence; hard-failing the job on a relation the migration explicitly tolerated
+# missing is a false positive, and a gate that cries wolf trains approvers to
+# click through.
+ALTER_RELATION_RE = re.compile(
+    r"^\s*alter\s+(table|view|materialized\s+view|foreign\s+table)\s+"
+    rf"(if\s+exists\s+)?(?:only\s+)?{QUALIFIED}"
 )
 ROW_SECURITY_RE = re.compile(r"\brow\s+level\s+security\b")
 CREATE_POLICY_RE = re.compile(rf"^\s*create\s+policy\b[\s\S]*?\bon\s+{QUALIFIED}")
@@ -170,6 +195,7 @@ class Targets:
         functions: set[str],
         roles: set[str],
         seeded: set[str],
+        optional: set[str] | None = None,
     ) -> None:
         self.tables = sorted(tables)
         self.views = sorted(views)
@@ -177,11 +203,19 @@ class Targets:
         self.functions = sorted(functions)
         self.roles = sorted(roles)
         self.seeded = sorted(seeded)
+        # Relations an `... if exists` statement named. Read if present, NEVER
+        # required: the migration said in its own SQL that it tolerates absence.
+        self.optional = sorted(set(optional or set()) - set(tables) - set(views))
+
+    @property
+    def required_relations(self) -> list[str]:
+        """Relations whose absence is a hard failure."""
+        return sorted(set(self.tables) | set(self.views))
 
     @property
     def relations(self) -> list[str]:
-        """Tables and views together -- everything `to_regclass` should resolve."""
-        return sorted(set(self.tables) | set(self.views))
+        """Everything to run `to_regclass` over, required or not."""
+        return sorted(set(self.required_relations) | set(self.optional))
 
     def is_empty(self) -> bool:
         return not (
@@ -192,6 +226,7 @@ class Targets:
         return {
             "tables": self.tables,
             "views": self.views,
+            "optional_relations": self.optional,
             "rls_relations": self.rls_relations,
             "functions": self.functions,
             "roles": self.roles,
@@ -242,6 +277,7 @@ def derive_targets(migrations: dict[str, Path], allowlist: list[str]) -> Targets
     functions: set[str] = set()
     roles: set[str] = set(ALWAYS_PROBED_ROLES)
     seeded: set[str] = set()
+    optional: set[str] = set()
 
     for version in allowlist:
         path = migrations.get(version)
@@ -264,12 +300,24 @@ def derive_targets(migrations: dict[str, Path], allowlist: list[str]) -> Targets
             if match := INSERT_INTO_RE.match(statement):
                 seeded.add(f"{match.group(1)}.{match.group(2)}")
                 continue
-            if match := ALTER_TABLE_RE.match(statement):
-                name = f"{match.group(1)}.{match.group(2)}"
-                # An ALTER names a relation that must exist afterwards, whether
-                # or not this batch created it.
-                tables.add(name)
-                if ROW_SECURITY_RE.search(statement):
+            if match := ALTER_RELATION_RE.match(statement):
+                kind, if_exists = match.group(1), match.group(2)
+                name = f"{match.group(3)}.{match.group(4)}"
+                if if_exists:
+                    # The migration itself tolerates the relation being absent,
+                    # so requiring it here would be a false positive. Read it if
+                    # it happens to be there; never fail on it.
+                    optional.add(name)
+                elif kind == "table":
+                    # An ALTER names a relation that must exist afterwards,
+                    # whether or not this batch created it.
+                    tables.add(name)
+                else:
+                    # A view is not a table: keeping the distinction stops the
+                    # blanket "every relation gets an RLS reading" rule from
+                    # claiming row security on something that cannot have it.
+                    views.add(name)
+                if kind == "table" and ROW_SECURITY_RE.search(statement):
                     rls.add(name)
                 continue
             if GRANT_RE.match(statement):
@@ -283,7 +331,7 @@ def derive_targets(migrations: dict[str, Path], allowlist: list[str]) -> Targets
     # Every relation is worth an RLS reading -- RLS-on-with-zero-policies was the
     # single check the canary run could not confirm at all.
     rls |= tables
-    return Targets(tables, views, rls, functions, roles, seeded)
+    return Targets(tables, views, rls, functions, roles, seeded, optional)
 
 
 def _sql_array(values: list[str]) -> str:
@@ -339,7 +387,8 @@ select jsonb_build_object(
     select jsonb_agg(jsonb_build_object(
       'name', rel.name,
       'to_regclass', rel.oid::text,
-      'relkind', (select c.relkind::text from pg_class c where c.oid = rel.oid)
+      'relkind', (select c.relkind::text from pg_class c where c.oid = rel.oid),
+      'reloptions', (select to_jsonb(c.reloptions) from pg_class c where c.oid = rel.oid)
     ) order by rel.name) from rel), '[]'::jsonb),
   'row_security', coalesce((
     select jsonb_agg(jsonb_build_object(
@@ -362,10 +411,15 @@ select jsonb_build_object(
   'acl', coalesce((
     select jsonb_agg(jsonb_build_object(
       'name', rel.name,
-      'grantee', coalesce(a.grantee::regrole::text, 'public'),
+      -- aclexplode returns OID 0 for PUBLIC, never NULL, and `0::regrole::text`
+      -- renders as a bare `-`. A grant to PUBLIC is exactly the drift class of
+      -- #664/#649, so it must be searchable by name in the artifact.
+      'grantee', case when a.grantee = 0 then 'PUBLIC'
+                      else a.grantee::regrole::text end,
       'privilege', a.privilege_type,
-      'grantor', a.grantor::regrole::text
-    ) order by rel.name, coalesce(a.grantee::regrole::text, 'public'), a.privilege_type)
+      'grantor', case when a.grantor = 0 then 'PUBLIC'
+                      else a.grantor::regrole::text end
+    ) order by rel.name, a.grantee, a.privilege_type)
     from rel
     join pg_class c on c.oid = rel.oid
     cross join lateral aclexplode(c.relacl) a), '[]'::jsonb),
@@ -376,7 +430,37 @@ select jsonb_build_object(
         select coalesce(jsonb_agg(jsonb_build_object(
           'identity', p.oid::regprocedure::text,
           'prokind', p.prokind::text,
-          'has_definition', pg_get_functiondef(p.oid) is not null
+          'has_definition', pg_get_functiondef(p.oid) is not null,
+          -- FUNCTION PRIVILEGES (issue #697 review, H1). Without these the
+          -- report showed a function existing with a readable definition and
+          -- said NOTHING about whether its revoke took -- while a section
+          -- headed "Functions" invites the reader to assume it was checked.
+          -- 20260810090000's ENTIRE privilege payload is
+          -- `revoke all on function plm.load_pmt_capture_chunk(...) from
+          -- public, anon, authenticated`. 20260810020000 carries 14 more of
+          -- the same shape, and 20260810030000 / 20260810130000 likewise.
+          -- Whether a revoke took is a catalog fact -- that is the whole
+          -- thesis of #697.
+          --
+          -- `proacl is null` means DEFAULT privileges, which for a function
+          -- is `EXECUTE to PUBLIC`. That is the opposite of "no grants", and
+          -- it is precisely the state a missing revoke leaves behind, so it
+          -- is reported explicitly rather than rendered as an empty list.
+          'acl_is_default', p.proacl is null,
+          'acl', coalesce((
+            select jsonb_agg(jsonb_build_object(
+              'grantee', case when a.grantee = 0 then 'PUBLIC'
+                              else a.grantee::regrole::text end,
+              'privilege', a.privilege_type,
+              'grantor', case when a.grantor = 0 then 'PUBLIC'
+                              else a.grantor::regrole::text end
+            ) order by a.grantee, a.privilege_type)
+            from aclexplode(p.proacl) a), '[]'::jsonb),
+          'execute_held_by', coalesce((
+            select jsonb_agg(probe_roles.role order by probe_roles.role)
+            from probe_roles
+            where has_function_privilege(probe_roles.role, p.oid, 'EXECUTE')
+          ), '[]'::jsonb)
         ) order by p.oid::regprocedure::text), '[]'::jsonb)
         from pg_proc p
         join pg_namespace ns on ns.oid = p.pronamespace
@@ -493,6 +577,14 @@ def render_report(
         "- Privileges, RLS flags, policy counts and row counts are EVIDENCE, not "
         "assertions. The lane has no expected value for them; a human reads them."
     )
+    add(
+        "- **Function privileges are the raw `proacl` plus an `EXECUTE` probe of "
+        "the derived roles.** `acl_is_default = true` means `proacl` is NULL, "
+        "which for a function is **`EXECUTE` to `PUBLIC`** — the state a missing "
+        "revoke leaves behind, NOT \"no grants\". Privileges on arguments, "
+        "argument defaults, `security definer` status and the function BODY are "
+        "not compared against anything."
+    )
     add("")
     add("## Derived targets")
     add("")
@@ -506,6 +598,21 @@ def render_report(
         for error in errors:
             add(f"- {error}")
         add("")
+
+    if targets.is_empty():
+        # ISSUE #697 EXISTS BECAUSE A GREEN TICK WAS MISTAKEN FOR EVIDENCE.
+        # A run where this step proved nothing must therefore not end green in
+        # enforcing mode. `20260810110000` lands exactly here: its only
+        # statement outside a `do $$` block is an `alter view`, and before the
+        # review fix even that derived nothing. The remedy for a genuinely
+        # unverifiable migration is to say so on the issue, not to let the lane
+        # report a verification it did not perform.
+        failures.append(
+            "the allowlisted migrations named NO catalog object this lexer can "
+            "read, so this step proved nothing. That may be legitimate (a "
+            "pure-data migration), but a run that verified nothing must not "
+            "report itself green. Record the reason on the issue."
+        )
 
     if catalog is None:
         if not targets.is_empty():
@@ -528,14 +635,20 @@ def render_report(
 
     add("## Relations (`to_regclass`)")
     add("")
-    add("| name | to_regclass | relkind |")
-    add("| --- | --- | --- |")
+    add("| name | required | to_regclass | relkind | reloptions |")
+    add("| --- | --- | --- | --- | --- |")
+    required = set(targets.required_relations)
     for row in data.get("relations") or []:
         resolved = row.get("to_regclass")
-        add(f"| `{row.get('name')}` | `{resolved or 'NULL'}` | `{row.get('relkind') or ''}` |")
-        if resolved is None:
+        name = row.get("name")
+        options = ", ".join(f"`{o}`" for o in (row.get("reloptions") or [])) or "_none_"
+        add(
+            f"| `{name}` | {name in required} | `{resolved or 'NULL'}` | "
+            f"`{row.get('relkind') or ''}` | {options} |"
+        )
+        if resolved is None and name in required:
             failures.append(
-                f"{row.get('name')}: to_regclass is NULL — the apply reported "
+                f"{name}: to_regclass is NULL — the apply reported "
                 "success and the object is not there"
             )
     add("")
@@ -589,13 +702,54 @@ def render_report(
     for row in data.get("functions") or []:
         overloads = row.get("overloads") or []
         if not overloads:
-            add(f"| `{row.get('name')}` | _no overload found_ | | |")
+            add(f"| `{row.get('name')}` | **NOT FOUND** | | |")
+            # Same class of catastrophe as a missing table, and the lane knows
+            # the expected answer identically: an applied `create or replace
+            # function` with nothing in pg_proc. Warner derives 21 functions and
+            # Paramount 11; any of them silently vanishing used to pass green.
+            failures.append(
+                f"{row.get('name')}: no function or procedure of that name "
+                "exists in pg_proc — the apply reported success and the "
+                "routine is not there"
+            )
             continue
         for overload in overloads:
             add(
                 f"| `{row.get('name')}` | `{overload.get('identity')}` | "
                 f"`{overload.get('prokind')}` | {overload.get('has_definition')} |"
             )
+    add("")
+
+    add("## Function privileges (`proacl` + `has_function_privilege`)")
+    add("")
+    add(
+        "**`acl default` = true means `proacl` is NULL, which for a function is "
+        "`EXECUTE` to `PUBLIC`** — the state a missing revoke leaves behind, not "
+        "an absence of grants. Read that column first."
+    )
+    add("")
+    add("| overload | acl default | grantee | privilege | grantor |")
+    add("| --- | --- | --- | --- | --- |")
+    for row in data.get("functions") or []:
+        for overload in row.get("overloads") or []:
+            identity = overload.get("identity")
+            default = overload.get("acl_is_default")
+            acl = overload.get("acl") or []
+            if not acl:
+                add(f"| `{identity}` | {default} | _no explicit ACL entry_ | | |")
+                continue
+            for entry in acl:
+                add(
+                    f"| `{identity}` | {default} | `{entry.get('grantee')}` | "
+                    f"`{entry.get('privilege')}` | `{entry.get('grantor')}` |"
+                )
+    add("")
+    add("| overload | roles effectively holding EXECUTE |")
+    add("| --- | --- |")
+    for row in data.get("functions") or []:
+        for overload in row.get("overloads") or []:
+            holders = ", ".join(f"`{r}`" for r in (overload.get("execute_held_by") or []))
+            add(f"| `{overload.get('identity')}` | {holders or '_none_'} |")
     add("")
 
     add("## Row counts for seeded relations")
@@ -630,8 +784,9 @@ def verify(
     if targets.is_empty():
         errors.append(
             "the allowlisted migrations named no catalog object this lexer can "
-            "read. That is legal (a pure-data migration), but it means THIS "
-            "STEP PROVED NOTHING. Do not read the green tick as verification."
+            "read. That may be legal (a pure-data migration), but it means THIS "
+            "STEP PROVED NOTHING, so enforcing mode fails rather than letting a "
+            "green tick stand in for evidence it never gathered."
         )
     else:
         try:
@@ -697,7 +852,14 @@ def main() -> int:
     parser.add_argument("--allowlist", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--project-ref", required=True)
-    parser.add_argument("--token", required=True)
+    # The token comes from the ENVIRONMENT, never argv. Process arguments are
+    # visible in OS process listings, and the rest of this lane already passes
+    # SUPABASE_ACCESS_TOKEN by env.
+    parser.add_argument(
+        "--token-env",
+        default="SUPABASE_ACCESS_TOKEN",
+        help="name of the env var holding the Management API token",
+    )
     parser.add_argument(
         "--mode",
         choices=("enforce", "record"),
@@ -705,13 +867,21 @@ def main() -> int:
         help="enforce fails the job on a missing relation or missing evidence",
     )
     args = parser.parse_args()
+    token = os.environ.get(args.token_env, "")
+    if not token:
+        print(
+            f"CATALOG VERIFICATION BLOCKED: {args.token_env} is empty. Failing "
+            "rather than reporting a verification that could never have run.",
+            file=sys.stderr,
+        )
+        return 1
     try:
         return verify(
             args.repo.resolve(),
             args.allowlist,
             args.output_dir,
             args.project_ref,
-            args.token,
+            token,
             enforcing=args.mode == "enforce",
         )
     except (GuardError, OSError) as exc:
