@@ -113,7 +113,8 @@ independently. The promotion plan is unaffected; it is now an authoring prohibit
 - `/worksp/shared-db` cleaned **after recovery**: 3 stashes read, 2 genuinely unique,
   all preserved to `recovered/*` branches on the remote before anything was dropped.
 - A dead session burning ~19% of a core for five days was stopped. **One "stale" session
-  was NOT killed** — `claude-rc-worksp@shared-db.service` is managed infrastructure.
+  was NOT killed** — the `claude-rc-worksp` systemd template unit for this repo is managed
+  infrastructure, one of six identical listeners, and would simply restart.
 
 ---
 
