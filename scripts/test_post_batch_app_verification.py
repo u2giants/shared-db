@@ -39,6 +39,7 @@ from post_batch_app_verification import (  # noqa: E402
     BASELINE_GAP_POLICY,
     BATCH_RESTING_POINTS,
     MANIFEST_DRIFT,
+    NEVER_REST_BY_BATCH,
     MANUAL_ONLY_BATCHES,
     POSTGREST_ADDRESSED_BUT_UNEXPOSED,
     PRODUCT_DEPTH_EXPECTED_TOTAL,
@@ -73,6 +74,7 @@ from post_batch_app_verification import (  # noqa: E402
     build_pgrst_schemas_expr,
     clock_expressions,
     cumulative_extras,
+    build_ledger_sql,
     judge_ledger,
     run_query,
     extract_report,
@@ -331,9 +333,11 @@ class VerifyDriverTests(unittest.TestCase):
             if "schema_migrations" in sql:
                 # M6: only B0's resting point has landed, which is what the
                 # BatchResolution below claims.
-                return [{"report": [
-                    {"batch": b, "version": v, "applied": b == "B0"}
-                    for b, v in BATCH_RESTING_POINTS.items()]}]
+                return [{"report": {
+                    "resting_points": [
+                        {"batch": b, "version": v, "applied": b == "B0"}
+                        for b, v in BATCH_RESTING_POINTS.items()],
+                    "never_rest_applied": []}}]
             if "jsonb_build_object('key'" in sql:
                 # Each batch extra is now its own query; answer each one TRUE.
                 key = sql.split("'key', '", 1)[1].split("'", 1)[0]
@@ -1189,11 +1193,94 @@ class ReviewFixTests(unittest.TestCase):
         )
 
     @staticmethod
-    def _ledger(*applied_batches):
-        return [
-            {"batch": b, "version": v, "applied": b in applied_batches}
-            for b, v in BATCH_RESTING_POINTS.items()
-        ]
+    def _ledger(*applied_batches, never_rest=()):
+        return {
+            "resting_points": [
+                {"batch": b, "version": v, "applied": b in applied_batches}
+                for b, v in BATCH_RESTING_POINTS.items()
+            ],
+            "never_rest_applied": list(never_rest),
+        }
+
+    def test_every_never_rest_version_maps_to_a_backlog_batch(self):
+        mapped = {v for versions in NEVER_REST_BY_BATCH.values() for v in versions}
+        self.assertEqual(mapped, set(NEVER_REST_VERSIONS))
+        self.assertNotIn("B0", NEVER_REST_BY_BATCH)
+
+    def test_the_backlog_resting_points_are_strictly_increasing(self):
+        """The premise the version->batch mapping depends on."""
+        backlog = [v for b, v in BATCH_RESTING_POINTS.items() if b != "B0"]
+        self.assertEqual(backlog, sorted(backlog))
+        self.assertEqual(len(backlog), len(set(backlog)))
+
+    def test_a_half_applied_later_batch_is_caught(self):
+        """THE REPRODUCED HOLE: claim B8, B8 landed, B9 HALF applied.
+
+        B8's resting point is present and B9's is absent, so nothing is 'ahead'
+        and a resting-point-only check goes green -- while production sits
+        between 20260810030000 and 20260810110000, where the eight Warner tables
+        are readable by every authenticated account in the shared project.
+        """
+        fails = judge_ledger(
+            BatchResolution("B8", BATCH_RESTING_POINTS["B8"], ["20260809170500"]),
+            self._ledger(
+                "B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8",
+                # B9 started: the Warner create landed, its grants fix did not.
+                never_rest=["20260810010000", "20260810020000", "20260810030000"],
+            ),
+        )
+        self.assertEqual(len(fails), 1, fails)
+        self.assertIn("HALF-APPLIED BATCH: B9", fails[0])
+        self.assertIn("20260810030000", fails[0])
+        self.assertIn("EXPOSED STATE", fails[0])
+        self.assertIn("COMPLETE the batch", fails[0])
+
+    def test_a_half_applied_batch_makes_the_whole_run_fail(self):
+        """It must reach the exit code, not just the report body."""
+        _, failures = render_report(
+            BatchResolution("B8", BATCH_RESTING_POINTS["B8"], ["20260809170500"]),
+            PRODUCTION_PROJECT_REF,
+            {app: [] for app in APP_MANIFEST},
+            judge_ledger(
+                BatchResolution("B8", BATCH_RESTING_POINTS["B8"], ["20260809170500"]),
+                self._ledger(
+                    "B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8",
+                    never_rest=["20260810030000"],
+                ),
+            ),
+            [], (), [],
+        )
+        self.assertTrue(any("HALF-APPLIED" in f for f in failures), failures)
+
+    def test_a_finished_batchs_interior_versions_are_not_a_half_apply(self):
+        """B1 landed completely: its own never-rest versions are history."""
+        self.assertEqual(
+            judge_ledger(
+                BatchResolution("B1", BATCH_RESTING_POINTS["B1"], ["20260728134500"]),
+                self._ledger(
+                    "B0", "B1",
+                    never_rest=sorted(NEVER_REST_BY_BATCH["B1"]),
+                ),
+            ),
+            [],
+        )
+
+    def test_a_half_applied_EARLIER_batch_is_also_caught(self):
+        """B3 never finished but B4 landed on top of it -- still exposed."""
+        fails = judge_ledger(
+            BatchResolution("B4", BATCH_RESTING_POINTS["B4"], ["20260731220000"]),
+            self._ledger(
+                "B0", "B1", "B2", "B4",
+                never_rest=[NEVER_REST_BY_BATCH["B3"][0]],
+            ),
+        )
+        self.assertTrue(any("HALF-APPLIED BATCH: B3" in f for f in fails), fails)
+
+    def test_the_ledger_sql_asks_about_every_never_rest_version(self):
+        sql = build_ledger_sql()
+        self.assertIn("never_rest_applied", sql)
+        for version in NEVER_REST_VERSIONS:
+            self.assertIn(version, sql)
 
     def test_m6_batches_are_not_applied_in_version_order(self):
         """Why `max(version)` is the WRONG primitive, proven from the contract.
@@ -1243,12 +1330,12 @@ class ReviewFixTests(unittest.TestCase):
             ), payload)
 
     def test_m6_a_null_applied_flag_is_not_a_pass(self):
-        rows = self._ledger("B0", "B1")
-        for r in rows:
+        payload = self._ledger("B0", "B1")
+        for r in payload["resting_points"]:
             if r["batch"] == "B1":
                 r["applied"] = None
         fails = judge_ledger(
-            BatchResolution("B1", BATCH_RESTING_POINTS["B1"], ["20260728134500"]), rows
+            BatchResolution("B1", BATCH_RESTING_POINTS["B1"], ["20260728134500"]), payload
         )
         self.assertTrue(any("is NOT in the migration ledger" in f for f in fails), fails)
 

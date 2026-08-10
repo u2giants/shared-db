@@ -94,10 +94,22 @@ THE FOUR TRAPS THIS FILE IS WRITTEN AGAINST
 --------------------------------------------
 Each has already fired in this repository at least once.
 
-  1. **"It applied successfully" proves nothing.** Nothing here reads
-     `supabase_migrations.schema_migrations`. Every assertion is a catalog fact:
+  1. **"It applied successfully" proves nothing.** NO ASSERTION ABOUT WHAT A
+     MIGRATION LEFT BEHIND COMES FROM THE LEDGER. Every one is a catalog fact:
      `to_regclass`, `pg_proc`, `pg_get_viewdef`, `has_table_privilege`,
-     `information_schema.columns`, `pg_constraint`.
+     `information_schema.columns`, `pg_constraint`, `pg_policies`.
+
+     `supabase_migrations.schema_migrations` is read in exactly one place --
+     `build_ledger_sql` -- and for exactly one purpose: checking the operator's
+     `--batch` claim against WHICH MIGRATIONS RAN, which is the only thing a
+     ledger is authoritative about. It is never evidence that an object exists,
+     is shaped correctly, or is readable. `judge_ledger` draws the same line in
+     more detail; if these two ever disagree, the ledger loses.
+
+     (An earlier version of this docstring said "Nothing here reads
+     `supabase_migrations.schema_migrations`", which stopped being true when the
+     batch-identity check was added. It is called out because a false sentence
+     at the top of an operating manual is worse than a missing one.)
   2. **The null-permissive guard.** A check shaped `if not (x or role = 'y')`
      never fires when `role` is NULL. Every verdict in this file goes through
      `is_explicit_true()`, which requires a non-null value AND a positive match.
@@ -114,6 +126,50 @@ Each has already fired in this repository at least once.
      absence there as a break would be a false positive -- it would fail for a
      configuration reason, not because the application is broken. See
      `POSTGREST_UNEXPOSED_SCHEMAS`.
+
+
+THE MANIFEST'S FAILURE DIRECTION -- THE MOST IMPORTANT PARAGRAPH HERE
+----------------------------------------------------------------------
+Everything this module concludes rests on `APP_MANIFEST`. The manifest was
+built by a HEURISTIC, and **the heuristic's failure mode is a FALSE PASS**,
+which is the dangerous direction. Read this before you trust a green run.
+
+Privileges were derived by scanning each `.from('x')` call site and taking the
+first `.select` / `.insert` / `.update` / `.delete` within roughly 260
+characters. That window is arbitrary. It MISSES:
+
+  * a write more than 260 characters from its `.from()` -- a long chained
+    builder, an interleaved comment block, or the split form
+    `const q = pim().from('x')` with `await q.delete()` fifty lines later;
+  * any table name this module did not hand-catch as computed. Two were caught
+    by hand -- PopDAM's `.schema('core').from(table)` where `table` comes from
+    a `tableByField` map, and the same file's dynamic picker -- but a third
+    written in a different style would simply not appear.
+
+**A miss is silent and it is a false pass.** The privilege never enters the
+manifest, so this module never asserts it, so a batch that revokes it produces
+a green run while the application 403s in front of a user. Nothing downstream
+compensates: `is_explicit_true`, the no-evidence rule and the per-app queries
+all make the manifest's CLAIMS trustworthy, and none of them can make the
+manifest COMPLETE.
+
+An over-match fails the other way -- it asserts a privilege the app does not
+need, the run goes red, and a human investigates. That is loud and
+self-correcting.
+
+**The tuning history matters, and it points the wrong way.** The first draft
+assumed any table an app touches is a table an app writes. That over-assumed,
+and the first live run produced eighteen false failures. Correcting it moved
+the manifest toward UNDER-detection. That was the right call for a tool anyone
+will actually run -- a guard that cries wolf is one people click through -- but
+it is the wrong direction for a safety net, and the trade was made knowingly.
+
+**What to do about it.** Treat a green run as "no REGRESSION was detected in
+what the manifest knows about", never as "the applications are fine". When a
+batch touches grants on a schema an app uses, re-derive that app's entries from
+a fresh `origin/main` clone rather than trusting this file, and widen the
+window or read the call sites by hand. §7.1's five-minute smoke test exists
+precisely because this gap cannot be closed from the database side.
 
 
 WHAT THIS CANNOT PROVE -- read this before trusting a green run
@@ -255,6 +311,34 @@ NEVER_REST_VERSIONS = frozenset(
 """.split()
 )
 
+def _never_rest_by_batch() -> dict[str, tuple[str, ...]]:
+    """Map each §6 never-rest version to the batch it belongs to.
+
+    Contract §5: a batch is a CONTIGUOUS VERSION-ORDERED SLICE of the remaining
+    set, so B1 through B9 have strictly increasing resting points and a version
+    belongs to the first backlog batch whose resting point is at or above it.
+
+    B0 is excluded, and that exclusion is the whole subtlety. The canary
+    `20260810140000` sorts numerically above every version in B1-B8 (the same
+    fact that made `max(version)` the wrong ledger primitive), so including it
+    would capture versions belonging to B9. It has no never-rest versions of its
+    own -- it is one migration applied alone -- so dropping it loses nothing.
+    """
+    backlog = [(b, v) for b, v in BATCH_RESTING_POINTS.items() if b != "B0"]
+    out: dict[str, list[str]] = {}
+    for version in sorted(NEVER_REST_VERSIONS):
+        for batch, resting in backlog:
+            if resting >= version:
+                out.setdefault(batch, []).append(version)
+                break
+        else:  # pragma: no cover - guarded by a test
+            raise VerificationError(
+                f"never-rest version {version} sorts above every batch resting "
+                "point, so the §5/§6 lists in this file disagree with each other."
+            )
+    return {b: tuple(v) for b, v in out.items()}
+
+
 # Contract §5: never applied at all, at any time, in any batch. Applying it
 # REGRESSES a live security control and sorts below the migration that would
 # repair it, so the damage is permanent.
@@ -262,6 +346,10 @@ RETIRED_VERSIONS = frozenset({"20260729120000"})
 
 # Contract §6.5: held pending the FRIENDS TV removal work.
 HELD_VERSIONS = frozenset({"20260802170000", "20260802171000"})
+
+# Which batch each never-rest version belongs to. Built once, so the ledger can
+# detect a batch that is HALF applied -- see `judge_ledger`.
+NEVER_REST_BY_BATCH = _never_rest_by_batch()
 
 
 # ---------------------------------------------------------------------------
@@ -1656,8 +1744,18 @@ def build_ledger_sql() -> str:
     resting point must BE in the ledger, and no LATER batch's resting point may
     be. "Later" means later in the promotion order (`BATCH_RESTING_POINTS`
     declaration order), not numerically larger.
+
+    A RESTING POINT ALONE IS NOT ENOUGH, EITHER. Asking only about the ten
+    resting points leaves a hole that was reproduced: claim B8, with B8 landed
+    and B9 HALF applied. B8's resting point is present, B9's is absent, nothing
+    is "ahead", and the run goes green -- while production sits in a §6
+    never-rest state. Between `20260810030000` and `20260810110000` that state
+    is the eight Warner tables readable by every authenticated account in the
+    shared project. So this also asks whether any of the 53 §6 never-rest
+    versions is applied, which lets `judge_ledger` spot a batch that started and
+    did not finish.
     """
-    branches = " union all ".join(
+    resting = " union all ".join(
         "select jsonb_build_object("
         f"'batch', {quote_literal(batch)}, "
         f"'version', {quote_literal(version)}, "
@@ -1666,10 +1764,16 @@ def build_ledger_sql() -> str:
         ") as x"
         for batch, version in BATCH_RESTING_POINTS.items()
     )
+    never_rest = ", ".join(quote_literal(v) for v in sorted(NEVER_REST_VERSIONS))
     return (
-        "select jsonb_agg(x order by x->>'batch') as report from ("
-        + branches
-        + ") t"
+        "select jsonb_build_object("
+        "'resting_points', (select jsonb_agg(x order by x->>'batch') from ("
+        + resting
+        + ") t), "
+        "'never_rest_applied', (select coalesce(jsonb_agg(m.version order by m.version), "
+        "'[]'::jsonb) from supabase_migrations.schema_migrations m "
+        f"where m.version = any (array[{never_rest}]))"
+        ") as report"
     )
 
 
@@ -2034,13 +2138,20 @@ def judge_ledger(resolution: BatchResolution, ledger: object) -> list[str]:
     read gate, Paramount's TRUNCATE and the security_invoker fix -- were chosen
     for the wrong state.
     """
-    rows = _rows(ledger)
-    if not rows:
+    envelope = _rows(ledger)
+    if not envelope:
         return [
             "LEDGER: could not read supabase_migrations.schema_migrations, so the "
             f"claim that {resolution.batch} is the applied state is UNVERIFIED. "
             "The batch-specific checks are chosen from that claim, so an "
             "unverifiable claim makes them unverifiable too."
+        ]
+    payload = envelope[0]
+    rows = _rows(payload.get("resting_points"))
+    if not rows:
+        return [
+            "LEDGER: the resting-point probe returned nothing, so which batch is "
+            "actually applied is UNVERIFIED."
         ]
     applied = {
         r.get("batch"): is_explicit_true(r.get("applied"))
@@ -2075,6 +2186,30 @@ def judge_ledger(resolution: BatchResolution, ledger: object) -> list[str]:
             "batch you NAMED, not the batch you are IN, so the later batch's "
             "assertions — which are the security-critical ones — were never run. "
             f"Re-run with --batch {ahead[-1]}."
+        )
+
+    # THE HALF-APPLIED BATCH. A batch whose resting point is absent but some of
+    # whose never-rest versions ARE applied is not "not started" -- it is
+    # STARTED AND UNFINISHED, which contract §6 says is not a pause but an
+    # exposure. The three worst states in the whole promotion are of exactly
+    # this shape, all inside B9.
+    never_rest_applied = {
+        str(v) for v in (payload.get("never_rest_applied") or []) if v
+    }
+    for batch in sorted(NEVER_REST_BY_BATCH, key=batch_index):
+        if applied.get(batch):
+            continue  # the batch finished; its interior versions are history
+        landed = sorted(never_rest_applied & set(NEVER_REST_BY_BATCH[batch]))
+        if not landed:
+            continue
+        failures.append(
+            f"HALF-APPLIED BATCH: {batch} has NOT reached its resting point "
+            f"({BATCH_RESTING_POINTS[batch]}), but {len(landed)} of its "
+            f"never-rest versions are already applied (highest: {landed[-1]}). "
+            "Contract §6: this is not a pause, it is an EXPOSED STATE, and the "
+            "only correct next move is to COMPLETE the batch — not to verify, "
+            "and not to wait. A resting-point-only check cannot see this, which "
+            "is why the never-rest list is asked about directly."
         )
     return failures
 

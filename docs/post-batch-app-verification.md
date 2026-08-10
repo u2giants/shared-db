@@ -124,10 +124,21 @@ or if a later batch has also landed.
 **This is the only place the ledger is read**, and only for the one thing it is authoritative about —
 *which migrations ran*. It is never treated as evidence of what they left behind.
 
-> **A trap worth knowing.** The batches are **not** applied in version order. B0 is the canary
-> `20260810140000`, which sorts numerically *above* every version in B1–B8. A `max(version)` check
-> therefore reports "you are at B0" on a database where B1 has landed — this tool did exactly that on
-> its first live run. The check is presence-per-resting-point, not maximum.
+It also asks whether any of the 53 §6 **never-rest** versions is applied, so it can spot a batch that
+is **half applied**: resting point absent, interior versions present. That state is not a pause, it is
+an exposure — between `20260810030000` and `20260810110000` it means the eight Warner tables are
+readable by every authenticated account in the shared project.
+
+> **Two traps worth knowing, both found by running this thing.**
+>
+> The batches are **not** applied in version order. B0 is the canary `20260810140000`, which sorts
+> numerically *above* every version in B1–B8. A `max(version)` check therefore reports "you are at B0"
+> on a database where B1 has landed — this tool did exactly that on its first live run. The check is
+> presence-per-resting-point, not maximum.
+>
+> And presence-per-resting-point **alone** is still not enough. Claim B8 with B9 half applied: B8's
+> resting point is present, B9's is absent, nothing is "ahead", green run — while production sits in a
+> never-rest state. That is why the never-rest list is asked about directly.
 
 ---
 
@@ -145,6 +156,29 @@ Two things are **inferred, not observed**, and the script says so in its own doc
    production's grant matrix — if they were, the check could never detect a lost grant.
 2. **Role attribution** is by file location: `src/` is `authenticated`, `workers/` and
    `apps/worker/` are `service_role`.
+
+### The heuristic's failure direction — read this before trusting a green run
+
+The privilege scan uses a **~260-character proximity window**, and **a miss produces a FALSE PASS**.
+That is the dangerous direction.
+
+It misses a write more than 260 characters from its `.from()` — a long chained builder, an interleaved
+comment block, or the split form `const q = pim().from('x')` with `await q.delete()` fifty lines
+later. It also misses any computed table name not hand-caught the way PopDAM's
+`.schema('core').from(table)` was. When it misses, the privilege never enters the manifest, so this
+tool never asserts it, so **a batch that revokes it goes green while the app 403s in front of a user**.
+
+An over-match fails the other way: a privilege the app does not need is asserted, the run goes red, a
+human investigates. Loud and self-correcting.
+
+**The tuning history points the wrong way and you should know it.** The first draft assumed any table
+an app touches is a table an app writes; that over-assumed and produced eighteen false failures on the
+first live run. Correcting it moved the manifest toward **under**-detection — the right call for a
+tool anyone will actually run, the wrong one for a safety net, and the trade was made knowingly.
+
+So: treat a green run as *"no regression was detected in what the manifest knows about"*, never as
+*"the applications are fine"*. When a batch touches grants on a schema an app uses, re-derive that
+app's entries from a fresh `origin/main` clone instead of trusting this file.
 
 ---
 
