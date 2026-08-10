@@ -210,12 +210,15 @@ database, or any other task. Everything under "Still forbidden" in §0.1-A is un
 **Closure rule — read this before assuming anything is allowed because it is not listed
 above.** This exception waives the read-only proof and **nothing else**. Every other condition
 in §0.1-A still binds — catalog-only `SELECT`s against `information_schema` and `pg_catalog`,
-no long or unbounded scans, and **no row contents read or reported**. Catalog-only is the
+no long or unbounded scans, and **no row contents read or reported** — and `pg_stats` is row
+contents, not catalog metadata, because `most_common_vals` and `histogram_bounds` hold sampled
+values from real columns. Catalog-only is the
 scope Albert was asked about and the scope he approved. So a row count, a sample row, a
 `SELECT` queued by a migration plan (for example
 [`docs/parent-child-answers-20260803.md`](docs/parent-child-answers-20260803.md) or the
 age_group plan's Step D1), and a client-side `pg_dump` are all **outside** this exception and
-each needs its own owner authorisation. The list above enumerates; this sentence closes.
+each needs **its own ruling from Albert**. Not from the Cloud SQL instance owner — instance
+admin is not business authority here. The list above enumerates; this sentence closes.
 
 **Do NOT fix #705.** Albert ruled the account is to be left alone. Stop proposing privilege
 changes for it and do not re-raise it as a blocker.
@@ -234,7 +237,8 @@ changes for it and do not re-raise it as a blocker.
   `op read 'op://vibe_coding/tcaf3o3u2cx52g6ivvczxbhola/DB_PASSWORD'`. The password is in a
   **custom field named `DB_PASSWORD`**, not `credential`. 1Password item IDs can be re-keyed
   mid-session, so if that ID 404s, re-resolve by title with
-  `op item list --vault vibe_coding --format json` (same recovery as §9). Never write the
+  `op item list --vault vibe_coding --format json` (same pattern as §9, `AGENTS.md:1946-1963`).
+  Never write the
   value anywhere.
 
 **Evidence.** The completed capture is at
