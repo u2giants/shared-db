@@ -33,10 +33,35 @@
 --     touches nothing that any app reads. AGENTS.md section 4 rule 3.
 --   * No app reads it, no app writes it, nothing depends on it. Dropping it
 --     later is a no-op for every consumer.
---   * RLS is ENABLED WITH NO POLICIES, and no role is granted anything. Under
---     PostgREST that makes it invisible and unwritable to `anon` and
---     `authenticated`. A canary must not become an accidental attack surface.
+--   * RLS is ENABLED WITH NO POLICIES, **and the schema's default grant is
+--     REVOKED**. Read the next paragraph before copying this file.
 --   * `if not exists` so a re-run cannot fail.
+--
+-- ***** RLS ALONE IS NOT ENOUGH IN THIS SCHEMA. READ THIS. *****
+--
+-- An earlier draft of this header asserted that this table granted nothing to
+-- any role, and relied on RLS-with-no-policies alone. That claim was FALSE, and
+-- the reason is worth knowing because it will catch the next person too.
+--
+-- `20260710135975_reconcile_service_role_grants.sql` line 14 runs
+--
+--     alter default privileges in schema plm grant all on tables to service_role;
+--
+-- A default-privilege rule fires at CREATE TABLE, silently, with nothing in the
+-- creating migration to hint at it. So EVERY new `plm.*` table is born with ALL
+-- privileges already held by `service_role` -- and `service_role` BYPASSES RLS
+-- in Supabase entirely. "RLS enabled, no policies" therefore locks out `anon`
+-- and `authenticated` but does nothing whatsoever about `service_role`.
+--
+-- That is the exact defect `20260810080000`, `20260810090000` and the Warner
+-- revoke work all exist to clean up, and it reappeared here in the one file
+-- whose entire purpose is to be the safest possible change. The blast radius is
+-- nil -- an empty table nothing reads -- but a false comment is what the next
+-- author copies, which is why it is corrected rather than deleted.
+--
+-- The revoke below uses a bare `revoke all` rather than enumerating privilege
+-- bits. Hand-enumeration misses `MAINTAIN` on PostgreSQL 17.6 and would need
+-- editing on every future privilege addition; `all` cannot go stale.
 --
 -- DO NOT extend this table, do not add columns to it later, and do not build
 -- anything on it. If you need a second canary, write a second migration.
@@ -60,7 +85,55 @@ comment on table plm.production_lane_canary is
 
 alter table plm.production_lane_canary enable row level security;
 
--- No policies and no grants, on purpose. See the header.
+-- No policies, on purpose. See the header.
+
+-- Undo the schema default grant that CREATE TABLE just applied, plus the three
+-- browser-facing grantees for symmetry. `public` first: `anon` and
+-- `authenticated` inherit from it, so revoking them without it leaves the
+-- privilege reachable.
+revoke all on plm.production_lane_canary from public;
+revoke all on plm.production_lane_canary from anon;
+revoke all on plm.production_lane_canary from authenticated;
+revoke all on plm.production_lane_canary from service_role;
+
+-- Assert the RESULT, not that the statements above ran. A revoke that silently
+-- did nothing looks identical in a migration log to one that worked, and this
+-- migration's whole job is to be trustworthy evidence.
+--
+-- Two checks on purpose. `aclexplode` is version-proof and needs no privilege
+-- names, so it catches MAINTAIN on PG 17.6 and anything Postgres adds later.
+-- `has_table_privilege` then names the seven universal bits explicitly, so a
+-- failure says WHICH privilege survived instead of just "something did".
+do $$
+declare
+  v_leftover text;
+  v_priv     text;
+  v_role     text;
+begin
+  select string_agg(distinct a.grantee::regrole::text || ':' || a.privilege_type, ', ')
+    into v_leftover
+    from pg_class c
+    cross join lateral aclexplode(c.relacl) a
+   where c.oid = 'plm.production_lane_canary'::regclass
+     and a.grantee::regrole::text in
+         ('public', 'anon', 'authenticated', 'service_role');
+  if v_leftover is not null then
+    raise exception
+      'production_lane_canary still grants % -- the revoke did not take. The '
+      'plm schema default privileges (20260710135975) grant ALL to service_role '
+      'at CREATE TABLE, and service_role bypasses RLS.', v_leftover;
+  end if;
+
+  foreach v_role in array array['anon', 'authenticated', 'service_role'] loop
+    foreach v_priv in array array['select', 'insert', 'update', 'delete',
+                                  'truncate', 'references', 'trigger'] loop
+      if has_table_privilege(v_role, 'plm.production_lane_canary', v_priv) then
+        raise exception 'production_lane_canary: % still holds %',
+          v_role, v_priv;
+      end if;
+    end loop;
+  end loop;
+end $$;
 
 insert into plm.production_lane_canary (note)
 values (

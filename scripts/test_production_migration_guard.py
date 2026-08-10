@@ -1208,12 +1208,85 @@ class CanaryTests(unittest.TestCase):
                 self.assertNotIn(forbidden, lowered)
         self.assertIn("create table if not exists", lowered)
 
-    def test_the_canary_is_not_reachable_from_the_browser_roles(self) -> None:
+    def test_the_canary_revokes_the_schema_default_grant(self) -> None:
+        """RLS ALONE IS NOT ENOUGH IN `plm`, and this test exists to say so.
+
+        `20260710135975_reconcile_service_role_grants.sql` line 14 runs
+        `alter default privileges in schema plm grant all on tables to
+        service_role`. That fires at CREATE TABLE, silently, with nothing in the
+        creating migration to hint at it -- so every new `plm.*` table is born
+        with ALL privileges held by `service_role`, and `service_role` BYPASSES
+        RLS in Supabase.
+
+        An earlier draft of this canary claimed "no role is granted anything"
+        and relied on RLS with no policies. That was false. The blast radius was
+        nil (an empty table nothing reads); the danger was the comment, because
+        a header that states a safety property the file does not have is what
+        the next author copies.
+        """
         raw = local_migrations(REPO)[self.VERSION].read_text(encoding="utf-8")
         lowered = strip_sql(raw)
         self.assertIn("enable row level security", lowered)
         self.assertNotIn("create policy", lowered)
-        self.assertNotIn("grant ", lowered)
+        for role in ("public", "anon", "authenticated", "service_role"):
+            with self.subTest(role=role):
+                self.assertIn(
+                    "revoke all on plm.production_lane_canary from " + role,
+                    lowered,
+                )
+
+    def test_the_canary_revokes_with_ALL_not_an_enumerated_list(self) -> None:
+        """A hand-enumerated list misses MAINTAIN on PG 17.6 and goes stale."""
+        raw = local_migrations(REPO)[self.VERSION].read_text(encoding="utf-8")
+        lowered = strip_sql(raw)
+        for line in lowered.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("revoke "):
+                with self.subTest(line=stripped):
+                    self.assertTrue(
+                        stripped.startswith("revoke all "),
+                        "revoke bits individually and the next privilege "
+                        "Postgres adds is silently left granted",
+                    )
+
+    def test_the_canary_asserts_the_RESULTING_privileges_at_apply_time(self) -> None:
+        """The assertion must be about the RESULT, not that the statements ran.
+
+        A revoke that silently did nothing looks identical in a migration log to
+        one that worked. This canary's entire job is to be trustworthy evidence
+        that the lane works, so it self-checks in the database it just wrote to
+        and raises if any privilege survived. That is stronger than anything
+        this offline suite could assert, because it runs against the real
+        production catalog.
+        """
+        raw = local_migrations(REPO)[self.VERSION].read_text(encoding="utf-8").lower()
+        # Version-proof check: catches MAINTAIN without naming it.
+        self.assertIn("aclexplode", raw)
+        # Named bits, so a failure says WHICH privilege survived.
+        self.assertIn("has_table_privilege", raw)
+        for privilege in (
+            "select",
+            "insert",
+            "update",
+            "delete",
+            "truncate",
+            "references",
+            "trigger",
+        ):
+            with self.subTest(privilege=privilege):
+                self.assertIn("'" + privilege + "'", raw)
+        for role in ("anon", "authenticated", "service_role"):
+            with self.subTest(role=role):
+                self.assertIn("'" + role + "'", raw)
+        self.assertIn("raise exception", raw)
+
+    def test_the_canary_header_no_longer_claims_it_grants_nothing(self) -> None:
+        """Guard against the false claim reappearing by copy-paste."""
+        raw = local_migrations(REPO)[self.VERSION].read_text(encoding="utf-8")
+        self.assertNotIn("no role is granted anything", raw)
+        # And it must explain WHY the revoke is needed, not just do it.
+        self.assertIn("20260710135975", raw)
+        self.assertIn("default privileges", raw)
 
     def test_the_canary_passes_the_guard_on_its_own(self) -> None:
         remote = production_ledger_versions()
