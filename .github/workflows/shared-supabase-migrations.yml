@@ -71,6 +71,15 @@ jobs:
         run: node --test tools/coldlion-promotion-failure-recording.test.mjs
       - name: Test production guard
         run: python -m unittest scripts/test_production_migration_guard.py
+      # Issue #697. Offline, no database, no network, no secrets -- it drives the
+      # target DERIVATION, the SQL builder and the report renderer on temporary
+      # files and literals. It lives HERE, in this lane's own pull-request gate,
+      # rather than in the Node-only `Promotion contract tests (offline)` job,
+      # because it is Python and this is the job that already guards this lane.
+      # #695 records that supabase/tests/ exists and nothing runs it; this must
+      # not join that pile.
+      - name: Test post-apply catalog verification
+        run: python -m unittest scripts/test_production_catalog_verification.py
 
   preview:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'preview'
@@ -343,6 +352,7 @@ jobs:
             --allowlist "$PRODUCTION_ALLOWLIST" \
             --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
       - name: Fresh dry-run, then apply
+        id: apply
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
@@ -376,6 +386,48 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/bounded-production"
           supabase migration list --linked | tee "$RUNNER_TEMP/production-ledger-after.txt"
+      # =====================================================================
+      # POST-APPLY CATALOG VERIFICATION (issue #697).
+      #
+      # `supabase db push` DISCARDS `RAISE NOTICE` and every DO-block output,
+      # and the step above is a LEDGER read. Without this step the lane can
+      # prove that it WROTE but not WHAT it wrote -- after the fully green
+      # canary apply, only 2 of 5 basic checks were provable from the
+      # artifacts (#677). "The table exists", "it holds exactly one row" and
+      # "RLS is on with zero policies" were all inference from reading the
+      # SQL. For the licensor batches, which are largely ABOUT grants and RLS,
+      # that is not good enough: whether a revoke actually took is a CATALOG
+      # FACT, and this is the step that reports it.
+      #
+      # STRICTLY READ-ONLY. It sends SELECT-only statements to the Supabase
+      # Management API `database/query` endpoint with `read_only: true`. It
+      # does NOT touch the Supabase CLI, does NOT resolve a binary by version
+      # string (#688), and cannot influence `verify_dry_run` (#697 trap list).
+      # It uses the SUPABASE_ACCESS_TOKEN already in this job -- no new secret.
+      #
+      # `if: always()` so a FAILED apply still produces catalog evidence, which
+      # is when it is most wanted. The mode switches to `record` in that case:
+      # after a failed apply a missing object is already explained, and failing
+      # again on it would only add noise to an already-red run.
+      # =====================================================================
+      - name: Post-apply catalog verification
+        if: always()
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+          VERIFY_MODE: ${{ steps.apply.outcome == 'success' && 'enforce' || 'record' }}
+        run: |
+          # pipefail or `tee` swallows the exit code and an ENFORCING failure
+          # would silently go green -- the exact defect this step exists to end.
+          set -o pipefail
+          python scripts/production_catalog_verification.py \
+            --repo "$GITHUB_WORKSPACE" \
+            --allowlist "$PRODUCTION_ALLOWLIST" \
+            --output-dir "$RUNNER_TEMP/catalog-verification" \
+            --project-ref "$PRODUCTION_PROJECT_REF" \
+            --token "$SUPABASE_ACCESS_TOKEN" \
+            --mode "$VERIFY_MODE" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Save apply evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -386,5 +438,7 @@ jobs:
             ${{ runner.temp }}/production-dry-run.txt
             ${{ runner.temp }}/production-apply.txt
             ${{ runner.temp }}/production-ledger-after.txt
+            ${{ runner.temp }}/catalog-verification/production-catalog-verification.md
+            ${{ runner.temp }}/catalog-verification/production-catalog-verification.json
           if-no-files-found: warn
           retention-days: 90
