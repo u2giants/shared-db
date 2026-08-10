@@ -1198,7 +1198,7 @@ class ApplyLaneTests(unittest.TestCase):
 class CanaryTests(unittest.TestCase):
     """Customer #1 for the apply lane -- deliberately NOT a licensor feature."""
 
-    VERSION = "20260810130000"
+    VERSION = "20260810140000"
 
     def test_the_canary_exists_and_is_additive_only(self) -> None:
         raw = local_migrations(REPO)[self.VERSION].read_text(encoding="utf-8")

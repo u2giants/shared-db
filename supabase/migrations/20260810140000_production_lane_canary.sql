@@ -53,7 +53,7 @@ create table if not exists plm.production_lane_canary (
 
 comment on table plm.production_lane_canary is
   'No-op canary for the bounded production migration apply lane (issue #660). '
-  'Written by migration 20260810130000 as the first change ever pushed through '
+  'Written by migration 20260810140000 as the first change ever pushed through '
   'the production-apply job, so that a lane failure could never be confused '
   'with a licensor feature failure. No application reads or writes this table. '
   'Do not extend it and do not build on it.';

@@ -537,7 +537,7 @@ you want on the one run that writes. The dry-run job is now read-only (`link`,
 `migration list`, `db push --dry-run`) and ungated. **If you ever add a mutating command to it,
 put the environment back first.**
 
-**Customer #1 is a canary, not a licensor feature.** `20260810130000_production_lane_canary.sql`
+**Customer #1 is a canary, not a licensor feature.** `20260810140000_production_lane_canary.sql`
 creates one table, inserts one row, and is read by nothing. It goes through the lane first so a
 lane failure can never be confused with a migration failure. This lane has already produced two
 failures that looked like migration faults and were neither — both lexer bugs in
