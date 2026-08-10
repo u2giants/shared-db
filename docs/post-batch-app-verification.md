@@ -87,19 +87,47 @@ exposed to the shared production project — it asks the catalog, not the migrat
 | The clock agrees | `TimeZone` + a midday-UTC pin | This database runs `America/New_York` |
 | Batch-specific facts | §7.2 | See below |
 
-Plus the **batch-specific** assertions the contract names in §7.2, one query each:
+Plus the **batch-specific** assertions §7.2 names — one query each, and **cumulative**: a run for B<n>
+re-checks every assertion from B0 through B<n>, because these are invariants about the state each
+batch established, not one-shot "did the SQL run" checks. A later migration or a manual fix can
+regress any of them, and §6's exposed states are defined by exactly these properties.
 
-| Batch | Asserted |
+| Batch | Asserted automatically |
 |---|---|
+| **B0** | `plm.production_lane_canary` exists, holds **exactly one** row, has RLS on with **zero** policies |
 | **B1** | `sync_coldlion_licensors_properties` is 3-arg; the 2-arg overload is **gone** from both `plm` and `public` |
+| **B2** | The tree function still resolves at its exact 4-arg signature; its body reaches `plm."divisionCode"`; that table exists |
+| **B3** | `plm.promote_coldlion_source_owned` exists and its body carries the **advisory lock** that distinguishes the eighth body from the earlier unsafe ones |
+| **B4** | `core.licensor_alias` exists and `normalized_alias` is `GENERATED ALWAYS` |
+| **B5** | The ack-authority function resolves from `current_user` and **not** `session_user`, and rejects a NULL effective role |
 | **B6** | The 8-argument `trip_taxonomy_circuit_breaker` is gone from both schemas |
-| **B7** | `api.opa_property_reconciliation` survived its drop-and-recreate, and has a readable definition |
-| **B8** | `core.product_size` exists, holds rows, holds **active** rows; `core.product_depth` exists |
-| **B9** | `api.dam_order_list` has `security_invoker=true` (#653); no Warner `plm.wb_*` SELECT policy is still `using (true)`; `service_role` holds no TRUNCATE on `plm.pmt_*` |
+| **B7** | `api.opa_property_reconciliation` survived its drop-and-recreate and has a readable definition |
+| **B8** | `core.product_size` holds **exactly 538 rows / 530 active / 8 inactive**, `core.product_depth` **exactly 121** — the constants the seed migrations assert against |
+| **B9** | `api.dam_order_list` has `security_invoker=true` (#653); **all eight** Warner tables carry the `app.has_any_role` gate with a non-null qual; `service_role` holds no TRUNCATE on `plm.pmt_*`, and the 23 tables are actually present |
 
-And it refuses to certify an illegal state: if the last version applied is on contract §6's
-never-rest list, or is the retired `20260729120000`, or is one of the two §6.5-held versions, the run
-**fails** and tells you to complete the batch rather than verify and wait.
+**Every batch also has a manual checklist** printed in the report, for what §7.2 requires that no
+query can answer — most importantly **B3's ColdLion promotion dry pass**, because §7.2 states
+incomplete provenance is *unrecoverable after the fact*. The report never says "there is nothing to
+check"; where this tool has no automated check it says so and names what a human still owes.
+
+It refuses to certify an illegal state: if the last version applied is on §6's never-rest list, or is
+the retired `20260729120000`, or is one of the two §6.5-held versions, the run **fails** and tells you
+to complete the batch rather than verify and wait.
+
+### It also checks that you named the right batch
+
+The batch identifier is a claim by the operator, and an agent that applies B9 and types `--batch B5`
+would get B5's extras, skip every B9 security assertion, and see green. So the run reads
+`supabase_migrations.schema_migrations` and **fails** if the claimed batch's resting point is missing,
+or if a later batch has also landed.
+
+**This is the only place the ledger is read**, and only for the one thing it is authoritative about —
+*which migrations ran*. It is never treated as evidence of what they left behind.
+
+> **A trap worth knowing.** The batches are **not** applied in version order. B0 is the canary
+> `20260810140000`, which sorts numerically *above* every version in B1–B8. A `max(version)` check
+> therefore reports "you are at B0" on a database where B1 has landed — this tool did exactly that on
+> its first live run. The check is presence-per-resting-point, not maximum.
 
 ---
 
@@ -135,8 +163,15 @@ surfaced three things worth their own tickets:
    yet; B8 creates it. `StylesPage.tsx` swallows the error and shows `COMMON_SIZE_OPTIONS`. This is
    exactly the silent failure §3.2 warns about, happening now, and nobody has noticed.
 3. **Two contract claims did not reproduce** against today's `origin/main`: `core.product_material`
-   has no reader at all, and `dam_character_catalog` is read from `public`, not `api`. Both are
-   recorded in the script's `MANIFEST_DRIFT` rather than dropped.
+   has no reader at all (and **already exists on production** — it is not something B8 creates), and
+   `dam_character_catalog` is read from `public`, not `api`. Filed as **#721**.
+4. **PopDAM's worker calls a schema PostgREST does not expose.**
+   `apps/worker/src/handlers/ai-tagging-shared.ts:269` does
+   `.schema("dam").from("sku_human_description")`. The relation exists and `service_role` can read
+   it, but `dam` is absent from `pgrst.db_schemas`, so that call path 404s today. Reported in every
+   run as an exposure gap, not a missing object.
+
+The PopPIM privilege gap is **#720**; the contract drift is **#721**. Neither is fixed in this PR.
 
 ---
 
@@ -190,3 +225,16 @@ do. It stays a human step (§7.0), and the report says so in every run.
    `BASELINE_GAP_POLICY` in the script and is exactly one privilege wide per entry.
 6. **The non-default `User-Agent` is load-bearing.** Cloudflare answers HTTP 403 (error 1010) to
    `Python-urllib`, and the run then looks like an auth failure it is not.
+7. **One query set per application, never one flattened query.** Three relations — `core.licensor`,
+   `core.customer`, `core.contact_company` — appear in two applications each with different roles and
+   privileges. Keying shared evidence by relation name lets one app's row overwrite another's, and
+   the first version of this tool printed "all three applications PASS" on a database where PopPIM's
+   collab pane and PopDAM's customer picker were both dead. Per-app queries make that structurally
+   impossible. `CrossAppRelationCollisionTests` is the regression guard; do not merge the queries
+   back together for speed.
+8. **Two-zone date checks must actually use two zones.** `timestamptz::date` already converts through
+   `TimeZone`, so `(ts at time zone 'UTC')::date` is the *server* date, not the UTC one. The UTC leg
+   needs a second `at time zone 'UTC'`. The first version was a tautology that could never fire.
+9. **Privileges come from `has_table_privilege`, never `information_schema.role_table_grants`.** The
+   latter only reports grants involving currently-enabled roles, and from the Management API
+   connection it returns nothing for `service_role` — so a `not exists` check on it passes forever.

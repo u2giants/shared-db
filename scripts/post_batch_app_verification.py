@@ -176,11 +176,42 @@ POSTGREST_UNEXPOSED_SCHEMAS = frozenset({"plm"})
 # from production's `pgrst.db_schemas` and compared against this set.
 REQUIRED_POSTGREST_SCHEMAS = ("api", "app", "core", "crm", "pim", "public")
 
+# L10. Schemas an application addresses THROUGH PostgREST that production does
+# not expose. Not in REQUIRED_POSTGREST_SCHEMAS -- their absence is the status
+# quo, not something a batch broke -- but reported in every run, because leaving
+# them silently off the required list is how a known-broken call path becomes
+# invisible.
+POSTGREST_ADDRESSED_BUT_UNEXPOSED = {
+    "dam": "popdam3 apps/worker/src/handlers/ai-tagging-shared.ts:269-270 does "
+    ".schema('dam').from('sku_human_description'). The relation exists and "
+    "service_role can SELECT it (verified 2026-08-10), so this is an exposure "
+    "gap, not a missing object. Either expose `dam` or change that call path.",
+}
+
 IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
+PROJECT_REF = re.compile(r"^[a-z]{20}$")
 
 
 class VerificationError(Exception):
     """Raised for anything that makes the verification itself untrustworthy."""
+
+
+def quote_literal(value: str) -> str:
+    """Single-quote a string for SQL. Identifiers are validated, not escaped."""
+    return "'" + value.replace("'", "''") + "'"
+
+
+def check_identifier(value: str, what: str) -> str:
+    """Refuse anything that is not a plain lowercase identifier.
+
+    Every identifier in this module comes from the hardcoded manifest above, so
+    this can never fire in normal operation. It exists so that a future edit
+    that pastes in a name from an untrusted place fails LOUDLY at build time
+    rather than producing surprising SQL.
+    """
+    if not IDENTIFIER.match(value):
+        raise VerificationError(f"refusing to build SQL for a non-identifier {what}: {value!r}")
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -849,14 +880,19 @@ OUT_OF_SCOPE = {
 # Recorded rather than dropped, because a silent divergence between the contract
 # and the check is exactly how a check drifts into proving nothing.
 MANIFEST_DRIFT = (
+    "Contract drift is tracked in issue #721; the PopPIM privilege gap below is "
+    "issue #720. Neither is fixed here.",
     "Contract §3.2 and §7.2/B8 say StylesPage.tsx reads `core.product_material` "
     "and falls back to COMMON_PRODUCT_MATERIAL_OPTIONS. On origin/main as of "
     "2026-08-10 there is NO such read: `product_material` survives only as an "
     "array COLUMN on the assets facet (src/hooks/useAssets.ts:179). "
     "`core.product_material` is therefore NOT in the PopDAM manifest. "
-    "`core.product_depth` likewise has no reader. B8 still creates them; they "
-    "are simply not yet an application dependency, so their absence would not "
-    "break PopDAM today.",
+    "CORRECTION to an earlier draft of this note, which said 'B8 still creates "
+    "them': `core.product_material` ALREADY EXISTS on production today "
+    "(to_regclass returns it, verified 2026-08-10). B8 creates "
+    "`core.product_depth`, which does not exist yet. So product_material is an "
+    "existing table with no reader, and product_depth is a future table with no "
+    "reader -- two different situations that the earlier wording merged.",
     "Contract §3.2 lists `api.dam_character_catalog`. On origin/main the reads "
     "are UNQUALIFIED (`client.from(\"dam_character_catalog\")`) and ApisTab.tsx:283 "
     "passes the schema explicitly as \"public\". It is recorded as "
@@ -887,7 +923,62 @@ class BatchExtra:
     why: str
 
 
+# Expected seed sizes, copied from the constants the seed migrations assert
+# against so the two cannot drift apart silently. See the B8 block below.
+PRODUCT_SIZE_EXPECTED_TOTAL = 538
+PRODUCT_SIZE_EXPECTED_ACTIVE = 530
+PRODUCT_SIZE_EXPECTED_INACTIVE = 8
+PRODUCT_DEPTH_EXPECTED_TOTAL = 121
+
+# The eight Warner tables, named in 20260810110000 lines 91-93 and 111-113.
+WARNER_TABLES = (
+    "wb_franchise_property",
+    "wb_style_guide",
+    "wb_character",
+    "wb_asset",
+    "wb_asset_style_guide",
+    "wb_asset_franchise_property",
+    "wb_asset_character",
+    "wb_property_character",
+)
+
+# 20260810090000 header: "TRUNCATE and TRIGGER revoked from service_role on the
+# 23 plm.pmt_* tables."
+PARAMOUNT_TABLE_COUNT = 23
+
 BATCH_EXTRAS: dict[str, tuple[BatchExtra, ...]] = {
+    # M4. §7.2 defines an extra for all ten batches. The first version covered
+    # five and printed "the contract defines no batch-specific database check"
+    # for the rest -- which affirmatively told the operator there was nothing to
+    # check when the contract said there was. Every batch now has either a real
+    # automated check or an explicit entry in `MANUAL_ONLY_BATCHES` naming what
+    # a human must still do. Neither list may be empty for a batch.
+    "B0": (
+        BatchExtra(
+            "canary_table_exists",
+            "to_regclass('plm.production_lane_canary') is not null",
+            "§7.2/B0: the canary exists to prove the LANE, and its whole design "
+            "argument is that one row in one table is checkable where a comment "
+            "would not be. 20260810140000 line 33 says so explicitly.",
+        ),
+        BatchExtra(
+            "canary_holds_exactly_one_row",
+            "(select count(*) from plm.production_lane_canary) = 1",
+            "The migration's own stated verification: `select * from "
+            "plm.production_lane_canary; -- expect exactly 1 row`. This is the "
+            "one assertion that distinguishes 'the SQL ran' from 'a ledger row "
+            "was written' -- the exact doubt #611 is about.",
+        ),
+        BatchExtra(
+            "canary_has_rls_on_and_no_policies",
+            "(select c.relrowsecurity from pg_class c where c.oid = "
+            "to_regclass('plm.production_lane_canary')) "
+            "and not exists (select 1 from pg_policies where schemaname = 'plm' "
+            "and tablename = 'production_lane_canary')",
+            "The migration states RLS is enabled WITH NO POLICIES. Asserting it "
+            "proves the security posture landed, not just the table.",
+        ),
+    ),
     "B1": (
         BatchExtra(
             "coldlion_sync_is_three_arg",
@@ -904,6 +995,103 @@ BATCH_EXTRAS: dict[str, tuple[BatchExtra, ...]] = {
             "and p.pronargs = 2)",
             "§D3.1: the drop is the destructive half. A surviving 2-arg overload "
             "means PostgREST/callers can still resolve the old body.",
+        ),
+    ),
+    "B2": (
+        BatchExtra(
+            "db_data_admin_tree_function_still_resolves",
+            "to_regprocedure('api.db_data_admin_licensor_property_tree"
+            "(text,boolean,text,integer)') is not null",
+            "§7.3, THE HIGHEST-PROBABILITY ABORT IN THE WHOLE BACKLOG. "
+            "20260728171500 reads the LIVE catalog body via pg_get_functiondef, "
+            "string-patches it and re-executes it. If it half-worked, this exact "
+            "signature is what the app calls and what must still resolve.",
+        ),
+        BatchExtra(
+            "db_data_admin_tree_reads_division_names_not_codes",
+            "pg_get_functiondef(to_regprocedure('api.db_data_admin_licensor_property_tree"
+            "(text,boolean,text,integer)')) like '%divisionCode%'",
+            "§7.2/B2: the point of the batch is that the tree shows division "
+            "NAMES instead of numeric codes. The patched body reaches "
+            "plm.\"divisionCode\"; an unpatched body does not mention it at all. "
+            "This is the database half of 'confirm division names appear'.",
+        ),
+        BatchExtra(
+            "division_code_table_exists",
+            "to_regclass('plm.\"divisionCode\"') is not null",
+            "§7.3: 20260728171500 references plm.\"divisionCode\", a table "
+            "created NOWHERE in the backlog -- it depends on production already "
+            "having it. If it is absent the patched function is broken at "
+            "runtime, not at apply time.",
+        ),
+    ),
+    "B3": (
+        BatchExtra(
+            "promote_coldlion_source_owned_exists",
+            "exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+            "where n.nspname = 'plm' and p.proname = 'promote_coldlion_source_owned')",
+            "§5/B3 is eight successive bodies of this one function and only the "
+            "eighth is safe to rest on.",
+        ),
+        BatchExtra(
+            "promote_coldlion_has_the_serialization_lock",
+            "(select bool_and(pg_get_functiondef(p.oid) like '%pg_advisory%') "
+            "from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+            "where n.nspname = 'plm' and p.proname = 'promote_coldlion_source_owned')",
+            "§5/B3: the earlier bodies have NO SERIALIZATION LOCK. Resting on "
+            "one of them is a named unsafe state, and the advisory lock is the "
+            "difference between the eighth body and the earlier ones.",
+        ),
+    ),
+    "B4": (
+        BatchExtra(
+            "core_licensor_alias_exists",
+            "to_regclass('core.licensor_alias') is not null",
+            "§5/B4 creates the alias table. Additive and read by nothing yet, so "
+            "existence is the whole of the database-side check.",
+        ),
+        BatchExtra(
+            "core_licensor_alias_has_its_normalizer",
+            "exists (select 1 from information_schema.columns "
+            "where table_schema = 'core' and table_name = 'licensor_alias' "
+            "and column_name = 'normalized_alias' and is_generated = 'ALWAYS')",
+            "20260731210000 lines 132-133: normalized_alias is a GENERATED "
+            "ALWAYS STORED column. This repo has already shipped a guard broken "
+            "by exactly this feature (a BEFORE trigger reading a STORED column "
+            "Postgres populates AFTER before-triggers), so its presence and its "
+            "generated-ness are both worth asserting.",
+        ),
+    ),
+    "B5": (
+        BatchExtra(
+            "taxonomy_ack_authority_exists",
+            "exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+            "where n.nspname = 'plm' and p.proname = 'assert_taxonomy_alert_ack_authority')",
+            "§5/B5 rests on 20260802160000, which fixes the effective-role check.",
+        ),
+        BatchExtra(
+            "taxonomy_ack_resolves_role_from_current_user_not_session_user",
+            "(select bool_and(pg_get_functiondef(p.oid) like '%current_user%' "
+            "and pg_get_functiondef(p.oid) not like '%session_user%') "
+            "from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+            "where n.nspname = 'plm' and p.proname = 'assert_taxonomy_alert_ack_authority')",
+            "§7.2/B5 asks whether the effective-role check accepts a "
+            "non-administrator. THIS IS THE BATCH'S ENTIRE POINT: 20260802160000 "
+            "replaces `coalesce(v_jwt_role, session_user)` with "
+            "`coalesce(v_jwt_role, current_user)`. Resting on the unfixed body "
+            "means the wrong role is authorised. Asserting the BODY is the only "
+            "way to tell the two apart from the catalog.",
+        ),
+        BatchExtra(
+            "taxonomy_ack_rejects_a_null_effective_role",
+            "(select bool_and(pg_get_functiondef(p.oid) like '%is null%') "
+            "from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+            "where n.nspname = 'plm' and p.proname = 'assert_taxonomy_alert_ack_authority')",
+            "20260802160000 line 74 adds an explicit `if v_effective is null "
+            "then` before the membership test. That is the null-permissive "
+            "defence in SQL form -- without it a NULL role makes "
+            "`v_effective = any(v_allowed)` evaluate to NULL and the guard never "
+            "fires. It is the same bug class this module guards in Python.",
         ),
     ),
     "B6": (
@@ -932,19 +1120,52 @@ BATCH_EXTRAS: dict[str, tuple[BatchExtra, ...]] = {
         ),
     ),
     "B8": (
+        # M5. `count(*) > 0` is NOT what §7.2/B8 asks for. The contract says to
+        # cross-check the picker contents against WHAT B8 SEEDED, and §6 warns
+        # that a HALF-seeded core.product_size is exactly what PopDAM swallows
+        # into COMMON_SIZE_OPTIONS. A half-seeded table passes `> 0` happily.
+        #
+        # The expected numbers are not invented here: they are the constants the
+        # seed migration itself asserts against, so this check and the migration
+        # cannot drift apart without one of them failing.
+        #   20260809170200_core_product_size_seed_from_legacy_mg04.sql:54-56
+        #     v_expected_identities = 538, v_expected_active = 530,
+        #     v_expected_inactive = 8
+        #   20260809170100_core_product_depth_seed_from_designflow.sql:29
+        #     v_expected_rows = 121
+        #
+        # Equality, not `>=`: the seed is an upsert on an identity tuple and the
+        # migration asserts exact equality itself, so any other number means
+        # either the seed did not complete or something else wrote to the table.
         BatchExtra(
-            "core_product_size_is_seeded",
-            "(select count(*) from core.product_size) > 0",
-            "§7.2/B8 -- THE MOST IMPORTANT CHECK IN THE CONTRACT. An empty or "
-            "half-seeded core.product_size is exactly what PopDAM swallows: "
-            "StylesPage falls back to a hardcoded list and reports nothing. A "
-            "plausible-looking picker is not evidence of success.",
+            "core_product_size_row_count_matches_the_seed",
+            f"(select count(*) from core.product_size) = {PRODUCT_SIZE_EXPECTED_TOTAL}",
+            f"§7.2/B8 -- THE MOST IMPORTANT CHECK IN THE CONTRACT. Expect exactly "
+            f"{PRODUCT_SIZE_EXPECTED_TOTAL} rows, the number the seed migration "
+            "asserts at line 54. A half-seeded table is what PopDAM swallows into "
+            "a hardcoded list while reporting nothing, so 'some rows' is not a pass.",
         ),
         BatchExtra(
-            "core_product_size_has_active_rows",
-            "(select count(*) from core.product_size where status = 'active') > 0",
-            "PopDAM filters .eq('status','active'). Rows that all landed "
-            "inactive are indistinguishable from no rows at all, in the UI.",
+            "core_product_size_active_count_matches_the_seed",
+            "(select count(*) from core.product_size where status = 'active') = "
+            f"{PRODUCT_SIZE_EXPECTED_ACTIVE}",
+            f"Expect exactly {PRODUCT_SIZE_EXPECTED_ACTIVE} active rows (seed line 55). "
+            "PopDAM filters .eq('status','active'), so the active count is what "
+            "reaches the picker -- rows that all landed inactive look identical to "
+            "no rows at all.",
+        ),
+        BatchExtra(
+            "core_product_size_inactive_count_matches_the_seed",
+            "(select count(*) from core.product_size where status <> 'active') = "
+            f"{PRODUCT_SIZE_EXPECTED_INACTIVE}",
+            f"Expect exactly {PRODUCT_SIZE_EXPECTED_INACTIVE} inactive rows (seed line "
+            "56) -- the named historical identities. Missing them means the legacy "
+            "mirror drifted and the seed took a different path than intended.",
+        ),
+        BatchExtra(
+            "core_product_depth_row_count_matches_the_seed",
+            f"(select count(*) from core.product_depth) = {PRODUCT_DEPTH_EXPECTED_TOTAL}",
+            f"Expect exactly {PRODUCT_DEPTH_EXPECTED_TOTAL} rows (depth seed line 29).",
         ),
         BatchExtra(
             "core_product_depth_exists",
@@ -964,23 +1185,72 @@ BATCH_EXTRAS: dict[str, tuple[BatchExtra, ...]] = {
             "bypassing RLS on core.customer, core.factory and plm.item for every "
             "authenticated reader. 20260810110000 is the fix.",
         ),
+        # M7. The first version asserted `not exists (... qual = 'true')`.
+        # `pg_policies.qual` is a DEPARSED expression, so `using ((1=1))`,
+        # `using (true or ...)` or any other spelling of "everyone" slips
+        # straight through a literal string match, and a NULL qual -- a policy
+        # with no USING clause at all -- was not asserted either.
+        #
+        # The fix is to stop asserting the absence of the BAD state and assert
+        # the presence of the GOOD one, which is the same positive-match
+        # discipline `is_explicit_true` applies on the Python side. The gate
+        # 20260810110000 installs calls `app.has_any_role(...)` (line 123), so
+        # every one of the eight tables must carry a SELECT policy whose qual is
+        # NON-NULL and references that function. Anything else -- `true`,
+        # `(1=1)`, a dropped policy, a missing table -- fails.
         BatchExtra(
-            "warner_read_gate_is_not_wide_open",
-            "not exists (select 1 from pg_policies where schemaname = 'plm' "
-            "and tablename like 'wb\\_%' and cmd = 'SELECT' and qual = 'true')",
-            "§5/§6: between 20260810030000 and 20260810110000 the eight Warner "
-            "tables carry `for select to authenticated using (true)` -- every "
-            "authenticated account in the shared project can read confidential "
-            "STARLABS data. A surviving `using (true)` means B9 did not complete.",
+            "warner_read_gate_is_the_role_gate_on_all_eight_tables",
+            "(select count(*) from pg_policies p "
+            "where p.schemaname = 'plm' and p.tablename = any (array["
+            + ", ".join(quote_literal(t) for t in WARNER_TABLES)
+            + "]) and p.cmd = 'SELECT' and p.qual is not null "
+            "and p.qual like '%has_any_role%') = "
+            + str(len(WARNER_TABLES)),
+            "§5/§6, the SECOND-WORST state in the contract: between 20260810030000 "
+            "and 20260810110000 the eight Warner tables carry `for select to "
+            "authenticated using (true)` and every authenticated account in the "
+            "shared project can read confidential STARLABS data. This asserts the "
+            "POSITIVE end state -- all eight tables carrying the "
+            "`app.has_any_role` gate with a non-null qual -- because matching the "
+            "literal string 'true' misses `(1=1)`, `true or ...` and a NULL qual.",
         ),
+        # H3. The first version used `information_schema.role_table_grants`,
+        # which only reports grants involving CURRENTLY ENABLED roles. From the
+        # Management API connection `current_user` is `supabase_read_only_user`,
+        # so it returns ZERO rows for `service_role` in any schema -- verified
+        # against production on 2026-08-10 -- and `not exists (empty)` is
+        # unconditionally TRUE. This check could never fail, which is the worst
+        # possible property for a check guarding the contract's #1-ranked
+        # exposed state.
+        #
+        # `has_table_privilege` asks the catalog directly and does not care
+        # which roles the reader has enabled. It is the primitive this module's
+        # own docstring already names, and the one every other privilege check
+        # here uses.
         BatchExtra(
             "paramount_service_role_has_no_truncate",
-            "not exists (select 1 from information_schema.role_table_grants "
-            "where table_schema = 'plm' and table_name like 'pmt\\_%' "
-            "and grantee = 'service_role' and privilege_type = 'TRUNCATE')",
-            "§5: TRUNCATE does not fire row-level triggers, so one statement "
-            "silently bypasses all five immutability guards. 20260810090000 "
-            "closes it.",
+            "not exists (select 1 from pg_class c "
+            "join pg_namespace n on n.oid = c.relnamespace "
+            "where n.nspname = 'plm' and c.relname like 'pmt\\_%' "
+            "and c.relkind in ('r','p') "
+            "and has_table_privilege('service_role', c.oid, 'TRUNCATE'))",
+            "§5, the WORST state in the contract: TRUNCATE does not fire "
+            "row-level triggers, so one statement silently bypasses all five "
+            "immutability guards on 23 Paramount tables. 20260810090000 revokes "
+            "it. Uses has_table_privilege, NOT role_table_grants -- the latter "
+            "reports nothing for service_role from this connection and would "
+            "pass unconditionally forever.",
+        ),
+        BatchExtra(
+            "paramount_tables_are_actually_present",
+            "(select count(*) from pg_class c "
+            "join pg_namespace n on n.oid = c.relnamespace "
+            "where n.nspname = 'plm' and c.relname like 'pmt\\_%' "
+            f"and c.relkind in ('r','p')) >= {PARAMOUNT_TABLE_COUNT}",
+            "The TRUNCATE check above is `not exists`, which also passes when "
+            "there are no tables at all. This asserts the tables B9 creates are "
+            f"there ({PARAMOUNT_TABLE_COUNT} of them), so the revoke check cannot "
+            "be satisfied by an empty schema.",
         ),
     ),
 }
@@ -1015,24 +1285,6 @@ def is_explicit_true(value: object) -> bool:
     if isinstance(value, int):  # bool is handled above
         return value == 1
     return False
-
-
-def quote_literal(value: str) -> str:
-    """Single-quote a string for SQL. Identifiers are validated, not escaped."""
-    return "'" + value.replace("'", "''") + "'"
-
-
-def check_identifier(value: str, what: str) -> str:
-    """Refuse anything that is not a plain lowercase identifier.
-
-    Every identifier in this module comes from the hardcoded manifest above, so
-    this can never fire in normal operation. It exists so that a future edit
-    that pastes in a name from an untrusted place fails LOUDLY at build time
-    rather than producing surprising SQL.
-    """
-    if not IDENTIFIER.match(value):
-        raise VerificationError(f"refusing to build SQL for a non-identifier {what}: {value!r}")
-    return value
 
 
 # ---------------------------------------------------------------------------
@@ -1284,6 +1536,42 @@ def build_foreign_key_sql(fks: list[ForeignKey]) -> str:
     )
 
 
+def clock_expressions(pin: str = CLOCK_PIN_UTC) -> tuple[str, str]:
+    """The two date expressions that MUST be computed differently. Returns (utc, server).
+
+    H2, AND THE BUG HERE WAS A TAUTOLOGY THAT COULD NEVER FIRE. The first
+    version wrote the UTC leg as:
+
+        ((<naive ts> at time zone 'UTC')::date)
+
+    `<naive ts> at time zone 'UTC'` yields a `timestamptz`, and casting a
+    `timestamptz` to `date` ALREADY converts through `current_setting('TimeZone')`.
+    So that expression is the SERVER date, computed twice, and the
+    `utc != server` branch in `judge_environment` was dead code. Proven against
+    production on 2026-08-10: with the pin at midnight, the old UTC leg and the
+    server leg both returned `2026-08-09`, while a real two-zone comparison
+    disagrees (`2026-08-10` UTC vs `2026-08-09` New York).
+
+    The fix is the SECOND `at time zone 'UTC'`, which converts the `timestamptz`
+    back to a naive timestamp expressed in UTC, so the `::date` that follows has
+    nothing left to convert:
+
+        (((<naive ts> at time zone 'UTC') at time zone 'UTC')::date)   -- UTC
+        (((<naive ts> at time zone 'UTC') at time zone <TimeZone>)::date) -- server
+
+    Both legs are now naive timestamps at the point of the `::date` cast, and
+    they genuinely differ whenever the pinned time falls on opposite sides of
+    midnight in the two zones. The asymmetry is the entire point of the check,
+    which is why the two expressions are built here, together, where the
+    difference between them is visible in one screen.
+    """
+    ts = f"(current_date::text || ' ' || {quote_literal(pin)})::timestamp at time zone 'UTC'"
+    return (
+        f"((({ts}) at time zone 'UTC')::date)::text",
+        f"((({ts}) at time zone current_setting('TimeZone'))::date)::text",
+    )
+
+
 def build_environment_sql() -> str:
     """PostgREST-exposed schemas, and the clock, pinned to midday UTC.
 
@@ -1308,21 +1596,80 @@ def build_environment_sql() -> str:
     fails, which is the correct outcome: an unreadable PostgREST configuration
     is not evidence that PostgREST is fine.
     """
-    pin = quote_literal(CLOCK_PIN_UTC)
+    utc_expr, server_expr = clock_expressions()
     return (
         "select jsonb_build_object("
-        "'pgrst_db_schemas', ("
-        "  select split_part(cfg, '=', 2) from pg_db_role_setting s, "
-        "  unnest(s.setconfig) as cfg where cfg like 'pgrst.db_schemas=%' limit 1), "
+        "'pgrst_db_schemas', (" + build_pgrst_schemas_expr() + "), "
+        "'pgrst_setting_count', ("
+        "  select count(*)::int from pg_db_role_setting s, "
+        "  unnest(s.setconfig) as cfg where cfg like 'pgrst.db_schemas=%'), "
         "'server_timezone', current_setting('TimeZone', true), "
-        "'pinned_utc', (current_date::text || ' ' || " + pin + ")::timestamp, "
-        "'pinned_date_utc', ((current_date::text || ' ' || " + pin + ")"
-        "::timestamp at time zone 'UTC')::date::text, "
-        "'pinned_date_server', ((current_date::text || ' ' || " + pin + ")"
-        "::timestamp at time zone 'UTC' at time zone current_setting('TimeZone'))"
-        "::date::text, "
+        f"'pinned_date_utc', {utc_expr}, "
+        f"'pinned_date_server', {server_expr}, "
         "'observed_at_utc', (now() at time zone 'UTC')::text"
         ") as report"
+    )
+
+
+def build_pgrst_schemas_expr() -> str:
+    """The `pgrst.db_schemas` value, deterministically.
+
+    L9: the first version used `limit 1` with no `order by`, so with more than
+    one matching row -- which is possible, the setting can be attached to more
+    than one role -- it returned an arbitrary one. `min()` is deterministic, and
+    `pgrst_setting_count` is returned alongside so a run where several roles
+    disagree is visible rather than silently resolved.
+    """
+    return (
+        "select min(split_part(cfg, '=', 2)) from pg_db_role_setting s, "
+        "unnest(s.setconfig) as cfg where cfg like 'pgrst.db_schemas=%'"
+    )
+
+
+def build_ledger_sql() -> str:
+    """Whether each batch's resting point is present in the migration ledger.
+
+    M6. THIS IS THE ONE PLACE THE LEDGER IS READ, AND THE DISTINCTION MATTERS.
+    Everywhere else in this module the ledger is deliberately ignored, because
+    a ledger row is not evidence that an object exists -- that is the trap the
+    whole file is written against. Here the ledger is used for the ONLY thing it
+    is actually authoritative about: WHICH MIGRATIONS RAN. It is never treated
+    as evidence of what they left behind.
+
+    Without it, batch identity is whatever the operator typed. An agent that
+    applies B9 and types `--batch B5` gets B5's extras, skips every B9 security
+    assertion -- Warner's read gate, Paramount's TRUNCATE, the `dam_order_list`
+    security_invoker fix -- and sees green.
+
+    THE OBVIOUS IMPLEMENTATION IS WRONG, AND A LIVE RUN PROVED IT. The first
+    version asked for `max(version)` and compared it to the claimed batch's
+    resting point. That assumes the batches are applied in VERSION order. They
+    are not: B0 is the canary `20260810140000`, which sorts ABOVE every version
+    in B1 through B8. So after B1 lands, `max(version)` is still the canary, and
+    the check reported "LEDGER MISMATCH: you asked to verify B1 but the highest
+    version applied is 20260810140000 - B0" on a database where B1 genuinely was
+    the applied batch. Contract §5 says a batch is a contiguous version-ordered
+    slice of the REMAINING set; it does not say the batches themselves run in
+    version order, and B0 is the counter-example.
+
+    The correct question is per-resting-point presence: the claimed batch's
+    resting point must BE in the ledger, and no LATER batch's resting point may
+    be. "Later" means later in the promotion order (`BATCH_RESTING_POINTS`
+    declaration order), not numerically larger.
+    """
+    branches = " union all ".join(
+        "select jsonb_build_object("
+        f"'batch', {quote_literal(batch)}, "
+        f"'version', {quote_literal(version)}, "
+        "'applied', exists (select 1 from supabase_migrations.schema_migrations "
+        f"where version = {quote_literal(version)})"
+        ") as x"
+        for batch, version in BATCH_RESTING_POINTS.items()
+    )
+    return (
+        "select jsonb_agg(x order by x->>'batch') as report from ("
+        + branches
+        + ") t"
     )
 
 
@@ -1363,10 +1710,95 @@ def build_batch_extras_sql(extras: tuple[BatchExtra, ...]) -> str:
     )
 
 
+# M4. What §7.2 requires that NO database query can answer. Printed in every
+# report for the relevant batch, so the operator is told what is still owed
+# rather than told there is nothing to check.
+#
+# The original wording -- "the contract defines no batch-specific database check
+# for B3" -- was false and dangerous: §7.2 defines an extra for all ten batches,
+# and B3's says INCOMPLETE PROVENANCE IS UNRECOVERABLE AFTER THE FACT.
+MANUAL_ONLY_BATCHES: dict[str, tuple[str, ...]] = {
+    "B0": ("Confirm the lane's own job summary. This batch is about the lane, not the data.",),
+    "B1": (
+        "Open the DB Data Admin licensor/property tree screen and confirm it renders, "
+        "and that the ColdLion breaker state reads as untripped.",
+    ),
+    "B2": (
+        "Open the DB Data Admin licensor->property tree and confirm DIVISION NAMES "
+        "appear instead of numeric codes. The automated check proves the patched "
+        "function reaches plm.\"divisionCode\"; only a human can see what rendered.",
+    ),
+    "B3": (
+        "RUN ONE COLDLION PROMOTION DRY PASS and confirm the provenance columns are "
+        "populated, BEFORE starting B4. §7.2 states incomplete provenance is "
+        "UNRECOVERABLE AFTER THE FACT. No read-only query can substitute for this: "
+        "it requires executing the promotion, which this module must never do.",
+    ),
+    "B4": ("Confirm the DB Data Admin licensor list still renders.",),
+    "B5": (
+        "Acknowledge one taxonomy alert AS A NON-ADMINISTRATOR and confirm the "
+        "effective-role check accepts it. The automated check proves the fixed body "
+        "is installed; it cannot prove a real non-admin session is accepted.",
+    ),
+    "B6": ("Open PopPIM product pages and exercise the UPC/identity contract.",),
+    "B7": (
+        "Nothing app-facing: api.opa_property_reconciliation has no deployed reader, "
+        "and its existence is asserted automatically.",
+    ),
+    "B8": (
+        "OPEN POPDAM STYLES AND LOOK AT THE SIZE PICKER. The automated check proves "
+        "the seeded row counts; it cannot prove the values reached the UI. A "
+        "plausible-looking list is not evidence of success -- if it looks like a "
+        "short generic list, PopDAM has silently fallen back to COMMON_SIZE_OPTIONS.",
+    ),
+    "B9": (
+        "Spot-check that a NON-administrator, non-sales, non-licensing account cannot "
+        "read plm.wb_*. The automated check proves the policy is the role gate; only "
+        "a real session proves the gate holds.",
+        "Confirm with the owner, ON THE DAY, that 20260810170000 widening plm.item "
+        "SELECT to every authenticated account is still wanted (contract D6).",
+    ),
+}
+
+
 def batch_index(batch: str) -> int:
     """Position of a batch in the promotion order. UNKNOWN sorts last."""
     order = list(BATCH_RESTING_POINTS)
     return order.index(batch) if batch in order else len(order)
+
+
+def cumulative_extras(batch: str) -> tuple[BatchExtra, ...]:
+    """Every batch assertion up to AND INCLUDING this one.
+
+    M6, and the reviewer asked me to argue this if I declined it. I did not
+    decline it, because the argument for cumulative runs is stronger than the
+    argument against.
+
+    The promotion is forward-only across nine batches that can be days apart,
+    and the assertions here are not "did this batch's SQL execute" -- they are
+    invariants about the state the batch established. Warner's read gate being
+    the role gate, service_role holding no TRUNCATE on the Paramount tables, the
+    2-argument ColdLion signature staying dropped: none of those stop mattering
+    when the next batch starts. A later migration, a concurrent workstream or a
+    manual fix can regress any of them, and a non-cumulative run would never
+    look again. The contract's §6 exposed states are defined by exactly these
+    properties, so re-checking them is re-checking that production is still out
+    of the states it is not allowed to rest in.
+
+    The cost is bounded and small: 26 assertions at B9, one cheap catalog query
+    each, on a script that runs ten times total. The one real objection -- that
+    an earlier batch's assertion could become legitimately obsolete later -- does
+    not apply to this backlog, because §3.4 establishes there are no renames and
+    no batch supersedes an earlier batch's object. If that ever changes, the
+    right fix is an explicit `retired_at` on the assertion, not silently
+    narrowing the window.
+    """
+    here = batch_index(batch)
+    out: list[BatchExtra] = []
+    for name, extras in BATCH_EXTRAS.items():
+        if batch_index(name) <= here:
+            out.extend(extras)
+    return tuple(out)
 
 
 # ---------------------------------------------------------------------------
@@ -1382,6 +1814,14 @@ def run_query(project_ref: str, token: str, sql: str, api: str = MANAGEMENT_API)
     it Cloudflare answers 403 (error 1010) and the run looks like an auth
     failure it is not.
     """
+    # L8. The only argument that reached a URL unvalidated. A Supabase project
+    # ref is twenty lowercase letters; anything else is a typo or an attempt to
+    # bend the path, and either way it must not be interpolated.
+    if not PROJECT_REF.fullmatch(project_ref):
+        raise VerificationError(
+            f"refusing to build a request URL for a malformed project ref: "
+            f"{project_ref!r}. Expected twenty lowercase letters."
+        )
     url = f"{api.rstrip('/')}/v1/projects/{project_ref}/database/query"
     body = json.dumps({"query": sql, "read_only": True}).encode("utf-8")
     request = urllib.request.Request(
@@ -1581,7 +2021,69 @@ def judge_app(
     return failures
 
 
-def judge_environment(environment: object, required=REQUIRED_POSTGREST_SCHEMAS) -> list[str]:
+def judge_ledger(resolution: BatchResolution, ledger: object) -> list[str]:
+    """Check the operator's `--batch` claim against what is actually applied.
+
+    M6. `resolve_batch` takes the flag's word, and an agent that applies B9 and
+    types `--batch B5` gets B5's extras, skips every B9 security assertion, and
+    sees green. The ledger is the only thing that can contradict the operator,
+    and contradicting the operator is the entire purpose of this function.
+
+    A MISMATCH IS FATAL, NOT A WARNING. Being wrong about which batch you are
+    verifying means the batch-specific assertions -- the ones covering Warner's
+    read gate, Paramount's TRUNCATE and the security_invoker fix -- were chosen
+    for the wrong state.
+    """
+    rows = _rows(ledger)
+    if not rows:
+        return [
+            "LEDGER: could not read supabase_migrations.schema_migrations, so the "
+            f"claim that {resolution.batch} is the applied state is UNVERIFIED. "
+            "The batch-specific checks are chosen from that claim, so an "
+            "unverifiable claim makes them unverifiable too."
+        ]
+    applied = {
+        r.get("batch"): is_explicit_true(r.get("applied"))
+        for r in rows
+        if r.get("batch")
+    }
+    if resolution.batch not in applied:
+        return [
+            f"LEDGER: no presence evidence came back for {resolution.batch}'s "
+            "resting point, so the claimed batch could not be confirmed."
+        ]
+
+    failures: list[str] = []
+    if not applied[resolution.batch]:
+        failures.append(
+            f"LEDGER MISMATCH: you asked to verify {resolution.batch}, but its "
+            f"resting point {resolution.last_version} is NOT in the migration "
+            "ledger. The batch you named has not finished landing, so its "
+            "batch-specific checks are being run against a state that does not "
+            "exist yet."
+        )
+    here = batch_index(resolution.batch)
+    ahead = sorted(
+        (b for b, was in applied.items() if was and batch_index(b) > here),
+        key=batch_index,
+    )
+    if ahead:
+        failures.append(
+            f"LEDGER MISMATCH: you asked to verify {resolution.batch}, but "
+            f"{', '.join(ahead)} {'has' if len(ahead) == 1 else 'have'} ALSO "
+            "landed. Every batch-specific check in this run was chosen for the "
+            "batch you NAMED, not the batch you are IN, so the later batch's "
+            "assertions — which are the security-critical ones — were never run. "
+            f"Re-run with --batch {ahead[-1]}."
+        )
+    return failures
+
+
+def judge_environment(
+    environment: object,
+    required=REQUIRED_POSTGREST_SCHEMAS,
+    notes: list[str] | None = None,
+) -> list[str]:
     """Check PostgREST exposure and the two-timezone date agreement."""
     rows = _rows(environment)
     if not rows:
@@ -1601,6 +2103,21 @@ def judge_environment(environment: object, required=REQUIRED_POSTGREST_SCHEMAS) 
         )
     else:
         exposed = {s.strip() for s in exposed_raw.split(",") if s.strip()}
+        # L10. PopDAM's worker does `.schema("dam").from("sku_human_description")`
+        # -- a PostgREST call against a schema production does NOT expose.
+        # Verified 2026-08-10: the relation exists and service_role can read it,
+        # but `dam` is absent from pgrst.db_schemas, so that call 404s today.
+        # It is a real pre-existing defect, it is not batch damage, and it is
+        # reported every run rather than being hidden by leaving `dam` out of
+        # the required list without comment.
+        for schema, why in sorted(POSTGREST_ADDRESSED_BUT_UNEXPOSED.items()):
+            if schema in exposed or notes is None:
+                continue
+            notes.append(
+                f"ENVIRONMENT: schema {schema!r} is addressed through PostgREST by "
+                "an application but is NOT in pgrst.db_schemas, so that call path "
+                f"returns 404 today. Pre-existing, not batch damage. {why}"
+            )
         for schema in required:
             if schema not in exposed:
                 failures.append(
@@ -1694,7 +2211,11 @@ def render_report(
     add("## Batch-specific checks (contract §7.2)")
     add("")
     if not extras_spec:
-        add(f"_The contract defines no batch-specific database check for {resolution.batch}._")
+        add(
+            f"**This module implements no automated database check for "
+            f"{resolution.batch}. §7.2 still requires a manual one — see below.** "
+            "That is a gap in this tool, not an absence in the contract."
+        )
     else:
         rows = {r.get("key"): r for r in _rows(extras)}
         add("| Check | Result | Why it matters |")
@@ -1716,6 +2237,23 @@ def render_report(
                     f"(reported {row.get('passed')!r}). {e.why}"
                 )
             add(f"| `{e.key}` | {verdict} | {e.why} |")
+    add("")
+
+    add(f"## Still required by hand for {resolution.batch} (contract §7.2)")
+    add("")
+    add(
+        "**A green run above does not discharge these.** Nothing here is a database "
+        "fact, so nothing here could be automated. §7.1's five-minute smoke test "
+        "applies after EVERY batch in addition to these."
+    )
+    add("")
+    for item in MANUAL_ONLY_BATCHES.get(resolution.batch, ()):
+        add(f"- [ ] {item}")
+    if resolution.batch not in MANUAL_ONLY_BATCHES:
+        add(
+            f"- [ ] **UNKNOWN BATCH.** No manual checklist is recorded for "
+            f"`{resolution.batch}`. Read §7.2 directly before proceeding."
+        )
     add("")
 
     add("## Environment")
@@ -1793,7 +2331,6 @@ def verify(
 ) -> int:
     all_relations = [r for s in APP_MANIFEST.values() for r in s.relations]
     all_routines = [r for s in APP_MANIFEST.values() for r in s.routines]
-    all_fks = [f for s in APP_MANIFEST.values() for f in s.foreign_keys]
 
     if not all_relations or not all_routines:
         print(
@@ -1819,13 +2356,42 @@ def verify(
                 )
             return None
 
-    results["relations"] = fetch("relation", build_relation_sql(all_relations))
-    results["routines"] = fetch("routine", build_routine_sql(all_routines))
-    results["columns"] = fetch("column", build_column_sql(all_relations))
-    results["foreign_keys"] = fetch("foreign key", build_foreign_key_sql(all_fks))
+    # ONE QUERY SET PER APPLICATION. NOT one flattened query for all three.
+    #
+    # C1, and it is the whole reason this loop exists. The first version of this
+    # module built ONE query from every app's relations and then keyed the
+    # result by relation NAME. Three relations appear in two applications each
+    # with DIFFERENT roles and privileges -- `core.licensor`, `core.customer`
+    # and `core.contact_company`. A name-keyed dict keeps whichever row arrives
+    # last, and `order by relation` does not break that tie, so which one
+    # survived was arbitrary and each app could be judged against ANOTHER app's
+    # row. A batch revoking SELECT from `authenticated` on `core.customer` and
+    # `core.contact_company` -- killing PopPIM's board collab pane and PopDAM's
+    # customer picker -- printed "all three applications PASS" and exited 0,
+    # because PopCRM's service_role rows overwrote both.
+    #
+    # Keying by (relation, role, privilege) would also have worked. Per-app
+    # queries were chosen instead because they make the collision STRUCTURALLY
+    # IMPOSSIBLE rather than merely handled: two applications' evidence never
+    # occupies the same dictionary at any point. The cost is a handful of extra
+    # round trips on a script that runs at most ten times.
+    for app, spec in APP_MANIFEST.items():
+        results[f"relations::{app}"] = fetch(
+            f"{app} relation", build_relation_sql(list(spec.relations))
+        )
+        results[f"routines::{app}"] = fetch(
+            f"{app} routine", build_routine_sql(list(spec.routines))
+        )
+        results[f"columns::{app}"] = fetch(
+            f"{app} column", build_column_sql(list(spec.relations))
+        )
+        results[f"foreign_keys::{app}"] = fetch(
+            f"{app} foreign key", build_foreign_key_sql(list(spec.foreign_keys))
+        )
     results["environment"] = fetch("environment", build_environment_sql())
+    results["ledger"] = fetch("migration ledger", build_ledger_sql(), fatal=False)
 
-    extras_spec = BATCH_EXTRAS.get(resolution.batch, ())
+    extras_spec = cumulative_extras(resolution.batch)
     extra_rows: list[dict] = []
     for extra in extras_spec:
         # `fatal=False`: an extra that cannot run is NOT silently dropped -- it
@@ -1842,16 +2408,17 @@ def verify(
         app: judge_app(
             app,
             spec,
-            results["relations"],
-            results["routines"],
-            results["columns"],
-            results["foreign_keys"],
+            results[f"relations::{app}"],
+            results[f"routines::{app}"],
+            results[f"columns::{app}"],
+            results[f"foreign_keys::{app}"],
             batch=resolution.batch,
             notes=notes,
         )
         for app, spec in APP_MANIFEST.items()
     }
-    environment_failures = judge_environment(results["environment"])
+    environment_failures = judge_environment(results["environment"], notes=notes)
+    environment_failures.extend(judge_ledger(resolution, results["ledger"]))
 
     markdown, failures = render_report(
         resolution,

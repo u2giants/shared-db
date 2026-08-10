@@ -38,6 +38,15 @@ from post_batch_app_verification import (  # noqa: E402
     BATCH_EXTRAS,
     BASELINE_GAP_POLICY,
     BATCH_RESTING_POINTS,
+    MANIFEST_DRIFT,
+    MANUAL_ONLY_BATCHES,
+    POSTGREST_ADDRESSED_BUT_UNEXPOSED,
+    PRODUCT_DEPTH_EXPECTED_TOTAL,
+    PRODUCT_SIZE_EXPECTED_ACTIVE,
+    PRODUCT_SIZE_EXPECTED_INACTIVE,
+    PRODUCT_SIZE_EXPECTED_TOTAL,
+    PROJECT_REF,
+    WARNER_TABLES,
     CLOCK_PIN_UTC,
     HELD_VERSIONS,
     NEVER_REST_VERSIONS,
@@ -61,6 +70,11 @@ from post_batch_app_verification import (  # noqa: E402
     build_relation_sql,
     build_routine_sql,
     batch_index,
+    build_pgrst_schemas_expr,
+    clock_expressions,
+    cumulative_extras,
+    judge_ledger,
+    run_query,
     extract_report,
     is_explicit_true,
     judge_app,
@@ -314,6 +328,16 @@ class VerifyDriverTests(unittest.TestCase):
         """Synthesise a catalog that satisfies the whole manifest -> exit 0."""
 
         def responder(ref, token, sql, api=None):
+            if "schema_migrations" in sql:
+                # M6: only B0's resting point has landed, which is what the
+                # BatchResolution below claims.
+                return [{"report": [
+                    {"batch": b, "version": v, "applied": b == "B0"}
+                    for b, v in BATCH_RESTING_POINTS.items()]}]
+            if "jsonb_build_object('key'" in sql:
+                # Each batch extra is now its own query; answer each one TRUE.
+                key = sql.split("'key', '", 1)[1].split("'", 1)[0]
+                return [{"report": {"key": key, "passed": True}}]
             if "'pgrst_db_schemas'" in sql:
                 return [
                     {
@@ -546,6 +570,143 @@ class BaselineGapTests(unittest.TestCase):
         self.assertNotIn("SELECT", set().union(*gapped.values()))
 
 
+class CrossAppRelationCollisionTests(unittest.TestCase):
+    """C1 REGRESSION. Built from the REAL collision, not a synthetic one.
+
+    Three relations appear in two applications each, with different roles and
+    privileges. The original code flattened all three apps into one query and
+    keyed the result by relation NAME, so one app's row silently replaced
+    another's and each app could be judged against the wrong evidence.
+
+    The reviewer's reproduction is `test_the_reviewers_reproduction`: a batch
+    that revokes SELECT from `authenticated` on `core.contact_company` and
+    `core.customer` kills PopPIM's board collab pane and PopDAM's customer
+    picker, and the old code printed all three PASS and exited 0.
+    """
+
+    COLLIDING = {
+        "core.licensor": {"PopPIM", "PopDAM"},
+        "core.contact_company": {"PopPIM", "PopCRM"},
+        "core.customer": {"PopDAM", "PopCRM"},
+    }
+
+    def test_the_collision_this_guards_still_exists_in_the_manifest(self):
+        """If this fails, the manifest changed -- re-derive, do not delete."""
+        seen: dict[str, set[str]] = {}
+        for app, spec in APP_MANIFEST.items():
+            for rel in spec.relations:
+                seen.setdefault(rel.qualified, set()).add(app)
+        shared = {k: v for k, v in seen.items() if len(v) > 1}
+        self.assertEqual(shared, self.COLLIDING)
+
+    def test_the_colliding_relations_really_do_differ_between_apps(self):
+        """A collision only matters because the rows are NOT interchangeable."""
+        for qualified, apps in self.COLLIDING.items():
+            shapes = set()
+            for app in apps:
+                rel = next(
+                    r for r in APP_MANIFEST[app].relations if r.qualified == qualified
+                )
+                shapes.add((rel.roles, rel.privileges))
+            self.assertEqual(len(shapes), len(apps), f"{qualified} shapes: {shapes}")
+
+    def test_the_reviewers_reproduction_now_fails_loudly(self):
+        """Revoke authenticated SELECT on two shared relations -> both apps FAIL.
+
+        Per-app evidence is passed to per-app judges, exactly as `verify()` does
+        it. PopCRM's service_role rows can no longer overwrite PopPIM's and
+        PopDAM's authenticated rows, because they are never in the same dict.
+        """
+
+        def evidence_for(app):
+            rows = []
+            for rel in APP_MANIFEST[app].relations:
+                revoked = rel.qualified in ("core.contact_company", "core.customer")
+                rows.append(
+                    {
+                        "relation": rel.qualified,
+                        "exists": True,
+                        "relkind": "r" if rel.kind == "table" else "v",
+                        "kind_ok": True,
+                        "privileges": [
+                            {
+                                "role": role,
+                                "privilege": priv,
+                                # the batch revoked SELECT from `authenticated` only
+                                "held": not (
+                                    revoked and role == "authenticated" and priv == "SELECT"
+                                ),
+                            }
+                            for role in rel.roles
+                            for priv in rel.privileges
+                        ],
+                    }
+                )
+            return rows
+
+        verdicts = {}
+        for app, spec in APP_MANIFEST.items():
+            verdicts[app] = judge_app(
+                app,
+                spec,
+                evidence_for(app),
+                [
+                    {"routine": fn.qualified, "overloads": 1, "exists": True,
+                     "privileges": [{"role": r, "privilege": "EXECUTE", "held": True}
+                                    for r in fn.roles]}
+                    for fn in spec.routines
+                ],
+                [{"relation": r.qualified, "column": c, "present": True}
+                 for r in spec.relations for c in r.columns],
+                [{"relation": f"{f.schema}.{f.table}", "column": f.column, "present": True}
+                 for f in spec.foreign_keys],
+                batch="B1",
+                notes=[],
+            )
+
+        # PopPIM loses core.contact_company -> the board collab pane is dead.
+        self.assertTrue(
+            any("core.contact_company" in f and "does NOT hold SELECT" in f
+                for f in verdicts["PopPIM"]),
+            verdicts["PopPIM"],
+        )
+        # PopDAM loses core.customer -> the customer picker is dead.
+        self.assertTrue(
+            any("core.customer" in f and "does NOT hold SELECT" in f
+                for f in verdicts["PopDAM"]),
+            verdicts["PopDAM"],
+        )
+        # PopCRM reaches both as service_role, which was NOT revoked. It passes,
+        # and that is correct -- the bug was PopCRM's pass being COPIED onto the
+        # other two, not PopCRM passing.
+        self.assertEqual(verdicts["PopCRM"], [])
+
+    def test_verify_asks_a_separate_question_per_application(self):
+        """Structural proof: `verify()` issues per-app relation queries."""
+        seen: list[str] = []
+
+        def responder(ref, token, sql, api=None):
+            seen.append(sql)
+            return [{"report": None}]
+
+        with tempfile.TemporaryDirectory() as tmp, io.StringIO() as o, io.StringIO() as e, \
+                contextlib.redirect_stdout(o), contextlib.redirect_stderr(e):
+            verify(
+                BatchResolution("B0", BATCH_RESTING_POINTS["B0"], ["20260810140000"]),
+                Path(tmp),
+                PRODUCTION_PROJECT_REF,
+                "not-a-real-token",
+                query=responder,
+            )
+        relation_queries = [s for s in seen if "expected_kind" in s]
+        self.assertEqual(len(relation_queries), len(APP_MANIFEST))
+        # No single relation query may carry another app's exclusive relation.
+        pim_only = "pim.saved_view"
+        crm_only = "crm.email_message"
+        for sql in relation_queries:
+            self.assertFalse(pim_only in sql and crm_only in sql)
+
+
 class BatchResolutionTests(unittest.TestCase):
     def test_the_ten_legal_resting_points_are_exactly_the_contract_list(self):
         self.assertEqual(
@@ -626,6 +787,58 @@ class ClockTests(unittest.TestCase):
         self.assertIn("pinned_date_server", sql)
         self.assertIn("at time zone 'UTC'", sql)
         self.assertIn("current_setting('TimeZone')", sql)
+
+    def test_the_two_legs_are_not_the_same_computation(self):
+        """H2 REGRESSION. The old UTC leg WAS the server leg, spelled twice.
+
+        `<naive ts> at time zone 'UTC'` is a timestamptz, and `timestamptz::date`
+        already converts through TimeZone -- so the old expression computed the
+        server date and the `utc != server` branch was unreachable. Verified
+        against production 2026-08-10: at a midnight pin the old UTC leg and the
+        server leg both returned 2026-08-09, while the corrected legs return
+        2026-08-10 and 2026-08-09.
+        """
+        utc, server = clock_expressions()
+        self.assertNotEqual(utc, server)
+        # The UTC leg must convert BACK to a naive timestamp before ::date,
+        # which is what the second `at time zone 'UTC'` does. Exactly two.
+        self.assertEqual(utc.count("at time zone 'UTC'"), 2)
+        # The server leg converts to the session zone, once, after the same
+        # single UTC anchoring.
+        self.assertEqual(server.count("at time zone 'UTC'"), 1)
+        self.assertIn("at time zone current_setting('TimeZone')", server)
+        self.assertNotIn("current_setting('TimeZone')", utc)
+
+    def test_the_pin_is_evaluated_not_just_pattern_matched(self):
+        """Evaluate the SEMANTICS the SQL encodes, with a real tz database.
+
+        `zoneinfo` models exactly what Postgres does here: anchor the naive
+        wall time in UTC, then read the calendar date in each zone. This is the
+        test that would have caught H2 -- the old expression collapses both legs
+        onto the server zone, so `midnight` would have shown agreement where the
+        truth is disagreement.
+        """
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        def legs(pin):
+            h, m, s = (int(x) for x in pin.split(":"))
+            anchored = datetime(2026, 8, 10, h, m, s, tzinfo=ZoneInfo("UTC"))
+            return (
+                anchored.astimezone(ZoneInfo("UTC")).date(),
+                anchored.astimezone(ZoneInfo("America/New_York")).date(),
+            )
+
+        # The pin this module actually uses: the two zones must AGREE.
+        utc, server = legs(CLOCK_PIN_UTC)
+        self.assertEqual(utc, server)
+
+        # Midnight UTC: they must DISAGREE. If a future edit moved the pin to
+        # midnight, `judge_environment` would start failing every run -- which
+        # is why the pin is midday and why this asserts the trap is real.
+        utc_mid, server_mid = legs("00:00:00")
+        self.assertNotEqual(utc_mid, server_mid)
+        self.assertEqual((utc_mid - server_mid).days, 1)
 
     def test_agreeing_dates_pass(self):
         self.assertEqual(
@@ -847,8 +1060,10 @@ class BatchExtrasTests(unittest.TestCase):
 
     def test_b8_guards_the_silently_swallowed_object(self):
         keys = {e.key for e in BATCH_EXTRAS["B8"]}
-        self.assertIn("core_product_size_is_seeded", keys)
-        self.assertIn("core_product_size_has_active_rows", keys)
+        self.assertIn("core_product_size_row_count_matches_the_seed", keys)
+        self.assertIn("core_product_size_active_count_matches_the_seed", keys)
+        self.assertIn("core_product_size_inactive_count_matches_the_seed", keys)
+        self.assertIn("core_product_depth_row_count_matches_the_seed", keys)
         self.assertIn("core_product_depth_exists", keys)
 
     def test_b7_asserts_the_view_survived_its_drop_and_recreate(self):
@@ -859,7 +1074,7 @@ class BatchExtrasTests(unittest.TestCase):
     def test_b9_asserts_security_invoker_and_the_three_windows(self):
         keys = {e.key for e in BATCH_EXTRAS["B9"]}
         self.assertIn("dam_order_list_is_security_invoker", keys)
-        self.assertIn("warner_read_gate_is_not_wide_open", keys)
+        self.assertIn("warner_read_gate_is_the_role_gate_on_all_eight_tables", keys)
         self.assertIn("paramount_service_role_has_no_truncate", keys)
 
     def test_b1_and_b6_assert_the_old_signatures_are_gone(self):
@@ -914,6 +1129,208 @@ class BatchExtrasTests(unittest.TestCase):
         )
         self.assertEqual(len(failures), 1)
         self.assertIn("dam_order_list_is_security_invoker", failures[0])
+
+
+class ReviewFixTests(unittest.TestCase):
+    """H3, M4, M5, M6, M7, L8, L9, L10, L11 -- one or more assertions each."""
+
+    def test_h3_no_check_uses_role_table_grants(self):
+        """It reports nothing for service_role from this connection.
+
+        Verified against production 2026-08-10: `information_schema.
+        role_table_grants` returns ZERO rows for `service_role` in `plm` when
+        `current_user` is `supabase_read_only_user`, so `not exists (...)` on it
+        is unconditionally TRUE and can never fail.
+        """
+        blob = " ".join(build_batch_extra_sql(e) for e in cumulative_extras("B9"))
+        self.assertNotIn("role_table_grants", blob)
+        self.assertIn("has_table_privilege('service_role'", blob)
+
+    def test_h3_truncate_check_cannot_be_satisfied_by_an_empty_schema(self):
+        keys = {e.key for e in BATCH_EXTRAS["B9"]}
+        self.assertIn("paramount_service_role_has_no_truncate", keys)
+        self.assertIn("paramount_tables_are_actually_present", keys)
+
+    def test_m4_every_batch_has_an_automated_check_or_a_named_manual_one(self):
+        for batch in BATCH_RESTING_POINTS:
+            has_auto = bool(BATCH_EXTRAS.get(batch))
+            has_manual = bool(MANUAL_ONLY_BATCHES.get(batch))
+            self.assertTrue(has_auto or has_manual, batch)
+            self.assertTrue(has_manual, f"{batch} has no manual checklist recorded")
+
+    def test_m4_b3_manual_step_names_the_unrecoverable_risk(self):
+        text = " ".join(MANUAL_ONLY_BATCHES["B3"])
+        self.assertIn("UNRECOVERABLE", text.upper())
+        self.assertIn("provenance", text)
+
+    def test_m4_the_report_never_claims_there_is_nothing_to_check(self):
+        md, _ = render_report(
+            BatchResolution("B3", BATCH_RESTING_POINTS["B3"], ["20260731200000"]),
+            PRODUCTION_PROJECT_REF,
+            {app: [] for app in APP_MANIFEST},
+            [], None, (), [],
+        )
+        self.assertNotIn("defines no batch-specific database check", md)
+        self.assertIn("Still required by hand", md)
+        self.assertIn("UNRECOVERABLE", md.upper())
+
+    def test_m5_b8_asserts_exact_seed_counts_not_merely_nonzero(self):
+        blob = " ".join(build_batch_extra_sql(e) for e in BATCH_EXTRAS["B8"])
+        self.assertIn(str(PRODUCT_SIZE_EXPECTED_TOTAL), blob)
+        self.assertIn(str(PRODUCT_SIZE_EXPECTED_ACTIVE), blob)
+        self.assertIn(str(PRODUCT_SIZE_EXPECTED_INACTIVE), blob)
+        self.assertIn(str(PRODUCT_DEPTH_EXPECTED_TOTAL), blob)
+        self.assertNotIn("> 0", blob)
+
+    def test_m5_the_expected_counts_are_internally_consistent(self):
+        self.assertEqual(
+            PRODUCT_SIZE_EXPECTED_ACTIVE + PRODUCT_SIZE_EXPECTED_INACTIVE,
+            PRODUCT_SIZE_EXPECTED_TOTAL,
+        )
+
+    @staticmethod
+    def _ledger(*applied_batches):
+        return [
+            {"batch": b, "version": v, "applied": b in applied_batches}
+            for b, v in BATCH_RESTING_POINTS.items()
+        ]
+
+    def test_m6_batches_are_not_applied_in_version_order(self):
+        """Why `max(version)` is the WRONG primitive, proven from the contract.
+
+        B0 is the canary 20260810140000, which sorts numerically ABOVE every
+        version in B1 through B8. A live run against production reported
+        "highest version applied is 20260810140000 - B0" on a database where B1
+        was genuinely the applied batch. Presence-per-resting-point is the only
+        formulation that survives this.
+        """
+        versions = list(BATCH_RESTING_POINTS.values())
+        self.assertNotEqual(versions, sorted(versions))
+        self.assertGreater(BATCH_RESTING_POINTS["B0"], BATCH_RESTING_POINTS["B8"])
+
+    def test_m6_the_canary_being_applied_does_not_break_a_b1_verification(self):
+        """The exact false positive the first implementation produced."""
+        self.assertEqual(
+            judge_ledger(
+                BatchResolution("B1", BATCH_RESTING_POINTS["B1"], ["20260728134500"]),
+                self._ledger("B0", "B1"),
+            ),
+            [],
+        )
+
+    def test_m6_a_later_batch_having_landed_is_fatal(self):
+        fails = judge_ledger(
+            BatchResolution("B5", BATCH_RESTING_POINTS["B5"], ["20260802160000"]),
+            self._ledger("B0", "B1", "B2", "B3", "B4", "B5", "B9"),
+        )
+        self.assertEqual(len(fails), 1)
+        self.assertIn("LEDGER MISMATCH", fails[0])
+        self.assertIn("B9", fails[0])
+        self.assertIn("--batch B9", fails[0])
+
+    def test_m6_the_claimed_batch_not_having_landed_is_fatal(self):
+        fails = judge_ledger(
+            BatchResolution("B5", BATCH_RESTING_POINTS["B5"], ["20260802160000"]),
+            self._ledger("B0", "B1"),
+        )
+        self.assertTrue(any("is NOT in the migration ledger" in f for f in fails), fails)
+
+    def test_m6_an_unreadable_or_empty_ledger_is_fatal(self):
+        for payload in (None, [], {}):
+            self.assertTrue(judge_ledger(
+                BatchResolution("B1", BATCH_RESTING_POINTS["B1"], ["20260728134500"]),
+                payload,
+            ), payload)
+
+    def test_m6_a_null_applied_flag_is_not_a_pass(self):
+        rows = self._ledger("B0", "B1")
+        for r in rows:
+            if r["batch"] == "B1":
+                r["applied"] = None
+        fails = judge_ledger(
+            BatchResolution("B1", BATCH_RESTING_POINTS["B1"], ["20260728134500"]), rows
+        )
+        self.assertTrue(any("is NOT in the migration ledger" in f for f in fails), fails)
+
+    def test_m6_extras_are_cumulative(self):
+        b1 = {e.key for e in cumulative_extras("B1")}
+        b9 = {e.key for e in cumulative_extras("B9")}
+        self.assertTrue(b1 < b9)
+        # A B1 invariant is still re-checked at B9.
+        self.assertIn("coldlion_sync_two_arg_is_gone", b9)
+        # And B9's own assertions are not present at B1.
+        self.assertNotIn("dam_order_list_is_security_invoker", b1)
+
+    def test_m6_cumulative_keys_are_unique(self):
+        keys = [e.key for e in cumulative_extras("B9")]
+        self.assertEqual(len(keys), len(set(keys)))
+
+    def test_m7_warner_gate_asserts_the_role_gate_not_the_literal_true(self):
+        extra = next(
+            e for e in BATCH_EXTRAS["B9"]
+            if e.key == "warner_read_gate_is_the_role_gate_on_all_eight_tables"
+        )
+        self.assertNotIn("qual = 'true'", extra.expression)
+        self.assertIn("qual is not null", extra.expression)
+        self.assertIn("has_any_role", extra.expression)
+        self.assertIn(str(len(WARNER_TABLES)), extra.expression)
+        self.assertEqual(len(WARNER_TABLES), 8)
+        for table in WARNER_TABLES:
+            self.assertIn(table, extra.expression)
+
+    def test_l8_a_malformed_project_ref_is_refused_before_any_request(self):
+        for bad in ["", "x", "../../admin", "qsllyeztdwjgirsysga1", "QSLLYEZTDWJGIRSYSGAI",
+                    "qsllyeztdwjgirsysgai/x"]:
+            with self.assertRaises(VerificationError, msg=bad):
+                run_query(bad, "token", "select 1")
+
+    def test_l8_the_real_production_ref_is_accepted_by_the_pattern(self):
+        self.assertTrue(PROJECT_REF.fullmatch(PRODUCTION_PROJECT_REF))
+        self.assertTrue(PROJECT_REF.fullmatch("rjyboqwcdzcocqgmsyel"))  # preview
+
+    def test_l9_the_pgrst_lookup_is_deterministic(self):
+        expr = build_pgrst_schemas_expr()
+        self.assertNotIn("limit 1", expr)
+        self.assertIn("min(", expr)
+        self.assertIn("pgrst_setting_count", build_environment_sql())
+
+    def test_l10_dam_is_recorded_as_addressed_but_unexposed(self):
+        self.assertIn("dam", POSTGREST_ADDRESSED_BUT_UNEXPOSED)
+        self.assertNotIn("dam", REQUIRED_POSTGREST_SCHEMAS)
+        used = {r.schema for s in APP_MANIFEST.values() for r in s.relations}
+        self.assertIn("dam", used)
+
+    def test_l10_an_addressed_but_unexposed_schema_is_reported_every_run(self):
+        notes = []
+        fails = judge_environment(
+            {
+                "pgrst_db_schemas": "public, graphql_public, api, crm, pim, core, app",
+                "server_timezone": "America/New_York",
+                "pinned_date_utc": "2026-08-10",
+                "pinned_date_server": "2026-08-10",
+            },
+            notes=notes,
+        )
+        self.assertEqual(fails, [])
+        self.assertTrue(any("'dam'" in n and "404" in n for n in notes), notes)
+
+    def test_l11_the_query_actually_used_is_the_one_swept_for_mutations(self):
+        """`verify()` calls build_batch_extra_sql, not build_batch_extras_sql."""
+        blob = " ".join(
+            build_batch_extra_sql(e)
+            for batch in BATCH_RESTING_POINTS
+            for e in BATCH_EXTRAS.get(batch, ())
+        ).lower()
+        blob = re.sub(r"'(?:[^']|'')*'", " ", blob)
+        for word in ("insert into", "update ", "delete from", "alter ", "create ",
+                     "drop ", "truncate", "grant ", "revoke "):
+            self.assertNotIn(word, blob, word)
+
+    def test_the_product_material_correction_is_recorded(self):
+        text = " ".join(MANIFEST_DRIFT)
+        self.assertIn("ALREADY EXISTS on production", text)
+        self.assertIn("#721", text)
+        self.assertIn("#720", text)
 
 
 class ManifestTests(unittest.TestCase):
