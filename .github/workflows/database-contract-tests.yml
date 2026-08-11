@@ -106,15 +106,86 @@ jobs:
           sudo apt-get install -y postgresql-client
           psql --version
 
-      - name: Start the ephemeral database and apply every migration
-        id: dbstart
+      # WHY THE MIGRATIONS ARE MOVED ASIDE FIRST
+      # ----------------------------------------
+      # `supabase db start` applies supabase/migrations itself, and STOPS DEAD on the
+      # first file that fails. Run that way, this job reports exactly one broken
+      # migration per CI run and tells you nothing at all about the contract tests.
+      #
+      # That is not hypothetical. The first real run of this workflow died on
+      # 20260702220336_ai_sentinel_stats_exact_match.sql with
+      # `relation "assets" does not exist` -- the repository's migration history is NOT
+      # self-contained, because some objects (`public.assets` among them) exist in the
+      # deployed databases without any migration here having created them. From-empty
+      # replay therefore cannot be assumed to reach the end.
+      #
+      # So the database is started EMPTY (with the Supabase roles and extensions the CLI
+      # seeds) and every migration is then applied by psql in filename order, RECORDING
+      # each failure and CONTINUING. One run then answers both questions at once: which
+      # migrations cannot replay from empty, and which contract tests hold on whatever
+      # schema that produces. Neither answer is hidden behind the other.
+      - name: Start an empty ephemeral database
         run: |
           set -euo pipefail
-          # `supabase db start` brings up ONLY the Postgres container and applies every
-          # file in supabase/migrations in order, from empty. No auth/storage/studio
-          # containers -- these are SQL contract tests, they need a database and nothing
-          # else, and every container skipped is a minute of runner time saved.
+          mkdir -p "$RUNNER_TEMP/migrations"
+          mv supabase/migrations/*.sql "$RUNNER_TEMP/migrations/"
           supabase db start 2>&1 | tee "$RUNNER_TEMP/db-start.log"
+
+      - name: Replay every migration, recording failures
+        id: replay
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 54322
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: |
+          set -uo pipefail
+          shopt -s nullglob
+          MIGS=("$RUNNER_TEMP"/migrations/*.sql)
+          mkdir -p "$RUNNER_TEMP/migration-logs"
+          OK=0; BAD=0
+          : > "$RUNNER_TEMP/failed-migrations.txt"
+          for m in "${MIGS[@]}"; do
+            base="$(basename "$m")"
+            # --single-transaction matches how the Supabase CLI applies a migration: the
+            # file lands whole or not at all, so a half-applied file can never leave a
+            # schema that no real database would ever have.
+            if psql -v ON_ERROR_STOP=1 --no-psqlrc --single-transaction -f "$m" \
+                 > "$RUNNER_TEMP/migration-logs/$base.log" 2>&1; then
+              OK=$((OK+1))
+            else
+              BAD=$((BAD+1))
+              echo "$base" >> "$RUNNER_TEMP/failed-migrations.txt"
+              echo "::warning::migration did not replay from empty: $base"
+            fi
+          done
+          echo "Replayed ${#MIGS[@]} migrations: $OK applied, $BAD failed."
+          {
+            echo "## Migration replay against an empty database"
+            echo ""
+            echo "| outcome | count |"
+            echo "| --- | ---: |"
+            echo "| migration files | ${#MIGS[@]} |"
+            echo "| applied | $OK |"
+            echo "| did NOT replay | $BAD |"
+            echo ""
+            if [ "$BAD" -gt 0 ]; then
+              echo "A migration that cannot replay from empty is NOT necessarily broken in the"
+              echo "deployed databases -- it usually means it depends on an object no migration in"
+              echo "this repository creates. It does mean the history is not self-contained, and it"
+              echo "means every contract test downstream of it is running on a thinner schema."
+              echo ""
+              echo "<details><summary>Migrations that did not replay</summary>"
+              echo ""
+              echo '```'
+              cat "$RUNNER_TEMP/failed-migrations.txt"
+              echo '```'
+              echo ""
+              echo "</details>"
+              echo ""
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Run every supabase/tests/*.sql
         id: run
@@ -217,6 +288,8 @@ jobs:
           name: supabase-contract-test-logs
           path: |
             ${{ runner.temp }}/db-start.log
+            ${{ runner.temp }}/failed-migrations.txt
+            ${{ runner.temp }}/migration-logs/
             ${{ runner.temp }}/results/
           if-no-files-found: warn
           retention-days: 30
