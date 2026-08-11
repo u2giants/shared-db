@@ -1063,6 +1063,121 @@ class NoopDeclarationTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("REJECTED", failures[0])
 
+    # -- `do` blocks -------------------------------------------------------
+    # A data-only migration is allowed to be a `do` block. 20260807030000 (batch
+    # B7, on the critical path to the Disney/OPA tables) is entirely one
+    # `do $coco$ ... $coco$;` that re-parents a single core.property row: it
+    # creates no object and issues no grant, so target derivation is empty and it
+    # hard-fails a CORRECT apply, yet the head-only claim check refused its
+    # declaration too. There was no legal way to make the file verify.
+
+    def test_a_data_only_do_block_with_a_custom_tag_is_accepted(self):
+        sql = (
+            "-- catalog-verification: no-op re-parents exactly one curated row, "
+            "creates no catalog object\n"
+            "do $coco$\n"
+            "declare v_updated integer;\n"
+            "begin\n"
+            "  select name into v_name from core.property where id = c_id;\n"
+            "  if v_name <> 'COCO' then\n"
+            "    raise exception 'not coco, refusing to touch it';\n"
+            "  end if;\n"
+            "  update core.property set licensor_id = c_disney where id = c_id;\n"
+            "  get diagnostics v_updated = row_count;\n"
+            "  raise notice 'applied to % rows', v_updated;\n"
+            "end;\n"
+            "$coco$;\n"
+        )
+        targets, (_, failures) = self.render(sql)
+        self.assertTrue(targets.noop_declaration["accepted"])
+        self.assertEqual(failures, [])
+
+    def test_a_do_block_executing_a_static_data_payload_is_accepted(self):
+        """20260807030000's real shape: a guarded `execute $ins$ insert ... $ins$`."""
+        sql = (
+            "-- catalog-verification: no-op writes one audit row behind a "
+            "to_regclass guard, creates nothing\n"
+            "do $coco$\n"
+            "begin\n"
+            "  update core.property set licensor_id = c_disney where id = c_id;\n"
+            "  if to_regclass('core.taxonomy_owner_ruling') is not null then\n"
+            "    execute $ins$\n"
+            "      insert into core.taxonomy_owner_ruling (entity_id) values ($1)\n"
+            "    $ins$ using c_id;\n"
+            "  end if;\n"
+            "end;\n"
+            "$coco$;\n"
+        )
+        targets, (_, failures) = self.render(sql)
+        self.assertTrue(targets.noop_declaration["accepted"])
+        self.assertEqual(failures, [])
+
+    def test_a_do_block_containing_a_grant_is_rejected(self):
+        sql = (
+            "-- catalog-verification: no-op honestly this one changes no "
+            "catalog object at all\n"
+            "do $coco$\n"
+            "begin\n"
+            "  update plm.widget set a = 1;\n"
+            "  grant select on plm.widget to service_role;\n"
+            "end;\n"
+            "$coco$;\n"
+        )
+        targets, (_, failures) = self.render(sql)
+        self.assertFalse(targets.noop_declaration["accepted"])
+        self.assertIn("`grant`", targets.noop_declaration["rejected_because"])
+        self.assertTrue(any("REJECTED" in f for f in failures))
+
+    def test_a_do_block_of_dynamic_sql_is_rejected(self):
+        """20260810120000's shape. If this ever passes, the change is a bypass."""
+        sql = (
+            "-- catalog-verification: no-op this only tidies up some grants, "
+            "nothing structural\n"
+            "do $$\n"
+            "declare t text;\n"
+            "begin\n"
+            "  update plm.widget set a = 1;\n"
+            "  foreach t in array array['wb_asset','wb_character']\n"
+            "  loop\n"
+            "    execute format('revoke insert on plm.%I from service_role', t);\n"
+            "  end loop;\n"
+            "end;\n"
+            "$$;\n"
+        )
+        targets, (_, failures) = self.render(sql)
+        self.assertFalse(targets.noop_declaration["accepted"])
+        self.assertIn("DYNAMIC SQL", targets.noop_declaration["rejected_because"])
+        self.assertTrue(any("REJECTED" in f for f in failures))
+
+    def test_a_do_block_cannot_hide_a_revoke_behind_a_loop_head(self):
+        """A head-only check would wave this through: the head is `foreach`."""
+        sql = (
+            "-- catalog-verification: no-op nothing structural in here at all, "
+            "promise\n"
+            "do $$\n"
+            "begin\n"
+            "  update plm.widget set a = 1;\n"
+            "  foreach t in array array['a'] loop "
+            "revoke insert on plm.widget from service_role; end loop;\n"
+            "end;\n"
+            "$$;\n"
+        )
+        targets = targets_for(sql)
+        self.assertFalse(targets.noop_declaration["accepted"])
+        self.assertIn("`revoke`", targets.noop_declaration["rejected_because"])
+
+    def test_a_declaration_beside_a_do_block_still_sees_outside_statements(self):
+        """A data-only block does not excuse DDL sitting next to it."""
+        sql = (
+            "-- catalog-verification: no-op just a data touch-up, no catalog "
+            "object anywhere\n"
+            "do $coco$ begin update plm.widget set a = 1; end; $coco$;\n"
+            "create table plm.sneaky (id bigint);\n"
+        )
+        targets = targets_for(sql)
+        self.assertFalse(targets.noop_declaration["accepted"])
+        self.assertIn("sneaky", targets.noop_declaration["rejected_because"])
+
     def test_a_reasonless_declaration_is_rejected(self):
         targets = targets_for(
             "-- catalog-verification: no-op meh\nupdate plm.widget set a = 1;"

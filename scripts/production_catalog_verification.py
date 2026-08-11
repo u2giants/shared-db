@@ -271,10 +271,37 @@ NOOP_DECLARATION_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 # Statement heads a pure-DATA migration is allowed to contain. Anything else --
-# any DDL, any `do $$` block, any grant -- means the file is NOT a no-op and the
-# declaration is rejected.
+# any DDL, any grant -- means the file is NOT a no-op and the declaration is
+# rejected. A `do` block is the ONE exception, and it is not taken on trust
+# either: see `noop_do_block_offence` below, which reads INSIDE it.
 DATA_STATEMENT_RE = re.compile(
     r"^\s*(insert|update|delete|merge|with|select|values|set|reset|analyze)\b"
+)
+# A dollar-quoted delimiter: `$$` or an arbitrary tag such as `$coco$`, `$ins$`.
+# The tag is NOT assumed to be `$$` -- 20260807030000's whole body is `$coco$`,
+# and it nests a second `$ins$` payload inside it.
+DOLLAR_TAG_RE = re.compile(r"\$[A-Za-z_0-9]*\$")
+# `do [language plpgsql] $tag$ ... $tag$`, captured so the body can be read.
+DO_BLOCK_RE = re.compile(
+    r"^\s*do\s*(?:language\s+[a-z_][a-z_0-9]*\s*)?(\$[A-Za-z_0-9]*\$)"
+    r"(?P<body>.*)"
+    r"\1\s*$",
+    re.DOTALL,
+)
+# `execute` inside a `do` block is the dividing line between a data-only block
+# and dynamic SQL. Static payload -> readable, and judged like any statement.
+# Anything else (`format(...)`, concatenation, a variable) -> NOT readable, and
+# a text lexer guessing at it would be strictly worse than an honest refusal.
+# This is what keeps 20260810120000's `execute format('revoke insert on plm.%I
+# ...')` a REJECT.
+EXECUTE_RE = re.compile(r"\bexecute\b\s*", re.IGNORECASE)
+# Whole words that mean a `do` block is NOT data-only. Scanned over the body
+# with literals blanked and nested dollar bodies removed, so prose inside a
+# `raise notice` message cannot trip it and a real statement cannot hide behind
+# a `for ... loop` head that a head-only check would have waved through.
+NOOP_FORBIDDEN_IN_DO_RE = re.compile(
+    r"\b(create|alter|drop|grant|revoke|truncate|comment|reindex|refresh"
+    r"|cluster|copy|call|import|vacuum|do)\b"
 )
 
 
@@ -656,6 +683,144 @@ def parse_grant_statement(
     return expectations, relations, functions, notes
 
 
+def split_statements_dollar_aware(text: str) -> list[str]:
+    """Split on `;` while stepping OVER dollar-quoted bodies.
+
+    `split_statements` is only safe on text whose dollar bodies have already been
+    removed. The no-op claim check has to keep those bodies -- the whole question
+    is what is inside them -- so it needs a splitter that treats `$tag$ ... $tag$`
+    as one opaque token instead of splitting on the semicolons inside it.
+
+    An UNTERMINATED dollar quote keeps the rest of the text as a single statement
+    rather than guessing where it ends. That reads as one long non-data statement
+    and the claim is rejected, which is the safe direction.
+    """
+    parts: list[str] = []
+    buf: list[str] = []
+    i = 0
+    while i < len(text):
+        match = DOLLAR_TAG_RE.match(text, i)
+        if match:
+            tag = match.group(0)
+            end = text.find(tag, match.end())
+            if end == -1:
+                buf.append(text[i:])
+                break
+            buf.append(text[i : end + len(tag)])
+            i = end + len(tag)
+            continue
+        if text[i] == ";":
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(text[i])
+        i += 1
+    else:
+        parts.append("".join(buf))
+    if buf and (not parts or parts[-1] != "".join(buf)):
+        parts.append("".join(buf))
+    return [part for part in parts if part.strip()]
+
+
+def _execute_payload_offence(body: str) -> str | None:
+    """Judge every `execute` in a `do` block. Returns a reason to REJECT, or None.
+
+    An `execute` whose payload is a STATIC literal -- `execute $ins$ insert ...
+    $ins$ using ...`, which is exactly what 20260807030000 does to keep its audit
+    insert behind a `to_regclass` guard -- is readable text, so it is judged by
+    the same `DATA_STATEMENT_RE` as any other statement.
+
+    An `execute` whose payload is anything else is DYNAMIC SQL. The statement is
+    not knowable from the file, so it is refused. 20260810120000's `execute
+    format('revoke insert on plm.%I from service_role', t)` is that case, and it
+    must stay a reject: widening the claim check to cover a genuine data-only
+    block is a fix, widening it to cover dynamic SQL would be a bypass.
+    """
+    # COMMENTS MUST GO FIRST, and this is not cosmetic: 20260807030000's block
+    # explains itself at length and the prose contains the word EXECUTE
+    # ("The real reasons to keep EXECUTE are about later runs"). Scanned raw,
+    # that sentence reads as an `execute` with no payload and the file is
+    # rejected for a comment. Literals and nested dollar bodies are KEPT, because
+    # the payload being judged IS a literal.
+    body = strip_sql(body, keep_literals=True, keep_dollar=True)
+    for match in EXECUTE_RE.finditer(body):
+        rest = body[match.end() :]
+        payload: str | None = None
+        tag = DOLLAR_TAG_RE.match(rest)
+        if tag:
+            end = rest.find(tag.group(0), tag.end())
+            if end != -1:
+                payload = rest[tag.end() : end]
+        elif rest.startswith("'"):
+            end = rest.find("'", 1)
+            if end != -1:
+                payload = rest[1:end]
+        if payload is None:
+            return (
+                "it contains DYNAMIC SQL (`execute "
+                f"{' '.join(rest.split())[:60]}`), whose statement is not "
+                "knowable from the file text"
+            )
+        if not DATA_STATEMENT_RE.match(payload):
+            return (
+                "it `execute`s a non-data statement: "
+                f"`{' '.join(payload.split())[:80]}`"
+            )
+    return None
+
+
+def noop_do_block_offence(statement: str) -> str | None:
+    """Is this `do` block data-only? Returns a reason to REJECT, or None.
+
+    ADDED for 20260807030000 (batch B7). Its ENTIRE body is one `do $coco$ ...
+    $coco$;` block that re-parents a single `core.property` row. It creates no
+    object and issues no grant, so target derivation is empty and it hard-fails a
+    CORRECT apply -- but it could not declare itself a no-op either, because the
+    claim check saw only the statement head `do` and rejected it. There was no
+    legal way to make the file verify. That is a gap in the CHECK, not a problem
+    with the file.
+
+    THIS IS NOT A WIDENING INTO A RUBBER STAMP, and that is the load-bearing
+    part. The body is read, not waved through:
+
+      * every `execute` must carry a STATIC payload that is itself data-shaped
+        (`_execute_payload_offence`), so dynamic SQL is still refused;
+      * no `create`, `alter`, `drop`, `grant`, `revoke`, `truncate`, `comment`
+        or friends may appear anywhere in the body, scanned with literals
+        blanked so prose in a `raise notice` cannot trip it and a statement
+        cannot hide behind a `for ... loop` head;
+      * the body must actually CONTAIN a data statement, so a block that proves
+        nothing cannot claim to be a data no-op.
+    """
+    match = DO_BLOCK_RE.match(statement.strip())
+    if not match:
+        return "its `do` block could not be read (unterminated dollar quote?)"
+    body = match.group("body")
+    offence = _execute_payload_offence(body)
+    if offence:
+        return offence
+    # Literals blanked, nested dollar bodies (the `execute` payloads already
+    # judged above) removed -- so what is scanned is real statement text only.
+    scrubbed = strip_sql(body)
+    forbidden = sorted({m.group(1) for m in NOOP_FORBIDDEN_IN_DO_RE.finditer(scrubbed)})
+    if forbidden:
+        return (
+            "its `do` block contains "
+            f"{', '.join('`' + word + '`' for word in forbidden)}, which is not "
+            "a data statement"
+        )
+    has_data = any(
+        DATA_STATEMENT_RE.match(inner)
+        for inner in split_statements(scrubbed)
+    ) or bool(EXECUTE_RE.search(body))
+    if not has_data:
+        return (
+            "its `do` block contains no data statement at all, so it proves "
+            "nothing rather than being a data-only no-op"
+        )
+    return None
+
+
 def read_noop_declaration(raw: str, version: str) -> dict | None:
     """The one honest way a migration says "I name no catalog object".
 
@@ -676,12 +841,23 @@ def read_noop_declaration(raw: str, version: str) -> dict | None:
     if not match:
         return None
     reason = match.group("reason").strip()
-    statements = split_statements(strip_sql(raw))
-    offenders = [
-        " ".join(s.split())[:120]
-        for s in statements
-        if not DATA_STATEMENT_RE.match(s)
-    ]
+    # Dollar bodies are KEPT here, and the splitter steps over them, because the
+    # question a `do` block asks is what is inside it. `strip_sql` with the
+    # default `keep_dollar=False` deletes exactly the text that has to be read.
+    statements = split_statements_dollar_aware(
+        strip_sql(raw, keep_dollar=True)
+    )
+    offenders: list[str] = []
+    for statement in statements:
+        if DATA_STATEMENT_RE.match(statement):
+            continue
+        if DO_BLOCK_RE.match(statement.strip()):
+            offence = noop_do_block_offence(statement)
+            if offence is None:
+                continue
+            offenders.append(offence)
+            continue
+        offenders.append(" ".join(statement.split())[:120])
     if len(reason) < 20:
         return {
             "version": version,
