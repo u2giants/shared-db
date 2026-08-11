@@ -93,13 +93,34 @@ jobs:
           done
           echo "All four Step 7A test files present and covered by the glob above."
 
+      # ---------------------------------------------------------------------------------
+      # #654 — the skills-versus-rulebook drift check must actually RUN, not skip.
+      #
+      # scripts/check-skill-drift.mjs landed in #575 but SKIPPED in CI, because the skills
+      # live in u2giants/ai-devops and this job only ever checked out shared-db. A check
+      # that skips is not a mechanical check; it is a check that runs when someone
+      # remembers, which is the same state #654 was filed about.
+      #
+      # u2giants/ai-devops is a PUBLIC repository, so the default GITHUB_TOKEN can read it
+      # and no secret is needed. Checking it out into a sibling path makes the check real.
+      # ---------------------------------------------------------------------------------
+      - name: Check out the ai-devops skills so the drift check has something to compare
+        uses: actions/checkout@v4
+        with:
+          repository: u2giants/ai-devops
+          path: .ai-devops-checkout
+          persist-credentials: false
+
       - name: Check the shared-db skills do not contradict AGENTS.md
-        # SKIPS cleanly in CI, where u2giants/ai-devops is not checked out, and says so
-        # loudly rather than printing a green tick it has not earned. It runs for real on a
-        # developer or agent machine, which is where the skills actually live.
-        #
         # It exists because shared-db-change told sessions to apply DDL through an MCP that
         # AGENTS.md says may be bound to PRODUCTION. It drifted for weeks and THREE separate
         # adversarial model reviews missed it, because the skills live in a different
-        # repository and nobody's CI could see both files at once.
-        run: node scripts/check-skill-drift.mjs
+        # repository and nobody's CI could see both files at once. Now CI sees both.
+        #
+        # --require-skills makes a missing checkout a FAILURE rather than a clean skip. In
+        # CI the skills are always present, so "not found" means the checkout above broke,
+        # and that must be loud. On a developer machine the flag is omitted and the old
+        # skip-if-absent behaviour still applies.
+        env:
+          AI_DEVOPS_DIR: ${{ github.workspace }}/.ai-devops-checkout
+        run: node scripts/check-skill-drift.mjs --require-skills
