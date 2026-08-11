@@ -760,27 +760,63 @@ revoke all on function plm.load_pmt_capture_chunk(uuid, text, jsonb) from anon, 
 grant execute on function plm.load_pmt_capture_chunk(uuid, text, jsonb) to service_role;
 
 -- =====================================================================================
--- SECTION 9. plm.validate_pmt_capture -- one extra population, reconciled the same way.
+-- SECTION 9. plm.validate_pmt_capture -- STRICTLY ADDITIVE. Checks 1-13 are byte-identical
+-- to 20260810020000; three new checks and one new population are appended.
 --
--- The metadata-value count is added as a manifest-reconciled population, NOT as a hard-coded
--- CHECK. Spec section 8.6 is explicit: this scrape's counts belong in pmt_capture_expectation
--- where the next capture can legitimately differ, never frozen into a constraint.
+-- READ THIS BEFORE EDITING. `create or replace function` REPLACES THE WHOLE BODY. There is
+-- no "add a check" syntax: any check omitted from this file is DELETED from the database,
+-- silently, with no error and no diff for a reviewer to notice. An earlier draft of this
+-- very migration rewrote the function from scratch and thereby dropped twelve of the
+-- thirteen existing checks -- assets-covered-by-batches, batch completeness, batch ID-set
+-- equality, per-property capture completeness, rights-list title coverage, the
+-- co-occurrence-never-direct assertion, the anomalies-preserved assertion, unresolved
+-- failures, duplicate asset IDs, and the capture-exists guard -- while ALSO renaming six
+-- manifest populations (property_character_explicit, property_style_guide_explicit,
+-- property_franchise_asset_cooccurrence, authorized_property_context,
+-- malformed_explicit_pairs, captured_properties). Those names are emitted by
+-- manifestExpectations() in tools/sync-paramount-creative-library.mjs, so the renames would
+-- have left six declared expectations joining to nothing, reporting actual 0, and failing
+-- every finalization forever. The function below is therefore built FROM the 20260810020000
+-- text, not rewritten to resemble it.
 --
--- A second, structural check is added too: every metadata row must belong to an asset in the
--- SAME capture. The composite FK already makes a cross-capture row impossible to insert, so
--- this can only ever report 0 -- and that is exactly why it is worth asserting. If it is ever
--- non-zero, the FK has been dropped by someone and finalization must stop.
+-- WHAT IS GENUINELY NEW:
+--   * the 'asset_metadata_values' population in the actuals CTE, reconciled against the
+--     manifest, NOT a hard-coded CHECK -- spec section 8.6 is explicit that this scrape's
+--     counts belong in pmt_capture_expectation where the next capture may legitimately
+--     differ, and never frozen into a constraint.
+--   * check 14: that expectation must be DECLARED, so an empty metadata load cannot pass
+--     check 1 vacuously.
+--   * check 15: every metadata row belongs to an asset in the SAME capture.
+--   * check 16: every metadata row carries a source hash.
+--
+-- "No incomplete batch blocks finalization" (spec section 8.6) is NOT re-added here: check 4
+-- already asserts it for every batch. A second copy would report the same failure twice.
 -- =====================================================================================
 create or replace function plm.validate_pmt_capture(p_capture_id uuid)
 returns table (check_name text, expected bigint, actual bigint, ok boolean, detail text)
 language plpgsql
+-- SECURITY INVOKER, deliberately, unlike the import functions. This reporter is granted to
+-- authenticated so an operator can read the check results, and a DEFINER function bypasses
+-- RLS entirely -- which would let ANY signed-in user, including one with no app role at all,
+-- read Paramount population counts through it. As invoker it is bounded by the same read
+-- policy as the base tables. finalize calls it from inside a DEFINER context and is
+-- unaffected.
 security invoker
 set search_path = plm, core, public, extensions
 as $$
+declare
+  c plm.pmt_capture%rowtype;
 begin
+  select * into c from plm.pmt_capture where capture_id = p_capture_id;
+  if c.capture_id is null then
+    raise exception 'Paramount validation refused: capture % does not exist.', p_capture_id
+      using errcode = 'P0001';
+  end if;
+
+  -- 1. Manifest expected vs actual, for every declared population.
   return query
-  with actuals as (
-    select 'licensed_business_titles' as population, count(*)::bigint as n from plm.pmt_authorized_title where capture_id = p_capture_id
+  with actuals(population, actual) as (
+    select 'licensed_business_titles', count(*)::bigint from plm.pmt_authorized_title where capture_id = p_capture_id
     union all select 'licensed_property_selections', count(*)::bigint from plm.pmt_property where capture_id = p_capture_id and is_licensed_selection
     union all select 'property_result_rows', count(*)::bigint from plm.pmt_authorized_property_asset where capture_id = p_capture_id
     union all select 'unique_authorized_assets', count(*)::bigint from plm.pmt_asset where capture_id = p_capture_id
@@ -795,68 +831,191 @@ begin
     union all select 'asset_character', count(*)::bigint from plm.pmt_asset_character where capture_id = p_capture_id
     union all select 'asset_style_guide', count(*)::bigint from plm.pmt_asset_collection where capture_id = p_capture_id
     union all select 'asset_brand', count(*)::bigint from plm.pmt_asset_brand where capture_id = p_capture_id
-    union all select 'property_character', count(*)::bigint from plm.pmt_property_character where capture_id = p_capture_id
-    union all select 'property_style_guide', count(*)::bigint from plm.pmt_property_collection where capture_id = p_capture_id
-    union all select 'property_franchise_evidence', count(*)::bigint from plm.pmt_property_franchise_evidence where capture_id = p_capture_id
-    union all select 'relationship_anomalies', count(*)::bigint from plm.pmt_relationship_anomaly where capture_id = p_capture_id
-    union all select 'property_capture_log', count(*)::bigint from plm.pmt_property_capture_log where capture_id = p_capture_id
-    -- NEW in 20260811030000.
+    union all select 'property_character_explicit', count(*)::bigint from plm.pmt_property_character where capture_id = p_capture_id
+    union all select 'property_style_guide_explicit', count(*)::bigint from plm.pmt_property_collection where capture_id = p_capture_id
+    union all select 'property_franchise_asset_cooccurrence', count(*)::bigint from plm.pmt_property_franchise_evidence where capture_id = p_capture_id
+    union all select 'authorized_property_context', count(*)::bigint from plm.pmt_authorized_property_asset where capture_id = p_capture_id
+    union all select 'malformed_explicit_pairs', count(*)::bigint from plm.pmt_relationship_anomaly where capture_id = p_capture_id
+    union all select 'captured_properties', count(*)::bigint from plm.pmt_property_capture_log where capture_id = p_capture_id
+    -- NEW in 20260811030000: the lossless repeated-metadata population, reconciled against
+    -- the manifest exactly like every other one. Deliberately NOT a hard-coded CHECK --
+    -- the next capture is allowed to be a different size (spec section 8.6).
     union all select 'asset_metadata_values', count(*)::bigint from plm.pmt_asset_metadata_value where capture_id = p_capture_id
   )
-  -- Every EXPECTED population must reconcile. A manifest population with no actual counter
-  -- shows as actual 0 and fails, rather than being quietly ignored.
-  select 'manifest:' || e.population,
-         e.expected_count,
-         coalesce(a.n, 0),
-         coalesce(a.n, 0) = e.expected_count,
-         case when coalesce(a.n, 0) = e.expected_count then 'reconciled'
-              else 'MISMATCH: manifest expected ' || e.expected_count || ', database holds ' || coalesce(a.n, 0)
-         end
+  select 'manifest:' || e.population, e.expected_count, coalesce(a.actual, 0),
+         coalesce(a.actual, 0) = e.expected_count,
+         case when a.population is null then 'no actual measured for this declared population'
+              else null end
   from plm.pmt_capture_expectation e
   left join actuals a on a.population = e.population
-  where e.capture_id = p_capture_id
+  where e.capture_id = p_capture_id;
 
-  union all
+  -- 2. At least one expectation must exist. A capture with no declared expectations would
+  --    pass check 1 vacuously, which is exactly how an empty load looks like a good one.
+  return query
+  select 'manifest:expectations_declared',
+         1::bigint,
+         (select count(*)::bigint from plm.pmt_capture_expectation where capture_id = p_capture_id),
+         (select count(*) from plm.pmt_capture_expectation where capture_id = p_capture_id) > 0,
+         'a capture with zero declared expectations would pass every count check vacuously';
 
-  -- Structural: no metadata row may reference an asset outside its own capture. The
-  -- composite FK makes this impossible to insert; asserting it means a dropped FK is caught
-  -- at finalization instead of silently permitting orphans from then on.
-  select 'structural:metadata_rows_belong_to_capture_assets',
-         0::bigint,
-         (select count(*)::bigint
-            from plm.pmt_asset_metadata_value m
-            where m.capture_id = p_capture_id
-              and not exists (select 1 from plm.pmt_asset a
-                               where a.capture_id = m.capture_id and a.asset_id = m.asset_id)),
-         (select count(*) from plm.pmt_asset_metadata_value m
-            where m.capture_id = p_capture_id
-              and not exists (select 1 from plm.pmt_asset a
-                               where a.capture_id = m.capture_id and a.asset_id = m.asset_id)) = 0,
-         'Every metadata value must belong to an asset in the SAME capture.'
+  -- 3. Every asset has full metadata. In this schema "has full metadata" means the asset
+  --    row itself exists AND appears in a complete batch's returned set; the batch table is
+  --    the record of that. So: every asset must be inside the batch coverage.
+  return query
+  select 'assets_covered_by_batches',
+         (select count(*)::bigint from plm.pmt_asset where capture_id = p_capture_id),
+         (select coalesce(sum(returned_asset_count), 0)::bigint
+            from plm.pmt_capture_batch where capture_id = p_capture_id and complete),
+         (select count(*) from plm.pmt_asset where capture_id = p_capture_id)
+           = (select coalesce(sum(returned_asset_count), 0)
+                from plm.pmt_capture_batch where capture_id = p_capture_id and complete),
+         'every asset must be described by a complete full-metadata batch';
 
-  union all
+  -- 4. No incomplete batches.
+  return query
+  select 'batches_all_complete', 0::bigint,
+         (select count(*)::bigint from plm.pmt_capture_batch where capture_id = p_capture_id and not complete),
+         not exists (select 1 from plm.pmt_capture_batch where capture_id = p_capture_id and not complete),
+         'an incomplete batch means some asset was requested and never described';
 
-  -- Structural: source_hash is the row's provenance. A blank one means a loader wrote a row
-  -- it could not account for.
-  select 'structural:metadata_source_hashes_present',
-         0::bigint,
+  -- 5. Every batch passed exact ID-set validation.
+  return query
+  select 'batches_id_sets_matched', 0::bigint,
+         (select count(*)::bigint from plm.pmt_capture_batch
+           where capture_id = p_capture_id and not id_sets_matched),
+         not exists (select 1 from plm.pmt_capture_batch
+                      where capture_id = p_capture_id and not id_sets_matched),
+         'equal counts are not proof; the requested and returned ID sets must be identical';
+
+  -- 6. Every exact Property capture is complete.
+  return query
+  select 'property_captures_complete', 0::bigint,
+         (select count(*)::bigint from plm.pmt_property_capture_log
+           where capture_id = p_capture_id and not complete),
+         not exists (select 1 from plm.pmt_property_capture_log
+                      where capture_id = p_capture_id and not complete),
+         'a partly-scraped Property looks identical to a Property with fewer assets';
+
+  -- 7. All rights-list titles are represented, including the portal-unavailable ones.
+  return query
+  select 'rights_list_titles_present', c.licensed_title_count::bigint,
+         (select count(*)::bigint from plm.pmt_authorized_title where capture_id = p_capture_id),
+         (select count(*) from plm.pmt_authorized_title where capture_id = p_capture_id)
+           = c.licensed_title_count,
+         'every rights-list title must be a row, including titles absent from the portal view';
+
+  -- 8. Captured titles: unique assets equal full-metadata assets. (Also a CHECK; asserted
+  --    here too so the report names it rather than the load failing with a constraint code.)
+  return query
+  select 'captured_title_counts_agree', 0::bigint,
+         (select count(*)::bigint from plm.pmt_authorized_title
+           where capture_id = p_capture_id and capture_status = 'captured'
+             and unique_asset_count <> full_metadata_count),
+         not exists (select 1 from plm.pmt_authorized_title
+                      where capture_id = p_capture_id and capture_status = 'captured'
+                        and unique_asset_count <> full_metadata_count),
+         null;
+
+  -- 9. Search-result rows may EXCEED unique assets (overlapping Property scopes) but may
+  --    never be fewer: fewer means the authorized scope was not fully collected.
+  return query
+  select 'search_rows_at_least_unique_assets',
+         (select count(*)::bigint from plm.pmt_asset where capture_id = p_capture_id),
+         (select count(*)::bigint from plm.pmt_authorized_property_asset where capture_id = p_capture_id),
+         (select count(*) from plm.pmt_authorized_property_asset where capture_id = p_capture_id)
+           >= (select count(*) from plm.pmt_asset where capture_id = p_capture_id),
+         'overlap makes MORE search rows than assets legitimate; FEWER is a truncated scope';
+
+  -- 10. No co-occurrence row claims to be direct. (CHECK-enforced; named here explicitly.)
+  return query
+  select 'cooccurrence_never_direct', 0::bigint,
+         (select count(*)::bigint from plm.pmt_property_franchise_evidence
+           where capture_id = p_capture_id
+             and (is_direct_source_relationship or evidence_kind <> 'asset_cooccurrence_not_direct_pair')),
+         not exists (select 1 from plm.pmt_property_franchise_evidence
+                      where capture_id = p_capture_id
+                        and (is_direct_source_relationship
+                             or evidence_kind <> 'asset_cooccurrence_not_direct_pair')),
+         null;
+
+  -- 11. Malformed values stayed anomalies -- none of them was quietly turned into a link.
+  return query
+  select 'anomalies_preserved',
+         (select expected_count from plm.pmt_capture_expectation
+           where capture_id = p_capture_id and population = 'malformed_explicit_pairs'),
+         (select count(*)::bigint from plm.pmt_relationship_anomaly where capture_id = p_capture_id),
+         coalesce(
+           (select count(*) from plm.pmt_relationship_anomaly where capture_id = p_capture_id)
+             = (select expected_count from plm.pmt_capture_expectation
+                 where capture_id = p_capture_id and population = 'malformed_explicit_pairs'),
+           false),
+         'a malformed value that vanished was probably repaired into a link table';
+
+  -- 12. Unresolved failures.
+  return query
+  select 'no_unresolved_failures', 0::bigint, c.failure_count::bigint, c.failure_count = 0, null;
+
+  -- 13. Duplicate asset IDs within the capture. The primary key already forbids this; the
+  --     check is here so the validation REPORT covers it rather than relying on silence.
+  return query
+  select 'no_duplicate_asset_ids', 0::bigint,
+         (select count(*)::bigint from (
+            select asset_id from plm.pmt_asset where capture_id = p_capture_id
+            group by asset_id having count(*) > 1) d),
+         not exists (select 1 from (
+            select asset_id from plm.pmt_asset where capture_id = p_capture_id
+            group by asset_id having count(*) > 1) d),
+         null;
+
+  -- NOTE ON ORPHAN LINKS. There is deliberately no "orphan endpoint" count here. Every
+  -- relationship table carries a capture-scoped composite FOREIGN KEY, so an orphan link
+  -- cannot be inserted in the first place -- it fails at load time, loudly, instead of
+  -- being counted at finalize time. Checking for something the database cannot contain
+  -- would be theatre; the contract test proves the FK rejects it instead.
+
+  -- ===================================================================================
+  -- 14-16. NEW in 20260811030000 -- the metadata-value population.
+  -- ===================================================================================
+
+  -- 14. The metadata population must be DECLARED. Without this, a capture that loaded no
+  --     metadata at all and declared no expectation for it would sail through check 1
+  --     vacuously -- the same vacuous-pass hole check 2 exists to close, one level down.
+  return query
+  select 'metadata_expectation_declared',
+         1::bigint,
+         (select count(*)::bigint from plm.pmt_capture_expectation
+           where capture_id = p_capture_id and population = 'asset_metadata_values'),
+         (select count(*) from plm.pmt_capture_expectation
+           where capture_id = p_capture_id and population = 'asset_metadata_values') > 0,
+         'a capture with no declared asset_metadata_values expectation cannot be shown lossless';
+
+  -- 15. Every metadata row belongs to an asset in the SAME capture. The capture-scoped
+  --     composite FK makes this impossible to insert, so this can only ever report 0 --
+  --     which is precisely why it is asserted: if the FK is ever dropped, finalization
+  --     stops here instead of silently admitting orphans from that moment on.
+  return query
+  select 'metadata_rows_belong_to_capture_assets', 0::bigint,
          (select count(*)::bigint from plm.pmt_asset_metadata_value m
-            where m.capture_id = p_capture_id and btrim(coalesce(m.source_hash,'')) = ''),
-         (select count(*) from plm.pmt_asset_metadata_value m
-            where m.capture_id = p_capture_id and btrim(coalesce(m.source_hash,'')) = '') = 0,
-         'Every metadata value must carry a source hash.'
+           where m.capture_id = p_capture_id
+             and not exists (select 1 from plm.pmt_asset a
+                              where a.capture_id = m.capture_id and a.asset_id = m.asset_id)),
+         not exists (select 1 from plm.pmt_asset_metadata_value m
+                      where m.capture_id = p_capture_id
+                        and not exists (select 1 from plm.pmt_asset a
+                                         where a.capture_id = m.capture_id and a.asset_id = m.asset_id)),
+         'a metadata value whose asset is not in this capture is a cross-capture leak';
 
-  union all
+  -- 16. source_hash is the row's provenance. A blank one means the loader wrote a row it
+  --     could not account for, which makes the count above unprovable.
+  return query
+  select 'metadata_source_hashes_present', 0::bigint,
+         (select count(*)::bigint from plm.pmt_asset_metadata_value m
+           where m.capture_id = p_capture_id and btrim(coalesce(m.source_hash, '')) = ''),
+         not exists (select 1 from plm.pmt_asset_metadata_value m
+                      where m.capture_id = p_capture_id and btrim(coalesce(m.source_hash, '')) = ''),
+         'every metadata value must carry a source hash';
 
-  -- Structural: an incomplete metadata batch means the capture never finished reading the
-  -- source. Finalizing on top of it would publish a partial library as if it were whole.
-  select 'structural:no_incomplete_metadata_batch',
-         0::bigint,
-         (select count(*)::bigint from plm.pmt_capture_batch b
-            where b.capture_id = p_capture_id and b.complete = false),
-         (select count(*) from plm.pmt_capture_batch b
-            where b.capture_id = p_capture_id and b.complete = false) = 0,
-         'No metadata batch may be incomplete at finalization.';
 end;
 $$;
 
@@ -864,9 +1023,11 @@ comment on function plm.validate_pmt_capture(uuid) is
 'Reconciles a capture against its manifest expectations and asserts the structural rules '
 'finalization depends on. Counts come from plm.pmt_capture_expectation, never from a '
 'hard-coded constant, so the NEXT capture is allowed to be a different size. As of '
-'20260811030000 it also reconciles the asset_metadata_values population and asserts that '
-'every metadata row belongs to an asset in its own capture, carries a source hash, and that '
-'no metadata batch is left incomplete.';
+'20260811030000 it ALSO reconciles the asset_metadata_values population and asserts that the '
+'metadata expectation was declared, that every metadata row belongs to an asset in its own '
+'capture, and that every metadata row carries a source hash. Checks 1-13 are unchanged from '
+'20260810020000 -- this function is replaced WHOLE by every migration that touches it, so a '
+'check missing from the newest migration is a check DELETED from the database.';
 
 revoke all on function plm.validate_pmt_capture(uuid) from public;
 revoke all on function plm.validate_pmt_capture(uuid) from anon;
