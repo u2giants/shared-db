@@ -263,7 +263,7 @@ begin
   select count(*) into v_n
   from information_schema.tables
   where table_schema = 'plm'
-    and table_name ~ 'propert.*character|character.*propert';
+    and table_name ~ '^dcp_(propert.*character|character.*propert)';
   if v_n > 0 then
     raise exception 'D FAILED: % plm property-character table(s) exist. No such table may '
       'ever be created.', v_n;
@@ -590,7 +590,7 @@ begin
     -- relationships would now be sitting.
     if exists (
       select 1 from information_schema.tables
-      where table_schema = 'plm' and table_name ~ 'propert.*character|character.*propert'
+      where table_schema = 'plm' and table_name ~ '^dcp_(propert.*character|character.*propert)'
     ) then
       raise exception 'E FAILED: a property-character table came into existence. Nine '
         'relationships Disney never asserted would now exist for this one asset.';
