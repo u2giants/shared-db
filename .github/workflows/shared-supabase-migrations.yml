@@ -323,7 +323,8 @@ jobs:
           # THE RESOLVED SET MUST EQUAL THE NAMED SET, exactly and in order.
           python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
             --dry-run-output "$RUNNER_TEMP/preview-dry-run.txt" \
-            --allowlist "$PREVIEW_ALLOWLIST"
+            --allowlist "$PREVIEW_ALLOWLIST" \
+            --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
       - name: Bounded apply
         if: inputs.mode == 'apply'
         env:
@@ -343,7 +344,8 @@ jobs:
           supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/preview-dry-run.txt"
           python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
             --dry-run-output "$RUNNER_TEMP/preview-dry-run.txt" \
-            --allowlist "$PREVIEW_ALLOWLIST"
+            --allowlist "$PREVIEW_ALLOWLIST" \
+            --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
           # THE WRITE. Preview only.
           supabase db push --include-all 2>&1 | tee "$RUNNER_TEMP/preview-apply.txt"
       # ALWAYS, including after a failed apply -- a partial apply is exactly when
@@ -479,7 +481,8 @@ jobs:
           supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
           python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
             --dry-run-output "$RUNNER_TEMP/production-dry-run.txt" \
-            --allowlist "$PRODUCTION_ALLOWLIST"
+            --allowlist "$PRODUCTION_ALLOWLIST" \
+            --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
       - name: Save dry-run evidence
         uses: actions/upload-artifact@v4
         with:
@@ -672,7 +675,8 @@ jobs:
           supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
           python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
             --dry-run-output "$RUNNER_TEMP/production-dry-run.txt" \
-            --allowlist "$PRODUCTION_ALLOWLIST"
+            --allowlist "$PRODUCTION_ALLOWLIST" \
+            --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
           # THE WRITE.
           supabase db push --include-all 2>&1 | tee "$RUNNER_TEMP/production-apply.txt"
       - name: Capture production migration record (after)
