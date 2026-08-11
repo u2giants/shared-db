@@ -270,7 +270,12 @@ jobs:
             echo "\`$BOOT\` -- schema only, no rows. Statement errors: **$BASE_ERR**."
             echo ""
             if [ "$BASE_ERR" -gt 0 ]; then
-              echo "An error here usually means a migration has started creating an object the"
+              echo "TWO errors are EXPECTED and harmless: the baseline emits its functions twice"
+              echo "because pg_proc returns them in name order, not dependency order, and"
+              echo "claim_pdf_backfill_batch / count_pdf_backfill_remaining call"
+              echo "is_style_guide_source_pdf. They fail on the first pass and land on the second."
+              echo ""
+              echo "MORE than two usually means a migration has started creating an object the"
               echo "baseline also creates. Delete it from the baseline rather than leaving both."
               echo ""
               echo "<details><summary>Baseline errors</summary>"

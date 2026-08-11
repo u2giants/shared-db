@@ -47,6 +47,13 @@ dependency order, and a SQL-language function is validated when it is created:
 `CREATE OR REPLACE` is idempotent, so a second pass resolves every forward reference
 without anyone hand-maintaining an ordering.
 
+The job summary reports the baseline's statement-error count on every run. **Two are
+expected**: the first pass of the function block cannot create
+`claim_pdf_backfill_batch` or `count_pdf_backfill_remaining` before
+`is_style_guide_source_pdf` exists, and the second pass lands them. More than two usually
+means a migration has started creating an object the baseline also creates — delete it
+from the baseline rather than leaving both.
+
 **No rows. Not one.** No production data, no personal data, no licensed data. Test data
 belongs in `020_test_fixture_seed.sql` and is synthetic.
 
