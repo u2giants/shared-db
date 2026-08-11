@@ -573,6 +573,12 @@ jobs:
       - name: Automatic model review (verdict advisory -- but it MUST run)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Which model reviews is CONFIGURATION, not code. Set the repository
+          # (or environment) variable SHARED_DB_REVIEW_MODEL to change it
+          # without editing the script; unset, the script uses its own
+          # DEFAULT_MODEL, which is a real, working id. A wrong id here fails
+          # the job with a message naming the id -- it does not silently pass.
+          SHARED_DB_REVIEW_MODEL: ${{ vars.SHARED_DB_REVIEW_MODEL }}
           PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
           REQUESTED_SHA: ${{ inputs.commit_sha }}
         run: python scripts/production_apply_model_review.py
