@@ -17,13 +17,35 @@ Everything downstream of those 66 was missing from the ephemeral schema, so **26
 they could not pass. The lane proved only the subset of the contract provable from the
 repository alone.
 
-Two artifacts were missing. They are here.
+Two artifacts were missing. They are here, and with them **15 of those 26 files now
+pass** and the pass-1 replay failures fall from **66 to 10** (measured, run 31500417400).
+The 11 that remain each carry the actual error they fail with in
+`supabase/tests/ci-quarantine.txt`; three of them are candidate real defects in the tests
+themselves, exposed for the first time now that the schema is complete enough to reach
+the failing line.
 
 ## `010_pre_adoption_baseline.sql`
 
-The **schema only** of every relation that exists in production but that no migration in
-this repository creates. 126 tables, 1 view, 159 primary/unique/check constraints, 179
-indexes, 58 foreign keys.
+The **schema only** of every relation, function, trigger, policy and grant that exists in
+production but that no migration in this repository creates: 126 tables, 1 view, 157
+primary/unique/check constraints, 151 indexes, 54 foreign keys, 60 functions, 25 triggers
+and 509 access-rule statements.
+
+Functions, triggers and grants are not optional extras, and each was learned the hard way
+from a measured run:
+
+* Without `public.has_role()` the very first reconcile migration aborts and the eighteen
+  migrations downstream of it never create their own tables. Adding the functions is what
+  took the failures from 41 to 11.
+* Without the triggers, `20260723113000` aborts on
+  `trigger set_assets_updated_at for table assets does not exist`.
+* Without the grants, three tests fail on `permission denied` with every object present.
+
+The functions are emitted **twice**. `pg_proc` returns them in name order, which is not
+dependency order, and a SQL-language function is validated when it is created:
+`claim_pdf_backfill_batch` calls `is_style_guide_source_pdf`, and `c` sorts before `i`.
+`CREATE OR REPLACE` is idempotent, so a second pass resolves every forward reference
+without anyone hand-maintaining an ordering.
 
 **No rows. Not one.** No production data, no personal data, no licensed data. Test data
 belongs in `020_test_fixture_seed.sql` and is synthetic.
@@ -56,7 +78,11 @@ Read-only, from production, schema only. Nothing below writes anything.
    Never `psql` into production, never `apply_migration`, never `supabase db push`.
 4. **Emit only foreign keys whose target is also in the baseline set.** A key pointing at
    a table that a *migration* creates would be added twice.
-5. **Scan the result before committing**: no `INSERT`/`COPY`, no email addresses, and
+5. **Emit nothing a migration also creates** — not a column it `ADD`s, not an index,
+   constraint or policy name it creates on the same table. This file is the *pre*-adoption
+   shape. A duplicate makes the migration abort and, because migrations apply in a single
+   transaction, loses every other statement in that file.
+6. **Scan the result before committing**: no `INSERT`/`COPY`, no email addresses, and
    read the distinct string literals — they must be nothing but column names and enum
    labels.
 
@@ -70,8 +96,23 @@ run prints the baseline's statement-error count, so that drift is visible, never
 ## `020_test_fixture_seed.sql`
 
 Four active authenticated profiles, one Licensor, one Property, one Customer, one
-Factory, one ColdLion source ref. That is the whole of it, and it is all the eleven
-data-needing contract tests ask for.
+Factory, one ColdLion source ref. That is the whole of it.
+
+**Two rules this file learned by breaking things.**
+
+* **Give every fixture row an explicit `code`.** `core.licensor` is declared
+  `unique nulls not distinct (code)`, so at most one row in the table may have a null
+  code. A fixture that omits it silently consumes that single slot and the next test to
+  insert a licensor dies on `duplicate key value violates unique constraint
+  licensor_code_key`. That is exactly what happened to
+  `clickup_task_import_contracts.sql` — a passing test broken by fixture data, which is
+  the worst way for a seed to fail. `core.property` and `core.factory` carry the same
+  rule. `core.customer` is `core.company` renamed and has no `code` column at all.
+* **Go in through the real front door.** `public.handle_new_user()` is a real
+  pre-adoption trigger on `auth.users` and refuses any signup with no open invitation.
+  The seed creates the invitation and lets the trigger run. Do **not** disable a guard to
+  make a fixture load — a seed that switches off the thing under test is worse than no
+  seed at all.
 
 **Every row is invented.** Names are prefixed `ZZ Fixture` so that a row escaping into a
 real database is instantly recognisable as test scaffolding. Email addresses use the
