@@ -147,3 +147,34 @@ decision and was not taken here. The moment it is taken:
   (§3).
 - **Every authenticated user, including the owner, gets "Access denied"** until §7.1 is done.
 - Even after §7.1, the tool is read-only (§2) and has four working tabs, not five.
+
+## 9. The production Coolify application, created without a domain
+
+`db-data-admin-production` = **`zeoy8qfjqffu8ym533cc7dl4`**, in project `DB Data Admin`
+(`x433rsji7hlmgpysautjpa1e`), production environment (`ly7550eqjkwyto8ehzo08hkh`, id 14).
+Image `ghcr.io/u2giants/db-data-admin:sha-63d262e`. Status `exited:unhealthy` because it was
+created with `instant_deploy: false` and has never been deployed. **fqdn is empty.**
+
+Confirmed not publicly exposed, immediately after creation:
+
+| URL | result |
+| --- | --- |
+| `http://zeoy8qfjqffu8ym533cc7dl4.178.156.180.212.sslip.io` | **404** — Traefik has no route |
+| `https://data.designflow.app` | **503** — unchanged, no cutover happened |
+| `https://data-dev.designflow.app/health` | **200** — development untouched |
+
+Two Coolify behaviours worth recording because both would have caused a silent mistake:
+
+1. **Creation attached a public `sslip.io` domain that was never requested.** The create
+   response returned `http://<uuid>.178.156.180.212.sslip.io`. It was stripped at once by
+   PATCHing `domains` to an empty string and re-reading the application to confirm
+   `fqdn` is empty. Had it been left, the app would have been publicly reachable the moment
+   it was deployed, which is precisely what "no fqdn" was meant to prevent.
+2. **`POST /envs` returned HTTP 422 while still creating the record.** Three variables were
+   reported as failures and were in fact created, so a retry produced duplicates. They were
+   enumerated by uuid and de-duplicated down to exactly three. Never trust the status code
+   from that endpoint; re-read `/envs`.
+
+Final variables on the production application: `DB_DATA_ADMIN_SUPABASE_URL`,
+`DB_DATA_ADMIN_SUPABASE_ANON_KEY`, `DB_DATA_ADMIN_AUTH_REDIRECT_URL`, and deliberately **no**
+`DB_DATA_ADMIN_ALLOW_PASSWORD_LOGIN`, which is what keeps the tool SSO-only (§5).
