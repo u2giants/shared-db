@@ -105,7 +105,8 @@ jobs:
           for f in \
             scripts/test_production_migration_guard.py \
             scripts/test_production_catalog_verification.py \
-            scripts/test_post_batch_app_verification.py
+            scripts/test_post_batch_app_verification.py \
+            scripts/test_production_apply_model_review.py
           do
             if [ ! -f "$f" ]; then
               echo "::error::Expected Python test file is missing: $f" >&2
@@ -164,10 +165,9 @@ jobs:
   #   - `environment:`. Preview is the safe target; a gate that fires on harmless
   #     events trains the approver to click through (issue #646).
   #   - The typed confirmation string and the exact-origin/main-SHA check.
-  #   - The advisory model-review step. That step currently reports "NOT RUN --
-  #     ANTHROPIC_API_KEY is not configured on this repository" and is
-  #     `continue-on-error`, i.e. a permanent silent no-op. It is not touched by
-  #     this change, and it is not reproduced here. Do not add it.
+  #   - The model-review step. It is now mandatory on the PRODUCTION lane (it
+  #     fails that job if it cannot run) and it needs ANTHROPIC_API_KEY. Preview
+  #     is the safe target and does not carry it. Do not add it here.
   # ===========================================================================
   preview:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'preview'
@@ -501,11 +501,15 @@ jobs:
   #      run on its own findings.
   #   2. An automatic MODEL REVIEW that posts a technical verdict into the job
   #      summary, where the human approver reads it.
-  #      ****** THE MODEL REVIEW IS ADVISORY AND MAY NEVER BE THE ONLY GATE. ******
-  #      It does not fail the run and it does not approve the run. It exists to put
-  #      a written technical opinion in front of the human, not to replace them. If
-  #      you ever make its verdict blocking, you have created a lane where a model
-  #      can wave a production write through. Do not.
+  #      ****** THE VERDICT IS ADVISORY AND MAY NEVER BE THE ONLY GATE. ******
+  #      The verdict does not fail the run and does not approve the run. It exists
+  #      to put a written technical opinion in front of the human, not to replace
+  #      them. If you ever make its VERDICT blocking, you have created a lane where
+  #      a model can wave a production write through. Do not.
+  #      ****** BUT THE REVIEW ACTUALLY RUNNING IS MANDATORY. ******
+  #      If it cannot run (no ANTHROPIC_API_KEY, API failure, empty response) the
+  #      step FAILS and this job goes red, so `production-apply` never reaches the
+  #      approval gate. A green job that reviewed nothing is a silent failure.
   #   3. `environment: production` -- Albert, as required reviewer, clicking
   #      approve. This is the gate that actually holds. Nothing below it runs
   #      until he does.
@@ -559,8 +563,14 @@ jobs:
             --repo "$GITHUB_WORKSPACE" \
             --allowlist "$PRODUCTION_ALLOWLIST" \
             --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
-      - name: Automatic model review (ADVISORY -- never blocking)
-        continue-on-error: true
+      # The VERDICT is advisory; the review HAPPENING is mandatory. There is no
+      # `continue-on-error` here on purpose: it used to be here, and with
+      # ANTHROPIC_API_KEY unset the step printed "NOT RUN" and the job still went
+      # green, so every production apply carried a review that had never
+      # happened. The script exits non-zero only when the review could not be
+      # performed (missing key, empty allowlist, API failure, empty response) --
+      # never on the model's opinion. See scripts/production_apply_model_review.py.
+      - name: Automatic model review (verdict advisory -- but it MUST run)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
