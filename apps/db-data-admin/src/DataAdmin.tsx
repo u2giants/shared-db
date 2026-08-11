@@ -11,6 +11,7 @@ import { RecordEditor } from './RecordEditor'
 import { MergeDialog } from './MergeDialog'
 import { LicensorTree } from './LicensorTree'
 import { PropertyTable } from './PropertyTable'
+import { ProductDepthTable } from './ProductDepthTable'
 import { INLINE_EDITABLE_PROPS, INLINE_EDIT_REASON, INLINE_UNDO_REASON, saveInlineRow } from './lib/inline-edit'
 import { FilterHeader, type HeaderProps } from './FilterHeader'
 
@@ -66,7 +67,7 @@ const baseColumns: ColumnRegular[] = [
 
 export function DataAdmin({ client, email, onSignOut }: Props) {
   const [kind, setKind] = useState<EntityKind>('customer')
-  const [section, setSection] = useState<'entity' | 'taxonomy' | 'property'>('entity')
+  const [section, setSection] = useState<'entity' | 'taxonomy' | 'property' | 'product-depth'>('entity')
   const [query, setQuery] = useState<QueryState>(initialQuery)
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
@@ -307,8 +308,12 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
     void persistInlineChanges(pending)
   }
 
-  if (denied) return <section className="access-denied" role="alert"><h1>Access denied</h1><p>You are signed in, but DB Data Admin requires an active Administrator grant.</p><button className="secondary" onClick={onSignOut}><LogOut /> Sign out</button></section>
-
+  // The Customers/Vendors/Licensors/Properties screens require the `administrator`
+  // gate. Product Depth deliberately does NOT — owner decision 1 on issue #597 opens
+  // it to the shared Designer role as well. So a denial on the entity probe must not
+  // hide the whole application: the tab strip stays, and the denial is scoped to the
+  // section that actually refused. (Before this, a Designer saw a bare "Access denied"
+  // page and could never reach the screen they were granted.)
   return <section className="workspace">
     <div className="workspace-bar"><div><strong>{email}</strong><span>Preview database</span></div><button className="secondary" onClick={onSignOut}><LogOut /> Sign out</button></div>
     <nav className="tabs" aria-label="Data type">
@@ -316,8 +321,13 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
       <button className={section === 'entity' && kind === 'vendor' ? 'active' : ''} onClick={() => { setSection('entity'); setKind('vendor') }}>Vendors</button>
       <button className={section === 'taxonomy' ? 'active' : ''} onClick={() => setSection('taxonomy')}>Licensors</button>
       <button className={section === 'property' ? 'active' : ''} onClick={() => setSection('property')}>Properties</button>
+      <button className={section === 'product-depth' ? 'active' : ''} onClick={() => setSection('product-depth')}>Product Depth</button>
     </nav>
-    {section === 'taxonomy'
+    {section === 'product-depth'
+      ? <ProductDepthTable client={client} />
+      : denied
+      ? <section className="access-denied" role="alert"><h1>Access denied</h1><p>You are signed in, but this screen requires an active Administrator grant.</p><button className="secondary" onClick={onSignOut}><LogOut /> Sign out</button></section>
+      : section === 'taxonomy'
       ? <LicensorTree client={client} />
       : section === 'property'
       ? <PropertyTable client={client} />
