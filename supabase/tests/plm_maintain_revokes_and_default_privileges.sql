@@ -2,6 +2,15 @@
 -- Contract tests for migration 20260810180000 -- the PostgreSQL 17 MAINTAIN revokes on
 -- the 39 plm landing tables (#664) and the plm schema default-privilege hole (#649).
 --
+-- THE NUMBER 39 IS NOW HISTORICAL PROSE, NOT A CONTRACT. Read it as "the plm landing
+-- tables". It was 23 pmt + 16 nbcu when this file was written; #757 adds a seventeenth
+-- nbcu table (plm.nbcu_asset_ip_family, migration 20260811070000) and #752 adds a
+-- twenty-fourth pmt table, so the live total moves. NOTHING BELOW DEPENDS ON THE
+-- NUMBER: every section enumerates the family from pg_class and then cross-checks the
+-- named arrays, which is precisely so that adding a table cannot make this test pass
+-- vacuously. Update the arrays when a table is added; leave the arithmetic in the prose
+-- alone rather than racing another PR over the same lines.
+--
 -- HOW TO RUN
 --   Against PREVIEW rjyboqwcdzcocqgmsyel ONLY, on the SESSION pooler port 5432, NOT the
 --   transaction pooler port 6543.
@@ -105,13 +114,24 @@ declare
     'pmt_asset_character','pmt_asset_collection','pmt_asset_brand',
     'pmt_property_character','pmt_property_collection','pmt_property_franchise_evidence',
     'pmt_authorized_property_asset','pmt_relationship_anomaly','pmt_property_capture_log',
-    'pmt_shrink_override'];
+    'pmt_shrink_override',
+    -- Added by 20260811030000 (PR #752, the lossless repeated-metadata table). It is a
+    -- pmt landing table like every other name here, so it keeps service_role's documented
+    -- INSERT/UPDATE/DELETE and must hold none of TRUNCATE/REFERENCES/TRIGGER/MAINTAIN.
+    'pmt_asset_metadata_value'];
   v_nbcu text[] := array[
     'nbcu_capture','nbcu_right','nbcu_scope','nbcu_property','nbcu_ip_family',
     'nbcu_character','nbcu_style_guide','nbcu_asset','nbcu_asset_metadata_value',
     'nbcu_asset_scope','nbcu_ip_family_property','nbcu_property_character',
     'nbcu_asset_property','nbcu_asset_character','nbcu_asset_style_guide',
-    'nbcu_style_guide_property'];
+    'nbcu_style_guide_property',
+    -- Added by #757 (migration 20260811070000). NOTE THE COUPLING, because it is not
+    -- obvious: this array is read in TWO places -- the mandatory-existence check just
+    -- below, and the nbcu UPDATE/DELETE assertion further down. Naming a table here
+    -- makes it REQUIRED TO EXIST, so this file goes red on any database where
+    -- 20260811070000 has not been applied. That is intended; do not "fix" it by
+    -- removing the name.
+    'nbcu_asset_ip_family'];
   v_found text[];
   v_missing text[];
   t     text;
