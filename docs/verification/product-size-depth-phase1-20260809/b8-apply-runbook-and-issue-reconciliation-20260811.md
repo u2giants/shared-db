@@ -136,11 +136,12 @@ returned **38 passed / 0 failed** plus **3 supplementary passed** on preview.
 | 14 | Unauthorized Depth mutation | fails **and writes no data row and no audit row** |
 
 Checks 12–14 have a precedent already measured against production by another agent, and it
-should be cited rather than rebuilt: the tester `poppim-production-ai-test@popcre.com`
-**holds the administrator role** but has `app_access = pm` only, and receives **HTTP 403 on
-every DB Data Admin contract** (`channel_list`, `licensor_property_tree`, `customer_list`).
-Anonymous receives 401. That is the "a role alone is not sufficient" proof; it does not need
-running again.
+should be cited rather than rebuilt: the **PM production test account** (identify it by its
+`app.profile` UUID — this repository is public, so it is deliberately not named here; see
+AGENTS.md §6.14) **holds the administrator role** but has `app_access = pm` only, and
+receives **HTTP 403 on every DB Data Admin contract** (`channel_list`,
+`licensor_property_tree`, `customer_list`). Anonymous receives 401. That is the "a role
+alone is not sufficient" proof; it does not need running again.
 
 ---
 
