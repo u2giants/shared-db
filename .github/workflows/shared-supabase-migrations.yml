@@ -126,17 +126,23 @@ jobs:
   #      whole queue with "Found local migration files to be inserted before the
   #      last migration on remote database" and exits 1. So the lane was stuck
   #      closed with no operator control at all.
-  #   2. The only escape was `--include-all`, which would have swept all four
-  #      pending migrations at once. Those four belong to THREE different
-  #      workstreams, including a security migration. "Apply everything pending"
-  #      is not a lane; it is the absence of one.
+  #   2. The only escape was the CLI's include-all flag, which would have swept
+  #      all four pending migrations at once. Those four belong to THREE
+  #      different workstreams, including a security migration. "Apply
+  #      everything pending" is not a lane; it is the absence of one.
+  #
+  # (This header spells that flag WITHOUT its two leading dashes on purpose.
+  # `test_include_all_is_bounded_and_dry_run_only` bans the literal token by
+  # plain text search everywhere above this job, and prose is not exempt from a
+  # text search. The exact flag appears in the step comments below, which are
+  # inside the job the test allows it in. Do not "fix" the spelling here.)
   #
   # This is now the SAME MECHANISM the production lane already uses, not a second
   # one. `scripts/production_migration_guard.py` is target-agnostic in everything
   # that matters here -- it takes a repo, an allowlist and a REMOTE LEDGER FILE,
   # and it prunes a detached checkout down to exactly `remote-ledger | allowlist`.
-  # Point it at preview's ledger and it bounds preview. The bound that makes
-  # `--include-all` safe is the FILESYSTEM, never the flag. Reusing this file also
+  # Point it at preview's ledger and it bounds preview. The bound that makes the
+  # include-all flag safe is the FILESYSTEM, never the flag. Reusing this file also
   # means every policy rule inside `parse_allowlist` (HARD_BLOCKED, the AGENTS.md
   # 6.8 bundle, the 6.5 FR hold, the #660 security co-presence rules) applies to
   # preview too. That is deliberate: preview is the rehearsal for production, and
