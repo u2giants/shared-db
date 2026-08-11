@@ -350,8 +350,22 @@ begin
     raise exception 'C FAILED: role authenticated was not denied UPDATE.';
   end if;
 
-  -- C5. AS `authenticated` -- the FUNCTION path is closed as well. Even if a future grant
-  -- restored EXECUTE, the predicate must still refuse the browser role.
+  -- C5. AS `authenticated` -- the FUNCTION path is closed as well.
+  --
+  -- WHAT THIS DOES AND DOES NOT PROVE -- READ BEFORE STRENGTHENING THE CLAIM.
+  -- It proves the EXECUTE REVOKE holds. It does NOT prove the predicate would refuse,
+  -- and it CANNOT, because `set role` changes current_user but leaves SESSION_USER as the
+  -- migration owner (verified: current_user='authenticated', session_user='postgres'), and
+  -- the predicate matches positively on session_user. So inside this test harness the
+  -- predicate would return TRUE for a browser role -- the grant is what stops it here.
+  -- That is not a hole in the contract: in the real deployment a PostgREST connection has
+  -- session_user 'authenticator' and JWT role 'authenticated', and the predicate is false
+  -- on both counts. It is a limit of `set role` as a way to impersonate a browser, which
+  -- is exactly why section D calls the predicate DIRECTLY with browser-shaped arguments.
+  -- The two sections together cover what neither can alone.
+  --
+  -- The test still guards the regression that matters: if a future migration granted
+  -- EXECUTE to authenticated, the call would SUCCEED here and this section would fail.
   set local role authenticated;
   v_ok := false;
   begin
