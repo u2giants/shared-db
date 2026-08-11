@@ -90,18 +90,29 @@ begin
 
   -- ---------------------------------------------------------------------------------
   -- One canonical Licensor and one Property beneath it.
+  --
+  -- EVERY FIXTURE ROW CARRIES AN EXPLICIT `code`, AND THAT IS NOT COSMETIC. core.licensor
+  -- is declared `unique nulls not distinct (code)`, so at most ONE row in the whole table
+  -- may have a null code. A fixture that omits the code silently consumes that single
+  -- slot, and the next test to insert a licensor without one dies on
+  -- "duplicate key value violates unique constraint licensor_code_key". That is exactly
+  -- what happened to clickup_task_import_contracts.sql on the first run of this seed --
+  -- a passing test broken by fixture data, which is the worst way for a seed to fail.
+  -- core.property, core.customer and core.factory carry the same rule on their own code
+  -- columns. If you add a fixture row to any of them, give it a code.
   -- ---------------------------------------------------------------------------------
   select id into v_licensor_id from core.licensor where name = 'ZZ Fixture Licensor';
   if v_licensor_id is null then
-    insert into core.licensor (name) values ('ZZ Fixture Licensor') returning id into v_licensor_id;
+    insert into core.licensor (name, code) values ('ZZ Fixture Licensor', 'ZZFXL')
+    returning id into v_licensor_id;
   end if;
 
   select id into v_property_id
   from core.property
   where name = 'ZZ Fixture Property' and licensor_id = v_licensor_id;
   if v_property_id is null then
-    insert into core.property (licensor_id, name)
-    values (v_licensor_id, 'ZZ Fixture Property')
+    insert into core.property (licensor_id, name, code)
+    values (v_licensor_id, 'ZZ Fixture Property', 'ZZFXP')
     returning id into v_property_id;
   end if;
 
@@ -110,12 +121,14 @@ begin
   -- ---------------------------------------------------------------------------------
   select id into v_customer_id from core.customer where name = 'ZZ Fixture Customer';
   if v_customer_id is null then
-    insert into core.customer (name) values ('ZZ Fixture Customer') returning id into v_customer_id;
+    insert into core.customer (name, code) values ('ZZ Fixture Customer', 'ZZFXC')
+    returning id into v_customer_id;
   end if;
 
   select id into v_factory_id from core.factory where name = 'ZZ Fixture Factory';
   if v_factory_id is null then
-    insert into core.factory (name) values ('ZZ Fixture Factory') returning id into v_factory_id;
+    insert into core.factory (name, code) values ('ZZ Fixture Factory', 'ZZFXV')
+    returning id into v_factory_id;
   end if;
 
   -- ---------------------------------------------------------------------------------
