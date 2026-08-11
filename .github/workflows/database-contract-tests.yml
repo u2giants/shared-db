@@ -372,7 +372,7 @@ jobs:
           fi
           # A REAL NAME IN THE FIXTURE IS A LEAK, so refuse rather than seed one. `.invalid`
           # is reserved by RFC 2606 and can never be a real domain.
-          if grep -nEi "@(?!fixture\.invalid)[A-Za-z0-9.-]+\.[A-Za-z]{2,}" -P "$SEED"; then
+          if grep -nPi "@(?!fixture\.invalid\b)[A-Za-z0-9.-]+\.[A-Za-z]{2,}" "$SEED"; then
             echo "::error::$SEED contains an email address outside fixture.invalid. Fixture data must be synthetic." >&2
             exit 1
           fi
