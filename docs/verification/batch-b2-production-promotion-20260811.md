@@ -108,6 +108,50 @@ Run <https://github.com/u2giants/shared-db/actions/runs/31450243224> (SHA `d0a83
 - `Production apply (requires Albert's approval)` — **`waiting`** on `environment: production`.
   `pending_deployments` reports the sole eligible reviewer is `u2giants`.
 
+**Albert approved this run, but by the time he clicked, `main` had moved from `d0a832c` to
+`0365f44` (five PRs merged in between). `Verify exact main commit` refused. The run FAILED SAFELY:
+production was NOT written.** Re-confirmed directly afterwards — ledger still 373 rows, max
+`20260810140000`, and the live tree body still 13,802 chars with `division_name` absent.
+
+### 6.4 Re-stage at `0365f44` — full re-verification from scratch
+
+A merge freeze was put in force (PRs #746, #751, #752, #753 held unmerged) so `main` would stop
+moving. Work was done in a dedicated worktree cut from a freshly fetched `origin/main`.
+
+Every precondition in §2–§5 above was **re-measured live against production** at the new SHA, and
+every number was identical: ledger 373 / `20260810140000`; tree body 13,802 chars with `pi.` = 2,
+`li.` = 1, `division_name` absent; `plm."divisionCode"` present with all six columns;
+`pim.product` 17,909 rows / 17,909 distinct task ids / 0 untrimmed / 0 null `external_source` /
+17,859 `directus_product` + 50 `clickup`; all three target objects still absent.
+
+**Re-staged dry run — GREEN.** Run <https://github.com/u2giants/shared-db/actions/runs/31496831439>
+(SHA `0365f44`):
+
+```
+BOUNDED OK: 376 migration files on disk, all within remote-ledger | allowlist (3 allowlisted).
+Would push these migrations:
+ • 20260728171500_db_data_admin_tree_plm_division_names.sql
+ • 20260728174500_clickup_incremental_task_import_reissue.sql
+ • 20260728181500_clickup_incremental_task_import_fixes.sql
+```
+
+**Re-staged apply dispatch.** Run <https://github.com/u2giants/shared-db/actions/runs/31496978455>
+(SHA `0365f441b693a445d15049e21c1530fa5ba867c2`):
+
+- `SQL migration guards` — success
+- `Production apply review (advisory model verdict + hard guards)` — success
+- `Production apply (requires Albert's approval)` — `waiting`
+
+`origin/main` was re-derived immediately before the apply dispatch and was still `0365f44`, so the
+`Verify exact main commit` step will pass provided the freeze holds until he clicks.
+
+### 6.5 Atomicity note
+
+`supabase db push` is atomic **per file**, not per batch (AGENTS.md §5.1-A,
+`docs/verification/issue-611-db-push-atomicity-20260810.md`). A mid-batch failure would leave the
+earlier files applied *and* ledgered. The resulting position is recorded in §9 whatever it turns
+out to be.
+
 ## 7. Finding — the #709 User-Agent path did NOT execute
 
 The brief expected this run to be the first real production exercise of the User-Agent fix in
