@@ -1227,7 +1227,14 @@ def main() -> int:
     bounded.add_argument("--remote-ledger", type=Path, required=True)
     verify = subs.add_parser("verify-dry-run")
     verify.add_argument("--dry-run-output", type=Path, required=True)
-    verify.add_argument("--remote-ledger", type=Path, required=False)
+    # REQUIRED on the CLI even though the Python function's `ledger` is
+    # optional. The function stays optional for `production_catalog_verification`
+    # and other direct callers; the LANE must never be able to omit it, because
+    # an omitted ledger silently restores the exact B9 deadlock this flag exists
+    # to remove (a loud refusal, but at the last gate, after everything else has
+    # already passed). All four workflow call sites pass it; there is a test
+    # asserting they always will.
+    verify.add_argument("--remote-ledger", type=Path, required=True)
     verify.add_argument("--allowlist", required=True)
     args = parser.parse_args()
     try:

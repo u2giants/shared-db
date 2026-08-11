@@ -1487,6 +1487,27 @@ class ApplyLaneTests(unittest.TestCase):
         self.assertLess(verify, push)
         self.assertEqual(push, len(commands) - 1, "the push must be the last command")
 
+    def test_every_verify_dry_run_call_passes_a_remote_ledger(self) -> None:
+        """The lane must never re-create the B9 deadlock at its last gate.
+
+        `verify-dry-run`'s co-presence check is ledger-aware; without a ledger
+        it reverts to the ledger-blind behaviour that made B9 unshippable, and
+        it would do so at the step immediately before the write, after every
+        other gate had already passed. `--remote-ledger` is `required=True` on
+        the CLI, so a dropped flag is an argparse error rather than a mystery
+        refusal -- and this test says so at the call sites too.
+        """
+        calls = [
+            WORKFLOW_TEXT[match.end() : match.end() + 400]
+            for match in re.finditer(r"verify-dry-run", WORKFLOW_TEXT)
+        ]
+        self.assertEqual(len(calls), 4, "expected four verify-dry-run call sites")
+        for index, call in enumerate(calls):
+            with self.subTest(call=index):
+                head = call.split("- name:")[0]
+                self.assertIn("--remote-ledger", head)
+                self.assertIn("ledger-before.txt", head)
+
     def test_the_apply_job_uploads_before_dryrun_and_after_evidence(self) -> None:
         job = _job("production-apply")
         for artifact in (
