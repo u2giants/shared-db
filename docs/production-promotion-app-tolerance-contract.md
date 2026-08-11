@@ -411,21 +411,21 @@ with the independently derived 47-entry apply set in
 | **B9** | `20260810010000` … `20260810170000` (excl. `140000`) | 14 | **ATOMIC — the licensor landing batch.** Carries all three security co-presence pairs (below), the `api.dam_order_list` `security_invoker` fix, and both DAM function chains. There is **no** safe internal boundary anywhere in it. |
 
 > **⚠️ Correction to the earlier batch sketch, and it is load-bearing.** An earlier draft placed
-> `20260731150000` and `20260731153000` (PopSG) in a batch *after* `20260731200000`. **That is not
-> executable.** `supabase db push` applies in version order, and `20260731150000` sorts below
-> `20260731163000`, `180000`, `190000` and `200000`. The two PopSG files therefore belong **inside
-> B3**, making B3 ten files and B4 two. With this correction the batch counts sum to exactly 61.
+> `20260731150000` and `20260731153000` (PopSG) in a batch *after* `20260731200000`. **The two PopSG
+> files belong inside B3**, making B3 ten files and B4 two. With this correction the batch counts sum
+> to exactly 61.
 >
-> **⚠️ CORRECTION TO THIS CORRECTION (2026-08-11, §5A.5).** The paragraph above originally justified
-> itself with "a batch is a contiguous version-ordered slice of the remaining set; it cannot
-> leapfrog." **That justification is FALSE for the production lane and has been removed.**
+> **Why — stated correctly, because the original reason given here was wrong (2026-08-11, §5A.5).**
+> This note used to say such a split was "not executable" because `supabase db push` applies in
+> version order and a batch is therefore "a contiguous version-ordered slice that cannot leapfrog".
+> **That reasoning is FALSE for the production lane and has been removed.**
 > `scripts/production_migration_guard.py` `prepare()` computes `keep = remote | set(allowlist)` and
 > **deletes every migration file outside it**, so `supabase db push` never sees the skipped versions
 > and an allowlist need not be contiguous. That is precisely why production's ledger is applied out
-> of order. **The conclusion still stands** — the two PopSG files belong inside B3, and B3 is atomic
-> for the reasons in its own row — **but nowhere in this document may version order be treated as a
-> mechanism that prevents a bad ordering. Only the operator and this document do that.** Full
-> explanation and consequences: §5A.5.
+> of order. **The conclusion stands on different grounds:** B3 is **contract policy**, mechanically
+> enforced by the guard's `ATOMIC_BATCHES` entry for B3 — which is what actually refuses a partial
+> B3 allowlist — and the PopSG files sit inside its span. **Nowhere in this document may version
+> order be treated as a mechanism that prevents a bad ordering.** Full consequences: §5A.5.
 
 ### B9's three security co-presence pairs — the reason it cannot be split
 
@@ -634,9 +634,11 @@ not what it looks like.**
 > ### ⚠️ CORRECTION — "a batch cannot leapfrog" is FALSE for the production lane. Read this before
 > ### relying on version order anywhere in this document.
 >
-> §5's own correction note argues that a batch is necessarily a contiguous version-ordered slice
-> because `supabase db push` applies in version order and "cannot leapfrog". **That is true of a
-> plain checkout and FALSE of the production lane**, and the difference is load-bearing.
+> An earlier version of §5's own correction note argued that a batch is necessarily a contiguous
+> version-ordered slice because `supabase db push` applies in version order and "cannot leapfrog".
+> **That is true of a plain checkout and FALSE of the production lane**, and the difference is
+> load-bearing. The sentence has been struck from §5; this box explains why. If you find that
+> reasoning anywhere else in this repo — a doc, an issue, a PR body, a comment — it is wrong.
 >
 > **VERIFIED in `scripts/production_migration_guard.py`, `prepare()`:** the lane builds a *bounded
 > checkout* and then computes `keep = remote | set(allowlist)` and **deletes every migration file
