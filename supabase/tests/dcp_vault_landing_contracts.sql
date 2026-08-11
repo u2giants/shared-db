@@ -31,13 +31,13 @@
 --   prefix 99999999-9999-4999-8999-*.
 --
 -- SIDE EFFECTS: NONE. Every section that writes runs inside an explicit transaction that
---   ends in ROLLBACK, and section G re-asserts that against the committed state afterwards.
+--   ends in ROLLBACK, and section H re-asserts that against the committed state afterwards.
 --
 -- WHAT IT ASSERTS. Every assertion targets the OBJECT and its BEHAVIOUR -- to_regclass,
 --   pg_trigger, pg_policy, has_table_privilege, and real statements that must be refused.
 --   NOT ONE assertion reads a migration ledger row: a ledger row proves a file ran, never
 --   that it did what it claimed. Every count check is written so that an EMPTY set FAILS.
---     A  The ten tables and the three functions exist (to_regclass / pg_proc).
+--     A  The ten tables and the fourteen functions exist (to_regclass / pg_proc).
 --     B  PRIVILEGES: service_role holds SELECT and INSERT and NOTHING ELSE -- no UPDATE,
 --        DELETE, TRUNCATE, REFERENCES, TRIGGER or MAINTAIN. anon and public hold nothing.
 --        The table list is ENUMERATED FROM pg_class, so a plm.dcp_* table added later
@@ -48,8 +48,14 @@
 --     D  THE NULL-ROLE CASE: plm.dcp_loader_privilege_ok returns FALSE for NULL/NULL and
 --        for empty strings, and TRUE only on a positive match. This is the exact condition
 --        that holds inside a migration.
---     E  IMMUTABILITY ACTUALLY BLOCKS A WRITE. Not "the trigger exists" -- a real UPDATE
---        and a real DELETE against a completed crawl are executed and must both raise.
+--     E  IMMUTABILITY ACTUALLY BLOCKS A WRITE. Not "the trigger exists" -- real INSERT,
+--        UPDATE and DELETE statements against a completed crawl are executed and must all
+--        raise. E6 is the INSERT case specifically: section 7 revokes UPDATE, DELETE and
+--        TRUNCATE from service_role but KEEPS INSERT, so INSERT is the only mutating
+--        operation still available and therefore the one worth proving. E7 covers the
+--        deliberate dcp_load_exception carve-out (resolution columns stay writable, source
+--        fields do not). E8 reads back the STORED waived_at written by
+--        plm.close_dcp_crawl_gap and asserts it is exactly 12:00:00 UTC.
 --     F  The frozen row hash: shape, NULL-versus-empty distinction, tile-order
 --        independence, empty-array-versus-NULL distinction, and separator refusal.
 --     G  The America/New_York date trap: a midday-UTC waiver reads as the SAME calendar
@@ -92,16 +98,17 @@ begin
   where p.pronamespace = 'plm'::regnamespace
     and p.proname in (
       'dcp_loader_privilege_ok','dcp_asset_row_hash','dcp_reject_completed_crawl_change',
+      'dcp_load_exception_freeze',
       'dcp_reject_completed_source_field_change','dcp_crawl_freeze','begin_dcp_crawl',
       'open_dcp_crawl_section','close_dcp_crawl_section','load_dcp_asset_chunk',
       'record_dcp_crawl_gap','close_dcp_crawl_gap','finalize_dcp_crawl','fail_dcp_crawl'
     );
-  if v_fns <> 13 then
-    raise exception 'A FAILED: expected 13 plm.dcp_* / DCP loader functions in pg_proc, '
+  if v_fns <> 14 then
+    raise exception 'A FAILED: expected 14 plm.dcp_* / DCP loader functions in pg_proc, '
       'found %. A missing one means an object in the claim was never created.', v_fns;
   end if;
 
-  raise notice 'A PASSED: 10 tables and 13 functions present.';
+  raise notice 'A PASSED: 10 tables and 14 functions present.';
 end;
 $$;
 
@@ -350,11 +357,44 @@ begin
   where c.relnamespace = 'plm'::regnamespace
     and c.relname like 'dcp\_%'
     and not tg.tgisinternal;
-  if v_trigs < 9 then
+  if v_trigs < 10 then
     raise exception 'E FAILED: only % non-internal triggers on plm.dcp_* tables; expected '
-      'at least 9 (5 crawl-scoped + 3 identity + the crawl freeze + the chunk ledger).',
-      v_trigs;
+      'at least 10 (4 crawl-scoped + dcp_load_exception + 3 identity + the crawl freeze + '
+      'the chunk ledger).', v_trigs;
   end if;
+
+  -- STRUCTURAL: every crawl-scoped trigger must cover INSERT as well as UPDATE and DELETE.
+  -- Read from pg_trigger.tgtype rather than proved only through behaviour, so a trigger
+  -- that loses its INSERT branch fails HERE by name instead of silently re-opening the one
+  -- operation section 7 still permits. tgtype bit 4 = INSERT, 8 = DELETE, 16 = UPDATE.
+  declare
+    v_t  text;
+    v_ty smallint;
+  begin
+    foreach v_t in array array[
+      'dcp_crawl_section','dcp_crawl_gap','dcp_asset_crawl',
+      'dcp_asset_tile_observation','dcp_load_exception','dcp_chunk_ledger'
+    ] loop
+      select tg.tgtype into v_ty
+      from pg_trigger tg join pg_class c on c.oid = tg.tgrelid
+      where c.relnamespace = 'plm'::regnamespace and c.relname = v_t
+        and not tg.tgisinternal
+        and tg.tgname = 'trg_' || v_t || '_immutable';
+      if v_ty is null then
+        raise exception 'E FAILED: plm.% has no trg_%_immutable trigger.', v_t, v_t;
+      end if;
+      if (v_ty & 4) = 0 then
+        raise exception 'E FAILED: the immutability trigger on plm.% does NOT fire on '
+          'INSERT. Section 7 keeps INSERT for service_role, so INSERT is the only mutating '
+          'operation still available and an UPDATE/DELETE-only trigger guards nothing '
+          'against it.', v_t;
+      end if;
+      if (v_ty & 8) = 0 or (v_ty & 16) = 0 then
+        raise exception 'E FAILED: the immutability trigger on plm.% lost its UPDATE or '
+          'DELETE coverage.', v_t;
+      end if;
+    end loop;
+  end;
 
   insert into plm.dcp_crawl (
     crawl_id, captured_on, portal_base_url, crawler_version, account_scope,
@@ -503,8 +543,180 @@ begin
 
   update plm.dcp_style_guide set resolution_reason = 'ZZTEST reviewed' where id = v_guide;
 
-  raise notice 'E PASSED: completed-crawl evidence refuses UPDATE and DELETE; the crawl '
-    'header is frozen; source columns freeze while reconciliation columns stay editable.';
+  -- E6. THE HIGH FINDING, PROVED BEHAVIOURALLY. INSERT is the ONLY mutating operation
+  -- section 7 still leaves to service_role, so it is the one that matters most. Each of
+  -- these adds evidence to an ALREADY-COMPLETED crawl and must be refused. Before the
+  -- INSERT branch existed, every one of them SUCCEEDED and the crawl silently gained a
+  -- portal link, a membership row, a section, a gap or a chunk it never observed.
+  v_ok := false;
+  begin
+    insert into plm.dcp_asset_tile_observation (crawl_id, dcp_asset_id, portal_tile_id,
+                                                listing_kind, crawl_section_id, link_evidence)
+    values (v_crawl, v_asset, v_tile, 'style_guide', null, 'aggregated_row');
+  exception when others then v_ok := true;
+  end;
+  if not v_ok then
+    raise exception 'E6 FAILED: a tile observation was INSERTED into a COMPLETED crawl. '
+      'That crawl now claims a portal link it never observed, and "completed evidence is '
+      'frozen" is false for the only operation service_role can still perform.';
+  end if;
+
+  v_ok := false;
+  begin
+    insert into plm.dcp_asset_crawl (crawl_id, dcp_asset_id, observed_row_hash)
+    values (v_crawl, v_asset, repeat('c', 64));
+  exception when others then v_ok := true;
+  end;
+  if not v_ok then
+    raise exception 'E6 FAILED: a membership row was INSERTED into a COMPLETED crawl.';
+  end if;
+
+  v_ok := false;
+  begin
+    insert into plm.dcp_crawl_section (crawl_id, portal_tile_id, listing_kind)
+    values (v_crawl, v_tile, 'style_guide');
+  exception when others then v_ok := true;
+  end;
+  if not v_ok then
+    raise exception 'E6 FAILED: a section was INSERTED into a COMPLETED crawl -- which '
+      'would also have retroactively changed what that crawl claimed to attempt.';
+  end if;
+
+  v_ok := false;
+  begin
+    insert into plm.dcp_chunk_ledger (crawl_id, chunk_number, chunk_sha256,
+                                      rows_received, rows_landed, rows_rejected)
+    values (v_crawl, 99, repeat('d', 64), 1, 1, 0);
+  exception when others then v_ok := true;
+  end;
+  if not v_ok then
+    raise exception 'E6 FAILED: a ledger row was INSERTED into a COMPLETED crawl, breaking '
+      'the chunk reconciliation finalize already performed.';
+  end if;
+
+  v_ok := false;
+  begin
+    insert into plm.dcp_load_exception (crawl_id, reason_code, reason)
+    values (v_crawl, 'ZZTEST', 'ZZTEST after the fact');
+  exception when others then v_ok := true;
+  end;
+  if not v_ok then
+    raise exception 'E6 FAILED: a load exception was INSERTED into a COMPLETED crawl -- a '
+      'finding that crawl never produced.';
+  end if;
+
+  -- E7. The dcp_load_exception carve-out, both halves. A warning recorded BEFORE
+  -- completion must still be resolvable AFTER it (otherwise resolved_at and
+  -- resolution_note are dead weight from the first completed crawl), while its source
+  -- fields stay frozen.
+  declare
+    v_exc uuid;
+    v_c2  uuid := '99999999-9999-4999-8999-000000000003';
+  begin
+    insert into plm.dcp_crawl (
+      crawl_id, captured_on, portal_base_url, crawler_version, account_scope,
+      line_of_business, started_at, captured_by, private_source_commit, status,
+      rows_received, distinct_assets_received, finished_at
+    ) values (
+      v_c2, date '2026-01-04', 'https://zztest.example.invalid', 'ZZTEST-0',
+      'ZZTEST-scope', 'ZZTEST-lob', now(), 'ZZTEST-runner', 'ZZTESTCOMMIT', 'running',
+      1, 1, now()
+    );
+    insert into plm.dcp_load_exception (crawl_id, severity, reason_code, reason)
+    values (v_c2, 'warning', 'ZZTEST', 'ZZTEST warning to triage later')
+    returning id into v_exc;
+    update plm.dcp_crawl set status = 'complete' where crawl_id = v_c2;
+
+    -- MUST SUCCEED.
+    update plm.dcp_load_exception
+      set resolved_at = now(), resolution_note = 'ZZTEST triaged'
+      where id = v_exc;
+    if (select resolved_at from plm.dcp_load_exception where id = v_exc) is null then
+      raise exception 'E7 FAILED: a warning on a COMPLETED crawl could not be resolved. '
+        'The carve-out that makes resolved_at/resolution_note usable is missing.';
+    end if;
+
+    -- MUST BE REFUSED.
+    v_ok := false;
+    begin
+      update plm.dcp_load_exception set reason = 'ZZTEST rewritten' where id = v_exc;
+    exception when others then v_ok := true;
+    end;
+    if not v_ok then
+      raise exception 'E7 FAILED: a SOURCE field of a load exception on a COMPLETED crawl '
+        'was rewritten. Only resolved_at and resolution_note may change.';
+    end if;
+  end;
+
+  raise notice 'E PASSED: completed-crawl evidence refuses INSERT, UPDATE and DELETE; the '
+    'crawl header is frozen; source columns freeze while reconciliation and exception-'
+    'resolution columns stay editable.';
+end;
+$$;
+
+rollback;
+
+-- =====================================================================================
+-- E8. THE STORED waived_at VALUE. Behaviour of plm.close_dcp_crawl_gap, not a property of
+-- a literal.
+--
+-- THIS IS THE ASSERTION THE FIRST VERSION OF THIS FILE WAS MISSING. Section G below proves
+-- that a midday-UTC timestamp reads as one calendar date in both zones -- which is true of
+-- any midday-UTC literal and would pass no matter what the function stored. The original
+-- function stored 20:00Z, and section G could not have noticed. So the stored value is
+-- read back and asserted here, exactly as the function wrote it.
+-- =====================================================================================
+begin;
+
+do $$
+declare
+  v_crawl uuid := '99999999-9999-4999-8999-000000000004';
+  v_tile  uuid;
+  v_sec   uuid;
+  v_gap   uuid;
+  v_at    timestamptz;
+  v_utc   text;
+begin
+  insert into plm.dcp_crawl (
+    crawl_id, captured_on, portal_base_url, crawler_version, account_scope,
+    line_of_business, started_at, captured_by, private_source_commit, status
+  ) values (
+    v_crawl, date '2026-08-10', 'https://zztest.example.invalid', 'ZZTEST-0',
+    'ZZTEST-scope', 'ZZTEST-lob', now(), 'ZZTEST-runner', 'ZZTESTCOMMIT', 'running'
+  );
+  insert into plm.dcp_portal_tile (source_key, first_seen_crawl_id)
+  values ('ZZTEST-TILE-W', v_crawl) returning id into v_tile;
+  insert into plm.dcp_crawl_section (crawl_id, portal_tile_id, listing_kind)
+  values (v_crawl, v_tile, 'asset') returning id into v_sec;
+  insert into plm.dcp_crawl_gap (crawl_section_id, offset_from, offset_to, reason)
+  values (v_sec, 0, 10, 'ZZTEST gap to waive') returning id into v_gap;
+
+  -- A deliberately AWKWARD input time: late in the UTC day, so a wrong-direction
+  -- conversion is guaranteed to land somewhere other than midday.
+  perform plm.close_dcp_crawl_gap(v_gap, 'waived', 'ZZTEST waiver reason', 'ZZTEST-approver',
+                                  timestamptz '2026-08-10 23:41:07+00');
+
+  select waived_at into v_at from plm.dcp_crawl_gap where id = v_gap;
+  if v_at is null then
+    raise exception 'E8 FAILED: the waiver did not store a waived_at at all.';
+  end if;
+
+  v_utc := to_char(v_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS');
+  if v_utc <> '2026-08-10 12:00:00' then
+    raise exception 'E8 FAILED: waived_at stored as % UTC, expected 2026-08-10 12:00:00. '
+      'The midday-UTC pin does not hold, so the margin to the UTC day boundary is not the '
+      '12 hours every comment in the migration claims.', v_utc;
+  end if;
+
+  -- And the property that pin exists for, on the value the function ACTUALLY stored.
+  if (v_at at time zone 'UTC')::date <> (v_at at time zone 'America/New_York')::date then
+    raise exception 'E8 FAILED: the STORED waived_at reads as different calendar dates in '
+      'UTC (%) and America/New_York (%).',
+      (v_at at time zone 'UTC')::date, (v_at at time zone 'America/New_York')::date;
+  end if;
+
+  raise notice 'E8 PASSED: close_dcp_crawl_gap stored waived_at at exactly 12:00:00 UTC, '
+    'one calendar date in both zones.';
 end;
 $$;
 
@@ -577,7 +789,14 @@ end;
 $$;
 
 -- =====================================================================================
--- G. THE America/New_York DATE TRAP.
+-- G. THE America/New_York DATE TRAP -- the PROPERTY, not the stored value.
+--
+-- READ THIS TOGETHER WITH E8. This section asserts a property of midday-UTC LITERALS and
+-- would pass whatever plm.close_dcp_crawl_gap actually stored -- the first version of this
+-- file had only this section, and the function was storing 20:00Z the whole time. E8 is
+-- what proves the function; this is what proves the rule the function implements, plus a
+-- control showing the trap is still real on this server.
+-- ORIGINAL HEADING: THE America/New_York DATE TRAP.
 --
 -- The server runs America/New_York. A midnight-UTC approval timestamp read back through
 -- ::date returns the PREVIOUS day locally, so two reports disagree about when a loss was

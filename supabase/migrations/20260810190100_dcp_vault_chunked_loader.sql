@@ -133,8 +133,13 @@ create policy dcp_chunk_ledger_read on plm.dcp_chunk_ledger
     or app.has_any_role(array['sales', 'licensing']::app.app_role[])
   );
 
+-- INSERT is covered as well as UPDATE and DELETE, for the reason set out at the head of
+-- section 6 in 20260810190000: service_role keeps INSERT and loses everything else, so an
+-- UPDATE/DELETE-only trigger would leave the only available mutating operation unguarded.
+-- A ledger row added to a completed crawl would claim a chunk that crawl never applied,
+-- and would break the reconciliation finalize already performed.
 create trigger trg_dcp_chunk_ledger_immutable
-  before update or delete on plm.dcp_chunk_ledger
+  before insert or update or delete on plm.dcp_chunk_ledger
   for each row execute function plm.dcp_reject_completed_crawl_change();
 
 -- =====================================================================================
@@ -158,7 +163,7 @@ create or replace function plm.begin_dcp_crawl(
 returns uuid
 language plpgsql
 security definer
-set search_path = plm, core, app, public, extensions
+set search_path = plm, core, app, extensions, pg_catalog
 as $$
 declare
   v_role  text := auth.role();
@@ -279,7 +284,7 @@ create or replace function plm.open_dcp_crawl_section(
 returns uuid
 language plpgsql
 security definer
-set search_path = plm, core, app, public, extensions
+set search_path = plm, core, app, extensions, pg_catalog
 as $$
 declare
   v_role    text := auth.role();
@@ -398,7 +403,7 @@ create or replace function plm.load_dcp_asset_chunk(
 returns jsonb
 language plpgsql
 security definer
-set search_path = plm, core, app, public, extensions
+set search_path = plm, core, app, extensions, pg_catalog
 as $$
 declare
   v_role       text := auth.role();
@@ -415,7 +420,8 @@ declare
   v_guide      uuid;
   v_asset      uuid;
   v_tile       uuid;
-  v_tile_keys  text[];
+  v_tile_keys  text[];   -- from the INPUT row; drives which links to write
+  v_hash_tiles text[];   -- read BACK from the links actually written; hashed
   v_key        text;
   v_hash       text;
   v_folder     text;
@@ -690,6 +696,38 @@ begin
     -- specification in section 1 of 20260810190000. It is deliberately NOT computed here
     -- and NOT computed by the loader program: two implementations of a frozen scheme is
     -- how a frozen scheme stops being frozen.
+    --
+    -- EVERY ARGUMENT IS THE **STORED** VALUE, NOT THE INPUT VALUE. The spec says "as
+    -- stored" and it means it, because the hash exists to detect a change in what the
+    -- DATABASE holds between two crawls. Two places where those genuinely differ, and both
+    -- were wrong in the first draft of this loader:
+    --
+    --   SLOT 7, the guide id. On a conflicting_guide_source_id row this loader
+    --   deliberately does NOT overwrite the stored id (see above). Hashing the INPUT id
+    --   would therefore digest a value that is not in the database, and the next crawl --
+    --   reading the same stored row and the same source -- could compute a different hash
+    --   for data that never changed. v_existing_guide_id is the value the upsert actually
+    --   left in the row, so that is what is hashed.
+    --
+    --   SLOT 8, the tile set. The spec says "the SET of tile source_key values LINKED to
+    --   this asset in THIS crawl". That is read back from
+    --   plm.dcp_asset_tile_observation AFTER the link loop above, not taken from the input
+    --   row before it. The difference is real for a both-flags row, whose links are
+    --   deliberately withheld: hashing the input list would claim tiles the crawl did not
+    --   link, and the row would then compare unequal against a later crawl that linked
+    --   exactly the same nothing. An asset with no links yields an EMPTY array, which the
+    --   spec defines as "no tiles" and hashes differently from NULL ("not observed").
+    --
+    -- On the trimming point the spec is unchanged and needs no exception: values are
+    -- hashed exactly as STORED, and any normalisation this loader performs (trimming a
+    -- tile key, lowercasing an extension, folding a blank folder path to NULL) happens
+    -- BEFORE storage. The serialization itself still trims nothing.
+    select array_agg(pt.source_key) into v_hash_tiles
+    from plm.dcp_asset_tile_observation o
+    join plm.dcp_portal_tile pt on pt.id = o.portal_tile_id
+    where o.crawl_id = p_crawl_id and o.dcp_asset_id = v_asset;
+    v_hash_tiles := coalesce(v_hash_tiles, array[]::text[]);
+
     v_hash := plm.dcp_asset_row_hash(
       'disney_dcpvault',
       r ->> 'source_path',
@@ -697,8 +735,8 @@ begin
       v_ext,
       v_folder,
       r ->> 'style_guide_source_path',
-      v_guide_id,
-      v_tile_keys
+      v_existing_guide_id,
+      v_hash_tiles
     );
 
     -- The 83 exact duplicate input rows collapse HERE, on the primary key. A duplicate
@@ -783,7 +821,7 @@ create or replace function plm.record_dcp_crawl_gap(
 returns uuid
 language plpgsql
 security definer
-set search_path = plm, core, app, public, extensions
+set search_path = plm, core, app, extensions, pg_catalog
 as $$
 declare
   v_role text := auth.role();
@@ -842,7 +880,7 @@ create or replace function plm.close_dcp_crawl_section(
 returns void
 language plpgsql
 security definer
-set search_path = plm, core, app, public, extensions
+set search_path = plm, core, app, extensions, pg_catalog
 as $$
 declare
   v_role text := auth.role();
@@ -914,7 +952,7 @@ create or replace function plm.close_dcp_crawl_gap(
 returns void
 language plpgsql
 security definer
-set search_path = plm, core, app, public, extensions
+set search_path = plm, core, app, extensions, pg_catalog
 as $$
 declare
   v_role text := auth.role();
@@ -952,11 +990,23 @@ begin
     -- date D" report does -- returns the PREVIOUS day, so two reports would disagree
     -- about when the loss was accepted. Midday UTC is 07:00 or 08:00 local, so the date
     -- is the same in BOTH zones, on both sides of every daylight-saving transition.
-    v_when := date_trunc('day', coalesce(p_waived_at, now()) at time zone 'UTC')
-              + interval '12 hours';
+    --
+    -- THE CONVERSION IS EXPLICIT IN BOTH DIRECTIONS, AND THAT IS THE WHOLE FIX.
+    --   `ts at time zone 'UTC'`      timestamptz -> NAIVE timestamp, read in UTC
+    --   `date_trunc('day', ...)`     midnight of that UTC day, still naive
+    --   `... at time zone 'UTC'`     NAIVE -> timestamptz, INTERPRETED as UTC
+    --   `+ interval '12 hours'`      midday UTC
+    -- The second `at time zone 'UTC'` is not redundant with the first: the operator means
+    -- opposite things depending on whether its input carries a zone. Omitting it leaves a
+    -- naive value that the timestamptz assignment then interprets in the SERVER's zone
+    -- (America/New_York), which lands the "midday" at 20:00Z -- 4 hours from the UTC day
+    -- boundary instead of 12, and not the value every comment here claims. That was the
+    -- original bug, verified stored as 16:00-04 on preview.
+    v_when := (date_trunc('day', coalesce(p_waived_at, now()) at time zone 'UTC')
+               at time zone 'UTC') + interval '12 hours';
 
     update plm.dcp_crawl_gap
-      set waived_at = v_when at time zone 'UTC',
+      set waived_at = v_when,
           waived_by = p_waived_by,
           waiver_reason = p_note
       where id = p_gap_id and resolved_at is null and waived_at is null;
@@ -991,7 +1041,7 @@ create or replace function plm.finalize_dcp_crawl(p_crawl_id uuid)
 returns jsonb
 language plpgsql
 security definer
-set search_path = plm, core, app, public, extensions
+set search_path = plm, core, app, extensions, pg_catalog
 as $$
 declare
   v_role        text := auth.role();
@@ -1134,7 +1184,7 @@ create or replace function plm.fail_dcp_crawl(p_crawl_id uuid, p_reason text)
 returns void
 language plpgsql
 security definer
-set search_path = plm, core, app, public, extensions
+set search_path = plm, core, app, extensions, pg_catalog
 as $$
 declare
   v_role text := auth.role();

@@ -148,6 +148,10 @@ create or replace function plm.dcp_loader_privilege_ok(
 returns boolean
 language sql
 immutable
+-- Pinned even though this is NOT a SECURITY DEFINER function and calls only builtins.
+-- An IMMUTABLE function with an unpinned search_path is the shape that becomes a problem
+-- the day someone adds a schema-qualified callee to it, and pinning costs nothing today.
+set search_path = pg_catalog
 as $$
   select
     (p_role is not null and btrim(p_role) = 'service_role')
@@ -216,14 +220,26 @@ grant execute on function plm.dcp_loader_privilege_ok(text, text) to authenticat
 --   that renders NULL as '' collides the two, and both occur in this data (design section
 --   2 records one row with a blank folder subpath, and 88,125 files with no guide id).
 --
--- CASE: values are hashed exactly as stored. There is NO case folding anywhere in the
---   serialization. file_extension is lowercase in the hash ONLY because the loader stores
---   it lowercase (a CHECK constraint enforces that), not because the hash lowercases it.
+-- CASE, AND WHERE NORMALISATION IS ALLOWED TO LIVE: every slot is hashed exactly AS
+--   STORED. There is NO case folding and NO trimming anywhere in the serialization.
+--   Loaders may of course normalise a value BEFORE storing it -- lowercasing an extension,
+--   trimming a tile key, folding a blank folder path to NULL -- and the hash then digests
+--   that stored result. file_extension is lowercase in the hash ONLY because the loader
+--   stores it lowercase (a CHECK constraint enforces that), not because the hash
+--   lowercases it. THE RULE THAT MATTERS: the hash never sees an input value that differs
+--   from what the database holds. A caller that passes a row's raw input instead of the
+--   value the upsert actually left behind has violated this specification even though the
+--   function will happily hash it -- the two diverge exactly where the loader declined to
+--   overwrite a stored value, which is precisely the case worth detecting.
 --
--- TILE LIST (slot 8): the SET of plm.dcp_portal_tile.source_key values linked to this
---   asset in THIS crawl, with duplicates removed, sorted ASCENDING using the `C`
---   COLLATION (raw byte order), and joined with a single U+001E (ASCII 30, RECORD
---   SEPARATOR) between adjacent elements, with NO leading or trailing U+001E.
+-- TILE LIST (slot 8): the SET of plm.dcp_portal_tile.source_key values ACTUALLY LINKED to
+--   this asset in THIS crawl -- that is, read back from plm.dcp_asset_tile_observation
+--   after the links have been written, never taken from an input row's tile list before
+--   they were. Duplicates removed, sorted ASCENDING using the `C` COLLATION (raw byte
+--   order), and joined with a single U+001E (ASCII 30, RECORD SEPARATOR) between adjacent
+--   elements, with NO leading or trailing U+001E. The distinction is not academic: a row
+--   whose links are deliberately withheld (both listing flags set on an aggregated row)
+--   must hash with NO tiles, because no tiles were linked.
 --   * The `C` collation is REQUIRED and is not incidental. The database's default
 --     collation is locale-dependent and can order the same two strings differently on a
 --     different server or after a libc upgrade; a locale-sorted list would silently
@@ -257,6 +273,9 @@ create or replace function plm.dcp_asset_row_hash(
 returns text
 language plpgsql
 immutable
+-- Pinned for the same reason as plm.dcp_loader_privilege_ok above: not definer, builtins
+-- only today, but this is the FROZEN hash and it must never become resolution-dependent.
+set search_path = pg_catalog
 as $$
 declare
   v_us   constant text := chr(31);   -- UNIT SEPARATOR, slot terminator
@@ -923,6 +942,20 @@ comment on column plm.dcp_asset_tile_observation.listing_kind is
 -- WHY BEFORE-ROW TRIGGERS AND WHAT DEFEATS THEM: TRUNCATE does not fire row triggers at
 -- all, so every guarantee below depends on section 7 having revoked TRUNCATE from
 -- service_role. The two sections are one mechanism; do not weaken either alone.
+--
+-- AND WHY EVERY CRAWL-SCOPED TRIGGER COVERS **INSERT** AS WELL AS UPDATE AND DELETE.
+-- Read this before "simplifying" any trigger below back to `before update or delete`.
+-- Section 7 revokes UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and MAINTAIN from
+-- service_role but deliberately KEEPS INSERT. INSERT is therefore the ONE mutating
+-- operation still available to the loader's role -- which makes it the one an
+-- UPDATE/DELETE-only trigger would leave completely unguarded. The concrete hole: crawl X
+-- finalizes, then a plain
+--     insert into plm.dcp_asset_tile_observation (crawl_id, ...) values (X, ...);
+-- adds a portal link that crawl never observed. No grant stops it and, without the INSERT
+-- branch, no trigger fires either -- and the claim "a completed crawl's evidence is frozen"
+-- would be false for the only operation anyone could still perform. The same hole exists
+-- on dcp_asset_crawl, dcp_crawl_section, dcp_crawl_gap, dcp_load_exception and
+-- dcp_chunk_ledger, so all six are covered.
 -- =====================================================================================
 
 -- -------------------------------------------------------------------------------------
@@ -974,26 +1007,124 @@ $$;
 
 comment on function plm.dcp_reject_completed_crawl_change() is
 'Row trigger freezing every CRAWL-SCOPED plm.dcp_* table once its owning crawl reaches '
-'status complete. Fires on UPDATE and DELETE. This is what makes "completed crawls are '
-'retained permanently" enforceable rather than a promise. It is defeated by TRUNCATE, '
-'which fires no row trigger -- which is exactly why section 7 of migration 20260810190000 '
-'revokes TRUNCATE from service_role. The two are one mechanism.';
+'status complete. FIRES ON INSERT, UPDATE AND DELETE -- all three, deliberately. INSERT is '
+'not an afterthought here: section 7 revokes UPDATE, DELETE and TRUNCATE from service_role '
+'but KEEPS INSERT, so INSERT is the only mutating operation still available and is '
+'therefore the one an unguarded trigger would leave wide open. Without the INSERT branch a '
+'plain INSERT could add a tile observation, a section, a gap or a membership row to an '
+'already-completed crawl, and that crawl would then claim evidence it never observed. '
+'TRUNCATE fires no row trigger at all, which is exactly why section 7 revokes it. The '
+'revokes and this trigger are ONE mechanism; neither is sufficient alone.';
 
 do $$
 declare t text;
 begin
+  -- plm.dcp_load_exception is deliberately NOT in this list. It gets the narrower
+  -- plm.dcp_load_exception_freeze below, because its resolution columns must stay
+  -- writable after completion -- see the note there.
   foreach t in array array[
     'dcp_crawl_section','dcp_crawl_gap','dcp_asset_crawl',
-    'dcp_asset_tile_observation','dcp_load_exception'
+    'dcp_asset_tile_observation'
   ]
   loop
     execute format(
-      'create trigger %I before update or delete on plm.%I '
+      'create trigger %I before insert or update or delete on plm.%I '
       'for each row execute function plm.dcp_reject_completed_crawl_change()',
       'trg_' || t || '_immutable', t);
   end loop;
 end;
 $$;
+
+-- -------------------------------------------------------------------------------------
+-- 6.1b plm.dcp_load_exception -- frozen against INSERT and DELETE, but a human may still
+--      RESOLVE an entry after the crawl completes.
+--
+-- THE DECISION, STATED SO NOBODY HAS TO GUESS WHETHER IT WAS INTENTIONAL. Freezing this
+-- table wholesale (the 6.1 treatment) would mean that the moment a crawl completes, a
+-- `warning` row can never be annotated, triaged or marked resolved -- which is the entire
+-- purpose of its resolved_at and resolution_note columns, and those columns would be dead
+-- weight from the first completed crawl onward. Warnings are, by definition, the entries
+-- that DID load and that a human is expected to look at LATER; "later" is almost always
+-- after the crawl finished.
+--
+-- So the carve-out is the same principle used for the stable-identity tables in 6.2:
+-- SOURCE facts freeze, OUR later decisions do not.
+--   * INSERT into a completed crawl: REFUSED. A new exception after the fact would be a
+--     finding the crawl never actually produced.
+--   * DELETE from a completed crawl: REFUSED. Deleting a finding is how a finding stops
+--     existing.
+--   * UPDATE of a completed crawl's row: only resolved_at and resolution_note may change.
+--     Everything else -- severity, reason_code, reason, raw_row, the row/chunk pointers --
+--     is source evidence and stays frozen.
+-- Note that unresolved REJECTED rows still block finalization (finalize gate 3), so this
+-- carve-out cannot be used to complete a crawl over open rejections and tidy them up
+-- afterwards.
+-- -------------------------------------------------------------------------------------
+create or replace function plm.dcp_load_exception_freeze()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_crawl  uuid;
+  v_status text;
+begin
+  -- NEW is unassigned in a DELETE trigger, so the branch precedes the read.
+  if tg_op = 'DELETE' then
+    v_crawl := old.crawl_id;
+  else
+    v_crawl := new.crawl_id;
+  end if;
+
+  select c.status into v_status from plm.dcp_crawl c where c.crawl_id = v_crawl;
+
+  if v_status is distinct from 'complete' then
+    if tg_op = 'DELETE' then return old; end if;
+    return new;
+  end if;
+
+  if tg_op = 'INSERT' then
+    raise exception 'DCP Vault crawl % is COMPLETE; a new load exception may not be added '
+      'to it. An exception recorded after the fact is a finding the crawl never produced.',
+      v_crawl using errcode = 'P0001';
+  end if;
+
+  if tg_op = 'DELETE' then
+    raise exception 'DCP Vault crawl % is COMPLETE; its load exceptions may not be deleted. '
+      'Deleting a finding is how a finding stops existing.', v_crawl using errcode = 'P0001';
+  end if;
+
+  if new.crawl_id         is distinct from old.crawl_id
+  or new.crawl_section_id is distinct from old.crawl_section_id
+  or new.chunk_number     is distinct from old.chunk_number
+  or new.row_number       is distinct from old.row_number
+  or new.severity         is distinct from old.severity
+  or new.reason_code      is distinct from old.reason_code
+  or new.reason           is distinct from old.reason
+  or new.source_path      is distinct from old.source_path
+  or new.raw_row          is distinct from old.raw_row
+  or new.created_at       is distinct from old.created_at then
+    raise exception 'DCP Vault crawl % is COMPLETE: the source fields of a load exception '
+      'are immutable. Only resolved_at and resolution_note may change, so a human can still '
+      'triage a warning after the crawl finished.', v_crawl using errcode = 'P0001';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger trg_dcp_load_exception_immutable
+  before insert or update or delete on plm.dcp_load_exception
+  for each row execute function plm.dcp_load_exception_freeze();
+
+comment on function plm.dcp_load_exception_freeze() is
+'Narrower freeze for plm.dcp_load_exception. Once the owning crawl is complete: INSERT is '
+'refused (a finding the crawl never produced), DELETE is refused (deleting a finding is how '
+'it stops existing), and UPDATE may change ONLY resolved_at and resolution_note. This is a '
+'DELIBERATE carve-out, not an oversight: warnings are precisely the entries a human is '
+'expected to triage LATER, and "later" is nearly always after the crawl finished, so the '
+'wholesale 6.1 freeze would have made those two columns dead weight from the first '
+'completed crawl. Unresolved REJECTED rows still block finalization, so this cannot be used '
+'to complete a crawl over open rejections and tidy them afterwards.';
 
 -- -------------------------------------------------------------------------------------
 -- 6.2 Stable identities: SOURCE columns freeze; OUR columns stay editable.
