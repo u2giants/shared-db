@@ -104,6 +104,76 @@ class TestReviewMustRun(EnvSandbox):
             self.assertEqual(review.main(), 0)
         self.assertEqual(state["n"], 2)
 
+    def _big_batch(self) -> list[str]:
+        """Write migrations that together blow past MAX_SQL_CHARS."""
+        migrations = Path(self.temp.name) / "supabase" / "migrations"
+        versions = []
+        for i in range(3):
+            version = f"2026010200000{i}"
+            (migrations / f"{version}_big.sql").write_text(
+                "-- x" * (review.MAX_SQL_CHARS // 4), encoding="utf-8"
+            )
+            versions.append(version)
+        return versions
+
+    def test_a_truncated_batch_cannot_return_clear(self) -> None:
+        """THE HIGH FINDING. A batch that does not fit must never pass.
+
+        collect_sql used to `break` at MAX_SQL_CHARS, so migrations after the
+        cut were invisible to the model and it could still answer CLEAR.
+        """
+        versions = self._big_batch()
+        called = []
+
+        def should_not_run(prompt, api_key):
+            called.append(prompt)
+            return "Everything looks great.\nVERDICT: CLEAR"
+
+        with patch.dict(
+            "os.environ", {"PRODUCTION_ALLOWLIST": ",".join(versions)}
+        ), patch.object(review, "call_api", should_not_run):
+            self.assertEqual(review.main(), 1)
+        # Not merely "did not return CLEAR" -- the API is never even asked, so no
+        # clean-looking verdict about unsent SQL can exist anywhere.
+        self.assertEqual(called, [])
+        text = self.summary_text()
+        self.assertIn("REVIEW DID NOT RUN", text)
+        self.assertNotIn("VERDICT: CLEAR", text)
+
+    def test_the_operator_is_told_exactly_what_was_not_sent(self) -> None:
+        versions = self._big_batch()
+        with patch.dict("os.environ", {"PRODUCTION_ALLOWLIST": ",".join(versions)}):
+            self.assertEqual(review.main(), 1)
+        text = self.summary_text()
+        self.assertIn("were NOT sent", text)
+        # The dropped versions are named, not just counted.
+        self.assertIn(versions[-1], text)
+        self.assertIn("Split the allowlist", text)
+
+    def test_collect_sql_reports_oversize_files_instead_of_breaking(self) -> None:
+        versions = self._big_batch()
+        sql, unsent = review.collect_sql(Path(self.temp.name), versions)
+        # The first file fits; the two after it are reported, not dropped.
+        self.assertEqual(len(unsent), 2)
+        self.assertIn(versions[0], sql)
+        for dropped in versions[1:]:
+            self.assertNotIn(dropped, sql)
+            self.assertTrue(any(dropped in u for u in unsent))
+
+    def test_collect_sql_reports_a_missing_file_as_unsent(self) -> None:
+        sql, unsent = review.collect_sql(Path(self.temp.name), ["20991231000000"])
+        self.assertEqual(sql, "")
+        self.assertEqual(len(unsent), 1)
+        self.assertIn("file not found", unsent[0])
+
+    def test_a_batch_that_fits_is_still_sent_whole(self) -> None:
+        """The guard must not turn into a blanket refusal."""
+        sql, unsent = review.collect_sql(
+            Path(self.temp.name), ["20260101000000"]
+        )
+        self.assertEqual(unsent, [])
+        self.assertIn("create table public.thing();", sql)
+
     def test_there_is_no_bypass_env_var(self) -> None:
         """A future 'skip the review' flag must not quietly reappear."""
         source = Path(review.__file__).read_text(encoding="utf-8")

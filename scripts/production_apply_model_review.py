@@ -22,8 +22,9 @@ design. Read this before changing anything here.
      that had reviewed nothing. A green tick that stands in for evidence it
      never gathered is a silent failure, and silent failures are banned.
 
-     So: missing API key, empty allowlist, API/network error after retries, or
-     an empty model response now EXIT NON-ZERO with a message naming the cause.
+     So: missing API key, empty allowlist, API/network error after retries, an
+     empty model response, or a batch too large to send in full now EXIT
+     NON-ZERO with a message naming the cause.
      The `production-apply-review` job goes red, and because `production-apply`
      `needs:` it, the approval gate is never even offered.
 
@@ -34,6 +35,7 @@ design. Read this before changing anything here.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 from pathlib import Path
@@ -95,24 +97,37 @@ class ReviewNotPerformed(Exception):
     """The review did not happen. This is fatal; it is never advisory."""
 
 
-def collect_sql(repo: Path, versions: list[str]) -> str:
+def collect_sql(repo: Path, versions: list[str]) -> tuple[str, list[str]]:
+    """Return (payload, unsent) where `unsent` names every version the model
+    will NOT see.
+
+    The caller MUST treat a non-empty `unsent` as fatal. This used to `break`
+    silently at MAX_SQL_CHARS: everything after the cut vanished from the
+    prompt, and the model -- which has no way to know a file was withheld --
+    could still answer VERDICT: CLEAR. That is a clean pass on SQL nobody
+    reviewed, i.e. the exact defect this script was rewritten to remove, and it
+    is not hypothetical: single migrations in this repo are already 161KB,
+    136KB and 123KB, so one batch of landing files crosses the cap on its own.
+    """
     chunks: list[str] = []
+    unsent: list[str] = []
     total = 0
     for version in versions:
         matches = sorted((repo / "supabase" / "migrations").glob(f"{version}_*.sql"))
         if not matches:
-            chunks.append(f"\n===== {version} — FILE NOT FOUND =====\n")
+            # Cannot happen after `production_migration_guard.py preflight`,
+            # which runs earlier in this job and requires every allowlisted file
+            # to exist. Fatal here anyway: a review of a file that was never read
+            # is not a review.
+            unsent.append(f"{version} (file not found)")
             continue
         body = matches[0].read_text(encoding="utf-8", errors="replace")
         if total + len(body) > MAX_SQL_CHARS:
-            chunks.append(
-                f"\n===== {matches[0].name} — TRUNCATED, batch exceeds "
-                f"{MAX_SQL_CHARS} characters =====\n"
-            )
-            break
+            unsent.append(f"{version} ({matches[0].name}, {len(body)} chars)")
+            continue
         total += len(body)
         chunks.append(f"\n===== {matches[0].name} =====\n{body}")
-    return "".join(chunks)
+    return "".join(chunks), unsent
 
 
 def call_api(prompt: str, api_key: str) -> str:
@@ -152,7 +167,13 @@ def ask_model(prompt: str, api_key: str, sleep=time.sleep) -> str:
     for attempt in range(ATTEMPTS):
         try:
             text = (call_api(prompt, api_key) or "").strip()
-        except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
+        except (
+            urllib.error.URLError,
+            http.client.HTTPException,
+            OSError,
+            ValueError,
+            KeyError,
+        ) as exc:
             last = exc
             if attempt + 1 < ATTEMPTS:
                 sleep(BACKOFF_SECONDS[min(attempt, len(BACKOFF_SECONDS) - 1)])
@@ -229,11 +250,25 @@ def main() -> int:
             "(Settings -> Secrets and variables -> Actions) and re-dispatch."
         )
     repo = Path(os.environ.get("GITHUB_WORKSPACE", ".")).resolve()
+    sql, unsent = collect_sql(repo, versions)
+    # A PARTIAL REVIEW IS NOT A REVIEW. Refuse BEFORE spending the API call: if
+    # any migration could not be put in front of the model, no verdict it
+    # returns -- CLEAR included -- describes this batch. Fail here rather than
+    # let a clean-looking answer be produced about SQL that was never sent.
+    if unsent:
+        return fail(
+            "the batch does not fit in one review, so the model would not have "
+            "seen all of it. These migrations were NOT sent: "
+            + "; ".join(unsent)
+            + f". The payload cap is {MAX_SQL_CHARS} characters. A verdict on a "
+            "partial batch is worthless, so no verdict was requested. Split the "
+            "allowlist into smaller batches and dispatch them one at a time."
+        )
     prompt = PROMPT.format(
         sha=sha,
         count=len(versions),
         versions="\n".join(f"- {version}" for version in versions),
-        sql=collect_sql(repo, versions),
+        sql=sql,
     )
     try:
         text = ask_model(prompt, api_key)
