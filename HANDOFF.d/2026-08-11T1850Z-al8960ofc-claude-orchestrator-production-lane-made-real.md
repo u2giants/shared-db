@@ -279,7 +279,7 @@ refused two approved runs this week because main moved between staging and the c
 - **Worktree:** `issue-727-design` — **LIVE, branch unmerged, one untracked GLM artifact.** Do not delete.
 
 ### Agent: GLM — issue #729 launch readiness (read-only)
-- **Asked:** what actually blocks `data.designflow.app`.
+- **Asked:** what actually blocks the launch of **DB Data Admin**, the application that owns the hostname `data.designflow.app`.
 - **Did:** posted a checklist. Live: `app.app_access` admin rows = **0**; `core.product_size`/`core.product_depth` **absent**; 16 `api.db_data_admin_*` functions present; `data.designflow.app` → `178.156.180.212`, **503**; `data-dev` → 200.
 - **Found three things that change the picture:** (1) **the DNS blocker is not a DNS blocker** — the record already points at the Coolify VPS; the only owner click is attaching the fqdn to Coolify app `zeoy8qfjqffu8ym533cc7dl4`. (2) **#773's ordering constraint costs nothing** — `20260810050000` is data-only and sorts above all of B8, so version-ordered promotion satisfies it automatically. (3) **The dangerous gap:** `20260810050000` sits inside atomic B9 but the guard did not encode that, so a single-file allowlist would have passed. **It refused the shortcut** — that refusal is what produced PR #781.
 - **Also:** the admin app reads **shared Supabase only**; zero of the 25 `db_data_admin_*` functions reference `dflow.`. Workflow run **31506619979** sits at `waiting` on Albert's environment review and **would fail anyway** — `COOLIFY_PROD_APP_UUID` is unset. `DataAdmin.tsx` renders **five** tabs unconditionally including Product Depth; docs saying "four tabs ship" are stale, and that tab is a visibly broken screen until B8 lands.
@@ -358,8 +358,8 @@ Most urgent first. **#736 claims to index these and is incomplete** — it misse
 3. **#778** — the orphan `designflow` schema: ~1,100 rows, nothing points at it. First step
    is read-only: does that data exist anywhere else? Nothing may be dropped without Albert
    naming the exact schema and action.
-4. **#729** — attach the fqdn to Coolify app `zeoy8qfjqffu8ym533cc7dl4`, and set
-   `COOLIFY_PROD_APP_UUID`. Both come **after** B8 and B9.
+4. **#729** — attach the **DB Data Admin** fqdn to Coolify app `zeoy8qfjqffu8ym533cc7dl4`,
+   and set `COOLIFY_PROD_APP_UUID`. Both come **after** B8 and B9.
 5. Standing and inherited, untouched this session: #774, #769, #768, #711 (D2, D5, D6, D7),
    #732, #675, #645, #644, #643, #665, #618, #582, #551, #541, #539, #531, #516, #515, #503, #696.
 
