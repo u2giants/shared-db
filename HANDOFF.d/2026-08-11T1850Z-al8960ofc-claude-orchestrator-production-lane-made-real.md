@@ -447,3 +447,61 @@ to production.
 `experiment_611_db_push_atomicity.sh` was actually run (#611 is closed but that is not
 proof), get the 4 unbatched leftovers reviewed, and only then propose `20260810180000`
 alone to Albert.
+
+---
+
+## 13. LATE ADDITIONS — after the handover was first drafted
+
+Three things landed after §0–§12 were written. They are appended rather than folded in, so
+the record shows what was known when.
+
+### 13.1 The review model is now `claude-opus-5` (PR #787, merged)
+Albert asked why the lane used Opus 4.5 when Opus 5 exists. Fair, and nobody had chosen
+4.5 — PR #783 corrected a **non-existent** id (`claude-opus-4-5-20260514`) to the nearest
+working one and stopped there. An agent then called the live `/v1/models` and got, in order:
+`claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `claude-opus-4-8`, `claude-opus-4-7`,
+`claude-sonnet-4-6`, `claude-opus-4-6`, `claude-opus-4-5-20251101`, `claude-haiku-4-5-20251001`,
+`claude-sonnet-4-5-20250929`. Default is now `claude-opus-5`. `SHARED_DB_REVIEW_MODEL` override
+untouched. Test suite **358 passing**.
+
+**Two operational notes:** the review's response hit its token ceiling mid-sentence, so no
+trailing `VERDICT:` line was emitted — the script correctly defaulted to CONCERNS and said so
+out loud. **Raising `max_tokens` is a sensible follow-up.** And running the script on Windows
+crashes on a Unicode arrow unless `PYTHONIOENCODING=utf-8` is set; CI runners are UTF-8, so the
+lane is unaffected.
+
+### 13.2 The first real review in this repo's history found real problems — issue #788
+That live end-to-end run was against **`20260811070000`**, one of the four unbatched leftovers.
+It returned **CONCERNS** with substantive findings: the batch depends on `plm.nbcu_*` tables no
+file in it creates; the out-of-order apply would break two lower-versioned count gates; a
+`CREATE OR REPLACE finalize_nbcu_capture` tightens the loader contract; and PG17-only `MAINTAIN`
+syntax is used.
+
+**This is signal about the leftovers as a group.** `20260811030000`, `050000`, `060000` and
+`070000` are in no batch, in no allowlist, and were explicitly outside the Grok brief — **nobody
+has reviewed them.** Filed as **#788**. Verify each finding against the real SQL before acting on
+it or dismissing it; a model verdict is a claim, the code is the fact.
+
+### 13.3 Issue #782 triaged — it is a REQUEST, not a handover
+Filed after this session's start sweep, so it was untriaged until Albert spotted it. Verified
+read-only: **nothing was built and no database was touched** — no branch, PR, worktree or
+migration in this repo references it. App-side work is real and separate (`u2giants/popcrm-web`
+@ `5191d35`).
+
+It asks for a CRM-owned, service-role-only table plus narrow functions holding one opaque
+Microsoft Graph delta link, so PopCRM's mail worker stops skipping mail during bursts. Preview
+only, explicitly no production. **Verdict: ready to dispatch.** Seven of the nine required
+handover questions are answered; **"what I tried that did NOT work" and "facts that may be
+stale" are both absent.**
+
+**⚠️ It orders a Kimi K3 review loop.** Do not let an agent hard-code that: a pinned model id
+that did not exist is precisely what #783 and #787 spent today fixing. Confirm against the live
+provider list and prefer a setting over a constant.
+
+No conflict with anything in flight. Only soft overlap: its migration filename must be
+timestamped **after** whatever the promotion batches stage.
+
+### 13.4 Open issues filed this session
+**#778** orphan `designflow` schema (needs Albert) · **#784** non-atomic never-rest states
+unenforced · **#785** nothing proves the review model id is real · **#788** the four unreviewed
+leftovers.
