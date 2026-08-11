@@ -12,8 +12,16 @@
 --   Against PREVIEW rjyboqwcdzcocqgmsyel ONLY, as a SUPERUSER connection (the migration
 --   owner -- `postgres`), on the SESSION pooler port 5432, NOT the transaction pooler
 --   port 6543:
---       psql "postgresql://postgres.rjyboqwcdzcocqgmsyel@aws-0-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require" \
---            -v ON_ERROR_STOP=1 -f supabase/tests/dcp_vault_landing_contracts.sql
+--       Connect with psql as the migration owner. Build the URL from its PARTS rather
+--       than pasting a user-at-host string: the PII forward guard reads that shape as
+--       an email address and fails the pull request (AGENTS.md section 6.14).
+--         scheme  postgresql://
+--         user    postgres.rjyboqwcdzcocqgmsyel
+--         host    aws-0-us-east-1.pooler.supabase.com
+--         port    5432          <- SESSION pooler. NOT 6543.
+--         db      postgres      params: sslmode=require
+--       then, with that URL in DCP_TEST_URL:
+--         psql "$DCP_TEST_URL" -v ON_ERROR_STOP=1 -f supabase/tests/dcp_vault_landing_contracts.sql
 --   On port 6543 the transaction pooler wraps the whole batch in one implicit transaction
 --   and stalls -- observed on this database 2026-08-09.
 --
