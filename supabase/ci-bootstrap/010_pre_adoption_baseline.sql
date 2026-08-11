@@ -6795,10 +6795,8 @@ alter table public.style_guide_render_queue enable row level security;
 alter table public.tiff_optimization_queue enable row level security;
 alter table public.user_roles enable row level security;
 
--- Row-security policies (70)
+-- Row-security policies (67)
 do $bootstrap$ begin create policy "Admin delete admin_config" on public.admin_config for delete to authenticated using (has_role(auth.uid(), 'admin'::app_role)); exception when duplicate_object then null; end $bootstrap$;
-do $bootstrap$ begin create policy "Admin read all admin_config" on public.admin_config for select to authenticated using (has_role(auth.uid(), 'admin'::app_role)); exception when duplicate_object then null; end $bootstrap$;
-do $bootstrap$ begin create policy "Authenticated read non-secret admin_config" on public.admin_config for select to authenticated using ((key !~* '(pass|secret|token|key|cred|pwd)'::text)); exception when duplicate_object then null; end $bootstrap$;
 do $bootstrap$ begin create policy "Admin update admin_config" on public.admin_config for update to authenticated using (has_role(auth.uid(), 'admin'::app_role)); exception when duplicate_object then null; end $bootstrap$;
 do $bootstrap$ begin create policy "Admin write admin_config" on public.admin_config for insert to authenticated with check (has_role(auth.uid(), 'admin'::app_role)); exception when duplicate_object then null; end $bootstrap$;
 do $bootstrap$ begin create policy "anon can read SCAN_REQUEST for Realtime watcher" on public.admin_config for select to anon using ((key = 'SCAN_REQUEST'::text)); exception when duplicate_object then null; end $bootstrap$;
@@ -6858,7 +6856,6 @@ do $bootstrap$ begin create policy "Admin manage render_queue" on public.render_
 do $bootstrap$ begin create policy "service role all" on public.sku_files_used for all to service_role using (true) with check (true); exception when duplicate_object then null; end $bootstrap$;
 do $bootstrap$ begin create policy "authenticated read" on public.sku_files_used for select to authenticated using (true); exception when duplicate_object then null; end $bootstrap$;
 do $bootstrap$ begin create policy "Admins can manage style_groups" on public.style_groups for all to public using (has_role(auth.uid(), 'admin'::app_role)); exception when duplicate_object then null; end $bootstrap$;
-do $bootstrap$ begin create policy "Authenticated users can read style_groups" on public.style_groups for select to authenticated using (true); exception when duplicate_object then null; end $bootstrap$;
 do $bootstrap$ begin create policy "authenticated read style_guide_crawl_runs" on public.style_guide_crawl_runs for select to authenticated using (true); exception when duplicate_object then null; end $bootstrap$;
 do $bootstrap$ begin create policy "admin full access style_guide_crawl_runs" on public.style_guide_crawl_runs for all to authenticated using (has_role(auth.uid(), 'admin'::app_role)); exception when duplicate_object then null; end $bootstrap$;
 do $bootstrap$ begin create policy "authenticated read style_guide_files" on public.style_guide_files for select to authenticated using (true); exception when duplicate_object then null; end $bootstrap$;
