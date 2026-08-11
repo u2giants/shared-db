@@ -4,8 +4,10 @@ Issues: #730, #710. Claim: #740. Target: **production `qsllyeztdwjgirsysgai`** (
 `get_project_url` → `https://qsllyeztdwjgirsysgai.supabase.co` before every action). Preview
 `rjyboqwcdzcocqgmsyel` was never touched.
 
-**STATUS AT TIME OF WRITING: NOT APPLIED. Blocked on the `production` environment approval,
-which only Albert can click.** All automated gates are green. See §6.
+**STATUS: APPLIED TO PRODUCTION AND VERIFIED. 2026-08-11.** Albert approved run
+<https://github.com/u2giants/shared-db/actions/runs/31496978455> (SHA `0365f44`) and it completed
+successfully. Ledger **373 → 376**. Every object and behaviour was verified independently of the
+ledger — see §9. All three applications PASS the post-batch harness — see §10.
 
 ---
 
@@ -140,17 +142,29 @@ Would push these migrations:
 
 - `SQL migration guards` — success
 - `Production apply review (advisory model verdict + hard guards)` — success
-- `Production apply (requires Albert's approval)` — `waiting`
+- `Production apply (requires Albert's approval)` — **Albert approved. Job completed SUCCESS.**
 
-`origin/main` was re-derived immediately before the apply dispatch and was still `0365f44`, so the
-`Verify exact main commit` step will pass provided the freeze holds until he clicks.
+`origin/main` was re-derived immediately before the apply dispatch and was still `0365f44`, and the
+freeze held until he clicked, so `Verify exact main commit` passed. **This run is the production
+write.** Run conclusion: `completed / success`, head SHA
+`0365f441b693a445d15049e21c1530fa5ba867c2`, branch `main`, event `workflow_dispatch`.
+
+The lesson from §6.2 and §6.3 is now on the record twice: the SHA pin is not a formality. Two
+separate approved runs were refused because `main` moved between dispatch and click. It only
+succeeded once merges were frozen. Any future production apply should be dispatched under a freeze.
 
 ### 6.5 Atomicity note
 
 `supabase db push` is atomic **per file**, not per batch (AGENTS.md §5.1-A,
-`docs/verification/issue-611-db-push-atomicity-20260810.md`). A mid-batch failure would leave the
-earlier files applied *and* ledgered. The resulting position is recorded in §9 whatever it turns
-out to be.
+`docs/verification/issue-611-db-push-atomicity-20260810.md`). A mid-batch failure would have left
+the earlier files applied *and* ledgered. **It did not happen** — all three files applied and the
+ledger moved by exactly +3 (§9.1). No partial-application recovery was needed.
+
+**A green workflow is not evidence of anything in the database.** `success` is a statement about
+the CLI exit code and the ledger insert, not about what the SQL did. This repo has a worked example
+of a migration that installed cleanly while doing nothing — a BEFORE trigger reading a GENERATED
+STORED column, which Postgres populates only *after* before-triggers, so the guard read NULL every
+time and never fired. Nothing in §9 relies on the run's conclusion.
 
 ## 7. Finding — the #709 User-Agent path did NOT execute
 
@@ -173,23 +187,187 @@ summary and tells the approver to rely on the deterministic guards instead. But 
    summary. Anyone assuming a silent review job means "the model found nothing" would be wrong.
 2. #709 cannot be closed on the strength of this run.
 
-## 8. Post-apply verification plan (to be filled in after approval)
+## 8. Post-apply verification plan — EXECUTED
 
-Not run yet. When the write lands, verification will be by object and behaviour, not by the ledger,
-and each item will be labelled harness-derived vs directly inspected:
+The plan below was carried out in full. Results in §9 (direct inspection) and §10 (harness).
+Every §9 item is **my own direct catalog/behaviour query against production**, run through the
+Supabase MCP against `qsllyeztdwjgirsysgai` (ref re-confirmed via `get_project_url` first).
+Every §10 item is **harness-derived**. The two are kept apart deliberately so neither is used to
+vouch for the other.
 
-- `pg_get_functiondef` on `api.db_data_admin_licensor_property_tree` — assert `division_name` and
-  `division_external_code` now appear, and that the two `pi.`/one `li.` blocks each gained the
-  subqueries. Then call the RPC and assert a `plm_context` entry carries a real division name.
-- `to_regprocedure` on `pim.sync_clickup_tasks(jsonb,text)` and `public.sync_clickup_tasks(jsonb,text)`;
-  `pg_get_functiondef` to confirm the **`181500`** body won (resolve-by `btrim(clickup_task_id)`
-  first, `fetch_started_at` watermark, `watermark_advanced` flag) and not the `174500` body.
-- `to_regclass('pim.pim_product_clickup_task_id_uidx')` plus `pg_get_indexdef` — unique, on
-  `btrim(clickup_task_id)`, partial on non-null/non-blank.
-- `to_regclass('pim.pim_product_clickup_list_updated_idx')`.
-- `information_schema.columns` — all 11 new `clickup_*` columns on `pim.product`.
-- `pg_proc.proacl` — `service_role` holds EXECUTE on both `sync_clickup_tasks`; `public` does not.
-- `ingest.sync_run` — assert **no** new backfill or trim-repair row was written (both were
-  predicted no-ops in §5; a row appearing would mean production differed from the dry-run reading).
-- `pim.product` row count still 17,909 and `external_source` split still 17,859/50 — the migrations
-  must not re-key or duplicate a single product row.
+## 9. Post-apply verification — DIRECT INSPECTION (my own queries, not the harness)
+
+### 9.1 The ledger
+
+| | Before | After |
+|---|---|---|
+| Rows in `supabase_migrations.schema_migrations` | **373** | **376** |
+| Max version | `20260810140000` | `20260810140000` (unchanged — B2 sorts below it) |
+
+Delta is **exactly +3**, and the three present versions are exactly
+`20260728171500`, `20260728174500`, `20260728181500` (verified by selecting them back by name,
+not by counting). The full 376-row ledger was dumped and diffed against the 429 migration files on
+disk: **zero orphans** (no applied version lacks a file). No unintended migration rode along.
+
+This section is recorded for completeness only. **A ledger row is not evidence that SQL did
+anything** — that is the whole premise of issue #611 — so everything below stands on its own.
+
+### 9.2 `20260728171500` — the string-patch. THE PATCH LANDED.
+
+This was the documented trap: the migration reads the live catalog body of
+`api.db_data_admin_licensor_property_tree(text, boolean, text, integer)` via `pg_get_functiondef`,
+string-patches it, and re-executes it. A silent no-op would have applied and ledgered cleanly.
+
+`pg_get_functiondef` re-read after the apply:
+
+| Measure | Before | After |
+|---|---|---|
+| Body length | 13,802 chars | **14,888 chars** (+1,086) |
+| `division_name` occurrences | **0** | **6** |
+| `division_external_code` occurrences | 0 | **3** |
+| `divisionCode` references | 0 | **6** |
+| `'division_code', pi.division_code,` | 2 | 2 (preserved, each now followed by the new subqueries) |
+
+The function still resolves at its exact four-argument signature, so the app's call path is intact.
+
+The installed text was read back directly. Verbatim excerpt from the live body:
+
+```
+'division_code', pi.division_code,
+ 'division_name', (
+   select d.division_name from plm."divisionCode" d
+   where d."divCode_id"::text = pi.division_code
+ ),
+ 'division_external_code', (
+   select d.external_divisoncode from plm."divisionCode" d
+   where d."divCo...
+```
+
+**Behavioural proof, not just textual.** The MCP role is not granted EXECUTE on the RPC, so the
+function could not be called directly. Instead the exact correlated subquery the migration
+installed was executed against live production data:
+
+| `division_code` | resolved `division_name` | resolved `division_external_code` |
+|---|---|---|
+| `8` | **Spruce Lic** | **SP001** |
+
+It returns a real division NAME, not a numeric code and not NULL. That is the behaviour the batch
+existed to produce. The remaining half — that the name *renders* in the UI — is a human eyeball
+test and is still open; see §11.
+
+### 9.3 `20260728174500` and `20260728181500` — the clickup incremental import
+
+Object existence, by `to_regprocedure` / `to_regclass`:
+
+| Object | Result |
+|---|---|
+| `pim.sync_clickup_tasks(jsonb,text)` | present |
+| `public.sync_clickup_tasks(jsonb,text)` | present |
+| `api.clickup_task_sync_run_list(integer)` | present |
+| `pim.pim_product_clickup_task_id_uidx` | present |
+| `pim.pim_product_clickup_list_updated_idx` | present |
+
+**The unique index is real and usable**, from `pg_index` + `pg_get_indexdef`:
+
+```
+CREATE UNIQUE INDEX pim_product_clickup_task_id_uidx ON pim.product
+  USING btree (btrim(clickup_task_id))
+  WHERE ((clickup_task_id IS NOT NULL) AND (btrim(clickup_task_id) <> ''::text))
+```
+
+`indisunique = true`, `indisvalid = true`, `indisready = true`, `indislive = true`. Not an INVALID
+leftover from a failed build — it built cleanly, exactly as the 17,909-distinct pre-check predicted.
+
+**The `181500` body won, not the `174500` body.** Both migrations `create or replace` the same
+function, so the later one must be the survivor. `pg_get_functiondef` on the live
+`pim.sync_clickup_tasks` (20,190 chars) contains all three `181500`-only markers:
+`watermark_advanced`, `fetch_started_at`, and resolve-by `btrim(clickup_task_id)`.
+
+`pim.product` now carries **14** `clickup*` columns.
+
+**Privileges are correct and not over-granted** (`pg_proc.proacl`):
+
+- `pim.sync_clickup_tasks` -> `{postgres=X/postgres, service_role=X/postgres}`
+- `public.sync_clickup_tasks` -> `{postgres=X/postgres, service_role=X/postgres}`
+- `api.clickup_task_sync_run_list` -> `{postgres, authenticated, service_role}`
+
+Neither `sync_clickup_tasks` grants EXECUTE to `PUBLIC` or to `anon`.
+
+### 9.4 The two data-repair blocks were the clean no-ops predicted
+
+| Check | Before | After |
+|---|---|---|
+| `pim.product` rows | 17,909 | **17,909** |
+| distinct `clickup_task_id` | 17,909 | **17,909** |
+| untrimmed clickup `external_id` | 0 | **0** |
+| `external_source IS NULL` | 0 | **0** |
+| `external_source` split | 17,859 / 50 | **17,859 `directus_product` / 50 `clickup`** |
+| `ingest.sync_run` rows | 26 (latest `2026-07-22 19:10:49`) | **26 (latest `2026-07-22 19:10:49`)** |
+
+No product row was re-keyed, duplicated or lost, and **no audit row was written** — confirming both
+repair blocks claimed nothing, exactly as the pre-check said they would.
+
+## 10. Post-batch application verification — HARNESS-DERIVED
+
+`scripts/post_batch_app_verification.py --versions 20260728171500,20260728174500,20260728181500
+--project-ref qsllyeztdwjgirsysgai`. Exit code **0**.
+
+This harness is now trustworthy: issue #721 proved its assertions were already correct and only
+comment strings changed (PR #742), and PR #741 made its 141 offline tests actually execute in CI.
+
+| Application | Verdict | Failures |
+|---|---|---|
+| PopCRM | **PASS** | 0 |
+| PopDAM | **PASS** | 0 |
+| PopPIM | **PASS** | 0 |
+
+All eight batch-specific checks PASS, including the two that matter most for B2:
+
+- `db_data_admin_tree_function_still_resolves` — PASS. The contract calls this the
+  highest-probability abort in the whole backlog.
+- `db_data_admin_tree_reads_division_names_not_codes` — PASS. The patched body reaches
+  `plm."divisionCode"`; an unpatched body would not mention it at all.
+
+Also PASS: `division_code_table_exists`, `canary_table_exists`, `canary_holds_exactly_one_row`,
+`canary_has_rls_on_and_no_policies`, `coldlion_sync_is_three_arg`,
+`coldlion_sync_two_arg_is_gone`. Environment check PASS.
+
+The run reports **13 recorded gaps / not-yet-due objects**. None is B2 damage; all are pre-existing
+and were already on record from 2026-08-10 (the PopPIM `authenticated` privilege gaps = issue #720,
+still open; `core.product_size` absent until B8; the `dam` schema not exposed through PostgREST).
+They are listed unsuppressed in the harness output and are unchanged by this batch.
+
+## 11. Still required by hand
+
+The harness states plainly what it did **not** prove: it did not open the applications, did not
+read the PopCRM worker journal, did not evaluate RLS semantics, did not compare function argument
+names or return shapes, and did not exercise DesignFlow non-production.
+
+- [ ] **Open the DB Data Admin licensor -> property tree and confirm DIVISION NAMES appear instead
+  of numeric codes.** §9.2 proves the patched function reaches `plm."divisionCode"` and that the
+  lookup returns "Spruce Lic" for code `8`. Only a human can see what actually rendered.
+- [ ] Contract §7.1's five-minute smoke test, which applies after every batch.
+
+## 12. Position after B2, and what remains
+
+- Production ledger: **376 applied**, max version `20260810140000`. The ledger remains applied out
+  of order; the high max does not mean the range below it is complete.
+- Migration files in the repo at `0365f44`: **429**.
+- **Total unapplied: 53.**
+- Three of those 53 belong to **no batch** in the nine-batch plan and will therefore never be
+  promoted by B3..B9:
+  - `20260810180000_plm_default_privilege_hole_and_pg17_maintain_revokes.sql`
+  - `20260810190000_dcp_vault_source_landing.sql`
+  - `20260810190100_dcp_vault_chunked_loader.sql`
+
+  The orchestrator has ruled these get a new **B10**, with `20260810180000` FIRST inside it.
+- **Unapplied within B3..B9: 50.** Stated both ways so nobody later mistakes 53 for 50.
+
+## 13. Scope
+
+Batch B2 only. Albert's approval covered these three migrations and nothing else. No DROP, no data
+deletion, no rename, no new migrations authored, and preview `rjyboqwcdzcocqgmsyel` was never
+touched. Issues #730 and #710 and claim #740 are left open for the orchestrator to close.
+
+Issue **#709 stays open** — see §7; the advisory model review did not run, so nothing about it was
+proven by this batch.
