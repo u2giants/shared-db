@@ -1093,7 +1093,11 @@ begin
       'Deleting a finding is how a finding stops existing.', v_crawl using errcode = 'P0001';
   end if;
 
-  if new.crawl_id         is distinct from old.crawl_id
+  -- `id` is compared too. Without it a completed crawl's finding could be RE-KEYED --
+  -- every other column identical, a new primary key -- which breaks any external
+  -- reference to that finding while looking like nothing changed.
+  if new.id               is distinct from old.id
+  or new.crawl_id         is distinct from old.crawl_id
   or new.crawl_section_id is distinct from old.crawl_section_id
   or new.chunk_number     is distinct from old.chunk_number
   or new.row_number       is distinct from old.row_number

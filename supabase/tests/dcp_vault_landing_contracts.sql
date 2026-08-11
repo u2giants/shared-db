@@ -25,6 +25,14 @@
 --   On port 6543 the transaction pooler wraps the whole batch in one implicit transaction
 --   and stalls -- observed on this database 2026-08-09.
 --
+-- WHY EVERY "must be refused" CHECK TRAPS sqlstate 'P0001' AND NOT `when others`:
+--   `when others` is satisfied by ANY error. A NOT NULL violation, a unique violation, a
+--   foreign-key violation or a typo in the test's own fixture would all set the flag and
+--   the section would PASS FOR THE WRONG REASON -- reporting that a guard works when the
+--   statement never reached it. Every guard in these two migrations raises with
+--   `using errcode = 'P0001'`, so that is what is trapped. A refusal from anything else
+--   now propagates and fails the run, which is the correct outcome.
+--
 -- EVERY VALUE IN THIS FILE IS INVENTED. u2giants/shared-db is PUBLIC. No real Disney tile
 --   slug, property, franchise, style guide, region, DAM path, file name or portal URL
 --   appears here. Fixtures use ZZTEST-* tokens, example.invalid URLs and the reserved uuid
@@ -438,7 +446,7 @@ begin
   begin
     update plm.dcp_asset_crawl set observed_row_hash = repeat('b', 64)
     where crawl_id = v_crawl;
-  exception when others then v_ok := true;
+  exception when sqlstate 'P0001' then v_ok := true;
   end;
   if not v_ok then
     raise exception 'E1 FAILED: an UPDATE of a COMPLETED crawl''s plm.dcp_asset_crawl row '
@@ -449,7 +457,7 @@ begin
   v_ok := false;
   begin
     delete from plm.dcp_asset_tile_observation where crawl_id = v_crawl;
-  exception when others then v_ok := true;
+  exception when sqlstate 'P0001' then v_ok := true;
   end;
   if not v_ok then
     raise exception 'E2 FAILED: a DELETE of a COMPLETED crawl''s tile observations '
@@ -500,7 +508,7 @@ begin
     v_ok := false;
     begin
       update plm.dcp_crawl_gap set attempt_count = 99 where id = v_frozen_gap;
-    exception when others then v_ok := true;
+    exception when sqlstate 'P0001' then v_ok := true;
     end;
     if not v_ok then
       raise exception 'E3b FAILED: a gap belonging to a COMPLETED crawl was UPDATED. The '
@@ -512,7 +520,7 @@ begin
   v_ok := false;
   begin
     update plm.dcp_crawl set notes = 'ZZTEST tamper' where crawl_id = v_crawl;
-  exception when others then v_ok := true;
+  exception when sqlstate 'P0001' then v_ok := true;
   end;
   if not v_ok then
     raise exception 'E4 FAILED: a COMPLETED plm.dcp_crawl row was UPDATED.';
@@ -521,7 +529,7 @@ begin
   v_ok := false;
   begin
     delete from plm.dcp_crawl where crawl_id = v_crawl;
-  exception when others then v_ok := true;
+  exception when sqlstate 'P0001' then v_ok := true;
   end;
   if not v_ok then
     raise exception 'E4 FAILED: a COMPLETED plm.dcp_crawl row was DELETED -- which would '
@@ -534,7 +542,7 @@ begin
   v_ok := false;
   begin
     update plm.dcp_asset set file_name = 'ZZTEST-renamed.zzz' where id = v_asset;
-  exception when others then v_ok := true;
+  exception when sqlstate 'P0001' then v_ok := true;
   end;
   if not v_ok then
     raise exception 'E5 FAILED: a SOURCE column of an asset observed by a COMPLETED crawl '
@@ -553,7 +561,7 @@ begin
     insert into plm.dcp_asset_tile_observation (crawl_id, dcp_asset_id, portal_tile_id,
                                                 listing_kind, crawl_section_id, link_evidence)
     values (v_crawl, v_asset, v_tile, 'style_guide', null, 'aggregated_row');
-  exception when others then v_ok := true;
+  exception when sqlstate 'P0001' then v_ok := true;
   end;
   if not v_ok then
     raise exception 'E6 FAILED: a tile observation was INSERTED into a COMPLETED crawl. '
@@ -565,7 +573,7 @@ begin
   begin
     insert into plm.dcp_asset_crawl (crawl_id, dcp_asset_id, observed_row_hash)
     values (v_crawl, v_asset, repeat('c', 64));
-  exception when others then v_ok := true;
+  exception when sqlstate 'P0001' then v_ok := true;
   end;
   if not v_ok then
     raise exception 'E6 FAILED: a membership row was INSERTED into a COMPLETED crawl.';
@@ -575,7 +583,7 @@ begin
   begin
     insert into plm.dcp_crawl_section (crawl_id, portal_tile_id, listing_kind)
     values (v_crawl, v_tile, 'style_guide');
-  exception when others then v_ok := true;
+  exception when sqlstate 'P0001' then v_ok := true;
   end;
   if not v_ok then
     raise exception 'E6 FAILED: a section was INSERTED into a COMPLETED crawl -- which '
@@ -587,7 +595,7 @@ begin
     insert into plm.dcp_chunk_ledger (crawl_id, chunk_number, chunk_sha256,
                                       rows_received, rows_landed, rows_rejected)
     values (v_crawl, 99, repeat('d', 64), 1, 1, 0);
-  exception when others then v_ok := true;
+  exception when sqlstate 'P0001' then v_ok := true;
   end;
   if not v_ok then
     raise exception 'E6 FAILED: a ledger row was INSERTED into a COMPLETED crawl, breaking '
@@ -598,7 +606,7 @@ begin
   begin
     insert into plm.dcp_load_exception (crawl_id, reason_code, reason)
     values (v_crawl, 'ZZTEST', 'ZZTEST after the fact');
-  exception when others then v_ok := true;
+  exception when sqlstate 'P0001' then v_ok := true;
   end;
   if not v_ok then
     raise exception 'E6 FAILED: a load exception was INSERTED into a COMPLETED crawl -- a '
@@ -640,7 +648,7 @@ begin
     v_ok := false;
     begin
       update plm.dcp_load_exception set reason = 'ZZTEST rewritten' where id = v_exc;
-    exception when others then v_ok := true;
+    exception when sqlstate 'P0001' then v_ok := true;
     end;
     if not v_ok then
       raise exception 'E7 FAILED: a SOURCE field of a load exception on a COMPLETED crawl '
@@ -766,7 +774,7 @@ begin
   begin
     perform plm.dcp_asset_row_hash('s','/p' || chr(31) || 'x','f','e','r','/g','gid',
                                    array['a']);
-  exception when others then v_ok := true;
+  exception when sqlstate 'P0001' then v_ok := true;
   end;
   if not v_ok then
     raise exception 'F FAILED: a value containing U+001F was accepted. The serialization '
@@ -777,7 +785,7 @@ begin
   begin
     perform plm.dcp_asset_row_hash('s','/p','f','e','r','/g','gid',
                                    array['a' || chr(30) || 'b']);
-  exception when others then v_ok := true;
+  exception when sqlstate 'P0001' then v_ok := true;
   end;
   if not v_ok then
     raise exception 'F FAILED: a tile key containing U+001E was accepted.';

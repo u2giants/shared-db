@@ -163,7 +163,7 @@ create or replace function plm.begin_dcp_crawl(
 returns uuid
 language plpgsql
 security definer
-set search_path = plm, core, app, extensions, pg_catalog
+set search_path = pg_catalog, plm, core, app, extensions
 as $$
 declare
   v_role  text := auth.role();
@@ -284,7 +284,7 @@ create or replace function plm.open_dcp_crawl_section(
 returns uuid
 language plpgsql
 security definer
-set search_path = plm, core, app, extensions, pg_catalog
+set search_path = pg_catalog, plm, core, app, extensions
 as $$
 declare
   v_role    text := auth.role();
@@ -403,7 +403,7 @@ create or replace function plm.load_dcp_asset_chunk(
 returns jsonb
 language plpgsql
 security definer
-set search_path = plm, core, app, extensions, pg_catalog
+set search_path = pg_catalog, plm, core, app, extensions
 as $$
 declare
   v_role       text := auth.role();
@@ -421,7 +421,15 @@ declare
   v_asset      uuid;
   v_tile       uuid;
   v_tile_keys  text[];   -- from the INPUT row; drives which links to write
-  v_hash_tiles text[];   -- read BACK from the links actually written; hashed
+  -- EVERY variable below is read BACK from the database after the upserts and is what the
+  -- frozen hash digests. Nothing derived from the input row reaches plm.dcp_asset_row_hash.
+  v_hash_tiles text[];   -- slot 8, from the links actually written
+  v_stored_system text;  -- slot 1
+  v_stored_path   text;  -- slot 2
+  v_stored_name   text;  -- slot 3
+  v_stored_ext    text;  -- slot 4
+  v_stored_folder text;  -- slot 5
+  v_stored_guide_path text; -- slot 6
   v_key        text;
   v_hash       text;
   v_folder     text;
@@ -614,10 +622,12 @@ begin
     )
     on conflict (source_system, source_path) do update
       set last_seen_crawl_id = excluded.last_seen_crawl_id
-    returning id, source_guide_id into v_guide, v_existing_guide_id;
+    returning id, source_guide_id, source_path
+      into v_guide, v_existing_guide_id, v_stored_guide_path;
 
     if v_guide is null then
-      select g.id, g.source_guide_id into v_guide, v_existing_guide_id
+      select g.id, g.source_guide_id, g.source_path
+        into v_guide, v_existing_guide_id, v_stored_guide_path
       from plm.dcp_style_guide g
       where g.source_system = 'disney_dcpvault'
         and g.source_path = r ->> 'style_guide_source_path';
@@ -649,12 +659,36 @@ begin
       r ->> 'source_path', v_guide, r ->> 'file_name', v_ext, v_folder,
       nullif(btrim(coalesce(r ->> 'source_asset_id', '')), ''), p_crawl_id, p_crawl_id
     )
+    -- RETURNING EVERY COLUMN THE HASH CONSUMES -- NOT JUST THE id.
+    --
+    -- This upsert deliberately refreshes only last_seen_crawl_id: file_name,
+    -- file_extension and relative_folder_path are SOURCE columns and are never
+    -- overwritten from a later crawl (and after any complete crawl the 6.2 trigger
+    -- forbids it outright). So on a re-observed asset whose portal display name has
+    -- changed, the row still holds the ORIGINAL values while the input row carries the
+    -- new ones. Hashing the input would then store a digest of data the database does not
+    -- hold, and -- worse -- a third crawl reading the same new source would hash the same
+    -- new values, compare EQUAL, and report "no change" for a row that never matched the
+    -- source in the first place. The divergence would also be permanent, because the
+    -- stored columns can no longer be corrected once frozen.
+    --
+    -- Reading them back costs four words and removes the whole class of bug. See the
+    -- slot-by-slot note at the hash call below: EVERY slot reads STORED, none reads input.
     on conflict (source_system, source_path) do update
       set last_seen_crawl_id = excluded.last_seen_crawl_id
-    returning id into v_asset;
+    returning id, source_system, source_path, file_name, file_extension,
+              relative_folder_path
+      into v_asset, v_stored_system, v_stored_path, v_stored_name, v_stored_ext,
+           v_stored_folder;
 
+    -- The concurrent-race fallback must read back the SAME columns, or the race path
+    -- would quietly reintroduce exactly the defect the RETURNING above removes.
     if v_asset is null then
-      select a.id into v_asset from plm.dcp_asset a
+      select a.id, a.source_system, a.source_path, a.file_name, a.file_extension,
+             a.relative_folder_path
+        into v_asset, v_stored_system, v_stored_path, v_stored_name, v_stored_ext,
+             v_stored_folder
+      from plm.dcp_asset a
       where a.source_system = 'disney_dcpvault' and a.source_path = r ->> 'source_path';
     end if;
 
@@ -728,13 +762,40 @@ begin
     where o.crawl_id = p_crawl_id and o.dcp_asset_id = v_asset;
     v_hash_tiles := coalesce(v_hash_tiles, array[]::text[]);
 
+    -- ---------------------------------------------------------------------------------
+    -- THE SLOT-BY-SLOT AUDIT. EVERY ONE OF THE EIGHT READS **STORED**, NOT INPUT.
+    -- Keep this list correct if the hash call ever changes. Three of these were input-
+    -- derived in an earlier draft and were the same defect as slots 7 and 8, just on
+    -- columns that happen not to diverge on a FIRST load.
+    --
+    --   slot 1 source_system           v_stored_system      <- RETURNING (was a literal)
+    --   slot 2 source_path             v_stored_path        <- RETURNING (was input)
+    --   slot 3 file_name               v_stored_name        <- RETURNING (was input) *
+    --   slot 4 file_extension          v_stored_ext         <- RETURNING (was input) *
+    --   slot 5 relative_folder_path    v_stored_folder      <- RETURNING (was input) *
+    --   slot 6 guide source_path       v_stored_guide_path  <- RETURNING (was input)
+    --   slot 7 guide source_guide_id   v_existing_guide_id  <- RETURNING
+    --   slot 8 tile key set            v_hash_tiles         <- re-read from the links
+    --
+    -- * THE THREE THAT CAN ACTUALLY DIVERGE. Slots 2 and 6 are natural keys and slot 1 is
+    --   effectively constant, so for those, stored and input are equal by construction --
+    --   they are read back for uniformity and to make this audit trivially checkable, not
+    --   because they were wrong. Slots 3, 4 and 5 are the ONLY non-key plm.dcp_asset
+    --   columns in the hash, they are never refreshed by the upsert, and they are frozen
+    --   by the 6.2 trigger after any complete crawl -- so those three were the real bug.
+    --
+    -- NOTE ON WHY THIS ROUND IS NOT A ONE-WAY-DOOR PROBLEM: on a first load every asset
+    -- is a fresh INSERT, so stored equals input on all eight slots and no hash computed
+    -- before this fix would have been wrong. The divergence only appears from the SECOND
+    -- crawl onward, which is why this had to land before one ever runs.
+    -- ---------------------------------------------------------------------------------
     v_hash := plm.dcp_asset_row_hash(
-      'disney_dcpvault',
-      r ->> 'source_path',
-      r ->> 'file_name',
-      v_ext,
-      v_folder,
-      r ->> 'style_guide_source_path',
+      v_stored_system,
+      v_stored_path,
+      v_stored_name,
+      v_stored_ext,
+      v_stored_folder,
+      v_stored_guide_path,
       v_existing_guide_id,
       v_hash_tiles
     );
@@ -743,6 +804,22 @@ begin
     -- that is NOT exact -- same DAM path, different content, therefore a different hash --
     -- is NOT collapsed silently: it is recorded as an exception, because two different
     -- descriptions of one file is a finding, not noise.
+    --
+    -- KNOWN, ACCEPTED, AND WRITTEN DOWN SO THE NEXT READER DOES NOT HAVE TO REDISCOVER IT:
+    -- the tile links above are written BEFORE this conflict is detected. So if a
+    -- non-exact duplicate IS rejected here, any tile links its row contributed have
+    -- already landed, and the stored hash (computed from the FIRST row's link set) can
+    -- describe fewer tiles than the link set now holds. Not fixed, deliberately:
+    --   * It cannot occur on the measured extract -- all 83 duplicate DAM-path groups are
+    --     EXACT duplicates, which produce an identical hash and collapse cleanly.
+    --   * Avoiding it means deferring link writes until after the conflict check, which
+    --     would break slot 8's definition -- the hash is specified over the links ACTUALLY
+    --     WRITTEN, and there would be none to read yet.
+    --   * The rejection is recorded either way, so the condition is never silent: a
+    --     conflicting_duplicate_dam_path exception is an unresolved REJECTED row, and
+    --     finalize gate 3 refuses to complete the crawl until a human has dealt with it.
+    -- If a future extract starts producing non-exact duplicates in volume, revisit this
+    -- by rejecting the whole DAM path up front rather than by reordering the writes.
     insert into plm.dcp_asset_crawl (crawl_id, dcp_asset_id, observed_row_hash)
     values (p_crawl_id, v_asset, v_hash)
     on conflict (crawl_id, dcp_asset_id) do nothing;
@@ -821,7 +898,7 @@ create or replace function plm.record_dcp_crawl_gap(
 returns uuid
 language plpgsql
 security definer
-set search_path = plm, core, app, extensions, pg_catalog
+set search_path = pg_catalog, plm, core, app, extensions
 as $$
 declare
   v_role text := auth.role();
@@ -880,7 +957,7 @@ create or replace function plm.close_dcp_crawl_section(
 returns void
 language plpgsql
 security definer
-set search_path = plm, core, app, extensions, pg_catalog
+set search_path = pg_catalog, plm, core, app, extensions
 as $$
 declare
   v_role text := auth.role();
@@ -952,7 +1029,7 @@ create or replace function plm.close_dcp_crawl_gap(
 returns void
 language plpgsql
 security definer
-set search_path = plm, core, app, extensions, pg_catalog
+set search_path = pg_catalog, plm, core, app, extensions
 as $$
 declare
   v_role text := auth.role();
@@ -1041,7 +1118,7 @@ create or replace function plm.finalize_dcp_crawl(p_crawl_id uuid)
 returns jsonb
 language plpgsql
 security definer
-set search_path = plm, core, app, extensions, pg_catalog
+set search_path = pg_catalog, plm, core, app, extensions
 as $$
 declare
   v_role        text := auth.role();
@@ -1184,7 +1261,7 @@ create or replace function plm.fail_dcp_crawl(p_crawl_id uuid, p_reason text)
 returns void
 language plpgsql
 security definer
-set search_path = plm, core, app, extensions, pg_catalog
+set search_path = pg_catalog, plm, core, app, extensions
 as $$
 declare
   v_role text := auth.role();
