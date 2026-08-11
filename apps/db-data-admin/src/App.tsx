@@ -2,7 +2,7 @@ import { Database, LogIn, ShieldCheck } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { readConfig } from './lib/config'
-import { formatBuildLabel, readOAuthCallbackError } from './lib/presentation'
+import { formatBuildLabel, formatEnvironmentLabel, readOAuthCallbackError } from './lib/presentation'
 import { createSupabase } from './lib/supabase'
 import { DataAdmin } from './DataAdmin'
 import './styles.css'
@@ -120,7 +120,7 @@ export function App() {
           </form>
         )}
 
-        {config && !loading && session && supabase && <DataAdmin client={supabase} email={session.user.email} onSignOut={() => void supabase.auth.signOut()} />}
+        {config && !loading && session && supabase && <DataAdmin client={supabase} email={session.user.email} environmentLabel={formatEnvironmentLabel(config.supabaseUrl)} onSignOut={() => void supabase.auth.signOut()} />}
       </section>
     </main>
   )
