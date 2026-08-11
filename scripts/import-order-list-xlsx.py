@@ -1631,7 +1631,9 @@ def render_report(
     add("")
     add(f"- Generated: {generated_at}")
     add(f"- Run mode: **{run_mode}**")
-    add(f"- Target project ref: `{project_ref}`")
+    # NB: the label deliberately avoids the word "Target", which is also a customer
+    # name the leak test in scripts/tests/test_import_order_list.py screens for.
+    add(f"- Destination project ref: `{project_ref}`")
     add(f"- Source spreadsheet: `{SOURCE_SPREADSHEET_ID}`, tab `{SOURCE_TAB_NAME}` "
         f"(gid `{SOURCE_TAB_GID}`)")
     add(f"- Workbook file: `{workbook_name}`")
