@@ -560,11 +560,14 @@ so the whole of B10 is now born clean. The ruling is not dropped — it is **dis
 > `api` still hand `service_role` all eight bits at `CREATE TABLE`. Any future migration creating a
 > table in those three schemas re-enters the exact state #773 was written about.
 
-### 5A.4 The four parts, and why B10 cannot be one unit
+### 5A.4 The four parts, and why B10 is divided into them
 
-Six files spanning two licensors and two independent DCP builds is not one safe unit.
-`20260811030000` (Paramount) sorts *between* the two DCP builds, and each part is split at a
-boundary where the database is coherent. **The parts are ordered by version, but note that the
+**To be precise about what is being claimed: all six COULD safely run as one allowlist, in version
+order, after B9.** Nothing here proves a combined B10 unsafe. The four parts exist because six files
+spanning two licensors and two independent DCP builds give the operator **four genuinely coherent
+resting points** instead of one all-or-nothing run — smaller runs, each individually verifiable,
+each stopping somewhere this document has reasoned about. `20260811030000` (Paramount) sorts
+*between* the two DCP builds, so the parts fall out at those seams. **The parts are ordered by version, but note that the
 production lane could technically run them in another order — see the leapfrog correction in §5A.5
 before assuming version order is a guard rail.**
 
@@ -584,7 +587,10 @@ aborts); for B10a and B10c it is POLICY — see the leapfrog correction below, b
 not what it looks like.**
 
 > ### ⛔ The hardest edge: **`20260810080000` (B9) MUST apply before `20260811070000` (B10d).**
-> **B10 can never precede B9. Not "should not" — the run aborts.**
+> **`20260811070000` can never precede `20260810080000`. Not "should not" — the run aborts.**
+> (Scope note, because the overbroad version of this sentence was wrong: **only B10b and B10d abort**
+> if run before B9. B10a and B10c are held behind B9 by policy, not mechanism — see the leapfrog
+> correction below.)
 >
 > **VERIFIED FROM THE SQL, not inferred.** `20260810080000_nbcu_revoke_default_granted_write_privileges.sql`
 > ends in a `do $$` assertion block that counts `service_role`'s grants on `plm.nbcu_*` and raises
@@ -668,10 +674,14 @@ correction:**
   `20260731150000` — a **B3** member (the PopSG file that §5's correction note moved into B3).
   VERIFIED by grep across `supabase/migrations/`. B4 also depends on `public.approve_licensor_alias`,
   but that is created by `20260731210000` itself, inside B4.
-- **"`20260810050000` grants access to screens B8 creates" — CONFIRMED, and it is already satisfied
-  by version order.** `20260810050000` is a B9 member; B8 is `20260809170000`…`20260809170500`,
-  which all sort **below** it. `supabase db push` applies in version order, so B8 cannot follow B9.
-  **No extra rule is needed. Do not add one.**
+- **"`20260810050000` grants access to screens B8 creates" — CONFIRMED as a real dependency, and
+  NOT automatically satisfied.** `20260810050000` is a B9 member; B8 is
+  `20260809170000`…`20260809170500`, which all sort **below** it. An earlier draft of this bullet
+  said version order therefore settles it and "no extra rule is needed". **That was wrong, for the
+  same reason as the leapfrog correction above:** separate allowlists are separate runs, and the
+  bounded checkout deletes everything outside `applied ∪ allowlist`, so **a B9 allowlist can be
+  promoted with B8 still unapplied.** Nothing mechanical stops it. **B8-before-B9 is a rule of this
+  document that the operator must honour**, exactly like B4-after-B3.
 
 ### 5A.6 The #790 interaction — B10's risk is the INVERSE of B5–B9's, and that is more dangerous
 
@@ -817,12 +827,17 @@ move is to complete the batch, not to wait.
 **The two B10 never-rest states, spelled out (added 2026-08-11, §5A):**
 
 - **After `20260810190000`, before `20260810190100`** — nine `plm.dcp_*` tables that **have no
-  supported loader and can never be finalized**. (`service_role` *does* hold `insert`, so a raw
-  write is possible — that is part of why this state is bad, not a reason it is safe.) The only
-  checked writer is the chunked loader in `20260810190100`, and
-  the only path to `dcp_crawl.status = 'complete'` is `plm.finalize_dcp_crawl`, also in `190100`. The
-  immutability triggers therefore **can never arm**, because no crawl can ever reach `'complete'`.
-  That is a half-build, not a paused promotion. **Enforced by `CO_PRESENCE_RULES`.**
+  supported loader and cannot be safely finalized**. The only *checked* writer is the chunked loader
+  in `20260810190100`, and the only *checked* path to `dcp_crawl.status = 'complete'` is
+  `plm.finalize_dcp_crawl`, also in `190100` — the routine that verifies sections, gaps, membership
+  and counts.
+  **State this accurately, because the overstated version of it was wrong:** `service_role` holds
+  `insert`, and there is **no header INSERT trigger**, so a caller *can* directly insert a
+  `dcp_crawl` row already carrying `status = 'complete'` if it satisfies the row checks — and thereby
+  arm the immutability triggers over data nothing ever validated. **That is worse than "nothing can
+  happen", not better.** The gap is the absence of the supported, checked finalization path, not an
+  inability to reach the status value. A half-build, not a paused promotion. **Enforced by
+  `CO_PRESENCE_RULES`.**
 - **After `20260811050000`, before `20260811060000`** — the same shape for
   `plm.dcp_metadata_run` / `dcp_metadata_asset` / `dcp_property` / `dcp_character` / `dcp_term` and
   the three observation tables: created, `service_role`-insertable, ungoverned by any supported
