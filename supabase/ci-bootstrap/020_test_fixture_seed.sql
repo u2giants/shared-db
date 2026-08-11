@@ -121,7 +121,9 @@ begin
   -- ---------------------------------------------------------------------------------
   select id into v_customer_id from core.customer where name = 'ZZ Fixture Customer';
   if v_customer_id is null then
-    insert into core.customer (name, code) values ('ZZ Fixture Customer', 'ZZFXC')
+    -- No `code` here: core.customer is core.company renamed, and it never had that
+    -- column. core.licensor, core.property and core.factory do, and they need it.
+    insert into core.customer (name) values ('ZZ Fixture Customer')
     returning id into v_customer_id;
   end if;
 
