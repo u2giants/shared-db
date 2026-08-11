@@ -644,7 +644,10 @@ begin
     -- overwriting an already-applied response.
     update plm.dcp_metadata_asset m set
       fetch_status   = v_fetch,
-      attempt_count  = m.attempt_count + 1,
+      -- UNQUALIFIED deliberately. Inside an UPDATE's SET list the target alias is not in
+      -- scope on the right-hand side, so `m.attempt_count + 1` raises "missing FROM-clause
+      -- entry for table m" -- caught by the loader contract test on CI.
+      attempt_count  = attempt_count + 1,
       http_status    = nullif(r->>'http_status','')::integer,
       response_bytes = nullif(r->>'response_bytes','')::bigint,
       retrieved_at   = coalesce(nullif(r->>'retrieved_at','')::timestamptz, now()),
