@@ -128,8 +128,27 @@ begin
       'GENERATED-STORED-versus-BEFORE-trigger class of bug cannot occur.', v_n;
   end if;
 
+  -- THE ENVIRONMENTAL PRECONDITION SECTION C DEPENDS ON, ASSERTED RATHER THAN ASSUMED.
+  -- C proves RLS denial by actually running as anon and authenticated, which needs those
+  -- roles to exist AND this connection to be a member of them. Without this check, a shim
+  -- regression makes C fail with "permission denied to set role" -- an error about the
+  -- TEST HARNESS that reads exactly like a failure of the CONTRACT.
+  if not exists (select 1 from pg_roles where rolname = 'anon')
+  or not exists (select 1 from pg_roles where rolname = 'authenticated') then
+    raise exception 'A FAILED: role anon and/or authenticated does not exist, so the RLS '
+      'denial tests in section C cannot run. This is an environment problem, NOT a '
+      'contract failure.';
+  end if;
+  if not pg_has_role(session_user, 'anon', 'MEMBER')
+  or not pg_has_role(session_user, 'authenticated', 'MEMBER') then
+    raise exception 'A FAILED: session_user %L is not a member of anon/authenticated, so '
+      'section C cannot SET ROLE to them to prove denial by execution. Environment '
+      'problem, NOT a contract failure.', session_user;
+  end if;
+
   raise notice 'A PASSED: guard satisfied; table present; 4 functions with correct '
-    'volatility/definer/search_path; exactly 1 index; 0 triggers.';
+    'volatility/definer/search_path; exactly 1 index; 0 triggers; anon/authenticated '
+    'exist and are assumable, so section C can prove denial by execution.';
 end;
 $$;
 
@@ -168,7 +187,15 @@ begin
   -- Belt and braces: the same fact through has_table_privilege, which resolves privileges
   -- inherited through role membership and would catch a grant made to a role service_role
   -- is a member of -- something role_table_grants alone would not show.
-  foreach v_priv in array array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']
+  -- MAINTAIN is included only on PG17+, where it exists -- it is the `m` in the crm default
+  -- ACL's `arwdDxtm`, so leaving it out would check one privilege short of the very set
+  -- this section defends against. Naming it unconditionally would instead ERROR on an older
+  -- server, turning a portability problem into a fake contract failure.
+  foreach v_priv in array (
+    array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']
+    || case when current_setting('server_version_num')::int >= 170000
+            then array['MAINTAIN'] else array[]::text[] end
+  )
   loop
     if has_table_privilege('service_role', 'crm.worker_delta_cursor', v_priv) then
       raise exception 'B FAILED: service_role has % on crm.worker_delta_cursor via an '
@@ -538,6 +565,48 @@ begin
       'stuck worker would hide behind a fresh timestamp.';
   end if;
 
+  -- E9b. THE LINK IS STORED BYTE-EXACTLY -- NOT TRIMMED, NOT NORMALISED.
+  -- The column contract says the token is kept exactly as the provider issued it, and the
+  -- digest is the ONLY safe way to confirm a save. If save() trimmed the value, the stored
+  -- bytes would differ from the bytes the caller holds and the caller's own digest of the
+  -- original would never match -- defeating the one mechanism that lets an operator verify
+  -- a cursor without touching it. A leading/trailing space is a legal, if unlikely, part
+  -- of an opaque token, so this is asserted rather than assumed.
+  declare
+    v_padded text := '  ZZTEST-OPAQUE-LINK-PADDED  ';
+    v_cur    uuid;
+    v_stored text;
+  begin
+    v_cur := (crm.save_worker_delta_cursor('ZZTEST-cursor-bytes', 'ZZTEST-purpose', null,
+                v_padded, null)->>'version')::uuid;
+    select delta_link, delta_link_sha256 into v_stored, v_sha
+    from crm.worker_delta_cursor where cursor_key = 'ZZTEST-cursor-bytes';
+
+    if v_stored <> v_padded then
+      raise exception 'E FAILED: the stored link is not byte-identical to the input. It '
+        'was trimmed or normalised, so the caller''s own digest of the token it holds can '
+        'never match the stored digest.';
+    end if;
+    if v_sha <> encode(sha256(convert_to(v_padded, 'UTF8')), 'hex') then
+      raise exception 'E FAILED: the digest is not the digest of the UNMODIFIED input.';
+    end if;
+  end;
+
+  -- E9c. But a WHITESPACE-ONLY link is still folded to NULL, because "no cursor yet" and
+  -- "a cursor made of spaces" must not be two different states. That is a test on the
+  -- input, not an edit of it.
+  perform crm.save_worker_delta_cursor('ZZTEST-cursor-blanklink', 'ZZTEST-purpose', null,
+            '   ', null);
+  if (select delta_link from crm.worker_delta_cursor
+      where cursor_key = 'ZZTEST-cursor-blanklink') is not null then
+    raise exception 'E FAILED: a whitespace-only link was stored as a real cursor value.';
+  end if;
+  if (select delta_link_sha256 from crm.worker_delta_cursor
+      where cursor_key = 'ZZTEST-cursor-blanklink') is not null then
+    raise exception 'E FAILED: a NULL link carries a digest. The digest CHECK should have '
+      'refused that pairing.';
+  end if;
+
   -- E10. A blank cursor_key and a blank purpose are both refused.
   v_ok := false;
   begin
@@ -612,13 +681,18 @@ begin
     raise exception 'F FAILED: the status function body returns delta_link.';
   end if;
 
-  -- F4. save() must not echo it back either. The caller just supplied it; returning it
-  -- puts an opaque token into one more log line for no benefit.
+  -- F4a. status() holds on a SECOND, independently created cursor -- so F1 is a property
+  -- of the function, not an accident of the one row it was first pointed at.
   v_save := crm.worker_delta_cursor_status('ZZTEST-cursor-denial');
   if v_save ? 'delta_link' then
     raise exception 'F FAILED: status leaked delta_link on a second cursor.';
   end if;
+  if v_save::text like '%ZZTEST-OPAQUE-LINK-DENIAL%' then
+    raise exception 'F FAILED: status leaked the second cursor''s link by value.';
+  end if;
 
+  -- F4b. AND save() must not echo the link back either. The caller just supplied it;
+  -- returning it puts an opaque token into one more log line for no benefit.
   select (crm.save_worker_delta_cursor('ZZTEST-cursor-f4', 'ZZTEST-purpose', null,
             'ZZTEST-OPAQUE-LINK-F4', null))::text into v_keys;
   if v_keys like '%ZZTEST-OPAQUE-LINK-F4%' then

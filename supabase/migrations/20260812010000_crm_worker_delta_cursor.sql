@@ -122,8 +122,14 @@ comment on function crm.worker_cursor_privilege_ok(text, text) is
 'in shape to plm.dcp_loader_privilege_ok. Written as a callable function rather than an '
 'inline expression so a contract test can prove the NULL case is rejected.';
 
+-- service_role ONLY -- deliberately NOT `authenticated`, which is where the plm predicate
+-- this one mirrors did land. The function is pure over its arguments and leaks nothing, so
+-- an authenticated grant would be harmless; it is still withheld, because this file argues
+-- a few lines further down that "not reachable" beats "fails safely once you read the
+-- body", and a predicate a browser role can call would be the one object in the contract
+-- contradicting that.
 revoke all on function crm.worker_cursor_privilege_ok(text, text) from public;
-grant execute on function crm.worker_cursor_privilege_ok(text, text) to authenticated, service_role;
+grant execute on function crm.worker_cursor_privilege_ok(text, text) to service_role;
 
 -- =====================================================================================
 -- SECTION 2. crm.worker_delta_cursor -- the durable state itself
@@ -168,7 +174,9 @@ create table crm.worker_delta_cursor (
     or (delta_link is not null and delta_link_sha256 ~ '^[0-9a-f]{64}$')
   ),
   constraint worker_delta_cursor_save_count_chk check (save_count >= 0),
-  -- save_count = 0 is the never-saved seed row, which by definition has never advanced.
+  -- A row that has never been saved cannot have advanced. NOTE that save_count = 0 is NOT
+  -- reachable through the sanctioned API at all -- create mode always writes 1 -- so this
+  -- is a STRUCTURAL guard against a hand-written row, not a state the contract produces.
   constraint worker_delta_cursor_advanced_chk check (
     save_count > 0 or advanced_at is null
   )
@@ -215,8 +223,10 @@ comment on column crm.worker_delta_cursor.version is
 'digest compares equal on a legitimate re-write of the same link, which would let a stale '
 'writer win the very race this column exists to lose.';
 comment on column crm.worker_delta_cursor.save_count is
-'Number of successful saves. 0 is the never-saved seed row. Monotonic, and useful evidence '
-'that a worker is actually advancing rather than repeatedly failing its CAS.';
+'Number of successful saves. Monotonic, and useful evidence that a worker is actually '
+'advancing rather than repeatedly failing its compare-and-swap. The lowest value the '
+'sanctioned API can produce is 1 -- create mode counts as a save -- so 0 exists only as a '
+'structural guard against a hand-written row, not as a state this contract creates.';
 comment on column crm.worker_delta_cursor.advanced_at is
 'When the stored link last actually CHANGED -- not when the row was last written. A worker '
 'that keeps saving the same link is not making progress, and collapsing the two timestamps '
@@ -372,11 +382,32 @@ as $$
 declare
   v_role      text := auth.role();
   v_key       text := btrim(coalesce(p_cursor_key, ''));
-  v_link      text := nullif(btrim(coalesce(p_delta_link, '')), '');
+  -- THE LINK IS NOT TRIMMED, AND THAT IS DELIBERATE -- do not "tidy" this into btrim().
+  -- The column contract says the token is stored EXACTLY as the provider issued it, and
+  -- btrim() is a normalisation: it would make the stored bytes differ from the bytes the
+  -- caller holds, and the server-computed digest would then be a digest of something the
+  -- caller cannot reproduce -- so "confirm the save by comparing digests", the entire
+  -- reason delta_link_sha256 exists, would fail against the untrimmed original.
+  -- A blank or whitespace-only input is still folded to NULL, because "no cursor yet" and
+  -- "a cursor made of spaces" must not be two different states -- but that is a test on
+  -- the input, not an edit of it.
+  v_link      text := case when btrim(coalesce(p_delta_link, '')) = ''
+                           then null else p_delta_link end;
   v_sha       text;
   v_new       uuid := gen_random_uuid();
   v_now       timestamptz := now();
-  v_out       crm.worker_delta_cursor%rowtype;
+  -- SCALARS, NOT A %rowtype. plpgsql refuses a record/row variable in a MULTIPLE-ITEM INTO
+  -- list ("record variable cannot be part of multiple-item INTO list", 42601), and the
+  -- ADVANCE branch below must return the row AND the computed `advanced` boolean from one
+  -- statement -- which is the whole point of doing the digest comparison inside the CAS.
+  -- So the fields are captured individually. v_r_key doubles as the "did the statement
+  -- match a row?" flag: it is NULL exactly when the compare-and-swap found nothing.
+  v_r_key     text;
+  v_r_version uuid;
+  v_r_count   integer;
+  v_r_adv     timestamptz;
+  v_r_upd     timestamptz;
+  v_r_sha     text;
   v_advanced  boolean;
   v_exists    boolean;
 begin
@@ -420,13 +451,14 @@ begin
       v_now, v_now
     )
     on conflict (cursor_key) do nothing
-    returning * into v_out;
+    returning cursor_key, version, save_count, advanced_at, updated_at, delta_link_sha256
+      into v_r_key, v_r_version, v_r_count, v_r_adv, v_r_upd, v_r_sha;
 
     -- A brand-new cursor that arrived carrying a link HAS advanced -- from nothing to
     -- something. One that arrived empty has not.
     v_advanced := v_link is not null;
 
-    if v_out.cursor_key is null then
+    if v_r_key is null then
       raise exception 'Worker delta cursor refused: cursor %L already exists, but this '
         'save presented no expected_version, i.e. it believed it was CREATING the cursor. '
         'Another worker created or advanced it first. Re-load the cursor and retry the '
@@ -482,10 +514,11 @@ begin
       from prev
      where c.cursor_key = prev.cursor_key
        and c.version    = p_expected_version
-    returning c.*, (v_sha is distinct from prev.delta_link_sha256)
-      into v_out, v_advanced;
+    returning c.cursor_key, c.version, c.save_count, c.advanced_at, c.updated_at,
+              c.delta_link_sha256, (v_sha is distinct from prev.delta_link_sha256)
+      into v_r_key, v_r_version, v_r_count, v_r_adv, v_r_upd, v_r_sha, v_advanced;
 
-    if v_out.cursor_key is null then
+    if v_r_key is null then
       select exists (select 1 from crm.worker_delta_cursor c where c.cursor_key = v_key)
         into v_exists;
       raise exception 'Worker delta cursor refused: compare-and-swap failed for cursor '
@@ -506,13 +539,13 @@ begin
   -- inferred from `advanced_at = now()`, which is transaction time and therefore reports a
   -- false "advanced" for a second save in the same transaction.
   return jsonb_build_object(
-    'cursor_key',        v_out.cursor_key,
-    'version',           v_out.version,
-    'save_count',        v_out.save_count,
+    'cursor_key',        v_r_key,
+    'version',           v_r_version,
+    'save_count',        v_r_count,
     'advanced',          coalesce(v_advanced, false),
-    'delta_link_sha256', v_out.delta_link_sha256,
-    'advanced_at',       v_out.advanced_at,
-    'updated_at',        v_out.updated_at
+    'delta_link_sha256', v_r_sha,
+    'advanced_at',       v_r_adv,
+    'updated_at',        v_r_upd
   );
 end;
 $$;
