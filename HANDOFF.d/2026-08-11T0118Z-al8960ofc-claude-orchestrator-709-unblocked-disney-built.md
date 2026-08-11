@@ -49,7 +49,25 @@ you allocate a version from it.
 
 ---
 
-## 2. ⚠️ ANOTHER SESSION IS LIVE IN THIS REPO — DO NOT TOUCH ITS WORK
+## 2. ⚠️ ANOTHER SESSION WAS LIVE IN THIS REPO — RESOLVED AT 01:20Z, READ THIS ANYWAY
+
+> **UPDATE 2026-08-11T01:22Z, written before this file was merged.** PR #728
+> **merged itself at 01:20Z** as `63d262e`, two minutes after I first saw it —
+> which is the correct behaviour for a docs-only PR under the handover standard.
+> **`origin/main` is now `63d262ef612520193cd1a4059beca6b097a74526`, not the
+> `960f45a` quoted in §1.**
+>
+> I verified the thing I was worried about rather than assuming it was fine:
+> the diff is **46 insertions and zero deletions**, it adds a new `## 0.0-A`
+> owner ruling at line 86, and **my §0.1-A.1 survives intact at line 218** with
+> its closure rule (`waives the read-only proof and nothing else`, catalog-only,
+> no row contents, `pg_stats` excluded) and the "its own ruling from Albert"
+> wording both present. **No clobber, no contradiction.** Issue #735 has been
+> updated and can be closed.
+>
+> The section below is left as written because **the lesson in its last two
+> paragraphs still stands and is not fixed by anything**.
+
 
 At 01:17Z, one minute before I began this handover, **PR #728** appeared:
 
