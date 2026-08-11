@@ -18,7 +18,7 @@ import { FilterHeader, type HeaderProps } from './FilterHeader'
 export { FilterHeader }
 export type { HeaderProps }
 
-type Props = { client: ApiClient; email?: string; onSignOut: () => void }
+type Props = { client: ApiClient; email?: string; environmentLabel: string; onSignOut: () => void }
 type UndoStep = Array<{ id: string; changes: Record<string, unknown> }>
 
 export function StatusDropdownEditor({ column, val, save, close }: EditorType) {
@@ -64,7 +64,7 @@ const baseColumns: ColumnRegular[] = [
   { prop: 'updated_at', name: 'Updated', size: 175, sortable: true },
 ]
 
-export function DataAdmin({ client, email, onSignOut }: Props) {
+export function DataAdmin({ client, email, environmentLabel, onSignOut }: Props) {
   const [kind, setKind] = useState<EntityKind>('customer')
   const [section, setSection] = useState<'entity' | 'taxonomy' | 'property'>('entity')
   const [query, setQuery] = useState<QueryState>(initialQuery)
@@ -310,7 +310,7 @@ export function DataAdmin({ client, email, onSignOut }: Props) {
   if (denied) return <section className="access-denied" role="alert"><h1>Access denied</h1><p>You are signed in, but DB Data Admin requires an active Administrator grant.</p><button className="secondary" onClick={onSignOut}><LogOut /> Sign out</button></section>
 
   return <section className="workspace">
-    <div className="workspace-bar"><div><strong>{email}</strong><span>Preview database</span></div><button className="secondary" onClick={onSignOut}><LogOut /> Sign out</button></div>
+    <div className="workspace-bar"><div><strong>{email}</strong><span>{environmentLabel}</span></div><button className="secondary" onClick={onSignOut}><LogOut /> Sign out</button></div>
     <nav className="tabs" aria-label="Data type">
       <button className={section === 'entity' && kind === 'customer' ? 'active' : ''} onClick={() => { setSection('entity'); setKind('customer') }}>Customers</button>
       <button className={section === 'entity' && kind === 'vendor' ? 'active' : ''} onClick={() => { setSection('entity'); setKind('vendor') }}>Vendors</button>

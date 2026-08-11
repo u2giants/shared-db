@@ -116,3 +116,76 @@ jobs:
             --request POST \
             --header "Authorization: Bearer ${COOLIFY_TOKEN}" \
             "${COOLIFY_URL}/api/v1/deploy?uuid=${COOLIFY_APP_UUID}&force=false"
+
+  # ---------------------------------------------------------------------------
+  # Production release for https://data.designflow.app (issue #729).
+  #
+  # This job is deliberately INERT until two independent things are true, so that
+  # merging this workflow can never surprise anyone by publishing an admin tool
+  # that reads and writes the database four live applications share:
+  #
+  #   1. The repository variable COOLIFY_PROD_APP_UUID must be set. It is empty
+  #      until the production Coolify application actually exists. An empty value
+  #      skips the job instead of deploying a wrong or missing target.
+  #   2. The job runs in the GitHub environment `production`, whose required
+  #      reviewer is the owner. Every production release therefore waits for an
+  #      explicit human approval in the Actions UI.
+  #
+  # There is NO fallback path. If either gate is missing the job does not run and
+  # says so; it must never quietly deploy somewhere else. Rollback is the same
+  # mechanism with an earlier immutable tag, described in
+  # docs/db-data-admin-deployment.md.
+  # ---------------------------------------------------------------------------
+  deploy-production:
+    if: github.event_name == 'push'
+    needs: container
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://data.designflow.app
+    env:
+      COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+      COOLIFY_PROD_APP_UUID: ${{ vars.COOLIFY_PROD_APP_UUID }}
+      COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+    steps:
+      - name: Refuse to deploy without an explicit production target
+        run: |
+          if [ -z "${COOLIFY_PROD_APP_UUID}" ]; then
+            echo "::error::COOLIFY_PROD_APP_UUID is not set. The production Coolify"
+            echo "::error::application for data.designflow.app does not exist yet, or the"
+            echo "::error::repository variable was never filled in. Refusing to deploy."
+            exit 1
+          fi
+
+      - name: Point Coolify at the verified immutable image
+        run: |
+          image_tag="sha-${GITHUB_SHA::7}"
+          curl --fail-with-body --silent --show-error \
+            --request PATCH \
+            --header "Authorization: Bearer ${COOLIFY_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "{\"docker_registry_image_tag\":\"${image_tag}\"}" \
+            "${COOLIFY_URL}/api/v1/applications/${COOLIFY_PROD_APP_UUID}"
+
+      - name: Deploy through Coolify
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${COOLIFY_TOKEN}" \
+            "${COOLIFY_URL}/api/v1/deploy?uuid=${COOLIFY_PROD_APP_UUID}&force=false"
+
+      - name: Verify the live production build reports this commit
+        run: |
+          for attempt in $(seq 1 30); do
+            code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://data.designflow.app/health || true)"
+            live="$(curl --silent https://data.designflow.app/ | grep -o 'name="build-sha" content="[0-9a-f]*"' | grep -o '[0-9a-f]\{40\}' || true)"
+            if [ "${code}" = "200" ] && [ "${live}" = "${GITHUB_SHA}" ]; then
+              echo "data.designflow.app is healthy and serving ${GITHUB_SHA}"
+              exit 0
+            fi
+            echo "attempt ${attempt}: health=${code} build-sha=${live:-none}"
+            sleep 10
+          done
+          echo "::error::data.designflow.app did not report health 200 and build-sha ${GITHUB_SHA}."
+          echo "::error::Roll back in Coolify to the previous sha-<commit> image."
+          exit 1
