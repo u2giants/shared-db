@@ -277,6 +277,18 @@ NOOP_DECLARATION_RE = re.compile(
 DATA_STATEMENT_RE = re.compile(
     r"^\s*(insert|update|delete|merge|with|select|values|set|reset|analyze)\b"
 )
+# `set` is in the list above for `set local statement_timeout` and friends. But
+# `set role` and `set session authorization` CHANGE THE EXECUTING PRINCIPAL,
+# which is a privilege operation, and they must not ride in on that allowance.
+PRINCIPAL_CHANGE_RE = re.compile(
+    r"^\s*set\s+(?:local\s+|session\s+)?(role|session\s+authorization)\b"
+)
+# plpgsql structure that can precede a real statement WITHOUT a semicolon in
+# between: `begin insert into t values (1); end`. Peeled off before asking
+# whether a block contains a data statement -- never before a rule that REJECTS.
+CONTROL_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:begin|end|then|else|loop|declare)\b\s*)+"
+)
 # A dollar-quoted delimiter: `$$` or an arbitrary tag such as `$coco$`, `$ins$`.
 # The tag is NOT assumed to be `$$` -- 20260807030000's whole body is `$coco$`,
 # and it nests a second `$ins$` payload inside it.
@@ -683,20 +695,67 @@ def parse_grant_statement(
     return expectations, relations, functions, notes
 
 
-def split_statements_dollar_aware(text: str) -> list[str]:
-    """Split on `;` while stepping OVER dollar-quoted bodies.
+def is_data_statement(statement: str) -> str | None:
+    """Is this statement one a pure-DATA migration may contain?
 
-    `split_statements` is only safe on text whose dollar bodies have already been
-    removed. The no-op claim check has to keep those bodies -- the whole question
-    is what is inside them -- so it needs a splitter that treats `$tag$ ... $tag$`
-    as one opaque token instead of splitting on the semicolons inside it.
-
-    An UNTERMINATED dollar quote keeps the rest of the text as a single statement
-    rather than guessing where it ends. That reads as one long non-data statement
-    and the claim is rejected, which is the safe direction.
+    The single place that question is answered, so a carve-out cannot be added
+    on one path and forgotten on another. `set role service_role` is data-shaped
+    by head alone and is NOT a data statement.
     """
+    if PRINCIPAL_CHANGE_RE.match(statement):
+        return None
+    return DATA_STATEMENT_RE.match(statement)
+
+
+def split_statements_quote_aware(text: str) -> list[str]:
+    """Split on `;` while stepping OVER dollar-quoted bodies AND string literals.
+
+    `split_statements` is only safe on text whose dollar bodies are gone and
+    whose literals are blanked. The no-op claim check has to keep both -- the
+    whole question is what is inside them -- so it needs a splitter that treats
+    each quoted region as one opaque token.
+
+    LITERALS MATTER AS MUCH AS DOLLAR BODIES HERE, and 20260807030000 is the
+    proof: its audit-insert payload contains the prose `... count(*): core.
+    property COCO parented to ZZ DTR - NO LICENSE; 15 public.assets ...`. That
+    SEMICOLON IS INSIDE A STRING. Split on it and the payload appears to contain
+    a second statement beginning `15 ' 'public.assets`, which is not data-shaped,
+    and a correct file is rejected for its own documentation.
+
+    An UNTERMINATED quote keeps the rest of the text as one statement rather than
+    guessing where it ends. That reads as one long non-data statement and the
+    claim is rejected -- the safe direction.
+    """
+    spans = _quoted_spans(text)
     parts: list[str] = []
-    buf: list[str] = []
+    start = 0
+    for index, char in enumerate(text):
+        if char != ";":
+            continue
+        if any(begin <= index < end for begin, end, _, _ in spans):
+            continue
+        parts.append(text[start:index])
+        start = index + 1
+    parts.append(text[start:])
+    return [part for part in parts if part.strip()]
+
+
+def _quoted_spans(text: str) -> list[tuple[int, int, int, int]]:
+    """Every single- and dollar-quoted region, as (start, end, inner, inner_end).
+
+    This is what makes the `execute` scan honest in BOTH directions. Without it:
+
+      * the word `execute` inside a `raise notice` message is read as a real
+        `execute` with no payload, and an innocent block is rejected for its own
+        prose; and
+      * a payload's boundaries cannot be found reliably, which is how the first
+        version of this reader ended up judging only a payload's FIRST statement.
+
+    A DOUBLED quote is an ESCAPED quote and does not end the literal -- this
+    repo's own comments are full of `caller''s`. An unterminated quote runs to
+    the end of the text rather than being guessed at.
+    """
+    spans: list[tuple[int, int, int, int]] = []
     i = 0
     while i < len(text):
         match = DOLLAR_TAG_RE.match(text, i)
@@ -704,69 +763,110 @@ def split_statements_dollar_aware(text: str) -> list[str]:
             tag = match.group(0)
             end = text.find(tag, match.end())
             if end == -1:
-                buf.append(text[i:])
+                spans.append((i, len(text), match.end(), len(text)))
                 break
-            buf.append(text[i : end + len(tag)])
+            spans.append((i, end + len(tag), match.end(), end))
             i = end + len(tag)
             continue
-        if text[i] == ";":
-            parts.append("".join(buf))
-            buf = []
-        else:
-            buf.append(text[i])
+        if text[i] == "'":
+            j = i + 1
+            while j < len(text):
+                if text[j] == "'":
+                    if text[j : j + 2] == "'" * 2:
+                        j += 2
+                        continue
+                    break
+                j += 1
+            spans.append((i, min(j + 1, len(text)), i + 1, j))
+            i = min(j + 1, len(text))
+            continue
         i += 1
-    else:
-        parts.append("".join(buf))
-    if buf and (not parts or parts[-1] != "".join(buf)):
-        parts.append("".join(buf))
-    return [part for part in parts if part.strip()]
+    return spans
 
 
-def _execute_payload_offence(body: str) -> str | None:
-    """Judge every `execute` in a `do` block. Returns a reason to REJECT, or None.
+def _forbidden_words(scrubbed: str) -> list[str]:
+    return sorted({m.group(1) for m in NOOP_FORBIDDEN_IN_DO_RE.finditer(scrubbed)})
 
-    An `execute` whose payload is a STATIC literal -- `execute $ins$ insert ...
-    $ins$ using ...`, which is exactly what 20260807030000 does to keep its audit
-    insert behind a `to_regclass` guard -- is readable text, so it is judged by
-    the same `DATA_STATEMENT_RE` as any other statement.
 
-    An `execute` whose payload is anything else is DYNAMIC SQL. The statement is
-    not knowable from the file, so it is refused. 20260810120000's `execute
-    format('revoke insert on plm.%I from service_role', t)` is that case, and it
-    must stay a reject: widening the claim check to cover a genuine data-only
-    block is a fix, widening it to cover dynamic SQL would be a bypass.
+def _payload_offence(payload: str) -> str | None:
+    """Judge a static `execute` payload. Returns a reason to REJECT, or None.
+
+    EVERY STATEMENT IN THE PAYLOAD IS JUDGED, NOT JUST THE FIRST. The first
+    version of this reader used an anchored match here, so it read only as far as
+    the payload's first `;`, and the forbidden-word scan then ran over text from
+    which `strip_sql` had ALREADY deleted the payload. A `revoke` in the second
+    statement of
+
+        execute $ins$ insert into t values (1); revoke all on t from public $ins$
+
+    fell in the gap between the two checks and was ACCEPTED with a green tick.
+    Both halves are closed here: the payload is split into statements and each
+    one must be data, AND the forbidden-word scan is run over the payload itself.
     """
-    # COMMENTS MUST GO FIRST, and this is not cosmetic: 20260807030000's block
-    # explains itself at length and the prose contains the word EXECUTE
-    # ("The real reasons to keep EXECUTE are about later runs"). Scanned raw,
-    # that sentence reads as an `execute` with no payload and the file is
-    # rejected for a comment. Literals and nested dollar bodies are KEPT, because
-    # the payload being judged IS a literal.
-    body = strip_sql(body, keep_literals=True, keep_dollar=True)
-    for match in EXECUTE_RE.finditer(body):
-        rest = body[match.end() :]
-        payload: str | None = None
-        tag = DOLLAR_TAG_RE.match(rest)
-        if tag:
-            end = rest.find(tag.group(0), tag.end())
-            if end != -1:
-                payload = rest[tag.end() : end]
-        elif rest.startswith("'"):
-            end = rest.find("'", 1)
-            if end != -1:
-                payload = rest[1:end]
-        if payload is None:
-            return (
-                "it contains DYNAMIC SQL (`execute "
-                f"{' '.join(rest.split())[:60]}`), whose statement is not "
-                "knowable from the file text"
-            )
-        if not DATA_STATEMENT_RE.match(payload):
+    statements = split_statements_quote_aware(
+        strip_sql(payload, keep_literals=True, keep_dollar=True)
+    )
+    if not statements:
+        return "it `execute`s an empty payload, which proves nothing"
+    for inner in statements:
+        if not is_data_statement(inner):
             return (
                 "it `execute`s a non-data statement: "
-                f"`{' '.join(payload.split())[:80]}`"
+                f"`{' '.join(inner.split())[:80]}`"
             )
+    forbidden = _forbidden_words(strip_sql(payload))
+    if forbidden:
+        return (
+            "it `execute`s a payload containing "
+            f"{', '.join('`' + word + '`' for word in forbidden)}, which is not "
+            "a data statement"
+        )
     return None
+
+
+def _execute_offences(readable: str) -> tuple[list[str], int]:
+    """Judge every real `execute` in an already-comment-stripped block body.
+
+    A STATIC payload -- `execute $ins$ insert ... $ins$ using ...`, which is what
+    20260807030000 does to keep its audit insert behind a `to_regclass` guard --
+    is readable text, so it is judged like any other statement. Anything else is
+    DYNAMIC SQL and is refused: 20260810120000's `execute format('revoke insert
+    on plm.%I from service_role', t)` is that case and must stay a reject.
+    Widening this check to cover a genuine data-only block is a fix; widening it
+    to cover dynamic SQL would be a bypass.
+
+    A match on the word `execute` INSIDE a literal is prose, not a statement, and
+    is skipped -- see `_quoted_spans`.
+    """
+    spans = _quoted_spans(readable)
+    offences: list[str] = []
+    found = 0
+    for match in EXECUTE_RE.finditer(readable):
+        if any(start <= match.start() < end for start, end, _, _ in spans):
+            continue
+        found += 1
+        after = match.end()
+        while after < len(readable) and readable[after].isspace():
+            after += 1
+        payload = next(
+            (
+                readable[inner:inner_end]
+                for start, _, inner, inner_end in spans
+                if start == after
+            ),
+            None,
+        )
+        if payload is None:
+            offences.append(
+                "it contains DYNAMIC SQL (`execute "
+                f"{' '.join(readable[after:].split())[:60]}`), whose statement "
+                "is not knowable from the file text"
+            )
+            continue
+        offence = _payload_offence(payload)
+        if offence:
+            offences.append(offence)
+    return offences, found
 
 
 def noop_do_block_offence(statement: str) -> str | None:
@@ -780,40 +880,59 @@ def noop_do_block_offence(statement: str) -> str | None:
     legal way to make the file verify. That is a gap in the CHECK, not a problem
     with the file.
 
-    THIS IS NOT A WIDENING INTO A RUBBER STAMP, and that is the load-bearing
-    part. The body is read, not waved through:
+    THE PROPERTY THIS MUST GUARANTEE: no statement anywhere inside an accepted
+    block escapes the rules. The first version did NOT, and that is the bug this
+    docstring exists to stop coming back. Three checks over three views of the
+    same text, deliberately overlapping:
 
-      * every `execute` must carry a STATIC payload that is itself data-shaped
-        (`_execute_payload_offence`), so dynamic SQL is still refused;
+      * every `execute` must carry a STATIC payload, and EVERY STATEMENT in that
+        payload must be data-shaped. Dynamic SQL -- `format(...)`, a variable,
+        concatenation -- is refused outright, because it is not knowable from the
+        file text and a lexer guessing at it would be worse than an honest
+        failure.
       * no `create`, `alter`, `drop`, `grant`, `revoke`, `truncate`, `comment`
-        or friends may appear anywhere in the body, scanned with literals
-        blanked so prose in a `raise notice` cannot trip it and a statement
-        cannot hide behind a `for ... loop` head;
+        or friends may appear anywhere -- in the body OR inside a payload.
+        Scanned over whole text with literals blanked, NOT over statement heads,
+        so a `revoke` cannot hide behind a `for ... loop` head.
       * the body must actually CONTAIN a data statement, so a block that proves
-        nothing cannot claim to be a data no-op.
+        nothing cannot claim to be a data-only no-op.
     """
     match = DO_BLOCK_RE.match(statement.strip())
     if not match:
         return "its `do` block could not be read (unterminated dollar quote?)"
     body = match.group("body")
-    offence = _execute_payload_offence(body)
-    if offence:
-        return offence
-    # Literals blanked, nested dollar bodies (the `execute` payloads already
-    # judged above) removed -- so what is scanned is real statement text only.
+    # COMMENTS GO FIRST, and this is not cosmetic: 20260807030000's block
+    # explains itself at length and its prose contains the word EXECUTE ("The
+    # real reasons to keep EXECUTE are about later runs"). Read raw, that
+    # sentence looks like an `execute` with no payload and the file is rejected
+    # for a comment. Literals and dollar bodies are KEPT, because a payload
+    # being judged IS a literal.
+    readable = strip_sql(body, keep_literals=True, keep_dollar=True)
+    offences, executes = _execute_offences(readable)
+    if offences:
+        return offences[0]
+    # Literals blanked and dollar bodies removed: real statement text only. The
+    # payloads this pass deletes were each judged IN FULL above.
     scrubbed = strip_sql(body)
-    forbidden = sorted({m.group(1) for m in NOOP_FORBIDDEN_IN_DO_RE.finditer(scrubbed)})
+    forbidden = _forbidden_words(scrubbed)
     if forbidden:
         return (
             "its `do` block contains "
             f"{', '.join('`' + word + '`' for word in forbidden)}, which is not "
             "a data statement"
         )
+    # A leading `begin`, `then`, `loop` or `declare` is plpgsql structure, not a
+    # statement of its own, and `begin insert into t values (1); end` carries no
+    # semicolon after `begin`. Peeling that structure off is what lets the
+    # SIMPLEST honest block -- one with no `execute` in it at all -- be accepted,
+    # instead of the accept path running only through `execute`, which was
+    # backwards. It cannot open a hole: the forbidden-word scan above already
+    # covered the whole body however it splits.
     has_data = any(
-        DATA_STATEMENT_RE.match(inner)
+        is_data_statement(CONTROL_PREFIX_RE.sub("", inner))
         for inner in split_statements(scrubbed)
-    ) or bool(EXECUTE_RE.search(body))
-    if not has_data:
+    )
+    if not has_data and executes == 0:
         return (
             "its `do` block contains no data statement at all, so it proves "
             "nothing rather than being a data-only no-op"
@@ -844,12 +963,12 @@ def read_noop_declaration(raw: str, version: str) -> dict | None:
     # Dollar bodies are KEPT here, and the splitter steps over them, because the
     # question a `do` block asks is what is inside it. `strip_sql` with the
     # default `keep_dollar=False` deletes exactly the text that has to be read.
-    statements = split_statements_dollar_aware(
+    statements = split_statements_quote_aware(
         strip_sql(raw, keep_dollar=True)
     )
     offenders: list[str] = []
     for statement in statements:
-        if DATA_STATEMENT_RE.match(statement):
+        if is_data_statement(statement):
             continue
         if DO_BLOCK_RE.match(statement.strip()):
             offence = noop_do_block_offence(statement)

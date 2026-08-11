@@ -1166,6 +1166,76 @@ class NoopDeclarationTests(unittest.TestCase):
         self.assertFalse(targets.noop_declaration["accepted"])
         self.assertIn("`revoke`", targets.noop_declaration["rejected_because"])
 
+    # -- the second statement of an `execute` payload ----------------------
+    # REGRESSION GUARD. The first version of the `do`-block reader judged a
+    # static payload with an ANCHORED match, so it read only the payload's FIRST
+    # statement, and the forbidden-keyword scan then ran over text from which
+    # `strip_sql` had already deleted that same payload. Anything after the first
+    # `;` inside an `execute` payload fell in the gap between the two checks and
+    # a privilege change sailed through with a green tick. Every statement
+    # ANYWHERE inside an accepted block must be judged.
+
+    def declared(self, block):
+        return targets_for(
+            "-- catalog-verification: no-op only touches data rows, no catalog "
+            "object anywhere in here\n" + block
+        )
+
+    def test_a_revoke_in_the_second_statement_of_a_dollar_payload_is_rejected(self):
+        targets = self.declared(
+            "do $c$ begin execute $ins$ insert into t values (1); "
+            "revoke all on t from public $ins$; end $c$;"
+        )
+        self.assertFalse(targets.noop_declaration["accepted"])
+        self.assertIn("revoke", targets.noop_declaration["rejected_because"])
+
+    def test_a_revoke_in_the_second_statement_of_a_quoted_payload_is_rejected(self):
+        targets = self.declared(
+            "do $c$ begin execute 'insert into t values(1); "
+            "revoke all on t from public'; end $c$;"
+        )
+        self.assertFalse(targets.noop_declaration["accepted"])
+        self.assertIn("revoke", targets.noop_declaration["rejected_because"])
+
+    def test_set_role_is_not_a_data_statement(self):
+        """`set` is in the data heads for `set local statement_timeout`. Changing
+        the executing principal is a privilege operation and must not ride in on
+        that."""
+        targets = self.declared(
+            "do $c$ begin execute 'set role service_role'; end $c$;"
+        )
+        self.assertFalse(targets.noop_declaration["accepted"])
+        self.assertIn("set role", targets.noop_declaration["rejected_because"])
+
+    def test_a_top_level_set_role_is_not_a_data_statement_either(self):
+        targets = self.declared("update t set a = 1;\nset role service_role;")
+        self.assertFalse(targets.noop_declaration["accepted"])
+
+    def test_the_word_execute_inside_a_raise_notice_is_not_an_execute(self):
+        """Literals are text, not statements. Scanning them as SQL is the same
+        defect class as the `$$`-inside-a-comment bug in `strip_sql`."""
+        targets = self.declared(
+            "do $c$ begin update t set a = 1; "
+            "raise notice 'we execute the backfill later'; end $c$;"
+        )
+        self.assertTrue(targets.noop_declaration["accepted"])
+
+    def test_the_simplest_honest_block_is_accepted_without_any_execute(self):
+        """A plain data-only block must be the EASIEST case to accept, not a
+        case that only passes because it happens to contain an `execute`."""
+        targets = self.declared("do $c$ begin insert into t values (1); end $c$;")
+        self.assertTrue(targets.noop_declaration["accepted"])
+
+    def test_a_comment_saying_execute_cannot_stand_in_for_a_data_statement(self):
+        targets = self.declared(
+            "do $c$ begin\n"
+            "  -- we execute the real work in a later migration\n"
+            "  perform 1;\n"
+            "end $c$;"
+        )
+        self.assertFalse(targets.noop_declaration["accepted"])
+        self.assertIn("no data statement", targets.noop_declaration["rejected_because"])
+
     def test_a_declaration_beside_a_do_block_still_sees_outside_statements(self):
         """A data-only block does not excuse DDL sitting next to it."""
         sql = (
