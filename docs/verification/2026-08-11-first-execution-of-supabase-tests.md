@@ -120,3 +120,24 @@ indistinguishable from a passing one until the day it matters.
   worth running automatically.
 - No migration was added, changed or removed. No schema change. Nothing was applied to
   preview or production.
+
+## Confirmed again on the final head SHA
+
+The run above was `95d1a83`. After a quarantine-rot guard was added and the branch was
+brought up to date with `main`, everything was re-verified on the PR's final head SHA
+`8db55150de724efc7a8c09dd83994b4ccc0d13ee` — a head_sha check, not a badge colour:
+
+| lane | run | result |
+| --- | --- | --- |
+| `supabase/tests` ephemeral | [31495136624](https://github.com/u2giants/shared-db/actions/runs/31495136624) | 40 files executed, 14 passed, 0 failed, 26 quarantined-failing |
+| Python suites | [31495136691](https://github.com/u2giants/shared-db/actions/runs/31495136691) | `Ran 297 tests … OK` across all 3 files |
+
+`dcp_vault_landing_contracts.sql` passes sections A through H on both runs.
+
+### The quarantine list is now policed too
+
+The list was the last place in this workflow where something could rot unnoticed: a line
+naming a renamed or deleted test file matched nothing forever, and a quarantined test that
+started passing stayed ignored. Both are the green-but-inert failure this issue exists to
+kill, so a stale line now FAILS the job and a quarantined-but-passing file is warned about
+and named in the summary.
