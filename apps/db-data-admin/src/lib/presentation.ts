@@ -21,10 +21,10 @@ export function readOAuthCallbackError(location: Pick<Location, 'search' | 'hash
  * The database this deployment is actually talking to, named for the operator.
  *
  * The workspace bar used to print the literal string "Preview database" no matter
- * where it ran, which would have told every user of the production tool at
- * data.designflow.app that they were safely poking a preview copy while they edited
- * the database four live applications share. That is exactly the kind of silent
- * mislabel this repository refuses to ship.
+ * where it ran, which would have told every user of DB Data Admin in production at
+ * its own hostname data.designflow.app that they were safely poking a preview copy
+ * while they edited the database four live applications share. That is exactly the
+ * kind of silent mislabel this repository refuses to ship.
  *
  * The label is DERIVED from the Supabase project ref the app is genuinely connected
  * to, never from a separate environment variable someone can set wrong or forget.

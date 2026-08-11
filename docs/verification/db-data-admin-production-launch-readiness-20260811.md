@@ -76,7 +76,7 @@ This is not merely a runtime check. Structurally, **no** `api.db_data_admin_*` f
 `EXECUTE` to `anon`; all 16 carry exactly `postgres=X/postgres | authenticated=X/postgres`.
 Anonymous access is impossible by ACL, not by convention.
 
-**Signed in but unauthorized — denied.** The tester `poppim-production-ai-test@popcre.com`
+**Signed in but unauthorized — denied.** The production AI tester account (referred to by role, not by address; AGENTS.md 6.14)
 **holds the `administrator` role** but its `app_access` is `pm` only. It receives **HTTP 403**
 on `channel_list`, `licensor_property_tree` and `customer_list`. This is the strongest form of
 the test: holding the role alone does not open the tool. Both conditions are required.

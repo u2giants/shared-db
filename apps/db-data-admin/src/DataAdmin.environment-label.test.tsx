@@ -25,12 +25,12 @@ async function renderBar(supabaseUrl: string) {
   render(
     <DataAdmin
       client={stubClient()}
-      email="albert@popcre.com"
+      email="signed-in-administrator"
       environmentLabel={formatEnvironmentLabel(supabaseUrl)}
       onSignOut={() => {}}
     />,
   )
-  return await screen.findByText('albert@popcre.com')
+  return await screen.findByText('signed-in-administrator')
 }
 
 describe('DataAdmin workspace bar names the database it is really connected to', () => {
