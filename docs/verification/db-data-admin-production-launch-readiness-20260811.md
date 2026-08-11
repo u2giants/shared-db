@@ -83,7 +83,7 @@ the test: holding the role alone does not open the tool. Both conditions are req
 
 **Authorized administrator — NOT PROVEN, and cannot be, in production.** There are zero `admin`
 grants in production (§1), so no authorized user exists to test with. This case must be proven
-on **preview**, which runs the identical gate. See §6 for what is still outstanding.
+on **preview**, which runs the identical gate. See §7 for what is still outstanding.
 
 ## 4. There is no DNS work to do
 
