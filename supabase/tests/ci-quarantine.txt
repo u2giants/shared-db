@@ -60,3 +60,4 @@ db_data_admin_single_record_updates.sql                       # fixture requires
 
 # --- Asserts a property of a specific deployed environment -----------------------------
 taxonomy_baseline_pin_and_breaker_environment_contracts.sql   # by name and by design: it asserts which baseline is ACTIVATED on the target database
+owner_ruling_coco_is_a_disney_license_contracts.sql             # asserts a specific real core.property row (COCO) that only a deployed database holds
