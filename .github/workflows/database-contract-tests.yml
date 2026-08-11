@@ -31,6 +31,22 @@
 # one merged without anybody remembering to add it. A new supabase/tests/*.sql file
 # is wired into CI the moment it is committed.
 #
+# THE PRE-ADOPTION BASELINE AND THE FIXTURE SEED (issue #754)
+# -----------------------------------------------------------
+# The repository's migration history is NOT self-contained -- it was adopted on top of
+# an already-populated database. A bare from-empty replay applied 363 of 429 migrations
+# and 26 of 40 contract tests could not run at all. Two artifacts in
+# supabase/ci-bootstrap/ close that gap, and NEITHER is a migration:
+#
+#   010_pre_adoption_baseline.sql -- the SCHEMA ONLY of every relation that exists in
+#     production but that no migration here creates. Captured read-only. No rows.
+#   020_test_fixture_seed.sql -- the handful of reference rows the db_data_admin suite
+#     and its siblings need. Entirely INVENTED: `ZZ Fixture` names, `.invalid` emails.
+#
+# They are applied in a TWO-PASS replay: pass 1 replays everything and records failures,
+# the baseline lands, pass 2 re-runs only the failures. Both passes print their counts,
+# so the size of the remaining gap is a number on every run rather than a footnote.
+#
 # QUARANTINE. Some files assert facts that are true only of a long-lived deployed
 # database (grants made by hand, seeded reference rows, environment pins) and cannot
 # hold on a from-empty ephemeral one. Those are listed in tests/ci-quarantine.txt
@@ -134,7 +150,7 @@ jobs:
           mv supabase/migrations/*.sql "$RUNNER_TEMP/migrations/"
           supabase db start 2>&1 | tee "$RUNNER_TEMP/db-start.log"
 
-      - name: Replay every migration, recording failures
+      - name: Replay every migration, recording failures (pass 1)
         id: replay
         env:
           PGHOST: 127.0.0.1
@@ -149,6 +165,15 @@ jobs:
           mkdir -p "$RUNNER_TEMP/migration-logs"
           OK=0; BAD=0
           : > "$RUNNER_TEMP/failed-migrations.txt"
+          # THE LEDGER TABLE, because applying by psql instead of by the CLI means nothing
+          # creates it. 20260723112940_dam_core_taxonomy_ledger_barrier.sql reads
+          # supabase_migrations.schema_migrations and cannot work without it. Each file's
+          # version is recorded as it lands, which is exactly what the CLI would record.
+          psql -v ON_ERROR_STOP=1 --no-psqlrc -c \
+            'create schema if not exists supabase_migrations;
+             create table if not exists supabase_migrations.schema_migrations (
+               version text primary key, statements text[], name text);' \
+            > "$RUNNER_TEMP/ledger-init.log" 2>&1
           for m in "${MIGS[@]}"; do
             base="$(basename "$m")"
             # --single-transaction matches how the Supabase CLI applies a migration: the
@@ -157,6 +182,10 @@ jobs:
             if psql -v ON_ERROR_STOP=1 --no-psqlrc --single-transaction -f "$m" \
                  > "$RUNNER_TEMP/migration-logs/$base.log" 2>&1; then
               OK=$((OK+1))
+              psql -q --no-psqlrc -c \
+                "insert into supabase_migrations.schema_migrations (version, name)
+                 values ('${base%%_*}', '$base') on conflict (version) do nothing;" \
+                >> "$RUNNER_TEMP/ledger-init.log" 2>&1
             else
               BAD=$((BAD+1))
               echo "$base" >> "$RUNNER_TEMP/failed-migrations.txt"
@@ -169,9 +198,9 @@ jobs:
           # still moved aside that test failed for a reason that had nothing to do with the
           # database -- a false failure is as bad as a false pass.
           mv "$RUNNER_TEMP"/migrations/*.sql supabase/migrations/
-          echo "Replayed ${#MIGS[@]} migrations: $OK applied, $BAD failed."
+          echo "Pass 1 replayed ${#MIGS[@]} migrations: $OK applied, $BAD failed."
           {
-            echo "## Migration replay against an empty database"
+            echo "## Migration replay, pass 1 (empty database, no baseline)"
             echo ""
             echo "| outcome | count |"
             echo "| --- | ---: |"
@@ -182,10 +211,10 @@ jobs:
             if [ "$BAD" -gt 0 ]; then
               echo "A migration that cannot replay from empty is NOT necessarily broken in the"
               echo "deployed databases -- it usually means it depends on an object no migration in"
-              echo "this repository creates. It does mean the history is not self-contained, and it"
-              echo "means every contract test downstream of it is running on a thinner schema."
+              echo "this repository creates. These are the ones the captured pre-adoption baseline"
+              echo "exists to unblock; pass 2 below re-runs exactly this list."
               echo ""
-              echo "<details><summary>Migrations that did not replay</summary>"
+              echo "<details><summary>Migrations that did not replay in pass 1</summary>"
               echo ""
               echo '```'
               cat "$RUNNER_TEMP/failed-migrations.txt"
@@ -195,6 +224,159 @@ jobs:
               echo ""
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # THE CAPTURED PRE-ADOPTION BASELINE (issue #754)
+      # -----------------------------------------------
+      # supabase/ci-bootstrap/010_pre_adoption_baseline.sql holds the SCHEMA ONLY of every
+      # relation that exists in production but that no migration in this repository
+      # creates -- public.assets, the legacy popdam tables, the plm.* legacy mirrors.
+      # Without it a from-empty replay can never reach the starting point production
+      # actually had, and two thirds of the contract tests can never run.
+      #
+      # WHY BETWEEN THE PASSES AND NOT BEFORE PASS 1. Some baseline columns are typed with
+      # enums that 20260621150714_foundation.sql creates (app.entity_status). Applied
+      # first, this file would have to create those types itself, and foundation's
+      # unguarded CREATE TYPE would then fail -- trading one gap for a worse one. Applied
+      # here, foundation has already run and every type exists.
+      #
+      # WHY IT IS NOT A MIGRATION. A file inserted at the front of an already-applied
+      # sequence cannot re-run against preview or production, whose ledgers are long past
+      # this point, and a back-dated version is precisely what the Guard B backdating
+      # check exists to stop. The only consumer is a from-empty replay, which only ever
+      # happens in this runner.
+      - name: Apply the captured pre-adoption baseline
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 54322
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: |
+          set -euo pipefail
+          BOOT=supabase/ci-bootstrap/010_pre_adoption_baseline.sql
+          if [ ! -f "$BOOT" ]; then
+            echo "::error::$BOOT is missing. Without it this lane silently reverts to proving only the subset of the contract provable from the repository alone." >&2
+            exit 1
+          fi
+          # NOT --single-transaction: this file is a snapshot, and one object that a future
+          # migration starts creating itself must not discard the other 500. Failures are
+          # counted and reported below.
+          psql --no-psqlrc -f "$BOOT" > "$RUNNER_TEMP/baseline.log" 2>&1 || true
+          BASE_ERR=$(grep -c '^psql:.*ERROR' "$RUNNER_TEMP/baseline.log" || true)
+          echo "Baseline applied with $BASE_ERR statement error(s)."
+          {
+            echo "## Captured pre-adoption baseline"
+            echo ""
+            echo "\`$BOOT\` -- schema only, no rows. Statement errors: **$BASE_ERR**."
+            echo ""
+            if [ "$BASE_ERR" -gt 0 ]; then
+              echo "An error here usually means a migration has started creating an object the"
+              echo "baseline also creates. Delete it from the baseline rather than leaving both."
+              echo ""
+              echo "<details><summary>Baseline errors</summary>"
+              echo ""
+              echo '```'
+              grep '^psql:.*ERROR' "$RUNNER_TEMP/baseline.log" | head -50 || true
+              echo '```'
+              echo ""
+              echo "</details>"
+              echo ""
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # PASS 2. Re-run ONLY the migrations that failed in pass 1, in filename order, now
+      # that the objects they depend on exist. What still fails after this is the honest
+      # residue: migrations whose precondition is deployed DATA (a specific Licensor, an
+      # authoritative row count in a legacy mirror) rather than a missing object. Those
+      # refusals are correct -- they are guards doing their job on a database that really
+      # does not hold that data -- and the tests downstream of them stay quarantined with
+      # that reason written down.
+      - name: Re-run the migrations that failed, now on the baseline (pass 2)
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 54322
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: |
+          set -uo pipefail
+          mkdir -p "$RUNNER_TEMP/migration-logs-pass2"
+          PASS1_BAD=$(wc -l < "$RUNNER_TEMP/failed-migrations.txt" | tr -d ' ')
+          OK=0; BAD=0
+          : > "$RUNNER_TEMP/failed-migrations-pass2.txt"
+          while read -r base; do
+            [ -n "$base" ] || continue
+            m="supabase/migrations/$base"
+            if [ ! -f "$m" ]; then
+              echo "::error::pass 2 cannot find $m" >&2; BAD=$((BAD+1)); continue
+            fi
+            if psql -v ON_ERROR_STOP=1 --no-psqlrc --single-transaction -f "$m" \
+                 > "$RUNNER_TEMP/migration-logs-pass2/$base.log" 2>&1; then
+              OK=$((OK+1))
+              psql -q --no-psqlrc -c \
+                "insert into supabase_migrations.schema_migrations (version, name)
+                 values ('${base%%_*}', '$base') on conflict (version) do nothing;" \
+                >> "$RUNNER_TEMP/ledger-init.log" 2>&1
+            else
+              BAD=$((BAD+1))
+              echo "$base" >> "$RUNNER_TEMP/failed-migrations-pass2.txt"
+              echo "::warning::still does not replay after the baseline: $base"
+            fi
+          done < "$RUNNER_TEMP/failed-migrations.txt"
+          echo "Pass 2: $OK of $PASS1_BAD now apply, $BAD still fail."
+          {
+            echo "## Migration replay, pass 2 (on the captured baseline)"
+            echo ""
+            echo "| outcome | count |"
+            echo "| --- | ---: |"
+            echo "| failed in pass 1 | $PASS1_BAD |"
+            echo "| now apply | $OK |"
+            echo "| STILL do not replay | $BAD |"
+            echo ""
+            if [ "$BAD" -gt 0 ]; then
+              echo "<details><summary>Still failing after the baseline -- with the first error of each</summary>"
+              echo ""
+              echo '```'
+              while read -r b; do
+                [ -n "$b" ] || continue
+                echo "--- $b"
+                grep -m1 'ERROR' "$RUNNER_TEMP/migration-logs-pass2/$b.log" 2>/dev/null || echo "    (no ERROR line)"
+              done < "$RUNNER_TEMP/failed-migrations-pass2.txt"
+              echo '```'
+              echo ""
+              echo "</details>"
+              echo ""
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # THE SYNTHETIC FIXTURE SEED (issue #754)
+      # ---------------------------------------
+      # Eleven contract tests assert RLS, grants, merge behaviour and read contracts, and
+      # need a few reference rows merely to have something to act on. Every row in this
+      # file is INVENTED -- `ZZ Fixture` names, `.invalid` email addresses. No production
+      # row, no real person, customer, vendor, licensor or property is copied into it, and
+      # none may ever be.
+      - name: Apply the synthetic test-fixture seed
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 54322
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: |
+          set -euo pipefail
+          SEED=supabase/ci-bootstrap/020_test_fixture_seed.sql
+          if [ ! -f "$SEED" ]; then
+            echo "::error::$SEED is missing. The db_data_admin suite cannot run without it." >&2
+            exit 1
+          fi
+          # A REAL NAME IN THE FIXTURE IS A LEAK, so refuse rather than seed one. `.invalid`
+          # is reserved by RFC 2606 and can never be a real domain.
+          if grep -nEi "@(?!fixture\.invalid)[A-Za-z0-9.-]+\.[A-Za-z]{2,}" -P "$SEED"; then
+            echo "::error::$SEED contains an email address outside fixture.invalid. Fixture data must be synthetic." >&2
+            exit 1
+          fi
+          psql -v ON_ERROR_STOP=1 --no-psqlrc -f "$SEED" 2>&1 | tee "$RUNNER_TEMP/fixture-seed.log"
 
       - name: Run every supabase/tests/*.sql
         id: run
@@ -324,7 +506,12 @@ jobs:
           path: |
             ${{ runner.temp }}/db-start.log
             ${{ runner.temp }}/failed-migrations.txt
+            ${{ runner.temp }}/failed-migrations-pass2.txt
             ${{ runner.temp }}/migration-logs/
+            ${{ runner.temp }}/migration-logs-pass2/
+            ${{ runner.temp }}/baseline.log
+            ${{ runner.temp }}/fixture-seed.log
+            ${{ runner.temp }}/ledger-init.log
             ${{ runner.temp }}/results/
           if-no-files-found: warn
           retention-days: 30
