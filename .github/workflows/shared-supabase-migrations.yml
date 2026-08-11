@@ -37,6 +37,20 @@ on:
         description: "Production: type DRY-RUN <sha> for a dry run, or APPLY <sha> to apply"
         type: string
         required: false
+      # PRODUCTION APPLY ONLY, AND MANDATORY THERE. Code review for shared-db
+      # happens in Claude Code (owner decision, 2026-08-11); this input is how
+      # the run records WHERE it happened. `required:` is false at the schema
+      # level ONLY because preview and dry-run dispatches share these inputs and
+      # must not be forced to fill it -- exactly like `commit_sha` and
+      # `confirmation` above. The real enforcement is
+      # scripts/production_apply_review_reference.py inside
+      # `production-apply-review`, which FAILS CLOSED on an empty or implausible
+      # value. Do NOT add a `default:` here: a default would pre-satisfy the
+      # gate, which is the whole thing this is designed to prevent.
+      review_reference:
+        description: "Production apply ONLY (REQUIRED): https URL of the Claude Code review comment, or a path under .ai/reviews/"
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -106,14 +120,14 @@ jobs:
             scripts/test_production_migration_guard.py \
             scripts/test_production_catalog_verification.py \
             scripts/test_post_batch_app_verification.py \
-            scripts/test_production_apply_model_review.py
+            scripts/test_production_apply_review_reference.py
           do
             if [ ! -f "$f" ]; then
               echo "::error::Expected Python test file is missing: $f" >&2
               exit 1
             fi
           done
-          echo "All three Python suites present and covered by the glob above."
+          echo "All four Python suites present and covered by the glob above."
 
   # ===========================================================================
   # PREVIEW: BOUNDED, NAMED APPLY (issue #739).
@@ -165,9 +179,9 @@ jobs:
   #   - `environment:`. Preview is the safe target; a gate that fires on harmless
   #     events trains the approver to click through (issue #646).
   #   - The typed confirmation string and the exact-origin/main-SHA check.
-  #   - The model-review step. It is now mandatory on the PRODUCTION lane (it
-  #     fails that job if it cannot run) and it needs ANTHROPIC_API_KEY. Preview
-  #     is the safe target and does not carry it. Do not add it here.
+  #   - The review-reference gate. It is mandatory on the PRODUCTION lane (it
+  #     fails that job when no reference is supplied). Preview is the safe
+  #     target and does not carry it. Do not add it here.
   # ===========================================================================
   preview:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'preview'
@@ -502,23 +516,31 @@ jobs:
   #      (parse_allowlist -> HARD_BLOCKED / 6.8 bundle / 6.5 hold / co-presence,
   #      then validate_candidates, then whole-batch preflight). This job FAILS the
   #      run on its own findings.
-  #   2. An automatic MODEL REVIEW that posts a technical verdict into the job
-  #      summary, where the human approver reads it.
-  #      ****** THE VERDICT IS ADVISORY AND MAY NEVER BE THE ONLY GATE. ******
-  #      The verdict does not fail the run and does not approve the run. It exists
-  #      to put a written technical opinion in front of the human, not to replace
-  #      them. If you ever make its VERDICT blocking, you have created a lane where
-  #      a model can wave a production write through. Do not.
-  #      ****** BUT THE REVIEW ACTUALLY RUNNING IS MANDATORY. ******
-  #      If it cannot run (no ANTHROPIC_API_KEY, API failure, empty response) the
-  #      step FAILS and this job goes red, so `production-apply` never reaches the
-  #      approval gate. A green job that reviewed nothing is a silent failure.
+  #   2. A REQUIRED REVIEW REFERENCE. Code review for shared-db is performed in
+  #      Claude Code (owner decision, 2026-08-11); this lane no longer calls a
+  #      paid model to duplicate it. What it still enforces is that a review was
+  #      recorded: the operator must supply `review_reference`, and
+  #      scripts/production_apply_review_reference.py FAILS CLOSED on an empty,
+  #      whitespace, placeholder or implausible value, so `production-apply`
+  #      never reaches the approval gate. The reference is echoed into the job
+  #      summary and the evidence artifact, where the human approver reads it.
+  #      ****** WHAT IT PROVES, EXACTLY. ******
+  #      That a reference was RECORDED -- not that the review behind it was any
+  #      good. That judgement belongs to the approver in gate 3, who should open
+  #      the link before approving. Do not restore an automated verdict here and
+  #      do not ever make a machine opinion sufficient to wave a production
+  #      write through.
+  #      ****** AND DO NOT MAKE IT SKIPPABLE. ******
+  #      No default on the input, no env var that skips it, no
+  #      `continue-on-error`. A green job that reviewed nothing is a silent
+  #      failure -- that is why the paid step lost its `continue-on-error`
+  #      (#617), and removing the cost must not reintroduce the hole.
   #   3. `environment: production` -- Albert, as required reviewer, clicking
   #      approve. This is the gate that actually holds. Nothing below it runs
   #      until he does.
   # ===========================================================================
   production-apply-review:
-    name: Production apply review (advisory model verdict + hard guards)
+    name: Production apply review (recorded review reference + hard guards)
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'production' && inputs.mode == 'apply'
     needs: validate
     runs-on: ubuntu-latest
@@ -566,25 +588,30 @@ jobs:
             --repo "$GITHUB_WORKSPACE" \
             --allowlist "$PRODUCTION_ALLOWLIST" \
             --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
-      # The VERDICT is advisory; the review HAPPENING is mandatory. There is no
-      # `continue-on-error` here on purpose: it used to be here, and with
-      # ANTHROPIC_API_KEY unset the step printed "NOT RUN" and the job still went
-      # green, so every production apply carried a review that had never
-      # happened. The script exits non-zero only when the review could not be
-      # performed (missing key, empty allowlist, API failure, empty response) --
-      # never on the model's opinion. See scripts/production_apply_model_review.py.
-      - name: Automatic model review (verdict advisory -- but it MUST run)
+      # THE REVIEW GATE. It costs nothing to run and it cannot be skipped.
+      #
+      # This step used to call the Anthropic API on every attempt, billed per
+      # batch and per attempt, including failed attempts. In its entire life it
+      # produced one substantive verdict (B10d, #788) and none of its findings
+      # survived adjudication (#800), while every real defect found on
+      # 2026-08-11 was found by an agent in Claude Code reproducing behaviour.
+      # The owner removed the paid call on 2026-08-11 and moved review to
+      # Claude Code.
+      #
+      # What is deliberately KEPT is the property that mattered: an apply cannot
+      # proceed without a review, and nobody can silently skip one. There is no
+      # `continue-on-error` here on purpose -- it used to be here, and with the
+      # API key unset the step printed "NOT RUN" and the job still
+      # went green, so every production apply carried a review that had never
+      # happened. Removing the cost must not restore that hole. The script exits
+      # non-zero when no plausible reference is supplied, and there is no
+      # environment variable, default value or flag that gets past it.
+      - name: Require a recorded review reference (Claude Code review)
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Which model reviews is CONFIGURATION, not code. Set the repository
-          # (or environment) variable SHARED_DB_REVIEW_MODEL to change it
-          # without editing the script; unset, the script uses its own
-          # DEFAULT_MODEL, which is a real, working id. A wrong id here fails
-          # the job with a message naming the id -- it does not silently pass.
-          SHARED_DB_REVIEW_MODEL: ${{ vars.SHARED_DB_REVIEW_MODEL }}
+          REVIEW_REFERENCE: ${{ inputs.review_reference }}
           PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
           REQUESTED_SHA: ${{ inputs.commit_sha }}
-        run: python scripts/production_apply_model_review.py
+        run: python scripts/production_apply_review_reference.py
       - name: Upload pre-approval evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -592,7 +619,7 @@ jobs:
           name: production-apply-review-${{ inputs.commit_sha }}
           path: |
             ${{ runner.temp }}/production-ledger-before.txt
-            ${{ runner.temp }}/production-model-review.md
+            ${{ runner.temp }}/production-review-reference.md
           if-no-files-found: warn
           retention-days: 90
 
@@ -626,6 +653,18 @@ jobs:
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
           test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
+      # Re-assert the review reference IN THIS JOB, after the approval wait, so
+      # the apply evidence artifact carries it too. The pre-approval job already
+      # enforced it; this repeat exists because the artifact that records what
+      # was written to production should say who reviewed it and where, without
+      # anyone having to go and find a second artifact from a sibling job.
+      # It is a pure string check -- no network, no secret, no cost.
+      - name: Record the review reference in the apply evidence
+        env:
+          REVIEW_REFERENCE: ${{ inputs.review_reference }}
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+        run: python scripts/production_apply_review_reference.py
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
@@ -734,6 +773,7 @@ jobs:
         with:
           name: production-migration-apply-${{ inputs.commit_sha }}
           path: |
+            ${{ runner.temp }}/production-review-reference.md
             ${{ runner.temp }}/production-ledger-before.txt
             ${{ runner.temp }}/production-dry-run.txt
             ${{ runner.temp }}/production-apply.txt
