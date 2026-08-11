@@ -267,6 +267,12 @@ jobs:
           # IN THE PREVIEW LEDGER, and any batch whose non-deferrable dependencies
           # cannot resolve. Same code path as production, judged against preview's
           # own ledger.
+          #
+          # READ THE FAILURE TEXT CAREFULLY. The guard is shared, and its messages
+          # are worded for production -- "already applied on production" here means
+          # ALREADY APPLIED ON PREVIEW, because `--remote-ledger` is preview's
+          # ledger, read by this job seconds ago. The wording is not corrected here
+          # because this job does not own scripts/; the check itself is correct.
           python scripts/production_migration_guard.py preflight \
             --repo "$GITHUB_WORKSPACE" \
             --allowlist "$PREVIEW_ALLOWLIST" \
