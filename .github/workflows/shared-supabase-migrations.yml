@@ -25,6 +25,10 @@ on:
         description: "Production only: comma-separated exact migration versions"
         type: string
         required: false
+      preview_allowlist:
+        description: "Preview only: comma-separated exact migration versions. REQUIRED for both dry-run and apply."
+        type: string
+        required: false
       commit_sha:
         description: "Production only: exact origin/main commit SHA"
         type: string
@@ -110,34 +114,282 @@ jobs:
           done
           echo "All three Python suites present and covered by the glob above."
 
+  # ===========================================================================
+  # PREVIEW: BOUNDED, NAMED APPLY (issue #739).
+  #
+  # WHAT CHANGED AND WHY. This job used to run a BARE `supabase db push`. That
+  # had two failure modes, both of them live on 2026-08-11:
+  #
+  #   1. It could not apply ANYTHING. Preview was missing four migrations, and
+  #      one of them (20260810140000) sorts BELOW preview's ledger head
+  #      (20260810170000, already applied there). A bare `db push` refuses that
+  #      whole queue with "Found local migration files to be inserted before the
+  #      last migration on remote database" and exits 1. So the lane was stuck
+  #      closed with no operator control at all.
+  #   2. The only escape was the CLI's include-all flag, which would have swept
+  #      all four pending migrations at once. Those four belong to THREE
+  #      different workstreams, including a security migration. "Apply
+  #      everything pending" is not a lane; it is the absence of one.
+  #
+  # (This header spells that flag WITHOUT its two leading dashes on purpose.
+  # `test_include_all_is_bounded_and_dry_run_only` bans the literal token by
+  # plain text search everywhere above this job, and prose is not exempt from a
+  # text search. The exact flag appears in the step comments below, which are
+  # inside the job the test allows it in. Do not "fix" the spelling here.)
+  #
+  # This is now the SAME MECHANISM the production lane already uses, not a second
+  # one. `scripts/production_migration_guard.py` is target-agnostic in everything
+  # that matters here -- it takes a repo, an allowlist and a REMOTE LEDGER FILE,
+  # and it prunes a detached checkout down to exactly `remote-ledger | allowlist`.
+  # Point it at preview's ledger and it bounds preview. The bound that makes the
+  # include-all flag safe is the FILESYSTEM, never the flag. Reusing this file also
+  # means every policy rule inside `parse_allowlist` (HARD_BLOCKED, the AGENTS.md
+  # 6.8 bundle, the 6.5 FR hold, the #660 security co-presence rules) applies to
+  # preview too. That is deliberate: preview is the rehearsal for production, and
+  # a rehearsal that is allowed to assemble a set production would refuse is not
+  # a rehearsal.
+  #
+  # PREVIEW AND PRODUCTION HAVE DIVERGED IN BOTH DIRECTIONS, verified by object on
+  # 2026-08-11: preview holds all 23 plm.pmt_* tables and production holds none,
+  # while 20260810140000 is applied on production and not on preview. Nothing in
+  # this job may assume preview is "production minus N". It reads preview's own
+  # ledger every run and judges the allowlist against that and nothing else.
+  #
+  # THE ALLOWLIST IS REQUIRED FOR BOTH MODES. The old dry-run reported on the
+  # whole pending queue, which is not what any subsequent apply would do -- an
+  # honest rehearsal has to rehearse the bounded set. `preview_allowlist` is
+  # therefore required for dry-run as well, and an empty one fails.
+  #
+  # DELIBERATELY NOT COPIED FROM THE PRODUCTION LANE:
+  #   - `environment:`. Preview is the safe target; a gate that fires on harmless
+  #     events trains the approver to click through (issue #646).
+  #   - The typed confirmation string and the exact-origin/main-SHA check.
+  #   - The advisory model-review step. That step currently reports "NOT RUN --
+  #     ANTHROPIC_API_KEY is not configured on this repository" and is
+  #     `continue-on-error`, i.e. a permanent silent no-op. It is not touched by
+  #     this change, and it is not reproduced here. Do not add it.
+  # ===========================================================================
   preview:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'preview'
     needs: validate
     runs-on: ubuntu-latest
     env:
       PREVIEW_PROJECT_REF: rjyboqwcdzcocqgmsyel
+      PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE: qsllyeztdwjgirsysgai
     steps:
+      # FIRST STEP ON PURPOSE, before any credential is used. A lane that can be
+      # pointed at the wrong project is worse than no lane, so the ref this job
+      # will write to is asserted to be the preview ref AND asserted not to be the
+      # production ref, as two independent checks rather than one.
+      - name: Assert the target project ref is PREVIEW
+        env:
+          PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
+        run: |
+          set -euo pipefail
+          echo "PROJECT REF THIS JOB WILL WRITE TO: $PREVIEW_PROJECT_REF"
+          if [ "$PREVIEW_PROJECT_REF" != "rjyboqwcdzcocqgmsyel" ]; then
+            echo "REFUSED: preview job is not pointed at the preview project ref." >&2
+            exit 1
+          fi
+          if [ "$PREVIEW_PROJECT_REF" = "$PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE" ]; then
+            echo "REFUSED: preview job is pointed at PRODUCTION ($PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE)." >&2
+            exit 1
+          fi
+          echo "REF OK: preview = rjyboqwcdzcocqgmsyel (production qsllyeztdwjgirsysgai is not this job's target)."
+          if [ -z "${PREVIEW_ALLOWLIST// /}" ]; then
+            echo "REFUSED: preview_allowlist is empty. This lane applies ONLY the versions you name, in dry-run and in apply alike. Name them." >&2
+            exit 1
+          fi
+      # fetch-depth: 0 because `production_migration_guard.py prepare` builds the
+      # bounded set with `git worktree add --detach <sha>`, which needs the object.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve the exact commit under test
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
-      - name: Link preview
+      - name: Capture preview migration record (before)
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
         run: |
+          set -euo pipefail
           supabase login --token "$SUPABASE_ACCESS_TOKEN"
           supabase link --project-ref "$PREVIEW_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
-      - name: Dry-run preview
+          supabase migration list --linked | tee "$RUNNER_TEMP/preview-ledger-before.txt"
+      # NO SILENT INCLUSION. Before anything is applied, print the exact set this
+      # run will apply and the exact set it will leave alone. The skip list is
+      # computed from the same two inputs the guard uses -- local files and the
+      # preview ledger read seconds ago -- so a reader can see every pending
+      # migration this run is choosing NOT to touch, by version.
+      - name: Announce the bounded set (apply list and skip list)
+        env:
+          PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
+          # Labels the summary only. It never selects behaviour.
+          RUN_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          python - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import os, sys
+          sys.path.insert(0, os.path.join(os.environ["GITHUB_WORKSPACE"], "scripts"))
+          from pathlib import Path
+          from production_migration_guard import local_migrations, parse_remote_versions
+
+          repo = Path(os.environ["GITHUB_WORKSPACE"])
+          ledger = Path(os.environ["RUNNER_TEMP"]) / "preview-ledger-before.txt"
+          named = [v.strip() for v in os.environ["PREVIEW_ALLOWLIST"].split(",") if v.strip()]
+          local = local_migrations(repo)
+          remote = parse_remote_versions(ledger)
+          pending = sorted(set(local) - remote)
+
+          print("## Preview bounded apply")
+          print()
+          print(f"Project ref: `{os.environ['PREVIEW_PROJECT_REF']}` (PREVIEW)")
+          print(f"Mode: `{os.environ.get('RUN_MODE', 'n/a')}`")
+          print(f"Preview ledger rows before: {len(remote)}")
+          print()
+          print(f"### WILL APPLY ({len(named)} named)")
+          for v in named:
+              print(f"- {v} {local[v].name if v in local else '(NOT ON DISK)'}")
+          skipped = [v for v in pending if v not in set(named)]
+          print()
+          print(f"### WILL SKIP ({len(skipped)} pending but not named)")
+          for v in skipped:
+              print(f"- {v} {local[v].name}")
+          if not skipped:
+              print("- (none)")
+          print()
+          print("Everything else on disk is already in the preview ledger.")
+          PY
+      - name: Hard guard preflight
+        env:
+          PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
+        run: |
+          # Fails loudly on: an empty allowlist, a non-14-digit entry, a duplicate,
+          # an out-of-order list, a version that is NOT ON DISK, a version ALREADY
+          # IN THE PREVIEW LEDGER, and any batch whose non-deferrable dependencies
+          # cannot resolve. Same code path as production, judged against preview's
+          # own ledger.
+          #
+          # READ THE FAILURE TEXT CAREFULLY. The guard is shared, and its messages
+          # are worded for production -- "already applied on production" here means
+          # ALREADY APPLIED ON PREVIEW, because `--remote-ledger` is preview's
+          # ledger, read by this job seconds ago. The wording is not corrected here
+          # because this job does not own scripts/; the check itself is correct.
+          python scripts/production_migration_guard.py preflight \
+            --repo "$GITHUB_WORKSPACE" \
+            --allowlist "$PREVIEW_ALLOWLIST" \
+            --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
+      - name: Build bounded checkout
+        env:
+          PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
+          COMMIT_SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          python scripts/production_migration_guard.py prepare \
+            --repo "$GITHUB_WORKSPACE" \
+            --output "$RUNNER_TEMP/bounded-preview" \
+            --commit-sha "$COMMIT_SHA" \
+            --allowlist "$PREVIEW_ALLOWLIST" \
+            --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
+      # THE HONEST DRY-RUN. It runs against the BOUNDED checkout, so what it
+      # prints is exactly what an apply of this same allowlist would do -- not the
+      # whole pending queue, which is what the old bare `db push --dry-run`
+      # reported and which no apply would ever have matched.
+      - name: Bounded dry-run
         if: inputs.mode == 'dry-run'
         env:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
-        run: supabase db push --dry-run
-      - name: Apply preview
+          PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
+        run: |
+          cd "$RUNNER_TEMP/bounded-preview"
+          supabase link --project-ref "$PREVIEW_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          set -o pipefail
+          # Re-prove the bound AT THE POINT OF USE, after `link`, as the last
+          # command before the push. `prepare` ran in an earlier step.
+          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" assert-bounded \
+            --dir "$RUNNER_TEMP/bounded-preview" \
+            --allowlist "$PREVIEW_ALLOWLIST" \
+            --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
+          # --include-all is REQUIRED and safe here for the same reason as in the
+          # production lane, and for one preview-specific reason: 20260810140000
+          # sorts BELOW preview's ledger head, so the CLI refuses it without the
+          # flag. The bound is the filesystem -- `prepare` left exactly
+          # `remote-ledger | allowlist` on disk. NEVER add this flag to a
+          # `supabase db push` that runs in $GITHUB_WORKSPACE.
+          supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/preview-dry-run.txt"
+          # THE RESOLVED SET MUST EQUAL THE NAMED SET, exactly and in order.
+          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
+            --dry-run-output "$RUNNER_TEMP/preview-dry-run.txt" \
+            --allowlist "$PREVIEW_ALLOWLIST"
+      - name: Bounded apply
         if: inputs.mode == 'apply'
         env:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
-        run: supabase db push
+          PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
+        run: |
+          cd "$RUNNER_TEMP/bounded-preview"
+          supabase link --project-ref "$PREVIEW_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          set -o pipefail
+          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" assert-bounded \
+            --dir "$RUNNER_TEMP/bounded-preview" \
+            --allowlist "$PREVIEW_ALLOWLIST" \
+            --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
+          # A FRESH dry-run immediately before the write, verified against the
+          # allowlist, so the run proves what it is about to do rather than
+          # inheriting an earlier job's claim.
+          supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/preview-dry-run.txt"
+          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
+            --dry-run-output "$RUNNER_TEMP/preview-dry-run.txt" \
+            --allowlist "$PREVIEW_ALLOWLIST"
+          # THE WRITE. Preview only.
+          supabase db push --include-all 2>&1 | tee "$RUNNER_TEMP/preview-apply.txt"
+      # ALWAYS, including after a failed apply -- a partial apply is exactly when
+      # the row delta matters most.
+      - name: Capture preview migration record (after)
+        if: always()
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/bounded-preview" 2>/dev/null || cd "$GITHUB_WORKSPACE"
+          supabase migration list --linked | tee "$RUNNER_TEMP/preview-ledger-after.txt"
+      - name: Report the preview ledger delta
+        if: always()
+        run: |
+          set -euo pipefail
+          python - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import os, sys
+          sys.path.insert(0, os.path.join(os.environ["GITHUB_WORKSPACE"], "scripts"))
+          from pathlib import Path
+          from production_migration_guard import parse_remote_versions
+
+          tmp = Path(os.environ["RUNNER_TEMP"])
+          before_p, after_p = tmp / "preview-ledger-before.txt", tmp / "preview-ledger-after.txt"
+          if not (before_p.exists() and after_p.exists()):
+              print("### Preview ledger delta: NOT AVAILABLE (a ledger read did not complete)")
+              raise SystemExit(0)
+          before, after = parse_remote_versions(before_p), parse_remote_versions(after_p)
+          print("### Preview ledger delta")
+          print(f"- rows before: {len(before)}")
+          print(f"- rows after:  {len(after)}")
+          print(f"- added: {', '.join(sorted(after - before)) or '(none)'}")
+          print(f"- removed: {', '.join(sorted(before - after)) or '(none)'}")
+          PY
+      - name: Save preview evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-migration-${{ inputs.mode }}-${{ steps.commit.outputs.sha }}
+          path: |
+            ${{ runner.temp }}/preview-ledger-before.txt
+            ${{ runner.temp }}/preview-dry-run.txt
+            ${{ runner.temp }}/preview-apply.txt
+            ${{ runner.temp }}/preview-ledger-after.txt
+          if-no-files-found: warn
+          retention-days: 90
 
   # ISSUE #646: this job deliberately has NO `environment:`.
   #
