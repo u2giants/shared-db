@@ -1114,8 +1114,8 @@ Stated honestly, because a summary is a document like any other.
 - **Fourteen legal resting points**, listed in §6 — the original ten, plus B10's four (§5A). Every
   other version in §6's first block is an exposed state.
 - **B1, B3, B7, B9, B10a and B10c are atomic.** Do not split them, whatever a description implies.
-  **The guard only enforces the first four** (`ATOMIC_BATCHES`), and B10c is enforced by nothing at
-  all — see §5A.8 and #784.
+  **`ATOMIC_BATCHES` covers only the first four**; **B10a is enforced separately, by its
+  `CO_PRESENCE_RULES` pair**; and **B10c is enforced by nothing at all** — see §5A.8 and #784.
 - **There is a batch B10, of six migrations in four parts** (§5A), covering everything merged after
   `20260810170000`. **Finishing B1–B9 does not promote it.** `20260810180000` is already applied and
   must never appear in an allowlist again.
