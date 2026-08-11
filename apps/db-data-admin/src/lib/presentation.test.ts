@@ -1,5 +1,34 @@
 import { describe, expect, it } from 'vitest'
-import { formatBuildLabel, readOAuthCallbackError } from './presentation'
+import { formatBuildLabel, formatEnvironmentLabel, readOAuthCallbackError } from './presentation'
+
+describe('formatEnvironmentLabel', () => {
+  it('names the production database when connected to the shared production project', () => {
+    expect(formatEnvironmentLabel('https://qsllyeztdwjgirsysgai.supabase.co'))
+      .toBe('Production database')
+  })
+
+  it('names the preview database when connected to the preview branch project', () => {
+    expect(formatEnvironmentLabel('https://rjyboqwcdzcocqgmsyel.supabase.co'))
+      .toBe('Preview database')
+  })
+
+  // The old literal said "Preview database" everywhere. Production must never be
+  // able to render that string again, so assert the inverse explicitly.
+  it('never calls the production project a preview', () => {
+    expect(formatEnvironmentLabel('https://qsllyeztdwjgirsysgai.supabase.co'))
+      .not.toContain('Preview')
+  })
+
+  it('reports an unrecognized project rather than guessing', () => {
+    expect(formatEnvironmentLabel('https://someotherref123.supabase.co'))
+      .toBe('Unrecognized database (someotherref123)')
+  })
+
+  it('treats a non-Supabase or empty origin as local', () => {
+    expect(formatEnvironmentLabel('http://localhost:54321')).toBe('Local database')
+    expect(formatEnvironmentLabel('')).toBe('Local database')
+  })
+})
 
 describe('readOAuthCallbackError', () => {
   it('reads the Supabase OAuth failure returned in the query string', () => {
