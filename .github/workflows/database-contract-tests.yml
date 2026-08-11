@@ -37,7 +37,10 @@
 # with a REASON each; they are still executed and their output is still printed, but
 # their result does not fail the job. The list is printed in the summary on every run
 # so it can never quietly grow. Nothing may be added to it to make a red job green
-# without the reason being written down.
+# without the reason being written down. And the list itself is policed: a line naming
+# a file that no longer exists FAILS the job, and a quarantined file that PASSES is
+# reported as a warning telling you to take it off the list. A quarantine entry that
+# matches nothing is exactly the kind of green-but-inert check #731 exists to kill.
 
 name: Database Contract Tests
 
@@ -219,10 +222,28 @@ jobs:
             grep -vE '^\s*(#|$)' "$QUARANTINE_FILE" | awk '{print $1}' | grep -qxF "$1"
           }
 
+          # A QUARANTINE ENTRY IS ITSELF A THING THAT CAN ROT SILENTLY. If a test file is
+          # renamed or deleted, its line here keeps matching nothing forever and nobody is
+          # told. That is the same defect as an un-run test: present, green, enforcing
+          # nothing. So a line naming a file that does not exist FAILS the job.
+          if [ -f "$QUARANTINE_FILE" ]; then
+            STALE=()
+            while read -r name; do
+              [ -n "$name" ] || continue
+              [ -f "supabase/tests/$name" ] || STALE+=("$name")
+            done < <(grep -vE '^\s*(#|$)' "$QUARANTINE_FILE" | awk '{print $1}')
+            if [ "${#STALE[@]}" -gt 0 ]; then
+              printf '::error::quarantine names a file that does not exist: %s\n' "${STALE[@]}" >&2
+              echo "::error::$QUARANTINE_FILE is stale. Remove the dead line(s) -- a quarantine entry that matches nothing hides nothing and proves nothing." >&2
+              exit 1
+            fi
+          fi
+
           mkdir -p "$RUNNER_TEMP/results"
           PASS=0; FAIL=0; QUAR_PASS=0; QUAR_FAIL=0
           FAILED_FILES=()
           QUAR_FAILED_FILES=()
+          QUAR_PASSED_FILES=()
 
           echo "Executing ${#FILES[@]} contract test files."
           echo ""
@@ -240,7 +261,10 @@ jobs:
             echo "::endgroup::"
             if [ "$rc" -eq 0 ]; then
               if is_quarantined "$base"; then
-                QUAR_PASS=$((QUAR_PASS+1)); echo "PASS (quarantined) $base"
+                # It passes but is still quarantined, so its result is being ignored.
+                # Say so loudly: the line should come out.
+                QUAR_PASS=$((QUAR_PASS+1)); QUAR_PASSED_FILES+=("$base")
+                echo "::warning::$base is quarantined but PASSED -- remove it from $QUARANTINE_FILE so its result counts."
               else
                 PASS=$((PASS+1)); echo "PASS $base"
               fi
@@ -271,6 +295,11 @@ jobs:
             if [ "${#FAILED_FILES[@]}" -gt 0 ]; then
               echo "### Failures"
               printf '  - %s\n' "${FAILED_FILES[@]}"
+              echo ""
+            fi
+            if [ "${#QUAR_PASSED_FILES[@]}" -gt 0 ]; then
+              echo "### Quarantined but passing -- take these off the list"
+              printf '  - %s\n' "${QUAR_PASSED_FILES[@]}"
               echo ""
             fi
             if [ -f "$QUARANTINE_FILE" ]; then
