@@ -68,13 +68,6 @@ create schema if not exists api;
 -- The DAM search migrations need pgvector; the CLI's local stack does not enable it.
 create extension if not exists vector with schema extensions;
 
--- ------------------------------------------------------------------------------------
--- Enum types the legacy popdam tables are declared against. None of these is created by
--- any migration in this repository -- they are pre-adoption, like the tables that use
--- them. Guarded so a re-run, or a future migration that adopts one, does not break.
--- (Note: these are the PUBLIC enums. The identically named app.app_name / app.app_role /
--- app.entity_status are different types and ARE created by the foundation migration.)
--- ------------------------------------------------------------------------------------
 do $bootstrap$ begin
   CREATE TYPE public.app_name AS ENUM ('popdam', 'styleguides');
 exception when duplicate_object then null; end $bootstrap$;
@@ -120,7 +113,7 @@ create sequence if not exists plm.groups_id_seq;
 create sequence if not exists plm.item_character_associations_id_seq;
 
 -- ------------------------------------------------------------------------------------
--- Tables -- schema only, captured from production (126)
+-- Tables -- schema only, captured from production, minus every column a migration adds (125)
 -- ------------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS core.age_group (
   id integer DEFAULT nextval('core.age_group_id_seq'::regclass) NOT NULL,
@@ -149,27 +142,6 @@ CREATE TABLE IF NOT EXISTS core.artist_types (
   created_by integer NOT NULL,
   updated_at timestamp with time zone,
   updated_by integer);
-CREATE TABLE IF NOT EXISTS core.customer (
-  id uuid DEFAULT gen_random_uuid() NOT NULL,
-  name text NOT NULL,
-  company_type text DEFAULT 'customer'::text NOT NULL,
-  status app.entity_status DEFAULT 'active'::app.entity_status NOT NULL,
-  website text,
-  domain text,
-  phone text,
-  address jsonb DEFAULT '{}'::jsonb NOT NULL,
-  metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
-  created_at timestamp with time zone DEFAULT now() NOT NULL,
-  updated_at timestamp with time zone DEFAULT now() NOT NULL,
-  customer_status text,
-  chain_type text,
-  routing_aliases text,
-  so_patterns text,
-  primary_salesperson_profile_id uuid,
-  account_owner_profile_id uuid,
-  is_potential boolean DEFAULT true NOT NULL,
-  display_name text,
-  normalized_name text DEFAULT lower(regexp_replace(name, '\s+'::text, ' '::text, 'g'::text)));
 CREATE TABLE IF NOT EXISTS core."externalCustomer" (
   id integer GENERATED ALWAYS AS IDENTITY NOT NULL,
   "companyCode" character varying,
@@ -1854,11 +1826,7 @@ CREATE TABLE IF NOT EXISTS public.assets (
   ai_model text,
   stage text,
   customer text,
-  program text,
-  content_type text,
-  product_material text[],
-  product_dimensions text,
-  customer_id uuid);
+  program text);
 CREATE TABLE IF NOT EXISTS public.characters (
   id uuid DEFAULT gen_random_uuid() NOT NULL,
   property_id uuid NOT NULL,
@@ -2135,13 +2103,7 @@ CREATE TABLE IF NOT EXISTS public.style_groups (
   cover_description text,
   stage text,
   customer text,
-  program text,
-  item_description text,
-  item_description_source text,
-  rich_metadata jsonb,
-  rich_metadata_source text,
-  rich_metadata_updated_at timestamp with time zone,
-  customer_id uuid);
+  program text);
 CREATE TABLE IF NOT EXISTS public.style_guide_crawl_runs (
   id uuid DEFAULT gen_random_uuid() NOT NULL,
   status text DEFAULT 'pending'::text NOT NULL,
@@ -2171,11 +2133,9 @@ CREATE TABLE IF NOT EXISTS public.style_guide_files (
   last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
   is_active boolean DEFAULT true NOT NULL,
   created_at timestamp with time zone DEFAULT now() NOT NULL,
-  licensor_name text DEFAULT split_part(relative_path, '/'::text, 1),
+  licensor_name text GENERATED ALWAYS AS (split_part(relative_path, '/'::text, 1)) STORED,
   thumbnail_url text,
-  thumbnail_error text,
-  tag_names text[] DEFAULT '{}'::text[] NOT NULL,
-  tag_search_text text DEFAULT ''::text NOT NULL);
+  thumbnail_error text);
 CREATE TABLE IF NOT EXISTS public.style_guide_render_queue (
   id uuid DEFAULT gen_random_uuid() NOT NULL,
   style_guide_file_id uuid NOT NULL,
@@ -2215,7 +2175,7 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
   role app_role NOT NULL);
 
 -- ------------------------------------------------------------------------------------
--- Primary keys, unique constraints and checks (159)
+-- Primary keys, unique constraints and checks (157)
 -- ------------------------------------------------------------------------------------
 ALTER TABLE core.age_group ADD CONSTRAINT age_group_pkey PRIMARY KEY (id);
 ALTER TABLE core.art_types ADD CONSTRAINT art_types_code_key UNIQUE (code);
@@ -2223,7 +2183,6 @@ ALTER TABLE core.art_types ADD CONSTRAINT art_types_name_key UNIQUE (name);
 ALTER TABLE core.art_types ADD CONSTRAINT art_types_pkey PRIMARY KEY (id);
 ALTER TABLE core.artist_types ADD CONSTRAINT artist_types_code_key UNIQUE (code);
 ALTER TABLE core.artist_types ADD CONSTRAINT artist_types_pkey PRIMARY KEY (id);
-ALTER TABLE core.customer ADD CONSTRAINT company_pkey PRIMARY KEY (id);
 ALTER TABLE core."externalCustomer" ADD CONSTRAINT "externalCustomer_pkey" PRIMARY KEY ("customerCode");
 ALTER TABLE core."externalVendor" ADD CONSTRAINT "externalVendor_pkey" PRIMARY KEY ("vendorCode");
 ALTER TABLE core."licenseList" ADD CONSTRAINT "licenseList_pkey" PRIMARY KEY ("licenseList_id");
@@ -2327,7 +2286,6 @@ ALTER TABLE public.asset_tags ADD CONSTRAINT asset_tags_pkey PRIMARY KEY (id);
 ALTER TABLE public.asset_tags ADD CONSTRAINT asset_tags_asset_id_tag_key UNIQUE (asset_id, tag);
 ALTER TABLE public.assets ADD CONSTRAINT assets_pkey PRIMARY KEY (id);
 ALTER TABLE public.assets ADD CONSTRAINT assets_relative_path_unique UNIQUE (relative_path);
-ALTER TABLE public.assets ADD CONSTRAINT assets_content_type_check CHECK ((content_type = ANY (ARRAY['source_art'::text, 'style_guide_art'::text, 'pattern_allover'::text, 'icon_badge'::text, 'product_photo'::text, 'lifestyle_photo'::text, 'render_mockup'::text, 'tech_pack'::text, 'licensing_sheet'::text, 'spec_layout_doc'::text, 'packaging_art'::text, 'sticker'::text, 'jcard'::text, 'other'::text])));
 ALTER TABLE public.characters ADD CONSTRAINT characters_pkey PRIMARY KEY (id);
 ALTER TABLE public.characters ADD CONSTRAINT characters_external_id_key UNIQUE (external_id);
 ALTER TABLE public.erp_enrichment_log ADD CONSTRAINT erp_enrichment_log_pkey PRIMARY KEY (id);
@@ -2378,7 +2336,7 @@ ALTER TABLE public.user_roles ADD CONSTRAINT user_roles_pkey PRIMARY KEY (id);
 ALTER TABLE public.user_roles ADD CONSTRAINT user_roles_user_id_role_key UNIQUE (user_id, role);
 
 -- ------------------------------------------------------------------------------------
--- Indexes (179)
+-- Indexes (151)
 -- ------------------------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS age_group_created_by_fkey ON core.age_group USING btree (created_by);
 CREATE INDEX IF NOT EXISTS age_group_updated_by_fkey ON core.age_group USING btree (updated_by);
@@ -2387,14 +2345,6 @@ CREATE INDEX IF NOT EXISTS art_types_divisioncode_id_fkey ON core.art_types USIN
 CREATE INDEX IF NOT EXISTS art_types_updated_by_fkey ON core.art_types USING btree (updated_by);
 CREATE INDEX IF NOT EXISTS artist_types_created_by_fkey ON core.artist_types USING btree (created_by);
 CREATE INDEX IF NOT EXISTS artist_types_updated_by_fkey ON core.artist_types USING btree (updated_by);
-CREATE INDEX IF NOT EXISTS core_company_domain_idx ON core.customer USING btree (domain);
-CREATE INDEX IF NOT EXISTS core_company_customer_status_idx ON core.customer USING btree (customer_status);
-CREATE INDEX IF NOT EXISTS core_customer_is_potential_idx ON core.customer USING btree (is_potential);
-CREATE INDEX IF NOT EXISTS core_customer_name_idx ON core.customer USING btree (name);
-CREATE INDEX IF NOT EXISTS core_customer_status_name_idx ON core.customer USING btree (customer_status, name);
-CREATE INDEX IF NOT EXISTS core_company_normalized_name_idx ON core.customer USING btree (normalized_name);
-CREATE INDEX IF NOT EXISTS core_customer_normalized_name_trgm_idx ON core.customer USING gin (normalized_name extensions.gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS core_customer_display_name_trgm_idx ON core.customer USING gin (lower(display_name) extensions.gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_relations_child ON core."merchGroupRelations" USING btree (child_mg_id);
 CREATE INDEX IF NOT EXISTS idx_relations_grand_parent ON core."merchGroupRelations" USING btree (grand_parent_mg_id);
 CREATE INDEX IF NOT EXISTS idx_relations_parent ON core."merchGroupRelations" USING btree (parent_mg_id);
@@ -2449,7 +2399,6 @@ CREATE INDEX IF NOT EXISTS idx_agent_pairings_code ON public.agent_pairings USIN
 CREATE INDEX IF NOT EXISTS idx_agent_registrations_last_heartbeat ON public.agent_registrations USING btree (last_heartbeat);
 CREATE INDEX IF NOT EXISTS idx_ai_sentinel_cleanup_log_asset ON public.ai_sentinel_cleanup_log USING btree (ai_asset_id);
 CREATE INDEX IF NOT EXISTS idx_app_access_user_id ON public.app_access USING btree (user_id);
-CREATE INDEX IF NOT EXISTS app_access_user_id_idx ON public.app_access USING btree (user_id);
 CREATE UNIQUE INDEX asset_checkouts_one_active_per_asset ON public.asset_checkouts USING btree (asset_id) WHERE (status = ANY (ARRAY['active'::checkout_status, 'checkin_queued'::checkout_status, 'uploading'::checkout_status, 'verifying'::checkout_status]));
 CREATE INDEX IF NOT EXISTS asset_checkouts_awaiting_verification ON public.asset_checkouts USING btree (verify_deadline_at) WHERE ((status = 'verifying'::checkout_status) AND (source_provider = 'seafile'::text));
 CREATE INDEX IF NOT EXISTS idx_asset_path_history_asset_id_detected_at ON public.asset_path_history USING btree (asset_id, detected_at DESC);
@@ -2481,13 +2430,6 @@ CREATE INDEX IF NOT EXISTS idx_assets_program ON public.assets USING btree (prog
 CREATE INDEX IF NOT EXISTS idx_assets_program_trgm ON public.assets USING gin (program extensions.gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_assets_customer_trgm ON public.assets USING gin (customer extensions.gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_assets_facet_counts ON public.assets USING btree (is_deleted) INCLUDE (file_type, status, workflow_status, stage, is_licensed, modified_at, file_created_at, thumbnail_url, style_group_id) WHERE (is_deleted = false);
-CREATE INDEX IF NOT EXISTS idx_assets_full_text_search ON public.assets USING gin (to_tsvector('simple'::regconfig, ((((((((((((((((((COALESCE(filename, ''::text) || ' '::text) || COALESCE(relative_path, ''::text)) || ' '::text) || COALESCE(cover_description, ''::text)) || ' '::text) || COALESCE(ai_description, ''::text)) || ' '::text) || COALESCE(scene_description, ''::text)) || ' '::text) || COALESCE(customer, ''::text)) || ' '::text) || COALESCE(program, ''::text)) || ' '::text) || COALESCE(licensor_name, ''::text)) || ' '::text) || COALESCE(property_name, ''::text)) || ' '::text) || COALESCE(product_category, ''::text)))) WHERE (is_deleted = false);
-CREATE INDEX IF NOT EXISTS idx_assets_ai_tag_untagged_candidates ON public.assets USING btree (primary_sort_tier, id) INCLUDE (thumbnail_url, filename, relative_path, style_group_id) WHERE ((is_deleted = false) AND (thumbnail_url IS NOT NULL) AND (primary_sort_tier <> ALL (ARRAY[4, 8])) AND (status <> 'tagged'::asset_status));
-CREATE INDEX IF NOT EXISTS idx_assets_ai_tag_all_candidates ON public.assets USING btree (primary_sort_tier, id) INCLUDE (thumbnail_url, filename, relative_path, style_group_id) WHERE ((is_deleted = false) AND (thumbnail_url IS NOT NULL) AND (primary_sort_tier <> ALL (ARRAY[4, 8])));
-CREATE INDEX IF NOT EXISTS idx_assets_ai_tag_tagged_groups ON public.assets USING btree (style_group_id) WHERE ((is_deleted = false) AND (status = 'tagged'::asset_status) AND (ai_tagged_at IS NOT NULL) AND (style_group_id IS NOT NULL));
-CREATE INDEX IF NOT EXISTS idx_assets_product_material_gin ON public.assets USING gin (product_material);
-CREATE INDEX IF NOT EXISTS idx_assets_has_product_material ON public.assets USING btree (id) WHERE (product_material IS NOT NULL);
-CREATE INDEX IF NOT EXISTS assets_customer_id_idx ON public.assets USING btree (customer_id) WHERE (customer_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_characters_is_priority ON public.characters USING btree (is_priority) WHERE (is_priority = true);
 CREATE INDEX IF NOT EXISTS idx_characters_usage_count ON public.characters USING btree (usage_count);
 CREATE INDEX IF NOT EXISTS idx_eel_target_id ON public.erp_enrichment_log USING btree (target_id);
@@ -2506,7 +2448,6 @@ CREATE INDEX IF NOT EXISTS idx_hygiene_findings_relative_path ON public.hygiene_
 CREATE UNIQUE INDEX uq_hygiene_findings_path_check ON public.hygiene_findings USING btree (relative_path, check_type) WHERE (status <> 'resolved'::text);
 CREATE INDEX IF NOT EXISTS idx_pdf_text_samples_asset_id ON public.pdf_text_samples USING btree (asset_id);
 CREATE INDEX IF NOT EXISTS idx_pdf_text_samples_sampled_at ON public.pdf_text_samples USING btree (sampled_at DESC);
-CREATE INDEX IF NOT EXISTS idx_pdf_text_samples_extracted_text_search ON public.pdf_text_samples USING gin (to_tsvector('simple'::regconfig, COALESCE(extracted_text, ''::text))) WHERE (extracted_text IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_processing_queue_status ON public.processing_queue USING btree (status);
 CREATE INDEX IF NOT EXISTS idx_prod_order_headers_current_style_number ON public.prod_order_headers_current USING btree (style_number);
 CREATE INDEX IF NOT EXISTS idx_prod_order_headers_current_prod_order_number ON public.prod_order_headers_current USING btree (prod_order_number);
@@ -2528,12 +2469,6 @@ CREATE INDEX IF NOT EXISTS idx_style_groups_property_id ON public.style_groups U
 CREATE INDEX IF NOT EXISTS idx_sg_stage ON public.style_groups USING btree (stage);
 CREATE INDEX IF NOT EXISTS idx_sg_customer ON public.style_groups USING btree (customer);
 CREATE INDEX IF NOT EXISTS idx_sg_program ON public.style_groups USING btree (program);
-CREATE INDEX IF NOT EXISTS idx_style_groups_full_text_search ON public.style_groups USING gin (to_tsvector('simple'::regconfig, ((((((((((((((COALESCE(sku, ''::text) || ' '::text) || COALESCE(folder_path, ''::text)) || ' '::text) || COALESCE(cover_description, ''::text)) || ' '::text) || COALESCE(customer, ''::text)) || ' '::text) || COALESCE(program, ''::text)) || ' '::text) || COALESCE(licensor_name, ''::text)) || ' '::text) || COALESCE(property_name, ''::text)) || ' '::text) || COALESCE(product_category, ''::text))));
-CREATE INDEX IF NOT EXISTS idx_style_groups_sku_trgm ON public.style_groups USING gin (sku extensions.gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_style_groups_folder_path_trgm ON public.style_groups USING gin (folder_path extensions.gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_style_groups_customer_trgm ON public.style_groups USING gin (customer extensions.gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_style_groups_program_trgm ON public.style_groups USING gin (program extensions.gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS style_groups_customer_id_idx ON public.style_groups USING btree (customer_id) WHERE (customer_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_sgf_root_label ON public.style_guide_files USING btree (root_label);
 CREATE INDEX IF NOT EXISTS idx_sgf_directory_path ON public.style_guide_files USING btree (directory_path);
 CREATE INDEX IF NOT EXISTS idx_sgf_normalized_name ON public.style_guide_files USING btree (normalized_name);
@@ -2545,10 +2480,6 @@ CREATE INDEX IF NOT EXISTS idx_sgf_licensor_name ON public.style_guide_files USI
 CREATE INDEX IF NOT EXISTS idx_sgf_render_errored ON public.style_guide_files USING btree (id) WHERE (is_active AND (thumbnail_url IS NULL) AND (thumbnail_error IS NOT NULL));
 CREATE INDEX IF NOT EXISTS idx_style_guide_files_filename_trgm ON public.style_guide_files USING gin (lower(filename) extensions.gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_style_guide_files_active_modified ON public.style_guide_files USING btree (modified_at DESC NULLS LAST, filename) WHERE is_active;
-CREATE INDEX IF NOT EXISTS idx_sgf_relative_path_trgm ON public.style_guide_files USING gin (relative_path extensions.gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_sgf_directory_path_trgm ON public.style_guide_files USING gin (directory_path extensions.gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_style_guide_files_tag_names ON public.style_guide_files USING gin (tag_names);
-CREATE INDEX IF NOT EXISTS idx_style_guide_files_tag_search_trgm ON public.style_guide_files USING gin (tag_search_text extensions.gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_sgrq_status ON public.style_guide_render_queue USING btree (status);
 CREATE INDEX IF NOT EXISTS idx_sgrq_file_id ON public.style_guide_render_queue USING btree (style_guide_file_id);
 CREATE INDEX IF NOT EXISTS idx_sgrq_created_at ON public.style_guide_render_queue USING btree (created_at DESC);
@@ -2558,10 +2489,9 @@ CREATE INDEX IF NOT EXISTS idx_tiff_opt_status ON public.tiff_optimization_queue
 CREATE INDEX IF NOT EXISTS idx_tiff_opt_compression ON public.tiff_optimization_queue USING btree (compression_type);
 CREATE INDEX IF NOT EXISTS tiff_optimization_queue_claimed_by_idx ON public.tiff_optimization_queue USING btree (claimed_by) WHERE (claimed_by IS NOT NULL);
 CREATE INDEX IF NOT EXISTS tiff_optimization_queue_claimed_at_idx ON public.tiff_optimization_queue USING btree (claimed_at) WHERE (claimed_at IS NOT NULL);
-CREATE INDEX IF NOT EXISTS user_roles_user_id_idx ON public.user_roles USING btree (user_id);
 
 -- ------------------------------------------------------------------------------------
--- Foreign keys (only those whose target is also in this baseline) (58)
+-- Foreign keys (only where the target is also in this baseline) (54)
 -- ------------------------------------------------------------------------------------
 ALTER TABLE core.art_types ADD CONSTRAINT art_types_divisioncode_id_fkey FOREIGN KEY (divisioncode_id) REFERENCES plm."divisionCode"("divCode_id");
 ALTER TABLE core."merchGroupRelations" ADD CONSTRAINT "merchGroupRelations_child_mg_id_fkey" FOREIGN KEY (child_mg_id) REFERENCES core."merchGroupMaster"(mg_id) ON DELETE CASCADE;
@@ -2590,7 +2520,6 @@ ALTER TABLE plm.sample_event ADD CONSTRAINT sample_event_sample_id_fk_fkey FOREI
 ALTER TABLE plm.sample_shipment_item ADD CONSTRAINT sample_shipment_item_box_id_fk_fkey FOREIGN KEY (box_id_fk) REFERENCES plm.sample_box(box_id_pk) ON UPDATE CASCADE ON DELETE SET NULL;
 ALTER TABLE plm.sample_shipment_item ADD CONSTRAINT sample_shipment_item_sample_id_fk_fkey FOREIGN KEY (sample_id_fk) REFERENCES plm.sample(sample_id_pk) ON UPDATE CASCADE ON DELETE CASCADE;
 ALTER TABLE public.agent_pairings ADD CONSTRAINT agent_pairings_agent_registration_id_fkey FOREIGN KEY (agent_registration_id) REFERENCES agent_registrations(id) ON DELETE CASCADE;
-ALTER TABLE public.app_access ADD CONSTRAINT app_access_user_id_fkey FOREIGN KEY (user_id) REFERENCES profiles(user_id) ON DELETE CASCADE;
 ALTER TABLE public.asset_characters ADD CONSTRAINT asset_characters_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
 ALTER TABLE public.asset_characters ADD CONSTRAINT asset_characters_character_id_fkey FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE;
 ALTER TABLE public.asset_checkouts ADD CONSTRAINT asset_checkouts_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT;
@@ -2599,7 +2528,6 @@ ALTER TABLE public.asset_path_history ADD CONSTRAINT asset_path_history_asset_id
 ALTER TABLE public.asset_tags ADD CONSTRAINT asset_tags_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
 ALTER TABLE public.assets ADD CONSTRAINT assets_product_subtype_id_fkey FOREIGN KEY (product_subtype_id) REFERENCES product_subtypes(id) ON DELETE SET NULL;
 ALTER TABLE public.assets ADD CONSTRAINT assets_style_group_id_fkey FOREIGN KEY (style_group_id) REFERENCES style_groups(id) ON DELETE SET NULL;
-ALTER TABLE public.assets ADD CONSTRAINT assets_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES core.customer(id) ON DELETE SET NULL;
 ALTER TABLE public.characters ADD CONSTRAINT characters_property_id_fkey FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE;
 ALTER TABLE public.erp_items_current ADD CONSTRAINT erp_items_current_sync_run_id_fkey FOREIGN KEY (sync_run_id) REFERENCES erp_sync_runs(id) ON DELETE SET NULL;
 ALTER TABLE public.erp_items_raw ADD CONSTRAINT erp_items_raw_sync_run_id_fkey FOREIGN KEY (sync_run_id) REFERENCES erp_sync_runs(id) ON DELETE SET NULL;
@@ -2617,10 +2545,8 @@ ALTER TABLE public.properties ADD CONSTRAINT properties_licensor_id_fkey FOREIGN
 ALTER TABLE public.render_queue ADD CONSTRAINT render_queue_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
 ALTER TABLE public.sku_files_used ADD CONSTRAINT sku_files_used_style_guide_file_id_fkey FOREIGN KEY (style_guide_file_id) REFERENCES style_guide_files(id) ON DELETE SET NULL;
 ALTER TABLE public.style_groups ADD CONSTRAINT style_groups_primary_asset_id_fkey FOREIGN KEY (primary_asset_id) REFERENCES assets(id) ON DELETE SET NULL;
-ALTER TABLE public.style_groups ADD CONSTRAINT style_groups_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES core.customer(id) ON DELETE SET NULL;
 ALTER TABLE public.style_guide_files ADD CONSTRAINT style_guide_files_crawl_run_id_fkey FOREIGN KEY (crawl_run_id) REFERENCES style_guide_crawl_runs(id) ON DELETE SET NULL;
 ALTER TABLE public.style_guide_render_queue ADD CONSTRAINT style_guide_render_queue_style_guide_file_id_fkey FOREIGN KEY (style_guide_file_id) REFERENCES style_guide_files(id) ON DELETE CASCADE;
-ALTER TABLE public.user_roles ADD CONSTRAINT user_roles_user_id_fkey FOREIGN KEY (user_id) REFERENCES profiles(user_id) ON DELETE CASCADE;
 
 -- ------------------------------------------------------------------------------------
 -- Views (1)
@@ -2657,11 +2583,2052 @@ CREATE OR REPLACE VIEW public.sg_archive_usage AS  WITH usage AS (
      LEFT JOIN usage u ON (((u.licensor_name = g.licensor_name) AND (NOT (u.property_folder IS DISTINCT FROM g.property_folder)))));
 
 -- ------------------------------------------------------------------------------------
--- FOREIGN KEYS DELIBERATELY OMITTED
+-- PRE-ADOPTION FUNCTIONS
 -- ------------------------------------------------------------------------------------
--- A foreign key from a baseline table to a table that a MIGRATION creates is not emitted
--- here: at the moment this file runs, pass 1 has already created those tables, but the
--- constraint would then be added twice if a later migration adds it too. Only FKs whose
--- target is itself part of this baseline are included. This is a from-empty test lane,
--- not a replica of production's constraint set, and this file says so rather than
--- pretending otherwise.
+-- Functions, exactly like the tables above, that exist in production and that no
+-- migration in this repository creates. This is not an optional extra: without
+-- public.has_role() the very first reconcile migration aborts, and eighteen migrations
+-- downstream of it never create their own tables either. They come last because several
+-- read the tables above.
+-- ------------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.auto_queue_render()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  -- Skip junk files (macOS resource forks, system files)
+  IF NEW.filename LIKE '._%' OR
+     NEW.filename = '.DS_Store' OR
+     NEW.filename = '.localized' OR
+     NEW.filename = 'Thumbs.db' OR
+     NEW.filename = 'desktop.ini' OR
+     NEW.filename LIKE '~%' THEN
+    RETURN NEW;
+  END IF;
+
+  -- Queue ANY file type that has a thumbnail error and no thumbnail
+  IF NEW.thumbnail_error IS NOT NULL
+     AND NEW.thumbnail_url IS NULL THEN
+    INSERT INTO public.render_queue (asset_id, status)
+    VALUES (NEW.id, 'pending')
+    ON CONFLICT DO NOTHING;
+  END IF;
+
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.backfill_pdf_files_used()
+ RETURNS integer
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+  v_id    uuid;
+  v_total int := 0;
+BEGIN
+  FOR v_id IN (
+    SELECT DISTINCT asset_id
+    FROM pdf_text_samples
+    WHERE asset_id IS NOT NULL
+      AND extracted_text IS NOT NULL
+      AND char_count > 100
+  ) LOOP
+    v_total := v_total + parse_pdf_files_used(v_id);
+  END LOOP;
+  RETURN v_total;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.bulk_assign_style_groups(p_assignments jsonb)
+ RETURNS integer
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  WITH rows AS (
+    SELECT
+      (x->>'asset_id')::uuid AS asset_id,
+      (x->>'style_group_id')::uuid AS style_group_id
+    FROM jsonb_array_elements(COALESCE(p_assignments, '[]'::jsonb)) AS x
+  ),
+  upd AS (
+    UPDATE public.assets a
+    SET style_group_id = r.style_group_id
+    FROM rows r
+    WHERE a.id = r.asset_id
+      AND a.is_deleted = false
+    RETURNING 1
+  )
+  SELECT COUNT(*)::integer FROM upd;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.bulk_insert_pdf_text_samples(p_rows jsonb)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+DECLARE
+  v_count int;
+BEGIN
+  SET LOCAL app.skip_parse_pdf_trigger = '1';
+
+  INSERT INTO pdf_text_samples (
+    asset_id, filename, relative_path, extraction_method,
+    extracted_text, page_count, char_count, extraction_error,
+    thumbnail_url, sampled_at
+  )
+  SELECT
+    NULLIF(elem->>'asset_id', '')::uuid,
+    elem->>'filename',
+    elem->>'relative_path',
+    elem->>'extraction_method',
+    NULLIF(elem->>'extracted_text', ''),
+    (elem->>'page_count')::int,
+    COALESCE((elem->>'char_count')::int, 0),
+    NULLIF(elem->>'extraction_error', ''),
+    NULLIF(elem->>'thumbnail_url', ''),
+    now()
+  FROM jsonb_array_elements(p_rows) AS elem
+  ON CONFLICT (asset_id) DO UPDATE SET
+    filename          = EXCLUDED.filename,
+    relative_path     = EXCLUDED.relative_path,
+    extraction_method = EXCLUDED.extraction_method,
+    extracted_text    = EXCLUDED.extracted_text,
+    page_count        = EXCLUDED.page_count,
+    char_count        = EXCLUDED.char_count,
+    extraction_error  = EXCLUDED.extraction_error,
+    thumbnail_url     = EXCLUDED.thumbnail_url,
+    sampled_at        = EXCLUDED.sampled_at;
+
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+  RETURN v_count;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.claim_jobs(p_agent_id text, p_batch_size integer DEFAULT 5)
+ RETURNS SETOF processing_queue
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  RETURN QUERY
+  UPDATE public.processing_queue
+  SET status = 'claimed', agent_id = p_agent_id, claimed_at = now()
+  WHERE id IN (
+    SELECT id FROM public.processing_queue
+    WHERE status = 'pending'
+    ORDER BY created_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT p_batch_size
+  )
+  RETURNING *;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.claim_pdf_backfill_batch(p_limit integer DEFAULT 25)
+ RETURNS TABLE(id uuid, filename text, relative_path text, needs_thumbnail boolean)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+AS $function$
+  SELECT
+    a.id,
+    a.filename,
+    a.relative_path,
+    (a.thumbnail_url IS NULL) AS needs_thumbnail
+  FROM assets a
+  WHERE a.is_deleted = false
+    AND public.is_style_guide_source_pdf(a.file_type::text, a.filename)
+    AND NOT EXISTS (
+      SELECT 1 FROM pdf_text_samples pts WHERE pts.asset_id = a.id
+    )
+  ORDER BY a.id
+  LIMIT p_limit;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.claim_render_jobs(p_agent_id text, p_batch_size integer DEFAULT 1, p_lease_minutes integer DEFAULT 5, p_max_attempts integer DEFAULT 5)
+ RETURNS TABLE(id uuid, asset_id uuid, attempts integer, lease_expires_at timestamp with time zone)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  RETURN QUERY
+  WITH claimable AS (
+    SELECT rq.id
+    FROM render_queue rq
+    WHERE (
+      -- Pending jobs
+      rq.status = 'pending'
+      OR
+      -- Expired-lease claimed jobs (crashed agent)
+      (rq.status = 'claimed' AND rq.lease_expires_at IS NOT NULL AND rq.lease_expires_at < now())
+    )
+    AND rq.attempts < p_max_attempts
+    ORDER BY rq.created_at ASC
+    FOR UPDATE SKIP LOCKED
+    LIMIT p_batch_size
+  )
+  UPDATE render_queue rq
+  SET
+    status = 'claimed',
+    claimed_by = p_agent_id,
+    claimed_at = now(),
+    lease_expires_at = now() + (p_lease_minutes || ' minutes')::interval,
+    attempts = rq.attempts + 1
+  FROM claimable
+  WHERE rq.id = claimable.id
+  RETURNING rq.id, rq.asset_id, rq.attempts, rq.lease_expires_at;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.claim_sg_render_jobs(p_agent_id text, p_batch_size integer DEFAULT 1, p_lease_minutes integer DEFAULT 5, p_max_attempts integer DEFAULT 3)
+ RETURNS TABLE(id uuid, style_guide_file_id uuid, attempts integer, lease_expires_at timestamp with time zone)
+ LANGUAGE sql
+AS $function$
+  UPDATE public.style_guide_render_queue q
+  SET
+    status = 'claimed',
+    claimed_by = p_agent_id,
+    claimed_at = now(),
+    lease_expires_at = now() + (p_lease_minutes || ' minutes')::interval,
+    attempts = q.attempts + 1
+  WHERE q.id IN (
+    SELECT id FROM public.style_guide_render_queue
+    WHERE
+      (status = 'pending' OR (status = 'claimed' AND lease_expires_at < now()))
+      AND attempts < p_max_attempts
+    ORDER BY created_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT p_batch_size
+  )
+  RETURNING q.id, q.style_guide_file_id, q.attempts, q.lease_expires_at;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.claim_tiff_jobs(p_agent_id text, p_batch_size integer DEFAULT 1, p_lease_minutes integer DEFAULT 10)
+ RETURNS TABLE(id uuid, relative_path text, filename text, file_size bigint, file_modified_at timestamp with time zone, file_created_at timestamp with time zone, mode text)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  RETURN QUERY
+  WITH claimable AS (
+    SELECT tq.id
+    FROM tiff_optimization_queue tq
+    WHERE tq.status IN ('queued_test', 'queued_process')
+    ORDER BY tq.created_at ASC
+    FOR UPDATE SKIP LOCKED
+    LIMIT p_batch_size
+  )
+  UPDATE tiff_optimization_queue tq
+  SET
+    status = 'processing',
+    claimed_by = p_agent_id,
+    claimed_at = now()
+  FROM claimable
+  WHERE tq.id = claimable.id
+  RETURNING tq.id, tq.relative_path, tq.filename, tq.file_size, tq.file_modified_at, tq.file_created_at,
+    CASE WHEN tq.status = 'queued_test' THEN 'test' ELSE 'process' END AS mode;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.cleanup_mega_group_tags_batch()
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+ SET statement_timeout TO '30s'
+AS $function$
+DECLARE
+  v_deleted int;
+BEGIN
+  DELETE FROM asset_tags
+  WHERE ctid IN (
+    SELECT at2.ctid
+    FROM asset_tags at2
+    JOIN assets a ON a.id = at2.asset_id
+    WHERE at2.source = 'ai'
+      AND a.style_group_id IN (
+        '038e1fda-f413-495d-981a-f2bfbe3b604e',
+        '0ef04984-f645-469b-9775-a0c8e3eb416a',
+        '6241f8d1-1c75-4e4c-918f-28e73d8f3bc3',
+        '2f8c7f5e-a76d-4310-b571-7202e847cb76',
+        '4978fbe3-d604-477b-abe0-536cad1d706b',
+        'ac2bbd81-648f-43a1-b1cf-4bb0bdd78d79'
+      )
+      AND a.ai_tagged_at IS NULL
+      AND a.is_deleted = false
+    LIMIT 10000
+  );
+  GET DIAGNOSTICS v_deleted = ROW_COUNT;
+  RETURN v_deleted;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.cleanup_mega_group_tags_batch(p_cursor uuid DEFAULT NULL::uuid, p_batch_size integer DEFAULT 5, p_min_group_size integer DEFAULT 50)
+ RETURNS TABLE(next_cursor uuid, groups_processed integer, tags_deleted integer, characters_deleted integer, metadata_cleared integer, done boolean)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+ SET statement_timeout TO '120s'
+AS $function$
+DECLARE
+  v_group record;
+  v_groups_processed int := 0;
+  v_tags_deleted int := 0;
+  v_chars_deleted int := 0;
+  v_meta_cleared int := 0;
+  v_last_id uuid;
+  v_group_count int := 0;
+  v_batch_tags int;
+  v_batch_chars int;
+  v_batch_meta int;
+BEGIN
+  FOR v_group IN
+    SELECT sg.id
+    FROM style_groups sg
+    WHERE sg.asset_count >= p_min_group_size
+      AND (p_cursor IS NULL OR sg.id > p_cursor)
+    ORDER BY sg.id
+    LIMIT p_batch_size
+  LOOP
+    v_group_count := v_group_count + 1;
+    v_last_id := v_group.id;
+
+    -- 1) Delete contaminated tags from NON-directly-tagged assets (ai_tagged_at IS NULL)
+    --    These assets only have propagated tags — delete all AI tags.
+    WITH non_tagged_assets AS (
+      SELECT a.id FROM assets a
+      WHERE a.style_group_id = v_group.id
+        AND a.is_deleted = false
+        AND a.ai_tagged_at IS NULL
+    ),
+    del_tags_null AS (
+      DELETE FROM asset_tags at
+      USING non_tagged_assets nta
+      WHERE at.asset_id = nta.id
+        AND at.source = 'ai'
+      RETURNING 1
+    ),
+    -- 2) Delete contaminated tags from DIRECTLY-tagged assets
+    --    Keep tags created within 5 min of ai_tagged_at; delete the rest.
+    tagged_assets AS (
+      SELECT a.id, a.ai_tagged_at FROM assets a
+      WHERE a.style_group_id = v_group.id
+        AND a.is_deleted = false
+        AND a.ai_tagged_at IS NOT NULL
+    ),
+    del_tags_late AS (
+      DELETE FROM asset_tags at
+      USING tagged_assets ta
+      WHERE at.asset_id = ta.id
+        AND at.source = 'ai'
+        AND at.created_at > ta.ai_tagged_at + interval '5 minutes'
+      RETURNING 1
+    )
+    SELECT
+      (SELECT count(*) FROM del_tags_null) + (SELECT count(*) FROM del_tags_late)
+    INTO v_batch_tags;
+
+    v_tags_deleted := v_tags_deleted + COALESCE(v_batch_tags, 0);
+
+    -- 3) Delete contaminated asset_characters (same logic)
+    WITH non_tagged_assets AS (
+      SELECT a.id FROM assets a
+      WHERE a.style_group_id = v_group.id
+        AND a.is_deleted = false
+        AND a.ai_tagged_at IS NULL
+    ),
+    del_chars_null AS (
+      DELETE FROM asset_characters ac
+      USING non_tagged_assets nta
+      WHERE ac.asset_id = nta.id
+      RETURNING 1
+    ),
+    tagged_assets AS (
+      SELECT a.id, a.ai_tagged_at FROM assets a
+      WHERE a.style_group_id = v_group.id
+        AND a.is_deleted = false
+        AND a.ai_tagged_at IS NOT NULL
+    )
+    SELECT (SELECT count(*) FROM del_chars_null)
+    INTO v_batch_chars;
+
+    v_chars_deleted := v_chars_deleted + COALESCE(v_batch_chars, 0);
+
+    -- 4) Clear propagated metadata on non-tagged assets
+    WITH cleared AS (
+      UPDATE assets a
+      SET
+        big_theme = NULL,
+        little_theme = NULL,
+        design_style = NULL,
+        cover_description = NULL
+      WHERE a.style_group_id = v_group.id
+        AND a.is_deleted = false
+        AND a.ai_tagged_at IS NULL
+        AND (a.big_theme IS NOT NULL OR a.little_theme IS NOT NULL
+             OR a.design_style IS NOT NULL OR a.cover_description IS NOT NULL)
+      RETURNING 1
+    )
+    SELECT count(*) INTO v_batch_meta FROM cleared;
+
+    v_meta_cleared := v_meta_cleared + COALESCE(v_batch_meta, 0);
+    v_groups_processed := v_groups_processed + 1;
+  END LOOP;
+
+  RETURN QUERY SELECT
+    v_last_id,
+    v_groups_processed,
+    v_tags_deleted,
+    v_chars_deleted,
+    v_meta_cleared,
+    (v_group_count < p_batch_size);
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.clear_style_group_batch(p_last_id uuid DEFAULT NULL::uuid, p_batch_size integer DEFAULT 200)
+ RETURNS TABLE(cleared_count integer, last_id uuid, has_more boolean)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+ SET statement_timeout TO '120s'
+ SET lock_timeout TO '0'
+AS $function$
+DECLARE
+  v_start_id uuid := COALESCE(p_last_id, '00000000-0000-0000-0000-000000000000'::uuid);
+  v_cleared integer;
+  v_last uuid;
+BEGIN
+  IF p_batch_size IS NULL OR p_batch_size < 1 THEN
+    p_batch_size := 1;
+  END IF;
+
+  WITH batch AS (
+    SELECT a.id
+    FROM public.assets a
+    WHERE a.is_deleted = false
+      AND a.style_group_id IS NOT NULL
+      AND a.id > v_start_id
+    ORDER BY a.id ASC
+    LIMIT p_batch_size
+  ),
+  upd AS (
+    UPDATE public.assets a
+    SET style_group_id = NULL
+    FROM batch b
+    WHERE a.id = b.id
+    RETURNING a.id
+  )
+  SELECT COUNT(*)::integer,
+         (SELECT u.id FROM upd u ORDER BY u.id DESC LIMIT 1)
+  INTO v_cleared, v_last
+  FROM upd;
+
+  RETURN QUERY SELECT
+    COALESCE(v_cleared, 0),
+    v_last,
+    COALESCE(v_cleared, 0) = p_batch_size;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.compute_primary_sort_tier()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  fn        text    := lower(NEW.filename);
+  base_name text    := lower(regexp_replace(NEW.filename, '\.[^.]+$', ''));
+  has_thumb boolean := (NEW.thumbnail_url IS NOT NULL AND NEW.thumbnail_error IS NULL);
+  is_photo34   boolean := (base_name LIKE '%3-4%');
+  is_mockup    boolean := (fn LIKE '%mockup%' OR fn LIKE '%mock up%');
+  is_art       boolean := (fn LIKE '%art%');
+  is_techpack  boolean := (fn LIKE '%tech pack%' OR fn LIKE '%techpack%' OR fn LIKE '%tech_pack%');
+  is_pkg       boolean := (fn LIKE '%packaging%');
+BEGIN
+  IF    is_photo34                                                              THEN NEW.primary_sort_tier :=  1;
+  ELSIF is_mockup   AND has_thumb                                               THEN NEW.primary_sort_tier :=  2;
+  ELSIF is_art      AND has_thumb                                               THEN NEW.primary_sort_tier :=  3;
+  ELSIF is_techpack AND has_thumb                                               THEN NEW.primary_sort_tier :=  4;
+  ELSIF NOT is_mockup AND NOT is_art AND NOT is_techpack AND NOT is_pkg
+        AND has_thumb                                                           THEN NEW.primary_sort_tier :=  5;
+  ELSIF is_pkg      AND has_thumb                                               THEN NEW.primary_sort_tier :=  6;
+  ELSIF is_mockup                                                               THEN NEW.primary_sort_tier :=  7;
+  ELSIF is_art                                                                  THEN NEW.primary_sort_tier :=  8;
+  ELSIF is_techpack                                                             THEN NEW.primary_sort_tier :=  9;
+  ELSIF NOT is_mockup AND NOT is_art AND NOT is_techpack AND NOT is_pkg         THEN NEW.primary_sort_tier := 10;
+  ELSE                                                                               NEW.primary_sort_tier := 11;
+  END IF;
+  RETURN NEW;
+END; $function$;
+
+CREATE OR REPLACE FUNCTION public.count_pdf_backfill_remaining()
+ RETURNS bigint
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+AS $function$
+  SELECT COUNT(*)
+  FROM assets a
+  WHERE a.is_deleted = false
+    AND public.is_style_guide_source_pdf(a.file_type::text, a.filename)
+    AND NOT EXISTS (
+      SELECT 1 FROM pdf_text_samples pts WHERE pts.asset_id = a.id
+    );
+$function$;
+
+CREATE OR REPLACE FUNCTION public.deactivate_stale_sg_files(p_root_label text, p_run_id uuid)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_count integer;
+BEGIN
+  UPDATE style_guide_files
+  SET is_active = false
+  WHERE root_label = p_root_label
+    AND crawl_run_id != p_run_id
+    AND is_active = true;
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+  RETURN v_count;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.execute_readonly_query(query_text text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+ SET statement_timeout TO '15s'
+AS $function$
+DECLARE
+  result jsonb;
+  trimmed text;
+BEGIN
+  trimmed := lower(trim(query_text));
+  
+  -- Allow SELECT and WITH...SELECT (CTEs)
+  IF NOT (trimmed ~ '^select\s' OR trimmed ~ '^with\s') THEN
+    RAISE EXCEPTION 'Only SELECT queries are allowed';
+  END IF;
+  
+  IF trimmed ~ '\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|execute)\b' THEN
+    RAISE EXCEPTION 'Query contains forbidden keywords';
+  END IF;
+
+  EXECUTE format('SELECT jsonb_agg(row_to_json(t)) FROM (%s) t', query_text) INTO result;
+  
+  RETURN COALESCE(result, '[]'::jsonb);
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.find_ai_pdf_duplicates()
+ RETURNS TABLE(id uuid, filename text, relative_path text, thumbnail_url text, style_group_id uuid)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+AS $function$
+  SELECT
+    a.id,
+    a.filename,
+    a.relative_path,
+    a.thumbnail_url,
+    a.style_group_id
+  FROM assets a
+  WHERE a.file_type = 'ai'
+    AND a.is_deleted = false
+    AND EXISTS (
+      SELECT 1 FROM assets p
+      WHERE p.file_type = 'pdf'
+        AND p.is_deleted = false
+        -- Same directory (everything before the last slash, or empty string for root)
+        AND regexp_replace(p.relative_path, '/[^/]*$', '') = regexp_replace(a.relative_path, '/[^/]*$', '')
+        -- Same base filename, case-insensitive (strip final extension)
+        AND lower(regexp_replace(p.filename, '\.[^.]+$', '')) = lower(regexp_replace(a.filename, '\.[^.]+$', ''))
+    )
+  ORDER BY a.relative_path;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.get_filter_counts(p_filters jsonb DEFAULT '{}'::jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_min_date timestamptz;
+  v_search text;
+  v_file_types text[];
+  v_statuses text[];
+  v_workflow_statuses text[];
+  v_is_licensed boolean;
+  v_licensor_id uuid;
+  v_property_id uuid;
+  v_asset_types text[];
+  v_art_sources text[];
+  v_tag_filter text;
+  v_stages text[];
+  v_customer text;
+  v_program text;
+  v_result jsonb := '{}'::jsonb;
+BEGIN
+  SELECT (value #>> '{}')::timestamptz INTO v_min_date
+  FROM admin_config WHERE key = 'THUMBNAIL_MIN_DATE';
+  IF v_min_date IS NULL THEN
+    v_min_date := '2020-01-01'::timestamptz;
+  END IF;
+
+  v_search := p_filters ->> 'search';
+  v_is_licensed := (p_filters ->> 'isLicensed')::boolean;
+  v_licensor_id := (p_filters ->> 'licensorId')::uuid;
+  v_property_id := (p_filters ->> 'propertyId')::uuid;
+  v_tag_filter := p_filters ->> 'tagFilter';
+  v_customer := p_filters ->> 'customer';
+  v_program := p_filters ->> 'program';
+
+  IF p_filters ? 'fileType' AND jsonb_array_length(p_filters -> 'fileType') > 0 THEN
+    SELECT array_agg(x::text) INTO v_file_types FROM jsonb_array_elements_text(p_filters -> 'fileType') x;
+  END IF;
+  IF p_filters ? 'status' AND jsonb_array_length(p_filters -> 'status') > 0 THEN
+    SELECT array_agg(x::text) INTO v_statuses FROM jsonb_array_elements_text(p_filters -> 'status') x;
+  END IF;
+  IF p_filters ? 'workflowStatus' AND jsonb_array_length(p_filters -> 'workflowStatus') > 0 THEN
+    SELECT array_agg(x::text) INTO v_workflow_statuses FROM jsonb_array_elements_text(p_filters -> 'workflowStatus') x;
+  END IF;
+  IF p_filters ? 'assetType' AND jsonb_array_length(p_filters -> 'assetType') > 0 THEN
+    SELECT array_agg(x::text) INTO v_asset_types FROM jsonb_array_elements_text(p_filters -> 'assetType') x;
+  END IF;
+  IF p_filters ? 'artSource' AND jsonb_array_length(p_filters -> 'artSource') > 0 THEN
+    SELECT array_agg(x::text) INTO v_art_sources FROM jsonb_array_elements_text(p_filters -> 'artSource') x;
+  END IF;
+  IF p_filters ? 'stage' AND jsonb_array_length(p_filters -> 'stage') > 0 THEN
+    SELECT array_agg(x::text) INTO v_stages FROM jsonb_array_elements_text(p_filters -> 'stage') x;
+  END IF;
+
+  WITH base AS MATERIALIZED (
+    SELECT file_type, status, workflow_status, stage, is_licensed
+    FROM assets
+    WHERE is_deleted = false
+      AND (modified_at >= v_min_date OR file_created_at >= v_min_date OR thumbnail_url IS NOT NULL)
+      AND (v_search IS NULL OR filename ILIKE '%' || v_search || '%')
+      AND (v_licensor_id IS NULL OR licensor_id = v_licensor_id)
+      AND (v_property_id IS NULL OR property_id = v_property_id)
+      AND (v_asset_types IS NULL OR asset_type::text = ANY(v_asset_types))
+      AND (v_art_sources IS NULL OR art_source::text = ANY(v_art_sources))
+      AND (v_tag_filter IS NULL OR v_tag_filter = ANY(tags))
+      AND (v_customer IS NULL OR customer = v_customer)
+      AND (v_program IS NULL OR program = v_program)
+  )
+  SELECT jsonb_build_object(
+    'fileType', COALESCE((
+      SELECT jsonb_object_agg(file_type::text, cnt) FROM (
+        SELECT file_type, count(*) AS cnt FROM base
+        WHERE (v_statuses IS NULL OR status::text = ANY(v_statuses))
+          AND (v_workflow_statuses IS NULL OR workflow_status::text = ANY(v_workflow_statuses))
+          AND (v_stages IS NULL OR stage = ANY(v_stages))
+          AND (v_is_licensed IS NULL OR is_licensed = v_is_licensed)
+        GROUP BY file_type
+      ) s
+    ), '{}'::jsonb),
+    'status', COALESCE((
+      SELECT jsonb_object_agg(status::text, cnt) FROM (
+        SELECT status, count(*) AS cnt FROM base
+        WHERE (v_file_types IS NULL OR file_type::text = ANY(v_file_types))
+          AND (v_workflow_statuses IS NULL OR workflow_status::text = ANY(v_workflow_statuses))
+          AND (v_stages IS NULL OR stage = ANY(v_stages))
+          AND (v_is_licensed IS NULL OR is_licensed = v_is_licensed)
+        GROUP BY status
+      ) s
+    ), '{}'::jsonb),
+    'workflowStatus', COALESCE((
+      SELECT jsonb_object_agg(workflow_status, cnt) FROM (
+        SELECT workflow_status, count(*) AS cnt FROM base
+        WHERE workflow_status IS NOT NULL
+          AND (v_file_types IS NULL OR file_type::text = ANY(v_file_types))
+          AND (v_statuses IS NULL OR status::text = ANY(v_statuses))
+          AND (v_stages IS NULL OR stage = ANY(v_stages))
+          AND (v_is_licensed IS NULL OR is_licensed = v_is_licensed)
+        GROUP BY workflow_status
+      ) s
+    ), '{}'::jsonb),
+    'stage', COALESCE((
+      SELECT jsonb_object_agg(stage, cnt) FROM (
+        SELECT stage, count(*) AS cnt FROM base
+        WHERE stage IS NOT NULL
+          AND (v_file_types IS NULL OR file_type::text = ANY(v_file_types))
+          AND (v_statuses IS NULL OR status::text = ANY(v_statuses))
+          AND (v_workflow_statuses IS NULL OR workflow_status::text = ANY(v_workflow_statuses))
+          AND (v_is_licensed IS NULL OR is_licensed = v_is_licensed)
+        GROUP BY stage
+      ) s
+    ), '{}'::jsonb),
+    'isLicensed', (
+      SELECT jsonb_build_object(
+        'true', COALESCE(sum(CASE WHEN is_licensed = true THEN 1 ELSE 0 END), 0),
+        'false', COALESCE(sum(CASE WHEN is_licensed = false OR is_licensed IS NULL THEN 1 ELSE 0 END), 0)
+      ) FROM base
+      WHERE (v_file_types IS NULL OR file_type::text = ANY(v_file_types))
+        AND (v_statuses IS NULL OR status::text = ANY(v_statuses))
+        AND (v_workflow_statuses IS NULL OR workflow_status::text = ANY(v_workflow_statuses))
+        AND (v_stages IS NULL OR stage = ANY(v_stages))
+    )
+  ) INTO v_result;
+
+  RETURN v_result;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.get_sg_preview_stats()
+ RETURNS json
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  WITH file_stats AS (
+    SELECT
+      COUNT(*) FILTER (WHERE is_active)                                                                                                                                                              AS total_active,
+      COUNT(*) FILTER (WHERE is_active AND thumbnail_url IS NOT NULL)                                                                                                                                AS has_preview,
+      COUNT(*) FILTER (WHERE is_active AND thumbnail_url IS NULL AND thumbnail_error IS NULL     AND lower(file_extension) IN ('pdf', 'ai', 'psd', 'eps', 'jpg', 'jpeg', 'png', 'tif', 'tiff'))   AS renderable_no_preview,
+      COUNT(*) FILTER (WHERE is_active AND thumbnail_url IS NULL AND thumbnail_error IS NOT NULL AND lower(file_extension) IN ('pdf', 'ai', 'psd', 'eps', 'jpg', 'jpeg', 'png', 'tif', 'tiff'))   AS render_errored,
+      COUNT(*) FILTER (WHERE is_active AND thumbnail_url IS NULL                                 AND lower(file_extension) NOT IN ('pdf', 'ai', 'psd', 'eps', 'jpg', 'jpeg', 'png', 'tif', 'tiff')) AS unsupported
+    FROM public.style_guide_files
+  ),
+  queue_stats AS (
+    SELECT COUNT(*) FILTER (WHERE status IN ('pending', 'claimed')) AS queued_now
+    FROM public.style_guide_render_queue
+  )
+  SELECT json_build_object(
+    'total_active',          fs.total_active,
+    'has_preview',           fs.has_preview,
+    'renderable_no_preview', fs.renderable_no_preview,
+    'render_errored',        fs.render_errored,
+    'unsupported',           fs.unsupported,
+    'queued_now',            qs.queued_now
+  )
+  FROM file_stats fs, queue_stats qs;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.get_sg_render_queue_stats()
+ RETURNS json
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  SELECT json_build_object(
+    'pending',   COUNT(*) FILTER (WHERE status = 'pending'),
+    'claimed',   COUNT(*) FILTER (WHERE status = 'claimed'),
+    'completed', COUNT(*) FILTER (WHERE status = 'completed'),
+    'failed',    COUNT(*) FILTER (WHERE status = 'failed')
+  )
+  FROM style_guide_render_queue;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  _invitation record;
+  _email text;
+  _full_name text;
+  _provider text;
+  _app public.app_name;
+BEGIN
+  _email := lower(NEW.email);
+  _full_name := COALESCE(
+    NEW.raw_user_meta_data->>'full_name',
+    NEW.raw_user_meta_data->>'name',
+    _email
+  );
+  _provider := NEW.raw_app_meta_data->>'provider';
+
+  -- Company SSO users come from managed identity providers and bypass
+  -- invitation rows. Azure is the active UI path; Authentik is retained for
+  -- existing/backend compatibility.
+  IF _provider IN ('authentik', 'azure') THEN
+    INSERT INTO public.profiles (user_id, email, full_name)
+    VALUES (NEW.id, _email, _full_name)
+    ON CONFLICT (user_id) DO UPDATE
+      SET email = EXCLUDED.email,
+          full_name = EXCLUDED.full_name,
+          updated_at = now();
+
+    INSERT INTO public.user_roles (user_id, role)
+    VALUES (NEW.id, 'user')
+    ON CONFLICT (user_id, role) DO NOTHING;
+
+    INSERT INTO public.app_access (user_id, app)
+    VALUES (NEW.id, 'popdam'::public.app_name)
+    ON CONFLICT (user_id, app) DO NOTHING;
+
+    RETURN NEW;
+  END IF;
+
+  -- Google and email/password remain invitation-only.
+  SELECT * INTO _invitation
+  FROM public.invitations
+  WHERE lower(email) = _email AND accepted_at IS NULL
+  ORDER BY created_at DESC
+  LIMIT 1;
+
+  IF _invitation IS NULL THEN
+    RAISE EXCEPTION 'Access denied: no valid invitation found for %', _email;
+  END IF;
+
+  INSERT INTO public.profiles (user_id, email, full_name)
+  VALUES (NEW.id, _email, _full_name)
+  ON CONFLICT (user_id) DO UPDATE
+    SET email = EXCLUDED.email,
+        full_name = EXCLUDED.full_name,
+        updated_at = now();
+
+  INSERT INTO public.user_roles (user_id, role)
+  VALUES (NEW.id, _invitation.role)
+  ON CONFLICT (user_id, role) DO NOTHING;
+
+  FOREACH _app IN ARRAY COALESCE(_invitation.apps, ARRAY['popdam']::public.app_name[])
+  LOOP
+    INSERT INTO public.app_access (user_id, app, granted_by)
+    VALUES (NEW.id, _app, _invitation.invited_by)
+    ON CONFLICT (user_id, app) DO NOTHING;
+  END LOOP;
+
+  IF NEW.invited_at IS NULL OR NEW.email_confirmed_at IS NOT NULL THEN
+    UPDATE public.invitations
+    SET accepted_at = now()
+    WHERE id = _invitation.id;
+  END IF;
+
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.handle_user_confirmed()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF OLD.email_confirmed_at IS NULL AND NEW.email_confirmed_at IS NOT NULL THEN
+    UPDATE public.invitations
+    SET accepted_at = now()
+    WHERE email = NEW.email AND accepted_at IS NULL;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.has_app_access(_user_id uuid, _app app_name)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  SELECT EXISTS (
+    SELECT 1 FROM public.app_access
+    WHERE user_id = _user_id AND app = _app
+  )
+$function$;
+
+CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role app_role)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  SELECT EXISTS (
+    SELECT 1 FROM public.user_roles
+    WHERE user_id = _user_id AND role = _role
+  )
+$function$;
+
+CREATE OR REPLACE FUNCTION public.infer_path_attrs(p_path text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ IMMUTABLE
+AS $function$
+DECLARE
+  segs text[];
+  idx  int;
+  s    text;
+  c1   text;
+  cust text := NULL;
+  prog text := NULL;
+BEGIN
+  IF p_path IS NULL OR p_path = '' THEN
+    RETURN jsonb_build_object('stage', NULL, 'customer', NULL, 'program', NULL);
+  END IF;
+
+  segs := string_to_array(p_path, '/');
+  idx  := array_position(segs, '____New Structure');
+  IF idx IS NULL THEN
+    RETURN jsonb_build_object('stage', NULL, 'customer', NULL, 'program', NULL);
+  END IF;
+
+  s := NULLIF(segs[idx + 1], '');
+  IF s IS NULL THEN
+    RETURN jsonb_build_object('stage', NULL, 'customer', NULL, 'program', NULL);
+  END IF;
+
+  -- Customer / program are only reliably encoded in the "In Development / Customer Adopted" branch.
+  IF s = 'In Development' AND segs[idx + 2] = 'Customer Adopted' THEN
+    c1 := NULLIF(segs[idx + 3], '');
+    IF c1 IS NULL THEN
+      cust := NULL; prog := NULL;
+    ELSIF c1 = '_FINISHED' THEN
+      -- wrapper bucket: _FINISHED / <Customer>_finished / <Program> / <SKU>
+      cust := NULLIF(regexp_replace(COALESCE(segs[idx + 4], ''), '_finished$', '', 'i'), '');
+      prog := NULLIF(segs[idx + 5], '');
+    ELSIF left(c1, 1) = '_' THEN
+      -- status buckets (_NOT APPROVED, _REJECTED, _No Customer, _NOT SUBMITTED): no real customer
+      cust := NULL; prog := NULL;
+    ELSE
+      cust := c1;
+      prog := NULLIF(segs[idx + 4], '');
+    END IF;
+
+    -- Guard: the program slot must be a real program folder, not the SKU folder or a file.
+    IF prog IS NOT NULL THEN
+      IF prog ~ '\.[A-Za-z0-9]+$' THEN
+        prog := NULL;  -- looks like a filename
+      ELSIF prog !~ '[[:space:]]' AND prog ~ '^[A-Za-z]{1,6}[0-9][A-Za-z0-9]*$' AND length(prog) >= 8 THEN
+        prog := NULL;  -- looks like a SKU code (no program folder present)
+      END IF;
+    END IF;
+  END IF;
+
+  RETURN jsonb_build_object('stage', s, 'customer', cust, 'program', prog);
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.is_style_guide_source_pdf(p_file_type text, p_filename text)
+ RETURNS boolean
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+  SELECT p_file_type = 'pdf' AND p_filename IS NOT NULL AND (
+    p_filename ILIKE '%licensing sheet%' OR p_filename ILIKE '%licensing_sheet%' OR
+    p_filename ILIKE '%license sheet%'   OR p_filename ILIKE '%license_sheet%'   OR
+    p_filename ILIKE '%tech pack%'       OR p_filename ILIKE '%tech_pack%'       OR
+    p_filename ILIKE '%techpack%'
+  );
+$function$;
+
+CREATE OR REPLACE FUNCTION public.normalize_for_sg_match(p text)
+ RETURNS text
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+  SELECT regexp_replace(lower(regexp_replace(p, '\.[^.]+$', '')), '[^a-z0-9]', '', 'g')
+$function$;
+
+CREATE OR REPLACE FUNCTION public.parse_pdf_files_used(p_asset_id uuid)
+ RETURNS integer
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+  v_sku     text;
+  v_ftype   text;
+  v_fname   text;
+  v_text    text;
+  v_lines   text[];
+  v_in_sect boolean := false;
+  v_line    text;
+  v_trimmed text;
+  v_count   int := 0;
+  v_entry   text;
+  v_inline  text;
+BEGIN
+  SELECT sku, file_type::text, filename INTO v_sku, v_ftype, v_fname FROM assets WHERE id = p_asset_id;
+  IF v_sku IS NULL OR v_sku = '' THEN RETURN 0; END IF;
+
+  -- Style Guide Sources are parsed ONLY from licensing-sheet / tech-pack PDFs.
+  IF NOT public.is_style_guide_source_pdf(v_ftype, v_fname) THEN RETURN 0; END IF;
+
+  SELECT extracted_text INTO v_text
+  FROM pdf_text_samples
+  WHERE asset_id = p_asset_id AND extracted_text IS NOT NULL
+  ORDER BY sampled_at DESC LIMIT 1;
+  IF v_text IS NULL THEN RETURN 0; END IF;
+
+  v_lines := string_to_array(v_text, E'\n');
+  FOREACH v_line IN ARRAY v_lines LOOP
+    v_trimmed := trim(v_line);
+
+    IF v_trimmed ~* '^\s*(files?\s+used|source\s+files?|art\s+files?|design\s+files?)\s*:' THEN
+      v_in_sect := true;
+      v_inline := trim(regexp_replace(v_trimmed, '(?i)^\s*(files?\s+used|source\s+files?|art\s+files?|design\s+files?)\s*:\s*', ''));
+      IF v_inline <> '' THEN
+        FOREACH v_entry IN ARRAY string_to_array(v_inline, ',') LOOP
+          v_entry := trim(v_entry);
+          IF v_entry <> '' AND length(v_entry) >= 2 AND NOT v_entry ~ '^\d+$' THEN
+            INSERT INTO sku_files_used (sku, file_name, source)
+            VALUES (v_sku, v_entry, 'pdf_text')
+            ON CONFLICT (sku, file_name) DO NOTHING;
+            v_count := v_count + 1;
+          END IF;
+        END LOOP;
+        v_in_sect := false;
+      END IF;
+      CONTINUE;
+    END IF;
+
+    IF v_in_sect THEN
+      IF v_trimmed = '' OR v_trimmed ~ '^\S[^:]*:\s*$' THEN
+        v_in_sect := false;
+        CONTINUE;
+      END IF;
+      IF v_trimmed ~ '^\d+$' OR length(v_trimmed) < 2 THEN CONTINUE; END IF;
+      INSERT INTO sku_files_used (sku, file_name, source)
+      VALUES (v_sku, v_trimmed, 'pdf_text')
+      ON CONFLICT (sku, file_name) DO NOTHING;
+      v_count := v_count + 1;
+    END IF;
+  END LOOP;
+  RETURN v_count;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.propagate_group_tags_batch(p_cursor uuid DEFAULT NULL::uuid, p_batch_size integer DEFAULT 100)
+ RETURNS TABLE(next_cursor uuid, propagated integer, skipped integer, done boolean)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+ SET statement_timeout TO '120s'
+ SET lock_timeout TO '0'
+AS $function$
+DECLARE
+  v_next_cursor uuid;
+  v_total_propagated int := 0;
+  v_group_count int := 0;
+  v_batch_propagated int;
+  v_file_specific_tags text[] := ARRAY[
+    'art_piece','art piece','product','product shot','product photo',
+    'packaging','package','tech_pack','tech pack','technical pack',
+    'photography','photo','mockup','mock up','mock-up',
+    'front view','back view','side view','flat lay','flatlay',
+    'render','3d render'
+  ];
+BEGIN
+  FOR v_next_cursor IN
+    SELECT sg.id
+    FROM style_groups sg
+    WHERE (p_cursor IS NULL OR sg.id > p_cursor)
+    ORDER BY sg.id
+    LIMIT p_batch_size
+  LOOP
+    v_group_count := v_group_count + 1;
+
+    WITH source_asset AS (
+      SELECT a.id, a.licensor_id, a.property_id, a.is_licensed,
+             a.big_theme, a.little_theme, a.design_style, a.cover_description
+      FROM assets a
+      WHERE a.style_group_id = v_next_cursor
+        AND a.is_deleted = false
+        AND a.ai_tagged_at IS NOT NULL
+      ORDER BY a.primary_sort_tier ASC, a.ai_tagged_at ASC
+      LIMIT 1
+    ),
+    source_tags AS (
+      SELECT at2.tag
+      FROM asset_tags at2
+      JOIN source_asset sa ON sa.id = at2.asset_id
+      WHERE at2.source = 'ai'
+        AND lower(trim(at2.tag)) != ALL(v_file_specific_tags)
+    ),
+    source_chars AS (
+      SELECT ac.character_id
+      FROM asset_characters ac
+      JOIN source_asset sa ON sa.id = ac.asset_id
+    ),
+    siblings AS (
+      SELECT a.id, a.licensor_id, a.property_id, a.is_licensed,
+             a.big_theme, a.little_theme, a.design_style, a.cover_description
+      FROM assets a
+      CROSS JOIN source_asset sa
+      WHERE a.style_group_id = v_next_cursor
+        AND a.is_deleted = false
+        AND a.id != sa.id
+    ),
+    inserted_tags AS (
+      INSERT INTO asset_tags (asset_id, tag, source)
+      SELECT s.id, st.tag, 'ai'
+      FROM siblings s
+      CROSS JOIN source_tags st
+      ON CONFLICT (asset_id, tag) DO NOTHING
+      RETURNING 1
+    ),
+    inserted_chars AS (
+      INSERT INTO asset_characters (asset_id, character_id)
+      SELECT s.id, sc.character_id
+      FROM siblings s
+      CROSS JOIN source_chars sc
+      ON CONFLICT (asset_id, character_id) DO NOTHING
+      RETURNING 1
+    ),
+    meta_updates AS (
+      UPDATE assets a
+      SET
+        licensor_id = COALESCE(a.licensor_id, sa.licensor_id),
+        property_id = COALESCE(a.property_id, sa.property_id),
+        is_licensed = CASE WHEN a.is_licensed = true THEN true ELSE COALESCE(sa.is_licensed, a.is_licensed) END,
+        big_theme = COALESCE(a.big_theme, sa.big_theme),
+        little_theme = COALESCE(a.little_theme, sa.little_theme),
+        design_style = COALESCE(a.design_style, sa.design_style),
+        cover_description = COALESCE(a.cover_description, sa.cover_description)
+      FROM source_asset sa, siblings s
+      WHERE a.id = s.id
+        AND (
+          (a.licensor_id IS NULL AND sa.licensor_id IS NOT NULL) OR
+          (a.property_id IS NULL AND sa.property_id IS NOT NULL) OR
+          (a.is_licensed IS NOT TRUE AND sa.is_licensed = true) OR
+          (a.big_theme IS NULL AND sa.big_theme IS NOT NULL) OR
+          (a.little_theme IS NULL AND sa.little_theme IS NOT NULL) OR
+          (a.design_style IS NULL AND sa.design_style IS NOT NULL) OR
+          (a.cover_description IS NULL AND sa.cover_description IS NOT NULL)
+        )
+      RETURNING 1
+    )
+    SELECT
+      (SELECT count(*)::int FROM inserted_tags) + (SELECT count(*)::int FROM inserted_chars)
+    INTO v_batch_propagated;
+
+    v_total_propagated := v_total_propagated + COALESCE(v_batch_propagated, 0);
+  END LOOP;
+
+  RETURN QUERY SELECT
+    v_next_cursor,
+    v_total_propagated,
+    0::int,
+    (v_group_count < p_batch_size);
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.queue_nightly_rebuild_style_groups()
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_current jsonb;
+  v_status  text;
+  v_now     timestamptz := now();
+  v_state   jsonb;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('BULK_OPERATIONS'));
+
+  SELECT value INTO v_current
+  FROM admin_config
+  WHERE key = 'BULK_OPERATIONS';
+
+  v_current := COALESCE(v_current, '{}'::jsonb);
+  v_status  := v_current->'rebuild-style-groups'->>'status';
+
+  -- Skip if already running or queued
+  IF v_status IN ('running', 'queued') THEN
+    RETURN;
+  END IF;
+
+  v_state := jsonb_build_object(
+    'status',         'queued',
+    'cursor',         0,
+    'params',         jsonb_build_object('force_restart', true),
+    'started_at',     v_now::text,
+    'updated_at',     v_now::text,
+    'progress',       '{}'::jsonb,
+    'run_id',         gen_random_uuid()::text,
+    'queue_position', (EXTRACT(EPOCH FROM v_now) * 1000)::bigint,
+    'requested_by',   'pg_cron'
+  );
+
+  v_current := jsonb_set(v_current, ARRAY['rebuild-style-groups'], v_state);
+
+  INSERT INTO admin_config (key, value, updated_at)
+  VALUES ('BULK_OPERATIONS', v_current, v_now)
+  ON CONFLICT (key) DO UPDATE
+    SET value      = EXCLUDED.value,
+        updated_at = EXCLUDED.updated_at;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.queue_sg_render_jobs_by_ids(p_file_ids uuid[])
+ RETURNS integer
+ LANGUAGE sql
+AS $function$
+  WITH inserted AS (
+    INSERT INTO public.style_guide_render_queue (style_guide_file_id)
+    SELECT t.id
+    FROM unnest(p_file_ids) AS t(id)
+    JOIN public.style_guide_files f ON f.id = t.id
+    WHERE f.thumbnail_url IS NULL
+      AND f.thumbnail_error IS NULL
+      AND lower(f.file_extension) IN ('pdf', 'ai', 'psd', 'eps', 'jpg', 'jpeg', 'png', 'tif', 'tiff')
+      AND NOT EXISTS (
+        SELECT 1 FROM public.style_guide_render_queue q
+        WHERE q.style_guide_file_id = t.id
+          AND q.status IN ('pending', 'claimed')
+      )
+    RETURNING 1
+  )
+  SELECT count(*)::int FROM inserted;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.reconcile_style_group_stats_batch(p_cursor uuid DEFAULT NULL::uuid, p_batch_size integer DEFAULT 200, p_sub text DEFAULT 'counts'::text)
+ RETURNS TABLE(next_cursor uuid, processed integer, sub text, done boolean)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+ SET statement_timeout TO '120s'
+ SET lock_timeout TO '0'
+AS $function$
+DECLARE
+  v_ids uuid[];
+  v_count int;
+  v_last_id uuid;
+  v_done boolean;
+BEGIN
+  -- Fetch batch of style_group IDs using keyset pagination
+  SELECT array_agg(sg.id ORDER BY sg.id), count(*)::int
+  INTO v_ids, v_count
+  FROM (
+    SELECT sg2.id
+    FROM style_groups sg2
+    WHERE (p_cursor IS NULL OR sg2.id > p_cursor)
+    ORDER BY sg2.id
+    LIMIT p_batch_size
+  ) sg;
+
+  v_done := (v_count < p_batch_size);
+
+  IF v_count = 0 THEN
+    -- No more groups in this sub-stage
+    IF p_sub = 'counts' THEN
+      -- Signal transition to primaries
+      RETURN QUERY SELECT NULL::uuid, 0, 'counts_done'::text, false;
+    ELSE
+      -- Primaries done = fully complete
+      RETURN QUERY SELECT NULL::uuid, 0, 'complete'::text, true;
+    END IF;
+    RETURN;
+  END IF;
+
+  v_last_id := v_ids[array_length(v_ids, 1)];
+
+  IF p_sub = 'counts' THEN
+    -- Refresh counts + latest_file_date for this batch
+    PERFORM refresh_style_group_counts_batch(v_ids);
+
+    IF v_done THEN
+      -- Counts exhausted → signal transition
+      RETURN QUERY SELECT v_last_id, v_count, 'counts_done'::text, false;
+    ELSE
+      RETURN QUERY SELECT v_last_id, v_count, 'counts'::text, false;
+    END IF;
+
+  ELSIF p_sub = 'primaries' THEN
+    -- Refresh primary asset selection for this batch
+    PERFORM refresh_style_group_primaries(v_ids);
+
+    RETURN QUERY SELECT v_last_id, v_count, p_sub, v_done;
+
+  ELSE
+    RAISE EXCEPTION 'Unknown sub-stage: %', p_sub;
+  END IF;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.refresh_group_on_asset_hard_delete()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF OLD.style_group_id IS NOT NULL THEN
+    PERFORM refresh_style_group_counts_batch(ARRAY[OLD.style_group_id]);
+    PERFORM refresh_style_group_primaries(ARRAY[OLD.style_group_id]);
+  END IF;
+  RETURN OLD;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.refresh_primary_on_asset_soft_delete()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  -- Only act when this asset is currently the group's primary
+  IF NEW.style_group_id IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM style_groups
+       WHERE id = NEW.style_group_id
+         AND primary_asset_id = NEW.id
+     )
+  THEN
+    PERFORM refresh_style_group_primaries(ARRAY[NEW.style_group_id]);
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.refresh_style_group_counts()
+ RETURNS void
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+ SET statement_timeout TO '60s'
+AS $function$
+  UPDATE public.style_groups sg
+  SET
+    asset_count = COALESCE(agg.asset_count, 0),
+    latest_file_date = agg.latest_file_date,
+    updated_at = now()
+  FROM (
+    SELECT
+      sg2.id AS style_group_id,
+      COUNT(a.id)::integer AS asset_count,
+      MAX(a.modified_at) AS latest_file_date
+    FROM public.style_groups sg2
+    LEFT JOIN public.assets a
+      ON a.style_group_id = sg2.id
+      AND a.is_deleted = false
+    GROUP BY sg2.id
+  ) agg
+  WHERE sg.id = agg.style_group_id;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.refresh_style_group_counts_batch(p_group_ids uuid[])
+ RETURNS integer
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+ SET statement_timeout TO '30s'
+ SET lock_timeout TO '0'
+AS $function$
+  WITH agg AS (
+    SELECT
+      sg.id AS style_group_id,
+      COUNT(a.id)::integer AS asset_count,
+      MAX(a.modified_at) AS latest_file_date
+    FROM public.style_groups sg
+    LEFT JOIN public.assets a
+      ON a.style_group_id = sg.id
+      AND a.is_deleted = false
+    WHERE sg.id = ANY(p_group_ids)
+    GROUP BY sg.id
+  ),
+  upd AS (
+    UPDATE public.style_groups sg
+    SET
+      asset_count             = agg.asset_count,
+      latest_file_date        = agg.latest_file_date,
+      -- Clear primary fields for empty groups so they disappear from the library
+      primary_asset_id        = CASE WHEN agg.asset_count = 0 THEN NULL ELSE sg.primary_asset_id END,
+      primary_asset_type      = CASE WHEN agg.asset_count = 0 THEN NULL ELSE sg.primary_asset_type END,
+      primary_thumbnail_url   = CASE WHEN agg.asset_count = 0 THEN NULL ELSE sg.primary_thumbnail_url END,
+      primary_thumbnail_error = CASE WHEN agg.asset_count = 0 THEN NULL ELSE sg.primary_thumbnail_error END,
+      updated_at              = now()
+    FROM agg
+    WHERE sg.id = agg.style_group_id
+    RETURNING 1
+  )
+  SELECT COUNT(*)::integer FROM upd;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.refresh_style_group_counts_on_asset_change()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_group_ids uuid[];
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    SELECT array_agg(DISTINCT style_group_id)
+      INTO v_group_ids
+      FROM new_table
+     WHERE style_group_id IS NOT NULL;
+
+  ELSIF TG_OP = 'DELETE' THEN
+    SELECT array_agg(DISTINCT style_group_id)
+      INTO v_group_ids
+      FROM old_table
+     WHERE style_group_id IS NOT NULL;
+
+  ELSE -- UPDATE: only care about rows where is_deleted or style_group_id actually changed
+    SELECT array_agg(DISTINCT grp)
+      INTO v_group_ids
+      FROM (
+        SELECT o.style_group_id AS grp
+          FROM old_table o
+          JOIN new_table n ON n.id = o.id
+         WHERE (o.is_deleted IS DISTINCT FROM n.is_deleted
+                OR o.style_group_id IS DISTINCT FROM n.style_group_id)
+           AND o.style_group_id IS NOT NULL
+        UNION
+        SELECT n.style_group_id AS grp
+          FROM old_table o
+          JOIN new_table n ON n.id = o.id
+         WHERE (o.is_deleted IS DISTINCT FROM n.is_deleted
+                OR o.style_group_id IS DISTINCT FROM n.style_group_id)
+           AND n.style_group_id IS NOT NULL
+      ) t;
+  END IF;
+
+  IF v_group_ids IS NOT NULL AND array_length(v_group_ids, 1) > 0 THEN
+    PERFORM public.refresh_style_group_counts_batch(v_group_ids);
+  END IF;
+
+  RETURN NULL;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.refresh_style_group_primaries(p_group_ids uuid[])
+ RETURNS integer
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+ SET statement_timeout TO '30s'
+ SET lock_timeout TO '0'
+AS $function$
+  WITH picked AS (
+    SELECT DISTINCT ON (sg.id)
+      sg.id AS style_group_id,
+      a.id AS primary_asset_id,
+      a.asset_type::text AS primary_asset_type,
+      a.thumbnail_url AS primary_thumbnail_url,
+      a.thumbnail_error AS primary_thumbnail_error
+    FROM public.style_groups sg
+    LEFT JOIN public.assets a
+      ON a.style_group_id = sg.id AND a.is_deleted = false
+    WHERE sg.id = ANY(p_group_ids)
+    ORDER BY sg.id, a.primary_sort_tier ASC, a.created_at ASC
+  ),
+  upd AS (
+    UPDATE public.style_groups sg SET
+      primary_asset_id = picked.primary_asset_id,
+      primary_asset_type = picked.primary_asset_type,
+      primary_thumbnail_url = picked.primary_thumbnail_url,
+      primary_thumbnail_error = picked.primary_thumbnail_error,
+      updated_at = now()
+    FROM picked WHERE sg.id = picked.style_group_id
+    RETURNING 1
+  )
+  SELECT COUNT(*)::integer FROM upd;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.refresh_style_guide_matviews()
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  REFRESH MATERIALIZED VIEW CONCURRENTLY public.style_guide_file_groups;
+  REFRESH MATERIALIZED VIEW public.style_guide_folders;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.requeue_all_failed_sg_jobs(p_limit integer DEFAULT 500)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_count int;
+BEGIN
+  UPDATE public.style_guide_render_queue
+  SET
+    status        = 'pending',
+    error_message = NULL,
+    completed_at  = NULL,
+    claimed_at    = NULL,
+    claimed_by    = NULL
+  WHERE id IN (
+    SELECT id FROM public.style_guide_render_queue
+    WHERE status = 'failed'
+    LIMIT p_limit
+  );
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+  RETURN v_count;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.reset_stale_jobs(p_timeout_minutes integer DEFAULT 30)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  affected int;
+BEGIN
+  UPDATE public.processing_queue
+  SET status = 'pending', agent_id = NULL, claimed_at = NULL
+  WHERE status IN ('claimed', 'processing')
+    AND claimed_at < now() - (p_timeout_minutes || ' minutes')::interval;
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  RETURN affected;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.resolve_sku_files_used()
+ RETURNS integer
+ LANGUAGE plpgsql
+AS $function$
+DECLARE v_count int;
+BEGIN
+  UPDATE sku_files_used u
+  SET style_guide_file_id = (
+    SELECT s.id
+    FROM style_guide_files s
+    WHERE s.is_active = true
+      AND normalize_for_sg_match(s.filename) = normalize_for_sg_match(u.file_name)
+    ORDER BY s.modified_at DESC NULLS LAST
+    LIMIT 1
+  )
+  WHERE style_guide_file_id IS NULL;
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+  RETURN v_count;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.resolve_sku_files_used_fuzzy(p_threshold real DEFAULT 0.6)
+ RETURNS integer
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+  r        record;
+  v_id     uuid;
+  v_score  real;
+  v_linked int := 0;
+BEGIN
+  FOR r IN
+    SELECT id, file_name FROM sku_files_used WHERE style_guide_file_id IS NULL
+  LOOP
+    v_id := NULL; v_score := NULL;
+
+    SELECT f.id, similarity(lower(f.filename), lower(r.file_name))
+      INTO v_id, v_score
+    FROM style_guide_files f
+    WHERE f.is_active AND lower(f.filename) % lower(r.file_name)
+    ORDER BY similarity(lower(f.filename), lower(r.file_name)) DESC
+    LIMIT 1;
+
+    UPDATE sku_files_used
+       SET style_guide_file_id  = CASE WHEN v_score >= p_threshold THEN v_id
+                                       ELSE style_guide_file_id END,
+           match_best_score      = GREATEST(COALESCE(match_best_score, 0), COALESCE(v_score, 0)),
+           match_attempts        = match_attempts + 1,
+           last_match_attempt_at = now()
+     WHERE id = r.id;
+
+    IF v_id IS NOT NULL AND v_score >= p_threshold THEN v_linked := v_linked + 1; END IF;
+  END LOOP;
+  RETURN v_linked;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.retry_sg_render_errors(p_file_ids uuid[] DEFAULT NULL::uuid[], p_limit integer DEFAULT 500)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_ids    uuid[];
+  v_queued int;
+BEGIN
+  SELECT ARRAY_AGG(id) INTO v_ids
+  FROM (
+    SELECT id
+    FROM public.style_guide_files
+    WHERE is_active
+      AND thumbnail_url IS NULL
+      AND thumbnail_error IS NOT NULL
+      AND lower(file_extension) IN ('pdf', 'ai', 'psd', 'eps', 'jpg', 'jpeg', 'png', 'tif', 'tiff')
+      AND (p_file_ids IS NULL OR id = ANY(p_file_ids))
+    LIMIT CASE WHEN p_file_ids IS NULL THEN p_limit ELSE NULL END
+  ) sub;
+
+  IF v_ids IS NULL OR array_length(v_ids, 1) = 0 THEN
+    RETURN 0;
+  END IF;
+
+  UPDATE public.style_guide_files SET thumbnail_error = NULL WHERE id = ANY(v_ids);
+  SELECT public.queue_sg_render_jobs_by_ids(v_ids) INTO v_queued;
+  RETURN v_queued;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.retry_sg_render_errors(p_file_ids uuid[] DEFAULT NULL::uuid[])
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_ids uuid[];
+  v_queued int;
+BEGIN
+  -- Disable statement timeout for this bulk operation; it may touch tens of thousands of rows.
+  SET LOCAL statement_timeout = 0;
+
+  SELECT ARRAY_AGG(id) INTO v_ids
+  FROM public.style_guide_files
+  WHERE is_active
+    AND thumbnail_url IS NULL
+    AND thumbnail_error IS NOT NULL
+    AND lower(file_extension) IN ('pdf', 'ai', 'psd', 'jpg', 'jpeg', 'png', 'tif', 'tiff')
+    AND (p_file_ids IS NULL OR id = ANY(p_file_ids));
+
+  IF v_ids IS NULL OR array_length(v_ids, 1) = 0 THEN
+    RETURN 0;
+  END IF;
+
+  UPDATE public.style_guide_files SET thumbnail_error = NULL WHERE id = ANY(v_ids);
+  SELECT public.queue_sg_render_jobs_by_ids(v_ids) INTO v_queued;
+  RETURN v_queued;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.run_full_reconcile_style_group_stats()
+ RETURNS TABLE(counts_updated integer, primaries_updated integer)
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+  v_cursor         uuid := NULL;
+  v_batch_ids      uuid[];
+  v_batch_size     int  := 500;
+  v_batch_count    int;
+  v_counts_updated int  := 0;
+  v_prim_updated   int  := 0;
+BEGIN
+  -- Phase 1: recompute asset_count for every group in one UPDATE+JOIN pass;
+  --          also clears primary fields on groups that are now empty.
+  WITH agg AS (
+    SELECT
+      sg.id                        AS style_group_id,
+      COUNT(a.id)::integer         AS asset_count,
+      MAX(a.modified_at)           AS latest_file_date
+    FROM public.style_groups sg
+    LEFT JOIN public.assets a
+      ON a.style_group_id = sg.id AND a.is_deleted = false
+    GROUP BY sg.id
+  ),
+  upd AS (
+    UPDATE public.style_groups sg SET
+      asset_count             = agg.asset_count,
+      latest_file_date        = agg.latest_file_date,
+      primary_asset_id        = CASE WHEN agg.asset_count = 0 THEN NULL ELSE sg.primary_asset_id        END,
+      primary_asset_type      = CASE WHEN agg.asset_count = 0 THEN NULL ELSE sg.primary_asset_type      END,
+      primary_thumbnail_url   = CASE WHEN agg.asset_count = 0 THEN NULL ELSE sg.primary_thumbnail_url   END,
+      primary_thumbnail_error = CASE WHEN agg.asset_count = 0 THEN NULL ELSE sg.primary_thumbnail_error END,
+      updated_at              = now()
+    FROM agg
+    WHERE sg.id = agg.style_group_id
+    RETURNING 1
+  )
+  SELECT COUNT(*)::int INTO v_counts_updated FROM upd;
+
+  -- Phase 2: re-pick primary asset for every group, batched to avoid huge arrays.
+  LOOP
+    SELECT array_agg(id ORDER BY id), COUNT(*)::int
+    INTO v_batch_ids, v_batch_count
+    FROM (
+      SELECT id FROM public.style_groups
+      WHERE (v_cursor IS NULL OR id > v_cursor)
+      ORDER BY id
+      LIMIT v_batch_size
+    ) sub;
+
+    EXIT WHEN v_batch_count = 0;
+
+    PERFORM public.refresh_style_group_primaries(v_batch_ids);
+    v_prim_updated := v_prim_updated + v_batch_count;
+    v_cursor := v_batch_ids[array_length(v_batch_ids, 1)];
+
+    EXIT WHEN v_batch_count < v_batch_size;
+  END LOOP;
+
+  RETURN QUERY SELECT v_counts_updated, v_prim_updated;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.set_assets_updated_at()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.set_style_group_cover(p_group_id uuid, p_asset_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_asset assets%ROWTYPE;
+BEGIN
+  -- Must be authenticated
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  -- Fetch the asset and verify it belongs to this style group
+  SELECT * INTO v_asset FROM public.assets WHERE id = p_asset_id AND is_deleted = false;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Asset not found';
+  END IF;
+  IF v_asset.style_group_id IS DISTINCT FROM p_group_id THEN
+    RAISE EXCEPTION 'Asset does not belong to this style group';
+  END IF;
+
+  -- Update only the cover columns
+  UPDATE public.style_groups
+  SET
+    primary_asset_id        = p_asset_id,
+    primary_asset_type      = v_asset.asset_type,
+    primary_thumbnail_url   = v_asset.thumbnail_url,
+    primary_thumbnail_error = v_asset.thumbnail_error,
+    updated_at              = now()
+  WHERE id = p_group_id;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.sync_asset_tags_to_array()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_asset_id uuid;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    v_asset_id := OLD.asset_id;
+  ELSE
+    v_asset_id := NEW.asset_id;
+  END IF;
+
+  UPDATE public.assets
+  SET tags = COALESCE(
+    (SELECT array_agg(at.tag ORDER BY at.tag) FROM public.asset_tags at WHERE at.asset_id = v_asset_id),
+    '{}'::text[]
+  )
+  WHERE id = v_asset_id;
+
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.sync_cover_description_to_style_group()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_group_id uuid;
+  v_desc text;
+BEGIN
+  v_group_id := NEW.style_group_id;
+  IF v_group_id IS NULL THEN RETURN NEW; END IF;
+
+  -- Use cover_description from the group's primary asset, or fallback to first non-null in group
+  SELECT COALESCE(
+    (SELECT a.cover_description FROM public.assets a
+     JOIN public.style_groups sg ON sg.primary_asset_id = a.id
+     WHERE sg.id = v_group_id AND a.cover_description IS NOT NULL),
+    (SELECT a.cover_description FROM public.assets a
+     WHERE a.style_group_id = v_group_id AND a.is_deleted = false AND a.cover_description IS NOT NULL
+     LIMIT 1)
+  ) INTO v_desc;
+
+  UPDATE public.style_groups
+  SET cover_description = v_desc, updated_at = now()
+  WHERE id = v_group_id AND (cover_description IS DISTINCT FROM v_desc);
+
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.sync_designer_to_style_group()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_group_id uuid;
+  v_conflict boolean := false;
+  v_designer text;
+  v_tech_designer text;
+  v_freelancer text;
+  v_designers text[];
+  v_tech_designers text[];
+  v_freelancers text[];
+BEGIN
+  v_group_id := NEW.style_group_id;
+  IF v_group_id IS NULL THEN RETURN NEW; END IF;
+
+  SELECT
+    array_agg(DISTINCT a.designer_name) FILTER (WHERE a.designer_name IS NOT NULL),
+    array_agg(DISTINCT a.technical_designer_name) FILTER (WHERE a.technical_designer_name IS NOT NULL),
+    array_agg(DISTINCT a.freelancer_name) FILTER (WHERE a.freelancer_name IS NOT NULL)
+  INTO v_designers, v_tech_designers, v_freelancers
+  FROM public.assets a
+  WHERE a.style_group_id = v_group_id AND a.is_deleted = false;
+
+  v_designer := v_designers[1];
+  v_tech_designer := v_tech_designers[1];
+  v_freelancer := v_freelancers[1];
+
+  IF array_length(v_designers, 1) > 1
+     OR array_length(v_tech_designers, 1) > 1
+     OR array_length(v_freelancers, 1) > 1 THEN
+    v_conflict := true;
+  END IF;
+
+  UPDATE public.style_groups
+  SET designer_name = v_designer,
+      technical_designer_name = v_tech_designer,
+      freelancer_name = v_freelancer,
+      designer_conflict = v_conflict,
+      updated_at = now()
+  WHERE id = v_group_id;
+
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.sync_primary_asset_on_thumbnail()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF NEW.style_group_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- Case 1: Group has no primary — assign when asset has a thumbnail.
+  -- Covers INSERT (asset indexed with thumbnail already set) and
+  -- UPDATE where thumbnail just appeared (OLD.thumbnail_url IS NULL).
+  IF NEW.thumbnail_url IS NOT NULL
+     AND (TG_OP = 'INSERT' OR OLD.thumbnail_url IS NULL)
+  THEN
+    UPDATE public.style_groups sg
+    SET primary_asset_id        = NEW.id,
+        primary_asset_type      = NEW.asset_type::text,
+        primary_thumbnail_url   = NEW.thumbnail_url,
+        primary_thumbnail_error = NEW.thumbnail_error,
+        updated_at              = now()
+    WHERE sg.id = NEW.style_group_id
+      AND sg.primary_asset_id IS NULL;
+  END IF;
+
+  -- Case 2: This asset IS already the primary — keep cached fields in sync.
+  UPDATE public.style_groups sg
+  SET primary_thumbnail_url   = NEW.thumbnail_url,
+      primary_thumbnail_error = NEW.thumbnail_error,
+      updated_at              = now()
+  WHERE sg.id = NEW.style_group_id
+    AND sg.primary_asset_id = NEW.id
+    AND (sg.primary_thumbnail_url  IS DISTINCT FROM NEW.thumbnail_url
+         OR sg.primary_thumbnail_error IS DISTINCT FROM NEW.thumbnail_error);
+
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.trg_fn_parse_pdf_files_used()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+  -- Allow bulk-insert RPC to suppress this per-row trigger via session variable
+  IF current_setting('app.skip_parse_pdf_trigger', true) = '1' THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.asset_id IS NOT NULL AND NEW.extracted_text IS NOT NULL THEN
+    PERFORM parse_pdf_files_used(NEW.asset_id);
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.trg_fn_resolve_sku_file_used()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+  IF NEW.style_guide_file_id IS NULL THEN
+    SELECT id INTO NEW.style_guide_file_id
+    FROM style_guide_files
+    WHERE is_active = true
+      AND normalize_for_sg_match(filename) = normalize_for_sg_match(NEW.file_name)
+    ORDER BY modified_at DESC NULLS LAST
+    LIMIT 1;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.trg_set_asset_path_attrs()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE j jsonb;
+BEGIN
+  j := public.infer_path_attrs(NEW.relative_path);
+  NEW.stage    := j ->> 'stage';
+  NEW.customer := j ->> 'customer';
+  NEW.program  := j ->> 'program';
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.trg_set_sg_path_attrs()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE j jsonb;
+BEGIN
+  j := public.infer_path_attrs(NEW.folder_path);
+  NEW.stage    := j ->> 'stage';
+  NEW.customer := j ->> 'customer';
+  NEW.program  := j ->> 'program';
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.update_asset_checkouts_updated_at()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.update_bulk_operation(p_op_key text, p_op_state jsonb, p_only_if_status text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_current jsonb;
+  v_existing_status text;
+BEGIN
+  -- Serialize all writers on the BULK_OPERATIONS config key
+  PERFORM pg_advisory_xact_lock(hashtext('BULK_OPERATIONS'));
+
+  -- Read current value
+  SELECT value INTO v_current
+  FROM admin_config
+  WHERE key = 'BULK_OPERATIONS';
+
+  v_current := COALESCE(v_current, '{}'::jsonb);
+
+  -- Conditional update: only proceed if current status matches expected
+  IF p_only_if_status IS NOT NULL THEN
+    v_existing_status := v_current->p_op_key->>'status';
+    IF v_existing_status IS DISTINCT FROM p_only_if_status THEN
+      -- Return current state unchanged (caller can detect no-op)
+      RETURN v_current;
+    END IF;
+  END IF;
+
+  -- Atomically set the single operation key
+  v_current := jsonb_set(v_current, ARRAY[p_op_key], p_op_state);
+
+  -- Upsert into admin_config
+  INSERT INTO admin_config (key, value, updated_at)
+  VALUES ('BULK_OPERATIONS', v_current, now())
+  ON CONFLICT (key) DO UPDATE
+    SET value = EXCLUDED.value,
+        updated_at = EXCLUDED.updated_at;
+
+  RETURN v_current;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.update_bulk_operations_batch(p_updates jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_current jsonb;
+  v_key text;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('BULK_OPERATIONS'));
+
+  SELECT value INTO v_current
+  FROM admin_config
+  WHERE key = 'BULK_OPERATIONS';
+
+  v_current := COALESCE(v_current, '{}'::jsonb);
+
+  -- Merge each key from p_updates into the current state
+  FOR v_key IN SELECT jsonb_object_keys(p_updates) LOOP
+    v_current := jsonb_set(v_current, ARRAY[v_key], p_updates->v_key);
+  END LOOP;
+
+  INSERT INTO admin_config (key, value, updated_at)
+  VALUES ('BULK_OPERATIONS', v_current, now())
+  ON CONFLICT (key) DO UPDATE
+    SET value = EXCLUDED.value,
+        updated_at = EXCLUDED.updated_at;
+
+  RETURN v_current;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$function$;
+
+
+-- ------------------------------------------------------------------------------------
+-- WHAT THIS FILE DELIBERATELY DOES NOT CONTAIN
+-- ------------------------------------------------------------------------------------
+-- * Any column that a migration in this repository ADDs to one of the tables above.
+--   This file is the PRE-adoption shape. Leaving such a column in would make the
+--   migration abort with "column already exists" and, because migrations are applied in
+--   a single transaction, lose every other statement in that file too.
+-- * Any index or constraint whose name a migration creates, for the same reason.
+-- * Any foreign key whose target is created by a migration rather than by this file.
+-- * Any row. Not one.
+-- ------------------------------------------------------------------------------------
