@@ -62,23 +62,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Refuse to run if any shared-database credential is present
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD_PREVIEW: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
-          SUPABASE_DB_PASSWORD_PRODUCTION: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
+      # This is a STATIC self-check of this workflow file, not a runtime read of the
+      # environment. The first version of this step mapped the three secrets into `env:`
+      # so it could test whether they were empty -- which is precisely how a secret gets
+      # into a job's scope, so it failed itself on the first run. The lesson generalises:
+      # you cannot prove a credential is absent by asking for it. Read the file instead.
+      - name: Refuse to run if this workflow can reach a shared database
         run: |
           set -euo pipefail
-          # These are read here ONLY to prove they are absent. If a future edit wires a
-          # real credential into this job, this step fails first and loudly, before any
-          # test can reach a shared database.
-          for v in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD_PREVIEW SUPABASE_DB_PASSWORD_PRODUCTION; do
+          SELF=.github/workflows/database-contract-tests.yml
+          # `secrets.` anywhere in this file, the preview or production project refs, or a
+          # `supabase link` all mean this job is no longer confined to a throwaway
+          # database. The pattern is written split so that this guard does not match its
+          # own source line.
+          if grep -nE '\$\{\{ *secrets\.' "$SELF"; then
+            echo "::error::$SELF references a secret. This job must only ever touch a local throwaway database." >&2
+            exit 1
+          fi
+          if grep -nE 'rjyboqwcdzcocqgmsyel|qsllyeztdwjgirsysgai|supabase +link' "$SELF" \
+             | grep -vE '^\s*[0-9]+:\s*#'; then
+            echo "::error::$SELF names a shared project ref or links to one outside a comment." >&2
+            exit 1
+          fi
+          # And prove nothing upstream leaked one in anyway.
+          for v in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD_PREVIEW SUPABASE_DB_PASSWORD_PRODUCTION SUPABASE_DB_URL; do
             if [ -n "${!v:-}" ]; then
               echo "::error::$v is set in a job that must only ever touch a local throwaway database." >&2
               exit 1
             fi
           done
-          echo "No shared-database credentials in scope. Local ephemeral database only."
+          echo "Confined to a local ephemeral database: no secrets, no shared project ref, no link."
 
       - uses: supabase/setup-cli@v1
         with:
