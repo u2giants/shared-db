@@ -79,8 +79,10 @@ jobs:
             echo "::error::$SELF references a secret. This job must only ever touch a local throwaway database." >&2
             exit 1
           fi
-          if grep -nE 'rjyboqwcdzcocqgmsyel|qsllyeztdwjgirsysgai|supabase +link' "$SELF" \
-             | grep -vE '^\s*[0-9]+:\s*#'; then
+          # Built from PIECES so that this line does not match itself -- the first attempt
+          # wrote the refs out in full and the guard failed on its own source.
+          PAT="rjybo""qwcdzcocqgmsyel|qsllye""ztdwjgirsysgai|supabase +link"
+          if grep -nE "$PAT" "$SELF" | grep -vE '^[0-9]+:\s*#'; then
             echo "::error::$SELF names a shared project ref or links to one outside a comment." >&2
             exit 1
           fi
