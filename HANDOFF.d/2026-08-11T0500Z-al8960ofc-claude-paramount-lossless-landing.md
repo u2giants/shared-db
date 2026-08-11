@@ -1,9 +1,11 @@
 # Paramount Creative Library — lossless landing (issue #724, DB claim #744)
 
-**Status: OPEN.** Code complete and pushed. Preview apply, preview load, PR and merge are
-NOT done and are blocked on one external dependency (see section 6).
+**Status: OPEN.** Code complete both sides. **PR #752 is open.** The private builder is done
+and proven. Preview apply, preview load and merge remain (see section 6). Nothing is blocked.
 
-- Branch: `feat/724-paramount-lossless-landing`, pushed to `origin`.
+- PR: https://github.com/u2giants/shared-db/pull/752
+- Branch: `feat/724-paramount-lossless-landing`, rebased onto `c3808fa` and pushed.
+- Private builder: `u2giants/licensor-source-data` commit `6925627`.
 - Worktree: `C:\repos\shared-db\.claude\worktrees\pmt-lossless`
 - Migration version (pre-allocated by the orchestrator, do NOT change):
   `20260811030000_pmt_lossless_source_ids_and_asset_metadata_value.sql`
@@ -160,27 +162,37 @@ Three consequences the next session must not miss:
 
 ## 6. WHAT IS NOT DONE, and the one thing blocking it
 
-### BLOCKER — the private builder (spec section 8.5) was not written
+### RESOLVED — the private builder is written and proven (spec section 8.5)
 
-The loader now reads `asset-metadata-values.jsonl` from the private capture directory, and
-it is **required, not optional** (a capture that cannot state its metadata population is not
-a lossless capture, and defaulting it to `[]` would load a hollow capture that reconciles
-against a missing expectation and looks complete).
+`paramount/scripts/build-normalized.mjs` in the PRIVATE repo now emits
+`paramount/asset-metadata-values.jsonl`. Committed and pushed as `6925627` on branch
+`codex/paramount-creative-library-20260807` of `u2giants/licensor-source-data` (private).
 
-**Nothing produces that file yet.** It must be written by
-`paramount/scripts/build-normalized.mjs` in the PRIVATE repository
-`C:\repos\licensor-source-data-paramount` — which is a different repository, outside this
-worktree, and was not touched. The builder must also add an `asset_metadata_values` count to
-`capture-summary.json`, or `manifestExpectations()` returns `undefined` for it and the
-capture fails at the expectation insert.
+Measured on the real capture:
 
-Until that exists, **Phase 4 (preview load) cannot run**, and therefore the PR should not be
-merged as "verified".
+```
+asset_metadata_values            150,430      max value_ordinal 11 (12 values on one element)
+asset_metadata_distinct_elements 7            data_type: 125,314 string / 25,116 number
+refused unsafe fields            []           skipped valueless rows 0
+sha256  6d91f1b1c7ed0cccfbbbdbd232c600c5f0ad629a0e989418fc09090cb45b00e2
+```
+
+Gates that passed:
+
+- **Deterministic** — two consecutive runs byte-identical (`cmp`), and the summary SHA-256
+  matches the file on disk. The builder re-reads what it wrote and throws if the line count
+  or hash disagrees.
+- **No existing output changed** — `git diff` over every pre-existing `paramount/*.csv` is
+  EMPTY. All relationship counts identical; the 4 malformed caret pairs remain anomalies.
+- **Safe** — 0 banned element keys, 0 URL/token/bearer-shaped values across all 150,430 rows.
+- **End-to-end** — all 150,430 rows fed through the real `buildPayloads()` from the shared-db
+  branch were accepted, with 0 `undefined` values and correct types.
+
+Only `capture-summary.json` and the builder changed, plus the new output file.
 
 ### Remaining, in order
 
-1. **Private builder** (blocker above). Deterministic, streaming/line-oriented, excludes
-   media/URL/credential fields, preserves exact string IDs and value order.
+1. ~~Private builder~~ **DONE** — see above.
 2. **Preview apply** to `rjyboqwcdzcocqgmsyel` — all four migrations in order.
 3. **Preview load + reconciliation** (counts only, never row contents).
 4. **PR, CI green, merge.**
