@@ -1,7 +1,23 @@
 # Paramount Creative Library — lossless landing (issue #724, DB claim #744)
 
-**Status: OPEN.** Code complete both sides. **PR #752 is open.** The private builder is done
-and proven. Preview apply, preview load and merge remain (see section 6). Nothing is blocked.
+**Status: OPEN.** Code complete both sides. **PR #752 open. Migration APPLIED TO PREVIEW and
+proven by object and by behaviour.** One thing outstanding: the real 150,430-value capture
+load needs `PMT_PORTAL_GLOBAL_ASSET_COUNT`, an operator observation nobody recorded (see
+section 6). Merge is queued behind a merge freeze until production batch B2 lands.
+
+**Preview apply evidence:** ledger 425 -> 426, only new version `20260811030000`; 19 source-ID
+columns text / 0 bigint; `plm.pmt_asset_metadata_value` exists; 8 `api.pmt_*` views compile;
+CHECK 96 / FK 49 / PK 24 all validated; the 14 rebuilt FKs present and validated; RLS enabled
+not forced with 2 policies; anon NONE, authenticated SELECT only, service_role has no
+TRUNCATE/REFERENCES/TRIGGER/MAINTAIN. Behavioural gates all pass -- see PR #752 comment for
+the full table. `validate_pmt_capture` returned **18 checks / 13 passing**, which is positive
+proof checks 1-13 survived the function replacement.
+
+**How the apply was done (option C, orchestrator-approved):** preview's ledger is out of order,
+so `db push` refused and `--include-all` would have applied four other workstreams' migrations.
+The four foreign pending files were held aside in this isolated worktree, a normal `db push`
+landed exactly one migration with a real ledger row, and the files were restored immediately.
+Do NOT use `--include-all` on preview.
 
 - PR: https://github.com/u2giants/shared-db/pull/752
 - Branch: `feat/724-paramount-lossless-landing`, rebased onto `c3808fa` and pushed.
