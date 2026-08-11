@@ -76,6 +76,16 @@ const CONTRADICTIONS = [
     why: 'Querying the old label returns EMPTY, and step 0 treats empty as permission to start. That would let a second orchestrator start while one is already live.',
   },
   {
+    id: 'marker-query-without-repo',
+    // Matches a `gh issue list` that filters on one of the coordination labels but never
+    // names the repository, on the same line. The negative lookahead is line-scoped on
+    // purpose: these commands are written on one line, and letting it span newlines would
+    // match a --repo belonging to a DIFFERENT command further down.
+    pattern: /gh issue list(?![^\n]*--repo)[^\n]*--label\s+(orchestrator-marker|db-claim|db-work)/,
+    agents: 'AGENTS.md §2 — the orchestrator marker is an issue in u2giants/shared-db specifically',
+    why: 'These skills load into sessions working in OTHER repositories. Without --repo, gh queries whatever repo you are standing in, EXITS 0, and returns zero markers — indistinguishable from a clear board. The session then opens a SECOND orchestrator while one is live, defeating the single-orchestrator lock. Found 2026-08-11 by an independent Codex review (#530).',
+  },
+  {
     id: 'prune-false',
     // Not preceded by "not" — the skills correctly WARN against this flag, and flagging
     // the warning as the defect is how a drift check turns into noise.
