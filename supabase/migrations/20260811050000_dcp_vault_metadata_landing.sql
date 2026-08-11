@@ -567,13 +567,29 @@ create table plm.dcp_metadata_asset (
   -- page and the tiny zero-record body both fail this. Note carefully what is NOT
   -- required: no individual Disney field. The sample already proved that some assets omit
   -- `character` entirely, so demanding any optional field would reject honest successes.
+  --
+  -- normalized_hash IS DELIBERATELY **NOT** IN THIS CHECK, AND THE REASON IS AN ORDERING
+  -- FACT, NOT AN OVERSIGHT. Read this before "completing" the constraint.
+  --   source_hash CAN be required here because it digests the received response TEXT,
+  --   which the loader holds in hand at the moment it writes the row.
+  --   normalized_hash CANNOT. Its specification requires digesting the values as STORED
+  --   and the link sets as ACTUALLY WRITTEN -- so it cannot exist until after this row is
+  --   stored and its property, character and term links are inserted. Requiring it here
+  --   makes the very first UPDATE that marks a row successful violate the constraint, and
+  --   the only ways out are both wrong: compute the digest from the INPUT row instead
+  --   (which is the exact defect that lets a stale stored value hide behind an
+  --   unchanged-looking hash forever), or drop the read-back. This was caught by the
+  --   loader contract test on its first CI run.
+  --   THE GUARANTEE IS NOT LOST, it moves one step later: GATE 5 of
+  --   plm.finalize_dcp_metadata_run refuses to complete any run holding a successful row
+  --   without BOTH digests. A missing normalized_hash is therefore transient within a
+  --   single load statement and impossible in any completed run.
   constraint dcp_metadata_asset_success_evidence_chk check (
     fetch_status <> 'success'
     or (raw_metadata is not null
         and jsonb_typeof(raw_metadata) = 'object'
         and retrieved_at is not null
-        and source_hash is not null
-        and normalized_hash is not null)
+        and source_hash is not null)
   ),
   -- A signed-out response must NOT retain a body. Storing it would keep a page of portal
   -- chrome in a licensor-confidential table for no diagnostic value.
