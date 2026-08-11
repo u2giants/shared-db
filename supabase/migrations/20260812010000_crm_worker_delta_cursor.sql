@@ -636,8 +636,19 @@ comment on function crm.worker_delta_cursor_status(text) is
 -- 2026-07-29 public-schema audit found 88 instances of, and "it fails safely once you
 -- read the body" is a worse position than "it is not reachable".
 --
--- These functions live in `crm`, not `public`, so PostgREST does not expose them at all
--- unless `crm` is added to the exposed schema list. Both fences, on purpose.
+-- AND DO NOT ASSUME THE SCHEMA HIDES THEM. `crm` IS ALREADY POSTGREST-EXPOSED:
+--     pgrst.db_schemas = public, graphql_public, api, crm, pim, core, app
+-- (read from the live `authenticator` role settings, and recorded in AGENTS.md 8.1). So
+-- PostgREST CAN route an RPC call to these functions today. There is no second "it is not
+-- in the exposed schema list" fence, and an earlier draft of this comment claimed there
+-- was -- which is exactly the kind of durable false statement that gets cited later to
+-- justify a grant nobody re-checks.
+--
+-- WHAT ACTUALLY PROTECTS THEM, both tested: (1) EXECUTE is service_role only, so a browser
+-- JWT gets 42501 at the door; and (2) if that grant were ever widened, the predicate still
+-- refuses, because a real PostgREST connection has session_user `authenticator` and JWT
+-- role `authenticated` and fails BOTH arms of the positive match. Section B asserts the
+-- grants and section D asserts the predicate, so neither can regress silently.
 -- -------------------------------------------------------------------------------------
 revoke all on function crm.load_worker_delta_cursor(text) from public;
 revoke all on function crm.save_worker_delta_cursor(text, text, text, text, uuid) from public;
