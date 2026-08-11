@@ -56,7 +56,7 @@ There is no wildcard record on `designflow.app`.
 
 1. the repository variable `COOLIFY_PROD_APP_UUID` is non-empty — it stays empty until
    the production Coolify application exists, and an empty value fails the job loudly
-   rather than deploying an unknown target;
+   and visibly rather than deploying an unknown target or quietly doing nothing;
 2. the GitHub environment `production` approves the run — its required reviewer is the
    owner, so every production release waits on a human click in the Actions UI.
 

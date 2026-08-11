@@ -126,7 +126,8 @@ jobs:
   #
   #   1. The repository variable COOLIFY_PROD_APP_UUID must be set. It is empty
   #      until the production Coolify application actually exists. An empty value
-  #      skips the job instead of deploying a wrong or missing target.
+  #      FAILS the job loudly and visibly; it never falls through to a default or a
+  #      guessed target, and it is never a silent no-op.
   #   2. The job runs in the GitHub environment `production`, whose required
   #      reviewer is the owner. Every production release therefore waits for an
   #      explicit human approval in the Actions UI.
