@@ -377,6 +377,7 @@ declare
   v_new       uuid := gen_random_uuid();
   v_now       timestamptz := now();
   v_out       crm.worker_delta_cursor%rowtype;
+  v_advanced  boolean;
   v_exists    boolean;
 begin
   if not crm.worker_cursor_privilege_ok(v_role, session_user) then
@@ -421,6 +422,10 @@ begin
     on conflict (cursor_key) do nothing
     returning * into v_out;
 
+    -- A brand-new cursor that arrived carrying a link HAS advanced -- from nothing to
+    -- something. One that arrived empty has not.
+    v_advanced := v_link is not null;
+
     if v_out.cursor_key is null then
       raise exception 'Worker delta cursor refused: cursor %L already exists, but this '
         'save presented no expected_version, i.e. it believed it was CREATING the cursor. '
@@ -434,7 +439,30 @@ begin
     -- meant to close. Under READ COMMITTED the second of two concurrent savers blocks on
     -- the row lock, RE-EVALUATES this predicate after the first commits, sees the rotated
     -- version, matches zero rows, and is refused below. The loser loses, loudly.
+    --
+    -- WHY THE `prev` CTE WITH `FOR UPDATE`, RATHER THAN READING c.delta_link_sha256
+    -- DIRECTLY IN THE SET LIST -- AND WHY NOT A PLAIN SELECT BEFOREHAND EITHER.
+    -- Two things need the value the row held BEFORE this write: advanced_at, and the
+    -- `advanced` field returned to the caller. Neither can get it honestly any other way:
+    --   * A plain SELECT before the UPDATE reads OUTSIDE the row lock, so a concurrent
+    --     saver can change the row in between and the answer is stale.
+    --   * Deriving it afterwards from `advanced_at = now()` is WRONG, and provably so:
+    --     now() is TRANSACTION time, so two saves in one transaction share it and the
+    --     second reports "advanced" even when it did not move the link. The contract
+    --     tests run in a single transaction and caught exactly that.
+    --   * RETURNING cannot see old values on this Postgres version (`RETURNING OLD.*`
+    --     arrived in PG18; this project is 17.6).
+    -- The CTE takes the row lock FIRST, and under READ COMMITTED a FOR UPDATE that waits
+    -- follows the update chain and re-reads the newest committed version -- so `prev` is
+    -- the value that was really there when this statement won the lock, and the whole
+    -- comparison happens inside one statement with the row held.
     -- ---------------------------------------------------------------------------------
+    with prev as (
+      select c.cursor_key, c.delta_link_sha256
+      from crm.worker_delta_cursor c
+      where c.cursor_key = v_key
+      for update
+    )
     update crm.worker_delta_cursor c
        set purpose           = btrim(p_purpose),
            owner_identity    = nullif(btrim(coalesce(p_owner_identity, '')), ''),
@@ -447,13 +475,15 @@ begin
            -- hide a stuck worker behind a fresh-looking timestamp. `is distinct from`
            -- rather than `<>`, so a NULL on either side compares correctly.
            advanced_at       = case
-                                 when v_sha is distinct from c.delta_link_sha256
+                                 when v_sha is distinct from prev.delta_link_sha256
                                  then v_now else c.advanced_at
                                end,
            updated_at        = v_now
-     where c.cursor_key = v_key
+      from prev
+     where c.cursor_key = prev.cursor_key
        and c.version    = p_expected_version
-    returning * into v_out;
+    returning c.*, (v_sha is distinct from prev.delta_link_sha256)
+      into v_out, v_advanced;
 
     if v_out.cursor_key is null then
       select exists (select 1 from crm.worker_delta_cursor c where c.cursor_key = v_key)
@@ -471,25 +501,15 @@ begin
   -- Never returns delta_link. The caller just supplied it; echoing it back would put an
   -- opaque, potentially credential-bearing token into one more place for no benefit.
   --
-  -- `advanced` is derived from advanced_at = v_now, NOT from a digest comparison taken
-  -- before the UPDATE. A pre-UPDATE SELECT of the old digest would be read OUTSIDE the row
-  -- lock and could be stale, so it could report "advanced" for a save that did not move
-  -- the link (or the reverse). advanced_at was computed INSIDE the UPDATE against the
-  -- locked row, so re-using it is the one comparison guaranteed to agree with what was
-  -- actually stored.
-  --
-  -- HONEST LIMITATION, STATED RATHER THAN HIDDEN: now() is TRANSACTION time, so two saves
-  -- of the SAME transaction share it, and a second same-transaction save that did NOT move
-  -- the link would still see advanced_at = v_now and report advanced=true. That cannot
-  -- happen in the intended use -- one save is the last step of one worker cycle, one
-  -- transaction -- and the alternative (reading the old digest before the UPDATE, outside
-  -- the row lock) is wrong in the concurrent case, which is the case that matters.
-  -- `advanced` is a REPORTING field; advanced_at itself is correct either way.
+  -- `advanced` comes from the DIGEST COMPARISON made inside the CAS statement itself,
+  -- against the row while it was LOCKED -- see the note on the `prev` CTE above. It is not
+  -- inferred from `advanced_at = now()`, which is transaction time and therefore reports a
+  -- false "advanced" for a second save in the same transaction.
   return jsonb_build_object(
     'cursor_key',        v_out.cursor_key,
     'version',           v_out.version,
     'save_count',        v_out.save_count,
-    'advanced',          coalesce(v_out.advanced_at = v_now, false),
+    'advanced',          coalesce(v_advanced, false),
     'delta_link_sha256', v_out.delta_link_sha256,
     'advanced_at',       v_out.advanced_at,
     'updated_at',        v_out.updated_at
