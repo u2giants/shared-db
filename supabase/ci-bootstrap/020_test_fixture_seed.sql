@@ -60,6 +60,16 @@ begin
   -- Four authenticated, active profiles.
   -- ---------------------------------------------------------------------------------
   for v_i in 1 .. array_length(v_ids, 1) loop
+    -- THE INVITATION IS NOT OPTIONAL SCAFFOLDING. `public.handle_new_user()` is a real
+    -- pre-adoption trigger on auth.users, and it REFUSES any Google or email/password
+    -- signup that has no open invitation row: "Access denied: no valid invitation found".
+    -- That guard is correct and must not be disabled to make a fixture load -- a seed that
+    -- switches off the thing under test is worse than no seed. So the fixture goes in
+    -- through the real front door: invite, then create the user.
+    insert into public.invitations (email)
+    values (format('zz-fixture-user-%s@fixture.invalid', v_i))
+    on conflict do nothing;
+
     insert into auth.users (id, email)
     values (v_ids[v_i], format('zz-fixture-user-%s@fixture.invalid', v_i))
     on conflict (id) do nothing;

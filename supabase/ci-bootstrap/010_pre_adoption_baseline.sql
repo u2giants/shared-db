@@ -2336,260 +2336,16 @@ ALTER TABLE public.user_roles ADD CONSTRAINT user_roles_pkey PRIMARY KEY (id);
 ALTER TABLE public.user_roles ADD CONSTRAINT user_roles_user_id_role_key UNIQUE (user_id, role);
 
 -- ------------------------------------------------------------------------------------
--- Indexes (151)
--- ------------------------------------------------------------------------------------
-CREATE INDEX IF NOT EXISTS age_group_created_by_fkey ON core.age_group USING btree (created_by);
-CREATE INDEX IF NOT EXISTS age_group_updated_by_fkey ON core.age_group USING btree (updated_by);
-CREATE INDEX IF NOT EXISTS art_types_created_by_fkey ON core.art_types USING btree (created_by);
-CREATE INDEX IF NOT EXISTS art_types_divisioncode_id_fkey ON core.art_types USING btree (divisioncode_id);
-CREATE INDEX IF NOT EXISTS art_types_updated_by_fkey ON core.art_types USING btree (updated_by);
-CREATE INDEX IF NOT EXISTS artist_types_created_by_fkey ON core.artist_types USING btree (created_by);
-CREATE INDEX IF NOT EXISTS artist_types_updated_by_fkey ON core.artist_types USING btree (updated_by);
-CREATE INDEX IF NOT EXISTS idx_relations_child ON core."merchGroupRelations" USING btree (child_mg_id);
-CREATE INDEX IF NOT EXISTS idx_relations_grand_parent ON core."merchGroupRelations" USING btree (grand_parent_mg_id);
-CREATE INDEX IF NOT EXISTS idx_relations_parent ON core."merchGroupRelations" USING btree (parent_mg_id);
-CREATE UNIQUE INDEX uniq_grand_parent_parent_child ON core."merchGroupRelations" USING btree (grand_parent_mg_id, parent_mg_id, child_mg_id);
-CREATE UNIQUE INDEX uniq_parent_child_no_grand ON core."merchGroupRelations" USING btree (parent_mg_id, child_mg_id) WHERE (grand_parent_mg_id IS NULL);
-CREATE INDEX IF NOT EXISTS idx_properties_licensor_id ON core.properties_and_characters USING btree (licensor_id);
-CREATE INDEX IF NOT EXISTS idx_properties_name ON core.properties_and_characters USING btree (name);
-CREATE UNIQUE INDEX unique_character_entity ON core.properties_and_characters USING btree (licensor_id, source_licensed_property_id, source_character_id) WHERE ((type)::text = 'CHARACTER'::text);
-CREATE UNIQUE INDEX unique_property_entity ON core.properties_and_characters USING btree (licensor_id, source_licensed_property_id) WHERE ((type)::text = 'PROPERTY'::text);
-CREATE INDEX IF NOT EXISTS idx_property_character_associations_character_id ON core.property_character_associations USING btree (character_id);
-CREATE INDEX IF NOT EXISTS idx_property_character_associations_licensor_id ON core.property_character_associations USING btree (licensor_id);
-CREATE INDEX IF NOT EXISTS idx_property_character_associations_property_id ON core.property_character_associations USING btree (property_id);
-CREATE UNIQUE INDEX "GridLayout_pkey" ON plm."GridLayout" USING btree (id);
-CREATE UNIQUE INDEX "GridViewState_user_grid_view" ON plm."GridViewState" USING btree (user_id_fk, grid_id, view_name);
-CREATE UNIQUE INDEX "ProdOrderDetail_pkey" ON plm."ProdOrderDetail" USING btree (id);
-CREATE INDEX IF NOT EXISTS "idx_rfqItem_copied_from_id" ON plm."RFQItem" USING btree ("rfqItem_copied_from_id") WHERE ("rfqItem_copied_from_id" IS NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_rfqitem_choosen_vendor ON plm."RFQItem" USING btree ("rfqItem_choosen_vendor");
-CREATE INDEX IF NOT EXISTS idx_rfqitem_container ON plm."RFQItem" USING btree (rfq_container_id_fk);
-CREATE INDEX IF NOT EXISTS idx_rfqitem_customer ON plm."RFQItem" USING btree ("rfqItem_customer");
-CREATE INDEX IF NOT EXISTS idx_rfqitem_delivery_loc ON plm."RFQItem" USING btree ("rfqItem_delivery_loc");
-CREATE INDEX IF NOT EXISTS idx_rfqitem_divcode ON plm."RFQItem" USING btree ("rfqItem_divCode_id_fk");
-CREATE INDEX IF NOT EXISTS idx_rfqitem_home_list ON plm."RFQItem" USING btree ("rfqItem_active", "rfqItem_id" DESC) WHERE ("rfqItem_archive" IS NULL);
-CREATE INDEX IF NOT EXISTS idx_rfqitem_rfq_group ON plm."RFQItem" USING btree ("rfqItem_rfq_group");
-CREATE INDEX IF NOT EXISTS idx_rfqitem_step ON plm."RFQItem" USING btree ("rfqItem_step");
-CREATE INDEX IF NOT EXISTS idx_rfqvendor_item_fk ON plm."RFQVendor" USING btree ("RFQitem_id_fk");
-CREATE INDEX IF NOT EXISTS idx_rfqvendor_vendor_archived ON plm."RFQVendor" USING btree (vendor_id_fk, "RFQVendor_archived");
-CREATE UNIQUE INDEX "StandardizedVersionDetail_pkey" ON plm."StandardizedDetail" USING btree (id);
-CREATE INDEX IF NOT EXISTS art_piece_attachment_art_piece_id_fkey ON plm.art_piece_attachment USING btree (art_piece_id);
-CREATE INDEX IF NOT EXISTS art_piece_attachment_company_code_fkey ON plm.art_piece_attachment USING btree (company_code);
-CREATE INDEX IF NOT EXISTS art_piece_attachment_created_by_fkey ON plm.art_piece_attachment USING btree (created_by);
-CREATE INDEX IF NOT EXISTS art_piece_attachment_divisioncode_id_fkey ON plm.art_piece_attachment USING btree (divisioncode_id);
-CREATE INDEX IF NOT EXISTS art_piece_attachment_updated_by_fkey ON plm.art_piece_attachment USING btree (updated_by);
-CREATE UNIQUE INDEX grid_cell_notes_grid_row_col_uq ON plm.grid_cell_notes USING btree (grid_type, row_id, col_id);
-CREATE INDEX IF NOT EXISTS grid_cell_notes_grid_type_idx ON plm.grid_cell_notes USING btree (grid_type);
-CREATE INDEX IF NOT EXISTS "idx_itemLicenseImage_item" ON plm."itemLicenseImage" USING btree (itemheader_id_fk);
-CREATE INDEX IF NOT EXISTS idx_itemlicenseimage_item ON plm."itemLicenseImage" USING btree (itemheader_id_fk);
-CREATE UNIQUE INDEX "itemType_name_key" ON plm."itemType" USING btree (item_type_name);
-CREATE INDEX IF NOT EXISTS "itemType_status_idx" ON plm."itemType" USING btree (item_type_status);
-CREATE INDEX IF NOT EXISTS idx_item_character_associations_character_id ON plm.item_character_associations USING btree (character_id);
-CREATE INDEX IF NOT EXISTS item_prod_order_detail_associations_item_header_idx ON plm.item_prod_order_detail_associations USING btree (item_header_id);
-CREATE INDEX IF NOT EXISTS item_prod_order_detail_associations_matched_item_number_idx ON plm.item_prod_order_detail_associations USING btree (matched_item_number);
-CREATE INDEX IF NOT EXISTS item_prod_order_detail_associations_prod_detail_idx ON plm.item_prod_order_detail_associations USING btree (prod_order_detail_pkey);
-CREATE UNIQUE INDEX item_prod_order_detail_associations_unique_pair ON plm.item_prod_order_detail_associations USING btree (item_header_id, prod_order_detail_pkey);
-CREATE INDEX IF NOT EXISTS idx_licensing_feedback_reply_status ON plm."licensingFeedbackReply" USING btree (licensing_status_id_fk);
-CREATE UNIQUE INDEX unique_item_stage ON plm."licensingMilestone" USING btree (itemheader_id_fk, stage);
-CREATE UNIQUE INDEX "productUserAssignment_item_role_key" ON plm."productUserAssignment" USING btree (item_id_fk, role);
-CREATE INDEX IF NOT EXISTS "productUserAssignment_user_idx" ON plm."productUserAssignment" USING btree (user_id_fk);
-CREATE INDEX IF NOT EXISTS idx_sample_box_id_fk ON plm.sample USING btree (box_id_fk);
-CREATE INDEX IF NOT EXISTS idx_sample_attachment_sample_id_fk ON plm.sample_attachment USING btree (sample_id_fk);
-CREATE INDEX IF NOT EXISTS idx_sample_event_sample_id_fk ON plm.sample_event USING btree (sample_id_fk);
-CREATE INDEX IF NOT EXISTS idx_agent_pairings_code ON public.agent_pairings USING btree (pairing_code) WHERE (status = 'pending'::text);
-CREATE INDEX IF NOT EXISTS idx_agent_registrations_last_heartbeat ON public.agent_registrations USING btree (last_heartbeat);
-CREATE INDEX IF NOT EXISTS idx_ai_sentinel_cleanup_log_asset ON public.ai_sentinel_cleanup_log USING btree (ai_asset_id);
-CREATE INDEX IF NOT EXISTS idx_app_access_user_id ON public.app_access USING btree (user_id);
-CREATE UNIQUE INDEX asset_checkouts_one_active_per_asset ON public.asset_checkouts USING btree (asset_id) WHERE (status = ANY (ARRAY['active'::checkout_status, 'checkin_queued'::checkout_status, 'uploading'::checkout_status, 'verifying'::checkout_status]));
-CREATE INDEX IF NOT EXISTS asset_checkouts_awaiting_verification ON public.asset_checkouts USING btree (verify_deadline_at) WHERE ((status = 'verifying'::checkout_status) AND (source_provider = 'seafile'::text));
-CREATE INDEX IF NOT EXISTS idx_asset_path_history_asset_id_detected_at ON public.asset_path_history USING btree (asset_id, detected_at DESC);
-CREATE INDEX IF NOT EXISTS idx_asset_tags_asset_id ON public.asset_tags USING btree (asset_id);
-CREATE INDEX IF NOT EXISTS idx_asset_tags_source ON public.asset_tags USING btree (source);
-CREATE INDEX IF NOT EXISTS idx_assets_file_type ON public.assets USING btree (file_type);
-CREATE INDEX IF NOT EXISTS idx_assets_status ON public.assets USING btree (status);
-CREATE INDEX IF NOT EXISTS idx_assets_workflow_status ON public.assets USING btree (workflow_status);
-CREATE INDEX IF NOT EXISTS idx_assets_is_licensed ON public.assets USING btree (is_licensed);
-CREATE INDEX IF NOT EXISTS idx_assets_modified_at ON public.assets USING btree (modified_at);
-CREATE INDEX IF NOT EXISTS idx_assets_file_created_at ON public.assets USING btree (file_created_at);
-CREATE INDEX IF NOT EXISTS idx_assets_licensor_id ON public.assets USING btree (licensor_id);
-CREATE INDEX IF NOT EXISTS idx_assets_property_id ON public.assets USING btree (property_id);
-CREATE INDEX IF NOT EXISTS idx_assets_product_subtype_id ON public.assets USING btree (product_subtype_id);
-CREATE INDEX IF NOT EXISTS idx_assets_quick_hash ON public.assets USING btree (quick_hash);
-CREATE INDEX IF NOT EXISTS idx_assets_tags ON public.assets USING gin (tags);
-CREATE INDEX IF NOT EXISTS idx_assets_is_deleted ON public.assets USING btree (is_deleted);
-CREATE INDEX IF NOT EXISTS idx_assets_filename_trgm ON public.assets USING gin (filename extensions.gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_assets_relative_path_trgm ON public.assets USING gin (relative_path extensions.gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_assets_style_group_id ON public.assets USING btree (style_group_id);
-CREATE INDEX IF NOT EXISTS idx_assets_ai_tagged_at ON public.assets USING btree (ai_tagged_at) WHERE (ai_tagged_at IS NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_assets_clear_style_cursor ON public.assets USING btree (id) WHERE ((is_deleted = false) AND (style_group_id IS NOT NULL));
-CREATE INDEX IF NOT EXISTS idx_assets_primary_sort_tier ON public.assets USING btree (style_group_id, primary_sort_tier, created_at) WHERE (is_deleted = false);
-CREATE INDEX IF NOT EXISTS idx_assets_compat_audit ON public.assets USING btree (id) WHERE ((file_type = 'ai'::file_type) AND (is_deleted = false) AND (thumbnail_url IS NOT NULL));
-CREATE INDEX IF NOT EXISTS idx_assets_pdf_not_deleted ON public.assets USING btree (file_type, id) WHERE (is_deleted = false);
-CREATE INDEX IF NOT EXISTS idx_assets_stage ON public.assets USING btree (stage);
-CREATE INDEX IF NOT EXISTS idx_assets_customer ON public.assets USING btree (customer);
-CREATE INDEX IF NOT EXISTS idx_assets_program ON public.assets USING btree (program);
-CREATE INDEX IF NOT EXISTS idx_assets_program_trgm ON public.assets USING gin (program extensions.gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_assets_customer_trgm ON public.assets USING gin (customer extensions.gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_assets_facet_counts ON public.assets USING btree (is_deleted) INCLUDE (file_type, status, workflow_status, stage, is_licensed, modified_at, file_created_at, thumbnail_url, style_group_id) WHERE (is_deleted = false);
-CREATE INDEX IF NOT EXISTS idx_characters_is_priority ON public.characters USING btree (is_priority) WHERE (is_priority = true);
-CREATE INDEX IF NOT EXISTS idx_characters_usage_count ON public.characters USING btree (usage_count);
-CREATE INDEX IF NOT EXISTS idx_eel_target_id ON public.erp_enrichment_log USING btree (target_id);
-CREATE INDEX IF NOT EXISTS idx_eel_run_id ON public.erp_enrichment_log USING btree (run_id);
-CREATE INDEX IF NOT EXISTS idx_erp_items_current_style_number ON public.erp_items_current USING btree (style_number);
-CREATE INDEX IF NOT EXISTS idx_erp_items_current_mg_category ON public.erp_items_current USING btree (mg_category);
-CREATE INDEX IF NOT EXISTS idx_erp_items_current_synced_at ON public.erp_items_current USING btree (synced_at);
-CREATE INDEX IF NOT EXISTS idx_erp_items_current_dismissed ON public.erp_items_current USING btree (dismissed) WHERE (dismissed = true);
-CREATE INDEX IF NOT EXISTS idx_erp_items_raw_external_id ON public.erp_items_raw USING btree (external_id);
-CREATE INDEX IF NOT EXISTS idx_erp_items_raw_sync_run_id ON public.erp_items_raw USING btree (sync_run_id);
-CREATE UNIQUE INDEX erp_sync_runs_one_running ON public.erp_sync_runs USING btree ((true)) WHERE (status = 'running'::text);
-CREATE INDEX IF NOT EXISTS idx_hygiene_findings_check_type ON public.hygiene_findings USING btree (check_type);
-CREATE INDEX IF NOT EXISTS idx_hygiene_findings_status ON public.hygiene_findings USING btree (status);
-CREATE INDEX IF NOT EXISTS idx_hygiene_findings_asset_id ON public.hygiene_findings USING btree (asset_id);
-CREATE INDEX IF NOT EXISTS idx_hygiene_findings_relative_path ON public.hygiene_findings USING btree (relative_path);
-CREATE UNIQUE INDEX uq_hygiene_findings_path_check ON public.hygiene_findings USING btree (relative_path, check_type) WHERE (status <> 'resolved'::text);
-CREATE INDEX IF NOT EXISTS idx_pdf_text_samples_asset_id ON public.pdf_text_samples USING btree (asset_id);
-CREATE INDEX IF NOT EXISTS idx_pdf_text_samples_sampled_at ON public.pdf_text_samples USING btree (sampled_at DESC);
-CREATE INDEX IF NOT EXISTS idx_processing_queue_status ON public.processing_queue USING btree (status);
-CREATE INDEX IF NOT EXISTS idx_prod_order_headers_current_style_number ON public.prod_order_headers_current USING btree (style_number);
-CREATE INDEX IF NOT EXISTS idx_prod_order_headers_current_prod_order_number ON public.prod_order_headers_current USING btree (prod_order_number);
-CREATE INDEX IF NOT EXISTS idx_prod_order_headers_current_due_date ON public.prod_order_headers_current USING btree (due_date);
-CREATE INDEX IF NOT EXISTS idx_prod_order_headers_raw_external_id ON public.prod_order_headers_raw USING btree (external_id);
-CREATE INDEX IF NOT EXISTS idx_prod_order_headers_raw_sync_run_id ON public.prod_order_headers_raw USING btree (sync_run_id);
-CREATE INDEX IF NOT EXISTS idx_prod_order_sync_runs_started_at ON public.prod_order_sync_runs USING btree (started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_pcp_status ON public.product_category_predictions USING btree (status);
-CREATE INDEX IF NOT EXISTS idx_pcp_erp_item_id ON public.product_category_predictions USING btree (erp_item_id);
-CREATE INDEX IF NOT EXISTS idx_render_queue_status ON public.render_queue USING btree (status);
-CREATE UNIQUE INDEX uq_render_queue_asset_active ON public.render_queue USING btree (asset_id) WHERE (status = ANY (ARRAY['pending'::queue_status, 'claimed'::queue_status]));
-CREATE INDEX IF NOT EXISTS idx_scanner_ai_ignores_path ON public.scanner_ai_ignores USING btree (relative_path);
-CREATE INDEX IF NOT EXISTS sku_files_used_sku_idx ON public.sku_files_used USING btree (sku);
-CREATE INDEX IF NOT EXISTS sku_files_used_style_guide_file_id_idx ON public.sku_files_used USING btree (style_guide_file_id) WHERE (style_guide_file_id IS NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_style_groups_sku ON public.style_groups USING btree (sku);
-CREATE INDEX IF NOT EXISTS idx_style_groups_latest_file_date ON public.style_groups USING btree (latest_file_date);
-CREATE INDEX IF NOT EXISTS idx_style_groups_licensor_id ON public.style_groups USING btree (licensor_id);
-CREATE INDEX IF NOT EXISTS idx_style_groups_property_id ON public.style_groups USING btree (property_id);
-CREATE INDEX IF NOT EXISTS idx_sg_stage ON public.style_groups USING btree (stage);
-CREATE INDEX IF NOT EXISTS idx_sg_customer ON public.style_groups USING btree (customer);
-CREATE INDEX IF NOT EXISTS idx_sg_program ON public.style_groups USING btree (program);
-CREATE INDEX IF NOT EXISTS idx_sgf_root_label ON public.style_guide_files USING btree (root_label);
-CREATE INDEX IF NOT EXISTS idx_sgf_directory_path ON public.style_guide_files USING btree (directory_path);
-CREATE INDEX IF NOT EXISTS idx_sgf_normalized_name ON public.style_guide_files USING btree (normalized_name);
-CREATE INDEX IF NOT EXISTS idx_sgf_is_active ON public.style_guide_files USING btree (is_active);
-CREATE INDEX IF NOT EXISTS idx_sgf_crawl_run_id ON public.style_guide_files USING btree (crawl_run_id);
-CREATE INDEX IF NOT EXISTS idx_sgf_style_guide_folder ON public.style_guide_files USING btree (style_guide_folder);
-CREATE INDEX IF NOT EXISTS idx_sgf_property_folder ON public.style_guide_files USING btree (property_folder);
-CREATE INDEX IF NOT EXISTS idx_sgf_licensor_name ON public.style_guide_files USING btree (licensor_name);
-CREATE INDEX IF NOT EXISTS idx_sgf_render_errored ON public.style_guide_files USING btree (id) WHERE (is_active AND (thumbnail_url IS NULL) AND (thumbnail_error IS NOT NULL));
-CREATE INDEX IF NOT EXISTS idx_style_guide_files_filename_trgm ON public.style_guide_files USING gin (lower(filename) extensions.gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_style_guide_files_active_modified ON public.style_guide_files USING btree (modified_at DESC NULLS LAST, filename) WHERE is_active;
-CREATE INDEX IF NOT EXISTS idx_sgrq_status ON public.style_guide_render_queue USING btree (status);
-CREATE INDEX IF NOT EXISTS idx_sgrq_file_id ON public.style_guide_render_queue USING btree (style_guide_file_id);
-CREATE INDEX IF NOT EXISTS idx_sgrq_created_at ON public.style_guide_render_queue USING btree (created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sgrq_status_created_at ON public.style_guide_render_queue USING btree (status, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sgrq_file_status ON public.style_guide_render_queue USING btree (style_guide_file_id, status);
-CREATE INDEX IF NOT EXISTS idx_tiff_opt_status ON public.tiff_optimization_queue USING btree (status);
-CREATE INDEX IF NOT EXISTS idx_tiff_opt_compression ON public.tiff_optimization_queue USING btree (compression_type);
-CREATE INDEX IF NOT EXISTS tiff_optimization_queue_claimed_by_idx ON public.tiff_optimization_queue USING btree (claimed_by) WHERE (claimed_by IS NOT NULL);
-CREATE INDEX IF NOT EXISTS tiff_optimization_queue_claimed_at_idx ON public.tiff_optimization_queue USING btree (claimed_at) WHERE (claimed_at IS NOT NULL);
-
--- ------------------------------------------------------------------------------------
--- Foreign keys (only where the target is also in this baseline) (54)
--- ------------------------------------------------------------------------------------
-ALTER TABLE core.art_types ADD CONSTRAINT art_types_divisioncode_id_fkey FOREIGN KEY (divisioncode_id) REFERENCES plm."divisionCode"("divCode_id");
-ALTER TABLE core."merchGroupRelations" ADD CONSTRAINT "merchGroupRelations_child_mg_id_fkey" FOREIGN KEY (child_mg_id) REFERENCES core."merchGroupMaster"(mg_id) ON DELETE CASCADE;
-ALTER TABLE core."merchGroupRelations" ADD CONSTRAINT "merchGroupRelations_grand_parent_mg_id_fkey" FOREIGN KEY (grand_parent_mg_id) REFERENCES core."merchGroupMaster"(mg_id) ON DELETE CASCADE;
-ALTER TABLE core."merchGroupRelations" ADD CONSTRAINT "merchGroupRelations_parent_mg_id_fkey" FOREIGN KEY (parent_mg_id) REFERENCES core."merchGroupMaster"(mg_id) ON DELETE CASCADE;
-ALTER TABLE core.properties_and_characters ADD CONSTRAINT properties_and_characters_licensor_id_fkey FOREIGN KEY (licensor_id) REFERENCES core."licenseList"("licenseList_id") ON UPDATE CASCADE ON DELETE RESTRICT;
-ALTER TABLE core.property_character_associations ADD CONSTRAINT property_character_associations_character_id_fkey FOREIGN KEY (character_id) REFERENCES core.properties_and_characters(id) ON UPDATE CASCADE ON DELETE CASCADE;
-ALTER TABLE core.property_character_associations ADD CONSTRAINT property_character_associations_licensor_id_fkey FOREIGN KEY (licensor_id) REFERENCES core."licenseList"("licenseList_id") ON UPDATE CASCADE ON DELETE RESTRICT;
-ALTER TABLE core.property_character_associations ADD CONSTRAINT property_character_associations_property_id_fkey FOREIGN KEY (property_id) REFERENCES core.properties_and_characters(id) ON UPDATE CASCADE ON DELETE CASCADE;
-ALTER TABLE plm."RFQItem" ADD CONSTRAINT "fk_rfqItem_copied_from" FOREIGN KEY ("rfqItem_copied_from_id") REFERENCES plm."RFQItem"("rfqItem_id") ON DELETE SET NULL;
-ALTER TABLE plm.art_piece_attachment ADD CONSTRAINT art_piece_attachment_company_code_fkey FOREIGN KEY (company_code) REFERENCES plm."companyCode"("comCode_id");
-ALTER TABLE plm.art_piece_attachment ADD CONSTRAINT art_piece_attachment_divisioncode_id_fkey FOREIGN KEY (divisioncode_id) REFERENCES plm."divisionCode"("divCode_id");
-ALTER TABLE plm."itemLicenseImage" ADD CONSTRAINT "itemLicenseImage_itemheader_id_fk_fkey" FOREIGN KEY (itemheader_id_fk) REFERENCES plm."itemHeader"(item_id_pk) ON DELETE CASCADE;
-ALTER TABLE plm.item_character_associations ADD CONSTRAINT item_character_associations_character_id_fkey FOREIGN KEY (character_id) REFERENCES core.properties_and_characters(id) ON UPDATE CASCADE ON DELETE RESTRICT;
-ALTER TABLE plm.item_character_associations ADD CONSTRAINT item_character_associations_item_header_id_fkey FOREIGN KEY (item_header_id) REFERENCES plm."itemHeader"(item_id_pk) ON UPDATE CASCADE ON DELETE CASCADE;
-ALTER TABLE plm.item_prod_order_detail_associations ADD CONSTRAINT item_prod_order_detail_associations_item_header_id_fkey FOREIGN KEY (item_header_id) REFERENCES plm."itemHeader"(item_id_pk) ON UPDATE CASCADE ON DELETE CASCADE;
-ALTER TABLE plm.item_prod_order_detail_associations ADD CONSTRAINT item_prod_order_detail_associations_prod_order_detail_pkey_fkey FOREIGN KEY (prod_order_detail_pkey) REFERENCES plm."ProdOrderDetail"(pkey) ON UPDATE CASCADE ON DELETE CASCADE;
-ALTER TABLE plm."licensingFeedbackReply" ADD CONSTRAINT "licensingFeedbackReply_licensing_status_id_fk_fkey" FOREIGN KEY (licensing_status_id_fk) REFERENCES plm."licensingStatus"(id) ON DELETE CASCADE;
-ALTER TABLE plm."licensingStatus" ADD CONSTRAINT "licensingStatus_tagged_group_id_fkey" FOREIGN KEY (tagged_group_id) REFERENCES plm.groups(id);
-ALTER TABLE plm."productUserAssignment" ADD CONSTRAINT "productUserAssignment_item_id_fk_fkey" FOREIGN KEY (item_id_fk) REFERENCES plm."itemHeader"(item_id_pk) ON UPDATE CASCADE ON DELETE CASCADE;
-ALTER TABLE plm.sample ADD CONSTRAINT sample_box_id_fk_fkey FOREIGN KEY (box_id_fk) REFERENCES plm.sample_box(box_id_pk) ON UPDATE CASCADE ON DELETE SET NULL;
-ALTER TABLE plm.sample ADD CONSTRAINT sample_factory_group_id_fk_fkey FOREIGN KEY (factory_group_id_fk) REFERENCES plm.sample_factory_group(factory_group_id_pk) ON UPDATE CASCADE ON DELETE SET NULL;
-ALTER TABLE plm.sample_attachment ADD CONSTRAINT sample_attachment_sample_id_fk_fkey FOREIGN KEY (sample_id_fk) REFERENCES plm.sample(sample_id_pk) ON UPDATE CASCADE ON DELETE CASCADE;
-ALTER TABLE plm.sample_comments ADD CONSTRAINT sample_comments_sample_id_fk_fkey FOREIGN KEY (sample_id_fk) REFERENCES plm.sample(sample_id_pk) ON UPDATE CASCADE ON DELETE CASCADE;
-ALTER TABLE plm.sample_event ADD CONSTRAINT sample_event_sample_id_fk_fkey FOREIGN KEY (sample_id_fk) REFERENCES plm.sample(sample_id_pk) ON UPDATE CASCADE ON DELETE SET NULL;
-ALTER TABLE plm.sample_shipment_item ADD CONSTRAINT sample_shipment_item_box_id_fk_fkey FOREIGN KEY (box_id_fk) REFERENCES plm.sample_box(box_id_pk) ON UPDATE CASCADE ON DELETE SET NULL;
-ALTER TABLE plm.sample_shipment_item ADD CONSTRAINT sample_shipment_item_sample_id_fk_fkey FOREIGN KEY (sample_id_fk) REFERENCES plm.sample(sample_id_pk) ON UPDATE CASCADE ON DELETE CASCADE;
-ALTER TABLE public.agent_pairings ADD CONSTRAINT agent_pairings_agent_registration_id_fkey FOREIGN KEY (agent_registration_id) REFERENCES agent_registrations(id) ON DELETE CASCADE;
-ALTER TABLE public.asset_characters ADD CONSTRAINT asset_characters_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
-ALTER TABLE public.asset_characters ADD CONSTRAINT asset_characters_character_id_fkey FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE;
-ALTER TABLE public.asset_checkouts ADD CONSTRAINT asset_checkouts_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT;
-ALTER TABLE public.asset_checkouts ADD CONSTRAINT asset_checkouts_device_id_fkey FOREIGN KEY (device_id) REFERENCES helper_devices(id);
-ALTER TABLE public.asset_path_history ADD CONSTRAINT asset_path_history_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
-ALTER TABLE public.asset_tags ADD CONSTRAINT asset_tags_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
-ALTER TABLE public.assets ADD CONSTRAINT assets_product_subtype_id_fkey FOREIGN KEY (product_subtype_id) REFERENCES product_subtypes(id) ON DELETE SET NULL;
-ALTER TABLE public.assets ADD CONSTRAINT assets_style_group_id_fkey FOREIGN KEY (style_group_id) REFERENCES style_groups(id) ON DELETE SET NULL;
-ALTER TABLE public.characters ADD CONSTRAINT characters_property_id_fkey FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE;
-ALTER TABLE public.erp_items_current ADD CONSTRAINT erp_items_current_sync_run_id_fkey FOREIGN KEY (sync_run_id) REFERENCES erp_sync_runs(id) ON DELETE SET NULL;
-ALTER TABLE public.erp_items_raw ADD CONSTRAINT erp_items_raw_sync_run_id_fkey FOREIGN KEY (sync_run_id) REFERENCES erp_sync_runs(id) ON DELETE SET NULL;
-ALTER TABLE public.helper_tokens ADD CONSTRAINT helper_tokens_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
-ALTER TABLE public.helper_tokens ADD CONSTRAINT helper_tokens_checkout_id_fkey FOREIGN KEY (checkout_id) REFERENCES asset_checkouts(id) ON DELETE SET NULL;
-ALTER TABLE public.hygiene_findings ADD CONSTRAINT hygiene_findings_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
-ALTER TABLE public.pdf_text_samples ADD CONSTRAINT pdf_text_samples_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
-ALTER TABLE public.processing_queue ADD CONSTRAINT processing_queue_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
-ALTER TABLE public.prod_order_headers_current ADD CONSTRAINT prod_order_headers_current_sync_run_id_fkey FOREIGN KEY (sync_run_id) REFERENCES prod_order_sync_runs(id) ON DELETE SET NULL;
-ALTER TABLE public.prod_order_headers_raw ADD CONSTRAINT prod_order_headers_raw_sync_run_id_fkey FOREIGN KEY (sync_run_id) REFERENCES prod_order_sync_runs(id) ON DELETE SET NULL;
-ALTER TABLE public.product_category_predictions ADD CONSTRAINT product_category_predictions_erp_item_id_fkey FOREIGN KEY (erp_item_id) REFERENCES erp_items_current(id) ON DELETE CASCADE;
-ALTER TABLE public.product_subtypes ADD CONSTRAINT product_subtypes_type_id_fkey FOREIGN KEY (type_id) REFERENCES product_types(id) ON DELETE CASCADE;
-ALTER TABLE public.product_types ADD CONSTRAINT product_types_category_id_fkey FOREIGN KEY (category_id) REFERENCES product_categories(id) ON DELETE CASCADE;
-ALTER TABLE public.properties ADD CONSTRAINT properties_licensor_id_fkey FOREIGN KEY (licensor_id) REFERENCES licensors(id) ON DELETE CASCADE;
-ALTER TABLE public.render_queue ADD CONSTRAINT render_queue_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
-ALTER TABLE public.sku_files_used ADD CONSTRAINT sku_files_used_style_guide_file_id_fkey FOREIGN KEY (style_guide_file_id) REFERENCES style_guide_files(id) ON DELETE SET NULL;
-ALTER TABLE public.style_groups ADD CONSTRAINT style_groups_primary_asset_id_fkey FOREIGN KEY (primary_asset_id) REFERENCES assets(id) ON DELETE SET NULL;
-ALTER TABLE public.style_guide_files ADD CONSTRAINT style_guide_files_crawl_run_id_fkey FOREIGN KEY (crawl_run_id) REFERENCES style_guide_crawl_runs(id) ON DELETE SET NULL;
-ALTER TABLE public.style_guide_render_queue ADD CONSTRAINT style_guide_render_queue_style_guide_file_id_fkey FOREIGN KEY (style_guide_file_id) REFERENCES style_guide_files(id) ON DELETE CASCADE;
-
--- ------------------------------------------------------------------------------------
--- Views (1)
--- ------------------------------------------------------------------------------------
-CREATE OR REPLACE VIEW public.sg_archive_usage AS  WITH usage AS (
-         SELECT f.licensor_name,
-            f.property_folder,
-            max(sg.latest_file_date) AS most_recent_design_date,
-            count(DISTINCT u_1.id) AS design_ref_count,
-            count(DISTINCT u_1.sku) AS designs_using
-           FROM ((sku_files_used u_1
-             JOIN style_groups sg ON ((sg.sku = u_1.sku)))
-             JOIN style_guide_files f ON ((f.id = u_1.style_guide_file_id)))
-          GROUP BY f.licensor_name, f.property_folder
-        ), guides AS (
-         SELECT style_guide_files.licensor_name,
-            style_guide_files.property_folder,
-            count(*) AS total_files,
-            count(*) FILTER (WHERE style_guide_files.is_active) AS active_files,
-            max(style_guide_files.modified_at) AS newest_sg_file_date
-           FROM style_guide_files
-          GROUP BY style_guide_files.licensor_name, style_guide_files.property_folder
-        )
- SELECT g.licensor_name,
-    g.property_folder,
-    g.total_files,
-    g.active_files,
-    g.newest_sg_file_date,
-    u.most_recent_design_date,
-    COALESCE(u.designs_using, (0)::bigint) AS designs_using,
-    COALESCE(u.design_ref_count, (0)::bigint) AS design_ref_count,
-    ((u.most_recent_design_date IS NULL) OR (u.most_recent_design_date < (now() - '3 years'::interval))) AS archive_candidate
-   FROM (guides g
-     LEFT JOIN usage u ON (((u.licensor_name = g.licensor_name) AND (NOT (u.property_folder IS DISTINCT FROM g.property_folder)))));
-
--- ------------------------------------------------------------------------------------
--- PRE-ADOPTION FUNCTIONS
+-- PRE-ADOPTION FUNCTIONS (60)
 -- ------------------------------------------------------------------------------------
 -- Functions, exactly like the tables above, that exist in production and that no
--- migration in this repository creates. This is not an optional extra: without
--- public.has_role() the very first reconcile migration aborts, and eighteen migrations
--- downstream of it never create their own tables either. They come last because several
--- read the tables above.
+-- migration in this repository creates. This is not an optional extra. Without
+-- public.has_role() the very first reconcile migration aborts, and the eighteen
+-- migrations downstream of it never create their own tables either -- which is exactly
+-- what the first measured run showed: 66 pass-1 failures fell only to 41.
+--
+-- They come BEFORE the indexes because some index predicates call them
+-- (public.is_style_guide_source_pdf), and AFTER the tables because some read them.
 -- ------------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.auto_queue_render()
  RETURNS trigger
@@ -4622,13 +4378,346 @@ $function$;
 
 
 -- ------------------------------------------------------------------------------------
+-- Indexes (151)
+-- ------------------------------------------------------------------------------------
+CREATE INDEX IF NOT EXISTS age_group_created_by_fkey ON core.age_group USING btree (created_by);
+CREATE INDEX IF NOT EXISTS age_group_updated_by_fkey ON core.age_group USING btree (updated_by);
+CREATE INDEX IF NOT EXISTS art_types_created_by_fkey ON core.art_types USING btree (created_by);
+CREATE INDEX IF NOT EXISTS art_types_divisioncode_id_fkey ON core.art_types USING btree (divisioncode_id);
+CREATE INDEX IF NOT EXISTS art_types_updated_by_fkey ON core.art_types USING btree (updated_by);
+CREATE INDEX IF NOT EXISTS artist_types_created_by_fkey ON core.artist_types USING btree (created_by);
+CREATE INDEX IF NOT EXISTS artist_types_updated_by_fkey ON core.artist_types USING btree (updated_by);
+CREATE INDEX IF NOT EXISTS idx_relations_child ON core."merchGroupRelations" USING btree (child_mg_id);
+CREATE INDEX IF NOT EXISTS idx_relations_grand_parent ON core."merchGroupRelations" USING btree (grand_parent_mg_id);
+CREATE INDEX IF NOT EXISTS idx_relations_parent ON core."merchGroupRelations" USING btree (parent_mg_id);
+CREATE UNIQUE INDEX uniq_grand_parent_parent_child ON core."merchGroupRelations" USING btree (grand_parent_mg_id, parent_mg_id, child_mg_id);
+CREATE UNIQUE INDEX uniq_parent_child_no_grand ON core."merchGroupRelations" USING btree (parent_mg_id, child_mg_id) WHERE (grand_parent_mg_id IS NULL);
+CREATE INDEX IF NOT EXISTS idx_properties_licensor_id ON core.properties_and_characters USING btree (licensor_id);
+CREATE INDEX IF NOT EXISTS idx_properties_name ON core.properties_and_characters USING btree (name);
+CREATE UNIQUE INDEX unique_character_entity ON core.properties_and_characters USING btree (licensor_id, source_licensed_property_id, source_character_id) WHERE ((type)::text = 'CHARACTER'::text);
+CREATE UNIQUE INDEX unique_property_entity ON core.properties_and_characters USING btree (licensor_id, source_licensed_property_id) WHERE ((type)::text = 'PROPERTY'::text);
+CREATE INDEX IF NOT EXISTS idx_property_character_associations_character_id ON core.property_character_associations USING btree (character_id);
+CREATE INDEX IF NOT EXISTS idx_property_character_associations_licensor_id ON core.property_character_associations USING btree (licensor_id);
+CREATE INDEX IF NOT EXISTS idx_property_character_associations_property_id ON core.property_character_associations USING btree (property_id);
+CREATE UNIQUE INDEX "GridLayout_pkey" ON plm."GridLayout" USING btree (id);
+CREATE UNIQUE INDEX "GridViewState_user_grid_view" ON plm."GridViewState" USING btree (user_id_fk, grid_id, view_name);
+CREATE UNIQUE INDEX "ProdOrderDetail_pkey" ON plm."ProdOrderDetail" USING btree (id);
+CREATE INDEX IF NOT EXISTS "idx_rfqItem_copied_from_id" ON plm."RFQItem" USING btree ("rfqItem_copied_from_id") WHERE ("rfqItem_copied_from_id" IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_rfqitem_choosen_vendor ON plm."RFQItem" USING btree ("rfqItem_choosen_vendor");
+CREATE INDEX IF NOT EXISTS idx_rfqitem_container ON plm."RFQItem" USING btree (rfq_container_id_fk);
+CREATE INDEX IF NOT EXISTS idx_rfqitem_customer ON plm."RFQItem" USING btree ("rfqItem_customer");
+CREATE INDEX IF NOT EXISTS idx_rfqitem_delivery_loc ON plm."RFQItem" USING btree ("rfqItem_delivery_loc");
+CREATE INDEX IF NOT EXISTS idx_rfqitem_divcode ON plm."RFQItem" USING btree ("rfqItem_divCode_id_fk");
+CREATE INDEX IF NOT EXISTS idx_rfqitem_home_list ON plm."RFQItem" USING btree ("rfqItem_active", "rfqItem_id" DESC) WHERE ("rfqItem_archive" IS NULL);
+CREATE INDEX IF NOT EXISTS idx_rfqitem_rfq_group ON plm."RFQItem" USING btree ("rfqItem_rfq_group");
+CREATE INDEX IF NOT EXISTS idx_rfqitem_step ON plm."RFQItem" USING btree ("rfqItem_step");
+CREATE INDEX IF NOT EXISTS idx_rfqvendor_item_fk ON plm."RFQVendor" USING btree ("RFQitem_id_fk");
+CREATE INDEX IF NOT EXISTS idx_rfqvendor_vendor_archived ON plm."RFQVendor" USING btree (vendor_id_fk, "RFQVendor_archived");
+CREATE UNIQUE INDEX "StandardizedVersionDetail_pkey" ON plm."StandardizedDetail" USING btree (id);
+CREATE INDEX IF NOT EXISTS art_piece_attachment_art_piece_id_fkey ON plm.art_piece_attachment USING btree (art_piece_id);
+CREATE INDEX IF NOT EXISTS art_piece_attachment_company_code_fkey ON plm.art_piece_attachment USING btree (company_code);
+CREATE INDEX IF NOT EXISTS art_piece_attachment_created_by_fkey ON plm.art_piece_attachment USING btree (created_by);
+CREATE INDEX IF NOT EXISTS art_piece_attachment_divisioncode_id_fkey ON plm.art_piece_attachment USING btree (divisioncode_id);
+CREATE INDEX IF NOT EXISTS art_piece_attachment_updated_by_fkey ON plm.art_piece_attachment USING btree (updated_by);
+CREATE UNIQUE INDEX grid_cell_notes_grid_row_col_uq ON plm.grid_cell_notes USING btree (grid_type, row_id, col_id);
+CREATE INDEX IF NOT EXISTS grid_cell_notes_grid_type_idx ON plm.grid_cell_notes USING btree (grid_type);
+CREATE INDEX IF NOT EXISTS "idx_itemLicenseImage_item" ON plm."itemLicenseImage" USING btree (itemheader_id_fk);
+CREATE INDEX IF NOT EXISTS idx_itemlicenseimage_item ON plm."itemLicenseImage" USING btree (itemheader_id_fk);
+CREATE UNIQUE INDEX "itemType_name_key" ON plm."itemType" USING btree (item_type_name);
+CREATE INDEX IF NOT EXISTS "itemType_status_idx" ON plm."itemType" USING btree (item_type_status);
+CREATE INDEX IF NOT EXISTS idx_item_character_associations_character_id ON plm.item_character_associations USING btree (character_id);
+CREATE INDEX IF NOT EXISTS item_prod_order_detail_associations_item_header_idx ON plm.item_prod_order_detail_associations USING btree (item_header_id);
+CREATE INDEX IF NOT EXISTS item_prod_order_detail_associations_matched_item_number_idx ON plm.item_prod_order_detail_associations USING btree (matched_item_number);
+CREATE INDEX IF NOT EXISTS item_prod_order_detail_associations_prod_detail_idx ON plm.item_prod_order_detail_associations USING btree (prod_order_detail_pkey);
+CREATE UNIQUE INDEX item_prod_order_detail_associations_unique_pair ON plm.item_prod_order_detail_associations USING btree (item_header_id, prod_order_detail_pkey);
+CREATE INDEX IF NOT EXISTS idx_licensing_feedback_reply_status ON plm."licensingFeedbackReply" USING btree (licensing_status_id_fk);
+CREATE UNIQUE INDEX unique_item_stage ON plm."licensingMilestone" USING btree (itemheader_id_fk, stage);
+CREATE UNIQUE INDEX "productUserAssignment_item_role_key" ON plm."productUserAssignment" USING btree (item_id_fk, role);
+CREATE INDEX IF NOT EXISTS "productUserAssignment_user_idx" ON plm."productUserAssignment" USING btree (user_id_fk);
+CREATE INDEX IF NOT EXISTS idx_sample_box_id_fk ON plm.sample USING btree (box_id_fk);
+CREATE INDEX IF NOT EXISTS idx_sample_attachment_sample_id_fk ON plm.sample_attachment USING btree (sample_id_fk);
+CREATE INDEX IF NOT EXISTS idx_sample_event_sample_id_fk ON plm.sample_event USING btree (sample_id_fk);
+CREATE INDEX IF NOT EXISTS idx_agent_pairings_code ON public.agent_pairings USING btree (pairing_code) WHERE (status = 'pending'::text);
+CREATE INDEX IF NOT EXISTS idx_agent_registrations_last_heartbeat ON public.agent_registrations USING btree (last_heartbeat);
+CREATE INDEX IF NOT EXISTS idx_ai_sentinel_cleanup_log_asset ON public.ai_sentinel_cleanup_log USING btree (ai_asset_id);
+CREATE INDEX IF NOT EXISTS idx_app_access_user_id ON public.app_access USING btree (user_id);
+CREATE UNIQUE INDEX asset_checkouts_one_active_per_asset ON public.asset_checkouts USING btree (asset_id) WHERE (status = ANY (ARRAY['active'::checkout_status, 'checkin_queued'::checkout_status, 'uploading'::checkout_status, 'verifying'::checkout_status]));
+CREATE INDEX IF NOT EXISTS asset_checkouts_awaiting_verification ON public.asset_checkouts USING btree (verify_deadline_at) WHERE ((status = 'verifying'::checkout_status) AND (source_provider = 'seafile'::text));
+CREATE INDEX IF NOT EXISTS idx_asset_path_history_asset_id_detected_at ON public.asset_path_history USING btree (asset_id, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_asset_tags_asset_id ON public.asset_tags USING btree (asset_id);
+CREATE INDEX IF NOT EXISTS idx_asset_tags_source ON public.asset_tags USING btree (source);
+CREATE INDEX IF NOT EXISTS idx_assets_file_type ON public.assets USING btree (file_type);
+CREATE INDEX IF NOT EXISTS idx_assets_status ON public.assets USING btree (status);
+CREATE INDEX IF NOT EXISTS idx_assets_workflow_status ON public.assets USING btree (workflow_status);
+CREATE INDEX IF NOT EXISTS idx_assets_is_licensed ON public.assets USING btree (is_licensed);
+CREATE INDEX IF NOT EXISTS idx_assets_modified_at ON public.assets USING btree (modified_at);
+CREATE INDEX IF NOT EXISTS idx_assets_file_created_at ON public.assets USING btree (file_created_at);
+CREATE INDEX IF NOT EXISTS idx_assets_licensor_id ON public.assets USING btree (licensor_id);
+CREATE INDEX IF NOT EXISTS idx_assets_property_id ON public.assets USING btree (property_id);
+CREATE INDEX IF NOT EXISTS idx_assets_product_subtype_id ON public.assets USING btree (product_subtype_id);
+CREATE INDEX IF NOT EXISTS idx_assets_quick_hash ON public.assets USING btree (quick_hash);
+CREATE INDEX IF NOT EXISTS idx_assets_tags ON public.assets USING gin (tags);
+CREATE INDEX IF NOT EXISTS idx_assets_is_deleted ON public.assets USING btree (is_deleted);
+CREATE INDEX IF NOT EXISTS idx_assets_filename_trgm ON public.assets USING gin (filename extensions.gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_assets_relative_path_trgm ON public.assets USING gin (relative_path extensions.gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_assets_style_group_id ON public.assets USING btree (style_group_id);
+CREATE INDEX IF NOT EXISTS idx_assets_ai_tagged_at ON public.assets USING btree (ai_tagged_at) WHERE (ai_tagged_at IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_assets_clear_style_cursor ON public.assets USING btree (id) WHERE ((is_deleted = false) AND (style_group_id IS NOT NULL));
+CREATE INDEX IF NOT EXISTS idx_assets_primary_sort_tier ON public.assets USING btree (style_group_id, primary_sort_tier, created_at) WHERE (is_deleted = false);
+CREATE INDEX IF NOT EXISTS idx_assets_compat_audit ON public.assets USING btree (id) WHERE ((file_type = 'ai'::file_type) AND (is_deleted = false) AND (thumbnail_url IS NOT NULL));
+CREATE INDEX IF NOT EXISTS idx_assets_pdf_not_deleted ON public.assets USING btree (file_type, id) WHERE (is_deleted = false);
+CREATE INDEX IF NOT EXISTS idx_assets_stage ON public.assets USING btree (stage);
+CREATE INDEX IF NOT EXISTS idx_assets_customer ON public.assets USING btree (customer);
+CREATE INDEX IF NOT EXISTS idx_assets_program ON public.assets USING btree (program);
+CREATE INDEX IF NOT EXISTS idx_assets_program_trgm ON public.assets USING gin (program extensions.gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_assets_customer_trgm ON public.assets USING gin (customer extensions.gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_assets_facet_counts ON public.assets USING btree (is_deleted) INCLUDE (file_type, status, workflow_status, stage, is_licensed, modified_at, file_created_at, thumbnail_url, style_group_id) WHERE (is_deleted = false);
+CREATE INDEX IF NOT EXISTS idx_characters_is_priority ON public.characters USING btree (is_priority) WHERE (is_priority = true);
+CREATE INDEX IF NOT EXISTS idx_characters_usage_count ON public.characters USING btree (usage_count);
+CREATE INDEX IF NOT EXISTS idx_eel_target_id ON public.erp_enrichment_log USING btree (target_id);
+CREATE INDEX IF NOT EXISTS idx_eel_run_id ON public.erp_enrichment_log USING btree (run_id);
+CREATE INDEX IF NOT EXISTS idx_erp_items_current_style_number ON public.erp_items_current USING btree (style_number);
+CREATE INDEX IF NOT EXISTS idx_erp_items_current_mg_category ON public.erp_items_current USING btree (mg_category);
+CREATE INDEX IF NOT EXISTS idx_erp_items_current_synced_at ON public.erp_items_current USING btree (synced_at);
+CREATE INDEX IF NOT EXISTS idx_erp_items_current_dismissed ON public.erp_items_current USING btree (dismissed) WHERE (dismissed = true);
+CREATE INDEX IF NOT EXISTS idx_erp_items_raw_external_id ON public.erp_items_raw USING btree (external_id);
+CREATE INDEX IF NOT EXISTS idx_erp_items_raw_sync_run_id ON public.erp_items_raw USING btree (sync_run_id);
+CREATE UNIQUE INDEX erp_sync_runs_one_running ON public.erp_sync_runs USING btree ((true)) WHERE (status = 'running'::text);
+CREATE INDEX IF NOT EXISTS idx_hygiene_findings_check_type ON public.hygiene_findings USING btree (check_type);
+CREATE INDEX IF NOT EXISTS idx_hygiene_findings_status ON public.hygiene_findings USING btree (status);
+CREATE INDEX IF NOT EXISTS idx_hygiene_findings_asset_id ON public.hygiene_findings USING btree (asset_id);
+CREATE INDEX IF NOT EXISTS idx_hygiene_findings_relative_path ON public.hygiene_findings USING btree (relative_path);
+CREATE UNIQUE INDEX uq_hygiene_findings_path_check ON public.hygiene_findings USING btree (relative_path, check_type) WHERE (status <> 'resolved'::text);
+CREATE INDEX IF NOT EXISTS idx_pdf_text_samples_asset_id ON public.pdf_text_samples USING btree (asset_id);
+CREATE INDEX IF NOT EXISTS idx_pdf_text_samples_sampled_at ON public.pdf_text_samples USING btree (sampled_at DESC);
+CREATE INDEX IF NOT EXISTS idx_processing_queue_status ON public.processing_queue USING btree (status);
+CREATE INDEX IF NOT EXISTS idx_prod_order_headers_current_style_number ON public.prod_order_headers_current USING btree (style_number);
+CREATE INDEX IF NOT EXISTS idx_prod_order_headers_current_prod_order_number ON public.prod_order_headers_current USING btree (prod_order_number);
+CREATE INDEX IF NOT EXISTS idx_prod_order_headers_current_due_date ON public.prod_order_headers_current USING btree (due_date);
+CREATE INDEX IF NOT EXISTS idx_prod_order_headers_raw_external_id ON public.prod_order_headers_raw USING btree (external_id);
+CREATE INDEX IF NOT EXISTS idx_prod_order_headers_raw_sync_run_id ON public.prod_order_headers_raw USING btree (sync_run_id);
+CREATE INDEX IF NOT EXISTS idx_prod_order_sync_runs_started_at ON public.prod_order_sync_runs USING btree (started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pcp_status ON public.product_category_predictions USING btree (status);
+CREATE INDEX IF NOT EXISTS idx_pcp_erp_item_id ON public.product_category_predictions USING btree (erp_item_id);
+CREATE INDEX IF NOT EXISTS idx_render_queue_status ON public.render_queue USING btree (status);
+CREATE UNIQUE INDEX uq_render_queue_asset_active ON public.render_queue USING btree (asset_id) WHERE (status = ANY (ARRAY['pending'::queue_status, 'claimed'::queue_status]));
+CREATE INDEX IF NOT EXISTS idx_scanner_ai_ignores_path ON public.scanner_ai_ignores USING btree (relative_path);
+CREATE INDEX IF NOT EXISTS sku_files_used_sku_idx ON public.sku_files_used USING btree (sku);
+CREATE INDEX IF NOT EXISTS sku_files_used_style_guide_file_id_idx ON public.sku_files_used USING btree (style_guide_file_id) WHERE (style_guide_file_id IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_style_groups_sku ON public.style_groups USING btree (sku);
+CREATE INDEX IF NOT EXISTS idx_style_groups_latest_file_date ON public.style_groups USING btree (latest_file_date);
+CREATE INDEX IF NOT EXISTS idx_style_groups_licensor_id ON public.style_groups USING btree (licensor_id);
+CREATE INDEX IF NOT EXISTS idx_style_groups_property_id ON public.style_groups USING btree (property_id);
+CREATE INDEX IF NOT EXISTS idx_sg_stage ON public.style_groups USING btree (stage);
+CREATE INDEX IF NOT EXISTS idx_sg_customer ON public.style_groups USING btree (customer);
+CREATE INDEX IF NOT EXISTS idx_sg_program ON public.style_groups USING btree (program);
+CREATE INDEX IF NOT EXISTS idx_sgf_root_label ON public.style_guide_files USING btree (root_label);
+CREATE INDEX IF NOT EXISTS idx_sgf_directory_path ON public.style_guide_files USING btree (directory_path);
+CREATE INDEX IF NOT EXISTS idx_sgf_normalized_name ON public.style_guide_files USING btree (normalized_name);
+CREATE INDEX IF NOT EXISTS idx_sgf_is_active ON public.style_guide_files USING btree (is_active);
+CREATE INDEX IF NOT EXISTS idx_sgf_crawl_run_id ON public.style_guide_files USING btree (crawl_run_id);
+CREATE INDEX IF NOT EXISTS idx_sgf_style_guide_folder ON public.style_guide_files USING btree (style_guide_folder);
+CREATE INDEX IF NOT EXISTS idx_sgf_property_folder ON public.style_guide_files USING btree (property_folder);
+CREATE INDEX IF NOT EXISTS idx_sgf_licensor_name ON public.style_guide_files USING btree (licensor_name);
+CREATE INDEX IF NOT EXISTS idx_sgf_render_errored ON public.style_guide_files USING btree (id) WHERE (is_active AND (thumbnail_url IS NULL) AND (thumbnail_error IS NOT NULL));
+CREATE INDEX IF NOT EXISTS idx_style_guide_files_filename_trgm ON public.style_guide_files USING gin (lower(filename) extensions.gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_style_guide_files_active_modified ON public.style_guide_files USING btree (modified_at DESC NULLS LAST, filename) WHERE is_active;
+CREATE INDEX IF NOT EXISTS idx_sgrq_status ON public.style_guide_render_queue USING btree (status);
+CREATE INDEX IF NOT EXISTS idx_sgrq_file_id ON public.style_guide_render_queue USING btree (style_guide_file_id);
+CREATE INDEX IF NOT EXISTS idx_sgrq_created_at ON public.style_guide_render_queue USING btree (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sgrq_status_created_at ON public.style_guide_render_queue USING btree (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sgrq_file_status ON public.style_guide_render_queue USING btree (style_guide_file_id, status);
+CREATE INDEX IF NOT EXISTS idx_tiff_opt_status ON public.tiff_optimization_queue USING btree (status);
+CREATE INDEX IF NOT EXISTS idx_tiff_opt_compression ON public.tiff_optimization_queue USING btree (compression_type);
+CREATE INDEX IF NOT EXISTS tiff_optimization_queue_claimed_by_idx ON public.tiff_optimization_queue USING btree (claimed_by) WHERE (claimed_by IS NOT NULL);
+CREATE INDEX IF NOT EXISTS tiff_optimization_queue_claimed_at_idx ON public.tiff_optimization_queue USING btree (claimed_at) WHERE (claimed_at IS NOT NULL);
+
+-- ------------------------------------------------------------------------------------
+-- Foreign keys (only where the target is also in this baseline) (54)
+-- ------------------------------------------------------------------------------------
+ALTER TABLE core.art_types ADD CONSTRAINT art_types_divisioncode_id_fkey FOREIGN KEY (divisioncode_id) REFERENCES plm."divisionCode"("divCode_id");
+ALTER TABLE core."merchGroupRelations" ADD CONSTRAINT "merchGroupRelations_child_mg_id_fkey" FOREIGN KEY (child_mg_id) REFERENCES core."merchGroupMaster"(mg_id) ON DELETE CASCADE;
+ALTER TABLE core."merchGroupRelations" ADD CONSTRAINT "merchGroupRelations_grand_parent_mg_id_fkey" FOREIGN KEY (grand_parent_mg_id) REFERENCES core."merchGroupMaster"(mg_id) ON DELETE CASCADE;
+ALTER TABLE core."merchGroupRelations" ADD CONSTRAINT "merchGroupRelations_parent_mg_id_fkey" FOREIGN KEY (parent_mg_id) REFERENCES core."merchGroupMaster"(mg_id) ON DELETE CASCADE;
+ALTER TABLE core.properties_and_characters ADD CONSTRAINT properties_and_characters_licensor_id_fkey FOREIGN KEY (licensor_id) REFERENCES core."licenseList"("licenseList_id") ON UPDATE CASCADE ON DELETE RESTRICT;
+ALTER TABLE core.property_character_associations ADD CONSTRAINT property_character_associations_character_id_fkey FOREIGN KEY (character_id) REFERENCES core.properties_and_characters(id) ON UPDATE CASCADE ON DELETE CASCADE;
+ALTER TABLE core.property_character_associations ADD CONSTRAINT property_character_associations_licensor_id_fkey FOREIGN KEY (licensor_id) REFERENCES core."licenseList"("licenseList_id") ON UPDATE CASCADE ON DELETE RESTRICT;
+ALTER TABLE core.property_character_associations ADD CONSTRAINT property_character_associations_property_id_fkey FOREIGN KEY (property_id) REFERENCES core.properties_and_characters(id) ON UPDATE CASCADE ON DELETE CASCADE;
+ALTER TABLE plm."RFQItem" ADD CONSTRAINT "fk_rfqItem_copied_from" FOREIGN KEY ("rfqItem_copied_from_id") REFERENCES plm."RFQItem"("rfqItem_id") ON DELETE SET NULL;
+ALTER TABLE plm.art_piece_attachment ADD CONSTRAINT art_piece_attachment_company_code_fkey FOREIGN KEY (company_code) REFERENCES plm."companyCode"("comCode_id");
+ALTER TABLE plm.art_piece_attachment ADD CONSTRAINT art_piece_attachment_divisioncode_id_fkey FOREIGN KEY (divisioncode_id) REFERENCES plm."divisionCode"("divCode_id");
+ALTER TABLE plm."itemLicenseImage" ADD CONSTRAINT "itemLicenseImage_itemheader_id_fk_fkey" FOREIGN KEY (itemheader_id_fk) REFERENCES plm."itemHeader"(item_id_pk) ON DELETE CASCADE;
+ALTER TABLE plm.item_character_associations ADD CONSTRAINT item_character_associations_character_id_fkey FOREIGN KEY (character_id) REFERENCES core.properties_and_characters(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+ALTER TABLE plm.item_character_associations ADD CONSTRAINT item_character_associations_item_header_id_fkey FOREIGN KEY (item_header_id) REFERENCES plm."itemHeader"(item_id_pk) ON UPDATE CASCADE ON DELETE CASCADE;
+ALTER TABLE plm.item_prod_order_detail_associations ADD CONSTRAINT item_prod_order_detail_associations_item_header_id_fkey FOREIGN KEY (item_header_id) REFERENCES plm."itemHeader"(item_id_pk) ON UPDATE CASCADE ON DELETE CASCADE;
+ALTER TABLE plm.item_prod_order_detail_associations ADD CONSTRAINT item_prod_order_detail_associations_prod_order_detail_pkey_fkey FOREIGN KEY (prod_order_detail_pkey) REFERENCES plm."ProdOrderDetail"(pkey) ON UPDATE CASCADE ON DELETE CASCADE;
+ALTER TABLE plm."licensingFeedbackReply" ADD CONSTRAINT "licensingFeedbackReply_licensing_status_id_fk_fkey" FOREIGN KEY (licensing_status_id_fk) REFERENCES plm."licensingStatus"(id) ON DELETE CASCADE;
+ALTER TABLE plm."licensingStatus" ADD CONSTRAINT "licensingStatus_tagged_group_id_fkey" FOREIGN KEY (tagged_group_id) REFERENCES plm.groups(id);
+ALTER TABLE plm."productUserAssignment" ADD CONSTRAINT "productUserAssignment_item_id_fk_fkey" FOREIGN KEY (item_id_fk) REFERENCES plm."itemHeader"(item_id_pk) ON UPDATE CASCADE ON DELETE CASCADE;
+ALTER TABLE plm.sample ADD CONSTRAINT sample_box_id_fk_fkey FOREIGN KEY (box_id_fk) REFERENCES plm.sample_box(box_id_pk) ON UPDATE CASCADE ON DELETE SET NULL;
+ALTER TABLE plm.sample ADD CONSTRAINT sample_factory_group_id_fk_fkey FOREIGN KEY (factory_group_id_fk) REFERENCES plm.sample_factory_group(factory_group_id_pk) ON UPDATE CASCADE ON DELETE SET NULL;
+ALTER TABLE plm.sample_attachment ADD CONSTRAINT sample_attachment_sample_id_fk_fkey FOREIGN KEY (sample_id_fk) REFERENCES plm.sample(sample_id_pk) ON UPDATE CASCADE ON DELETE CASCADE;
+ALTER TABLE plm.sample_comments ADD CONSTRAINT sample_comments_sample_id_fk_fkey FOREIGN KEY (sample_id_fk) REFERENCES plm.sample(sample_id_pk) ON UPDATE CASCADE ON DELETE CASCADE;
+ALTER TABLE plm.sample_event ADD CONSTRAINT sample_event_sample_id_fk_fkey FOREIGN KEY (sample_id_fk) REFERENCES plm.sample(sample_id_pk) ON UPDATE CASCADE ON DELETE SET NULL;
+ALTER TABLE plm.sample_shipment_item ADD CONSTRAINT sample_shipment_item_box_id_fk_fkey FOREIGN KEY (box_id_fk) REFERENCES plm.sample_box(box_id_pk) ON UPDATE CASCADE ON DELETE SET NULL;
+ALTER TABLE plm.sample_shipment_item ADD CONSTRAINT sample_shipment_item_sample_id_fk_fkey FOREIGN KEY (sample_id_fk) REFERENCES plm.sample(sample_id_pk) ON UPDATE CASCADE ON DELETE CASCADE;
+ALTER TABLE public.agent_pairings ADD CONSTRAINT agent_pairings_agent_registration_id_fkey FOREIGN KEY (agent_registration_id) REFERENCES agent_registrations(id) ON DELETE CASCADE;
+ALTER TABLE public.asset_characters ADD CONSTRAINT asset_characters_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
+ALTER TABLE public.asset_characters ADD CONSTRAINT asset_characters_character_id_fkey FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE;
+ALTER TABLE public.asset_checkouts ADD CONSTRAINT asset_checkouts_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT;
+ALTER TABLE public.asset_checkouts ADD CONSTRAINT asset_checkouts_device_id_fkey FOREIGN KEY (device_id) REFERENCES helper_devices(id);
+ALTER TABLE public.asset_path_history ADD CONSTRAINT asset_path_history_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
+ALTER TABLE public.asset_tags ADD CONSTRAINT asset_tags_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
+ALTER TABLE public.assets ADD CONSTRAINT assets_product_subtype_id_fkey FOREIGN KEY (product_subtype_id) REFERENCES product_subtypes(id) ON DELETE SET NULL;
+ALTER TABLE public.assets ADD CONSTRAINT assets_style_group_id_fkey FOREIGN KEY (style_group_id) REFERENCES style_groups(id) ON DELETE SET NULL;
+ALTER TABLE public.characters ADD CONSTRAINT characters_property_id_fkey FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE;
+ALTER TABLE public.erp_items_current ADD CONSTRAINT erp_items_current_sync_run_id_fkey FOREIGN KEY (sync_run_id) REFERENCES erp_sync_runs(id) ON DELETE SET NULL;
+ALTER TABLE public.erp_items_raw ADD CONSTRAINT erp_items_raw_sync_run_id_fkey FOREIGN KEY (sync_run_id) REFERENCES erp_sync_runs(id) ON DELETE SET NULL;
+ALTER TABLE public.helper_tokens ADD CONSTRAINT helper_tokens_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
+ALTER TABLE public.helper_tokens ADD CONSTRAINT helper_tokens_checkout_id_fkey FOREIGN KEY (checkout_id) REFERENCES asset_checkouts(id) ON DELETE SET NULL;
+ALTER TABLE public.hygiene_findings ADD CONSTRAINT hygiene_findings_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
+ALTER TABLE public.pdf_text_samples ADD CONSTRAINT pdf_text_samples_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
+ALTER TABLE public.processing_queue ADD CONSTRAINT processing_queue_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
+ALTER TABLE public.prod_order_headers_current ADD CONSTRAINT prod_order_headers_current_sync_run_id_fkey FOREIGN KEY (sync_run_id) REFERENCES prod_order_sync_runs(id) ON DELETE SET NULL;
+ALTER TABLE public.prod_order_headers_raw ADD CONSTRAINT prod_order_headers_raw_sync_run_id_fkey FOREIGN KEY (sync_run_id) REFERENCES prod_order_sync_runs(id) ON DELETE SET NULL;
+ALTER TABLE public.product_category_predictions ADD CONSTRAINT product_category_predictions_erp_item_id_fkey FOREIGN KEY (erp_item_id) REFERENCES erp_items_current(id) ON DELETE CASCADE;
+ALTER TABLE public.product_subtypes ADD CONSTRAINT product_subtypes_type_id_fkey FOREIGN KEY (type_id) REFERENCES product_types(id) ON DELETE CASCADE;
+ALTER TABLE public.product_types ADD CONSTRAINT product_types_category_id_fkey FOREIGN KEY (category_id) REFERENCES product_categories(id) ON DELETE CASCADE;
+ALTER TABLE public.properties ADD CONSTRAINT properties_licensor_id_fkey FOREIGN KEY (licensor_id) REFERENCES licensors(id) ON DELETE CASCADE;
+ALTER TABLE public.render_queue ADD CONSTRAINT render_queue_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE;
+ALTER TABLE public.sku_files_used ADD CONSTRAINT sku_files_used_style_guide_file_id_fkey FOREIGN KEY (style_guide_file_id) REFERENCES style_guide_files(id) ON DELETE SET NULL;
+ALTER TABLE public.style_groups ADD CONSTRAINT style_groups_primary_asset_id_fkey FOREIGN KEY (primary_asset_id) REFERENCES assets(id) ON DELETE SET NULL;
+ALTER TABLE public.style_guide_files ADD CONSTRAINT style_guide_files_crawl_run_id_fkey FOREIGN KEY (crawl_run_id) REFERENCES style_guide_crawl_runs(id) ON DELETE SET NULL;
+ALTER TABLE public.style_guide_render_queue ADD CONSTRAINT style_guide_render_queue_style_guide_file_id_fkey FOREIGN KEY (style_guide_file_id) REFERENCES style_guide_files(id) ON DELETE CASCADE;
+
+-- ------------------------------------------------------------------------------------
+-- Views (1)
+-- ------------------------------------------------------------------------------------
+CREATE OR REPLACE VIEW public.sg_archive_usage AS  WITH usage AS (
+         SELECT f.licensor_name,
+            f.property_folder,
+            max(sg.latest_file_date) AS most_recent_design_date,
+            count(DISTINCT u_1.id) AS design_ref_count,
+            count(DISTINCT u_1.sku) AS designs_using
+           FROM ((sku_files_used u_1
+             JOIN style_groups sg ON ((sg.sku = u_1.sku)))
+             JOIN style_guide_files f ON ((f.id = u_1.style_guide_file_id)))
+          GROUP BY f.licensor_name, f.property_folder
+        ), guides AS (
+         SELECT style_guide_files.licensor_name,
+            style_guide_files.property_folder,
+            count(*) AS total_files,
+            count(*) FILTER (WHERE style_guide_files.is_active) AS active_files,
+            max(style_guide_files.modified_at) AS newest_sg_file_date
+           FROM style_guide_files
+          GROUP BY style_guide_files.licensor_name, style_guide_files.property_folder
+        )
+ SELECT g.licensor_name,
+    g.property_folder,
+    g.total_files,
+    g.active_files,
+    g.newest_sg_file_date,
+    u.most_recent_design_date,
+    COALESCE(u.designs_using, (0)::bigint) AS designs_using,
+    COALESCE(u.design_ref_count, (0)::bigint) AS design_ref_count,
+    ((u.most_recent_design_date IS NULL) OR (u.most_recent_design_date < (now() - '3 years'::interval))) AS archive_candidate
+   FROM (guides g
+     LEFT JOIN usage u ON (((u.licensor_name = g.licensor_name) AND (NOT (u.property_folder IS DISTINCT FROM g.property_folder)))));
+
+-- ------------------------------------------------------------------------------------
+-- PRE-ADOPTION TRIGGERS (25)
+-- ------------------------------------------------------------------------------------
+-- Triggers on the tables above that no migration in this repository creates. Without
+-- them 20260723113000_dam_core_licensor_property_cutover aborts on a trigger it expects
+-- to find ("trigger set_assets_updated_at for table assets does not exist"), so these
+-- are as load-bearing as the functions they call. Guarded, because CREATE TRIGGER is not
+-- CREATE OR REPLACE-able here and a migration may adopt one later.
+-- ------------------------------------------------------------------------------------
+do $bootstrap$ begin
+  CREATE TRIGGER on_auth_user_email_confirmed AFTER UPDATE OF email_confirmed_at ON auth.users FOR EACH ROW EXECUTE FUNCTION handle_user_confirmed();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER asset_checkouts_updated_at BEFORE UPDATE ON public.asset_checkouts FOR EACH ROW EXECUTE FUNCTION update_asset_checkouts_updated_at();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_sync_asset_tags AFTER INSERT OR DELETE OR UPDATE ON public.asset_tags FOR EACH ROW EXECUTE FUNCTION sync_asset_tags_to_array();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER set_assets_updated_at BEFORE UPDATE ON public.assets FOR EACH ROW EXECUTE FUNCTION set_assets_updated_at();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_auto_queue_render AFTER INSERT OR UPDATE OF thumbnail_error, thumbnail_url ON public.assets FOR EACH ROW EXECUTE FUNCTION auto_queue_render();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_compute_primary_sort_tier BEFORE INSERT OR UPDATE OF filename, relative_path, thumbnail_url, thumbnail_error ON public.assets FOR EACH ROW EXECUTE FUNCTION compute_primary_sort_tier();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_refresh_group_on_asset_hard_delete AFTER DELETE ON public.assets FOR EACH ROW EXECUTE FUNCTION refresh_group_on_asset_hard_delete();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_refresh_primary_on_asset_soft_delete AFTER UPDATE OF is_deleted ON public.assets FOR EACH ROW WHEN (((new.is_deleted = true) AND (old.is_deleted = false))) EXECUTE FUNCTION refresh_primary_on_asset_soft_delete();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_refresh_sg_counts_on_delete AFTER DELETE ON public.assets REFERENCING OLD TABLE AS old_table FOR EACH STATEMENT EXECUTE FUNCTION refresh_style_group_counts_on_asset_change();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_refresh_sg_counts_on_insert AFTER INSERT ON public.assets REFERENCING NEW TABLE AS new_table FOR EACH STATEMENT EXECUTE FUNCTION refresh_style_group_counts_on_asset_change();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_refresh_sg_counts_on_update AFTER UPDATE ON public.assets REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table FOR EACH STATEMENT EXECUTE FUNCTION refresh_style_group_counts_on_asset_change();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_set_path_attrs BEFORE INSERT OR UPDATE OF relative_path ON public.assets FOR EACH ROW EXECUTE FUNCTION trg_set_asset_path_attrs();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_sync_cover_description_to_style_group AFTER INSERT OR UPDATE OF cover_description, style_group_id ON public.assets FOR EACH ROW EXECUTE FUNCTION sync_cover_description_to_style_group();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_sync_designer_to_style_group AFTER INSERT OR UPDATE OF designer_name, technical_designer_name, freelancer_name, style_group_id ON public.assets FOR EACH ROW EXECUTE FUNCTION sync_designer_to_style_group();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_sync_primary_on_thumbnail AFTER INSERT OR UPDATE ON public.assets FOR EACH ROW EXECUTE FUNCTION sync_primary_asset_on_thumbnail();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER update_characters_updated_at BEFORE UPDATE ON public.characters FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER set_erp_items_current_updated_at BEFORE UPDATE ON public.erp_items_current FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER update_licensors_updated_at BEFORE UPDATE ON public.licensors FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_pdf_text_samples_parse_files AFTER INSERT ON public.pdf_text_samples FOR EACH ROW EXECUTE FUNCTION trg_fn_parse_pdf_files_used();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER update_prod_order_headers_current_updated_at BEFORE UPDATE ON public.prod_order_headers_current FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON public.profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER update_properties_updated_at BEFORE UPDATE ON public.properties FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_resolve_sku_file_used BEFORE INSERT ON public.sku_files_used FOR EACH ROW EXECUTE FUNCTION trg_fn_resolve_sku_file_used();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER trg_set_path_attrs BEFORE INSERT OR UPDATE OF folder_path ON public.style_groups FOR EACH ROW EXECUTE FUNCTION trg_set_sg_path_attrs();
+exception when duplicate_object then null; end $bootstrap$;
+do $bootstrap$ begin
+  CREATE TRIGGER update_style_groups_updated_at BEFORE UPDATE ON public.style_groups FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+exception when duplicate_object then null; end $bootstrap$;
+
+-- ------------------------------------------------------------------------------------
 -- WHAT THIS FILE DELIBERATELY DOES NOT CONTAIN
 -- ------------------------------------------------------------------------------------
 -- * Any column that a migration in this repository ADDs to one of the tables above.
---   This file is the PRE-adoption shape. Leaving such a column in would make the
---   migration abort with "column already exists" and, because migrations are applied in
---   a single transaction, lose every other statement in that file too.
--- * Any index or constraint whose name a migration creates, for the same reason.
+--   This file is the PRE-adoption shape. Leaving such a column in would make that
+--   migration abort with "column already exists" and, because a migration is applied in
+--   a single transaction, lose every other statement in its file too.
+-- * Any index or constraint whose name a migration creates on the same table, for the
+--   same reason.
 -- * Any foreign key whose target is created by a migration rather than by this file.
 -- * Any row. Not one.
 -- ------------------------------------------------------------------------------------
