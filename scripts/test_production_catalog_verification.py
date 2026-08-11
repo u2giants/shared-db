@@ -844,6 +844,42 @@ class PrivilegeAssertionTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("not held after the apply", failures[0])
 
+    def public_relation_catalog(self, held_by_public):
+        """PUBLIC's effective privileges as the SQL actually reports them.
+
+        The `probe_roles` CTE probes the pseudo-role under its literal lowercase
+        name `public`, so `effective_privileges` rows carry `role = 'public'`.
+        `PrivilegeExpectation` normalises the grantee to `PUBLIC`. If the lookup
+        does not fold the two together, PUBLIC matches nothing and every revoke
+        reads green while every grant reads red.
+        """
+        catalog = self.relation_catalog([])
+        catalog["effective_privileges"] = [
+            {"name": "plm.widget", "role": "public", "privilege": p}
+            for p in held_by_public
+        ]
+        return catalog
+
+    def test_public_revoke_that_did_not_take_fails(self):
+        """The silent-pass direction: PUBLIC still holds it, and it must FAIL."""
+        rows, failures = self.assert_for(
+            "revoke truncate on plm.widget from public;",
+            self.public_relation_catalog(["SELECT", "TRUNCATE"]),
+        )
+        self.assertEqual([r[1] for r in rows], ["FAIL"])
+        self.assertEqual(len(failures), 1)
+        self.assertIn("STILL HELD", failures[0])
+        self.assertIn("TRUNCATE", failures[0])
+
+    def test_public_grant_that_took_passes(self):
+        """The false-negative direction: a correct apply must not be blocked."""
+        rows, failures = self.assert_for(
+            "grant select on plm.widget to public;",
+            self.public_relation_catalog(["SELECT"]),
+        )
+        self.assertEqual(failures, [])
+        self.assertEqual([r[1] for r in rows], ["PASS"])
+
     def test_owner_is_recorded_with_a_reason_not_failed(self):
         rows, failures = self.assert_for(
             "revoke truncate on plm.widget from service_role;",

@@ -1158,7 +1158,16 @@ def assert_privileges(
     functions = {row.get("name"): row for row in (data.get("functions") or [])}
     effective: dict[tuple[str, str], set[str]] = {}
     for row in data.get("effective_privileges") or []:
-        key = (str(row.get("name")), str(row.get("role")))
+        # `probe_roles` probes the pseudo-role under its literal lowercase name
+        # `public`, while `PrivilegeExpectation` normalises the grantee to
+        # `PUBLIC`. Normalise here too, or the two keys never meet: a revoke
+        # from PUBLIC that did NOT take reads PASS, and a grant to PUBLIC that
+        # DID take reads FAIL.
+        role = str(row.get("role"))
+        key = (
+            str(row.get("name")),
+            "PUBLIC" if role.lower() == "public" else role,
+        )
         effective.setdefault(key, set()).add(str(row.get("privilege")).upper())
     defacl = {
         (str(r.get("schema")), str(r.get("defacl_role")), str(r.get("objtype"))): r
