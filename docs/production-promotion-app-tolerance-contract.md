@@ -32,8 +32,10 @@ applications keep reading it.
 boundary.** **Since 2026-08-11 there is also a batch B10 (§5A), in four parts, covering the six
 migrations merged after the nine-batch plan was written. Completing B1–B9 does NOT promote them, and
 B10 may never run before B9 (§5A.5).**
-Sub-batching is safe here because the only structural change to a live object across
-the whole backlog is one view rebuild and two function-signature drops, and because there is not a
+Sub-batching is safe here because the structural changes to live objects across
+the whole backlog are few and enumerated — **one view rebuild and two function-signature drops in
+B1–B9, plus the five `api.pmt_*` views that B10b (`20260811030000`) drops and recreates in a single
+transaction (§5A.4)** — and because there is not a
 single `ALTER … RENAME` anywhere in the backlog — rename is the failure mode that almost all of the
 application fragility below is about, and it never occurs.
 
@@ -560,23 +562,26 @@ so the whole of B10 is now born clean. The ruling is not dropped — it is **dis
 
 ### 5A.4 The four parts, and why B10 cannot be one unit
 
-Six files spanning two licensors and two independent DCP builds is not one safe unit. A batch is a
-**contiguous version-ordered slice** of the remaining set — `supabase db push` applies in version
-order and cannot leapfrog (§5's correction note). `20260811030000` (Paramount) sorts *between* the
-two DCP builds, so the split is forced to respect that.
+Six files spanning two licensors and two independent DCP builds is not one safe unit.
+`20260811030000` (Paramount) sorts *between* the two DCP builds, and each part is split at a
+boundary where the database is coherent. **The parts are ordered by version, but note that the
+production lane could technically run them in another order — see the leapfrog correction in §5A.5
+before assuming version order is a guard rail.**
 
 | # | Versions | Count | Atomic? | Why the boundary at the end is safe |
 |---|---|---|---|---|
-| **B10a** | `20260810190000`, `20260810190100` | 2 | **ATOMIC** | Disney DCP Vault source landing + its chunked loader. `20260810190000` creates nine `plm.dcp_*` tables, the frozen row-hash function and the immutability triggers but **no loader**; `20260810190100` is the only path to a row or to `status='complete'`. Rest only after `190100`. |
+| **B10a** | `20260810190000`, `20260810190100` | 2 | **ATOMIC** | Disney DCP Vault source landing + its chunked loader. `20260810190000` creates nine `plm.dcp_*` tables, the frozen row-hash function and the immutability triggers but **no loader**; `20260810190100` supplies the chunked loader, `plm.dcp_chunk_ledger` and `plm.finalize_dcp_crawl` — the only path to `status='complete'`. **Precisely:** `20260810190000` does grant `service_role` `select, insert` on the nine tables, so a raw `INSERT` is *technically* possible; what is missing is the **supported, checked, finalizable** path. Rest only after `190100`. |
 | **B10b** | `20260811030000` | 1 | single file — **trivially atomic** | Paramount lossless source ids + `plm.pmt_asset_metadata_value`. One file, so there is no internal boundary to rest at. Safe at the end because the five `api.pmt_*` views it drops are recreated inside the same file. |
-| **B10c** | `20260811050000`, `20260811060000` | 2 | **ATOMIC** | DCP Vault metadata landing + its chunked loader. Identical shape to B10a: `050000` creates `plm.dcp_metadata_*`, `dcp_property`, `dcp_character`, `dcp_term` and three observation tables with no loader; `060000` supplies `begin_dcp_metadata_run` / `load_dcp_metadata_chunk` / `finalize_dcp_metadata_run`. Rest only after `060000`. |
+| **B10c** | `20260811050000`, `20260811060000` | 2 | **ATOMIC** | DCP Vault metadata landing + its chunked loader. Identical shape to B10a: `050000` creates `plm.dcp_metadata_*`, `dcp_property`, `dcp_character`, `dcp_term` and three observation tables with no loader; `060000` supplies `begin_dcp_metadata_run` / `load_dcp_metadata_chunk` / `finalize_dcp_metadata_run` plus `plm.dcp_metadata_chunk_ledger` and `plm.dcp_metadata_load_exception`. Same precision as B10a: `050000` **does** grant `service_role` `select, insert`, so the gap is the supported loader and finalizer, not raw writability. Rest only after `060000`. |
 | **B10d** | `20260811070000` | 1 | single file — **trivially atomic** | NBCU asset ↔ IP-family relationship: `create table plm.nbcu_asset_ip_family` (the **17th** NBCU table) plus a `create or replace plm.finalize_nbcu_capture`. One file, so no internal boundary. **Its CONCERNS review is DISCHARGED (§5A.7, #800)** — the one real finding became the hard ordering edge in §5A.5. |
 
 **2 + 1 + 2 + 1 = 6.** Reconciles with §5A.2.
 
 ### 5A.5 Ordering dependencies, both directions — VERIFIED, not assumed
 
-**B10 depends on B9. All four parts, and the dependency is hard for three of them.**
+**B10 is ordered after B9 for all four parts. For B10b and B10d the dependency is HARD (the run
+aborts); for B10a and B10c it is POLICY — see the leapfrog correction below, because the reason is
+not what it looks like.**
 
 > ### ⛔ The hardest edge: **`20260810080000` (B9) MUST apply before `20260811070000` (B10d).**
 > **B10 can never precede B9. Not "should not" — the run aborts.**
@@ -600,13 +605,44 @@ two DCP builds, so the split is forced to respect that.
 > nothing adapts them.
 >
 > This edge is of the same class as **B4-after-B3** and **B9-after-B8**, and is recorded here as a
-> first-class ordering constraint for the same reason: it is invisible in the file names, it is
-> enforced by nothing in the guard, and version order is the only thing that currently satisfies it.
-> **Version order does satisfy it** (`20260810080000` < `20260811070000`) and `supabase db push`
-> cannot leapfrog — so under normal operation this is safe. It becomes live the moment anyone hand-
-> writes an allowlist, reorders a batch, or promotes B10 "since it is small" while B9 waits for
-> approval. Adjudicated in [#800](https://github.com/u2giants/shared-db/issues/800) item (b); do not
-> re-litigate it, and do not remove this edge because "the timestamps already handle it".
+> first-class ordering constraint for the same reason: it is invisible in the file names and it is
+> enforced by nothing in the guard.
+>
+> **⚠️ Do NOT dismiss it with "the timestamps already handle it". THEY DO NOT.** See the leapfrog
+> correction immediately below — the production lane **deletes** every migration outside
+> `applied ∪ allowlist` before running `supabase db push`, so an allowlist naming only B10 really
+> would run B10 with B9 absent. **The timestamps are not a guard rail here; the operator and this
+> document are.** Adjudicated in [#800](https://github.com/u2giants/shared-db/issues/800) item (b);
+> do not re-litigate it, and do not delete this edge.
+
+> ### ⚠️ CORRECTION — "a batch cannot leapfrog" is FALSE for the production lane. Read this before
+> ### relying on version order anywhere in this document.
+>
+> §5's own correction note argues that a batch is necessarily a contiguous version-ordered slice
+> because `supabase db push` applies in version order and "cannot leapfrog". **That is true of a
+> plain checkout and FALSE of the production lane**, and the difference is load-bearing.
+>
+> **VERIFIED in `scripts/production_migration_guard.py`, `prepare()`:** the lane builds a *bounded
+> checkout* and then computes `keep = remote | set(allowlist)` and **deletes every migration file
+> not in `keep`**. `supabase db push` therefore never sees the skipped versions at all. It applies
+> the allowlist in version order — but the allowlist need not be contiguous, and the gaps are simply
+> gone. **This is exactly why production's ledger is applied out of order in the first place.**
+>
+> Consequences, stated bluntly because a reader who assumes contiguity will get this wrong:
+>
+> - **B10a (`20260810190000` + `20260810190100`) and B10c (`20260811050000` + `20260811060000`)
+>   CAN technically be run before B9.** They create their own objects and consume nothing B9 makes.
+>   Nothing mechanical stops it.
+> - **B10b (`20260811030000`) and B10d (`20260811070000`) CANNOT** — B10b alters objects only B9
+>   creates, and B10d trips B9's 16/15 assertion. Those are hard.
+> - **B10b is independent of the DCP parts** and may be ordered before or after them.
+>
+> **This document nonetheless mandates B9 first, for all four parts** (§5A.9). That is a *policy*
+> choice, not a mechanical consequence: promoting licensor landing schema out of the planned order
+> multiplies the states an operator has to reason about, and two of the four parts are hard-blocked
+> anyway. **Do not "optimise" B10a or B10c ahead of B9 on the grounds that it is technically
+> possible.** If a future operator has a real reason to, it needs its own owner approval and its own
+> entry here — not a silent reinterpretation of this section.
 
 - `20260811030000` (B10b) **alters** `plm.pmt_*` tables and drops/recreates five `api.pmt_*` views.
   Those objects are created by `20260810020000` — a **B9** member. **B10b aborts without B9.**
@@ -614,8 +650,9 @@ two DCP builds, so the split is forced to respect that.
   plm.finalize_nbcu_capture`. Those come from `20260810070000` — a **B9** member. **B10d aborts
   without B9.** (This is the CONCERNS finding in #788, and it is **correct**: VERIFIED by reading
   the file — no B10 member creates any `plm.nbcu_*` table.)
-- B10a and B10c create their own objects and need nothing from B9, **but they sort above all of B9
-  and cannot leapfrog it.** B9 runs first regardless.
+- B10a and B10c create their own objects and need nothing from B9. **They sort above B9, but that is
+  NOT what keeps them behind it** — the lane could run them alone (see the leapfrog correction).
+  They wait on B9 by the policy stated there, not by mechanism.
 
 **Nothing in B1–B9 depends on anything in B10.** The dependency is one-directional. VERIFIED by
 searching all six files for objects consumed by earlier batches: none.
@@ -660,10 +697,10 @@ built by `execute format`, **#794 landing changes nothing** — the blind spot s
 
 | Version | Shape | Privilege / policy work the verifier cannot read | Still blind after #794? |
 |---|---|---|---|
-| `20260810190000` | create-table + dynamic loop | `grant select on plm.%I to authenticated` and `revoke update, delete, truncate, references, trigger, maintain on plm.%I from service_role`, looped over the nine `plm.dcp_*` tables | **YES — still blind.** `execute format`. |
+| `20260810190000` | create-table + dynamic loop | **All three** of `grant select, insert on plm.%I to service_role`, `grant select on plm.%I to authenticated`, and `revoke update, delete, truncate, references, trigger, maintain on plm.%I from service_role` — every one issued via `execute format`, looped over the nine `plm.dcp_*` tables. **The `service_role` write grant itself is invisible too, not just the revoke.** | **YES — still blind.** `execute format`. |
 | `20260810190100` | create-table + literal grants | Creates `plm.dcp_chunk_ledger` and the loader functions; grants/revokes are **literal and lexer-readable** | **No — already visible.** Least affected. |
 | `20260811030000` | create-table + view rebuild + dynamic loop | `grant select on api.%I to authenticated, service_role` for the **five recreated `api.pmt_*` views**, issued inside a `do $$ … execute format(...)` loop | **YES — still blind**, and this is the sharpest B10 case: five live `api` views are dropped and recreated, and the re-grant that restores app access is the exact statement the verifier cannot see. #794 will not read it. Same blind spot as `20260810120000`. |
-| `20260811050000` | create-table + dynamic grants | **All** table grants are `execute format('grant select, insert on plm.%I to service_role', t)`, plus `create policy %I on plm.%I` built in a `do $$` block | **YES for the privileges — but this is a NOTE, not a blocker.** Target derivation still works, because the targets come from its **readable `create table` statements**; only the privilege *expectation* is undrivable. The step will go green having checked existence, not access. |
+| `20260811050000` | create-table + dynamic grants | **All** table grants are dynamic — `execute format('grant select, insert on plm.%I to service_role', t)` and `grant select … to authenticated` — plus `create policy %I on plm.%I` built in a `do $$` block | **YES for the privileges — but this is a NOTE, not a blocker.** Target derivation still works, because the targets come from its **readable `create table` statements**; only the privilege *expectation* is undrivable. The step will go green having checked existence, not access. |
 | `20260811060000` | create-table + literal grants | Creates `plm.dcp_metadata_chunk_ledger` and `plm.dcp_metadata_load_exception`; grants and revokes are **static** | **No — already visible.** No issue found. |
 | `20260811070000` | create-table + mixed | Static `revoke all … from public/anon/authenticated`, a static `revoke update, delete, truncate, references, trigger, maintain`, and a static `grant select, insert … to service_role` — **all readable**. A trailing `foreach p in array array['UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']` **self-check** loop is not | **Partly — and it does not matter.** The dynamic part is an assertion, not the grant. The grants that decide access are literal. |
 
@@ -746,8 +783,10 @@ not perform it, and until it is done, the never-rest states in §6 for B10c are 
 `20260811070000` reference objects that only B9 creates, and `20260810080000`'s 16/15 assertion
 **aborts** if `20260811070000` lands first.
 
-B10a, B10b and B10c may not be reordered among themselves: version order is apply order, and
-`supabase db push` cannot leapfrog.
+**B10a, B10b and B10c may not be reordered among themselves.** That is a rule of this document, not
+a mechanical impossibility — the lane's bounded checkout would permit it (§5A.5 leapfrog
+correction). B10b is genuinely independent of the DCP parts; the fixed order exists so that every
+run's starting state is one this document has actually reasoned about.
 
 ---
 
@@ -777,14 +816,17 @@ move is to complete the batch, not to wait.
 
 **The two B10 never-rest states, spelled out (added 2026-08-11, §5A):**
 
-- **After `20260810190000`, before `20260810190100`** — nine `plm.dcp_*` tables that **cannot be
-  loaded and cannot be finalized**. The only writer is the chunked loader in `20260810190100`, and
+- **After `20260810190000`, before `20260810190100`** — nine `plm.dcp_*` tables that **have no
+  supported loader and can never be finalized**. (`service_role` *does* hold `insert`, so a raw
+  write is possible — that is part of why this state is bad, not a reason it is safe.) The only
+  checked writer is the chunked loader in `20260810190100`, and
   the only path to `dcp_crawl.status = 'complete'` is `plm.finalize_dcp_crawl`, also in `190100`. The
   immutability triggers therefore **can never arm**, because no crawl can ever reach `'complete'`.
   That is a half-build, not a paused promotion. **Enforced by `CO_PRESENCE_RULES`.**
 - **After `20260811050000`, before `20260811060000`** — the same shape for
   `plm.dcp_metadata_run` / `dcp_metadata_asset` / `dcp_property` / `dcp_character` / `dcp_term` and
-  the three observation tables: created, ungoverned by any loader, triggers unarmed. **Enforced by
+  the three observation tables: created, `service_role`-insertable, ungoverned by any supported
+  loader, triggers unarmed. **Enforced by
   NOTHING — see §5A.8 and #784.** The guard will accept `20260811050000` alone. Only the operator
   stands between this list and that state.
 
@@ -1050,7 +1092,10 @@ Stated honestly, because a summary is a document like any other.
 - **There is a batch B10, of six migrations in four parts** (§5A), covering everything merged after
   `20260810170000`. **Finishing B1–B9 does not promote it.** `20260810180000` is already applied and
   must never appear in an allowlist again.
-- **B10 can NEVER be promoted before B9.** `20260810080000` (B9) asserts **exactly 16 SELECT and 15
+- **"A batch cannot leapfrog" is FALSE for the production lane.** `prepare()` deletes every migration
+  outside `applied ∪ allowlist`, so version order is **not** a guard rail (§5A.5). Anything in this
+  document that relies on ordering relies on the operator.
+- **B10 must NEVER be promoted before B9.** `20260810080000` (B9) asserts **exactly 16 SELECT and 15
   INSERT** grants on `plm.nbcu_*`; `20260811070000` (B10d) adds the **17th** table. Out of order, the
   assertion raises and the batch aborts (§5A.5, #800).
 - **B9 is allowlistable again.** The co-presence deadlock over the already-applied `20260810180000`
