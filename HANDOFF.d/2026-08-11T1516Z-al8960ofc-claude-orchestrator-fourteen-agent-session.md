@@ -208,7 +208,7 @@ a single migration in. **Use the lane now; do not repeat that manoeuvre.**
 - **Found — the blocker:** production `app.app_access` has **ZERO admin rows** (crm 27 active / 4 revoked, dam 3, pm 2, admin 0). Every DB Data Admin RPC calls `app.require_db_data_admin_access()`, so **every screen returns Access denied for every user, Albert included.** The fix is `20260810050000`, unapplied.
 - **Found — DNS is a non-issue:** `data.designflow.app` ALREADY resolves to the Coolify VPS `178.156.180.212`. The 503 is Traefik with no route. There is **no DNS change to make**; the single irreversible step is attaching the fqdn.
 - **Found — two near-misses:** Coolify silently attached a public `sslip.io` domain it never requested (stripped immediately; that hostname now 404s), and `POST /envs` returned HTTP 422 **while creating the record anyway**, so its retry made duplicates.
-- **Proved access control against production:** anonymous → 401 on all three RPCs; the tester `poppim-production-ai-test@popcre.com`, which **holds the administrator role but has `app_access = pm` only**, → 403 on every contract. That is the strongest form of "a role alone is not sufficient".
+- **Proved access control against production:** anonymous → 401 on all three RPCs; the dedicated production test account (identified by its `app.profile` UUID per `AGENTS.md` §6.14 — the address is deliberately not written here), which **holds the administrator role but has `app_access = pm` only**, → 403 on every contract. That is the strongest form of "a role alone is not sufficient".
 - **Worktree:** `.claude/worktrees/issue-729-launch` — **finished.**
 - **Deliberately did NOT do:** attach the fqdn (Albert's call alone). Did not sign in as a real user to prove the authorized-administrator case — that one needs a human.
 
@@ -474,8 +474,12 @@ only. No value appears in any artifact.
 `OrderList.xlsx` and `OrderList - Order.xlsx` from `C:\Users\ahazan2\Downloads`. Confirmed
 gone.
 
-**The PII forward guard caught two PRs** heading into the public repo with a real
-`popcre.com` address. Both fixed by removing the address, neither by loosening the guard.
+**The PII forward guard caught THREE PRs** heading into the public repo with a real
+company email address — two sub-agents' PRs, and **this handover file itself**. All three
+were fixed by removing the address and referring to the person by `app.profile` UUID per
+`AGENTS.md` §6.14. None was fixed by loosening the guard or applying the `pii-guard-allow`
+label. Worth noting that the orchestrator wrote the third one while documenting the first
+two: the guard is load-bearing, not ceremonial.
 
 ---
 
