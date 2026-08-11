@@ -1,0 +1,211 @@
+# Executes every contract test in supabase/tests/ against a THROWAWAY database.
+#
+# WHY THIS WORKFLOW EXISTS (issues #695 and #731)
+# ----------------------------------------------
+# Until this file, NOTHING in .github/workflows executed supabase/tests/. Forty
+# contract-test files -- the ones that assert BEHAVIOUR rather than "the migration
+# applied" -- were enforced only by whoever remembered to run them by hand against
+# preview. A test that is never run is indistinguishable from a test that passes,
+# right up until production. #695 recorded that. #731 recorded that two suites
+# merged in one session had never executed even once.
+#
+# WHAT IT RUNS AGAINST
+# --------------------
+# A LOCAL, EPHEMERAL Supabase stack (`supabase db start`) created fresh inside the
+# runner and thrown away with it. Every migration in supabase/migrations/ is applied
+# to it from empty, so the schema under test is the repo's own definition of itself.
+#
+#   IT MUST NEVER POINT AT PREVIEW (rjyboqwcdzcocqgmsyel) OR PRODUCTION
+#   (qsllyeztdwjgirsysgai). There is no SUPABASE_ACCESS_TOKEN, no
+#   SUPABASE_DB_PASSWORD_* and no `supabase link` in this workflow, and none may be
+#   added. These tests write and roll back; run against a shared database from a pull
+#   request, that is a mutation of shared state driven by unreviewed code.
+#
+# NO `paths:` FILTER, ON PURPOSE (AGENTS.md 5.2). A path-filtered guard reports a
+# stale green: a change outside the filter skips the job and the pull request still
+# shows all-checks-passed. The tests read across the whole of supabase/migrations,
+# so no honest filter exists.
+#
+# THE FILE LIST IS A GLOB, NOT A LIST. That is the specific defect #731 is about --
+# `shared-supabase-migrations.yml` names its Python test files explicitly and a new
+# one merged without anybody remembering to add it. A new supabase/tests/*.sql file
+# is wired into CI the moment it is committed.
+#
+# QUARANTINE. Some files assert facts that are true only of a long-lived deployed
+# database (grants made by hand, seeded reference rows, environment pins) and cannot
+# hold on a from-empty ephemeral one. Those are listed in tests/ci-quarantine.txt
+# with a REASON each; they are still executed and their output is still printed, but
+# their result does not fail the job. The list is printed in the summary on every run
+# so it can never quietly grow. Nothing may be added to it to make a red job green
+# without the reason being written down.
+
+name: Database Contract Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-contract-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract-tests:
+    name: supabase/tests against an ephemeral database
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to run if any shared-database credential is present
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD_PREVIEW: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
+          SUPABASE_DB_PASSWORD_PRODUCTION: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
+        run: |
+          set -euo pipefail
+          # These are read here ONLY to prove they are absent. If a future edit wires a
+          # real credential into this job, this step fails first and loudly, before any
+          # test can reach a shared database.
+          for v in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD_PREVIEW SUPABASE_DB_PASSWORD_PRODUCTION; do
+            if [ -n "${!v:-}" ]; then
+              echo "::error::$v is set in a job that must only ever touch a local throwaway database." >&2
+              exit 1
+            fi
+          done
+          echo "No shared-database credentials in scope. Local ephemeral database only."
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.105.0
+
+      - name: Install psql
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          psql --version
+
+      - name: Start the ephemeral database and apply every migration
+        id: dbstart
+        run: |
+          set -euo pipefail
+          # `supabase db start` brings up ONLY the Postgres container and applies every
+          # file in supabase/migrations in order, from empty. No auth/storage/studio
+          # containers -- these are SQL contract tests, they need a database and nothing
+          # else, and every container skipped is a minute of runner time saved.
+          supabase db start 2>&1 | tee "$RUNNER_TEMP/db-start.log"
+
+      - name: Run every supabase/tests/*.sql
+        id: run
+        env:
+          # The local stack's fixed superuser connection. This is the Supabase CLI's
+          # documented default for a throwaway local database; it is not a secret and
+          # it reaches nothing outside this runner.
+          PGHOST: 127.0.0.1
+          PGPORT: 54322
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: |
+          set -uo pipefail
+          shopt -s nullglob
+          FILES=(supabase/tests/*.sql)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "::error::No supabase/tests/*.sql found -- the glob or the checkout is wrong." >&2
+            exit 1
+          fi
+
+          QUARANTINE_FILE=supabase/tests/ci-quarantine.txt
+          is_quarantined() {
+            [ -f "$QUARANTINE_FILE" ] || return 1
+            grep -vE '^\s*(#|$)' "$QUARANTINE_FILE" | awk '{print $1}' | grep -qxF "$1"
+          }
+
+          mkdir -p "$RUNNER_TEMP/results"
+          PASS=0; FAIL=0; QUAR_PASS=0; QUAR_FAIL=0
+          FAILED_FILES=()
+          QUAR_FAILED_FILES=()
+
+          echo "Executing ${#FILES[@]} contract test files."
+          echo ""
+
+          for f in "${FILES[@]}"; do
+            base="$(basename "$f")"
+            log="$RUNNER_TEMP/results/$base.log"
+            echo "::group::$base"
+            if psql -v ON_ERROR_STOP=1 --no-psqlrc -f "$f" > "$log" 2>&1; then
+              rc=0
+            else
+              rc=$?
+            fi
+            cat "$log"
+            echo "::endgroup::"
+            if [ "$rc" -eq 0 ]; then
+              if is_quarantined "$base"; then
+                QUAR_PASS=$((QUAR_PASS+1)); echo "PASS (quarantined) $base"
+              else
+                PASS=$((PASS+1)); echo "PASS $base"
+              fi
+            else
+              if is_quarantined "$base"; then
+                QUAR_FAIL=$((QUAR_FAIL+1)); QUAR_FAILED_FILES+=("$base")
+                echo "::warning::FAIL (quarantined, not failing the job) $base"
+              else
+                FAIL=$((FAIL+1)); FAILED_FILES+=("$base")
+                echo "::error::FAIL $base"
+              fi
+            fi
+          done
+
+          {
+            echo "## supabase/tests contract results"
+            echo ""
+            echo "Ran against a from-empty ephemeral database with every supabase/migrations file applied."
+            echo ""
+            echo "| outcome | count |"
+            echo "| --- | ---: |"
+            echo "| files executed | ${#FILES[@]} |"
+            echo "| passed | $PASS |"
+            echo "| FAILED | $FAIL |"
+            echo "| quarantined, passed anyway | $QUAR_PASS |"
+            echo "| quarantined, failed | $QUAR_FAIL |"
+            echo ""
+            if [ "${#FAILED_FILES[@]}" -gt 0 ]; then
+              echo "### Failures"
+              printf '  - %s\n' "${FAILED_FILES[@]}"
+              echo ""
+            fi
+            if [ -f "$QUARANTINE_FILE" ]; then
+              echo "### Quarantine list (printed every run so it cannot grow quietly)"
+              echo ""
+              echo '```'
+              cat "$QUARANTINE_FILE"
+              echo '```'
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+          if [ "$FAIL" -gt 0 ]; then
+            echo "::error::$FAIL non-quarantined contract test file(s) failed." >&2
+            exit 1
+          fi
+
+      - name: Upload every test's output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-contract-test-logs
+          path: |
+            ${{ runner.temp }}/db-start.log
+            ${{ runner.temp }}/results/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Stop the ephemeral database
+        if: always()
+        run: supabase stop --no-backup || true

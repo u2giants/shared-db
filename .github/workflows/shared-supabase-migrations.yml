@@ -69,17 +69,46 @@ jobs:
       # supabase/migrations, which is what this workflow guards.
       - name: Test ColdLion promotion failure-recording ownership
         run: node --test tools/coldlion-promotion-failure-recording.test.mjs
-      - name: Test production guard
-        run: python -m unittest scripts/test_production_migration_guard.py
-      # Issue #697. Offline, no database, no network, no secrets -- it drives the
-      # target DERIVATION, the SQL builder and the report renderer on temporary
-      # files and literals. It lives HERE, in this lane's own pull-request gate,
-      # rather than in the Node-only `Promotion contract tests (offline)` job,
-      # because it is Python and this is the job that already guards this lane.
-      # #695 records that supabase/tests/ exists and nothing runs it; this must
-      # not join that pile.
-      - name: Test post-apply catalog verification
-        run: python -m unittest scripts/test_production_catalog_verification.py
+      # ISSUE #731: this step used to NAME its Python test files one by one. That is
+      # exactly how scripts/test_post_batch_app_verification.py (141 tests, merged in
+      # PR #719) came to sit in the repository for a whole session without executing
+      # once -- it was written, it was merged, and no line here mentioned it, so every
+      # pull request went green without it. An explicit list silently shrinks coverage
+      # the moment somebody forgets to extend it, and nothing goes red to say so.
+      #
+      # It is now a GLOB over scripts/test_*.py, so a new Python test file is wired
+      # into this gate the moment it is committed. Every test under that glob must pass
+      # OFFLINE: no database, no network, no secrets, no project ref. If a test ever
+      # needs a live database it does not belong here -- put it in supabase/tests/ and
+      # let Database Contract Tests run it against the ephemeral stack.
+      - name: Test every scripts/test_*.py (offline)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          FILES=(scripts/test_*.py)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "::error::No scripts/test_*.py found -- the glob or the checkout is wrong." >&2
+            exit 1
+          fi
+          echo "Running ${#FILES[@]} Python test files:"
+          printf '  %s\n' "${FILES[@]}"
+          python -m unittest "${FILES[@]}"
+      # Named explicitly so that deleting or renaming one of these fails the job loudly
+      # instead of quietly shrinking the glob above back to a state nobody notices.
+      - name: Prove the known Python suites were in that glob
+        run: |
+          set -euo pipefail
+          for f in \
+            scripts/test_production_migration_guard.py \
+            scripts/test_production_catalog_verification.py \
+            scripts/test_post_batch_app_verification.py
+          do
+            if [ ! -f "$f" ]; then
+              echo "::error::Expected Python test file is missing: $f" >&2
+              exit 1
+            fi
+          done
+          echo "All three Python suites present and covered by the glob above."
 
   preview:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'preview'
