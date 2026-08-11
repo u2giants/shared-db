@@ -160,6 +160,12 @@ jobs:
               echo "::warning::migration did not replay from empty: $base"
             fi
           done
+          # PUT THE MIGRATION FILES BACK before any test runs. At least one contract test
+          # (owner_ruling_coco_is_a_disney_license_contracts.sql) READS ITS MIGRATION FROM
+          # DISK with \set and refuses to run if the file loads empty. With the directory
+          # still moved aside that test failed for a reason that had nothing to do with the
+          # database -- a false failure is as bad as a false pass.
+          mv "$RUNNER_TEMP"/migrations/*.sql supabase/migrations/
           echo "Replayed ${#MIGS[@]} migrations: $OK applied, $BAD failed."
           {
             echo "## Migration replay against an empty database"
