@@ -413,9 +413,19 @@ with the independently derived 47-entry apply set in
 > **⚠️ Correction to the earlier batch sketch, and it is load-bearing.** An earlier draft placed
 > `20260731150000` and `20260731153000` (PopSG) in a batch *after* `20260731200000`. **That is not
 > executable.** `supabase db push` applies in version order, and `20260731150000` sorts below
-> `20260731163000`, `180000`, `190000` and `200000`. A batch is a contiguous version-ordered slice
-> of the remaining set; it cannot leapfrog. The two PopSG files therefore belong **inside B3**,
-> making B3 ten files and B4 two. With this correction the batch counts sum to exactly 61.
+> `20260731163000`, `180000`, `190000` and `200000`. The two PopSG files therefore belong **inside
+> B3**, making B3 ten files and B4 two. With this correction the batch counts sum to exactly 61.
+>
+> **⚠️ CORRECTION TO THIS CORRECTION (2026-08-11, §5A.5).** The paragraph above originally justified
+> itself with "a batch is a contiguous version-ordered slice of the remaining set; it cannot
+> leapfrog." **That justification is FALSE for the production lane and has been removed.**
+> `scripts/production_migration_guard.py` `prepare()` computes `keep = remote | set(allowlist)` and
+> **deletes every migration file outside it**, so `supabase db push` never sees the skipped versions
+> and an allowlist need not be contiguous. That is precisely why production's ledger is applied out
+> of order. **The conclusion still stands** — the two PopSG files belong inside B3, and B3 is atomic
+> for the reasons in its own row — **but nowhere in this document may version order be treated as a
+> mechanism that prevents a bad ordering. Only the operator and this document do that.** Full
+> explanation and consequences: §5A.5.
 
 ### B9's three security co-presence pairs — the reason it cannot be split
 
@@ -573,7 +583,7 @@ before assuming version order is a guard rail.**
 
 | # | Versions | Count | Atomic? | Why the boundary at the end is safe |
 |---|---|---|---|---|
-| **B10a** | `20260810190000`, `20260810190100` | 2 | **ATOMIC** | Disney DCP Vault source landing + its chunked loader. `20260810190000` creates nine `plm.dcp_*` tables, the frozen row-hash function and the immutability triggers but **no loader**; `20260810190100` supplies the chunked loader, `plm.dcp_chunk_ledger` and `plm.finalize_dcp_crawl` — the only path to `status='complete'`. **Precisely:** `20260810190000` does grant `service_role` `select, insert` on the nine tables, so a raw `INSERT` is *technically* possible; what is missing is the **supported, checked, finalizable** path. Rest only after `190100`. |
+| **B10a** | `20260810190000`, `20260810190100` | 2 | **ATOMIC** | Disney DCP Vault source landing + its chunked loader. `20260810190000` creates nine `plm.dcp_*` tables, the frozen row-hash function and the immutability triggers but **no loader**; `20260810190100` supplies the chunked loader, `plm.dcp_chunk_ledger` and `plm.finalize_dcp_crawl` — the only **checked** path to `status='complete'`. **Precisely, because the loose version of this was wrong:** `20260810190000` grants `service_role` `select, insert` on the nine tables and installs **no header INSERT trigger**, so a caller can write rows directly and even insert a `dcp_crawl` row already marked `'complete'`. What is missing between the pair is the **supported, checked, finalizable** path — not the ability to write. See §6. Rest only after `190100`. |
 | **B10b** | `20260811030000` | 1 | single file — **trivially atomic** | Paramount lossless source ids + `plm.pmt_asset_metadata_value`. One file, so there is no internal boundary to rest at. Safe at the end because the five `api.pmt_*` views it drops are recreated inside the same file. |
 | **B10c** | `20260811050000`, `20260811060000` | 2 | **ATOMIC** | DCP Vault metadata landing + its chunked loader. Identical shape to B10a: `050000` creates `plm.dcp_metadata_*`, `dcp_property`, `dcp_character`, `dcp_term` and three observation tables with no loader; `060000` supplies `begin_dcp_metadata_run` / `load_dcp_metadata_chunk` / `finalize_dcp_metadata_run` plus `plm.dcp_metadata_chunk_ledger` and `plm.dcp_metadata_load_exception`. Same precision as B10a: `050000` **does** grant `service_role` `select, insert`, so the gap is the supported loader and finalizer, not raw writability. Rest only after `060000`. |
 | **B10d** | `20260811070000` | 1 | single file — **trivially atomic** | NBCU asset ↔ IP-family relationship: `create table plm.nbcu_asset_ip_family` (the **17th** NBCU table) plus a `create or replace plm.finalize_nbcu_capture`. One file, so no internal boundary. **Its CONCERNS review is DISCHARGED (§5A.7, #800)** — the one real finding became the hard ordering edge in §5A.5. |
