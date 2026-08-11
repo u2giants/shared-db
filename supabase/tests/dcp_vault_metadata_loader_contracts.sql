@@ -388,7 +388,9 @@ begin
     (select coalesce(array_agg(t.source_value), array[]::text[])
        from plm.dcp_asset_term_observation o join plm.dcp_term t on t.id = o.dcp_term_id
       where o.metadata_run_id = v_run and o.dcp_asset_id = v_a1 and t.term_kind = 'keyword')
-  ) into v_hash2;
+  ) into v_hash2
+  from plm.dcp_metadata_asset m
+  where m.metadata_run_id = v_run and m.dcp_asset_id = v_a1;
   if v_hash1 <> v_hash2 then
     raise exception 'F FAILED: the stored normalized hash does not match a hash recomputed '
       'from the STORED values. The loader digested something other than what it stored, '
