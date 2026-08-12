@@ -24,6 +24,8 @@ from production_migration_guard import (  # noqa: E402
     local_migrations,
     manifest_path,
     CO_PRESENCE_RULES,
+    dropped_objects,
+    object_events,
     ATOMIC_BATCHES,
     assert_atomic_batches,
     assert_content_manifest,
@@ -2026,6 +2028,181 @@ class LexerFalseAcceptDefects(unittest.TestCase):
             "alter table plm.t alter column id set default nextval('plm.s'::regclass);\n"
         )
         self.assertIn("plm.real", created_objects(sql))
+
+    # --- #609 F5: `available` never shrank on DROP/RENAME --------------------
+
+    def test_f5_a_dropped_object_is_reported_as_dropped(self) -> None:
+        """The defect, exactly as #609 states it: `drop table plm.old` yielded
+        `created_objects == {}` and removed nothing, so a later
+        `alter table plm.old` was still satisfied from the ledger."""
+        self.assertEqual(dropped_objects("drop table plm.old;\n"), {"plm.old"})
+
+    def test_f5_drop_then_recreate_in_one_file_leaves_the_object_AVAILABLE(self) -> None:
+        """The normal way to change a view's column set. Contract section 5's B7
+        (`api.opa_property_reconciliation`) and B10b both do it. Treating it as a
+        removal would turn one false-ACCEPT into a wave of false REJECTs."""
+        sql = (
+            "drop view if exists api.x;\n"
+            "create view api.x as select 1 as a;\n"
+        )
+        self.assertEqual(dropped_objects(sql), set())
+        self.assertIn("api.x", created_objects(sql))
+
+    def test_f5_create_then_drop_in_one_file_leaves_the_object_GONE(self) -> None:
+        """Last event wins in both directions, not just the convenient one."""
+        sql = "create table plm.tmp (id uuid);\ndrop table plm.tmp;\n"
+        self.assertEqual(dropped_objects(sql), {"plm.tmp"})
+
+    def test_f5_a_multi_object_drop_removes_every_name(self) -> None:
+        self.assertEqual(
+            dropped_objects("drop table plm.a, plm.b cascade;\n"),
+            {"plm.a", "plm.b"},
+        )
+
+    def test_f5_a_rename_removes_the_OLD_name_and_adds_the_NEW_one(self) -> None:
+        events = dict(
+            (obj, created) for _pos, obj, created in
+            object_events("alter table plm.old rename to fresh;\n")
+        )
+        self.assertEqual(events, {"plm.old": False, "plm.fresh": True})
+
+    def test_f5_rename_COLUMN_is_not_a_rename_of_the_table(self) -> None:
+        """`rename column y to z` carries a noun between `rename` and `to`. If
+        this ever matched, every column rename in the backlog would delete its
+        own table from `available` and reject the batch."""
+        self.assertEqual(
+            dropped_objects("alter table plm.t rename column a to b;\n"), set()
+        )
+
+    def test_f5_rename_CONSTRAINT_is_not_a_rename_of_the_table(self) -> None:
+        self.assertEqual(
+            dropped_objects("alter table plm.t rename constraint a to b;\n"), set()
+        )
+
+    def test_f5_set_schema_moves_the_qualified_name(self) -> None:
+        events = dict(
+            (obj, created) for _pos, obj, created in
+            object_events("alter table plm.t set schema core;\n")
+        )
+        self.assertEqual(events, {"plm.t": False, "core.t": True})
+
+    def test_f5_drop_TRIGGER_on_a_table_does_not_drop_the_table(self) -> None:
+        """`drop trigger x on plm.t` names a table it does not remove. The
+        reference regexes already read this position; the drop regexes must not."""
+        self.assertEqual(
+            dropped_objects("drop trigger x on plm.t;\n"), set()
+        )
+
+    def test_f5_drop_POLICY_and_INDEX_do_not_drop_their_target(self) -> None:
+        self.assertEqual(dropped_objects("drop policy p on plm.t;\n"), set())
+        self.assertEqual(dropped_objects("drop index plm.idx;\n"), set())
+
+    def test_f5_a_batch_referencing_a_DROPPED_object_is_REFUSED(self) -> None:
+        """End to end. Before this, the ledger still 'provided' plm.old and the
+        batch passed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "supabase" / "migrations"
+            root.mkdir(parents=True)
+            (root / "20260101000000_a.sql").write_text(
+                "create table plm.old (id uuid);\n", encoding="utf-8"
+            )
+            (root / "20260102000000_b.sql").write_text(
+                "drop table plm.old;\n", encoding="utf-8"
+            )
+            (root / "20260103000000_c.sql").write_text(
+                "alter table plm.old add column x uuid;\n", encoding="utf-8"
+            )
+            migrations = local_migrations(Path(tmp))
+            with self.assertRaises(GuardError) as ctx:
+                preflight_batch(
+                    migrations,
+                    ["20260102000000", "20260103000000"],
+                    {"20260101000000"},
+                )
+            message = str(ctx.exception)
+            self.assertIn("plm.old", message)
+            self.assertIn("DROPPED (or renamed away) by 20260102000000", message)
+            # The advice must be the OPPOSITE of the "created by X" case: no
+            # allowlist can bring a dropped object back.
+            self.assertIn("Adding versions to the allowlist cannot fix this", message)
+
+    def test_f5_a_drop_in_the_APPLIED_LEDGER_is_honoured_too(self) -> None:
+        """The removal need not be in the batch. If production already dropped
+        it, the batch still aborts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "supabase" / "migrations"
+            root.mkdir(parents=True)
+            (root / "20260101000000_a.sql").write_text(
+                "create table plm.old (id uuid);\n", encoding="utf-8"
+            )
+            (root / "20260102000000_b.sql").write_text(
+                "drop table plm.old;\n", encoding="utf-8"
+            )
+            (root / "20260103000000_c.sql").write_text(
+                "alter table plm.old add column x uuid;\n", encoding="utf-8"
+            )
+            migrations = local_migrations(Path(tmp))
+            with self.assertRaises(GuardError) as ctx:
+                preflight_batch(
+                    migrations,
+                    ["20260103000000"],
+                    {"20260101000000", "20260102000000"},
+                )
+            self.assertIn("DROPPED (or renamed away) by 20260102000000", str(ctx.exception))
+
+    def test_f5_a_recreated_object_is_available_again(self) -> None:
+        """Dropping then re-creating across FILES must not leave a permanent
+        hole -- otherwise every drop-and-recreate split over two migrations
+        becomes an unsatisfiable refusal."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "supabase" / "migrations"
+            root.mkdir(parents=True)
+            (root / "20260101000000_a.sql").write_text(
+                "create table plm.old (id uuid);\n", encoding="utf-8"
+            )
+            (root / "20260102000000_b.sql").write_text(
+                "drop table plm.old;\n", encoding="utf-8"
+            )
+            (root / "20260103000000_c.sql").write_text(
+                "create table plm.old (id uuid);\n", encoding="utf-8"
+            )
+            (root / "20260104000000_d.sql").write_text(
+                "alter table plm.old add column x uuid;\n", encoding="utf-8"
+            )
+            migrations = local_migrations(Path(tmp))
+            preflight_batch(
+                migrations,
+                ["20260102000000", "20260103000000", "20260104000000"],
+                {"20260101000000"},
+            )
+
+    def test_f5_no_existing_migration_becomes_a_new_rejection(self) -> None:
+        """MEASURED EXPOSURE, re-measured on every run rather than quoted.
+
+        Walk every migration in version order, applying creates and net drops,
+        and assert that no file hard-references an object an earlier file
+        removed. When this was written it held across all 437 files with 8 net
+        drop events. If a future migration breaks it, that is a REAL finding --
+        do not delete this test to get past it, and do not assume the lexer is
+        at fault before checking the migration.
+        """
+        migrations = local_migrations(REPO)
+        available: set[str] = set()
+        removed: dict[str, str] = {}
+        offenders: list[str] = []
+        for version in sorted(migrations):
+            raw = migrations[version].read_text(encoding="utf-8")
+            for obj, reason in hard_references(raw):
+                if obj in removed:
+                    offenders.append(f"{version} -> {obj} ({reason}), dropped by {removed[obj]}")
+            created, dropped = created_objects(raw), dropped_objects(raw)
+            available |= created
+            available -= dropped
+            for obj in created:
+                removed.pop(obj, None)
+            for obj in dropped:
+                removed[obj] = version
+        self.assertEqual(offenders, [])
 
     # --- #672 item 2: the bare `do '...'` blind spot -------------------------
 

@@ -1460,6 +1460,121 @@ def created_objects(raw: str) -> set[str]:
     return found
 
 
+# ---------------------------------------------------------------------------
+# #609 F5 -- `available` NEVER SHRANK.
+#
+# The preflight modelled object CREATION only. `drop table plm.old` in file N
+# produced `created_objects == {}` and removed nothing, so a later
+# `alter table plm.old` was still satisfied from the remote ledger and the batch
+# passed -- the false-ACCEPT direction. The issue records this as an
+# ARCHITECTURAL limit rather than a regex bug, and it is: closing it means the
+# preflight has to model removal as well as creation. That is what this does.
+#
+# LAST EVENT WINS, AND THAT IS THE WHOLE MODEL. Within one file the events are
+# read in TEXT ORDER and only the final one for an object counts, because that
+# is the file's end state -- which is the only thing a later file can observe.
+# So the near-universal `drop view if exists api.x; create view api.x ...`
+# (contract section 5, B7 and B10b both do it) leaves api.x AVAILABLE, and the
+# reverse order leaves it gone. Getting this backwards would turn a
+# false-ACCEPT into a wave of false REJECTs across the whole backlog.
+#
+# `created_objects` IS DELIBERATELY UNCHANGED. It still reports every object the
+# file creates anywhere. `preflight_batch` applies `available |= created` and
+# then `available -= dropped_objects(raw)`, and because `dropped_objects` only
+# reports objects whose LAST event is a removal, the order of those two lines
+# gives the correct end state either way. Leaving `created_objects` alone keeps
+# every existing caller and test meaning exactly what it meant before.
+#
+# WHAT IS AND IS NOT MODELLED. Removals reached only through
+# `execute format(...)` are invisible here for the same reason creations are
+# (module header). A drop this scanner cannot see leaves `available` too large,
+# which is the pre-existing behaviour, not a new hole. This check may REJECT;
+# it is still never an APPROVAL.
+#
+# MEASURED EXPOSURE. Across every file in supabase/migrations/, walked in
+# version order, no object that a migration drops-and-does-not-recreate is
+# hard-referenced by any later migration -- so no existing batch's verdict
+# changes. See test_f5_no_existing_migration_becomes_a_new_rejection.
+# ---------------------------------------------------------------------------
+
+# Object kinds whose removal this models. Deliberately the same five kinds
+# `CREATE_RES` recognises: modelling the removal of something whose creation is
+# invisible would produce refusals nothing could ever satisfy.
+DROP_RES = (
+    re.compile(r"\bdrop\s+(?:unlogged\s+)?table\s+(?:if\s+exists\s+)?"),
+    re.compile(r"\bdrop\s+(?:materialized\s+)?view\s+(?:if\s+exists\s+)?"),
+    re.compile(r"\bdrop\s+(?:function|procedure)\s+(?:if\s+exists\s+)?"),
+    re.compile(r"\bdrop\s+type\s+(?:if\s+exists\s+)?"),
+    re.compile(r"\bdrop\s+sequence\s+(?:if\s+exists\s+)?"),
+)
+# Where a `drop` object list ends. `cascade`/`restrict` are not object names and
+# a `;` ends the statement outright.
+DROP_LIST_END_RE = re.compile(r";|\bcascade\b|\brestrict\b")
+# `alter <kind> [if exists] [only] sch.obj rename to newname` -- the old name
+# STOPS EXISTING and a new one appears in the same schema. `rename column`,
+# `rename constraint` and friends do not match, because they carry the noun
+# between `rename` and `to`.
+RENAME_RE = re.compile(
+    r"\balter\s+(?:table|view|materialized\s+view|sequence|type|function|procedure)\s+"
+    r"(?:if\s+exists\s+)?(?:only\s+)?" + IDENT + r"\s+rename\s+to\s+([a-z_][a-z0-9_]*)"
+)
+# `alter <kind> sch.obj set schema other` -- same object, different qualified
+# name, so the old qualified name stops resolving.
+SET_SCHEMA_RE = re.compile(
+    r"\balter\s+(?:table|view|materialized\s+view|sequence|type|function|procedure)\s+"
+    r"(?:if\s+exists\s+)?(?:only\s+)?" + IDENT + r"\s+set\s+schema\s+([a-z_][a-z0-9_]*)"
+)
+
+
+def object_events(raw: str) -> list[tuple[int, str, bool]]:
+    """Every creation and removal in the file, as ``(position, object, created)``.
+
+    Positions come from the SAME stripped text `created_objects` scans
+    (``keep_regclass=False``), so a `create table a.b` sitting inside a kept
+    ``::regclass`` literal cannot register here either -- the #609 F2 phantom.
+    """
+    text = strip_sql(raw, keep_regclass=False)
+    events: list[tuple[int, str, bool]] = []
+    for pattern in CREATE_RES:
+        for match in pattern.finditer(text):
+            events.append(
+                (match.start(), f"{match.group(1)}.{match.group(2)}", True)
+            )
+    for pattern in DROP_RES:
+        for match in pattern.finditer(text):
+            end = DROP_LIST_END_RE.search(text, match.end())
+            segment = text[match.end() : end.start() if end else len(text)]
+            # `drop table a.b, c.d` removes both.
+            for obj in re.finditer(IDENT, segment):
+                events.append(
+                    (match.start() + obj.start(), f"{obj.group(1)}.{obj.group(2)}", False)
+                )
+    for match in RENAME_RE.finditer(text):
+        schema, old, new = match.group(1), match.group(2), match.group(3)
+        events.append((match.start(), f"{schema}.{old}", False))
+        events.append((match.start() + 1, f"{schema}.{new}", True))
+    for match in SET_SCHEMA_RE.finditer(text):
+        schema, obj, new_schema = match.group(1), match.group(2), match.group(3)
+        events.append((match.start(), f"{schema}.{obj}", False))
+        events.append((match.start() + 1, f"{new_schema}.{obj}", True))
+    events.sort(key=lambda item: item[0])
+    return events
+
+
+def dropped_objects(raw: str) -> set[str]:
+    """Objects this file removes and does NOT put back. Last event wins.
+
+    The complement of `created_objects` for `preflight_batch`'s `available` set.
+    An object dropped and then re-created in the same file is NOT here -- the
+    drop-and-recreate is the normal way to change a view's column set, and
+    treating it as a removal would reject most of B7 and all of B10b.
+    """
+    final: dict[str, bool] = {}
+    for _position, obj, created in object_events(raw):
+        final[obj] = created
+    return {obj for obj, created in final.items() if not created}
+
+
 def hard_references(raw: str) -> list[tuple[str, str]]:
     text = strip_sql(raw)
     found: list[tuple[str, str]] = []
@@ -1482,11 +1597,27 @@ def preflight_batch(
         for obj in created_objects(path.read_text(encoding="utf-8")):
             creators.setdefault(obj, []).append(version)
 
+    # #609 F5. `available` now SHRINKS on a drop/rename, so the ledger prefix has
+    # to be walked in version order -- an unordered union would let a create in a
+    # later applied file be cancelled by a drop in an earlier one, or vice versa.
+    # `removed_by` remembers WHICH version removed an object, so the refusal can
+    # say "dropped by X" instead of the misleading "created by X, which is not
+    # applied" the creation-only model would have printed.
     available: set[str] = set()
+    removed_by: dict[str, str] = {}
     for version in sorted(remote):
         path = migrations.get(version)
-        if path is not None:
-            available |= created_objects(path.read_text(encoding="utf-8"))
+        if path is None:
+            continue
+        raw = path.read_text(encoding="utf-8")
+        created = created_objects(raw)
+        dropped = dropped_objects(raw)
+        available |= created
+        available -= dropped
+        for obj in created:
+            removed_by.pop(obj, None)
+        for obj in dropped:
+            removed_by[obj] = version
 
     problems: list[str] = []
     for version in allowlist:
@@ -1499,9 +1630,32 @@ def preflight_batch(
             assert_no_archaic_function_body(version, raw)
         except GuardError as exc:
             problems.append(str(exc))
-        available |= created_objects(raw)
+        created = created_objects(raw)
+        dropped = dropped_objects(raw)
+        available |= created
+        available -= dropped
+        for obj in created:
+            removed_by.pop(obj, None)
+        for obj in dropped:
+            removed_by[obj] = version
         for obj, reason in hard_references(raw):
             if obj in available:
+                continue
+            # #609 F5. A POSITIVE, RECORDED REMOVAL. This is the one case the
+            # creation-only model could not see at all, and it is reported
+            # separately because the advice is the opposite: the object is not
+            # "coming later", it is GONE, and no amount of adding versions to the
+            # allowlist will bring it back.
+            if obj in removed_by:
+                problems.append(
+                    f"{version} references missing {obj} ({reason}); it was "
+                    f"DROPPED (or renamed away) by {removed_by[obj]} and not "
+                    f"re-created -- would abort the batch (42P01 undefined_table "
+                    f"/ 42883 undefined_function). Adding versions to the "
+                    f"allowlist cannot fix this: either {version} is referencing "
+                    f"the wrong name, or {removed_by[obj]} should not be in this "
+                    f"batch."
+                )
                 continue
             known = sorted(creators.get(obj, []))
             if not known:
