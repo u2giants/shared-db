@@ -282,6 +282,50 @@ CO_PRESENCE_RULES: tuple[tuple[str, frozenset[str], str], ...] = (
 # ---------------------------------------------------------------------------
 # ATOMIC BATCHES (added 2026-08-11)
 #
+# ****** TWO PROVENANCES, ONE MECHANISM (issue #784, added 2026-08-12). ******
+#
+# Read this before deciding an entry is mislabelled. Every entry below states
+# the same enforced property -- PRODUCTION MUST NOT COME TO REST INSIDE THIS SET
+# -- but it is derived from the contract in one of two ways, and the `basis`
+# field says which:
+#
+#   "ATOMIC"     the contract's section 5 table declares the batch atomic in so
+#                many words. B1, B3, B7, B9 (and B10a, B10c in section 5A.4).
+#
+#   "NEVER-REST" the contract does NOT use the word atomic, but its section 6
+#                never-rest list names EVERY member of the batch except the
+#                last, and section 6's legal-resting-point list names that last
+#                member. The set of legal resting states is therefore exactly
+#                {none of it, all of it} -- mechanically identical to atomic,
+#                derived rather than declared. B2, B4, B5, B6, B8.
+#
+# WHY ONE MECHANISM AND NOT TWO. Issue #784 asked for the shape to be decided
+# first, and warned that the non-atomic batches "are not all-or-nothing like the
+# atomic four". They were checked one by one against section 6 and they ARE: for
+# each of B2, B4, B5, B6 and B8 the contract forbids resting on every member but
+# the terminal one, so "an allowlist may not stop at a version section 6 forbids
+# resting on" and "all members or none" describe the same set of accepted
+# allowlists. Inventing a second checker to express an identical rule would give
+# the lane two places to look and two places to drift. If a future batch ever
+# gains a genuine INTERNAL legal resting point, that is when a second shape is
+# warranted -- and it must be added with the contract text quoted beside it,
+# never by weakening this one.
+#
+# B4 IS INCLUDED THOUGH #784 DID NOT NAME IT. #784 listed B2, B5, B6 and B8.
+# Section 6 names `20260731210000` (B4's first of two) as a never-rest state and
+# `20260731220000` as its legal resting point, so B4 is the same gap by the same
+# derivation. Leaving it out because an issue body did not list it would rebuild
+# the exact defect -- a rule that exists only in prose -- for one batch, and
+# AGENTS.md 4.3 is explicit that the CONTRACT is the authority for batch
+# membership, never an issue body. B4 is already applied to production, so the
+# entry is inert today; it is here so the mechanism has no hole in it.
+#
+# THE COVERAGE IS PINNED BY A TEST, NOT BY THIS COMMENT. `test_every_section_6
+# _never_rest_version_is_enforced` parses the contract's own section 6 list and
+# asserts every version in it belongs to a registered batch and is not that
+# batch's terminal member. That is what stops the next never-rest state from
+# being added to the contract and enforced by nothing.
+#
 # docs/production-promotion-app-tolerance-contract.md declares FOUR of its nine
 # promotion batches ATOMIC -- B1, B3, B7 and B9 (contract section 5 table, and
 # section 10: "B1, B3, B7 and B9 are atomic. Do not split them, whatever a
@@ -350,9 +394,10 @@ CO_PRESENCE_RULES: tuple[tuple[str, frozenset[str], str], ...] = (
 # files and B4 two") and its section 6 lists are consistent. The two versions are
 # encoded here as B3 members and B4 is not an atomic batch, so the overlap is not
 # reproduced in the guard.
-ATOMIC_BATCHES: tuple[tuple[str, str, frozenset[str]], ...] = (
+ATOMIC_BATCHES: tuple[tuple[str, str, str, frozenset[str]], ...] = (
     (
         "B1",
+        "ATOMIC",
         "the ColdLion circuit-breaker batch. It carries the BUNDLE_20260804 "
         "four AND the sync_coldlion_licensors_properties 2-arg -> 3-arg "
         "signature change at 20260726030000, whose 2-arg predecessor is created "
@@ -375,7 +420,27 @@ ATOMIC_BATCHES: tuple[tuple[str, str, frozenset[str]], ...] = (
         ),
     ),
     (
+        "B2",
+        "NEVER-REST",
+        "the ClickUp importer batch. Contract section 6 forbids resting after "
+        "20260728171500 and after 20260728174500, and lists 20260728181500 as "
+        "the batch's only legal resting point -- so the legal states are none of "
+        "it or all of it. 20260728174500 creates the ClickUp incremental "
+        "importer and 20260728181500 corrects it: resting between them ships a "
+        "KNOWN-DEFECTIVE importer to production. (Contract section 7.3 also "
+        "records this batch as the one most likely to abort, so a partial "
+        "landing here is not a hypothetical.)",
+        frozenset(
+            {
+                "20260728171500",
+                "20260728174500",
+                "20260728181500",
+            }
+        ),
+    ),
+    (
         "B3",
+        "ATOMIC",
         "the plm.promote_coldlion_source_owned chain. Eight successive bodies of "
         "the same function, of which only the eighth (20260731200000) is safe to "
         "rest on functionally. Earlier bodies leave a known ambiguous-column "
@@ -414,7 +479,65 @@ ATOMIC_BATCHES: tuple[tuple[str, str, frozenset[str]], ...] = (
         ),
     ),
     (
+        "B4",
+        "NEVER-REST",
+        "the core.licensor alias batch. Contract section 6 forbids resting after "
+        "20260731210000 and lists 20260731220000 as the legal resting point, so "
+        "the alias table must not land without the owner-approved remaining five "
+        "aliases that fill it. NOT NAMED BY #784 -- derived from section 6 by "
+        "the same rule as B2/B5/B6/B8; see the header. Already applied to "
+        "production, so this entry is inert today and exists so the mechanism "
+        "has no hole.",
+        frozenset(
+            {
+                "20260731210000",
+                "20260731220000",
+            }
+        ),
+    ),
+    (
+        "B5",
+        "NEVER-REST",
+        "the taxonomy alert acknowledgement RPC and its three corrections. "
+        "Contract section 6 forbids resting after 20260802140000, 20260802141000 "
+        "and 20260802150000, and lists 20260802160000 as the legal resting "
+        "point. 20260802160000 fixes the EFFECTIVE-ROLE CHECK, so every earlier "
+        "resting state leaves the acknowledgement RPC judging the wrong "
+        "principal. NOTE: the two AGENTS.md 6.5 held versions (20260802170000, "
+        "20260802171000) sort just above 20260802160000 and are deliberately NOT "
+        "members -- FR_HELD_20260803 refuses them by a separate, stricter rule.",
+        frozenset(
+            {
+                "20260802140000",
+                "20260802141000",
+                "20260802150000",
+                "20260802160000",
+            }
+        ),
+    ),
+    (
+        "B6",
+        "NEVER-REST",
+        "the item identity/UPC contract, temp status watch and taxonomy baseline "
+        "pins. Contract section 6 forbids resting after 20260803150000, "
+        "20260803200000, 20260803201000 and 20260804120000, and lists "
+        "20260804120100 as the legal resting point. 20260804120100 drops the "
+        "8-arg trip_taxonomy_circuit_breaker and re-creates it, so resting "
+        "before it leaves the pin table without its environment/provenance "
+        "columns.",
+        frozenset(
+            {
+                "20260803150000",
+                "20260803200000",
+                "20260803201000",
+                "20260804120000",
+                "20260804120100",
+            }
+        ),
+    ),
+    (
         "B7",
+        "ATOMIC",
         "the Disney OPA batch. 20260807190000 does `drop view if exists "
         "api.opa_property_reconciliation` followed by a `create view` -- a "
         "genuine column-set change that `create or replace view` cannot do, so "
@@ -434,7 +557,31 @@ ATOMIC_BATCHES: tuple[tuple[str, str, frozenset[str]], ...] = (
         ),
     ),
     (
+        "B8",
+        "NEVER-REST",
+        "the core.product_size / core.product_depth foundation, both seeds, the "
+        "guarded importer, the api pickers and the DB Data Admin mutations. "
+        "Contract section 6 forbids resting after 20260809170000, 20260809170100, "
+        "20260809170200, 20260809170300 and 20260809170400, and lists "
+        "20260809170500 as the legal resting point. A HALF-SEEDED "
+        "core.product_size is the single failure PopDAM swallows SILENTLY -- it "
+        "falls back to style_groups.size_name, which looks plausible and is "
+        "wrong (contract section 3.2). There is no monitoring that would catch "
+        "it, so this batch's partial state is discovered by a user or not at all.",
+        frozenset(
+            {
+                "20260809170000",
+                "20260809170100",
+                "20260809170200",
+                "20260809170300",
+                "20260809170400",
+                "20260809170500",
+            }
+        ),
+    ),
+    (
         "B9",
+        "ATOMIC",
         "the licensor landing batch. It carries all three security co-presence "
         "pairs (Paramount TRUNCATE, Warner `using (true)`, NBCU direct write -- "
         "the three worst resting states in the whole backlog), the "
@@ -479,7 +626,7 @@ def assert_atomic_batches(allowlist: list[str], remote: set[str]) -> None:
     this guard under time pressure.
     """
     chosen = set(allowlist)
-    for name, why, members in ATOMIC_BATCHES:
+    for name, basis, why, members in ATOMIC_BATCHES:
         present = chosen & members
         if not present:
             continue
@@ -493,10 +640,15 @@ def assert_atomic_batches(allowlist: list[str], remote: set[str]) -> None:
             if already
             else ""
         )
+        citation = (
+            f"section 5 declares {name} atomic"
+            if basis == "ATOMIC"
+            else f"section 6 forbids resting on every member of {name} but the last"
+        )
         raise GuardError(
-            f"batch {name} is ATOMIC and this allowlist would split it. "
-            f"docs/production-promotion-app-tolerance-contract.md section 5 "
-            f"declares {name} atomic: {why}\n"
+            f"batch {name} is {basis} and this allowlist would split it. "
+            f"docs/production-promotion-app-tolerance-contract.md "
+            f"{citation}: {why}\n"
             f"  batch {name} has {len(members)} members\n"
             f"  supplied ({len(present)}): {', '.join(sorted(present))}\n"
             f"  MISSING ({len(missing)}): {', '.join(missing)}{resume}\n"

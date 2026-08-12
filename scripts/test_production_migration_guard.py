@@ -2078,42 +2078,86 @@ class LexerFalseAcceptDefects(unittest.TestCase):
         self.assertIn("20260729120000", HARD_BLOCKED)
 
 
-BATCHES = {name: members for name, _why, members in ATOMIC_BATCHES}
+BATCHES = {name: members for name, _basis, _why, members in ATOMIC_BATCHES}
+BASES = {name: basis for name, basis, _why, _members in ATOMIC_BATCHES}
 
-# The guard's own member counts. Asserted rather than derived, so a member
-# quietly added to or dropped from ATOMIC_BATCHES fails here instead of silently
-# changing what "atomic" means.
+# The guard's EXACT membership, version by version. Issue #784 item 2: this used
+# to assert COUNTS only, and the exact membership had been reconciled BY HAND
+# during the #781 review with nothing pinning it afterwards -- so a future edit
+# could swap one version for another and every test would still pass. Batch
+# membership drift is not hypothetical in this repo: on 2026-08-11 the lists
+# carried in issue text (#710, #773) were found to contain a B3/B4 overlap the
+# contract did not have.
+#
+# TRANSCRIBED FROM docs/production-promotion-app-tolerance-contract.md, section 5
+# (and 5A.4 for B10), NOT from any issue body. AGENTS.md 4.3: the contract is the
+# authority for batch membership, never an issue.
 #
 # B3 is 11, NOT the contract section-5 functional count of 10: the guard carries
 # one SECURITY appendage the contract predates -- 20260812020000 (issue #822,
-# service_role TRUNCATE revoke on three append-only tables plus core.property_alias). The contract's
-# ten are a strict subset of the guard's eleven. See the B3 entry in
-# production_migration_guard.py and test_b3_requires_the_truncate_fix below.
-CONTRACT_COUNTS = {"B1": 11, "B3": 11, "B7": 6, "B9": 14}
+# service_role TRUNCATE revoke on three append-only tables plus
+# core.property_alias). The contract's ten are a strict subset of the guard's
+# eleven. See the B3 entry in production_migration_guard.py and
+# B3TruncateFixCoPresenceTest below.
+CONTRACT_MEMBERSHIP = {
+    "B1": frozenset({
+        "20260724060000", "20260724061000", "20260726030000", "20260726031000",
+        "20260726032000", "20260726180000", "20260727221500", "20260727223000",
+        "20260727224500", "20260727230000", "20260728134500",
+    }),
+    "B2": frozenset({
+        "20260728171500", "20260728174500", "20260728181500",
+    }),
+    "B3": frozenset({
+        "20260729230000", "20260729234500", "20260729235500", "20260730000500",
+        "20260731150000", "20260731153000", "20260731163000", "20260731180000",
+        "20260731190000", "20260731200000",
+        "20260812020000",  # the post-contract #822 security appendage
+    }),
+    "B4": frozenset({
+        "20260731210000", "20260731220000",
+    }),
+    "B5": frozenset({
+        "20260802140000", "20260802141000", "20260802150000", "20260802160000",
+    }),
+    "B6": frozenset({
+        "20260803150000", "20260803200000", "20260803201000", "20260804120000",
+        "20260804120100",
+    }),
+    "B7": frozenset({
+        "20260807030000", "20260807170000", "20260807170100", "20260807180000",
+        "20260807190000", "20260807200000",
+    }),
+    "B8": frozenset({
+        "20260809170000", "20260809170100", "20260809170200", "20260809170300",
+        "20260809170400", "20260809170500",
+    }),
+    "B9": frozenset({
+        "20260810010000", "20260810020000", "20260810030000", "20260810050000",
+        "20260810060000", "20260810070000", "20260810080000", "20260810090000",
+        "20260810100000", "20260810110000", "20260810120000", "20260810130000",
+        "20260810160000", "20260810170000",
+    }),
+}
+CONTRACT_COUNTS = {name: len(members) for name, members in CONTRACT_MEMBERSHIP.items()}
 
-# Contract section 5: batches the contract does NOT declare atomic. A promotion
-# of any part of one of these must be unaffected by the atomicity check.
-B5_MEMBERS = [
-    "20260802140000",
-    "20260802141000",
-    "20260802150000",
-    "20260802160000",
-]
-B6_MEMBERS = [
-    "20260803150000",
-    "20260803200000",
-    "20260803201000",
-    "20260804120000",
-    "20260804120100",
-]
-B8_MEMBERS = [
-    "20260809170000",
-    "20260809170100",
-    "20260809170200",
-    "20260809170300",
-    "20260809170400",
-    "20260809170500",
-]
+# Which entries the contract DECLARES atomic (section 5 / 5A.4) versus which are
+# DERIVED from its section 6 never-rest list. The guard states this in each
+# entry's `basis` field and the refusal message quotes the right section, so a
+# mislabelled entry would cite a contract sentence that does not exist.
+CONTRACT_BASES = {
+    "B1": "ATOMIC",
+    "B2": "NEVER-REST",
+    "B3": "ATOMIC",
+    "B4": "NEVER-REST",
+    "B5": "NEVER-REST",
+    "B6": "NEVER-REST",
+    "B7": "ATOMIC",
+    "B8": "NEVER-REST",
+    "B9": "ATOMIC",
+}
+
+CONTRACT_PATH = REPO / "docs" / "production-promotion-app-tolerance-contract.md"
 
 
 class AtomicBatchTests(unittest.TestCase):
@@ -2127,10 +2171,92 @@ class AtomicBatchTests(unittest.TestCase):
     check did not over-reach.
     """
 
-    def test_membership_matches_the_contract_counts(self) -> None:
-        self.assertEqual(set(BATCHES), set(CONTRACT_COUNTS))
+    def test_membership_matches_the_contract_EXACTLY(self) -> None:
+        """#784 item 2. EXACT frozensets, not counts.
+
+        The count-only version of this test would pass while a member was
+        swapped for an entirely different version. It is what let the B3/B4
+        overlap in #710/#773 go unnoticed for as long as it did.
+        """
+        self.assertEqual(set(BATCHES), set(CONTRACT_MEMBERSHIP))
+        for name, expected in CONTRACT_MEMBERSHIP.items():
+            self.assertEqual(BATCHES[name], expected, name)
+
+    def test_membership_counts_still_reconcile_with_the_contract(self) -> None:
         for name, expected in CONTRACT_COUNTS.items():
             self.assertEqual(len(BATCHES[name]), expected, name)
+
+    def test_every_entry_declares_the_right_basis(self) -> None:
+        """ATOMIC entries cite contract section 5; NEVER-REST entries cite
+        section 6. A mislabelled entry would quote a sentence that is not
+        there."""
+        self.assertEqual(BASES, CONTRACT_BASES)
+        for basis in BASES.values():
+            self.assertIn(basis, {"ATOMIC", "NEVER-REST"})
+
+    # -- #784: the prose in contract section 6 is now enforced --------------
+
+    def _section_6_never_rest_versions(self) -> set[str]:
+        """The contract's OWN never-rest list, parsed from the file.
+
+        Deliberately read from the contract rather than transcribed, so a
+        never-rest state added to the document and enforced by nothing fails
+        here. That is the exact defect #784 was filed about.
+        """
+        text = CONTRACT_PATH.read_text(encoding="utf-8")
+        body = text.split("## 6. States that must NEVER be rested on", 1)[1]
+        body = body.split("**The two B10 never-rest states", 1)[0]
+        block = body.split("```", 2)[1]
+        return set(re.findall(r"\b\d{14}\b", block))
+
+    def test_the_section_6_list_is_parseable_and_not_empty(self) -> None:
+        """If the contract's heading or fence shape changes, the coverage test
+        below would silently pass over an empty set. Fail loudly instead."""
+        versions = self._section_6_never_rest_versions()
+        self.assertGreaterEqual(len(versions), 50, sorted(versions))
+
+    def test_every_section_6_never_rest_version_is_ENFORCED(self) -> None:
+        """THE POINT OF #784.
+
+        Every version the contract forbids resting on must belong to a
+        registered batch, and must not be that batch's terminal member -- so
+        an allowlist that stops at it is refused by `assert_atomic_batches`.
+        Before this change, B2/B4/B5/B6/B8's 15 never-rest versions belonged to
+        no entry at all and the guard accepted resting on any of them.
+        """
+        # KNOWN AND OPEN, tracked as issue #819: B10a's 20260810190000 and
+        # B10c's 20260811050000 are section 6 never-rest states that belong to
+        # no registered batch. #819 registers them; this exclusion is deleted in
+        # the same commit. It is listed explicitly rather than skipped silently
+        # so the gap is visible in the test output, not hidden by a filter.
+        OPEN_819 = {"20260810190000", "20260811050000"}
+        unenforced: list[str] = []
+        for version in sorted(self._section_6_never_rest_versions() - OPEN_819):
+            owner = [n for n, m in BATCHES.items() if version in m]
+            if not owner:
+                unenforced.append(f"{version}: in no registered batch")
+                continue
+            name = owner[0]
+            if version == max(BATCHES[name]):
+                unenforced.append(
+                    f"{version}: is {name}'s terminal member, so resting on it "
+                    "is accepted"
+                )
+        self.assertEqual(unenforced, [])
+
+    def test_resting_on_any_section_6_version_is_REFUSED(self) -> None:
+        """End to end, one allowlist per never-rest version: an allowlist whose
+        highest version is a forbidden resting state must be refused."""
+        for version in sorted(self._section_6_never_rest_versions()):
+            owner = [n for n, m in BATCHES.items() if version in m]
+            if not owner:  # tracked by #819; see the test above
+                continue
+            name = owner[0]
+            stopping_here = sorted(v for v in BATCHES[name] if v <= version)
+            with self.subTest(version=version, batch=name):
+                with self.assertRaises(GuardError) as ctx:
+                    assert_atomic_batches(stopping_here, set())
+                self.assertIn(f"batch {name} is", str(ctx.exception))
 
     def test_batches_do_not_overlap_each_other(self) -> None:
         """The #773 / #710 B3/B4 defect must not be reproduced here.
@@ -2219,7 +2345,9 @@ class AtomicBatchTests(unittest.TestCase):
                 with self.subTest(batch=name, version=version):
                     with self.assertRaises(GuardError) as ctx:
                         assert_atomic_batches([version], set())
-                    self.assertIn(f"batch {name} is ATOMIC", str(ctx.exception))
+                    self.assertIn(
+                        f"batch {name} is {BASES[name]}", str(ctx.exception)
+                    )
 
     def test_every_proper_subset_missing_one_member_is_REFUSED(self) -> None:
         for name, members in BATCHES.items():
@@ -2230,11 +2358,45 @@ class AtomicBatchTests(unittest.TestCase):
 
     # -- the batches the contract does NOT declare atomic -------------------
 
-    def test_non_atomic_batches_B5_B6_B8_are_unaffected(self) -> None:
-        for members in (B5_MEMBERS, B6_MEMBERS, B8_MEMBERS):
-            for size in range(1, len(members) + 1):
-                with self.subTest(members=members[:size]):
-                    assert_atomic_batches(members[:size], set())
+    def test_the_NEVER_REST_batches_are_now_ENFORCED(self) -> None:
+        """ISSUE #784 -- A DELIBERATE BEHAVIOUR CHANGE. EVERY ONE OF THESE
+        PARTIAL ALLOWLISTS USED TO PASS.
+
+        The predecessor of this test asserted the OPPOSITE: that a partial
+        B5/B6/B8 allowlist was "unaffected" by the check. It was faithful to the
+        guard as it stood, and the guard was wrong -- contract section 6 forbids
+        resting inside these batches and nothing enforced it. A partial B2
+        allowlist would have shipped the known-defective ClickUp importer.
+        """
+        for name in ("B2", "B4", "B5", "B6", "B8"):
+            members = sorted(BATCHES[name])
+            for size in range(1, len(members)):
+                with self.subTest(batch=name, members=members[:size]):
+                    with self.assertRaises(GuardError) as ctx:
+                        assert_atomic_batches(members[:size], set())
+                    self.assertIn(f"batch {name} is NEVER-REST", str(ctx.exception))
+
+    def test_a_complete_NEVER_REST_batch_is_ACCEPTED(self) -> None:
+        """The check must compel completion, never forbid it."""
+        for name in ("B2", "B4", "B5", "B6", "B8"):
+            with self.subTest(batch=name):
+                assert_atomic_batches(sorted(BATCHES[name]), set())
+
+    def test_a_NEVER_REST_refusal_cites_contract_section_6(self) -> None:
+        """An ATOMIC refusal cites section 5; these must cite section 6, because
+        that is the sentence the operator has to go and read."""
+        with self.assertRaises(GuardError) as ctx:
+            assert_atomic_batches(["20260728174500"], set())
+        message = str(ctx.exception)
+        self.assertIn("batch B2 is NEVER-REST", message)
+        self.assertIn("section 6 forbids resting on every member of B2", message)
+        self.assertIn("20260728181500", message)
+
+    def test_a_NEVER_REST_batch_resumes_after_a_mid_batch_abort(self) -> None:
+        """Ledger-awareness applies to these entries exactly as it does to the
+        atomic ones: the remainder ALONE is the only legal recovery."""
+        applied = BATCHES["B8"] - {"20260809170500"}
+        assert_atomic_batches(["20260809170500"], set(applied))
 
     def test_the_canary_alone_is_unaffected(self) -> None:
         """B0, `20260810140000`, goes first and ALONE by contract section 5. It is
@@ -2263,7 +2425,7 @@ class AtomicBatchTests(unittest.TestCase):
         self.assertIn("Excluded because production already has them", message)
 
     def test_a_fully_applied_batch_does_not_block_anything(self) -> None:
-        assert_atomic_batches(B5_MEMBERS, set(BATCHES["B9"]))
+        assert_atomic_batches(sorted(BATCHES["B5"]), set(BATCHES["B9"]))
 
     # -- the choke points --------------------------------------------------
 
