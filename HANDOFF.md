@@ -1882,7 +1882,27 @@ merge (which would close the practical hole), and if it does not, either enable 
 the comparison to `<=`. **Verify before changing — do not edit `scripts/check-sql.sh` as a
 drive-by.**
 
-### B8 — `tools/emit-coldlion-rollback-sql.mjs` has NO unit test (HIGH — recorded 2026-07-31, NOT implemented)
+### B8 — `tools/emit-coldlion-rollback-sql.mjs` had NO unit test (recorded 2026-07-31 — ✅ **DONE**, closed by PR #358; heading corrected 2026-08-12, issue #520)
+
+> ✅ **IMPLEMENTED — do not re-do this work.** `tools/emit-coldlion-rollback-sql.test.mjs`
+> **exists on `main`**, added by commit `d266ecb` (PR #358). Re-verified on **2026-08-12** in a
+> worktree cut from `origin/main`:
+>
+> ```bash
+> ls tools/emit-coldlion-rollback-sql.test.mjs
+> git log --oneline -1 -- tools/emit-coldlion-rollback-sql.test.mjs   # d266ecb @ (#358)
+> ```
+>
+> The body below is the **original 2026-07-31 wording, kept as history**. Its first sentence
+> ("No … test.mjs exists") and the old heading ("HIGH … NOT implemented") were **both wrong from
+> 2026-08-06 onward** and misled at least one session into planning the work again. The entry is
+> kept, rather than deleted, so B8 stays visible by B-number. Issue #520 tracked this correction
+> and may be closed with this change.
+>
+> If you are auditing coverage, read the test file itself — not the checklist below — for what is
+> actually asserted.
+
+*Original 2026-07-31 text, kept for the record:*
 
 **No `tools/emit-coldlion-rollback-sql.test.mjs` exists** (verified by listing `tools/`). Every
 other Step 7A tool has one, and `.github/workflows/tools-offline-tests.yml` would pick a new test
