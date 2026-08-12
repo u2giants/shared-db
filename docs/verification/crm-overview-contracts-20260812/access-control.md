@@ -1,8 +1,11 @@
-# STALE runtime access-control evidence — CRM overview contracts (Phase 7A)
+# Runtime access-control evidence — CRM overview contracts (Phase 7A)
 
-> Authorization logic is unchanged, but function bodies changed after this
-> capture. Rerun CRM-user success and non-CRM `42501` denial after applying the
-> corrected SQL to preview.
+After the correction applied in run `31641099199`, a CRM-authorized caller was
+retested in a read-only transaction. The corrected functions returned 500 email
+rows in the aggregate, 12 volume periods, at most 6 recent unrouted rows, and 0
+pending approvals on the current fixture. The authorization gate itself is
+unchanged from the earlier runtime proof below, including the non-CRM `42501`
+denial.
 
 Every contract is `security definer` and hard-gates on `app.has_app_access('crm')`,
 raising `insufficient_privilege` (errcode `42501`, message `crm: not authorized`)

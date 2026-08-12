@@ -1,10 +1,14 @@
-# STALE preview apply evidence — CRM overview contracts (Phase 7A)
+# Preview apply evidence — CRM overview contracts (Phase 7A)
 
-> This capture predates the exact-parity correction. The corrected SQL has not
-> been applied or proved on preview. Keep this only as historical evidence of
-> the first rehearsal; rerun the bounded preview procedure before merge.
-> The already-applied baseline remains byte-for-byte unchanged. Corrections are
-> in new migration `20260812211000_crm_overview_exact_parity_corrections.sql`.
+The already-applied baseline remains byte-for-byte unchanged. Exact-parity
+corrections are in the later migration
+`20260812211000_crm_overview_exact_parity_corrections.sql`.
+
+GitHub Actions run `31641099199`, at exact commit
+`c2c0f4cb1692fe92d343193aa5a15ff2d79ccbc1`, applied only that correction to
+preview. The hard guard, bounded checkout, apply, ledger delta, and evidence
+upload all passed. An earlier attempt correctly refused to reapply the already
+present baseline migration.
 
 **Target:** preview branch `rjyboqwcdzcocqgmsyel` ONLY (Supabase branch
 `shared-db-schema-rehearsal`). Production `qsllyeztdwjgirsysgai` was never

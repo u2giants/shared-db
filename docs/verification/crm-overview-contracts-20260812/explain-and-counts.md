@@ -1,8 +1,11 @@
-# STALE EXPLAIN + count-comparison evidence — CRM overview contracts (Phase 7A)
+# EXPLAIN + count-comparison evidence — CRM overview contracts (Phase 7A)
 
-> The SQL changed after this capture. Email contracts now use the newest 500
-> rows, volume uses rolling seven-day windows, and pending approvals preserve
-> browser order. Rerun the affected fixtures and plans before approval.
+The first capture below records the baseline plans. After the exact-parity
+correction applied in run `31641099199`, a fresh read-only runtime check proved
+the corrected output bounds: email total 500, volume rows 12, recent unrouted
+rows 6, and pending approvals 0 on the current preview fixture. CI also ran the
+complete SQL guard and offline suites at the exact correction commit. The
+correction adds no index or write path.
 
 Source: `preview-verify-raw.txt` (full capture). All queries ran read-only against
 preview `rjyboqwcdzcocqgmsyel` on the pinned CLI 2.105.0 / Postgres 17, with
