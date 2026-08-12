@@ -1580,12 +1580,68 @@ class CoPresenceIsLedgerAwareTest(unittest.TestCase):
                 with self.subTest(fix=fix, ledger=sorted(ledger)):
                     self.assertEqual(parse_allowlist(fix, ledger), [fix])
 
-    def test_an_applied_CREATE_does_not_trigger_the_rule_at_all(self) -> None:
-        """Sanity: the rule only fires on a create that is IN the allowlist."""
+    def test_an_applied_CREATE_STILL_COMPELS_every_outstanding_fix(self) -> None:
+        """ISSUE #672 ITEM 1 -- A DELIBERATE BEHAVIOUR CHANGE. THIS USED TO PASS.
+
+        Before this change the rule was gated on `create in chosen` alone, so an
+        applied create silenced it completely and this exact allowlist was
+        ACCEPTED -- leaving `20260810180000` unapplied while production already
+        held the 23 Paramount tables. The rule's claim is "production must never
+        hold the create without the fixes"; a half-finished repair violates it
+        just as hard as a half-finished first promotion.
+
+        If you are here because this test failed after an edit: you have
+        reinstated the hole, not simplified the guard.
+        """
+        with self.assertRaises(GuardError) as caught:
+            parse_allowlist("20260810090000", {"20260810020000"})
+        message = str(caught.exception)
+        self.assertIn("20260810020000 is ALREADY APPLIED", message)
+        self.assertIn("20260810180000", message)
+        # It must tell the operator NOT to re-list the applied create, because
+        # `validate_candidates` refuses that outright -- otherwise the obvious
+        # next move produces a second, more confusing refusal.
+        self.assertIn("Do NOT add 20260810020000 back", message)
+
+    def test_the_warner_half_repair_from_issue_672_is_REFUSED(self) -> None:
+        """The concrete case issue #672 item 1 names.
+
+        Warner's create `20260810030000` is applied; the operator lists only
+        `20260810110000`. That leaves `20260810120000` unapplied, so production
+        keeps the wrong read claim and `service_role` keeps INSERT. Refused.
+        """
+        with self.assertRaises(GuardError) as caught:
+            parse_allowlist("20260810110000", {"20260810030000"})
+        message = str(caught.exception)
+        self.assertIn("20260810030000 is ALREADY APPLIED", message)
+        self.assertIn("20260810120000", message)
+
+    def test_the_COMPLETE_warner_repair_is_ACCEPTED(self) -> None:
+        """Finishing the repair is always legal -- that is what keeps the
+        one-directional recovery design intact. Only stopping short is refused."""
         self.assertEqual(
-            parse_allowlist("20260810090000", {"20260810020000"}),
-            ["20260810090000"],
+            parse_allowlist("20260810110000,20260810120000", {"20260810030000"}),
+            ["20260810110000", "20260810120000"],
         )
+
+    def test_an_applied_CREATE_whose_fixes_are_all_applied_is_SILENT(self) -> None:
+        """A fully repaired production must not block unrelated promotions."""
+        applied = {"20260810030000", "20260810110000", "20260810120000"}
+        self.assertEqual(parse_allowlist("20260810140000", applied), ["20260810140000"])
+
+    def test_the_rule_never_demands_the_APPLIED_CREATE_itself(self) -> None:
+        """One-directional still holds: the rule demands fixes, never the create.
+
+        Proven by construction -- for every rule, the allowlist of ALL its
+        outstanding fixes is accepted with the create applied and nothing else
+        in the ledger, so no refusal can be escaped only by naming the create.
+        """
+        for create, fixes, _why in CO_PRESENCE_RULES:
+            with self.subTest(create=create):
+                allowlist = ",".join(sorted(fixes))
+                self.assertEqual(
+                    parse_allowlist(allowlist, {create}), sorted(fixes)
+                )
 
     def test_the_error_message_names_what_the_ledger_already_covers(self) -> None:
         """An operator reading the refusal must see which fix was excused."""

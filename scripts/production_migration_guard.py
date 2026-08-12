@@ -172,6 +172,18 @@ FR_REMOVAL_VERSIONS: set[str] = set()
 # There are explicit tests for each of those recovery cases; if you change this
 # structure and they still pass, you have broken the tests, not proved the change.
 #
+# ****** ONE-DIRECTIONAL IS NOT THE SAME AS "SILENT ONCE THE CREATE LANDS". ******
+#
+# Issue #672 item 1. The rule fires when the create is in the ALLOWLIST **or**
+# already in the LEDGER. What stays one-directional is which versions it
+# DEMANDS: it demands the outstanding fixes, never the create. So a recovery run
+# after a mid-batch abort is still legal -- it just has to carry EVERY fix that
+# is not yet applied, instead of an arbitrary subset. `20260810110000` ALONE
+# with `20260810030000` already applied is REFUSED, because it leaves
+# `20260810120000` unapplied and production holding the wrong read claim with
+# `service_role` still able to INSERT. `20260810110000` + `20260810120000`
+# together is ACCEPTED in that same state. See `parse_allowlist`.
+#
 # NOT LISTED HERE, ON PURPOSE: `20260810110000` also alters `api.dam_order_list`,
 # which `20260810010000` creates. That is a DEPENDENCY, not a policy, and it is
 # already enforced by `preflight_batch` -- which reads the real production ledger
@@ -586,9 +598,36 @@ def parse_allowlist(raw: str, remote: set[str] | frozenset[str] = frozenset()) -
     # because that is exactly the exposed state. Do not collapse those two
     # cases; there are tests for both, plus one for the missing-and-unapplied
     # case, and they are what tells you what you broke.
+    #
+    # THE RULE ALSO FIRES WHEN THE CREATE IS ALREADY APPLIED (issue #672 item 1,
+    # deliberately deferred by PR #747 because it turns a PASS into a FAIL).
+    #
+    # `create in remote` is the state the rule exists to end, not a state that
+    # excuses it. Before this, the rule was gated on `create in chosen` alone, so
+    # once the CREATE had landed the guard stopped compelling anything: with
+    # Warner's `20260810030000` applied, an allowlist of `20260810110000` ALONE
+    # passed, leaving `20260810120000` unapplied -- production holding the wrong
+    # read claim with `service_role` still able to INSERT. The rule's whole claim
+    # is "production must never hold the create without the fixes", and that
+    # claim is violated exactly as hard by a half-finished repair as by a
+    # half-finished first promotion.
+    #
+    # THIS DOES NOT BREAK RECOVERY, AND THE DISTINCTION IS THE WHOLE DESIGN.
+    # Required membership stays `fixes - already_applied`, so completing the
+    # repair is always legal and re-listing an applied version (which
+    # `validate_candidates` refuses outright) is never required. What is now
+    # refused is stopping short: a repair allowlist that names SOME outstanding
+    # fixes and not all of them. That is the same "you may finish, you may not
+    # rest inside" shape `assert_atomic_batches` already uses, and for the same
+    # reason -- this lane is forward-only with no undo.
+    #
+    # Paramount and NBCU each have two fixes and Warner two, so every rule can
+    # surface this; Warner is where it was found. A rule whose fixes are all
+    # applied is silent, so a fully repaired production stays promotable.
     chosen = set(values)
     for create, fixes, why in CO_PRESENCE_RULES:
-        if create not in chosen:
+        create_applied = create in remote
+        if create not in chosen and not create_applied:
             continue
         already = fixes & set(remote)
         missing = sorted((fixes - already) - chosen)
@@ -599,13 +638,25 @@ def parse_allowlist(raw: str, remote: set[str] | frozenset[str] = frozenset()) -
                 if already
                 else ""
             )
+            if create_applied:
+                raise GuardError(
+                    f"co-presence rule: {create} is ALREADY APPLIED on production "
+                    f"and its fix(es) {', '.join(missing)} are neither applied nor "
+                    f"in this allowlist.{satisfied} Production is sitting in the "
+                    f"exposed state right now, so an allowlist that repairs only "
+                    f"part of it is refused. {why} Add every missing version to "
+                    f"the allowlist. (Do NOT add {create} back -- "
+                    "`validate_candidates` refuses any allowlist naming an "
+                    "already-applied version, and it does not need re-applying.)"
+                )
             raise GuardError(
                 f"co-presence rule: {create} may not be promoted without "
                 f"{', '.join(missing)}.{satisfied} {why} Add the missing version(s) to the "
                 "allowlist. (This rule is one-directional on purpose: promoting "
                 f"{', '.join(sorted(fixes))} WITHOUT {create} is allowed, because "
                 "that is the only legal way to recover a run that died between "
-                "them.)"
+                "them -- but the recovery must carry EVERY outstanding fix, not "
+                "just some of them.)"
             )
     return values
 
