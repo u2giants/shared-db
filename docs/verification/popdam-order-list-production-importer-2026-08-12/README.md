@@ -15,7 +15,7 @@ This document contains counts, hashes, object names and command shapes only. No 
 
 ## The gates, in the order they fire
 
-Everything that can refuse the run is checked **before the connection string is read**, so a wrong invocation never touches a credential.
+Gates 1-11 are checked **before the connection string is read**, so a wrong invocation never touches a credential. Gates 12-14 necessarily require a connection; they run immediately after it opens and before any write, and no row is written until all of them and the pre-write balance checks pass.
 
 | # | Gate | Function | Refusal proof |
 |---:|---|---|---|
@@ -28,7 +28,7 @@ Everything that can refuse the run is checked **before the connection string is 
 | 7 | Project ref proved from `supabase/.temp/project-ref` | `assert_write_target` | `test_wrong_target_aborts_the_whole_run_before_any_write` and three ref-value tests |
 | 8 | Confirmation matches, bound to commit + hash + ref | `assert_production_confirmation` | five `ProductionConfirmationTests` cases |
 | 9 | Project ref **re-proved** immediately before the transaction opens | `main()` | `test_a_drifted_target_never_reaches_the_first_batch_from_main` |
-| 10 | Project ref **re-proved before every batch** | `apply_plan(target_guard=…)` | `test_drift_after_the_first_batch_aborts_and_writes_no_more`, `test_guard_runs_before_every_batch_not_just_the_first` |
+| 10 | **Server identity** re-proved before every batch | `apply_plan(target_guard=…)` | `test_drift_after_the_first_batch_aborts_and_writes_no_more`, `test_guard_runs_before_every_batch_not_just_the_first`, `test_fingerprint_change_mid_run_aborts` |
 | 11 | `allow_replace=False` — the second, independent replacement lock | `apply_plan` | `test_apply_plan_refuses_replace_when_allow_replace_is_false` |
 | 12 | **The SERVER must confirm it is the proven project** | `assert_server_is_target` | `test_stale_url_pointing_at_preview_is_refused`, `test_unprovable_server_is_refused` |
 | 13 | Zero pre-existing `google_order_list` source refs | `assert_no_existing_source_refs` | `test_preexisting_source_refs_refuse_the_run` |
@@ -61,7 +61,7 @@ Why: the orders loop completes before the lines loop begins. With per-batch comm
 
 `--replace-source` is impossible in production two independent ways: the CLI refuses the combination, and the production call site passes `allow_replace=False`, which raises inside `apply_plan` before the first batch opens. Deleting either lock still leaves the other.
 
-Mid-run drift behaviour is deliberate: the guard runs **before** `begin_batch`, so batches already committed stay committed and no partial batch is left open. A later run resumes safely because every canonical row is addressed by its deterministic Google source ref.
+Mid-run drift aborts everything: the guard runs inside the transaction, so a failure rolls the entire import back and leaves nothing durable. There is no partial state to resume, which is the point.
 
 ## The exact production command — recorded, NOT run
 
