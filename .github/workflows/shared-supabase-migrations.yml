@@ -47,6 +47,13 @@ on:
       # `production-apply-review`, which FAILS CLOSED on an empty or implausible
       # value. Do NOT add a `default:` here: a default would pre-satisfy the
       # gate, which is the whole thing this is designed to prevent.
+      #
+      # `required: true` was CONSIDERED and rejected (PR #806 review). It would
+      # force every preview and dry-run dispatch to invent a value, which trains
+      # operators to type junk into a field that is supposed to mean something.
+      # The script is the enforcement instead, and it now refuses even when the
+      # caller supplies no commit SHA and no allowlist -- so it is fail-closed
+      # on its own assertions, not on how this file happens to call it.
       review_reference:
         description: "Production apply ONLY (REQUIRED): https URL of the Claude Code review comment, or a path under .ai/reviews/"
         type: string

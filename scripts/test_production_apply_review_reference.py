@@ -27,6 +27,11 @@ REPO = Path(__file__).resolve().parents[1]
 
 GOOD_URL = "https://github.com/u2giants/shared-db/pull/804#pullrequestreview-1234567890"
 
+# The binding every real dispatch supplies. Tests that assert an ACCEPT must
+# pass these; a test that accepts without them is testing the hole, not the gate.
+SHA = "326c25e16123029af3b302945d283a729801a995"
+ALLOWLIST = "20260810070000"
+
 
 class TestRefusals(unittest.TestCase):
     """Everything here must FAIL CLOSED."""
@@ -107,27 +112,123 @@ class TestRefusals(unittest.TestCase):
         self.assertTrue(reason)
 
 
-class TestAcceptances(unittest.TestCase):
-    def test_a_github_review_comment_url_is_accepted(self) -> None:
-        accepted, reason = gate.validate(GOOD_URL)
+class TestTheEmptyTokenDoor(unittest.TestCase):
+    """Regression: the hole GLM found and the reviewer reproduced on PR #806.
+
+    The content check on a reviews file was written `if tokens:`, so an apply
+    that supplied neither a commit SHA nor an allowlist skipped it entirely and
+    ANY unrelated review file was accepted -- `main()` printed
+    `Commit: (unknown)` and returned 0. Same door via a SHA under 7 characters,
+    which `binding_tokens` refuses to contribute.
+
+    These tests exist because the script must be fail-closed on its OWN
+    assertions, not because of how the workflow happens to call it. Both
+    workflow inputs are `required: false`.
+    """
+
+    def unrelated_reviews_file(self, root: str) -> None:
+        path = Path(root, ".ai", "reviews", "some-old-batch.md")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "Reviewed a completely different batch months ago.", encoding="utf-8"
+        )
+
+    def test_no_sha_and_no_allowlist_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            self.unrelated_reviews_file(root)
+            accepted, reason = gate.validate(
+                ".ai/reviews/some-old-batch.md", repo=Path(root), sha="", allowlist=""
+            )
+        self.assertFalse(accepted, "an unrelated review file passed with no binding")
+        self.assertIn("nothing to bind", reason)
+
+    def test_a_short_sha_with_no_allowlist_is_refused(self) -> None:
+        # binding_tokens contributes nothing below 7 chars, so this is the same
+        # door wearing a different hat.
+        with tempfile.TemporaryDirectory() as root:
+            self.unrelated_reviews_file(root)
+            accepted, reason = gate.validate(
+                ".ai/reviews/some-old-batch.md",
+                repo=Path(root),
+                sha="326c25",
+                allowlist="",
+            )
+        self.assertFalse(accepted)
+        self.assertIn("nothing to bind", reason)
+
+    def test_binding_tokens_is_empty_for_both_shapes(self) -> None:
+        self.assertEqual(gate.binding_tokens("", ""), [])
+        self.assertEqual(gate.binding_tokens("326c25", ""), [])
+        self.assertEqual(gate.binding_tokens("", " , "), [])
+
+    def test_a_url_is_also_refused_with_no_binding(self) -> None:
+        """The door is closed on BOTH branches, not just the file branch."""
+        accepted, reason = gate.validate(GOOD_URL, sha="", allowlist="")
+        self.assertFalse(accepted)
+        self.assertIn("nothing to bind", reason)
+
+    def test_main_exits_non_zero_when_both_env_vars_are_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            self.unrelated_reviews_file(root)
+            env = {
+                "RUNNER_TEMP": root,
+                "GITHUB_WORKSPACE": root,
+                "GITHUB_STEP_SUMMARY": str(Path(root, "summary.md")),
+                "REVIEW_REFERENCE": ".ai/reviews/some-old-batch.md",
+                "REQUESTED_SHA": "",
+                "PRODUCTION_ALLOWLIST": "",
+            }
+            with patch.dict(os.environ, env):
+                self.assertEqual(gate.main(), 1)
+
+    def test_a_sha_alone_is_enough_to_bind(self) -> None:
+        """Do not over-correct: one of the two is sufficient."""
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root, ".ai", "reviews", "b.md")
+            path.parent.mkdir(parents=True)
+            path.write_text(f"Reviewed {SHA[:7]}.", encoding="utf-8")
+            accepted, reason = gate.validate(
+                ".ai/reviews/b.md", repo=Path(root), sha=SHA, allowlist=""
+            )
         self.assertTrue(accepted, reason)
+
+    def test_an_allowlist_alone_is_enough_to_bind(self) -> None:
+        accepted, reason = gate.validate(GOOD_URL, sha="", allowlist=ALLOWLIST)
+        self.assertTrue(accepted, reason)
+
+
+class TestAcceptances(unittest.TestCase):
+    """Every acceptance MUST pass a binding.
+
+    These used to call `validate(value)` with no SHA and no allowlist, which is
+    what let the empty-token hole through unnoticed. Supplying the binding is
+    not test ceremony -- it is the calling contract.
+    """
+
+    def accept(self, value: str, **kw) -> None:
+        kw.setdefault("sha", SHA)
+        kw.setdefault("allowlist", ALLOWLIST)
+        accepted, reason = gate.validate(value, **kw)
+        self.assertTrue(accepted, reason)
+
+    def bound_reviews_file(self, root: str, body: str, name: str = "b10a.md") -> None:
+        path = Path(root, ".ai", "reviews", name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+    def test_a_github_review_comment_url_is_accepted(self) -> None:
+        self.accept(GOOD_URL)
 
     def test_an_issue_comment_url_is_accepted(self) -> None:
-        accepted, reason = gate.validate(
-            "https://github.com/u2giants/shared-db/issues/800#issuecomment-1"
-        )
-        self.assertTrue(accepted, reason)
+        self.accept("https://github.com/u2giants/shared-db/issues/800#issuecomment-1")
 
     def test_surrounding_whitespace_is_tolerated(self) -> None:
-        accepted, reason = gate.validate(f"  {GOOD_URL}  ")
-        self.assertTrue(accepted, reason)
+        self.accept(f"  {GOOD_URL}  ")
 
-    def test_an_existing_reviews_file_is_accepted(self) -> None:
-        existing = sorted(Path(REPO, ".ai", "reviews").glob("*.md"))
-        self.assertTrue(existing, ".ai/reviews/ is empty; this test needs a real file")
-        rel = existing[0].relative_to(REPO).as_posix()
-        accepted, reason = gate.validate(rel, repo=REPO)
-        self.assertTrue(accepted, reason)
+    def test_an_existing_reviews_file_that_names_this_apply_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            self.bound_reviews_file(root, f"Reviewed {ALLOWLIST} in Claude Code.")
+            self.accept(".ai/reviews/b10a.md", repo=Path(root))
 
     def test_a_reviews_file_naming_this_commit_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as root:
@@ -164,10 +265,30 @@ class TestAcceptances(unittest.TestCase):
         self.assertEqual(tokens, ["326c25e", "111", "222"])
 
     def test_a_windows_style_path_is_accepted(self) -> None:
-        existing = sorted(Path(REPO, ".ai", "reviews").glob("*.md"))
-        rel = existing[0].relative_to(REPO).as_posix().replace("/", "\\")
-        accepted, reason = gate.validate(rel, repo=REPO)
-        self.assertTrue(accepted, reason)
+        with tempfile.TemporaryDirectory() as root:
+            self.bound_reviews_file(root, f"Reviewed {ALLOWLIST}.")
+            self.accept(".ai\\reviews\\b10a.md", repo=Path(root))
+
+    def test_a_real_committed_reviews_file_still_passes_when_bound(self) -> None:
+        """A legitimate in-repo reference must not have become collateral.
+
+        The reviewer's constraint: `20260807030000`-style legitimate references
+        keep passing. This reads a REAL file from `.ai/reviews/` and binds the
+        apply to a version string that file actually contains.
+        """
+        candidates = sorted(Path(REPO, ".ai", "reviews").glob("*.md"))
+        self.assertTrue(candidates, ".ai/reviews/ is empty; this test needs a real file")
+        version = re.compile(r"\b\d{14}\b")
+        for path in candidates:
+            found = version.search(path.read_text(encoding="utf-8", errors="replace"))
+            if found:
+                rel = path.relative_to(REPO).as_posix()
+                accepted, reason = gate.validate(
+                    rel, repo=REPO, sha=SHA, allowlist=found.group(0)
+                )
+                self.assertTrue(accepted, reason)
+                return
+        self.skipTest("no committed review file names a migration version")
 
 
 class TestMainAndEvidence(unittest.TestCase):

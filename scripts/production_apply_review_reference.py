@@ -135,6 +135,10 @@ def binding_tokens(sha: str, allowlist: str) -> list[str]:
     """Strings that tie a review to THIS apply: the commit and each version.
 
     The short SHA is included because humans quote seven characters, not forty.
+    A SHA under 7 characters contributes NOTHING -- matching a review file on
+    three or four hex characters would bind nothing at all. That is deliberate,
+    and it is safe only because `validate` REFUSES an apply whose token list
+    comes back empty. Do not relax the length rule; do not remove that refusal.
     """
     tokens: list[str] = []
     sha = (sha or "").strip()
@@ -145,6 +149,41 @@ def binding_tokens(sha: str, allowlist: str) -> list[str]:
         if part:
             tokens.append(part)
     return tokens
+
+
+def require_binding(tokens: list[str]) -> tuple[bool, str]:
+    """Refuse an apply that gives this gate nothing to bind a review TO.
+
+    THE DEFECT THIS CLOSES (found by GLM, reproduced on PR #806, held before
+    merge). The content check on a `.ai/reviews/` file used to be written
+    `if tokens:` -- so when `REQUESTED_SHA` and `PRODUCTION_ALLOWLIST` were both
+    empty, the token list came back empty and the check was SKIPPED ENTIRELY.
+    Any unrelated review file was then accepted, `main()` printed
+    `Commit: (unknown)` and returned 0. A SHA shorter than seven characters did
+    the same thing, because `binding_tokens` only contributes a SHA at
+    `len(sha) >= 7`. That is exactly the "an old unrelated review satisfies
+    today's apply" hole that was supposedly fixed in d8e77b5, still reachable
+    through an empty-token door.
+
+    WHY IT IS FIXED IN THE SCRIPT AND NOT ONLY IN THE WORKFLOW. In practice a
+    real apply supplies both values and the guard chain rejects an empty
+    allowlist further along, so a live run would have gone red anyway. But both
+    inputs are `required: false` at the workflow level, which made this file
+    fail-closed BECAUSE OF HOW IT HAPPENS TO BE CALLED rather than because of
+    what it asserts. This file's entire purpose is to be the thing that cannot
+    be skipped, so it is the last place that pattern may survive. It now stands
+    on its own: no caller, present or future, can reach an accept path without
+    supplying something to bind to.
+    """
+    if tokens:
+        return True, ""
+    return False, (
+        "this apply supplied no commit SHA (7+ characters) and no allowlist, so "
+        "there is nothing to bind a review to and an unrelated review would be "
+        "accepted. Set REQUESTED_SHA and PRODUCTION_ALLOWLIST. This check is "
+        "deliberately in the script, not only in the workflow -- do not remove "
+        "it and rely on the caller."
+    )
 
 
 def validate(
@@ -212,7 +251,7 @@ def validate(
             )
         if len(value) < MIN_LENGTH:
             return False, f"{value!r} is too short to be a real reference"
-        return True, ""
+        return require_binding(binding_tokens(sha, allowlist))
 
     # Normalise a repo path the operator may have typed with backslashes or a
     # leading ./ so a correct reference is not refused on cosmetics.
@@ -246,15 +285,17 @@ def validate(
     # into "does .ai/reviews/ contain at least one file". The file must name
     # this commit or at least one of the migrations being applied.
     tokens = binding_tokens(sha, allowlist)
-    if tokens:
-        body = target.read_text(encoding="utf-8", errors="replace")
-        if not any(token in body for token in tokens):
-            return False, (
-                f"{value!r} exists but does not mention this apply. It must "
-                f"name the commit ({tokens[0]}) or at least one allowlisted "
-                "migration version, otherwise an old review of a different "
-                "batch would satisfy this run."
-            )
+    accepted, reason = require_binding(tokens)
+    if not accepted:
+        return accepted, reason
+    body = target.read_text(encoding="utf-8", errors="replace")
+    if not any(token in body for token in tokens):
+        return False, (
+            f"{value!r} exists but does not mention this apply. It must "
+            f"name the commit ({tokens[0]}) or at least one allowlisted "
+            "migration version, otherwise an old review of a different "
+            "batch would satisfy this run."
+        )
     return True, ""
 
 
