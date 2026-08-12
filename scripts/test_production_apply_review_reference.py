@@ -78,6 +78,29 @@ class TestRefusals(unittest.TestCase):
         reason = self.refused(".ai/reviews/this-file-was-never-written.md")
         self.assertIn("does not exist", reason)
 
+    def test_a_bare_host_with_only_a_query_is_refused(self) -> None:
+        # Codex found this: the code accepted a pathless URL if it carried a
+        # query or fragment, contradicting its own documented rule.
+        reason = self.refused("https://github.com/?reviewed=yes")
+        self.assertIn("no path", reason)
+
+    def test_a_bare_host_with_only_a_fragment_is_refused(self) -> None:
+        self.refused("https://github.com/#reviewed")
+
+    def test_an_unrelated_old_review_file_is_refused(self) -> None:
+        """Codex finding 2: any old file must not satisfy today's apply."""
+        existing = sorted(Path(REPO, ".ai", "reviews").glob("*.md"))
+        self.assertTrue(existing, ".ai/reviews/ is empty; this test needs a real file")
+        rel = existing[0].relative_to(REPO).as_posix()
+        accepted, reason = gate.validate(
+            rel,
+            repo=REPO,
+            sha="deadbee" + "f" * 33,
+            allowlist="29991231000000",
+        )
+        self.assertFalse(accepted, "an unrelated review file satisfied this apply")
+        self.assertIn("does not mention this apply", reason)
+
     def test_a_traversal_path_is_refused(self) -> None:
         accepted, reason = gate.validate(".ai/reviews/../../../etc/passwd")
         self.assertFalse(accepted)
@@ -105,6 +128,40 @@ class TestAcceptances(unittest.TestCase):
         rel = existing[0].relative_to(REPO).as_posix()
         accepted, reason = gate.validate(rel, repo=REPO)
         self.assertTrue(accepted, reason)
+
+    def test_a_reviews_file_naming_this_commit_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root, ".ai", "reviews", "b10a.md")
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "Reviewed 326c25e1 in Claude Code. No defects.", encoding="utf-8"
+            )
+            accepted, reason = gate.validate(
+                ".ai/reviews/b10a.md",
+                repo=Path(root),
+                sha="326c25e16123029af3b302945d283a729801a995",
+                allowlist="20260810070000",
+            )
+            self.assertTrue(accepted, reason)
+
+    def test_a_reviews_file_naming_an_allowlisted_version_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root, ".ai", "reviews", "b10a.md")
+            path.parent.mkdir(parents=True)
+            path.write_text("Reviewed 20260810070000.", encoding="utf-8")
+            accepted, reason = gate.validate(
+                ".ai/reviews/b10a.md",
+                repo=Path(root),
+                sha="326c25e16123029af3b302945d283a729801a995",
+                allowlist="20260810070000,20260810070100",
+            )
+            self.assertTrue(accepted, reason)
+
+    def test_binding_tokens_uses_the_short_sha_and_every_version(self) -> None:
+        tokens = gate.binding_tokens(
+            "326c25e16123029af3b302945d283a729801a995", " 111, 222 ,"
+        )
+        self.assertEqual(tokens, ["326c25e", "111", "222"])
 
     def test_a_windows_style_path_is_accepted(self) -> None:
         existing = sorted(Path(REPO, ".ai", "reviews").glob("*.md"))

@@ -131,15 +131,55 @@ def publish(text: str, heading: str) -> None:
     safe_print(out)
 
 
-def validate(raw: str, repo: Path | None = None) -> tuple[bool, str]:
+def binding_tokens(sha: str, allowlist: str) -> list[str]:
+    """Strings that tie a review to THIS apply: the commit and each version.
+
+    The short SHA is included because humans quote seven characters, not forty.
+    """
+    tokens: list[str] = []
+    sha = (sha or "").strip()
+    if len(sha) >= 7:
+        tokens.append(sha[:7])
+    for part in (allowlist or "").split(","):
+        part = part.strip()
+        if part:
+            tokens.append(part)
+    return tokens
+
+
+def validate(
+    raw: str,
+    repo: Path | None = None,
+    sha: str = "",
+    allowlist: str = "",
+) -> tuple[bool, str]:
     """Return (accepted, reason). `reason` describes the refusal when False.
 
     Accepted forms:
-      * An absolute http(s) URL with a host and a non-empty path -- a PR review
+      * An absolute https URL with a host AND a non-empty path -- a PR review
         comment, an issue comment, a commit comment, a gist.
       * A repository-relative path under `.ai/reviews/` that EXISTS in the
-        checkout. Existence is checked because a path that is not there is not
-        evidence of anything.
+        checkout AND mentions this apply (the short commit SHA, or one of the
+        allowlisted migration versions).
+
+    THE LIMIT OF THIS CHECK, STATED PLAINLY. An independent review of this file
+    (Codex, GPT-5.6, on PR chore/review-in-claude-code) made two findings, and
+    both are correct:
+
+      1. An invented https URL such as `https://example.com/nope` passes. It
+         cannot be otherwise: proving a URL holds a real review means fetching
+         it, and fetching things from this lane is precisely the paid, networked
+         behaviour the owner removed. The mitigation is human, not mechanical --
+         the reference is printed in the job summary that the approver on
+         `environment: production` is looking at when they click approve, and
+         the summary tells them to open it.
+      2. An unrelated OLD file under `.ai/reviews/` used to pass. That one WAS
+         fixable offline and is now fixed: a reviews file must mention this
+         commit or one of these migration versions, so last month's review of a
+         different batch no longer satisfies today's apply.
+
+    Do not "fix" finding 1 by adding an HTTP request. Do not weaken finding 2's
+    binding to make a dispatch easier.
     """
     value = (raw or "").strip()
 
@@ -156,7 +196,11 @@ def validate(raw: str, repo: Path | None = None) -> tuple[bool, str]:
         parsed = urlparse(value)
         if not parsed.netloc:
             return False, f"{value!r} is not a usable URL (it has no host)"
-        if parsed.path.strip("/") == "" and not parsed.fragment and not parsed.query:
+        # A NON-EMPTY PATH IS REQUIRED. This used to accept a bare host that
+        # carried only a query or a fragment, which contradicted the very
+        # sentence documenting it; Codex caught the inconsistency. No review
+        # lives at `https://github.com/?x=1`.
+        if parsed.path.strip("/") == "":
             return False, (
                 f"{value!r} points at a bare host with no path -- link the actual "
                 "review comment, issue or file"
@@ -190,11 +234,27 @@ def validate(raw: str, repo: Path | None = None) -> tuple[bool, str]:
         return False, f"{value!r} escapes the repository with '..'"
 
     root = repo or Path(os.environ.get("GITHUB_WORKSPACE") or ".")
-    if not (root / normalised).is_file():
+    target = root / normalised
+    if not target.is_file():
         return False, (
             f"{value!r} does not exist in this checkout. A path that is not "
             "there is not evidence of a review."
         )
+
+    # BIND THE FILE TO THIS APPLY. Without this, any review file committed at
+    # any time for any batch satisfies every future apply, and the gate decays
+    # into "does .ai/reviews/ contain at least one file". The file must name
+    # this commit or at least one of the migrations being applied.
+    tokens = binding_tokens(sha, allowlist)
+    if tokens:
+        body = target.read_text(encoding="utf-8", errors="replace")
+        if not any(token in body for token in tokens):
+            return False, (
+                f"{value!r} exists but does not mention this apply. It must "
+                f"name the commit ({tokens[0]}) or at least one allowlisted "
+                "migration version, otherwise an old review of a different "
+                "batch would satisfy this run."
+            )
     return True, ""
 
 
@@ -225,7 +285,11 @@ def main() -> int:
     allowlist = os.environ.get("PRODUCTION_ALLOWLIST", "").strip() or "(unknown)"
     actor = os.environ.get("GITHUB_ACTOR", "").strip() or "(unknown)"
 
-    accepted, reason = validate(raw)
+    accepted, reason = validate(
+        raw,
+        sha=os.environ.get("REQUESTED_SHA", ""),
+        allowlist=os.environ.get("PRODUCTION_ALLOWLIST", ""),
+    )
     if not accepted:
         return fail(reason)
 
@@ -239,9 +303,12 @@ def main() -> int:
         f"* **Commit:** `{sha}`\n"
         f"* **Allowlist:** `{allowlist}`\n\n"
         "**What this proves and what it does not.** It proves a reference was "
-        "recorded. It does NOT prove the review behind it was any good -- that "
-        "judgement belongs to the approver on the `production` environment "
-        "gate, who should open the link before approving."
+        "recorded, and -- for a `.ai/reviews/` path -- that the file exists and "
+        "names this apply. **This lane did NOT fetch or read the reference**; "
+        "doing so would restore the networked, paid behaviour that was removed. "
+        "It therefore does NOT prove the review behind it was any good.\n\n"
+        "**Approver: open the link above and read it BEFORE you approve.** That "
+        "judgement is yours, and nothing in this run has made it for you."
     )
     publish(body, heading="Production apply review reference")
     return 0

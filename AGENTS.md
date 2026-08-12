@@ -761,7 +761,9 @@ credential is used.
 2. **A RECORDED REVIEW REFERENCE.** ⚠️ **Code review for shared-db is done in Claude Code, not by
    this workflow** (owner decision, 2026-08-11). Review the batch there, then dispatch with
    `review_reference` set to the **https URL** of the review comment (PR review, issue comment,
-   commit comment) or a **path under `.ai/reviews/`** that exists at the applied commit.
+   commit comment) or a **path under `.ai/reviews/`** that exists at the applied commit **and
+   names this apply** (the short SHA or one of the allowlisted versions — so last month's review
+   of a different batch cannot satisfy today's run).
    **The reference is MANDATORY:** `scripts/production_apply_review_reference.py` fails closed on
    an empty, whitespace, placeholder (`n/a`, `none`, `TBD`, `-`, …) or implausible value, so
    `production-apply-review` goes **red** and `production-apply` never reaches the approval gate.
