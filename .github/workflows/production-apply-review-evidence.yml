@@ -1,0 +1,94 @@
+name: Production Apply Review Evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_main_sha:
+        description: "Exact current 40-character main SHA"
+        type: string
+        required: true
+      ordered_allowlist:
+        description: "Exact ordered comma-separated migration allowlist"
+        type: string
+        required: true
+      verdict:
+        description: "Review verdict"
+        type: choice
+        required: true
+        options: [APPROVE, REQUEST_CHANGES]
+      reviewer_label:
+        description: "Optional descriptive reviewer label"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    name: Record immutable review evidence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.reviewed_main_sha }}
+          fetch-depth: 0
+      - name: Prove exact current main commit
+        env:
+          REVIEWED_MAIN_SHA: ${{ inputs.reviewed_main_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$REVIEWED_MAIN_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$REVIEWED_MAIN_SHA"
+          test "$(git rev-parse origin/main)" = "$REVIEWED_MAIN_SHA"
+      - name: Normalize allowlist and write canonical evidence
+        env:
+          REVIEWED_MAIN_SHA: ${{ inputs.reviewed_main_sha }}
+          ORDERED_ALLOWLIST: ${{ inputs.ordered_allowlist }}
+          REVIEW_VERDICT: ${{ inputs.verdict }}
+          REVIEWER_ACTOR: ${{ github.actor }}
+          REVIEWER_LABEL: ${{ inputs.reviewer_label }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from scripts.production_migration_guard import parse_allowlist
+
+          label = os.environ["REVIEWER_LABEL"]
+          if "\n" in label or "\r" in label or len(label) > 200:
+              raise SystemExit("reviewer_label must be one line and at most 200 characters")
+          data = {
+              "schema_version": "shared-db-production-apply-review/v1",
+              "repository": os.environ["REPOSITORY"],
+              "workflow_file": ".github/workflows/production-apply-review-evidence.yml",
+              "workflow_run_id": int(os.environ["WORKFLOW_RUN_ID"]),
+              "workflow_run_attempt": int(os.environ["WORKFLOW_RUN_ATTEMPT"]),
+              "reviewed_main_sha": os.environ["REVIEWED_MAIN_SHA"],
+              "ordered_allowlist": parse_allowlist(os.environ["ORDERED_ALLOWLIST"]),
+              "verdict": os.environ["REVIEW_VERDICT"],
+              "reviewer_actor": os.environ["REVIEWER_ACTOR"],
+              "reviewer_label": label,
+              "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+          }
+          Path(os.environ["RUNNER_TEMP"], "production-apply-review-evidence.json").write_text(
+              json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
+              encoding="utf-8",
+          )
+          PY
+      - name: Upload immutable review evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-apply-review-evidence
+          path: ${{ runner.temp }}/production-apply-review-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Enforce approving verdict
+        env:
+          REVIEW_VERDICT: ${{ inputs.verdict }}
+        run: test "$REVIEW_VERDICT" = "APPROVE"

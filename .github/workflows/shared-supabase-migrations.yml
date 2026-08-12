@@ -16,7 +16,7 @@ on:
         default: preview
         options: [preview, production]
       mode:
-        description: "Preview may apply. Production apply needs environment approval."
+        description: "Preview may apply. Production apply needs immutable review evidence."
         type: choice
         required: true
         default: dry-run
@@ -37,25 +37,12 @@ on:
         description: "Production: type DRY-RUN <sha> for a dry run, or APPLY <sha> to apply"
         type: string
         required: false
-      # PRODUCTION APPLY ONLY, AND MANDATORY THERE. Code review for shared-db
-      # happens in Claude Code (owner decision, 2026-08-11); this input is how
-      # the run records WHERE it happened. `required:` is false at the schema
-      # level ONLY because preview and dry-run dispatches share these inputs and
-      # must not be forced to fill it -- exactly like `commit_sha` and
-      # `confirmation` above. The real enforcement is
-      # scripts/production_apply_review_reference.py inside
-      # `production-apply-review`, which FAILS CLOSED on an empty or implausible
-      # value. Do NOT add a `default:` here: a default would pre-satisfy the
-      # gate, which is the whole thing this is designed to prevent.
-      #
-      # `required: true` was CONSIDERED and rejected (PR #806 review). It would
-      # force every preview and dry-run dispatch to invent a value, which trains
-      # operators to type junk into a field that is supposed to mean something.
-      # The script is the enforcement instead, and it now refuses even when the
-      # caller supplies no commit SHA and no allowlist -- so it is fail-closed
-      # on its own assertions, not on how this file happens to call it.
-      review_reference:
-        description: "Production apply ONLY (REQUIRED): https URL of the Claude Code review comment, or a path under .ai/reviews/"
+      review_run_id:
+        description: "Production apply ONLY: successful Production Apply Review Evidence run ID"
+        type: string
+        required: false
+      review_artifact_digest:
+        description: "Production apply ONLY: pinned sha256 digest from that run's evidence artifact"
         type: string
         required: false
 
@@ -127,7 +114,7 @@ jobs:
             scripts/test_production_migration_guard.py \
             scripts/test_production_catalog_verification.py \
             scripts/test_post_batch_app_verification.py \
-            scripts/test_production_apply_review_reference.py
+            scripts/test_production_apply_review_evidence.py
           do
             if [ ! -f "$f" ]; then
               echo "::error::Expected Python test file is missing: $f" >&2
@@ -525,34 +512,24 @@ jobs:
   #      (parse_allowlist -> HARD_BLOCKED / 6.8 bundle / 6.5 hold / co-presence,
   #      then validate_candidates, then whole-batch preflight). This job FAILS the
   #      run on its own findings.
-  #   2. A REQUIRED REVIEW REFERENCE. Code review for shared-db is performed in
-  #      Claude Code (owner decision, 2026-08-11); this lane no longer calls a
-  #      paid model to duplicate it. What it still enforces is that a review was
-  #      recorded: the operator must supply `review_reference`, and
-  #      scripts/production_apply_review_reference.py FAILS CLOSED on an empty,
-  #      whitespace, placeholder or implausible value, so `production-apply`
-  #      never reaches the approval gate. The reference is echoed into the job
-  #      summary and the evidence artifact, where the human approver reads it.
-  #      ****** WHAT IT PROVES, EXACTLY. ******
-  #      That a reference was RECORDED -- not that the review behind it was any
-  #      good. That judgement belongs to the approver in gate 3, who should open
-  #      the link before approving. Do not restore an automated verdict here and
-  #      do not ever make a machine opinion sufficient to wave a production
-  #      write through.
-  #      ****** AND DO NOT MAKE IT SKIPPABLE. ******
-  #      No default on the input, no env var that skips it, no
-  #      `continue-on-error`. A green job that reviewed nothing is a silent
-  #      failure -- that is why the paid step lost its `continue-on-error`
-  #      (#617), and removing the cost must not reintroduce the hole.
-  #   3. `environment: production` -- Albert, as required reviewer, clicking
-  #      approve. This is the gate that actually holds. Nothing below it runs
-  #      until he does.
+  #   2. IMMUTABLE REVIEW EVIDENCE. A separate non-writing workflow records the
+  #      authenticated reviewer actor, APPROVE verdict, exact current main SHA,
+  #      and exact ordered allowlist. This lane pins that run and artifact by
+  #      ID plus SHA-256, then verifies both through GitHub before and after the
+  #      environment wait. URLs, paths, stale runs, reordered lists, and altered
+  #      artifacts fail closed.
+  #   3. `environment: production` remains the deployment boundary. Its manual
+  #      reviewer rule is removed only in the separate owner-approved phase;
+  #      this workflow keeps the environment binding unchanged.
   # ===========================================================================
   production-apply-review:
-    name: Production apply review (recorded review reference + hard guards)
+    name: Production apply review (immutable evidence + hard guards)
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'production' && inputs.mode == 'apply'
     needs: validate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     env:
       PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
     steps:
@@ -597,30 +574,20 @@ jobs:
             --repo "$GITHUB_WORKSPACE" \
             --allowlist "$PRODUCTION_ALLOWLIST" \
             --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
-      # THE REVIEW GATE. It costs nothing to run and it cannot be skipped.
-      #
-      # This step used to call the Anthropic API on every attempt, billed per
-      # batch and per attempt, including failed attempts. In its entire life it
-      # produced one substantive verdict (B10d, #788) and none of its findings
-      # survived adjudication (#800), while every real defect found on
-      # 2026-08-11 was found by an agent in Claude Code reproducing behaviour.
-      # The owner removed the paid call on 2026-08-11 and moved review to
-      # Claude Code.
-      #
-      # What is deliberately KEPT is the property that mattered: an apply cannot
-      # proceed without a review, and nobody can silently skip one. There is no
-      # `continue-on-error` here on purpose -- it used to be here, and with the
-      # API key unset the step printed "NOT RUN" and the job still
-      # went green, so every production apply carried a review that had never
-      # happened. Removing the cost must not restore that hole. The script exits
-      # non-zero when no plausible reference is supplied, and there is no
-      # environment variable, default value or flag that gets past it.
-      - name: Require a recorded review reference (Claude Code review)
+      - name: Verify immutable production review evidence
         env:
-          REVIEW_REFERENCE: ${{ inputs.review_reference }}
-          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+          GH_TOKEN: ${{ github.token }}
+          REVIEW_RUN_ID: ${{ inputs.review_run_id }}
+          REVIEW_ARTIFACT_DIGEST: ${{ inputs.review_artifact_digest }}
           REQUESTED_SHA: ${{ inputs.commit_sha }}
-        run: python scripts/production_apply_review_reference.py
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+        run: |
+          python scripts/production_apply_review_evidence.py \
+            --review-run-id "$REVIEW_RUN_ID" \
+            --expected-artifact-digest "$REVIEW_ARTIFACT_DIGEST" \
+            --commit-sha "$REQUESTED_SHA" \
+            --allowlist "$PRODUCTION_ALLOWLIST" \
+            --output-dir "$RUNNER_TEMP"
       - name: Upload pre-approval evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -628,18 +595,20 @@ jobs:
           name: production-apply-review-${{ inputs.commit_sha }}
           path: |
             ${{ runner.temp }}/production-ledger-before.txt
-            ${{ runner.temp }}/production-review-reference.md
+            ${{ runner.temp }}/production-apply-review-evidence.json
           if-no-files-found: warn
           retention-days: 90
 
   production-apply:
-    name: Production apply (requires Albert's approval)
+    name: Production apply (automatic evidence gates)
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'production' && inputs.mode == 'apply'
     needs: [validate, production-apply-review]
     runs-on: ubuntu-latest
-    # THE GATE. `production` must list Albert as a required reviewer. Nothing in
-    # this job runs until he approves. Do not remove this line, and do not move
-    # any writing step out of this job to get around it.
+    permissions:
+      contents: read
+      actions: read
+    # Keep the production environment binding. Environment policy is managed in
+    # a separate phase and is not changed by this repository patch.
     environment: production
     env:
       PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
@@ -662,18 +631,23 @@ jobs:
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
           test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
-      # Re-assert the review reference IN THIS JOB, after the approval wait, so
-      # the apply evidence artifact carries it too. The pre-approval job already
-      # enforced it; this repeat exists because the artifact that records what
-      # was written to production should say who reviewed it and where, without
-      # anyone having to go and find a second artifact from a sibling job.
-      # It is a pure string check -- no network, no secret, no cost.
-      - name: Record the review reference in the apply evidence
+      # Re-verify after the environment wait. GitHub artifacts are retention-
+      # bound, so this both pins the original ZIP digest and copies the verified
+      # canonical JSON into the final apply evidence artifact.
+      - name: Re-verify immutable production review evidence
         env:
-          REVIEW_REFERENCE: ${{ inputs.review_reference }}
-          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+          GH_TOKEN: ${{ github.token }}
+          REVIEW_RUN_ID: ${{ inputs.review_run_id }}
+          REVIEW_ARTIFACT_DIGEST: ${{ inputs.review_artifact_digest }}
           REQUESTED_SHA: ${{ inputs.commit_sha }}
-        run: python scripts/production_apply_review_reference.py
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+        run: |
+          python scripts/production_apply_review_evidence.py \
+            --review-run-id "$REVIEW_RUN_ID" \
+            --expected-artifact-digest "$REVIEW_ARTIFACT_DIGEST" \
+            --commit-sha "$REQUESTED_SHA" \
+            --allowlist "$PRODUCTION_ALLOWLIST" \
+            --output-dir "$RUNNER_TEMP"
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
@@ -782,7 +756,7 @@ jobs:
         with:
           name: production-migration-apply-${{ inputs.commit_sha }}
           path: |
-            ${{ runner.temp }}/production-review-reference.md
+            ${{ runner.temp }}/production-apply-review-evidence.json
             ${{ runner.temp }}/production-ledger-before.txt
             ${{ runner.temp }}/production-dry-run.txt
             ${{ runner.temp }}/production-apply.txt
