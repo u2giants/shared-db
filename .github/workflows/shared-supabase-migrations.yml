@@ -411,6 +411,7 @@ jobs:
             ${{ runner.temp }}/preview-dry-run.txt
             ${{ runner.temp }}/preview-apply.txt
             ${{ runner.temp }}/preview-ledger-after.txt
+            ${{ runner.temp }}/bounded-preview/supabase/migration-content-manifest.json
           if-no-files-found: warn
           retention-days: 90
 
@@ -511,6 +512,7 @@ jobs:
           path: |
             ${{ runner.temp }}/production-ledger-before.txt
             ${{ runner.temp }}/production-dry-run.txt
+            ${{ runner.temp }}/bounded-production/supabase/migration-content-manifest.json
           retention-days: 90
 
   # ===========================================================================
@@ -785,6 +787,7 @@ jobs:
             ${{ runner.temp }}/production-dry-run.txt
             ${{ runner.temp }}/production-apply.txt
             ${{ runner.temp }}/production-ledger-after.txt
+            ${{ runner.temp }}/bounded-production/supabase/migration-content-manifest.json
             ${{ runner.temp }}/catalog-verification/production-catalog-verification.md
             ${{ runner.temp }}/catalog-verification/production-catalog-verification.json
           if-no-files-found: warn
