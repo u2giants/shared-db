@@ -20,6 +20,16 @@ on:
       - "docs/db-data-admin-domain-ownership.md"
       - "scripts/check-domain-ownership.mjs"
       - ".github/workflows/db-data-admin.yml"
+  workflow_dispatch:
+    inputs:
+      project_ref:
+        description: "Production Supabase project ref. Must be exactly qsllyeztdwjgirsysgai."
+        required: true
+        type: string
+      confirmation:
+        description: "Type launch-data-designflow-app to confirm a production launch of data.designflow.app."
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -42,6 +52,9 @@ jobs:
         run: |
           node --test scripts/check-domain-ownership.test.mjs
           node scripts/check-domain-ownership.mjs
+      - name: Production launch readiness gate tests
+        working-directory: .
+        run: node --test scripts/tests/check-data-admin-launch-readiness.test.mjs
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -66,7 +79,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -84,7 +97,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: apps/db-data-admin
-          push: ${{ github.event_name == 'push' }}
+          push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
@@ -118,27 +131,32 @@ jobs:
             "${COOLIFY_URL}/api/v1/deploy?uuid=${COOLIFY_APP_UUID}&force=false"
 
   # ---------------------------------------------------------------------------
-  # Production release for https://data.designflow.app (issue #729).
+  # Production launch for https://data.designflow.app (issue #729).
   #
-  # This job is deliberately INERT until two independent things are true, so that
-  # merging this workflow can never surprise anyone by publishing an admin tool
-  # that reads and writes the database four live applications share:
+  # This job is DISPATCH-ONLY. It never runs on an ordinary push to main, so
+  # merging this workflow can never by itself publish the admin tool that four
+  # live applications share a database with. A launch requires:
   #
-  #   1. The repository variable COOLIFY_PROD_APP_UUID must be set. It is empty
-  #      until the production Coolify application actually exists. An empty value
-  #      FAILS the job loudly and visibly; it never falls through to a default or a
-  #      guessed target, and it is never a silent no-op.
-  #   2. The job runs in the GitHub environment `production`, whose required
-  #      reviewer is the owner. Every production release therefore waits for an
-  #      explicit human approval in the Actions UI.
+  #   1. workflow_dispatch from main, with inputs:
+  #        project_ref  == qsllyeztdwjgirsysgai
+  #        confirmation == launch-data-designflow-app
+  #   2. the checked-out GITHUB_SHA equals the current tip of origin/main
+  #      (checked after checkout, before any exposure);
+  #   3. a read-only Supabase evidence query proving the B8 + B9 migration
+  #      batches are in the ledger, the Product Depth tables/functions exist,
+  #      and at least one active admin has app_access for the 'admin' app;
+  #   4. the Coolify application uuid is exactly zeoy8qfjqffu8ym533cc7dl4.
   #
-  # There is NO fallback path. If either gate is missing the job does not run and
-  # says so; it must never quietly deploy somewhere else. Rollback is the same
-  # mechanism with an earlier immutable tag, described in
-  # docs/db-data-admin-deployment.md.
+  # Only then does it attach exactly https://data.designflow.app (rejecting any
+  # extra/sslip.io domain on re-read), set the exact sha-<commit> image, deploy,
+  # and verify the live site. The GitHub `production` environment is kept for
+  # audit/deployment history, but launch safety does NOT depend on a manual
+  # reviewer — the typed confirmation plus the read-only evidence gate are the
+  # control. Roll back in Coolify to the prior sha-<commit> tag (recorded by the
+  # gate); see docs/db-data-admin-deployment.md.
   # ---------------------------------------------------------------------------
   deploy-production:
-    if: github.event_name == 'push'
+    if: github.event_name == 'workflow_dispatch'
     needs: container
     runs-on: ubuntu-latest
     environment:
@@ -148,45 +166,153 @@ jobs:
       COOLIFY_URL: ${{ vars.COOLIFY_URL }}
       COOLIFY_PROD_APP_UUID: ${{ vars.COOLIFY_PROD_APP_UUID }}
       COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      EXPECTED_PROJECT_REF: qsllyeztdwjgirsysgai
+      EXPECTED_CONFIRMATION: launch-data-designflow-app
+      EXPECTED_APP_UUID: zeoy8qfjqffu8ym533cc7dl4
+      EXPECTED_DOMAIN: https://data.designflow.app
+      INPUT_PROJECT_REF: ${{ inputs.project_ref }}
+      INPUT_CONFIRMATION: ${{ inputs.confirmation }}
     steps:
-      - name: Refuse to deploy without an explicit production target
+      - name: Refuse unless this is a main dispatch with the exact typed inputs
         run: |
-          if [ -z "${COOLIFY_PROD_APP_UUID}" ]; then
-            echo "::error::COOLIFY_PROD_APP_UUID is not set. The production Coolify"
-            echo "::error::application for data.designflow.app does not exist yet, or the"
-            echo "::error::repository variable was never filled in. Refusing to deploy."
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]; then
+            echo "::error::deploy-production only runs on workflow_dispatch (got ${GITHUB_EVENT_NAME}). Ordinary pushes never deploy production."
+            exit 1
+          fi
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::Production launch must be dispatched from main (got ${GITHUB_REF})."
+            exit 1
+          fi
+          if [ "${INPUT_PROJECT_REF:-}" != "${EXPECTED_PROJECT_REF}" ]; then
+            echo "::error::input project_ref must be ${EXPECTED_PROJECT_REF} (got ${INPUT_PROJECT_REF:-<empty>})."
+            exit 1
+          fi
+          if [ "${INPUT_CONFIRMATION:-}" != "${EXPECTED_CONFIRMATION}" ]; then
+            echo "::error::input confirmation must be '${EXPECTED_CONFIRMATION}' (got ${INPUT_CONFIRMATION:-<empty>})."
+            exit 1
+          fi
+          if [ "${COOLIFY_PROD_APP_UUID:-}" != "${EXPECTED_APP_UUID}" ]; then
+            echo "::error::COOLIFY_PROD_APP_UUID must be ${EXPECTED_APP_UUID} (got ${COOLIFY_PROD_APP_UUID:-<empty>})."
             exit 1
           fi
 
-      - name: Point Coolify at the verified immutable image
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Fail unless the checked-out SHA is the current tip of origin/main
         run: |
+          set -euo pipefail
+          git fetch origin main
+          tip="$(git rev-parse origin/main)"
+          echo "origin/main tip: ${tip}"
+          echo "GITHUB_SHA:      ${GITHUB_SHA}"
+          if [ "${GITHUB_SHA}" != "${tip}" ]; then
+            echo "::error::GITHUB_SHA (${GITHUB_SHA}) is not the current tip of origin/main (${tip}). Re-dispatch from the latest main commit."
+            exit 1
+          fi
+          echo "ORIGIN_MAIN_SHA=${tip}" >> "$GITHUB_ENV"
+
+      - name: Gather read-only Supabase evidence (production, read_only query)
+        run: |
+          set -euo pipefail
+          SQL="select jsonb_build_object(
+            'ledger', coalesce((select jsonb_agg(version::text) from supabase_migrations.schema_migrations), '[]'::jsonb),
+            'tables', coalesce((select jsonb_agg(format('%s.%s', n.nspname, c.relname))
+                                from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                                where (n.nspname, c.relname) in (('core','product_size'),('core','product_depth'))), '[]'::jsonb),
+            'functions', coalesce((select jsonb_agg(format('%s.%s', n.nspname, p.proname))
+                                   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                                   where (n.nspname, p.proname) in (('api','db_data_admin_product_depth_list'),('api','db_data_admin_upsert_product_depth'),('api','db_data_admin_set_product_depth_status'),('app','require_db_data_admin_product_depth_access'))), '[]'::jsonb),
+            'admin_count', (select count(*)::int from app.app_access where app = 'admin' and revoked_at is null)
+          ) as evidence;"
+          body="$(jq -n --arg q "$SQL" '{query: $q, read_only: true}')"
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --url "https://api.supabase.com/v1/projects/${EXPECTED_PROJECT_REF}/database/query" \
+            --header "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --header "User-Agent: shared-db-data-admin-launch/1.0" \
+            --data "${body}" \
+            --output /tmp/supabase-evidence.json
+          echo "Supabase evidence bytes: $(wc -c < /tmp/supabase-evidence.json)"
+
+      - name: Read the production Coolify application
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            --request GET \
+            --header "Authorization: Bearer ${COOLIFY_TOKEN}" \
+            --output /tmp/coolify-app.json \
+            "${COOLIFY_URL}/api/v1/applications/${COOLIFY_PROD_APP_UUID}"
+
+      - name: Pre-mutation launch readiness gate
+        run: |
+          set -euo pipefail
+          node scripts/check-data-admin-launch-readiness.mjs \
+            --phase gate \
+            --supabase /tmp/supabase-evidence.json \
+            --coolify /tmp/coolify-app.json
+
+      - name: Recheck main tip immediately before public exposure
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          tip="$(git rev-parse origin/main)"
+          if [ "${GITHUB_SHA}" != "${tip}" ]; then
+            echo "::error::main moved to ${tip} after the first gate. Refusing to attach the domain or deploy stale ${GITHUB_SHA}. Re-dispatch from current main."
+            exit 1
+          fi
+
+      - name: Attach the exact domain and the immutable sha image tag
+        run: |
+          set -euo pipefail
           image_tag="sha-${GITHUB_SHA::7}"
+          body="$(jq -n --arg t "$image_tag" --arg d "${EXPECTED_DOMAIN}" '{docker_registry_image_tag: $t, domains: $d}')"
           curl --fail-with-body --silent --show-error \
             --request PATCH \
             --header "Authorization: Bearer ${COOLIFY_TOKEN}" \
             --header "Content-Type: application/json" \
-            --data "{\"docker_registry_image_tag\":\"${image_tag}\"}" \
+            --data "${body}" \
             "${COOLIFY_URL}/api/v1/applications/${COOLIFY_PROD_APP_UUID}"
+          echo "Patched image tag to ${image_tag} and fqdn to ${EXPECTED_DOMAIN}"
+
+      - name: Re-read Coolify and reject extra/sslip.io domains or a wrong tag
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            --request GET \
+            --header "Authorization: Bearer ${COOLIFY_TOKEN}" \
+            --output /tmp/coolify-app-after.json \
+            "${COOLIFY_URL}/api/v1/applications/${COOLIFY_PROD_APP_UUID}"
+          node scripts/check-data-admin-launch-readiness.mjs \
+            --phase domains \
+            --coolify /tmp/coolify-app-after.json
 
       - name: Deploy through Coolify
         run: |
+          set -euo pipefail
           curl --fail-with-body --silent --show-error \
             --request POST \
             --header "Authorization: Bearer ${COOLIFY_TOKEN}" \
             "${COOLIFY_URL}/api/v1/deploy?uuid=${COOLIFY_PROD_APP_UUID}&force=false"
 
-      - name: Verify the live production build reports this commit
+      - name: Verify external HTTPS, health and build-sha
         run: |
+          set -euo pipefail
           for attempt in $(seq 1 30); do
             code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://data.designflow.app/health || true)"
             live="$(curl --silent https://data.designflow.app/ | grep -o 'name="build-sha" content="[0-9a-f]*"' | grep -o '[0-9a-f]\{40\}' || true)"
             if [ "${code}" = "200" ] && [ "${live}" = "${GITHUB_SHA}" ]; then
-              echo "data.designflow.app is healthy and serving ${GITHUB_SHA}"
+              echo "data.designflow.app is healthy over HTTPS and serving ${GITHUB_SHA}"
               exit 0
             fi
             echo "attempt ${attempt}: health=${code} build-sha=${live:-none}"
             sleep 10
           done
           echo "::error::data.designflow.app did not report health 200 and build-sha ${GITHUB_SHA}."
-          echo "::error::Roll back in Coolify to the previous sha-<commit> image."
+          echo "::error::Roll back in Coolify to the prior sha-<commit> image recorded by the readiness gate."
           exit 1
