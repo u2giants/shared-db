@@ -57,7 +57,7 @@ jobs:
           import json, os
           from datetime import datetime, timezone
           from pathlib import Path
-          from scripts.production_migration_guard import parse_allowlist
+          from scripts.production_review_allowlist import normalize_review_allowlist
 
           label = os.environ["REVIEWER_LABEL"]
           if "\n" in label or "\r" in label or len(label) > 200:
@@ -69,7 +69,7 @@ jobs:
               "workflow_run_id": int(os.environ["WORKFLOW_RUN_ID"]),
               "workflow_run_attempt": int(os.environ["WORKFLOW_RUN_ATTEMPT"]),
               "reviewed_main_sha": os.environ["REVIEWED_MAIN_SHA"],
-              "ordered_allowlist": parse_allowlist(os.environ["ORDERED_ALLOWLIST"]),
+              "ordered_allowlist": normalize_review_allowlist(os.environ["ORDERED_ALLOWLIST"]),
               "verdict": os.environ["REVIEW_VERDICT"],
               "reviewer_actor": os.environ["REVIEWER_ACTOR"],
               "reviewer_label": label,
