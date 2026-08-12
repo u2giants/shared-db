@@ -2370,6 +2370,48 @@ have already happened in this repo, more than once.
     not sweep or remove any worktree on the strength of a number in a document**,
     and never remove one that is dirty, locked, or held by a live agent (B2.3).
 
+### 12.1 Four more standing facts, added after the relocation (2026-08-12, issue #772)
+
+> The ten rules above are a **frozen, byte-identical relocation** from the retired
+> `COORDINATOR_INTAKE.md` and must not be tidied. These four are **new** and are recorded here
+> instead. Each one has already misled at least one session. Numbering continues from 10.
+
+11. **Preview and production have diverged IN BOTH DIRECTIONS. Neither predicts the other.**
+    Verified by object on **2026-08-11**: preview `rjyboqwcdzcocqgmsyel` holds **all 23
+    `plm.pmt_*` tables**, with both prerequisite migrations genuinely applied, and production
+    `qsllyeztdwjgirsysgai` holds **ZERO** of them. In the other direction,
+    `20260810140000_production_lane_canary` **is applied on production and is NOT applied on
+    preview**. Both ledgers are also applied **out of order**, in different ways, so a high max
+    applied version does **not** mean everything below it is applied. Any claim of the shape
+    *"preview is production minus N migrations"* is wrong. A passing preview rehearsal means
+    *"this behaved correctly on preview"* and never *"this will behave correctly in production"* —
+    **post-apply verification against production objects and behaviour is not optional.** This has
+    misled at least three sessions.
+
+12. **The advisory model review in the production apply is a permanent silent no-op.** The step
+    *"Production apply review (advisory model verdict + hard guards)"* reports **"NOT RUN —
+    `ANTHROPIC_API_KEY` is not configured on this repository"** and is `continue-on-error`. No HTTP
+    request is made. **A green production apply run does NOT mean a model reviewed the
+    migrations.** The hard guards in that same job are real; the model verdict is not. Tracked as
+    #709 and #737.
+
+13. **The migration history is not self-contained — do not expect a clean replay.** Replaying all
+    429 migrations into an empty database **applies 363 and fails 66**, because this repo was
+    adopted on top of an already-populated database: `public.assets`, the legacy popdam tables and
+    the `dflow.*` mirrors exist in preview and production with **no migration here creating
+    them**. A CI bootstrap (PR #759) closes most of the gap — quarantined contract files 26 → 11,
+    passing tests 14 → 29, replay failures 66 → 10. It lives at `supabase/ci-bootstrap/` and is
+    **deliberately not a migration**: a file inserted at the front of an already-applied sequence
+    can never re-run, and a back-dated version is exactly what Guard B exists to stop. See also
+    §10.1.
+
+14. **Freeze merges before every production apply.** The production apply is pinned to an exact
+    `origin/main` SHA. On **2026-08-11** that pin refused **two separately approved runs**, each
+    because PRs merged between staging and the owner's click. Nothing was written either time —
+    the guard worked — but two owner approvals were wasted, and the third only landed under a
+    deliberate merge freeze. **Announce a freeze, hold every merge from staging until the run
+    finishes, then release it.** This is standard practice, not an improvisation.
+
 ---
 
 ## 11. Hosted-Supabase gotchas (do not relearn these the hard way)
