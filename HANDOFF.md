@@ -21,10 +21,17 @@
 > the wrong one. Strip the punctuation from the date-time portion and compare the
 > parsed instants.
 >
-> **What this file IS still authoritative for:** the **`## BACKLOG`** section
-> (items **B1–B14**) and the long-form history — the five defects, the chip
-> incident, the Supabase-MCP-is-production warning. **What it is NOT:** the
-> current handover, or a current inventory of anything.
+> **What this file IS still authoritative for:** the **long-form history** — the five defects,
+> the chip incident, the Supabase-MCP-is-production warning, and the written-up reasoning behind
+> each `B<n>`.
+>
+> **What it is NOT:** the current handover, a current inventory of anything, **or the backlog
+> tracker.** ⛔ **The `## BACKLOG` section is a POINTER, not a queue** (ruled 2026-08-09; see the
+> banner at the head of that section). **The one list of open work is GitHub Issues:**
+> `gh issue list --repo u2giants/shared-db --label db-work`. The `B<n>` write-ups here remain the
+> best explanation of *why* each item exists, and issues link back to them — but their **state**
+> is whatever the issue says, never what a heading here says. Corrected 2026-08-12: this
+> paragraph previously called the backlog section authoritative, which contradicted that ruling.
 >
 > Standing rule (was `COORDINATOR_INTAKE.md` §B2.0, retired 2026-08-07): **no document wins by name or by date.**
 > Where `HANDOFF.d/`, this file, and `COORDINATOR_INTAKE.md` disagree,
@@ -1562,7 +1569,12 @@ yet.** Until it lands, these tests are not enforced by CI on pull requests.
 
 ---
 
-## BACKLOG — repository-level improvements, NOT STARTED (recorded 2026-07-31)
+## BACKLOG — repository-level improvements, B1–B14 (recorded 2026-07-31; **state is tracked in GitHub Issues, not here**)
+
+> **Heading corrected 2026-08-12.** It read *"NOT STARTED"*, which contradicted the pointer table
+> immediately below — that table records **six of the fourteen items as closed or retired** (B2,
+> B4, B7, B10, B13, B14), and B6 and B8 have since shipped too. Nothing in this section may be
+> read as a statement of current state. Read the table, then the issue.
 
 > ⛔ **OBSOLETE 2026-08-07 — DO NOT DO THIS.** This used to require every `B<n>` to ALSO appear
 > as an entry in the `## REQUEST QUEUE` of `COORDINATOR_INTAKE.md`. **That file is retired and
@@ -1618,6 +1630,12 @@ yet.** Until it lands, these tests are not enforced by CI on pull requests.
 
 <details>
 <summary><strong>Original B1–B14 backlog text, kept verbatim for the record. It is HISTORY, not a queue — do not add to it and do not act from it without checking the issue above.</strong></summary>
+
+> ⚠️ **The next sentence was true on 2026-07-31 and is FALSE today (corrected 2026-08-12).** Much
+> of B1–B14 has since been implemented or retired — see the re-derived table above, and note that
+> **B6's guard is built and required** and **B8's test exists** (PR #358). The sentence is left in
+> place because this block is a verbatim historical record. **Never take an implementation state
+> from this block.**
 
 **Status: documentation only. Nothing in this section has been implemented.** It was written by
 a planning session that was explicitly forbidden from changing anything except this file — no

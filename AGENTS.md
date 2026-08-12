@@ -711,9 +711,20 @@ change) need just items 1 and "it reads correctly" — merge them promptly.
 
 ### 5.1 Promoting to production when a backlog exists — NEVER `--include-all` on the full repo set, ALWAYS inside the pruned temp checkout (learned 2026-07-23; recipe corrected 2026-07-27; wording made self-consistent 2026-08-09)
 
-> ⚠️ **Before you promote anything, read the #611 HARD GATE in §5.1-A.** The canary
-> `20260810140000` may go now; **no licensor batch may go** until
-> `scripts/experiment_611_db_push_atomicity.sh` has been RUN on Supabase CLI **2.105.0**.
+> ✅ **The #611 gate is DISCHARGED — corrected 2026-08-12.** It **RAN** on 2026-08-10 against
+> `main` tip `bc29d36` on the pinned **Supabase CLI 2.105.0**
+> ([`scripts/experiment_611_db_push_atomicity.sh`](scripts/experiment_611_db_push_atomicity.sh);
+> full result in
+> [`docs/verification/issue-611-db-push-atomicity-20260810.md`](docs/verification/issue-611-db-push-atomicity-20260810.md)).
+> **Licensor batches are no longer blocked by #611.** This block previously still read *"no
+> licensor batch may go until … has been RUN"*, directly contradicting §5.1-A two hundred lines
+> below, which has recorded the gate as discharged since 2026-08-10. A reader following the old
+> wording would have blocked a promotion that is in fact cleared.
+>
+> ⚠️ **The gate REOPENS on any Supabase CLI version bump** — the result is pinned to **2.105.0**.
+> If you are not on 2.105.0, re-run the script and re-record before promoting. **Read §5.1-A in
+> full before you promote anything**: everything else it says still binds, in particular that
+> `db push` is atomic **per FILE, not per batch**, and that **"PREFLIGHT OK" is not an approval**.
 
 Production almost always has **pending migrations from other workstreams that sit *before* your
 own** (e.g. DB Data Admin write paths, DAM taxonomy cutover, PopSG — several deliberately
@@ -1539,8 +1550,17 @@ Albert turned branch protection **ON** for `main` on 2026-08-04. This is a stand
 by the owner. **It is settled — do not re-ask it, do not treat it as an AI's preference, and do not
 weaken it.**
 
-**The verified fact, not a claim.** Read back live at **2026-08-06 16:00 UTC** with
-`gh api repos/u2giants/shared-db/branches/main/protection`:
+**The verified fact, not a claim.** Read back live and **RE-DERIVED on 2026-08-12** (previous
+re-derivation 2026-08-06 16:00 UTC) with:
+
+```bash
+gh api repos/u2giants/shared-db/branches/main/protection
+```
+
+The 2026-08-12 read matched every row below exactly — six contexts including `Intake pointer
+guard` and **not** `Backlog / queue sync`, `strict: true`, `enforce_admins: true`,
+`allow_force_pushes: false`, `allow_deletions: false`. **The table is accurate as of that date —
+and you must still run the command rather than trust it.**
 
 | Setting | Value |
 | --- | --- |
@@ -1558,11 +1578,16 @@ weaken it.**
 > check and both merge, silently erasing one another. That is the 2026-07-31 four-way
 > incident's exact mechanism. **Do not turn it back off.**
 >
-> ⚠️ **This table was stale for two days** — it still read `strict: false` and four
+> ⚠️ **This table was stale for two days once already** — it read `strict: false` and four
 > contexts after both had changed. A reviewing model (Grok 4.5, 2026-08-06) read it and
-> concluded a *correct* document was wrong. **Verify branch protection with the `gh api`
-> command above rather than trusting this table**, and re-read it back whenever you change
-> it. Prose asserting mutable state goes stale; the command does not.
+> concluded a *correct* document was wrong.
+>
+> **STANDING INSTRUCTION: never quote this table as fact. Run the `gh api` command above and
+> quote the live output**, in any issue, handover, review, or PR description that turns on
+> branch protection — and re-read it back whenever you change protection, stamping the new date
+> here. This follows §4.3 (point at the live reading, never at a number). Prose asserting mutable
+> state goes stale; the command does not. Two rows are **owner rulings you may never weaken to
+> make a check pass**: `strict` stays `true` and `enforce_admins` stays `true`.
 
 **The rule.**
 
