@@ -1825,7 +1825,51 @@ mode is silent data-logic loss.
 
 ---
 
-### B6 — Cross-PR object collision guard (HIGH — recorded 2026-07-31, NOT implemented)
+### B6 — Cross-PR object collision guard (recorded 2026-07-31 — guard now BUILT and REQUIRED; still tracked as issue #529. Evidence folded in 2026-08-12)
+
+> ### The dated evidence B6 was waiting for — four worktrees, one migration version
+>
+> The worktree sweep in **PR #455** (2026-08-06) found **four separate worktrees each carrying a
+> migration numbered `20260731170000`, all `CREATE OR REPLACE`-ing the same database function.**
+> Because each was a **new file**, git produced **no textual conflict** — a three-way merge could
+> not see the collision at all, and the outcome would have been **last-writer-wins**, silently.
+>
+> They were renumbered before any merge, to `20260731180000` / `190000` / `200000` / `210000`.
+> Re-verified on **2026-08-12**: all four are present in `supabase/migrations/` on `origin/main`.
+> Nothing was lost. This is the concrete incident shape B6 exists to stop.
+>
+> ### Re-assessment: would the guard catch this shape today?
+>
+> **The guard is built.** [`.github/workflows/pr-object-collision.yml`](.github/workflows/pr-object-collision.yml)
+> exists, its check-run name is **`Cross-PR object collision`**, and it is one of the six required
+> contexts on `main` (`AGENTS.md` §6.7). The original "not yet built" wording below is stale.
+>
+> **On the shape above — the object collision — yes.** The guard parses the objects a PR
+> creates-or-replaces out of its new migration files and fails when another **open** PR replaces
+> the same object. Four PRs replacing one function is exactly its detection case, and the shared
+> version number is not what it keys on.
+>
+> **Two limits that are still real, and the second one is now closed:**
+>
+> 1. **Work that never becomes an open PR is invisible to it.** The 2026-08-06 evidence was found
+>    in **worktrees**, not in PRs. A guard that queries `gh pr list` cannot see a branch nobody has
+>    opened a PR for. The mitigation is procedural, not CI: one orchestrator, one schema change in
+>    flight, and `AGENTS.md` §2.1-W (worktree-only, with the worktrees enumerated at handover).
+> 2. **The "last member of a colliding set" hole is CLOSED.** The workflow's own header says it
+>    cannot re-run when a *sibling* PR appears later, so under `strict: false` two PRs could both
+>    pass and both merge. Branch protection now has **`strict: true`** (verified live 2026-08-12),
+>    which forces every PR to be current with `main` before merging and therefore re-runs the check
+>    on the later member. **Do not turn `strict` off** — doing so re-opens precisely the 2026-07-31
+>    four-way mechanism.
+>
+> **What is left in B6, and why issue #529 stays open:** part 2 below — the explicit rule that a
+> migration containing `create or replace function` must be rebased onto current `origin/main`
+> immediately before merge — is now enforced *structurally* by `strict: true` rather than by the
+> checker itself. Whether to also assert it inside the checker (belt and braces, and a clearer
+> failure message than "branch is out of date") is the open question. Nothing here is a
+> regression; nothing here is urgent.
+
+*Original 2026-07-31 text, kept for the record. It says "not yet built" — that part is history.*
 
 **The problem.** `scripts/check-sql.sh` cannot see a sibling **open** PR, so two PRs that both
 `create or replace` the same database object both pass CI, and whichever merges second silently
