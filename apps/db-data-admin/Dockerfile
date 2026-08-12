@@ -11,6 +11,11 @@ RUN npm run build
 
 FROM nginx:1.29-alpine
 ENV NGINX_ENVSUBST_FILTER=^DB_DATA_ADMIN_
+# nginx's envsubst helper only replaces variables that exist in the container
+# environment. Production deliberately omits this development-only switch, so
+# define the safe disabled value or nginx treats the leftover placeholder as an
+# unknown nginx variable and refuses to start.
+ENV DB_DATA_ADMIN_ALLOW_PASSWORD_LOGIN=""
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80

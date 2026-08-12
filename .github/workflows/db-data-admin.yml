@@ -87,6 +87,19 @@ jobs:
       - name: Record build date
         id: build-date
         run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      - name: Prove the production container starts with password login unset
+        run: |
+          set -euo pipefail
+          docker build \
+            --build-arg "VITE_BUILD_SHA=${GITHUB_SHA}" \
+            --build-arg "VITE_BUILD_DATE=${{ steps.build-date.outputs.date }}" \
+            --tag db-data-admin-startup-test \
+            apps/db-data-admin
+          docker run --rm \
+            --env DB_DATA_ADMIN_SUPABASE_URL=https://example.invalid \
+            --env DB_DATA_ADMIN_SUPABASE_ANON_KEY=test-only \
+            --env DB_DATA_ADMIN_AUTH_REDIRECT_URL=https://example.invalid \
+            db-data-admin-startup-test nginx -t
       - uses: docker/metadata-action@v5
         id: meta
         with:
