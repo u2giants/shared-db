@@ -19,14 +19,18 @@ package can be written; it has never been executed, and it must not be executed 
 the owner approves the exact command and confirmation. A green CI run on this file
 proves the LOGIC and the REFUSALS, not an import. Do not read one as the other.
 
-An unresolved source-count discrepancy is recorded deliberately and must NOT be
-papered over: the populated-row count for this sheet lineage has been stated as 12,328
-(2026-08-09 export, SHA ``4958b4b7…``), 12,323 (2026-08-11 live-sheet browser exports,
-SHAs ``b9b282dc…`` / ``904b2cb9…``, neither retained) and 12,354 (the approved
-``68c9b03a…`` workbook under this file's own ``is_populated`` definition). The hash is
-settled; WHICH five rows changed between the first two is not knowable from this
-repository. That is why ``--expected-populated-rows`` is a required, un-defaulted input
-for production rather than a constant the code picks for itself.
+SOURCE ROW COUNT — SETTLED BY OWNER RULING. The approved populated-row count is
+**12,354**, for the approved ``68c9b03a…`` workbook under this file's own
+``is_populated`` definition. Two earlier figures appear in the history (12,328 from the
+superseded 2026-08-09 export, and 12,323 from 2026-08-11 live-sheet exports that were
+never retained); the owner closed that question by decision and no itemisation of the
+five-row difference is required. The history is kept in the reconciliation report as
+provenance, not as an open gate.
+
+``--expected-populated-rows`` remains required and un-defaulted anyway. That is not
+because the number is in doubt — it is so the approved figure is stated explicitly in
+the command being approved, and asserted against the workbook before any write, rather
+than living only as a constant in this file.
 
 =====================================================================================
 SAFETY RULES THIS FILE ENFORCES
@@ -325,6 +329,18 @@ RESOLUTION_NO_TYPE = "no_type"
 
 class ImporterError(RuntimeError):
     """Every refusal in this file. Loud, never swallowed."""
+
+
+class CommitOutcomeUnknown(ImporterError):
+    """The single COMMIT was issued but its outcome could not be established.
+
+    This is NOT the same as a rollback and must never be reported as one. If the
+    connection drops between the server committing and the acknowledgement arriving,
+    the rows ARE durable and the client cannot tell. Data integrity still holds — a
+    rerun meets :func:`assert_no_existing_source_refs`, finds the rows and refuses —
+    but the durable report must say "unknown, go and look", not "nothing was written".
+    Claiming a fact the code cannot know is the same defect class as a false record.
+    """
 
 
 # =====================================================================================
@@ -1391,8 +1407,20 @@ def apply_plan(
             gateway.commit_batch()
 
     if single_transaction:
-        # One commit for the whole import. Until this line runs, nothing is durable.
-        gateway.commit_batch()
+        # One commit for the whole import. Until this succeeds, nothing is durable.
+        # A failure HERE is indeterminate, not a rollback: the server may have
+        # committed and only the acknowledgement lost. It gets its own exception type
+        # so the report cannot claim "no rows were written".
+        try:
+            gateway.commit_batch()
+        except Exception as error:
+            raise CommitOutcomeUnknown(
+                "The final COMMIT did not return successfully, so the outcome of this "
+                f"import is UNKNOWN ({error}). The rows may or may not be durable. Do "
+                "NOT rerun blindly: query "
+                "plm.production_order_source_ref for source_system "
+                f"{SOURCE_SYSTEM!r} and establish the real state first."
+            ) from error
 
     return result
 
@@ -1903,10 +1931,18 @@ def assert_reviewed_commit_is_checked_out(commit_sha: str, repo_root: Path) -> N
             "reviewed importer. Check out the reviewed commit. Nothing has been "
             "written."
         )
-    dirty = git("status", "--porcelain")
+    # --untracked-files=no is deliberate and load-bearing. Plain --porcelain lists
+    # untracked files as "??", and a normal checkout always has some — the live
+    # orchestrator checkout has 18 today. Worse, this gate would be self-inflicting:
+    # an aborted run writes its abort report to an UNTRACKED path, so the next attempt
+    # would be refused because of the evidence the importer itself just produced, and
+    # the only way to proceed would be to delete that evidence or commit mid-incident.
+    # A gate whose workaround is "destroy the abort report" is worse than no gate.
+    # Every modification to reviewed, tracked code is still caught.
+    dirty = git("status", "--porcelain", "--untracked-files=no")
     if dirty:
         raise ImporterError(
-            "The working tree is not clean, so the code being run is not exactly the "
+            "Tracked files are modified, so the code being run is not exactly the "
             f"reviewed commit {commit_sha}. Refusing. Nothing has been written."
         )
 
@@ -2004,10 +2040,10 @@ class Reconciliation:
     baseline: ReconciliationBaseline = BASELINE
     checksum_matched_approved_source: bool = False
     #: Operator-declared populated-row count. Required for production. It is a CHECKED
-    #: INPUT, never a value the code picks for itself: the record carries an unresolved
-    #: 12,328 -> 12,323 -> 12,354 history (see the "Source row-count history" section of
-    #: the rendered report), so the number must be stated by whoever approves the run and
-    #: then asserted, not inferred.
+    #: INPUT, never a value the code picks for itself. The approved figure is 12,354
+    #: (owner ruling; the question is closed). Requiring it on the command line keeps
+    #: the approved number visible in the approved command and asserted before any
+    #: write, instead of being inferred from a constant.
     expected_populated_rows: int | None = None
 
     def balance_checks(self) -> list[tuple[str, bool, str]]:
@@ -2262,12 +2298,13 @@ def render_report(
     add(f"**Overall: {'BALANCED' if reconciliation.balanced() else 'NOT BALANCED'}**")
     add("")
 
-    add("## Source row-count history (unresolved, recorded deliberately)")
+    add("## Source row-count history (provenance; settled by owner ruling)")
     add("")
     add(
-        "The populated-row count for this sheet lineage has been stated three ways. "
-        "The workbook HASH is settled; the COUNT is not fully explained, so this run "
-        "asserts against an operator-declared number rather than choosing one."
+        "The approved populated-row count is **12,354**. Two earlier figures appear in "
+        "the history and are recorded here as provenance only — the owner closed the "
+        "question by decision and no itemisation of the difference is required. This "
+        "run still asserts against the count stated on the command line."
     )
     add("")
     add("| Count | Workbook SHA-256 | How it was produced |")
@@ -2289,12 +2326,11 @@ def render_report(
     )
     add("")
     add(
-        "The five-row shrink (12,328 -> 12,323) was measured on a file that is neither "
-        "the 2026-08-09 export nor the approved workbook, and that file was not kept. "
-        "WHICH five rows changed is therefore NOT knowable from this repository; only "
-        "the Google Sheets revision history for spreadsheet "
-        f"`{SOURCE_SPREADSHEET_ID}` can answer it. This report does not claim it is "
-        "resolved."
+        "For the record: the five-row shrink (12,328 -> 12,323) was measured on a file "
+        "that is neither the 2026-08-09 export nor the approved workbook, and that file "
+        "was not kept, so which rows changed cannot be recovered from this repository. "
+        "The owner closed this by ruling that 12,354 is the approved count. It is not "
+        "an outstanding gate."
     )
     add("")
 
@@ -2418,8 +2454,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "The populated-row count the operator expects. Required for --production "
-            "and asserted as a balance check. It is deliberately NOT defaulted: the "
-            "record carries an unresolved 12,328 / 12,323 / 12,354 history."
+            "and asserted as a balance check. Deliberately NOT defaulted, so the "
+            "approved figure (12,354) is visible in the approved command itself."
         ),
     )
     parser.add_argument(
@@ -2567,8 +2603,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if expected_populated_rows is None:
             raise ImporterError(
                 "--expected-populated-rows is required for --production. The source "
-                "row count has an unresolved history (12,328 -> 12,323 -> 12,354); "
-                "the approver must state the number this run is allowed to see."
+                "approved figure is 12,354; state it explicitly so the command being "
+                "approved carries the number it is allowed to see."
             )
     if expected_populated_rows is not None and expected_populated_rows < 1:
         raise ImporterError("--expected-populated-rows must be at least 1.")
@@ -2750,29 +2786,65 @@ def main(argv: Sequence[str] | None = None) -> int:
             target_guard=target_guard,
             single_transaction=writing,
         )
+    except CommitOutcomeUnknown as error:
+        # Distinct from a rollback, deliberately. See CommitOutcomeUnknown.
+        write_report(
+            ApplyResult(),
+            second_run=None,
+            outcome=(
+                "OUTCOME UNKNOWN. The single COMMIT did not return successfully, so "
+                "this run cannot say whether the rows are durable. Establish the real "
+                "state before doing anything else; do NOT rerun blindly. "
+                f"Cause: {error}"
+            ),
+        )
+        raise
     except Exception as error:
         write_report(
             ApplyResult(),
             second_run=None,
             outcome=(
-                "ABORTED. The whole import ran in ONE transaction and was rolled "
-                f"back, so NO rows were written. Cause: {error}"
+                "ABORTED before the commit. The whole import ran in ONE transaction "
+                f"and was rolled back, so NO rows were written. Cause: {error}"
             ),
         )
         raise
 
     second: ApplyResult | None = None
     if args.verify_idempotency:
-        second = apply_plan(
-            plan,
-            gateway,
-            batch_size=args.batch_size,
-            replace_source=args.replace_source,
-            dry_run=args.dry_run,
-            allow_replace=allow_replace,
-            target_guard=target_guard,
-            single_transaction=writing,
-        )
+        # The idempotency pass needs the same durable-record guarantee as the first.
+        try:
+            second = apply_plan(
+                plan,
+                gateway,
+                batch_size=args.batch_size,
+                replace_source=args.replace_source,
+                dry_run=args.dry_run,
+                allow_replace=allow_replace,
+                target_guard=target_guard,
+                single_transaction=writing,
+            )
+        except CommitOutcomeUnknown as error:
+            write_report(
+                first,
+                second_run=None,
+                outcome=(
+                    "FIRST PASS COMPLETED. The idempotency pass then failed to commit, "
+                    "so ITS outcome is unknown; the first pass is unaffected. "
+                    f"Cause: {error}"
+                ),
+            )
+            raise
+        except Exception as error:
+            write_report(
+                first,
+                second_run=None,
+                outcome=(
+                    "FIRST PASS COMPLETED AND COMMITTED. The idempotency pass then "
+                    f"aborted and was rolled back. Cause: {error}"
+                ),
+            )
+            raise
         if second.changed_rows != 0:
             write_report(
                 first,

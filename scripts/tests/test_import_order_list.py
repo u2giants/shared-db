@@ -1367,7 +1367,7 @@ class TargetDriftMidRunTests(_ProductionHarness):
 
 
 class ProductionReportTests(_ProductionHarness):
-    def test_report_records_the_unresolved_row_count_history(self):
+    def test_report_records_the_row_count_history_as_provenance(self):
         report = importer.render_report(
             reconciliation=importer.Reconciliation(
                 counters={"staged_rows": 1, "rows_direct": 1, "planned_lines": 0},
@@ -1385,7 +1385,7 @@ class ProductionReportTests(_ProductionHarness):
         self.assertIn("12,328", report)
         self.assertIn("12,323", report)
         self.assertIn("12,354", report)
-        self.assertIn("NOT knowable from this repository", report)
+        self.assertIn("settled by owner ruling", report)
         self.assertIn(REVIEWED_SHA, report)
 
     def test_report_carries_no_credential(self):
@@ -1616,7 +1616,37 @@ class ReviewedCommitTests(unittest.TestCase):
         (root / "a.txt").write_text("edited", encoding="utf-8")
         with self.assertRaises(importer.ImporterError) as caught:
             importer.assert_reviewed_commit_is_checked_out(head, root)
-        self.assertIn("not clean", str(caught.exception))
+        self.assertIn("Tracked files are modified", str(caught.exception))
+
+    def test_untracked_files_do_NOT_make_the_tree_dirty(self):
+        """M1. Untracked files are normal, and one of them is our own abort report.
+
+        Plain `git status --porcelain` lists untracked files as `??`. Treating those as
+        dirty refuses every normal checkout, and is self-inflicting: an aborted run
+        writes its abort report to an untracked path, so the next attempt would be
+        blocked by the evidence the importer itself just produced. The only workaround
+        would be deleting that evidence.
+        """
+        root, head = self._repo()
+        (root / "untracked-note.txt").write_text("scratch", encoding="utf-8")
+        reports = root / "docs" / "verification" / "popdam-order-list-production-x"
+        reports.mkdir(parents=True)
+        (reports / "README.md").write_text("ABORT REPORT", encoding="utf-8")
+        importer.assert_reviewed_commit_is_checked_out(head, root)
+
+    def test_a_modified_tracked_file_is_still_refused_alongside_untracked_ones(self):
+        root, head = self._repo()
+        (root / "untracked-note.txt").write_text("scratch", encoding="utf-8")
+        (root / "a.txt").write_text("edited", encoding="utf-8")
+        with self.assertRaises(importer.ImporterError) as caught:
+            importer.assert_reviewed_commit_is_checked_out(head, root)
+        self.assertIn("Tracked files are modified", str(caught.exception))
+
+    def test_a_deleted_tracked_file_is_refused(self):
+        root, head = self._repo()
+        (root / "a.txt").unlink()
+        with self.assertRaises(importer.ImporterError):
+            importer.assert_reviewed_commit_is_checked_out(head, root)
 
     def test_it_fails_closed_when_git_cannot_answer(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1758,6 +1788,138 @@ class SingleTransactionTests(unittest.TestCase):
             )
         self.assertEqual(gateway.batches_committed, 0, "nothing may be durable")
         self.assertEqual(gateway.batches_rolled_back, 1)
+
+
+class FailingCommitGateway(importer.InMemoryGateway):
+    """A gateway whose COMMIT raises, as a dropped network connection would."""
+
+    def commit_batch(self) -> None:
+        raise RuntimeError("connection closed while committing")
+
+
+class CommitOutcomeTests(unittest.TestCase):
+    """M2: a failed COMMIT is indeterminate and must never be reported as a rollback."""
+
+    def _plan(self):
+        rows = [
+            direct_row(i + 2, f"PO-{i:03d}", f"SKU-{i}", "generic") for i in range(6)
+        ]
+        return importer.build_plan(rows, LICENSED_CATALOG)
+
+    def test_a_failed_commit_raises_the_distinct_type(self):
+        with self.assertRaises(importer.CommitOutcomeUnknown) as caught:
+            importer.apply_plan(
+                self._plan(),
+                FailingCommitGateway(),
+                batch_size=5,
+                single_transaction=True,
+            )
+        message = str(caught.exception)
+        self.assertIn("UNKNOWN", message)
+        self.assertNotIn("NO rows were written", message)
+        self.assertIn("do", message.lower())
+
+    def test_it_is_an_importer_error_so_the_cli_still_exits_cleanly(self):
+        self.assertTrue(
+            issubclass(importer.CommitOutcomeUnknown, importer.ImporterError)
+        )
+
+    def test_an_abort_inside_the_loops_is_still_a_rollback_not_unknown(self):
+        gateway = importer.InMemoryGateway()
+
+        def guard():
+            raise importer.ImporterError("Refusing to write: drift")
+
+        with self.assertRaises(importer.ImporterError) as caught:
+            importer.apply_plan(
+                self._plan(),
+                gateway,
+                batch_size=5,
+                target_guard=guard,
+                single_transaction=True,
+            )
+        self.assertNotIsInstance(caught.exception, importer.CommitOutcomeUnknown)
+        self.assertEqual(gateway.batches_rolled_back, 1)
+
+
+class AbortReportWordingTests(unittest.TestCase):
+    """The durable record must match what actually happened."""
+
+    def test_main_distinguishes_unknown_commit_from_rollback(self):
+        """The two handlers exist and say different things."""
+        source = _IMPORTER_PATH.read_text(encoding="utf-8")
+        block = source[source.index("        first = apply_plan(") :]
+        block = block[: block.index("    second: ApplyResult | None = None")]
+        self.assertIn("except CommitOutcomeUnknown as error:", block)
+        self.assertIn("OUTCOME UNKNOWN", block)
+        self.assertIn("ABORTED before the commit", block)
+        # The rollback wording must not be reachable from the unknown-commit handler.
+        unknown = block[block.index("except CommitOutcomeUnknown") : block.index("    except Exception as error:")]
+        self.assertNotIn("NO rows were written", unknown)
+
+    def test_report_text_for_an_unknown_outcome_never_claims_no_rows(self):
+        report = importer.render_report(
+            reconciliation=importer.Reconciliation(
+                counters={"staged_rows": 1, "rows_direct": 1, "planned_lines": 0},
+                apply_result=importer.ApplyResult(),
+            ),
+            checksum=APPROVED,
+            project_ref=PROD,
+            workbook_name="OrderList.xlsx",
+            run_mode=(
+                "production write — OUTCOME UNKNOWN. The single COMMIT did not return "
+                "successfully, so this run cannot say whether the rows are durable."
+            ),
+            generated_at="2026-08-12T00:00:00Z",
+            title="PopDAM OrderList production import reconciliation",
+            reviewed_commit=REVIEWED_SHA,
+        )
+        self.assertIn("OUTCOME UNKNOWN", report)
+        self.assertNotIn("NO rows were written", report)
+
+
+class IdempotencyPassReportTests(unittest.TestCase):
+    """L2: the idempotency pass must leave a durable record when it fails."""
+
+    def test_main_wraps_the_second_apply_in_a_report_writing_try(self):
+        source = _IMPORTER_PATH.read_text(encoding="utf-8")
+        after = source[source.index("if args.verify_idempotency:") :]
+        second_call = after[: after.index("if second.changed_rows != 0:")]
+        self.assertIn("try:", second_call)
+        self.assertIn("write_report(", second_call)
+        self.assertIn("CommitOutcomeUnknown", second_call)
+
+
+class OwnerRulingTests(unittest.TestCase):
+    """The approved count is 12,354 and the five-row question is closed by decision."""
+
+    def test_baseline_is_the_approved_count(self):
+        self.assertEqual(importer.BASELINE.populated_rows, 12_354)
+
+    def test_nothing_frames_the_row_count_as_an_open_gate(self):
+        source = _IMPORTER_PATH.read_text(encoding="utf-8")
+        for phrase in (
+            "unresolved 12,328",
+            "NOT knowable from this repository",
+            "This report does not claim it is",
+        ):
+            self.assertNotIn(phrase, source, f"stale open-gate framing: {phrase!r}")
+
+    def test_report_presents_the_history_as_provenance(self):
+        report = importer.render_report(
+            reconciliation=importer.Reconciliation(
+                counters={"staged_rows": 1, "rows_direct": 1, "planned_lines": 0},
+                apply_result=importer.ApplyResult(),
+            ),
+            checksum=APPROVED,
+            project_ref=PROD,
+            workbook_name="OrderList.xlsx",
+            run_mode="production write",
+            generated_at="2026-08-12T00:00:00Z",
+        )
+        self.assertIn("settled by owner ruling", report)
+        self.assertIn("not an outstanding gate", report.lower())
+        self.assertIn("12,354", report)
 
 
 class ReportPreservationTests(_ProductionHarness):

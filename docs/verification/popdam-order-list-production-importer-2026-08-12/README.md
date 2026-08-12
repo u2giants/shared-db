@@ -33,7 +33,7 @@ Gates 1-11 are checked **before the connection string is read**, so a wrong invo
 | 12 | **The SERVER must confirm it is the proven project** | `assert_server_is_target` | `test_stale_url_pointing_at_preview_is_refused`, `test_unprovable_server_is_refused` |
 | 13 | Zero pre-existing `google_order_list` source refs | `assert_no_existing_source_refs` | `test_preexisting_source_refs_refuse_the_run` |
 | 14 | Advisory lock — no two concurrent imports | `acquire_import_lock` | `test_concurrent_run_is_refused_by_the_advisory_lock` |
-| 15 | `--reviewed-commit` must equal `HEAD` on a clean tree | `assert_reviewed_commit_is_checked_out` | four `ReviewedCommitTests` cases |
+| 15 | `--reviewed-commit` must equal `HEAD` with no modified TRACKED files | `assert_reviewed_commit_is_checked_out` | seven `ReviewedCommitTests` cases |
 | 16 | **All balance checks run BEFORE the first write** | `main` | `test_wrong_expected_row_count_aborts_with_nothing_written` |
 | 17 | `--dry-run` cannot be combined with `--preview`/`--production` | `main` | `test_dry_run_with_production_is_refused` |
 
@@ -55,7 +55,11 @@ This also makes `--project-ref-file` largely moot as a proof; it is additionally
 
 Why: the orders loop completes before the lines loop begins. With per-batch commits, an abort during the lines phase left all 3,212 orders present with only a fraction of their 24,010 lines. Four applications read this data; orders whose line sets are silently short are worse than no import at all, because nothing looks broken. About 27,000 rows is a small transaction for Postgres, so the cost is negligible. Because the run is single-transaction, the transaction-mode pooler (port 6543) is refused — it would silently split the transaction.
 
-**Additionally**, a report is now written **before** any exception escapes, recording the abort and its cause. Previously an abort raised before `report_path.write_text` and the only record was stderr scrollback. Reports also never overwrite an existing one; a second same-day run writes `README-<timestamp>.md` alongside.
+**Additionally**, a report is written **before** any exception escapes — for the first pass and for the idempotency pass — recording the abort and its cause. Reports never overwrite an existing one; a second same-day run writes `README-<timestamp>.md` alongside.
+
+**A failed COMMIT is reported as UNKNOWN, never as a rollback.** If the connection drops between the server committing and the acknowledgement arriving, the rows are durable and the client cannot tell. `CommitOutcomeUnknown` is a distinct exception type and gets its own report wording telling the operator to establish the real state before doing anything else. Data integrity is unaffected either way — a rerun meets `assert_no_existing_source_refs` and refuses — but a report asserting "NO rows were written" when that cannot be known is the same defect class as a false record.
+
+**The clean-tree check ignores untracked files** (`--untracked-files=no`). Plain `--porcelain` lists untracked files as `??`, so the gate would refuse every normal checkout — and it would be self-inflicting, because an aborted run writes its abort report to an untracked path and would block the next attempt. A gate whose only workaround is deleting the abort evidence is worse than no gate. Every modification or deletion of tracked, reviewed code is still caught.
 
 **Consequence for the approval package:** its "Rollback and disable boundary" section describes per-500-row batch commits with resumability. That is no longer accurate and should be updated to say the import is atomic and a failed run leaves nothing to resume. I did not edit that document — it is owned elsewhere.
 
@@ -80,9 +84,9 @@ python scripts/import-order-list-xlsx.py \
 
 `PRODUCTION_DATABASE_URL` supplies the connection string; it is never passed on the command line, never logged, and never reaches the report. A `--dry-run` rehearsal (which writes nothing and needs no credential) must precede it and must reproduce the approved baseline counts.
 
-## The five-row question: what is knowable, and what is not
+## Source row count — SETTLED
 
-The owner's ruling asks why the sheet shrank by five rows (12,328 → 12,323) and what those rows were. Here is the honest state of the record.
+**The owner has ruled: the approved populated-row count is 12,354, and the five-row question is closed by decision. No itemisation is required and this is not an outstanding gate.** The history below is retained as provenance only.
 
 | Count | Workbook SHA-256 | Bytes | How the count was produced |
 |---:|---|---:|---|
@@ -96,15 +100,14 @@ What is established:
 2. The 12,323 → 12,354 move is **not only a re-definition**. The prevailing note in `docs/app-migration-notes/popdam-order-list.md` explains it as a narrower manual count versus the importer's populated definition — and that is part of the answer, since the same approved file yields 12,349 under a PO-Status definition. But the files also differ: 12,323 was measured on `b9b282dc…` / `904b2cb9…`, and the approved workbook is `68c9b03a…` at a different byte size. **The 12,323 figure was never measured on the approved workbook at all.** Any account that treats the gap as purely definitional is incomplete.
 3. The 2026-08-09 and 2026-08-12 profiles also disagree on direct-only rows (8,412 vs 8,438), which is a further sign of genuine content movement rather than a pure counting-rule change.
 
-What is **not** knowable, and why:
+Why no itemisation exists (recorded so nobody re-opens this):
 
-- **Which five rows changed cannot be determined from this repository.** The workbook is licensed business data and was correctly never committed. Neither the `4958b4b7…` export nor either `b9b282dc…` / `904b2cb9…` export was retained. There is no row-level artifact anywhere in the repo to diff.
-- Only the Google Sheets revision history for spreadsheet `1i1da5J0qy5a0EvsO1CvfyQ6Xijn4678LG7TFqbwxwUk`, tab `Order` (gid `0`), can answer it. That is an owner action in a browser; an agent cannot and should not take it.
+- **Which five rows changed cannot be determined from this repository.** The workbook is licensed business data and was correctly never committed. Neither the `4958b4b7…` export nor either `b9b282dc…` / `904b2cb9…` export was retained, so there is no row-level artifact to diff. Only the Google Sheets revision history could answer it. **The owner has ruled that it does not need answering.**
 
-How the code handles this instead of guessing:
+How the code handles the settled number:
 
-- `--expected-populated-rows` has **no default** and is **required** for production. The approver states the number; the importer asserts it as a balance check and fails the run if the workbook disagrees.
-- The rendered reconciliation report prints all three counts, their hashes, and an explicit statement that the five-row question is unresolved. The report does not claim otherwise.
+- `--expected-populated-rows` has **no default** and is **required** for production — not because the number is in doubt, but so the approved figure (**12,354**) appears explicitly in the approved command and is asserted against the workbook before any write, rather than living only as a constant in the script.
+- The rendered report presents the count history as provenance and states that the question is settled by owner ruling.
 
 ## Test evidence
 
