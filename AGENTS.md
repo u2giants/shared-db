@@ -389,6 +389,38 @@ code, manage branches, or merge pull requests. Therefore:
 | **DesignFlow app repo** (`popcre/designflow-*`) | Work on **`sandbox-albert`**, push, and open/update a PR to **`develop`**. Do not merge it yourself. | DesignFlow work is reviewed by Uma. Keep schema changes out of these repos; use `shared-db` first. |
 | **This repo** (`shared-db`) | **Branch + PR, and the AI merges it** once the §5 checklist passes. | All apps read these tables. A bad change breaks everyone at once. The PR is a safety checkpoint and an undo button — not paperwork for the owner. |
 
+## 2.1-W WORKTREE-ONLY — no session works directly in the shared `shared-db` checkout (standing rule, added 2026-08-12, issue #513)
+
+**The rule.** In this repository, **every session — the orchestrator included — does its work in
+its own `git worktree` cut from `origin/main`.** The shared checkout (`C:\repos\shared-db` on the
+Windows boxes, and its equivalent elsewhere) is for reading and for `git fetch`. Nobody branches
+in it, commits in it, or leaves it checked out on a working branch.
+
+```bash
+git -C <shared-checkout> fetch origin --prune
+git -C <shared-checkout> worktree add <shared-checkout>/.claude/worktrees/<slug> -b <branch> origin/main
+```
+
+**Why it is a rule and not a preference.** Several sessions run this repo concurrently and they
+all share one working copy. Observed, dated damage:
+
+- **2026-08-06** — mid-session another session switched the shared checkout off the branch the
+  first session was on, onto `docs/plan-dispatch-collision-hardening`, and committed on top. A
+  commit landed on the **wrong branch and was pushed there** before anyone noticed. Recovery was
+  non-destructive (cherry-pick to the right branch through a temporary worktree; no branch was
+  rewritten, reverted, or force-pushed) but it cost a session.
+- The same event left PR #467 carrying four files belonging to PR #466, because #467's branch was
+  cut from the polluted checkout. The clean fix there was to **merge the earlier PR first** so the
+  files drop out of the later diff by themselves — never a rebase or force-push of someone else's
+  branch.
+- §5.1's own step-2 recipe already says to do sensitive git work in a dedicated worktree. This
+  section makes that the general rule rather than one recipe's footnote.
+
+**If you find the shared checkout on a working branch**, do not "fix" it by switching it back —
+another live agent may be mid-task on it. Leave it, work in your own worktree, and say so in your
+handoff. Remove your own worktree when your branch has merged; never remove one that is dirty,
+locked, or held by a live agent.
+
 ## 2.1 Host/server boundary
 
 This repo owns shared database schema, Supabase migrations, PLM import code, and the `systemd/plm-sync.*` templates. Durable host/OS changes on `hetz` are owned by the canonical Ansible repo at `/worksp/ansible` / [`u2giants/ansible`](https://github.com/u2giants/ansible), then applied by GitHub Actions.
@@ -937,6 +969,26 @@ context.)*
 
 **The stale-verdict trap itself is NOT retired.** Everything above about reading the run's SHA
 before believing a red X still applies, to every `paths:`-filtered workflow in this repo.
+
+### 5.2-A A SECOND flavour of false red: the job never ran at all (hosted-runner starvation, added 2026-08-12, issue #513)
+
+Dated evidence: on **2026-08-06**, `Cross-PR object collision` on **PR #466** went **red after 44
+minutes without ever executing a step**. The job annotation read:
+
+> *"The job was not acquired by Runner of type hosted even after multiple attempts."*
+
+That is **GitHub hosted-runner starvation, not a collision**, and not a fault in your PR.
+`gh run rerun --failed <run-id>` cleared it.
+
+**Before you believe any red required check, read the job annotations**, not just the red X:
+
+```bash
+gh run view <run-id> --log-failed
+gh api repos/u2giants/shared-db/actions/runs/<run-id>/jobs --jq '.jobs[] | {name, conclusion, steps: [.steps[].conclusion]}'
+```
+
+A job whose steps are all `null`/empty never ran. Re-run it; do not go looking for a code defect,
+and above all do not "fix" a guard that never executed.
 
 ## 6. How to tell if a change is already in flight
 
