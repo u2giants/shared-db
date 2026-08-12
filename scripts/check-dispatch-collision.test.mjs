@@ -21,7 +21,10 @@ import {
   nextFreeVersion,
   normalizeObject,
   parseClaimBlock,
+  reserveVersion,
   Unknown,
+  utcStamp,
+  versionRef,
 } from './check-dispatch-collision.mjs'
 import {
   describeCoverage,
@@ -614,4 +617,117 @@ test('#669 the heredoc command and the body file are byte-identical', () => {
 test('#669 the printed recipe points PowerShell users at --claim-body-file', () => {
   const command = claimCommand({ task: 't', objects: ['table core.licensor'], version: null })
   assert.match(command, /--claim-body-file/)
+})
+
+// --- #670 ATOMIC VERSION RESERVATION ---------------------------------------
+//
+// The axis NO mechanical check covered. Guard A sees one branch at a time; the
+// cross-PR object guard compares objects, not versions; and this script's own
+// version check is a READ, so two agents reading in the same minute both get a
+// clear. On 2026-08-10 two dispatched agents both landed on 20260810130000 and
+// only a human reading an open PR's file list caught it.
+//
+// `createRefFake` models the ONE property the whole design rests on: GitHub's
+// `POST /git/refs` is create-if-absent and answers `422 Reference already
+// exists` for a duplicate. The primitive itself was verified live against this
+// repository on 2026-08-06 (recorded in plan_dispatch-collision-hardening.md
+// step 5); it is not re-verified here because doing so would create permanent
+// refs in a shared repository as a side effect of running the test suite.
+
+function createRefFake(preTaken = []) {
+  const refs = new Set(preTaken.map((v) => versionRef(v)))
+  const calls = []
+  return {
+    refs,
+    calls,
+    baseSha: () => 'a'.repeat(40),
+    createRef(_repo, ref) {
+      calls.push(ref)
+      if (refs.has(ref)) return 'exists'
+      refs.add(ref)
+      return 'created'
+    },
+  }
+}
+
+test('#670 versionRef is deterministic and rejects anything that is not 14 digits', () => {
+  assert.equal(versionRef('20260812211000'), 'refs/db-claims/20260812211000')
+  assert.equal(versionRef('20260812211000'), versionRef(20260812211000))
+  // A junk ref created from a typo would be permanent, so this fails before
+  // any network call rather than after one.
+  for (const bad of ['2026081221100', '202608122110000', 'main', '', 'abcdefghijklmn']) {
+    assert.throws(() => versionRef(bad), Unknown, `expected ${JSON.stringify(bad)} to be rejected`)
+  }
+})
+
+test('#670 a free version is reserved on the first attempt', () => {
+  const io = createRefFake()
+  const got = reserveVersion({ stamp: '20260812211000', repo: 'r', sha: 'x', io })
+  assert.equal(got.version, '20260812211000')
+  assert.equal(got.ref, 'refs/db-claims/20260812211000')
+  assert.equal(got.attempts, 1)
+  assert.deepEqual(got.skipped, [])
+})
+
+test('#670 TWO AGENTS RACING ON THE SAME STAMP CANNOT BOTH GET IT', () => {
+  // The whole point of the issue, expressed as the 2026-08-10 near-miss:
+  // both agents start from the same number, in the same minute, with the same
+  // view of the repository.
+  const io = createRefFake()
+  const first = reserveVersion({ stamp: '20260810130000', repo: 'r', sha: 'x', io })
+  const second = reserveVersion({ stamp: '20260810130000', repo: 'r', sha: 'x', io })
+  assert.equal(first.version, '20260810130000')
+  assert.notEqual(second.version, first.version)
+  assert.equal(second.version, '20260810130001')
+  assert.deepEqual(second.skipped, ['20260810130000'])
+  // And a third does not get the second's number either.
+  const third = reserveVersion({ stamp: '20260810130000', repo: 'r', sha: 'x', io })
+  assert.equal(third.version, '20260810130002')
+  assert.equal(new Set([first.version, second.version, third.version]).size, 3)
+})
+
+test('#670 reservation walks past a run of versions already held', () => {
+  const io = createRefFake(['20260812211000', '20260812211001', '20260812211002'])
+  const got = reserveVersion({ stamp: '20260812211000', repo: 'r', sha: 'x', io })
+  assert.equal(got.version, '20260812211003')
+  assert.equal(got.attempts, 4)
+  assert.deepEqual(got.skipped, ['20260812211000', '20260812211001', '20260812211002'])
+})
+
+test('#670 exhausting the attempt budget THROWS instead of returning a free-for-all number', () => {
+  // The dangerous shortcut would be to give up and hand back an unreserved
+  // version, which is precisely the withdrawn --allocate-version behaviour.
+  const taken = Array.from({ length: 5 }, (_, i) => String(20260812211000n + BigInt(i)))
+  const io = createRefFake(taken)
+  assert.throws(
+    () => reserveVersion({ stamp: '20260812211000', repo: 'r', sha: 'x', io, maxAttempts: 5 }),
+    (error) => error instanceof Unknown && /could not reserve/.test(error.message),
+  )
+})
+
+test('#670 an UNCLASSIFIED createRef result is never treated as "already taken"', () => {
+  // NO SILENT FAILURES. Reading a 403, a rate limit or a dropped connection as
+  // "exists" would skip a version that is actually free, and on the last
+  // attempt would dress a network failure up as a successful reservation.
+  const io = { createRef: () => 'probably fine?' }
+  assert.throws(
+    () => reserveVersion({ stamp: '20260812211000', repo: 'r', sha: 'x', io }),
+    (error) => error instanceof Unknown && /expected 'created' or 'exists'/.test(error.message),
+  )
+  const throwing = { createRef: () => { throw new Unknown('403 rate limited') } }
+  assert.throws(() => reserveVersion({ stamp: '20260812211000', repo: 'r', sha: 'x', io: throwing }), Unknown)
+})
+
+test('#670 reservation asks the server exactly once per candidate', () => {
+  // A retry loop that re-checked before creating would reopen the
+  // read-then-write window the ref exists to close.
+  const io = createRefFake(['20260812211000'])
+  reserveVersion({ stamp: '20260812211000', repo: 'r', sha: 'x', io })
+  assert.deepEqual(io.calls, ['refs/db-claims/20260812211000', 'refs/db-claims/20260812211001'])
+})
+
+test('#670 utcStamp produces a 14-digit version that versionRef accepts', () => {
+  const stamp = utcStamp(new Date('2026-08-12T21:10:00.000Z'))
+  assert.equal(stamp, '20260812211000')
+  assert.equal(versionRef(stamp), 'refs/db-claims/20260812211000')
 })
