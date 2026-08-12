@@ -1,0 +1,57 @@
+# Guard: a PR must not reintroduce work an owner ruling has CANCELLED.
+#
+# Plan item C2 of `plan_orchestrator-workflow-gaps.md` (issue #619).
+#
+# Item C's finding: an owner ruling reaches the NEXT session, never the one already
+# running. On 2026-08-07 Albert ruled the Disney extract was not sensitive at ~17:00, and
+# at 22:26 a live session filed issue #578 asking for the git-history scrub that ruling had
+# just cancelled. Nothing can reach a running session. This makes the next thing that
+# session COMMITS fail loudly.
+#
+# Design rules, same as the other repo-wide guards here:
+#   1. NO `paths:` filter — the PR that reintroduces cancelled work is exactly the PR a
+#      filter would let skip the job while still showing all-checks-passed.
+#   2. A UNIQUE check-run name.
+#   3. The tests run FIRST, in the same job.
+#   4. `fetch-depth: 0` — the guard diffs against the base ref and must be able to see it.
+#      An unreadable diff FAILS; it is never treated as a clean diff.
+#
+# ⚠️ TO FINISH C2, AN ADMIN MUST MAKE `Cancelled work guard` A REQUIRED CONTEXT.
+# Branch protection is not editable from a workflow or by an agent session.
+
+name: Cancelled Work Guard
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cancelled-work-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Cancelled work guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Prove the guard fires, and that gutting its table is not a pass
+        run: node --test scripts/check-cancelled-work.test.mjs
+
+      - name: Check the PR does not reintroduce cancelled work
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "${BASE_REF}"
+          node scripts/check-cancelled-work.mjs --base "origin/${BASE_REF}"
