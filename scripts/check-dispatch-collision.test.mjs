@@ -6,6 +6,7 @@
 // exception, and the CLI's handling of that is asserted in the last block.
 
 import assert from 'node:assert/strict'
+import { readdirSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 import {
@@ -22,7 +23,15 @@ import {
   parseClaimBlock,
   Unknown,
 } from './check-dispatch-collision.mjs'
-import { describeCoverage, extractObjects } from './check-pr-object-collisions.mjs'
+import {
+  describeCoverage,
+  describeDispatchCoverage,
+  dispatchObjectKeys,
+  DISPATCH_UNMODELLED_FORMS,
+  extractObjects,
+  extractOperations,
+  inventoryDdlVerbs,
+} from './check-pr-object-collisions.mjs'
 
 // --- parseClaimBlock -------------------------------------------------------
 
@@ -201,15 +210,21 @@ test('formatReport prints NO verdict word and names the unchecked classes', () =
   const text = formatReport({ proposed, inFlight: [], result })
   assert.doesNotMatch(text, /safe/i)
   assert.match(text, /No overlap found in the object classes this tool can see/)
-  assert.match(text, /CHECKED: *function/)
-  assert.match(text, /NOT CHECKED:.*\btable\b/)
+  assert.match(text, /CHECKED: *column, comment, function/)
+  // Since #563 taught the dispatch parser every class, NOT CHECKED is empty —
+  // and the report must SAY that rather than print a bare "NOT CHECKED:" line,
+  // which reads as a truncated list.
+  assert.match(text, /NOT CHECKED: \(no DDL class is unmodelled\)/)
+  // The absence of unchecked classes must NOT be allowed to become a verdict.
   assert.match(text, /EVIDENCE, not clearance/)
+  assert.match(text, /dynamic SQL/)
 })
 
 test('formatReport derives the CHECKED list from the parser, not from a literal', () => {
-  // If step 3b teaches the parser `alter table`, this report must follow it
-  // with no second edit. Guarding that by comparing against describeCoverage().
-  const coverage = describeCoverage()
+  // Step 3b taught the parser `alter table`, and this report followed it with
+  // no second edit — which is what this test existed to guarantee. It now
+  // tracks the DISPATCH coverage, the one the report actually prints.
+  const coverage = describeDispatchCoverage()
   const proposed = { task: 't', objects: [], version: null }
   const result = findDispatchConflicts(proposed, [])
   const text = formatReport({ proposed, inFlight: [], result })
@@ -278,49 +293,156 @@ test('claimCommand body contains REAL newlines, not the characters backslash-n',
 // pass — which is exactly how a parser blind to `alter table` shipped behind a
 // green build.
 //
-// THESE FOUR ARE MARKED `todo` ON PURPOSE, and that is not a way of hiding a
-// failure. They are RED right now (verified locally; the output is in the PR
-// body for this change), because the parser fix is plan step 3b in Phase B and
-// this is Phase A. `node --test` reports a todo test on every run, so the gap
-// stays visible, while the required `Cross-PR object collision` job stays
-// green — a pull request whose tip is red can never merge, so landing them as
-// hard failures would strand this change permanently.
+// THESE FOUR WERE LANDED `todo` AND GENUINELY RED in Phase A, because the parser
+// fix was plan step 3b. `node --test` reports a todo test on every run, so the
+// gap stayed visible rather than hiding in a `skip`.
 //
-// ⚠️ STEP 3b MUST DELETE THE `{ todo: … }` OPTION FROM ALL FOUR. If they are
-// still marked todo after the parser is fixed, the fix is unproven.
+// STEP 3b (#563) IS NOW DONE, so the `{ todo: … }` option is DELETED from all
+// four and they must pass for real. The only change to their bodies is which
+// extractor they call: `dispatchObjectKeys` is the DISPATCH policy's reading of
+// the SQL, while `extractObjects` remains the merge guard's narrower
+// whole-object-replacement reading and is deliberately unchanged. The DDL text
+// and the assertion are exactly as landed.
 
-const TODO_UNTIL_STEP_3B = { todo: 'RED until plan step 3b teaches the parser these DDL forms' }
-
-test('an alter table in an open PR collides with a proposal naming that table', TODO_UNTIL_STEP_3B, () => {
-  const prObjects = extractObjects('alter table core.licensor add column risk_tier text;')
+test('an alter table in an open PR collides with a proposal naming that table', () => {
+  const prObjects = dispatchObjectKeys('alter table core.licensor add column risk_tier text;')
+  assert.deepEqual(prObjects, ['table core.licensor'])
   const result = findDispatchConflicts({ objects: ['table core.licensor'] }, [
     { label: 'PR #501', objects: prObjects, versions: [] },
   ])
   assert.equal(result.overlapFound, true)
 })
 
-test('a create table in an open PR collides with a proposal naming that table', TODO_UNTIL_STEP_3B, () => {
-  const prObjects = extractObjects('create table core.widget (id uuid primary key);')
+test('a create table in an open PR collides with a proposal naming that table', () => {
+  const prObjects = dispatchObjectKeys('create table core.widget (id uuid primary key);')
+  assert.deepEqual(prObjects, ['table core.widget'])
   const result = findDispatchConflicts({ objects: ['table core.widget'] }, [
     { label: 'PR #502', objects: prObjects, versions: [] },
   ])
   assert.equal(result.overlapFound, true)
 })
 
-test('a create index in an open PR collides with a proposal naming its table', TODO_UNTIL_STEP_3B, () => {
-  const prObjects = extractObjects('create index idx_licensor_code on core.licensor(code);')
+test('a create index in an open PR collides with a proposal naming its table', () => {
+  const prObjects = dispatchObjectKeys('create index idx_licensor_code on core.licensor(code);')
+  // BOTH identities: an index is a write to its table, and the index name is
+  // itself claimable. Emitting only one of the two was a false clear either way.
+  assert.deepEqual(prObjects, ['index idx_licensor_code', 'table core.licensor'])
   const result = findDispatchConflicts({ objects: ['table core.licensor'] }, [
     { label: 'PR #503', objects: prObjects, versions: [] },
   ])
   assert.equal(result.overlapFound, true)
 })
 
-test('a grant in an open PR collides with a proposal naming that table', TODO_UNTIL_STEP_3B, () => {
-  const prObjects = extractObjects('grant select on core.licensor to anon;')
+test('a grant in an open PR collides with a proposal naming that table', () => {
+  const prObjects = dispatchObjectKeys('grant select on core.licensor to anon;')
+  assert.deepEqual(prObjects, ['table core.licensor'])
   const result = findDispatchConflicts({ objects: ['table core.licensor'] }, [
     { label: 'PR #504', objects: prObjects, versions: [] },
   ])
   assert.equal(result.overlapFound, true)
+})
+
+// --- the rest of the blind spot named in the issue (#563) ------------------
+
+test('comment on / create type / anonymous index are all visible to dispatch', () => {
+  // `comment on column` must reach the TABLE too, or a column comment and a
+  // table rewrite run concurrently and one is lost.
+  assert.deepEqual(dispatchObjectKeys('comment on column core.t.c is $$x$$;'), [
+    'column core.t.c',
+    'table core.t',
+  ])
+  assert.deepEqual(dispatchObjectKeys('create type core.status as enum ($$a$$);'), ['type core.status'])
+  // An UNNAMED index still names its table; the optional-name group must not
+  // swallow the `on` keyword and lose the target entirely.
+  assert.deepEqual(dispatchObjectKeys('create index on core.licensor (code);'), ['table core.licensor'])
+})
+
+test('a grant on a schema does NOT masquerade as a table of the same name', () => {
+  // The object-type keyword is optional in Postgres and defaults to TABLE, so
+  // dropping it entirely would make `grant usage on schema plm` collide with a
+  // table called `plm` and miss a real collision on the schema.
+  assert.deepEqual(dispatchObjectKeys('grant usage on schema plm to anon;'), ['schema plm'])
+  // `on all tables in schema s` must not extract a phantom table named "all".
+  assert.deepEqual(dispatchObjectKeys('grant select on all tables in schema pim to anon;'), ['schema pim'])
+})
+
+test('a table rename claims the NEW name as well as the old one', () => {
+  // Emitting only the old identity lets a second agent claim the new name and
+  // collide invisibly.
+  assert.deepEqual(dispatchObjectKeys('alter table core.a rename to b;'), ['table core.a', 'table core.b'])
+})
+
+test('extractOperations reports action and kind separately, dispatch keys drop the action', () => {
+  const ops = extractOperations('alter table core.licensor add column x text;')
+  assert.deepEqual(ops, [{ action: 'alter', kind: 'table', target: 'core.licensor' }])
+  // Under the dispatch policy ANY write to a target collides with any other, so
+  // `alter` and `create` must reduce to the identical comparison key.
+  assert.deepEqual(
+    dispatchObjectKeys('create table core.licensor (id int);'),
+    dispatchObjectKeys('alter table core.licensor add column x text;'),
+  )
+})
+
+test('the MERGE guard parser is deliberately unchanged by this work', () => {
+  // The load-bearing safety property of #563. `check-pr-object-collisions.mjs`
+  // is a REQUIRED check on main; widening it would make its own failure
+  // messages ("one of these bodies would be silently overwritten") false and
+  // would risk exactly the alarm fatigue this workstream exists to cure.
+  // Plan step 3a's acceptance rule is satisfied by construction only while this
+  // stays true, so it is asserted, not assumed.
+  assert.deepEqual(extractObjects('alter table core.licensor add column x text;'), [])
+  assert.deepEqual(extractObjects('create table core.widget (id int);'), [])
+  assert.deepEqual(extractObjects('grant select on core.licensor to anon;'), [])
+  assert.deepEqual(describeCoverage().alterModelled, false)
+  // …while the dispatch policy DOES model alter.
+  assert.equal(describeDispatchCoverage().alterModelled, true)
+})
+
+test('dispatch coverage leaves no known DDL class unmodelled', () => {
+  // The report prints this list. If a class reappears here, the report starts
+  // telling coordinators the tool is blind to it and this test says so first.
+  assert.deepEqual(describeDispatchCoverage().notChecked, [])
+})
+
+test('no unmodelled DDL verb hides in the real migrations directory', () => {
+  // THE ANTI-REGRESSION MEASUREMENT (plan step 3b). Nothing in this repo would
+  // have noticed a NEW large blind class appearing — which is exactly how a
+  // parser blind to `alter table` shipped behind a green build. This walks the
+  // REAL migrations, not a fixture, so a future migration style that the parser
+  // cannot read fails here instead of returning a silent false clear.
+  const dir = new URL('../supabase/migrations/', import.meta.url)
+  const files = readdirSync(dir).filter((name) => name.endsWith('.sql'))
+  assert.ok(files.length > 100, `expected the real migrations directory, saw ${files.length} files`)
+
+  const inventory = inventoryDdlVerbs(files.map((name) => readFileSync(new URL(name, dir), 'utf8')))
+  assert.ok(inventory.length > 20, `inventory looks broken, only ${inventory.length} forms found`)
+
+  // A form is acceptable only if the parser MODELS it, or it is listed in
+  // DISPATCH_UNMODELLED_FORMS with a written reason. Anything else is a NEW
+  // blind class and fails here — the whole point of the measurement.
+  const unacknowledged = inventory.filter((entry) => !entry.acknowledged)
+  assert.deepEqual(
+    unacknowledged.map((e) => `${e.verb} (${e.count}x)`),
+    [],
+    'DDL forms in supabase/migrations/ that the dispatch parser neither models nor ' +
+      'acknowledges. Teach DISPATCH_PATTERNS the form, or add it to ' +
+      'DISPATCH_UNMODELLED_FORMS with a reason. Do not delete this test.',
+  )
+
+  // The acknowledged-but-unmodelled set must stay SMALL and every entry must
+  // carry a real reason, or the escape hatch becomes the new blind spot.
+  const unmodelled = inventory.filter((entry) => !entry.modelled)
+  for (const entry of unmodelled) {
+    const reason = DISPATCH_UNMODELLED_FORMS[entry.verb]
+    assert.ok(reason && reason.length > 40, `${entry.verb} needs a real written reason, got: ${reason}`)
+  }
+  const unmodelledStatements = unmodelled.reduce((sum, e) => sum + e.count, 0)
+  const total = inventory.reduce((sum, e) => sum + e.count, 0)
+  assert.ok(
+    unmodelledStatements / total < 0.05,
+    `${unmodelledStatements}/${total} DDL statements are unmodelled — over the 5% ceiling. ` +
+      'The dispatch parser has drifted behind what the migrations actually do.',
+  )
 })
 
 test('the modelled class DOES route through the parser end to end', () => {

@@ -73,7 +73,16 @@ import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { describeCoverage, extractObjects } from './check-pr-object-collisions.mjs'
+// The DISPATCH policy's parser, not the merge guard's (plan step 3b). Same
+// file, deliberately broader reading: `describeCoverage`/`extractObjects` model
+// whole-object REPLACEMENT for the merge guard, and were the reason this check
+// was blind to `alter table`, `create table`, `create index`, `grant`,
+// `comment on` and `create type` — a migration doing nothing but an
+// `alter table` reported as touching NO OBJECTS, which read as a clear.
+import {
+  describeDispatchCoverage,
+  dispatchObjectKeys,
+} from './check-pr-object-collisions.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -156,11 +165,13 @@ export function normalizeObject(text) {
  * migrations, and the earlier scalar `version` field exposed only the first of
  * them to comparison — a false clear in its own right (plan step 2b, defect 2).
  *
- * The result field is named `overlapFound`, NOT `safe`. This tool cannot see
- * `alter table`, `create table`, `create index` or `grant` at all, so "no
- * overlap in the classes I can read" is evidence, never clearance. A field
- * called `safe` invited callers to keep the old meaning after the printed
- * wording changed.
+ * The result field is named `overlapFound`, NOT `safe`, and it STAYS that way
+ * now that the parser reads every DDL class in `KNOWN_DDL_CLASSES` (#563).
+ * Full class coverage is not omniscience: the parser still cannot see DDL built
+ * by dynamic SQL, hidden behind `do $$ … $$` blocks, or written into a file this
+ * branch has not committed yet. "No overlap in what I could read" remains
+ * evidence, never clearance. A field called `safe` invited callers to keep the
+ * old meaning after the printed wording changed.
  *
  * @param {{objects: string[], version?: string|null}} proposed
  * @param {{label: string, objects: string[], versions?: string[], url?: string, draft?: boolean}[]} inFlight
@@ -220,7 +231,7 @@ export function nextFreeVersion(stamp, taken) {
 }
 
 export function formatReport({ proposed, inFlight, result }) {
-  const coverage = describeCoverage()
+  const coverage = describeDispatchCoverage()
   const lines = []
   lines.push(`Proposed task: ${proposed.task || '(unnamed)'}`)
   lines.push(`Objects it will write: ${proposed.objects.length ? proposed.objects.join(', ') : '(none — read-only)'}`)
@@ -239,10 +250,15 @@ export function formatReport({ proposed, inFlight, result }) {
     lines.push(
       'No overlap found in the object classes this tool can see.',
       `  CHECKED:     ${coverage.checked.join(', ')}`,
-      `  NOT CHECKED: ${notChecked.join(', ')}`,
+      `  NOT CHECKED: ${notChecked.length ? notChecked.join(', ') : '(no DDL class is unmodelled)'}`,
       '',
-      'This is EVIDENCE, not clearance. The coordinator must confirm no collision',
-      'in the unchecked classes before dispatching.',
+      // Still no verdict, and the reason is unchanged even though the class
+      // list is now complete: agents grep for a reassuring word and act on it
+      // regardless of any caveat printed after it.
+      'This is EVIDENCE, not clearance. Full DDL-class coverage is not omniscience:',
+      'DDL built by dynamic SQL or hidden inside a `do $$ … $$` block is invisible,',
+      'and so is any file not yet committed to a branch this tool can read. The',
+      'coordinator still confirms before dispatching.',
     )
     return lines.join('\n')
   }
@@ -404,7 +420,7 @@ export function gatherOpenPrObjects(repo, io = defaultIo) {
             'exists cannot be empty; refusing to report it as touching no objects.',
         )
       }
-      for (const object of extractObjects(sql)) objects.add(object)
+      for (const object of dispatchObjectKeys(sql)) objects.add(object)
     }
     if (objects.size === 0 && versions.size === 0) continue
     sources.push({
@@ -565,11 +581,13 @@ Options:
   --allocate-version   WITHDRAWN — it reserved nothing. Exits 2. See below.
   --json               Machine-readable output.
 
-Exit 0 = the check completed and found NO OVERLAP IN THE CLASSES IT CAN SEE.
-         That is evidence, not clearance: the parser is blind to "alter table",
-         "create table", "create index", "grant", "comment on", "create type",
-         so a clear result does not mean the objects are free. The report names
-         exactly what was and was not checked — read it.
+Exit 0 = the check completed and found NO OVERLAP IN WHAT IT COULD READ.
+         Since #563 the parser reads every DDL class this repo uses, including
+         "alter table", "create table", "create index", "grant", "comment on"
+         and "create type", which it was previously blind to. It is still not
+         clearance: DDL built by dynamic SQL or hidden inside a do-block is
+         invisible, as is any file not yet committed to a readable branch.
+         The report names exactly what was checked — read it.
 Exit 1 = collision. Exit 2 = could not determine.
 
 A task that cannot declare its objects must be dispatched READ-ONLY.
@@ -614,7 +632,7 @@ function main(argv) {
   let objects = options.objects.map(normalizeObject)
   if (options.sql) {
     try {
-      objects = [...new Set([...objects, ...extractObjects(readFileSync(options.sql, 'utf8'))])]
+      objects = [...new Set([...objects, ...dispatchObjectKeys(readFileSync(options.sql, 'utf8'))])]
     } catch (error) {
       console.error(`UNKNOWN: could not read --sql ${options.sql}: ${error.message}`)
       return 2
