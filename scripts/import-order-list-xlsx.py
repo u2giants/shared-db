@@ -131,6 +131,31 @@ PRODUCTION_CONFIRMATION_TEMPLATE = (
 #: package that names seven characters is not an exact package.
 FULL_GIT_SHA_LENGTH = 40
 
+# =====================================================================================
+# Server identity. Reading supabase/.temp/project-ref proves the Supabase CLI's LINK
+# state; it says nothing about the database the connection string actually opens. The
+# two are only connected if we ask the SERVER. Supabase does not expose the project ref
+# through SQL, so the ref is recovered from the connection parameters libpq ACTUALLY
+# used (connection.info), which is the socket that carries the writes — not from the
+# string we parsed. That is combined with a live content precondition that a
+# preview-pointing URL cannot satisfy.
+# =====================================================================================
+#: ``db.<ref>.supabase.co`` (direct) and ``<ref>.supabase.co``.
+HOST_PROJECT_REF_PATTERNS = (
+    re.compile(r"^db\.([a-z0-9]{20})\.supabase\.(?:co|com|net|in)$", re.IGNORECASE),
+    re.compile(r"^([a-z0-9]{20})\.supabase\.(?:co|com|net|in)$", re.IGNORECASE),
+)
+#: Pooler connections carry the ref in the user name: ``postgres.<ref>``.
+POOLER_USER_REF_PATTERN = re.compile(r"^postgres\.([a-z0-9]{20})$", re.IGNORECASE)
+
+#: Supabase's TRANSACTION-mode pooler. It cannot hold a multi-statement transaction, so
+#: the single-transaction production import would be silently split. Refused.
+TRANSACTION_POOLER_PORT = 6543
+
+#: Advisory-lock key for the whole OrderList import. Two overlapping runs would both
+#: pass the read-then-insert check in ``order_id_for_source`` and both insert.
+IMPORT_ADVISORY_LOCK_KEY = 852_000_727
+
 
 # =====================================================================================
 # Phase 0 baseline. The reconciliation report asserts against these numbers; it does
@@ -1223,6 +1248,7 @@ def apply_plan(
     dry_run: bool = False,
     allow_replace: bool = True,
     target_guard: Callable[[], None] | None = None,
+    single_transaction: bool = False,
 ) -> ApplyResult:
     """Write the plan. Idempotent by construction.
 
@@ -1239,12 +1265,20 @@ def apply_plan(
     production path always passes it, so ``--replace-source`` cannot reach production
     even if the CLI guard were removed.
 
-    ``target_guard`` is invoked before EVERY batch. The production path points it at
-    :func:`assert_write_target`, which re-reads ``supabase/.temp/project-ref`` from
-    disk, so a relink mid-run aborts the remaining batches instead of writing them into
-    a different database. Batches already committed stay committed and are safely
-    resumed by a later run, because every row is addressed by its deterministic source
-    ref.
+    ``target_guard`` is invoked before EVERY batch. For a real write the production
+    path points it at :func:`assert_server_identity_unchanged`, which asks the SERVER
+    for its own identity. Re-reading ``supabase/.temp/project-ref`` there would prove
+    nothing: the psycopg connection is opened once, and a later ``supabase link``
+    cannot move an already-open socket. What can move underneath a live run is the
+    server on the other end of it.
+
+    ``single_transaction=True`` (always used for real writes) commits ONCE, at the very
+    end. Per-batch commits were rejected: the orders loop finishes entirely before the
+    lines loop starts, so an abort partway through the lines would leave all 3,212
+    orders present with only a fraction of their 24,010 lines — four applications would
+    then read orders whose line sets are silently short, which is far worse than no
+    import at all. The batch structure is kept, but as the CADENCE of the drift check
+    rather than as a commit boundary. Any exception rolls the whole import back.
     """
     if replace_source and not allow_replace:
         raise ImporterError(
@@ -1266,10 +1300,13 @@ def apply_plan(
     orders = plan.writable_orders()
     for start in range(0, len(orders), batch_size):
         chunk = orders[start : start + batch_size]
-        if target_guard is not None:
-            target_guard()
-        gateway.begin_batch()
+        if not single_transaction:
+            gateway.begin_batch()
         try:
+            # Inside the try: a guard failure must roll the transaction back, not
+            # escape past the rollback and leave it open.
+            if target_guard is not None:
+                target_guard()
             for order in chunk:
                 full = dict(order.payload)
                 full["metadata"] = order.metadata
@@ -1297,17 +1334,23 @@ def apply_plan(
                         {"kind": "order", "source_id": order.source_id, "fields": changed}
                     )
         except Exception:
+            # In single-transaction mode this rolls back the ENTIRE import, not just
+            # this chunk, which is exactly the intent.
             gateway.rollback_batch()
             raise
-        gateway.commit_batch()
+        if not single_transaction:
+            gateway.commit_batch()
 
     lines = plan.writable_lines()
     for start in range(0, len(lines), batch_size):
         chunk = lines[start : start + batch_size]
-        if target_guard is not None:
-            target_guard()
-        gateway.begin_batch()
+        if not single_transaction:
+            gateway.begin_batch()
         try:
+            # Inside the try: a guard failure must roll the transaction back, not
+            # escape past the rollback and leave it open.
+            if target_guard is not None:
+                target_guard()
             for line in chunk:
                 full = dict(line.payload)
                 full["metadata"] = line.metadata
@@ -1340,8 +1383,15 @@ def apply_plan(
                         {"kind": "line", "source_id": line.source_id, "fields": changed}
                     )
         except Exception:
+            # In single-transaction mode this rolls back the ENTIRE import, not just
+            # this chunk, which is exactly the intent.
             gateway.rollback_batch()
             raise
+        if not single_transaction:
+            gateway.commit_batch()
+
+    if single_transaction:
+        # One commit for the whole import. Until this line runs, nothing is durable.
         gateway.commit_batch()
 
     return result
@@ -1644,6 +1694,221 @@ def assert_preview_target(project_ref_file: Path, *, preview: bool) -> str:
     return assert_write_target(
         project_ref_file, mode=MODE_PREVIEW if preview else MODE_DRY_RUN
     )
+
+
+# =====================================================================================
+# Server identity — the causal link between the proven ref and the actual writes
+# =====================================================================================
+@dataclass(frozen=True)
+class ServerIdentity:
+    """What the SERVER and the live socket say about themselves.
+
+    ``project_ref`` comes from the parameters libpq actually used
+    (``connection.info.host`` / ``.user``), not from the connection string as we parsed
+    it. ``fingerprint`` is a live server-side tuple; it is re-read before every batch,
+    so a pooler that re-points at a different backend, a failover, or a restart aborts
+    the run instead of quietly finishing it somewhere else.
+    """
+
+    project_ref: str | None
+    host: str | None
+    port: int | None
+    database: str | None
+    user: str | None
+    fingerprint: tuple[str, ...]
+
+    def redacted(self) -> str:
+        """Safe to print: host, database and ref only. Never the user or password."""
+        return f"host={self.host} db={self.database} ref={self.project_ref}"
+
+
+def project_ref_from_connection(host: str | None, user: str | None) -> str | None:
+    """Recover the Supabase project ref from the live connection parameters."""
+    for candidate in (host or "",):
+        for pattern in HOST_PROJECT_REF_PATTERNS:
+            found = pattern.match(candidate.strip())
+            if found:
+                return found.group(1).lower()
+    found = POOLER_USER_REF_PATTERN.match((user or "").strip())
+    if found:
+        return found.group(1).lower()
+    return None
+
+
+def read_server_fingerprint(connection: Any) -> tuple[str, ...]:
+    """A live server-side identity tuple. All three functions are public in Postgres."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "select current_database(), "
+            "coalesce(inet_server_addr()::text, 'local'), "
+            "pg_postmaster_start_time()::text"
+        )
+        row = cursor.fetchone()
+    return tuple(str(value) for value in row)
+
+
+def read_server_identity(connection: Any) -> ServerIdentity:
+    info = connection.info
+    host = getattr(info, "host", None)
+    user = getattr(info, "user", None)
+    port = getattr(info, "port", None)
+    return ServerIdentity(
+        project_ref=project_ref_from_connection(host, user),
+        host=host,
+        port=int(port) if port not in (None, "") else None,
+        database=getattr(info, "dbname", None),
+        user=user,
+        fingerprint=read_server_fingerprint(connection),
+    )
+
+
+def assert_server_is_target(
+    connection: Any, *, expected_ref: str, mode: str
+) -> ServerIdentity:
+    """Refuse unless the SERVER we are connected to is the proven target.
+
+    This is the gate that makes the ref file mean anything. Without it,
+    ``supabase/.temp/project-ref`` proves only the CLI's link state while
+    ``PRODUCTION_DATABASE_URL`` could open a completely different database — and the
+    reconciliation report would then name the wrong destination as evidence.
+    """
+    identity = read_server_identity(connection)
+    if identity.project_ref is None:
+        raise ImporterError(
+            "Cannot prove which Supabase project this connection actually opened. "
+            f"The live connection parameters ({identity.redacted()}) carry no "
+            "recognisable project ref: a Supabase host is `db.<ref>.supabase.co` and a "
+            "pooler user is `postgres.<ref>`. Refusing to write to a database whose "
+            "identity cannot be established. Nothing has been written."
+        )
+    if identity.project_ref != expected_ref:
+        raise ImporterError(
+            "TARGET MISMATCH. The proven project ref and the database this connection "
+            "actually opened are different databases.\n"
+            f"  supabase/.temp/project-ref (and --{mode}) require: {expected_ref}\n"
+            f"  the live connection actually opened:               "
+            f"{identity.project_ref}\n"
+            "The ref file records the Supabase CLI link state; the connection string "
+            "decides where rows land. They disagree, so the connection string is "
+            "stale or wrong. Refusing. Nothing has been written."
+        )
+    if mode == MODE_PRODUCTION and identity.port == TRANSACTION_POOLER_PORT:
+        raise ImporterError(
+            f"Refusing to import through the transaction-mode pooler (port "
+            f"{TRANSACTION_POOLER_PORT}). It cannot hold the single transaction this "
+            "import runs in, so a failure would leave orders committed without their "
+            "lines. Use the direct or session connection. Nothing has been written."
+        )
+    return identity
+
+
+def assert_server_identity_unchanged(connection: Any, baseline: ServerIdentity) -> None:
+    """Re-assert the SERVER's own identity. Called before every batch.
+
+    Re-reading the ref file would prove nothing here: the psycopg connection is opened
+    once and a later ``supabase link`` cannot move an open socket. What CAN move
+    underneath a live run is the server on the other end of it.
+    """
+    current = read_server_fingerprint(connection)
+    if current != baseline.fingerprint:
+        raise ImporterError(
+            "TARGET DRIFT DETECTED MID-RUN. The database on the other end of this "
+            "connection is no longer the one that was proven before the import "
+            "started (its identity tuple changed: database name, server address or "
+            "postmaster start time). Aborting. The transaction has been rolled back."
+        )
+
+
+def assert_no_existing_source_refs(connection: Any) -> int:
+    """Production precondition: no ``google_order_list`` rows may exist yet.
+
+    Required by the approval package, and it doubles as a content-based proof that
+    this is not preview: preview already holds 3,212 imported orders, so a stale
+    ``PRODUCTION_DATABASE_URL`` pointing there fails here even if everything else
+    somehow passed.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "select count(*) from plm.production_order_source_ref "
+            "where source_system = %s",
+            [SOURCE_SYSTEM],
+        )
+        count = int(cursor.fetchone()[0])
+    if count:
+        raise ImporterError(
+            f"Refusing: {count} {SOURCE_SYSTEM!r} order source references already "
+            "exist in this database. A first production import expects zero. Either "
+            "the import already ran, or this connection is not pointing at the "
+            "database you think it is. Nothing has been written."
+        )
+    return count
+
+
+def acquire_import_lock(connection: Any) -> None:
+    """Refuse to run while another import holds the lock.
+
+    ``order_id_for_source`` is read-then-insert at READ COMMITTED. Two overlapping
+    runs — plausible when someone reruns after an aborted attempt — would both see
+    "no row" and both insert. A session advisory lock removes the race outright
+    instead of hiding it behind ``on conflict do nothing``, which would swallow the
+    evidence that two runs overlapped.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute("select pg_try_advisory_lock(%s)", [IMPORT_ADVISORY_LOCK_KEY])
+        acquired = bool(cursor.fetchone()[0])
+    if not acquired:
+        raise ImporterError(
+            "Another OrderList import holds the advisory lock on this database. "
+            "Refusing to run two importers concurrently. Nothing has been written."
+        )
+
+
+def assert_reviewed_commit_is_checked_out(commit_sha: str, repo_root: Path) -> None:
+    """Prove the code being RUN is the code that was reviewed.
+
+    Without this, ``--reviewed-commit`` is an unchecked operator string and, since the
+    other two components of the confirmation are compile-time constants, the whole
+    confirmation is self-issued and a stale approval is replayable. Fails closed: if
+    git cannot answer, the run is refused.
+    """
+    import subprocess
+
+    def git(*args: str) -> str:
+        try:
+            done = subprocess.run(
+                ["git", "-C", str(repo_root), *args],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError as error:
+            raise ImporterError(
+                f"Cannot verify --reviewed-commit: git is not runnable ({error}). "
+                "Refusing. Nothing has been written."
+            ) from error
+        if done.returncode != 0:
+            raise ImporterError(
+                f"Cannot verify --reviewed-commit: `git {' '.join(args)}` failed "
+                f"({done.stderr.strip()}). Refusing. Nothing has been written."
+            )
+        return done.stdout.strip()
+
+    head = git("rev-parse", "HEAD").lower()
+    if head != commit_sha:
+        raise ImporterError(
+            "--reviewed-commit does not match the checked-out code.\n"
+            f"  --reviewed-commit: {commit_sha}\n"
+            f"  HEAD:              {head}\n"
+            "A confirmation is only meaningful if the importer being run IS the "
+            "reviewed importer. Check out the reviewed commit. Nothing has been "
+            "written."
+        )
+    dirty = git("status", "--porcelain")
+    if dirty:
+        raise ImporterError(
+            "The working tree is not clean, so the code being run is not exactly the "
+            f"reviewed commit {commit_sha}. Refusing. Nothing has been written."
+        )
 
 
 # =====================================================================================
@@ -2237,6 +2502,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     # -------------------------------------------------------------------------------
     if args.preview and args.production:  # pragma: no cover - argparse blocks it first
         raise ImporterError("--preview and --production are mutually exclusive.")
+    if args.dry_run and (args.preview or args.production):
+        # A "--dry-run --production" run would open a real production connection, run
+        # live queries, and then write a report titled "production import
+        # reconciliation" with run mode "production write" claiming 3,212 orders and
+        # 24,010 lines inserted — for an import that never happened — over the top of
+        # any genuine same-day report. In a repo whose approval process runs on these
+        # documents that is a manufactured false record. Refused.
+        raise ImporterError(
+            "--dry-run cannot be combined with --preview or --production. A dry run is "
+            "in-memory and opens no connection; combining them would produce a report "
+            "that claims an import which never happened. Run --dry-run on its own for "
+            "the rehearsal: every asserted Phase 0 baseline count is derived from the "
+            "workbook, not from the live catalog, so the rehearsal loses nothing it "
+            "is required to prove."
+        )
     if not args.dry_run and not (args.preview or args.production):
         raise ImporterError(
             "Pass --dry-run, --preview or --production. Refusing to guess."
@@ -2272,6 +2552,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         expected_sha256 = APPROVED_SOURCE_SHA256
         reviewed_commit = assert_reviewed_commit(args.reviewed_commit)
+        assert_reviewed_commit_is_checked_out(
+            reviewed_commit, Path(__file__).resolve().parents[1]
+        )
+        if args.project_ref_file != Path(DEFAULT_PROJECT_REF_FILE):
+            # Historically the whole target proof reduced to "a file containing the
+            # right string", which an operator could point anywhere. The server-identity
+            # gate below is now the real proof, but there is no reason to keep this
+            # override available in production either.
+            raise ImporterError(
+                "--project-ref-file cannot be overridden with --production. The "
+                f"default {DEFAULT_PROJECT_REF_FILE} is the only accepted location."
+            )
         if expected_populated_rows is None:
             raise ImporterError(
                 "--expected-populated-rows is required for --production. The source "
@@ -2318,10 +2610,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # here the workbook was read, which takes real time; a relink in that window
         # must abort, not be inherited.
         project_ref = assert_write_target(args.project_ref_file, mode=mode)
-        print(f"Write target proven: {project_ref}", file=sys.stderr)
-
-        def target_guard() -> None:  # noqa: F811 - deliberate per-batch recheck
-            assert_write_target(args.project_ref_file, mode=mode)
+        print(f"Link state proven: {project_ref}", file=sys.stderr)
 
         env_var = (
             "PRODUCTION_DATABASE_URL" if mode == MODE_PRODUCTION
@@ -2337,6 +2626,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"psycopg is required for --{mode}. `pip install 'psycopg[binary]'`."
             ) from error
         connection = psycopg.connect(database_url, autocommit=False)
+
+        # THE causal gate. Everything above proves the Supabase CLI's link state and
+        # the operator's intent; only this proves that the database on the other end of
+        # THIS socket is the one the report is about to name as the destination.
+        identity = assert_server_is_target(
+            connection, expected_ref=project_ref, mode=mode
+        )
+        print(f"Server identity proven: {identity.redacted()}", file=sys.stderr)
+        acquire_import_lock(connection)
+        if mode == MODE_PRODUCTION:
+            assert_no_existing_source_refs(connection)
+
+        def target_guard() -> None:
+            assert_server_identity_unchanged(connection, identity)
+
         catalog = load_master_data_catalog(connection)
         gateway: ImportGateway = PostgresGateway(connection)
         run_mode = f"{mode} write"
@@ -2346,17 +2650,116 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_mode = "dry run (in-memory, nothing written)"
 
     allow_replace = mode != MODE_PRODUCTION
+    writing = mode in MODE_REQUIRED_PROJECT_REF
 
     plan = build_plan(rows, catalog)
-    first = apply_plan(
-        plan,
-        gateway,
-        batch_size=args.batch_size,
-        replace_source=args.replace_source,
-        dry_run=args.dry_run,
-        allow_replace=allow_replace,
-        target_guard=target_guard,
+
+    # -------------------------------------------------------------------------------
+    # THE BALANCE CHECKS GATE THE WRITE. They used to run after every batch was
+    # committed, which meant an approver who passed the wrong --expected-populated-rows
+    # got all 3,212 orders and 24,010 lines inserted and only then read "did NOT
+    # balance", with nothing rolled back. Every counter these checks assert on comes
+    # from build_plan and is therefore fully known here, before a single row is
+    # written, so there is no reason to check them afterwards.
+    # -------------------------------------------------------------------------------
+    pre_write = Reconciliation(
+        counters=plan.counters,
+        apply_result=ApplyResult(),
+        checksum_matched_approved_source=matches_approved,
+        expected_populated_rows=expected_populated_rows,
     )
+    if not pre_write.balanced():
+        failures = [
+            f"  FAIL {name}: {detail}"
+            for name, passed, detail in pre_write.balance_checks()
+            if not passed
+        ]
+        raise ImporterError(
+            "Reconciliation did NOT balance. Refusing to write anything.\n"
+            + "\n".join(failures)
+            + "\nNothing has been written."
+        )
+    print(
+        f"Pre-write reconciliation balanced ({len(pre_write.balance_checks())} checks).",
+        file=sys.stderr,
+    )
+
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    report_slug = MODE_PRODUCTION if mode == MODE_PRODUCTION else "preview"
+    report_dir = args.report_dir or Path(
+        f"docs/verification/popdam-order-list-{report_slug}-{today}"
+    )
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    def write_report(
+        applied: ApplyResult,
+        *,
+        second_run: ApplyResult | None,
+        outcome: str,
+    ) -> Path:
+        """Write the report. NEVER overwrites an existing one.
+
+        Silently replacing a same-day report would destroy the evidence of an earlier
+        run in a repo whose approval process is built on these documents.
+        """
+        path = report_dir / "README.md"
+        if path.exists():
+            stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+            path = report_dir / f"README-{stamp}.md"
+            print(
+                f"A report already exists in {report_dir}; writing {path.name} instead "
+                "of overwriting it.",
+                file=sys.stderr,
+            )
+        path.write_text(
+            render_report(
+                reconciliation=Reconciliation(
+                    counters=plan.counters,
+                    apply_result=applied,
+                    checksum_matched_approved_source=matches_approved,
+                    expected_populated_rows=expected_populated_rows,
+                ),
+                checksum=checksum,
+                project_ref=project_ref,
+                workbook_name=workbook.name,
+                run_mode=f"{run_mode} — {outcome}",
+                generated_at=datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                second_run=second_run,
+                title=(
+                    "PopDAM OrderList production import reconciliation"
+                    if mode == MODE_PRODUCTION
+                    else "PopDAM OrderList preview import reconciliation"
+                ),
+                reviewed_commit=reviewed_commit,
+            ),
+            encoding="utf-8",
+        )
+        print(f"Report written: {path}", file=sys.stderr)
+        return path
+
+    # An abort mid-import must leave a DURABLE record. Previously the exception escaped
+    # before the report was written and the only trace was stderr scrollback.
+    try:
+        first = apply_plan(
+            plan,
+            gateway,
+            batch_size=args.batch_size,
+            replace_source=args.replace_source,
+            dry_run=args.dry_run,
+            allow_replace=allow_replace,
+            target_guard=target_guard,
+            single_transaction=writing,
+        )
+    except Exception as error:
+        write_report(
+            ApplyResult(),
+            second_run=None,
+            outcome=(
+                "ABORTED. The whole import ran in ONE transaction and was rolled "
+                f"back, so NO rows were written. Cause: {error}"
+            ),
+        )
+        raise
 
     second: ApplyResult | None = None
     if args.verify_idempotency:
@@ -2368,52 +2771,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             dry_run=args.dry_run,
             allow_replace=allow_replace,
             target_guard=target_guard,
+            single_transaction=writing,
         )
         if second.changed_rows != 0:
+            write_report(
+                first,
+                second_run=second,
+                outcome=(
+                    "IDEMPOTENCY FAILED: the second run changed "
+                    f"{second.changed_rows} business rows."
+                ),
+            )
             raise ImporterError(
                 f"Idempotency check FAILED: the second run changed "
                 f"{second.changed_rows} business rows."
             )
 
-    reconciliation = Reconciliation(
-        counters=plan.counters,
-        apply_result=first,
-        checksum_matched_approved_source=matches_approved,
-        expected_populated_rows=expected_populated_rows,
-    )
-
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    report_slug = MODE_PRODUCTION if mode == MODE_PRODUCTION else "preview"
-    report_dir = args.report_dir or Path(
-        f"docs/verification/popdam-order-list-{report_slug}-{today}"
-    )
-    report_dir.mkdir(parents=True, exist_ok=True)
-    report_path = report_dir / "README.md"
-    report_path.write_text(
-        render_report(
-            reconciliation=reconciliation,
-            checksum=checksum,
-            project_ref=project_ref,
-            workbook_name=workbook.name,
-            run_mode=run_mode,
-            generated_at=datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            second_run=second,
-            title=(
-                "PopDAM OrderList production import reconciliation"
-                if mode == MODE_PRODUCTION
-                else "PopDAM OrderList preview import reconciliation"
-            ),
-            reviewed_commit=reviewed_commit,
-        ),
-        encoding="utf-8",
-    )
-    print(f"Report written: {report_path}", file=sys.stderr)
-
-    if not reconciliation.balanced():
-        raise ImporterError(
-            "Reconciliation did NOT balance. See the balance-check table in "
-            f"{report_path}. Nothing further will run."
-        )
+    write_report(first, second_run=second, outcome="completed")
     return 0
 
 

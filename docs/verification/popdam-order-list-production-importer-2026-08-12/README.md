@@ -30,6 +30,34 @@ Everything that can refuse the run is checked **before the connection string is 
 | 9 | Project ref **re-proved** immediately before the transaction opens | `main()` | `test_a_drifted_target_never_reaches_the_first_batch_from_main` |
 | 10 | Project ref **re-proved before every batch** | `apply_plan(target_guard=…)` | `test_drift_after_the_first_batch_aborts_and_writes_no_more`, `test_guard_runs_before_every_batch_not_just_the_first` |
 | 11 | `allow_replace=False` — the second, independent replacement lock | `apply_plan` | `test_apply_plan_refuses_replace_when_allow_replace_is_false` |
+| 12 | **The SERVER must confirm it is the proven project** | `assert_server_is_target` | `test_stale_url_pointing_at_preview_is_refused`, `test_unprovable_server_is_refused` |
+| 13 | Zero pre-existing `google_order_list` source refs | `assert_no_existing_source_refs` | `test_preexisting_source_refs_refuse_the_run` |
+| 14 | Advisory lock — no two concurrent imports | `acquire_import_lock` | `test_concurrent_run_is_refused_by_the_advisory_lock` |
+| 15 | `--reviewed-commit` must equal `HEAD` on a clean tree | `assert_reviewed_commit_is_checked_out` | four `ReviewedCommitTests` cases |
+| 16 | **All balance checks run BEFORE the first write** | `main` | `test_wrong_expected_row_count_aborts_with_nothing_written` |
+| 17 | `--dry-run` cannot be combined with `--preview`/`--production` | `main` | `test_dry_run_with_production_is_refused` |
+
+Every production refusal test also asserts, structurally, that `apply_plan` was never entered — not merely that an exception was raised.
+
+## The target proof is now causal (was the worst defect in the first draft)
+
+`supabase/.temp/project-ref` records the **Supabase CLI link state**. It says nothing about the database `PRODUCTION_DATABASE_URL` actually opens. In the first draft nothing compared the two, so a stale connection string could have landed 24,010 lines in the wrong database while the report named `qsllyeztdwjgirsysgai` as the destination — an affirmatively false evidence artifact. Three layers now close it:
+
+1. **Connection parameters.** The project ref is recovered from `connection.info.host` / `.user` — what libpq actually used, i.e. the socket carrying the writes — and must equal the proven ref. Supabase does not expose the project ref through SQL, so this is the strongest available link; it is stated here plainly rather than overclaimed.
+2. **A content precondition.** Production must hold **zero** `google_order_list` source refs. Preview already holds 3,212, so a connection string stale in the most likely direction fails this check on live data even if everything else passed.
+3. **A live fingerprint.** `current_database()`, `inet_server_addr()` and `pg_postmaster_start_time()` are captured after connecting and re-asserted **before every batch**. The old per-batch check re-read the ref file, which could not detect anything: the psycopg connection is opened once and a later `supabase link` cannot move an open socket. The new check watches what actually can move — the server on the other end.
+
+This also makes `--project-ref-file` largely moot as a proof; it is additionally forbidden from being overridden in production.
+
+## H2 decision: one transaction, and a report that survives an abort
+
+**Chosen: the entire production import runs in ONE transaction.** The batch structure is kept, but as the cadence of the drift check, not as a commit boundary. `apply_plan(single_transaction=True)` commits once at the very end; any exception rolls the whole import back.
+
+Why: the orders loop completes before the lines loop begins. With per-batch commits, an abort during the lines phase left all 3,212 orders present with only a fraction of their 24,010 lines. Four applications read this data; orders whose line sets are silently short are worse than no import at all, because nothing looks broken. About 27,000 rows is a small transaction for Postgres, so the cost is negligible. Because the run is single-transaction, the transaction-mode pooler (port 6543) is refused — it would silently split the transaction.
+
+**Additionally**, a report is now written **before** any exception escapes, recording the abort and its cause. Previously an abort raised before `report_path.write_text` and the only record was stderr scrollback. Reports also never overwrite an existing one; a second same-day run writes `README-<timestamp>.md` alongside.
+
+**Consequence for the approval package:** its "Rollback and disable boundary" section describes per-500-row batch commits with resumability. That is no longer accurate and should be updated to say the import is atomic and a failed run leaves nothing to resume. I did not edit that document — it is owned elsewhere.
 
 `--replace-source` is impossible in production two independent ways: the CLI refuses the combination, and the production call site passes `allow_replace=False`, which raises inside `apply_plan` before the first batch opens. Deleting either lock still leaves the other.
 
@@ -51,10 +79,6 @@ python scripts/import-order-list-xlsx.py \
 ```
 
 `PRODUCTION_DATABASE_URL` supplies the connection string; it is never passed on the command line, never logged, and never reaches the report. A `--dry-run` rehearsal (which writes nothing and needs no credential) must precede it and must reproduce the approved baseline counts.
-
-## Balance checks: 10 becomes 11 in production
-
-The preview path runs 10 checks. A production run supplying `--expected-populated-rows` runs those same 10 plus one more — "staged rows equal the operator-declared expected populated rows". The final approval package should say **11 of 11**, not 10 of 10.
 
 ## The five-row question: what is knowable, and what is not
 
@@ -84,4 +108,10 @@ How the code handles this instead of guessing:
 
 ## Test evidence
 
-`python -m unittest discover -s scripts/tests -p "test_import_order_list.py"` — **118 tests, OK**. One pre-existing test (`test_there_is_no_production_flag`) was replaced, because the behaviour it asserted is exactly what issue #852 directed to change; it was replaced with a mutual-exclusion test plus 29 new production-gate tests, every one of which proves a refusal happens before any write.
+`python -m unittest discover -s scripts/tests -p "test_import_order_list.py"` — **145 tests, OK**, fully offline. One pre-existing test (`test_there_is_no_production_flag`) was replaced, because the behaviour it asserted is exactly what issue #852 directed to change.
+
+56 tests cover the production path. Every negative test asserts both the refusal message **and**, structurally, that `apply_plan` was never entered — an earlier draft of this PR claimed no-write coverage it did not have, which an adversarial review correctly caught.
+
+## Balance checks: 11, and they now gate the write
+
+A production run supplying `--expected-populated-rows` runs the preview 10 plus one more. Critically, they run **before** the first write rather than after the last commit. Every counter they assert on comes from `build_plan` and is fully known before any row is written, so the earlier ordering — insert 3,212 orders and 24,010 lines, then report "did NOT balance" with nothing rolled back — had no justification.

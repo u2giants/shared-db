@@ -1004,8 +1004,14 @@ class _ProductionHarness(unittest.TestCase):
         self.root = Path(self._tmp.name)
         self.workbook = self.root / "OrderList.xlsx"
         self.workbook.write_bytes(b"not the real workbook")
-        self.ref_file = self.root / "project-ref"
+        # --project-ref-file cannot be overridden in production, so the harness runs
+        # from a temp working directory that contains the real default path.
+        self.ref_file = self.root / importer.DEFAULT_PROJECT_REF_FILE
+        self.ref_file.parent.mkdir(parents=True, exist_ok=True)
         self.write_ref(importer.PRODUCTION_PROJECT_REF)
+        previous_cwd = os.getcwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, previous_cwd)
 
         real_sha = importer.sha256_file
         importer.sha256_file = lambda path, chunk_size=1 << 20: APPROVED  # type: ignore[assignment]
@@ -1015,12 +1021,54 @@ class _ProductionHarness(unittest.TestCase):
         importer.read_workbook_rows = lambda *a, **k: []  # type: ignore[assignment]
         self.addCleanup(lambda: setattr(importer, "read_workbook_rows", real_read))
 
+        # The reviewed-commit gate is verified unstubbed in ReviewedCommitTests against
+        # a real throwaway git repository. It is stubbed here so the tests below can
+        # reach the gates that sit AFTER it.
+        real_commit = importer.assert_reviewed_commit_is_checked_out
+        importer.assert_reviewed_commit_is_checked_out = lambda *a, **k: None  # type: ignore[assignment]
+        self.addCleanup(
+            lambda: setattr(
+                importer, "assert_reviewed_commit_is_checked_out", real_commit
+            )
+        )
+
         # Guarantee no connection string is reachable. If any gate leaked, the run
         # would fail with the credential error instead of the refusal being asserted.
         for name in ("PRODUCTION_DATABASE_URL", "PREVIEW_DATABASE_URL"):
             previous = os.environ.pop(name, None)
             if previous is not None:
                 self.addCleanup(os.environ.__setitem__, name, previous)
+
+        self._install_write_spy()
+
+    def _install_write_spy(self) -> None:
+        """Record every apply_plan call so a refusal can PROVE no write was attempted.
+
+        The adversarial review of PR #860 was right that asserting an exception message
+        is not the same as asserting nothing was written. This makes it structural:
+        apply_plan is the only path to a write, and these tests assert it was never
+        entered.
+        """
+        self.apply_calls: list[object] = []
+        real_apply = importer.apply_plan
+
+        def spy(*args, **kwargs):
+            self.apply_calls.append(args)
+            return real_apply(*args, **kwargs)
+
+        importer.apply_plan = spy  # type: ignore[assignment]
+        self.addCleanup(lambda: setattr(importer, "apply_plan", real_apply))
+
+    def assertNoWriteAttempted(self) -> None:
+        self.assertEqual(
+            self.apply_calls, [], "apply_plan was reached; a write was attempted"
+        )
+
+    def unapproved_hash(self) -> str:
+        """Disarm the eight conditional Phase 0 assertions for synthetic row sets."""
+        other = "f" * 64
+        importer.sha256_file = lambda path, chunk_size=1 << 20: other  # type: ignore
+        return other
 
     def write_ref(self, value: str) -> None:
         self.ref_file.write_text(value, encoding="utf-8")
@@ -1038,7 +1086,6 @@ class _ProductionHarness(unittest.TestCase):
             "--production",
             "--reviewed-commit", REVIEWED_SHA,
             "--expected-populated-rows", str(rows),
-            "--project-ref-file", str(self.ref_file),
         ]
         if confirm is not None:
             args += ["--confirm", confirm]
@@ -1079,6 +1126,7 @@ class ProductionTargetTests(_ProductionHarness):
         message = str(caught.exception)
         self.assertIn("Refusing to write", message)
         self.assertNotIn("database-url", message)
+        self.assertNoWriteAttempted()
 
 
 class ProductionChecksumPinTests(_ProductionHarness):
@@ -1090,6 +1138,7 @@ class ProductionChecksumPinTests(_ProductionHarness):
                 )
             )
         self.assertIn("cannot be overridden", str(caught.exception))
+        self.assertNoWriteAttempted()
         self.assertIn("Nothing has been written", str(caught.exception))
 
     def test_wrong_workbook_hash_aborts_before_any_write(self):
@@ -1102,6 +1151,7 @@ class ProductionChecksumPinTests(_ProductionHarness):
         message = str(caught.exception)
         self.assertIn("Source checksum mismatch", message)
         self.assertNotIn("database-url", message)
+        self.assertNoWriteAttempted()
 
 
 class ProductionConfirmationTests(_ProductionHarness):
@@ -1118,25 +1168,30 @@ class ProductionConfirmationTests(_ProductionHarness):
         self.assertIn("--confirm is required", message)
         self.assertIn(self.confirmation(), message)
         self.assertNotIn("database-url", message)
+        self.assertNoWriteAttempted()
 
     def test_empty_confirmation_is_refused(self):
         with self.assertRaises(importer.ImporterError):
             importer.main(self.argv(confirm="   "))
+        self.assertNoWriteAttempted()
 
     def test_confirmation_for_a_different_commit_is_refused(self):
         with self.assertRaises(importer.ImporterError) as caught:
             importer.main(self.argv(confirm=self.confirmation(commit="b" * 40)))
         self.assertIn("does not match this run", str(caught.exception))
+        self.assertNoWriteAttempted()
 
     def test_confirmation_for_a_different_workbook_is_refused(self):
         with self.assertRaises(importer.ImporterError):
             importer.main(self.argv(confirm=self.confirmation(sha="d" * 64)))
+        self.assertNoWriteAttempted()
 
     def test_confirmation_for_a_different_target_is_refused(self):
         with self.assertRaises(importer.ImporterError):
             importer.main(
                 self.argv(confirm=self.confirmation(ref=importer.PREVIEW_PROJECT_REF))
             )
+        self.assertNoWriteAttempted()
 
     def test_wrong_confirmation_never_echoes_the_received_value(self):
         secret_ish = self.confirmation(commit="e" * 40)
@@ -1165,11 +1220,11 @@ class ProductionConfirmationTests(_ProductionHarness):
         argv = [
             "--workbook", str(self.workbook), "--production",
             "--expected-populated-rows", "12354",
-            "--project-ref-file", str(self.ref_file),
         ]
         with self.assertRaises(importer.ImporterError) as caught:
             importer.main(argv)
         self.assertIn("--reviewed-commit is required", str(caught.exception))
+        self.assertNoWriteAttempted()
 
 
 class ProductionReplaceSourceTests(_ProductionHarness):
@@ -1181,6 +1236,7 @@ class ProductionReplaceSourceTests(_ProductionHarness):
         message = str(caught.exception)
         self.assertIn("refused with --production", message)
         self.assertIn("Nothing has been written", message)
+        self.assertNoWriteAttempted()
 
     def test_apply_plan_refuses_replace_when_allow_replace_is_false(self):
         """The second, independent lock: even if the CLI guard were deleted."""
@@ -1200,12 +1256,12 @@ class ProductionExpectedRowsTests(_ProductionHarness):
         argv = [
             "--workbook", str(self.workbook), "--production",
             "--reviewed-commit", REVIEWED_SHA,
-            "--project-ref-file", str(self.ref_file),
             "--confirm", self.confirmation(),
         ]
         with self.assertRaises(importer.ImporterError) as caught:
             importer.main(argv)
         self.assertIn("--expected-populated-rows is required", str(caught.exception))
+        self.assertNoWriteAttempted()
 
     def test_it_is_a_checked_input_not_a_hard_coded_number(self):
         """No default. The importer must never pick a row count for the approver."""
@@ -1262,13 +1318,19 @@ class TargetDriftMidRunTests(_ProductionHarness):
 
         with self.assertRaises(importer.ImporterError) as caught:
             importer.apply_plan(
-                plan, gateway, batch_size=5, allow_replace=False, target_guard=guard
+                plan,
+                gateway,
+                batch_size=5,
+                allow_replace=False,
+                target_guard=guard,
+                single_transaction=True,
             )
         self.assertIn("Refusing to write", str(caught.exception))
-        # Batch one committed; batch two never opened. A later run resumes safely
-        # because every row is addressed by its deterministic source ref.
-        self.assertEqual(gateway.batches_committed, 1)
-        self.assertEqual(len(gateway.orders), 5)
+        # H2: the whole import is ONE transaction, so an abort commits NOTHING. A
+        # partially committed import (orders present, lines short) is the failure mode
+        # this replaced.
+        self.assertEqual(gateway.batches_committed, 0)
+        self.assertEqual(gateway.batches_rolled_back, 1)
 
     def test_guard_runs_before_every_batch_not_just_the_first(self):
         plan = self._plan()
@@ -1342,6 +1404,382 @@ class ProductionReportTests(_ProductionHarness):
         )
         for forbidden in ("postgres://", "postgresql://", "password", "sslmode"):
             self.assertNotIn(forbidden, report.lower())
+
+
+# =====================================================================================
+# 14. Adversarial-review fixes: server identity, write-gating checks, transaction
+# boundary, reviewed-commit verification, concurrency, report preservation.
+# =====================================================================================
+class FakeCursor:
+    def __init__(self, connection: "FakeConnection") -> None:
+        self._connection = connection
+        self._result: object = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql: str, params=None) -> None:
+        self._connection.executed.append(sql)
+        if "pg_postmaster_start_time" in sql:
+            self._result = self._connection.fingerprint
+        elif "pg_try_advisory_lock" in sql:
+            self._result = (self._connection.lock_available,)
+        elif "production_order_source_ref" in sql:
+            self._result = (self._connection.existing_source_refs,)
+        else:  # pragma: no cover - no other query is issued by these gates
+            raise AssertionError(f"unexpected query: {sql}")
+
+    def fetchone(self):
+        return self._result
+
+
+class FakeInfo:
+    def __init__(self, host, user, port, dbname):
+        self.host, self.user, self.port, self.dbname = host, user, port, dbname
+
+
+class FakeConnection:
+    def __init__(
+        self,
+        *,
+        host="db.qsllyeztdwjgirsysgai.supabase.co",
+        user="postgres",
+        port=5432,
+        dbname="postgres",
+        fingerprint=("postgres", "10.0.0.1", "2026-08-12 00:00:00+00"),
+        lock_available=True,
+        existing_source_refs=0,
+    ):
+        self.info = FakeInfo(host, user, port, dbname)
+        self.fingerprint = fingerprint
+        self.lock_available = lock_available
+        self.existing_source_refs = existing_source_refs
+        self.executed: list[str] = []
+
+    def cursor(self):
+        return FakeCursor(self)
+
+
+PROD = importer.PRODUCTION_PROJECT_REF
+PREV = importer.PREVIEW_PROJECT_REF
+
+
+class ServerIdentityTests(unittest.TestCase):
+    """C1: the proven ref must be causally linked to the database actually written."""
+
+    def test_ref_is_recovered_from_a_direct_host(self):
+        self.assertEqual(
+            importer.project_ref_from_connection(f"db.{PROD}.supabase.co", "postgres"),
+            PROD,
+        )
+
+    def test_ref_is_recovered_from_a_pooler_user(self):
+        self.assertEqual(
+            importer.project_ref_from_connection(
+                "aws-0-us-east-1.pooler.supabase.com", f"postgres.{PROD}"
+            ),
+            PROD,
+        )
+
+    def test_unrecognisable_connection_yields_no_ref(self):
+        for host, user in (
+            ("localhost", "postgres"),
+            ("evil.example.com", "postgres"),
+            (None, None),
+            ("", ""),
+        ):
+            self.assertIsNone(importer.project_ref_from_connection(host, user))
+
+    def test_matching_server_is_accepted(self):
+        connection = FakeConnection()
+        identity = importer.assert_server_is_target(
+            connection, expected_ref=PROD, mode=importer.MODE_PRODUCTION
+        )
+        self.assertEqual(identity.project_ref, PROD)
+
+    def test_stale_url_pointing_at_preview_is_refused(self):
+        """The exact C1 scenario: ref file says production, the URL opens preview."""
+        connection = FakeConnection(host=f"db.{PREV}.supabase.co")
+        with self.assertRaises(importer.ImporterError) as caught:
+            importer.assert_server_is_target(
+                connection, expected_ref=PROD, mode=importer.MODE_PRODUCTION
+            )
+        message = str(caught.exception)
+        self.assertIn("TARGET MISMATCH", message)
+        self.assertIn(PROD, message)
+        self.assertIn(PREV, message)
+        self.assertIn("Nothing has been written", message)
+
+    def test_unprovable_server_is_refused(self):
+        connection = FakeConnection(host="localhost", user="postgres")
+        with self.assertRaises(importer.ImporterError) as caught:
+            importer.assert_server_is_target(
+                connection, expected_ref=PROD, mode=importer.MODE_PRODUCTION
+            )
+        self.assertIn("cannot be established", str(caught.exception))
+
+    def test_identity_never_prints_the_user_or_a_password(self):
+        connection = FakeConnection(user="postgres.secretuser")
+        identity = importer.read_server_identity(connection)
+        self.assertNotIn("secretuser", identity.redacted())
+
+    def test_transaction_pooler_port_is_refused_in_production(self):
+        connection = FakeConnection(
+            host="aws-0-us-east-1.pooler.supabase.com",
+            user=f"postgres.{PROD}",
+            port=importer.TRANSACTION_POOLER_PORT,
+        )
+        with self.assertRaises(importer.ImporterError) as caught:
+            importer.assert_server_is_target(
+                connection, expected_ref=PROD, mode=importer.MODE_PRODUCTION
+            )
+        self.assertIn("transaction-mode pooler", str(caught.exception))
+
+    def test_fingerprint_change_mid_run_aborts(self):
+        connection = FakeConnection()
+        identity = importer.read_server_identity(connection)
+        connection.fingerprint = ("postgres", "10.0.0.9", "2026-08-12 09:00:00+00")
+        with self.assertRaises(importer.ImporterError) as caught:
+            importer.assert_server_identity_unchanged(connection, identity)
+        self.assertIn("TARGET DRIFT DETECTED MID-RUN", str(caught.exception))
+
+    def test_unchanged_fingerprint_passes(self):
+        connection = FakeConnection()
+        identity = importer.read_server_identity(connection)
+        importer.assert_server_identity_unchanged(connection, identity)
+
+    def test_preexisting_source_refs_refuse_the_run(self):
+        """Content-based cross-check: preview already holds 3,212 of these."""
+        connection = FakeConnection(existing_source_refs=3212)
+        with self.assertRaises(importer.ImporterError) as caught:
+            importer.assert_no_existing_source_refs(connection)
+        self.assertIn("already", str(caught.exception))
+        self.assertIn("Nothing has been written", str(caught.exception))
+
+    def test_empty_target_is_accepted(self):
+        self.assertEqual(
+            importer.assert_no_existing_source_refs(FakeConnection()), 0
+        )
+
+    def test_concurrent_run_is_refused_by_the_advisory_lock(self):
+        with self.assertRaises(importer.ImporterError) as caught:
+            importer.acquire_import_lock(FakeConnection(lock_available=False))
+        self.assertIn("Another OrderList import", str(caught.exception))
+
+    def test_lock_is_acquired_when_free(self):
+        importer.acquire_import_lock(FakeConnection())
+
+
+class ReviewedCommitTests(unittest.TestCase):
+    """H3: the confirmation must not be self-issued."""
+
+    def _repo(self) -> tuple[Path, str]:
+        import subprocess
+
+        directory = tempfile.mkdtemp()
+        self.addCleanup(
+            lambda: __import__("shutil").rmtree(directory, ignore_errors=True)
+        )
+        root = Path(directory)
+
+        def git(*args):
+            return subprocess.run(
+                ["git", "-C", str(root), *args],
+                capture_output=True, text=True, check=True,
+            ).stdout.strip()
+
+        git("init", "-q")
+        git("config", "user.email", "t@example.com")
+        git("config", "user.name", "T")
+        (root / "a.txt").write_text("one", encoding="utf-8")
+        git("add", "-A")
+        git("commit", "-q", "-m", "one")
+        return root, git("rev-parse", "HEAD").lower()
+
+    def test_matching_head_on_a_clean_tree_passes(self):
+        root, head = self._repo()
+        importer.assert_reviewed_commit_is_checked_out(head, root)
+
+    def test_a_different_commit_is_refused(self):
+        root, _ = self._repo()
+        with self.assertRaises(importer.ImporterError) as caught:
+            importer.assert_reviewed_commit_is_checked_out("b" * 40, root)
+        message = str(caught.exception)
+        self.assertIn("does not match the checked-out code", message)
+        self.assertIn("Nothing has been written", message)
+
+    def test_a_dirty_tree_is_refused(self):
+        root, head = self._repo()
+        (root / "a.txt").write_text("edited", encoding="utf-8")
+        with self.assertRaises(importer.ImporterError) as caught:
+            importer.assert_reviewed_commit_is_checked_out(head, root)
+        self.assertIn("not clean", str(caught.exception))
+
+    def test_it_fails_closed_when_git_cannot_answer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(importer.ImporterError) as caught:
+                importer.assert_reviewed_commit_is_checked_out(
+                    "c" * 40, Path(directory)
+                )
+            self.assertIn("Cannot verify --reviewed-commit", str(caught.exception))
+
+
+class DryRunFlagCombinationTests(_ProductionHarness):
+    """H1: no manufactured false record."""
+
+    def test_dry_run_with_production_is_refused(self):
+        with self.assertRaises(importer.ImporterError) as caught:
+            importer.main(self.argv("--dry-run", confirm=self.confirmation()))
+        message = str(caught.exception)
+        self.assertIn("cannot be combined", message)
+        self.assertNoWriteAttempted()
+
+    def test_dry_run_with_preview_is_refused(self):
+        with self.assertRaises(importer.ImporterError):
+            importer.main(
+                ["--workbook", str(self.workbook), "--dry-run", "--preview"]
+            )
+        self.assertNoWriteAttempted()
+
+    def test_a_plain_dry_run_still_works(self):
+        other = self.unapproved_hash()
+        argv = [
+            "--workbook", str(self.workbook), "--dry-run",
+            "--expected-sha256", other,
+        ]
+        self.assertEqual(importer.main(argv), 0)
+
+
+class BalanceChecksGateTheWriteTests(unittest.TestCase):
+    """C2: a failing check must PREVENT the write, not report it afterwards."""
+
+    def test_pre_write_reconciliation_uses_only_plan_counters(self):
+        """The proof that these checks CAN run before the write."""
+        checks = importer.Reconciliation(
+            counters={"staged_rows": 5, "rows_direct": 5, "planned_lines": 0},
+            apply_result=importer.ApplyResult(),
+            expected_populated_rows=5,
+        ).balance_checks()
+        self.assertTrue(all(passed for _, passed, _ in checks))
+
+    def test_wrong_expected_row_count_aborts_with_nothing_written(self):
+        import shutil
+
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        if True:
+            root = Path(directory)
+            previous = os.getcwd()
+            os.chdir(root)
+            self.addCleanup(os.chdir, previous)
+            workbook = root / "OrderList.xlsx"
+            workbook.write_bytes(b"x")
+
+            real_sha = importer.sha256_file
+            importer.sha256_file = lambda path, chunk_size=1 << 20: "f" * 64  # type: ignore
+            self.addCleanup(lambda: setattr(importer, "sha256_file", real_sha))
+
+            real_read = importer.read_workbook_rows
+            rows = [direct_row(i + 2, f"PO-{i}", f"SKU-{i}", "generic") for i in range(4)]
+            importer.read_workbook_rows = lambda *a, **k: rows  # type: ignore
+            self.addCleanup(lambda: setattr(importer, "read_workbook_rows", real_read))
+
+            written: list[Path] = []
+            real_apply = importer.apply_plan
+
+            def spy(*a, **k):
+                written.append(Path("apply_plan was called"))
+                return real_apply(*a, **k)
+
+            importer.apply_plan = spy  # type: ignore
+            self.addCleanup(lambda: setattr(importer, "apply_plan", real_apply))
+
+            with self.assertRaises(importer.ImporterError) as caught:
+                importer.main(
+                    [
+                        "--workbook", str(workbook),
+                        "--dry-run",
+                        "--expected-sha256", "f" * 64,
+                        "--expected-populated-rows", "12323",
+                    ]
+                )
+            message = str(caught.exception)
+            self.assertIn("did NOT balance", message)
+            self.assertIn("Refusing to write anything", message)
+            self.assertIn("operator-declared", message)
+            self.assertEqual(written, [], "apply_plan must never have been reached")
+
+
+class SingleTransactionTests(unittest.TestCase):
+    """H2: the whole import is one transaction."""
+
+    def _plan(self, count=12):
+        rows = [
+            direct_row(i + 2, f"PO-{i:03d}", f"SKU-{i}", "generic") for i in range(count)
+        ]
+        return importer.build_plan(rows, LICENSED_CATALOG)
+
+    def test_single_transaction_commits_exactly_once(self):
+        gateway = importer.InMemoryGateway()
+        importer.apply_plan(
+            self._plan(), gateway, batch_size=5, single_transaction=True
+        )
+        self.assertEqual(gateway.batches_committed, 1)
+
+    def test_batched_mode_commits_per_batch(self):
+        gateway = importer.InMemoryGateway()
+        importer.apply_plan(
+            self._plan(), gateway, batch_size=5, single_transaction=False
+        )
+        self.assertGreater(gateway.batches_committed, 1)
+
+    def test_a_failure_in_the_lines_phase_commits_no_orders(self):
+        """The exact H2 failure mode: orders present, lines short. Must not happen."""
+        plan = self._plan()
+        gateway = importer.InMemoryGateway()
+        calls = {"n": 0}
+
+        def guard():
+            calls["n"] += 1
+            # Fire during the LINES phase, after every order has been staged.
+            if calls["n"] > -(-len(plan.writable_orders()) // 5):
+                raise importer.ImporterError("Refusing to write: drift")
+
+        with self.assertRaises(importer.ImporterError):
+            importer.apply_plan(
+                plan,
+                gateway,
+                batch_size=5,
+                target_guard=guard,
+                single_transaction=True,
+            )
+        self.assertEqual(gateway.batches_committed, 0, "nothing may be durable")
+        self.assertEqual(gateway.batches_rolled_back, 1)
+
+
+class ReportPreservationTests(_ProductionHarness):
+    """L2: a genuine report must never be silently overwritten."""
+
+    def test_existing_report_is_not_overwritten(self):
+        report_dir = self.root / "report"
+        report_dir.mkdir()
+        original = report_dir / "README.md"
+        original.write_text("GENUINE EARLIER RUN", encoding="utf-8")
+        other = self.unapproved_hash()
+        argv = [
+            "--workbook", str(self.workbook),
+            "--dry-run",
+            "--expected-sha256", other,
+            "--report-dir", str(report_dir),
+        ]
+        self.assertEqual(importer.main(argv), 0)
+        self.assertEqual(original.read_text(encoding="utf-8"), "GENUINE EARLIER RUN")
+        self.assertEqual(
+            len(list(report_dir.glob("README-*.md"))), 1, "a second file is written"
+        )
 
 
 if __name__ == "__main__":
