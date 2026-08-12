@@ -2138,6 +2138,15 @@ CONTRACT_MEMBERSHIP = {
         "20260810100000", "20260810110000", "20260810120000", "20260810130000",
         "20260810160000", "20260810170000",
     }),
+    # Contract section 5A.4. B10b (20260811030000) and B10d (20260811070000) are
+    # single files -- trivially atomic, nothing to stop halfway through -- so
+    # they have no entry and must not gain one.
+    "B10a": frozenset({
+        "20260810190000", "20260810190100",
+    }),
+    "B10c": frozenset({
+        "20260811050000", "20260811060000",
+    }),
 }
 CONTRACT_COUNTS = {name: len(members) for name, members in CONTRACT_MEMBERSHIP.items()}
 
@@ -2155,6 +2164,8 @@ CONTRACT_BASES = {
     "B7": "ATOMIC",
     "B8": "NEVER-REST",
     "B9": "ATOMIC",
+    "B10a": "ATOMIC",
+    "B10c": "ATOMIC",
 }
 
 CONTRACT_PATH = REPO / "docs" / "production-promotion-app-tolerance-contract.md"
@@ -2224,14 +2235,8 @@ class AtomicBatchTests(unittest.TestCase):
         Before this change, B2/B4/B5/B6/B8's 15 never-rest versions belonged to
         no entry at all and the guard accepted resting on any of them.
         """
-        # KNOWN AND OPEN, tracked as issue #819: B10a's 20260810190000 and
-        # B10c's 20260811050000 are section 6 never-rest states that belong to
-        # no registered batch. #819 registers them; this exclusion is deleted in
-        # the same commit. It is listed explicitly rather than skipped silently
-        # so the gap is visible in the test output, not hidden by a filter.
-        OPEN_819 = {"20260810190000", "20260811050000"}
         unenforced: list[str] = []
-        for version in sorted(self._section_6_never_rest_versions() - OPEN_819):
+        for version in sorted(self._section_6_never_rest_versions()):
             owner = [n for n, m in BATCHES.items() if version in m]
             if not owner:
                 unenforced.append(f"{version}: in no registered batch")
@@ -2248,10 +2253,7 @@ class AtomicBatchTests(unittest.TestCase):
         """End to end, one allowlist per never-rest version: an allowlist whose
         highest version is a forbidden resting state must be refused."""
         for version in sorted(self._section_6_never_rest_versions()):
-            owner = [n for n, m in BATCHES.items() if version in m]
-            if not owner:  # tracked by #819; see the test above
-                continue
-            name = owner[0]
+            name = next(n for n, m in BATCHES.items() if version in m)
             stopping_here = sorted(v for v in BATCHES[name] if v <= version)
             with self.subTest(version=version, batch=name):
                 with self.assertRaises(GuardError) as ctx:
@@ -2448,6 +2450,57 @@ class AtomicBatchTests(unittest.TestCase):
             with self.assertRaises(GuardError) as ctx:
                 assert_bounded(root, "20260810050000", ledger)
             self.assertIn("batch B9 is ATOMIC", str(ctx.exception))
+
+    # -- #819: B10a and B10c -----------------------------------------------
+
+    def test_the_lone_20260811050000_shortcut_is_REFUSED(self) -> None:
+        """ISSUE #819 -- A DELIBERATE BEHAVIOUR CHANGE. THIS USED TO PASS.
+
+        B10c is declared ATOMIC by contract section 5A.4 and was enforced by
+        nothing: not by ATOMIC_BATCHES and, unlike B10a, not by any co-presence
+        rule either. `20260811050000` alone leaves plm.dcp_metadata_* created,
+        service_role-insertable, with no supported loader or finalizer.
+        """
+        with self.assertRaises(GuardError) as ctx:
+            assert_atomic_batches(["20260811050000"], set())
+        message = str(ctx.exception)
+        self.assertIn("batch B10c is ATOMIC", message)
+        self.assertIn("MISSING (1): 20260811060000", message)
+
+    def test_a_complete_B10c_allowlist_is_ACCEPTED(self) -> None:
+        assert_atomic_batches(sorted(BATCHES["B10c"]), set())
+
+    def test_B10c_resumes_with_the_loader_alone_once_the_landing_is_applied(
+        self,
+    ) -> None:
+        """The recovery case. A run that died between the two is repaired by
+        20260811060000 ALONE -- validate_candidates refuses to re-list the
+        applied 20260811050000."""
+        assert_atomic_batches(["20260811060000"], {"20260811050000"})
+
+    def test_B10a_is_enforced_by_BOTH_mechanisms_and_they_agree(self) -> None:
+        """B10a already had a one-directional co-presence rule (#665). The new
+        atomic entry must not contradict it: the create alone is refused by
+        both, and the loader alone is accepted by both once the create is
+        applied."""
+        with self.assertRaises(GuardError):
+            assert_atomic_batches(["20260810190000"], set())
+        with self.assertRaises(GuardError):
+            parse_allowlist("20260810190000", frozenset())
+        assert_atomic_batches(["20260810190100"], {"20260810190000"})
+        self.assertEqual(
+            parse_allowlist("20260810190100", {"20260810190000"}),
+            ["20260810190100"],
+        )
+
+    def test_the_single_file_B10_parts_have_no_entry(self) -> None:
+        """B10b and B10d are one file each, so there is no internal boundary to
+        stop at. Registering them would add a batch that can never be split and
+        a message that can never fire -- and would invite someone to 'complete'
+        it by adding neighbours that are not members."""
+        registered = set().union(*BATCHES.values())
+        self.assertNotIn("20260811030000", registered)
+        self.assertNotIn("20260811070000", registered)
 
     def test_the_refusal_message_says_what_to_do(self) -> None:
         with self.assertRaises(GuardError) as ctx:

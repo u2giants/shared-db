@@ -609,6 +609,66 @@ ATOMIC_BATCHES: tuple[tuple[str, str, str, frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        # Issue #819, contract section 5A.4 and 5A.8.
+        "B10a",
+        "ATOMIC",
+        "the Disney DCP Vault source landing plus its chunked loader. "
+        "20260810190000 creates nine plm.dcp_* tables, the frozen row-hash "
+        "function and the immutability triggers but NO loader; 20260810190100 "
+        "supplies the chunked loader, plm.dcp_chunk_ledger and "
+        "plm.finalize_dcp_crawl -- the only CHECKED path to "
+        "dcp_crawl.status = 'complete'. State the exposure accurately, because "
+        "the loose version of it was wrong: 20260810190000 grants service_role "
+        "select AND insert and installs no header INSERT trigger, so a caller "
+        "CAN write rows directly and can insert a dcp_crawl row already marked "
+        "'complete', arming the immutability triggers over data nothing ever "
+        "validated. That is worse than 'nothing can happen', not better. What "
+        "is missing between the pair is the supported, checked, finalizable "
+        "path -- not the ability to write. "
+        "WHY THIS ENTRY EXISTS ALONGSIDE THE CO-PRESENCE RULE, which already "
+        "covers the pair one-directionally (issue #665): the co-presence rule "
+        "fires on the CREATE, so it is the right tool for 'the create must "
+        "carry its fix'. This entry states the batch property the contract "
+        "actually declares -- B10a is ATOMIC (section 5A.4) -- and section 5A.8 "
+        "names registering B10a and B10c in ATOMIC_BATCHES as the correct fix. "
+        "The two checks agree and the stricter one wins, which is the safe "
+        "direction; neither is redundant, because deleting either would leave a "
+        "claim the contract makes with nothing behind it.",
+        frozenset(
+            {
+                "20260810190000",
+                "20260810190100",
+            }
+        ),
+    ),
+    (
+        # Issue #819. THE GAP THIS ISSUE WAS FILED ABOUT.
+        "B10c",
+        "ATOMIC",
+        "the DCP Vault metadata landing plus its chunked loader. Declared ATOMIC "
+        "by contract section 5A.4 and enforced by NOTHING until now -- not by "
+        "ATOMIC_BATCHES, and (unlike B10a) not by any co-presence rule either, "
+        "so the guard accepted an allowlist of 20260811050000 ALONE and only the "
+        "operator stood between the contract and that state. 20260811050000 "
+        "creates plm.dcp_metadata_*, dcp_property, dcp_character, dcp_term and "
+        "three observation tables with no loader; 20260811060000 supplies "
+        "begin_dcp_metadata_run / load_dcp_metadata_chunk / "
+        "finalize_dcp_metadata_run plus plm.dcp_metadata_chunk_ledger and "
+        "plm.dcp_metadata_load_exception. Identical shape to B10a, including the "
+        "precision: 20260811050000 DOES grant service_role select and insert, so "
+        "the gap is the supported loader and finalizer, not raw writability. "
+        "Rest only after 20260811060000 (contract section 6). "
+        "B10b (20260811030000) and B10d (20260811070000) are single files and "
+        "therefore trivially atomic -- there is no internal boundary to stop at, "
+        "so they get no entry.",
+        frozenset(
+            {
+                "20260811050000",
+                "20260811060000",
+            }
+        ),
+    ),
 )
 
 
