@@ -356,6 +356,7 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
+          COLDLION_ALERT_ISSUE_REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
           set +e
@@ -364,7 +365,18 @@ jobs:
             --project-ref "$PRODUCTION_PROJECT_REF" --out alert-plan.json
           CODE=$?
           set -e
-          if [ "$CODE" -eq 1 ] && [ -f alert-plan.json ]; then
+          # #551 dedupe. Exit 3 means this exact alert set is ALREADY on an open issue,
+          # so filing another one only buries it. The run is already RED (this step only
+          # runs on failure()), so the loud signal is not lost.
+          if [ "$CODE" -eq 3 ]; then
+            MATCH=$(node -e "try{process.stdout.write(String(JSON.parse(require('fs').readFileSync('alert-plan.json','utf8')).dedupe_matched_issue??'unknown'))}catch(e){process.stdout.write('unknown')}")
+            echo "::error::ColdLion PRODUCTION alert is ALREADY REPORTED on open issue #${MATCH}; no duplicate filed. The run stays RED. Human response owner: ${COLDLION_HUMAN_RESPONSE_OWNER}."
+            exit 0
+          fi
+          if [ "$CODE" -eq 4 ]; then
+            echo "::error title=ColdLion alert DEDUPE CHECK FAILED::The duplicate check could not be completed. Filing the alert anyway — a possible duplicate is strictly better than a swallowed production alert. Human response owner: ${COLDLION_HUMAN_RESPONSE_OWNER}."
+          fi
+          if { [ "$CODE" -eq 1 ] || [ "$CODE" -eq 4 ]; } && [ -f alert-plan.json ]; then
             TITLE=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('alert-plan.json','utf8')).title)")
             node -e "require('fs').writeFileSync('alert-body.md', JSON.parse(require('fs').readFileSync('alert-plan.json','utf8')).body)"
           else
