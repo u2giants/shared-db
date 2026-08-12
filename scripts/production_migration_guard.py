@@ -325,7 +325,7 @@ CO_PRESENCE_RULES: tuple[tuple[str, frozenset[str], str], ...] = (
 # legal resting point from the same section, and each count reconciles exactly
 # with the section 5 table -- EXCEPT B3, which carries one SECURITY appendage the
 # contract predates: 20260812020000 (issue #822, the service_role TRUNCATE revoke
-# on B3's four append-only tables). So the guard counts are (11, 11, 6, 14) while
+# on three append-only tables plus core.property_alias). So the guard counts are (11, 11, 6, 14) while
 # the contract's functional section-5 counts stay (11, 10, 6, 14). The divergence
 # is deliberate and is documented in the B3 entry below; the contract's ten are a
 # strict subset of the guard's eleven.
@@ -372,10 +372,13 @@ ATOMIC_BATCHES: tuple[tuple[str, str, frozenset[str]], ...] = (
         "`supabase db push` applies in version order, so they cannot be "
         "leapfrogged into a later batch. 20260812020000 is the SECURITY appendage "
         "added by issue #822: the creates in this span `grant all` (including "
-        "TRUNCATE) to service_role on four append-only evidence/decision tables, "
-        "and TRUNCATE does not fire the BEFORE UPDATE OR DELETE row triggers that "
-        "enforce their append-only semantics -- so service_role is one statement "
-        "away from silently wiping them. 20260812020000 revokes truncate plus the "
+        "TRUNCATE) to service_role on three append-only evidence/decision tables "
+        "plus core.property_alias (controlled shared alias truth whose writes go "
+        "through public.promote_property_alias_batch()). For the three append-only "
+        "tables, TRUNCATE does not fire the BEFORE UPDATE OR DELETE row triggers "
+        "that enforce their append-only semantics -- so service_role is one "
+        "statement away from silently wiping them; core.property_alias is revoked "
+        "alongside as defense in depth. 20260812020000 revokes truncate plus the "
         "DDL-adjacent bits and keeps the DML, so production must not rest at "
         "20260731200000 without it. It sorts after every other member, so the "
         "revoke runs once the over-grant exists; the recovery allowlist of "

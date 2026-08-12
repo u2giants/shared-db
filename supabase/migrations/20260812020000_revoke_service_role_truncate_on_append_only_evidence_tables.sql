@@ -1,5 +1,8 @@
 -- =====================================================================================
--- service_role TRUNCATE removal on four append-only evidence/decision tables.
+-- service_role TRUNCATE removal on four evidence/decision tables: three append-only
+-- (plm.coldlion_promotion_audit, plm.coldlion_promotion_quarantine,
+-- dam.popsg_property_resolution) plus core.property_alias, whose TRUNCATE removal is
+-- defense in depth (no append-only trigger to bypass). See WHAT DEFECT THIS CORRECTS below.
 --
 -- Migration: 20260812020000_revoke_service_role_truncate_on_append_only_evidence_tables.sql
 -- Claim:     issue #822 (batch B3 TRUNCATE-forward fix).
@@ -11,32 +14,46 @@
 -- =====================================================================================
 -- WHAT DEFECT THIS CORRECTS
 -- =====================================================================================
--- Four tables created inside atomic batch B3 are APPEND-ONLY evidence / decision state,
+-- Four tables created inside atomic batch B3 were over-granted `grant all` (including
+-- TRUNCATE) to service_role. Three of them are APPEND-ONLY evidence / decision state,
 -- enforced by BEFORE UPDATE OR DELETE FOR EACH ROW triggers:
 --
 --   plm.coldlion_promotion_audit       created by 20260729230000; grant all -> service_role
 --   plm.coldlion_promotion_quarantine  created by 20260729230000; grant all -> service_role
---   core.property_alias                created by 20260731150000; grant all -> service_role
 --   dam.popsg_property_resolution      created by 20260731150000; grant all -> service_role
 --
+-- The fourth is a different kind of protected state:
+--
+--   core.property_alias                created by 20260731150000; grant all -> service_role
+--
+-- core.property_alias is CONTROLLED SHARED ALIAS TRUTH, not an append-only table. Its
+-- writes are intended to go through public.promote_property_alias_batch(), and it does NOT
+-- carry a general append-only BEFORE UPDATE OR DELETE trigger. It is revoked here for
+-- DEFENSE IN DEPTH -- removing TRUNCATE from a role that has no legitimate use for it --
+-- not because a row trigger would otherwise be bypassed.
+--
 -- `grant all` is the eight PostgreSQL table bits a,r,w,d,D,x,t,m. The dangerous one is
--- D = TRUNCATE: **TRUNCATE DOES NOT FIRE ROW TRIGGERS**. Every immutability guarantee on
--- these four tables is built on a BEFORE UPDATE OR DELETE FOR EACH ROW trigger, so a
--- service_role TRUNCATE bypasses all of them -- executed by the exact role the importers
--- and promotion runners run as. That is the same defect class 20260810180000 closed for
--- the 39 plm landing tables, now applied to four more append-only tables.
+-- D = TRUNCATE: **TRUNCATE DOES NOT FIRE ROW TRIGGERS**. For the three append-only
+-- tables every immutability guarantee is built on a BEFORE UPDATE OR DELETE FOR EACH ROW
+-- trigger, so a service_role TRUNCATE bypasses all of them -- executed by the exact role
+-- the importers and promotion runners run as. That is the same defect class 20260810180000
+-- closed for the 39 plm landing tables, now applied to those three append-only tables;
+-- core.property_alias is revoked alongside them so the whole B3 grant family is narrowed
+-- to one posture even though it has no such trigger to bypass.
 --
 -- This migration removes TRUNCATE and the three DDL-adjacent bits that have no legitimate
 -- use for a data role -- REFERENCES, TRIGGER, MAINTAIN -- and KEEPS the DML bits the
--- original `grant all` was there to provide: INSERT, SELECT, UPDATE, DELETE (arwd). The
--- append-only semantics for UPDATE/DELETE continue to be enforced by the existing row
--- triggers (which DO fire for those operations); this migration removes only the one bit
--- that bypasses them and the three DDL bits no importer needs. It deliberately does NOT
--- narrow further: matching the 20260810180000 standard keeps one posture for the
--- "TRUNCATE-bypasses-triggers" defect class rather than a per-table patchwork that is
--- harder to prove and easier to get wrong. (The writes themselves happen through
--- SECURITY DEFINER functions running as their owner; the `grant all` to service_role is
--- the legitimate operational DML surface for the role, minus the bypass/DDL bits.)
+-- original `grant all` was there to provide: INSERT, SELECT, UPDATE, DELETE (arwd). For
+-- the three append-only tables, the UPDATE/DELETE semantics continue to be enforced by the
+-- existing row triggers (which DO fire for those operations); this migration removes only
+-- the one bit that bypasses them and the three DDL bits no importer needs. It deliberately
+-- does NOT narrow further, and it deliberately applies the SAME revoke to core.property_alias
+-- too: matching the 20260810180000 standard keeps one posture for the whole B3 grant family
+-- (the "TRUNCATE-bypasses-triggers" defect class for the three append-only tables, plus
+-- defense in depth for core.property_alias) rather than a per-table patchwork that is
+-- harder to prove and easier to get wrong. (The writes themselves happen through SECURITY
+-- DEFINER functions running as their owner; the `grant all` to service_role is the
+-- legitimate operational DML surface for the role, minus the bypass/DDL bits.)
 -- =====================================================================================
 -- CO-PRESENCE WITH BATCH B3 -- why this file is an ATOMIC_BATCHES B3 member
 -- =====================================================================================
@@ -49,7 +66,7 @@
 -- is ledger-aware and resume-safe -- the recovery allowlist of 20260812020000 ALONE is
 -- legal once the rest of B3 has landed, because validate_candidates refuses to re-list
 -- already-applied versions. Without this co-presence, B3 could ship leaving service_role
--- one TRUNCATE away from silently wiping append-only evidence.
+-- one TRUNCATE away from silently wiping protected evidence/decision state.
 -- =====================================================================================
 -- ORDERING / RISK
 -- =====================================================================================
@@ -104,8 +121,8 @@ begin
     execute format(
       'revoke truncate, references, trigger, maintain on %s from service_role', t);
     -- Defensive parity with the plm landing tables (20260810180000): public and anon hold
-    -- nothing on append-only evidence. These are no-ops where the creating migration
-    -- already revoked them; they make the assertion below robustly true everywhere.
+    -- nothing on these four evidence/decision tables. These are no-ops where the creating
+    -- migration already revoked them; they make the assertion below robustly true everywhere.
     -- authenticated KEEPS its explicit SELECT (admin read) -- `from public`/`from anon`
     -- never touches an explicit grant to authenticated.
     execute format('revoke all on %s from public', t);
@@ -166,7 +183,8 @@ begin
     end loop;
 
     -- service_role must STILL hold the DML bits -- proves this did not over-revoke and
-    -- that the append-only workflows can still write/read.
+    -- that the write paths can still write/read (the append-only workflows on the three
+    -- trigger-protected tables; public.promote_property_alias_batch() on core.property_alias).
     foreach p in array array['INSERT','SELECT','UPDATE','DELETE'] loop
       if not has_table_privilege('service_role', t, p) then
         v_bad := v_bad + 1;
@@ -175,7 +193,7 @@ begin
     end loop;
   end loop;
 
-  -- public/anon hold nothing on append-only evidence (defensive parity).
+  -- public/anon hold nothing on these evidence/decision tables (defensive parity).
   select count(*) into v_public
     from information_schema.role_table_grants g
    where (g.table_schema || '.' || g.table_name) = any(v_tables)

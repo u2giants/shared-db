@@ -1788,7 +1788,7 @@ BATCHES = {name: members for name, _why, members in ATOMIC_BATCHES}
 #
 # B3 is 11, NOT the contract section-5 functional count of 10: the guard carries
 # one SECURITY appendage the contract predates -- 20260812020000 (issue #822,
-# service_role TRUNCATE revoke on B3's four append-only tables). The contract's
+# service_role TRUNCATE revoke on three append-only tables plus core.property_alias). The contract's
 # ten are a strict subset of the guard's eleven. See the B3 entry in
 # production_migration_guard.py and test_b3_requires_the_truncate_fix below.
 CONTRACT_COUNTS = {"B1": 11, "B3": 11, "B7": 6, "B9": 14}
@@ -2001,11 +2001,14 @@ class AtomicBatchTests(unittest.TestCase):
 class B3TruncateFixCoPresenceTest(unittest.TestCase):
     """Issue #822: the service_role TRUNCATE revoke (20260812020000) is a B3 member.
 
-    B3's creates `grant all` (including TRUNCATE) to service_role on four
-    append-only evidence/decision tables. TRUNCATE does not fire the BEFORE
-    UPDATE OR DELETE row triggers that enforce append-only semantics, so B3
-    without the fix leaves service_role one statement away from silently wiping
-    them. The guard therefore lists 20260812020000 in the B3 ATOMIC_BATCHES set,
+    B3's creates `grant all` (including TRUNCATE) to service_role on three
+    append-only evidence/decision tables plus core.property_alias (controlled
+    shared alias truth whose writes go through public.promote_property_alias_batch()).
+    For the three append-only tables, TRUNCATE does not fire the BEFORE UPDATE OR
+    DELETE row triggers that enforce append-only semantics, so B3 without the fix
+    leaves service_role one statement away from silently wiping them; for
+    core.property_alias the revoke is defense in depth. The guard therefore lists
+    20260812020000 in the B3 ATOMIC_BATCHES set,
     so it cannot be omitted from a B3 promotion. These tests pin that property
     and the ledger-aware recovery shape (the fix ALONE is legal once B3 lands).
     The exhaustive AtomicBatchTests already prove the basic cases (every member
