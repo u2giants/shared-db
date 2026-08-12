@@ -748,6 +748,7 @@ jobs:
             --allowlist "$PRODUCTION_ALLOWLIST" \
             --output-dir "$RUNNER_TEMP/catalog-verification" \
             --project-ref "$PRODUCTION_PROJECT_REF" \
+            --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt" \
             --mode "$VERIFY_MODE" \
             | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Save apply evidence
