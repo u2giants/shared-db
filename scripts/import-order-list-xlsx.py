@@ -7,32 +7,50 @@ Profile: docs/app-migration-notes/popdam-order-list.md (the 48-column contract)
 Schema:  supabase/migrations/20260810010000_popdam_order_list_contract.sql
 
 =====================================================================================
-READ THIS FIRST — THE REAL IMPORT HAS NOT RUN
+READ THIS FIRST — WHERE THIS IMPORT HAS AND HAS NOT RUN
 =====================================================================================
-As of the commit that introduced this file, the approved source workbook
-(SHA-256 ``4958B4B7...FC6ABBE4``) was NOT available on the machine that wrote it, so
-this importer has NEVER been executed against the real 12,328-row source and NOTHING
-has been written to preview or production. Everything below is proven only by the
-synthetic suite in ``scripts/tests/test_import_order_list.py``.
+PREVIEW (``rjyboqwcdzcocqgmsyel``): DONE, 2026-08-12. 3,212 orders and 24,010 lines
+inserted; a second identical run changed 0 business rows; all 10 balance checks PASS.
+Evidence: ``docs/verification/popdam-order-list-preview-2026-08-12/README.md``.
 
-Issue #727 stays OPEN until someone supplies the workbook, runs::
+PRODUCTION (``qsllyeztdwjgirsysgai``): NOT RUN. NOTHING has been written. The
+``--production`` path added for issue #852 exists so an EXACT, commit-bound approval
+package can be written; it has never been executed, and it must not be executed until
+the owner approves the exact command and confirmation. A green CI run on this file
+proves the LOGIC and the REFUSALS, not an import. Do not read one as the other.
 
-    python scripts/import-order-list-xlsx.py \
-        --workbook /path/to/OrderList.xlsx --dry-run
-    python scripts/import-order-list-xlsx.py \
-        --workbook /path/to/OrderList.xlsx --preview --database-url "$PREVIEW_URL"
-
-and commits the reconciliation report. A green CI run on this file proves the LOGIC,
-not the IMPORT. Do not read one as the other.
+An unresolved source-count discrepancy is recorded deliberately and must NOT be
+papered over: the populated-row count for this sheet lineage has been stated as 12,328
+(2026-08-09 export, SHA ``4958b4b7…``), 12,323 (2026-08-11 live-sheet browser exports,
+SHAs ``b9b282dc…`` / ``904b2cb9…``, neither retained) and 12,354 (the approved
+``68c9b03a…`` workbook under this file's own ``is_populated`` definition). The hash is
+settled; WHICH five rows changed between the first two is not knowable from this
+repository. That is why ``--expected-populated-rows`` is a required, un-defaulted input
+for production rather than a constant the code picks for itself.
 
 =====================================================================================
 SAFETY RULES THIS FILE ENFORCES
 =====================================================================================
 * The workbook SHA-256 must equal ``--expected-sha256`` (defaulting to the approved
   constant below). A different workbook is refused, not imported "close enough".
-* Writes require BOTH ``--preview`` AND ``supabase/.temp/project-ref`` reading exactly
-  ``rjyboqwcdzcocqgmsyel``. The production ref is refused unconditionally; there is no
-  flag that turns production writes on.
+* Writes require an EXPLICIT mode flag AND ``supabase/.temp/project-ref`` reading the
+  matching ref: ``--preview`` requires ``rjyboqwcdzcocqgmsyel``; ``--production``
+  requires ``qsllyeztdwjgirsysgai``. The two flags are mutually exclusive. Neither
+  flag means no write at all.
+* ``--production`` additionally requires (issue #852, and the approval package in
+  ``docs/verification/popdam-order-list-production-approval-2026-08-12/README.md``):
+  the exact approved workbook SHA-256 (``--expected-sha256`` cannot relax it);
+  ``--reviewed-commit`` naming the merged, reviewed shared-db commit; ``--confirm``
+  carrying the exact confirmation sentence bound to that commit, that hash and that
+  project ref; and ``--expected-populated-rows`` stating the count the operator
+  expects. Every one of those is checked BEFORE the connection string is read, so a
+  wrong invocation never touches a credential.
+* The write target is re-proved from ``supabase/.temp/project-ref`` immediately before
+  the connection is opened AND again before every batch, so a relink mid-run aborts
+  instead of writing the remaining batches into the wrong database.
+* ``--replace-source`` is impossible in production. It is blocked by the CLI, and
+  ``apply_plan`` is additionally called with ``allow_replace=False``, which raises
+  before any write even if the CLI check were ever removed.
 * Every canonical row is addressed by a deterministic Google source ref. A second
   identical run therefore inserts nothing and updates nothing.
 * An existing row whose desired payload has DRIFTED is never silently rewritten. It is
@@ -54,7 +72,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 # =====================================================================================
 # Source identity. Deliberately module-level and readable, not buried in argparse
@@ -86,6 +104,32 @@ PRODUCTION_PROJECT_REF = "qsllyeztdwjgirsysgai"
 
 DEFAULT_PROJECT_REF_FILE = "supabase/.temp/project-ref"
 DEFAULT_BATCH_SIZE = 500
+
+#: Run modes. ``dry_run`` writes nothing at all; the other two write.
+MODE_DRY_RUN = "dry-run"
+MODE_PREVIEW = "preview"
+MODE_PRODUCTION = "production"
+
+#: The project ref each write mode is allowed to touch. Any other value refuses.
+MODE_REQUIRED_PROJECT_REF = {
+    MODE_PREVIEW: PREVIEW_PROJECT_REF,
+    MODE_PRODUCTION: PRODUCTION_PROJECT_REF,
+}
+
+#: The exact sentence ``--confirm`` must carry for a production run. It is bound to the
+#: reviewed commit, the workbook hash and the destination project ref, so a confirmation
+#: copied from a different approval package, a different workbook, or a different target
+#: cannot authorize this one. The approval package quotes this same wording.
+PRODUCTION_CONFIRMATION_TEMPLATE = (
+    "I approve one production import of OrderList.xlsx "
+    "SHA-256 {source_sha256} "
+    "into Supabase project {project_ref} "
+    "using reviewed shared-db commit {commit_sha}"
+)
+
+#: Length of a full git object name. Production refuses an abbreviated SHA: an approval
+#: package that names seven characters is not an exact package.
+FULL_GIT_SHA_LENGTH = 40
 
 
 # =====================================================================================
@@ -1177,6 +1221,8 @@ def apply_plan(
     batch_size: int = DEFAULT_BATCH_SIZE,
     replace_source: bool = False,
     dry_run: bool = False,
+    allow_replace: bool = True,
+    target_guard: Callable[[], None] | None = None,
 ) -> ApplyResult:
     """Write the plan. Idempotent by construction.
 
@@ -1187,7 +1233,26 @@ def apply_plan(
     * ref + different payload -> DRIFT. Counted and reported, and rewritten only when
       ``--replace-source`` is passed. Silently overwriting is how an import destroys
       edits staff made in the app after the first load.
+
+    ``allow_replace=False`` makes replacement structurally impossible for this call: it
+    raises before the first batch opens rather than trusting a caller-side check. The
+    production path always passes it, so ``--replace-source`` cannot reach production
+    even if the CLI guard were removed.
+
+    ``target_guard`` is invoked before EVERY batch. The production path points it at
+    :func:`assert_write_target`, which re-reads ``supabase/.temp/project-ref`` from
+    disk, so a relink mid-run aborts the remaining batches instead of writing them into
+    a different database. Batches already committed stay committed and are safely
+    resumed by a later run, because every row is addressed by its deterministic source
+    ref.
     """
+    if replace_source and not allow_replace:
+        raise ImporterError(
+            "replace_source is not permitted for this run (allow_replace=False). "
+            "Refusing before any write. --replace-source has no production form: an "
+            "import that can silently rewrite production rows is not an import, it is "
+            "an unreviewed data migration."
+        )
     result = ApplyResult()
     order_ids: dict[str, str] = {}
 
@@ -1201,6 +1266,8 @@ def apply_plan(
     orders = plan.writable_orders()
     for start in range(0, len(orders), batch_size):
         chunk = orders[start : start + batch_size]
+        if target_guard is not None:
+            target_guard()
         gateway.begin_batch()
         try:
             for order in chunk:
@@ -1237,6 +1304,8 @@ def apply_plan(
     lines = plan.writable_lines()
     for start in range(0, len(lines), batch_size):
         chunk = lines[start : start + batch_size]
+        if target_guard is not None:
+            target_guard()
         gateway.begin_batch()
         try:
             for line in chunk:
@@ -1538,29 +1607,126 @@ def assert_source_checksum(path: Path, expected: str) -> str:
     return actual
 
 
-def assert_preview_target(project_ref_file: Path, *, preview: bool) -> str:
-    """Prove the write target immediately before writing. Production is never allowed."""
-    if not preview:
+def assert_write_target(project_ref_file: Path, *, mode: str) -> str:
+    """Prove the write target from disk. Called before the connection AND every batch.
+
+    Re-reading the file on every call is the point: it is what turns a mid-run
+    ``supabase link`` at another database into an abort instead of a partial import
+    landing in the wrong project.
+    """
+    if mode not in MODE_REQUIRED_PROJECT_REF:
         raise ImporterError(
-            "Refusing to write without --preview. This importer has no production mode."
+            "Refusing to write without an explicit target mode. Pass exactly one of "
+            "--preview or --production (or --dry-run, which writes nothing)."
         )
+    required = MODE_REQUIRED_PROJECT_REF[mode]
     if not project_ref_file.exists():
         raise ImporterError(
             f"Cannot prove the write target: {project_ref_file} does not exist. "
-            "Run `supabase link` against preview first."
+            f"Run `supabase link` against {mode} ({required}) first."
         )
     ref = project_ref_file.read_text(encoding="utf-8").strip()
-    if ref == PRODUCTION_PROJECT_REF:
+    if ref == required:
+        return ref
+    other = (
+        "PRODUCTION" if ref == PRODUCTION_PROJECT_REF
+        else "PREVIEW" if ref == PREVIEW_PROJECT_REF
+        else "an unknown project"
+    )
+    raise ImporterError(
+        f"{project_ref_file} reads {ref!r} ({other}), but --{mode} requires "
+        f"{required!r}. Refusing to write. Nothing has been written."
+    )
+
+
+def assert_preview_target(project_ref_file: Path, *, preview: bool) -> str:
+    """Backwards-compatible preview-only wrapper around :func:`assert_write_target`."""
+    return assert_write_target(
+        project_ref_file, mode=MODE_PREVIEW if preview else MODE_DRY_RUN
+    )
+
+
+# =====================================================================================
+# Production confirmation gate
+# =====================================================================================
+def build_production_confirmation(
+    *, commit_sha: str, source_sha256: str, project_ref: str
+) -> str:
+    """The exact sentence a production run must be given via ``--confirm``.
+
+    Deterministic and lower-cased in its variable parts so the operator can regenerate
+    it, but NOT derivable from the flags alone at check time: the values it is built
+    from are the ones actually proven at runtime (the hash of the file on disk, the ref
+    read from ``supabase/.temp/project-ref``), never the ones the operator typed.
+    """
+    return PRODUCTION_CONFIRMATION_TEMPLATE.format(
+        source_sha256=source_sha256.strip().lower(),
+        project_ref=project_ref.strip(),
+        commit_sha=commit_sha.strip().lower(),
+    )
+
+
+def _normalize_confirmation(value: str) -> str:
+    """Collapse whitespace, case and a trailing period.
+
+    A correct approval pasted out of a wrapped document, or ended with a full stop,
+    must not be rejected — otherwise the operator learns to retype it, which is exactly
+    how a wrong confirmation gets typed with confidence. Nothing SEMANTIC is relaxed:
+    the commit, the hash and the ref must still match character for character.
+    """
+    collapsed = " ".join(value.split()).strip()
+    while collapsed.endswith(".") or collapsed.endswith(" "):
+        collapsed = collapsed[:-1].rstrip()
+    return collapsed.lower()
+
+
+def assert_reviewed_commit(commit_sha: str | None) -> str:
+    """A production run must name the full 40-character reviewed commit."""
+    candidate = (commit_sha or "").strip().lower()
+    if not candidate:
         raise ImporterError(
-            f"{project_ref_file} points at PRODUCTION ({PRODUCTION_PROJECT_REF}). "
-            "Refusing. Relink to preview."
+            "--reviewed-commit is required for --production. It must be the full "
+            "40-character shared-db commit SHA that was reviewed and merged, and it "
+            "must be the commit this working tree is checked out at."
         )
-    if ref != PREVIEW_PROJECT_REF:
+    if len(candidate) != FULL_GIT_SHA_LENGTH or not re.fullmatch(
+        r"[0-9a-f]{40}", candidate
+    ):
         raise ImporterError(
-            f"{project_ref_file} reads {ref!r}, which is not preview "
-            f"({PREVIEW_PROJECT_REF}). Refusing."
+            f"--reviewed-commit {commit_sha!r} is not a full 40-character git SHA. "
+            "An abbreviated SHA is not an exact approval package. Refusing."
         )
-    return ref
+    return candidate
+
+
+def assert_production_confirmation(
+    provided: str | None, *, commit_sha: str, source_sha256: str, project_ref: str
+) -> str:
+    """Refuse a production run whose confirmation is missing or does not match.
+
+    Raises BEFORE any credential is read and before any connection is opened.
+    """
+    expected = build_production_confirmation(
+        commit_sha=commit_sha, source_sha256=source_sha256, project_ref=project_ref
+    )
+    if not (provided or "").strip():
+        raise ImporterError(
+            "--confirm is required for --production and was empty.\n"
+            "The exact confirmation for THIS commit, workbook and target is:\n"
+            f"  {expected}\n"
+            "Nothing has been written."
+        )
+    if _normalize_confirmation(provided or "") != _normalize_confirmation(expected):
+        raise ImporterError(
+            "--confirm does not match this run. Refusing before any credential is "
+            "used.\n"
+            f"  expected: {expected}\n"
+            "  received: (withheld — it did not match, and echoing it back would "
+            "invite copy-pasting the wrong approval into the next attempt)\n"
+            "A confirmation is bound to one reviewed commit, one workbook hash and "
+            "one project ref. Nothing has been written."
+        )
+    return expected
 
 
 # =====================================================================================
@@ -1572,6 +1738,12 @@ class Reconciliation:
     apply_result: ApplyResult
     baseline: ReconciliationBaseline = BASELINE
     checksum_matched_approved_source: bool = False
+    #: Operator-declared populated-row count. Required for production. It is a CHECKED
+    #: INPUT, never a value the code picks for itself: the record carries an unresolved
+    #: 12,328 -> 12,323 -> 12,354 history (see the "Source row-count history" section of
+    #: the rendered report), so the number must be stated by whoever approves the run and
+    #: then asserted, not inferred.
+    expected_populated_rows: int | None = None
 
     def balance_checks(self) -> list[tuple[str, bool, str]]:
         """``(name, passed, detail)``. These are ASSERTIONS, not decoration."""
@@ -1610,6 +1782,15 @@ class Reconciliation:
                 f"{matches} statuses vs {planned_lines} lines",
             ),
         ]
+
+        if self.expected_populated_rows is not None:
+            checks.append(
+                (
+                    "staged rows equal the operator-declared expected populated rows",
+                    staged == self.expected_populated_rows,
+                    f"{staged} staged vs {self.expected_populated_rows} declared",
+                )
+            )
 
         if self.checksum_matched_approved_source:
             base = self.baseline
@@ -1683,6 +1864,8 @@ def render_report(
     run_mode: str,
     generated_at: str,
     second_run: ApplyResult | None = None,
+    title: str = "PopDAM OrderList preview import reconciliation",
+    reviewed_commit: str | None = None,
 ) -> str:
     """Markdown reconciliation report.
 
@@ -1694,10 +1877,12 @@ def render_report(
     lines: list[str] = []
     add = lines.append
 
-    add("# PopDAM OrderList preview import reconciliation")
+    add(f"# {title}")
     add("")
     add(f"- Generated: {generated_at}")
     add(f"- Run mode: **{run_mode}**")
+    if reviewed_commit:
+        add(f"- Reviewed shared-db commit: `{reviewed_commit}`")
     # NB: the label deliberately avoids the word "Target", which is also a customer
     # name the leak test in scripts/tests/test_import_order_list.py screens for.
     add(f"- Destination project ref: `{project_ref}`")
@@ -1812,6 +1997,42 @@ def render_report(
     add(f"**Overall: {'BALANCED' if reconciliation.balanced() else 'NOT BALANCED'}**")
     add("")
 
+    add("## Source row-count history (unresolved, recorded deliberately)")
+    add("")
+    add(
+        "The populated-row count for this sheet lineage has been stated three ways. "
+        "The workbook HASH is settled; the COUNT is not fully explained, so this run "
+        "asserts against an operator-declared number rather than choosing one."
+    )
+    add("")
+    add("| Count | Workbook SHA-256 | How it was produced |")
+    add("|---:|---|---|")
+    add(
+        "| 12,328 | `4958b4b7…fc6abbe4` | 2026-08-09 Phase 0 audit of the "
+        "then-approved export. |"
+    )
+    add(
+        "| 12,323 | `b9b282dc…ffba30` / `904b2cb9…0b2845` | 2026-08-11 browser exports "
+        "of the live sheet. DIFFERENT files from both the 2026-08-09 export and the "
+        "approved one; neither was retained. |"
+    )
+    add(
+        f"| 12,354 | `{APPROVED_SOURCE_SHA256}` | 2026-08-12 re-profile of the "
+        "owner-accepted workbook using this importer's own `is_populated` definition "
+        "(any mapped cell non-empty). The same file gives 12,349 under a PO-Status "
+        "definition. |"
+    )
+    add("")
+    add(
+        "The five-row shrink (12,328 -> 12,323) was measured on a file that is neither "
+        "the 2026-08-09 export nor the approved workbook, and that file was not kept. "
+        "WHICH five rows changed is therefore NOT knowable from this repository; only "
+        "the Google Sheets revision history for spreadsheet "
+        f"`{SOURCE_SPREADSHEET_ID}` can answer it. This report does not claim it is "
+        "resolved."
+    )
+    add("")
+
     if applied.drift_details:
         add("## Drift (existing rows whose source payload changed)")
         add("")
@@ -1873,7 +2094,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Idempotent importer for the legacy Google OrderList Order tab. "
-            "Preview only; there is no production mode."
+            "Writes only with an explicit --preview or --production flag; "
+            "--production additionally requires the approved workbook hash, the "
+            "reviewed commit, and an exact confirmation."
         )
     )
     parser.add_argument("--workbook", required=True, type=Path, help="Local .xlsx export")
@@ -1891,15 +2114,57 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Plan and reconcile against an in-memory database. Writes nothing.",
     )
-    parser.add_argument(
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument(
         "--preview",
         action="store_true",
-        help=f"Required for any real write. Target must be {PREVIEW_PROJECT_REF}.",
+        help=f"Write to preview. Target must be {PREVIEW_PROJECT_REF}.",
+    )
+    target.add_argument(
+        "--production",
+        action="store_true",
+        help=(
+            f"Write to PRODUCTION ({PRODUCTION_PROJECT_REF}). Requires the approved "
+            "workbook hash, --reviewed-commit, --confirm and "
+            "--expected-populated-rows. Cannot be combined with --preview or "
+            "--replace-source."
+        ),
+    )
+    parser.add_argument(
+        "--reviewed-commit",
+        default=None,
+        help=(
+            "Full 40-character shared-db commit SHA that was reviewed and merged. "
+            "Required for --production."
+        ),
+    )
+    parser.add_argument(
+        "--confirm",
+        default=None,
+        help=(
+            "Exact confirmation sentence bound to the reviewed commit, the workbook "
+            "SHA-256 and the project ref. Required for --production. A wrong or "
+            "missing value aborts before the connection string is read."
+        ),
+    )
+    parser.add_argument(
+        "--expected-populated-rows",
+        type=int,
+        default=None,
+        help=(
+            "The populated-row count the operator expects. Required for --production "
+            "and asserted as a balance check. It is deliberately NOT defaulted: the "
+            "record carries an unresolved 12,328 / 12,323 / 12,354 history."
+        ),
     )
     parser.add_argument(
         "--database-url",
-        default=os.environ.get("PREVIEW_DATABASE_URL"),
-        help="Preview connection string. Never logged.",
+        default=None,
+        help=(
+            "Connection string. Never logged. Defaults to PREVIEW_DATABASE_URL for "
+            "--preview and PRODUCTION_DATABASE_URL for --production; it is read only "
+            "AFTER every gate has passed."
+        ),
     )
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument(
@@ -1910,7 +2175,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Rewrite existing rows whose source payload drifted. PREVIEW ONLY, and "
-            "only after reviewing the drift table from a run without it."
+            "only after reviewing the drift table from a run without it. There is no "
+            "production form of this flag."
         ),
     )
     parser.add_argument(
@@ -1965,44 +2231,121 @@ def load_master_data_catalog(connection: Any) -> MasterDataCatalog:  # pragma: n
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
-    if not args.dry_run and not args.preview:
-        raise ImporterError("Pass --dry-run or --preview. Refusing to guess.")
+    # -------------------------------------------------------------------------------
+    # Gate order matters. Everything that can refuse this run is checked BEFORE the
+    # connection string is read, so a wrong invocation never touches a credential.
+    # -------------------------------------------------------------------------------
+    if args.preview and args.production:  # pragma: no cover - argparse blocks it first
+        raise ImporterError("--preview and --production are mutually exclusive.")
+    if not args.dry_run and not (args.preview or args.production):
+        raise ImporterError(
+            "Pass --dry-run, --preview or --production. Refusing to guess."
+        )
+    if args.replace_source and args.production:
+        raise ImporterError(
+            "--replace-source is refused with --production. There is no production "
+            "form of replacement: rewriting production rows from a spreadsheet is an "
+            "unreviewed data migration, not an import. Nothing has been written."
+        )
     if args.replace_source and not args.preview:
         raise ImporterError("--replace-source is preview-only.")
     if args.batch_size < 1:
         raise ImporterError("--batch-size must be at least 1.")
 
+    mode = (
+        MODE_PRODUCTION if args.production
+        else MODE_PREVIEW if args.preview
+        else MODE_DRY_RUN
+    )
+
+    reviewed_commit: str | None = None
+    expected_sha256 = args.expected_sha256
+    expected_populated_rows = args.expected_populated_rows
+    if mode == MODE_PRODUCTION:
+        # The hash is PINNED, not merely defaulted. --expected-sha256 (and the
+        # ORDER_LIST_SHA256 environment variable behind it) cannot relax production.
+        if expected_sha256.strip().lower() != APPROVED_SOURCE_SHA256:
+            raise ImporterError(
+                "--production pins the workbook SHA-256 to the approved constant "
+                f"{APPROVED_SOURCE_SHA256}. It cannot be overridden by "
+                "--expected-sha256 or ORDER_LIST_SHA256. Nothing has been written."
+            )
+        expected_sha256 = APPROVED_SOURCE_SHA256
+        reviewed_commit = assert_reviewed_commit(args.reviewed_commit)
+        if expected_populated_rows is None:
+            raise ImporterError(
+                "--expected-populated-rows is required for --production. The source "
+                "row count has an unresolved history (12,328 -> 12,323 -> 12,354); "
+                "the approver must state the number this run is allowed to see."
+            )
+    if expected_populated_rows is not None and expected_populated_rows < 1:
+        raise ImporterError("--expected-populated-rows must be at least 1.")
+
     workbook = args.workbook
     if not workbook.exists():
         raise ImporterError(f"Workbook not found: {workbook}")
 
-    checksum = assert_source_checksum(workbook, args.expected_sha256)
+    checksum = assert_source_checksum(workbook, expected_sha256)
     matches_approved = checksum.lower() == APPROVED_SOURCE_SHA256
     print(f"Source checksum verified: {checksum}", file=sys.stderr)
+
+    # Prove the target from disk BEFORE the confirmation, so the confirmation is
+    # checked against the ref actually on disk rather than the one the operator hoped
+    # for. Re-proved again below, immediately before the connection opens, and once
+    # more before every batch.
+    project_ref: str
+    target_guard: Callable[[], None] | None = None
+    if mode in MODE_REQUIRED_PROJECT_REF:
+        project_ref = assert_write_target(args.project_ref_file, mode=mode)
+    else:
+        project_ref = "(none — dry run)"
+
+    if mode == MODE_PRODUCTION:
+        assert reviewed_commit is not None
+        assert_production_confirmation(
+            args.confirm,
+            commit_sha=reviewed_commit,
+            source_sha256=checksum,
+            project_ref=project_ref,
+        )
+        print("Production confirmation accepted.", file=sys.stderr)
 
     rows = read_workbook_rows(workbook, args.sheet)
     print(f"Read {len(rows)} physical rows from tab {args.sheet!r}.", file=sys.stderr)
 
-    if args.preview:
-        project_ref = assert_preview_target(args.project_ref_file, preview=True)
+    if mode in MODE_REQUIRED_PROJECT_REF:
+        # Recheck immediately before the transaction opens. Between the gates above and
+        # here the workbook was read, which takes real time; a relink in that window
+        # must abort, not be inherited.
+        project_ref = assert_write_target(args.project_ref_file, mode=mode)
         print(f"Write target proven: {project_ref}", file=sys.stderr)
-        if not args.database_url:
-            raise ImporterError("--database-url (or PREVIEW_DATABASE_URL) is required.")
+
+        def target_guard() -> None:  # noqa: F811 - deliberate per-batch recheck
+            assert_write_target(args.project_ref_file, mode=mode)
+
+        env_var = (
+            "PRODUCTION_DATABASE_URL" if mode == MODE_PRODUCTION
+            else "PREVIEW_DATABASE_URL"
+        )
+        database_url = args.database_url or os.environ.get(env_var)
+        if not database_url:
+            raise ImporterError(f"--database-url (or {env_var}) is required.")
         try:
             import psycopg  # type: ignore import-not-found
         except ImportError as error:  # pragma: no cover
             raise ImporterError(
-                "psycopg is required for --preview. `pip install 'psycopg[binary]'`."
+                f"psycopg is required for --{mode}. `pip install 'psycopg[binary]'`."
             ) from error
-        connection = psycopg.connect(args.database_url, autocommit=False)
+        connection = psycopg.connect(database_url, autocommit=False)
         catalog = load_master_data_catalog(connection)
         gateway: ImportGateway = PostgresGateway(connection)
-        run_mode = "preview write"
+        run_mode = f"{mode} write"
     else:
-        project_ref = "(none — dry run)"
         catalog = MasterDataCatalog()
         gateway = InMemoryGateway()
         run_mode = "dry run (in-memory, nothing written)"
+
+    allow_replace = mode != MODE_PRODUCTION
 
     plan = build_plan(rows, catalog)
     first = apply_plan(
@@ -2011,6 +2354,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         batch_size=args.batch_size,
         replace_source=args.replace_source,
         dry_run=args.dry_run,
+        allow_replace=allow_replace,
+        target_guard=target_guard,
     )
 
     second: ApplyResult | None = None
@@ -2021,6 +2366,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             batch_size=args.batch_size,
             replace_source=args.replace_source,
             dry_run=args.dry_run,
+            allow_replace=allow_replace,
+            target_guard=target_guard,
         )
         if second.changed_rows != 0:
             raise ImporterError(
@@ -2032,11 +2379,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         counters=plan.counters,
         apply_result=first,
         checksum_matched_approved_source=matches_approved,
+        expected_populated_rows=expected_populated_rows,
     )
 
     today = datetime.utcnow().strftime("%Y-%m-%d")
+    report_slug = MODE_PRODUCTION if mode == MODE_PRODUCTION else "preview"
     report_dir = args.report_dir or Path(
-        f"docs/verification/popdam-order-list-preview-{today}"
+        f"docs/verification/popdam-order-list-{report_slug}-{today}"
     )
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / "README.md"
@@ -2049,6 +2398,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_mode=run_mode,
             generated_at=datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
             second_run=second,
+            title=(
+                "PopDAM OrderList production import reconciliation"
+                if mode == MODE_PRODUCTION
+                else "PopDAM OrderList preview import reconciliation"
+            ),
+            reviewed_commit=reviewed_commit,
         ),
         encoding="utf-8",
     )
