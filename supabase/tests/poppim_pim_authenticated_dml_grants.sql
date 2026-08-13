@@ -160,7 +160,7 @@ begin
       array_length(missing, 1), array_to_string(missing, ', ');
   end if;
 
-  raise notice 'B OK: authenticated holds SELECT+INSERT+UPDATE+DELETE on all 20 widened tables';
+  raise notice 'B OK: authenticated holds SELECT+INSERT+UPDATE+DELETE on all 18 widened tables';
 end $$;
 
 -- -------------------------------------------------------------------------------------
