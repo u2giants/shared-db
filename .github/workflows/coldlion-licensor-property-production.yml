@@ -66,6 +66,9 @@ on:
           - compare
           - health
           - readiness
+          # ARMED BUT READ-ONLY (issue #548). Runs with the production feed still
+          # DISABLED and proves exactly what every lane WOULD do, without doing it.
+          - preflight
       confirm_production:
         description: "Type the production project ref to confirm: qsllyeztdwjgirsysgai"
         type: string
@@ -171,6 +174,9 @@ jobs:
           case "$JOB" in
             coldlion|promote) WRITES=true ;;
             compare|health|readiness) WRITES=true ;;
+            # preflight is the ONLY lane that writes nothing: it runs in its own job,
+            # never in the `production` job, and never touches a database. See #548.
+            preflight) WRITES=false ;;
             *) echo "::error::Unknown production job: $JOB" >&2; exit 1 ;;
           esac
           echo "job=$JOB" >> "$GITHUB_OUTPUT"
@@ -203,7 +209,9 @@ jobs:
   # ---------------------------------------------------------------------------------
   production:
     needs: gate
-    if: needs.gate.outputs.enabled == 'true'
+    # `preflight` is excluded here on purpose: it must NEVER enter the job that holds
+    # the production environment and the production DB password (#548).
+    if: needs.gate.outputs.enabled == 'true' && needs.gate.outputs.job != 'preflight'
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -356,6 +364,7 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
+          COLDLION_ALERT_ISSUE_REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
           set +e
@@ -364,7 +373,18 @@ jobs:
             --project-ref "$PRODUCTION_PROJECT_REF" --out alert-plan.json
           CODE=$?
           set -e
-          if [ "$CODE" -eq 1 ] && [ -f alert-plan.json ]; then
+          # #551 dedupe. Exit 3 means this exact alert set is ALREADY on an open issue,
+          # so filing another one only buries it. The run is already RED (this step only
+          # runs on failure()), so the loud signal is not lost.
+          if [ "$CODE" -eq 3 ]; then
+            MATCH=$(node -e "try{process.stdout.write(String(JSON.parse(require('fs').readFileSync('alert-plan.json','utf8')).dedupe_matched_issue??'unknown'))}catch(e){process.stdout.write('unknown')}")
+            echo "::error::ColdLion PRODUCTION alert is ALREADY REPORTED on open issue #${MATCH}; no duplicate filed. The run stays RED. Human response owner: ${COLDLION_HUMAN_RESPONSE_OWNER}."
+            exit 0
+          fi
+          if [ "$CODE" -eq 4 ]; then
+            echo "::error title=ColdLion alert DEDUPE CHECK FAILED::The duplicate check could not be completed. Filing the alert anyway — a possible duplicate is strictly better than a swallowed production alert. Human response owner: ${COLDLION_HUMAN_RESPONSE_OWNER}."
+          fi
+          if { [ "$CODE" -eq 1 ] || [ "$CODE" -eq 4 ]; } && [ -f alert-plan.json ]; then
             TITLE=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('alert-plan.json','utf8')).title)")
             node -e "require('fs').writeFileSync('alert-body.md', JSON.parse(require('fs').readFileSync('alert-plan.json','utf8')).body)"
           else
@@ -389,3 +409,190 @@ jobs:
             --label "coldlion-taxonomy-alert" \
             || gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body-file alert-body.md
           echo "::error::ColdLion PRODUCTION alert delivered. Human response owner: ${COLDLION_HUMAN_RESPONSE_OWNER}."
+
+  # ---------------------------------------------------------------------------------
+  # PREFLIGHT — ARMED BUT READ-ONLY (issue #548).
+  #
+  # THE PROBLEM IT SOLVES
+  # ---------------------
+  # Every lane above, including the read-only `readiness` operator gate, lives inside
+  # the `production` job and is gated on COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED.
+  # So setting that one variable SIMULTANEOUSLY arms the 06:00 snapshot, the 06:30
+  # promotion (which WRITES to production), the 07:00 comparison and the hourly health
+  # lane. The one check an operator wants to run BEFORE committing was only available
+  # AFTER committing. That is backwards, and it is the single biggest risk in Step 8.
+  #
+  # WHAT THIS JOB IS
+  # ----------------
+  # A separate, second-variable state that proves EXACTLY what the production feed
+  # WOULD do, without doing any of it. It is armed in the sense that it carries the
+  # full four-part production authorization and resolves the real production target;
+  # it is read-only in the sense that it can reach no database at all.
+  #
+  # HOW "READ-ONLY" IS GUARANTEED — three independent reasons, not one:
+  #   1. It is a DIFFERENT JOB. It has no `environment: production` and no
+  #      SUPABASE_DB_PASSWORD_PRODUCTION, so it holds no production credential.
+  #   2. No step runs `supabase link`, so no runner has a session to write through.
+  #   3. Every runner is invoked WITHOUT --apply and WITHOUT --linked. Every ColdLion
+  #      runner's own guard already short-circuits there
+  #      (assertColdlionApplyTarget: "if (!apply) return; // dry runs never write
+  #      anywhere"), and each one prints the SQL and configuration it would use.
+  #   The step "Prove this job cannot write" re-asserts 1 and 3 at runtime, and
+  #   tools/coldlion-licensor-property-production-workflow.test.mjs asserts them
+  #   statically before any run.
+  #
+  # IT IS ITS OWN SWITCH. It is gated on COLDLION_LICENSOR_PROPERTY_PRODUCTION_ARMED_READONLY,
+  # NOT on the feed's enable variable, so it can be exercised while the feed stays off —
+  # which is the entire point. It is dispatch-only and is deliberately absent from every
+  # cron above: nothing schedules it, so it can never become a background job.
+  #
+  # ENABLING THIS VARIABLE DOES NOT ENABLE THE FEED. Turning the feed on remains a
+  # separate, named, owner-approved Step 8 action against
+  # COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED.
+  # ---------------------------------------------------------------------------------
+  preflight:
+    needs: gate
+    # Dispatch-only, and independent of the feed's enable variable BY DESIGN. `gate`
+    # has already refused any ref that is not production and any dispatch that did not
+    # spell the production ref out.
+    if: github.event_name == 'workflow_dispatch' && inputs.job == 'preflight'
+    runs-on: ubuntu-latest
+    env:
+      # Part 4 of the four-part authorization. Here it authorizes only the RESOLUTION of
+      # the production target; with no --apply and no --linked there is nothing to write
+      # to and no credential to write with.
+      COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED: "true"
+      ARMED_READONLY_VARIABLE: COLDLION_LICENSOR_PROPERTY_PRODUCTION_ARMED_READONLY
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Arm gate (its OWN variable — never the feed's enable variable)
+        id: armed
+        run: |
+          set -euo pipefail
+          if [ "${{ vars.COLDLION_LICENSOR_PROPERTY_PRODUCTION_ARMED_READONLY }}" = "true" ]; then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+            echo "ARMED, READ-ONLY. Resolving the production plan for ${PRODUCTION_PROJECT_REF} without touching it."
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=ColdLion preflight is not armed::Set repository variable COLDLION_LICENSOR_PROPERTY_PRODUCTION_ARMED_READONLY=true to run the read-only preflight. This variable does NOT enable the production feed; the feed stays governed by COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED and Albert Hazan's Step 8 approval. Nothing ran."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.armed.outputs.armed == 'true'
+        with:
+          node-version: 22
+
+      - name: Offline contract tests
+        if: steps.armed.outputs.armed == 'true'
+        run: |
+          node --test \
+            tools/phase6-preview-guards.test.mjs \
+            tools/coldlion-production-schedule-map.test.mjs \
+            tools/coldlion-production-authorization.test.mjs \
+            tools/coldlion-licensor-property-production-workflow.test.mjs \
+            tools/dispatch-coldlion-taxonomy-alerts.test.mjs
+
+      - name: Prove this job cannot write
+        if: steps.armed.outputs.armed == 'true'
+        run: |
+          set -euo pipefail
+          if [ -n "${SUPABASE_DB_PASSWORD_PRODUCTION:-}" ] || [ -n "${SUPABASE_DB_PASSWORD:-}" ]; then
+            echo "::error::The preflight job must hold NO production database password. Refusing." >&2
+            exit 1
+          fi
+          if [ -f supabase/.temp/project-ref ]; then
+            echo "::error::The preflight job must not be linked to any Supabase project. Refusing." >&2
+            exit 1
+          fi
+          echo "No production credential, no linked project. This job cannot reach a database."
+
+      - name: Which secret NAMES would be present when the feed is armed (values never printed)
+        if: steps.armed.outputs.armed == 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
+        run: |
+          set -euo pipefail
+          MISSING=""
+          [ -n "${SUPABASE_ACCESS_TOKEN:-}" ] || MISSING="$MISSING SUPABASE_ACCESS_TOKEN"
+          [ -n "${COLDLION_API_KEY:-}" ] || MISSING="$MISSING COLDLION_API_KEY"
+          echo "SUPABASE_DB_PASSWORD_PRODUCTION is deliberately NOT readable from this job;"
+          echo "it lives only in the 'production' environment. Verify it there before Step 8."
+          if [ -n "$MISSING" ]; then
+            echo "::warning title=Secret not wired yet::These secret names are still empty and the production feed WILL refuse to start without them:$MISSING"
+          else
+            echo "Both repository-level secret names are populated."
+          fi
+
+      - name: Which lane each cron WOULD resolve to
+        if: steps.armed.outputs.armed == 'true'
+        run: |
+          set -euo pipefail
+          node -e "import('./tools/coldlion-production-schedule-map.mjs').then(m=>{for(const [cron,job] of Object.entries(m.COLDLION_PRODUCTION_SCHEDULE_JOBS)) console.log(cron.padEnd(14), '->', job)})"
+
+      # Each runner below is the EXACT production invocation minus --apply and --linked.
+      # It resolves the real production target, then prints the SQL and configuration it
+      # would use and stops before every database write. The snapshot runner DOES contact
+      # the live ColdLion ERP to build its read-only plan; none of these runners connects
+      # to Supabase. If a runner cannot produce its plan, that is a real defect and this
+      # job fails loudly rather than reporting a clean preflight.
+      - name: coldlion — what the 06:00 snapshot WOULD do
+        if: steps.armed.outputs.armed == 'true'
+        env:
+          # Repository secret only. The preflight needs it for the live ERP read, but it
+          # still has no Supabase password, project session, or database write path.
+          COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
+        run: |
+          set -euo pipefail
+          node tools/sync-coldlion-licensors-properties.mjs \
+            --production --production-authorized \
+            --project-ref "$PRODUCTION_PROJECT_REF"
+
+      - name: promote — what the 06:30 promotion WOULD do
+        if: steps.armed.outputs.armed == 'true'
+        run: |
+          set -euo pipefail
+          node tools/promote-coldlion-source-owned.mjs \
+            --production --production-authorized \
+            --project-ref "$PRODUCTION_PROJECT_REF"
+
+      - name: compare — what the 07:00 comparison WOULD do
+        if: steps.armed.outputs.armed == 'true'
+        run: |
+          set -euo pipefail
+          node tools/compare-coldlion-designflow-daily.mjs \
+            --production --production-authorized \
+            --project-ref "$PRODUCTION_PROJECT_REF"
+
+      - name: health — what the hourly health lane WOULD do
+        if: steps.armed.outputs.armed == 'true'
+        run: |
+          set -euo pipefail
+          node tools/check-coldlion-designflow-sync-health.mjs \
+            --production --production-authorized \
+            --project-ref "$PRODUCTION_PROJECT_REF"
+
+      - name: readiness — what the operator gate WOULD evaluate
+        if: steps.armed.outputs.armed == 'true'
+        run: |
+          set -euo pipefail
+          node tools/evaluate-coldlion-licensor-property-cutover-readiness.mjs \
+            --production --production-authorized \
+            --project-ref "$PRODUCTION_PROJECT_REF"
+
+      - name: alert — what the failure alert WOULD deliver
+        if: steps.armed.outputs.armed == 'true'
+        run: |
+          set -euo pipefail
+          node tools/dispatch-coldlion-taxonomy-alerts.mjs \
+            --production --production-authorized \
+            --project-ref "$PRODUCTION_PROJECT_REF"
+
+      - name: Preflight summary
+        if: steps.armed.outputs.armed == 'true'
+        run: |
+          set -euo pipefail
+          echo "PREFLIGHT COMPLETE (read-only). Every lane resolved production ${PRODUCTION_PROJECT_REF} and printed its plan."
+          echo "NOTHING was written. The production feed is STILL governed by COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED,"
+          echo "which this job neither reads as permission nor changes. Human response owner: ${COLDLION_HUMAN_RESPONSE_OWNER}."
