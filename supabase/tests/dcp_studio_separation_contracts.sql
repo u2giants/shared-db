@@ -32,7 +32,7 @@ begin
     for v_table_name in
       select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'plm' and c.relkind = 'r'
-        and c.relname like v_prefix || '\_%' escape '\'
+        and c.relname like v_prefix || '\_%' escape chr(92)
       order by c.relname
     loop
       execute format('select count(*) from plm.%I', v_table_name) into v_before;
@@ -96,7 +96,7 @@ begin
     for v_table_name in
       select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'plm' and c.relkind = 'r'
-        and c.relname like v_prefix || '\_%' escape '\'
+        and c.relname like v_prefix || '\_%' escape chr(92)
       order by c.relname
     loop
       execute format('select count(*) from plm.%I', v_table_name) into v_after;
@@ -115,10 +115,10 @@ begin
       join pg_namespace parent_ns on parent_ns.oid = parent.relnamespace
       where c.contype = 'f'
         and child_ns.nspname = 'plm'
-        and child.relname like v_prefix || '\_%' escape '\'
+        and child.relname like v_prefix || '\_%' escape chr(92)
         and not (
           (parent_ns.nspname = 'plm'
-            and parent.relname like v_prefix || '\_%' escape '\')
+            and parent.relname like v_prefix || '\_%' escape chr(92))
           or (parent_ns.nspname = 'core' and (
             (child.relname = v_prefix || '_style_guide' and parent.relname = 'style_guide')
             or (child.relname = v_prefix || '_portal_tile' and parent.relname = 'property')
@@ -178,9 +178,9 @@ begin
   if exists (
     select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'plm' and c.relkind = 'r'
-      and (c.relname like 'lucasfilm_dcp\_%' escape '\'
-        or c.relname like 'marvel_dcp\_%' escape '\'
-        or c.relname like 'twentieth_century_dcp\_%' escape '\')
+      and (c.relname like 'lucasfilm_dcp\_%' escape chr(92)
+        or c.relname like 'marvel_dcp\_%' escape chr(92)
+        or c.relname like 'twentieth_century_dcp\_%' escape chr(92))
       and has_table_privilege('service_role', c.oid, 'INSERT')
   ) then
     raise exception 'service_role may not directly insert into studio landing tables';

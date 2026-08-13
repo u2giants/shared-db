@@ -152,7 +152,7 @@ begin
   from pg_class c
   where c.relnamespace = 'plm'::regnamespace
     and c.relkind = 'r'
-    and c.relname like 'dcp\_%';
+    and c.relname like 'twentieth_century_dcp\_%';
 
   if v_tables is null or array_length(v_tables, 1) is null then
     raise exception 'B FAILED: pg_class returned NO plm.twentieth_century_dcp_* tables. The enumeration is '
@@ -231,7 +231,7 @@ begin
   select array_agg(c.relname order by c.relname) into v_tables
   from pg_class c
   where c.relnamespace = 'plm'::regnamespace and c.relkind = 'r'
-    and c.relname like 'dcp\_%';
+    and c.relname like 'twentieth_century_dcp\_%';
 
   if v_tables is null then
     raise exception 'C FAILED: no plm.twentieth_century_dcp_* tables found -- vacuous pass prevented.';
@@ -366,7 +366,7 @@ begin
   from pg_trigger tg
   join pg_class c on c.oid = tg.tgrelid
   where c.relnamespace = 'plm'::regnamespace
-    and c.relname like 'dcp\_%'
+    and c.relname like 'twentieth_century_dcp\_%'
     and not tg.tgisinternal;
   if v_trigs < 10 then
     raise exception 'E FAILED: only % non-internal triggers on plm.twentieth_century_dcp_* tables; expected '
