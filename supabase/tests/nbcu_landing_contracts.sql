@@ -119,9 +119,13 @@ begin
   v_cap := plm.begin_nbcu_capture(
     'nbcu:ZZTEST-J:' || repeat('7', 40),
     'u2giants/ZZTEST',
-    'ZZTEST-J',
-    'ZZTEST-J',
-    '{}'::jsonb
+    repeat('7', 40),
+    repeat('8', 64),
+    'https://portal.example.invalid/',
+    now(),
+    '{"properties":4}'::jsonb,
+    '{}'::jsonb,
+    'contract-test-A1'
   );
 
   foreach v_kind in array array[
