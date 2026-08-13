@@ -2059,6 +2059,19 @@ class LexerFalseAcceptDefects(unittest.TestCase):
             {"plm.a", "plm.b"},
         )
 
+    def test_f5_function_argument_types_are_not_recorded_as_dropped_objects(self) -> None:
+        """Issue #881: the object list ends when the signature starts."""
+        self.assertEqual(
+            dropped_objects("drop function plm.f(plm.mytype);\n"),
+            {"plm.f"},
+        )
+
+    def test_f5_procedure_signature_with_qualified_types_stays_bounded(self) -> None:
+        self.assertEqual(
+            dropped_objects("drop procedure if exists plm.p(core.a, core.b);\n"),
+            {"plm.p"},
+        )
+
     def test_f5_a_rename_removes_the_OLD_name_and_adds_the_NEW_one(self) -> None:
         events = dict(
             (obj, created) for _pos, obj, created in

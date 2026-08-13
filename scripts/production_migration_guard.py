@@ -1509,7 +1509,7 @@ DROP_RES = (
 )
 # Where a `drop` object list ends. `cascade`/`restrict` are not object names and
 # a `;` ends the statement outright.
-DROP_LIST_END_RE = re.compile(r";|\bcascade\b|\brestrict\b")
+DROP_LIST_END_RE = re.compile(r"\(|;|\bcascade\b|\brestrict\b")
 # `alter <kind> [if exists] [only] sch.obj rename to newname` -- the old name
 # STOPS EXISTING and a new one appears in the same schema. `rename column`,
 # `rename constraint` and friends do not match, because they carry the noun
