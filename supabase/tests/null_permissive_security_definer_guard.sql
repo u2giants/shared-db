@@ -1,4 +1,4 @@
--- Contract tests for 20260813010000_null_permissive_security_definer_guard_fix.sql
+-- Contract tests for 20260813030000_null_permissive_security_definer_guard_fix.sql
 -- (issue #861 -- the NULL-permissive SECURITY DEFINER guard).
 --
 -- Rollback-safe. Writes NOTHING: every authorised call is aimed at an argument

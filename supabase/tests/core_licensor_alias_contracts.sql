@@ -315,7 +315,7 @@ begin
   end;
 
   -- D5/D6 call public.approve_licensor_alias, which is authority-guarded. Until
-  -- 20260813010000 they reached its validations from a session with NO JWT claims,
+  -- 20260813030000 they reached its validations from a session with NO JWT claims,
   -- because the old guard shape evaluated to NULL under a NULL auth.role() and
   -- skipped its own raise (issue #861). Declare an authorised caller so these two
   -- assertions test what they say they test.

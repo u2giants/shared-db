@@ -234,7 +234,7 @@ begin
       raise notice 'C2. PASS - an active decision must name who activated it and when';
   end;
 
-  -- C3/C4/C7 call the authority-guarded RPCs. Until 20260813010000 they reached the
+  -- C3/C4/C7 call the authority-guarded RPCs. Until 20260813030000 they reached the
   -- post-guard validations from a session with NO JWT claims, because the old guard
   -- shape `if not (app.has_role(...) or auth.role() = 'service_role')` evaluated to
   -- NULL under a NULL auth.role() and skipped its own raise (issue #861). That is
