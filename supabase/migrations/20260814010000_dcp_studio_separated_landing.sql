@@ -1397,7 +1397,7 @@ begin
   ]
   loop
     execute format(
-      'revoke update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
+      'revoke insert, update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
     execute format('revoke all on plm.%I from public', t);
     execute format('revoke all on plm.%I from anon', t);
     execute format('grant select on plm.%I to service_role', t);
@@ -2708,7 +2708,7 @@ begin
   ]
   loop
     execute format(
-      'revoke update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
+      'revoke insert, update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
     execute format('revoke all on plm.%I from public', t);
     execute format('revoke all on plm.%I from anon', t);
     execute format('grant select on plm.%I to service_role', t);
@@ -4230,7 +4230,7 @@ begin
   ]
   loop
     execute format(
-      'revoke update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
+      'revoke insert, update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
     execute format('revoke all on plm.%I from public', t);
     execute format('revoke all on plm.%I from anon', t);
     execute format('grant select on plm.%I to service_role', t);
@@ -5541,7 +5541,7 @@ begin
   ]
   loop
     execute format(
-      'revoke update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
+      'revoke insert, update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
     execute format('revoke all on plm.%I from public', t);
     execute format('revoke all on plm.%I from anon', t);
     execute format('grant select on plm.%I to service_role', t);
@@ -7063,7 +7063,7 @@ begin
   ]
   loop
     execute format(
-      'revoke update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
+      'revoke insert, update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
     execute format('revoke all on plm.%I from public', t);
     execute format('revoke all on plm.%I from anon', t);
     execute format('grant select on plm.%I to service_role', t);
@@ -8374,7 +8374,7 @@ begin
   ]
   loop
     execute format(
-      'revoke update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
+      'revoke insert, update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
     execute format('revoke all on plm.%I from public', t);
     execute format('revoke all on plm.%I from anon', t);
     execute format('grant select on plm.%I to service_role', t);

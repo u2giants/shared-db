@@ -121,6 +121,7 @@ begin
             and parent.relname like v_prefix || '\_%' escape '\')
           or (parent_ns.nspname = 'core' and (
             (child.relname = v_prefix || '_style_guide' and parent.relname = 'style_guide')
+            or (child.relname = v_prefix || '_portal_tile' and parent.relname = 'property')
             or (child.relname = v_prefix || '_property' and parent.relname = 'property')
             or (child.relname = v_prefix || '_character' and parent.relname = 'character')
           ))

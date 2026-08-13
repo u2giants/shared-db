@@ -1518,9 +1518,9 @@ comment on table plm.lucasfilm_dcp_metadata_load_exception is
 
 revoke all on plm.lucasfilm_dcp_metadata_load_exception from public;
 revoke all on plm.lucasfilm_dcp_metadata_load_exception from anon;
-revoke update, delete, truncate, references, trigger, maintain
+revoke insert, update, delete, truncate, references, trigger, maintain
   on plm.lucasfilm_dcp_metadata_load_exception from service_role;
-grant select, insert on plm.lucasfilm_dcp_metadata_load_exception to service_role;
+grant select on plm.lucasfilm_dcp_metadata_load_exception to service_role;
 grant select on plm.lucasfilm_dcp_metadata_load_exception to authenticated;
 
 alter table plm.lucasfilm_dcp_metadata_load_exception enable row level security;
@@ -4023,9 +4023,9 @@ comment on table plm.marvel_dcp_metadata_load_exception is
 
 revoke all on plm.marvel_dcp_metadata_load_exception from public;
 revoke all on plm.marvel_dcp_metadata_load_exception from anon;
-revoke update, delete, truncate, references, trigger, maintain
+revoke insert, update, delete, truncate, references, trigger, maintain
   on plm.marvel_dcp_metadata_load_exception from service_role;
-grant select, insert on plm.marvel_dcp_metadata_load_exception to service_role;
+grant select on plm.marvel_dcp_metadata_load_exception to service_role;
 grant select on plm.marvel_dcp_metadata_load_exception to authenticated;
 
 alter table plm.marvel_dcp_metadata_load_exception enable row level security;
@@ -6528,9 +6528,9 @@ comment on table plm.twentieth_century_dcp_metadata_load_exception is
 
 revoke all on plm.twentieth_century_dcp_metadata_load_exception from public;
 revoke all on plm.twentieth_century_dcp_metadata_load_exception from anon;
-revoke update, delete, truncate, references, trigger, maintain
+revoke insert, update, delete, truncate, references, trigger, maintain
   on plm.twentieth_century_dcp_metadata_load_exception from service_role;
-grant select, insert on plm.twentieth_century_dcp_metadata_load_exception to service_role;
+grant select on plm.twentieth_century_dcp_metadata_load_exception to service_role;
 grant select on plm.twentieth_century_dcp_metadata_load_exception to authenticated;
 
 alter table plm.twentieth_century_dcp_metadata_load_exception enable row level security;
