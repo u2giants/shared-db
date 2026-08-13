@@ -28,7 +28,7 @@ correct row in the big canonical `core.property` table — automatically first,
 then by human review for whatever automation cannot resolve. Every canonical
 property that ColdLion does **not** carry is set **inactive**. The mapping
 function is exposed as a screen on `https://data.designflow.app`, and
-`larevalo@popcre.com` is granted access to operate it.
+`app.profile` `8f383a14-f303-4890-90a2-80306a2d4665` is granted access to operate it.
 
 ## 2. Why this shape
 
@@ -110,7 +110,7 @@ guards in `tools/sync-coldlion-licensors-properties.mjs` apply.
 
 ## 5. Access
 
-`larevalo@popcre.com` is to be granted access to the mapping screen.
+`app.profile` `8f383a14-f303-4890-90a2-80306a2d4665` is to be granted access to the mapping screen.
 
 DB Data Admin authorizes through `app.require_db_data_admin_access()`, which
 requires **both**:
@@ -158,7 +158,7 @@ missing 5 properties (`CHR`, `EX`, `GW`, `LB`, `SGT`) and disagrees on one
 3. Consolidate the portal scrapes into `core.property` / `core.character` /
    `core.style_guide` / canonical asset. Structure — `db-work` issue.
 4. Build the mapping function and its review queue. Structure plus app work.
-5. Expose it in DB Data Admin and grant `larevalo@popcre.com`.
+5. Expose it in DB Data Admin and grant `app.profile` `8f383a14-f303-4890-90a2-80306a2d4665`.
 6. Turn on ColdLion-driven deactivation, proposed-list-first.
 
 ## 8. What this document does NOT change

@@ -19,7 +19,7 @@ Production URL: **`https://data.designflow.app`**
 > `core.*` master data, with ColdLion mapped onto it and a mapping/review screen hosted
 > here. Read [`docs/core-master-data-consolidation-aim.md`](docs/core-master-data-consolidation-aim.md)
 > before extending either tab. It also records the outstanding access grant for
-> `larevalo@popcre.com` and the two grants DB Data Admin requires.
+> `app.profile` `8f383a14-f303-4890-90a2-80306a2d4665` and the two grants DB Data Admin requires.
 
 This is the cold-start specification for a developer with no prior context. It incorporates
 the useful database inventory, curation workflows, safety checks, traps, and acceptance
