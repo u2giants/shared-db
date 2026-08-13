@@ -21,7 +21,13 @@ AI sessions from breaking each other through the one database they all depend on
 
 > **Started in `shared-db` and you are not the orchestrator? Stop and hand over.**
 > This repo runs **one orchestrator session**, which dispatches every task to
-> sub-agents in isolated worktrees. **Any other session opens a GitHub issue and stops:**
+> sub-agents in isolated worktrees.
+> **Scope: STRUCTURE, not data (§0.0-B, owner ruling 2026-08-13).** This repo and its
+> orchestrator govern the *shape* of the database — schema, tables, columns, views, functions,
+> triggers, RLS, indexes, migrations. An application session changing its own *rows* does not
+> belong here and must not open an issue for it. The one exception is curated Master Data
+> under §6.4.
+> **Any other session with a STRUCTURE change opens a GitHub issue and stops:**
 > `gh issue create --repo u2giants/shared-db --label db-work --title "HANDOVER: …" --body-file <file>`.
 > ⚠️ **`COORDINATOR_INTAKE.md` is RETIRED** (2026-08-07) and is now a short pointer file.
 > **It stays on disk on purpose — retired means "pointer plus guard", not "deleted".** The
@@ -45,11 +51,34 @@ AI sessions from breaking each other through the one database they all depend on
 > `shared-db-orchestrator` to run a orchestrator session, `shared-db-handover` to
 > close one out.
 
+> ## ⚠️ Before you conclude "this schema object does not exist"
+>
+> **The live catalog is NOT proof that work was never done.** It is proof of what is
+> APPLIED. A migration that is merged to `main` but never applied is invisible in
+> `information_schema` and looks exactly like work nobody ever wrote. On 2026-08-13 that
+> is precisely what happened: 17 Disney landing tables were reported to the owner as
+> "missing" when they existed as reviewed, merged SQL that had never been switched on
+> (issue #892).
+>
+> **Always check the ledger against `main` before reporting a schema gap:**
+>
+>     SUPABASE_ACCESS_TOKEN=… node scripts/check-migration-ledger-drift.mjs --target production
+>
+> It reports both directions — merged-but-not-applied, and applied-but-not-on-`main`.
+> Exit 0 = no drift, 1 = drift, **2 = could not check, which is never "no drift"**. It also
+> runs on every push to `main`, daily, and on demand: workflow `Migration Ledger Drift`
+> ([`.github/workflows/migration-ledger-drift.yml`](.github/workflows/migration-ledger-drift.yml)).
+
 ## 0. Shared-db gatekeeper rule for consumer repos
 
 `shared-db` is the gatekeeper for every database schema change in the shared
 Supabase project, including DesignFlow PLM tables that still appear in app repos
 as Sequelize models or legacy inline startup migrations.
+
+**Scope reminder: this is a STRUCTURE rule, not a data rule.** Ordinary
+application row writes belong to the application session that owns the feature —
+see §0.0-B, which is the controlling statement of what this repo governs and
+what it does not. §0 governs the shape of the database; §0.0-B draws the line.
 
 Consumer repos must not author schema changes locally. That means no app-repo
 inline migrations, no direct SQL runbooks, no dashboard edits, and no model-only
@@ -116,9 +145,11 @@ stopped being a review:
 - changing shared Supabase data or structure during a review
 - bypassing the preview → branch → pull-request process in this repo
 
-**Every CHANGE is still authored here first** (§0 and §5): schema, tables, columns, views,
-functions/RPCs, triggers, RLS policies, indexes, constraints, seeds, migrations and shared
-data contracts.
+**Every STRUCTURAL change is still authored here first** (§0 and §5): schema, tables, columns,
+views, functions/RPCs, triggers, RLS policies, indexes, constraints, structural seeds shipped as
+migrations, migrations and shared data contracts. **Ordinary application data writes are not on
+this list** — see §0.0-B, which supersedes any reading of this paragraph that would route
+routine row changes through this repo.
 
 **Nothing else is relaxed.** Production and shared-cloud safety rules are unchanged; use the
 approved read-only AI identity wherever one is required, and never use privileged personal
@@ -128,6 +159,79 @@ private licensor source data inside its approved private repository, but license
 never be copied into a public repo, a GitHub issue, logs, prompts sent to outside services,
 commit messages or pull requests. And §4.2 still stands — prove which project you are pointed
 at (`get_project_url` for MCP, `cat supabase/.temp/project-ref` for the CLI) and quote it.
+
+## 0.0-B OWNER RULING — this repo and its orchestrator govern STRUCTURE, not DATA (Albert Hazan, 2026-08-13)
+
+> "shared-db orchestrator is for creating, changing, or deleting the STRUCTURE or schema or
+> design of the database, not for creating, changing, or deleting the data inside the database.
+> That should be done by the sessions working on the actual application."
+> — Albert Hazan, 2026-08-13
+
+**This is the controlling statement of scope.** Where any other section of this document, any
+skill, any memory file, any consumer-repo doc, or any global instruction block reads as though
+routine row writes must be routed through this repo or its orchestrator, **this section wins**
+and that reading is wrong. It resolves a real ambiguity: the earlier rules listed "seeds" and
+"data fixes" in the same breath as tables and columns, and several sessions correctly concluded
+from that wording that any `INSERT` put them under the orchestrator. That was never the intent.
+
+### What the orchestrator governs — STRUCTURE
+
+Authored here first, on a branch, preview-first, merged by pull request:
+
+schemas · tables · columns · types and enums · views · materialised views · functions and RPCs ·
+triggers · row-security (RLS) policies · grants and privileges · indexes · constraints ·
+extensions · realtime publications · storage policies · migrations · **structural seed data that
+ships as a migration** (lookup/enum/reference rows the schema itself depends on) · shared data
+contracts between applications.
+
+### What the orchestrator does NOT govern — DATA
+
+The rows an application creates, edits, or removes in the normal course of doing its job. The
+session working on that application owns those writes outright. **No GitHub issue, no
+orchestrator dispatch, no handover, no branch, and no migration.** Concretely, and non-exhaustively:
+
+- a feature or bug fix writing, updating, or deleting its own application rows
+- a scraper, importer, or sync job writing into the ingest/staging tables it owns
+- backfilling, correcting, or cleaning up application data the app itself produced
+- test, demo, or fixture data in preview
+- operational data: job runs, queue rows, cache entries, audit and log rows
+
+Calling one of these "database work" and refusing it is a mistake. Routing one of them through
+an issue and the orchestrator is also a mistake — it wastes the queue and delays the app.
+
+### The one carve-out — CURATED MASTER DATA stays gated
+
+**§6.4 and its 2026-08-03 correction survive this ruling in full and are not relaxed.** Bulk or
+ad-hoc loading of outside-sourced content into curated Master Data — `core.licensor`,
+`core.property`, `core.character`, `core.customer`, `core.factory` and their `*_ext` tables —
+remains gated, still binds the AI session doing the typing, and still carries the matched-row
+abstention rule. That gate was bought with an incident: a spreadsheet dump can silently supersede
+hand-curated rulings, and nothing in this database records which fields a human set, so an
+ad-hoc session cannot tell curated from untouched.
+
+The carve-out is narrow and it is about **provenance and target**, not about volume or verb. It
+applies when outside-sourced content (a spreadsheet, CSV, export, pasted rows, screenshot, chat
+message, or API pull) is written into those Master Data tables. It does **not** turn an
+application's own row writes elsewhere in the database into orchestrator work.
+
+### What is unchanged everywhere
+
+- **§4.2 applies to data writes exactly as before.** Owning your rows does not relax proving your
+  connection target. Before any `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE`, in preview or production,
+  prove which database you are pointed at and quote the proof in your report. §4.2 is a safety
+  rule about *where the statement lands*; §0.0-B is a routing rule about *who decides it*. They
+  are independent and both bind.
+- **Production and shared-cloud safety rules**, the read-only AI identity requirement, and
+  licensed-data protection are unchanged.
+- **Read-only inspection** stays wide open per §0.0-A.
+- **The single-orchestrator rule (§12.1) still governs structure work.** A session that needs a
+  schema change in `shared-db` still stops, opens an issue, and hands over.
+
+### The test, in one line
+
+*Am I changing the shape of the database, or the contents of it?* Shape → this repo, orchestrator,
+branch, preview, PR. Contents → your own application session, with §4.2 proof, unless the target
+is curated Master Data.
 
 ## 0.1 Database schema ownership is not deployment-secret ownership
 
@@ -389,6 +493,38 @@ code, manage branches, or merge pull requests. Therefore:
 | **DesignFlow app repo** (`popcre/designflow-*`) | Work on **`sandbox-albert`**, push, and open/update a PR to **`develop`**. Do not merge it yourself. | DesignFlow work is reviewed by Uma. Keep schema changes out of these repos; use `shared-db` first. |
 | **This repo** (`shared-db`) | **Branch + PR, and the AI merges it** once the §5 checklist passes. | All apps read these tables. A bad change breaks everyone at once. The PR is a safety checkpoint and an undo button — not paperwork for the owner. |
 
+## 2.1-W WORKTREE-ONLY — no session works directly in the shared `shared-db` checkout (standing rule, added 2026-08-12, issue #513)
+
+**The rule.** In this repository, **every session — the orchestrator included — does its work in
+its own `git worktree` cut from `origin/main`.** The shared checkout (`C:\repos\shared-db` on the
+Windows boxes, and its equivalent elsewhere) is for reading and for `git fetch`. Nobody branches
+in it, commits in it, or leaves it checked out on a working branch.
+
+```bash
+git -C <shared-checkout> fetch origin --prune
+git -C <shared-checkout> worktree add <shared-checkout>/.claude/worktrees/<slug> -b <branch> origin/main
+```
+
+**Why it is a rule and not a preference.** Several sessions run this repo concurrently and they
+all share one working copy. Observed, dated damage:
+
+- **2026-08-06** — mid-session another session switched the shared checkout off the branch the
+  first session was on, onto `docs/plan-dispatch-collision-hardening`, and committed on top. A
+  commit landed on the **wrong branch and was pushed there** before anyone noticed. Recovery was
+  non-destructive (cherry-pick to the right branch through a temporary worktree; no branch was
+  rewritten, reverted, or force-pushed) but it cost a session.
+- The same event left PR #467 carrying four files belonging to PR #466, because #467's branch was
+  cut from the polluted checkout. The clean fix there was to **merge the earlier PR first** so the
+  files drop out of the later diff by themselves — never a rebase or force-push of someone else's
+  branch.
+- §5.1's own step-2 recipe already says to do sensitive git work in a dedicated worktree. This
+  section makes that the general rule rather than one recipe's footnote.
+
+**If you find the shared checkout on a working branch**, do not "fix" it by switching it back —
+another live agent may be mid-task on it. Leave it, work in your own worktree, and say so in your
+handoff. Remove your own worktree when your branch has merged; never remove one that is dirty,
+locked, or held by a live agent.
+
 ## 2.1 Host/server boundary
 
 This repo owns shared database schema, Supabase migrations, PLM import code, and the `systemd/plm-sync.*` templates. Durable host/OS changes on `hetz` are owned by the canonical Ansible repo at `/worksp/ansible` / [`u2giants/ansible`](https://github.com/u2giants/ansible), then applied by GitHub Actions.
@@ -573,7 +709,9 @@ rule closes that evidence gap, not a mistake.
    proof covers everything submitted in the same tool call as the check or in the
    immediately following tool call (a batch, a migration file, a `db push`); it never
    carries further.** Preview being "the safe one" is not an exemption: the proof
-   requirement is unconditional.
+   requirement is unconditional. **§0.0-B does not narrow this.** An application session
+   that owns its own data writes still owes the proof on every one of them: §0.0-B decides
+   *who authorises* a statement, §4.2 decides *that you know where it lands*. Both bind.
 2. **"Prove" means an explicit check of the live connection target, executed immediately
    before the statement.** It is not an assumption, not a memory, not a check made earlier in
    the session, not a `.sql` filename, not a branch name, not a doc, not a plan that said
@@ -661,6 +799,14 @@ supabase/migrations/` + `supabase migration list` on production. RE-DERIVE BEFOR
 A snapshot without the timestamp, the source command and the re-derive marker is a defect —
 fix it when you see it. And no session may act on a snapshot it did not re-derive itself.
 
+⛔ **Do not propose a CI check that compares documents to GitHub issues.** It has been
+proposed twice, built once (B13) and deleted once, and three models re-reviewed it on
+2026-08-13 and rejected every variant. The reasoning, the verified false-positive rates and
+the one narrower check that could earn its place later are in
+[`docs/artifact-consistency-checker-rejected-20260813.md`](docs/artifact-consistency-checker-rejected-20260813.md).
+The mitigation for unsourced figures is this section plus the plan standard's rule that a
+status row marked done must cite an artifact, never a bare number.
+
 ## 5. The `shared-db` merge protocol (the checklist the AI runs)
 
 Merge a `shared-db` PR **only when every item is true**:
@@ -679,9 +825,20 @@ change) need just items 1 and "it reads correctly" — merge them promptly.
 
 ### 5.1 Promoting to production when a backlog exists — NEVER `--include-all` on the full repo set, ALWAYS inside the pruned temp checkout (learned 2026-07-23; recipe corrected 2026-07-27; wording made self-consistent 2026-08-09)
 
-> ⚠️ **Before you promote anything, read the #611 HARD GATE in §5.1-A.** The canary
-> `20260810140000` may go now; **no licensor batch may go** until
-> `scripts/experiment_611_db_push_atomicity.sh` has been RUN on Supabase CLI **2.105.0**.
+> ✅ **The #611 gate is DISCHARGED — corrected 2026-08-12.** It **RAN** on 2026-08-10 against
+> `main` tip `bc29d36` on the pinned **Supabase CLI 2.105.0**
+> ([`scripts/experiment_611_db_push_atomicity.sh`](scripts/experiment_611_db_push_atomicity.sh);
+> full result in
+> [`docs/verification/issue-611-db-push-atomicity-20260810.md`](docs/verification/issue-611-db-push-atomicity-20260810.md)).
+> **Licensor batches are no longer blocked by #611.** This block previously still read *"no
+> licensor batch may go until … has been RUN"*, directly contradicting §5.1-A two hundred lines
+> below, which has recorded the gate as discharged since 2026-08-10. A reader following the old
+> wording would have blocked a promotion that is in fact cleared.
+>
+> ⚠️ **The gate REOPENS on any Supabase CLI version bump** — the result is pinned to **2.105.0**.
+> If you are not on 2.105.0, re-run the script and re-record before promoting. **Read §5.1-A in
+> full before you promote anything**: everything else it says still binds, in particular that
+> `db push` is atomic **per FILE, not per batch**, and that **"PREFLIGHT OK" is not an approval**.
 
 Production almost always has **pending migrations from other workstreams that sit *before* your
 own** (e.g. DB Data Admin write paths, DAM taxonomy cutover, PopSG — several deliberately
@@ -937,6 +1094,26 @@ context.)*
 
 **The stale-verdict trap itself is NOT retired.** Everything above about reading the run's SHA
 before believing a red X still applies, to every `paths:`-filtered workflow in this repo.
+
+### 5.2-A A SECOND flavour of false red: the job never ran at all (hosted-runner starvation, added 2026-08-12, issue #513)
+
+Dated evidence: on **2026-08-06**, `Cross-PR object collision` on **PR #466** went **red after 44
+minutes without ever executing a step**. The job annotation read:
+
+> *"The job was not acquired by Runner of type hosted even after multiple attempts."*
+
+That is **GitHub hosted-runner starvation, not a collision**, and not a fault in your PR.
+`gh run rerun --failed <run-id>` cleared it.
+
+**Before you believe any red required check, read the job annotations**, not just the red X:
+
+```bash
+gh run view <run-id> --log-failed
+gh api repos/u2giants/shared-db/actions/runs/<run-id>/jobs --jq '.jobs[] | {name, conclusion, steps: [.steps[].conclusion]}'
+```
+
+A job whose steps are all `null`/empty never ran. Re-run it; do not go looking for a code defect,
+and above all do not "fix" a guard that never executed.
 
 ## 6. How to tell if a change is already in flight
 
@@ -1258,6 +1435,14 @@ that does not exist and never will.
    proof in your report. A spreadsheet dump aimed at preview that lands on production
    `qsllyeztdwjgirsysgai` is unrecoverable in exactly the way §4.2 describes.
 
+**Relationship to §0.0-B (2026-08-13).** §0.0-B hands ordinary application data writes back to the
+application sessions, and **explicitly preserves this subsection as its one carve-out**. Nothing
+here is relaxed. The scope is unchanged and is defined by **provenance and target**: outside-sourced
+content written into curated Master Data (`core.licensor`, `core.property`, `core.character`,
+`core.customer`, `core.factory` and their `*_ext` tables). Do not read §0.0-B's "app sessions own
+their data" as an exemption from §6.4 — it names §6.4 as the exception to itself. Equally, do not
+read §6.4 as reaching an application's own rows in its own tables; it does not, and never did.
+
 **What has NOT changed.** §6.4's three parts, its two loopholes, the production violation warning
 (`plm.import_master_data` still force-sets curated status on production; `20260802170000` is merged
 but **not applied there**), and the compliant reference implementations all stand exactly as written
@@ -1487,8 +1672,17 @@ Albert turned branch protection **ON** for `main` on 2026-08-04. This is a stand
 by the owner. **It is settled — do not re-ask it, do not treat it as an AI's preference, and do not
 weaken it.**
 
-**The verified fact, not a claim.** Read back live at **2026-08-06 16:00 UTC** with
-`gh api repos/u2giants/shared-db/branches/main/protection`:
+**The verified fact, not a claim.** Read back live and **RE-DERIVED on 2026-08-12** (previous
+re-derivation 2026-08-06 16:00 UTC) with:
+
+```bash
+gh api repos/u2giants/shared-db/branches/main/protection
+```
+
+The 2026-08-12 read matched every row below exactly — six contexts including `Intake pointer
+guard` and **not** `Backlog / queue sync`, `strict: true`, `enforce_admins: true`,
+`allow_force_pushes: false`, `allow_deletions: false`. **The table is accurate as of that date —
+and you must still run the command rather than trust it.**
 
 | Setting | Value |
 | --- | --- |
@@ -1506,11 +1700,16 @@ weaken it.**
 > check and both merge, silently erasing one another. That is the 2026-07-31 four-way
 > incident's exact mechanism. **Do not turn it back off.**
 >
-> ⚠️ **This table was stale for two days** — it still read `strict: false` and four
+> ⚠️ **This table was stale for two days once already** — it read `strict: false` and four
 > contexts after both had changed. A reviewing model (Grok 4.5, 2026-08-06) read it and
-> concluded a *correct* document was wrong. **Verify branch protection with the `gh api`
-> command above rather than trusting this table**, and re-read it back whenever you change
-> it. Prose asserting mutable state goes stale; the command does not.
+> concluded a *correct* document was wrong.
+>
+> **STANDING INSTRUCTION: never quote this table as fact. Run the `gh api` command above and
+> quote the live output**, in any issue, handover, review, or PR description that turns on
+> branch protection — and re-read it back whenever you change protection, stamping the new date
+> here. This follows §4.3 (point at the live reading, never at a number). Prose asserting mutable
+> state goes stale; the command does not. Two rows are **owner rulings you may never weaken to
+> make a check pass**: `strict` stays `true` and `enforce_admins` stays `true`.
 
 **The rule.**
 
@@ -2317,6 +2516,55 @@ have already happened in this repo, more than once.
     `HANDOFF.d/2026-08-06T0149Z-al8960ofc-orchestrator-skill-repair.md` §4. **Do
     not sweep or remove any worktree on the strength of a number in a document**,
     and never remove one that is dirty, locked, or held by a live agent (B2.3).
+
+### 12.1 More standing facts, added after the relocation (2026-08-12, issue #772; item 15 added 2026-08-13)
+
+> The ten rules above are a **frozen, byte-identical relocation** from the retired
+> `COORDINATOR_INTAKE.md` and must not be tidied. The items below are **new** and are recorded
+> here instead. Each one has already misled at least one session. Numbering continues from 10.
+
+11. **Preview and production have diverged IN BOTH DIRECTIONS. Neither predicts the other.**
+    Verified by object on **2026-08-11**: preview `rjyboqwcdzcocqgmsyel` holds **all 23
+    `plm.pmt_*` tables**, with both prerequisite migrations genuinely applied, and production
+    `qsllyeztdwjgirsysgai` holds **ZERO** of them. In the other direction,
+    `20260810140000_production_lane_canary` **is applied on production and is NOT applied on
+    preview**. Both ledgers are also applied **out of order**, in different ways, so a high max
+    applied version does **not** mean everything below it is applied. Any claim of the shape
+    *"preview is production minus N migrations"* is wrong. A passing preview rehearsal means
+    *"this behaved correctly on preview"* and never *"this will behave correctly in production"* —
+    **post-apply verification against production objects and behaviour is not optional.** This has
+    misled at least three sessions.
+
+12. **The advisory model review in the production apply is a permanent silent no-op.** The step
+    *"Production apply review (advisory model verdict + hard guards)"* reports **"NOT RUN —
+    `ANTHROPIC_API_KEY` is not configured on this repository"** and is `continue-on-error`. No HTTP
+    request is made. **A green production apply run does NOT mean a model reviewed the
+    migrations.** The hard guards in that same job are real; the model verdict is not. Tracked as
+    #709 and #737.
+
+13. **The migration history is not self-contained — do not expect a clean replay.** Replaying all
+    429 migrations into an empty database **applies 363 and fails 66**, because this repo was
+    adopted on top of an already-populated database: `public.assets`, the legacy popdam tables and
+    the `dflow.*` mirrors exist in preview and production with **no migration here creating
+    them**. A CI bootstrap (PR #759) closes most of the gap — quarantined contract files 26 → 11,
+    passing tests 14 → 29, replay failures 66 → 10. It lives at `supabase/ci-bootstrap/` and is
+    **deliberately not a migration**: a file inserted at the front of an already-applied sequence
+    can never re-run, and a back-dated version is exactly what Guard B exists to stop. See also
+    §10.1.
+
+14. **Freeze merges before every production apply.** The production apply is pinned to an exact
+    `origin/main` SHA. On **2026-08-11** that pin refused **two separately approved runs**, each
+    because PRs merged between staging and the owner's click. Nothing was written either time —
+    the guard worked — but two owner approvals were wasted, and the third only landed under a
+    deliberate merge freeze. **Announce a freeze, hold every merge from staging until the run
+    finishes, then release it.** This is standard practice, not an improvisation.
+
+15. **The single-orchestrator rule is scoped to STRUCTURE (owner ruling §0.0-B, 2026-08-13).**
+    Rules 1 and 2 above ("one orchestrator", "one schema change in flight") govern changes to the
+    *shape* of the database. They do **not** make an application session's ordinary row writes
+    into orchestrator work, and a session must not open an issue or hand over merely because its
+    feature writes data. The single exception is curated Master Data under §6.4, which stays
+    gated. §4.2's connection-target proof still applies to every data write regardless.
 
 ---
 
