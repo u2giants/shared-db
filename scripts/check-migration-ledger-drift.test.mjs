@@ -20,6 +20,7 @@ import {
   APPLIED_VERSIONS_SQL,
   fetchAppliedVersions,
   guardClassifications,
+  classifyPendingWithRules,
   validatePendingClassifications,
 } from './check-migration-ledger-drift.mjs'
 
@@ -41,6 +42,10 @@ function io({ files, applied }) {
 const classifications = (versions, kind = 'genuinely-pending') => Object.fromEntries(
   versions.map((version) => [version, { kind, reason: 'focused test reason' }]),
 )
+
+const ruleFixture = (overrides = {}) => ({
+  retired: [], hardBlocked: [], bundle: [], frHeld: [], frRemoval: [], atomic: [], coPresence: [], ...overrides,
+})
 
 const files = (versions) => versions.map((v) => `supabase/migrations/${v}_thing.sql`)
 
@@ -111,6 +116,39 @@ test('carries the production guard reason for an atomic or co-presence migration
   assert.equal(result['20260810190000'].kind, 'guarded-batch')
   assert.match(result['20260810190000'].reason, /Disney DCP Vault|B9/)
   assert.match(result['20260810190000'].reason, /20260810190100/)
+})
+
+test('ledger-aware co-presence classifies every outstanding fix in a full fix-only recovery', () => {
+  const rules = ruleFixture({ coPresence: [{ create: '100', fixes: ['110', '120'], why: 'both fixes close the exposure' }] })
+  const result = classifyPendingWithRules(['110', '120'], ['100'], rules)
+  for (const version of ['110', '120']) {
+    assert.equal(result[version].kind, 'guarded-batch')
+    assert.match(result[version].reason, /Create 100 is already applied/)
+    assert.match(result[version].reason, /110, 120/)
+  }
+})
+
+test('ledger-aware co-presence permits the remaining fix recovery after its sibling applied', () => {
+  const rules = ruleFixture({ coPresence: [{ create: '100', fixes: ['110', '120'], why: 'both fixes close the exposure' }] })
+  const result = classifyPendingWithRules(['120'], ['100', '110'], rules)
+  assert.equal(result['120'].kind, 'guarded-batch')
+  assert.match(result['120'].reason, /Outstanding required fixes: 120/)
+  assert.doesNotMatch(result['120'].reason, /Outstanding required fixes: 110/)
+})
+
+test('one-directional co-presence does not make a fix depend on an unapplied create', () => {
+  const rules = ruleFixture({ coPresence: [{ create: '100', fixes: ['110', '120'], why: 'create requires fixes' }] })
+  const result = classifyPendingWithRules(['110'], [], rules)
+  assert.equal(result['110'].kind, 'genuinely-pending')
+})
+
+test('future FR removal versions inherit the deliberate owner-held bundle', () => {
+  const rules = ruleFixture({ frHeld: ['200', '210'], frRemoval: ['220', '230'] })
+  const result = classifyPendingWithRules(['200', '220', '230'], [], rules)
+  for (const version of ['200', '220', '230']) {
+    assert.equal(result[version].kind, 'deliberately-held')
+    assert.match(result[version].reason, /200, 210, 220, 230/)
+  }
 })
 
 test('REFUSES incomplete, unknown, or reasonless pending classification', () => {

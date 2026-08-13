@@ -88,8 +88,8 @@ export const PENDING_KINDS = new Set(['genuinely-pending', 'guarded-batch', 'del
 
 /**
  * Read the production lane's existing rules instead of maintaining a second list here.
- * Python emits one classification for every requested version. Any import, parse, or
- * coverage failure is UNKNOWN and makes the drift check exit 2.
+ * Python emits the rule data; JavaScript applies it with the actual ledger. Any import,
+ * parse, or coverage failure is UNKNOWN and makes the drift check exit 2.
  */
 export function guardClassifications(versions, appliedVersions = []) {
   if (versions.length === 0) return {}
@@ -100,38 +100,17 @@ root = Path(sys.argv[1])
 sys.path.insert(0, str(root / 'scripts'))
 from production_migration_guard import HARD_BLOCKED, BUNDLE_20260804, FR_HELD_20260803, FR_REMOVAL_VERSIONS, CO_PRESENCE_RULES, ATOMIC_BATCHES
 from post_batch_app_verification import RETIRED_VERSIONS
-versions = json.loads(sys.argv[2]); applied = set(json.loads(sys.argv[3])); out = {}
-for version in versions:
-    if version in RETIRED_VERSIONS:
-        out[version] = {'kind':'retired','reason':'RETIRED_VERSIONS: never apply this version; applying it would regress a live production security control whose end state is already present.'}
-        continue
-    if version in FR_HELD_20260803:
-        suffix = ('The required FR removal migration set is not yet defined.' if not FR_REMOVAL_VERSIONS else 'It may ship only with the full recorded FR removal set.')
-        out[version] = {'kind':'deliberately-held','reason':'AGENTS.md 6.5 owner ruling holds both FR versions for one bounded apply with the FR removal work. ' + suffix}
-        continue
-    if version in HARD_BLOCKED:
-        out[version] = {'kind':'retired','reason':'production_migration_guard.HARD_BLOCKED: the general production lane refuses this version outright. Do not apply it.'}
-        continue
-    matches = []
-    if version in BUNDLE_20260804:
-        matches.append('AGENTS.md 6.8 requires the complete four-version ColdLion bundle, never a subset.')
-    for name, basis, why, members in ATOMIC_BATCHES:
-        if version in members:
-            outstanding = sorted(set(members) - applied)
-            matches.append(f'{name} {basis} batch: {why} Outstanding set: {", ".join(outstanding)}.')
-    for create, fixes, why in CO_PRESENCE_RULES:
-        if version == create:
-            outstanding = sorted(set(fixes) - applied)
-            matches.append(why + (' Outstanding required fixes: ' + ', '.join(outstanding) + '.' if outstanding else ' All required fixes are already applied.'))
-    if matches:
-        out[version] = {'kind':'guarded-batch','reason':' '.join(matches)}
-    else:
-        out[version] = {'kind':'genuinely-pending','reason':'No retirement, owner-hold, atomic-batch, bundle, or create-side co-presence rule names this version. It is still unapproved until the normal bounded promotion workflow passes.'}
-print(json.dumps(out))
+print(json.dumps({
+  'retired': sorted(RETIRED_VERSIONS), 'hardBlocked': sorted(HARD_BLOCKED),
+  'bundle': sorted(BUNDLE_20260804), 'frHeld': sorted(FR_HELD_20260803),
+  'frRemoval': sorted(FR_REMOVAL_VERSIONS),
+  'coPresence': [{'create': c, 'fixes': sorted(f), 'why': w} for c, f, w in CO_PRESENCE_RULES],
+  'atomic': [{'name': n, 'basis': b, 'why': w, 'members': sorted(m)} for n, b, w, m in ATOMIC_BATCHES],
+}))
 `
   let raw
   try {
-    raw = execFileSync('python', ['-c', program, repoRoot, JSON.stringify(versions), JSON.stringify(appliedVersions)], {
+    raw = execFileSync('python', ['-c', program, repoRoot], {
       cwd: repoRoot,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -139,9 +118,50 @@ print(json.dumps(out))
   } catch (error) {
     throw new Unknown(`could not classify pending migrations from the production guard rules: ${error.message}`)
   }
-  let result
-  try { result = JSON.parse(raw) } catch { throw new Unknown('production guard classification returned invalid JSON') }
+  let rules
+  try { rules = JSON.parse(raw) } catch { throw new Unknown('production guard classification returned invalid JSON') }
+  const result = classifyPendingWithRules(versions, appliedVersions, rules)
   validatePendingClassifications(versions, result)
+  return result
+}
+
+export function classifyPendingWithRules(versions, appliedVersions, rules) {
+  const applied = new Set(appliedVersions)
+  const retired = new Set(rules.retired)
+  const hardBlocked = new Set(rules.hardBlocked)
+  const bundle = new Set(rules.bundle)
+  const frHeld = new Set(rules.frHeld)
+  const frRemoval = new Set(rules.frRemoval)
+  const result = {}
+  for (const version of versions) {
+    if (retired.has(version)) {
+      result[version] = { kind: 'retired', reason: 'RETIRED_VERSIONS: never apply this version; applying it would regress a live production security control whose end state is already present.' }
+      continue
+    }
+    if (frHeld.has(version) || frRemoval.has(version)) {
+      const suffix = frRemoval.size === 0 ? 'The required FR removal migration set is not yet defined.' : `Full held bundle: ${[...frHeld, ...frRemoval].sort().join(', ')}.`
+      result[version] = { kind: 'deliberately-held', reason: `AGENTS.md 6.5 owner ruling holds both FR versions and every FR removal member for one bounded apply. ${suffix}` }
+      continue
+    }
+    if (hardBlocked.has(version)) {
+      result[version] = { kind: 'retired', reason: 'production_migration_guard.HARD_BLOCKED: the general production lane refuses this version outright. Do not apply it.' }
+      continue
+    }
+    const matches = []
+    if (bundle.has(version)) matches.push('AGENTS.md 6.8 requires the complete four-version ColdLion bundle, never a subset.')
+    for (const { name, basis, why, members } of rules.atomic) {
+      if (members.includes(version)) matches.push(`${name} ${basis} batch: ${why} Outstanding set: ${members.filter((v) => !applied.has(v)).join(', ')}.`)
+    }
+    for (const { create, fixes, why } of rules.coPresence) {
+      const outstanding = fixes.filter((v) => !applied.has(v))
+      if (version === create || (applied.has(create) && outstanding.includes(version))) {
+        matches.push(`${why} ${applied.has(create) ? `Create ${create} is already applied; fix-only recovery must carry every outstanding fix.` : ''} Outstanding required fixes: ${outstanding.join(', ')}.`)
+      }
+    }
+    result[version] = matches.length
+      ? { kind: 'guarded-batch', reason: matches.join(' ') }
+      : { kind: 'genuinely-pending', reason: 'No retirement, owner-hold, atomic-batch, bundle, or ledger-aware co-presence rule names this version. It is still unapproved until the normal bounded promotion workflow passes.' }
+  }
   return result
 }
 
