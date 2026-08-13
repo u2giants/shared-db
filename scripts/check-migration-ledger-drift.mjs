@@ -84,6 +84,81 @@ export const PROJECT_REFS = {
 /** Thrown when an input cannot be gathered. Never swallowed into a green result. */
 export class Unknown extends Error {}
 
+export const PENDING_KINDS = new Set(['genuinely-pending', 'guarded-batch', 'deliberately-held', 'retired'])
+
+/**
+ * Read the production lane's existing rules instead of maintaining a second list here.
+ * Python emits one classification for every requested version. Any import, parse, or
+ * coverage failure is UNKNOWN and makes the drift check exit 2.
+ */
+export function guardClassifications(versions, appliedVersions = []) {
+  if (versions.length === 0) return {}
+  const program = String.raw`
+import json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root / 'scripts'))
+from production_migration_guard import HARD_BLOCKED, BUNDLE_20260804, FR_HELD_20260803, FR_REMOVAL_VERSIONS, CO_PRESENCE_RULES, ATOMIC_BATCHES
+from post_batch_app_verification import RETIRED_VERSIONS
+versions = json.loads(sys.argv[2]); applied = set(json.loads(sys.argv[3])); out = {}
+for version in versions:
+    if version in RETIRED_VERSIONS:
+        out[version] = {'kind':'retired','reason':'RETIRED_VERSIONS: never apply this version; applying it would regress a live production security control whose end state is already present.'}
+        continue
+    if version in FR_HELD_20260803:
+        suffix = ('The required FR removal migration set is not yet defined.' if not FR_REMOVAL_VERSIONS else 'It may ship only with the full recorded FR removal set.')
+        out[version] = {'kind':'deliberately-held','reason':'AGENTS.md 6.5 owner ruling holds both FR versions for one bounded apply with the FR removal work. ' + suffix}
+        continue
+    if version in HARD_BLOCKED:
+        out[version] = {'kind':'retired','reason':'production_migration_guard.HARD_BLOCKED: the general production lane refuses this version outright. Do not apply it.'}
+        continue
+    matches = []
+    if version in BUNDLE_20260804:
+        matches.append('AGENTS.md 6.8 requires the complete four-version ColdLion bundle, never a subset.')
+    for name, basis, why, members in ATOMIC_BATCHES:
+        if version in members:
+            outstanding = sorted(set(members) - applied)
+            matches.append(f'{name} {basis} batch: {why} Outstanding set: {", ".join(outstanding)}.')
+    for create, fixes, why in CO_PRESENCE_RULES:
+        if version == create:
+            outstanding = sorted(set(fixes) - applied)
+            matches.append(why + (' Outstanding required fixes: ' + ', '.join(outstanding) + '.' if outstanding else ' All required fixes are already applied.'))
+    if matches:
+        out[version] = {'kind':'guarded-batch','reason':' '.join(matches)}
+    else:
+        out[version] = {'kind':'genuinely-pending','reason':'No retirement, owner-hold, atomic-batch, bundle, or create-side co-presence rule names this version. It is still unapproved until the normal bounded promotion workflow passes.'}
+print(json.dumps(out))
+`
+  let raw
+  try {
+    raw = execFileSync('python', ['-c', program, repoRoot, JSON.stringify(versions), JSON.stringify(appliedVersions)], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+  } catch (error) {
+    throw new Unknown(`could not classify pending migrations from the production guard rules: ${error.message}`)
+  }
+  let result
+  try { result = JSON.parse(raw) } catch { throw new Unknown('production guard classification returned invalid JSON') }
+  validatePendingClassifications(versions, result)
+  return result
+}
+
+export function validatePendingClassifications(versions, classifications) {
+  const expected = [...new Set(versions)].sort()
+  const actual = Object.keys(classifications ?? {}).sort()
+  if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+    throw new Unknown(`pending migration classification is incomplete: expected ${expected.join(', ')}, got ${actual.join(', ')}`)
+  }
+  for (const version of expected) {
+    const row = classifications[version]
+    if (!PENDING_KINDS.has(row?.kind) || !row?.reason?.trim()) {
+      throw new Unknown(`pending migration ${version} has an unknown or reasonless classification`)
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Pure logic — no network, no filesystem. Unit-tested in the .test.mjs sibling.
 // ---------------------------------------------------------------------------
@@ -150,7 +225,7 @@ export function computeDrift(mainVersions, appliedVersions) {
   }
 }
 
-export function formatReport({ target, projectRef, baseRef, drift, fileByVersion = {} }) {
+export function formatReport({ target, projectRef, baseRef, drift, fileByVersion = {}, pendingClassifications = {} }) {
   const lines = []
   lines.push(`Migration ledger drift — ${target} (${projectRef})`)
   lines.push(`  merged on ${baseRef}: ${drift.mergedCount} version(s)`)
@@ -169,14 +244,19 @@ export function formatReport({ target, projectRef, baseRef, drift, fileByVersion
     lines.push('')
     lines.push(`MERGED BUT NOT APPLIED — ${drift.mergedNotApplied.length} version(s):`)
     for (const version of drift.mergedNotApplied) {
-      lines.push(`  ${version}  ${fileByVersion[version] ?? ''}`.trimEnd())
+      const classification = pendingClassifications[version]
+      if (!classification) throw new Unknown(`pending migration ${version} has no classification`)
+      lines.push(`  ${version}  [${classification.kind.toUpperCase()}]  ${fileByVersion[version] ?? ''}`.trimEnd())
+      lines.push(`    why: ${classification.reason}`)
     }
     lines.push('')
     lines.push('These are reviewed, merged migrations that are NOT switched on in this database.')
     lines.push('⚠️ Any object they create is ABSENT FROM THE LIVE CATALOG. Do not read that')
     lines.push('absence as "the work was never done" — that is exactly the wrong conclusion')
     lines.push('reported to the owner on 2026-08-13 (issue #892). Read the SQL on main first.')
-    lines.push('To fix: apply them through the Shared Supabase Migrations workflow.')
+    lines.push('Do not turn this list into a broad apply. RETIRED means never apply; HELD and')
+    lines.push('GUARDED entries must satisfy their stated rule; only then may genuinely pending')
+    lines.push('work enter the bounded Shared Supabase Migrations workflow.')
   }
 
   if (drift.appliedNotMerged.length > 0) {
@@ -307,6 +387,7 @@ export async function fetchAppliedVersions(projectRef, token = process.env.SUPAB
 export const defaultIo = {
   mainMigrationFiles,
   fetchAppliedVersions,
+  guardClassifications,
 }
 
 /**
@@ -326,8 +407,11 @@ export async function runDriftCheck({ target, baseRef = 'origin/main', io = defa
 
   const appliedVersions = await io.fetchAppliedVersions(projectRef)
   const drift = computeDrift(mainVersions, appliedVersions)
+  const classify = io.guardClassifications ?? guardClassifications
+  const pendingClassifications = await classify(drift.mergedNotApplied, appliedVersions)
+  validatePendingClassifications(drift.mergedNotApplied, pendingClassifications)
 
-  return { projectRef, baseRef, target, drift, fileByVersion }
+  return { projectRef, baseRef, target, drift, fileByVersion, pendingClassifications }
 }
 
 // ---------------------------------------------------------------------------
