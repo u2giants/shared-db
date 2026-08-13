@@ -111,6 +111,11 @@ jobs:
       - name: Collect undelivered alerts
         if: env.skip != 'true'
         id: collect
+        env:
+          # The dispatcher reads the repository's OPEN issues to decide whether this
+          # alert set was already reported (#551). Read-only: `gh issue list` only.
+          GH_TOKEN: ${{ github.token }}
+          COLDLION_ALERT_ISSUE_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           set +e
@@ -118,14 +123,28 @@ jobs:
           CODE=$?
           set -e
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
-          # 0 = all clear, 1 = alerts found, 2 = unparseable (fail closed)
+          # 0 = all clear
+          # 1 = alerts found, not yet reported -> create the issue
+          # 2 = unparseable probe (fail closed)
+          # 3 = alerts found but ALREADY REPORTED on an open issue -> do NOT create a
+          #     duplicate; the run still goes red because the alert is still outstanding
+          # 4 = alerts found and the DEDUPE CHECK ITSELF FAILED -> create the issue
+          #     anyway (never swallow an alert) and shout about the broken dedupe
           if [ "$CODE" -eq 2 ]; then
             echo "::error::ColdLion alert probe was unparseable — failing closed. Human response owner: ${HUMAN_RESPONSE_OWNER}."
             exit 2
           fi
+          if [ "$CODE" -eq 3 ]; then
+            MATCH=$(node -e "try{process.stdout.write(String(JSON.parse(require('fs').readFileSync('alert-plan.json','utf8')).dedupe_matched_issue??'unknown'))}catch(e){process.stdout.write('unknown')}")
+            echo "::warning title=ColdLion alert already reported::This alert set is already open as issue #${MATCH}. No duplicate issue was created (issue #551). The run still fails because the alert is still outstanding. Human response owner: ${HUMAN_RESPONSE_OWNER}."
+          fi
+          if [ "$CODE" -eq 4 ]; then
+            echo "::error title=ColdLion alert DEDUPE CHECK FAILED::The duplicate check could not be completed, so this run cannot prove the alert was already reported. It is delivering the issue anyway — a possible duplicate is strictly better than a swallowed alert. Fix the dedupe lookup. Human response owner: ${HUMAN_RESPONSE_OWNER}."
+          fi
 
       - name: Deliver — open a GitHub issue naming the human response owner
-        if: env.skip != 'true' && steps.collect.outputs.code == '1'
+        # Codes 1 and 4 deliver. Code 3 deliberately does NOT: it is already reported.
+        if: env.skip != 'true' && (steps.collect.outputs.code == '1' || steps.collect.outputs.code == '4')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -150,7 +169,9 @@ jobs:
           echo "::error::ColdLion taxonomy alert delivered. Human response owner: ${HUMAN_RESPONSE_OWNER}."
 
       - name: Fail loudly when an alert is outstanding
-        if: env.skip != 'true' && steps.collect.outputs.code == '1'
+        # 1, 3 and 4 all mean "an alert is outstanding". Deduplicating the ISSUE must
+        # never deduplicate the FAILURE: a suppressed duplicate still leaves the run RED.
+        if: env.skip != 'true' && (steps.collect.outputs.code == '1' || steps.collect.outputs.code == '3' || steps.collect.outputs.code == '4')
         run: |
-          echo "An undelivered ColdLion taxonomy alert exists. Human response owner: ${HUMAN_RESPONSE_OWNER}." >&2
+          echo "An undelivered ColdLion taxonomy alert exists (dispatcher exit ${{ steps.collect.outputs.code }}). Human response owner: ${HUMAN_RESPONSE_OWNER}." >&2
           exit 1
