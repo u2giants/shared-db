@@ -2088,6 +2088,25 @@ class LexerFalseAcceptDefects(unittest.TestCase):
             {"plm.p", "plm.q"},
         )
 
+    def test_f5_routine_names_may_start_with_drop_modifier_words(self) -> None:
+        self.assertEqual(
+            dropped_objects(
+                "drop function plm.cascade_worker(integer), "
+                "plm.restrict_worker(text);\n"
+            ),
+            {"plm.cascade_worker", "plm.restrict_worker"},
+        )
+
+    def test_f5_true_trailing_drop_modifiers_end_routine_lists(self) -> None:
+        self.assertEqual(
+            dropped_objects("drop function plm.f(integer) cascade;\n"),
+            {"plm.f"},
+        )
+        self.assertEqual(
+            dropped_objects("drop procedure plm.p(text) restrict;\n"),
+            {"plm.p"},
+        )
+
     def test_f5_a_rename_removes_the_OLD_name_and_adds_the_NEW_one(self) -> None:
         events = dict(
             (obj, created) for _pos, obj, created in

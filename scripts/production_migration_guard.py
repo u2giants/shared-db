@@ -1562,11 +1562,15 @@ def object_events(raw: str) -> list[tuple[int, str, bool]]:
         while cursor <= len(text):
             at_end = cursor == len(text)
             char = "" if at_end else text[cursor]
+            item_so_far = text[item_start:cursor].rstrip()
+            trailing_modifier = bool(
+                item_so_far.endswith(")")
+                and re.match(r"(?:cascade|restrict)\b", text[cursor:])
+            )
             terminal = depth == 0 and (
                 at_end
                 or char == ";"
-                or text.startswith("cascade", cursor)
-                or text.startswith("restrict", cursor)
+                or trailing_modifier
             )
             separator = depth == 0 and char == ","
             if terminal or separator:
