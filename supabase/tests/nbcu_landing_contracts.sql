@@ -108,10 +108,10 @@ begin
 
   if not exists (
     select 1
-      from pg_constraint
+     from pg_constraint
      where conrelid = 'plm.nbcu_property'::regclass
        and conname = 'nbcu_property_source_kind_nonblank_chk'
-       and pg_get_constraintdef(oid) like '%btrim(source_kind)%'
+       and pg_get_constraintdef(oid) like '%source_kind ~%[^[:space:]]%'
   ) then
     raise exception 'A1 FAILED: the nonblank source_kind check is missing or malformed';
   end if;
@@ -161,6 +161,32 @@ begin
       'https://portal.example.invalid/source-kind', now(), '{}'::jsonb
     );
     raise exception 'A1 FAILED: empty source_kind was accepted';
+  exception when check_violation then null;
+  end;
+
+  begin
+    insert into plm.nbcu_property (
+      capture_id, property_key, property_source_id, property_label,
+      source_kind, source_url, source_captured_at, raw
+    ) values (
+      v_cap, 'source-id:ZZTEST-J-tab', 'ZZTEST-J-tab',
+      'ZZTEST Source Kind', E'\t\t',
+      'https://portal.example.invalid/source-kind', now(), '{}'::jsonb
+    );
+    raise exception 'A1 FAILED: tab-only source_kind was accepted';
+  exception when check_violation then null;
+  end;
+
+  begin
+    insert into plm.nbcu_property (
+      capture_id, property_key, property_source_id, property_label,
+      source_kind, source_url, source_captured_at, raw
+    ) values (
+      v_cap, 'source-id:ZZTEST-J-newline', 'ZZTEST-J-newline',
+      'ZZTEST Source Kind', E'\r\n',
+      'https://portal.example.invalid/source-kind', now(), '{}'::jsonb
+    );
+    raise exception 'A1 FAILED: line-break-only source_kind was accepted';
   exception when check_violation then null;
   end;
 
