@@ -184,19 +184,10 @@ begin
       v_bad := v_bad + 1;
     end if;
 
-    -- The CHUNK LEDGERS are written only by SECURITY DEFINER functions and deliberately
-    -- grant service_role no INSERT; every landing table keeps it.
-    --
-    -- marvel_dcp_metadata_chunk_ledger (migration 20260811060000, the Phase-2 loader) was added
-    -- to this carve-out because this section enumerates plm.marvel_dcp_* FROM pg_class rather
-    -- than from a fixed list -- which is the design working exactly as intended. A new DCP
-    -- table appeared and this assertion caught it on the first CI run rather than letting
-    -- it escape. It belongs here for the same reason its Phase-1 sibling does: its rows
-    -- are written solely by definer functions, so granting service_role INSERT would hand
-    -- out a privilege nothing uses and let a ledger row be forged outside the loader.
-    if t not in ('marvel_dcp_chunk_ledger', 'marvel_dcp_metadata_chunk_ledger')
-       and not has_table_privilege('service_role', 'plm.' || t, 'INSERT') then
-      raise warning 'B: service_role LOST INSERT on plm.%', t;
+    -- Every table is function-write-only. service_role may call guarded loaders but
+    -- may not bypass them with direct INSERT.
+    if has_table_privilege('service_role', 'plm.' || t, 'INSERT') then
+      raise warning 'B: service_role holds direct INSERT on plm.%', t;
       v_bad := v_bad + 1;
     end if;
 
@@ -212,7 +203,7 @@ begin
     raise exception 'B FAILED: % privilege violation(s) across % plm.marvel_dcp_* tables.',
       v_bad, array_length(v_tables, 1);
   end if;
-  raise notice 'B PASSED: % tables, service_role SELECT/INSERT only, anon nothing.',
+  raise notice 'B PASSED: % tables, service_role SELECT only, anon nothing.',
     array_length(v_tables, 1);
 end;
 $$;
@@ -2575,4 +2566,3 @@ end;
 $$;
 
 \echo 'DCP VAULT METADATA LOADER CONTRACTS: ALL SECTIONS PASSED (A-H)'
-

@@ -3,6 +3,52 @@ begin;
 -- Physically separate DCP Vault landing families
 -- Existing plm.dcp_* objects remain the Disney-only compatibility family.
 
+-- The existing family already contains Disney-only evidence. Prove that structural fact
+-- without exposing row values, then lock it in while preserving every row and function signature.
+do $$
+declare
+  v_mismatch_count bigint;
+  v_table text;
+begin
+  foreach v_table in array array[
+    'dcp_crawl', 'dcp_portal_tile', 'dcp_style_guide', 'dcp_asset',
+    'dcp_property', 'dcp_character', 'dcp_term'
+  ] loop
+    execute format(
+      'select count(*) from plm.%I where source_system is distinct from %L',
+      v_table, 'disney_dcpvault'
+    ) into v_mismatch_count;
+    if v_mismatch_count <> 0 then
+      raise exception 'Disney DCP compatibility constraint refused: % rows in % have a non-Disney source discriminator.',
+        v_mismatch_count, v_table using errcode = 'P0001';
+    end if;
+  end loop;
+end
+$$;
+
+alter table plm.dcp_crawl add constraint dcp_crawl_disney_source_chk
+  check (source_system = 'disney_dcpvault') not valid;
+alter table plm.dcp_portal_tile add constraint dcp_portal_tile_disney_source_chk
+  check (source_system = 'disney_dcpvault') not valid;
+alter table plm.dcp_style_guide add constraint dcp_style_guide_disney_source_chk
+  check (source_system = 'disney_dcpvault') not valid;
+alter table plm.dcp_asset add constraint dcp_asset_disney_source_chk
+  check (source_system = 'disney_dcpvault') not valid;
+alter table plm.dcp_property add constraint dcp_property_disney_source_chk
+  check (source_system = 'disney_dcpvault') not valid;
+alter table plm.dcp_character add constraint dcp_character_disney_source_chk
+  check (source_system = 'disney_dcpvault') not valid;
+alter table plm.dcp_term add constraint dcp_term_disney_source_chk
+  check (source_system = 'disney_dcpvault') not valid;
+
+alter table plm.dcp_crawl validate constraint dcp_crawl_disney_source_chk;
+alter table plm.dcp_portal_tile validate constraint dcp_portal_tile_disney_source_chk;
+alter table plm.dcp_style_guide validate constraint dcp_style_guide_disney_source_chk;
+alter table plm.dcp_asset validate constraint dcp_asset_disney_source_chk;
+alter table plm.dcp_property validate constraint dcp_property_disney_source_chk;
+alter table plm.dcp_character validate constraint dcp_character_disney_source_chk;
+alter table plm.dcp_term validate constraint dcp_term_disney_source_chk;
+
 -- Lucasfilm DCP Vault
 -- =====================================================================================
 -- Disney Lucasfilm DCP Vault -- source-observation landing schema.
@@ -1354,7 +1400,7 @@ begin
       'revoke update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
     execute format('revoke all on plm.%I from public', t);
     execute format('revoke all on plm.%I from anon', t);
-    execute format('grant select, insert on plm.%I to service_role', t);
+    execute format('grant select on plm.%I to service_role', t);
     execute format('grant select on plm.%I to authenticated', t);
   end loop;
 end;
@@ -2665,7 +2711,7 @@ begin
       'revoke update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
     execute format('revoke all on plm.%I from public', t);
     execute format('revoke all on plm.%I from anon', t);
-    execute format('grant select, insert on plm.%I to service_role', t);
+    execute format('grant select on plm.%I to service_role', t);
     execute format('grant select on plm.%I to authenticated', t);
   end loop;
 end;
@@ -4187,7 +4233,7 @@ begin
       'revoke update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
     execute format('revoke all on plm.%I from public', t);
     execute format('revoke all on plm.%I from anon', t);
-    execute format('grant select, insert on plm.%I to service_role', t);
+    execute format('grant select on plm.%I to service_role', t);
     execute format('grant select on plm.%I to authenticated', t);
   end loop;
 end;
@@ -5498,7 +5544,7 @@ begin
       'revoke update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
     execute format('revoke all on plm.%I from public', t);
     execute format('revoke all on plm.%I from anon', t);
-    execute format('grant select, insert on plm.%I to service_role', t);
+    execute format('grant select on plm.%I to service_role', t);
     execute format('grant select on plm.%I to authenticated', t);
   end loop;
 end;
@@ -7020,7 +7066,7 @@ begin
       'revoke update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
     execute format('revoke all on plm.%I from public', t);
     execute format('revoke all on plm.%I from anon', t);
-    execute format('grant select, insert on plm.%I to service_role', t);
+    execute format('grant select on plm.%I to service_role', t);
     execute format('grant select on plm.%I to authenticated', t);
   end loop;
 end;
@@ -8331,7 +8377,7 @@ begin
       'revoke update, delete, truncate, references, trigger, maintain on plm.%I from service_role', t);
     execute format('revoke all on plm.%I from public', t);
     execute format('revoke all on plm.%I from anon', t);
-    execute format('grant select, insert on plm.%I to service_role', t);
+    execute format('grant select on plm.%I to service_role', t);
     execute format('grant select on plm.%I to authenticated', t);
   end loop;
 end;

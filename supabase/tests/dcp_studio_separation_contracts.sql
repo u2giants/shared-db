@@ -11,6 +11,9 @@ declare
   v_after bigint;
   v_sql text;
   v_rejected boolean;
+  v_table_name text;
+  v_before_inventory jsonb;
+  v_after_inventory jsonb;
 begin
   foreach v_prefix in array array[
     'lucasfilm_dcp', 'marvel_dcp', 'twentieth_century_dcp'
@@ -25,7 +28,16 @@ begin
       else 'lucasfilm_dcpvault'
     end;
 
-    execute format('select count(*) from plm.%I_crawl', v_prefix) into v_before;
+    v_before_inventory := '{}'::jsonb;
+    for v_table_name in
+      select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'plm' and c.relkind = 'r'
+        and c.relname like v_prefix || '\_%' escape '\'
+      order by c.relname
+    loop
+      execute format('select count(*) from plm.%I', v_table_name) into v_before;
+      v_before_inventory := v_before_inventory || jsonb_build_object(v_table_name, v_before);
+    end loop;
 
     v_rejected := false;
     begin
@@ -56,6 +68,14 @@ begin
     end;
     if not v_rejected then raise exception 'unknown source_system unexpectedly accepted for %', v_prefix; end if;
 
+    v_rejected := false;
+    begin
+      execute v_sql using 'avatar_dcpvault';
+    exception when sqlstate 'P0001' then
+      v_rejected := position('source_system' in sqlerrm) > 0;
+    end;
+    if not v_rejected then raise exception 'unassigned Avatar source unexpectedly accepted for %', v_prefix; end if;
+
     foreach v_sql in array array[
       format('select plm.load_%I_asset_chunk($1, ''00000000-0000-0000-0000-000000000000''::uuid, 1, ''[]'', repeat(''0'',64))', v_prefix),
       format('select plm.begin_%I_metadata_run($1, ''00000000-0000-0000-0000-000000000000''::uuid, date ''2099-01-01'', ''/synthetic'', ''synthetic'', ''synthetic'', repeat(''a'',40), ''{}''::jsonb)', v_prefix),
@@ -72,9 +92,18 @@ begin
       end if;
     end loop;
 
-    execute format('select count(*) from plm.%I_crawl', v_prefix) into v_after;
-    if v_after <> v_before then
-      raise exception 'studio mismatch guard wrote a crawl row for %', v_prefix;
+    v_after_inventory := '{}'::jsonb;
+    for v_table_name in
+      select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'plm' and c.relkind = 'r'
+        and c.relname like v_prefix || '\_%' escape '\'
+      order by c.relname
+    loop
+      execute format('select count(*) from plm.%I', v_table_name) into v_after;
+      v_after_inventory := v_after_inventory || jsonb_build_object(v_table_name, v_after);
+    end loop;
+    if v_after_inventory <> v_before_inventory then
+      raise exception 'studio mismatch guard changed Phase 1 or Phase 2 inventory for %', v_prefix;
     end if;
 
     if exists (
@@ -87,8 +116,15 @@ begin
       where c.contype = 'f'
         and child_ns.nspname = 'plm'
         and child.relname like v_prefix || '\_%' escape '\'
-        and (parent_ns.nspname <> 'plm'
-          or parent.relname not like v_prefix || '\_%' escape '\')
+        and not (
+          (parent_ns.nspname = 'plm'
+            and parent.relname like v_prefix || '\_%' escape '\')
+          or (parent_ns.nspname = 'core' and (
+            (child.relname = v_prefix || '_style_guide' and parent.relname = 'style_guide')
+            or (child.relname = v_prefix || '_property' and parent.relname = 'property')
+            or (child.relname = v_prefix || '_character' and parent.relname = 'character')
+          ))
+        )
     ) then
       raise exception 'family-local foreign-key closure failed for %', v_prefix;
     end if;
@@ -109,6 +145,8 @@ $$;
 do $$
 declare
   v_disney_function_count integer;
+  v_table_name text;
+  v_constraint_count integer;
 begin
   select count(*) into v_disney_function_count
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -119,6 +157,32 @@ begin
     );
   if v_disney_function_count <> 6 then
     raise exception 'Disney compatibility function inventory changed';
+  end if;
+
+  foreach v_table_name in array array[
+    'dcp_crawl', 'dcp_portal_tile', 'dcp_style_guide', 'dcp_asset',
+    'dcp_property', 'dcp_character', 'dcp_term'
+  ] loop
+    select count(*) into v_constraint_count
+    from pg_constraint c
+    where c.conrelid = format('plm.%I', v_table_name)::regclass
+      and c.contype = 'c'
+      and c.convalidated
+      and pg_get_constraintdef(c.oid) like '%source_system%disney_dcpvault%';
+    if v_constraint_count = 0 then
+      raise exception 'Disney-only source constraint missing on %', v_table_name;
+    end if;
+  end loop;
+
+  if exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'plm' and c.relkind = 'r'
+      and (c.relname like 'lucasfilm_dcp\_%' escape '\'
+        or c.relname like 'marvel_dcp\_%' escape '\'
+        or c.relname like 'twentieth_century_dcp\_%' escape '\')
+      and has_table_privilege('service_role', c.oid, 'INSERT')
+  ) then
+    raise exception 'service_role may not directly insert into studio landing tables';
   end if;
 end
 $$;
