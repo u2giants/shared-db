@@ -8,8 +8,8 @@
 --   only SELECT. RLS and table privileges are independent gates in PostgreSQL, so the
 --   write policy never did anything and PopPIM's browser writes were rejected with
 --   `permission denied`. 20260813180000 grants INSERT, UPDATE and DELETE -- exactly the
---   DML a `FOR ALL` policy authorises, and nothing more -- on the 20 affected tables.
---   Three tables were deliberately NOT widened; see section C.
+--   DML a `FOR ALL` policy authorises, and nothing more -- on 18 of the 21 affected
+--   tables. Five tables in `pim` are deliberately NOT widened; see section C.
 --
 -- HOW TO RUN
 --   Against PREVIEW rjyboqwcdzcocqgmsyel ONLY, on the SESSION pooler port 5432, NOT the
@@ -45,12 +45,13 @@
 --      carrying a permissive `pm_write ALL/authenticated` policy) and cross-checked
 --      against the named 23-table array. Adding a pim table with a pm_write policy and
 --      forgetting to grant it therefore FAILS here rather than passing vacuously.
---   B  PRESENCE. On the 20 widened tables, `authenticated` holds SELECT, INSERT,
+--   B  PRESENCE. On the 18 widened tables, `authenticated` holds SELECT, INSERT,
 --      UPDATE and DELETE.
---   C  NARROWNESS PRESERVED. The three deliberately narrow tables still hold exactly
+--   C  NARROWNESS PRESERVED. The five deliberately narrow tables still hold exactly
 --      their narrower set -- `product` = SELECT+UPDATE, `stage_history` =
---      SELECT+INSERT, `view_pref` = SELECT+INSERT+UPDATE. This is the half that stops
---      a silent over-grant from passing as a fix.
+--      SELECT+INSERT, `view_pref` = SELECT+INSERT+UPDATE, and `customer_ext` /
+--      `factory_ext` = SELECT only (RPC-only, per db_data_admin_extensions.sql). This
+--      is the half that stops a silent over-grant from passing as a fix.
 --   D  NO PRIVILEGE BEYOND WHAT THE POLICY AUTHORISES. On every pim table,
 --      `authenticated` holds none of TRUNCATE, REFERENCES, TRIGGER, MAINTAIN. A
 --      `FOR ALL` policy authorises DML only; those four are not DML.
@@ -67,8 +68,8 @@
 -- -------------------------------------------------------------------------------------
 do $$
 declare
-  -- All 23 pim tables that carry a pm_write ALL/authenticated policy = the 20 widened
-  -- by 20260813180000 plus the 3 held deliberately narrow. `saved_view` is the 24th pim
+  -- All 23 pim tables that carry a pm_write ALL/authenticated policy = the 18 widened
+  -- by 20260813180000 plus the 5 held deliberately narrow. `saved_view` is the 24th pim
   -- table and is excluded on purpose: it has four per-verb policies and no pm_write.
   expected text[] := array[
     'checklist_item','customer_ext','customer_order','design','design_asset',
@@ -122,18 +123,17 @@ end $$;
 do $$
 declare
   widened text[] := array[
-    'checklist_item','customer_ext','customer_order','design','design_asset',
-    'design_collection','factory_ext','product_assignee','product_field','product_file',
-    'product_link','product_sample','product_style_group','product_submission',
-    'product_tag','product_time_entry','product_update','project','revision_request',
-    'stage'
+    'checklist_item','customer_order','design','design_asset','design_collection',
+    'product_assignee','product_field','product_file','product_link','product_sample',
+    'product_style_group','product_submission','product_tag','product_time_entry',
+    'product_update','project','revision_request','stage'
   ];
   tbl text;
   missing text[] := array[]::text[];
   verb text;
 begin
-  if array_length(widened, 1) <> 20 then
-    raise exception 'B FAILED: the widened array must hold exactly 20 tables, holds %',
+  if array_length(widened, 1) <> 18 then
+    raise exception 'B FAILED: the widened array must hold exactly 18 tables, holds %',
       array_length(widened, 1);
   end if;
 
@@ -185,7 +185,9 @@ begin
       values
         ('product',       array['SELECT','UPDATE']),            -- 20260727013100
         ('stage_history', array['SELECT','INSERT']),            -- 20260727013100
-        ('view_pref',     array['SELECT','INSERT','UPDATE'])    -- 20260727013100
+        ('view_pref',     array['SELECT','INSERT','UPDATE']),   -- 20260727013100
+        ('customer_ext',  array['SELECT']),                     -- db_data_admin_extensions
+        ('factory_ext',   array['SELECT'])                      -- db_data_admin_extensions
     ) as v(tbl, allowed)
   loop
     if not exists (
@@ -210,15 +212,18 @@ begin
 
   if array_length(problems, 1) is not null then
     raise exception
-      'C FAILED: %. These three tables were narrowed ON PURPOSE by '
-      '20260727013100_poppim_atomic_contract_dml_grants.sql -- pim.product is UPDATE-'
-      'only for the security-invoker atomic RPCs, pim.stage_history is INSERT-only '
-      'workflow evidence, pim.view_pref is upsert-only. Widening any of them is a '
+      'C FAILED: %. These five tables were narrowed ON PURPOSE. '
+      '20260727013100_poppim_atomic_contract_dml_grants.sql made pim.product UPDATE-'
+      'only for the security-invoker atomic RPCs, pim.stage_history INSERT-only '
+      'workflow evidence, and pim.view_pref upsert-only. supabase/tests/'
+      'db_data_admin_extensions.sql makes pim.customer_ext and pim.factory_ext read-'
+      'only for authenticated -- the DB Data Admin extension rows are written through '
+      'protected API contracts, never from a browser. Widening any of them is a '
       'separate owner decision that #866 explicitly did not make.',
       array_to_string(problems, '; ');
   end if;
 
-  raise notice 'C OK: product=SELECT+UPDATE, stage_history=SELECT+INSERT, view_pref=SELECT+INSERT+UPDATE';
+  raise notice 'C OK: product=S+U, stage_history=S+I, view_pref=S+I+U, customer_ext/factory_ext=S only';
 end $$;
 
 -- -------------------------------------------------------------------------------------
@@ -359,5 +364,5 @@ end $$;
 
 -- =====================================================================================
 -- END. If every section printed OK, migration 20260813180000 landed exactly as designed:
--- 20 tables repaired, 3 held deliberately narrow, nothing over-granted, no policy moved.
+-- 18 tables repaired, 5 held deliberately narrow, nothing over-granted, no policy moved.
 -- =====================================================================================

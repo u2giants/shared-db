@@ -36,6 +36,11 @@
 --   20260621151155 was plainly "PM roles may write these tables"; leaving 12 of them
 --   half-wired keeps the same latent bug waiting for the next consumer.
 --
+--   "ALL" means all the ones where the `pm_write` policy is the LAST word. Three of the
+--   21 are governed by a LATER, deliberate, narrower decision, and reversing one of
+--   those silently is not what "fix all 21" asked for. Those three are named below and
+--   raised in the pull request as distinct owner sub-decisions. 18 are repaired here.
+--
 -- WHY THIS IS NOT `grant all`
 --   This repo has twice set a deliberate verb-surgical precedent
 --   (20260727013100_poppim_atomic_contract_dml_grants.sql and
@@ -48,7 +53,16 @@
 --     * Nothing here touches a policy. The row-level restriction (administrator or
 --       licensing/designer/sales) is unchanged and remains the real gate.
 --
--- THE THREE TABLES THIS MIGRATION DELIBERATELY DOES NOT TOUCH
+-- THE FIVE TABLES THIS MIGRATION DELIBERATELY DOES NOT TOUCH
+--   0. `pim.customer_ext` and `pim.factory_ext` -- BOTH IN THE 21, BOTH RPC-ONLY BY AN
+--      EXPLICIT LATER CONTRACT. `supabase/tests/db_data_admin_extensions.sql` asserts,
+--      for `crm.customer_ext`, `crm.factory_ext`, `pim.customer_ext`, `pim.factory_ext`
+--      and `dam.factory_ext`, that `authenticated` can SELECT but holds NO direct
+--      INSERT/UPDATE/DELETE -- the DB Data Admin extension rows are written through
+--      protected API contracts, not from a browser. That test FAILED when an earlier
+--      revision of this migration included them, which is exactly what it is for.
+--      They pick up the `pm_write` policy because they live in `pim`, but the policy
+--      is not the governing decision for them. Left alone.
 --   1. `pim.product` -- IN the 21, and DELIBERATELY LEFT NARROW.
 --      It holds UPDATE but not INSERT or DELETE, granted knowingly by
 --      20260727013100 for the security-invoker atomic RPCs. Widening it to
@@ -87,17 +101,15 @@
 
 do $$
 declare
-  -- The 20 tables that carry an inert `pm_write ALL/authenticated` policy AND are
+  -- The 18 tables that carry an inert `pm_write ALL/authenticated` policy AND are
   -- not subject to a later, deliberate narrowing. This is the live-derived set of 21
-  -- minus `pim.product` (see header).
+  -- minus `pim.product`, `pim.customer_ext` and `pim.factory_ext` (see header).
   target_tables text[] := array[
     'checklist_item',
-    'customer_ext',
     'customer_order',
     'design',
     'design_asset',
     'design_collection',
-    'factory_ext',
     'product_assignee',
     'product_field',
     'product_file',
@@ -175,11 +187,10 @@ end $$;
 do $$
 declare
   widened text[] := array[
-    'checklist_item','customer_ext','customer_order','design','design_asset',
-    'design_collection','factory_ext','product_assignee','product_field','product_file',
-    'product_link','product_sample','product_style_group','product_submission',
-    'product_tag','product_time_entry','product_update','project','revision_request',
-    'stage'
+    'checklist_item','customer_order','design','design_asset','design_collection',
+    'product_assignee','product_field','product_file','product_link','product_sample',
+    'product_style_group','product_submission','product_tag','product_time_entry',
+    'product_update','project','revision_request','stage'
   ];
   tbl text;
   bad text[] := array[]::text[];
@@ -240,5 +251,19 @@ begin
       'pim.view_pref gained DELETE. 20260727013100 granted INSERT + UPDATE only.';
   end if;
 
-  raise notice 'pim DML grants: post-condition OK (20 widened, 3 held narrow)';
+  -- The two DB Data Admin extension tables are RPC-only for authenticated.
+  foreach tbl in array array['customer_ext','factory_ext'] loop
+    if exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+               where n.nspname = 'pim' and c.relname = tbl and c.relkind = 'r')
+       and (has_table_privilege('authenticated', format('pim.%I', tbl), 'INSERT')
+            or has_table_privilege('authenticated', format('pim.%I', tbl), 'UPDATE')
+            or has_table_privilege('authenticated', format('pim.%I', tbl), 'DELETE')) then
+      raise exception
+        'pim.% gained direct DML. The DB Data Admin extension tables are written '
+        'through protected API contracts only; supabase/tests/db_data_admin_extensions.sql '
+        'asserts authenticated holds SELECT and nothing else on them.', tbl;
+    end if;
+  end loop;
+
+  raise notice 'pim DML grants: post-condition OK (18 widened, 5 held narrow)';
 end $$;
