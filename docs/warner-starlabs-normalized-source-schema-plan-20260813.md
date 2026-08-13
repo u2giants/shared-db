@@ -1,9 +1,13 @@
 # Warner STARLABS normalized source schema plan
 
-Status date: 2026-08-13  
-Workstream: GitHub issue #925  
-Production project: `qsllyeztdwjgirsysgai`  
-Preview project: `rjyboqwcdzcocqgmsyel`  
+Status date: 2026-08-13
+
+Workstream: GitHub issue #925
+
+Production project: `qsllyeztdwjgirsysgai`
+
+Preview project: `rjyboqwcdzcocqgmsyel`
+
 Handoff: [`../HANDOFF.d/2026-08-13T1829Z-al8960ofc-codex-wb-scrape-schema-change.md`](../HANDOFF.d/2026-08-13T1829Z-al8960ofc-codex-wb-scrape-schema-change.md)
 
 This plan contains structure and object names only. It contains no licensed Warner row values.

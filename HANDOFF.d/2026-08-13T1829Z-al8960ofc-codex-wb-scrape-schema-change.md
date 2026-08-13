@@ -1,7 +1,9 @@
 # Warner STARLABS schema change handoff
 
-Status: OPEN  
-Issue: u2giants/shared-db #925  
+Status: OPEN
+
+Issue: u2giants/shared-db #925
+
 Plan: [`../docs/warner-starlabs-normalized-source-schema-plan-20260813.md`](../docs/warner-starlabs-normalized-source-schema-plan-20260813.md)
 
 ## 1. What this application is
