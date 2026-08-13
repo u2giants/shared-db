@@ -2072,6 +2072,22 @@ class LexerFalseAcceptDefects(unittest.TestCase):
             {"plm.p"},
         )
 
+    def test_f5_multi_function_drop_reads_past_each_balanced_signature(self) -> None:
+        self.assertEqual(
+            dropped_objects(
+                "drop function plm.f(integer), plm.g(core.kind, numeric(10, 2));\n"
+            ),
+            {"plm.f", "plm.g"},
+        )
+
+    def test_f5_multi_procedure_drop_reads_past_each_balanced_signature(self) -> None:
+        self.assertEqual(
+            dropped_objects(
+                "drop procedure if exists plm.p(core.a), plm.q(text, core.b) cascade;\n"
+            ),
+            {"plm.p", "plm.q"},
+        )
+
     def test_f5_a_rename_removes_the_OLD_name_and_adds_the_NEW_one(self) -> None:
         events = dict(
             (obj, created) for _pos, obj, created in

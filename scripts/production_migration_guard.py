@@ -1503,9 +1503,11 @@ def created_objects(raw: str) -> set[str]:
 DROP_RES = (
     re.compile(r"\bdrop\s+(?:unlogged\s+)?table\s+(?:if\s+exists\s+)?"),
     re.compile(r"\bdrop\s+(?:materialized\s+)?view\s+(?:if\s+exists\s+)?"),
-    re.compile(r"\bdrop\s+(?:function|procedure)\s+(?:if\s+exists\s+)?"),
     re.compile(r"\bdrop\s+type\s+(?:if\s+exists\s+)?"),
     re.compile(r"\bdrop\s+sequence\s+(?:if\s+exists\s+)?"),
+)
+DROP_ROUTINE_RE = re.compile(
+    r"\bdrop\s+(?:function|procedure)\s+(?:if\s+exists\s+)?"
 )
 # Where a `drop` object list ends. `cascade`/`restrict` are not object names and
 # a `;` ends the statement outright.
@@ -1549,6 +1551,43 @@ def object_events(raw: str) -> list[tuple[int, str, bool]]:
                 events.append(
                     (match.start() + obj.start(), f"{obj.group(1)}.{obj.group(2)}", False)
                 )
+    for match in DROP_ROUTINE_RE.finditer(text):
+        # A routine list is different from every other DROP list: commas inside
+        # argument signatures are not item separators. Walk balanced
+        # parentheses so `drop function plm.f(integer), plm.g(text)` records
+        # both routines, while qualified argument types never become objects.
+        item_start = match.end()
+        depth = 0
+        cursor = item_start
+        while cursor <= len(text):
+            at_end = cursor == len(text)
+            char = "" if at_end else text[cursor]
+            terminal = depth == 0 and (
+                at_end
+                or char == ";"
+                or text.startswith("cascade", cursor)
+                or text.startswith("restrict", cursor)
+            )
+            separator = depth == 0 and char == ","
+            if terminal or separator:
+                item = text[item_start:cursor]
+                obj = re.search(IDENT, item)
+                if obj:
+                    events.append(
+                        (
+                            item_start + obj.start(),
+                            f"{obj.group(1)}.{obj.group(2)}",
+                            False,
+                        )
+                    )
+                if terminal:
+                    break
+                item_start = cursor + 1
+            elif char == "(":
+                depth += 1
+            elif char == ")" and depth:
+                depth -= 1
+            cursor += 1
     for match in RENAME_RE.finditer(text):
         schema, old, new = match.group(1), match.group(2), match.group(3)
         events.append((match.start(), f"{schema}.{old}", False))
