@@ -334,8 +334,8 @@ export function reserveVersion({ stamp, repo, sha, io, maxAttempts = 60, unavail
   // the exact defect this function exists to remove.
   throw new Unknown(
     `could not reserve a migration version: ${maxAttempts} consecutive candidates from ` +
-      `${stamp} are already reserved. That many simultaneous reservations is not normal — ` +
-      'check refs/db-claims for junk before raising the limit.',
+      `${stamp} are unavailable or reserved. That many occupied candidates is not normal — ` +
+      'check migrations, open PRs, claims, and refs/db-claims before raising the limit.',
   )
 }
 
@@ -725,7 +725,7 @@ Options:
                        create-if-absent, so two orchestrators racing in the same
                        minute CANNOT both receive the same number. Starts at
                        --version if given, else the current UTC stamp, and walks
-                       forward past any already reserved. THIS MUTATES THE
+                       forward past any unavailable or already reserved. THIS MUTATES THE
                        REMOTE REPOSITORY, which is why the flag says "reserve"
                        and not "allocate".
   --allocate-version   WITHDRAWN — it reserved nothing. Exits 2. Use
@@ -783,7 +783,7 @@ function runReserveVersion(options, io = defaultIo) {
   console.log(`  ref:      ${reservation.ref}`)
   console.log(`  attempts: ${reservation.attempts}`)
   if (reservation.skipped.length) {
-    console.log(`  already reserved by someone else: ${reservation.skipped.join(', ')}`)
+    console.log(`  unavailable on disk/PR/claim, or already reserved: ${reservation.skipped.join(', ')}`)
   }
   console.log('')
   console.log('This number is now YOURS. No other agent can be handed it, including one')

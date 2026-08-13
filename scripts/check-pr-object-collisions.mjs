@@ -611,6 +611,11 @@ const DISPATCH_PATTERNS = [
   },
 ]
 
+/** PostgreSQL accepts both `DO $$...$$` and `DO LANGUAGE plpgsql $tag$...$tag$`. */
+function dollarQuoteStartsDo(source, offset) {
+  return /\bdo(?:\s+language\s+[a-z_][a-z0-9_$]*)?\s*$/i.test(source.slice(0, offset))
+}
+
 /**
  * The DISPATCH-policy view of a migration: structured operations rather than
  * flat strings, so a consumer can reason about `action` and `kind` separately.
@@ -642,7 +647,7 @@ export function extractOperations(sql) {
   // normal idempotent migration form. Keep the body so those writes are seen.
   const text = normalizeSql(sql)
     .replace(/\$([A-Za-z_]*)\$([\s\S]*?)\$\1\$/g, (whole, _tag, body, offset, source) =>
-      /\bdo\s*$/i.test(source.slice(0, offset)) ? body : ' ')
+      dollarQuoteStartsDo(source, offset) ? body : ' ')
     .replace(/'(?:[^']|'')*'/g, " '' ")
   const seen = new Map()
   // Bare SQL keywords are never object names. They appear when an upstream
@@ -737,7 +742,7 @@ export function inventoryDdlVerbs(sqlTexts) {
     // top-level DO block is retained because it changes shared objects.
     const text = normalizeSql(sql)
       .replace(/\$([A-Za-z_]*)\$([\s\S]*?)\$\1\$/g, (whole, _tag, body, offset, source) =>
-        /\bdo\s*$/i.test(source.slice(0, offset)) ? body : ' ')
+        dollarQuoteStartsDo(source, offset) ? body : ' ')
       .replace(/'(?:[^']|'')*'/g, ' ')
     for (const statement of text.split(';')) {
       const m = /(?:^|\bbegin\s+|\bthen\s+)\s*(create|alter|drop|grant|revoke|comment)\s+((?:or\s+replace\s+|if\s+(?:not\s+)?exists\s+|unique\s+|concurrently\s+|only\s+|materialized\s+|recursive\s+|temp\s+|temporary\s+|global\s+|local\s+|unlogged\s+|foreign\s+|constraint\s+|default\s+)*)([a-z_]+)/i.exec(

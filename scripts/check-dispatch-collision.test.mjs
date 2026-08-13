@@ -472,10 +472,19 @@ test('literal DDL inside a DO block is visible to dispatch and inventory', () =>
   assert.ok(inventory.some((entry) => entry.verb === 'alter table'))
 })
 
+test('literal DDL inside DO LANGUAGE with a tagged body is visible', () => {
+  const sql = `do language plpgsql $guard$ begin
+    create table core.tagged_do_table (id bigint);
+  end $guard$;`
+  assert.deepEqual(dispatchObjectKeys(sql), ['table core.tagged_do_table'])
+  const inventory = inventoryDdlVerbs([sql])
+  assert.ok(inventory.some((entry) => entry.verb === 'create table'))
+})
+
 test('dynamic DDL and function-body prose remain excluded', () => {
-  const sql = `create or replace function plm.f() returns void language plpgsql as $$ begin
+  const sql = `create or replace function plm.f() returns void language plpgsql as $body$ begin
     execute 'alter table core.secret add column x text';
-  end $$;`
+  end $body$;`
   assert.deepEqual(dispatchObjectKeys(sql), ['function plm.f'])
 })
 
