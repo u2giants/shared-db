@@ -22,13 +22,17 @@ end $$;
 
 -- NULL manifest fields fail closed with no header write.
 do $null_manifest$
-declare before_count bigint;
+declare before_count bigint; rejected boolean;
 begin
  select count(*) into before_count from plm.wb_capture;
+ rejected:=false;
  begin perform plm.begin_wb_capture('wb_franchise',date '2099-01-09','synthetic',null,1,'synthetic','https://example.invalid',null);
- exception when sqlstate 'P0001' then if position('invalid manifest metadata' in sqlerrm)=0 then raise; end if; end;
+ exception when sqlstate 'P0001' then rejected:=position('invalid manifest metadata' in sqlerrm)>0; end;
+ if not rejected then raise exception 'NULL snapshot digest did not reach the controlled refusal'; end if;
+ rejected:=false;
  begin perform plm.begin_wb_capture('wb_franchise',date '2099-01-09','synthetic',repeat('a',64),null,'synthetic','https://example.invalid',null);
- exception when sqlstate 'P0001' then if position('invalid manifest metadata' in sqlerrm)=0 then raise; end if; end;
+ exception when sqlstate 'P0001' then rejected:=position('invalid manifest metadata' in sqlerrm)>0; end;
+ if not rejected then raise exception 'NULL expected count did not reach the controlled refusal'; end if;
  if (select count(*) from plm.wb_capture)<>before_count then raise exception 'NULL manifest refusal wrote a header'; end if;
 end
 $null_manifest$;
@@ -53,21 +57,42 @@ do $$ begin
 end $$;
 rollback;
 
+-- A legacy replacement-heavy refresh is refused before changing its table.
+begin;
+do $legacy_shrink$
+declare first_snapshot jsonb; replacement jsonb; before_rows bigint; rejected boolean:=false;
+begin
+ first_snapshot:='{"captured_at":"2099-01-10","rows":[{"source_term":"Property","source_id":"shrink-old-1","label":"Synthetic Old One","captured_date":"2099-01-10","source_url":"https://example.invalid"},{"source_term":"Property","source_id":"shrink-old-2","label":"Synthetic Old Two","captured_date":"2099-01-10","source_url":"https://example.invalid"}]}'::jsonb;
+ replacement:='{"captured_at":"2099-01-11","rows":[{"source_term":"Property","source_id":"shrink-new","label":"Synthetic New","captured_date":"2099-01-11","source_url":"https://example.invalid"}]}'::jsonb;
+ perform * from plm.sync_wb_franchise_property(first_snapshot,'mirror_only',1);
+ select count(*) into before_rows from plm.wb_franchise_property;
+ begin perform * from plm.sync_wb_franchise_property(replacement,'mirror_only',0);
+ exception when sqlstate 'P0001' then rejected:=true; end;
+ if not rejected then raise exception 'legacy shrink refusal did not fire'; end if;
+ if (select count(*) from plm.wb_franchise_property)<>before_rows or exists(select 1 from plm.wb_franchise_property where source_id='shrink-new') then raise exception 'legacy shrink refusal wrote rows'; end if;
+end
+$legacy_shrink$;
+rollback;
+
 -- Representative legacy protocol failures are controlled and leave no landed row.
 begin;
 do $legacy_failures$
 declare c uuid; payload text:='[{"source_term":"Property","source_id":"legacy-failure","label":"Synthetic Failure","captured_date":"2099-01-08","source_url":"https://example.invalid"}]';
- chunk_hash text; manifest_hash text; before_rows bigint;
+ chunk_hash text; manifest_hash text; before_rows bigint; rejected boolean;
 begin
  chunk_hash:=encode(extensions.digest(convert_to(payload,'UTF8'),'sha256'),'hex');
  manifest_hash:=encode(extensions.digest(convert_to(chunk_hash,'UTF8'),'sha256'),'hex');
  select count(*) into before_rows from plm.wb_franchise_property;
  c:=plm.begin_wb_capture('wb_franchise_property',date '2099-01-08','synthetic-failure',manifest_hash,2,'synthetic','https://example.invalid',null);
- begin perform plm.load_wb_chunk(c,1,payload,repeat('0',64)); raise exception 'bad chunk digest passed';
- exception when sqlstate 'P0001' then null; end;
+ rejected:=false;
+ begin perform plm.load_wb_chunk(c,1,payload,repeat('0',64));
+ exception when sqlstate 'P0001' then rejected:=true; end;
+ if not rejected then raise exception 'bad chunk digest passed'; end if;
  perform plm.load_wb_chunk(c,1,payload,chunk_hash);
- begin perform * from plm.finalize_wb_capture(c,manifest_hash,1); raise exception 'declared count mismatch passed';
- exception when sqlstate 'P0001' then null; end;
+ rejected:=false;
+ begin perform * from plm.finalize_wb_capture(c,manifest_hash,1);
+ exception when sqlstate 'P0001' then rejected:=true; end;
+ if not rejected then raise exception 'declared count mismatch passed'; end if;
  if (select count(*) from plm.wb_franchise_property)<>before_rows then raise exception 'failed legacy finalize wrote rows'; end if;
  perform plm.fail_wb_capture(c,'synthetic controlled failure');
  if not exists(select 1 from plm.wb_capture where capture_id=c and chunk_number=0 and status='failed') then raise exception 'fail_wb_capture did not fail header'; end if;
@@ -78,9 +103,10 @@ rollback;
 
 begin;
 set local role authenticated;
-do $denied$ begin
- begin perform plm.begin_wb_capture('wb_franchise_property',date '2099-01-08','synthetic',repeat('a',64),1,'synthetic','https://example.invalid',null); raise exception 'authenticated legacy begin passed';
- exception when insufficient_privilege then null; when sqlstate 'P0001' then null; end;
+do $denied$ declare rejected boolean:=false; begin
+ begin perform plm.begin_wb_capture('wb_franchise_property',date '2099-01-08','synthetic',repeat('a',64),1,'synthetic','https://example.invalid',null);
+ exception when insufficient_privilege then rejected:=true; when sqlstate 'P0001' then rejected:=true; end;
+ if not rejected then raise exception 'authenticated legacy begin passed'; end if;
 end $denied$;
 rollback;
 
