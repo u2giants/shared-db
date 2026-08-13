@@ -100,7 +100,7 @@ objects that fixtures never would have. Each was fixed at the source, not filter
 
 | Phantom | Cause | Fix |
 |---|---|---|
-| `table if`, `table as`, `table %s`, `table plm` | DDL built inside dynamic SQL string literals, e.g. `execute 'alter table if exists %s …'` | strip `$$ … $$` bodies **then** string literals, in that order — apostrophes inside function bodies were unbalancing quote pairing across the whole file |
+| `table if`, `table as`, `table %s`, `table plm` | DDL built inside dynamic SQL string literals, e.g. `execute 'alter table if exists %s …'` | strip function bodies but retain top-level `DO` bodies, then strip string literals |
 | `table their`, `table the` | English prose inside `comment on … is '…'` text | as above, plus: an unqualified `grant` target with no explicit object-type keyword is not believed |
 | `table tables` (5 migrations) | `alter default privileges … grant all ON TABLES to r` — a form with no object name at all | negative lookahead; its own pattern handles that form |
 | `table all` | `grant … on all tables in schema s` | negative lookahead |
@@ -114,10 +114,11 @@ DDL verbs and reports whether each is modelled. The test
 `no unmodelled DDL verb hides in the real migrations directory` fails when a form is
 neither modelled nor listed in `DISPATCH_UNMODELLED_FORMS` with a written reason.
 
-Current inventory: **35 distinct DDL forms**. Unmodelled: **3** — `create extension` (12),
+Current inventory: **36 distinct DDL forms**. Unmodelled: **3** — `create extension` (12),
 `create event` (2), `drop event` (2) — all database-global objects rather than schema
 objects, each carrying a written reason in `DISPATCH_UNMODELLED_FORMS`. That is **16 of
-3 033 statements, 0.53%**, against a 5% ceiling asserted by the test.
+3 104 statements, 0.52%**, against a 5% ceiling asserted by the test. Literal DDL
+inside top-level `DO` blocks is included in this count; function-body dynamic SQL is not.
 
 This is the measurement whose absence let a parser blind to `alter table` ship behind a
 green build for weeks.

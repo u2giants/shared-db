@@ -25,6 +25,7 @@ import {
   Unknown,
   utcStamp,
   versionRef,
+  versionsOnDisk,
 } from './check-dispatch-collision.mjs'
 import {
   describeCoverage,
@@ -462,6 +463,22 @@ test('the modelled class DOES route through the parser end to end', () => {
   assert.equal(result.overlapFound, true)
 })
 
+test('literal DDL inside a DO block is visible to dispatch and inventory', () => {
+  const sql = `do $$ begin
+    alter table dflow.sample_shipment_item add constraint sample_unique unique (id);
+  end $$;`
+  assert.deepEqual(dispatchObjectKeys(sql), ['table dflow.sample_shipment_item'])
+  const inventory = inventoryDdlVerbs([sql])
+  assert.ok(inventory.some((entry) => entry.verb === 'alter table'))
+})
+
+test('dynamic DDL and function-body prose remain excluded', () => {
+  const sql = `create or replace function plm.f() returns void language plpgsql as $$ begin
+    execute 'alter table core.secret add column x text';
+  end $$;`
+  assert.deepEqual(dispatchObjectKeys(sql), ['function plm.f'])
+})
+
 // --- gatherOpenPrObjects (plan step 2b) ------------------------------------
 
 const SQL = 'create or replace function plm.foo() returns void as $$ begin end $$ language plpgsql;'
@@ -692,6 +709,24 @@ test('#670 reservation walks past a run of versions already held', () => {
   assert.equal(got.version, '20260812211003')
   assert.equal(got.attempts, 4)
   assert.deepEqual(got.skipped, ['20260812211000', '20260812211001', '20260812211002'])
+})
+
+test('#670 failure to read versions on disk fails closed', () => {
+  assert.throws(
+    () => versionsOnDisk('Z:/path-that-must-not-exist/shared-db-migrations'),
+    (error) => error instanceof Unknown && /could not read/.test(error.message),
+  )
+})
+
+test('#670 reservation skips versions already present on disk, a PR, or a claim', () => {
+  const io = createRefFake()
+  const got = reserveVersion({
+    stamp: '20260812211000', repo: 'r', sha: 'x', io,
+    unavailableVersions: ['20260812211000', '20260812211001'],
+  })
+  assert.equal(got.version, '20260812211002')
+  assert.deepEqual(got.skipped, ['20260812211000', '20260812211001'])
+  assert.deepEqual(io.calls, ['refs/db-claims/20260812211002'])
 })
 
 test('#670 exhausting the attempt budget THROWS instead of returning a free-for-all number', () => {

@@ -307,7 +307,7 @@ export function extractObjects(sql) {
 //   noisier version of it is the alarm-fatigue disease this workstream exists
 //   to cure (plan step 3a).
 //
-//   So NOTHING above this line changed. `DISPATCH_PATTERNS` is a superset used
+//   So NOTHING above this line changed. `DISPATCH_PATTERNS` is the broader policy used
 //   ONLY by the dispatch-time check, whose policy is deliberately broader: any
 //   write to the same target collides. It over-blocks, which fails safe, and it
 //   costs a coordinator a conversation rather than an agent a whole session.
@@ -615,9 +615,10 @@ const DISPATCH_PATTERNS = [
  * The DISPATCH-policy view of a migration: structured operations rather than
  * flat strings, so a consumer can reason about `action` and `kind` separately.
  *
- * Includes everything `extractObjects` finds (mapped to `action: 'replace'`)
- * PLUS the broad classes above, so a dispatch check never sees LESS than the
- * merge guard does.
+ * Combines the merge guard's whole-object patterns with the broader dispatch
+ * patterns. The two policies overlap, but neither result is promised to be a
+ * strict superset of the other because dispatch deliberately ignores dynamic
+ * function-body SQL while retaining literal DDL inside `DO` blocks.
  *
  * @returns {{action: string, kind: string, target: string}[]}
  */
@@ -636,13 +637,12 @@ export function extractOperations(sql) {
   // apostrophes inside `$$ … $$` function bodies unbalance quote pairing across
   // the whole file and shift every pair after them. Bodies go first.
   //
-  // This also removes DDL genuinely written inside a function body — which is
-  // correct twice over: it is dynamic (`%s` cannot be resolved into an object
-  // name), and the tables it creates are `create temporary table` scratch space
-  // that is session-local and cannot collide. `describeDispatchCoverage`'s
-  // caveat about dynamic SQL states this limit out loud rather than hiding it.
+  // Function bodies remain excluded, but a top-level `DO $$ ... $$` block is
+  // different: this repository uses literal DDL inside those blocks as its
+  // normal idempotent migration form. Keep the body so those writes are seen.
   const text = normalizeSql(sql)
-    .replace(/\$([A-Za-z_]*)\$[\s\S]*?\$\1\$/g, ' ')
+    .replace(/\$([A-Za-z_]*)\$([\s\S]*?)\$\1\$/g, (whole, _tag, body, offset, source) =>
+      /\bdo\s*$/i.test(source.slice(0, offset)) ? body : ' ')
     .replace(/'(?:[^']|'')*'/g, " '' ")
   const seen = new Map()
   // Bare SQL keywords are never object names. They appear when an upstream
@@ -733,12 +733,14 @@ export function inventoryDdlVerbs(sqlTexts) {
     // that would have made this measurement useless, and useless measurements
     // get deleted. String literals and `$$ … $$` bodies go first for the same
     // reason: DDL nested inside a function body is not the axis two agents
-    // collide on, and its prose is pure noise here.
+    // collide on, and its prose is pure noise here. Literal DDL inside a
+    // top-level DO block is retained because it changes shared objects.
     const text = normalizeSql(sql)
-      .replace(/\$([A-Za-z_]*)\$[\s\S]*?\$\1\$/g, ' ')
+      .replace(/\$([A-Za-z_]*)\$([\s\S]*?)\$\1\$/g, (whole, _tag, body, offset, source) =>
+        /\bdo\s*$/i.test(source.slice(0, offset)) ? body : ' ')
       .replace(/'(?:[^']|'')*'/g, ' ')
     for (const statement of text.split(';')) {
-      const m = /^\s*(create|alter|drop|grant|revoke|comment)\s+((?:or\s+replace\s+|if\s+(?:not\s+)?exists\s+|unique\s+|concurrently\s+|only\s+|materialized\s+|recursive\s+|temp\s+|temporary\s+|global\s+|local\s+|unlogged\s+|foreign\s+|constraint\s+|default\s+)*)([a-z_]+)/i.exec(
+      const m = /(?:^|\bbegin\s+|\bthen\s+)\s*(create|alter|drop|grant|revoke|comment)\s+((?:or\s+replace\s+|if\s+(?:not\s+)?exists\s+|unique\s+|concurrently\s+|only\s+|materialized\s+|recursive\s+|temp\s+|temporary\s+|global\s+|local\s+|unlogged\s+|foreign\s+|constraint\s+|default\s+)*)([a-z_]+)/i.exec(
         statement,
       )
       if (!m) continue

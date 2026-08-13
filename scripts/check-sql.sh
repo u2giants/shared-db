@@ -267,7 +267,7 @@ resolve_ledger_file() {
     # non-zero status, never a silently truncated ledger.
     if psql "$ledger_url" --set ON_ERROR_STOP=1 -At \
       -c 'select version from supabase_migrations.schema_migrations order by version' \
-      > "$out" 2>/dev/null; then
+      > "$out"; then
       echo "$out"
     else
       rm -f "$out"

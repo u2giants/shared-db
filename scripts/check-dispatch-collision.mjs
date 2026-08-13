@@ -304,10 +304,16 @@ export function utcStamp(now = new Date()) {
  *
  * @returns {{version: string, ref: string, attempts: number, skipped: string[]}}
  */
-export function reserveVersion({ stamp, repo, sha, io, maxAttempts = 60 }) {
+export function reserveVersion({ stamp, repo, sha, io, maxAttempts = 60, unavailableVersions = [] }) {
   const skipped = []
+  const unavailable = new Set(unavailableVersions.map(String))
   let candidate = String(stamp)
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (unavailable.has(candidate)) {
+      skipped.push(candidate)
+      candidate = String(BigInt(candidate) + 1n)
+      continue
+    }
     const ref = versionRef(candidate)
     const outcome = io.createRef(repo, ref, sha)
     if (outcome === 'created') return { version: candidate, ref, attempts: attempt, skipped }
@@ -359,7 +365,7 @@ export function formatReport({ proposed, inFlight, result }) {
       // list is now complete: agents grep for a reassuring word and act on it
       // regardless of any caveat printed after it.
       'This is EVIDENCE, not clearance. Full DDL-class coverage is not omniscience:',
-      'DDL built by dynamic SQL or hidden inside a `do $$ … $$` block is invisible,',
+      'DDL built by dynamic SQL is invisible; literal DDL inside `do $$ … $$` is read,',
       'and so is any file not yet committed to a branch this tool can read. The',
       'coordinator still confirms before dispatching.',
     )
@@ -590,15 +596,14 @@ export const defaultIo = {
   },
 }
 
-export function versionsOnDisk() {
-  const dir = path.join(repoRoot, MIGRATIONS_DIR)
+export function versionsOnDisk(dir = path.join(repoRoot, MIGRATIONS_DIR)) {
   try {
     return readdirSync(dir)
       .filter((name) => name.endsWith('.sql'))
       .map((name) => name.slice(0, 14))
       .filter((stamp) => /^\d{14}$/.test(stamp))
-  } catch {
-    return []
+  } catch (error) {
+    throw new Unknown(`could not read ${dir}: ${error.message}`)
   }
 }
 
@@ -731,8 +736,8 @@ Exit 0 = the check completed and found NO OVERLAP IN WHAT IT COULD READ.
          Since #563 the parser reads every DDL class this repo uses, including
          "alter table", "create table", "create index", "grant", "comment on"
          and "create type", which it was previously blind to. It is still not
-         clearance: DDL built by dynamic SQL or hidden inside a do-block is
-         invisible, as is any file not yet committed to a readable branch.
+         clearance: DDL built by dynamic SQL is invisible. Literal DDL inside
+         a do-block is read. Any file not yet committed is also invisible.
          The report names exactly what was checked — read it.
 Exit 1 = collision. Exit 2 = could not determine.
 
@@ -751,7 +756,15 @@ function runReserveVersion(options, io = defaultIo) {
     // Validate before touching the network so a typo fails instantly and
     // cannot create a junk ref.
     versionRef(start)
-    reservation = reserveVersion({ stamp: start, repo, sha: io.baseSha(repo), io })
+    const sources = [...gatherClaims(repo), ...gatherOpenPrObjects(repo), ...localVersionSource()]
+    const unavailableVersions = sources.flatMap((source) => source.versions ?? [])
+    reservation = reserveVersion({
+      stamp: start,
+      repo,
+      sha: io.baseSha(repo),
+      io,
+      unavailableVersions,
+    })
   } catch (error) {
     if (!(error instanceof Unknown)) throw error
     console.error(`UNKNOWN: ${error.message}`)
