@@ -998,7 +998,7 @@ comment on column plm.lucasfilm_dcp_asset_tile_observation.listing_kind is
 -- AND WHY EVERY CRAWL-SCOPED TRIGGER COVERS **INSERT** AS WELL AS UPDATE AND DELETE.
 -- Read this before "simplifying" any trigger below back to `before update or delete`.
 -- Section 7 revokes UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and MAINTAIN from
--- service_role but deliberately KEEPS INSERT. INSERT is therefore the ONE mutating
+-- service_role. Guarded SECURITY DEFINER functions are therefore the only writing
 -- operation still available to the loader's role -- which makes it the one an
 -- UPDATE/DELETE-only trigger would leave completely unguarded. The concrete hole: crawl X
 -- finalizes, then a plain
@@ -1379,10 +1379,10 @@ comment on function plm.lucasfilm_dcp_crawl_freeze() is
 -- Every immutability guarantee in this migration rests on this revoke.
 --
 -- THE POSTURE, copied from 20260810110000 (Warner) verbatim as the pattern:
---   service_role keeps SELECT and INSERT; UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+--   service_role keeps SELECT only; INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
 --   and MAINTAIN are revoked. public and anon get `revoke all`.
 --   INSERT is kept deliberately: the 20260810190100 loader functions are SECURITY DEFINER
---   and never consume service_role's table grants, but the loader's own INSERT path and
+--   and never consume service_role's table grants; the loader's security-definer path and
 --   the exception table are exercised by service_role in the apply lane, and Warner's
 --   shipped posture is the pattern this ruling names. It is the MUTATING bits -- above all
 --   TRUNCATE -- that the immutability design cannot survive.
@@ -2397,7 +2397,7 @@ comment on table plm.lucasfilm_dcp_asset_term_observation is
 -- WHY EVERY RUN-SCOPED TRIGGER COVERS **INSERT** AS WELL AS UPDATE AND DELETE.
 -- Read this before "simplifying" any trigger below to `before update or delete`.
 -- Section 6 revokes UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and MAINTAIN from
--- service_role but deliberately KEEPS INSERT -- so INSERT is the ONE mutating operation
+-- service_role, so guarded SECURITY DEFINER functions are the only writing path
 -- still available to the loader's role, which makes it the one an UPDATE/DELETE-only
 -- trigger would leave completely unguarded. The concrete hole here: metadata run R
 -- finalizes with its counts reconciled, and then a plain
@@ -2454,7 +2454,7 @@ comment on function plm.lucasfilm_dcp_reject_completed_metadata_change() is
 'Row trigger freezing every RUN-SCOPED plm.lucasfilm_dcp_* metadata table once its owning '
 'plm.lucasfilm_dcp_metadata_run reaches status complete. FIRES ON INSERT, UPDATE AND DELETE -- all '
 'three, deliberately. INSERT is not an afterthought: section 6 of migration 20260811050000 '
-'revokes UPDATE, DELETE and TRUNCATE from service_role but KEEPS INSERT, so INSERT is the '
+'revokes every direct mutation from service_role, so guarded functions are the '
 'only mutating operation still available and therefore the one an unguarded trigger would '
 'leave wide open. Without the INSERT branch a plain INSERT could add a property link, a '
 'character link or a term link to an already-completed and already-reconciled run, and that '
@@ -2694,7 +2694,7 @@ $$;
 -- erase a completed metadata run's entire evidence without any section 5 trigger running
 -- once. Every immutability guarantee in this migration rests on this revoke.
 --
--- THE POSTURE, identical to Phase 1: service_role keeps SELECT and INSERT; UPDATE, DELETE,
+-- THE POSTURE, identical to Phase 1: service_role keeps SELECT only; INSERT, UPDATE, DELETE,
 -- TRUNCATE, REFERENCES, TRIGGER and MAINTAIN are revoked; public and anon get `revoke all`.
 -- =====================================================================================
 do $$
@@ -2858,7 +2858,7 @@ begin
       'security or their read policy.', v_missing;
   end if;
 
-  -- 8.6 service_role must hold NO mutating bit beyond INSERT on any of the eight tables.
+  -- 8.6 service_role must hold NO direct mutating privilege on any of the eight tables.
   -- TRUNCATE above all: it fires no row trigger, so one TRUNCATE would erase a completed
   -- run's evidence with every section 5 guard silently standing by.
   select string_agg(distinct t || '/' || priv, ', ') into v_missing
@@ -2867,7 +2867,7 @@ begin
     'lucasfilm_dcp_asset_property_observation','lucasfilm_dcp_asset_character_observation',
     'lucasfilm_dcp_asset_term_observation'
   ]) as t,
-  unnest(array['UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) as priv
+  unnest(array['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) as priv
   where has_table_privilege('service_role', 'plm.' || quote_ident(t), priv);
   if v_missing is not null then
     raise exception 'DCP metadata landing self-check FAILED: service_role still holds '
@@ -2877,7 +2877,7 @@ begin
 
   raise notice 'DCP metadata landing self-checks passed: 8 tables, RLS + policies present, '
     'no property-character bridge, Phase-1 frozen hash untouched, service_role holds no '
-    'mutating bit beyond INSERT.';
+    'direct mutating privilege.';
 end;
 $$;
 
@@ -3831,7 +3831,7 @@ comment on column plm.marvel_dcp_asset_tile_observation.listing_kind is
 -- AND WHY EVERY CRAWL-SCOPED TRIGGER COVERS **INSERT** AS WELL AS UPDATE AND DELETE.
 -- Read this before "simplifying" any trigger below back to `before update or delete`.
 -- Section 7 revokes UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and MAINTAIN from
--- service_role but deliberately KEEPS INSERT. INSERT is therefore the ONE mutating
+-- service_role. Guarded SECURITY DEFINER functions are therefore the only writing
 -- operation still available to the loader's role -- which makes it the one an
 -- UPDATE/DELETE-only trigger would leave completely unguarded. The concrete hole: crawl X
 -- finalizes, then a plain
@@ -4212,10 +4212,10 @@ comment on function plm.marvel_dcp_crawl_freeze() is
 -- Every immutability guarantee in this migration rests on this revoke.
 --
 -- THE POSTURE, copied from 20260810110000 (Warner) verbatim as the pattern:
---   service_role keeps SELECT and INSERT; UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+--   service_role keeps SELECT only; INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
 --   and MAINTAIN are revoked. public and anon get `revoke all`.
 --   INSERT is kept deliberately: the 20260810190100 loader functions are SECURITY DEFINER
---   and never consume service_role's table grants, but the loader's own INSERT path and
+--   and never consume service_role's table grants; the loader's security-definer path and
 --   the exception table are exercised by service_role in the apply lane, and Warner's
 --   shipped posture is the pattern this ruling names. It is the MUTATING bits -- above all
 --   TRUNCATE -- that the immutability design cannot survive.
@@ -5230,7 +5230,7 @@ comment on table plm.marvel_dcp_asset_term_observation is
 -- WHY EVERY RUN-SCOPED TRIGGER COVERS **INSERT** AS WELL AS UPDATE AND DELETE.
 -- Read this before "simplifying" any trigger below to `before update or delete`.
 -- Section 6 revokes UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and MAINTAIN from
--- service_role but deliberately KEEPS INSERT -- so INSERT is the ONE mutating operation
+-- service_role, so guarded SECURITY DEFINER functions are the only writing path
 -- still available to the loader's role, which makes it the one an UPDATE/DELETE-only
 -- trigger would leave completely unguarded. The concrete hole here: metadata run R
 -- finalizes with its counts reconciled, and then a plain
@@ -5287,7 +5287,7 @@ comment on function plm.marvel_dcp_reject_completed_metadata_change() is
 'Row trigger freezing every RUN-SCOPED plm.marvel_dcp_* metadata table once its owning '
 'plm.marvel_dcp_metadata_run reaches status complete. FIRES ON INSERT, UPDATE AND DELETE -- all '
 'three, deliberately. INSERT is not an afterthought: section 6 of migration 20260811050000 '
-'revokes UPDATE, DELETE and TRUNCATE from service_role but KEEPS INSERT, so INSERT is the '
+'revokes every direct mutation from service_role, so guarded functions are the '
 'only mutating operation still available and therefore the one an unguarded trigger would '
 'leave wide open. Without the INSERT branch a plain INSERT could add a property link, a '
 'character link or a term link to an already-completed and already-reconciled run, and that '
@@ -5527,7 +5527,7 @@ $$;
 -- erase a completed metadata run's entire evidence without any section 5 trigger running
 -- once. Every immutability guarantee in this migration rests on this revoke.
 --
--- THE POSTURE, identical to Phase 1: service_role keeps SELECT and INSERT; UPDATE, DELETE,
+-- THE POSTURE, identical to Phase 1: service_role keeps SELECT only; INSERT, UPDATE, DELETE,
 -- TRUNCATE, REFERENCES, TRIGGER and MAINTAIN are revoked; public and anon get `revoke all`.
 -- =====================================================================================
 do $$
@@ -5691,7 +5691,7 @@ begin
       'security or their read policy.', v_missing;
   end if;
 
-  -- 8.6 service_role must hold NO mutating bit beyond INSERT on any of the eight tables.
+  -- 8.6 service_role must hold NO direct mutating privilege on any of the eight tables.
   -- TRUNCATE above all: it fires no row trigger, so one TRUNCATE would erase a completed
   -- run's evidence with every section 5 guard silently standing by.
   select string_agg(distinct t || '/' || priv, ', ') into v_missing
@@ -5700,7 +5700,7 @@ begin
     'marvel_dcp_asset_property_observation','marvel_dcp_asset_character_observation',
     'marvel_dcp_asset_term_observation'
   ]) as t,
-  unnest(array['UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) as priv
+  unnest(array['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) as priv
   where has_table_privilege('service_role', 'plm.' || quote_ident(t), priv);
   if v_missing is not null then
     raise exception 'DCP metadata landing self-check FAILED: service_role still holds '
@@ -5710,7 +5710,7 @@ begin
 
   raise notice 'DCP metadata landing self-checks passed: 8 tables, RLS + policies present, '
     'no property-character bridge, Phase-1 frozen hash untouched, service_role holds no '
-    'mutating bit beyond INSERT.';
+    'direct mutating privilege.';
 end;
 $$;
 
@@ -6664,7 +6664,7 @@ comment on column plm.twentieth_century_dcp_asset_tile_observation.listing_kind 
 -- AND WHY EVERY CRAWL-SCOPED TRIGGER COVERS **INSERT** AS WELL AS UPDATE AND DELETE.
 -- Read this before "simplifying" any trigger below back to `before update or delete`.
 -- Section 7 revokes UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and MAINTAIN from
--- service_role but deliberately KEEPS INSERT. INSERT is therefore the ONE mutating
+-- service_role. Guarded SECURITY DEFINER functions are therefore the only writing
 -- operation still available to the loader's role -- which makes it the one an
 -- UPDATE/DELETE-only trigger would leave completely unguarded. The concrete hole: crawl X
 -- finalizes, then a plain
@@ -7045,10 +7045,10 @@ comment on function plm.twentieth_century_dcp_crawl_freeze() is
 -- Every immutability guarantee in this migration rests on this revoke.
 --
 -- THE POSTURE, copied from 20260810110000 (Warner) verbatim as the pattern:
---   service_role keeps SELECT and INSERT; UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+--   service_role keeps SELECT only; INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
 --   and MAINTAIN are revoked. public and anon get `revoke all`.
 --   INSERT is kept deliberately: the 20260810190100 loader functions are SECURITY DEFINER
---   and never consume service_role's table grants, but the loader's own INSERT path and
+--   and never consume service_role's table grants; the loader's security-definer path and
 --   the exception table are exercised by service_role in the apply lane, and Warner's
 --   shipped posture is the pattern this ruling names. It is the MUTATING bits -- above all
 --   TRUNCATE -- that the immutability design cannot survive.
@@ -8063,7 +8063,7 @@ comment on table plm.twentieth_century_dcp_asset_term_observation is
 -- WHY EVERY RUN-SCOPED TRIGGER COVERS **INSERT** AS WELL AS UPDATE AND DELETE.
 -- Read this before "simplifying" any trigger below to `before update or delete`.
 -- Section 6 revokes UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and MAINTAIN from
--- service_role but deliberately KEEPS INSERT -- so INSERT is the ONE mutating operation
+-- service_role, so guarded SECURITY DEFINER functions are the only writing path
 -- still available to the loader's role, which makes it the one an UPDATE/DELETE-only
 -- trigger would leave completely unguarded. The concrete hole here: metadata run R
 -- finalizes with its counts reconciled, and then a plain
@@ -8120,7 +8120,7 @@ comment on function plm.twentieth_century_dcp_reject_completed_metadata_change()
 'Row trigger freezing every RUN-SCOPED plm.twentieth_century_dcp_* metadata table once its owning '
 'plm.twentieth_century_dcp_metadata_run reaches status complete. FIRES ON INSERT, UPDATE AND DELETE -- all '
 'three, deliberately. INSERT is not an afterthought: section 6 of migration 20260811050000 '
-'revokes UPDATE, DELETE and TRUNCATE from service_role but KEEPS INSERT, so INSERT is the '
+'revokes every direct mutation from service_role, so guarded functions are the '
 'only mutating operation still available and therefore the one an unguarded trigger would '
 'leave wide open. Without the INSERT branch a plain INSERT could add a property link, a '
 'character link or a term link to an already-completed and already-reconciled run, and that '
@@ -8360,7 +8360,7 @@ $$;
 -- erase a completed metadata run's entire evidence without any section 5 trigger running
 -- once. Every immutability guarantee in this migration rests on this revoke.
 --
--- THE POSTURE, identical to Phase 1: service_role keeps SELECT and INSERT; UPDATE, DELETE,
+-- THE POSTURE, identical to Phase 1: service_role keeps SELECT only; INSERT, UPDATE, DELETE,
 -- TRUNCATE, REFERENCES, TRIGGER and MAINTAIN are revoked; public and anon get `revoke all`.
 -- =====================================================================================
 do $$
@@ -8524,7 +8524,7 @@ begin
       'security or their read policy.', v_missing;
   end if;
 
-  -- 8.6 service_role must hold NO mutating bit beyond INSERT on any of the eight tables.
+  -- 8.6 service_role must hold NO direct mutating privilege on any of the eight tables.
   -- TRUNCATE above all: it fires no row trigger, so one TRUNCATE would erase a completed
   -- run's evidence with every section 5 guard silently standing by.
   select string_agg(distinct t || '/' || priv, ', ') into v_missing
@@ -8533,7 +8533,7 @@ begin
     'twentieth_century_dcp_asset_property_observation','twentieth_century_dcp_asset_character_observation',
     'twentieth_century_dcp_asset_term_observation'
   ]) as t,
-  unnest(array['UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) as priv
+  unnest(array['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) as priv
   where has_table_privilege('service_role', 'plm.' || quote_ident(t), priv);
   if v_missing is not null then
     raise exception 'DCP metadata landing self-check FAILED: service_role still holds '
@@ -8543,7 +8543,7 @@ begin
 
   raise notice 'DCP metadata landing self-checks passed: 8 tables, RLS + policies present, '
     'no property-character bridge, Phase-1 frozen hash untouched, service_role holds no '
-    'mutating bit beyond INSERT.';
+    'direct mutating privilege.';
 end;
 $$;
 

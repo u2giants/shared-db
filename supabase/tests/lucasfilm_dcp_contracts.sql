@@ -47,7 +47,7 @@
 --   NOT ONE assertion reads a migration ledger row: a ledger row proves a file ran, never
 --   that it did what it claimed. Every count check is written so that an EMPTY set FAILS.
 --     A  The ten tables and the fourteen functions exist (to_regclass / pg_proc).
---     B  PRIVILEGES: service_role holds SELECT and INSERT and NOTHING ELSE -- no UPDATE,
+--     B  PRIVILEGES: service_role holds SELECT only and every direct write is denied -- no UPDATE,
 --        DELETE, TRUNCATE, REFERENCES, TRIGGER or MAINTAIN. anon and public hold nothing.
 --        The table list is ENUMERATED FROM pg_class, so a plm.lucasfilm_dcp_* table added later
 --        without a matching revoke FAILS here rather than escaping the check.
@@ -60,7 +60,7 @@
 --     E  IMMUTABILITY ACTUALLY BLOCKS A WRITE. Not "the trigger exists" -- real INSERT,
 --        UPDATE and DELETE statements against a completed crawl are executed and must all
 --        raise. E6 is the INSERT case specifically: section 7 revokes UPDATE, DELETE and
---        TRUNCATE from service_role but KEEPS INSERT, so INSERT is the only mutating
+--        all direct mutation from service_role, so guarded functions are the only writing
 --        operation still available and therefore the one worth proving. E7 covers the
 --        deliberate lucasfilm_dcp_load_exception carve-out (resolution columns stay writable, source
 --        fields do not). E8 reads back the STORED waived_at written by
@@ -122,7 +122,7 @@ end;
 $$;
 
 -- =====================================================================================
--- B. PRIVILEGES. service_role: SELECT + INSERT and NOTHING ELSE. anon/public: nothing.
+-- B. PRIVILEGES. service_role: SELECT only; every direct write denied. anon/public: nothing.
 --
 -- UPDATE / DELETE / TRUNCATE / REFERENCES / TRIGGER / MAINTAIN all arrive FREE from the
 -- plm schema default privilege (20260710135975:14) at CREATE TABLE time -- verified live
@@ -396,7 +396,7 @@ begin
       end if;
       if (v_ty & 4) = 0 then
         raise exception 'E FAILED: the immutability trigger on plm.% does NOT fire on '
-          'INSERT. Section 7 keeps INSERT for service_role, so INSERT is the only mutating '
+          'INSERT. Section 7 denies direct writes to service_role, so guarded functions are the only '
           'operation still available and an UPDATE/DELETE-only trigger guards nothing '
           'against it.', v_t;
       end if;
@@ -916,7 +916,7 @@ $$;
 --
 -- WHAT IT ASSERTS
 --   A  The eight tables and the four new functions exist.
---   B  PRIVILEGES: service_role holds SELECT and INSERT and NOTHING ELSE. anon/public
+--   B  PRIVILEGES: service_role holds SELECT only and every direct write is denied. anon/public
 --      hold nothing. Enumerated from pg_class so a table added later without a revoke
 --      fails here rather than escaping.
 --   C  RLS enabled, exactly one SELECT policy each, to {authenticated}, and the predicate
@@ -987,7 +987,7 @@ end;
 $$;
 
 -- =====================================================================================
--- B. PRIVILEGES. service_role: SELECT + INSERT only. anon/public: nothing.
+-- B. PRIVILEGES. service_role: SELECT only; every direct write denied. anon/public: nothing.
 --    Enumerated from pg_class, NOT from a hand-written list, so a plm.lucasfilm_dcp_metadata_*
 --    table added later without a matching revoke FAILS here instead of escaping.
 -- =====================================================================================
@@ -1013,7 +1013,8 @@ begin
 
     -- TRUNCATE ABOVE ALL. It fires NO row triggers, so one TRUNCATE would erase a
     -- completed run's evidence with every freeze trigger silently standing by.
-    if has_table_privilege('service_role', 'plm.' || quote_ident(r.relname), 'UPDATE')
+    if has_table_privilege('service_role', 'plm.' || quote_ident(r.relname), 'INSERT')
+    or has_table_privilege('service_role', 'plm.' || quote_ident(r.relname), 'UPDATE')
     or has_table_privilege('service_role', 'plm.' || quote_ident(r.relname), 'DELETE')
     or has_table_privilege('service_role', 'plm.' || quote_ident(r.relname), 'TRUNCATE')
     or has_table_privilege('service_role', 'plm.' || quote_ident(r.relname), 'REFERENCES')
@@ -1040,7 +1041,7 @@ begin
     raise exception 'B FAILED: %', array_to_string(v_bad, '; ');
   end if;
 
-  raise notice 'B PASSED: 10 tables, service_role SELECT+INSERT only, anon locked out.';
+  raise notice 'B PASSED: 10 tables, service_role SELECT only, anon locked out.';
 end;
 $$;
 
@@ -1216,7 +1217,7 @@ begin
     end if;
     if (v_ty & 4) = 0 then
       raise exception 'E FAILED: the immutability trigger on plm.% does NOT fire on '
-        'INSERT. service_role keeps INSERT and loses everything else, so INSERT is the '
+        'direct writes. service_role receives SELECT only, so the guarded loader is the '
         'only mutating operation still available and an UPDATE/DELETE-only trigger guards '
         'nothing against it.', v_t;
     end if;
@@ -1519,7 +1520,7 @@ begin
   where metadata_run_id = v_run;
 
   -- E4a. INSERT of a new character link into a completed run. THIS IS THE ONE THAT
-  -- MATTERS: service_role keeps INSERT and loses everything else, so this is the only
+  -- MATTERS: service_role receives SELECT only and all direct writes are denied, so this is the only
   -- mutating operation still available, and without the INSERT branch nothing would stop
   -- an asset being given a character Disney never returned inside a reconciled run.
   v_ok := false;

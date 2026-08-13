@@ -140,7 +140,7 @@ create policy lucasfilm_dcp_chunk_ledger_read on plm.lucasfilm_dcp_chunk_ledger
   );
 
 -- INSERT is covered as well as UPDATE and DELETE, for the reason set out at the head of
--- section 6 in 20260810190000: service_role keeps INSERT and loses everything else, so an
+-- section 6 in 20260810190000: service_role receives SELECT only and all direct writes are denied, so an
 -- UPDATE/DELETE-only trigger would leave the only available mutating operation unguarded.
 -- A ledger row added to a completed crawl would claim a chunk that crawl never applied,
 -- and would break the reconciliation finalize already performed.
@@ -2473,10 +2473,10 @@ begin
       'found %.', v_count;
   end if;
 
-  -- 8.2 service_role must hold no mutating bit beyond INSERT on the two new tables.
+  -- 8.2 service_role must hold no direct mutating privilege on the two new tables.
   select string_agg(distinct t || '/' || priv, ', ') into v_missing
   from unnest(array['lucasfilm_dcp_metadata_chunk_ledger','lucasfilm_dcp_metadata_load_exception']) as t,
-       unnest(array['UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) as priv
+       unnest(array['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) as priv
   where has_table_privilege('service_role', 'plm.' || quote_ident(t), priv);
   if v_missing is not null then
     raise exception 'DCP metadata loader self-check FAILED: service_role still holds '
@@ -2645,7 +2645,7 @@ create policy marvel_dcp_chunk_ledger_read on plm.marvel_dcp_chunk_ledger
   );
 
 -- INSERT is covered as well as UPDATE and DELETE, for the reason set out at the head of
--- section 6 in 20260810190000: service_role keeps INSERT and loses everything else, so an
+-- section 6 in 20260810190000: service_role receives SELECT only and all direct writes are denied, so an
 -- UPDATE/DELETE-only trigger would leave the only available mutating operation unguarded.
 -- A ledger row added to a completed crawl would claim a chunk that crawl never applied,
 -- and would break the reconciliation finalize already performed.
@@ -4978,10 +4978,10 @@ begin
       'found %.', v_count;
   end if;
 
-  -- 8.2 service_role must hold no mutating bit beyond INSERT on the two new tables.
+  -- 8.2 service_role must hold no direct mutating privilege on the two new tables.
   select string_agg(distinct t || '/' || priv, ', ') into v_missing
   from unnest(array['marvel_dcp_metadata_chunk_ledger','marvel_dcp_metadata_load_exception']) as t,
-       unnest(array['UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) as priv
+       unnest(array['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) as priv
   where has_table_privilege('service_role', 'plm.' || quote_ident(t), priv);
   if v_missing is not null then
     raise exception 'DCP metadata loader self-check FAILED: service_role still holds '
@@ -5150,7 +5150,7 @@ create policy twentieth_century_dcp_chunk_ledger_read on plm.twentieth_century_d
   );
 
 -- INSERT is covered as well as UPDATE and DELETE, for the reason set out at the head of
--- section 6 in 20260810190000: service_role keeps INSERT and loses everything else, so an
+-- section 6 in 20260810190000: service_role receives SELECT only and all direct writes are denied, so an
 -- UPDATE/DELETE-only trigger would leave the only available mutating operation unguarded.
 -- A ledger row added to a completed crawl would claim a chunk that crawl never applied,
 -- and would break the reconciliation finalize already performed.
@@ -7483,10 +7483,10 @@ begin
       'found %.', v_count;
   end if;
 
-  -- 8.2 service_role must hold no mutating bit beyond INSERT on the two new tables.
+  -- 8.2 service_role must hold no direct mutating privilege on the two new tables.
   select string_agg(distinct t || '/' || priv, ', ') into v_missing
   from unnest(array['twentieth_century_dcp_metadata_chunk_ledger','twentieth_century_dcp_metadata_load_exception']) as t,
-       unnest(array['UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) as priv
+       unnest(array['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) as priv
   where has_table_privilege('service_role', 'plm.' || quote_ident(t), priv);
   if v_missing is not null then
     raise exception 'DCP metadata loader self-check FAILED: service_role still holds '
