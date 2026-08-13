@@ -42,8 +42,10 @@ begin
     v_rejected := false;
     begin
       v_sql := format(
-        'select plm.begin_%I_crawl($1, date ''2099-01-01'', ''https://synthetic.invalid'', '
-        '||'''synthetic'', ''synthetic'', ''synthetic'', ''synthetic'', repeat(''a'',40), 1, 1, null)',
+        $sql$select plm.begin_%I_crawl(
+          $1, date '2099-01-01', 'https://synthetic.invalid', 'synthetic',
+          'synthetic', 'synthetic', 'synthetic', repeat('a', 40), 1, 1, null
+        )$sql$,
         v_prefix
       );
       execute v_sql using v_other_source;
