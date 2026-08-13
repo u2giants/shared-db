@@ -95,7 +95,10 @@ export const DEDUPE_ENABLED_VARIABLE = "COLDLION_ALERT_DEDUPE_ENABLED";
 export const DEDUPE_LOOKUP_LIMIT_VARIABLE = "COLDLION_ALERT_DEDUPE_LOOKUP_LIMIT";
 export const DEDUPE_REPO_VARIABLE = "COLDLION_ALERT_ISSUE_REPO";
 export const DEDUPE_GH_BIN_VARIABLE = "COLDLION_ALERT_DEDUPE_GH_BIN";
-export const DEDUPE_DEFAULT_LOOKUP_LIMIT = 100;
+// Keep enough headroom above the repository's normal open-issue count that the
+// fail-closed truncation alarm is exceptional, not permanently noisy. Operators can
+// still override this, and a full page is still treated as an unverified lookup.
+export const DEDUPE_DEFAULT_LOOKUP_LIMIT = 500;
 
 export const EXIT_ALL_CLEAR = 0;
 export const EXIT_DELIVER_NEW = 1;
@@ -189,7 +192,7 @@ export function lookupExistingAlertIssues({
         "--limit",
         String(limit),
         "--json",
-        "number,title,body",
+        "number,title,body,author",
       ],
       { encoding: "utf8" },
     );
@@ -257,7 +260,12 @@ export function resolveDedupeDecision({ key, lookup, env = {} } = {}) {
       reason: `could not verify whether this alert was already reported (${lookup?.error ?? "no lookup result"}); delivering anyway rather than risking a swallowed alert`,
     };
   }
-  const match = (lookup.issues ?? []).find((i) => parseDedupeMarker(i?.body) === key);
+  // Only this workflow's durable issues may suppress a delivery. Handover/review issues
+  // routinely quote workflow output verbatim; allowing any author to suppress on a
+  // quoted marker would lose the real alert's durable surface.
+  const match = (lookup.issues ?? []).find(
+    (i) => i?.author?.login === "github-actions[bot]" && parseDedupeMarker(i?.body) === key,
+  );
   if (match) {
     return {
       action: "suppress",

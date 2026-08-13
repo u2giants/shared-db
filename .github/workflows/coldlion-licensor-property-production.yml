@@ -533,11 +533,16 @@ jobs:
 
       # Each runner below is the EXACT production invocation minus --apply and --linked.
       # It resolves the real production target, then prints the SQL and configuration it
-      # would use and stops. Nothing connects. If a runner cannot even produce its plan,
-      # that is a real defect and this job fails loudly rather than reporting a clean
-      # preflight.
+      # would use and stops before every database write. The snapshot runner DOES contact
+      # the live ColdLion ERP to build its read-only plan; none of these runners connects
+      # to Supabase. If a runner cannot produce its plan, that is a real defect and this
+      # job fails loudly rather than reporting a clean preflight.
       - name: coldlion — what the 06:00 snapshot WOULD do
         if: steps.armed.outputs.armed == 'true'
+        env:
+          # Repository secret only. The preflight needs it for the live ERP read, but it
+          # still has no Supabase password, project session, or database write path.
+          COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
         run: |
           set -euo pipefail
           node tools/sync-coldlion-licensors-properties.mjs \

@@ -301,6 +301,18 @@ test("#548: NO preflight runner may be given --apply or --linked", () => {
   }
 });
 
+test("#548: the live ERP preflight receives its API key without gaining a database write path", () => {
+  const snapshotStep = preflightJob.slice(
+    preflightJob.indexOf("name: coldlion"),
+    preflightJob.indexOf("name: promote"),
+  );
+  assert.match(snapshotStep, /COLDLION_API_KEY:\s*\$\{\{ secrets\.COLDLION_API_KEY \}\}/);
+  assert.doesNotMatch(snapshotStep, /SUPABASE_DB_PASSWORD/);
+  assert.doesNotMatch(snapshotStep, /--apply\b|--linked\b|supabase link/);
+  assert.match(preflightJob, /DOES contact\s+#?\s*the live ColdLion ERP|DOES contact[\s\S]*live ColdLion ERP/);
+  assert.doesNotMatch(preflightJob, /Nothing connects\./);
+});
+
 test("#548: the preflight covers EVERY lane the enable variable would arm", () => {
   // A preflight that silently skipped a lane would be worse than none: it would give
   // false confidence about the exact lane nobody checked.

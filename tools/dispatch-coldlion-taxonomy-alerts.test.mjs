@@ -104,10 +104,11 @@ test("unparseable_probe_fails_closed_and_never_reports_all_clear", () => {
 // the duplicates, and it must never quietly swallow a genuine alert.
 // ---------------------------------------------------------------------------------
 
-const openIssue = (number, key) => ({
+const openIssue = (number, key, login = "github-actions[bot]") => ({
   number,
   title: "ColdLion taxonomy alert",
   body: key ? `${renderDedupeMarker(key)}\n\nbody text` : "body text with no marker",
+  author: { login },
 });
 const okLookup = (issues, limit = DEDUPE_DEFAULT_LOOKUP_LIMIT) => ({
   ok: true,
@@ -170,6 +171,16 @@ test("an_already_reported_alert_suppresses_the_duplicate_but_still_fails_red", (
   assert.equal(d.exit_code, EXIT_ALREADY_REPORTED);
   assert.notEqual(d.exit_code, 0, "a suppressed duplicate must NEVER look like all-clear");
   assert.ok(d.reason.includes("#42"));
+});
+
+test("a_handover_quoting_the_marker_cannot_suppress_the_bot_alert", () => {
+  const key = buildDeliveryPlan(probe([alert()])).dedupe_key;
+  const d = resolveDedupeDecision({
+    key,
+    lookup: okLookup([openIssue(41, key, "u2giants")]),
+  });
+  assert.equal(d.action, "create");
+  assert.equal(d.exit_code, EXIT_DELIVER_NEW);
 });
 
 test("an_unreported_alert_is_delivered", () => {
@@ -251,6 +262,7 @@ test("the_lookup_reaches_the_STATE_STORE_by_listing_open_issues_not_by_label_or_
   assert.ok(args.includes("--repo u2giants/shared-db"));
   assert.ok(args.includes("--state open"));
   assert.ok(args.includes(`--limit ${DEDUPE_DEFAULT_LOOKUP_LIMIT}`));
+  assert.ok(args.includes("--json number,title,body,author"));
   // The delivering workflow may create the issue WITHOUT the label when the label does
   // not exist, so a label filter would miss exactly the issues this must find. And
   // GitHub's in:body search index lags minutes, which on a 10-minute cron is the flood.
