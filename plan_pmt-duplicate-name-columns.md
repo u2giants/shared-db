@@ -15,16 +15,59 @@ established, and the change log at the end of this section for what the revision
 
 | # | Step | State | Evidence |
 |---|---|---|---|
-| 1 | Settle intent: duplicate attribute vs. distinct fact (both columns) | ⬜ open | Repo-side payload lineage already traced — see §5a. Live sampling + private-builder read still required |
-| 2 | Migration A — drop `NOT NULL`, add deprecation comments (with the drift-refusal guard) | ⬜ open | — |
-| 3 | Stop BOTH writers: client tool **and** `plm.load_pmt_capture_chunk` | ⬜ open | Both writers named in §5a; the DB-side function is the one the first draft missed |
-| 4 | Migration B — replace reads with joins; drop `idx_pmt_atp_name` | ⬜ open | Repo grep already clean of readers outside migrations — §5a |
-| 5 | Tests in `supabase/tests/` | ⬜ open | — |
-| 6 | Migration C — drop the columns | ⬜ open | — |
-| 7 | Skill + docs update | ⬜ open | — |
+| 1 | Settle intent: duplicate attribute vs. distinct fact (both columns) | ⛔ **open — blocked on out-of-repo evidence** | Repo-side payload lineage traced (§5a). The decisive witness was NOT readable by the authoring session: the private builder in `u2giants/licensor-source-data` (`paramount/`) and per-capture live sampling. See the execution log below for the exact unresolved fact |
+| 2 | Migration A — drop `NOT NULL`, add deprecation comments (with the drift-refusal guard) | ✅ **authored, not applied** (author-only lane) | `supabase/migrations/20260814170219_pmt_duplicate_name_columns_deprecated.sql` sections 1–2 (guard reproduced from the NBCU precedent). Offline pin: `tools/sync-paramount-creative-library.test.mjs` → "the deprecation migration relaxes BOTH columns behind the drift guard, and drops the index" |
+| 3 | Stop BOTH writers: client tool **and** `plm.load_pmt_capture_chunk` | ✅ **authored, not applied/deployed** (author-only lane) | Client: `buildPayloads` in `tools/sync-paramount-creative-library.mjs` no longer maps either name (comment marks the #965/#970 rebase point). DB: `create or replace function` in migration section 3, body spliced verbatim from the live `20260811030000` body minus exactly the two writes. Offline pins: "the loader forwards NEITHER duplicated property-name copy", "the database boundary receives no name key…", "the deprecation migration replaces the loader WITHOUT the two duplicate-name writes" — 60/60 `node --test` pass |
+| 4 | Migration B — replace reads with joins; drop `idx_pmt_atp_name` | ✅ **authored** — zero in-repo readers (§5a), so it reduces to the catalog double-check + the index drop | Index drop is migration section 4 (`drop index plm.idx_pmt_atp_name`, plain). Live-catalog double-check (Step 4's `pg_proc`/`pg_views` queries, in the adjacency-refined form) is now section E of the contract test, so it runs against every database the suite touches |
+| 5 | Tests in `supabase/tests/` | ✅ **authored, not yet run against a database** | `supabase/tests/pmt_no_duplicate_property_name_contracts.sql` — the INTERIM-state version that matches the migrations it ships with (nullable + unwritten + function-body + reintroduction-allowlist + join-reachability + no-live-reader). CI's `supabase/tests against an ephemeral database` job replays the migrations and runs it; the preview rehearsal is still owed |
+| 6 | Migration C — drop the columns | ⬜ open — **deliberately deferred** | Blocked on Step 1's evidence AND on the Step 3 loader change being applied and proven by a real capture. The staged migration carries no `drop column` / `rename column`, and the offline test "…is STAGED: schema-only, and carries no column drop" enforces that |
+| 7 | Skill + docs update | 🔶 **partial** | Docs line added to `docs/core-master-data-consolidation-aim.md`. The skill (`paramount-creative-library-scrape`) lives outside this repo and was NOT edited — out of the author-only lane's scope; still owed by the session that closes this plan out |
 
 **A fresh session starts at Step 1.** Step 1 is a genuine fork: one of the two columns may not
 be a duplicate at all, and getting that wrong deletes a real fact.
+
+### Execution log — 2026-08-14, GLM 5.2 author session (issue #964, author-only lane)
+
+**The exact unresolved fact blocking Step 1.** For each of
+`plm.pmt_authorized_title_property.paramount_property_name` (fed from `licensed-title-scope.csv`)
+and `plm.pmt_property_capture_log.property_name` (fed from `capture-log.csv`): **which portal
+payload does the private capture builder write into that CSV field — the same property record
+that feeds `plm.pmt_property.property_name` (→ duplicate, drop), or a rights-list display
+string / the search string the portal displayed (→ distinct fact, rename and keep the writer)?**
+Settling it requires (a) reading the builder in the private `u2giants/licensor-source-data`
+repo and (b) per-capture sampling on production — neither was available in this sandbox
+(no network, no secrets, private repo absent). Repo-side evidence still leans duplicate (§5a).
+
+**What was authored** (one branch, one reserved version, nothing applied anywhere):
+
+1. `supabase/migrations/20260814170219_pmt_duplicate_name_columns_deprecated.sql` — the
+   staged Steps 2+3(DB half)+4 in one file: drift/orphan refusal guard → `drop not null` on
+   both columns → deprecation comments → whole-function `load_pmt_capture_chunk` replacement
+   (live `20260811030000` body minus exactly the two duplicate-name writes; allow list,
+   privilege check, status guard, 5000-row bound, unreachable-else backstop, `security
+   definer` + pinned `search_path`, and the revoke/grant posture preserved verbatim) →
+   `drop index plm.idx_pmt_atp_name`.
+2. `tools/sync-paramount-creative-library.mjs` — `buildPayloads` no longer forwards either
+   name; the source CSVs may still carry the fields (fixtures kept, tests prove the omission
+   is the loader's).
+3. `tools/sync-paramount-creative-library.test.mjs` — 7 new focused tests (4 payload +
+   3 migration-content), 60/60 pass offline.
+4. `supabase/tests/pmt_no_duplicate_property_name_contracts.sql` — interim-state contract
+   (see STATUS row 5). When Migration C lands, its PR must flip sections A and D to the
+   post-drop assertions and delete section D's two-column allowlist.
+5. `docs/core-master-data-consolidation-aim.md` — one audit-record line.
+
+**Sequencing the applier MUST honour** (also stated in the migration header): apply
+`20260814170219` to an environment **before** running any Paramount capture with this
+revision of the client tool. The tool stops sending the two name fields; the pre-migration
+function body would insert NULL into still-`NOT NULL` columns and abort the load mid-capture.
+
+**Still owed, in order:** merge (PR + the six required contexts) → apply to preview →
+contract-test rehearsal on preview → apply to production → a real capture completing with
+both columns NULL on all new rows → Step 1's private-builder read + live sampling → Migration C
+(drop or rename per the finding) → skill update in both copies (Step 7).
+
+
 
 **What the 2026-08-14 revision changed** (full reasoning inline where it applies):
 
