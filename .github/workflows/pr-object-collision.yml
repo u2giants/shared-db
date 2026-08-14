@@ -65,7 +65,7 @@ jobs:
       # this one job precisely so they cannot drift apart. This step adds no new
       # required status context -- the job name is unchanged.
       - name: Unit-test the dispatch-time collision checker (shares the parser)
-        run: node --test scripts/check-dispatch-collision.test.mjs
+        run: node --test scripts/check-dispatch-collision.test.mjs scripts/manage-migration-author-lanes.test.mjs
 
       - name: No other open PR replaces the same database object
         env:
