@@ -142,6 +142,13 @@ test('ambiguous GitHub delete failure fails closed and never retries or deletes 
   assert.equal(deletes,1);assert.equal(io.refs.get(EXCLUSIVE_REFS.preview),'owner')
 })
 
+test('release accepts a replacement owner that acquired immediately after the delete',()=>{
+  const io=memoryIo();io.refs.set(MUTEX_REF,'ours');let deletes=0
+  io.deleteRef=()=>{deletes++;io.refs.set(MUTEX_REF,'next-owner')}
+  assert.equal(releaseOwnedRef(MUTEX_REF,'ours',io),true)
+  assert.equal(deletes,1);assert.equal(io.refs.get(MUTEX_REF),'next-owner')
+})
+
 test('101 claims and 101 open PR sources are all considered',()=>{
   const claims=Array.from({length:101},(_,i)=>({number:i+1,body:body([`table core.c${i}`],String(i+1))}))
   const state=assertLaneAvailable(claims,[],NOW,{ignoreCapacity:true});assert.equal(state.active.length,101)
