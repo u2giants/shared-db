@@ -81,7 +81,7 @@ begin
     select table_name, column_name from (values
       ('pmt_authorized_title_property', 'paramount_property_name'),
       ('pmt_property_capture_log',      'property_name')
-    ) as v(tbl, col)
+    ) as v(table_name, column_name)
   loop
     select c.is_nullable into v_text
     from information_schema.columns c

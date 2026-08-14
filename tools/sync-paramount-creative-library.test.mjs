@@ -765,6 +765,25 @@ async function readDeprecationMigration() {
   ).replace(/\r\n/g, "\n");
 }
 
+async function readDuplicateNameContract() {
+  const { readFileSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  return readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "supabase", "tests",
+      "pmt_no_duplicate_property_name_contracts.sql"),
+    "utf8"
+  ).replace(/\r\n/g, "\n");
+}
+
+test("the duplicate-name contract exposes the VALUES aliases its loop reads", async () => {
+  const sql = await readDuplicateNameContract();
+  assert.match(sql, /select table_name, column_name from \(values[\s\S]*?\) as v\(table_name, column_name\)/,
+    "section A must alias VALUES as table_name/column_name for r.table_name/r.column_name");
+  assert.doesNotMatch(sql, /\) as v\(tbl, col\)/,
+    "the old aliases make SELECT table_name,column_name fail before assertions run");
+});
+
 test("the deprecation migration replaces the loader WITHOUT the two duplicate-name writes", async () => {
   const sql = await readDeprecationMigration();
   const starts = sql.match(/create or replace function plm\.load_pmt_capture_chunk\(/g) ?? [];
