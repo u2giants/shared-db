@@ -677,7 +677,7 @@ four rules below are non-negotiable for any database change.
    groups fill up to three author lanes. When a claim releases, rerun the queue
    audit and dispatch every reported `REFILL REQUIRED NOW` issue in the same
    turn. Never wait for Albert to ask or approve routine dispatch. Ask him only
-   for a genuine business ruling or exact production approval. Recompute after
+   for a genuine business ruling or material production risk. Recompute after
    every merge. Preview and merge stay globally serialized.
 
    An empty author lane is valid only when the audit has classified every open
@@ -710,10 +710,17 @@ four rules below are non-negotiable for any database change.
    verdict, confirmed/disproved findings, defects, false positives, policy/tool
    adherence, continuity, latency, turns, and only metrics the wrapper reports.
    Kimi headless metrics and returned model are unavailable; never invent them.
-   Reviewer approval may start preview/merge and prepare a production approval
-   package. It never authorizes production; Albert must approve the exact
-   migration and project. Record Qwen High as requested, but never override the
-   wrapper's qualified fixed configuration.
+   After review approval, green checks, preview proof, and guarded merge, run
+   `--production-risk-gate <evidence.json>`. Automatically promote only when the
+   evidence proves: no existing data is deleted or permanently rewritten, no
+   expected user downtime, no material access change, a tested credible recovery
+   path, and no unresolved material objection. Otherwise ask Albert one plain
+   business-risk question. Never ask him to approve migration numbers, project
+   identifiers, SQL, or other technical details. This policy cannot authorize
+   its own rollout; the older exact-approval rule remains binding until #1015 is
+   independently reviewed, merged in both repos, installed, and forward-tested.
+   Record Qwen High as requested, but never override the wrapper's qualified
+   fixed configuration.
 
    Audit reports malformed claims without hiding the healthy ones; allocation
    still refuses while any malformed claim exists. **Expiry never unlocks an

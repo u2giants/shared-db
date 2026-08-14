@@ -16,6 +16,9 @@ not production database state:
 - The external-review cursor advances Grok → GLM → Kimi → Qwen → Grok, returns
   the same assignment on retry, and refuses a concurrent orchestrator that does
   not own the shared lock.
+- Complete safe production-risk evidence permits automatic promotion; each of
+  the five unsafe cases blocks it with a plain business-risk reason, and missing
+  evidence fails closed.
 
 Proof command:
 
@@ -23,5 +26,5 @@ Proof command:
 node --test scripts/manage-migration-author-lanes.test.mjs scripts/check-dispatch-collision.test.mjs
 ```
 
-Result: 103 passed, 0 failed. No database, preview, merge, or production call was
+Result: 105 passed, 0 failed. No database, preview, merge, or production call was
 made by this forward test.
