@@ -554,7 +554,7 @@ export function buildPayloads(cap) {
 
     // The property NAME is deliberately NOT forwarded. It duplicates
     // plm.pmt_property.property_name, which the pmt_property payload above already
-    // carries for the same (capture_id, property_source_id). Migration 20260814191958
+    // carries for the same (capture_id, property_source_id). Migration 20260814193351
     // deprecated the column; the database-side loader no longer reads this key, and the
     // column is dropped once plan_pmt-duplicate-name-columns.md Step 1 is settled. If
     // Step 1 rules this a distinct fact (the rights-list display name), restore this
@@ -617,7 +617,7 @@ export function buildPayloads(cap) {
 
     // Same rule as pmt_authorized_title_property above: the property NAME is not
     // forwarded. The row is keyed by the FK'd property_source_id and joins to
-    // plm.pmt_property for the name. Migration 20260814191958 deprecated the column.
+    // plm.pmt_property for the name. Migration 20260814193351 deprecated the column.
     // If plan Step 1 rules this the search string the portal displayed (a distinct
     // fact), restore this mapping alongside the rename.
     pmt_property_capture_log: cap.captureLog.map((r) => ({

@@ -33,7 +33,7 @@
 --
 -- SEQUENCING. Apply this migration to an environment BEFORE running a Paramount capture
 -- with the matching tools/sync-paramount-creative-library.mjs revision: that revision
--- stops sending the two name fields, so a pre-20260814191958 function body would read
+-- stops sending the two name fields, so a pre-20260814193351 function body would read
 -- them as NULL and violate the then-still-active NOT NULL. A database at this version is
 -- consistent with both writers, old and new.
 --
@@ -102,18 +102,18 @@ alter table plm.pmt_authorized_title_property alter column paramount_property_na
 alter table plm.pmt_property_capture_log alter column property_name drop not null;
 
 comment on column plm.pmt_authorized_title_property.paramount_property_name is
-  'DEPRECATED 2026-08-14 (20260814191958) -- duplicate of plm.pmt_property.property_name. '
+  'DEPRECATED 2026-08-14 (20260814193351) -- duplicate of plm.pmt_property.property_name. '
   'Do not read it and do not write it: join through '
   'pmt_authorized_title_property_property_fkey on (capture_id, property_source_id) instead. '
-  'Nullable and unwritten since 20260814191958 -- the client loader and '
+  'Nullable and unwritten since 20260814193351 -- the client loader and '
   'plm.load_pmt_capture_chunk stopped populating it in the same change. Dropped by a later '
   'migration once plan_pmt-duplicate-name-columns.md Step 1 settles duplicate-vs-distinct '
   'against the private capture builder.';
 
 comment on column plm.pmt_property_capture_log.property_name is
-  'DEPRECATED 2026-08-14 (20260814191958) -- duplicate of plm.pmt_property.property_name. '
+  'DEPRECATED 2026-08-14 (20260814193351) -- duplicate of plm.pmt_property.property_name. '
   'Do not read it and do not write it: join through pmt_pcl_property_fkey on (capture_id, '
-  'property_source_id) instead. Nullable and unwritten since 20260814191958 -- the client '
+  'property_source_id) instead. Nullable and unwritten since 20260814193351 -- the client '
   'loader and plm.load_pmt_capture_chunk stopped populating it in the same change. Dropped '
   'or renamed by a later migration once plan_pmt-duplicate-name-columns.md Step 1 settles '
   'whether this column is the property name or the search string the portal displayed.';
@@ -383,7 +383,7 @@ comment on function plm.load_pmt_capture_chunk(uuid, text, jsonb) is
 'Paramount source IDs as EXACT TEXT -- every ::bigint cast is gone, because casting an '
 'identifier to a number is how a leading zero or a >2^53 value gets destroyed without an '
 'error -- and it loads plm.pmt_asset_metadata_value, the lossless repeated-metadata store. '
-'As of 20260814191958 it no longer writes the duplicated property-name copies on '
+'As of 20260814193351 it no longer writes the duplicated property-name copies on '
 'plm.pmt_authorized_title_property and plm.pmt_property_capture_log: the property name is '
 'written once, to plm.pmt_property, and both tables reach it by their capture-scoped '
 'foreign keys. Rows still carrying those keys in the JSON are accepted; the keys are not '

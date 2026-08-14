@@ -113,10 +113,10 @@ empty resolution table as "the scrape never ran".
 **Paramount was schema-audited on 2026-08-14** (plan_pmt-duplicate-name-columns.md
 and its two sibling plans). The schema is the strongest of the four; the audit's
 findings are being fixed in stages. One fix is authored in the repository tree but has
-not been applied to any database — migration `20260814191958`: two
+not been applied to any database — migration `20260814193351`: two
 non-entity tables carried a duplicated copy of the property name —
 `plm.pmt_authorized_title_property.paramount_property_name` and
-`plm.pmt_property_capture_log.property_name`. Migration `20260814191958` makes both
+`plm.pmt_property_capture_log.property_name`. Migration `20260814193351` makes both
 nullable, stops both writers (the client loader and `plm.load_pmt_capture_chunk`)
 and drops `idx_pmt_atp_name`; the property name is read by joining
 `plm.pmt_property` on `(capture_id, property_source_id)`. The columns themselves

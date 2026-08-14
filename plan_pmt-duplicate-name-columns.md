@@ -16,7 +16,7 @@ established, and the change log at the end of this section for what the revision
 | # | Step | State | Evidence |
 |---|---|---|---|
 | 1 | Settle intent: duplicate attribute vs. distinct fact (both columns) | ⛔ **open — blocked on out-of-repo evidence** | Repo-side payload lineage traced (§5a). The decisive witness was NOT readable by the authoring session: the private builder in `u2giants/licensor-source-data` (`paramount/`) and per-capture live sampling. See the execution log below for the exact unresolved fact |
-| 2 | Migration A — drop `NOT NULL`, add deprecation comments (with the drift-refusal guard) | ✅ **authored, not applied** (author-only lane) | `supabase/migrations/20260814191958_pmt_duplicate_name_columns_deprecated.sql` sections 1–2 (guard reproduced from the NBCU precedent). Offline pin: `tools/sync-paramount-creative-library.test.mjs` → "the deprecation migration relaxes BOTH columns behind the drift guard, and drops the index" |
+| 2 | Migration A — drop `NOT NULL`, add deprecation comments (with the drift-refusal guard) | ✅ **authored, not applied** (author-only lane) | `supabase/migrations/20260814193351_pmt_duplicate_name_columns_deprecated.sql` sections 1–2 (guard reproduced from the NBCU precedent). Offline pin: `tools/sync-paramount-creative-library.test.mjs` → "the deprecation migration relaxes BOTH columns behind the drift guard, and drops the index" |
 | 3 | Stop BOTH writers: client tool **and** `plm.load_pmt_capture_chunk` | ✅ **authored, not applied/deployed** (author-only lane) | Client: `buildPayloads` in `tools/sync-paramount-creative-library.mjs` no longer maps either name (comment marks the #965/#970 rebase point). DB: `create or replace function` in migration section 3, body spliced verbatim from the live `20260811030000` body minus exactly the two writes. Offline pins: "the loader forwards NEITHER duplicated property-name copy", "the database boundary receives no name key…", "the deprecation migration replaces the loader WITHOUT the two duplicate-name writes" — 60/60 `node --test` pass |
 | 4 | Migration B — replace reads with joins; drop `idx_pmt_atp_name` | ✅ **authored** — zero in-repo readers (§5a), so it reduces to the catalog double-check + the index drop | Index drop is migration section 4 (`drop index plm.idx_pmt_atp_name`, plain). Live-catalog double-check (Step 4's `pg_proc`/`pg_views` queries, in the adjacency-refined form) is now section E of the contract test, so it runs against every database the suite touches |
 | 5 | Tests in `supabase/tests/` | ✅ **authored, not yet run against a database** | `supabase/tests/pmt_no_duplicate_property_name_contracts.sql` — the INTERIM-state version that matches the migrations it ships with (nullable + unwritten + function-body + reintroduction-allowlist + join-reachability + no-live-reader). CI's `supabase/tests against an ephemeral database` job replays the migrations and runs it; the preview rehearsal is still owed |
@@ -40,7 +40,7 @@ repo and (b) per-capture sampling on production — neither was available in thi
 
 **What was authored** (one branch, one reserved version, nothing applied anywhere):
 
-1. `supabase/migrations/20260814191958_pmt_duplicate_name_columns_deprecated.sql` — the
+1. `supabase/migrations/20260814193351_pmt_duplicate_name_columns_deprecated.sql` — the
    staged Steps 2+3(DB half)+4 in one file: drift/orphan refusal guard → `drop not null` on
    both columns → deprecation comments → whole-function `load_pmt_capture_chunk` replacement
    (live `20260811030000` body minus exactly the two duplicate-name writes; allow list,
@@ -58,7 +58,7 @@ repo and (b) per-capture sampling on production — neither was available in thi
 5. `docs/core-master-data-consolidation-aim.md` — one audit-record line.
 
 **Sequencing the applier MUST honour** (also stated in the migration header): apply
-`20260814191958` to an environment **before** running any Paramount capture with this
+`20260814193351` to an environment **before** running any Paramount capture with this
 revision of the client tool. The tool stops sending the two name fields; the pre-migration
 function body would insert NULL into still-`NOT NULL` columns and abort the load mid-capture.
 

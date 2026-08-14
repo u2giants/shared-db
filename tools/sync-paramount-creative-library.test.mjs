@@ -356,7 +356,7 @@ test("a title with no resolved property produces no title-property mapping row",
 // The duplicated property-name copies (issue #964, plan_pmt-duplicate-name-columns.md).
 // plm.pmt_property.property_name is the single place a property name is written.
 // pmt_authorized_title_property.paramount_property_name and
-// pmt_property_capture_log.property_name were deprecated by migration 20260814191958;
+// pmt_property_capture_log.property_name were deprecated by migration 20260814193351;
 // this loader must stop forwarding BOTH, while the source files may still carry them.
 // ---------------------------------------------------------------------------
 test("the loader forwards NEITHER duplicated property-name copy", () => {
@@ -386,7 +386,7 @@ test("the omission is the loader's, not the fixture's -- the source fields still
 test("the database boundary receives no name key: the serialized chunks omit both columns", () => {
   // This is the exact wire format plm.load_pmt_capture_chunk receives. An absent key
   // serializes to nothing, so the DB-side r->>'...' reads NULL -- legal only after
-  // migration 20260814191958 dropped the NOT NULL. If either key reappears here, a
+  // migration 20260814193351 dropped the NOT NULL. If either key reappears here, a
   // capture run against a post-drop database is one migration away from failing.
   const p = buildPayloads(fixtureCapture);
   const atpJson = JSON.stringify(p.pmt_authorized_title_property);
@@ -749,7 +749,7 @@ test("no RAISE statement uses %L, which is a format() specifier and prints a str
 
 // ---------------------------------------------------------------------------
 // Issue #964, plan_pmt-duplicate-name-columns.md -- the deprecation migration itself
-// (20260814191958). These pin, OFFLINE, the invariants the database contract test
+// (20260814193351). These pin, OFFLINE, the invariants the database contract test
 // supabase/tests/pmt_no_duplicate_property_name_contracts.sql pins against a live
 // catalog: both writers stopped, guard before relax, index gone, posture intact, and
 // NOTHING destructive in the staged file.
@@ -760,7 +760,7 @@ async function readDeprecationMigration() {
   const { fileURLToPath } = await import("node:url");
   return readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), "..", "supabase", "migrations",
-      "20260814191958_pmt_duplicate_name_columns_deprecated.sql"),
+      "20260814193351_pmt_duplicate_name_columns_deprecated.sql"),
     "utf8"
   ).replace(/\r\n/g, "\n");
 }
