@@ -21,14 +21,14 @@ create temporary table remaining_source_resolution_stage (
 -- candidate until the conflict gate below proves that the fan-out agrees.
 insert into remaining_source_resolution_stage
 select 'disney_opa', 'property', licensed_property_id::text,
-       property_id, null, null, null, resolution_status, resolution_reason,
+       property_id, null::uuid, null::uuid, null::uuid, resolution_status, resolution_reason,
        resolved_at, resolved_by
 from plm.opa_property_character
 where resolution_status <> 'unresolved' or property_id is not null
    or resolution_reason is not null or resolved_at is not null or resolved_by is not null
 union all
 select 'disney_opa', 'property', licensed_property_id::text,
-       core_property_id, null, null, null,
+       core_property_id, null::uuid, null::uuid, null::uuid,
        case resolution_status when 'resolved' then 'matched'
                               when 'not_a_property' then 'rejected'
                               else resolution_status end,
@@ -38,7 +38,7 @@ where resolution_status <> 'unresolved' or core_property_id is not null
    or resolution_reason is not null or resolved_at is not null or resolved_by is not null
 union all
 select 'disney_opa', 'character', character_id::text,
-       null, core_character_id, null, null,
+       null::uuid, core_character_id, null::uuid, null::uuid,
        case resolution_status when 'resolved' then 'matched'
                               when 'not_a_character' then 'rejected'
                               else resolution_status end,
