@@ -12,6 +12,18 @@ DECLARE
   v_carrier smallint;
   v_shipment bigint;
 BEGIN
+  IF to_regclass('dflow.sample_shipment') IS NULL
+     OR to_regclass('dflow.sample_carrier') IS NULL THEN
+    RAISE EXCEPTION 'Release A shipment-header relations are missing';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+    WHERE table_schema='dflow' AND table_name='sample_shipment_line'
+      AND column_name='sample_shipment_id')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns
+    WHERE table_schema='dflow' AND table_name='sample_movement'
+      AND column_name='sample_shipment_id') THEN
+    RAISE EXCEPTION 'Release A shipment identity columns are missing';
+  END IF;
   IF (SELECT count(*) FROM dflow.sample_carrier WHERE is_active) <> 4 THEN
     RAISE EXCEPTION 'Release A must seed exactly four proven active carriers';
   END IF;
