@@ -29,6 +29,14 @@ on:
         description: "Preview only: comma-separated exact migration versions. REQUIRED for both dry-run and apply."
         type: string
         required: false
+      claim_pr:
+        description: "Preview only: pull request number holding the migration claim"
+        type: string
+        required: false
+      claim_head_sha:
+        description: "Preview only: exact claimed pull request head SHA"
+        type: string
+        required: false
       commit_sha:
         description: "Production only: exact origin/main commit SHA"
         type: string
@@ -181,6 +189,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'preview'
     needs: validate
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: read
+      pull-requests: read
     env:
       PREVIEW_PROJECT_REF: rjyboqwcdzcocqgmsyel
       PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE: qsllyeztdwjgirsysgai
@@ -212,7 +224,22 @@ jobs:
       # bounded set with `git worktree add --detach <sha>`, which needs the object.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.claim_head_sha }}
           fetch-depth: 0
+      - name: Acquire the exclusive GitHub-backed preview lane
+        id: preview_lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAIM_PR: ${{ inputs.claim_pr }}
+          CLAIM_HEAD_SHA: ${{ inputs.claim_head_sha }}
+        run: |
+          set -euo pipefail
+          test -n "$CLAIM_PR"
+          test -n "$CLAIM_HEAD_SHA"
+          node scripts/manage-migration-author-lanes.mjs --acquire-preview \
+            --owner "github-actions:${GITHUB_RUN_ID}" --pr "$CLAIM_PR" --head-sha "$CLAIM_HEAD_SHA" \
+            > "$RUNNER_TEMP/preview-lock.json"
+          echo "owner_sha=$(jq -r .ownerSha "$RUNNER_TEMP/preview-lock.json")" >> "$GITHUB_OUTPUT"
       - name: Resolve the exact commit under test
         id: commit
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -401,6 +428,12 @@ jobs:
             ${{ runner.temp }}/bounded-preview/supabase/migration-content-manifest.json
           if-no-files-found: warn
           retention-days: 90
+      - name: Release the exclusive preview lane with ownership proof
+        if: always() && steps.preview_lock.outputs.owner_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER_SHA: ${{ steps.preview_lock.outputs.owner_sha }}
+        run: node scripts/manage-migration-author-lanes.mjs --release-preview --owner-sha "$OWNER_SHA"
 
   # ISSUE #646: this job deliberately has NO `environment:`.
   #
@@ -598,14 +631,13 @@ jobs:
             ${{ runner.temp }}/production-apply-review-evidence.json
           if-no-files-found: warn
           retention-days: 90
-
   production-apply:
     name: Production apply (automatic evidence gates)
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'production' && inputs.mode == 'apply'
     needs: [validate, production-apply-review]
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       actions: read
     # Keep the production environment binding. Environment policy is managed in
     # a separate phase and is not changed by this repository patch.
@@ -631,6 +663,17 @@ jobs:
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
           test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
+      - name: Acquire the exclusive production lane and freeze merges
+        id: production_lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/manage-migration-author-lanes.mjs --acquire-production \
+            --owner "github-actions:${GITHUB_RUN_ID}" --head-sha "$REQUESTED_SHA" \
+            > "$RUNNER_TEMP/production-lock.json"
+          echo "owner_sha=$(jq -r .ownerSha "$RUNNER_TEMP/production-lock.json")" >> "$GITHUB_OUTPUT"
       # Re-verify after the environment wait. GitHub artifacts are retention-
       # bound, so this both pins the original ZIP digest and copies the verified
       # canonical JSON into the final apply evidence artifact.
@@ -767,3 +810,9 @@ jobs:
             ${{ runner.temp }}/catalog-verification/production-catalog-verification.json
           if-no-files-found: warn
           retention-days: 90
+      - name: Release the exclusive production lane with ownership proof
+        if: always() && steps.production_lock.outputs.owner_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER_SHA: ${{ steps.production_lock.outputs.owner_sha }}
+        run: node scripts/manage-migration-author-lanes.mjs --release-production --owner-sha "$OWNER_SHA"
