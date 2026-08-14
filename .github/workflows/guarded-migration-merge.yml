@@ -70,13 +70,14 @@ jobs:
           gh api "repos/u2giants/shared-db/statuses/$REQUESTED_SHA" -f state=success -f context='Migration guarded merge authorization' -f description='Exclusive merge lock held and exact head revalidated'
           gh pr merge "${{ inputs.pull_request }}" --repo u2giants/shared-db --merge --match-head-commit "${{ inputs.head_sha }}"
       - name: Revoke authorization if the guarded merge did not complete
+        id: revoke_authorization
         if: failure() && steps.merge_lock.outputs.owner_sha != ''
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_SHA: ${{ inputs.head_sha }}
         run: gh api "repos/u2giants/shared-db/statuses/$REQUESTED_SHA" -f state=failure -f context='Migration guarded merge authorization' -f description='Guarded merge failed; authorization revoked before lock release'
       - name: Release the exclusive merge lane with ownership proof
-        if: always() && steps.merge_lock.outputs.owner_sha != ''
+        if: always() && steps.merge_lock.outputs.owner_sha != '' && (steps.guarded_merge.outcome == 'success' || steps.revoke_authorization.outcome == 'success')
         env:
           GH_TOKEN: ${{ github.token }}
           OWNER_SHA: ${{ steps.merge_lock.outputs.owner_sha }}
