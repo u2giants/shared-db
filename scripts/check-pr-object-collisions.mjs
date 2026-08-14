@@ -40,7 +40,7 @@
 //       it prevents. This mirrors Guard B in scripts/check-sql.sh and
 //       scripts/check-backlog-queue-sync.mjs: when the guard cannot gather its
 //       inputs with confidence (no `gh`, no token, no pull-request context, an
-//       API error) it prints a LOUD SKIPPED warning and exits 0. It never
+//       API error) it prints a loud error and exits 2. It never
 //       guesses.
 //
 //   (b) It is deliberately COARSE on function overloads: it keys on
@@ -847,7 +847,7 @@ export function findCollisions(sources, primaryLabel) {
   for (const source of sources) {
     const seen = new Set()
     for (const file of source.files ?? []) {
-      for (const object of extractObjects(file.sql)) {
+      for (const object of dispatchObjectKeys(file.sql)) {
         seen.add(object)
         if (!index.has(object)) index.set(object, new Map())
         const bySource = index.get(object)
@@ -934,11 +934,16 @@ function gh(args) {
 }
 
 function ghJson(args) {
-  const out = gh(args)
+  const paginated = args.includes('--paginate')
+  const actualArgs = paginated && !args.includes('--slurp') ? [...args.slice(0, args.indexOf('--paginate') + 1), '--slurp', ...args.slice(args.indexOf('--paginate') + 1)] : args
+  const out = gh(actualArgs)
   try {
-    return JSON.parse(out)
+    const parsed = JSON.parse(out)
+    if (!paginated) return parsed
+    if (!Array.isArray(parsed) || parsed.some((page) => !Array.isArray(page))) throw new Error('bad pages')
+    return parsed.flat()
   } catch {
-    throw new Skip(`\`gh ${args.join(' ')}\` did not return JSON`)
+    throw new Skip(`\`gh ${actualArgs.join(' ')}\` did not return complete paginated JSON`)
   }
 }
 
@@ -1066,10 +1071,10 @@ function main() {
     sources = gatherSources()
   } catch (error) {
     if (!(error instanceof Skip)) throw error
-    console.warn('WARNING: cross-PR object collision guard SKIPPED --', error.message)
+    console.error('ERROR: cross-PR object collision guard could not gather complete inputs --', error.message)
     console.warn('No collision checking was performed. This is deliberate: a guard')
-    console.warn('that cannot gather its inputs must not guess. See B6 in HANDOFF.md.')
-    return 0
+    console.warn('that cannot gather its inputs must fail closed. See B6 in HANDOFF.md.')
+    return 2
   }
 
   // Only a collision that INVOLVES this pull request may fail it.

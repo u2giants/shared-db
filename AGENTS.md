@@ -649,17 +649,21 @@ four rules below are non-negotiable for any database change.
      --objects "<every exact object written, comma-separated>"
    ```
 
-   The command fails closed if claims are unreadable, objects overlap, GitHub is
-   unavailable, version reservation fails, or three author lanes are occupied.
+   Allocation is serialized across computers by a GitHub-backed lock. The command
+   fails closed if claims are unreadable, objects overlap an open claim or pull
+   request, GitHub is unavailable, version reservation fails, or three author
+   lanes are occupied. Older claims count until they are explicitly released.
    The created issue body is authoritative and machine-readable. Never hand-edit
    its fenced blocks. The permanent version ref prevents reuse even after a lease
    ends; the lease only controls who occupies an author lane.
 
    Audit lanes with `node scripts/manage-migration-author-lanes.mjs --audit`.
-   Close claims immediately after merge or abandonment. Run
-   `node scripts/manage-migration-author-lanes.mjs --cleanup-stale` to close
-   expired leases. This removes stale ownership clutter but never frees a version
-   for reuse, because an abandoned version may already exist in preview's ledger.
+   Audit reports malformed claims without hiding the healthy ones; allocation
+   still refuses while any malformed claim exists. **Expiry never unlocks an
+   object.** Renew active work or explicitly release a claim after proving its
+   branch/worktree/PR is finished. Cleanup may report stale work, but it must not
+   silently close it. A reserved version is never freed for reuse because an
+   abandoned version may already exist in preview's ledger.
 
    **If you cannot list the objects up front, your task is read-only** — and read-only work cannot
    collide. Close your claim when the work merges or is abandoned; an open claim
@@ -669,10 +673,14 @@ four rules below are non-negotiable for any database change.
    backstop AFTER it, and by the time that one fires, somebody's session is
    already wasted — on 2026-07-31, three of four were.
 
-   Before preview and again before merge, fetch `origin/main`, update the branch
+   Before preview and again before merge, acquire the exclusive GitHub-backed
+   `preview` or `merge` lease. Instructions in chat are not a lock. Fetch `origin/main`, update the branch
    from newly merged `main`, and re-run the version/object checks and all existing
    SQL/cross-PR guards. A clean author lane does not grant access to preview.
    The orchestrator grants the single preview lane, then the single merge lane.
+   Release each stage lease explicitly when that stage ends. Required CI rejects
+   a migration PR unless its exact version and normalized objects match a live,
+   branch-bound author claim; merge CI also requires that PR's merge lease.
    **The concrete symptom when this rule is broken:** the preview branch is
    persistent, so its ledger holds every branch that ever ran `db push` —
    including unmerged ones. A `main`-based checkout then cannot dry-run against

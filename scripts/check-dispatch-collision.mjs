@@ -452,11 +452,16 @@ function gh(args) {
 }
 
 function ghJson(args) {
-  const raw = gh(args)
+  const paginated = args.includes('--paginate')
+  const actualArgs = paginated && !args.includes('--slurp') ? [...args.slice(0, args.indexOf('--paginate') + 1), '--slurp', ...args.slice(args.indexOf('--paginate') + 1)] : args
+  const raw = gh(actualArgs)
   try {
-    return JSON.parse(raw)
+    const parsed = JSON.parse(raw)
+    if (!paginated) return parsed
+    if (!Array.isArray(parsed) || parsed.some((page) => !Array.isArray(page))) throw new Error('paginated response is not an array of pages')
+    return parsed.flat()
   } catch {
-    throw new Unknown(`\`gh ${args.join(' ')}\` did not return JSON`)
+    throw new Unknown(`\`gh ${actualArgs.join(' ')}\` did not return complete paginated JSON`)
   }
 }
 
@@ -536,6 +541,7 @@ export function gatherOpenPrObjects(repo, io = defaultIo) {
       label: `PR #${pr.number}${pr.draft ? ' [DRAFT]' : ''} "${pr.title}"`,
       url: pr.html_url,
       draft: Boolean(pr.draft),
+      branch: pr.head?.ref ?? null,
       objects: [...objects].sort(),
       versions: [...versions].sort(),
     })

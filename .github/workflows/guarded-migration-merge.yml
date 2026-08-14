@@ -1,0 +1,67 @@
+name: Guarded Migration Merge
+
+on:
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: "Migration pull request number"
+        required: true
+        type: string
+      head_sha:
+        description: "Exact reviewed pull request head SHA"
+        required: true
+        type: string
+
+concurrency:
+  group: shared-db-guarded-merge
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: read
+  pull-requests: write
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.head_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require current main and rerun every coordination guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pull_request }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git merge-base HEAD origin/main)" = "$(git rev-parse origin/main)"
+          bash scripts/check-sql.sh
+          node scripts/check-pr-object-collisions.mjs
+          node scripts/check-migration-pr-lease.mjs
+      - name: Acquire the exclusive merge lane
+        id: merge_lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/manage-migration-author-lanes.mjs --acquire-merge \
+            --owner "github-actions:${GITHUB_RUN_ID}" --pr "${{ inputs.pull_request }}" \
+            --head-sha "${{ inputs.head_sha }}" > "$RUNNER_TEMP/merge-lock.json"
+          echo "owner_sha=$(jq -r .ownerSha "$RUNNER_TEMP/merge-lock.json")" >> "$GITHUB_OUTPUT"
+      - name: Re-prove the head and merge while the lock is held
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "${{ inputs.head_sha }}"
+          gh pr merge "${{ inputs.pull_request }}" --repo u2giants/shared-db --merge --match-head-commit "${{ inputs.head_sha }}"
+      - name: Release the exclusive merge lane with ownership proof
+        if: always() && steps.merge_lock.outputs.owner_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER_SHA: ${{ steps.merge_lock.outputs.owner_sha }}
+        run: node scripts/manage-migration-author-lanes.mjs --release-merge --owner-sha "$OWNER_SHA"

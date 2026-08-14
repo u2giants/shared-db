@@ -123,4 +123,6 @@ jobs:
         # skip-if-absent behaviour still applies.
         env:
           AI_DEVOPS_DIR: ${{ github.workspace }}/.ai-devops-checkout
-        run: node scripts/check-skill-drift.mjs --require-skills
+        run: |
+          node --test scripts/check-skill-drift.test.mjs
+          node scripts/check-skill-drift.mjs --require-skills

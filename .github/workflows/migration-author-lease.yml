@@ -1,0 +1,26 @@
+name: Migration Author Lease
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  verify:
+    name: Migration author lease
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test scripts/check-migration-pr-lease.test.mjs scripts/manage-migration-author-lanes.test.mjs
+      - name: Require a valid branch-bound claim and permanent version reservation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/check-migration-pr-lease.mjs
