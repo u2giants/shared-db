@@ -1,0 +1,44 @@
+name: Migration Author Lease
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  verify:
+    name: Migration author lease
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test scripts/check-migration-pr-lease.test.mjs scripts/manage-migration-author-lanes.test.mjs
+      - name: Require a valid branch-bound claim and permanent version reservation
+        id: lease_check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          result="$(node scripts/check-migration-pr-lease.mjs)"
+          echo "$result"
+          if [ "$result" = 'No migration files changed; claim check is not applicable.' ]; then
+            echo 'relevant=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'relevant=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Authorize ordinary merge only when this pull request has no migration
+        if: github.event_name == 'pull_request' && steps.lease_check.outputs.relevant == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/u2giants/shared-db/statuses/$HEAD_SHA" -f state=success -f context='Migration guarded merge authorization' -f description='No migration files; exclusive migration merge lane is not required'
