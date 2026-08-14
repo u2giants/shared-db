@@ -424,8 +424,13 @@ const DISPATCH_PATTERNS = [
       'gi',
     ),
     map: (m) => {
-      const ops = [{ action: 'create', kind: 'table', target: canonical(m[2]) }]
-      if (m[1]) ops.push({ action: 'create', kind: 'index', target: canonical(m[1].trim()) })
+      const table = canonical(m[2])
+      const ops = [{ action: 'create', kind: 'table', target: table }]
+      if (m[1]) {
+        let index = canonical(m[1].trim())
+        if (!index.includes('.') && table.includes('.')) index = `${table.split('.')[0]}.${index}`
+        ops.push({ action: 'create', kind: 'index', target: index })
+      }
       return ops
     },
   },

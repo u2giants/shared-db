@@ -516,6 +516,10 @@ export function gatherOpenPrObjects(repo, io = defaultIo) {
   const sources = []
   for (const pr of open) {
     const files = io.listPullFiles(repo, pr.number)
+    if (!Array.isArray(files)) throw new Unknown(`PR #${pr.number} returned an unreadable file list`)
+    if (!Number.isInteger(pr.changed_files) || pr.changed_files < 0) throw new Unknown(`PR #${pr.number} has no trustworthy changed_files count`)
+    if (pr.changed_files >= 3000) throw new Unknown(`PR #${pr.number} reaches GitHub's 3000-file limit; refusing incomplete coverage`)
+    if (files.length !== pr.changed_files) throw new Unknown(`PR #${pr.number} returned ${files.length} of ${pr.changed_files} changed files`)
     const objects = new Set()
     const versions = new Set()
     for (const file of files) {

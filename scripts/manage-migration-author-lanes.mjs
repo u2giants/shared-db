@@ -2,6 +2,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gatherOpenPrObjects, normalizeObject, parseClaimBlock } from './check-dispatch-collision.mjs'
 
@@ -17,7 +18,7 @@ export const EXCLUSIVE_REFS = Object.freeze({
 
 export class LaneError extends Error {}
 
-const CLAIM_KINDS = new Set(['schema','table','view','materialized view','function','procedure','trigger','policy','type','domain','sequence','index','publication','storage bucket'])
+const CLAIM_KINDS = new Set(['schema','table','column','view','materialized view','function','procedure','trigger','policy','type','domain','sequence','index','publication','storage bucket'])
 export function validateClaimObjects(objects) {
   const normalized = objects.map(normalizeObject)
   if (!normalized.length) throw new LaneError('at least one exact object is required')
@@ -33,6 +34,8 @@ export function validateClaimObjects(objects) {
       if (!new RegExp(`^${ident}$`).test(target)) throw new LaneError(`claim must name one exact ${kind}: ${object}`)
     } else if (kind === 'trigger' || kind === 'policy') {
       if (!namedOn.test(target)) throw new LaneError(`claim must use "${kind} name on schema.table": ${object}`)
+    } else if (kind === 'column') {
+      if (!new RegExp(`^${ident}\\.${ident}\\.${ident}$`).test(target)) throw new LaneError(`claim must use "column schema.table.column": ${object}`)
     } else if (!qualified.test(target)) throw new LaneError(`claim must use a schema-qualified exact name: ${object}`)
   }
   return normalized
@@ -261,4 +264,4 @@ export function main(argv, now = new Date(), io = githubIo) {
   } catch (error) { console.error(`REFUSED: ${error.message}`); return 2 }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) process.exitCode = main(process.argv.slice(2))
+if (process.argv[1] && path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1])) process.exitCode = main(process.argv.slice(2))

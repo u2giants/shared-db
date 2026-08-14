@@ -48,6 +48,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           node scripts/manage-migration-author-lanes.mjs --acquire-merge \
             --owner "github-actions:${GITHUB_RUN_ID}" --pr "${{ inputs.pull_request }}" \
             --head-sha "${{ inputs.head_sha }}" > "$RUNNER_TEMP/merge-lock.json"

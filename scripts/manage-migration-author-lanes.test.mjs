@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -147,4 +147,9 @@ test('101 claims and 101 open PR sources are all considered',()=>{
   const state=assertLaneAvailable(claims,[],NOW,{ignoreCapacity:true});assert.equal(state.active.length,101)
   const prs=Array.from({length:101},(_,i)=>({label:`PR #${i+1}`,objects:[`table core.p${i}`]}))
   assert.throws(()=>assertLaneAvailable([],['table core.p100'],NOW,{prSources:prs}),/PR #101/)
+})
+test('REAL CLI: a relative script path executes main and refuses missing arguments', () => {
+  const result = spawnSync(process.execPath, ['scripts/manage-migration-author-lanes.mjs'], { encoding: 'utf8' })
+  assert.equal(result.status, 2)
+  assert.match(result.stderr, /choose --claim/)
 })
