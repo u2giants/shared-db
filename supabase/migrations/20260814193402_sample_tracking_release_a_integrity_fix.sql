@@ -5,8 +5,13 @@ BEGIN;
 
 CREATE OR REPLACE FUNCTION dflow.prevent_sample_shipment_route_drift()
 RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  v_shipment_id bigint;
+  v_header dflow.sample_shipment;
 BEGIN
-  IF (NEW.origin_location_type,NEW.origin_location_id,
+  IF TG_TABLE_NAME='sample_shipment' THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended('sample_shipment:' || OLD.sample_shipment_id::text,0));
+    IF (NEW.origin_location_type,NEW.origin_location_id,
       NEW.destination_location_type,NEW.destination_location_id)
      IS DISTINCT FROM
      (OLD.origin_location_type,OLD.origin_location_id,
@@ -17,6 +22,35 @@ BEGIN
      ) THEN
     RAISE EXCEPTION 'Shipment route cannot change after lines are attached'
       USING ERRCODE='55000';
+    END IF;
+  ELSE
+    v_shipment_id := NEW.sample_shipment_id;
+    IF v_shipment_id IS NOT NULL THEN
+      PERFORM pg_advisory_xact_lock(hashtextextended('sample_shipment:' || v_shipment_id::text,0));
+      SELECT * INTO STRICT v_header FROM dflow.sample_shipment
+      WHERE sample_shipment_id=v_shipment_id;
+      IF (NEW.origin_location_type,NEW.origin_location_id,
+          NEW.destination_location_type,NEW.destination_location_id)
+         IS DISTINCT FROM
+         (v_header.origin_location_type,v_header.origin_location_id,
+          v_header.destination_location_type,v_header.destination_location_id) THEN
+        RAISE EXCEPTION 'Shipment line route must match shipment header %',v_shipment_id
+          USING ERRCODE='23514';
+      END IF;
+    END IF;
+    IF TG_OP='UPDATE'
+       AND (NEW.sample_id_fk,NEW.box_id_fk,NEW.sample_shipment_id,
+            NEW.origin_location_type,NEW.origin_location_id,
+            NEW.destination_location_type,NEW.destination_location_id)
+           IS DISTINCT FROM
+           (OLD.sample_id_fk,OLD.box_id_fk,OLD.sample_shipment_id,
+            OLD.origin_location_type,OLD.origin_location_id,
+            OLD.destination_location_type,OLD.destination_location_id)
+       AND EXISTS (SELECT 1 FROM dflow.sample_movement
+                   WHERE shipment_line_id=OLD.shipment_line_id) THEN
+      RAISE EXCEPTION 'Shipment line identity and route cannot change after movement'
+        USING ERRCODE='55000';
+    END IF;
   END IF;
   RETURN NEW;
 END $$;
@@ -25,6 +59,14 @@ DROP TRIGGER IF EXISTS sample_shipment_route_immutable_after_lines ON dflow.samp
 CREATE TRIGGER sample_shipment_route_immutable_after_lines
 BEFORE UPDATE OF origin_location_type,origin_location_id,
   destination_location_type,destination_location_id ON dflow.sample_shipment
+FOR EACH ROW EXECUTE FUNCTION dflow.prevent_sample_shipment_route_drift();
+
+DROP TRIGGER IF EXISTS sample_shipment_line_identity_immutable_after_movement
+  ON dflow.sample_shipment_line;
+CREATE TRIGGER sample_shipment_line_identity_immutable_after_movement
+BEFORE INSERT OR UPDATE OF sample_id_fk,box_id_fk,sample_shipment_id,
+  origin_location_type,origin_location_id,destination_location_type,destination_location_id
+  ON dflow.sample_shipment_line
 FOR EACH ROW EXECUTE FUNCTION dflow.prevent_sample_shipment_route_drift();
 
 CREATE OR REPLACE FUNCTION dflow.validate_sample_movement_shipment_identity()
@@ -62,6 +104,31 @@ DROP TRIGGER IF EXISTS sample_movement_shipment_identity ON dflow.sample_movemen
 CREATE TRIGGER sample_movement_shipment_identity
 BEFORE INSERT ON dflow.sample_movement
 FOR EACH ROW EXECUTE FUNCTION dflow.validate_sample_movement_shipment_identity();
+
+DO $$
+DECLARE v_bad bigint;
+BEGIN
+  SELECT count(*) INTO v_bad
+  FROM dflow.sample_movement m
+  JOIN dflow.sample_shipment_line l ON l.shipment_line_id=m.shipment_line_id
+  WHERE m.sample_id_fk IS DISTINCT FROM l.sample_id_fk
+     OR m.box_id_fk IS DISTINCT FROM l.box_id_fk
+     OR m.sample_shipment_id IS DISTINCT FROM l.sample_shipment_id;
+  IF v_bad > 0 THEN
+    RAISE EXCEPTION 'Release A integrity fix refused % movement identity mismatch(es)',v_bad;
+  END IF;
+  SELECT count(*) INTO v_bad
+  FROM dflow.sample_shipment_line l
+  JOIN dflow.sample_shipment s ON s.sample_shipment_id=l.sample_shipment_id
+  WHERE (l.origin_location_type,l.origin_location_id,
+         l.destination_location_type,l.destination_location_id)
+        IS DISTINCT FROM
+        (s.origin_location_type,s.origin_location_id,
+         s.destination_location_type,s.destination_location_id);
+  IF v_bad > 0 THEN
+    RAISE EXCEPTION 'Release A integrity fix refused % shipment route mismatch(es)',v_bad;
+  END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION dflow.post_sample_movement(
   p_sample_id integer, p_quantity integer,

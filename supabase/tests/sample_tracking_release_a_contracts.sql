@@ -119,6 +119,14 @@ BEGIN
     RAISE EXCEPTION 'unboxed shipment movement did not retain shipment identity';
   END IF;
   BEGIN
+    UPDATE dflow.sample_shipment_line SET sample_shipment_id=NULL
+    WHERE sample_id_fk=v_unboxed_sample;
+    RAISE EXCEPTION 'shipment line identity changed after movement';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL;
+  END;
+  PERFORM dflow.post_sample_movement(v_sample,1,'terminal','created','warehouse','china_warehouse',
+    'create','contract-test','production','release-a-create','hash-m');
+  BEGIN
     INSERT INTO dflow.sample_movement(sample_id_fk,quantity,from_location_type,from_location_id,
       to_location_type,to_location_id,box_id_fk,shipment_line_id,sample_shipment_id,lifecycle_action,
       actor_user,actor_role,idempotency_key,request_hash)
@@ -143,8 +151,6 @@ BEGIN
   EXCEPTION WHEN check_violation THEN NULL;
   END;
 
-  PERFORM dflow.post_sample_movement(v_sample,1,'terminal','created','warehouse','china_warehouse',
-    'create','contract-test','production','release-a-create','hash-m');
   IF NOT EXISTS (
     SELECT 1 FROM dflow.sample_inventory
     WHERE sample_id_fk=v_sample AND product_location_type='warehouse'
