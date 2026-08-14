@@ -42,12 +42,24 @@ begin
     'https://example.invalid/property', now(), '{}'::jsonb
   );
 
-  select * into v_changed from plm.source_resolution
+  select core_property_id, resolution_status
+  into v_changed.core_property_id, v_changed.resolution_status
+  from api.source_resolution
   where source_system = 'nbcu' and entity_kind = 'property'
     and source_id = 'source-id:zztest-durable';
   if v_changed.core_property_id is distinct from v_property
      or v_changed.resolution_status <> 'matched' then
     raise exception 'new capture bypassed the durable decision';
+  end if;
+
+  if not exists (
+    select 1 from plm.nbcu_property p
+    join api.source_resolution r
+      on r.source_system = 'nbcu' and r.entity_kind = 'property'
+     and r.source_id = p.property_key
+    where p.capture_id = v_capture and r.resolution_status = 'matched'
+  ) then
+    raise exception 'current source read path did not return the durable decision';
   end if;
 
   begin
@@ -73,4 +85,3 @@ begin
   delete from core.licensor where id = v_licensor;
 end;
 $$;
-

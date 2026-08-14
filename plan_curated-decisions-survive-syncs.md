@@ -157,8 +157,11 @@ upsert that clobbers the resolution columns — which Step 5 closes.
 - Documenting, but not applying, the owner-held `20260802170000` bundle (Step 0).
 - A capture-independent home for source→canonical resolution decisions, covering all six
   capture-scoped tables above.
-- A structural guard that refuses ANY sync/import path — present or future, in any schema —
-  from writing a curated field, so this cannot regress.
+- A structural guard on the six proven capture-scoped Paramount/NBCU tables that refuses
+  loaders from writing their deprecated resolution fields. Source-ID-keyed Disney, Warner,
+  OPA and ColdLion resolution contracts require a separate writer-by-writer rollout because
+  several of those functions legitimately write workflow state today; issue #999 tracks that
+  broader hardening without pretending an untested global trigger is safe.
 - Backfill of existing resolution state (currently zero rows resolved in `pmt_*`; verify
   `nbcu_*` before assuming the same).
 - Tests, docs, and the four scrape skills updated so loaders are told the new contract.
@@ -558,8 +561,11 @@ go through the durable command.
 
 #### Step 4. Migration C — read path
 
-- **What:** update whatever currently reads resolution off the landing tables to read it from
-  `plm.source_resolution` instead, joined on `(source_system, entity_kind, source_id)`.
+- **What:** the writer census found no application/API reader of the six deprecated resolution
+  column sets. Add `api.source_resolution` as the authenticated, security-invoker read path.
+  Consumers join it to the current source row on `(source_system, entity_kind, source_id)`.
+  Contract tests must perform that join after a later capture, rather than merely selecting
+  the durable table directly.
 - **Find the readers first, do not assume there are none:**
   ```sql
   select n.nspname, p.proname from pg_proc p
@@ -579,7 +585,7 @@ go through the durable command.
 
 ### PHASE 3 — The general guard (this is the part that makes it permanent)
 
-#### Step 5. Migration D — refuse any sync write to a curated field
+#### Step 5. Migration D — refuse sync writes on the six capture-scoped tables
 
 - **What:** first complete and record a census of every function, script and application that
   writes the legacy resolution columns. Then install a `BEFORE INSERT OR UPDATE` trigger on

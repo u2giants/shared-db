@@ -1,5 +1,5 @@
 -- Curated source-to-canonical decisions must outlive every source capture.
--- Issue #963. Reserved atomically by claim #996.
+-- Issue #963. Reserved atomically by claim #1000.
 --
 -- Landing rows are immutable snapshots and are often keyed by capture_id. A decision stored
 -- on one of those rows disappears from the current read path when the next capture lands.
@@ -83,6 +83,20 @@ grant select on table plm.source_resolution to authenticated, service_role;
 create policy source_resolution_authenticated_read
   on plm.source_resolution for select to authenticated using (true);
 
+create or replace view api.source_resolution
+with (security_invoker = true)
+as
+select source_system, entity_kind, source_id,
+       core_property_id, core_character_id, core_style_guide_id, dam_asset_id,
+       resolution_status, resolution_reason, resolved_at, resolved_by, updated_at
+from plm.source_resolution;
+comment on view api.source_resolution is
+'Authenticated read path for capture-independent source-to-canonical decisions. Join source '
+'landing rows by source_system, entity_kind and stable source_id; never read the deprecated '
+'resolution fields on a capture row.';
+revoke all on table api.source_resolution from public, anon;
+grant select on table api.source_resolution to authenticated, service_role;
+
 create or replace function plm.set_source_resolution(
   p_source_system text,
   p_entity_kind text,
@@ -119,6 +133,13 @@ begin
     raise exception using errcode = '42501',
       message = 'source resolution requires an authenticated actor';
   end if;
+
+  -- Serializes both an existing-row change and two simultaneous first decisions. Without
+  -- this key lock, two first writers can both observe no row and one receives a raw unique
+  -- violation instead of the documented reload conflict.
+  perform pg_advisory_xact_lock(hashtextextended(
+    concat_ws(E'\x1f', p_source_system, p_entity_kind, p_source_id), 0
+  ));
 
   select * into v_existing
   from plm.source_resolution
@@ -205,43 +226,45 @@ with candidates as (
          p.property_source_id::text source_id, p.core_property_id,
          null::uuid core_character_id, null::uuid core_style_guide_id, null::uuid dam_asset_id,
          p.resolution_status, p.resolution_reason, p.resolved_at, p.resolved_by,
-         coalesce(c.completed_at, c.started_at) captured_at
+         coalesce(c.completed_at, c.started_at) captured_at,
+         p.capture_id::text capture_tiebreaker
   from plm.pmt_property p join plm.pmt_capture c using (capture_id)
   where p.resolution_status <> 'unresolved' or p.core_property_id is not null
   union all
   select 'paramount', 'character', p.character_source_id::text, null, p.core_character_id,
          null, null, p.resolution_status, p.resolution_reason, p.resolved_at, p.resolved_by,
-         coalesce(c.completed_at, c.started_at)
+         coalesce(c.completed_at, c.started_at), p.capture_id::text
   from plm.pmt_character p join plm.pmt_capture c using (capture_id)
   where p.resolution_status <> 'unresolved' or p.core_character_id is not null
   union all
   select 'nbcu', 'property', p.property_key, p.core_property_id, null, null, null,
          p.resolution_status, p.resolution_reason, p.resolved_at, p.resolved_by,
-         coalesce(c.load_completed_at, c.source_captured_at)
+         coalesce(c.load_completed_at, c.source_captured_at), p.capture_id::text
   from plm.nbcu_property p join plm.nbcu_capture c on c.id = p.capture_id
   where p.resolution_status <> 'unresolved' or p.core_property_id is not null
   union all
   select 'nbcu', 'character', p.character_key, null, p.core_character_id, null, null,
          p.resolution_status, p.resolution_reason, p.resolved_at, p.resolved_by,
-         coalesce(c.load_completed_at, c.source_captured_at)
+         coalesce(c.load_completed_at, c.source_captured_at), p.capture_id::text
   from plm.nbcu_character p join plm.nbcu_capture c on c.id = p.capture_id
   where p.resolution_status <> 'unresolved' or p.core_character_id is not null
   union all
   select 'nbcu', 'style_guide', p.style_guide_key, null, null, p.core_style_guide_id, null,
          p.resolution_status, p.resolution_reason, p.resolved_at, p.resolved_by,
-         coalesce(c.load_completed_at, c.source_captured_at)
+         coalesce(c.load_completed_at, c.source_captured_at), p.capture_id::text
   from plm.nbcu_style_guide p join plm.nbcu_capture c on c.id = p.capture_id
   where p.resolution_status <> 'unresolved' or p.core_style_guide_id is not null
   union all
   select 'nbcu', 'asset', p.asset_source_key, null, null, null, p.dam_asset_id,
          p.resolution_status, p.resolution_reason, p.resolved_at, p.resolved_by,
-         coalesce(c.load_completed_at, c.source_captured_at)
+         coalesce(c.load_completed_at, c.source_captured_at), p.capture_id::text
   from plm.nbcu_asset p join plm.nbcu_capture c on c.id = p.capture_id
   where p.resolution_status <> 'unresolved' or p.dam_asset_id is not null
 ), ranked as (
   select *, row_number() over (
     partition by source_system, entity_kind, source_id
-    order by captured_at desc nulls last
+    order by captured_at desc nulls last, resolved_at desc nulls last,
+             capture_tiebreaker desc
   ) as choice
   from candidates
 )

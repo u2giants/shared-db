@@ -16,6 +16,51 @@ begin
     raise exception 'direct source_resolution mutation grants exist: %', v_count;
   end if;
 
+  if has_function_privilege('PUBLIC',
+       'plm.set_source_resolution(text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz)',
+       'EXECUTE')
+     or has_function_privilege('anon',
+       'plm.set_source_resolution(text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz)',
+       'EXECUTE') then
+    raise exception 'source resolution command is executable by PUBLIC/anon';
+  end if;
+  if not has_function_privilege('authenticated',
+       'plm.set_source_resolution(text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz)',
+       'EXECUTE')
+     or not has_function_privilege('service_role',
+       'plm.set_source_resolution(text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz)',
+       'EXECUTE') then
+    raise exception 'source resolution command missing authenticated/service_role execute';
+  end if;
+
+  if position('pg_advisory_xact_lock' in pg_get_functiondef(
+       'plm.set_source_resolution(text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz)'::regprocedure
+     )) = 0 then
+    raise exception 'source resolution command does not serialize first writers';
+  end if;
+
+  begin
+    execute 'set local role anon';
+    perform plm.set_source_resolution(
+      'zztest', 'property', 'anon-must-fail', 'unresolved',
+      null, null, null, null, null, null
+    );
+    execute 'reset role';
+    raise exception 'anon executed the source resolution command';
+  exception when insufficient_privilege then
+    execute 'reset role';
+  end;
+
+  execute 'set local role authenticated';
+  perform plm.set_source_resolution(
+    'zztest', 'property', 'authenticated-command', 'unresolved',
+    null, null, null, null, null, null
+  );
+  execute 'reset role';
+  delete from plm.source_resolution
+    where source_system = 'zztest' and entity_kind = 'property'
+      and source_id = 'authenticated-command';
+
   begin
     insert into plm.source_resolution (
       source_system, entity_kind, source_id, resolution_status
@@ -33,4 +78,3 @@ begin
   end;
 end;
 $$;
-
