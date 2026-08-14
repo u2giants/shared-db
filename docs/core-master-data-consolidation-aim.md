@@ -65,8 +65,19 @@ nothing about a Disney title.
 > The `<source>_property` / `<source>_character` tables are **resolution** tables —
 > they hold entities already reconciled to a canonical `core.*` row. They are empty
 > for Disney because the resolution pass has not been run, **not** because the
-> scrape has no data. Disney has 156,644 assets loaded. Always count the landing
-> table the loader actually wrote to.
+> scrape has no data. Disney has 156,644 assets loaded.
+>
+> **Never guess which table a loader wrote to. Ask:**
+>
+> ```sql
+> select * from api.source_capture_inventory order by source_system, row_count desc;
+> ```
+>
+> Exact live counts for every `plm` landing table, grouped by source, built from the
+> catalog so a new scrape's tables appear automatically. The numbers in the table
+> below are a dated snapshot; that view is always current. Note its
+> `carries_resolution` column describes the table's *shape* — it never tells you
+> whether a scrape ran.
 
 | Source | Assets | Properties | Characters | Style guides |
 |---|---|---|---|---|
