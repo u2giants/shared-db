@@ -347,7 +347,12 @@ begin
     {"metadata_element_id": "ZZTEST_FREEZE_ELEMENT"}
   ]$json$);
 
-  update plm.pmt_capture set status = 'complete' where capture_id = v_cap;
+  update plm.pmt_capture
+     set status = 'complete',
+         completed_at = now(),
+         validated_at = now(),
+         validation_passed = true
+   where capture_id = v_cap;
 
   v_ok := false;
   begin
