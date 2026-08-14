@@ -26,8 +26,10 @@ export const EXCLUSIVE_REFS = Object.freeze({
 const QUEUE_STATES = new Set(['eligible','blocked','owner-decision','data-only','non-structural'])
 
 export function parseQueueScope(body = '') {
-  const fence = /```db-work-scope\s*\n([\s\S]*?)```/.exec(body)
-  if (!fence) return null
+  const fences=[...body.matchAll(/```db-work-scope\s*\n([\s\S]*?)```/g)]
+  if (!fences.length) return null
+  if (fences.length !== 1) throw new LaneError('exactly one db-work-scope block is required')
+  const fence=fences[0]
   const lines = fence[1].split(/\r?\n/), fields = new Map(), objects = []
   let inObjects = false
   for (const raw of lines) {
@@ -52,8 +54,8 @@ export function parseQueueScope(body = '') {
 
 function overlaps(a, b) { const right = new Set(b); return a.some((x)=>right.has(x)) }
 
-export function buildDynamicQueues(issues, claims, now = new Date()) {
-  const openNumbers = new Set(issues.map((issue)=>Number(issue.number)))
+export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssueNumbers = issues.map((issue)=>issue.number)) {
+  const openNumbers = new Set(allOpenIssueNumbers.map(Number))
   const skipped = [], unclassified = [], malformed = [], candidates = []
   for (const issue of issues) {
     let scope
@@ -73,7 +75,8 @@ export function buildDynamicQueues(issues, claims, now = new Date()) {
   const ordered = components.sort((a,b)=>Number(Boolean(b.some(x=>x.claim)))-Number(Boolean(a.some(x=>x.claim))) || Math.max(...b.map(x=>x.priority))-Math.max(...a.map(x=>x.priority)))
   for (const component of ordered) {
     const activeItem = component.find((x)=>x.claim)
-    let lane = activeItem ? queues.find((q)=>!q.active) : [...queues].sort((a,b)=>a.queued.length-b.queued.length)[0]
+    const free=queues.filter((q)=>!q.active)
+    let lane = activeItem ? free[0] : [...(free.length?free:queues)].sort((a,b)=>a.queued.length-b.queued.length)[0]
     if (activeItem) lane.active = activeItem.claim
     lane.queued.push(...component.filter((x)=>x.issue).sort((a,b)=>b.priority-a.priority || a.issue-b.issue).map((x)=>x.issue))
     lane.objects.push(...new Set(component.flatMap((x)=>x.objects)))
@@ -180,6 +183,7 @@ export const githubIo = {
     const rows = ghPaginated(`repos/${REPO}/issues?state=open&labels=db-work&per_page=100`)
     return rows.filter((x)=>!x.pull_request).map((x)=>({ number:x.number, title:x.title, body:x.body, labels:(x.labels??[]).map((l)=>l.name) }))
   },
+  openIssueNumbers() { return ghPaginated(`repos/${REPO}/issues?state=open&per_page=100`).filter((x)=>!x.pull_request).map((x)=>x.number) },
   prSources() { return gatherOpenPrObjects(REPO) },
   openPulls() { return ghPaginated(`repos/${REPO}/pulls?state=open&per_page=100`) },
   getPr(number) { return ghJson(['api', `repos/${REPO}/pulls/${number}`]) },
@@ -293,13 +297,20 @@ export function assignNextReviewer({issue,pr,headSha},io=githubIo){
   const request={issue:Number(issue),pr:Number(pr),headSha:String(headSha)}, ownerSha=io.makeOwnerCommit(`db-coordination reviewer-assignment-lock issue=${request.issue} pr=${request.pr} head=${request.headSha}`)
   acquireMutex(ownerSha,io)
   try{
+    const assignmentRef=`refs/db-review-assignments/${request.issue}-${request.pr}-${request.headSha}`
+    const priorSha=io.readRef(assignmentRef)
+    if(priorSha){const prior=parseReviewCursor(io.getCommit(priorSha));return {...prior,wrapper:REVIEWERS.find((r)=>r.name===prior.reviewer)?.wrapper}}
     const cursorSha=io.readRef(REVIEW_CURSOR_REF), current=parseReviewCursor(cursorSha?io.getCommit(cursorSha):null)
-    if(current&&current.issue===request.issue&&current.pr===request.pr&&current.headSha===request.headSha)return {...current,wrapper:REVIEWERS.find((r)=>r.name===current.reviewer)?.wrapper}
+    if(current&&current.issue===request.issue&&current.pr===request.pr&&current.headSha===request.headSha){
+      if(!io.createRef(assignmentRef,cursorSha)&&io.readRef(assignmentRef)!==cursorSha)throw new LaneError('review assignment record could not be proved; retry the same assignment')
+      return {...current,wrapper:REVIEWERS.find((r)=>r.name===current.reviewer)?.wrapper}
+    }
     const sequence=(current?.sequence??0)+1, reviewer=REVIEWERS[(sequence-1)%REVIEWERS.length]
     const assignmentSha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=${sequence} reviewer=${reviewer.name} issue=${request.issue} pr=${request.pr} head=${request.headSha}`)
     requireOwnedRef(MUTEX_REF,ownerSha,io)
     if(cursorSha)io.updateRef(REVIEW_CURSOR_REF,assignmentSha);else if(!io.createRef(REVIEW_CURSOR_REF,assignmentSha))throw new LaneError('reviewer cursor was created concurrently; retry the same assignment')
     if(io.readRef(REVIEW_CURSOR_REF)!==assignmentSha)throw new LaneError('reviewer cursor advancement could not be proved; retry the same assignment')
+    if(!io.createRef(assignmentRef,assignmentSha)&&io.readRef(assignmentRef)!==assignmentSha)throw new LaneError('review assignment record could not be proved; retry the same assignment')
     return {sequence,reviewer:reviewer.name,wrapper:reviewer.wrapper,...request}
   }finally{if(io.readRef(MUTEX_REF)===ownerSha)releaseOwnedRef(MUTEX_REF,ownerSha,io)}
 }
@@ -393,7 +404,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     const claims = io.openClaims()
     if(o.assignReviewer){console.log(JSON.stringify(assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha},io),null,2));return 0}
     if (o.queueAudit) {
-      const result = buildDynamicQueues(io.openWorkIssues(), claims, now)
+      const result = buildDynamicQueues(io.openWorkIssues(), claims, now, io.openIssueNumbers())
       console.log(JSON.stringify(result,null,2))
       if (result.dispatchable.length) { console.error(`REFILL REQUIRED NOW: dispatch issue(s) ${result.dispatchable.map((n)=>`#${n}`).join(', ')}`); return 2 }
       if (result.emptyLanes && !result.fullyAudited) { console.error('EMPTY LANE NOT PROVEN: classify every open db-work issue before claiming no eligible work exists'); return 2 }

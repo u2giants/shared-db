@@ -16,6 +16,7 @@ test('queue scope is strict and requires objects for eligible work',()=>{
   assert.deepEqual(parseQueueScope(scope('eligible',9,['table core.a'],'#12, 13')), {state:'eligible',priority:9,dependencies:[12,13],objects:['table core.a']})
   assert.throws(()=>parseQueueScope(scope('eligible',1)),/must list exact objects/)
   assert.throws(()=>parseQueueScope(scope('waiting',1,['table core.a'])),/state must be/)
+  assert.throws(()=>parseQueueScope(`${scope('eligible',1,['table core.a'])}\n${scope('blocked',1)}`),/exactly one/)
 })
 
 test('dynamic queues serialize overlapping work and refill every empty lane',()=>{
@@ -31,6 +32,18 @@ test('dynamic queues serialize overlapping work and refill every empty lane',()=
   assert.ok(result.queues.some((q)=>q.queued.join(',')==='1,2'))
 })
 
+test('dynamic queues fill inactive lanes before queueing behind active claims',()=>{
+  const claims=[{number:31,body:body(['table core.a'],'31')},{number:32,body:body(['table core.b'],'32')}]
+  const one=buildDynamicQueues([{number:40,title:'c',body:scope('eligible',9,['table core.c'])}],claims,NOW)
+  assert.deepEqual(one.dispatchable,[40])
+  assert.equal(one.queues.find((q)=>q.queued.includes(40)).active,null)
+  const two=buildDynamicQueues([
+    {number:40,title:'c',body:scope('eligible',9,['table core.c'])},
+    {number:41,title:'d',body:scope('eligible',8,['table core.d'])},
+  ],[{number:31,body:body(['table core.a'],'31')}],NOW)
+  assert.deepEqual(new Set(two.dispatchable),new Set([40,41]))
+})
+
 test('blocked, owner-decision, data-only and dependent work never consume a lane',()=>{
   const issues=[
     {number:10,title:'open dependency',body:scope('blocked',9)},
@@ -43,6 +56,13 @@ test('blocked, owner-decision, data-only and dependent work never consume a lane
   assert.deepEqual(result.dispatchable,[])
   assert.equal(result.skipped.length,5)
   assert.equal(result.fullyAudited,true)
+})
+
+test('dependency on an open non-db-work issue prevents dispatch',()=>{
+  const issues=[{number:11,title:'dependent',body:scope('eligible',8,['table core.x'],'#99')}]
+  const result=buildDynamicQueues(issues,[],NOW,[11,99])
+  assert.deepEqual(result.dispatchable,[])
+  assert.match(result.skipped[0].reason,/99/)
 })
 
 test('an unclassified issue prevents proof that an empty lane is justified',()=>{
@@ -107,6 +127,13 @@ test('reviewer assignment retry returns the same assignment without advancing',(
   const first=assignNextReviewer(request,io), second=assignNextReviewer(request,io)
   assert.deepEqual(second,first)
   assert.equal(second.sequence,1)
+})
+
+test('reviewer assignment remains stable after later assignments advance the cursor',()=>{
+  const io=reviewIo(), a={issue:9,pr:109,headSha:'abcdef9'}
+  const first=assignNextReviewer(a,io)
+  assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
+  assert.deepEqual(assignNextReviewer(a,io),first)
 })
 
 test('concurrent orchestrator cannot advance reviewer cursor without the mutex',()=>{

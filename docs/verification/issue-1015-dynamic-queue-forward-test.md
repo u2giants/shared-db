@@ -23,5 +23,5 @@ Proof command:
 node --test scripts/manage-migration-author-lanes.test.mjs scripts/check-dispatch-collision.test.mjs
 ```
 
-Result: 100 passed, 0 failed. No database, preview, merge, or production call was
+Result: 103 passed, 0 failed. No database, preview, merge, or production call was
 made by this forward test.
