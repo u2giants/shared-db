@@ -164,6 +164,24 @@ export function requiredHeadersFor(file) {
   return entry ? entry.requiredHeaders : null;
 }
 
+const NULLABLE_ASSET_FIELDS = Object.freeze([
+  "warner_asset_id",
+  "season",
+  "file_size_bytes",
+]);
+
+/** Convert only exact empty optional Asset values to JSON null before hashing. */
+export function normalizeCaptureRows(target, rows) {
+  if (target !== "wb_asset_normalized") return rows;
+  return rows.map((row) => {
+    const normalized = { ...row };
+    for (const field of NULLABLE_ASSET_FIELDS) {
+      if (normalized[field] === "") normalized[field] = null;
+    }
+    return normalized;
+  });
+}
+
 /**
  * REFUSAL 0. Prove the file's COLUMN IDENTITY before a single row is built.
  *
@@ -637,7 +655,10 @@ export async function prepareCaptures(cfg, deps = {}) {
 
   const captures = [];
   for (const { file, target, allowEmpty = false } of CAPTURE_FILES) {
-    const rows = await readPinnedCsv(cfg.repoDir, cfg.pinnedCommit, file, runGit);
+    const rows = normalizeCaptureRows(
+      target,
+      await readPinnedCsv(cfg.repoDir, cfg.pinnedCommit, file, runGit)
+    );
     if (!rows.length && !allowEmpty) {
       throw new Error(
         `REFUSING TO LOAD. warner-bros/${file} parsed to ZERO rows at the pinned commit. ` +
@@ -651,6 +672,7 @@ export async function prepareCaptures(cfg, deps = {}) {
       rowCount: rows.length,
       chunks,
       manifestSha256: chainDigest(chunks),
+      skipLoad: rows.length === 0 && allowEmpty,
     });
   }
   return captures;
@@ -738,6 +760,20 @@ export async function loadCapture(client, cfg, capture, log = console.log) {
   }
 }
 
+/** Load prepared streams while recording truthful optional zero-row streams as skipped. */
+export async function loadPreparedCaptures(client, cfg, captures, log = console.log, load = loadCapture) {
+  const results = [];
+  for (const capture of captures) {
+    if (capture.skipLoad) {
+      log(`  ${capture.target}: SKIPPED -- optional source stream declared 0 rows; no database call made.`);
+      results.push({ target: capture.target, skipped: true, rows: 0 });
+      continue;
+    }
+    results.push(await load(client, cfg, capture, log));
+  }
+  return results;
+}
+
 async function main() {
   const apply = process.argv.includes("--apply");
   const cfg = resolveRunConfig(process.env);
@@ -763,9 +799,7 @@ async function main() {
   const client = new pg.Client({ connectionString: cfg.databaseUrl });
   await client.connect();
   try {
-    for (const capture of captures) {
-      await loadCapture(client, cfg, capture);
-    }
+    await loadPreparedCaptures(client, cfg, captures);
     console.log("  ALL ELEVEN CAPTURES COMPLETE.");
   } finally {
     await client.end();

@@ -27,10 +27,12 @@ import {
   readPinnedCsv,
   assertCaptureHeaders,
   resolvePinnedBlob,
+  normalizeCaptureRows,
   prepareCaptures,
   summarise,
   resolveRunConfig,
   loadCapture,
+  loadPreparedCaptures,
 } from "./sync-warner-starlabs.mjs";
 
 const cleanupMigration = readFileSync(
@@ -197,7 +199,35 @@ test("the direct Franchise-to-Property evidence stream may truthfully contain ze
   assert.equal(evidence.rowCount, 0);
   assert.deepEqual(evidence.chunks, []);
   assert.equal(evidence.manifestSha256, sha256(""));
+  assert.equal(evidence.skipLoad, true);
   assert.equal(captures.filter((c) => c.rowCount === 0).length, 1);
+});
+
+test("only exact blank optional Asset fields become JSON null before hashing", async () => {
+  const file = "assets-normalized.csv";
+  const header = [
+    "source_namespace", "source_id", "warner_asset_id", "file_name", "source_path",
+    "season", "file_size_bytes", "source_created_at", "source_url",
+  ];
+  const body = `${header.join(",")}\nsynthetic,, ,synthetic.bin,synthetic/path,,,unchanged,https://example.invalid\n`;
+  const g = fakeGit({ files: { [file]: body } });
+  const captures = await prepareCaptures(resolveRunConfig(baseEnv), { git: g.run });
+  const asset = captures.find((c) => c.file === file);
+  const [row] = JSON.parse(asset.chunks[0].json);
+  assert.equal(row.warner_asset_id, " ", "whitespace is source text, not an exact blank");
+  assert.equal(row.season, null);
+  assert.equal(row.file_size_bytes, null);
+  assert.equal(row.source_created_at, "unchanged", "unrelated optional strings stay untouched");
+  assert.equal(row.source_id, "", "required blank identity stays blank for fail-closed validation");
+  assert.equal(asset.chunks[0].sha256, sha256(asset.chunks[0].json));
+});
+
+test("normalization does not alter non-Asset rows or nonblank Asset values", () => {
+  const other = [{ season: "" }];
+  assert.equal(normalizeCaptureRows("wb_property", other), other);
+  assert.deepEqual(normalizeCaptureRows("wb_asset_normalized", [{
+    warner_asset_id: "id", season: "S1", file_size_bytes: "0", source_id: "required",
+  }]), [{ warner_asset_id: "id", season: "S1", file_size_bytes: "0", source_id: "required" }]);
 });
 
 // ---------------------------------------------------------------------------
@@ -518,23 +548,27 @@ test("a capture streams begin, every chunk in order, then finalize", async () =>
   assert.equal(c.queries[0].args[4], 3);
 });
 
-test("a truthful zero-row evidence capture begins and finalizes without inventing a chunk", async () => {
-  const c = fakeClient({
-    on: (sql) => sql.includes("finalize_wb_capture")
-      ? { rows: [{ rows_seen: 0, rows_landed: 0, rows_inserted: 0, rows_updated: 0, rows_unchanged: 0, rows_collapsed: 0, rows_missing: 0 }] }
-      : undefined,
-  });
+test("a truthful zero-row evidence stream is recorded as skipped with no database call", async () => {
+  const calls = [];
   const empty = {
     file: "links-franchise-property-evidence.csv",
     target: "wb_franchise_property_evidence",
     rowCount: 0,
     chunks: [],
     manifestSha256: chainDigest([]),
+    skipLoad: true,
   };
-  const result = await loadCapture(c, resolveRunConfig(baseEnv), empty, () => {});
-  assert.equal(result.report.rows_seen, 0);
-  assert.deepEqual(c.queries.map((q) => q.sql.match(/plm\.\w+/)[0]), ["plm.begin_wb_capture", "plm.finalize_wb_capture"]);
-  assert.equal(c.queries[0].args[4], 0);
+  const logs = [];
+  const result = await loadPreparedCaptures(
+    { query: () => { throw new Error("database must not be called"); } },
+    resolveRunConfig(baseEnv),
+    [empty],
+    (message) => logs.push(message),
+    async (...args) => { calls.push(args); throw new Error("loadCapture must not be called"); }
+  );
+  assert.deepEqual(calls, []);
+  assert.deepEqual(result, [{ target: "wb_franchise_property_evidence", skipped: true, rows: 0 }]);
+  assert.match(logs[0], /SKIPPED.*0 rows.*no database call/i);
 });
 
 test("a chunk whose reported row count differs is treated as a silent drop and fails the run", async () => {
