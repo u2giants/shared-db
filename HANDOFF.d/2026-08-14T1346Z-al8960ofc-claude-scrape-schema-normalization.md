@@ -1,3 +1,9 @@
+---
+issue: 958
+status: OPEN
+owner: claude/handoff-scrape-normalization
+---
+
 # Scrape landing-table normalization, ColdLion source rulings, and the licensing-manager gate
 
 **Written:** 2026-08-14T13:46Z
