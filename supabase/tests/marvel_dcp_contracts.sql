@@ -567,7 +567,11 @@ begin
       'was changed. Every stored row hash was computed from those exact values.';
   end if;
 
-  update plm.marvel_dcp_style_guide set resolution_reason = 'ZZTEST reviewed' where id = v_guide;
+  perform plm.set_source_resolution(
+    'marvel_dcpvault','style_guide',
+    (select 'path:' || source_path from plm.marvel_dcp_style_guide where id=v_guide),
+    'deferred',null,null,null,null,'ZZTEST reviewed',null
+  );
 
   -- E6. THE HIGH FINDING, PROVED BEHAVIOURALLY. INSERT is the ONLY mutating operation
   -- section 7 still leaves to service_role, so it is the one that matters most. Each of
@@ -1589,11 +1593,18 @@ begin
       'changed.';
   end if;
 
-  update plm.marvel_dcp_character set resolution_note = 'ZZTEST reviewed', resolved_at = now()
-  where id = v_char;
-  if (select resolution_note from plm.marvel_dcp_character where id = v_char) <> 'ZZTEST reviewed' then
-    raise exception 'E FAILED: a reconciliation column could not be written after the run '
-      'completed. Those columns are OUR decisions and must stay editable forever.';
+  perform plm.set_source_resolution(
+    'marvel_dcpvault','character',
+    (select 'id:' || source_id from plm.marvel_dcp_character where id=v_char),
+    'deferred',null,null,null,null,'ZZTEST reviewed',null
+  );
+  if not exists (
+    select 1 from plm.source_resolution
+    where source_system='marvel_dcpvault' and entity_kind='character'
+      and source_id=(select 'id:' || source_id from plm.marvel_dcp_character where id=v_char)
+      and resolution_reason='ZZTEST reviewed'
+  ) then
+    raise exception 'E FAILED: the durable reconciliation decision was not stored.';
   end if;
 
   -- E6. A second run over the same crawl may still re-observe the same identity. The

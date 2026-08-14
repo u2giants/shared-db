@@ -575,7 +575,11 @@ begin
       'was changed. Every stored row hash was computed from those exact values.';
   end if;
 
-  update plm.dcp_style_guide set resolution_reason = 'ZZTEST reviewed' where id = v_guide;
+  perform plm.set_source_resolution(
+    'disney_dcpvault','style_guide',
+    (select 'path:' || source_path from plm.dcp_style_guide where id=v_guide),
+    'deferred',null,null,null,null,'ZZTEST reviewed',null
+  );
 
   -- E6. THE HIGH FINDING, PROVED BEHAVIOURALLY. INSERT is the ONLY mutating operation
   -- section 7 still leaves to service_role, so it is the one that matters most. Each of
