@@ -28,9 +28,27 @@ owner: claude/schema-normalization-handoff-bb33e8
 | Latent problems are fixed now, not monitored | 2026-08-14 | "but what about the future. if it's possible for a problem to happen, address it now." |
 | Which work is next | 2026-08-14 | Fix curation persistence FIRST, and make it the general pattern across all four licensor scrapes. |
 
+### Waiting on the owner — ASKED 2026-08-14, NOT YET ANSWERED
+
+1. **May `20260802170000` be applied to production now, or only after PR #959 merges?**
+   Asked at the end of the 2026-08-14 session; the session closed without an answer, so
+   **nothing was applied.** The two are independent — #959 is docs-only and changes no schema,
+   so the apply does not need to wait for it. Recommendation: apply it, because until it lands
+   one re-run of the Master Data import force-resets `core.property.licensor_id` and forces
+   `status='active'` on every matched row, which silently reverts the COCO ruling of
+   2026-08-13. Evidence it is unapplied, re-runnable at any time:
+   ```sql
+   select version, name from supabase_migrations.schema_migrations
+   where version = '20260802170000';   -- returns nothing on production as of 2026-08-14
+   ```
+   **Read the migration file in full before applying it. Do not apply from a description.**
+   If the next session gets no answer either, treat this as the first thing to raise — do not
+   silently carry it forward a third time.
+
 ### Blocking — nothing
 
-No decision is blocking. All three plans can be executed as written.
+No decision blocks execution. All three plans can be started as written; item 1 above only
+affects whether Step 0 of the first plan runs before or after #959 merges.
 
 ### Worth the owner's attention, not blocking
 
