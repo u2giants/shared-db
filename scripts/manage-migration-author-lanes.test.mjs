@@ -148,8 +148,8 @@ test('101 claims and 101 open PR sources are all considered',()=>{
   const prs=Array.from({length:101},(_,i)=>({label:`PR #${i+1}`,objects:[`table core.p${i}`]}))
   assert.throws(()=>assertLaneAvailable([],['table core.p100'],NOW,{prSources:prs}),/PR #101/)
 })
-test('REAL CLI: a relative script path executes main and refuses missing arguments', () => {
-  const result = spawnSync(process.execPath, ['scripts/manage-migration-author-lanes.mjs'], { encoding: 'utf8' })
+test('REAL CLI: a relative script path executes main and refuses an invalid argument', () => {
+  const result = spawnSync(process.execPath, ['scripts/manage-migration-author-lanes.mjs', '--definitely-invalid'], { encoding: 'utf8' })
   assert.equal(result.status, 2)
-  assert.match(result.stderr, /choose --claim/)
+  assert.match(result.stderr, /unknown argument/)
 })
