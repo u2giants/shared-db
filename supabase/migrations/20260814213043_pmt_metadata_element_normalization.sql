@@ -3,7 +3,7 @@
 -- ISSUE #965. Plan: plan_pmt-metadata-element-normalization.md
 -- Orchestrator marker: #960
 --
--- Migration version 20260814201916 is reserved by the authoritative open
+-- Migration version 20260814213043 is reserved by the authoritative open
 -- db-claim issue #998 for this branch and exact object set.
 --
 -- Starts from the #964 / PR #981 body in 20260814193351 (the first

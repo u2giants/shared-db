@@ -911,7 +911,7 @@ test("the deprecation migration is STAGED: schema-only, and carries no column dr
 
 // ---------------------------------------------------------------------------
 // Issue #965 -- the metadata-element normalization migration (staged A+B+C+D).
-// Version 20260814201916 is reserved by authoritative claim issue #998.
+// Version 20260814213043 is reserved by authoritative claim issue #998.
 // ---------------------------------------------------------------------------
 async function readMetadataElementMigration() {
   const { readFileSync, readdirSync } = await import("node:fs");
