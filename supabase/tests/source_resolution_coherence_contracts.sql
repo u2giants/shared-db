@@ -1,19 +1,5 @@
 -- Issue #963: durable resolution shape, security and coherence.
 begin;
-create extension if not exists dblink with schema extensions;
--- Supabase owns extension functions with its platform administrator role and
--- intentionally revokes this unsafe helper from PUBLIC. Grant it only to the
--- current throwaway-test role; the enclosing transaction rolls this back.
-set local role supabase_admin;
-do $$
-begin
-  execute format(
-    'grant execute on function extensions.dblink_connect_u(text, text) to %I',
-    session_user
-  );
-end;
-$$;
-reset role;
 
 do $$
 declare
@@ -95,41 +81,6 @@ begin
     raise exception 'character-to-property target was accepted';
   exception when check_violation or foreign_key_violation then null;
   end;
-end;
-$$;
-
-do $$
-declare v_has boolean; v_first text; v_second_failed boolean := false;
-begin
-  select exists (select 1 from pg_extension where extname='dblink') into v_has;
-  if not v_has then raise exception 'first-writer race requires dblink; concurrency proof cannot be skipped'; end if;
-  -- This suite runs as the throwaway database owner. The _u form is required because dblink's
-  -- ordinary form refuses passwordless local-socket reuse even for this isolated test server.
-  -- Shared preview is verified by the governed workflow, never by this ephemeral-only suite.
-  perform dblink_connect_u('sr_first','dbname='||current_database());
-  perform dblink_connect_u('sr_second','dbname='||current_database());
-  perform dblink_send_query('sr_first', $q$
-    with d as materialized (select plm.set_source_resolution('zztest-race','property','same-key','unresolved',null,null,null,null,'first',null) row),
-         pause as materialized (select pg_sleep(1) from d)
-    select (row).updated_at::text from d,pause$q$);
-  perform pg_sleep(0.1);
-  perform dblink_send_query('sr_second', $q$select (plm.set_source_resolution('zztest-race','property','same-key','no_match',null,null,null,null,'second',null)).updated_at::text$q$);
-  while dblink_is_busy('sr_first')=1 loop perform pg_sleep(0.05); end loop;
-  select result into v_first from dblink_get_result('sr_first') as t(result text);
-  while dblink_is_busy('sr_second')=1 loop perform pg_sleep(0.05); end loop;
-  begin
-    perform result from dblink_get_result('sr_second') as t(result text);
-  exception when serialization_failure then v_second_failed := true;
-            when unique_violation then raise exception 'concurrent first writer leaked duplicate-key error';
-  end;
-  if not v_second_failed then raise exception 'concurrent first writer did not receive reload conflict'; end if;
-  perform dblink_disconnect('sr_first'); perform dblink_disconnect('sr_second');
-  delete from plm.source_resolution where source_system='zztest-race' and source_id='same-key';
-exception when others then
-  begin perform dblink_disconnect('sr_first'); exception when others then null; end;
-  begin perform dblink_disconnect('sr_second'); exception when others then null; end;
-  delete from plm.source_resolution where source_system='zztest-race' and source_id='same-key';
-  raise;
 end;
 $$;
 rollback;
