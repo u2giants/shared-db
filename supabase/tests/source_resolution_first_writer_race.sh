@@ -14,18 +14,33 @@ cleanup() {
 trap cleanup EXIT
 cleanup
 
+PGAPPNAME=source-resolution-first-writer \
 psql -v ON_ERROR_STOP=1 --no-psqlrc >"$first_log" 2>&1 <<'SQL' &
 begin;
 select plm.set_source_resolution(
   'zztest-race','property','same-key','unresolved',
   null,null,null,null,'first',null
 );
-select pg_sleep(1);
+select pg_sleep(10);
 commit;
 SQL
 first_pid=$!
 
-sleep 0.1
+first_ready=false
+for _ in $(seq 1 100); do
+  if [ "$(psql -v ON_ERROR_STOP=1 --no-psqlrc -Atqc \
+    "select exists (select 1 from pg_stat_activity where application_name='source-resolution-first-writer' and state='active' and query like 'select pg_sleep(%')")" = "t" ]; then
+    first_ready=true
+    break
+  fi
+  sleep 0.1
+done
+if [ "$first_ready" != true ]; then
+  echo "first writer did not reach its open transaction before timeout" >&2
+  cat "$first_log" >&2
+  exit 1
+fi
+
 set +e
 psql -v ON_ERROR_STOP=1 --no-psqlrc >"$second_log" 2>&1 <<'SQL'
 \set VERBOSITY verbose
