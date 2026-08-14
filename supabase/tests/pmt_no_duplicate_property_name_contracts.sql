@@ -342,12 +342,17 @@ begin
   raise notice '=== E. NO LIVE READER OF EITHER COPY ===';
 
   for r in
-    select n.nspname as schema_name, p.proname
-    from pg_proc p
-    join pg_namespace n on n.oid = p.pronamespace
-    where pg_get_functiondef(p.oid) ilike '%paramount_property_name%'
+    with eligible_functions as materialized (
+      select p.oid, p.proname, n.nspname as schema_name
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      where p.prokind in ('f', 'w')
+    )
+    select schema_name, proname
+    from eligible_functions
+    where pg_get_functiondef(oid) ilike '%paramount_property_name%'
        or position('property_name, reported_asset_count'
-                   in regexp_replace(pg_get_functiondef(p.oid), '[[:space:]]+', ' ', 'g')) <> 0
+                   in regexp_replace(pg_get_functiondef(oid), '[[:space:]]+', ' ', 'g')) <> 0
   loop
     v_fail := v_fail + 1;
     raise warning 'FAIL function still reads/writes a copy: %.%', r.schema_name, r.proname;

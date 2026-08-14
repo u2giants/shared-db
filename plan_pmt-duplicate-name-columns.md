@@ -62,10 +62,13 @@ repo and (b) per-capture sampling on production — neither was available in thi
 revision of the client tool. The tool stops sending the two name fields; the pre-migration
 function body would insert NULL into still-`NOT NULL` columns and abort the load mid-capture.
 
-**Still owed, in order:** merge (PR + the six required contexts) → apply to preview →
-contract-test rehearsal on preview → apply to production → a real capture completing with
-both columns NULL on all new rows → Step 1's private-builder read + live sampling → Migration C
-(drop or rename per the finding) → skill update in both copies (Step 7).
+**Still owed in this issue, in order:** merge (PR + the six required contexts) → apply to
+preview → contract-test rehearsal on preview → Step 1's private-builder read and preview
+evidence → Migration C (drop or rename per the finding) → skill update in both copies (Step 7).
+
+**Production is not authorized and is not part of this issue's completion.** It remains
+unapplied. Any future production apply and production capture verification must be a separate
+workstream started only after explicit owner authorization.
 
 
 
@@ -494,9 +497,9 @@ Step 6.
      the fixture's CSV rows (the source files may still carry the columns; the loader must
      simply not forward them). `node --test tools/sync-paramount-creative-library.test.mjs`
      must pass — CI runs it under the required `Tools offline tests` check.
-- **Dependencies:** Step 2 must be applied to **production** first (the loader writes
-  production captures too; a NULL into a still-`NOT NULL` column aborts the load mid-capture),
-  and to preview before the rehearsal.
+- **Dependencies:** Step 2 must be applied to preview before the rehearsal. The revised loader
+  must not be used for a production capture unless Step 2 has first been applied there, and
+  that production apply requires separate explicit owner authorization.
 - **You'll know it worked when:** `pg_get_functiondef('plm.load_pmt_capture_chunk'::regproc)`
   mentions neither column, the repo grep for `paramount_property_name` hits nothing outside
   `supabase/migrations/` and this plan, a dry run of the tool
@@ -644,7 +647,8 @@ body. Plus the Paramount loader's own test file updated in Step 3. The whole
 - **Workflow argument traps:** `review_artifact_digest` must be `sha256:<64 hex>` (the log
   prints bare hex); `reviewed_main_sha` must be the LIVE main SHA from
   `gh api repos/u2giants/shared-db/commits/main --jq .sha`, not a stale local `origin/main`.
-- **Preview is behind production** (#901) — apply by explicit version, re-verify on production.
+- **Preview is behind production** (#901) — apply to preview by explicit version. Any production
+  apply or production verification requires separate explicit owner authorization.
 - **No band-aids, no silent failures.**
 - **Licensed source data never leaves its approved private repo.** Do not paste Paramount
   property names into issues, PRs, or commit messages.
@@ -674,8 +678,9 @@ never fan out 1Password reads in parallel.
 gh workflow run "Shared Supabase Migrations" --repo u2giants/shared-db --ref main -f target=preview -f mode=apply -f preview_allowlist=<version>
 ```
 
-then production dry-run → `Production Apply Review Evidence` (live main SHA) → production apply
-with `review_artifact_digest=sha256:<hex>`.
+Production is not authorized by this plan. Only after separate explicit owner authorization:
+production dry-run → `Production Apply Review Evidence` (live main SHA) → production apply with
+`review_artifact_digest=sha256:<hex>`.
 
 ---
 
@@ -690,11 +695,11 @@ with `review_artifact_digest=sha256:<hex>`.
 - [ ] All readers repointed (expected: none found); `idx_pmt_atp_name` dropped; repo grep clean.
 - [ ] New contract test added, including the reintroduction guard and the function-body guard;
       `supabase/tests` read and green.
-- [ ] Pre-drop gate run on both environments; columns dropped, and a fresh capture completes
-      on preview afterwards.
+- [ ] Pre-drop gate run on preview; columns dropped there, and a fresh preview capture
+      completes afterwards.
 - [ ] Skill updated in both copies; `ai-devops` pushed.
-- [ ] Committed, pushed, PR merged, CI green, production apply verified by reading
-      `supabase_migrations.schema_migrations`.
+- [ ] Committed, pushed, PR merged, CI green; preview evidence complete.
+- [ ] Production remains unapplied and out of scope for this issue.
 - [ ] STATUS table updated with artifacts; handoff updated.
 
 **Risks and rollback.**

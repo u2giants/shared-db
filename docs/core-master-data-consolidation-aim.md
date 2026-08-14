@@ -112,8 +112,8 @@ empty resolution table as "the scrape never ran".
 
 **Paramount was schema-audited on 2026-08-14** (plan_pmt-duplicate-name-columns.md
 and its two sibling plans). The schema is the strongest of the four; the audit's
-findings are being fixed in stages. One fix is in the repository tree — migration
-`20260814170219`, applied to the databases through the usual migration lane: two
+findings are being fixed in stages. One fix is authored in the repository tree but has
+not been applied to any database — migration `20260814170219`: two
 non-entity tables carried a duplicated copy of the property name —
 `plm.pmt_authorized_title_property.paramount_property_name` and
 `plm.pmt_property_capture_log.property_name`. Migration `20260814170219` makes both
