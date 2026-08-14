@@ -155,7 +155,7 @@ export const CAPTURE_FILES = Object.freeze([
   { file: "links-asset-character-normalized.csv", target: "wb_asset_character_normalized", requiredHeaders: Object.freeze(["asset_namespace", "asset_source_id", "character_namespace", "source_url"]) },
   { file: "links-asset-style-guide-normalized.csv", target: "wb_asset_style_guide_normalized", requiredHeaders: Object.freeze(["asset_namespace", "asset_source_id", "style_guide_namespace", "source_url"]) },
   { file: "links-property-character-normalized.csv", target: "wb_property_character_normalized", requiredHeaders: Object.freeze(["property_namespace", "character_namespace", "property_label", "character_label", "source_url"]) },
-  { file: "links-franchise-property-evidence.csv", target: "wb_franchise_property_evidence", requiredHeaders: Object.freeze(["franchise_namespace", "property_namespace", "evidence_source", "source_url"]) },
+  { file: "links-franchise-property-evidence.csv", target: "wb_franchise_property_evidence", requiredHeaders: Object.freeze(["franchise_namespace", "property_namespace", "evidence_source", "source_url"]), allowEmpty: true },
 ]);
 
 /** The required-header list for one capture file, or null if the file is unknown. */
@@ -636,9 +636,9 @@ export async function prepareCaptures(cfg, deps = {}) {
   await assertPinnedCleanCheckout(cfg.repoDir, cfg.pinnedCommit, runGit);
 
   const captures = [];
-  for (const { file, target } of CAPTURE_FILES) {
+  for (const { file, target, allowEmpty = false } of CAPTURE_FILES) {
     const rows = await readPinnedCsv(cfg.repoDir, cfg.pinnedCommit, file, runGit);
-    if (!rows.length) {
+    if (!rows.length && !allowEmpty) {
       throw new Error(
         `REFUSING TO LOAD. warner-bros/${file} parsed to ZERO rows at the pinned commit. ` +
           "An empty capture file is a failed extract, never an empty population."
@@ -766,7 +766,7 @@ async function main() {
     for (const capture of captures) {
       await loadCapture(client, cfg, capture);
     }
-    console.log("  ALL EIGHT CAPTURES COMPLETE.");
+    console.log("  ALL ELEVEN CAPTURES COMPLETE.");
   } finally {
     await client.end();
   }

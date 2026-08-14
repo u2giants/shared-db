@@ -188,6 +188,18 @@ test("an empty capture file is refused rather than treated as an empty populatio
   await assert.rejects(prepareCaptures(resolveRunConfig(baseEnv), { git: g.run }), /parsed to ZERO rows/);
 });
 
+test("the direct Franchise-to-Property evidence stream may truthfully contain zero rows", async () => {
+  const file = "links-franchise-property-evidence.csv";
+  const header = CAPTURE_FILES.find((c) => c.file === file).requiredHeaders.join(",");
+  const g = fakeGit({ files: { [file]: `${header}\n` } });
+  const captures = await prepareCaptures(resolveRunConfig(baseEnv), { git: g.run });
+  const evidence = captures.find((c) => c.file === file);
+  assert.equal(evidence.rowCount, 0);
+  assert.deepEqual(evidence.chunks, []);
+  assert.equal(evidence.manifestSha256, sha256(""));
+  assert.equal(captures.filter((c) => c.rowCount === 0).length, 1);
+});
+
 // ---------------------------------------------------------------------------
 // REFUSAL 1 -- dirty tree / wrong HEAD
 // ---------------------------------------------------------------------------
@@ -504,6 +516,25 @@ test("a capture streams begin, every chunk in order, then finalize", async () =>
   assert.equal(c.queries[0].args[3], c.queries[3].args[1]);
   // The declared row count is sent up front.
   assert.equal(c.queries[0].args[4], 3);
+});
+
+test("a truthful zero-row evidence capture begins and finalizes without inventing a chunk", async () => {
+  const c = fakeClient({
+    on: (sql) => sql.includes("finalize_wb_capture")
+      ? { rows: [{ rows_seen: 0, rows_landed: 0, rows_inserted: 0, rows_updated: 0, rows_unchanged: 0, rows_collapsed: 0, rows_missing: 0 }] }
+      : undefined,
+  });
+  const empty = {
+    file: "links-franchise-property-evidence.csv",
+    target: "wb_franchise_property_evidence",
+    rowCount: 0,
+    chunks: [],
+    manifestSha256: chainDigest([]),
+  };
+  const result = await loadCapture(c, resolveRunConfig(baseEnv), empty, () => {});
+  assert.equal(result.report.rows_seen, 0);
+  assert.deepEqual(c.queries.map((q) => q.sql.match(/plm\.\w+/)[0]), ["plm.begin_wb_capture", "plm.finalize_wb_capture"]);
+  assert.equal(c.queries[0].args[4], 0);
 });
 
 test("a chunk whose reported row count differs is treated as a silent drop and fails the run", async () => {
