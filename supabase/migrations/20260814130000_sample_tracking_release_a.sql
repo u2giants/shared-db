@@ -196,6 +196,29 @@ ALTER TABLE dflow.sample_shipment_line
 ALTER TABLE dflow.sample_shipment_line ALTER COLUMN box_id_fk DROP NOT NULL;
 ALTER TABLE dflow.sample_shipment_line ADD CONSTRAINT sample_shipment_line_box_or_header_check
   CHECK (box_id_fk IS NOT NULL OR sample_shipment_id IS NOT NULL);
+
+CREATE OR REPLACE FUNCTION dflow.validate_sample_shipment_line_header()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_header dflow.sample_shipment;
+BEGIN
+  IF NEW.sample_shipment_id IS NULL THEN RETURN NEW; END IF;
+  SELECT * INTO v_header FROM dflow.sample_shipment WHERE sample_shipment_id=NEW.sample_shipment_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Shipment header % does not exist',NEW.sample_shipment_id USING ERRCODE='23503';
+  END IF;
+  IF NEW.origin_location_type IS DISTINCT FROM v_header.origin_location_type
+     OR NEW.origin_location_id IS DISTINCT FROM v_header.origin_location_id
+     OR NEW.destination_location_type IS DISTINCT FROM v_header.destination_location_type
+     OR NEW.destination_location_id IS DISTINCT FROM v_header.destination_location_id THEN
+    RAISE EXCEPTION 'Shipment line route must match shipment header %',NEW.sample_shipment_id
+      USING ERRCODE='23514';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER sample_shipment_line_header_route
+BEFORE INSERT OR UPDATE OF sample_shipment_id,origin_location_type,origin_location_id,
+  destination_location_type,destination_location_id ON dflow.sample_shipment_line
+FOR EACH ROW EXECUTE FUNCTION dflow.validate_sample_shipment_line_header();
 CREATE INDEX sample_shipment_line_header_idx ON dflow.sample_shipment_line(sample_shipment_id, shipment_line_id)
   WHERE sample_shipment_id IS NOT NULL;
 
@@ -205,7 +228,8 @@ ALTER TABLE dflow.sample_box
 ALTER TABLE dflow.sample_box
   ADD CONSTRAINT sample_box_custody_pair_check CHECK (
     (current_custody_type IS NULL AND current_custody_id IS NULL) OR
-    (current_custody_type IN ('factory','office','customer','warehouse','in_transit') AND btrim(current_custody_id) <> '')
+    (current_custody_type IN ('factory','office','customer','warehouse','in_transit')
+      AND current_custody_id IS NOT NULL AND btrim(current_custody_id) <> '')
   );
 CREATE UNIQUE INDEX sample_box_active_name_custody_uniq
   ON dflow.sample_box (lower(btrim(box_label)), current_custody_type, current_custody_id)
@@ -298,6 +322,10 @@ DECLARE
   v_result dflow.sample_movement;
   v_shipment_id bigint;
   v_line_box_id integer;
+  v_line_origin_type text;
+  v_line_origin_id text;
+  v_line_destination_type text;
+  v_line_destination_id text;
 BEGIN
   PERFORM pg_advisory_xact_lock(21450, p_sample_id);
   SELECT * INTO v_existing FROM dflow.sample_movement
@@ -309,7 +337,10 @@ BEGIN
     RETURN v_existing;
   END IF;
   IF p_shipment_line_id IS NOT NULL THEN
-    SELECT sample_shipment_id,box_id_fk INTO v_shipment_id,v_line_box_id
+    SELECT sample_shipment_id,box_id_fk,origin_location_type,origin_location_id,
+           destination_location_type,destination_location_id
+      INTO v_shipment_id,v_line_box_id,v_line_origin_type,v_line_origin_id,
+           v_line_destination_type,v_line_destination_id
     FROM dflow.sample_shipment_line
     WHERE shipment_line_id = p_shipment_line_id AND sample_id_fk = p_sample_id;
     IF NOT FOUND THEN
@@ -318,6 +349,20 @@ BEGIN
     END IF;
     IF p_box_id IS DISTINCT FROM v_line_box_id THEN
       RAISE EXCEPTION 'Box % does not match shipment line % box %',p_box_id,p_shipment_line_id,v_line_box_id
+        USING ERRCODE='23514';
+    END IF;
+    IF p_action IN ('ship','pack') AND (
+      p_from_type IS DISTINCT FROM v_line_origin_type OR p_from_id IS DISTINCT FROM v_line_origin_id
+      OR p_to_type <> 'in_transit'
+    ) THEN
+      RAISE EXCEPTION 'Ship movement route does not match shipment line %',p_shipment_line_id
+        USING ERRCODE='23514';
+    END IF;
+    IF p_action = 'receive' AND (
+      p_from_type <> 'in_transit' OR p_to_type IS DISTINCT FROM v_line_destination_type
+      OR p_to_id IS DISTINCT FROM v_line_destination_id
+    ) THEN
+      RAISE EXCEPTION 'Receive movement route does not match shipment line %',p_shipment_line_id
         USING ERRCODE='23514';
     END IF;
   END IF;
@@ -379,7 +424,7 @@ REVOKE ALL ON dflow.sample_creation_batch,dflow.sample_workflow,dflow.sample_pat
   dflow.sample_carrier,dflow.sample_shipment,dflow.sample_inventory FROM anon,authenticated;
 REVOKE ALL ON FUNCTION dflow.reject_sample_path_revision_mutation(),
   dflow.validate_sample_path_revision(),dflow.require_sample_path_revision(),
-  dflow.apply_sample_path_revision()
+  dflow.apply_sample_path_revision(),dflow.validate_sample_shipment_line_header()
   FROM PUBLIC,anon,authenticated;
 
 COMMIT;

@@ -37,6 +37,12 @@ BEGIN
     RAISE EXCEPTION 'invalid workflow/path pair was accepted';
   EXCEPTION WHEN check_violation THEN NULL;
   END;
+  BEGIN
+    INSERT INTO dflow.sample_box(box_label,direction,status,ownership_state,current_custody_type,current_custody_id)
+    VALUES('release-a-null-custody','outbound','packing','internal','office',NULL);
+    RAISE EXCEPTION 'box custody type without custody ID was accepted';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
 
   INSERT INTO dflow.sample_path_revision(sample_workflow_id,revision,business_path,reason,changed_by_user)
   VALUES(v_workflow,1,'nyo_ningbo','initial path','contract-test');
@@ -78,6 +84,15 @@ BEGIN
     request_hash,created_by_user,created_by_role,sample_shipment_id)
   VALUES(v_sample,v_box,1,'warehouse','china_warehouse','office','ningbo','warehouse_to_ningbo','packed',
     'release-a-line','hash-l','contract-test','production',v_shipment);
+  BEGIN
+    INSERT INTO dflow.sample_shipment_line(sample_id_fk,box_id_fk,quantity_intended,origin_location_type,
+      origin_location_id,destination_location_type,destination_location_id,route_leg,state,idempotency_key,
+      request_hash,created_by_user,created_by_role,sample_shipment_id)
+    VALUES(v_sample,v_box,1,'office','nyc','office','ningbo','nyc_to_ningbo','packed',
+      'release-a-route-mismatch','hash-rm','contract-test','production',v_shipment);
+    RAISE EXCEPTION 'shipment line route was allowed to contradict its header';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
 
   INSERT INTO dflow.sample(origin,direction,sample_name,status,quantity_migration_state)
   VALUES('factory_offer','inbound','release-a-unboxed','created','known')
