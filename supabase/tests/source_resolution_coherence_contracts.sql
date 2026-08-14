@@ -90,8 +90,12 @@ declare v_has boolean; v_first text; v_second_failed boolean := false;
 begin
   select exists (select 1 from pg_extension where extname='dblink') into v_has;
   if not v_has then raise exception 'first-writer race requires dblink; concurrency proof cannot be skipped'; end if;
-  perform dblink_connect('sr_first','dbname='||current_database());
-  perform dblink_connect('sr_second','dbname='||current_database());
+  -- This contract suite runs only against Supabase's throwaway local database. From inside
+  -- that database container the documented fixture connection is postgres/postgres on 5432.
+  -- Naming it here makes the two-backend proof deterministic; shared preview is verified by
+  -- the governed preview workflow, not by running this ephemeral-only suite there.
+  perform dblink_connect('sr_first','host=127.0.0.1 port=5432 dbname=postgres user=postgres password=postgres');
+  perform dblink_connect('sr_second','host=127.0.0.1 port=5432 dbname=postgres user=postgres password=postgres');
   perform dblink_send_query('sr_first', $q$
     with d as materialized (select plm.set_source_resolution('zztest-race','property','same-key','unresolved',null,null,null,null,'first',null) row),
          pause as materialized (select pg_sleep(1) from d)
