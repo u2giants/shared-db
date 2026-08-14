@@ -16,10 +16,13 @@ begin
     raise exception 'direct source_resolution mutation grants exist: %', v_count;
   end if;
 
-  if has_function_privilege('PUBLIC',
-       'plm.set_source_resolution(text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz)',
-       'EXECUTE')
-     or has_function_privilege('anon',
+  if exists (
+       select 1
+       from pg_proc p,
+            aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+       where p.oid = 'plm.set_source_resolution(text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz)'::regprocedure
+         and acl.grantee = 0 and acl.privilege_type = 'EXECUTE'
+     ) or has_function_privilege('anon',
        'plm.set_source_resolution(text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz)',
        'EXECUTE') then
     raise exception 'source resolution command is executable by PUBLIC/anon';
