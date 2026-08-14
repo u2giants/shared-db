@@ -1,0 +1,140 @@
+-- Fix forward from the exact Release A migration already applied to preview.
+-- Preserve legacy headerless shipment-line behavior while enforcing complete
+-- identity and route consistency for Release A header-backed shipments.
+BEGIN;
+
+CREATE OR REPLACE FUNCTION dflow.prevent_sample_shipment_route_drift()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF (NEW.origin_location_type,NEW.origin_location_id,
+      NEW.destination_location_type,NEW.destination_location_id)
+     IS DISTINCT FROM
+     (OLD.origin_location_type,OLD.origin_location_id,
+      OLD.destination_location_type,OLD.destination_location_id)
+     AND EXISTS (
+       SELECT 1 FROM dflow.sample_shipment_line
+       WHERE sample_shipment_id=OLD.sample_shipment_id
+     ) THEN
+    RAISE EXCEPTION 'Shipment route cannot change after lines are attached'
+      USING ERRCODE='55000';
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS sample_shipment_route_immutable_after_lines ON dflow.sample_shipment;
+CREATE TRIGGER sample_shipment_route_immutable_after_lines
+BEFORE UPDATE OF origin_location_type,origin_location_id,
+  destination_location_type,destination_location_id ON dflow.sample_shipment
+FOR EACH ROW EXECUTE FUNCTION dflow.prevent_sample_shipment_route_drift();
+
+CREATE OR REPLACE FUNCTION dflow.validate_sample_movement_shipment_identity()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_line dflow.sample_shipment_line;
+BEGIN
+  IF NEW.shipment_line_id IS NULL THEN RETURN NEW; END IF;
+  SELECT * INTO v_line FROM dflow.sample_shipment_line
+  WHERE shipment_line_id=NEW.shipment_line_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Shipment line % does not exist',NEW.shipment_line_id USING ERRCODE='23503';
+  END IF;
+  IF NEW.sample_id_fk IS DISTINCT FROM v_line.sample_id_fk
+     OR NEW.box_id_fk IS DISTINCT FROM v_line.box_id_fk
+     OR NEW.sample_shipment_id IS DISTINCT FROM v_line.sample_shipment_id THEN
+    RAISE EXCEPTION 'Movement identity does not match shipment line %',NEW.shipment_line_id
+      USING ERRCODE='23514';
+  END IF;
+  IF v_line.sample_shipment_id IS NOT NULL AND NOT (
+    (NEW.from_location_type IS NOT DISTINCT FROM v_line.origin_location_type
+      AND NEW.from_location_id IS NOT DISTINCT FROM v_line.origin_location_id
+      AND NEW.to_location_type='in_transit')
+    OR
+    (NEW.from_location_type='in_transit'
+      AND NEW.to_location_type IS NOT DISTINCT FROM v_line.destination_location_type
+      AND NEW.to_location_id IS NOT DISTINCT FROM v_line.destination_location_id)
+  ) THEN
+    RAISE EXCEPTION 'Movement route does not match shipment line %',NEW.shipment_line_id
+      USING ERRCODE='23514';
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS sample_movement_shipment_identity ON dflow.sample_movement;
+CREATE TRIGGER sample_movement_shipment_identity
+BEFORE INSERT ON dflow.sample_movement
+FOR EACH ROW EXECUTE FUNCTION dflow.validate_sample_movement_shipment_identity();
+
+CREATE OR REPLACE FUNCTION dflow.post_sample_movement(
+  p_sample_id integer, p_quantity integer,
+  p_from_type text, p_from_id text, p_to_type text, p_to_id text,
+  p_action text, p_actor_user text, p_actor_role text,
+  p_idempotency_key text, p_request_hash text,
+  p_box_id integer DEFAULT NULL, p_shipment_line_id bigint DEFAULT NULL,
+  p_actor_factory_id integer DEFAULT NULL, p_discrepancy_code text DEFAULT NULL,
+  p_discrepancy_details text DEFAULT NULL, p_reversal_of bigint DEFAULT NULL,
+  p_from_label text DEFAULT NULL, p_to_label text DEFAULT NULL
+) RETURNS dflow.sample_movement LANGUAGE plpgsql SECURITY INVOKER AS $$
+DECLARE
+  v_existing dflow.sample_movement;
+  v_result dflow.sample_movement;
+  v_shipment_id bigint;
+  v_line_box_id integer;
+  v_line_origin_type text;
+  v_line_origin_id text;
+  v_line_destination_type text;
+  v_line_destination_id text;
+BEGIN
+  PERFORM pg_advisory_xact_lock(21450, p_sample_id);
+  SELECT * INTO v_existing FROM dflow.sample_movement
+   WHERE sample_id_fk=p_sample_id AND idempotency_key=p_idempotency_key;
+  IF FOUND THEN
+    IF v_existing.request_hash <> p_request_hash THEN
+      RAISE EXCEPTION 'Idempotency key reused with different request' USING ERRCODE='23505';
+    END IF;
+    RETURN v_existing;
+  END IF;
+  IF p_shipment_line_id IS NOT NULL THEN
+    SELECT sample_shipment_id,box_id_fk,origin_location_type,origin_location_id,
+           destination_location_type,destination_location_id
+      INTO v_shipment_id,v_line_box_id,v_line_origin_type,v_line_origin_id,
+           v_line_destination_type,v_line_destination_id
+    FROM dflow.sample_shipment_line
+    WHERE shipment_line_id = p_shipment_line_id AND sample_id_fk = p_sample_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Shipment line % does not belong to sample %', p_shipment_line_id, p_sample_id
+        USING ERRCODE='23503';
+    END IF;
+    IF p_box_id IS DISTINCT FROM v_line_box_id THEN
+      RAISE EXCEPTION 'Box % does not match shipment line % box %',p_box_id,p_shipment_line_id,v_line_box_id
+        USING ERRCODE='23514';
+    END IF;
+    IF v_shipment_id IS NOT NULL AND p_action IN ('ship','pack') AND (
+      p_from_type IS DISTINCT FROM v_line_origin_type OR p_from_id IS DISTINCT FROM v_line_origin_id
+      OR p_to_type <> 'in_transit'
+    ) THEN
+      RAISE EXCEPTION 'Ship movement route does not match shipment line %',p_shipment_line_id
+        USING ERRCODE='23514';
+    END IF;
+    IF v_shipment_id IS NOT NULL AND p_action = 'receive' AND (
+      p_from_type <> 'in_transit' OR p_to_type IS DISTINCT FROM v_line_destination_type
+      OR p_to_id IS DISTINCT FROM v_line_destination_id
+    ) THEN
+      RAISE EXCEPTION 'Receive movement route does not match shipment line %',p_shipment_line_id
+        USING ERRCODE='23514';
+    END IF;
+  END IF;
+  INSERT INTO dflow.sample_movement(sample_id_fk,quantity,from_location_type,from_location_id,
+    from_location_label,to_location_type,to_location_id,to_location_label,box_id_fk,shipment_line_id,
+    sample_shipment_id,lifecycle_action,actor_user,actor_role,actor_factory_id,idempotency_key,
+    request_hash,discrepancy_code,discrepancy_details,reversal_of_movement_id)
+  VALUES(p_sample_id,p_quantity,p_from_type,p_from_id,p_from_label,p_to_type,p_to_id,p_to_label,
+    p_box_id,p_shipment_line_id,v_shipment_id,p_action,p_actor_user,p_actor_role,p_actor_factory_id,
+    p_idempotency_key,p_request_hash,p_discrepancy_code,p_discrepancy_details,p_reversal_of)
+  RETURNING * INTO v_result;
+  RETURN v_result;
+END $$;
+
+REVOKE ALL ON FUNCTION dflow.prevent_sample_shipment_route_drift(),
+  dflow.validate_sample_movement_shipment_identity()
+  FROM PUBLIC,anon,authenticated;
+
+COMMIT;

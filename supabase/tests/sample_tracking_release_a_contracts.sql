@@ -85,6 +85,12 @@ BEGIN
   VALUES(v_sample,v_box,1,'warehouse','china_warehouse','office','ningbo','warehouse_to_ningbo','packed',
     'release-a-line','hash-l','contract-test','production',v_shipment);
   BEGIN
+    UPDATE dflow.sample_shipment SET destination_location_id='nyc'
+    WHERE sample_shipment_id=v_shipment;
+    RAISE EXCEPTION 'shipment header route changed after lines were attached';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL;
+  END;
+  BEGIN
     INSERT INTO dflow.sample_shipment_line(sample_id_fk,box_id_fk,quantity_intended,origin_location_type,
       origin_location_id,destination_location_type,destination_location_id,route_leg,state,idempotency_key,
       request_hash,created_by_user,created_by_role,sample_shipment_id)
@@ -112,6 +118,23 @@ BEGIN
                    AND box_id_fk IS NULL AND to_location_type='in_transit') THEN
     RAISE EXCEPTION 'unboxed shipment movement did not retain shipment identity';
   END IF;
+  BEGIN
+    INSERT INTO dflow.sample_movement(sample_id_fk,quantity,from_location_type,from_location_id,
+      to_location_type,to_location_id,box_id_fk,shipment_line_id,sample_shipment_id,lifecycle_action,
+      actor_user,actor_role,idempotency_key,request_hash)
+    VALUES(v_unboxed_sample,1,'terminal','created','in_transit',v_shipment::text,
+      NULL,(SELECT shipment_line_id FROM dflow.sample_shipment_line WHERE sample_id_fk=v_sample),
+      v_shipment,'ship','contract-test','production','release-a-direct-bypass','hash-db');
+    RAISE EXCEPTION 'direct movement insert bypassed shipment identity enforcement';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    PERFORM dflow.post_sample_movement(v_sample,1,'terminal','created','office','nyc',
+      'return','contract-test','production','release-a-off-route','hash-or',v_box,
+      (SELECT shipment_line_id FROM dflow.sample_shipment_line WHERE sample_id_fk=v_sample));
+    RAISE EXCEPTION 'non-ship action bypassed shipment route enforcement';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
   BEGIN
     PERFORM dflow.post_sample_movement(v_sample,1,'warehouse','china_warehouse','in_transit',
       v_shipment::text,'ship','contract-test','production','release-a-wrong-box','hash-wb',NULL,
