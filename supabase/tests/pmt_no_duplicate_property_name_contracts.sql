@@ -138,6 +138,7 @@ declare
   d_norm text := regexp_replace(pg_get_functiondef('plm.load_pmt_capture_chunk'::regproc),
                                 '[[:space:]]+', ' ', 'g');
   d_low  text := lower(pg_get_functiondef('plm.load_pmt_capture_chunk'::regproc));
+  v_search_path_config text;
 begin
   raise notice '=== B. LIVE load_pmt_capture_chunk BODY ===';
 
@@ -164,8 +165,17 @@ begin
   if position('security definer' in d_low) = 0 then
     raise exception 'B FAILED: SECURITY DEFINER lost';
   end if;
-  if position('set search_path' in d_low) = 0
-     or position('plm, core, public, extensions' in d_norm) = 0 then
+
+  -- pg_get_functiondef normalizes SET syntax and quoting, so inspect the catalog's
+  -- stored per-function setting instead of matching rendered SQL text.
+  select cfg into v_search_path_config
+  from pg_proc p
+  cross join lateral unnest(p.proconfig) as cfg
+  where p.oid = 'plm.load_pmt_capture_chunk'::regproc
+    and cfg like 'search_path=%';
+
+  if regexp_replace(coalesce(v_search_path_config, ''), '[[:space:]"]+', '', 'g')
+       <> 'search_path=plm,core,public,extensions' then
     raise exception 'B FAILED: pinned search_path lost';
   end if;
   if position('not (p_target = any (c_targets))' in d) = 0 then
