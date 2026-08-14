@@ -4,7 +4,16 @@ create extension if not exists dblink with schema extensions;
 -- Supabase owns extension functions with its platform administrator role and
 -- intentionally revokes this unsafe helper from PUBLIC. Grant it only to the
 -- current throwaway-test role; the enclosing transaction rolls this back.
-grant execute on function extensions.dblink_connect_u(text, text) to current_user;
+set local role supabase_admin;
+do $$
+begin
+  execute format(
+    'grant execute on function extensions.dblink_connect_u(text, text) to %I',
+    session_user
+  );
+end;
+$$;
+reset role;
 
 do $$
 declare
