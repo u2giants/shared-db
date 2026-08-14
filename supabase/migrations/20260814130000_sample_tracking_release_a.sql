@@ -66,6 +66,63 @@ CREATE TABLE dflow.sample_path_revision (
   UNIQUE (sample_workflow_id, revision)
 );
 
+CREATE OR REPLACE FUNCTION dflow.validate_sample_path_revision()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  v_workflow_type text;
+  v_expected_revision integer;
+BEGIN
+  SELECT workflow_type INTO v_workflow_type
+  FROM dflow.sample_workflow
+  WHERE sample_workflow_id = NEW.sample_workflow_id
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Sample workflow % does not exist', NEW.sample_workflow_id USING ERRCODE = '23503';
+  END IF;
+  IF NOT (
+    (v_workflow_type = 'nyo_purchased_factory_reference' AND NEW.business_path IN ('nyo_ningbo','nyo_factory')) OR
+    (v_workflow_type = 'vendor_unsolicited_offer' AND NEW.business_path IN ('factory_ningbo_nyo','factory_nyo')) OR
+    (v_workflow_type = 'nyo_factory_make_request' AND NEW.business_path IN ('factory_ningbo_nyo','factory_ningbo_customer')) OR
+    (v_workflow_type = 'nyo_remote_china_inventory_request' AND NEW.business_path IN (
+      'china_warehouse_ningbo_nyo','china_warehouse_ningbo_customer','ningbo_nyo','ningbo_customer'
+    ))
+  ) THEN
+    RAISE EXCEPTION 'Path % is invalid for workflow type %', NEW.business_path, v_workflow_type
+      USING ERRCODE = '23514';
+  END IF;
+  SELECT COALESCE(max(revision),0) + 1 INTO v_expected_revision
+  FROM dflow.sample_path_revision WHERE sample_workflow_id = NEW.sample_workflow_id;
+  IF NEW.revision <> v_expected_revision THEN
+    RAISE EXCEPTION 'Path revision must be %, received %', v_expected_revision, NEW.revision
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER sample_path_revision_validate
+BEFORE INSERT ON dflow.sample_path_revision
+FOR EACH ROW EXECUTE FUNCTION dflow.validate_sample_path_revision();
+
+CREATE OR REPLACE FUNCTION dflow.require_sample_path_revision()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.business_path IS DISTINCT FROM OLD.business_path AND NOT EXISTS (
+    SELECT 1 FROM dflow.sample_path_revision r
+    WHERE r.sample_workflow_id = NEW.sample_workflow_id
+      AND r.business_path = NEW.business_path
+      AND r.revision = (SELECT max(r2.revision) FROM dflow.sample_path_revision r2
+                        WHERE r2.sample_workflow_id = NEW.sample_workflow_id)
+  ) THEN
+    RAISE EXCEPTION 'Insert the append-only path revision before changing the workflow path'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER sample_workflow_path_revision_required
+BEFORE UPDATE OF business_path ON dflow.sample_workflow
+FOR EACH ROW EXECUTE FUNCTION dflow.require_sample_path_revision();
+
 CREATE OR REPLACE FUNCTION dflow.reject_sample_path_revision_mutation()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -123,6 +180,9 @@ CREATE UNIQUE INDEX sample_shipment_active_tracking_uniq
 
 ALTER TABLE dflow.sample_shipment_line
   ADD COLUMN sample_shipment_id bigint REFERENCES dflow.sample_shipment(sample_shipment_id) ON UPDATE CASCADE ON DELETE RESTRICT;
+ALTER TABLE dflow.sample_shipment_line ALTER COLUMN box_id_fk DROP NOT NULL;
+ALTER TABLE dflow.sample_shipment_line ADD CONSTRAINT sample_shipment_line_box_or_header_check
+  CHECK (box_id_fk IS NOT NULL OR sample_shipment_id IS NOT NULL);
 CREATE INDEX sample_shipment_line_header_idx ON dflow.sample_shipment_line(sample_shipment_id, shipment_line_id)
   WHERE sample_shipment_id IS NOT NULL;
 
@@ -186,6 +246,74 @@ ALTER TABLE dflow.sample_movement DROP CONSTRAINT sample_movement_to_location_ty
 ALTER TABLE dflow.sample_movement ADD CONSTRAINT sample_movement_to_location_type_check
   CHECK (to_location_type IN ('factory','office','customer','warehouse','in_transit','terminal'));
 
+ALTER TABLE dflow.sample_movement
+  ADD COLUMN sample_shipment_id bigint REFERENCES dflow.sample_shipment(sample_shipment_id) ON UPDATE CASCADE ON DELETE RESTRICT;
+DO $$
+DECLARE v_name text;
+BEGIN
+  SELECT conname INTO v_name FROM pg_constraint
+  WHERE conrelid='dflow.sample_movement'::regclass AND contype='c'
+    AND pg_get_constraintdef(oid) LIKE '%box_id_fk IS NOT NULL%'
+    AND pg_get_constraintdef(oid) LIKE '%shipment_line_id IS NOT NULL%';
+  IF v_name IS NULL THEN
+    RAISE EXCEPTION 'Could not identify the existing sample movement transit identity guard';
+  END IF;
+  EXECUTE format('ALTER TABLE dflow.sample_movement DROP CONSTRAINT %I',v_name);
+END $$;
+ALTER TABLE dflow.sample_movement DROP CONSTRAINT sample_movement_transit_box_identity_check;
+ALTER TABLE dflow.sample_movement ADD CONSTRAINT sample_movement_transit_identity_check CHECK (
+  (from_location_type <> 'in_transit' AND to_location_type <> 'in_transit') OR
+  (shipment_line_id IS NOT NULL AND (box_id_fk IS NOT NULL OR sample_shipment_id IS NOT NULL))
+);
+ALTER TABLE dflow.sample_movement ADD CONSTRAINT sample_movement_transit_location_identity_check CHECK (
+  (from_location_type <> 'in_transit' OR from_location_id = COALESCE(box_id_fk::text,sample_shipment_id::text)) AND
+  (to_location_type <> 'in_transit' OR to_location_id = COALESCE(box_id_fk::text,sample_shipment_id::text))
+);
+
+CREATE OR REPLACE FUNCTION dflow.post_sample_movement(
+  p_sample_id integer, p_quantity integer,
+  p_from_type text, p_from_id text, p_to_type text, p_to_id text,
+  p_action text, p_actor_user text, p_actor_role text,
+  p_idempotency_key text, p_request_hash text,
+  p_box_id integer DEFAULT NULL, p_shipment_line_id bigint DEFAULT NULL,
+  p_actor_factory_id integer DEFAULT NULL, p_discrepancy_code text DEFAULT NULL,
+  p_discrepancy_details text DEFAULT NULL, p_reversal_of bigint DEFAULT NULL,
+  p_from_label text DEFAULT NULL, p_to_label text DEFAULT NULL
+) RETURNS dflow.sample_movement LANGUAGE plpgsql SECURITY INVOKER AS $$
+DECLARE
+  v_existing dflow.sample_movement;
+  v_result dflow.sample_movement;
+  v_shipment_id bigint;
+BEGIN
+  PERFORM pg_advisory_xact_lock(21450, p_sample_id);
+  SELECT * INTO v_existing FROM dflow.sample_movement
+   WHERE sample_id_fk=p_sample_id AND idempotency_key=p_idempotency_key;
+  IF FOUND THEN
+    IF v_existing.request_hash <> p_request_hash THEN
+      RAISE EXCEPTION 'Idempotency key reused with different request' USING ERRCODE='23505';
+    END IF;
+    RETURN v_existing;
+  END IF;
+  IF p_shipment_line_id IS NOT NULL THEN
+    SELECT sample_shipment_id INTO v_shipment_id
+    FROM dflow.sample_shipment_line
+    WHERE shipment_line_id = p_shipment_line_id AND sample_id_fk = p_sample_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Shipment line % does not belong to sample %', p_shipment_line_id, p_sample_id
+        USING ERRCODE='23503';
+    END IF;
+  END IF;
+  INSERT INTO dflow.sample_movement(sample_id_fk,quantity,from_location_type,from_location_id,
+    from_location_label,to_location_type,to_location_id,to_location_label,box_id_fk,shipment_line_id,
+    sample_shipment_id,lifecycle_action,actor_user,actor_role,actor_factory_id,idempotency_key,
+    request_hash,discrepancy_code,discrepancy_details,reversal_of_movement_id)
+  VALUES(p_sample_id,p_quantity,p_from_type,p_from_id,p_from_label,p_to_type,p_to_id,p_to_label,
+    p_box_id,p_shipment_line_id,v_shipment_id,p_action,p_actor_user,p_actor_role,p_actor_factory_id,
+    p_idempotency_key,p_request_hash,p_discrepancy_code,p_discrepancy_details,p_reversal_of)
+  RETURNING * INTO v_result;
+  RETURN v_result;
+END $$;
+
 CREATE OR REPLACE VIEW dflow.sample_inventory AS
 SELECT
   b.sample_id_fk,
@@ -231,6 +359,8 @@ COMMENT ON VIEW dflow.sample_inventory IS 'Server inventory read model derived f
 
 REVOKE ALL ON dflow.sample_creation_batch,dflow.sample_workflow,dflow.sample_path_revision,
   dflow.sample_carrier,dflow.sample_shipment,dflow.sample_inventory FROM anon,authenticated;
-REVOKE ALL ON FUNCTION dflow.reject_sample_path_revision_mutation() FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION dflow.reject_sample_path_revision_mutation(),
+  dflow.validate_sample_path_revision(),dflow.require_sample_path_revision()
+  FROM PUBLIC,anon,authenticated;
 
 COMMIT;

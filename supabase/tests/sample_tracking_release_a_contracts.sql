@@ -4,6 +4,8 @@ BEGIN;
 DO $$
 DECLARE
   v_sample integer;
+  v_invalid_sample integer;
+  v_unboxed_sample integer;
   v_box integer;
   v_batch bigint;
   v_workflow bigint;
@@ -27,14 +29,25 @@ BEGIN
   RETURNING sample_workflow_id INTO v_workflow;
 
   BEGIN
+    INSERT INTO dflow.sample(origin,direction,sample_name,status,quantity_migration_state)
+    VALUES('factory_offer','inbound','release-a-invalid-path','created','known')
+    RETURNING sample_id_pk INTO v_invalid_sample;
     INSERT INTO dflow.sample_workflow(sample_id_fk,workflow_type,business_path,created_by_user)
-    VALUES(v_sample,'vendor_unsolicited_offer','nyo_factory','contract-test');
+    VALUES(v_invalid_sample,'vendor_unsolicited_offer','nyo_factory','contract-test');
     RAISE EXCEPTION 'invalid workflow/path pair was accepted';
-  EXCEPTION WHEN check_violation OR unique_violation THEN NULL;
+  EXCEPTION WHEN check_violation THEN NULL;
   END;
 
   INSERT INTO dflow.sample_path_revision(sample_workflow_id,revision,business_path,reason,changed_by_user)
   VALUES(v_workflow,1,'nyo_ningbo','initial path','contract-test');
+  BEGIN
+    UPDATE dflow.sample_workflow SET business_path='nyo_factory' WHERE sample_workflow_id=v_workflow;
+    RAISE EXCEPTION 'workflow path changed without a matching revision';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL;
+  END;
+  INSERT INTO dflow.sample_path_revision(sample_workflow_id,revision,business_path,reason,changed_by_user)
+  VALUES(v_workflow,2,'nyo_factory','approved reroute','contract-test');
+  UPDATE dflow.sample_workflow SET business_path='nyo_factory' WHERE sample_workflow_id=v_workflow;
   BEGIN
     UPDATE dflow.sample_path_revision SET reason='rewritten' WHERE sample_workflow_id=v_workflow;
     RAISE EXCEPTION 'append-only path revision was mutable';
@@ -63,6 +76,25 @@ BEGIN
     request_hash,created_by_user,created_by_role,sample_shipment_id)
   VALUES(v_sample,v_box,1,'warehouse','china_warehouse','office','ningbo','warehouse_to_ningbo','packed',
     'release-a-line','hash-l','contract-test','production',v_shipment);
+
+  INSERT INTO dflow.sample(origin,direction,sample_name,status,quantity_migration_state)
+  VALUES('factory_offer','inbound','release-a-unboxed','created','known')
+  RETURNING sample_id_pk INTO v_unboxed_sample;
+  INSERT INTO dflow.sample_shipment_line(sample_id_fk,box_id_fk,quantity_intended,origin_location_type,
+    origin_location_id,destination_location_type,destination_location_id,route_leg,state,idempotency_key,
+    request_hash,created_by_user,created_by_role,sample_shipment_id)
+  VALUES(v_unboxed_sample,NULL,1,'warehouse','china_warehouse','office','ningbo','warehouse_to_ningbo','packed',
+    'release-a-unboxed-line','hash-ul','contract-test','production',v_shipment);
+  PERFORM dflow.post_sample_movement(v_unboxed_sample,1,'terminal','created','warehouse','china_warehouse',
+    'create','contract-test','production','release-a-unboxed-create','hash-um1');
+  PERFORM dflow.post_sample_movement(v_unboxed_sample,1,'warehouse','china_warehouse','in_transit',
+    v_shipment::text,'ship','contract-test','production','release-a-unboxed-ship','hash-um2',NULL,
+    (SELECT shipment_line_id FROM dflow.sample_shipment_line WHERE sample_id_fk=v_unboxed_sample));
+  IF NOT EXISTS (SELECT 1 FROM dflow.sample_movement
+                 WHERE sample_id_fk=v_unboxed_sample AND sample_shipment_id=v_shipment
+                   AND box_id_fk IS NULL AND to_location_type='in_transit') THEN
+    RAISE EXCEPTION 'unboxed shipment movement did not retain shipment identity';
+  END IF;
 
   PERFORM dflow.post_sample_movement(v_sample,1,'terminal','created','warehouse','china_warehouse',
     'create','contract-test','production','release-a-create','hash-m');
