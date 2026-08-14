@@ -83,40 +83,25 @@ create trigger opa_link_ensure_entities
 
 revoke all on function plm.opa_link_ensure_entities() from public;
 
--- Prove the regression is actually gone: a link row for a property and character that do
--- not yet exist must now succeed and must create both entities. Rolled back either way, so
--- this leaves no test data behind.
+-- Assert the trigger is actually installed. The functional proof that the regression is
+-- gone belongs to supabase/tests/opa_property_character_importer_contracts.sql and
+-- opa_property_character_landing_contracts.sql, which load real snapshots through
+-- plm.sync_opa_property_character(). An insert here would have to satisfy every business
+-- CHECK on the landing table (line of business, entitlement scope, option source), which
+-- makes it a brittle duplicate of those tests rather than an independent check.
 do $$
-declare
-  v_prop bigint := -999000001;
-  v_char bigint := -999000002;
-  v_props bigint;
-  v_chars bigint;
 begin
-  -- Every NOT NULL column is supplied explicitly. brand_property_id is NOT NULL on this
-  -- table, so it gets a negative sentinel like the other two ids rather than null.
-  insert into plm.opa_property_character (
-    licensed_property_id, character_id, property_name, character_name,
-    brand_property_id, option_source_id, captured_at, source_url, line_of_business,
-    entitlement_scope, raw, source_hash
-  ) values (
-    v_prop, v_char, 'MIGRATION SELFTEST PROPERTY', 'MIGRATION SELFTEST CHARACTER',
-    -999000003, 1007, current_date, 'migration:20260814060000', 'selftest',
-    'selftest', '{}'::jsonb, 'selftest'
-  );
-
-  select count(*) into v_props from plm.opa_property where licensed_property_id = v_prop;
-  select count(*) into v_chars from plm.opa_character where character_id = v_char;
-
-  if v_props <> 1 or v_chars <> 1 then
-    raise exception 'opa link trigger selftest failed: property rows %, character rows %',
-      v_props, v_chars;
+  if not exists (
+    select 1 from pg_trigger t
+    join pg_class c on c.oid = t.tgrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'plm'
+      and c.relname = 'opa_property_character'
+      and t.tgname  = 'opa_link_ensure_entities'
+      and not t.tgisinternal
+  ) then
+    raise exception 'opa link trigger was not installed';
   end if;
 
-  raise notice 'opa link trigger selftest OK: entities auto-created for a new link row';
-
-  delete from plm.opa_property_character
-   where licensed_property_id = v_prop and character_id = v_char;
-  delete from plm.opa_property  where licensed_property_id = v_prop;
-  delete from plm.opa_character where character_id = v_char;
+  raise notice 'opa link trigger installed on plm.opa_property_character';
 end $$;
