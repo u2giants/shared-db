@@ -1,4 +1,7 @@
 -- Issue #963: durable resolution shape, security and coherence.
+begin;
+create extension if not exists dblink with schema extensions;
+
 do $$
 declare
   v_rls boolean;
@@ -113,3 +116,4 @@ exception when others then
   raise;
 end;
 $$;
+rollback;
