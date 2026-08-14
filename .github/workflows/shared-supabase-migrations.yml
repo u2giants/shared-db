@@ -53,6 +53,18 @@ on:
         description: "Production apply ONLY: pinned sha256 digest from that run's evidence artifact"
         type: string
         required: false
+      source_pr:
+        description: "Activated automatic policy only: merged source PR number"
+        type: string
+        required: false
+      preview_run_id:
+        description: "Activated automatic policy only: exact successful preview-apply run ID"
+        type: string
+        required: false
+      preview_artifact_digest:
+        description: "Activated automatic policy only: pinned preview evidence artifact digest"
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -563,6 +575,8 @@ jobs:
     permissions:
       contents: read
       actions: read
+      checks: read
+      pull-requests: read
     env:
       PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
     steps:
@@ -621,6 +635,37 @@ jobs:
             --commit-sha "$REQUESTED_SHA" \
             --allowlist "$PRODUCTION_ALLOWLIST" \
             --output-dir "$RUNNER_TEMP"
+      - name: Detect machine-enforced policy activation
+        id: policy_activation
+        run: |
+          set -euo pipefail
+          active="$(jq -r 'if .active == true then "true" elif .active == false then "false" else error("activation must be boolean") end' config/production-risk-policy-activation.json)"
+          echo "active=$active" >> "$GITHUB_OUTPUT"
+          if [ "$active" = false ]; then
+            echo "New automatic policy is inactive. The production environment's old exact owner-approval rule remains mandatory."
+          fi
+      - name: Derive business risk from governed artifacts
+        if: steps.policy_activation.outputs.active == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+          SOURCE_PR: ${{ inputs.source_pr }}
+          REVIEW_RUN_ID: ${{ inputs.review_run_id }}
+          REVIEW_ARTIFACT_DIGEST: ${{ inputs.review_artifact_digest }}
+          PREVIEW_RUN_ID: ${{ inputs.preview_run_id }}
+          PREVIEW_ARTIFACT_DIGEST: ${{ inputs.preview_artifact_digest }}
+        run: |
+          set -euo pipefail
+          test -n "$SOURCE_PR"
+          test -n "$PREVIEW_RUN_ID"
+          test -n "$PREVIEW_ARTIFACT_DIGEST"
+          python scripts/production_business_risk_gate.py \
+            --main-sha "$REQUESTED_SHA" --allowlist "$PRODUCTION_ALLOWLIST" \
+            --pr "$SOURCE_PR" --review-run-id "$REVIEW_RUN_ID" \
+            --review-digest "$REVIEW_ARTIFACT_DIGEST" \
+            --preview-run-id "$PREVIEW_RUN_ID" --preview-digest "$PREVIEW_ARTIFACT_DIGEST" \
+            | tee "$RUNNER_TEMP/production-business-risk-evidence.json"
       - name: Upload pre-approval evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -629,6 +674,7 @@ jobs:
           path: |
             ${{ runner.temp }}/production-ledger-before.txt
             ${{ runner.temp }}/production-apply-review-evidence.json
+            ${{ runner.temp }}/production-business-risk-evidence.json
           if-no-files-found: warn
           retention-days: 90
   production-apply:
@@ -639,6 +685,8 @@ jobs:
     permissions:
       contents: write
       actions: read
+      checks: read
+      pull-requests: read
     # Keep the production environment binding. Environment policy is managed in
     # a separate phase and is not changed by this repository patch.
     environment: production
@@ -691,6 +739,34 @@ jobs:
             --commit-sha "$REQUESTED_SHA" \
             --allowlist "$PRODUCTION_ALLOWLIST" \
             --output-dir "$RUNNER_TEMP"
+      - name: Detect machine-enforced policy activation
+        id: policy_activation
+        run: |
+          set -euo pipefail
+          active="$(jq -r 'if .active == true then "true" elif .active == false then "false" else error("activation must be boolean") end' config/production-risk-policy-activation.json)"
+          echo "active=$active" >> "$GITHUB_OUTPUT"
+      - name: Re-derive business risk after the approval wait
+        if: steps.policy_activation.outputs.active == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+          SOURCE_PR: ${{ inputs.source_pr }}
+          REVIEW_RUN_ID: ${{ inputs.review_run_id }}
+          REVIEW_ARTIFACT_DIGEST: ${{ inputs.review_artifact_digest }}
+          PREVIEW_RUN_ID: ${{ inputs.preview_run_id }}
+          PREVIEW_ARTIFACT_DIGEST: ${{ inputs.preview_artifact_digest }}
+        run: |
+          set -euo pipefail
+          test -n "$SOURCE_PR"
+          test -n "$PREVIEW_RUN_ID"
+          test -n "$PREVIEW_ARTIFACT_DIGEST"
+          python scripts/production_business_risk_gate.py \
+            --main-sha "$REQUESTED_SHA" --allowlist "$PRODUCTION_ALLOWLIST" \
+            --pr "$SOURCE_PR" --review-run-id "$REVIEW_RUN_ID" \
+            --review-digest "$REVIEW_ARTIFACT_DIGEST" \
+            --preview-run-id "$PREVIEW_RUN_ID" --preview-digest "$PREVIEW_ARTIFACT_DIGEST" \
+            | tee "$RUNNER_TEMP/production-business-risk-evidence.json"
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
