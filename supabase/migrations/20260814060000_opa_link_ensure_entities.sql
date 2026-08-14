@@ -37,7 +37,12 @@ begin
         updated_at    = now()
     where plm.opa_property.property_name is distinct from excluded.property_name;
 
-  if not exists (
+  -- Only speak up when the name is genuinely ABSENT (null), which is the post-deprecation
+  -- case where the entity must already exist. A present-but-blank name is a data-shape
+  -- problem the table's own CHECK constraint already rejects, and it must keep rejecting it
+  -- as a check_violation - preempting that here would silently change the error class the
+  -- landing contract tests assert on.
+  if new.property_name is null and not exists (
     select 1 from plm.opa_property p
     where p.licensed_property_id = new.licensed_property_id
   ) then
@@ -57,7 +62,7 @@ begin
         updated_at     = now()
     where plm.opa_character.character_name is distinct from excluded.character_name;
 
-  if not exists (
+  if new.character_name is null and not exists (
     select 1 from plm.opa_character c
     where c.character_id = new.character_id
   ) then
