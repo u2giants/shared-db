@@ -1,0 +1,40 @@
+name: Recover Stranded Author Mutex
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: "Exact SHA currently held by refs/db-coordination/author-acquisition"
+        required: true
+        type: string
+      confirmation:
+        description: "Type RECOVER <exact SHA>"
+        required: true
+        type: string
+
+concurrency:
+  group: shared-db-author-mutex-recovery
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require exact confirmation and recover only the proven stale owner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          AUTHOR_MUTEX_RECOVERY_SERIALIZED: "true"
+        run: |
+          set -euo pipefail
+          test "$CONFIRMATION" = "RECOVER $EXPECTED_SHA"
+          node scripts/manage-migration-author-lanes.mjs --recover-author-mutex \
+            --expected-sha "$EXPECTED_SHA" --confirm-stale
