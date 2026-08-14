@@ -14,7 +14,7 @@
 |---|---|---|---|
 | 0 | Keep the owner-held `20260802170000` bundle out of this work | ✅ done | `AGENTS.md` §6.5 requires `20260802170000`, `20260802171000`, and the FR-removal migration to move together; #963 has no production authority. |
 | 1 | Inventory + writer census; fail-closed design agreed | ✅ done | `rg` census at `origin/main` `8553b49`: Paramount and NBCU loaders insert only unresolved/null defaults; no runtime writer updates the six legacy resolution column sets. Durable writes will use one command; legacy columns become fail-closed. |
-| 2 | Migration A — create `plm.source_resolution` (capture-independent) | ✅ implemented | migration `20260814213019`, claim #1016 |
+| 2 | Migration A — create `plm.source_resolution` (capture-independent) | ✅ implemented | migration `20260814220500`, claim #1024 |
 | 3 | Migration B — backfill from the 6 capture-scoped tables | ✅ implemented | PR #1018, deterministic backfill |
 | 4 | Migration C — views that read resolution from the new home | ✅ implemented | PR #1018, established Paramount views plus `api.source_resolution` |
 | 5 | Migration D — guards on six capture-scoped tables | ✅ implemented | PR #1018, six named triggers |
@@ -204,7 +204,7 @@ hardening; Step 5 here protects only the six capture-scoped Paramount/NBCU table
   20260814060000_opa_link_ensure_entities.sql
   ```
 
-  The implemented migration is `20260814213019`. **Never reuse a version number** — Supabase
+  The implemented migration is `20260814220500`. **Never reuse a version number** — Supabase
   keys on the version alone, so a duplicate makes one migration silently skip.
 
 - **`20260802170000_plm_import_preserve_curated_licensor_property_status.sql` is merged to
@@ -484,7 +484,7 @@ go through the durable command.
 
 #### Step 2. Migration A — `plm.source_resolution`
 
-- **File:** `supabase/migrations/20260814213019_source_resolution_durable_home.sql`
+- **File:** `supabase/migrations/20260814220500_source_resolution_durable_home.sql`
 - **What to create:**
 
   ```sql
