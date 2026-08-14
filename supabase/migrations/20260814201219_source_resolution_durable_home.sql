@@ -1,5 +1,5 @@
 -- Curated source-to-canonical decisions must outlive every source capture.
--- Issue #963. Reserved atomically by claim #993.
+-- Issue #963. Reserved atomically by claim #996.
 --
 -- Landing rows are immutable snapshots and are often keyed by capture_id. A decision stored
 -- on one of those rows disappears from the current read path when the next capture lands.
