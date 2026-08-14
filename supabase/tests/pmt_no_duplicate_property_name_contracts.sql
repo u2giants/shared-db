@@ -1,9 +1,9 @@
 -- =====================================================================================
--- Paramount duplicate property-name contracts -- migration 20260814170219, issue #964,
+-- Paramount duplicate property-name contracts -- migration 20260814191958, issue #964,
 -- plan_pmt-duplicate-name-columns.md.
 --
 -- THIS FILE ASSERTS THE INTERIM (PRE-DROP) STATE. It ships in the SAME change as
--- 20260814170219 and BEFORE the plan's Step 6 drop migration, so it asserts:
+-- 20260814191958 and BEFORE the plan's Step 6 drop migration, so it asserts:
 --   * both deprecated columns still EXIST but are nullable, unwritten and commented;
 --   * plm.load_pmt_capture_chunk no longer writes either copy (behaviourally);
 --   * the property name is reachable by join from both tables;
@@ -94,7 +94,7 @@ begin
     from pg_attribute a
     where a.attrelid = format('plm.%I', r.table_name)::regclass
       and a.attname = r.column_name and not a.attisdropped;
-    if v_text ilike 'DEPRECATED%20260814170219%duplicate of plm.pmt_property.property_name%'
+    if v_text ilike 'DEPRECATED%20260814191958%duplicate of plm.pmt_property.property_name%'
     then v_pass := v_pass + 1;
     else v_fail := v_fail + 1; raise warning 'FAIL %.% deprecation comment missing or malformed', r.table_name, r.column_name;
     end if;
@@ -230,7 +230,7 @@ begin
 
   -- Both arrays below DELIBERATELY carry NO paramount_property_name / property_name key.
   -- That is the exact shape tools/sync-paramount-creative-library.mjs has serialized
-  -- since 20260814170219: an absent key makes the DB-side r->>''...'' read NULL.
+  -- since 20260814191958: an absent key makes the DB-side r->>''...'' read NULL.
   v_n := plm.load_pmt_capture_chunk(v_cap, 'pmt_authorized_title_property', $json$[
     {"authorized_title_key": "ZZTEST-AT-1", "property_source_id": "99001",
      "reported_asset_count": 2, "mapping_status": "mapped", "notes": ""}
@@ -295,7 +295,7 @@ $$;
 --    named property_name or %_property_name. This is what stops the defect coming back
 --    with the next table someone adds.
 --
---    INTERIM ALLOWLIST: the two columns deprecated by 20260814170219 still exist and are
+--    INTERIM ALLOWLIST: the two columns deprecated by 20260814191958 still exist and are
 --    the ONLY permitted matches. The Step 6 drop migration's PR must delete both allowlist
 --    entries so the assertion becomes total.
 -- =====================================================================================
