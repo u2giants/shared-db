@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION dflow.prevent_sample_shipment_route_drift()
 RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
   v_shipment_id bigint;
-  v_header dflow.sample_shipment;
+  v_header record;
 BEGIN
   IF TG_TABLE_NAME='sample_shipment' THEN
     PERFORM pg_advisory_xact_lock(hashtextextended('sample_shipment:' || OLD.sample_shipment_id::text,0));
