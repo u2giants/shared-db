@@ -5,34 +5,12 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { acquireAuthorLane, acquireExclusive, assessProductionRisk, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, EXCLUSIVE_REFS, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, recoverStaleAuthorMutex, releaseOwnedRef, requireOwnedRef, REVIEW_CURSOR_REF, validateClaimObjects } from './manage-migration-author-lanes.mjs'
+import { acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, EXCLUSIVE_REFS, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, recoverStaleAuthorMutex, releaseOwnedRef, requireOwnedRef, REVIEW_CURSOR_REF, validateClaimObjects } from './manage-migration-author-lanes.mjs'
 
 const NOW = new Date('2026-08-14T20:00:00Z')
 const body = (objects, owner, expires = '2026-08-15T08:00:00.000Z') => claimBody({ version:`2026081420${owner.padStart(4,'0')}`, objects, owner:`agent-${owner}`, branch:`codex/${owner}`, worktree:`C:/w/${owner}`, expiresAt:new Date(expires) })
 
 const scope = (state, priority, objects=[], depends='') => `\`\`\`db-work-scope\nstate: ${state}\npriority: ${priority}\ndepends_on: ${depends}\nobjects:\n${objects.map((x)=>`  - ${x}`).join('\n')}\n\`\`\``
-
-const safeProductionEvidence=()=>({
-  permanentDataRewriteOrLoss:{value:false,evidence:'additive only'}, expectedDowntime:{value:false,evidence:'online preview proof'},
-  materialAccessChange:{value:false,evidence:'grants unchanged'}, recoveryTested:{value:true,evidence:'forward fix rehearsed'},
-  unresolvedMaterialObjection:{value:false,evidence:'reviewers approved'},
-})
-
-test('production risk gate permits automatic promotion only with complete safe evidence',()=>{
-  assert.deepEqual(assessProductionRisk(safeProductionEvidence()),{automaticPromotionAllowed:true,ownerDecisionReasons:[]})
-  const incomplete=safeProductionEvidence();delete incomplete.recoveryTested
-  assert.throws(()=>assessProductionRisk(incomplete),/incomplete for recoveryTested/)
-})
-
-test('production risk gate asks only plain-language business-risk questions',()=>{
-  for(const [key,value] of [['permanentDataRewriteOrLoss',true],['expectedDowntime',true],['materialAccessChange',true],['recoveryTested',false],['unresolvedMaterialObjection',true]]){
-    const evidence=safeProductionEvidence();evidence[key]={value,evidence:'risk found'}
-    const result=assessProductionRisk(evidence)
-    assert.equal(result.automaticPromotionAllowed,false)
-    assert.equal(result.ownerDecisionReasons.length,1)
-    assert.doesNotMatch(result.ownerDecisionReasons[0],/migration|project|sql|database identifier/i)
-  }
-})
 
 test('queue scope is strict and requires objects for eligible work',()=>{
   assert.deepEqual(parseQueueScope(scope('eligible',9,['table core.a'],'#12, 13')), {state:'eligible',priority:9,dependencies:[12,13],objects:['table core.a']})
@@ -337,4 +315,9 @@ test('REAL CLI: a relative script path executes main and refuses an invalid argu
   const result = spawnSync(process.execPath, ['scripts/manage-migration-author-lanes.mjs', '--definitely-invalid'], { encoding: 'utf8' })
   assert.equal(result.status, 2)
   assert.match(result.stderr, /unknown argument/)
+})
+test('forged caller-written production risk JSON has no CLI authorization path', () => {
+  const result = spawnSync(process.execPath, ['scripts/manage-migration-author-lanes.mjs', '--production-risk-gate', 'forged.json'], { encoding: 'utf8' })
+  assert.equal(result.status, 2)
+  assert.match(result.stderr, /unknown argument: --production-risk-gate/)
 })

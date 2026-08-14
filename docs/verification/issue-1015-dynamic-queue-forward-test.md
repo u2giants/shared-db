@@ -16,15 +16,20 @@ not production database state:
 - The external-review cursor advances Grok → GLM → Kimi → Qwen → Grok, returns
   the same assignment on retry, and refuses a concurrent orchestrator that does
   not own the shared lock.
-- Complete safe production-risk evidence permits automatic promotion; each of
-  the five unsafe cases blocks it with a plain business-risk reason, and missing
-  evidence fails closed.
+- The retired caller-written risk booleans cannot authorize anything.
+- A forged activation containing only booleans or prose fails closed.
+- Activation refuses a mismatch between installed and canonical skill hashes.
+- The inactive transition record preserves the old exact owner-approval rule.
+- Conservative SQL inspection sends destructive, locking, access-changing, or
+  otherwise ambiguous work to Albert instead of treating it as routine.
 
 Proof command:
 
 ```powershell
 node --test scripts/manage-migration-author-lanes.test.mjs scripts/check-dispatch-collision.test.mjs
+python -m unittest scripts/test_production_business_risk_gate.py
 ```
 
-Result: 105 passed, 0 failed. No database, preview, merge, or production call was
-made by this forward test.
+Result: 104 Node tests and 496 Python tests passed, including six adversarial
+production-policy tests. No database, preview, merge, or production call was
+made by these forward tests.

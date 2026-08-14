@@ -2,7 +2,6 @@
 
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gatherOpenPrObjects, normalizeObject, parseClaimBlock } from './check-dispatch-collision.mjs'
@@ -88,24 +87,6 @@ export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssu
 }
 
 export class LaneError extends Error {}
-
-const PRODUCTION_RISKS=Object.freeze({
-  permanentDataRewriteOrLoss:'existing production data may be lost or permanently altered',
-  expectedDowntime:'users may be interrupted', materialAccessChange:'access or permissions materially change',
-  recoveryTested:'recovery is uncertain', unresolvedMaterialObjection:'the reviewers have an unresolved material disagreement',
-})
-
-export function assessProductionRisk(evidence){
-  if(!evidence||typeof evidence!=='object'||Array.isArray(evidence))throw new LaneError('production risk evidence must be an object')
-  const expected={permanentDataRewriteOrLoss:false,expectedDowntime:false,materialAccessChange:false,recoveryTested:true,unresolvedMaterialObjection:false}
-  const ownerDecisionReasons=[]
-  for(const [key,safeValue] of Object.entries(expected)){
-    const item=evidence[key]
-    if(!item||typeof item.value!=='boolean'||typeof item.evidence!=='string'||!item.evidence.trim())throw new LaneError(`production risk evidence is incomplete for ${key}`)
-    if(item.value!==safeValue)ownerDecisionReasons.push(PRODUCTION_RISKS[key])
-  }
-  return {automaticPromotionAllowed:ownerDecisionReasons.length===0,ownerDecisionReasons}
-}
 
 const CLAIM_KINDS = new Set(['schema','table','column','view','materialized view','function','procedure','trigger','policy','type','domain','sequence','index','publication','storage bucket'])
 export function validateClaimObjects(objects) {
@@ -399,7 +380,6 @@ function parseArgs(argv) {
     else if (a === '--audit') out.audit = true
     else if (a === '--queue-audit') out.queueAudit = true
     else if (a === '--assign-reviewer') out.assignReviewer = true
-    else if (a === '--production-risk-gate') out.productionRiskFile = next(i), i++
     else if (a === '--cleanup-stale') out.cleanup = true
     else if (a === '--release-claim') out.releaseClaim = next(i), i++
     else if (a === '--confirm-finished') out.confirmFinished = true
@@ -422,7 +402,6 @@ export function main(argv, now = new Date(), io = githubIo) {
     if (o.acquireExclusive) { console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha }, io), null, 2)); return 0 }
     if (o.releaseExclusive) { if (!o.ownerSha) throw new LaneError('--owner-sha is required for safe release'); releaseOwnedRef(EXCLUSIVE_REFS[o.releaseExclusive], o.ownerSha, io); return 0 }
     const claims = io.openClaims()
-    if(o.productionRiskFile){const evidence=JSON.parse(readFileSync(o.productionRiskFile,'utf8'));const result=assessProductionRisk(evidence);console.log(JSON.stringify(result,null,2));return result.automaticPromotionAllowed?0:3}
     if(o.assignReviewer){console.log(JSON.stringify(assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha},io),null,2));return 0}
     if (o.queueAudit) {
       const result = buildDynamicQueues(io.openWorkIssues(), claims, now, io.openIssueNumbers())

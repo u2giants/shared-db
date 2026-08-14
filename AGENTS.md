@@ -710,15 +710,22 @@ four rules below are non-negotiable for any database change.
    verdict, confirmed/disproved findings, defects, false positives, policy/tool
    adherence, continuity, latency, turns, and only metrics the wrapper reports.
    Kimi headless metrics and returned model are unavailable; never invent them.
-   After review approval, green checks, preview proof, and guarded merge, run
-   `--production-risk-gate <evidence.json>`. Automatically promote only when the
-   evidence proves: no existing data is deleted or permanently rewritten, no
-   expected user downtime, no material access change, a tested credible recovery
-   path, and no unresolved material objection. Otherwise ask Albert one plain
+   After review approval, green checks, preview proof, and guarded merge, the
+   production workflow runs `scripts/production_business_risk_gate.py`. It
+   derives the result from the exact merged PR and required checks, immutable
+   review artifact, pinned preview-apply artifact and ledger, current-main SQL,
+   and the activation record. Caller-written booleans or prose are never
+   evidence. Automatically promote only when those governed records prove: no
+   existing data is deleted or permanently rewritten, no expected user downtime,
+   no material access change, a tested credible recovery path, and no unresolved
+   material objection. Ambiguous SQL stops for Albert. Ask him one plain
    business-risk question. Never ask him to approve migration numbers, project
    identifiers, SQL, or other technical details. This policy cannot authorize
-   its own rollout; the older exact-approval rule remains binding until #1015 is
-   independently reviewed, merged in both repos, installed, and forward-tested.
+   its own rollout. `config/production-risk-policy-activation.json` remains
+   inactive, and the older exact-approval rule remains binding, until #1015 is
+   independently reviewed, both PRs are merged, the installed skill hash matches
+   canonical ai-devops, and the forward-test proof hash is recorded. The gate
+   verifies those facts again before it can permit automatic promotion.
    Record Qwen High as requested, but never override the wrapper's qualified
    fixed configuration.
 
