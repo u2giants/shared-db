@@ -1,5 +1,18 @@
 -- Issue #995: truthful zero-row Warner evidence and nullable Asset values.
 
+alter table plm.wb_capture drop constraint wb_capture_expected_rows_chk;
+alter table plm.wb_capture add constraint wb_capture_expected_rows_chk check (
+  expected_row_count is null
+  or expected_row_count > 0
+  or (
+    chunk_number = 0
+    and target = 'wb_franchise_property_evidence'
+    and expected_row_count = 0
+  )
+);
+comment on constraint wb_capture_expected_rows_chk on plm.wb_capture is
+'Expected rows stay positive except for the header of the optional direct Warner Franchise-to-Property evidence stream, which may truthfully declare zero rows.';
+
 create or replace function plm.begin_wb_capture(
   p_target text,
   p_captured_at date,
