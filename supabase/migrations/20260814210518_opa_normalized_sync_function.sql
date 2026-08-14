@@ -396,4 +396,3 @@ comment on function plm.sync_opa_property_character(jsonb, text, numeric) is
 
 revoke all on function plm.sync_opa_property_character(jsonb, text, numeric) from public;
 grant execute on function plm.sync_opa_property_character(jsonb, text, numeric) to service_role;
-
