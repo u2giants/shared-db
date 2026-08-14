@@ -93,14 +93,16 @@ declare
   v_props bigint;
   v_chars bigint;
 begin
+  -- Every NOT NULL column is supplied explicitly. brand_property_id is NOT NULL on this
+  -- table, so it gets a negative sentinel like the other two ids rather than null.
   insert into plm.opa_property_character (
     licensed_property_id, character_id, property_name, character_name,
     brand_property_id, option_source_id, captured_at, source_url, line_of_business,
-    raw, source_hash
+    entitlement_scope, raw, source_hash
   ) values (
     v_prop, v_char, 'MIGRATION SELFTEST PROPERTY', 'MIGRATION SELFTEST CHARACTER',
-    null, 1007, current_date, 'migration:20260814060000', 'selftest',
-    '{}'::jsonb, 'selftest'
+    -999000003, 1007, current_date, 'migration:20260814060000', 'selftest',
+    'selftest', '{}'::jsonb, 'selftest'
   );
 
   select count(*) into v_props from plm.opa_property where licensed_property_id = v_prop;
