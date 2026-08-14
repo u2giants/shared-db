@@ -293,8 +293,7 @@ begin
   on conflict (licensed_property_id) do update set
     property_name = excluded.property_name,
     last_seen_at  = now(),
-    updated_at    = now()
-  where p.property_name is distinct from excluded.property_name;
+    updated_at    = now();
 
   insert into plm.opa_character as c (
     character_id, character_name, first_seen_at, last_seen_at, updated_at
@@ -305,8 +304,7 @@ begin
   on conflict (character_id) do update set
     character_name = excluded.character_name,
     last_seen_at   = now(),
-    updated_at     = now()
-  where c.character_name is distinct from excluded.character_name;
+    updated_at     = now();
 
   insert into plm.opa_property_character as t (
     licensed_property_id, character_id,

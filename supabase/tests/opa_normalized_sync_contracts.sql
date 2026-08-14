@@ -10,6 +10,7 @@ declare
   v_count integer;
   v_text text;
   v_uuid uuid;
+  v_snapshot jsonb;
 begin
   -- The deprecated link columns remain temporarily for compatibility, but new normalized
   -- writes must be able to omit them.
@@ -40,18 +41,20 @@ begin
   -- the deprecated duplicate columns on the link.
   insert into plm.opa_property (
     licensed_property_id, property_name, core_property_id, resolution_status,
-    resolution_reason, resolved_at, resolved_by
+    resolution_reason, resolved_at, resolved_by, last_seen_at
   ) values (
     953000001, 'Old Entity Property Name', v_core_property, 'resolved',
-    'synthetic contract resolution', timestamptz '2026-08-14 12:00:00+00', 'contract-test'
+    'synthetic contract resolution', timestamptz '2026-08-14 12:00:00+00', 'contract-test',
+    timestamptz '2026-08-01 00:00:00+00'
   );
 
   insert into plm.opa_character (
     character_id, character_name, core_character_id, resolution_status,
-    resolution_reason, resolved_at, resolved_by
+    resolution_reason, resolved_at, resolved_by, last_seen_at
   ) values (
     953000101, 'Old Entity Character Name', v_core_character, 'resolved',
-    'synthetic contract resolution', timestamptz '2026-08-14 12:00:00+00', 'contract-test'
+    'synthetic contract resolution', timestamptz '2026-08-14 12:00:00+00', 'contract-test',
+    timestamptz '2026-08-01 00:00:00+00'
   );
 
   insert into plm.opa_property_character (
@@ -64,9 +67,7 @@ begin
     'Home', 'licensee_account', '{}'::jsonb, md5('{}')
   );
 
-  select * into v_result
-  from plm.sync_opa_property_character(
-    jsonb_build_object(
+  v_snapshot := jsonb_build_object(
       'captured_at', '2026-08-14',
       'source_url', 'https://example.invalid/opa-contract',
       'line_of_business', 'Home',
@@ -96,7 +97,11 @@ begin
           'optionSourceID', 1007
         )
       )
-    ),
+    );
+
+  select * into v_result
+  from plm.sync_opa_property_character(
+    v_snapshot,
     'mirror_only',
     1.0
   );
@@ -189,6 +194,24 @@ begin
      or (select resolution_status from plm.opa_character where character_id = 953000101)
        is distinct from 'resolved' then
     raise exception 'entity resolution status was overwritten';
+  end if;
+
+  -- Reset only recency while keeping the same display names, then replay the identical
+  -- snapshot. This proves an unchanged observation still advances last_seen_at.
+  update plm.opa_property
+  set last_seen_at = timestamptz '2026-08-01 00:00:00+00'
+  where licensed_property_id = 953000001;
+  update plm.opa_character
+  set last_seen_at = timestamptz '2026-08-01 00:00:00+00'
+  where character_id = 953000101;
+
+  perform * from plm.sync_opa_property_character(v_snapshot, 'mirror_only', 1.0);
+
+  if (select last_seen_at from plm.opa_property where licensed_property_id = 953000001)
+       <= timestamptz '2026-08-01 00:00:00+00'
+     or (select last_seen_at from plm.opa_character where character_id = 953000101)
+       <= timestamptz '2026-08-01 00:00:00+00' then
+    raise exception 'entity last_seen_at did not advance on a repeated observation';
   end if;
 
   if has_function_privilege('public',
