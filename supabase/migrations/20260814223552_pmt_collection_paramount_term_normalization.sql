@@ -37,9 +37,15 @@ comment on view api.pmt_style_guides is
 'drift into separate populations. character_count is distinct characters reached through the '
 'style guide''s assets, which is why it is a count and not an array.';
 
-revoke all on api.pmt_style_guides from public;
-revoke all on api.pmt_style_guides from anon;
-grant select on api.pmt_style_guides to authenticated, service_role;
+-- A recreated view is a new object with default privileges. Re-pin its existing
+-- posture without teaching the object-claim parser that the view is also a table.
+do $$
+begin
+  execute 'revoke all on api.pmt_style_guides from public';
+  execute 'revoke all on api.pmt_style_guides from anon';
+  execute 'grant select on api.pmt_style_guides to authenticated, service_role';
+end;
+$$;
 
 create or replace function plm.load_pmt_capture_chunk(
   p_capture_id uuid,

@@ -378,9 +378,9 @@ test("#970 migration removes storage while preserving loader and API security co
   assert.match(sql, /grant execute on function plm\.load_pmt_capture_chunk\(uuid, text, jsonb\) to service_role;/);
   assert.match(sql, /create view api\.pmt_style_guides\s+with \(security_invoker = true\)/);
   assert.match(sql, /'Collection'::text\s+as paramount_term/);
-  assert.match(sql, /revoke all on api\.pmt_style_guides from public;/);
-  assert.match(sql, /revoke all on api\.pmt_style_guides from anon;/);
-  assert.match(sql, /grant select on api\.pmt_style_guides to authenticated, service_role;/);
+  assert.match(sql, /execute 'revoke all on api\.pmt_style_guides from public';/);
+  assert.match(sql, /execute 'revoke all on api\.pmt_style_guides from anon';/);
+  assert.match(sql, /execute 'grant select on api\.pmt_style_guides to authenticated, service_role';/);
   assert.match(sql, /alter table plm\.pmt_collection drop column paramount_term;/);
 });
 
