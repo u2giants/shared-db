@@ -571,6 +571,35 @@ test("a truthful zero-row evidence stream is recorded as skipped with no databas
   assert.match(logs[0], /SKIPPED.*0 rows.*no database call/i);
 });
 
+test("skipLoad cannot bypass a required stream", async () => {
+  await assert.rejects(
+    loadPreparedCaptures({}, resolveRunConfig(baseEnv), [{
+      file: "assets-normalized.csv",
+      target: "wb_asset_normalized",
+      rowCount: 0,
+      chunks: [],
+      manifestSha256: chainDigest([]),
+      skipLoad: true,
+    }], () => {}, async () => { throw new Error("must not load"); }),
+    /REFUSING TO SKIP.*Only the verified zero-row Franchise-to-Property evidence stream/
+  );
+});
+
+test("skipLoad cannot bypass a nonempty evidence stream", async () => {
+  const chunks = buildChunks([{ synthetic: true }]);
+  await assert.rejects(
+    loadPreparedCaptures({}, resolveRunConfig(baseEnv), [{
+      file: "links-franchise-property-evidence.csv",
+      target: "wb_franchise_property_evidence",
+      rowCount: 1,
+      chunks,
+      manifestSha256: chainDigest(chunks),
+      skipLoad: true,
+    }], () => {}, async () => { throw new Error("must not load"); }),
+    /REFUSING TO SKIP/
+  );
+});
+
 test("a chunk whose reported row count differs is treated as a silent drop and fails the run", async () => {
   const c = fakeClient({ on: (sql) => (sql.includes("load_wb_chunk") ? { rows: [{ n: 1 }] } : undefined) });
   await assert.rejects(loadCapture(c, resolveRunConfig(baseEnv), oneCapture(), () => {}), /sent 2 rows, database reported 1/);

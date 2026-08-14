@@ -764,7 +764,22 @@ export async function loadCapture(client, cfg, capture, log = console.log) {
 export async function loadPreparedCaptures(client, cfg, captures, log = console.log, load = loadCapture) {
   const results = [];
   for (const capture of captures) {
-    if (capture.skipLoad) {
+    const truthfulOptionalEmpty =
+      capture.file === "links-franchise-property-evidence.csv" &&
+      capture.target === "wb_franchise_property_evidence" &&
+      capture.rowCount === 0 &&
+      Array.isArray(capture.chunks) &&
+      capture.chunks.length === 0 &&
+      capture.manifestSha256 === chainDigest([]);
+    if (capture.skipLoad && !truthfulOptionalEmpty) {
+      throw new Error(
+        "REFUSING TO SKIP. Only the verified zero-row Franchise-to-Property evidence stream is optional."
+      );
+    }
+    if (capture.rowCount === 0 && !truthfulOptionalEmpty) {
+      throw new Error("REFUSING TO LOAD. An unverified zero-row capture reached the load boundary.");
+    }
+    if (truthfulOptionalEmpty) {
       log(`  ${capture.target}: SKIPPED -- optional source stream declared 0 rows; no database call made.`);
       results.push({ target: capture.target, skipped: true, rows: 0 });
       continue;
