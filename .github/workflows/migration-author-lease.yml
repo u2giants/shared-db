@@ -8,6 +8,7 @@ permissions:
   contents: read
   issues: read
   pull-requests: read
+  statuses: write
 
 jobs:
   verify:
@@ -24,3 +25,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: node scripts/check-migration-pr-lease.mjs
+      - name: Authorize ordinary merge only when this pull request has no migration
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if gh pr diff "${{ github.event.pull_request.number }}" --repo u2giants/shared-db --name-only | grep -qE '^supabase/migrations/.*\.sql$'; then
+            echo "Migration PR: guarded merge must authorize this exact head."
+            exit 0
+          fi
+          gh api "repos/u2giants/shared-db/statuses/$HEAD_SHA" -f state=success -f context='Migration guarded merge authorization' -f description='No migration files; exclusive migration merge lane is not required'

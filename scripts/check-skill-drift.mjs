@@ -59,6 +59,18 @@ const ORCHESTRATOR_REQUIREMENTS = [
  */
 const CONTRADICTIONS = [
   {
+    id: 'retired-single-writer',
+    pattern: /single-writer ownership of `supabase\/migrations\/`/i,
+    agents: '§4 permits up to three isolated migration authors',
+    why: 'This needlessly serializes every author and contradicts the atomic lane allocator.',
+  },
+  {
+    id: 'manual-migration-version',
+    pattern: /ls supabase\/migrations\s*\|\s*cut|pick the version by hand/i,
+    agents: '§4 requires a central atomic migration-version reservation',
+    why: 'A local directory listing cannot see simultaneous reservations on other computers.',
+  },
+  {
     id: 'mcp-ddl',
     // `~~…~~` means struck through and corrected below, which is how a superseded rule is
     // retired here. Do not re-flag a rule that has already been retired.

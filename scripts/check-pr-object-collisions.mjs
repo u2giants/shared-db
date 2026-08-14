@@ -962,11 +962,16 @@ function isMigration(file) {
 }
 
 function fetchFiles(repo, number, ref) {
-  const files = ghJson([
+  const pr = ghJson(['api', `repos/${repo}/pulls/${number}`])
+  const allFiles = ghJson([
     'api',
     '--paginate',
     `repos/${repo}/pulls/${number}/files?per_page=100`,
-  ]).filter(isMigration)
+  ])
+  if (!Number.isInteger(pr?.changed_files)) throw new Skip(`PR #${number} has no trustworthy changed_files count`)
+  if (pr.changed_files >= 3000) throw new Skip(`PR #${number} reaches GitHub's 3000-file limit`)
+  if (allFiles.length !== pr.changed_files) throw new Skip(`PR #${number} returned ${allFiles.length} of ${pr.changed_files} changed files`)
+  const files = allFiles.filter(isMigration)
   return files.map((file) => ({
     path: file.filename,
     sql: gh([

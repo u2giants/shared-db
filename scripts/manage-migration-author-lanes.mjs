@@ -21,8 +21,12 @@ export class LaneError extends Error {}
 const CLAIM_KINDS = new Set(['schema','table','column','view','materialized view','function','procedure','trigger','policy','type','domain','sequence','index','publication','storage bucket'])
 export function validateClaimObjects(objects) {
   const normalized = objects.map(normalizeObject)
-  if (!normalized.length) throw new LaneError('at least one exact object is required')
   if (new Set(normalized).size !== normalized.length) throw new LaneError('duplicate object claims are not allowed')
+  for (const object of [...normalized]) {
+    const match = /^column ([a-z_][a-z0-9_$]*\.[a-z_][a-z0-9_$]*)\.[a-z_][a-z0-9_$]*$/.exec(object)
+    if (match && !normalized.includes(`table ${match[1]}`)) normalized.push(`table ${match[1]}`)
+  }
+  if (!normalized.length) throw new LaneError('at least one exact object is required')
   for (const object of normalized) {
     const kind = [...CLAIM_KINDS].sort((a,b)=>b.length-a.length).find((k)=>object.startsWith(`${k} `))
     if (!kind) throw new LaneError(`unknown object kind in claim: ${object}`)
@@ -186,24 +190,25 @@ export function acquireExclusive(kind, metadata, io = githubIo) {
   const ref = EXCLUSIVE_REFS[kind]
   if (!ref) throw new LaneError(`unknown exclusive lane: ${kind}`)
   if (!metadata.owner || !metadata.headSha || (kind !== 'production' && !metadata.pr)) throw new LaneError('exclusive lane requires owner, exact head SHA, and a PR number except for production')
-  if (kind === 'production') {
-    if (metadata.headSha !== io.mainSha?.()) throw new LaneError('production lane requires the exact current main SHA')
-    const requestId = metadata.requestId ?? randomUUID()
-    const ownerSha = io.makeOwnerCommit(`db-coordination ${kind} ${requestId} head=${metadata.headSha}`)
+  const requestId = metadata.requestId ?? randomUUID()
+  const ownerSha = io.makeOwnerCommit(`db-coordination ${kind} ${requestId} pr=${metadata.pr ?? 'none'} head=${metadata.headSha}`)
+  acquireMutex(ownerSha, io)
+  try {
+    if (kind === 'production') {
+      if (metadata.headSha !== io.mainSha?.()) throw new LaneError('production lane requires the exact current main SHA')
+      if (io.readRef(EXCLUSIVE_REFS.merge)) throw new LaneError('a guarded merge is active; production promotion must wait')
+    } else {
+      const pr = io.getPr?.(metadata.pr)
+      if (!pr?.head?.sha || pr.head.sha !== metadata.headSha) throw new LaneError('exclusive lane head SHA does not match the live pull request')
+      const claims = io.openClaims()
+      const matching = claims.map((claim)=>({ ...claim, lease:parseAuthorLease(claim.body) })).filter((claim)=>!claim.lease.legacy && claim.lease.branch===pr.head.ref && claim.lease.active)
+      if (matching.length !== 1) throw new LaneError('exclusive lane requires exactly one live author claim for the pull-request branch')
+      if (kind === 'merge' && pr.base?.sha !== io.mainSha?.()) throw new LaneError('pull request is not based on the current main tip')
+      if (kind === 'merge' && io.readRef(EXCLUSIVE_REFS.production)) throw new LaneError('production promotion is active; merges are frozen')
+    }
     acquireRef(ref, ownerSha, io)
     return { kind, ref, ownerSha, requestId }
-  }
-  const pr = io.getPr?.(metadata.pr)
-  if (!pr?.head?.sha || pr.head.sha !== metadata.headSha) throw new LaneError('exclusive lane head SHA does not match the live pull request')
-  const claims = io.openClaims()
-  const matching = claims.map((claim)=>({ ...claim, lease:parseAuthorLease(claim.body) })).filter((claim)=>!claim.lease.legacy && claim.lease.branch===pr.head.ref && claim.lease.active)
-  if (matching.length !== 1) throw new LaneError('exclusive lane requires exactly one live author claim for the pull-request branch')
-  if (kind === 'merge' && pr.base?.sha !== io.mainSha?.()) throw new LaneError('pull request is not based on the current main tip')
-  if (kind === 'merge' && io.readRef(EXCLUSIVE_REFS.production)) throw new LaneError('production promotion is active; merges are frozen')
-  const requestId = metadata.requestId ?? randomUUID()
-  const ownerSha = io.makeOwnerCommit(`db-coordination ${kind} ${requestId} pr=${metadata.pr} head=${metadata.headSha}`)
-  acquireRef(ref, ownerSha, io)
-  return { kind, ref, ownerSha, requestId }
+  } finally { releaseOwnedRef(MUTEX_REF, ownerSha, io) }
 }
 
 function parseArgs(argv) {

@@ -79,12 +79,15 @@ test('preview and merge are fixed exclusive refs and merge refuses during produc
   releaseOwnedRef(EXCLUSIVE_REFS.preview,first.ownerSha,io)
   io.refs.set(EXCLUSIVE_REFS.production,'production-owner')
   assert.throws(()=>acquireExclusive('merge',{owner:'a',pr:1,headSha:'abc'},io),/merges are frozen/)
+  io.refs.delete(EXCLUSIVE_REFS.production);io.refs.set(EXCLUSIVE_REFS.merge,'merge-owner')
+  assert.throws(()=>acquireExclusive('production',{owner:'p',headSha:'main'},io),/guarded merge is active/)
 })
 
 test('unreadable claims fail closed',()=>assert.throws(()=>assertLaneAvailable([{number:9,body:'bad'}],[],NOW),/unreadable/))
 
 test('claim objects require known kinds and exact qualified identifiers',()=>{
   assert.deepEqual(validateClaimObjects(['TABLE Core.X']),['table core.x'])
+  assert.deepEqual(validateClaimObjects(['column Core.X.Code']),['column core.x.code','table core.x'])
   for(const bad of [['core.x'],['table *'],['table x'],['mystery core.x'],['trigger t']])assert.throws(()=>validateClaimObjects(bad),/claim|kind/)
 })
 

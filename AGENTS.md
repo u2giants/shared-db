@@ -1777,14 +1777,14 @@ re-derivation 2026-08-06 16:00 UTC) with:
 gh api repos/u2giants/shared-db/branches/main/protection
 ```
 
-The 2026-08-12 read matched every row below exactly — six contexts including `Intake pointer
-guard` and **not** `Backlog / queue sync`, `strict: true`, `enforce_admins: true`,
+The 2026-08-14 read matched every row below exactly, including `Migration author lease`,
+`Migration guarded merge authorization`, and **not** `Backlog / queue sync`; `strict: true`, `enforce_admins: true`,
 `allow_force_pushes: false`, `allow_deletions: false`. **The table is accurate as of that date —
 and you must still run the command rather than trust it.**
 
 | Setting | Value |
 | --- | --- |
-| `required_status_checks.contexts` | `["Promotion contract tests (offline)", "Cross-PR object collision", "Tools offline tests", "SQL migration guards", "Domain ownership", "Intake pointer guard"]` (**six**) — updated 2026-08-07: `Backlog / queue sync` removed, `Intake pointer guard` added, both named by the owner |
+| `required_status_checks.contexts` | `["Promotion contract tests (offline)", "Cross-PR object collision", "Tools offline tests", "SQL migration guards", "Domain ownership", "Intake pointer guard", "Handoff contract", "Migration author lease", "Migration guarded merge authorization"]` (**nine**) |
 | `required_status_checks.strict` | **`true`** (changed 2026-08-06 — see below) |
 | `enforce_admins.enabled` | **`true`** |
 | `allow_force_pushes.enabled` | `false` |
