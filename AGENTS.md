@@ -1325,7 +1325,7 @@ For the active ColdLion Licensor/Property source cutover, read the STATUS table 
 before re-deriving or re-planning anything.
 
 **Step 7A (the real recurring feed) is BUILT and preview-proven as of 2026-07-29; the next action
-is Step 8, Albert's production approval.** Two rules that catch sessions out:
+is Step 8, the production business-risk gate in §4.** Two rules that catch sessions out:
 
 - **A one-time 542-link run is NOT the feed switch.** The recurring lane is
   `.github/workflows/coldlion-licensor-property-production.yml` (production-only, currently
