@@ -1,5 +1,5 @@
 ---
-issue: none (documentation only — no structural DB change, so no orchestrator issue was required)
+issue: 1031
 status: OPEN
 owner: al8960ofc/claude-coldlion-history-endpoints-13b4f3 (session ended)
 ---
@@ -8,8 +8,15 @@ owner: al8960ofc/claude-coldlion-history-endpoints-13b4f3 (session ended)
 
 **Written:** 2026-08-14T2236Z · **Machine:** al8960ofc · **Agent:** claude · **Status:** OPEN
 
-**Owner of the two open actions:** Albert (send the note to ColdLion) and the next AI session
-(build the puller). Neither is blocked on the other.
+**Tracking issue:** [#1031](https://github.com/u2giants/shared-db/issues/1031) — carries both open
+actions. **Owners:** Albert (send the note to ColdLion) and the next AI session (build the
+puller). Neither is blocked on the other.
+
+**Note on the issue number:** this session made no structural database change, so no orchestrator
+issue was required for the work itself. #1031 exists because the repo's handoff-contract guard
+(`scripts/check-handoff-contract.mjs`) requires every `HANDOFF.d/` file to name a bare issue
+number, and because the open work genuinely needs a tracker. Close #1031 when the puller is
+built and proven.
 
 ---
 
