@@ -24,6 +24,8 @@ BEGIN
       USING ERRCODE='55000';
     END IF;
   ELSE
+    PERFORM pg_advisory_xact_lock(
+      hashtextextended('sample_shipment_line:' || NEW.shipment_line_id::text,0));
     v_shipment_id := NEW.sample_shipment_id;
     IF v_shipment_id IS NOT NULL THEN
       PERFORM pg_advisory_xact_lock(hashtextextended('sample_shipment:' || v_shipment_id::text,0));
@@ -74,6 +76,8 @@ RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE v_line dflow.sample_shipment_line;
 BEGIN
   IF NEW.shipment_line_id IS NULL THEN RETURN NEW; END IF;
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended('sample_shipment_line:' || NEW.shipment_line_id::text,0));
   SELECT * INTO v_line FROM dflow.sample_shipment_line
   WHERE shipment_line_id=NEW.shipment_line_id;
   IF NOT FOUND THEN
@@ -127,6 +131,22 @@ BEGIN
          s.destination_location_type,s.destination_location_id);
   IF v_bad > 0 THEN
     RAISE EXCEPTION 'Release A integrity fix refused % shipment route mismatch(es)',v_bad;
+  END IF;
+  SELECT count(*) INTO v_bad
+  FROM dflow.sample_movement m
+  JOIN dflow.sample_shipment_line l ON l.shipment_line_id=m.shipment_line_id
+  WHERE l.sample_shipment_id IS NOT NULL
+    AND NOT (
+      (m.from_location_type IS NOT DISTINCT FROM l.origin_location_type
+        AND m.from_location_id IS NOT DISTINCT FROM l.origin_location_id
+        AND m.to_location_type='in_transit')
+      OR
+      (m.from_location_type='in_transit'
+        AND m.to_location_type IS NOT DISTINCT FROM l.destination_location_type
+        AND m.to_location_id IS NOT DISTINCT FROM l.destination_location_id)
+    );
+  IF v_bad > 0 THEN
+    RAISE EXCEPTION 'Release A integrity fix refused % movement route mismatch(es)',v_bad;
   END IF;
 END $$;
 
