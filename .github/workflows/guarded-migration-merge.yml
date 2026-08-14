@@ -55,6 +55,7 @@ jobs:
             --head-sha "${{ inputs.head_sha }}" > "$RUNNER_TEMP/merge-lock.json"
           echo "owner_sha=$(jq -r .ownerSha "$RUNNER_TEMP/merge-lock.json")" >> "$GITHUB_OUTPUT"
       - name: Re-prove the head and merge while the lock is held
+        id: guarded_merge
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pull_request }}
@@ -68,6 +69,12 @@ jobs:
           node scripts/check-migration-pr-lease.mjs
           gh api "repos/u2giants/shared-db/statuses/$REQUESTED_SHA" -f state=success -f context='Migration guarded merge authorization' -f description='Exclusive merge lock held and exact head revalidated'
           gh pr merge "${{ inputs.pull_request }}" --repo u2giants/shared-db --merge --match-head-commit "${{ inputs.head_sha }}"
+      - name: Revoke authorization if the guarded merge did not complete
+        if: failure() && steps.merge_lock.outputs.owner_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SHA: ${{ inputs.head_sha }}
+        run: gh api "repos/u2giants/shared-db/statuses/$REQUESTED_SHA" -f state=failure -f context='Migration guarded merge authorization' -f description='Guarded merge failed; authorization revoked before lock release'
       - name: Release the exclusive merge lane with ownership proof
         if: always() && steps.merge_lock.outputs.owner_sha != ''
         env:
