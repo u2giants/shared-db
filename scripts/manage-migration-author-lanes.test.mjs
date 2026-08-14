@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { acquireAuthorLane, acquireExclusive, assertLaneAvailable, buildDynamicQueues, claimBody, EXCLUSIVE_REFS, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, recoverStaleAuthorMutex, releaseOwnedRef, requireOwnedRef, validateClaimObjects } from './manage-migration-author-lanes.mjs'
+import { acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, EXCLUSIVE_REFS, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, recoverStaleAuthorMutex, releaseOwnedRef, requireOwnedRef, REVIEW_CURSOR_REF, validateClaimObjects } from './manage-migration-author-lanes.mjs'
 
 const NOW = new Date('2026-08-14T20:00:00Z')
 const body = (objects, owner, expires = '2026-08-15T08:00:00.000Z') => claimBody({ version:`2026081420${owner.padStart(4,'0')}`, objects, owner:`agent-${owner}`, branch:`codex/${owner}`, worktree:`C:/w/${owner}`, expiresAt:new Date(expires) })
@@ -86,6 +86,34 @@ function memoryIo() {
     getCommit:()=>({message:'db-coordination author-acquisition request-1',committer:{date:'2026-08-14T19:55:00Z'}}),
   }
 }
+
+function reviewIo(){
+  const io=memoryIo(), commits=new Map();let seq=0
+  io.makeOwnerCommit=(message)=>{const sha=`review-${++seq}`;commits.set(sha,{message});return sha}
+  io.getCommit=(sha)=>commits.get(sha)
+  io.updateRef=(ref,sha)=>io.refs.set(ref,sha)
+  return io
+}
+
+test('reviewer cursor advances atomically through the durable round robin',()=>{
+  const io=reviewIo(), names=[]
+  for(let n=1;n<=5;n++)names.push(assignNextReviewer({issue:n,pr:100+n,headSha:`abcdef${n}`},io).reviewer)
+  assert.deepEqual(names,['grok-4.6','glm-5.2','kimi-k3','qwen-3.8-max','grok-4.6'])
+  assert.ok(io.refs.has(REVIEW_CURSOR_REF))
+})
+
+test('reviewer assignment retry returns the same assignment without advancing',()=>{
+  const io=reviewIo(), request={issue:9,pr:109,headSha:'abcdef9'}
+  const first=assignNextReviewer(request,io), second=assignNextReviewer(request,io)
+  assert.deepEqual(second,first)
+  assert.equal(second.sequence,1)
+})
+
+test('concurrent orchestrator cannot advance reviewer cursor without the mutex',()=>{
+  const io=reviewIo();io.refs.set(MUTEX_REF,'other-orchestrator')
+  assert.throws(()=>assignNextReviewer({issue:9,pr:109,headSha:'abcdef9'},io),/occupied/)
+  assert.equal(io.refs.get(REVIEW_CURSOR_REF),undefined)
+})
 
 const opts={task:'#1',owner:'agent',branch:'codex/x',worktree:'C:/w',objects:['table core.x'],leaseHours:12,requestId:'r1',mutexAttempts:1}
 

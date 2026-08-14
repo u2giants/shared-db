@@ -688,6 +688,33 @@ four rules below are non-negotiable for any database change.
    local work or prepare the next queued issue without creating overlapping
    migration files.
 
+   After an issue reaches an exact reviewed head, atomically assign its external
+   reviewer with:
+
+   ```bash
+   node scripts/manage-migration-author-lanes.mjs --assign-reviewer \
+     --issue <issue> --pr <pr> --head-sha <exact-head>
+   ```
+
+   The machine-independent cursor rotates Grok 4.6 → GLM 5.2 → Kimi K3 → Qwen
+   3.8 Max → repeat. Use only `ai-grok-review`, `ai-glm`, `ai-kimi`, or `ai-qwen`
+   and their fixed model settings. Reuse one named session for rebuttals. Require
+   a current exact-head re-read and `APPROVE` or `REVISE` with evidence. Verify
+   every claim independently. Relay disagreements with
+   `templates/delegation/debate-turn.md`, stopping at agreement or the initial
+   review plus three rebuttals. If material disagreement remains, stop the merge
+   and ask Albert one concise decision. Never send secrets or licensed rows.
+
+   Append objective reviewer evidence through an `ai-devops` PR to
+   `models_comparison_grok_kim_glm.md`: issue/PR, requested and proven model,
+   verdict, confirmed/disproved findings, defects, false positives, policy/tool
+   adherence, continuity, latency, turns, and only metrics the wrapper reports.
+   Kimi headless metrics and returned model are unavailable; never invent them.
+   Reviewer approval may start preview/merge and prepare a production approval
+   package. It never authorizes production; Albert must approve the exact
+   migration and project. Record Qwen High as requested, but never override the
+   wrapper's qualified fixed configuration.
+
    Audit reports malformed claims without hiding the healthy ones; allocation
    still refuses while any malformed claim exists. **Expiry never unlocks an
    object.** Renew active work or explicitly release a claim after proving its

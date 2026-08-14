@@ -13,6 +13,9 @@ not production database state:
   empty lane is justified.
 - Existing cross-process tests still admit exactly three unrelated authors and
   exactly one of two authors claiming the same object.
+- The external-review cursor advances Grok → GLM → Kimi → Qwen → Grok, returns
+  the same assignment on retry, and refuses a concurrent orchestrator that does
+  not own the shared lock.
 
 Proof command:
 
@@ -20,5 +23,5 @@ Proof command:
 node --test scripts/manage-migration-author-lanes.test.mjs scripts/check-dispatch-collision.test.mjs
 ```
 
-Result: 97 passed, 0 failed. No database, preview, merge, or production call was
+Result: 100 passed, 0 failed. No database, preview, merge, or production call was
 made by this forward test.
