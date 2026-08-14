@@ -15,12 +15,12 @@
 | 0 | Keep the owner-held `20260802170000` bundle out of this work | ✅ done | `AGENTS.md` §6.5 requires `20260802170000`, `20260802171000`, and the FR-removal migration to move together; #963 has no production authority. |
 | 1 | Inventory + writer census; fail-closed design agreed | ✅ done | `rg` census at `origin/main` `8553b49`: Paramount and NBCU loaders insert only unresolved/null defaults; no runtime writer updates the six legacy resolution column sets. Durable writes will use one command; legacy columns become fail-closed. |
 | 2 | Migration A — create `plm.source_resolution` (capture-independent) | ✅ implemented | migration `20260814213019`, claim #1016 |
-| 3 | Migration B — backfill from the 6 capture-scoped tables | ✅ implemented | PR #1005, deterministic backfill |
-| 4 | Migration C — views that read resolution from the new home | ✅ implemented | PR #1005, established Paramount views plus `api.source_resolution` |
-| 5 | Migration D — guards on six capture-scoped tables | ✅ implemented | PR #1005, six named triggers |
-| 6 | Migration E — deprecate the in-table resolution columns | ✅ implemented | PR #1005, comments and guards |
-| 7 | Tests in `supabase/tests/` | 🟡 verification pending | PR #1005 checks |
-| 8 | Docs: `AGENTS.md` §6.4 cross-reference and consolidation aim | ✅ implemented | PR #1005 |
+| 3 | Migration B — backfill from the 6 capture-scoped tables | ✅ implemented | PR #1018, deterministic backfill |
+| 4 | Migration C — views that read resolution from the new home | ✅ implemented | PR #1018, established Paramount views plus `api.source_resolution` |
+| 5 | Migration D — guards on six capture-scoped tables | ✅ implemented | PR #1018, six named triggers |
+| 6 | Migration E — deprecate the in-table resolution columns | ✅ implemented | PR #1018, comments and guards |
+| 7 | Tests in `supabase/tests/` | 🟡 verification pending | PR #1018 checks |
+| 8 | Docs: `AGENTS.md` §6.4 cross-reference and consolidation aim | ✅ implemented | PR #1018 |
 
 **A fresh session starts at Step 1.** Step 0 is deliberately excluded. `AGENTS.md` §6.5
 forbids applying `20260802170000` alone, and this issue has no production authority.
@@ -146,7 +146,8 @@ carry resolution state on a capture-scoped primary key:
 Disney (`opa_*`, `dcp_*`, and the `marvel_/lucasfilm_/twentieth_century_` studio splits) and
 Warner (`wb_*`) key their entity tables on the **source id alone**, so their rows survive a
 refresh structurally. They are exposed to the *other* half of the problem instead — a loader
-upsert that clobbers the resolution columns — which Step 5 closes.
+upsert that clobbers the resolution columns. Issue #999 owns that separate writer-by-writer
+hardening; Step 5 here protects only the six capture-scoped Paramount/NBCU tables.
 
 ---
 
@@ -164,7 +165,8 @@ upsert that clobbers the resolution columns — which Step 5 closes.
   broader hardening without pretending an untested global trigger is safe.
 - Backfill of existing resolution state (currently zero rows resolved in `pmt_*`; verify
   `nbcu_*` before assuming the same).
-- Tests, docs, and the four scrape skills updated so loaders are told the new contract.
+- Tests and shared-db docs updated so loaders are told the new contract. Portable scrape-skill
+  updates remain separate from this schema pull request.
 
 **NOT in scope — do not do these in this plan.**
 
@@ -202,7 +204,7 @@ upsert that clobbers the resolution columns — which Step 5 closes.
   20260814060000_opa_link_ensure_entities.sql
   ```
 
-  Your migrations continue from `20260814070000`. **Never reuse a version number** — Supabase
+  The implemented migration is `20260814213019`. **Never reuse a version number** — Supabase
   keys on the version alone, so a duplicate makes one migration silently skip.
 
 - **`20260802170000_plm_import_preserve_curated_licensor_property_status.sql` is merged to
@@ -482,9 +484,7 @@ go through the durable command.
 
 #### Step 2. Migration A — `plm.source_resolution`
 
-- **File:** `supabase/migrations/20260814070000_source_resolution_durable_home.sql`
-  (adjust the timestamp so it sorts after everything already merged; check
-  `ls supabase/migrations | tail -3` first).
+- **File:** `supabase/migrations/20260814213019_source_resolution_durable_home.sql`
 - **What to create:**
 
   ```sql

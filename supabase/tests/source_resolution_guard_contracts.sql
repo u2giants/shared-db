@@ -43,4 +43,3 @@ begin
   delete from plm.nbcu_capture where id = v_capture;
 end;
 $$;
-

@@ -11,7 +11,7 @@ begin
   from information_schema.role_table_grants
   where table_schema = 'plm' and table_name = 'source_resolution'
     and grantee in ('anon','authenticated','service_role')
-    and privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER');
+    and privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN');
   if v_count <> 0 then
     raise exception 'direct source_resolution mutation grants exist: %', v_count;
   end if;
@@ -86,7 +86,7 @@ do $$
 declare v_has boolean; v_first text; v_second_failed boolean := false;
 begin
   select exists (select 1 from pg_extension where extname='dblink') into v_has;
-  if not v_has then raise notice 'first-writer race SKIP: dblink unavailable; preview drill required'; return; end if;
+  if not v_has then raise exception 'first-writer race requires dblink; concurrency proof cannot be skipped'; end if;
   perform dblink_connect('sr_first','dbname='||current_database());
   perform dblink_connect('sr_second','dbname='||current_database());
   perform dblink_send_query('sr_first', $q$

@@ -77,7 +77,7 @@ comment on column plm.source_resolution.updated_at is
 
 alter table plm.source_resolution enable row level security;
 revoke all on table plm.source_resolution from public, anon, authenticated;
-revoke insert, update, delete, truncate, references, trigger
+revoke insert, update, delete, truncate, references, trigger, maintain
   on table plm.source_resolution from service_role;
 grant select on table plm.source_resolution to authenticated, service_role;
 create policy source_resolution_authenticated_read
