@@ -6,6 +6,7 @@ declare
   v_text text;
   v_n integer;
   v_invoker text;
+  v_search_path_config text;
 begin
   select count(*) into v_n
   from information_schema.columns
@@ -20,8 +21,14 @@ begin
   if v_text ilike '%paramount_term%' then
     raise exception 'loader failed: function still names paramount_term';
   end if;
+  select cfg into v_search_path_config
+  from pg_proc p
+  cross join lateral unnest(p.proconfig) as cfg
+  where p.oid = 'plm.load_pmt_capture_chunk'::regproc
+    and cfg like 'search_path=%';
   if v_text not ilike '%security definer%'
-     or v_text not ilike '%set search_path to %plm, core, public, extensions%'
+     or regexp_replace(coalesce(v_search_path_config, ''), '[[:space:]"]+', '', 'g')
+          <> 'search_path=plm,core,public,extensions'
      or v_text not ilike '%not (p_target = any (c_targets))%' then
     raise exception 'loader failed: security-definer safeguards changed';
   end if;
