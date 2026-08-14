@@ -658,6 +658,36 @@ four rules below are non-negotiable for any database change.
    ends; the lease only controls who occupies an author lane.
 
    Audit lanes with `node scripts/manage-migration-author-lanes.mjs --audit`.
+   Audit and refill the three dynamic queues with
+   `node scripts/manage-migration-author-lanes.mjs --queue-audit`. Every open
+   `db-work` issue must contain one authoritative block:
+
+   ````text
+   ```db-work-scope
+   state: eligible
+   priority: 100
+   depends_on:
+   objects:
+     - table schema.name
+   ````
+   ```
+
+   Allowed states are `eligible`, `blocked`, `owner-decision`, `data-only`, and
+   `non-structural`. Exact object overlap forms a serial queue; unrelated object
+   groups fill up to three author lanes. When a claim releases, rerun the queue
+   audit and dispatch every reported `REFILL REQUIRED NOW` issue in the same
+   turn. Never wait for Albert to ask or approve routine dispatch. Ask him only
+   for a genuine business ruling or exact production approval. Recompute after
+   every merge. Preview and merge stay globally serialized.
+
+   An empty author lane is valid only when the audit has classified every open
+   `db-work` issue and reports no eligible issue for it. Unclassified, malformed,
+   blocked, owner-decision, data-only, and non-structural issues never consume a
+   lane; unclassified or malformed issues also prevent a claim that no work
+   exists. While an author waits for CI, review, preview, or merge, continue safe
+   local work or prepare the next queued issue without creating overlapping
+   migration files.
+
    Audit reports malformed claims without hiding the healthy ones; allocation
    still refuses while any malformed claim exists. **Expiry never unlocks an
    object.** Renew active work or explicitly release a claim after proving its

@@ -18,6 +18,66 @@ export const EXCLUSIVE_REFS = Object.freeze({
   production: 'refs/db-coordination/production',
 })
 
+const QUEUE_STATES = new Set(['eligible','blocked','owner-decision','data-only','non-structural'])
+
+export function parseQueueScope(body = '') {
+  const fence = /```db-work-scope\s*\n([\s\S]*?)```/.exec(body)
+  if (!fence) return null
+  const lines = fence[1].split(/\r?\n/), fields = new Map(), objects = []
+  let inObjects = false
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (!line) continue
+    if (line === 'objects:') { inObjects = true; continue }
+    if (inObjects && line.startsWith('- ')) { objects.push(line.slice(2).trim()); continue }
+    inObjects = false
+    const match = /^([a-z_]+):\s*(.*)$/.exec(line)
+    if (!match || fields.has(match[1])) throw new LaneError('unreadable db-work-scope block')
+    fields.set(match[1], match[2].trim())
+  }
+  const state = fields.get('state')
+  if (!QUEUE_STATES.has(state)) throw new LaneError(`db-work-scope state must be one of ${[...QUEUE_STATES].join(', ')}`)
+  const priority = Number(fields.get('priority'))
+  if (!Number.isInteger(priority) || priority < 0) throw new LaneError('db-work-scope priority must be a non-negative integer')
+  const dependencies = (fields.get('depends_on') ?? '').split(',').map((v)=>v.trim()).filter(Boolean).map((v)=>Number(String(v).replace(/^#/,'')))
+  if (dependencies.some((v)=>!Number.isInteger(v) || v <= 0)) throw new LaneError('db-work-scope depends_on must contain issue numbers')
+  if (state === 'eligible' && !objects.length) throw new LaneError('eligible db-work-scope must list exact objects')
+  return { state, priority, dependencies, objects: objects.length ? validateClaimObjects(objects) : [] }
+}
+
+function overlaps(a, b) { const right = new Set(b); return a.some((x)=>right.has(x)) }
+
+export function buildDynamicQueues(issues, claims, now = new Date()) {
+  const openNumbers = new Set(issues.map((issue)=>Number(issue.number)))
+  const skipped = [], unclassified = [], malformed = [], candidates = []
+  for (const issue of issues) {
+    let scope
+    try { scope = parseQueueScope(issue.body) } catch (error) { malformed.push({ issue:issue.number, reason:error.message }); continue }
+    if (!scope) { unclassified.push(issue.number); continue }
+    if (scope.state !== 'eligible') { skipped.push({ issue:issue.number, reason:scope.state }); continue }
+    const waiting = scope.dependencies.filter((number)=>openNumbers.has(number))
+    if (waiting.length) { skipped.push({ issue:issue.number, reason:`depends-on-open:${waiting.join(',')}` }); continue }
+    candidates.push({ issue:issue.number, title:issue.title, ...scope })
+  }
+  const active = claims.map((claim)=>({ claim:claim.number, issue:null, priority:Number.MAX_SAFE_INTEGER, objects:parseAuthorLease(claim.body,now).objects }))
+  const components = [...active, ...candidates].map((item)=>[item])
+  for (let i=0;i<components.length;i++) for (let j=i+1;j<components.length;) {
+    if (components[i].some((a)=>components[j].some((b)=>overlaps(a.objects,b.objects)))) components[i].push(...components.splice(j,1)[0]); else j++
+  }
+  const queues = Array.from({length:MAX_AUTHOR_LANES},(_,index)=>({ lane:index+1, active:null, queued:[], objects:[] }))
+  const ordered = components.sort((a,b)=>Number(Boolean(b.some(x=>x.claim)))-Number(Boolean(a.some(x=>x.claim))) || Math.max(...b.map(x=>x.priority))-Math.max(...a.map(x=>x.priority)))
+  for (const component of ordered) {
+    const activeItem = component.find((x)=>x.claim)
+    let lane = activeItem ? queues.find((q)=>!q.active) : [...queues].sort((a,b)=>a.queued.length-b.queued.length)[0]
+    if (activeItem) lane.active = activeItem.claim
+    lane.queued.push(...component.filter((x)=>x.issue).sort((a,b)=>b.priority-a.priority || a.issue-b.issue).map((x)=>x.issue))
+    lane.objects.push(...new Set(component.flatMap((x)=>x.objects)))
+  }
+  const emptyLanes = queues.filter((q)=>!q.active).length
+  const dispatchable = queues.filter((q)=>!q.active && q.queued.length).map((q)=>q.queued[0])
+  return { queues, skipped, unclassified, malformed, dispatchable, emptyLanes, fullyAudited:!unclassified.length&&!malformed.length }
+}
+
 export class LaneError extends Error {}
 
 const CLAIM_KINDS = new Set(['schema','table','column','view','materialized view','function','procedure','trigger','policy','type','domain','sequence','index','publication','storage bucket'])
@@ -110,6 +170,10 @@ export const githubIo = {
   openClaims() {
     const rows = ghPaginated(`repos/${REPO}/issues?state=open&labels=db-claim&per_page=100`)
     return rows.filter((x) => !x.pull_request).map((x) => ({ number: x.number, title: x.title, body: x.body, url: x.html_url }))
+  },
+  openWorkIssues() {
+    const rows = ghPaginated(`repos/${REPO}/issues?state=open&labels=db-work&per_page=100`)
+    return rows.filter((x)=>!x.pull_request).map((x)=>({ number:x.number, title:x.title, body:x.body, labels:(x.labels??[]).map((l)=>l.name) }))
   },
   prSources() { return gatherOpenPrObjects(REPO) },
   openPulls() { return ghPaginated(`repos/${REPO}/pulls?state=open&per_page=100`) },
@@ -273,6 +337,7 @@ function parseArgs(argv) {
     const a = argv[i]
     if (a === '--claim') out.claim = true
     else if (a === '--audit') out.audit = true
+    else if (a === '--queue-audit') out.queueAudit = true
     else if (a === '--cleanup-stale') out.cleanup = true
     else if (a === '--release-claim') out.releaseClaim = next(i), i++
     else if (a === '--confirm-finished') out.confirmFinished = true
@@ -295,6 +360,13 @@ export function main(argv, now = new Date(), io = githubIo) {
     if (o.acquireExclusive) { console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha }, io), null, 2)); return 0 }
     if (o.releaseExclusive) { if (!o.ownerSha) throw new LaneError('--owner-sha is required for safe release'); releaseOwnedRef(EXCLUSIVE_REFS[o.releaseExclusive], o.ownerSha, io); return 0 }
     const claims = io.openClaims()
+    if (o.queueAudit) {
+      const result = buildDynamicQueues(io.openWorkIssues(), claims, now)
+      console.log(JSON.stringify(result,null,2))
+      if (result.dispatchable.length) { console.error(`REFILL REQUIRED NOW: dispatch issue(s) ${result.dispatchable.map((n)=>`#${n}`).join(', ')}`); return 2 }
+      if (result.emptyLanes && !result.fullyAudited) { console.error('EMPTY LANE NOT PROVEN: classify every open db-work issue before claiming no eligible work exists'); return 2 }
+      return result.malformed.length ? 2 : 0
+    }
     if (o.releaseClaim) {
       if (!o.confirmFinished || !o.owner) throw new LaneError('--release-claim requires exact --owner and --confirm-finished')
       const requestId=randomUUID(), ownerSha=io.makeOwnerCommit(`db-coordination claim-release ${requestId}`)
@@ -321,7 +393,7 @@ export function main(argv, now = new Date(), io = githubIo) {
       for(const problem of malformed)console.error(`MALFORMED ${problem}`)
       return malformed.length || occupied>MAX_AUTHOR_LANES ? 2 : 0
     }
-    if (!o.claim) throw new LaneError('choose --claim, --audit, --cleanup-stale, or an exclusive-lane command')
+    if (!o.claim) throw new LaneError('choose --claim, --audit, --queue-audit, --cleanup-stale, or an exclusive-lane command')
     for (const k of ['task','owner','branch','worktree']) if (!o[k]) throw new LaneError(`--${k} is required`)
     if (!o.objects.length) throw new LaneError('--objects must name every database object exactly')
     o.leaseHours ??= DEFAULT_LEASE_HOURS
