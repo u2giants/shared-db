@@ -25,3 +25,17 @@ begin
   end if;
 end;
 $$;
+
+do $$
+declare v_winner text;
+begin
+  with candidates(source_id,captured_at,resolved_at,capture_tiebreaker,decision) as (values
+    ('same','2026-08-14 12:00Z'::timestamptz,'2026-08-14 12:01Z'::timestamptz,'a','older'),
+    ('same','2026-08-14 12:00Z'::timestamptz,'2026-08-14 12:02Z'::timestamptz,'a','newer'),
+    ('tie','2026-08-14 12:00Z'::timestamptz,'2026-08-14 12:02Z'::timestamptz,'a','low-id'),
+    ('tie','2026-08-14 12:00Z'::timestamptz,'2026-08-14 12:02Z'::timestamptz,'b','high-id')
+  ), ranked as (select *,row_number() over(partition by source_id order by captured_at desc nulls last,resolved_at desc nulls last,capture_tiebreaker desc) choice from candidates)
+  select string_agg(decision,',' order by source_id) into v_winner from ranked where choice=1;
+  if v_winner <> 'newer,high-id' then raise exception 'deterministic ordering selected %',v_winner; end if;
+end;
+$$;

@@ -1,4 +1,4 @@
-# Implementation plan — curated decisions must survive every sync, everywhere
+# Implementation plan — Paramount/NBCU curated decisions must survive every sync
 
 **Written:** 2026-08-14 · **Machine:** al8960ofc · **Agent:** claude (Opus 5)
 **Repo:** `u2giants/shared-db` · **Target branch:** a new branch off `main`, PR to `main`
@@ -14,13 +14,13 @@
 |---|---|---|---|
 | 0 | Keep the owner-held `20260802170000` bundle out of this work | ✅ done | `AGENTS.md` §6.5 requires `20260802170000`, `20260802171000`, and the FR-removal migration to move together; #963 has no production authority. |
 | 1 | Inventory + writer census; fail-closed design agreed | ✅ done | `rg` census at `origin/main` `8553b49`: Paramount and NBCU loaders insert only unresolved/null defaults; no runtime writer updates the six legacy resolution column sets. Durable writes will use one command; legacy columns become fail-closed. |
-| 2 | Migration A — create `plm.source_resolution` (capture-independent) | ⬜ open | — |
-| 3 | Migration B — backfill from the 6 capture-scoped tables | ⬜ open | — |
-| 4 | Migration C — views that read resolution from the new home | ⬜ open | — |
-| 5 | Migration D — the general guard trigger on every landing table | ⬜ open | — |
-| 6 | Migration E — deprecate the in-table resolution columns | ⬜ open | — |
-| 7 | Tests in `supabase/tests/` | ⬜ open | — |
-| 8 | Docs: `AGENTS.md` §6.4 cross-reference + the four scrape skills | ⬜ open | — |
+| 2 | Migration A — create `plm.source_resolution` (capture-independent) | ✅ implemented | PR #1005, migration `20260814202438` |
+| 3 | Migration B — backfill from the 6 capture-scoped tables | ✅ implemented | PR #1005, deterministic backfill |
+| 4 | Migration C — views that read resolution from the new home | ✅ implemented | PR #1005, established Paramount views plus `api.source_resolution` |
+| 5 | Migration D — guards on six capture-scoped tables | ✅ implemented | PR #1005, six named triggers |
+| 6 | Migration E — deprecate the in-table resolution columns | ✅ implemented | PR #1005, comments and guards |
+| 7 | Tests in `supabase/tests/` | 🟡 verification pending | PR #1005 checks |
+| 8 | Docs: `AGENTS.md` §6.4 cross-reference and consolidation aim | ✅ implemented | PR #1005 |
 
 **A fresh session starts at Step 1.** Step 0 is deliberately excluded. `AGENTS.md` §6.5
 forbids applying `20260802170000` alone, and this issue has no production authority.
@@ -601,10 +601,11 @@ go through the durable command.
 - **Loud failure, no silent fallback.** Standing rule 11. The exception message must name the
   table, the column, and the id, and say what to do instead.
 - **Behaviour when done:** it is structurally impossible for a sync, import, backfill script,
-  or future loader nobody has written yet to write a curated decision on a disposable landing
-  row. The durable command is the only mutation path and records who decided and when.
+  or future loader to write a curated decision on the six scoped Paramount/NBCU landing rows.
+  The durable command is the only mutation path and records who decided and when. Issue #999
+  extends this protection to the other source families.
 - **You'll know it worked when:** a test (Step 7) proves that an UPDATE to `core_property_id`
-  outside the curation path raises, and the same UPDATE inside it succeeds.
+  outside the curation path raises, while the durable command succeeds.
 
 #### Step 6. Migration E — deprecate the in-table resolution columns
 
@@ -757,7 +758,8 @@ around it by applying each migration to preview explicitly by version. Do the sa
 - [ ] `plm.source_resolution` exists on production, with CHECKs and table/column comments.
 - [ ] Backfill run, with an in-migration assertion of what it moved (zero is a valid result).
 - [ ] Every reader found by the Step 4 queries updated or explicitly exempted in writing.
-- [ ] The guard trigger installed on every resolution-carrying `plm` table, failing loudly.
+- [ ] The guard trigger installed on all six capture-scoped Paramount/NBCU tables, failing
+      loudly. Issue #999 owns the source-ID-keyed Disney, Warner, OPA and ColdLion families.
 - [ ] Deprecation comments on the old columns; follow-up issue opened to drop them.
 - [ ] Four new test files added; whole `supabase/tests` job read and green.
 - [ ] `AGENTS.md`, `docs/core-master-data-consolidation-aim.md`, and all four scrape skills

@@ -78,3 +78,35 @@ begin
   end;
 end;
 $$;
+
+do $$
+declare v_has boolean; v_first text; v_second_failed boolean := false;
+begin
+  select exists (select 1 from pg_extension where extname='dblink') into v_has;
+  if not v_has then raise notice 'first-writer race SKIP: dblink unavailable; preview drill required'; return; end if;
+  perform dblink_connect('sr_first','dbname='||current_database());
+  perform dblink_connect('sr_second','dbname='||current_database());
+  perform dblink_send_query('sr_first', $q$
+    with d as materialized (select plm.set_source_resolution('zztest-race','property','same-key','unresolved',null,null,null,null,'first',null) row),
+         pause as materialized (select pg_sleep(1) from d)
+    select (row).updated_at::text from d,pause$q$);
+  perform pg_sleep(0.1);
+  perform dblink_send_query('sr_second', $q$select (plm.set_source_resolution('zztest-race','property','same-key','no_match',null,null,null,null,'second',null)).updated_at::text$q$);
+  while dblink_is_busy('sr_first')=1 loop perform pg_sleep(0.05); end loop;
+  select result into v_first from dblink_get_result('sr_first') as t(result text);
+  while dblink_is_busy('sr_second')=1 loop perform pg_sleep(0.05); end loop;
+  begin
+    perform result from dblink_get_result('sr_second') as t(result text);
+  exception when serialization_failure then v_second_failed := true;
+            when unique_violation then raise exception 'concurrent first writer leaked duplicate-key error';
+  end;
+  if not v_second_failed then raise exception 'concurrent first writer did not receive reload conflict'; end if;
+  perform dblink_disconnect('sr_first'); perform dblink_disconnect('sr_second');
+  delete from plm.source_resolution where source_system='zztest-race' and source_id='same-key';
+exception when others then
+  begin perform dblink_disconnect('sr_first'); exception when others then null; end;
+  begin perform dblink_disconnect('sr_second'); exception when others then null; end;
+  delete from plm.source_resolution where source_system='zztest-race' and source_id='same-key';
+  raise;
+end;
+$$;

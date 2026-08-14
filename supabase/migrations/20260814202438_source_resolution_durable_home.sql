@@ -97,6 +97,70 @@ comment on view api.source_resolution is
 revoke all on table api.source_resolution from public, anon;
 grant select on table api.source_resolution to authenticated, service_role;
 
+-- Keep the established Paramount consumer views truthful. These views retain their public
+-- column contract, but their resolution fields now come from the durable identity-keyed row.
+create or replace view api.pmt_properties
+with (security_invoker = true) as
+select
+  p.capture_id, p.property_source_id, p.property_name, p.is_licensed_selection,
+  coalesce((select array_agg(distinct t.authorized_title_name)
+              from plm.pmt_authorized_title_property atp
+              join plm.pmt_authorized_title t
+                on t.capture_id = atp.capture_id and t.authorized_title_key = atp.authorized_title_key
+             where atp.capture_id = p.capture_id and atp.property_source_id = p.property_source_id),
+           array[]::text[]) as business_title_names,
+  (select count(*) from plm.pmt_asset_property ap
+    where ap.capture_id = p.capture_id and ap.property_source_id = p.property_source_id) as asset_count,
+  (select count(*) from plm.pmt_property_character pch
+    where pch.capture_id = p.capture_id and pch.property_source_id = p.property_source_id) as character_count,
+  (select count(*) from plm.pmt_property_collection pc
+    where pc.capture_id = p.capture_id and pc.property_source_id = p.property_source_id) as style_guide_count,
+  coalesce((select array_agg(f.franchise_name order by f.franchise_name)
+              from plm.pmt_property_franchise_evidence pfe
+              join plm.pmt_franchise f
+                on f.capture_id = pfe.capture_id and f.franchise_source_id = pfe.franchise_source_id
+             where pfe.capture_id = p.capture_id and pfe.property_source_id = p.property_source_id),
+           array[]::text[]) as franchise_names_cooccurrence_evidence_only,
+  false as franchise_link_is_a_direct_source_relationship,
+  r.core_property_id, coalesce(r.resolution_status, 'unresolved') as resolution_status,
+  r.resolution_reason, r.resolved_at
+from plm.pmt_property p
+join api.pmt_latest_capture lc on lc.capture_id = p.capture_id
+left join plm.source_resolution r
+  on r.source_system = 'paramount' and r.entity_kind = 'property'
+ and r.source_id = p.property_source_id::text;
+
+create or replace view api.pmt_characters
+with (security_invoker = true) as
+select
+  ch.capture_id, ch.character_source_id, ch.character_name,
+  coalesce((select array_agg(p.property_name order by p.property_name)
+              from plm.pmt_property_character pch
+              join plm.pmt_property p
+                on p.capture_id = pch.capture_id and p.property_source_id = pch.property_source_id
+             where pch.capture_id = ch.capture_id
+               and pch.character_source_id = ch.character_source_id),
+           array[]::text[]) as explicit_property_names,
+  (select count(*) from plm.pmt_asset_character ac
+    where ac.capture_id = ch.capture_id and ac.character_source_id = ch.character_source_id)
+    as asset_count,
+  coalesce((select array_agg(distinct cl.collection_name)
+              from plm.pmt_asset_character ac
+              join plm.pmt_asset_collection acl
+                on acl.capture_id = ac.capture_id and acl.asset_id = ac.asset_id
+              join plm.pmt_collection cl
+                on cl.capture_id = acl.capture_id and cl.collection_source_id = acl.collection_source_id
+             where ac.capture_id = ch.capture_id
+               and ac.character_source_id = ch.character_source_id),
+           array[]::text[]) as style_guide_names,
+  r.core_character_id, coalesce(r.resolution_status, 'unresolved') as resolution_status,
+  r.resolution_reason, r.resolved_at
+from plm.pmt_character ch
+join api.pmt_latest_capture lc on lc.capture_id = ch.capture_id
+left join plm.source_resolution r
+  on r.source_system = 'paramount' and r.entity_kind = 'character'
+ and r.source_id = ch.character_source_id::text;
+
 create or replace function plm.set_source_resolution(
   p_source_system text,
   p_entity_kind text,
