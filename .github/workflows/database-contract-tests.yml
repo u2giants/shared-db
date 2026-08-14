@@ -503,6 +503,15 @@ jobs:
             exit 1
           fi
 
+      - name: Prove source-resolution concurrent first-writer conflict
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 54322
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: bash supabase/tests/source_resolution_first_writer_race.sh
+
       - name: Upload every test's output
         if: always()
         uses: actions/upload-artifact@v4

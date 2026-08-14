@@ -1437,9 +1437,15 @@ unset."** If the matching keys disagree — if one lookup key finds a row that a
 not — that is a **possible match, not an absence**: quarantine it as evidence for a human, and
 never resolve it by inserting.
 
-**What this means in practice TODAY.** No per-field curation record exists in this database, and
-no importer can currently tell curated from untouched. So the operative rule right now is not
-advisory: **an import writes a curated field only on INSERT of a genuinely new row, and writes no
+**Durable source-resolution decisions.** `plm.source_resolution` is the capture-independent
+home for a human decision that a Paramount or NBCU source identity matches a canonical property,
+character, style guide, or asset. Source loaders never write it and must leave the deprecated
+resolution columns on capture rows unresolved and null. Human tools use
+`plm.set_source_resolution()`; a later capture cannot bypass that decision.
+
+**What this means in practice TODAY.** The durable resolution record above does not identify
+which ordinary fields on a matched `core.*` row were curated. So the operative rule remains
+non-advisory: **an import writes a curated field only on INSERT of a genuinely new row, and writes no
 curated field at all on a matched row.** Gap-filling a matched row becomes permissible only once
 "deliberately set" is recorded per field and the importer actually consults that record.
 
