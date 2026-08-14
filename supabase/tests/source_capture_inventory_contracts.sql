@@ -129,6 +129,17 @@ begin
      or r.count_note not ilike '%NULL is intentional%' then
     raise exception 'B FAILED: DCP unavailable-membership contract wrong: %', row_to_json(r);
   end if;
+
+  for r in select * from api.source_capture_inventory
+    where table_name in ('dcp_chunk_ledger','dcp_asset_tile_observation')
+  loop
+    if r.count_basis <> 'latest_complete'
+       or r.latest_complete_row_count is not null
+       or r.latest_complete_status is not null
+       or r.count_note not ilike '%No complete DCP crawl exists%' then
+      raise exception 'B FAILED: immutable DCP crawl membership mislabeled: %', row_to_json(r);
+    end if;
+  end loop;
 end;
 $$;
 

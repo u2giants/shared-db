@@ -115,8 +115,8 @@ select
     when relname like 'opa\_%' then 'current_snapshot'
     when relname like 'pmt\_%' and (relname = 'pmt_capture' or has_capture_id) then 'latest_complete'
     when relname like 'nbcu\_%' and (relname = 'nbcu_capture' or has_capture_id) then 'latest_complete'
-    when relname in ('dcp_crawl','dcp_asset','dcp_asset_crawl','dcp_crawl_section',
-                     'dcp_crawl_gap','dcp_load_exception') then 'latest_complete'
+    when relname in ('dcp_crawl','dcp_asset','dcp_crawl_gap')
+         or (relname like 'dcp\_%' and has_crawl_id) then 'latest_complete'
     when relname = 'dcp_metadata_run' or (relname like 'dcp\_%' and has_metadata_run_id)
       then 'latest_complete'
     else 'retained_only'
@@ -126,8 +126,8 @@ select
       then case when pmt_capture_id is null then null else 'complete' end
     when relname like 'nbcu\_%' and (relname = 'nbcu_capture' or has_capture_id)
       then case when nbcu_capture_id is null then null else 'complete' end
-    when relname in ('dcp_crawl','dcp_asset','dcp_asset_crawl','dcp_crawl_section',
-                     'dcp_crawl_gap','dcp_load_exception')
+    when relname in ('dcp_crawl','dcp_asset','dcp_crawl_gap')
+         or (relname like 'dcp\_%' and has_crawl_id)
       then case when dcp_crawl_id is null then null else 'complete' end
     when relname = 'dcp_metadata_run' or (relname like 'dcp\_%' and has_metadata_run_id)
       then case when dcp_metadata_run_id is null then null else 'complete' end
@@ -146,11 +146,11 @@ select
       'No complete NBCU capture exists; latest-complete count is unknown, not zero.'
     when relname like 'nbcu\_%' and (relname = 'nbcu_capture' or has_capture_id) then
       'Latest complete NBCU capture; loading, rejected and abandoned captures excluded.'
-    when relname in ('dcp_crawl','dcp_asset','dcp_asset_crawl','dcp_crawl_section',
-                     'dcp_crawl_gap','dcp_load_exception') and dcp_crawl_id is null then
+    when (relname in ('dcp_crawl','dcp_asset','dcp_crawl_gap')
+          or (relname like 'dcp\_%' and has_crawl_id)) and dcp_crawl_id is null then
       'No complete DCP crawl exists; latest-complete membership is unknown, not zero.'
-    when relname in ('dcp_crawl','dcp_asset','dcp_asset_crawl','dcp_crawl_section',
-                     'dcp_crawl_gap','dcp_load_exception') then
+    when relname in ('dcp_crawl','dcp_asset','dcp_crawl_gap')
+         or (relname like 'dcp\_%' and has_crawl_id) then
       'Latest complete DCP path crawl, using immutable crawl membership where required.'
     when (relname = 'dcp_metadata_run' or (relname like 'dcp\_%' and has_metadata_run_id))
          and dcp_metadata_run_id is null then
