@@ -47,7 +47,9 @@ BEGIN
   END;
   INSERT INTO dflow.sample_path_revision(sample_workflow_id,revision,business_path,reason,changed_by_user)
   VALUES(v_workflow,2,'nyo_factory','approved reroute','contract-test');
-  UPDATE dflow.sample_workflow SET business_path='nyo_factory' WHERE sample_workflow_id=v_workflow;
+  IF (SELECT business_path FROM dflow.sample_workflow WHERE sample_workflow_id=v_workflow) <> 'nyo_factory' THEN
+    RAISE EXCEPTION 'path revision did not atomically update the workflow path';
+  END IF;
   BEGIN
     UPDATE dflow.sample_path_revision SET reason='rewritten' WHERE sample_workflow_id=v_workflow;
     RAISE EXCEPTION 'append-only path revision was mutable';
@@ -95,6 +97,13 @@ BEGIN
                    AND box_id_fk IS NULL AND to_location_type='in_transit') THEN
     RAISE EXCEPTION 'unboxed shipment movement did not retain shipment identity';
   END IF;
+  BEGIN
+    PERFORM dflow.post_sample_movement(v_sample,1,'warehouse','china_warehouse','in_transit',
+      v_shipment::text,'ship','contract-test','production','release-a-wrong-box','hash-wb',NULL,
+      (SELECT shipment_line_id FROM dflow.sample_shipment_line WHERE sample_id_fk=v_sample));
+    RAISE EXCEPTION 'movement accepted a box that differs from its shipment line';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
 
   PERFORM dflow.post_sample_movement(v_sample,1,'terminal','created','warehouse','china_warehouse',
     'create','contract-test','production','release-a-create','hash-m');

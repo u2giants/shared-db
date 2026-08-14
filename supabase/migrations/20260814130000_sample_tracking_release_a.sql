@@ -123,6 +123,19 @@ CREATE TRIGGER sample_workflow_path_revision_required
 BEFORE UPDATE OF business_path ON dflow.sample_workflow
 FOR EACH ROW EXECUTE FUNCTION dflow.require_sample_path_revision();
 
+CREATE OR REPLACE FUNCTION dflow.apply_sample_path_revision()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE dflow.sample_workflow
+  SET business_path = NEW.business_path, updated_at = NEW.changed_at
+  WHERE sample_workflow_id = NEW.sample_workflow_id;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER sample_path_revision_apply
+AFTER INSERT ON dflow.sample_path_revision
+FOR EACH ROW EXECUTE FUNCTION dflow.apply_sample_path_revision();
+
 CREATE OR REPLACE FUNCTION dflow.reject_sample_path_revision_mutation()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -284,6 +297,7 @@ DECLARE
   v_existing dflow.sample_movement;
   v_result dflow.sample_movement;
   v_shipment_id bigint;
+  v_line_box_id integer;
 BEGIN
   PERFORM pg_advisory_xact_lock(21450, p_sample_id);
   SELECT * INTO v_existing FROM dflow.sample_movement
@@ -295,12 +309,16 @@ BEGIN
     RETURN v_existing;
   END IF;
   IF p_shipment_line_id IS NOT NULL THEN
-    SELECT sample_shipment_id INTO v_shipment_id
+    SELECT sample_shipment_id,box_id_fk INTO v_shipment_id,v_line_box_id
     FROM dflow.sample_shipment_line
     WHERE shipment_line_id = p_shipment_line_id AND sample_id_fk = p_sample_id;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'Shipment line % does not belong to sample %', p_shipment_line_id, p_sample_id
         USING ERRCODE='23503';
+    END IF;
+    IF p_box_id IS DISTINCT FROM v_line_box_id THEN
+      RAISE EXCEPTION 'Box % does not match shipment line % box %',p_box_id,p_shipment_line_id,v_line_box_id
+        USING ERRCODE='23514';
     END IF;
   END IF;
   INSERT INTO dflow.sample_movement(sample_id_fk,quantity,from_location_type,from_location_id,
@@ -360,7 +378,8 @@ COMMENT ON VIEW dflow.sample_inventory IS 'Server inventory read model derived f
 REVOKE ALL ON dflow.sample_creation_batch,dflow.sample_workflow,dflow.sample_path_revision,
   dflow.sample_carrier,dflow.sample_shipment,dflow.sample_inventory FROM anon,authenticated;
 REVOKE ALL ON FUNCTION dflow.reject_sample_path_revision_mutation(),
-  dflow.validate_sample_path_revision(),dflow.require_sample_path_revision()
+  dflow.validate_sample_path_revision(),dflow.require_sample_path_revision(),
+  dflow.apply_sample_path_revision()
   FROM PUBLIC,anon,authenticated;
 
 COMMIT;
