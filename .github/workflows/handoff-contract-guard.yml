@@ -1,0 +1,62 @@
+# Guard: the HANDOFF.d/ ownership contract (issue #658, owner ruling 2026-08-13).
+#
+# What this does NOT do, deliberately: count the files in HANDOFF.d/ and fail
+# above a threshold. That design was proposed and REJECTED by the owner:
+#
+#   "when the 6th file gets there legitimately, if there are five files already
+#    there and some are stale, the legitimate file will get rejected."
+#
+# A count cap bills whoever shows up next for a mess somebody else left. This
+# repo can legitimately hold 20+ concurrent workstreams across the five
+# applications sharing the database, so there is no correct ceiling. This job
+# inspects ONLY the handoff files the pull request itself touches, plus the file
+# belonging to any issue the pull request closes. It can never fail a session for
+# somebody else's file.
+#
+# Design rules, shared with the other repo-wide guards here:
+#   1. NO `paths:` filter. A filtered guard skips exactly the docs-only PR that
+#      carries the change and still shows all-checks-passed (AGENTS.md 5.2).
+#   2. A UNIQUE check-run name, so it can be made a required context (6.7).
+#   3. Its own negative-path tests run FIRST, in the same job. A guard whose
+#      tests never run is a guard nobody has proven fires (backlog B7).
+#   4. NO SILENT PASS. Unreadable issue state fails the job.
+#
+# fetch-depth: 0 is required — the job diffs against the merge base.
+
+name: Handoff Contract Guard
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: handoff-contract-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Handoff contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Prove the guard refuses each failure it is meant to catch
+        run: node --test scripts/check-handoff-contract.test.mjs scripts/report-stale-handoffs.test.mjs
+
+      - name: Check the handoff files this pull request touches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HANDOFF_BASE: origin/${{ github.base_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/check-handoff-contract.mjs

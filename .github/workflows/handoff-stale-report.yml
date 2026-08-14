@@ -1,0 +1,46 @@
+# Weekly: report HANDOFF.d/ files whose issue is already closed (issue #658).
+#
+# The backstop for the one gap the pull-request guard cannot close: a session
+# that dies mid-run never returns to retire its own file.
+#
+# This job REPORTS and never blocks. It edits ONE tracking issue in place rather
+# than opening a fresh issue every week, because a weekly issue is a weekly issue
+# everybody mutes. It never deletes a file: deciding a workstream is finished is
+# a judgement, and the file's owner is named in the report so the ask lands on
+# the session that created it.
+
+name: Handoff Stale Report
+
+on:
+  schedule:
+    # Mondays 13:00 UTC — 09:00 America/New_York, the timezone this repo's
+    # timestamps use (AGENTS.md).
+    - cron: "0 13 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: handoff-stale-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: Stale handoff report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Prove the report classifies correctly before it writes anything
+        run: node --test scripts/report-stale-handoffs.test.mjs
+
+      - name: Report, and sync the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/report-stale-handoffs.mjs --publish
