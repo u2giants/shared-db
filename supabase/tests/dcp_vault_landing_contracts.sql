@@ -563,8 +563,8 @@ begin
   end if;
 
   -- E5. A stable identity observed by a completed crawl: SOURCE columns freeze, but
-  -- last_seen_crawl_id and the reconciliation columns must STILL be editable, or the
-  -- reconciliation workstream is dead on arrival.
+  -- last_seen_crawl_id must remain editable for refreshes. Human reconciliation now goes
+  -- through plm.set_source_resolution; the landing decision columns are immutable.
   v_ok := false;
   begin
     update plm.dcp_asset set file_name = 'ZZTEST-renamed.zzz' where id = v_asset;
@@ -687,8 +687,8 @@ begin
   end;
 
   raise notice 'E PASSED: completed-crawl evidence refuses INSERT, UPDATE and DELETE; the '
-    'crawl header is frozen; source columns freeze while reconciliation and exception-'
-    'resolution columns stay editable.';
+    'crawl header is frozen; source columns freeze; durable decisions use '
+    'plm.set_source_resolution while exception workflow state stays editable.';
 end;
 $$;
 

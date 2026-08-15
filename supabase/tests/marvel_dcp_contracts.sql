@@ -555,8 +555,8 @@ begin
   end if;
 
   -- E5. A stable identity observed by a completed crawl: SOURCE columns freeze, but
-  -- last_seen_crawl_id and the reconciliation columns must STILL be editable, or the
-  -- reconciliation workstream is dead on arrival.
+  -- last_seen_crawl_id must remain editable for refreshes. Human reconciliation now goes
+  -- through plm.set_source_resolution; the landing decision columns are immutable.
   v_ok := false;
   begin
     update plm.marvel_dcp_asset set file_name = 'ZZTEST-renamed.zzz' where id = v_asset;
@@ -679,8 +679,8 @@ begin
   end;
 
   raise notice 'E PASSED: completed-crawl evidence refuses INSERT, UPDATE and DELETE; the '
-    'crawl header is frozen; source columns freeze while reconciliation and exception-'
-    'resolution columns stay editable.';
+    'crawl header is frozen; source columns freeze; durable decisions use '
+    'plm.set_source_resolution while exception workflow state stays editable.';
 end;
 $$;
 
@@ -1581,8 +1581,8 @@ begin
       'evidence as a correction.';
   end if;
 
-  -- E5. An identity observed by a COMPLETE run has frozen source columns but editable
-  -- reconciliation columns. The carve-out is the entire reason those columns exist.
+  -- E5. An identity observed by a COMPLETE run has frozen source columns. Human
+  -- reconciliation uses plm.set_source_resolution; landing decision columns are immutable.
   v_ok := false;
   begin
     update plm.marvel_dcp_character set source_id = 'ZZTEST-CHAR-RENAMED' where id = v_char;
@@ -1620,7 +1620,8 @@ begin
 
   raise notice 'E PASSED: 9 properties + 1 character created no relationship; duplicates '
     'collapse; empty sets are zero rows beside a success; a completed run refuses INSERT, '
-    'UPDATE and DELETE; identities freeze their source columns only.';
+    'UPDATE and DELETE; identity refresh fields remain writable and durable decisions '
+    'use plm.set_source_resolution.';
   raise notice 'G PASSED: cross-crawl metadata refused; HTTP 200 is not success; failures '
     'need a code; interpreted values need their raw; unknown rights survive raw.';
 end;
