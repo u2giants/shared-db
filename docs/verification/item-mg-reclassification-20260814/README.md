@@ -9,9 +9,9 @@ The work is intentionally staged:
 1. Read every item description holistically and extract reusable product wording.
 2. Treat the complete `MG01 + MG02 + MG03` combination on post-change items as the primary product key.
 3. Use `MerchGroup_Rework.xlsx` to interpret that complete key and collect all observed product-description wording associated with it.
-4. Review and improve the wording dictionary before proposing MG codes for historical items.
+4. Propose a complete MG key for a historical item when a strong later-item analog supplies product and treatment evidence.
 
-No database data was changed. No MG recommendation has yet been assigned to an older item.
+No database data was changed.
 
 ## Controlling interpretation
 
@@ -20,6 +20,8 @@ No database data was changed. No MG recommendation has yet been assigned to an o
 - Wording that occurs under multiple complete keys is not automatically a conflict.
 - Post-change MG values are evidence. Pre-change MG values are not trusted as evidence of the new method.
 - For older items, MG03 stays unresolved until later-item evidence identifies the treatment.
+- Abstention is not a blanket ban on historical assignments. A close later analog with the same product and treatment can support the complete stored MG01+MG02+MG03 key.
+- Rotated dimensions such as `16x20` and `20x16` are treated as the same size when orientation does not change the product.
 - Material or construction wording is folded into the product type when the complete MG key says it is the same product. For example, `Polypropylene Molded Wall Clock` is consolidated into `Molded Wall Clock` under `M|W1|B1`.
 - Superficial pack-count, abbreviation, word-order, material and spelling differences are consolidated when they describe the same product within the same complete MG key.
 
@@ -38,6 +40,8 @@ No database data was changed. No MG recommendation has yet been assigned to an o
 | Pre-change items | 15,644 |
 | Pre-change items with extracted product wording | 8,587 |
 | Pre-change items needing product-wording review | 7,057 |
+| Pre-change items with high-confidence MG assignments | 45 |
+| High-confidence assignments that differ from the old MG values | 20 |
 
 ## Current review workbook
 
@@ -50,7 +54,7 @@ Its sheets are:
 - `Summary`: counts and the controlling interpretation.
 - `MG Product Dictionary`: one row per complete post-change MG key, its rework meaning, consolidated product wording and observed description variants.
 - `Post-Change Evidence`: every post-change item and the complete MG key supporting its product wording.
-- `Pre-Change Product Types`: every older item with product wording where currently resolved. Proposed MG01, MG02 and MG03 are deliberately blank.
+- `Pre-Change Product Types`: every older item, proposed MG codes where a strong later analog exists, the supporting later item, and the match evidence. MG03 remains blank when treatment evidence is insufficient.
 - `Post-Change Needs Review`: incomplete MG keys and product descriptions whose wording still needs review.
 
 There is no wording-conflict sheet. Broad wording shared by different complete MG keys is expected and must be interpreted using the whole key.

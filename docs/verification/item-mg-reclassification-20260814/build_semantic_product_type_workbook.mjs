@@ -33,22 +33,24 @@ const s = wb.worksheets.add("Summary");
 s.showGridLines = false;
 s.getRange("A1:F1").merge(); s.getRange("A1").values = [["MG Product Description Dictionary"]];
 s.getRange("A1:F1").format = { fill: "#17365D", font: { bold: true, color: "#FFFFFF", size: 18 }, rowHeight: 32 };
-s.getRange("A3:B14").values = [
+s.getRange("A3:B16").values = [
   ["Measure", "Count"], ["Post-change items", summary.post_change_items], ["Items with complete MG keys", summary.complete_key_items],
   ["Items with incomplete MG keys", summary.incomplete_key_items], ["Distinct three-part MG keys", summary.mg_primary_keys],
   ["Keys mapped to rework definitions", summary.mapped_rework_keys], ["Keys not found in rework definitions", summary.unmapped_rework_keys],
   ["Post-change items with product wording", summary.resolved_product_wording_items], ["Post-change items needing wording", summary.unresolved_product_wording_items],
   ["Pre-change items", summary.pre_change_items], ["Pre-change items with product wording", summary.pre_change_product_wording_resolved],
   ["Pre-change items needing product wording", summary.pre_change_product_wording_unresolved],
+  ["Pre-change high-confidence MG assignments", summary.pre_change_high_confidence_mg_assignments],
+  ["Pre-change high-confidence MG changes", summary.pre_change_high_confidence_mg_changes],
 ];
 s.getRange("A3:B3").format = { fill: "#4472C4", font: { bold: true, color: "#FFFFFF" } };
-s.getRange("B4:B14").format.numberFormat = "#,##0"; s.getRange("A:A").format.columnWidth = 38; s.getRange("B:B").format.columnWidth = 18;
+s.getRange("B4:B16").format.numberFormat = "#,##0"; s.getRange("A:A").format.columnWidth = 42; s.getRange("B:B").format.columnWidth = 18;
 s.getRange("D3:F3").merge(); s.getRange("D3").values = [["Controlling interpretation"]]; s.getRange("D3:F3").format = { fill: "#4472C4", font: { bold: true, color: "#FFFFFF" } };
 const notes = [
   "MG01 + MG02 + MG03 together roughly describe the product.",
   "Broad wording can legitimately appear under several complete MG keys.",
   "The dictionary combines the rework definition with wording observed after May 13, 2025.",
-  "Older MG values are not trusted. MG03 remains blank unless later evidence supports it.",
+  "Older MG values are not trusted. A complete key is proposed only when a strong later analog supports it.",
 ];
 notes.forEach((note, index) => { s.getRange(`D${4+index}:F${4+index}`).merge(); s.getRange(`D${4+index}`).values = [[note]]; });
 s.getRange("D4:F7").format = { wrapText: true, fill: "#EAF2F8" }; s.getRange("D:F").format.columnWidth = 22;
@@ -66,7 +68,7 @@ const p = wb.worksheets.add("Post-Change Evidence");
 table(p, postRows, "PostChangeEvidence", {"Original Item Desc":75,"Canonical Product Wording":36,"Observed Product Wording":36,"MG Key":18,"Created Date":18,"Item #":18,"Previous Extracted Product Type":34,"Review Status":24}, 5);
 
 const h = wb.worksheets.add("Pre-Change Product Types");
-table(h, preRows, "PreChangeProductTypes", {"Original Item Desc":75,"Extracted Product Wording":36,"Created Date":18,"Item #":18,"MG Assignment Status":38,"Proposed MG01":14,"Proposed MG02":14,"Proposed MG03":14}, 5);
+table(h, preRows, "PreChangeProductTypes", {"Original Item Desc":75,"Extracted Product Wording":36,"Created Date":18,"Item #":18,"Product Signature":26,"Treatment Profile":20,"MG Assignment Status":44,"Proposed MG01":14,"Proposed MG02":14,"Proposed MG03":14,"Matched Later Item #":20,"Matched Later Item Desc":75,"Matched Later Date":18,"Matched Later MG Key":20,"Analog Match Score":18,"MG Evidence":60}, 5);
 
 const n = wb.worksheets.add("Post-Change Needs Review");
 table(n, needsReview, "PostChangeNeedsReview", {"Original Item Desc":75,"Canonical Product Wording":36,"Observed Product Wording":36,"MG Key":18,"Created Date":18,"Item #":18,"Review Status":24}, 5);
@@ -74,8 +76,8 @@ table(n, needsReview, "PostChangeNeedsReview", {"Original Item Desc":75,"Canonic
 const out = path.join(dir, "mg_product_description_dictionary_review.xlsx");
 await (await SpreadsheetFile.exportXlsx(wb)).save(out);
 for (const [sheetName, range, file] of [
-  ["Summary","A1:F15","mg2-summary.png"], ["MG Product Dictionary","A1:W15","mg2-dictionary.png"],
-  ["Post-Change Evidence","A1:O15","mg2-post.png"], ["Pre-Change Product Types","A1:S15","mg2-pre.png"],
+  ["Summary","A1:F17","mg2-summary.png"], ["MG Product Dictionary","A1:W15","mg2-dictionary.png"],
+  ["Post-Change Evidence","A1:O15","mg2-post.png"], ["Pre-Change Product Types","A1:X15","mg2-pre.png"],
   ["Post-Change Needs Review","A1:O15","mg2-needs.png"],
 ]) {
   const image = await wb.render({ sheetName, range, scale: 1, format: "png" });

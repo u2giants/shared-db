@@ -6,6 +6,7 @@ import json
 import re
 import unicodedata
 from collections import Counter, defaultdict
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import pandas as pd
@@ -20,6 +21,94 @@ def normalized(value: object) -> str:
     text = unicodedata.normalize("NFKD", "" if pd.isna(value) else str(value)).encode("ascii", "ignore").decode().lower()
     text = text.replace("shadow box", "shadowbox").replace("die-cut", "diecut")
     return " ".join(re.sub(r"[^a-z0-9]+", " ", text).split())
+
+
+def dimension_signature(value: object) -> str:
+    text = unicodedata.normalize("NFKD", str(value)).encode("ascii", "ignore").decode().lower().replace("×", "x")
+    match = re.search(
+        r"(?<![a-z0-9])(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)(?:\s*[\"']?\s*x\s*(\d+(?:\.\d+)?))?",
+        text,
+    )
+    if not match:
+        return ""
+    face = sorted(float(value) for value in match.groups()[:2])
+    result = f"{face[0]:g}x{face[1]:g}"
+    if match.group(3):
+        result += f"x{float(match.group(3)):g}"
+    return result
+
+
+def comparison_signature(value: object) -> str:
+    text = unicodedata.normalize("NFKD", str(value)).encode("ascii", "ignore").decode().lower().replace("×", "x")
+    text = text.replace("holo foil", "holofoil").replace("shadow box", "shadowbox").replace("die-cut", "diecut")
+    text = re.sub(
+        r"(?<![a-z0-9])\d+(?:\.\d+)?\s*x\s*\d+(?:\.\d+)?(?:\s*[\"']?\s*x\s*\d+(?:\.\d+)?)?\s*(?:inches|inch|in|cm|mm|\")?",
+        " ",
+        text,
+    )
+    text = re.sub(r"\b(?:with|and|the|a|an|w)\b", " ", text)
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text).split())
+
+
+def treatment_profile(value: object) -> str:
+    text = normalized(value).replace("holo foil", "holofoil")
+    treatments = []
+    patterns = (
+        ("foil", r"\b(?:holofoil|foil)\b"),
+        ("high-gloss", r"\b(?:hi gloss|high gloss|gloss)\b"),
+        ("embroidery", r"\b(?:embroidery|embroidered|chenille)\b"),
+        ("diy", r"\b(?:diy|pbn|paint by numbers?|paint your own)\b"),
+        ("led", r"\b(?:led|light up|lighted)\b"),
+        ("glitter", r"\b(?:glitter|sequins?|rhinestones?)\b"),
+        ("handpaint", r"\b(?:handpaint|hand painted)\b"),
+        ("attachment", r"\b(?:attachment|physical attachment)\b"),
+        ("gel", r"\b(?:gel coat|gel coated|gel paint)\b"),
+        ("staggered", r"\bstaggered\b"),
+        ("shaped", r"\b(?:shaped|diecut|round)\b"),
+    )
+    for name, pattern in patterns:
+        if re.search(pattern, text):
+            treatments.append(name)
+    return "+".join(treatments)
+
+
+def token_similarity(left: str, right: str) -> tuple[float, float]:
+    left_tokens, right_tokens = set(left.split()), set(right.split())
+    union = left_tokens | right_tokens
+    jaccard = len(left_tokens & right_tokens) / len(union) if union else 0.0
+    sequence = SequenceMatcher(None, left, right).ratio()
+    return sequence, jaccard
+
+
+def assign_from_later_analog(row: pd.Series, candidates: list[dict]) -> dict:
+    signature = comparison_signature(row["Original Item Desc"])
+    size = dimension_signature(row["Original Item Desc"])
+    if not signature or signature in {"test", "fees", "mdpd fees"} or not candidates:
+        return {}
+
+    exact = [candidate for candidate in candidates if candidate["signature"] == signature]
+    exact_same_size = [candidate for candidate in exact if size and candidate["size"] == size]
+    strongest_exact = exact_same_size or exact
+    exact_keys = {candidate["key"] for candidate in strongest_exact}
+    if strongest_exact and len(exact_keys) == 1:
+        best = max(strongest_exact, key=lambda candidate: candidate["date"])
+        return {**best, "score": 100.0, "reason": "Same normalized product, treatment and artwork wording in a later item"}
+
+    if not row["Treatment Profile"]:
+        return {}
+    scored = []
+    for candidate in candidates:
+        sequence, jaccard = token_similarity(signature, candidate["signature"])
+        size_score = 1.0 if size and size == candidate["size"] else (0.4 if not size or not candidate["size"] else 0.0)
+        score = 0.55 * sequence + 0.35 * jaccard + 0.10 * size_score
+        scored.append((score, candidate))
+    scored.sort(key=lambda value: (value[0], value[1]["date"]), reverse=True)
+    best_score, best = scored[0]
+    runner_score = scored[1][0] if len(scored) > 1 and scored[1][1]["key"] != best["key"] else 0.0
+    close_keys = {candidate["key"] for score, candidate in scored if score >= best_score - 0.03}
+    if best_score >= 0.80 and len(close_keys) == 1 and best_score - runner_score >= 0.08:
+        return {**best, "score": round(best_score * 100, 1), "reason": "Strong later analog with the same product, explicit treatment and comparable wording"}
+    return {}
 
 
 def canonical_for_row(description: str, semantic: str, chunk: str) -> str:
@@ -120,13 +209,47 @@ def main() -> None:
     pre["Extracted Product Wording"] = pre.apply(
         lambda row: canonical_for_row(row["Original Item Desc"], row["Canonical Product Type"], row["Chunk Item Type"]), axis=1
     )
-    pre["Proposed MG01"] = ""
-    pre["Proposed MG02"] = ""
-    pre["Proposed MG03"] = ""
-    pre["MG Assignment Status"] = pre["Extracted Product Wording"].map(
-        lambda value: "Product wording extracted; MG not yet assigned" if value else "Product wording unresolved"
-    )
+    post["Product Signature"] = post["Canonical Product Wording"].map(normalized)
+    post["Treatment Profile"] = post["Original Item Desc"].map(treatment_profile)
+    analogs = defaultdict(list)
+    for _, later in post[post["Complete MG Key"]].iterrows():
+        analogs[(later["Product Signature"], later["Treatment Profile"])].append({
+            "key": later["MG Key"], "item": later["Item #"], "description": later["Original Item Desc"],
+            "date": later["Created Date"], "source_row": later["Source CSV Row"],
+            "signature": comparison_signature(later["Original Item Desc"]),
+            "size": dimension_signature(later["Original Item Desc"]),
+        })
+    pre["Product Signature"] = pre["Extracted Product Wording"].map(normalized)
+    pre["Treatment Profile"] = pre["Original Item Desc"].map(treatment_profile)
+    assignments = []
+    for _, old in pre.iterrows():
+        candidates = analogs.get((old["Product Signature"], old["Treatment Profile"]), [])
+        assignments.append(assign_from_later_analog(old, candidates))
+    pre["Proposed MG01"] = [match.get("key", "").split("|")[0] if match else "" for match in assignments]
+    pre["Proposed MG02"] = [match.get("key", "").split("|")[1] if match else "" for match in assignments]
+    pre["Proposed MG03"] = [match.get("key", "").split("|")[2] if match else "" for match in assignments]
+    pre["Matched Later Item #"] = [match.get("item", "") for match in assignments]
+    pre["Matched Later Item Desc"] = [match.get("description", "") for match in assignments]
+    pre["Matched Later Date"] = [match.get("date", "") for match in assignments]
+    pre["Matched Later MG Key"] = [match.get("key", "") for match in assignments]
+    pre["Analog Match Score"] = [match.get("score", "") for match in assignments]
+    pre["MG Evidence"] = [match.get("reason", "") for match in assignments]
+    statuses = []
+    for (_, old), match in zip(pre.iterrows(), assignments):
+        if match:
+            current = "|".join(str(old[column]).strip() for column in ("MG01", "MG02", "MG03"))
+            statuses.append("High-confidence later analog; current MG differs" if current != match["key"] else "High-confidence later analog; current MG agrees")
+        elif old["Extracted Product Wording"]:
+            statuses.append("Product wording extracted; MG unresolved")
+        else:
+            statuses.append("Product wording unresolved")
+    pre["MG Assignment Status"] = statuses
     pre_records = pre.drop(columns=["Date", "Chunk Item Type"]).to_dict(orient="records")
+    assigned_count = sum(bool(match) for match in assignments)
+    changed_count = sum(
+        bool(match) and "|".join(str(old[column]).strip() for column in ("MG01", "MG02", "MG03")) != match["key"]
+        for (_, old), match in zip(pre.iterrows(), assignments)
+    )
     summary = {
         "cutoff": "2025-05-14", "post_change_items": len(post),
         "complete_key_items": len(complete), "incomplete_key_items": len(post) - len(complete),
@@ -138,6 +261,8 @@ def main() -> None:
         "pre_change_items": len(pre),
         "pre_change_product_wording_resolved": int(pre["Extracted Product Wording"].ne("").sum()),
         "pre_change_product_wording_unresolved": int(pre["Extracted Product Wording"].eq("").sum()),
+        "pre_change_high_confidence_mg_assignments": assigned_count,
+        "pre_change_high_confidence_mg_changes": changed_count,
     }
     for name, value in {
         "mg_key_groups.json": groups, "mg_post_change_rows.json": detail_records,
