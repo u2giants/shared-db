@@ -189,6 +189,23 @@ def linked_connection(linked_dir: Path, expected_ref: str) -> tuple[str, dict[st
     return url, env
 
 
+def redact_psql_error(stderr: str, url: str, env: dict[str, str]) -> str:
+    text = stderr or ""
+    secrets = [url, env.get("PGPASSWORD", ""), env.get("SUPABASE_DB_PASSWORD", "")]
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, "[REDACTED]")
+    text = re.sub(r"postgres(?:ql)?://\S+", "[REDACTED_DATABASE_URL]", text, flags=re.I)
+    text = re.sub(
+        r'\b(host|user|database|password)\s*[=:]\s*(?:"[^"]*"|\S+)',
+        lambda match: f"{match.group(1)}=[REDACTED]",
+        text,
+        flags=re.I,
+    )
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return "\n".join(lines[:8]) or "psql returned no diagnostic text"
+
+
 def psql(url: str, env: dict[str, str], sql: str, *, capture: bool = True) -> str:
     if shutil.which("psql") is None:
         raise Refusal("psql is not installed on this runner")
@@ -197,7 +214,7 @@ def psql(url: str, env: dict[str, str], sql: str, *, capture: bool = True) -> st
         input=sql, text=True, env=env, capture_output=capture, check=False,
     )
     if result.returncode:
-        raise Refusal("psql failed; details withheld to protect connection metadata")
+        raise Refusal("psql failed:\n" + redact_psql_error(result.stderr or "", url, env))
     return (result.stdout or "").strip()
 
 
@@ -286,8 +303,8 @@ def main() -> int:
             result = subprocess.run(["psql", url, "-X", "-v", "ON_ERROR_STOP=1", "-f", temp_name], env=env, text=True, capture_output=True)
             if result.returncode:
                 raise Refusal(
-                    "atomic apply failed; PostgreSQL rolled back DDL and ledger together; "
-                    "details withheld to protect connection metadata"
+                    "atomic apply failed; PostgreSQL rolled back DDL and ledger together:\n"
+                    + redact_psql_error(result.stderr or "", url, env)
                 )
         finally:
             Path(temp_name).unlink(missing_ok=True)

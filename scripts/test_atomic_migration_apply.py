@@ -92,6 +92,7 @@ class AtomicMigrationApplyTests(unittest.TestCase):
                 atomic.psql("postgresql://safe.invalid/db", {}, "select 1;")
         self.assertNotIn("secret", str(caught.exception))
         self.assertNotIn("example.invalid", str(caught.exception))
+        self.assertIn("REDACTED", str(caught.exception))
 
     def test_remote_validation_accepts_compatible_varchar_and_ignores_extra_columns(self):
         columns = {
@@ -138,6 +139,7 @@ class AtomicMigrationApplyTests(unittest.TestCase):
             self.assertEqual(atomic.main(), 2)
         self.assertNotIn("secret", stderr.getvalue())
         self.assertNotIn("host", stderr.getvalue())
+        self.assertIn("REDACTED", stderr.getvalue())
 
     def test_wrapper_places_sql_and_exact_ledger_row_in_one_transaction(self):
         wrapper = atomic.build_wrapper("29990101000000", "test", "create table x(id int);", ["create table x(id int)"])
