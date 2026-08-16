@@ -296,7 +296,10 @@ def main() -> int:
     parser.add_argument("--review-digest", required=True)
     parser.add_argument("--preview-run-id", type=int, required=True)
     parser.add_argument("--preview-digest", required=True)
-    parser.add_argument("--owner-decision-run-id", type=int)
+    # GitHub Actions supplies an omitted optional workflow input as an empty
+    # string.  Keep it as text so the established no-risk automatic path can
+    # reach assess(); a material-risk path still rejects the missing value.
+    parser.add_argument("--owner-decision-run-id")
     parser.add_argument("--owner-decision-digest")
     args = parser.parse_args()
     try:

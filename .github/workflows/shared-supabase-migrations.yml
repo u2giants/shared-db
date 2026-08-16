@@ -611,6 +611,7 @@ jobs:
       contents: read
       actions: read
       checks: read
+      issues: read
       pull-requests: read
     env:
       PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
@@ -725,6 +726,7 @@ jobs:
       contents: write
       actions: read
       checks: read
+      issues: read
       pull-requests: read
     # Keep the production environment binding. Environment policy is managed in
     # a separate phase and is not changed by this repository patch.

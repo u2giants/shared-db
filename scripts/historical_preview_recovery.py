@@ -18,17 +18,18 @@ def verify(source_pr, main_sha, allowlist, repo=Path.cwd(), api=gh):
     if pr.get("merged") is not True or not re.fullmatch(r"[0-9a-f]{40}", str(pr.get("merge_commit_sha"))):
         raise ValueError("historical source PR is not merged")
     subprocess.run(["git", "merge-base", "--is-ancestor", pr["merge_commit_sha"], main_sha], cwd=repo, check=True)
-    files = []
+    files = {}
     page = 1
     while True:
         batch = api(f"repos/{REPO}/pulls/{source_pr}/files?per_page=100&page={page}")
-        files.extend(x.get("filename", "") for x in batch)
+        for item in batch:
+            files[item.get("filename", "")] = item.get("status")
         if len(batch) < 100: break
         page += 1
     for version in versions:
         matches = list(repo.glob(f"supabase/migrations/{version}_*.sql"))
         relative = matches[0].relative_to(repo).as_posix() if len(matches) == 1 else ""
-        if len(matches) != 1 or relative not in files:
+        if len(matches) != 1 or files.get(relative) != "added":
             raise ValueError(f"source PR did not author the exact migration {version}")
     return {"schema":"shared-db-historical-preview-source/v1", "sourcePr":source_pr,
             "sourceMergeSha":pr["merge_commit_sha"], "mainSha":main_sha, "allowlist":versions}

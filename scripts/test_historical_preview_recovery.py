@@ -12,10 +12,14 @@ class Tests(unittest.TestCase):
             subprocess.run(["git","add","."],cwd=root);subprocess.run(["git","commit","-m","x"],cwd=root,check=True,stdout=subprocess.DEVNULL)
             sha=subprocess.check_output(["git","rev-parse","HEAD"],cwd=root,text=True).strip()
             def api(path):
-                return {"merged":True,"merge_commit_sha":sha} if "/pulls/924" in path and "/files" not in path else [{"filename":"supabase/migrations/20260813210000_a.sql"}]
+                return {"merged":True,"merge_commit_sha":sha} if "/pulls/924" in path and "/files" not in path else [{"filename":"supabase/migrations/20260813210000_a.sql","status":"added"}]
             result=verify(924,sha,"20260813210000",root,api)
             self.assertEqual(result["allowlist"],["20260813210000"])
             with self.assertRaisesRegex(ValueError,"did not author"):
                 verify(924,sha,"20260813210000,20260813220000",root,api)
+            def edited_api(path):
+                return {"merged":True,"merge_commit_sha":sha} if "/files" not in path else [{"filename":"supabase/migrations/20260813210000_a.sql","status":"modified"}]
+            with self.assertRaisesRegex(ValueError,"did not author"):
+                verify(924,sha,"20260813210000",root,edited_api)
 
 if __name__=="__main__": unittest.main()
