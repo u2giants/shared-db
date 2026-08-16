@@ -31,7 +31,7 @@ async function getAllRows(serviceKey, schema, table, select, orderColumn) {
   const rows = [];
   const pageSize = 1000;
   for (let offset = 0; ; offset += pageSize) {
-    const url = `${SUPABASE_URL}/rest/v1/${table}?select=${encodeURIComponent(select)}&order=${encodeURIComponent(orderColumn)}.asc&offset=${offset}&limit=${pageSize}`;
+    const url = buildRowsUrl(table, select, orderColumn, offset, pageSize);
     const response = await fetch(url, {
       headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Accept-Profile": schema },
     });
@@ -43,8 +43,36 @@ async function getAllRows(serviceKey, schema, table, select, orderColumn) {
   return rows;
 }
 
+function buildRowsUrl(table, select, orderColumn, offset, pageSize) {
+  return `${SUPABASE_URL}/rest/v1/${table}?select=${encodeURIComponent(select)}&order=${encodeURIComponent(orderColumn)}.asc&offset=${offset}&limit=${pageSize}`;
+}
+
 function digest(values) {
   return crypto.createHash("sha256").update([...values].sort().join("\n")).digest("hex");
+}
+
+const normalized = (value) => String(value ?? "").trim().toUpperCase();
+const comparableFields = [
+  ["item_description", "itemDesc"],
+  ["mg01_code", "merchGroup01"],
+  ["mg02_code", "merchGroup02"],
+  ["mg03_code", "merchGroup03"],
+  ["mg04_code", "merchGroup04"],
+  ["mg05_code", "merchGroup05"],
+  ["mg06_code", "merchGroup06"],
+];
+
+function bestCandidateResolution(row, candidates) {
+  const scored = candidates.map((candidate) => ({
+    candidate,
+    score: comparableFields.reduce((score, [legacyField, coldField]) => {
+      const legacyValue = normalized(row[legacyField]);
+      return score + (legacyValue && legacyValue === normalized(candidate[coldField]) ? 1 : 0);
+    }, 0),
+  }));
+  const best = Math.max(...scored.map(({ score }) => score), -1);
+  const winners = scored.filter(({ score }) => score === best);
+  return { count: winners.length, score: best, candidate: winners.length === 1 && best > 0 ? winners[0].candidate : null };
 }
 
 async function main() {
@@ -70,36 +98,13 @@ for (const row of coldLion) {
 const legacyBare = new Set(legacy.map((row) => row.external_id));
 const unmatchedLegacy = legacy.filter((row) => !coldByBare.has(row.external_id));
 const ambiguousLegacy = legacy.filter((row) => (coldByBare.get(row.external_id)?.length ?? 0) > 1);
-const normalized = (value) => String(value ?? "").trim().toUpperCase();
-const comparableFields = [
-  ["item_description", "itemDesc"],
-  ["mg01_code", "merchGroup01"],
-  ["mg02_code", "merchGroup02"],
-  ["mg03_code", "merchGroup03"],
-  ["mg04_code", "merchGroup04"],
-  ["mg05_code", "merchGroup05"],
-  ["mg06_code", "merchGroup06"],
-];
-function bestCandidateResolution(row) {
-  const candidates = coldByBare.get(row.external_id) ?? [];
-  const scored = candidates.map((candidate) => ({
-    candidate,
-    score: comparableFields.reduce((score, [legacyField, coldField]) => {
-      const legacyValue = normalized(row[legacyField]);
-      return score + (legacyValue && legacyValue === normalized(candidate[coldField]) ? 1 : 0);
-    }, 0),
-  }));
-  const best = Math.max(...scored.map(({ score }) => score), -1);
-  const winners = scored.filter(({ score }) => score === best);
-  return { count: winners.length, score: best, candidate: winners.length === 1 && best > 0 ? winners[0].candidate : null };
-}
-const ambiguousUniquelyResolvedByContent = ambiguousLegacy.filter((row) => bestCandidateResolution(row).candidate !== null);
+const ambiguousUniquelyResolvedByContent = ambiguousLegacy.filter((row) => bestCandidateResolution(row, coldByBare.get(row.external_id) ?? []).candidate !== null);
 const uniquelyMappedLegacy = legacy.filter((row) => (coldByBare.get(row.external_id)?.length ?? 0) === 1);
 const coldOnly = coldLion.filter((row) => !legacyBare.has(String(row.itemNo ?? "")));
 const divisionCounts = Object.groupBy(coldLion, (row) => String(row.divisionCode ?? "(null)"));
 const coldOnlyDivisionCounts = Object.groupBy(coldOnly, (row) => String(row.divisionCode ?? "(null)"));
 const mappedByLegacyId = new Map(uniquelyMappedLegacy.map((row) => [row.id, coldKey(coldByBare.get(row.external_id)[0])]));
-for (const row of ambiguousUniquelyResolvedByContent) mappedByLegacyId.set(row.id, coldKey(bestCandidateResolution(row).candidate));
+for (const row of ambiguousUniquelyResolvedByContent) mappedByLegacyId.set(row.id, coldKey(bestCandidateResolution(row, coldByBare.get(row.external_id) ?? []).candidate));
 const linked = bridgeRows.filter((row) => row.erp_item_id !== null);
 const linkedUnmapped = linked.filter((row) => !mappedByLegacyId.has(row.erp_item_id));
 const legacyById = new Map(legacy.map((row) => [row.id, row]));
@@ -154,4 +159,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   });
 }
 
-export { digest };
+export { bestCandidateResolution, buildRowsUrl, digest };
