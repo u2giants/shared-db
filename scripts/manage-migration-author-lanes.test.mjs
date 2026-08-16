@@ -169,7 +169,7 @@ test('release refuses to delete a lock now owned by someone else', () => {
 
 test('preview and merge are fixed exclusive refs and merge refuses during production', () => {
   const io=memoryIo()
-  io.openClaims=()=>[{number:1,body:body(['table core.x'],'1')}]
+  io.openClaims=()=>[{number:1,body:body(['table core.x'],'1','2099-08-15T08:00:00.000Z')}]
   io.getPr=(number)=>({number:Number(number),head:{sha:'abc',ref:'codex/1'},base:{sha:'main'}})
   const first=acquireExclusive('preview',{owner:'a',pr:1,headSha:'abc'},io)
   assert.throws(()=>acquireExclusive('preview',{owner:'b',pr:2,headSha:'abc'},io),/occupied/)
@@ -178,6 +178,17 @@ test('preview and merge are fixed exclusive refs and merge refuses during produc
   assert.throws(()=>acquireExclusive('merge',{owner:'a',pr:1,headSha:'abc'},io),/merges are frozen/)
   io.refs.delete(EXCLUSIVE_REFS.production);io.refs.set(EXCLUSIVE_REFS.merge,'merge-owner')
   assert.throws(()=>acquireExclusive('production',{owner:'p',headSha:'main'},io),/guarded merge is active/)
+})
+
+test('historical preview recovery shares the preview lock and requires current main plus merged source PR',()=>{
+  const io=memoryIo()
+  io.getPr=()=>({merged:true,merge_commit_sha:'merged'})
+  const lock=acquireExclusive('preview-recovery',{owner:'recovery',pr:924,headSha:'main'},io)
+  assert.equal(lock.ref,EXCLUSIVE_REFS.preview)
+  releaseOwnedRef(EXCLUSIVE_REFS.preview,lock.ownerSha,io)
+  assert.throws(()=>acquireExclusive('preview-recovery',{owner:'recovery',pr:924,headSha:'old'},io),/current main/)
+  io.getPr=()=>({merged:false})
+  assert.throws(()=>acquireExclusive('preview-recovery',{owner:'recovery',pr:924,headSha:'main'},io),/already-merged/)
 })
 
 test('unreadable claims fail closed',()=>assert.throws(()=>assertLaneAvailable([{number:9,body:'bad'}],[],NOW),/unreadable/))
