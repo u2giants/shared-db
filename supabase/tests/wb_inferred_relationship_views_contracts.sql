@@ -2,7 +2,7 @@
 begin;
 
 insert into plm.wb_capture(capture_id,chunk_number,target,status,captured_at,private_source_commit,snapshot_sha256,expected_row_count,captured_by,source_url,started_at)
-values ('10490000-0000-4000-8000-000000000001',0,'wb_asset_normalized','loading',date '2099-04-09','synthetic',repeat('a',64),0,'synthetic','https://example.invalid',now());
+values ('10490000-0000-4000-8000-000000000001',0,'wb_asset_normalized','loading',date '2099-04-09','synthetic',repeat('a',64),1,'synthetic','https://example.invalid',now());
 
 insert into plm.wb_franchise(id,source_namespace,source_id,label,identity_method,capture_id,source_url,raw,source_hash,first_seen_at,last_seen_at) values
  ('10490000-0000-4000-8000-000000000011','synthetic_franchise','f-1','Invented Franchise','source_id','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','f1','2099-01-01','2099-01-10');
