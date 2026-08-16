@@ -21,6 +21,8 @@ from typing import Any, Callable
 from production_apply_review_evidence import verify as verify_review
 from production_migration_guard import parse_remote_versions
 from production_review_allowlist import normalize_review_allowlist
+from historical_preview_recovery import verify as verify_historical_preview
+from production_owner_decision_evidence import verify_artifact as verify_owner_decision
 
 REPOSITORY = "u2giants/shared-db"
 PREVIEW_WORKFLOW = ".github/workflows/shared-supabase-migrations.yml"
@@ -31,6 +33,12 @@ REQUIRED_CHECKS = {
     "Migration author lease",
     "SQL migration guards",
     "supabase/tests against an ephemeral database",
+}
+HISTORICAL_DISNEY_SOURCE = {
+    "pr": 924,
+    "head": "5135b668d87c1639281c506ae75fde75211b7019",
+    "merge": "96bf385aa5c0f703ec98f5730249f586964f5142",
+    "allowlist": ["20260813210000", "20260813220000"],
 }
 RISK_TEXT = {
     "permanent_data_rewrite_or_loss": "existing production data may be lost or permanently altered",
@@ -137,18 +145,20 @@ def select_preview_artifact(payload: Any, run_id: int, expected_name: str) -> di
 
 
 def prove_preview(
-    *, run_id: int, digest: str, pr_head: str, allowlist: list[str], api: Callable[[str], Any],
+    *, run_id: int, digest: str, pr_head: str, main_sha: str, source_pr: int, allowlist: list[str], api: Callable[[str], Any],
     downloader: Callable[[int, Path], None], repo_root: Path,
 ) -> None:
     run = api(f"repos/{REPOSITORY}/actions/runs/{run_id}")
     expected = {
         "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
-        "head_sha": pr_head, "path": PREVIEW_WORKFLOW,
+        "path": PREVIEW_WORKFLOW,
     }
     for key, value in expected.items():
         if run.get(key) != value:
             raise RiskGateError(f"preview run has wrong {key}")
-    name = f"preview-migration-apply-{pr_head}"
+    if run.get("head_sha") not in {pr_head, main_sha}:
+        raise RiskGateError("preview run has wrong head_sha")
+    name = f"preview-migration-apply-{run['head_sha']}"
     artifact = select_preview_artifact(
         api(f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"), run_id, name
     )
@@ -166,6 +176,15 @@ def prove_preview(
     apply = texts.get("preview-apply.txt", "")
     before = texts.get("preview-ledger-before.txt", "")
     after = texts.get("preview-ledger-after.txt", "")
+    historical = texts.get("historical-preview-source.json")
+    expected_head = pr_head
+    if historical:
+        record = json.loads(historical)
+        if record != verify_historical_preview(source_pr, main_sha, ",".join(allowlist), repo_root, api):
+            raise RiskGateError("historical preview source proof does not match current governed evidence")
+        expected_head = main_sha
+    if run.get("head_sha") != expected_head:
+        raise RiskGateError("preview run has wrong head_sha")
     with tempfile.TemporaryDirectory(prefix="production-risk-ledger-") as ledger_temp:
         before_path, after_path = Path(ledger_temp, "before.txt"), Path(ledger_temp, "after.txt")
         before_path.write_text(before, encoding="utf-8")
@@ -177,11 +196,27 @@ def prove_preview(
             raise RiskGateError(f"allowlisted migration {version} is absent from exact main")
         if filename.name not in dry or filename.name not in apply:
             raise RiskGateError(f"preview proof does not name exact migration {filename.name}")
-        if version in before_versions or version not in after_versions:
-            raise RiskGateError(f"preview ledger does not prove exactly-once application of {version}")
+        if historical:
+            if version not in before_versions or version not in after_versions:
+                raise RiskGateError(f"historical preview ledger does not prove stable prior application of {version}")
+        elif version in before_versions or version not in after_versions:
+                raise RiskGateError(f"preview ledger does not prove exactly-once application of {version}")
 
 
-def prove_pr_and_checks(pr_number: int, main_sha: str, api: Callable[[str], Any], repo_root: Path) -> str:
+def is_pinned_historical_disney_source(
+    pr_number: int, head: str, merge_sha: str, allowlist: list[str]
+) -> bool:
+    return (
+        pr_number == HISTORICAL_DISNEY_SOURCE["pr"]
+        and head == HISTORICAL_DISNEY_SOURCE["head"]
+        and merge_sha == HISTORICAL_DISNEY_SOURCE["merge"]
+        and allowlist == HISTORICAL_DISNEY_SOURCE["allowlist"]
+    )
+
+
+def prove_pr_and_checks(
+    pr_number: int, main_sha: str, allowlist: list[str], api: Callable[[str], Any], repo_root: Path
+) -> str:
     pr = api(f"repos/{REPOSITORY}/pulls/{pr_number}")
     if pr.get("merged") is not True or pr.get("merge_commit_sha") is None:
         raise RiskGateError("source PR is not merged")
@@ -195,6 +230,14 @@ def prove_pr_and_checks(pr_number: int, main_sha: str, api: Callable[[str], Any]
     checks = api(f"repos/{REPOSITORY}/commits/{head}/check-runs?per_page=100").get("check_runs", [])
     conclusions = {c.get("name"): c.get("conclusion") for c in checks if isinstance(c, dict)}
     missing = sorted(name for name in REQUIRED_CHECKS if conclusions.get(name) != "success")
+    historical_source = is_pinned_historical_disney_source(
+        pr_number, head, pr.get("merge_commit_sha"), allowlist
+    )
+    if historical_source:
+        # The author-lease workflow did not exist when this exact PR merged. Its
+        # historical source proof is verified later against current main and the
+        # preview artifact; every contemporary safety check remains mandatory.
+        missing = [name for name in missing if name != "Migration author lease"]
     if missing:
         raise RiskGateError(f"required exact-head checks are not successful: {', '.join(missing)}")
     return head
@@ -234,7 +277,7 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
     allowlist = normalize_review_allowlist(args.allowlist)
     activation = load_activation(args.activation)
     prove_activation(activation, main_sha=args.main_sha, api=api, repo_root=repo_root)
-    pr_head = prove_pr_and_checks(args.pr, args.main_sha, api, repo_root)
+    pr_head = prove_pr_and_checks(args.pr, args.main_sha, allowlist, api, repo_root)
     with tempfile.TemporaryDirectory(prefix="production-risk-review-") as temp:
         review_path = verify_review(
             run_id_text=str(args.review_run_id), expected_digest=args.review_digest,
@@ -246,15 +289,28 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
         return {"automaticPromotionAllowed": False, "ownerDecisionReasons": [RISK_TEXT["unresolved_material_objection"]]}
     prove_preview(
         run_id=args.preview_run_id, digest=args.preview_digest, pr_head=pr_head,
-        allowlist=allowlist, api=api, downloader=downloader, repo_root=repo_root,
+        main_sha=args.main_sha, source_pr=args.pr, allowlist=allowlist, api=api, downloader=downloader, repo_root=repo_root,
     )
     decision = decide_business_risk(classify_sql(repo_root, allowlist), recovery_proven=True, review_approved=True)
+    owner_evidence = None
+    if decision["ownerDecisionReasons"]:
+        if not args.owner_decision_run_id or not args.owner_decision_digest:
+            return {**decision, "productionPromotionAllowed": False}
+        owner_evidence = verify_owner_decision(
+            args.owner_decision_run_id, args.owner_decision_digest, args.main_sha,
+            allowlist, args.pr, downloader, api,
+        )
+        expected_risks = sorted(key for key, text in RISK_TEXT.items() if text in decision["ownerDecisionReasons"])
+        if sorted(owner_evidence["accepted_risks"]) != expected_risks:
+            raise RiskGateError("owner decision does not accept exactly the risks derived from governed evidence")
     return {
         **decision,
+        "productionPromotionAllowed": not decision["ownerDecisionReasons"] or owner_evidence is not None,
         "governedEvidence": {
             "mainSha": args.main_sha, "sourcePr": args.pr, "sourcePrHead": pr_head,
             "reviewRun": args.review_run_id, "previewRun": args.preview_run_id,
             "allowlist": allowlist,
+            "ownerDecision": owner_evidence,
         },
     }
 
@@ -270,6 +326,11 @@ def main() -> int:
     parser.add_argument("--review-digest", required=True)
     parser.add_argument("--preview-run-id", type=int, required=True)
     parser.add_argument("--preview-digest", required=True)
+    # GitHub Actions supplies an omitted optional workflow input as an empty
+    # string.  Keep it as text so the established no-risk automatic path can
+    # reach assess(); a material-risk path still rejects the missing value.
+    parser.add_argument("--owner-decision-run-id")
+    parser.add_argument("--owner-decision-digest")
     args = parser.parse_args()
     try:
         result = assess(args)
@@ -277,7 +338,7 @@ def main() -> int:
         print(f"::error::Production business-risk gate rejected evidence: {exc}")
         return 2
     print(json.dumps(result, sort_keys=True))
-    return 0 if result["automaticPromotionAllowed"] else 3
+    return 0 if result.get("productionPromotionAllowed", result["automaticPromotionAllowed"]) else 3
 
 
 if __name__ == "__main__":
