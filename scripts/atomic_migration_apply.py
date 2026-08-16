@@ -308,7 +308,14 @@ def main() -> int:
                 )
         finally:
             Path(temp_name).unlink(missing_ok=True)
-        verify = psql(url, env, "select count(*)||'|'||coalesce(cardinality(statements),-1)||'|'||coalesce(name,'') from supabase_migrations.schema_migrations where version='" + args.version + "';\n")
+        verify = psql(
+            url,
+            env,
+            "select count(*)||'|'||coalesce(max(cardinality(statements)),-1)||'|'||"
+            "coalesce(max(name),'') from supabase_migrations.schema_migrations where version='"
+            + args.version
+            + "';\n",
+        )
         expected = f"1|{len(statements)}|{name}"
         if verify != expected:
             raise Refusal("post-commit ledger verification failed")
