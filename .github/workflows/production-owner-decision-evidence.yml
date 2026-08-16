@@ -1,0 +1,40 @@
+name: Production Owner Decision Evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      comment_id: {description: "Authenticated Albert/u2giants decision comment ID", required: true, type: string}
+      commit_sha: {description: "Exact current origin/main SHA", required: true, type: string}
+      ordered_allowlist: {description: "Exact ordered migration batch", required: true, type: string}
+      source_pr: {description: "Original merged source PR", required: true, type: string}
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: "${{ inputs.commit_sha }}", fetch-depth: 0}
+      - name: Prove exact current main
+        env: {MAIN_SHA: "${{ inputs.commit_sha }}"}
+        run: |
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$MAIN_SHA"
+          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+      - name: Record authenticated exact owner decision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/production_owner_decision_evidence.py \
+            --comment-id "${{ inputs.comment_id }}" --main-sha "${{ inputs.commit_sha }}" \
+            --allowlist "${{ inputs.ordered_allowlist }}" --source-pr "${{ inputs.source_pr }}" \
+            --output production-owner-decision.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-owner-decision-${{ github.run_id }}
+          path: production-owner-decision.json
+          retention-days: 90
