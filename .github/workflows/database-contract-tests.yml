@@ -150,6 +150,16 @@ jobs:
           mv supabase/migrations/*.sql "$RUNNER_TEMP/migrations/"
           supabase db start 2>&1 | tee "$RUNNER_TEMP/db-start.log"
 
+      - name: Prove atomic migration DDL and ledger commit or roll back together
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 54322
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+          ATOMIC_MIGRATION_POSTGRES_TEST: "1"
+        run: python scripts/test_atomic_migration_apply_postgres.py
+
       - name: Replay every migration, recording failures (pass 1)
         id: replay
         env:
