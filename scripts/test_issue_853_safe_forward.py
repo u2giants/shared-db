@@ -16,8 +16,7 @@ SAFE = ROOT / "supabase/migrations/20260816110750_popdam_orderlist_item_bridge_s
 
 def executable_body(sql: str) -> str:
     start = sql.index("lock table plm.style_tracker_item_bridge")
-    end = sql.rindex("$$;") + len("$$;")
-    return sql[start:end]
+    return sql[start:].removesuffix("\n\ncommit;\n").removesuffix("\ncommit;\n").rstrip()
 
 
 class SafeForwardTests(unittest.TestCase):
@@ -25,6 +24,8 @@ class SafeForwardTests(unittest.TestCase):
         unsafe = UNSAFE.read_text(encoding="utf-8")
         safe = SAFE.read_text(encoding="utf-8")
         self.assertEqual(executable_body(safe), executable_body(unsafe))
+        self.assertIn("\nbegin;\n", unsafe.lower())
+        self.assertTrue(unsafe.rstrip().lower().endswith("commit;"))
         self.assertTrue(safe.lstrip().lower().splitlines()[0].startswith("--"))
         self.assertNotIn("\nbegin;\n", safe.lower())
         self.assertFalse(safe.rstrip().lower().endswith("commit;"))

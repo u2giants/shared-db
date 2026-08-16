@@ -212,8 +212,8 @@ class GuardTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(GuardError):
                 parse_allowlist(value)
 
-    def test_the_block_list_is_exactly_these_three(self) -> None:
-        # Two kinds, deliberately together. 20260726190000/20260726200000 are the
+    def test_the_block_list_is_exactly_these_four(self) -> None:
+        # Three kinds, deliberately together. 20260726190000/20260726200000 are the
         # already-applied Master Data pair. 20260729120000 is the third kind:
         # never applied, and applying it would REGRESS a live production security
         # control (see the guard's own comment and
@@ -227,6 +227,10 @@ class GuardTests(unittest.TestCase):
                 "20260816045130",
             },
         )
+
+    def test_the_unsafe_issue_853_migration_cannot_enter_an_allowlist(self) -> None:
+        with self.assertRaises(GuardError):
+            parse_allowlist("20260816045130")
 
     def test_the_retired_lockdown_migration_cannot_enter_an_allowlist(self) -> None:
         """A2's RETIRE verdict must be mechanical, not prose. (Kimi K3.)"""

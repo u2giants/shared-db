@@ -1463,9 +1463,8 @@ def resolve_batch(batch: str | None, versions_csv: str | None) -> BatchResolutio
     for v in versions:
         if v in RETIRED_VERSIONS:
             problems.append(
-                f"RETIRED MIGRATION APPLIED: {v} must NEVER reach production. It "
-                "REGRESSES a live security control and sorts below the migration "
-                "that would repair it, so the damage is not self-healing."
+                f"RETIRED MIGRATION APPLIED: {v} must NEVER reach production: "
+                f"{RETIRED_VERSION_REASONS[v]}."
             )
         if v in HELD_VERSIONS:
             problems.append(

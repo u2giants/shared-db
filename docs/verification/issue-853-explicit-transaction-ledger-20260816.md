@@ -9,6 +9,15 @@ successful CLI connection preflight. A valid migration shaped as
 `BEGIN; CREATE TABLE ...; COMMIT;` was run while a `BEFORE INSERT` trigger
 deliberately rejected only that migration's ledger row.
 
+The CLI came from the same complete official 2.105.0 Linux release archive
+qualified by issue #611. Its recorded binary hashes remain
+`039206687deb55706063371d7452c0d2b18de1e530dbc783f10b39f5589c3414`
+for the shim and
+`445d502015f1c15627ef0597db7b188b6ad990bdd1c9e1a5df10c605310af3a3`
+for `supabase-go`. The test deliberately used the transaction-control shape,
+not the licensed or application-specific statements, because only the
+transaction boundary can change the CLI's ledger atomicity.
+
 Counts-only/result-only evidence:
 
 ```text
