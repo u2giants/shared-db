@@ -236,7 +236,8 @@ export const githubIo = {
   rewriteVersion(worktree,oldVersion,newVersion) {
     const files=this.reversionFiles(worktree,oldVersion),migration=files.filter((file)=>new RegExp(`[\\/]${oldVersion}_[^\\/]+\\.sql$`).test(file))
     if(migration.length!==1)throw new LaneError('local worktree must contain exactly one old-version migration file')
-    for(const file of files)writeFileSync(file,readFileSync(file,'utf8').replaceAll(oldVersion,newVersion))
+    const exactVersion=new RegExp(`(?<!\\d)${oldVersion}(?!\\d)`,'g')
+    for(const file of files)writeFileSync(file,readFileSync(file,'utf8').replace(exactVersion,newVersion))
     const renamed=migration[0].replace(oldVersion,newVersion);renameSync(migration[0],renamed)
     return {files,migration:migration[0],renamed}
   },
@@ -401,9 +402,9 @@ export function reversionActiveClaim(options,now=new Date(),io=githubIo){
     io.rewriteVersion(options.worktree,OLD,newVersion);rewritten=true
     const newHead=io.commitAndPushReversion(options.worktree,OLD,newVersion)
     requireOwnedRef(MUTEX_REF,ownerSha,io)
-    const newBody=replaceClaimVersion(before.body,OLD,newVersion);io.updateIssue(1056,{body:newBody});bodyChanged=true
+    const newBody=replaceClaimVersion(before.body,OLD,newVersion);bodyChanged=true;io.updateIssue(1056,{body:newBody})
     const after=io.getIssue(1056),afterLease=parseAuthorLease(after.body,now)
-    if(afterLease.version!==newVersion||afterLease.owner!==lease.owner||afterLease.branch!==lease.branch||afterLease.worktree!==lease.worktree||afterLease.objects.join('|')!==lease.objects.join('|'))throw new LaneError('claim readback changed fields outside its fenced version')
+    if(after.body!==newBody||afterLease.version!==newVersion||afterLease.owner!==lease.owner||afterLease.branch!==lease.branch||afterLease.worktree!==lease.worktree||afterLease.objects.join('|')!==lease.objects.join('|'))throw new LaneError('claim readback changed fields outside its fenced version')
     const livePr=io.getPr(1047),liveVersions=migrationVersions(io.getPrFiles(1047))
     if(livePr?.head?.sha!==newHead||liveVersions.length!==1||liveVersions[0]!==newVersion)throw new LaneError('PR did not expose exactly the new reserved migration')
     if(io.readRef(`refs/db-claims/${OLD}`)!==oldReservation||!io.readRef(`refs/db-claims/${newVersion}`))throw new LaneError('permanent reservation readback changed')

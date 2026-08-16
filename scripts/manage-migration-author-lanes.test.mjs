@@ -551,3 +551,11 @@ test('active claim reversion fails closed when mutex ownership is lost during pa
   assert.throws(()=>reversionActiveClaim(reversionArgs,NOW,io),/ROLLBACK NOT ATTEMPTED/)
   assert.equal(io.refs.get(`refs/db-claims/${io.old}`),'old-ref')
 })
+test('active claim reversion rolls back an applied-then-failed issue update',()=>{
+  const io=reversionIo(),original=io.issue.body,baseUpdate=io.updateIssue,rewrites=[];let first=true
+  io.rewriteVersion=(_,from,to)=>{rewrites.push([from,to])}
+  io.updateIssue=(number,fields)=>{const result=baseUpdate(number,fields);if(first){first=false;throw new Error('response lost after PATCH')}return result}
+  assert.throws(()=>reversionActiveClaim(reversionArgs,NOW,io),/response lost/)
+  assert.equal(io.issue.body,original)
+  assert.deepEqual(rewrites,[[io.old,io.fresh],[io.fresh,io.old]])
+})
