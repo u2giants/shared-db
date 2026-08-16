@@ -559,3 +559,6 @@ test('active claim reversion rolls back an applied-then-failed issue update',()=
   assert.equal(io.issue.body,original)
   assert.deepEqual(rewrites,[[io.old,io.fresh],[io.fresh,io.old]])
 })
+test('active claim reversion supports a version present only in the migration filename',()=>{
+  const io=reversionIo();io.rewriteVersion=()=>{};assert.equal(reversionActiveClaim(reversionArgs,NOW,io).newVersion,io.fresh)
+})

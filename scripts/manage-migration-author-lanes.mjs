@@ -230,8 +230,11 @@ export const githubIo = {
   createClaim(title, body) { return gh(['issue', 'create', '--repo', REPO, '--label', 'db-claim', '--title', `CLAIM: ${title}`, '--body', body]).trim() },
   closeClaim(number) { gh(['issue', 'close', String(number), '--repo', REPO, '--comment', 'Expired migration-author lease closed by guarded cleanup. Its migration version remains unavailable.']) },
   reversionFiles(worktree,oldVersion) {
-    const rows=execFileSync('git',['-C',worktree,'grep','-l',oldVersion,'--','supabase/migrations','supabase/tests','docs'],{encoding:'utf8'}).trim().split(/\r?\n/).filter(Boolean)
-    return rows.map((file)=>path.join(worktree,file))
+    let referenced=[]
+    try{referenced=execFileSync('git',['-C',worktree,'grep','-l',oldVersion,'--','supabase/migrations','supabase/tests','docs'],{encoding:'utf8'}).trim().split(/\r?\n/).filter(Boolean)}
+    catch(error){if(error.status!==1)throw error}
+    const migrations=execFileSync('git',['-C',worktree,'ls-files',`supabase/migrations/${oldVersion}_*.sql`],{encoding:'utf8'}).trim().split(/\r?\n/).filter(Boolean)
+    return [...new Set([...referenced,...migrations])].map((file)=>path.join(worktree,file))
   },
   rewriteVersion(worktree,oldVersion,newVersion) {
     const files=this.reversionFiles(worktree,oldVersion),migration=files.filter((file)=>new RegExp(`[\\/]${oldVersion}_[^\\/]+\\.sql$`).test(file))
