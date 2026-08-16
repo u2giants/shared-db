@@ -346,6 +346,7 @@ jobs:
           print("Everything else on disk is already in the preview ledger.")
           PY
       - name: Hard guard preflight
+        if: inputs.historical_preview_source_pr == ''
         env:
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
         run: |
@@ -365,6 +366,7 @@ jobs:
             --allowlist "$PREVIEW_ALLOWLIST" \
             --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
       - name: Build bounded checkout
+        if: inputs.historical_preview_source_pr == ''
         env:
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
           COMMIT_SHA: ${{ steps.commit.outputs.sha }}
@@ -380,7 +382,7 @@ jobs:
       # whole pending queue, which is what the old bare `db push --dry-run`
       # reported and which no apply would ever have matched.
       - name: Bounded dry-run
-        if: inputs.mode == 'dry-run'
+        if: inputs.mode == 'dry-run' && inputs.historical_preview_source_pr == ''
         env:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
@@ -407,7 +409,7 @@ jobs:
             --allowlist "$PREVIEW_ALLOWLIST" \
             --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
       - name: Bounded apply
-        if: inputs.mode == 'apply'
+        if: inputs.mode == 'apply' && inputs.historical_preview_source_pr == ''
         env:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
@@ -429,6 +431,31 @@ jobs:
             --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
           # THE WRITE. Preview only.
           supabase db push --include-all 2>&1 | tee "$RUNNER_TEMP/preview-apply.txt"
+      - name: Recover proof for migrations already present on preview
+        if: inputs.mode == 'apply' && inputs.historical_preview_source_pr != ''
+        env:
+          PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path(os.environ["GITHUB_WORKSPACE"]) / "scripts"))
+          from production_migration_guard import local_migrations, parse_remote_versions
+
+          repo = Path(os.environ["GITHUB_WORKSPACE"])
+          temp = Path(os.environ["RUNNER_TEMP"])
+          versions = [v.strip() for v in os.environ["PREVIEW_ALLOWLIST"].split(",") if v.strip()]
+          local = local_migrations(repo)
+          ledger = parse_remote_versions(temp / "preview-ledger-before.txt")
+          missing = [v for v in versions if v not in ledger]
+          if missing:
+              raise SystemExit("REFUSED: historical preview recovery is missing ledger versions: " + ", ".join(missing))
+          names = [local[v].name for v in versions]
+          proof = "HISTORICAL PREVIEW PROOF: already applied; no database write performed\n" + "\n".join(names) + "\n"
+          (temp / "preview-dry-run.txt").write_text(proof, encoding="utf-8")
+          (temp / "preview-apply.txt").write_text(proof, encoding="utf-8")
+          PY
       # ALWAYS, including after a failed apply -- a partial apply is exactly when
       # the row delta matters most.
       - name: Capture preview migration record (after)
