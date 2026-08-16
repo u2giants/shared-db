@@ -5,26 +5,29 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, expandActiveClaimFromPr, EXCLUSIVE_REFS, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, REVIEW_CURSOR_REF, validateClaimObjects } from './manage-migration-author-lanes.mjs'
+import { acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, expandActiveClaimFromPr, EXCLUSIVE_REFS, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, reviewerExecutionPreflight, reversionActiveClaim, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects } from './manage-migration-author-lanes.mjs'
 
 const NOW = new Date('2026-08-14T20:00:00Z')
 const body = (objects, owner, expires = '2026-08-15T08:00:00.000Z') => claimBody({ version:`2026081420${owner.padStart(4,'0')}`, objects, owner:`agent-${owner}`, branch:`codex/${owner}`, worktree:`C:/w/${owner}`, expiresAt:new Date(expires) })
 
-const scope = (state, priority, objects=[], depends='') => `\`\`\`db-work-scope\nstate: ${state}\npriority: ${priority}\ndepends_on: ${depends}\nobjects:\n${objects.map((x)=>`  - ${x}`).join('\n')}\n\`\`\``
+const scope = (status, workType, route, priority, objects=[], depends='') => `\`\`\`db-work-scope\nstatus: ${status}\nwork_type: ${workType}\nroute: ${route}\npriority: ${priority}\ndepends_on: ${depends}\nobjects:\n${objects.map((x)=>`  - ${x}`).join('\n')}\n\`\`\``
 
-test('queue scope is strict and requires objects for eligible work',()=>{
-  assert.deepEqual(parseQueueScope(scope('eligible',9,['table core.a'],'#12, 13')), {state:'eligible',priority:9,dependencies:[12,13],objects:['table core.a']})
-  assert.throws(()=>parseQueueScope(scope('eligible',1)),/must list exact objects/)
-  assert.throws(()=>parseQueueScope(scope('waiting',1,['table core.a'])),/state must be/)
-  assert.throws(()=>parseQueueScope(`${scope('eligible',1,['table core.a'])}\n${scope('blocked',1)}`),/exactly one/)
+test('queue scope keeps status, work type, and route separate',()=>{
+  assert.deepEqual(parseQueueScope(scope('ready','structural','shared-db-orchestrator',9,['table core.a'],'#12, 13')), {status:'ready',workType:'structural',route:'shared-db-orchestrator',priority:9,dependencies:[12,13],objects:['table core.a']})
+  assert.throws(()=>parseQueueScope(scope('ready','structural','shared-db-orchestrator',1)),/must list exact objects/)
+  assert.throws(()=>parseQueueScope(scope('waiting','structural','shared-db-orchestrator',1,['table core.a'])),/status must be/)
+  assert.throws(()=>parseQueueScope(scope('ready','source-data','shared-db-orchestrator',1)),/not valid/)
+  assert.throws(()=>parseQueueScope(scope('ready','source-data','source-data-session',1,['table plm.nbcu_right'])),/must not claim/)
+  assert.throws(()=>parseQueueScope(`\`\`\`db-work-scope\nstate: eligible\npriority: 1\nobjects:\n  - table core.a\n\`\`\``),/state is retired/)
+  assert.throws(()=>parseQueueScope(`${scope('ready','structural','shared-db-orchestrator',1,['table core.a'])}\n${scope('blocked','repo-maintenance','repo-maintenance',1)}`),/exactly one/)
 })
 
 test('dynamic queues serialize overlapping work and refill every empty lane',()=>{
   const issues=[
-    {number:1,title:'a',body:scope('eligible',10,['table core.a'])},
-    {number:2,title:'a later',body:scope('eligible',8,['table core.a'])},
-    {number:3,title:'b',body:scope('eligible',7,['table core.b'])},
-    {number:4,title:'c',body:scope('eligible',6,['table core.c'])},
+    {number:1,title:'a',body:scope('ready','structural','shared-db-orchestrator',10,['table core.a'])},
+    {number:2,title:'a later',body:scope('ready','structural','shared-db-orchestrator',8,['table core.a'])},
+    {number:3,title:'b',body:scope('ready','structural','shared-db-orchestrator',7,['table core.b'])},
+    {number:4,title:'c',body:scope('ready','structural','shared-db-orchestrator',6,['table core.c'])},
   ]
   const result=buildDynamicQueues(issues,[],NOW)
   assert.equal(result.fullyAudited,true)
@@ -34,23 +37,23 @@ test('dynamic queues serialize overlapping work and refill every empty lane',()=
 
 test('dynamic queues fill inactive lanes before queueing behind active claims',()=>{
   const claims=[{number:31,body:body(['table core.a'],'31')},{number:32,body:body(['table core.b'],'32')}]
-  const one=buildDynamicQueues([{number:40,title:'c',body:scope('eligible',9,['table core.c'])}],claims,NOW)
+  const one=buildDynamicQueues([{number:40,title:'c',body:scope('ready','structural','shared-db-orchestrator',9,['table core.c'])}],claims,NOW)
   assert.deepEqual(one.dispatchable,[40])
   assert.equal(one.queues.find((q)=>q.queued.includes(40)).active,null)
   const two=buildDynamicQueues([
-    {number:40,title:'c',body:scope('eligible',9,['table core.c'])},
-    {number:41,title:'d',body:scope('eligible',8,['table core.d'])},
+    {number:40,title:'c',body:scope('ready','structural','shared-db-orchestrator',9,['table core.c'])},
+    {number:41,title:'d',body:scope('ready','structural','shared-db-orchestrator',8,['table core.d'])},
   ],[{number:31,body:body(['table core.a'],'31')}],NOW)
   assert.deepEqual(new Set(two.dispatchable),new Set([40,41]))
 })
 
-test('blocked, owner-decision, data-only and dependent work never consume a lane',()=>{
+test('status and non-structural routes never consume a migration-author lane',()=>{
   const issues=[
-    {number:10,title:'open dependency',body:scope('blocked',9)},
-    {number:11,title:'dependent',body:scope('eligible',8,['table core.x'],'#10')},
-    {number:12,title:'owner',body:scope('owner-decision',7)},
-    {number:13,title:'data',body:scope('data-only',6)},
-    {number:14,title:'app',body:scope('non-structural',5)},
+    {number:10,title:'open dependency',body:scope('blocked','structural','shared-db-orchestrator',9,['table core.blocked'])},
+    {number:11,title:'dependent',body:scope('ready','structural','shared-db-orchestrator',8,['table core.x'],'#10')},
+    {number:12,title:'owner',body:scope('owner-decision','security-settings','owner-only',7)},
+    {number:13,title:'data',body:scope('ready','application-data','application-session',6)},
+    {number:14,title:'app',body:scope('ready','repo-maintenance','repo-maintenance',5)},
   ]
   const result=buildDynamicQueues(issues,[],NOW)
   assert.deepEqual(result.dispatchable,[])
@@ -59,10 +62,41 @@ test('blocked, owner-decision, data-only and dependent work never consume a lane
 })
 
 test('dependency on an open non-db-work issue prevents dispatch',()=>{
-  const issues=[{number:11,title:'dependent',body:scope('eligible',8,['table core.x'],'#99')}]
+  const issues=[{number:11,title:'dependent',body:scope('ready','structural','shared-db-orchestrator',8,['table core.x'],'#99')}]
   const result=buildDynamicQueues(issues,[],NOW,[11,99])
   assert.deepEqual(result.dispatchable,[])
   assert.match(result.skipped[0].reason,/99/)
+})
+
+test('NBCU rights classification is source-data work and never dispatches',()=>{
+  const result=buildDynamicQueues([{number:732,title:'NBCU rights classification',body:scope('ready','source-data','source-data-session',600)}],[],NOW)
+  assert.deepEqual(result.dispatchable,[])
+  assert.equal(result.skipped[0].route,'source-data-session')
+})
+
+test('application row cleanup is application data and never dispatches',()=>{
+  const result=buildDynamicQueues([{number:20,title:'row cleanup',body:scope('ready','application-data','application-session',10)}],[],NOW)
+  assert.deepEqual(result.dispatchable,[])
+})
+
+test('outside-sourced core.property load keeps governed Master Data route without an author lane',()=>{
+  const result=buildDynamicQueues([{number:21,title:'outside source load',body:scope('ready','curated-master-data','curated-master-data-governance',10)}],[],NOW)
+  assert.deepEqual(result.dispatchable,[])
+  assert.equal(result.skipped[0].route,'curated-master-data-governance')
+})
+
+test('owner-only question with no implementation never dispatches',()=>{
+  const result=buildDynamicQueues([{number:22,title:'owner question',body:scope('owner-decision','repo-maintenance','owner-only',10)}],[],NOW)
+  assert.deepEqual(result.dispatchable,[])
+})
+
+test('answering a data question changes status only and cannot become structural',()=>{
+  const answered=scope('ready','source-data','source-data-session',10)
+  const parsed=parseQueueScope(answered)
+  assert.equal(parsed.status,'ready')
+  assert.equal(parsed.workType,'source-data')
+  assert.equal(parsed.route,'source-data-session')
+  assert.deepEqual(buildDynamicQueues([{number:23,title:'answered data question',body:answered}],[],NOW).dispatchable,[])
 })
 
 test('an unclassified issue prevents proof that an empty lane is justified',()=>{
@@ -99,6 +133,7 @@ function memoryIo() {
     makeOwnerCommit:()=>`sha-${++seq}`,
     createRef:(ref,sha)=>{calls.push(['create',ref,sha]);if(refs.has(ref))return false;refs.set(ref,sha);return true},
     readRef:(ref)=>refs.get(ref)??null,
+    listRefs:(prefix)=>[...refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha})),
     deleteRef:(ref)=>{calls.push(['delete',ref]);refs.delete(ref)},
     reserveVersion:()=>({version:'20260814170219'}),
     createClaim:()=> 'https://github.test/issues/1', closeClaim:()=>{},
@@ -157,9 +192,49 @@ test('terminal provider failure advances exactly once and retry is idempotent',(
   assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'kimi-k3')
 })
 
+test('reviewer execution preflight enforces approved wrapper, clean worktree, and exact head',()=>{
+  const io={commandAvailable:()=>true,localHead:()=>failedReview.headSha,localClean:()=>true}
+  const request={reviewer:'grok-4.6',wrapper:'ai-grok-review',worktree:'C:/review',headSha:failedReview.headSha}
+  assert.equal(reviewerExecutionPreflight(request,io).ready,true)
+  assert.throws(()=>reviewerExecutionPreflight({...request,wrapper:'ai-qwen'},io),/exact wrapper/)
+  assert.throws(()=>reviewerExecutionPreflight(request,{...io,commandAvailable:()=>false}),/cannot execute/)
+  assert.throws(()=>reviewerExecutionPreflight(request,{...io,localHead:()=> 'f'.repeat(40)}),/exact assigned head/)
+  assert.throws(()=>reviewerExecutionPreflight(request,{...io,localClean:()=>false}),/dirty/)
+})
+
+test('two consecutive terminal no-verdict failures form an immutable idempotent chain',()=>{
+  const io=failedReviewIo()
+  const first=replaceFailedReviewer(replacementRequest,io)
+  const secondRequest={...replacementRequest,failedSequence:first.sequence,failureCode:'turn_limit_cancelled'}
+  const second=replaceFailedReviewer(secondRequest,io)
+  assert.equal(first.sequence,2);assert.equal(second.sequence,3);assert.equal(second.reviewer,'kimi-k3')
+  assert.deepEqual(replaceFailedReviewer(replacementRequest,io),first)
+  assert.deepEqual(replaceFailedReviewer(secondRequest,io),second)
+  assert.equal(assignNextReviewer(failedReview,io).sequence,3)
+  assert.equal([...io.refs.keys()].filter((ref)=>ref.startsWith(REVIEW_REPLACEMENT_REF_PREFIX)).length,2)
+})
+
+test('chained replacement rejects mismatch, exact-head drift, and a verdict at every depth',()=>{
+  const io=failedReviewIo(), first=replaceFailedReviewer(replacementRequest,io)
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence+1},io),/does not match/)
+  io.getPr=()=>({state:'open',head:{sha:'ffffffffffffffffffffffffffffffffffffffff'}})
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence,failureCode:'provider_unavailable'},io),/exact open PR head/)
+  io.getPr=()=>({state:'open',head:{sha:failedReview.headSha}})
+  io.getPrReviews=()=>[{body:`APPROVE ${failedReview.headSha}`}]
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence,failureCode:'provider_unavailable'},io),/existing verdict/)
+})
+
+test('concurrent chained replacement write is rejected without changing the cursor or prior links',()=>{
+  const io=failedReviewIo(), first=replaceFailedReviewer(replacementRequest,io), before=io.refs.get(REVIEW_CURSOR_REF), create=io.createRef
+  io.createRef=(ref,sha)=>ref===`${REVIEW_REPLACEMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}-${first.sequence}`?false:create(ref,sha)
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence,failureCode:'wrapper_terminal_failure'},io),/created concurrently/)
+  assert.equal(io.refs.get(REVIEW_CURSOR_REF),before)
+  assert.deepEqual(replaceFailedReviewer(replacementRequest,io),first)
+})
+
 test('reviewer replacement rejects mismatched original assignment and preserves intervening rotation',()=>{
   const io=failedReviewIo()
-  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:2},io),/does not match/)
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:99},io),/does not match/)
   assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
   const replacement=replaceFailedReviewer(replacementRequest,io)
   assert.equal(replacement.priorSequence,2);assert.equal(replacement.sequence,3);assert.equal(replacement.reviewer,'kimi-k3')
@@ -174,7 +249,7 @@ test('reviewer replacement rejects a substantive exact-head verdict',()=>{
 
 test('reviewer replacement retry rejects mismatched failure sequence and missing evidence',()=>{
   const io=failedReviewIo(), done=replaceFailedReviewer(replacementRequest,io)
-  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:2},io),/does not match/)
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:99},io),/does not match/)
   const failureRef=[...io.refs.keys()].find((ref)=>ref.startsWith('refs/db-review-failures/'));io.refs.delete(failureRef)
   assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/evidence is missing/)
   assert.ok(done.replacementSha)
@@ -522,4 +597,40 @@ test('active claim expansion rolls back an ambiguous update failure while mutex-
 test('REAL main command wires claim-number into the incident-pinned expansion',()=>{
   const io=expansionIo(),args=['--expand-active-claim-from-pr','--claim-number','1063','--pr','1065','--owner','codex-issue-853-orderlist','--head-sha','head','--branch','codex/issue-853-orderlist-index','--worktree','C:\\repos\\shared-db-wt-853-index']
   assert.equal(main(args,NOW,io),0);assert.ok(parseAuthorLease(io.issue.body,NOW).objects.includes('table plm.item'))
+})
+
+function reversionIo(overrides={}){
+  const io=memoryIo(),old='20260816044638',fresh='20260816120000',head='a'.repeat(40),newHead='b'.repeat(40)
+  const issue={number:1056,state:'open',body:claimBody({version:old,objects:['sequence dflow.licensingtime_id_seq','sequence dflow.properties_and_characters_id_seq'],owner:'issue_764_sequence_repair/session-1053',branch:'codex/issue-764-sequence-repair',worktree:'C:\\repos\\shared-db-worktrees\\issue-764-sequence-repair',expiresAt:new Date('2026-08-16T16:46:32Z')})}
+  io.refs.set(`refs/db-claims/${old}`,'old-ref');io.refs.set(`refs/db-claims/${fresh}`,'new-ref')
+  io.getIssue=()=>structuredClone(issue);io.updateIssue=(_,fields)=>{Object.assign(issue,fields);return structuredClone(issue)}
+  io.getPr=()=>({state:'open',head:{sha:head,ref:'codex/issue-764-sequence-repair'}})
+  io.getPrFiles=()=>[{filename:`supabase/migrations/${old}_repair.sql`}]
+  io.localClean=()=>true;io.localHead=()=>head;io.currentMaxVersion=()=> '20260816063532'
+  io.reserveVersion=()=>({version:fresh});io.rewriteVersion=()=>{};io.commitAndPushReversion=()=>{io.getPr=()=>({state:'open',head:{sha:newHead,ref:'codex/issue-764-sequence-repair'}});io.getPrFiles=()=>[{filename:`supabase/migrations/${fresh}_repair.sql`}];return newHead}
+  return Object.assign(io,{issue,head,newHead,old,fresh},overrides)
+}
+const reversionArgs={claim:1056,pr:1047,oldVersion:'20260816044638',headSha:'a'.repeat(40),branch:'codex/issue-764-sequence-repair',worktree:'C:\\repos\\shared-db-worktrees\\issue-764-sequence-repair'}
+test('active claim reversion preserves ownership and both permanent refs',()=>{
+  const io=reversionIo(),result=reversionActiveClaim(reversionArgs,NOW,io),lease=parseAuthorLease(io.issue.body,NOW)
+  assert.equal(result.newVersion,io.fresh);assert.equal(lease.version,io.fresh);assert.equal(lease.owner,'issue_764_sequence_repair/session-1053');assert.equal(io.refs.get(`refs/db-claims/${io.old}`),'old-ref')
+})
+test('active claim reversion rejects changed head, collision, dirty worktree, and non-later reservation',()=>{
+  assert.throws(()=>reversionActiveClaim({...reversionArgs,headSha:'c'.repeat(40)},NOW,reversionIo()),/exact head/)
+  assert.throws(()=>reversionActiveClaim(reversionArgs,NOW,reversionIo({localClean:()=>false})),/dirty/)
+  assert.throws(()=>reversionActiveClaim(reversionArgs,NOW,reversionIo({reserveVersion:()=>({version:'20260816040000'})})),/not later/)
+  assert.throws(()=>reversionActiveClaim({...reversionArgs,claim:999},NOW,reversionIo()),/pinned/)
+})
+test('active claim reversion fails closed when mutex ownership is lost during partial failure',()=>{
+  const io=reversionIo();io.commitAndPushReversion=()=>{io.refs.set(MUTEX_REF,'successor');throw new Error('push failed')}
+  assert.throws(()=>reversionActiveClaim(reversionArgs,NOW,io),/ROLLBACK NOT ATTEMPTED/)
+  assert.equal(io.refs.get(`refs/db-claims/${io.old}`),'old-ref')
+})
+test('active claim reversion rolls back an applied-then-failed issue update',()=>{
+  const io=reversionIo(),original=io.issue.body,baseUpdate=io.updateIssue,rewrites=[];let first=true
+  io.rewriteVersion=(_,from,to)=>{rewrites.push([from,to])}
+  io.updateIssue=(number,fields)=>{const result=baseUpdate(number,fields);if(first){first=false;throw new Error('response lost after PATCH')}return result}
+  assert.throws(()=>reversionActiveClaim(reversionArgs,NOW,io),/response lost/)
+  assert.equal(io.issue.body,original)
+  assert.deepEqual(rewrites,[[io.old,io.fresh],[io.fresh,io.old]])
 })
