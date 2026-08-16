@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, EXCLUSIVE_REFS, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, readRefAfterWrite, recoverStaleAuthorMutex, releaseOwnedRef, requireOwnedRef, REVIEW_CURSOR_REF, validateClaimObjects } from './manage-migration-author-lanes.mjs'
+import { acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, expandActiveClaimFromPr, EXCLUSIVE_REFS, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, REVIEW_CURSOR_REF, validateClaimObjects } from './manage-migration-author-lanes.mjs'
 
 const NOW = new Date('2026-08-14T20:00:00Z')
 const body = (objects, owner, expires = '2026-08-15T08:00:00.000Z') => claimBody({ version:`2026081420${owner.padStart(4,'0')}`, objects, owner:`agent-${owner}`, branch:`codex/${owner}`, worktree:`C:/w/${owner}`, expiresAt:new Date(expires) })
@@ -109,9 +109,13 @@ function memoryIo() {
 
 function reviewIo(){
   const io=memoryIo(), commits=new Map();let seq=0
-  io.makeOwnerCommit=(message)=>{const sha=`review-${++seq}`;commits.set(sha,{message});return sha}
+  io.makeOwnerCommit=(message)=>{const sha=(++seq).toString(16).padStart(40,'0');commits.set(sha,{message});return sha}
   io.getCommit=(sha)=>commits.get(sha)
   io.updateRef=(ref,sha)=>io.refs.set(ref,sha)
+  io.getIssue=()=>({state:'open'})
+  io.getPr=(number)=>({number:Number(number),state:'open',head:{sha:'abcdef9',ref:'codex/x'}})
+  io.getIssueComments=()=>[]
+  io.getPrReviews=()=>[]
   return io
 }
 
@@ -140,6 +144,54 @@ test('concurrent orchestrator cannot advance reviewer cursor without the mutex',
   const io=reviewIo();io.refs.set(MUTEX_REF,'other-orchestrator')
   assert.throws(()=>assignNextReviewer({issue:9,pr:109,headSha:'abcdef9'},io),/occupied/)
   assert.equal(io.refs.get(REVIEW_CURSOR_REF),undefined)
+})
+
+const failedReview={issue:9,pr:109,headSha:'abcdef9000000000000000000000000000000000'}
+function failedReviewIo(){const io=reviewIo();io.getPr=()=>({state:'open',head:{sha:failedReview.headSha}});assignNextReviewer(failedReview,io);return io}
+const replacementRequest={...failedReview,failedSequence:1,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true}
+
+test('terminal provider failure advances exactly once and retry is idempotent',()=>{
+  const io=failedReviewIo(), first=replaceFailedReviewer(replacementRequest,io), second=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(first.sequence,2);assert.equal(first.reviewer,'glm-5.2');assert.deepEqual(second,first)
+  assert.equal(assignNextReviewer(failedReview,io).reviewer,'glm-5.2')
+  assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'kimi-k3')
+})
+
+test('reviewer replacement rejects mismatched original assignment and preserves intervening rotation',()=>{
+  const io=failedReviewIo()
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:2},io),/does not match/)
+  assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(replacement.priorSequence,2);assert.equal(replacement.sequence,3);assert.equal(replacement.reviewer,'kimi-k3')
+})
+
+test('reviewer replacement rejects a substantive exact-head verdict',()=>{
+  const io=failedReviewIo();io.getPrReviews=()=>[{body:`REVISE ${failedReview.headSha}`}]
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/existing verdict/)
+  const stateIo=failedReviewIo();stateIo.getPrReviews=()=>[{body:'',commit_id:failedReview.headSha,state:'APPROVED'}]
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,stateIo),/existing verdict/)
+})
+
+test('reviewer replacement retry rejects mismatched failure sequence and missing evidence',()=>{
+  const io=failedReviewIo(), done=replaceFailedReviewer(replacementRequest,io)
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:2},io),/does not match/)
+  const failureRef=[...io.refs.keys()].find((ref)=>ref.startsWith('refs/db-review-failures/'));io.refs.delete(failureRef)
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/evidence is missing/)
+  assert.ok(done.replacementSha)
+})
+
+test('reviewer replacement rejects unproved or nonterminal failures',()=>{
+  const io=failedReviewIo()
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,confirmNoVerdict:false},io),/confirmation/)
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failureCode:'reviewer_disagreed'},io),/recognized terminal/)
+})
+
+test('partial reviewer replacement failure rolls back cursor and immutable evidence',()=>{
+  const io=failedReviewIo(), assignment=io.refs.get(REVIEW_CURSOR_REF), originalCreate=io.createRef
+  io.createRef=(ref,sha)=>ref.startsWith('refs/db-review-replacements/')?false:originalCreate(ref,sha)
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/created concurrently/)
+  assert.equal(io.refs.get(REVIEW_CURSOR_REF),assignment)
+  assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith('refs/db-review-failures/')),false)
 })
 
 const opts={task:'#1',owner:'agent',branch:'codex/x',worktree:'C:/w',objects:['table core.x'],leaseHours:12,requestId:'r1',mutexAttempts:1}
@@ -303,6 +355,37 @@ test('release tolerates one stale post-delete GitHub read',()=>{
   assert.equal(io.refs.has(MUTEX_REF),false)
 })
 
+test('release tolerates bounded stale owner reads until exact absence is visible',()=>{
+  const io=memoryIo();io.refs.set(MUTEX_REF,'ours');let postDeleteReads=0,deleted=false,waited=0
+  io.deleteRef=()=>{deleted=true}
+  io.readRef=(ref)=>deleted&&ref===MUTEX_REF?(++postDeleteReads<5?'ours':null):io.refs.get(ref)??null
+  io.wait=(ms)=>{waited+=ms}
+  assert.equal(releaseOwnedRef(MUTEX_REF,'ours',io),true)
+  assert.equal(postDeleteReads,5);assert.equal(waited,3250)
+})
+
+test('release fails closed on ambiguous transport readback without retrying delete',()=>{
+  const io=memoryIo();io.refs.set(MUTEX_REF,'ours');let deletes=0,reads=0
+  io.deleteRef=()=>{deletes++}
+  io.readRef=()=>{if(++reads===1)return 'ours';throw new LaneError('transport endpoint not found')}
+  assert.throws(()=>releaseOwnedRef(MUTEX_REF,'ours',io),/transport endpoint not found/)
+  assert.equal(deletes,1)
+})
+
+test('only an explicit GitHub HTTP 404 is confirmed ref absence',()=>{
+  assert.equal(isConfirmedRefAbsence(new Error('gh: Not Found (HTTP 404)')),true)
+  assert.equal(isConfirmedRefAbsence(new Error('transport endpoint not found')),false)
+  assert.equal(isConfirmedRefAbsence(new Error('HTTP 502 upstream failure')),false)
+})
+
+test('release never deletes a changed owner during bounded readback',()=>{
+  const io=memoryIo();io.refs.set(MUTEX_REF,'ours');let deleted=false,deletes=0
+  io.deleteRef=()=>{deleted=true;deletes++}
+  io.readRef=()=>deleted?'successor':'ours'
+  assert.equal(releaseOwnedRef(MUTEX_REF,'ours',io),true)
+  assert.equal(deletes,1)
+})
+
 test('stranded author mutex recovery requires exact SHA, lock type, age, and explicit confirmation',()=>{
   const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc')
   const recover=(values={})=>recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0,...values},io)
@@ -357,4 +440,86 @@ test('forged caller-written production risk JSON has no CLI authorization path',
   const result = spawnSync(process.execPath, ['scripts/manage-migration-author-lanes.mjs', '--production-risk-gate', 'forged.json'], { encoding: 'utf8' })
   assert.equal(result.status, 2)
   assert.match(result.stderr, /unknown argument: --production-risk-gate/)
+})
+test('stranded atomic split-recovery mutex is recognized and safely recoverable',()=>{
+  const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:'db-coordination claim-split-recovery request-2',committer:{date:'2026-08-14T19:55:00Z'}})
+  const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
+  assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
+})
+test('stranded reviewer assignment and replacement mutexes are recoverable',()=>{
+  for(const kind of ['reviewer-assignment-lock','reviewer-replacement-lock']){
+    const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:`db-coordination ${kind} issue=1 pr=2 head=abcdef0`,committer:{date:'2026-08-14T19:55:00Z'}})
+    assert.equal(recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io).released,'4a69fbbc')
+  }
+})
+
+function splitIo(overrides={}) {
+  const io=memoryIo(), original=['table plm.style_tracker_item_bridge'], combined=[...original,'index plm.item_upper_trim_item_number_idx']
+  const issues=new Map([[1058,{number:1058,state:'closed',title:'CLAIM: #853/#868 bridge',body:claimBody({version:'20260816045130',objects:original,owner:'session',branch:'codex/source',worktree:'C:/source',expiresAt:new Date('2026-08-17T00:00:00Z')})}],[1063,{number:1063,state:'open',title:'CLAIM: #853/#868 bridge plus index',body:claimBody({version:'20260816063532',objects:combined,owner:'session',branch:'codex/source',worktree:'C:/source',expiresAt:new Date('2026-08-17T00:00:00Z')})}]])
+  io.refs.set('refs/db-claims/20260816045130','reserved-a');io.refs.set('refs/db-claims/20260816063532','reserved-b')
+  io.getIssue=(n)=>structuredClone(issues.get(Number(n)))
+  io.getIssueComments=()=>[{body:'Expired migration-author lease closed by guarded cleanup. Its migration version remains unavailable.'}]
+  io.updateIssue=(n,fields)=>{Object.assign(issues.get(Number(n)),fields);return io.getIssue(n)}
+  io.getPr=(n)=>Number(n)===1060?{state:'open',head:{ref:'codex/source'}}:{state:'open',head:{ref:'codex/target'}}
+  io.getPrFiles=(n)=>[{filename:`supabase/migrations/${Number(n)===1060?'20260816045130_a':'20260816063532_b'}.sql`}]
+  io.openClaims=()=>[io.getIssue(1063)]
+  io.prSources=()=>[{label:'PR #1060 "source"',objects:['table plm.style_tracker_item_bridge']},{label:'PR #1064 [DRAFT] "target"',objects:['index plm.item_upper_trim_item_number_idx']}]
+  return Object.assign(io,{issues},overrides)
+}
+const splitOptions={releasedClaim:1058,activeClaim:1063,sourcePr:1060,targetPr:1064,targetBranch:'codex/target',targetWorktree:'C:/target',requestId:'split',mutexAttempts:1}
+
+test('same-owner split recovery atomically restores original and rebinds remainder claim',()=>{
+  const io=splitIo(),result=recoverSameOwnerSplit(splitOptions,NOW,io)
+  assert.deepEqual(result.versions,['20260816045130','20260816063532']);assert.equal(io.getIssue(1058).state,'open');assert.match(io.getIssue(1063).body,/branch: codex\/target/)
+})
+test('same-owner split recovery rejects mismatched owner, workstream, subset, and remainder',()=>{
+  for(const mutate of [(io)=>io.issues.get(1063).title='CLAIM: #999 other',(io)=>io.issues.get(1063).body=io.issues.get(1063).body.replace('owner: session','owner: intruder'),(io)=>io.issues.get(1058).body=io.issues.get(1058).body.replace('table plm.style_tracker_item_bridge','table core.other'),(io)=>io.issues.get(1063).body=io.issues.get(1063).body.replace('index plm.item_upper_trim_item_number_idx','index plm.wrong')]){const io=splitIo();mutate(io);assert.throws(()=>recoverSameOwnerSplit(splitOptions,NOW,io));assert.equal(io.getIssue(1058).state,'closed')}
+})
+test('same-owner split recovery rejects pull-request mismatch and third-party collision',()=>{
+  let io=splitIo({getPrFiles:()=>[{filename:'supabase/migrations/20260816000000_wrong.sql'}]});assert.throws(()=>recoverSameOwnerSplit(splitOptions,NOW,io),/pull request/)
+  io=splitIo();io.openClaims=()=>[io.getIssue(1063),{number:77,body:claimBody({version:'20260816070000',objects:['table plm.style_tracker_item_bridge'],owner:'other',branch:'other',worktree:'C:/other',expiresAt:new Date('2026-08-17T00:00:00Z')})}];assert.throws(()=>recoverSameOwnerSplit(splitOptions,NOW,io),/collision/)
+  io=splitIo();io.prSources=()=>[{label:'PR #999',objects:['table plm.style_tracker_item_bridge']}];assert.throws(()=>recoverSameOwnerSplit(splitOptions,NOW,io),/PR #999/)
+})
+test('same-owner split recovery is pinned and rejects removed files, duplicate versions, and bad close reason',()=>{
+  let io=splitIo();assert.throws(()=>recoverSameOwnerSplit({...splitOptions,releasedClaim:999},NOW,io),/pinned/)
+  io=splitIo({getPrFiles:()=>[{status:'removed',filename:'supabase/migrations/20260816045130_a.sql'}]});assert.throws(()=>recoverSameOwnerSplit(splitOptions,NOW,io),/removes/)
+  io=splitIo();io.issues.get(1063).body=io.issues.get(1063).body.replace('20260816063532','20260816045130');assert.throws(()=>recoverSameOwnerSplit(splitOptions,NOW,io),/different permanent versions/)
+  io=splitIo({getIssueComments:()=>[{body:'manual close'}]});assert.throws(()=>recoverSameOwnerSplit(splitOptions,NOW,io),/guarded-release reason/)
+  io=splitIo();io.issues.get(1058).body=io.issues.get(1058).body.replace('2026-08-17T00:00:00.000Z','2026-08-14T19:00:00.000Z');assert.throws(()=>recoverSameOwnerSplit(splitOptions,NOW,io),/unexpired/)
+  io=splitIo({getPr:()=>({state:'open',head:{ref:'codex/source'}})});assert.throws(()=>recoverSameOwnerSplit({...splitOptions,targetBranch:'codex/source'},NOW,io),/different pull-request branches/)
+  io=splitIo();io.prSources=()=>[{label:'PR #999 "duplicate version"',objects:['table core.unrelated'],versions:['20260816045130']}];assert.throws(()=>recoverSameOwnerSplit(splitOptions,NOW,io),/version collision/)
+})
+test('same-owner split recovery refuses rollback mutations after mutex ownership loss',()=>{
+  const io=splitIo();const update=io.updateIssue;let updates=0;io.updateIssue=(n,fields)=>{updates++;const result=update(n,fields);if(updates===1)io.refs.set(MUTEX_REF,'successor');return result}
+  assert.throws(()=>recoverSameOwnerSplit(splitOptions,NOW,io),/ROLLBACK NOT ATTEMPTED/);assert.equal(updates,1)
+})
+test('same-owner split recovery rolls both issue mutations back after partial readback failure',()=>{
+  const io=splitIo();let activeReservationReads=0;const read=io.readRef,get=io.getIssue;io.readRef=(ref)=>ref==='refs/db-claims/20260816063532'&&++activeReservationReads===2?null:read(ref)
+  assert.throws(()=>recoverSameOwnerSplit(splitOptions,NOW,io),/reservation disappeared/);assert.equal(get(1058).state,'closed');assert.match(get(1063).body,/branch: codex\/source/)
+})
+
+function expansionIo(overrides={}){
+  const io=memoryIo(),issue={number:1063,state:'open',body:claimBody({version:'20260816063532',objects:['index plm.item_upper_trim_item_number_idx'],owner:'codex-issue-853-orderlist',branch:'codex/issue-853-orderlist-index',worktree:'C:\\repos\\shared-db-wt-853-index',expiresAt:new Date('2026-08-17T00:00:00Z')})}
+  io.refs.set('refs/db-claims/20260816063532','reserved');io.getIssue=()=>structuredClone(issue);io.updateIssue=(_n,fields)=>{Object.assign(issue,fields);return structuredClone(issue)}
+  io.getPr=()=>({state:'open',head:{sha:'head',ref:'codex/issue-853-orderlist-index'}});io.getPrFiles=()=>[{status:'added',filename:'supabase/migrations/20260816063532_index.sql'}];io.openClaims=()=>[structuredClone(issue)]
+  io.prSources=()=>[{label:'PR #1065 [DRAFT] "index"',objects:['index plm.item_upper_trim_item_number_idx','table plm.item'],versions:['20260816063532']}]
+  return Object.assign(io,{issue},overrides)
+}
+const expansionOptions={claim:1063,pr:1065,owner:'codex-issue-853-orderlist',headSha:'head',branch:'codex/issue-853-orderlist-index',worktree:'C:\\repos\\shared-db-wt-853-index',requestId:'expand',mutexAttempts:1}
+test('active claim expansion adds exactly the parser-proven uncovered object',()=>{
+  const io=expansionIo(),result=expandActiveClaimFromPr(expansionOptions,NOW,io);assert.deepEqual(result.added,['table plm.item']);assert.deepEqual(parseAuthorLease(io.issue.body,NOW).objects,['index plm.item_upper_trim_item_number_idx','table plm.item'])
+})
+test('active claim expansion rejects arbitrary extras, collisions, stale lease, and changed binding',()=>{
+  let io=expansionIo();io.prSources=()=>[{label:'PR #1065 "x"',objects:['index plm.item_upper_trim_item_number_idx','table plm.item','table plm.extra'],versions:['20260816063532']}];assert.throws(()=>expandActiveClaimFromPr(expansionOptions,NOW,io),/exactly table plm.item/)
+  io=expansionIo();io.openClaims=()=>[io.getIssue(),{number:9,body:claimBody({version:'20260816070000',objects:['table plm.item'],owner:'other',branch:'other',worktree:'C:/other',expiresAt:new Date('2026-08-17T00:00:00Z')})}];assert.throws(()=>expandActiveClaimFromPr(expansionOptions,NOW,io),/collision/)
+  io=expansionIo();io.issue.body=io.issue.body.replace('2026-08-17T00:00:00.000Z','2026-08-14T19:00:00.000Z');assert.throws(()=>expandActiveClaimFromPr(expansionOptions,NOW,io),/expired/)
+  io=expansionIo();assert.throws(()=>expandActiveClaimFromPr({...expansionOptions,headSha:'wrong'},NOW,io),/head or branch changed/)
+})
+test('active claim expansion rolls back an ambiguous update failure while mutex-owned',()=>{
+  const io=expansionIo(),before=io.issue.body;io.updateIssue=(_n,fields)=>{Object.assign(io.issue,fields);if(fields.body!==before)throw new LaneError('connection lost');return io.getIssue()}
+  assert.throws(()=>expandActiveClaimFromPr(expansionOptions,NOW,io),/connection lost/);assert.equal(io.issue.body,before)
+})
+test('REAL main command wires claim-number into the incident-pinned expansion',()=>{
+  const io=expansionIo(),args=['--expand-active-claim-from-pr','--claim-number','1063','--pr','1065','--owner','codex-issue-853-orderlist','--head-sha','head','--branch','codex/issue-853-orderlist-index','--worktree','C:\\repos\\shared-db-wt-853-index']
+  assert.equal(main(args,NOW,io),0);assert.ok(parseAuthorLease(io.issue.body,NOW).objects.includes('table plm.item'))
 })

@@ -13,6 +13,8 @@ export const MUTEX_STALE_AFTER_MS = 2 * 60 * 1000
 export const MUTEX_REF = 'refs/db-coordination/author-acquisition'
 export const MUTEX_RECOVERY_ACTIVE_REF = 'refs/db-coordination/author-acquisition-recovery-active'
 export const REVIEW_CURSOR_REF = 'refs/db-coordination/reviewer-round-robin'
+export const REVIEW_FAILURE_REF_PREFIX = 'refs/db-review-failures'
+export const REVIEW_REPLACEMENT_REF_PREFIX = 'refs/db-review-replacements'
 export const REVIEWERS = Object.freeze([
   { name:'grok-4.6', wrapper:'ai-grok-review' }, { name:'glm-5.2', wrapper:'ai-glm' },
   { name:'kimi-k3', wrapper:'ai-kimi' }, { name:'qwen-3.8-max', wrapper:'ai-qwen' },
@@ -174,6 +176,7 @@ function ghPaginated(endpoint) {
   if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) throw new LaneError(`GitHub pagination for ${endpoint} was incomplete or malformed`)
   return pages.flat()
 }
+export function isConfirmedRefAbsence(error) { return /HTTP 404/i.test(String(error?.message??'')) }
 
 export const githubIo = {
   openClaims() {
@@ -188,6 +191,15 @@ export const githubIo = {
   prSources() { return gatherOpenPrObjects(REPO) },
   openPulls() { return ghPaginated(`repos/${REPO}/pulls?state=open&per_page=100`) },
   getPr(number) { return ghJson(['api', `repos/${REPO}/pulls/${number}`]) },
+  getPrFiles(number) { return ghPaginated(`repos/${REPO}/pulls/${number}/files?per_page=100`) },
+  getIssue(number) { return ghJson(['api', `repos/${REPO}/issues/${number}`]) },
+  getIssueComments(number) { return ghPaginated(`repos/${REPO}/issues/${number}/comments?per_page=100`) },
+  getPrReviews(number) { return ghPaginated(`repos/${REPO}/pulls/${number}/reviews?per_page=100`) },
+  updateIssue(number, fields) {
+    const args=['api','-X','PATCH',`repos/${REPO}/issues/${number}`]
+    for(const [key,value] of Object.entries(fields))args.push('-f',`${key}=${value}`)
+    return ghJson(args)
+  },
   mainSha() { return ghJson(['api', `repos/${REPO}/git/ref/heads/main`])?.object?.sha ?? null },
   getCommit(sha) { return ghJson(['api', `repos/${REPO}/git/commits/${sha}`]) },
   makeOwnerCommit(message) {
@@ -206,7 +218,10 @@ export const githubIo = {
   readRef(ref) {
     const short = ref.replace(/^refs\//, '')
     try { return ghJson(['api', `repos/${REPO}/git/ref/${short}`])?.object?.sha ?? null }
-    catch (error) { if (/HTTP 404|not found/i.test(error.message)) return null; throw error }
+    // Only GitHub CLI's explicit HTTP 404 proves that this exact ref is absent.
+    // A transport message that merely says "not found" is ambiguous and must
+    // remain a hard failure rather than being mistaken for successful cleanup.
+    catch (error) { if (isConfirmedRefAbsence(error)) return null; throw error }
   },
   deleteRef(ref) { gh(['api', '-X', 'DELETE', `repos/${REPO}/git/refs/${ref.replace(/^refs\//, '')}`]) },
   updateRef(ref, sha) { gh(['api','-X','PATCH',`repos/${REPO}/git/refs/${ref.replace(/^refs\//,'')}`,'-f',`sha=${sha}`,'-F','force=true']) },
@@ -273,7 +288,7 @@ export function recoverStaleAuthorMutex({ expectedSha, confirmStale, serializedR
     const message=commit?.message ?? commit?.commit?.message ?? ''
     const dateText=commit?.committer?.date ?? commit?.commit?.committer?.date
     const acquiredAt=new Date(dateText)
-    if(!/^db-coordination (?:author-acquisition|preview|merge|production|claim-release)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
+    if(!/^db-coordination (?:author-acquisition|preview|merge|production|claim-release|claim-split-recovery|claim-object-expansion|reviewer-assignment-lock|reviewer-replacement-lock)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
     if(Number.isNaN(acquiredAt.valueOf()))throw new LaneError('refusing recovery: mutex owner time is unreadable')
     const age=now-acquiredAt
     if(age<minAgeMs)throw new LaneError(`refusing recovery: mutex is only ${Math.max(0,Math.floor(age/1000))} seconds old`)
@@ -287,17 +302,16 @@ export function releaseOwnedRef(ref, ownerSha, io = githubIo) {
   if (actual === null) return false
   if (actual !== ownerSha) throw new LaneError(`refusing to release ${ref}: it belongs to another owner`)
   io.deleteRef(ref)
-  let after = io.readRef(ref)
-  // GitHub can briefly return the deleted ref from a stale read replica.
-  // Re-read once before reporting an ambiguous release failure.
-  if (after === ownerSha) {
-    (io.wait ?? ((ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms)))(250)
-    after = io.readRef(ref)
+  const delays=[0,250,500,1000,1500,2000]
+  for(const delay of delays){
+    if(delay)(io.wait ?? ((ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms)))(delay)
+    const after=io.readRef(ref)
+    if(after===null)return true
+    // A different SHA means another contender acquired the static ref after
+    // our successful owner-verified delete. Never delete the successor.
+    if(after!==ownerSha)return true
   }
-  if (after === ownerSha) throw new LaneError(`release of ${ref} could not be proved; do not retry blindly`)
-  // A different SHA means another contender acquired the static ref after our
-  // successful delete. That proves our ownership ended; never delete it again.
-  return true
+  throw new LaneError(`release of ${ref} could not be proved after bounded readback; do not retry blindly`)
 }
 
 export function parseReviewCursor(commit) {
@@ -314,6 +328,13 @@ export function assignNextReviewer({issue,pr,headSha},io=githubIo){
   acquireMutex(ownerSha,io)
   try{
     const assignmentRef=`refs/db-review-assignments/${request.issue}-${request.pr}-${request.headSha}`
+    const replacementRef=`${REVIEW_REPLACEMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`
+    const replacementSha=io.readRef(replacementRef)
+    if(replacementSha){
+      const replacement=parseReviewReplacement(io.getCommit(replacementSha)), reviewer=REVIEWERS.find((r)=>r.name===replacement.reviewer)
+      if(replacement.issue!==request.issue||replacement.pr!==request.pr||replacement.headSha!==request.headSha||!reviewer)throw new LaneError('durable reviewer replacement does not match the assignment request')
+      return {...replacement,wrapper:reviewer.wrapper,replacementSha}
+    }
     const priorSha=io.readRef(assignmentRef)
     if(priorSha){const prior=parseReviewCursor(io.getCommit(priorSha));return {...prior,wrapper:REVIEWERS.find((r)=>r.name===prior.reviewer)?.wrapper}}
     const cursorSha=io.readRef(REVIEW_CURSOR_REF), current=parseReviewCursor(cursorSha?io.getCommit(cursorSha):null)
@@ -328,6 +349,73 @@ export function assignNextReviewer({issue,pr,headSha},io=githubIo){
     if(readRefAfterWrite(REVIEW_CURSOR_REF,assignmentSha,io)!==assignmentSha)throw new LaneError('reviewer cursor advancement could not be proved; retry the same assignment')
     if(!io.createRef(assignmentRef,assignmentSha)&&readRefAfterWrite(assignmentRef,assignmentSha,io)!==assignmentSha)throw new LaneError('review assignment record could not be proved; retry the same assignment')
     return {sequence,reviewer:reviewer.name,wrapper:reviewer.wrapper,...request}
+  }finally{if(io.readRef(MUTEX_REF)===ownerSha)releaseOwnedRef(MUTEX_REF,ownerSha,io)}
+}
+
+function parseReviewReplacement(commit) {
+  const message=commit?.message ?? commit?.commit?.message ?? ''
+  const match=/^db-coordination reviewer-replacement sequence=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40}) failed-sequence=(\d+) prior-sequence=(\d+) failure-ref=([0-9a-f]{7,40})$/i.exec(message)
+  if(!match)throw new LaneError('reviewer replacement ref does not point to a recognized replacement')
+  return {sequence:Number(match[1]),reviewer:match[2],issue:Number(match[3]),pr:Number(match[4]),headSha:match[5],failedSequence:Number(match[6]),priorSequence:Number(match[7]),failureSha:match[8]}
+}
+
+export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCode,confirmNoVerdict,confirmNoArtifact},io=githubIo){
+  const request={issue:Number(issue),pr:Number(pr),headSha:String(headSha??''),failedSequence:Number(failedSequence)}
+  if(!Number.isInteger(request.issue)||!Number.isInteger(request.pr)||!/^[0-9a-f]{40}$/i.test(request.headSha)||!Number.isInteger(request.failedSequence))throw new LaneError('reviewer replacement requires exact issue, PR, 40-character head SHA, and failed sequence')
+  if(!['insufficient_quota','provider_unavailable','wrapper_terminal_failure'].includes(String(failureCode??'')))throw new LaneError('reviewer replacement requires a recognized terminal provider/tool failure code')
+  if(!confirmNoVerdict||!confirmNoArtifact)throw new LaneError('reviewer replacement requires explicit confirmation that the failed session produced no verdict and no artifact')
+  const assignmentRef=`refs/db-review-assignments/${request.issue}-${request.pr}-${request.headSha}`
+  const failureRef=`${REVIEW_FAILURE_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}-${request.failedSequence}`
+  const replacementRef=`${REVIEW_REPLACEMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`
+  const ownerSha=io.makeOwnerCommit(`db-coordination reviewer-replacement-lock issue=${request.issue} pr=${request.pr} head=${request.headSha}`)
+  acquireMutex(ownerSha,io)
+  try{
+    const priorReplacement=io.readRef(replacementRef)
+    if(priorReplacement){
+      const parsed=parseReviewReplacement(io.getCommit(priorReplacement)), reviewer=REVIEWERS.find((r)=>r.name===parsed.reviewer)
+      if(parsed.issue!==request.issue||parsed.pr!==request.pr||parsed.headSha!==request.headSha||parsed.failedSequence!==request.failedSequence||!reviewer)throw new LaneError('durable reviewer replacement does not match this retry')
+      if(io.readRef(failureRef)!==parsed.failureSha)throw new LaneError('immutable reviewer failure evidence is missing or changed')
+      return {...parsed,wrapper:reviewer.wrapper,failureCode:String(failureCode),replacementSha:priorReplacement}
+    }
+    const assignmentSha=io.readRef(assignmentRef)
+    if(!assignmentSha)throw new LaneError('original durable reviewer assignment is missing')
+    const original=parseReviewCursor(io.getCommit(assignmentSha))
+    if(original.issue!==request.issue||original.pr!==request.pr||original.headSha!==request.headSha||original.sequence!==request.failedSequence)throw new LaneError('original durable reviewer assignment does not match the replacement request')
+    const cursorSha=io.readRef(REVIEW_CURSOR_REF), cursor=parseReviewCursor(cursorSha?io.getCommit(cursorSha):null)
+    if(!cursor||cursor.sequence<request.failedSequence)throw new LaneError('reviewer cursor is behind the failed durable assignment')
+    const issueRow=io.getIssue(request.issue), prRow=io.getPr(request.pr)
+    if(issueRow?.state!=='open')throw new LaneError('review replacement requires the exact issue to remain open')
+    if(prRow?.state!=='open'||prRow?.head?.sha!==request.headSha)throw new LaneError('review replacement requires the exact open PR head')
+    const evidence=[...(io.getIssueComments?.(request.issue)??[]),...(io.getIssueComments?.(request.pr)??[]),...(io.getPrReviews?.(request.pr)??[])]
+    if(evidence.some((row)=>{
+      const body=String(row.body??''), tied=row.commit_id===request.headSha||body.includes(request.headSha)
+      return tied&&(/\b(?:APPROVE|REVISE|REQUEST_CHANGES)\b/i.test(body)||['APPROVED','CHANGES_REQUESTED'].includes(String(row.state??'').toUpperCase()))
+    }))throw new LaneError('an existing verdict for the exact head forbids reviewer replacement')
+    const failureSha=io.makeOwnerCommit(`db-coordination reviewer-failure issue=${request.issue} pr=${request.pr} head=${request.headSha} sequence=${request.failedSequence} reviewer=${original.reviewer} code=${failureCode} verdict=none artifact=none`)
+    const sequence=cursor.sequence+1, reviewer=REVIEWERS[(sequence-1)%REVIEWERS.length]
+    if(reviewer.name===original.reviewer)throw new LaneError('next durable reviewer is the same failed provider; replacement refuses to retry it')
+    const cursorReplacementSha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=${sequence} reviewer=${reviewer.name} issue=${request.issue} pr=${request.pr} head=${request.headSha}`)
+    const replacementSha=io.makeOwnerCommit(`db-coordination reviewer-replacement sequence=${sequence} reviewer=${reviewer.name} issue=${request.issue} pr=${request.pr} head=${request.headSha} failed-sequence=${request.failedSequence} prior-sequence=${cursor.sequence} failure-ref=${failureSha}`)
+    let failureCreated=false, cursorUpdated=false
+    try{
+      requireOwnedRef(MUTEX_REF,ownerSha,io)
+      if(!io.createRef(failureRef,failureSha))throw new LaneError('review failure evidence already exists without a replacement; manual audit required')
+      failureCreated=true
+      if(readRefAfterWrite(failureRef,failureSha,io)!==failureSha)throw new LaneError('immutable review failure evidence could not be proved')
+      requireOwnedRef(MUTEX_REF,ownerSha,io)
+      io.updateRef(REVIEW_CURSOR_REF,cursorReplacementSha);cursorUpdated=true
+      if(readRefAfterWrite(REVIEW_CURSOR_REF,cursorReplacementSha,io)!==cursorReplacementSha)throw new LaneError('reviewer cursor replacement could not be proved')
+      if(!io.createRef(replacementRef,replacementSha))throw new LaneError('review replacement record was created concurrently')
+      if(readRefAfterWrite(replacementRef,replacementSha,io)!==replacementSha)throw new LaneError('review replacement record could not be proved')
+      return {sequence,reviewer:reviewer.name,wrapper:reviewer.wrapper,...request,priorSequence:cursor.sequence,failureCode:String(failureCode),failureSha,replacementSha}
+    }catch(error){
+      const rollback=[]
+      try{if(io.readRef(replacementRef)===replacementSha)releaseOwnedRef(replacementRef,replacementSha,io)}catch(e){rollback.push(e.message)}
+      try{if(cursorUpdated&&io.readRef(REVIEW_CURSOR_REF)===cursorReplacementSha){io.updateRef(REVIEW_CURSOR_REF,cursorSha);if(readRefAfterWrite(REVIEW_CURSOR_REF,cursorSha,io)!==cursorSha)throw new LaneError('cursor rollback could not be proved')}}catch(e){rollback.push(e.message)}
+      try{if(failureCreated&&io.readRef(failureRef)===failureSha)releaseOwnedRef(failureRef,failureSha,io)}catch(e){rollback.push(e.message)}
+      if(rollback.length)throw new LaneError(`review replacement failed (${error.message}) and rollback was incomplete: ${rollback.join('; ')}`)
+      throw error
+    }
   }finally{if(io.readRef(MUTEX_REF)===ownerSha)releaseOwnedRef(MUTEX_REF,ownerSha,io)}
 }
 
@@ -359,6 +447,137 @@ export function acquireAuthorLane(options, now = new Date(), io = githubIo) {
     // never mask the original lost-ownership refusal.
     if (io.readRef(MUTEX_REF) === ownerSha) releaseOwnedRef(MUTEX_REF, ownerSha, io)
   }
+}
+
+const SPLIT_REMAINDER = 'index plm.item_upper_trim_item_number_idx'
+function workstreamKey(title) {
+  const match = /^CLAIM:\s+(#[0-9]+(?:\/#?[0-9]+)*)\b/.exec(String(title ?? ''))
+  if (!match) throw new LaneError('claim title does not identify one exact issue workstream')
+  return match[1]
+}
+function migrationVersions(files) {
+  if(files.some((file)=>file.status==='removed'))throw new LaneError('pull request removes a file; split recovery refuses it')
+  return files.map((file)=>file.filename ?? file.path ?? '').map((name)=>/^supabase\/migrations\/(\d{14})_[^/]+\.sql$/.exec(name)?.[1]).filter(Boolean)
+}
+function replaceLeaseLocation(body, branch, worktree) {
+  const fence=/```db-author-lease\s*\n([\s\S]*?)```/.exec(body)
+  if(!fence)throw new LaneError('active claim has no manager-owned author lease block')
+  let block=fence[1]
+  if((block.match(/^branch:/gm)??[]).length!==1||(block.match(/^worktree:/gm)??[]).length!==1)throw new LaneError('active claim lease location is ambiguous')
+  block=block.replace(/^branch:.*$/m,`branch: ${branch}`).replace(/^worktree:.*$/m,`worktree: ${worktree}`)
+  return body.slice(0,fence.index)+fence[0].replace(fence[1],()=>block)+body.slice(fence.index+fence[0].length)
+}
+function replaceClaimObjects(body, version, objects) {
+  const fences=[...body.matchAll(/```db-claim\s*\n[\s\S]*?```/g)]
+  if(fences.length!==1)throw new LaneError('claim body must contain exactly one manager-owned db-claim block')
+  const replacement=['```db-claim',`version: ${version}`,'objects:',...objects.map((object)=>`  - ${normalizeObject(object)}`),'```'].join('\n')
+  return body.slice(0,fences[0].index)+replacement+body.slice(fences[0].index+fences[0][0].length)
+}
+
+export function expandActiveClaimFromPr(options, now = new Date(), io = githubIo) {
+  for(const key of ['claim','pr','owner','headSha','branch','worktree'])if(!options[key])throw new LaneError(`claim expansion requires ${key}`)
+  if(String(options.claim)!=='1063'||String(options.pr)!=='1065')throw new LaneError('claim expansion is pinned to claim #1063 and PR #1065')
+  if(options.owner!=='codex-issue-853-orderlist'||options.branch!=='codex/issue-853-orderlist-index'||options.worktree!=='C:\\repos\\shared-db-wt-853-index')throw new LaneError('claim expansion owner, branch, and worktree are pinned to the #853 index incident')
+  const requestId=options.requestId??randomUUID(),ownerSha=io.makeOwnerCommit(`db-coordination claim-object-expansion ${requestId}`)
+  acquireMutex(ownerSha,io,options.mutexAttempts??100)
+  let before,possiblyChanged=false
+  try {
+    before=io.getIssue(options.claim)
+    if(before?.state!=='open')throw new LaneError('target claim is not open')
+    const lease=parseAuthorLease(before.body,now)
+    if(lease.legacy||!lease.active)throw new LaneError('target claim lease is legacy or expired')
+    if(lease.owner!==options.owner||lease.branch!==options.branch||lease.worktree!==options.worktree)throw new LaneError('target claim owner, branch, or worktree changed')
+    if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError('permanent version reservation is unreadable')
+    const pr=io.getPr(options.pr)
+    if(pr?.state!=='open'||pr.head?.sha!==options.headSha||pr.head?.ref!==options.branch)throw new LaneError('open pull request head or branch changed')
+    const fileVersions=migrationVersions(io.getPrFiles(options.pr))
+    if(fileVersions.length!==1||fileVersions[0]!==lease.version)throw new LaneError('pull request files do not contain exactly the immutable migration version')
+    const sources=io.prSources(),targetSources=sources.filter((source)=>new RegExp(`^PR #${options.pr}(?:\\s|$)`).test(source.label))
+    if(targetSources.length!==1)throw new LaneError('pull request parser source is missing or ambiguous')
+    const target=targetSources[0]
+    if(target.versions?.length!==1||String(target.versions[0])!==lease.version)throw new LaneError('pull request migration version does not match the immutable claim version')
+    const claimed=new Set(lease.objects.map(normalizeObject)),parsed=validateClaimObjects(target.objects??[])
+    const uncovered=parsed.filter((object)=>!claimed.has(object))
+    if(uncovered.length!==1||uncovered[0]!=='table plm.item')throw new LaneError('parsed uncovered objects must equal exactly table plm.item')
+    const claims=io.openClaims()
+    if(claims.filter((claim)=>String(claim.number)===String(options.claim)).length!==1||claims.length>MAX_AUTHOR_LANES)throw new LaneError('active claim set or lane capacity is ambiguous')
+    const others=claims.filter((claim)=>String(claim.number)!==String(options.claim)),otherPrs=sources.filter((source)=>source!==target)
+    assertLaneAvailable(others,uncovered,now,{ignoreCapacity:true,prSources:otherPrs})
+    const expanded=[...lease.objects.map(normalizeObject),...uncovered]
+    const updatedBody=replaceClaimObjects(before.body,lease.version,expanded)
+    requireOwnedRef(MUTEX_REF,ownerSha,io)
+    possiblyChanged=true;io.updateIssue(options.claim,{body:updatedBody})
+    requireOwnedRef(MUTEX_REF,ownerSha,io)
+    const after=io.getIssue(options.claim),afterLease=parseAuthorLease(after?.body??'',now)
+    if(after?.state!=='open'||after.body!==updatedBody||afterLease.owner!==lease.owner||afterLease.branch!==lease.branch||afterLease.worktree!==lease.worktree||afterLease.version!==lease.version)throw new LaneError('expanded claim exact readback failed')
+    if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError('permanent reservation disappeared during claim expansion')
+    return {claim:Number(options.claim),version:lease.version,added:uncovered,objects:afterLease.objects}
+  } catch(error) {
+    if(possiblyChanged){
+      if(io.readRef(MUTEX_REF)!==ownerSha)throw new LaneError(`${error.message}; ROLLBACK NOT ATTEMPTED because mutex ownership was lost`)
+      try{requireOwnedRef(MUTEX_REF,ownerSha,io);io.updateIssue(options.claim,{body:before.body});requireOwnedRef(MUTEX_REF,ownerSha,io);if(io.getIssue(options.claim)?.body!==before.body)throw new LaneError('rollback readback mismatch')}
+      catch(rollbackError){throw new LaneError(`${error.message}; ROLLBACK INCOMPLETE: ${rollbackError.message}`)}
+    }
+    throw error
+  } finally {if(io.readRef(MUTEX_REF)===ownerSha)releaseOwnedRef(MUTEX_REF,ownerSha,io)}
+}
+
+export function recoverSameOwnerSplit(options, now = new Date(), io = githubIo) {
+  for(const key of ['releasedClaim','activeClaim','sourcePr','targetPr','targetBranch','targetWorktree'])if(!options[key])throw new LaneError(`split recovery requires ${key}`)
+  const requestId=options.requestId??randomUUID(), ownerSha=io.makeOwnerCommit(`db-coordination claim-split-recovery ${requestId}`)
+  acquireMutex(ownerSha,io,options.mutexAttempts??100)
+  let releasedBefore,activeBefore,releasedChanged=false,activeChanged=false
+  try {
+    if(String(options.releasedClaim)!=='1058'||String(options.activeClaim)!=='1063'||String(options.sourcePr)!=='1060')throw new LaneError('split recovery is pinned to claims #1058/#1063 and source PR #1060')
+    if(!/^\d+$/.test(String(options.targetPr)))throw new LaneError('target pull request must be numeric')
+    if(String(options.sourcePr)===String(options.targetPr))throw new LaneError('source and target pull requests must differ')
+    releasedBefore=io.getIssue(options.releasedClaim);activeBefore=io.getIssue(options.activeClaim)
+    if(releasedBefore?.state!=='closed'||activeBefore?.state!=='open')throw new LaneError('split recovery requires one closed original claim and one open active claim')
+    if(workstreamKey(releasedBefore.title)!=='#853/#868'||workstreamKey(activeBefore.title)!=='#853/#868')throw new LaneError('claims do not belong to the pinned #853/#868 workstream')
+    const closeComments=io.getIssueComments(options.releasedClaim)
+    if(closeComments.at(-1)?.body!=='Expired migration-author lease closed by guarded cleanup. Its migration version remains unavailable.')throw new LaneError('closed claim does not have the exact guarded-release reason')
+    const released=parseAuthorLease(releasedBefore.body,now),active=parseAuthorLease(activeBefore.body,now)
+    if(released.legacy||active.legacy||released.owner!==active.owner)throw new LaneError('claims do not have the same exact manager owner')
+    if(!released.active||!active.active)throw new LaneError('split recovery requires both exact leases to remain unexpired')
+    if(released.version===active.version)throw new LaneError('split claims must retain two different permanent versions')
+    const original=new Set(released.objects.map(normalizeObject)),combined=new Set(active.objects.map(normalizeObject))
+    if(original.size>=combined.size||[...original].some((object)=>!combined.has(object)))throw new LaneError('original claim objects are not an exact strict subset')
+    const remainder=[...combined].filter((object)=>!original.has(object))
+    if(remainder.length!==1||remainder[0]!==SPLIT_REMAINDER)throw new LaneError(`split remainder must be exactly ${SPLIT_REMAINDER}`)
+    for(const lease of [released,active])if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError(`permanent reservation for ${lease.version} is unreadable`)
+    const source=io.getPr(options.sourcePr),target=io.getPr(options.targetPr)
+    if(source?.state!=='open'||source.head?.ref!==released.branch)throw new LaneError('source pull request does not match the original claim branch')
+    if(target?.state!=='open'||target.head?.ref!==options.targetBranch)throw new LaneError('target pull request does not match the requested split branch')
+    if(options.targetBranch===released.branch)throw new LaneError('split recovery requires two different pull-request branches')
+    const sourceVersions=migrationVersions(io.getPrFiles(options.sourcePr)),targetVersions=migrationVersions(io.getPrFiles(options.targetPr))
+    if(sourceVersions.length!==1||sourceVersions[0]!==released.version)throw new LaneError('source pull request must contain only the original migration version')
+    if(targetVersions.length!==1||targetVersions[0]!==active.version)throw new LaneError('target pull request must contain only the remainder migration version')
+    const thirdParty=io.openClaims().filter((claim)=>![String(options.activeClaim),String(options.releasedClaim)].includes(String(claim.number)))
+    const incidentPr=new RegExp(`^PR #(?:${options.sourcePr}|${options.targetPr})(?:\\s|$)`)
+    const thirdPartyPrs=io.prSources().filter((pr)=>!incidentPr.test(pr.label))
+    const reservedVersions=new Set([released.version,active.version])
+    const versionCollision=thirdPartyPrs.find((pr)=>(pr.versions??[]).some((version)=>reservedVersions.has(String(version))))
+    if(versionCollision)throw new LaneError(`migration version collision with ${versionCollision.label}`)
+    assertLaneAvailable(thirdParty,[...combined],now,{prSources:thirdPartyPrs})
+    if(thirdParty.length+2>MAX_AUTHOR_LANES)throw new LaneError('split recovery would exceed migration-author capacity')
+    requireOwnedRef(MUTEX_REF,ownerSha,io)
+    const activeBody=replaceLeaseLocation(activeBefore.body,options.targetBranch,options.targetWorktree)
+    activeChanged=true;io.updateIssue(options.activeClaim,{body:activeBody})
+    requireOwnedRef(MUTEX_REF,ownerSha,io)
+    releasedChanged=true;io.updateIssue(options.releasedClaim,{state:'open'})
+    requireOwnedRef(MUTEX_REF,ownerSha,io)
+    const activeAfter=io.getIssue(options.activeClaim),releasedAfter=io.getIssue(options.releasedClaim)
+    if(activeAfter?.body!==activeBody||activeAfter?.state!=='open'||releasedAfter?.body!==releasedBefore.body||releasedAfter?.state!=='open')throw new LaneError('split recovery readback did not match both exact claims')
+    for(const lease of [released,active])if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError('permanent reservation disappeared during split recovery')
+    return {restored:Number(options.releasedClaim),rebound:Number(options.activeClaim),owner:active.owner,versions:[released.version,active.version]}
+  } catch(error) {
+    const rollback=[]
+    if(io.readRef(MUTEX_REF)!==ownerSha)throw new LaneError(`${error.message}; ROLLBACK NOT ATTEMPTED because mutex ownership was lost; manual manager recovery required`)
+    if(releasedChanged){try{requireOwnedRef(MUTEX_REF,ownerSha,io);io.updateIssue(options.releasedClaim,{state:'closed'});rollback.push('released claim')}catch(e){rollback.push(`FAILED released claim: ${e.message}`)}}
+    if(activeChanged){try{requireOwnedRef(MUTEX_REF,ownerSha,io);io.updateIssue(options.activeClaim,{body:activeBefore.body});rollback.push('active claim')}catch(e){rollback.push(`FAILED active claim: ${e.message}`)}}
+    if(rollback.some((x)=>x.startsWith('FAILED')))throw new LaneError(`${error.message}; ROLLBACK INCOMPLETE: ${rollback.join(', ')}`)
+    throw error
+  } finally { if(io.readRef(MUTEX_REF)===ownerSha)releaseOwnedRef(MUTEX_REF,ownerSha,io) }
 }
 
 export function acquireExclusive(kind, metadata, io = githubIo) {
@@ -400,14 +619,19 @@ function parseArgs(argv) {
     else if (a === '--audit') out.audit = true
     else if (a === '--queue-audit') out.queueAudit = true
     else if (a === '--assign-reviewer') out.assignReviewer = true
+    else if (a === '--replace-failed-reviewer') out.replaceFailedReviewer = true
     else if (a === '--cleanup-stale') out.cleanup = true
     else if (a === '--release-claim') out.releaseClaim = next(i), i++
     else if (a === '--confirm-finished') out.confirmFinished = true
     else if (a === '--recover-author-mutex') out.recoverMutex = true
+    else if (a === '--recover-same-owner-split') out.recoverSplit = true
+    else if (a === '--expand-active-claim-from-pr') out.expandClaim = true
     else if (a === '--confirm-stale') out.confirmStale = true
     else if (/^--acquire-(preview|preview-recovery|merge|production)$/.test(a)) out.acquireExclusive = a.slice(10)
     else if (/^--release-(preview|preview-recovery|merge|production)$/.test(a)) out.releaseExclusive = a.slice(10)
-    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
+    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--claim-number','--failed-sequence','--failure-code'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
+    else if(a==='--confirm-no-verdict')out.confirmNoVerdict=true
+    else if(a==='--confirm-no-artifact')out.confirmNoArtifact=true
     else if (a === '--objects') { out.objects.push(...next(i).split(',').map((v)=>v.trim()).filter(Boolean)); i++ }
     else if (a === '--lease-hours') { out.leaseHours = Number(next(i)); i++ }
     else throw new LaneError(`unknown argument: ${a}`)
@@ -419,6 +643,9 @@ export function main(argv, now = new Date(), io = githubIo) {
   try {
     const o = parseArgs(argv)
     if(o.recoverMutex){console.log(JSON.stringify(recoverStaleAuthorMutex({expectedSha:o.expectedSha,confirmStale:o.confirmStale,serializedRecovery:process.env.GITHUB_ACTIONS==='true'&&process.env.AUTHOR_MUTEX_RECOVERY_SERIALIZED==='true',now},io),null,2));return 0}
+    if(o.recoverSplit){console.log(JSON.stringify(recoverSameOwnerSplit(o,now,io),null,2));return 0}
+    if(o.expandClaim){console.log(JSON.stringify(expandActiveClaimFromPr({...o,claim:o.claimNumber},now,io),null,2));return 0}
+    if(o.replaceFailedReviewer){console.log(JSON.stringify(replaceFailedReviewer(o,io),null,2));return 0}
     if (o.acquireExclusive) { console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha }, io), null, 2)); return 0 }
     if (o.releaseExclusive) { if (!o.ownerSha) throw new LaneError('--owner-sha is required for safe release'); releaseOwnedRef(EXCLUSIVE_REFS[o.releaseExclusive], o.ownerSha, io); return 0 }
     const claims = io.openClaims()
