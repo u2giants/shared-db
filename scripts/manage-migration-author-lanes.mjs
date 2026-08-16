@@ -397,6 +397,7 @@ function replaceClaimObjects(body, version, objects) {
 export function expandActiveClaimFromPr(options, now = new Date(), io = githubIo) {
   for(const key of ['claim','pr','owner','headSha','branch','worktree'])if(!options[key])throw new LaneError(`claim expansion requires ${key}`)
   if(String(options.claim)!=='1063'||String(options.pr)!=='1065')throw new LaneError('claim expansion is pinned to claim #1063 and PR #1065')
+  if(options.owner!=='codex-issue-853-orderlist'||options.branch!=='codex/issue-853-orderlist-index'||options.worktree!=='C:\\repos\\shared-db-wt-853-index')throw new LaneError('claim expansion owner, branch, and worktree are pinned to the #853 index incident')
   const requestId=options.requestId??randomUUID(),ownerSha=io.makeOwnerCommit(`db-coordination claim-object-expansion ${requestId}`)
   acquireMutex(ownerSha,io,options.mutexAttempts??100)
   let before,possiblyChanged=false
@@ -409,6 +410,8 @@ export function expandActiveClaimFromPr(options, now = new Date(), io = githubIo
     if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError('permanent version reservation is unreadable')
     const pr=io.getPr(options.pr)
     if(pr?.state!=='open'||pr.head?.sha!==options.headSha||pr.head?.ref!==options.branch)throw new LaneError('open pull request head or branch changed')
+    const fileVersions=migrationVersions(io.getPrFiles(options.pr))
+    if(fileVersions.length!==1||fileVersions[0]!==lease.version)throw new LaneError('pull request files do not contain exactly the immutable migration version')
     const sources=io.prSources(),targetSources=sources.filter((source)=>new RegExp(`^PR #${options.pr}(?:\\s|$)`).test(source.label))
     if(targetSources.length!==1)throw new LaneError('pull request parser source is missing or ambiguous')
     const target=targetSources[0]
@@ -545,7 +548,7 @@ function parseArgs(argv) {
     else if (a === '--confirm-stale') out.confirmStale = true
     else if (/^--acquire-(preview|preview-recovery|merge|production)$/.test(a)) out.acquireExclusive = a.slice(10)
     else if (/^--release-(preview|preview-recovery|merge|production)$/.test(a)) out.releaseExclusive = a.slice(10)
-    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
+    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--claim-number'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
     else if (a === '--objects') { out.objects.push(...next(i).split(',').map((v)=>v.trim()).filter(Boolean)); i++ }
     else if (a === '--lease-hours') { out.leaseHours = Number(next(i)); i++ }
     else throw new LaneError(`unknown argument: ${a}`)
@@ -558,7 +561,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     const o = parseArgs(argv)
     if(o.recoverMutex){console.log(JSON.stringify(recoverStaleAuthorMutex({expectedSha:o.expectedSha,confirmStale:o.confirmStale,serializedRecovery:process.env.GITHUB_ACTIONS==='true'&&process.env.AUTHOR_MUTEX_RECOVERY_SERIALIZED==='true',now},io),null,2));return 0}
     if(o.recoverSplit){console.log(JSON.stringify(recoverSameOwnerSplit(o,now,io),null,2));return 0}
-    if(o.expandClaim){console.log(JSON.stringify(expandActiveClaimFromPr(o,now,io),null,2));return 0}
+    if(o.expandClaim){console.log(JSON.stringify(expandActiveClaimFromPr({...o,claim:o.claimNumber},now,io),null,2));return 0}
     if (o.acquireExclusive) { console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha }, io), null, 2)); return 0 }
     if (o.releaseExclusive) { if (!o.ownerSha) throw new LaneError('--owner-sha is required for safe release'); releaseOwnedRef(EXCLUSIVE_REFS[o.releaseExclusive], o.ownerSha, io); return 0 }
     const claims = io.openClaims()
