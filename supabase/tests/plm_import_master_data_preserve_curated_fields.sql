@@ -56,11 +56,14 @@ begin
   );
 
   select * into v_row from core.licensor where id = v_feed_licensor;
-  if v_row.name <> 'ZZ555 CURATED FEED LICENSOR ' || v_suffix
-     or v_row.code <> 'ZZ555-L-' || v_suffix
-     or v_row.status::text <> 'inactive'
-     or v_row.metadata <> '{"curated":true}'::jsonb then
-    raise exception 'issue 555: matched licensor curation was overwritten';
+  if v_row.name <> 'ZZ555 CURATED FEED LICENSOR ' || v_suffix then
+    raise exception 'issue 555: matched licensor name was overwritten';
+  elsif v_row.code <> 'ZZ555-L-' || v_suffix then
+    raise exception 'issue 555: matched licensor code was overwritten';
+  elsif v_row.status::text <> 'inactive' then
+    raise exception 'issue 555: matched licensor status was overwritten';
+  elsif v_row.metadata <> '{"curated":true}'::jsonb then
+    raise exception 'issue 555: matched licensor metadata was overwritten';
   end if;
 
   select * into v_row from core.property where id = v_property;
