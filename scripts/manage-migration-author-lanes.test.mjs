@@ -155,11 +155,12 @@ test('terminal provider failure advances exactly once and retry is idempotent',(
   assert.equal(first.sequence,2);assert.equal(first.reviewer,'glm-5.2');assert.deepEqual(second,first)
 })
 
-test('reviewer replacement rejects mismatched original assignment and moved cursor',()=>{
+test('reviewer replacement rejects mismatched original assignment and preserves intervening rotation',()=>{
   const io=failedReviewIo()
   assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:2},io),/does not match/)
   assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
-  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/cursor has moved/)
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(replacement.priorSequence,2);assert.equal(replacement.sequence,3);assert.equal(replacement.reviewer,'kimi-k3')
 })
 
 test('reviewer replacement rejects a substantive exact-head verdict',()=>{

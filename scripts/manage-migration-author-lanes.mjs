@@ -344,9 +344,9 @@ export function assignNextReviewer({issue,pr,headSha},io=githubIo){
 
 function parseReviewReplacement(commit) {
   const message=commit?.message ?? commit?.commit?.message ?? ''
-  const match=/^db-coordination reviewer-replacement sequence=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40}) failed-sequence=(\d+) failure-ref=([0-9a-f]{7,40})$/i.exec(message)
+  const match=/^db-coordination reviewer-replacement sequence=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40}) failed-sequence=(\d+) prior-sequence=(\d+) failure-ref=([0-9a-f]{7,40})$/i.exec(message)
   if(!match)throw new LaneError('reviewer replacement ref does not point to a recognized replacement')
-  return {sequence:Number(match[1]),reviewer:match[2],issue:Number(match[3]),pr:Number(match[4]),headSha:match[5],failedSequence:Number(match[6]),failureSha:match[7]}
+  return {sequence:Number(match[1]),reviewer:match[2],issue:Number(match[3]),pr:Number(match[4]),headSha:match[5],failedSequence:Number(match[6]),priorSequence:Number(match[7]),failureSha:match[8]}
 }
 
 export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCode,confirmNoVerdict,confirmNoArtifact},io=githubIo){
@@ -367,15 +367,16 @@ export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCo
     const original=parseReviewCursor(io.getCommit(assignmentSha))
     if(original.issue!==request.issue||original.pr!==request.pr||original.headSha!==request.headSha||original.sequence!==request.failedSequence)throw new LaneError('original durable reviewer assignment does not match the replacement request')
     const cursorSha=io.readRef(REVIEW_CURSOR_REF), cursor=parseReviewCursor(cursorSha?io.getCommit(cursorSha):null)
-    if(cursorSha!==assignmentSha||cursor.sequence!==request.failedSequence)throw new LaneError('reviewer cursor has moved; replacement would not advance the durable round robin exactly once')
+    if(!cursor||cursor.sequence<request.failedSequence)throw new LaneError('reviewer cursor is behind the failed durable assignment')
     const issueRow=io.getIssue(request.issue), prRow=io.getPr(request.pr)
     if(issueRow?.state!=='open')throw new LaneError('review replacement requires the exact issue to remain open')
     if(prRow?.state!=='open'||prRow?.head?.sha!==request.headSha)throw new LaneError('review replacement requires the exact open PR head')
     const evidence=[...(io.getIssueComments?.(request.issue)??[]),...(io.getIssueComments?.(request.pr)??[]),...(io.getPrReviews?.(request.pr)??[])].map((row)=>String(row.body??''))
     if(evidence.some((body)=>body.includes(request.headSha)&&/\b(?:APPROVE|REVISE|REQUEST_CHANGES)\b/i.test(body)))throw new LaneError('an existing verdict for the exact head forbids reviewer replacement')
     const failureSha=io.makeOwnerCommit(`db-coordination reviewer-failure issue=${request.issue} pr=${request.pr} head=${request.headSha} sequence=${request.failedSequence} reviewer=${original.reviewer} code=${failureCode} verdict=none artifact=none`)
-    const sequence=request.failedSequence+1, reviewer=REVIEWERS[(sequence-1)%REVIEWERS.length]
-    const replacementSha=io.makeOwnerCommit(`db-coordination reviewer-replacement sequence=${sequence} reviewer=${reviewer.name} issue=${request.issue} pr=${request.pr} head=${request.headSha} failed-sequence=${request.failedSequence} failure-ref=${failureSha}`)
+    const sequence=cursor.sequence+1, reviewer=REVIEWERS[(sequence-1)%REVIEWERS.length]
+    if(reviewer.name===original.reviewer)throw new LaneError('next durable reviewer is the same failed provider; replacement refuses to retry it')
+    const replacementSha=io.makeOwnerCommit(`db-coordination reviewer-replacement sequence=${sequence} reviewer=${reviewer.name} issue=${request.issue} pr=${request.pr} head=${request.headSha} failed-sequence=${request.failedSequence} prior-sequence=${cursor.sequence} failure-ref=${failureSha}`)
     let failureCreated=false, cursorUpdated=false
     try{
       requireOwnedRef(MUTEX_REF,ownerSha,io)
@@ -387,10 +388,10 @@ export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCo
       if(readRefAfterWrite(REVIEW_CURSOR_REF,replacementSha,io)!==replacementSha)throw new LaneError('reviewer cursor replacement could not be proved')
       if(!io.createRef(replacementRef,replacementSha))throw new LaneError('review replacement record was created concurrently')
       if(readRefAfterWrite(replacementRef,replacementSha,io)!==replacementSha)throw new LaneError('review replacement record could not be proved')
-      return {sequence,reviewer:reviewer.name,wrapper:reviewer.wrapper,...request,failureCode:String(failureCode),failureSha,replacementSha}
+      return {sequence,reviewer:reviewer.name,wrapper:reviewer.wrapper,...request,priorSequence:cursor.sequence,failureCode:String(failureCode),failureSha,replacementSha}
     }catch(error){
       if(io.readRef(replacementRef)===replacementSha)releaseOwnedRef(replacementRef,replacementSha,io)
-      if(cursorUpdated&&io.readRef(REVIEW_CURSOR_REF)===replacementSha){io.updateRef(REVIEW_CURSOR_REF,assignmentSha);if(readRefAfterWrite(REVIEW_CURSOR_REF,assignmentSha,io)!==assignmentSha)throw new LaneError(`review replacement failed and cursor rollback could not be proved: ${error.message}`)}
+      if(cursorUpdated&&io.readRef(REVIEW_CURSOR_REF)===replacementSha){io.updateRef(REVIEW_CURSOR_REF,cursorSha);if(readRefAfterWrite(REVIEW_CURSOR_REF,cursorSha,io)!==cursorSha)throw new LaneError(`review replacement failed and cursor rollback could not be proved: ${error.message}`)}
       if(failureCreated&&io.readRef(failureRef)===failureSha)releaseOwnedRef(failureRef,failureSha,io)
       throw error
     }
