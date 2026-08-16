@@ -385,7 +385,7 @@ function replaceLeaseLocation(body, branch, worktree) {
   let block=fence[1]
   if((block.match(/^branch:/gm)??[]).length!==1||(block.match(/^worktree:/gm)??[]).length!==1)throw new LaneError('active claim lease location is ambiguous')
   block=block.replace(/^branch:.*$/m,`branch: ${branch}`).replace(/^worktree:.*$/m,`worktree: ${worktree}`)
-  return body.slice(0,fence.index)+fence[0].replace(fence[1],block)+body.slice(fence.index+fence[0].length)
+  return body.slice(0,fence.index)+fence[0].replace(fence[1],()=>block)+body.slice(fence.index+fence[0].length)
 }
 
 export function recoverSameOwnerSplit(options, now = new Date(), io = githubIo) {
@@ -404,6 +404,7 @@ export function recoverSameOwnerSplit(options, now = new Date(), io = githubIo) 
     if(closeComments.at(-1)?.body!=='Expired migration-author lease closed by guarded cleanup. Its migration version remains unavailable.')throw new LaneError('closed claim does not have the exact guarded-release reason')
     const released=parseAuthorLease(releasedBefore.body,now),active=parseAuthorLease(activeBefore.body,now)
     if(released.legacy||active.legacy||released.owner!==active.owner)throw new LaneError('claims do not have the same exact manager owner')
+    if(!released.active||!active.active)throw new LaneError('split recovery requires both exact leases to remain unexpired')
     if(released.version===active.version)throw new LaneError('split claims must retain two different permanent versions')
     const original=new Set(released.objects.map(normalizeObject)),combined=new Set(active.objects.map(normalizeObject))
     if(original.size>=combined.size||[...original].some((object)=>!combined.has(object)))throw new LaneError('original claim objects are not an exact strict subset')
@@ -413,12 +414,16 @@ export function recoverSameOwnerSplit(options, now = new Date(), io = githubIo) 
     const source=io.getPr(options.sourcePr),target=io.getPr(options.targetPr)
     if(source?.state!=='open'||source.head?.ref!==released.branch)throw new LaneError('source pull request does not match the original claim branch')
     if(target?.state!=='open'||target.head?.ref!==options.targetBranch)throw new LaneError('target pull request does not match the requested split branch')
+    if(options.targetBranch===released.branch)throw new LaneError('split recovery requires two different pull-request branches')
     const sourceVersions=migrationVersions(io.getPrFiles(options.sourcePr)),targetVersions=migrationVersions(io.getPrFiles(options.targetPr))
     if(sourceVersions.length!==1||sourceVersions[0]!==released.version)throw new LaneError('source pull request must contain only the original migration version')
     if(targetVersions.length!==1||targetVersions[0]!==active.version)throw new LaneError('target pull request must contain only the remainder migration version')
     const thirdParty=io.openClaims().filter((claim)=>![String(options.activeClaim),String(options.releasedClaim)].includes(String(claim.number)))
     const incidentPr=new RegExp(`^PR #(?:${options.sourcePr}|${options.targetPr})(?:\\s|$)`)
     const thirdPartyPrs=io.prSources().filter((pr)=>!incidentPr.test(pr.label))
+    const reservedVersions=new Set([released.version,active.version])
+    const versionCollision=thirdPartyPrs.find((pr)=>(pr.versions??[]).some((version)=>reservedVersions.has(String(version))))
+    if(versionCollision)throw new LaneError(`migration version collision with ${versionCollision.label}`)
     assertLaneAvailable(thirdParty,[...combined],now,{prSources:thirdPartyPrs})
     if(thirdParty.length+2>MAX_AUTHOR_LANES)throw new LaneError('split recovery would exceed migration-author capacity')
     requireOwnedRef(MUTEX_REF,ownerSha,io)
@@ -434,8 +439,8 @@ export function recoverSameOwnerSplit(options, now = new Date(), io = githubIo) 
   } catch(error) {
     const rollback=[]
     if(io.readRef(MUTEX_REF)!==ownerSha)throw new LaneError(`${error.message}; ROLLBACK NOT ATTEMPTED because mutex ownership was lost; manual manager recovery required`)
-    if(releasedChanged){try{io.updateIssue(options.releasedClaim,{state:'closed'});rollback.push('released claim')}catch(e){rollback.push(`FAILED released claim: ${e.message}`)}}
-    if(activeChanged){try{io.updateIssue(options.activeClaim,{body:activeBefore.body});rollback.push('active claim')}catch(e){rollback.push(`FAILED active claim: ${e.message}`)}}
+    if(releasedChanged){try{requireOwnedRef(MUTEX_REF,ownerSha,io);io.updateIssue(options.releasedClaim,{state:'closed'});rollback.push('released claim')}catch(e){rollback.push(`FAILED released claim: ${e.message}`)}}
+    if(activeChanged){try{requireOwnedRef(MUTEX_REF,ownerSha,io);io.updateIssue(options.activeClaim,{body:activeBefore.body});rollback.push('active claim')}catch(e){rollback.push(`FAILED active claim: ${e.message}`)}}
     if(rollback.some((x)=>x.startsWith('FAILED')))throw new LaneError(`${error.message}; ROLLBACK INCOMPLETE: ${rollback.join(', ')}`)
     throw error
   } finally { if(io.readRef(MUTEX_REF)===ownerSha)releaseOwnedRef(MUTEX_REF,ownerSha,io) }
