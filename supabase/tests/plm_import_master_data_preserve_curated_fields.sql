@@ -11,6 +11,8 @@ declare
   v_property_source text;
   v_count integer;
   v_row record;
+  v_licensor_before jsonb;
+  v_property_before jsonb;
 begin
   v_feed_licensor_source := 'zz555-lic-' || v_suffix;
   v_property_source := 'zz555-prop-' || v_suffix;
@@ -38,6 +40,15 @@ begin
      v_feed_licensor_source, 'CURATED-SOURCE-CODE', 'CURATED SOURCE NAME',
      'rejected', '{"before":true}'::jsonb);
 
+  select jsonb_build_object(
+    'name', name, 'code', code, 'status', status, 'metadata', metadata
+  ) into v_licensor_before from core.licensor where id = v_feed_licensor;
+
+  select jsonb_build_object(
+    'licensor_id', licensor_id, 'name', name, 'code', code,
+    'status', status, 'metadata', metadata
+  ) into v_property_before from core.property where id = v_property;
+
   -- The property has no PLM source ref yet and sits under a different curated
   -- parent. The importer must find it globally by its unique code, not insert a
   -- duplicate beneath the feed parent.
@@ -55,24 +66,19 @@ begin
     '[]'::jsonb
   );
 
-  select * into v_row from core.licensor where id = v_feed_licensor;
-  if v_row.name <> 'ZZ555 CURATED FEED LICENSOR ' || v_suffix then
-    raise exception 'issue 555: matched licensor name was overwritten';
-  elsif v_row.code <> 'ZZ555-L-' || v_suffix then
-    raise exception 'issue 555: matched licensor code was overwritten';
-  elsif v_row.status::text <> 'inactive' then
-    raise exception 'issue 555: matched licensor status was overwritten';
-  elsif v_row.metadata <> '{"curated":true}'::jsonb then
-    raise exception 'issue 555: matched licensor metadata was overwritten';
+  select jsonb_build_object(
+    'name', name, 'code', code, 'status', status, 'metadata', metadata
+  ) into v_row from core.licensor where id = v_feed_licensor;
+  if v_row.jsonb_build_object is distinct from v_licensor_before then
+    raise exception 'issue 555: matched licensor curation changed';
   end if;
 
-  select * into v_row from core.property where id = v_property;
-  if v_row.licensor_id <> v_curated_parent
-     or v_row.name <> 'ZZ555 CURATED PROPERTY ' || v_suffix
-     or v_row.code <> 'ZZ555-PROP-' || v_suffix
-     or v_row.status::text <> 'inactive'
-     or v_row.metadata <> '{"curated":true}'::jsonb then
-    raise exception 'issue 555: matched property curation was overwritten';
+  select jsonb_build_object(
+    'licensor_id', licensor_id, 'name', name, 'code', code,
+    'status', status, 'metadata', metadata
+  ) into v_row from core.property where id = v_property;
+  if v_row.jsonb_build_object is distinct from v_property_before then
+    raise exception 'issue 555: matched property curation changed';
   end if;
 
   select count(*) into v_count
