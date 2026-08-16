@@ -200,6 +200,8 @@ class GuardTests(unittest.TestCase):
         values = [
             "",
             "20260727",
+            "20260727010000,",
+            ",20260727010000",
             "20260727010000,20260727010000",
             "20260727020000,20260727010000",
             # The Master Data pair stays HARD_BLOCKED permanently: already
@@ -212,15 +214,21 @@ class GuardTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(GuardError):
                 parse_allowlist(value)
 
-    def test_the_block_list_is_exactly_these_three(self) -> None:
-        # Two kinds, deliberately together. 20260726190000/20260726200000 are the
+    def test_the_block_list_is_exactly_these_four(self) -> None:
+        # Three kinds, deliberately together. 20260726190000/20260726200000 are the
         # already-applied Master Data pair. 20260729120000 is the third kind:
         # never applied, and applying it would REGRESS a live production security
-        # control (see the guard's own comment and
+        # control. 20260816045130 is the retired non-atomic OrderList migration.
+        # See the guard's own comments and
         # docs/verification/production-apply-set-and-rehearsal-20260809.md).
         self.assertEqual(
             HARD_BLOCKED,
-            {"20260726190000", "20260726200000", "20260729120000"},
+            {
+                "20260726190000",
+                "20260726200000",
+                "20260729120000",
+                "20260816045130",
+            },
         )
 
     def test_the_retired_lockdown_migration_cannot_enter_an_allowlist(self) -> None:
@@ -469,7 +477,7 @@ class GuardTests(unittest.TestCase):
         # falls through into the CLI push.
         self.assertLess(check, push, commands)
         between = "\n".join(commands[check + 1 : push])
-        self.assertIn("atomic-migration-allowlist.json", between)
+        self.assertIn("--classify-allowlist", between)
         self.assertIn("atomic_migration_apply.py", between)
 
         cds = [i for i, c in enumerate(commands) if c.startswith("cd ")]
@@ -1785,11 +1793,30 @@ class ApplyLaneTests(unittest.TestCase):
         step = [s for s in _steps(_job("production-apply")) if "Fresh dry-run" in s][0]
         commands = _run_block_commands(step)
         joined = "\n".join(commands)
-        self.assertIn("atomic-migration-allowlist.json", joined)
+        self.assertIn("--classify-allowlist", joined)
+        self.assertIn('if [ -n "$ATOMIC_VERSION" ]', joined)
+        self.assertNotIn("jq -e", joined)
         self.assertIn("--mode check", joined)
         self.assertIn("--mode apply", joined)
         self.assertIn("--target production", joined)
         self.assertIn("else", commands)
+
+    def test_all_four_apply_call_sites_use_the_fail_closed_classifier(self) -> None:
+        self.assertEqual(WORKFLOW_TEXT.count("--classify-allowlist"), 4)
+        self.assertEqual(WORKFLOW_TEXT.count('if [ -n "$ATOMIC_VERSION" ]'), 4)
+        self.assertNotIn("jq -e", WORKFLOW_TEXT)
+
+    def test_every_apply_job_installs_and_proves_psql(self) -> None:
+        for job_name in ("preview", "production-dry-run", "production-apply-review", "production-apply"):
+            with self.subTest(job=job_name):
+                joined = "\n".join(_steps(_job(job_name)))
+                self.assertIn("apt-get install -y postgresql-client", joined)
+                self.assertIn("psql --version", joined)
+
+    def test_retired_orderlist_migration_is_hard_blocked(self) -> None:
+        self.assertIn("20260816045130", HARD_BLOCKED)
+        with self.assertRaisesRegex(GuardError, "general production lane blocks"):
+            parse_allowlist("20260816045130")
 
     def test_every_verify_dry_run_call_passes_a_remote_ledger(self) -> None:
         """The lane must never re-create the B9 deadlock at its last gate.

@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,16 +21,74 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 POLICY = ROOT / "config" / "atomic-migration-allowlist.json"
 VERSION_RE = re.compile(r"^(\d{14})_(.+)\.sql$")
-TX_RE = re.compile(r"(?is)^\s*(begin|start\s+transaction|commit|rollback|savepoint|release\s+savepoint)\b")
-EXPECTED_COLUMNS = [
-    ("version", "text", "NO"),
-    ("statements", "ARRAY", "YES"),
-    ("name", "text", "YES"),
-]
+VERSION_VALUE_RE = re.compile(r"^\d{14}$")
+TX_RE = re.compile(
+    r"(?is)^\s*(begin|start\s+transaction|end|abort|commit(?:\s+prepared)?|"
+    r"rollback(?:\s+prepared)?|prepare\s+transaction|savepoint|release\s+savepoint)\b"
+)
+EXPECTED_COLUMNS = {
+    "version": ({"text", "character varying"}, "NO", {"text", "varchar"}),
+    "statements": ({"ARRAY"}, "YES", {"_text"}),
+    "name": ({"text", "character varying"}, "YES", {"text", "varchar"}),
+}
 
 
 class Refusal(RuntimeError):
     pass
+
+
+def validate_version(version: str) -> str:
+    if not VERSION_VALUE_RE.fullmatch(version):
+        raise Refusal("version must be an exact 14-digit migration version")
+    return version
+
+
+def read_policy() -> dict[str, dict[str, object]]:
+    try:
+        policy = json.loads(POLICY.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise Refusal("atomic migration policy is missing or invalid") from exc
+    if policy.get("schema_version") != 1 or not isinstance(policy.get("migrations"), dict):
+        raise Refusal("atomic migration policy has an unsupported shape")
+    migrations = policy["migrations"]
+    for version, entry in migrations.items():
+        validate_version(version)
+        if not isinstance(entry, dict):
+            raise Refusal(f"atomic policy entry {version} is not an object")
+    return migrations
+
+
+def classify_allowlist(raw: str) -> str:
+    """Return the sole atomic version, or an empty string for the normal CLI lane."""
+    items = raw.split(",")
+    if not items or any(not item.strip() for item in items):
+        raise Refusal("allowlist contains an empty or malformed entry")
+    versions = [validate_version(item.strip()) for item in items]
+    atomic = sorted(set(versions) & set(read_policy()))
+    if not atomic:
+        return ""
+    if len(versions) != 1 or len(atomic) != 1:
+        raise Refusal(
+            "an atomically authorized migration must be the only allowlisted version"
+        )
+    return atomic[0]
+
+
+def validate_policy_bindings(migrations_dir: Path) -> None:
+    """Prove every authorization is committed with exactly the bytes it names."""
+    for version, entry in read_policy().items():
+        matches = sorted(migrations_dir.glob(f"{version}_*.sql"))
+        if len(matches) != 1:
+            raise Refusal(
+                f"atomic policy {version} must bind exactly one committed migration; "
+                f"found {len(matches)}"
+            )
+        digest = hashlib.sha256(matches[0].read_bytes()).hexdigest()
+        if digest != entry.get("sha256"):
+            raise Refusal(f"atomic policy SHA256 mismatch for {version}")
+        targets = entry.get("targets")
+        if not isinstance(targets, list) or not targets or not set(targets) <= {"preview", "production"}:
+            raise Refusal(f"atomic policy targets are invalid for {version}")
 
 
 def split_sql(raw: str) -> list[str]:
@@ -82,8 +141,8 @@ def dollar_quote(value: str, seed: str) -> str:
 
 
 def load_candidate(migrations_dir: Path, version: str, target: str) -> tuple[Path, str, str, list[str]]:
-    policy = json.loads(POLICY.read_text(encoding="utf-8"))
-    entry = policy.get("migrations", {}).get(version)
+    validate_version(version)
+    entry = read_policy().get(version)
     if not entry or target not in entry.get("targets", []):
         raise Refusal(f"version {version} is not atomically authorized for {target}")
     matches = sorted(migrations_dir.glob(f"{version}_*.sql"))
@@ -131,34 +190,51 @@ def linked_connection(linked_dir: Path, expected_ref: str) -> tuple[str, dict[st
 
 
 def psql(url: str, env: dict[str, str], sql: str, *, capture: bool = True) -> str:
+    if shutil.which("psql") is None:
+        raise Refusal("psql is not installed on this runner")
     result = subprocess.run(
         ["psql", url, "-X", "-v", "ON_ERROR_STOP=1", "-At"],
         input=sql, text=True, env=env, capture_output=capture, check=False,
     )
     if result.returncode:
-        raise Refusal("psql failed; transaction rolled back\n" + (result.stderr or "").strip())
+        raise Refusal("psql failed; details withheld to protect connection metadata")
     return (result.stdout or "").strip()
 
 
 def validate_remote(url: str, env: dict[str, str], version: str) -> None:
+    validate_version(version)
     sql = """
-select current_user;
-select column_name||'|'||data_type||'|'||is_nullable
+select coalesce(jsonb_object_agg(
+  column_name,
+  jsonb_build_object('data_type', data_type, 'udt_name', udt_name, 'is_nullable', is_nullable)
+), '{}'::jsonb)::text
 from information_schema.columns
 where table_schema='supabase_migrations' and table_name='schema_migrations'
-order by ordinal_position;
+  and column_name in ('version', 'statements', 'name');
 select count(*) from supabase_migrations.schema_migrations where version = '""" + version + "';\n"
     lines = psql(url, env, sql).splitlines()
-    if len(lines) != 5:
+    if len(lines) != 2:
         raise Refusal("unexpected migration-ledger catalog result")
-    actual = [tuple(line.split("|")) for line in lines[1:4]]
-    if actual != EXPECTED_COLUMNS:
-        raise Refusal(f"unexpected migration-ledger columns: {actual}")
-    if lines[4] != "0":
+    try:
+        actual = json.loads(lines[0])
+    except json.JSONDecodeError as exc:
+        raise Refusal("unexpected migration-ledger catalog result") from exc
+    if not isinstance(actual, dict) or set(actual) != set(EXPECTED_COLUMNS):
+        raise Refusal("required migration-ledger columns are missing")
+    for column, (data_types, nullable, udt_names) in EXPECTED_COLUMNS.items():
+        metadata = actual[column]
+        if not isinstance(metadata, dict) or (
+            metadata.get("data_type") not in data_types
+            or metadata.get("is_nullable") != nullable
+            or metadata.get("udt_name") not in udt_names
+        ):
+            raise Refusal(f"migration-ledger column {column} has an incompatible type")
+    if lines[1] != "0":
         raise Refusal(f"version {version} is already applied")
 
 
 def build_wrapper(version: str, name: str, raw: str, statements: list[str]) -> str:
+    validate_version(version)
     values = ",\n".join(dollar_quote(s, f"s{i}") for i, s in enumerate(statements))
     return (
         "\\set ON_ERROR_STOP on\nBEGIN;\n" + raw.rstrip() + "\n"
@@ -171,13 +247,31 @@ def build_wrapper(version: str, name: str, raw: str, statements: list[str]) -> s
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--migrations-dir", type=Path, required=True)
-    parser.add_argument("--linked-dir", type=Path, required=True)
-    parser.add_argument("--version", required=True)
-    parser.add_argument("--target", choices=["preview", "production"], required=True)
-    parser.add_argument("--expected-project-ref", required=True)
-    parser.add_argument("--mode", choices=["check", "apply"], required=True)
+    parser.add_argument("--classify-allowlist")
+    parser.add_argument("--linked-dir", type=Path)
+    parser.add_argument("--version")
+    parser.add_argument("--target", choices=["preview", "production"])
+    parser.add_argument("--expected-project-ref")
+    parser.add_argument("--mode", choices=["check", "apply"])
     args = parser.parse_args()
     try:
+        if args.classify_allowlist is not None:
+            print(classify_allowlist(args.classify_allowlist))
+            return 0
+        missing = [
+            flag
+            for flag, value in (
+                ("--linked-dir", args.linked_dir),
+                ("--version", args.version),
+                ("--target", args.target),
+                ("--expected-project-ref", args.expected_project_ref),
+                ("--mode", args.mode),
+            )
+            if value is None
+        ]
+        if missing:
+            raise Refusal("missing required apply arguments: " + ", ".join(missing))
+        validate_version(args.version)
         path, name, raw, statements = load_candidate(args.migrations_dir, args.version, args.target)
         url, env = linked_connection(args.linked_dir, args.expected_project_ref)
         validate_remote(url, env, args.version)
@@ -191,7 +285,10 @@ def main() -> int:
         try:
             result = subprocess.run(["psql", url, "-X", "-v", "ON_ERROR_STOP=1", "-f", temp_name], env=env, text=True, capture_output=True)
             if result.returncode:
-                raise Refusal("atomic apply failed; PostgreSQL rolled back DDL and ledger together\n" + (result.stderr or "").strip())
+                raise Refusal(
+                    "atomic apply failed; PostgreSQL rolled back DDL and ledger together; "
+                    "details withheld to protect connection metadata"
+                )
         finally:
             Path(temp_name).unlink(missing_ok=True)
         verify = psql(url, env, "select count(*)||'|'||coalesce(cardinality(statements),-1)||'|'||coalesce(name,'') from supabase_migrations.schema_migrations where version='" + args.version + "';\n")
