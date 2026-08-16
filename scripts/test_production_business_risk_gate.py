@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from production_business_risk_gate import RiskGateError, classify_sql, decide_business_risk, load_activation, prove_activation, prove_preview
+from production_business_risk_gate import RiskGateError, classify_sql, decide_business_risk, is_pinned_historical_disney_source, load_activation, prove_activation, prove_preview
 
 
 class ProductionBusinessRiskGateTests(unittest.TestCase):
@@ -83,7 +83,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         with self.assertRaisesRegex(RiskGateError, "wrong head_sha"):
             prove_preview(
                 run_id=7, digest="sha256:" + "c" * 64, pr_head="a" * 40,
-                allowlist=["20260814000000"], api=lambda _: run,
+                main_sha="d" * 40, source_pr=1, allowlist=["20260814000000"], api=lambda _: run,
                 downloader=lambda *_: self.fail("forged run must not download"), repo_root=Path.cwd(),
             )
 
@@ -93,6 +93,25 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         self.assertEqual(text.count("python scripts/production_business_risk_gate.py"), 2)
         self.assertIn("environment: production", text)
         self.assertGreaterEqual(text.count("config/production-risk-policy-activation.json"), 2)
+
+    def test_historical_preview_recovery_proves_existing_ledger_without_writing(self):
+        workflow = Path(__file__).parents[1] / ".github/workflows/shared-supabase-migrations.yml"
+        text = workflow.read_text(encoding="utf-8")
+        self.assertIn("Recover proof for migrations already present on preview", text)
+        self.assertIn("HISTORICAL PREVIEW PROOF: already applied; no database write performed", text)
+        self.assertIn("REFUSED: historical preview recovery is missing ledger versions", text)
+        self.assertIn("inputs.mode == 'apply' && inputs.historical_preview_source_pr == ''", text)
+
+    def test_legacy_author_check_waiver_is_exactly_pinned(self):
+        args = [924, "5135b668d87c1639281c506ae75fde75211b7019", "96bf385aa5c0f703ec98f5730249f586964f5142", ["20260813210000", "20260813220000"]]
+        self.assertTrue(is_pinned_historical_disney_source(*args))
+        for changed in [
+            [925, *args[1:]],
+            [args[0], "a" * 40, *args[2:]],
+            [*args[:2], "b" * 40, args[3]],
+            [*args[:3], ["20260813210000"]],
+        ]:
+            self.assertFalse(is_pinned_historical_disney_source(*changed))
 
 
 if __name__ == "__main__":
