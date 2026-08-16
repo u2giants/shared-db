@@ -2,6 +2,8 @@
 -- Preserve every legacy ERP link while canonical ColdLion items are added.
 -- No bridge row or legacy link is removed by this migration.
 
+begin;
+
 lock table plm.style_tracker_item_bridge in share row exclusive mode;
 
 create temporary table issue_853_bridge_before on commit drop as
@@ -366,3 +368,5 @@ begin
   end if;
 end;
 $$;
+
+commit;
