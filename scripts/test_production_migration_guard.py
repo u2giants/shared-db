@@ -220,7 +220,12 @@ class GuardTests(unittest.TestCase):
         # docs/verification/production-apply-set-and-rehearsal-20260809.md).
         self.assertEqual(
             HARD_BLOCKED,
-            {"20260726190000", "20260726200000", "20260729120000"},
+            {
+                "20260726190000",
+                "20260726200000",
+                "20260729120000",
+                "20260816045130",
+            },
         )
 
     def test_the_retired_lockdown_migration_cannot_enter_an_allowlist(self) -> None:
