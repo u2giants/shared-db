@@ -17,6 +17,13 @@ alter table plm.style_tracker_item_bridge
   add constraint style_tracker_item_bridge_plm_item_id_fkey
   foreign key (plm_item_id) references plm.item(id) on delete restrict;
 
+alter table plm.style_tracker_item_bridge
+  drop constraint if exists style_tracker_item_bridge_erp_item_id_fkey;
+
+alter table plm.style_tracker_item_bridge
+  add constraint style_tracker_item_bridge_erp_item_id_fkey
+  foreign key (erp_item_id) references public.erp_items_current(id) on delete restrict;
+
 CREATE OR REPLACE FUNCTION plm.refresh_style_tracker_item_bridge()
  RETURNS TABLE(inserted_count integer, updated_count integer, total_count integer)
  LANGUAGE plpgsql

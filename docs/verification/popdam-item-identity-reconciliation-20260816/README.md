@@ -65,6 +65,7 @@ ERP link and a null canonical link. The same fail-loud unresolved state applies
 to any tied or zero-evidence multi-division identity. The refresh function is
 not allowed to replace a preserved link with null, and the canonical foreign key
 uses `ON DELETE RESTRICT` so a later deletion fails rather than blanking links.
+The retained legacy ERP foreign key uses the same fail-loud rule.
 
 ## Application-owned data
 

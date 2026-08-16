@@ -27,11 +27,11 @@ async function getAllColdLionItems(apiKey) {
   return rows;
 }
 
-async function getAllRows(serviceKey, schema, table, select) {
+async function getAllRows(serviceKey, schema, table, select, orderColumn) {
   const rows = [];
   const pageSize = 1000;
   for (let offset = 0; ; offset += pageSize) {
-    const url = `${SUPABASE_URL}/rest/v1/${table}?select=${encodeURIComponent(select)}&offset=${offset}&limit=${pageSize}`;
+    const url = `${SUPABASE_URL}/rest/v1/${table}?select=${encodeURIComponent(select)}&order=${encodeURIComponent(orderColumn)}.asc&offset=${offset}&limit=${pageSize}`;
     const response = await fetch(url, {
       headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Accept-Profile": schema },
     });
@@ -50,8 +50,8 @@ function digest(values) {
 async function main() {
 const apiKey = secret("op://vibe_coding/zq6cjbz3ycj6psgkeae2devufm/credential");
 const serviceKey = secret("op://vibe_coding/3hhxwrljnaq2tykxi7hplq5ryi/SUPABASE_SERVICE_ROLE_KEY");
-const legacy = await getAllRows(serviceKey, "public", "erp_items_current", "id,external_id,division_code,dismissed,item_description,mg01_code,mg02_code,mg03_code,mg04_code,mg05_code,mg06_code,licensor_code,property_code");
-const bridgeRows = await getAllRows(serviceKey, "public", "style_tracker_rows_with_bridge", "bridge_id,erp_item_id");
+const legacy = await getAllRows(serviceKey, "public", "erp_items_current", "id,external_id,division_code,dismissed,item_description,mg01_code,mg02_code,mg03_code,mg04_code,mg05_code,mg06_code,licensor_code,property_code", "id");
+const bridgeRows = await getAllRows(serviceKey, "public", "style_tracker_rows_with_bridge", "id,bridge_id,erp_item_id", "id");
 const coldLion = await getAllColdLionItems(apiKey);
 
 const coldKey = (row) => `${row.companyCode}|${row.divisionCode}|${row.itemNo}`;
