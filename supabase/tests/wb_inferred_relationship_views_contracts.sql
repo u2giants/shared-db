@@ -28,14 +28,14 @@ insert into plm.wb_asset_property(asset_id,property_id,capture_id,source_url,raw
  ('10490000-0000-4000-8000-000000000051','10490000-0000-4000-8000-000000000021','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','ap1','2099-01-01','2099-01-07'),
  ('10490000-0000-4000-8000-000000000052','10490000-0000-4000-8000-000000000021','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','ap2','2099-01-02','2099-01-08'),
  ('10490000-0000-4000-8000-000000000053','10490000-0000-4000-8000-000000000022','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','ap3','2099-01-02','2099-01-08');
-insert into plm.wb_asset_style_guide_normalized(asset_id,style_guide_id,capture_id,source_url,raw,source_hash) values
- ('10490000-0000-4000-8000-000000000051','10490000-0000-4000-8000-000000000031','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','as1'),
- ('10490000-0000-4000-8000-000000000052','10490000-0000-4000-8000-000000000031','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','as2'),
- ('10490000-0000-4000-8000-000000000051','10490000-0000-4000-8000-000000000032','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','as3');
-insert into plm.wb_asset_character_normalized(asset_id,character_id,capture_id,source_url,raw,source_hash) values
- ('10490000-0000-4000-8000-000000000051','10490000-0000-4000-8000-000000000041','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','ac1'),
- ('10490000-0000-4000-8000-000000000052','10490000-0000-4000-8000-000000000041','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','ac2'),
- ('10490000-0000-4000-8000-000000000051','10490000-0000-4000-8000-000000000042','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','ac3');
+insert into plm.wb_asset_style_guide_normalized(asset_id,style_guide_id,capture_id,source_url,raw,source_hash,first_seen_at,last_seen_at) values
+ ('10490000-0000-4000-8000-000000000051','10490000-0000-4000-8000-000000000031','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','as1','2099-01-05','2099-01-11'),
+ ('10490000-0000-4000-8000-000000000052','10490000-0000-4000-8000-000000000031','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','as2','2099-01-06','2099-01-12'),
+ ('10490000-0000-4000-8000-000000000051','10490000-0000-4000-8000-000000000032','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','as3','2099-01-05','2099-01-11');
+insert into plm.wb_asset_character_normalized(asset_id,character_id,capture_id,source_url,raw,source_hash,first_seen_at,last_seen_at) values
+ ('10490000-0000-4000-8000-000000000051','10490000-0000-4000-8000-000000000041','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','ac1','2099-01-04','2099-01-10'),
+ ('10490000-0000-4000-8000-000000000052','10490000-0000-4000-8000-000000000041','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','ac2','2099-01-05','2099-01-11'),
+ ('10490000-0000-4000-8000-000000000051','10490000-0000-4000-8000-000000000042','10490000-0000-4000-8000-000000000001','https://example.invalid','{}','ac3','2099-01-04','2099-01-10');
 insert into plm.wb_property_character_normalized(property_id,character_id,property_source_id,character_source_id,property_label,character_label,identity_fallback,capture_id,source_url,raw,source_hash)
 values ('10490000-0000-4000-8000-000000000021','10490000-0000-4000-8000-000000000041','same-id','c-1','Invented Product Property','Invented Character One',false,'10490000-0000-4000-8000-000000000001','https://example.invalid','{}','direct');
 
@@ -51,11 +51,22 @@ begin
  if exists(select 1 from information_schema.columns where table_schema='api' and table_name=any(names) and column_name in ('raw','file_name','source_path','source_url','label')) then raise exception 'licensed asset or payload field escaped into an inferred view'; end if;
  if (select count(*) from api.wb_inferred_franchise_property where franchise_id='10490000-0000-4000-8000-000000000011')<>2 then raise exception 'many-to-many or namespace isolation was lost'; end if;
  if not exists(select 1 from api.wb_inferred_franchise_property where property_id='10490000-0000-4000-8000-000000000021' and via_asset_count=2 and support_asset_count=3 and support_ratio=0.666667 and evidence_strength='strong') then raise exception 'strong support count or ratio changed'; end if;
+ if not exists(select 1 from api.wb_inferred_franchise_property where property_id='10490000-0000-4000-8000-000000000021' and first_seen_at='2099-01-02'::timestamptz and last_seen_at='2099-01-09'::timestamptz) then raise exception 'evidence timestamp semantics changed'; end if;
  if not exists(select 1 from api.wb_inferred_franchise_property where property_id='10490000-0000-4000-8000-000000000022' and property_source_namespace='warner_art_assets' and property_source_id='same-id' and via_asset_count=1 and evidence_strength='weak') then raise exception 'weak evidence or source namespace was lost'; end if;
  if not exists(select 1 from api.wb_inferred_property_character where property_id='10490000-0000-4000-8000-000000000021' and character_id='10490000-0000-4000-8000-000000000041' and via_asset_count=2 and support_ratio=1 and evidence_strength='universal' and evidence_type='inferred_asset_cooccurrence' and not is_direct) then raise exception 'universal inferred evidence changed'; end if;
  if not exists(select 1 from plm.wb_property_character_normalized where property_id='10490000-0000-4000-8000-000000000021' and character_id='10490000-0000-4000-8000-000000000041' and evidence_type='direct_warner_product_catalogue') then raise exception 'direct Warner assertion was not kept separate'; end if;
  if (select count(*) from api.wb_inferred_style_guide_character where style_guide_id='10490000-0000-4000-8000-000000000031')<>2 then raise exception 'multiple right-side relationships were collapsed'; end if;
  if exists(select 1 from api.wb_inferred_property_character where evidence_type<>'inferred_asset_cooccurrence' or is_direct) then raise exception 'inferred contract was misrepresented as direct'; end if;
+ if exists(
+  select 1 from (
+   select first_seen_at,last_seen_at from api.wb_inferred_franchise_property
+   union all select first_seen_at,last_seen_at from api.wb_inferred_franchise_style_guide
+   union all select first_seen_at,last_seen_at from api.wb_inferred_franchise_character
+   union all select first_seen_at,last_seen_at from api.wb_inferred_style_guide_property
+   union all select first_seen_at,last_seen_at from api.wb_inferred_property_character
+   union all select first_seen_at,last_seen_at from api.wb_inferred_style_guide_character
+  ) evidence_windows where first_seen_at>last_seen_at
+ ) then raise exception 'an inferred evidence window is inverted'; end if;
 end
 $contracts$;
 
