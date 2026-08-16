@@ -284,7 +284,7 @@ export function recoverStaleAuthorMutex({ expectedSha, confirmStale, serializedR
     const message=commit?.message ?? commit?.commit?.message ?? ''
     const dateText=commit?.committer?.date ?? commit?.commit?.committer?.date
     const acquiredAt=new Date(dateText)
-    if(!/^db-coordination (?:author-acquisition|preview|merge|production|claim-release|claim-split-recovery|claim-object-expansion)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
+    if(!/^db-coordination (?:author-acquisition|preview|merge|production|claim-release|claim-split-recovery|claim-object-expansion|reviewer-assignment-lock|reviewer-replacement-lock)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
     if(Number.isNaN(acquiredAt.valueOf()))throw new LaneError('refusing recovery: mutex owner time is unreadable')
     const age=now-acquiredAt
     if(age<minAgeMs)throw new LaneError(`refusing recovery: mutex is only ${Math.max(0,Math.floor(age/1000))} seconds old`)
@@ -325,6 +325,13 @@ export function assignNextReviewer({issue,pr,headSha},io=githubIo){
   acquireMutex(ownerSha,io)
   try{
     const assignmentRef=`refs/db-review-assignments/${request.issue}-${request.pr}-${request.headSha}`
+    const replacementRef=`${REVIEW_REPLACEMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`
+    const replacementSha=io.readRef(replacementRef)
+    if(replacementSha){
+      const replacement=parseReviewReplacement(io.getCommit(replacementSha)), reviewer=REVIEWERS.find((r)=>r.name===replacement.reviewer)
+      if(replacement.issue!==request.issue||replacement.pr!==request.pr||replacement.headSha!==request.headSha||!reviewer)throw new LaneError('durable reviewer replacement does not match the assignment request')
+      return {...replacement,wrapper:reviewer.wrapper,replacementSha}
+    }
     const priorSha=io.readRef(assignmentRef)
     if(priorSha){const prior=parseReviewCursor(io.getCommit(priorSha));return {...prior,wrapper:REVIEWERS.find((r)=>r.name===prior.reviewer)?.wrapper}}
     const cursorSha=io.readRef(REVIEW_CURSOR_REF), current=parseReviewCursor(cursorSha?io.getCommit(cursorSha):null)
@@ -361,7 +368,12 @@ export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCo
   acquireMutex(ownerSha,io)
   try{
     const priorReplacement=io.readRef(replacementRef)
-    if(priorReplacement){const parsed=parseReviewReplacement(io.getCommit(priorReplacement));return {...parsed,wrapper:REVIEWERS.find((r)=>r.name===parsed.reviewer)?.wrapper,failureCode:String(failureCode),replacementSha:priorReplacement}}
+    if(priorReplacement){
+      const parsed=parseReviewReplacement(io.getCommit(priorReplacement)), reviewer=REVIEWERS.find((r)=>r.name===parsed.reviewer)
+      if(parsed.issue!==request.issue||parsed.pr!==request.pr||parsed.headSha!==request.headSha||parsed.failedSequence!==request.failedSequence||!reviewer)throw new LaneError('durable reviewer replacement does not match this retry')
+      if(io.readRef(failureRef)!==parsed.failureSha)throw new LaneError('immutable reviewer failure evidence is missing or changed')
+      return {...parsed,wrapper:reviewer.wrapper,failureCode:String(failureCode),replacementSha:priorReplacement}
+    }
     const assignmentSha=io.readRef(assignmentRef)
     if(!assignmentSha)throw new LaneError('original durable reviewer assignment is missing')
     const original=parseReviewCursor(io.getCommit(assignmentSha))
@@ -371,11 +383,15 @@ export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCo
     const issueRow=io.getIssue(request.issue), prRow=io.getPr(request.pr)
     if(issueRow?.state!=='open')throw new LaneError('review replacement requires the exact issue to remain open')
     if(prRow?.state!=='open'||prRow?.head?.sha!==request.headSha)throw new LaneError('review replacement requires the exact open PR head')
-    const evidence=[...(io.getIssueComments?.(request.issue)??[]),...(io.getIssueComments?.(request.pr)??[]),...(io.getPrReviews?.(request.pr)??[])].map((row)=>String(row.body??''))
-    if(evidence.some((body)=>body.includes(request.headSha)&&/\b(?:APPROVE|REVISE|REQUEST_CHANGES)\b/i.test(body)))throw new LaneError('an existing verdict for the exact head forbids reviewer replacement')
+    const evidence=[...(io.getIssueComments?.(request.issue)??[]),...(io.getIssueComments?.(request.pr)??[]),...(io.getPrReviews?.(request.pr)??[])]
+    if(evidence.some((row)=>{
+      const body=String(row.body??''), tied=row.commit_id===request.headSha||body.includes(request.headSha)
+      return tied&&(/\b(?:APPROVE|REVISE|REQUEST_CHANGES)\b/i.test(body)||['APPROVED','CHANGES_REQUESTED'].includes(String(row.state??'').toUpperCase()))
+    }))throw new LaneError('an existing verdict for the exact head forbids reviewer replacement')
     const failureSha=io.makeOwnerCommit(`db-coordination reviewer-failure issue=${request.issue} pr=${request.pr} head=${request.headSha} sequence=${request.failedSequence} reviewer=${original.reviewer} code=${failureCode} verdict=none artifact=none`)
     const sequence=cursor.sequence+1, reviewer=REVIEWERS[(sequence-1)%REVIEWERS.length]
     if(reviewer.name===original.reviewer)throw new LaneError('next durable reviewer is the same failed provider; replacement refuses to retry it')
+    const cursorReplacementSha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=${sequence} reviewer=${reviewer.name} issue=${request.issue} pr=${request.pr} head=${request.headSha}`)
     const replacementSha=io.makeOwnerCommit(`db-coordination reviewer-replacement sequence=${sequence} reviewer=${reviewer.name} issue=${request.issue} pr=${request.pr} head=${request.headSha} failed-sequence=${request.failedSequence} prior-sequence=${cursor.sequence} failure-ref=${failureSha}`)
     let failureCreated=false, cursorUpdated=false
     try{
@@ -384,15 +400,17 @@ export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCo
       failureCreated=true
       if(readRefAfterWrite(failureRef,failureSha,io)!==failureSha)throw new LaneError('immutable review failure evidence could not be proved')
       requireOwnedRef(MUTEX_REF,ownerSha,io)
-      io.updateRef(REVIEW_CURSOR_REF,replacementSha);cursorUpdated=true
-      if(readRefAfterWrite(REVIEW_CURSOR_REF,replacementSha,io)!==replacementSha)throw new LaneError('reviewer cursor replacement could not be proved')
+      io.updateRef(REVIEW_CURSOR_REF,cursorReplacementSha);cursorUpdated=true
+      if(readRefAfterWrite(REVIEW_CURSOR_REF,cursorReplacementSha,io)!==cursorReplacementSha)throw new LaneError('reviewer cursor replacement could not be proved')
       if(!io.createRef(replacementRef,replacementSha))throw new LaneError('review replacement record was created concurrently')
       if(readRefAfterWrite(replacementRef,replacementSha,io)!==replacementSha)throw new LaneError('review replacement record could not be proved')
       return {sequence,reviewer:reviewer.name,wrapper:reviewer.wrapper,...request,priorSequence:cursor.sequence,failureCode:String(failureCode),failureSha,replacementSha}
     }catch(error){
-      if(io.readRef(replacementRef)===replacementSha)releaseOwnedRef(replacementRef,replacementSha,io)
-      if(cursorUpdated&&io.readRef(REVIEW_CURSOR_REF)===replacementSha){io.updateRef(REVIEW_CURSOR_REF,cursorSha);if(readRefAfterWrite(REVIEW_CURSOR_REF,cursorSha,io)!==cursorSha)throw new LaneError(`review replacement failed and cursor rollback could not be proved: ${error.message}`)}
-      if(failureCreated&&io.readRef(failureRef)===failureSha)releaseOwnedRef(failureRef,failureSha,io)
+      const rollback=[]
+      try{if(io.readRef(replacementRef)===replacementSha)releaseOwnedRef(replacementRef,replacementSha,io)}catch(e){rollback.push(e.message)}
+      try{if(cursorUpdated&&io.readRef(REVIEW_CURSOR_REF)===cursorReplacementSha){io.updateRef(REVIEW_CURSOR_REF,cursorSha);if(readRefAfterWrite(REVIEW_CURSOR_REF,cursorSha,io)!==cursorSha)throw new LaneError('cursor rollback could not be proved')}}catch(e){rollback.push(e.message)}
+      try{if(failureCreated&&io.readRef(failureRef)===failureSha)releaseOwnedRef(failureRef,failureSha,io)}catch(e){rollback.push(e.message)}
+      if(rollback.length)throw new LaneError(`review replacement failed (${error.message}) and rollback was incomplete: ${rollback.join('; ')}`)
       throw error
     }
   }finally{if(io.readRef(MUTEX_REF)===ownerSha)releaseOwnedRef(MUTEX_REF,ownerSha,io)}

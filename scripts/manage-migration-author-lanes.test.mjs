@@ -153,6 +153,8 @@ const replacementRequest={...failedReview,failedSequence:1,failureCode:'insuffic
 test('terminal provider failure advances exactly once and retry is idempotent',()=>{
   const io=failedReviewIo(), first=replaceFailedReviewer(replacementRequest,io), second=replaceFailedReviewer(replacementRequest,io)
   assert.equal(first.sequence,2);assert.equal(first.reviewer,'glm-5.2');assert.deepEqual(second,first)
+  assert.equal(assignNextReviewer(failedReview,io).reviewer,'glm-5.2')
+  assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'kimi-k3')
 })
 
 test('reviewer replacement rejects mismatched original assignment and preserves intervening rotation',()=>{
@@ -166,6 +168,16 @@ test('reviewer replacement rejects mismatched original assignment and preserves 
 test('reviewer replacement rejects a substantive exact-head verdict',()=>{
   const io=failedReviewIo();io.getPrReviews=()=>[{body:`REVISE ${failedReview.headSha}`}]
   assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/existing verdict/)
+  const stateIo=failedReviewIo();stateIo.getPrReviews=()=>[{body:'',commit_id:failedReview.headSha,state:'APPROVED'}]
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,stateIo),/existing verdict/)
+})
+
+test('reviewer replacement retry rejects mismatched failure sequence and missing evidence',()=>{
+  const io=failedReviewIo(), done=replaceFailedReviewer(replacementRequest,io)
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:2},io),/does not match/)
+  const failureRef=[...io.refs.keys()].find((ref)=>ref.startsWith('refs/db-review-failures/'));io.refs.delete(failureRef)
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/evidence is missing/)
+  assert.ok(done.replacementSha)
 })
 
 test('reviewer replacement rejects unproved or nonterminal failures',()=>{
@@ -402,6 +414,12 @@ test('stranded atomic split-recovery mutex is recognized and safely recoverable'
   const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:'db-coordination claim-split-recovery request-2',committer:{date:'2026-08-14T19:55:00Z'}})
   const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
   assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
+})
+test('stranded reviewer assignment and replacement mutexes are recoverable',()=>{
+  for(const kind of ['reviewer-assignment-lock','reviewer-replacement-lock']){
+    const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:`db-coordination ${kind} issue=1 pr=2 head=abcdef0`,committer:{date:'2026-08-14T19:55:00Z'}})
+    assert.equal(recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io).released,'4a69fbbc')
+  }
 })
 
 function splitIo(overrides={}) {
