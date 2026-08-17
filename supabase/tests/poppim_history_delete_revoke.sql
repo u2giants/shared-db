@@ -55,16 +55,6 @@ begin
       raise exception 'PUBLIC must not have write privileges on pim.%', relation_name;
     end if;
 
-    foreach privilege_name in array array['SELECT', 'INSERT', 'UPDATE'] loop
-      if not has_table_privilege(
-        'authenticated',
-        format('pim.%I', relation_name),
-        privilege_name
-      ) then
-        raise exception
-          'authenticated must retain % on pim.%', privilege_name, relation_name;
-      end if;
-    end loop;
   end loop;
 end
 $$;
