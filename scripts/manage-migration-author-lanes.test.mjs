@@ -641,10 +641,10 @@ test('REAL main command expands an active claim from exact issue scope',()=>{
 
 function renewalIo(overrides={}){
   const io=memoryIo(),version='20260816045130',head='a'.repeat(40),objects=['table plm.style_tracker_item_bridge']
-  const issue={number:1058,state:'open',body:claimBody({version,objects,owner:'codex-issue-853-orderlist',branch:'codex/issue-853-orderlist',worktree:'C:\\repos\\shared-db-worktrees\\issue-853-orderlist',expiresAt:new Date('2026-08-14T19:00:00Z')})}
+  const issue={number:1058,state:'open',title:'CLAIM: #853 OrderList bridge',body:claimBody({version,objects,owner:'codex-issue-853-orderlist',branch:'codex/issue-853-orderlist',worktree:'C:\\repos\\shared-db-worktrees\\issue-853-orderlist',expiresAt:new Date('2026-08-14T19:00:00Z')})}
   io.refs.set(`refs/db-claims/${version}`,'permanent')
   const workIssue={number:853,state:'open',body:scope('ready','structural','shared-db-orchestrator',900,objects)}
-  io.openClaims=()=>[structuredClone(issue)];io.getIssue=(number)=>structuredClone(Number(number)===853?workIssue:issue);io.updateIssue=(_n,fields)=>{Object.assign(issue,fields);return structuredClone(issue)}
+  io.openClaims=()=>[structuredClone(issue)];io.getIssue=(number)=>Number(number)===853?structuredClone(workIssue):Number(number)===1058?structuredClone(issue):null;io.updateIssue=(_n,fields)=>{Object.assign(issue,fields);return structuredClone(issue)}
   io.getPr=()=>({state:'open',head:{sha:head,ref:'codex/issue-853-orderlist'}})
   io.getPrFiles=()=>[{status:'added',filename:`supabase/migrations/${version}_orderlist.sql`}]
   io.prSources=()=>[{label:'PR #1060 "#853 OrderList"',objects:[...objects],versions:[version]}]
@@ -689,7 +689,19 @@ test('claim renewal rejects missing, closed, blocked, or wrong-route issue bindi
   for(const mutate of [io=>io.workIssue.state='closed',io=>io.workIssue.body=scope('blocked','structural','shared-db-orchestrator',900,io.objects),io=>io.workIssue.body=scope('ready','repo-maintenance','repo-maintenance',900)]){
     const io=renewalIo();mutate(io);assert.throws(()=>renewExpiredClaim(renewalOptions,NOW,io),/open ready structural/)
   }
-  assert.throws(()=>renewExpiredClaim({...renewalOptions,issue:999},NOW,renewalIo()),/open ready structural/)
+  assert.throws(()=>renewExpiredClaim({...renewalOptions,issue:999},NOW,renewalIo()),/not identified by the claim title/)
+})
+
+test('claim renewal binds the requested issue number to the claim title',()=>{
+  const io=renewalIo();io.workIssue.number=764
+  assert.throws(()=>renewExpiredClaim({...renewalOptions,issue:764},NOW,io),/not identified by the claim title/)
+})
+
+test('claim renewal refuses an issue scope mutation immediately before write',()=>{
+  const io=renewalIo(),baseGet=io.getIssue;let reads=0
+  io.getIssue=(number)=>{const value=baseGet(number);if(Number(number)===853&&++reads===2)value.body=scope('blocked','structural','shared-db-orchestrator',900,io.objects);return value}
+  assert.throws(()=>renewExpiredClaim(renewalOptions,NOW,io),/issue changed concurrently/)
+  assert.match(io.issue.body,/expires_at: 2026-08-14T19:00:00.000Z/)
 })
 
 test('claim renewal is idempotent for the exact already-written expiry',()=>{
