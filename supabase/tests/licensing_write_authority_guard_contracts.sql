@@ -63,7 +63,7 @@ begin
 end $$;
 
 -- A later CREATE OR REPLACE of the legacy importer cannot weaken the table guard.
-create or replace function plm.import_master_data(jsonb, jsonb)
+create or replace function plm.import_master_data(licensors_payload jsonb, customers_payload jsonb)
 returns table (sync_run_id uuid, licensors_seen integer, properties_seen integer, customers_seen integer, raw_records_upserted integer)
 language plpgsql security definer set search_path = pg_catalog, plm, core, app as $$
 begin

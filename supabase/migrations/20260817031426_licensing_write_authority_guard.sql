@@ -90,7 +90,7 @@ for each row execute function app.enforce_licensing_write_authority();
 create trigger property_licensing_write_guard before insert or update on core.property
 for each row execute function app.enforce_licensing_write_authority();
 
-create or replace function plm.import_master_data(jsonb, jsonb)
+create or replace function plm.import_master_data(licensors_payload jsonb, customers_payload jsonb)
 returns table (sync_run_id uuid, licensors_seen integer, properties_seen integer, customers_seen integer, raw_records_upserted integer)
 language plpgsql security definer set search_path = pg_catalog, plm as $$
 begin
@@ -100,13 +100,13 @@ $$;
 
 revoke all on function plm.import_master_data(jsonb,jsonb) from public, anon, authenticated, service_role;
 
-create or replace function plm.promote_coldlion_source_owned(jsonb, jsonb, boolean)
+create or replace function plm.promote_coldlion_source_owned(p_expected jsonb, p_client_plan jsonb default null, p_is_drill boolean default false)
 returns table (sync_run_id uuid, mode text, source_rows integer, linked_rows integer, promotions integer, curated_name_changes integer, provenance_refreshes integer, unchanged_rows integer, quarantined_rows integer, protected_violations integer)
 language plpgsql security definer set search_path = pg_catalog, plm as $$
 begin raise exception 'retired until #1090 Step 4: ColdLion cannot write canonical licensing identity'; end;
 $$;
 
-create or replace function public.promote_coldlion_source_owned(jsonb, jsonb, boolean)
+create or replace function public.promote_coldlion_source_owned(p_expected jsonb, p_client_plan jsonb default null, p_is_drill boolean default false)
 returns table (sync_run_id uuid, mode text, source_rows integer, linked_rows integer, promotions integer, curated_name_changes integer, provenance_refreshes integer, unchanged_rows integer, quarantined_rows integer, protected_violations integer)
 language plpgsql security definer set search_path = pg_catalog, public as $$
 begin raise exception 'retired until #1090 Step 4: ColdLion cannot write canonical licensing identity'; end;
