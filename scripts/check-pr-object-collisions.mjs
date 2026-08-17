@@ -974,6 +974,28 @@ export function validateFallbackPaths(paths, shallow = false) {
   return paths
 }
 
+export function isCompareTransportFailure(error) {
+  return /HTTP (?:404|5\d\d)\b/.test(error?.message ?? '')
+}
+
+export function parseGitNameStatus(raw) {
+  const fields = String(raw).split('\0').filter(Boolean)
+  const files = []
+  for (let i = 0; i < fields.length;) {
+    const status = fields[i++]
+    if (/^[RC]\d+/.test(status)) {
+      if (i + 1 >= fields.length) throw new Skip('fallback returned truncated rename/copy data')
+      i++ // previous path; GitHub Compare identifies a rename by its new path
+      files.push({ filename: fields[i++], status: status[0] === 'R' ? 'renamed' : 'copied' })
+    } else {
+      if (i >= fields.length) throw new Skip('fallback returned truncated name-status data')
+      files.push({ filename: fields[i++], status: status === 'D' ? 'removed' : status === 'A' ? 'added' : 'modified' })
+    }
+  }
+  validateFallbackPaths(files.map((file) => `${file.status}:${file.filename}`))
+  return files
+}
+
 function git(args) {
   try {
     return execFileSync('git', args, {
@@ -996,12 +1018,15 @@ function baseFilesFromCommitGraph(repo, number, baseRef, headSha) {
       throw new Skip(`fallback commit/tree identity mismatch for ${sha}`)
     }
     git(['cat-file', '-e', `${sha}^{commit}`])
+    if (git(['rev-parse', `${sha}^{tree}`]) !== commit.commit.tree.sha) {
+      throw new Skip(`fallback local/GitHub tree identity mismatch for ${sha}`)
+    }
   }
   const mergeBase = git(['merge-base', headSha, liveBase])
   if (!/^[0-9a-f]{40}$/.test(mergeBase)) throw new Skip('fallback could not prove an exact merge base')
-  const listed = git(['diff', '--name-only', '--diff-filter=AM', '-z', mergeBase, liveBase])
-    .split('\0').filter(Boolean)
-  return validateFallbackPaths(listed, shallow).map((filename) => ({ filename, status: 'modified' }))
+  const listed = parseGitNameStatus(git(['diff', '--name-status', '-z', mergeBase, liveBase]))
+  validateFallbackPaths(listed.map((file) => `${file.status}:${file.filename}`), shallow)
+  return { files: listed, baseSha: liveBase }
 }
 
 function isMigration(file) {
@@ -1060,12 +1085,12 @@ function baseBranchSource(repo, number, baseRef, headSha) {
     compare = ghJson(['api', baseCompareSpec(repo, headSha, baseRef)])
     if (!Array.isArray(compare?.files)) throw new Skip('Compare returned incomplete file data')
   } catch (error) {
-    if (!(error instanceof Skip)) throw error
+    if (!(error instanceof Skip) || !isCompareTransportFailure(error)) throw error
     compareFailed = true
   }
   const fallback = baseFilesFromCommitGraph(repo, number, baseRef, headSha)
-  if (!compareFailed) validateBaseFileAgreement(compare.files, fallback)
-  const files = (compareFailed ? fallback : compare.files).filter(isMigration)
+  if (!compareFailed) validateBaseFileAgreement(compare.files, fallback.files)
+  const files = (compareFailed ? fallback.files : compare.files).filter(isMigration)
   if (files.length === 0) return null
   return {
     label: `${baseRef} (merged since this PR branched)`,
@@ -1075,7 +1100,7 @@ function baseBranchSource(repo, number, baseRef, headSha) {
         'api',
         '-H',
         'Accept: application/vnd.github.raw',
-        `repos/${repo}/contents/${encodeURI(file.filename)}?ref=${baseRef}`,
+        `repos/${repo}/contents/${encodeURI(file.filename)}?ref=${fallback.baseSha}`,
       ]),
     })),
   }

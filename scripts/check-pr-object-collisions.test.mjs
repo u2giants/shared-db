@@ -19,6 +19,8 @@ import {
   validateBaseFileAgreement,
   validateFallbackIdentity,
   validateFallbackPaths,
+  isCompareTransportFailure,
+  parseGitNameStatus,
 } from './check-pr-object-collisions.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -179,6 +181,22 @@ test('fallback binds the exact pull request, base, and head identities', () => {
 test('fallback rejects a shallow graph or duplicate path evidence', () => {
   assert.throws(() => validateFallbackPaths(['a.sql'], true), /truncated/)
   assert.throws(() => validateFallbackPaths(['a.sql', 'a.sql']), /duplicate\/truncated/)
+})
+
+test('only Compare 404 and server failures activate the fallback', () => {
+  assert.equal(isCompareTransportFailure(new Error('gh: Not Found (HTTP 404)')), true)
+  assert.equal(isCompareTransportFailure(new Error('HTTP 503')), true)
+  assert.equal(isCompareTransportFailure(new Error('HTTP 403')), false)
+  assert.equal(isCompareTransportFailure(new Error('incomplete file data')), false)
+})
+
+test('fallback preserves deletions and complete rename paths', () => {
+  assert.deepEqual(parseGitNameStatus('D\0old.sql\0A\0new.sql\0R100\0before.sql\0after.sql\0'), [
+    { filename: 'old.sql', status: 'removed' },
+    { filename: 'new.sql', status: 'added' },
+    { filename: 'after.sql', status: 'renamed' },
+  ])
+  assert.throws(() => parseGitNameStatus('R100\0before.sql\0'), /truncated/)
 })
 
 // ---------------------------------------------------------------------------
