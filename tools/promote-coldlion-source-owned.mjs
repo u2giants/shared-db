@@ -542,6 +542,8 @@ function readLinkedProjectRef() {
 // =====================================================================================
 
 export function main(argv = process.argv.slice(2), env = process.env) {
+  process.stderr.write('ColdLion canonical promotion retired by shared-db issue #1090 Step 1.0; no database call was attempted.\n');
+  return 78;
   const auth = resolveProductionAuthorization(argv, env);
   if (!auth.requested) assertNoProductionEnv(env);
 

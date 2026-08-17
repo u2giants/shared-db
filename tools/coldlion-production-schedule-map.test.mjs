@@ -41,14 +41,14 @@ test("a PREVIEW cron string can never resolve a production job, and vice versa",
   assert.equal(assertPreviewAndProductionMapsDisjoint(), true);
 });
 
-test("the production workflow registers exactly the mapped crons and case arms", () => {
+test("the retired production workflow has no scheduled trigger but preserves its historical mapping", () => {
+  const registered = [...workflow.matchAll(/- cron:\s*"([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(registered, []);
+  assert.match(workflow, /Retired by shared-db issue #1090 Step 1\.0/);
   for (const [cron, job] of Object.entries(COLDLION_PRODUCTION_SCHEDULE_JOBS)) {
     const escaped = cron.replace(/\*/g, "\\*");
-    assert.match(workflow, new RegExp(`cron:\\s*"${escaped}"`), `missing cron ${cron}`);
-    assert.match(workflow, new RegExp(`"${escaped}"\\)\\s*JOB=${job}`), `missing case arm ${cron} -> ${job}`);
+    assert.match(workflow, new RegExp(`"${escaped}"\\)\\s*JOB=${job}`), `missing historical case arm ${cron} -> ${job}`);
   }
-  const registered = [...workflow.matchAll(/- cron:\s*"([^"]+)"/g)].map((m) => m[1]);
-  assertProductionScheduleMapComplete(registered);
 });
 
 test("lane selection never falls back to wall-clock time", () => {

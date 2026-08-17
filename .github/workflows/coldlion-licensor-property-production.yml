@@ -74,11 +74,6 @@ on:
         type: string
         required: true
         default: ""
-  schedule:
-    - cron: "0 6 * * *" # coldlion  — daily full snapshot
-    - cron: "30 6 * * *" # promote   — approved source-owned promotion
-    - cron: "0 7 * * *" # compare   — daily comparison
-    - cron: "45 * * * *" # health    — hourly
 
 permissions:
   contents: read
@@ -110,6 +105,10 @@ jobs:
       job: ${{ steps.plan.outputs.job }}
       writes: ${{ steps.plan.outputs.writes }}
     steps:
+      - name: Refuse retired canonical promotion lane
+        run: |
+          echo "::error::Retired by shared-db issue #1090 Step 1.0. This workflow cannot write canonical licensing data until the governed Step 4 replacement lands."
+          exit 78
       - uses: actions/checkout@v4
 
       - name: Refuse any ref that is not production
@@ -455,7 +454,7 @@ jobs:
     # Dispatch-only, and independent of the feed's enable variable BY DESIGN. `gate`
     # has already refused any ref that is not production and any dispatch that did not
     # spell the production ref out.
-    if: github.event_name == 'workflow_dispatch' && inputs.job == 'preflight'
+    if: ${{ false }}
     runs-on: ubuntu-latest
     env:
       # Part 4 of the four-part authorization. Here it authorizes only the RESOLUTION of
