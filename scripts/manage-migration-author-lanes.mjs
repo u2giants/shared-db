@@ -293,7 +293,15 @@ export const githubIo = {
     const short=prefix.replace(/^refs\//,'')
     return ghPaginated(`repos/${REPO}/git/matching-refs/${short}?per_page=100`).map((row)=>({ref:row.ref,sha:row.object?.sha})).filter((row)=>row.sha)
   },
-  deleteRef(ref) { deleteRefWithReadback(ref,{readRef:(target)=>this.readRef(target)}) },
+  // A DELETE is never replayed after a transport failure. The first request may
+  // have succeeded and a new owner may acquire the fixed coordination ref
+  // during backoff; replaying the DELETE could then remove that new owner.
+  deleteRef(ref) {
+    deleteRefWithReadback(ref,{
+      run:(args)=>runGitHubCommand(args,{attempts:1}),
+      readRef:(target)=>this.readRef(target),
+    })
+  },
   updateRef(ref, sha) { gh(['api','-X','PATCH',`repos/${REPO}/git/refs/${ref.replace(/^refs\//,'')}`,'-f',`sha=${sha}`,'-F','force=true']) },
   reserveVersion() { return JSON.parse(execFileSync(process.execPath, ['scripts/check-dispatch-collision.mjs', '--reserve-version', '--json'], { encoding: 'utf8' })) },
   createClaim(title, body) { return gh(['issue', 'create', '--repo', REPO, '--label', 'db-claim', '--title', `CLAIM: ${title}`, '--body', body]).trim() },

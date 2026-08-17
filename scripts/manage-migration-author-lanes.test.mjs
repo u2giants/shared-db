@@ -50,6 +50,23 @@ test('delete ref accepts only proved absence after a lost success response',()=>
   assert.throws(()=>deleteRefWithReadback('refs/db-coordination/preview',{run:()=>{throw absent},readRef:()=> 'next-owner'}),/does not exist/)
 })
 
+test('GitHub coordination delete never replays after response loss and preserves a new owner',()=>{
+  const originalExecutor=githubIo.deleteRef
+  let deleteCalls=0,readCalls=0
+  const run=(args)=>runGitHubCommand(args,{
+    attempts:1,
+    executor:()=>{deleteCalls++;throw commandFailure('HTTP 503 after DELETE')},
+    wait:()=>assert.fail('single-attempt DELETE must not back off for a replay'),
+  })
+  assert.throws(()=>deleteRefWithReadback('refs/db-coordination/preview',{
+    run,
+    readRef:()=>{readCalls++;return 'next-owner'},
+  }),error=>error instanceof LaneError&&error.transientTransport===true)
+  assert.equal(deleteCalls,1)
+  assert.equal(readCalls,1)
+  assert.equal(typeof originalExecutor,'function')
+})
+
 const NOW = new Date('2026-08-14T20:00:00Z')
 const body = (objects, owner, expires = '2026-08-15T08:00:00.000Z') => claimBody({ version:`2026081420${owner.padStart(4,'0')}`, objects, owner:`agent-${owner}`, branch:`codex/${owner}`, worktree:`C:/w/${owner}`, expiresAt:new Date(expires) })
 
