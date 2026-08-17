@@ -740,7 +740,9 @@ begin
   perform public.link_dam_order_line(v_line_d, null, 'ambiguous');
   update plm.production_order_line set master_data_match_status = 'unmatched' where id = v_line_u;
   select count(*) into v_n from api.dam_order_list
-   where order_id = v_order and master_data_match_status in ('ambiguous','unmatched');
+   where order_id = v_order
+     and order_line_id in (v_line_d, v_line_u)
+     and master_data_match_status in ('ambiguous','unmatched');
   if v_n = 2 then v_pass := v_pass + 1;
   else v_fail := v_fail + 1; raise notice 'FAIL ambiguous/unmatched rows not readable through the view (got %)', v_n; end if;
 
