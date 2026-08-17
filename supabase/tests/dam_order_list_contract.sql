@@ -379,6 +379,11 @@ declare
   v_line_u  uuid;
   v_line_m  uuid;
   v_line_na uuid;
+  v_bulk_l  uuid := '00000000-0000-0000-0000-000000000001';
+  v_bulk_g  uuid := '00000000-0000-0000-0000-000000000002';
+  v_bulk_d  uuid := '00000000-0000-0000-0000-000000000003';
+  v_bulk_u  uuid := '00000000-0000-0000-0000-000000000004';
+  v_bulk_x  uuid := '00000000-0000-0000-0000-000000000005';
   v_txt     text;
   v_got     uuid;
   v_n       integer;
@@ -506,9 +511,9 @@ begin
 
   insert into plm.production_order_line
     (production_order_id, line_number, sku, quantity_ordered, source_style_type,
-     source_system, source_id, master_data_match_status)
+     source_system, source_id, item_id, master_data_match_status)
   values
-    (v_order, '6', 'NCV3SP1', 1, 'licensed', 'dam_order_list_contract_test', 'ct-line-manual', 'manual')
+    (v_order, '6', 'NCV3SP1', 1, 'licensed', 'dam_order_list_contract_test', 'ct-line-manual', v_item_l, 'manual')
   returning id into v_line_m;
 
   insert into plm.production_order_line
@@ -517,6 +522,18 @@ begin
   values
     (v_order, '7', 'NCV3SP1', 1, 'licensed', 'dam_order_list_contract_test', 'ct-line-na', 'not_applicable')
   returning id into v_line_na;
+
+  -- Fixed near-zero UUIDs make p_limit=5 select only these fixtures even on shared
+  -- preview. The test must never lock or relink unrelated preview order lines.
+  insert into plm.production_order_line
+    (id, production_order_id, line_number, sku, quantity_ordered, source_style_type,
+     source_system, source_id, master_data_match_status)
+  values
+    (v_bulk_l, v_order, 'B1', 'NCV3SP1', 1, 'licensed', 'dam_order_list_contract_test', 'ct-bulk-l', 'unmatched'),
+    (v_bulk_g, v_order, 'B2', 'BFC02GABB', 1, 'generic', 'dam_order_list_contract_test', 'ct-bulk-g', 'ambiguous'),
+    (v_bulk_d, v_order, 'B3', 'DUPSKU1', 1, 'licensed', 'dam_order_list_contract_test', 'ct-bulk-d', 'unmatched'),
+    (v_bulk_u, v_order, 'B4', 'NOSUCHSKU', 1, 'licensed', 'dam_order_list_contract_test', 'ct-bulk-u', 'unmatched'),
+    (v_bulk_x, v_order, 'B5', 'CROSSSKU1', 1, 'licensed', 'dam_order_list_contract_test', 'ct-bulk-x', 'ambiguous');
 
   -- All four RPC-created lines exist. This is the regression guard for the NULLS NOT DISTINCT bug:
   -- before 20260810060000 the second line raised 23505 and no order survived at all.
@@ -558,14 +575,7 @@ begin
   else v_fail := v_fail + 1; raise notice 'FAIL expected 4 unlinked new lines, got %', v_n; end if;
 
   -- ------------------------------------------------------ 1b. bulk exact relink ------
-  update plm.production_order_line
-     set master_data_match_status = case
-       when id in (v_line_g, v_line_x) then 'ambiguous'
-       else 'unmatched'
-     end
-   where id in (v_line_l, v_line_g, v_line_d, v_line_u, v_line_x);
-
-  v_result := public.relink_dam_order_lines_bulk();
+  v_result := public.relink_dam_order_lines_bulk(5);
   if (v_result ->> 'linked')::integer = 3
      and (v_result ->> 'ties_left')::integer = 1
      and (v_result ->> 'no_candidate')::integer = 1
@@ -580,18 +590,18 @@ begin
   end if;
 
   if (select count(*) from plm.production_order_line
-      where (id = v_line_l and item_id = v_item_l and master_data_match_status = 'matched')
-         or (id = v_line_g and item_id = v_item_g and master_data_match_status = 'matched'
+      where (id = v_bulk_l and item_id = v_item_l and master_data_match_status = 'matched')
+         or (id = v_bulk_g and item_id = v_item_g and master_data_match_status = 'matched'
              and metadata ->> 'pre_bulk_relink_match_status' = 'ambiguous')
-         or (id = v_line_d and item_id = v_item_d and master_data_match_status = 'matched')) = 3 then
+         or (id = v_bulk_d and item_id = v_item_d and master_data_match_status = 'matched')) = 3 then
     v_pass := v_pass + 1;
   else
     v_fail := v_fail + 1; raise notice 'FAIL bulk relink did not link the three exact unique rows';
   end if;
 
-  if exists (select 1 from plm.production_order_line where id = v_line_x and item_id is null and master_data_match_status = 'ambiguous')
-     and exists (select 1 from plm.production_order_line where id = v_line_u and item_id is null and master_data_match_status = 'unmatched')
-     and exists (select 1 from plm.production_order_line where id = v_line_m and item_id is null and master_data_match_status = 'manual')
+  if exists (select 1 from plm.production_order_line where id = v_bulk_x and item_id is null and master_data_match_status = 'ambiguous')
+     and exists (select 1 from plm.production_order_line where id = v_bulk_u and item_id is null and master_data_match_status = 'unmatched')
+     and exists (select 1 from plm.production_order_line where id = v_line_m and item_id = v_item_l and master_data_match_status = 'manual')
      and exists (select 1 from plm.production_order_line where id = v_line_na and item_id is null and master_data_match_status = 'not_applicable') then
     v_pass := v_pass + 1;
   else
@@ -600,11 +610,11 @@ begin
 
   select md5(jsonb_agg(to_jsonb(x) order by x.id)::text) into v_snapshot
   from (select id, item_id, master_data_match_status, metadata, updated_at
-        from plm.production_order_line where production_order_id = v_order) x;
-  v_result := public.relink_dam_order_lines_bulk();
+        from plm.production_order_line where id in (v_bulk_u, v_bulk_x)) x;
+  v_result := public.relink_dam_order_lines_bulk(2);
   select md5(jsonb_agg(to_jsonb(x) order by x.id)::text) into v_txt
   from (select id, item_id, master_data_match_status, metadata, updated_at
-        from plm.production_order_line where production_order_id = v_order) x;
+        from plm.production_order_line where id in (v_bulk_u, v_bulk_x)) x;
   if (v_result ->> 'linked')::integer = 0 and v_snapshot = v_txt then v_pass := v_pass + 1;
   else v_fail := v_fail + 1; raise notice 'FAIL second bulk run was not idempotent: %', v_result; end if;
 
@@ -777,8 +787,8 @@ begin
   else v_fail := v_fail + 1; raise notice 'FAIL void did not record actor/reason'; end if;
 
   select count(*) into v_n from plm.production_order_line where production_order_id = v_order;
-  if v_n = 5 then v_pass := v_pass + 1;
-  else v_fail := v_fail + 1; raise notice 'FAIL voiding destroyed lines (% of 5 remain)', v_n; end if;
+  if v_n = 12 then v_pass := v_pass + 1;
+  else v_fail := v_fail + 1; raise notice 'FAIL voiding destroyed lines (% of 12 remain)', v_n; end if;
 
   -- A partial patch must not blank fields it did not mention.
   perform public.update_dam_order(v_order, jsonb_build_object('mbl','MBL-123'), '[]'::jsonb);
