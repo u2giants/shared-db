@@ -171,6 +171,7 @@ declare
   v_subset text[];
   v_mask integer;
   v_i integer;
+  v_copy integer;
 begin
   for v_table, v_columns in
     values
@@ -184,11 +185,13 @@ begin
           v_subset := array_append(v_subset, v_columns[v_i]);
         end if;
       end loop;
-      insert into plm.licensing_write_authorization
-        (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
-      values
-        (pg_backend_pid(), txid_current(), v_table, 'canonical_merge', gen_random_uuid(), repeat('e', 64),
-         'ci-legacy-contract-compatibility', v_subset, clock_timestamp() + interval '10 minutes');
+      for v_copy in 1..100 loop
+        insert into plm.licensing_write_authorization
+          (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+        values
+          (pg_backend_pid(), txid_current(), v_table, 'canonical_merge', gen_random_uuid(), repeat('e', 64),
+           'ci-legacy-contract-compatibility', v_subset, clock_timestamp() + interval '10 minutes');
+      end loop;
     end loop;
   end loop;
 end;

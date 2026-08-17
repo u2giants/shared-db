@@ -81,6 +81,9 @@ begin
   insert into plm.licensing_write_guard_audit
     (authorization_id, target_table, operation, write_kind, protected_columns, plan_id, plan_hash, actor)
   values (v_auth.id, tg_relid, tg_op, v_auth.write_kind, v_changed, v_auth.plan_id, v_auth.plan_hash, v_auth.actor);
+  update plm.licensing_write_authorization
+  set consumed_at = clock_timestamp()
+  where id = v_auth.id;
   return new;
 end;
 $$;
