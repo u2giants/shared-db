@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, expandActiveClaimFromPr, EXCLUSIVE_REFS, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects } from './manage-migration-author-lanes.mjs'
+import { acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects } from './manage-migration-author-lanes.mjs'
 
 const NOW = new Date('2026-08-14T20:00:00Z')
 const body = (objects, owner, expires = '2026-08-15T08:00:00.000Z') => claimBody({ version:`2026081420${owner.padStart(4,'0')}`, objects, owner:`agent-${owner}`, branch:`codex/${owner}`, worktree:`C:/w/${owner}`, expiresAt:new Date(expires) })
@@ -157,7 +157,7 @@ function reviewIo(){
 test('reviewer cursor advances atomically through the durable round robin',()=>{
   const io=reviewIo(), names=[]
   for(let n=1;n<=5;n++)names.push(assignNextReviewer({issue:n,pr:100+n,headSha:`abcdef${n}`},io).reviewer)
-  assert.deepEqual(names,['grok-4.6','glm-5.2','kimi-k3','qwen-3.8-max','grok-4.6'])
+  assert.deepEqual(names,['grok-4.6','glm-5.2','kimi-k3','grok-4.6','glm-5.2'])
   assert.ok(io.refs.has(REVIEW_CURSOR_REF))
 })
 
@@ -200,6 +200,16 @@ test('reviewer execution preflight enforces approved wrapper, clean worktree, an
   assert.throws(()=>reviewerExecutionPreflight(request,{...io,commandAvailable:()=>false}),/cannot execute/)
   assert.throws(()=>reviewerExecutionPreflight(request,{...io,localHead:()=> 'f'.repeat(40)}),/exact assigned head/)
   assert.throws(()=>reviewerExecutionPreflight(request,{...io,localClean:()=>false}),/dirty/)
+})
+
+test('paused Qwen evidence remains readable but Qwen receives no new assignment',()=>{
+  const io=reviewIo(), request={issue:9,pr:109,headSha:'abcdef9'}
+  const historical=io.makeOwnerCommit('db-coordination reviewer-cursor sequence=64 reviewer=qwen-3.8-max issue=9 pr=109 head=abcdef9')
+  io.refs.set(REVIEW_CURSOR_REF,historical)
+  const recovered=assignNextReviewer(request,io)
+  assert.equal(recovered.reviewer,'qwen-3.8-max');assert.equal(recovered.wrapper,'ai-qwen')
+  const next=assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
+  assert.notEqual(next.reviewer,'qwen-3.8-max')
 })
 
 test('two consecutive terminal no-verdict failures form an immutable idempotent chain',()=>{
@@ -579,28 +589,53 @@ test('same-owner split recovery rolls both issue mutations back after partial re
 })
 
 function expansionIo(overrides={}){
-  const io=memoryIo(),issue={number:1063,state:'open',body:claimBody({version:'20260816063532',objects:['index plm.item_upper_trim_item_number_idx'],owner:'codex-issue-853-orderlist',branch:'codex/issue-853-orderlist-index',worktree:'C:\\repos\\shared-db-wt-853-index',expiresAt:new Date('2026-08-17T00:00:00Z')})}
-  io.refs.set('refs/db-claims/20260816063532','reserved');io.getIssue=()=>structuredClone(issue);io.updateIssue=(_n,fields)=>{Object.assign(issue,fields);return structuredClone(issue)}
-  io.getPr=()=>({state:'open',head:{sha:'head',ref:'codex/issue-853-orderlist-index'}});io.getPrFiles=()=>[{status:'added',filename:'supabase/migrations/20260816063532_index.sql'}];io.openClaims=()=>[structuredClone(issue)]
+  const io=memoryIo(),issue={number:1063,state:'open',title:'CLAIM: #853 index',body:claimBody({version:'20260816063532',objects:['index plm.item_upper_trim_item_number_idx'],owner:'codex-issue-853-orderlist',branch:'codex/issue-853-orderlist-index',worktree:'C:\\repos\\shared-db-wt-853-index',expiresAt:new Date('2026-08-17T00:00:00Z')})}
+  const workIssue={number:853,state:'open',body:'```db-work-scope\nstatus: ready\nwork_type: structural\nroute: shared-db-orchestrator\npriority: 1\ndepends_on:\nobjects:\n  - table plm.item\n```'}
+  io.refs.set('refs/db-claims/20260816063532','reserved');io.getIssue=(n)=>structuredClone(Number(n)===853?workIssue:issue);io.updateIssue=(_n,fields)=>{Object.assign(issue,fields);return structuredClone(issue)}
+  io.getPr=()=>({state:'open',head:{sha:'a'.repeat(40),ref:'codex/issue-853-orderlist-index'}});io.getPrFiles=()=>[{status:'added',filename:'supabase/migrations/20260816063532_index.sql'}];io.openClaims=()=>[structuredClone(issue)]
   io.prSources=()=>[{label:'PR #1065 [DRAFT] "index"',objects:['index plm.item_upper_trim_item_number_idx','table plm.item'],versions:['20260816063532']}]
   return Object.assign(io,{issue},overrides)
 }
-const expansionOptions={claim:1063,pr:1065,owner:'codex-issue-853-orderlist',headSha:'head',branch:'codex/issue-853-orderlist-index',worktree:'C:\\repos\\shared-db-wt-853-index',requestId:'expand',mutexAttempts:1}
+const expansionOptions={issue:853,claim:1063,pr:1065,owner:'codex-issue-853-orderlist',headSha:'a'.repeat(40),branch:'codex/issue-853-orderlist-index',worktree:'C:\\repos\\shared-db-wt-853-index',requestId:'expand',mutexAttempts:1}
 test('active claim expansion adds exactly the parser-proven uncovered object',()=>{
   const io=expansionIo(),result=expandActiveClaimFromPr(expansionOptions,NOW,io);assert.deepEqual(result.added,['table plm.item']);assert.deepEqual(parseAuthorLease(io.issue.body,NOW).objects,['index plm.item_upper_trim_item_number_idx','table plm.item'])
 })
-test('active claim expansion rejects arbitrary extras, collisions, stale lease, and changed binding',()=>{
-  let io=expansionIo();io.prSources=()=>[{label:'PR #1065 "x"',objects:['index plm.item_upper_trim_item_number_idx','table plm.item','table plm.extra'],versions:['20260816063532']}];assert.throws(()=>expandActiveClaimFromPr(expansionOptions,NOW,io),/exactly table plm.item/)
-  io=expansionIo();io.openClaims=()=>[io.getIssue(),{number:9,body:claimBody({version:'20260816070000',objects:['table plm.item'],owner:'other',branch:'other',worktree:'C:/other',expiresAt:new Date('2026-08-17T00:00:00Z')})}];assert.throws(()=>expandActiveClaimFromPr(expansionOptions,NOW,io),/collision/)
+test('active claim expansion adds every parser-proven object and rejects collisions, stale lease, and changed binding',()=>{
+  let io=expansionIo();io.prSources=()=>[{label:'PR #1065 "x"',objects:['index plm.item_upper_trim_item_number_idx','table plm.item','table plm.extra'],versions:['20260816063532']}];assert.deepEqual(expandActiveClaimFromPr(expansionOptions,NOW,io).added,['table plm.item','table plm.extra'])
+  io=expansionIo();io.openClaims=()=>[io.getIssue(1063),{number:9,body:claimBody({version:'20260816070000',objects:['table plm.item'],owner:'other',branch:'other',worktree:'C:/other',expiresAt:new Date('2026-08-17T00:00:00Z')})}];assert.throws(()=>expandActiveClaimFromPr(expansionOptions,NOW,io),/collision/)
   io=expansionIo();io.issue.body=io.issue.body.replace('2026-08-17T00:00:00.000Z','2026-08-14T19:00:00.000Z');assert.throws(()=>expandActiveClaimFromPr(expansionOptions,NOW,io),/expired/)
-  io=expansionIo();assert.throws(()=>expandActiveClaimFromPr({...expansionOptions,headSha:'wrong'},NOW,io),/head or branch changed/)
+  io=expansionIo();assert.throws(()=>expandActiveClaimFromPr({...expansionOptions,headSha:'b'.repeat(40)},NOW,io),/head or branch changed/)
+  io=expansionIo();assert.throws(()=>expandActiveClaimFromPr({...expansionOptions,issue:999},NOW,io),/exact issue/)
 })
 test('active claim expansion rolls back an ambiguous update failure while mutex-owned',()=>{
   const io=expansionIo(),before=io.issue.body;io.updateIssue=(_n,fields)=>{Object.assign(io.issue,fields);if(fields.body!==before)throw new LaneError('connection lost');return io.getIssue()}
   assert.throws(()=>expandActiveClaimFromPr(expansionOptions,NOW,io),/connection lost/);assert.equal(io.issue.body,before)
 })
-test('REAL main command wires claim-number into the incident-pinned expansion',()=>{
-  const io=expansionIo(),args=['--expand-active-claim-from-pr','--claim-number','1063','--pr','1065','--owner','codex-issue-853-orderlist','--head-sha','head','--branch','codex/issue-853-orderlist-index','--worktree','C:\\repos\\shared-db-wt-853-index']
+test('REAL main command wires exact issue and claim into generalized expansion',()=>{
+  const io=expansionIo(),args=['--expand-active-claim-from-pr','--issue','853','--claim-number','1063','--pr','1065','--owner','codex-issue-853-orderlist','--head-sha','a'.repeat(40),'--branch','codex/issue-853-orderlist-index','--worktree','C:\\repos\\shared-db-wt-853-index']
+  assert.equal(main(args,NOW,io),0);assert.ok(parseAuthorLease(io.issue.body,NOW).objects.includes('table plm.item'))
+})
+
+test('issue-scope expansion adds only exact ready structural issue objects before authoring',()=>{
+  const io=expansionIo(),baseGet=io.getIssue;io.prSources=()=>[]
+  io.getIssue=(n)=>{const row=baseGet(n);if(Number(n)===853)row.body=row.body.replace('  - table plm.item','  - table plm.item\n  - table plm.extra');return row}
+  const result=expandActiveClaimFromIssue(expansionOptions,NOW,io)
+  assert.deepEqual(result.added,['table plm.item','table plm.extra'])
+  assert.deepEqual(parseAuthorLease(io.issue.body,NOW).objects.sort(),['index plm.item_upper_trim_item_number_idx','table plm.extra','table plm.item'])
+})
+
+test('issue-scope expansion rejects wrong routing, collisions, and ambiguous updates',()=>{
+  let io=expansionIo(),baseGet=io.getIssue
+  io.getIssue=(n)=>{const row=baseGet(n);if(Number(n)===853)row.body=row.body.replace('status: ready','status: blocked');return row}
+  assert.throws(()=>expandActiveClaimFromIssue(expansionOptions,NOW,io),/not open ready structural/)
+  io=expansionIo();io.openClaims=()=>[io.getIssue(1063),{number:9,body:claimBody({version:'20260816070000',objects:['table plm.item'],owner:'other',branch:'other',worktree:'C:/other',expiresAt:new Date('2026-08-17T00:00:00Z')})}]
+  assert.throws(()=>expandActiveClaimFromIssue(expansionOptions,NOW,io),/collision/)
+  io=expansionIo();io.prSources=()=>[];const before=io.issue.body;io.updateIssue=(_n,fields)=>{Object.assign(io.issue,fields);if(fields.body!==before)throw new LaneError('connection lost');return io.getIssue(1063)}
+  assert.throws(()=>expandActiveClaimFromIssue(expansionOptions,NOW,io),/connection lost/);assert.equal(io.issue.body,before)
+})
+
+test('REAL main command expands an active claim from exact issue scope',()=>{
+  const io=expansionIo();io.prSources=()=>[];const args=['--expand-active-claim-from-issue','--issue','853','--claim-number','1063','--owner','codex-issue-853-orderlist','--branch','codex/issue-853-orderlist-index','--worktree','C:\\repos\\shared-db-wt-853-index']
   assert.equal(main(args,NOW,io),0);assert.ok(parseAuthorLease(io.issue.body,NOW).objects.includes('table plm.item'))
 })
 
@@ -696,3 +731,58 @@ test('active claim reversion rolls back an applied-then-failed issue update',()=
   assert.equal(io.issue.body,original)
   assert.deepEqual(rewrites,[[io.old,io.fresh],[io.fresh,io.old]])
 })
+
+function withReversionRepo(files,run){
+  const repo=mkdtempSync(path.join(tmpdir(),'db-lane-reversion-'))
+  try{
+    for(const [relative,contents] of Object.entries(files)){
+      const absolute=path.join(repo,relative);mkdirSync(path.dirname(absolute),{recursive:true});writeFileSync(absolute,contents)
+    }
+    const initialized=spawnSync('git',['init','--quiet',repo],{encoding:'utf8'});assert.equal(initialized.status,0,initialized.stderr)
+    const added=spawnSync('git',['-C',repo,'add','--all'],{encoding:'utf8'});assert.equal(added.status,0,added.stderr)
+    return run(repo)
+  }finally{rmSync(repo,{recursive:true,force:true})}
+}
+
+test('REAL GIT: version rewrite discovers a migration whose version exists only in its filename and reverses it',()=>withReversionRepo({
+  'supabase/migrations/20260816044638_repair.sql':'select nextval(regclass);\n',
+  'docs/reversion.md':'reserved version 20260816044638\n',
+},(repo)=>{
+  const old='20260816044638',fresh='20260816120000',oldFile=path.join(repo,'supabase/migrations',`${old}_repair.sql`),newFile=path.join(repo,'supabase/migrations',`${fresh}_repair.sql`)
+  githubIo.rewriteVersion(repo,old,fresh)
+  assert.equal(existsSync(oldFile),false);assert.equal(existsSync(newFile),true);assert.equal(readFileSync(newFile,'utf8'),'select nextval(regclass);\n');assert.equal(readFileSync(path.join(repo,'docs/reversion.md'),'utf8'),`reserved version ${fresh}\n`)
+  githubIo.rewriteVersion(repo,fresh,old)
+  assert.equal(existsSync(oldFile),true);assert.equal(existsSync(newFile),false);assert.equal(readFileSync(path.join(repo,'docs/reversion.md'),'utf8'),`reserved version ${old}\n`)
+}))
+
+test('REAL GIT: version rewrite fails closed on missing, duplicate, and malformed migration filenames',()=>{
+  const old='20260816044638',fresh='20260816120000'
+  for(const files of [
+    {'docs/reversion.md':`reserved version ${old}\n`},
+    {[`supabase/migrations/${old}_a.sql`]:'select 1;\n',[`supabase/migrations/${old}_b.sql`]:'select 2;\n'},
+    {[`supabase/migrations/${old}.sql`]:'select 1;\n','docs/reversion.md':`reserved version ${old}\n`},
+  ])withReversionRepo(files,(repo)=>{
+    const before=new Map(Object.keys(files).map((relative)=>[relative,readFileSync(path.join(repo,relative),'utf8')]))
+    assert.throws(()=>githubIo.rewriteVersion(repo,old,fresh),/exactly one/)
+    for(const [relative,contents] of before)assert.equal(readFileSync(path.join(repo,relative),'utf8'),contents)
+  })
+})
+
+test('REAL GIT: version rewrite refuses an existing target filename without editing either migration',()=>withReversionRepo({
+  'supabase/migrations/20260816044638_repair.sql':'-- version 20260816044638\nselect 1;\n',
+  'supabase/migrations/20260816120000_repair.sql':'select 2;\n',
+},(repo)=>{
+  const old='20260816044638',fresh='20260816120000',oldFile=path.join(repo,'supabase/migrations',`${old}_repair.sql`),newFile=path.join(repo,'supabase/migrations',`${fresh}_repair.sql`)
+  assert.throws(()=>githubIo.rewriteVersion(repo,old,fresh),/target filename already exists/)
+  assert.equal(readFileSync(oldFile,'utf8'),`-- version ${old}\nselect 1;\n`);assert.equal(readFileSync(newFile,'utf8'),'select 2;\n')
+}))
+
+test('REAL GIT: failed migration rename restores all content edits before returning',()=>withReversionRepo({
+  'supabase/migrations/20260816044638_repair.sql':'-- version 20260816044638\nselect 1;\n',
+  'docs/reversion.md':'reserved version 20260816044638\n',
+},(repo)=>{
+  const io={...githubIo,renameVersionFile(){throw new Error('injected rename failure')}},old='20260816044638',fresh='20260816120000',oldFile=path.join(repo,'supabase/migrations',`${old}_repair.sql`)
+  assert.throws(()=>io.rewriteVersion(repo,old,fresh),/injected rename failure/)
+  assert.equal(existsSync(oldFile),true);assert.equal(existsSync(path.join(repo,'supabase/migrations',`${fresh}_repair.sql`)),false)
+  assert.equal(readFileSync(oldFile,'utf8'),`-- version ${old}\nselect 1;\n`);assert.equal(readFileSync(path.join(repo,'docs/reversion.md'),'utf8'),`reserved version ${old}\n`)
+}))
