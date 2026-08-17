@@ -1,6 +1,44 @@
 -- Synthetic and live contracts for issue #764. All fixtures are temporary.
 begin;
 
+create temporary table issue_764_migration_source (line text);
+\copy issue_764_migration_source(line) from 'supabase/migrations/20260817041506_repair_stale_dflow_sequences.sql'
+
+do $contract$
+declare
+  source_sql text := lower((select string_agg(line, E'\n') from issue_764_migration_source));
+  begin_at integer;
+  first_lock_at integer;
+  first_reset_at integer;
+  second_lock_at integer;
+  second_reset_at integer;
+  postconditions_at integer;
+  commit_at integer;
+begin
+  begin_at := strpos(source_sql, E'\nbegin;');
+  first_lock_at := strpos(source_sql, 'lock table dflow."licensingtime"');
+  first_reset_at := strpos(source_sql, $$select setval(
+  'dflow."licensingtime_id_seq"'$$);
+  second_lock_at := strpos(source_sql, 'lock table dflow.properties_and_characters');
+  second_reset_at := strpos(source_sql, $$select setval(
+  'dflow.properties_and_characters_id_seq'$$);
+  postconditions_at := strpos(source_sql, E'\ndo $$\nbegin\n  if not (');
+  commit_at := strpos(source_sql, E'\ncommit;');
+
+  if not (
+    0 < begin_at
+    and begin_at < first_lock_at
+    and first_lock_at < first_reset_at
+    and first_reset_at < second_lock_at
+    and second_lock_at < second_reset_at
+    and second_reset_at < postconditions_at
+    and postconditions_at < commit_at
+  ) then
+    raise exception 'sequence repair must keep both locks, resets, and postconditions inside one ordered transaction';
+  end if;
+end;
+$contract$;
+
 do $$
 declare
   v_next bigint;
