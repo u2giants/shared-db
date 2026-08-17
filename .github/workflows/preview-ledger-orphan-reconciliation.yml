@@ -1,0 +1,126 @@
+name: Preview Ledger Orphan Reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      main_sha: {description: "Exact current main SHA", required: true, type: string}
+      orphan_version: {description: "Exact abandoned preview-only version", required: true, type: string}
+      replacement_version: {description: "Exact approved replacement version", required: true, type: string}
+      issue: {description: "Owning work issue", required: true, type: string}
+      claim: {description: "Owning claim issue", required: true, type: string}
+      source_pr: {description: "Merged source PR", required: true, type: string}
+      preview_run_id: {description: "Successful replacement preview run", required: true, type: string}
+      preview_artifact_id: {description: "Immutable replacement preview artifact ID", required: true, type: string}
+      preview_artifact_digest: {description: "Pinned sha256 artifact digest", required: true, type: string}
+      confirmation: {description: "Type RECONCILE <orphan> AS <replacement>", required: true, type: string}
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: shared-supabase-migrations
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile one proven preview ledger orphan
+    runs-on: ubuntu-latest
+    environment: preview
+    timeout-minutes: 15
+    env:
+      PREVIEW_PROJECT_REF: rjyboqwcdzcocqgmsyel
+      PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE: qsllyeztdwjgirsysgai
+      GH_TOKEN: ${{ github.token }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: "${{ inputs.main_sha }}", fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: supabase/setup-cli@v1
+        with: {version: 2.105.0}
+      - name: Prove exact current main and preview-only intent
+        env:
+          MAIN_SHA: ${{ inputs.main_sha }}
+          ORPHAN: ${{ inputs.orphan_version }}
+          REPLACEMENT: ${{ inputs.replacement_version }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$MAIN_SHA"
+          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          test "$PREVIEW_PROJECT_REF" = rjyboqwcdzcocqgmsyel
+          test "$PREVIEW_PROJECT_REF" != "$PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE"
+          test "$CONFIRMATION" = "RECONCILE $ORPHAN AS $REPLACEMENT"
+          [[ "$ORPHAN" =~ ^[0-9]{14}$ && "$REPLACEMENT" =~ ^[0-9]{14}$ && "$ORPHAN" != "$REPLACEMENT" ]]
+          test -z "$(find supabase/migrations -maxdepth 1 -name "${ORPHAN}_*.sql" -print -quit)"
+          test "$(find supabase/migrations -maxdepth 1 -name "${REPLACEMENT}_*.sql" | wc -l)" = 1
+      - name: Acquire exclusive preview recovery lock
+        env: {MAIN_SHA: "${{ inputs.main_sha }}", SOURCE_PR: "${{ inputs.source_pr }}"}
+        run: node scripts/manage-migration-author-lanes.mjs --acquire-preview-recovery --owner "github-actions:${GITHUB_RUN_ID}" --pr "$SOURCE_PR" --head-sha "$MAIN_SHA" > "$RUNNER_TEMP/preview-lock.json"
+      - name: Fetch immutable GitHub evidence
+        env:
+          ISSUE: ${{ inputs.issue }}
+          CLAIM: ${{ inputs.claim }}
+          SOURCE_PR: ${{ inputs.source_pr }}
+          PREVIEW_RUN_ID: ${{ inputs.preview_run_id }}
+          ARTIFACT_ID: ${{ inputs.preview_artifact_id }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/issues/$ISSUE" > "$RUNNER_TEMP/issue.json"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/$CLAIM" > "$RUNNER_TEMP/claim.json"
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/$SOURCE_PR" > "$RUNNER_TEMP/pr.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$PREVIEW_RUN_ID" > "$RUNNER_TEMP/run.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/$ARTIFACT_ID" > "$RUNNER_TEMP/artifact.json"
+          gh api -H 'Accept: application/vnd.github+json' "repos/${GITHUB_REPOSITORY}/actions/artifacts/$ARTIFACT_ID/zip" > "$RUNNER_TEMP/preview.zip"
+          mkdir "$RUNNER_TEMP/preview-evidence"
+          unzip -q "$RUNNER_TEMP/preview.zip" -d "$RUNNER_TEMP/preview-evidence"
+      - name: Link only to preview
+        run: |
+          set -euo pipefail
+          supabase login --token "$SUPABASE_ACCESS_TOKEN"
+          supabase link --project-ref "$PREVIEW_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          grep -F "$PREVIEW_PROJECT_REF" supabase/.temp/pooler-url
+          ! grep -F "$PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE" supabase/.temp/pooler-url
+      - name: Exact proof with no write
+        run: |
+          python scripts/preview_ledger_orphan_reconcile.py --mode check \
+            --repo "$GITHUB_WORKSPACE" --linked-dir "$GITHUB_WORKSPACE" --expected-project-ref "$PREVIEW_PROJECT_REF" \
+            --main-sha '${{ inputs.main_sha }}' --orphan-version '${{ inputs.orphan_version }}' --replacement-version '${{ inputs.replacement_version }}' \
+            --issue '${{ inputs.issue }}' --claim '${{ inputs.claim }}' --source-pr '${{ inputs.source_pr }}' \
+            --preview-run-id '${{ inputs.preview_run_id }}' --preview-artifact-digest '${{ inputs.preview_artifact_digest }}' \
+            --issue-json "$RUNNER_TEMP/issue.json" --claim-json "$RUNNER_TEMP/claim.json" --pr-json "$RUNNER_TEMP/pr.json" \
+            --run-json "$RUNNER_TEMP/run.json" --artifact-json "$RUNNER_TEMP/artifact.json" --preview-evidence-dir "$RUNNER_TEMP/preview-evidence" \
+            --evidence-out "$RUNNER_TEMP/reconciliation-check.json"
+      - name: Transactional one-row reconciliation
+        run: |
+          python scripts/preview_ledger_orphan_reconcile.py --mode apply \
+            --repo "$GITHUB_WORKSPACE" --linked-dir "$GITHUB_WORKSPACE" --expected-project-ref "$PREVIEW_PROJECT_REF" \
+            --main-sha '${{ inputs.main_sha }}' --orphan-version '${{ inputs.orphan_version }}' --replacement-version '${{ inputs.replacement_version }}' \
+            --issue '${{ inputs.issue }}' --claim '${{ inputs.claim }}' --source-pr '${{ inputs.source_pr }}' \
+            --preview-run-id '${{ inputs.preview_run_id }}' --preview-artifact-digest '${{ inputs.preview_artifact_digest }}' \
+            --issue-json "$RUNNER_TEMP/issue.json" --claim-json "$RUNNER_TEMP/claim.json" --pr-json "$RUNNER_TEMP/pr.json" \
+            --run-json "$RUNNER_TEMP/run.json" --artifact-json "$RUNNER_TEMP/artifact.json" --preview-evidence-dir "$RUNNER_TEMP/preview-evidence" \
+            --evidence-out "$RUNNER_TEMP/reconciliation-apply.json"
+      - name: Upload immutable before and after evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-ledger-orphan-reconciliation-${{ inputs.orphan_version }}
+          path: |
+            ${{ runner.temp }}/reconciliation-check.json
+            ${{ runner.temp }}/reconciliation-apply.json
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Release preview recovery lock
+        if: always()
+        run: |
+          if [ -s "$RUNNER_TEMP/preview-lock.json" ]; then
+            OWNER_SHA="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["ownerSha"])' "$RUNNER_TEMP/preview-lock.json")"
+            node scripts/manage-migration-author-lanes.mjs --release-preview-recovery --owner-sha "$OWNER_SHA"
+          fi

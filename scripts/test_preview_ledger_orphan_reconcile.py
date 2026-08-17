@@ -1,0 +1,32 @@
+import importlib.util, pathlib, sys, unittest
+from unittest.mock import patch
+
+P=pathlib.Path(__file__).with_name('preview_ledger_orphan_reconcile.py'); sys.path.insert(0,str(P.parent))
+S=importlib.util.spec_from_file_location('reconcile',P); M=importlib.util.module_from_spec(S); S.loader.exec_module(M)
+
+class Tests(unittest.TestCase):
+    def test_version_is_exact(self):
+        self.assertEqual(M.version('20260817150944'),'20260817150944')
+        for bad in ('', '123', '2026081715094x', '202608171509440'):
+            with self.assertRaises(M.Refusal): M.version(bad)
+    def test_check_requires_exact_two_rows_and_statements(self):
+        args=type('A',(),{'orphan_version':'20260817150944','replacement_version':'20260817124545','mode':'check'})()
+        rows=[{'version':'20260817150944','statements':['select 1']},{'version':'20260817124545','statements':['select 1']}]
+        with patch.object(M,'ledger_rows',return_value=rows):
+            self.assertEqual(M.reconcile('url',{},args,['select 1']),(rows,rows))
+        rows[0]['statements']=['different']
+        with patch.object(M,'ledger_rows',return_value=rows):
+            with self.assertRaises(M.Refusal): M.reconcile('url',{},args,['select 1'])
+    def test_apply_is_transactional_exact_delete_and_readback(self):
+        args=type('A',(),{'orphan_version':'20260817150944','replacement_version':'20260817124545','mode':'apply'})()
+        before=[{'version':'20260817150944','statements':['select 1']},{'version':'20260817124545','statements':['select 1']}]
+        after=[{'version':'20260817124545','statements':['select 1']}]
+        with patch.object(M,'ledger_rows',side_effect=[before,after]), patch.object(M,'psql',return_value='') as call:
+            self.assertEqual(M.reconcile('url',{},args,['select 1']),(before,after))
+            sql=call.call_args.args[2]
+            self.assertIn('begin;',sql); self.assertIn('lock table supabase_migrations.schema_migrations in exclusive mode',sql)
+            self.assertIn("delete from supabase_migrations.schema_migrations where version='20260817150944'",sql)
+            self.assertNotIn("delete from supabase_migrations.schema_migrations where version='20260817124545'",sql)
+            self.assertIn('commit;',sql)
+
+if __name__=='__main__': unittest.main()
