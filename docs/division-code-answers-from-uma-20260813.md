@@ -22,6 +22,13 @@ Questions asked in [`division-code-questions-for-uma.md`](division-code-question
 >
 > A third gap: **92 further broken rows** exist that this document does not mention at
 > all. See [Rows this answer did not cover](#rows-this-answer-did-not-cover-2026-08-17).
+>
+> 3. **The Block A fix (the 217 rows) does not stand either.** Applying it creates
+>    **142 duplicate rows** on `(division, mgTypeCode, mg_code)`, 23 of them landing on a
+>    code that already means something different in `EH001`. Across both blocks the rule
+>    produces **169 duplicates**, and there is no unique constraint to stop it. Full
+>    row-by-row evidence:
+>    [`merchgroup-271-division-conflicts-back-to-uma-20260817.md`](merchgroup-271-division-conflicts-back-to-uma-20260817.md).
 
 ---
 
@@ -231,7 +238,7 @@ is enforced in the schema:
 | `CW001` | 1 | `EDGEHOME` | mixed | 1,269 | Clean — POP Lic |
 | `SP001` | 8 | `EDGEHOME` | mixed | 1,090 | Clean — Spruce Lic |
 | `EH001` | 9 | `EDGEHOME` / `SPRUCE` | mixed | 923 | Clean — Spruce non-Lic |
-| `EH001` | 2 | `EDGEHOME` | all `false` | 217 | Conflict — Block A, fix stands |
+| `EH001` | 2 | `EDGEHOME` | all `false` | 217 | Conflict — Block A, fix creates 142 duplicates (see 2026-08-17 collision analysis) |
 | `CW001` | 8 | `SPRUCE` | all `false` | 49 | Conflict — dead legacy, leave inactive |
 | `CW001` | 8 | `EDGEHOME` | all `true` | 5 | Conflict — needs a human check |
 | `EP001` | `NULL` | `EDGEHOME` | all `false` | 48 | Unhandled division |
@@ -245,7 +252,9 @@ is enforced in the schema:
 
 Steps 3 and 4 of the "Agreed next steps" below must **not** be run yet:
 
-- **Step 3** (fix the 271 rows) is safe for the 217 Block A rows only. The 54 Block B
+- **Step 3** (fix the 271 rows) is blocked in full. The 217 Block A rows were thought
+  safe, but the collision analysis of 2026-08-17 shows they create 142 duplicates. The
+  54 Block B
   rows are split as described above, and 5 of them are waiting on a human.
 - **Step 4** (backfill `erp_items_current.division_code`) is sound in principle — the
   mapping behind it is now proven — but has not been approved by the owner, and it
