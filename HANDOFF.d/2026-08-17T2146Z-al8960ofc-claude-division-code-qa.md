@@ -1,3 +1,9 @@
+---
+issue: 1137
+status: BLOCKED
+owner: claude/division-code-qa (session ended; blocked on Albert's division-2 ruling)
+---
+
 # Division codes: Q&A closed, cleanup blocked on ONE owner decision
 
 - **Written:** 2026-08-17T2146Z
@@ -213,6 +219,8 @@ did not name *who* owns action 3's table (DesignFlow, added), did not state that
 exists yet (§6 preamble and §8, added), and did not record where the ColdLion key comes from
 (§8, added).
 
-**Delete this file when:** Albert has answered §5, and actions 1, 2, 3 and 6 are merged and
+**Tracking issue:** [#1137](https://github.com/u2giants/shared-db/issues/1137).
+
+**Delete this file when:** issue #1137 is closed — Albert has answered §5, and actions 1, 2, 3 and 6 are merged and
 verified. Actions 4, 5, 7, 8 and 9 may outlive it — if so, move them to a fresh handoff rather
 than keeping this one alive.
