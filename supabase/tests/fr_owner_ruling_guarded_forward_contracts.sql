@@ -44,6 +44,12 @@ begin
       and protected_columns = array['status']::text[]
   ) then raise exception 'forward authorization left no immutable audit'; end if;
 
+  delete from plm.licensing_write_authorization
+  where backend_pid = pg_backend_pid()
+    and transaction_id = txid_current()
+    and target_table = 'core.licensor'::regclass
+    and consumed_at is null;
+
   begin
     update core.licensor set status = 'active' where id = v_fr_id;
     raise exception 'consumed authorization was replayed';

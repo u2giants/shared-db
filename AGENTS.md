@@ -1762,26 +1762,30 @@ permission shortcut.
 
 > "hold it and ship it together with the removal work"
 > — Albert Hazan, 2026-08-03, answering whether to promote the two merged migrations
-> `20260802170000` (durable curated licensor/property status) and `20260802171000`
+> `20260802170000` (durable curated licensor/property status) and the ruling originally recorded in `20260802171000`
 > (the FRIENDS TV / FRIDA KAHLO ruling) to production now, or hold them and combine them
 > with the `FR` removal work as ONE production change.
 
 This is a standing decision, ruled by the owner. **It is settled — do not re-ask it, do not treat
 it as an AI's preference.**
 
-**What is forbidden, stated so it cannot be read narrowly:** **neither `20260802170000` nor
-`20260802171000` may reach production by ANY route until the FR removal work is ready to go with
-them.** Not alone, not as a pair, not as part of a wider backlog sweep, not via `--include-all`, not
-re-issued under a fresh timestamp as a "bounded forward" copy (§5.1 already forbids that habit
-separately). The permitted event is exactly one: a single bounded production apply that carries
-`20260802170000`, `20260802171000` **and** the removal migrations together, in dependency order.
+**What is forbidden, stated so it cannot be read narrowly:** historical `20260802171000` is now
+permanently retired from production because the #1090 licensing guard makes its unguarded write
+unsafe. **Neither `20260802170000`, compatibility prerequisite `20260817225127`, nor guarded
+replacement `20260817232425` may reach production until the FR removal work is ready with them.**
+Not alone, not as a subset, not in a wider sweep, and not via `--include-all`. The permitted event
+is one bounded production apply carrying those three versions and every removal/cleanup member in
+dependency order. This is a safety-preserving supersession of the implementation, not a change to
+Albert's settled business ruling.
 
 **Why this is the right answer, so a future session does not "helpfully" unblock it.**
 
 - Albert's ruling on `FR` "FRIENDS TV" is that it **was never a real licensor and must be REMOVED**
   — not kept, not merely flagged. FRIENDS has always been a *property* under `WB` WARNER BROS, so
   genuine FRIENDS items already have a correct home.
-- Migration `20260802171000` sets `core.licensor` `FR` to **`status = 'inactive'`**. That is a
+- Guarded replacement `20260817232425` records the ruling and sets `core.licensor` `FR` to
+  **`status = 'inactive'`**. Historical `20260802171000` is retained as evidence but never applied
+  to production. The inactive step is a
   *different remedy*, written before the removal ruling existed, and the removal ruling
   **supersedes** it.
 - So promoting #408 alone would change production master data **twice**: once into `inactive` — a
@@ -1790,15 +1794,14 @@ separately). The permitted event is exactly one: a single bounded production app
   asked for is strictly worse than waiting.
 - Combining them means production moves once, from today's state to the intended end state.
 
-**How `20260802171000` reaches production without leaving `FR` inactive — read this before you
-conclude the ruling is impossible.** `20260802171000` is applied on preview, so §4 rule 4 freezes
-its text: it cannot be edited to drop the `inactive` statement, and it must not be skipped in the
-ledger. It therefore **does** apply to production as written, inside the combined push. What the
-ruling forbids is not the statement executing — it is production **coming to rest** in a state the
-owner rejected. Inside one bounded `db push`, `FR` passes from `active` to `inactive` to removed
+**How the ruling reaches production without leaving `FR` inactive — read this before you conclude
+the ruling is impossible.** Preview truthfully retains applied historical `20260802171000`; its
+text and ledger row are immutable. Production instead uses guarded forward `20260817232425`,
+which records the same ruling while satisfying the licensing authorization/audit contract. Inside
+one bounded promotion, `FR` passes from `active` to `inactive` to removed
 without ever being an observable steady state, and no application, sync, or human sees `FR` as an
 inactive licensor. That is the "moves once" the ruling means: one promotion event, one end state.
-An agent that promotes `20260802171000` on its own produces the forbidden thing — a production that
+An agent that promotes `20260817232425` on its own produces the forbidden thing — a production that
 sits at `inactive`, indefinitely, until a second irreversible change.
 
 **The consequence you must NOT report as a bug.** Until the combined change ships, **production and
