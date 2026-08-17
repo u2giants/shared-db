@@ -160,6 +160,16 @@ jobs:
           ATOMIC_MIGRATION_POSTGRES_TEST: "1"
         run: python scripts/test_atomic_migration_apply_postgres.py
 
+      - name: Prove preview ledger reconciliation rolls back an in-lock failure
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 54322
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+          PREVIEW_LEDGER_RECONCILE_POSTGRES_TEST: "1"
+        run: python scripts/test_preview_ledger_orphan_reconcile_postgres.py
+
       - name: Replay every migration, recording failures (pass 1)
         id: replay
         env:
