@@ -103,6 +103,11 @@ begin
   -- ---------------------------------------------------------------------------------
   select id into v_licensor_id from core.licensor where name = 'ZZ Fixture Licensor';
   if v_licensor_id is null then
+    insert into plm.licensing_write_authorization
+      (backend_pid, transaction_id, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+    values
+      (pg_backend_pid(), txid_current(), 'licensing_review_create', gen_random_uuid(), repeat('c', 64),
+       'ci-synthetic-fixture', array['name','code','status'], clock_timestamp() + interval '1 minute');
     insert into core.licensor (name, code) values ('ZZ Fixture Licensor', 'ZZFXL')
     returning id into v_licensor_id;
   end if;
@@ -111,8 +116,13 @@ begin
   from core.property
   where name = 'ZZ Fixture Property' and licensor_id = v_licensor_id;
   if v_property_id is null then
-    insert into core.property (licensor_id, name, code)
-    values (v_licensor_id, 'ZZ Fixture Property', 'ZZFXP')
+    insert into plm.licensing_write_authorization
+      (backend_pid, transaction_id, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+    values
+      (pg_backend_pid(), txid_current(), 'licensing_review_create', gen_random_uuid(), repeat('d', 64),
+       'ci-synthetic-fixture', array['licensor_id','name','code','status'], clock_timestamp() + interval '1 minute');
+    insert into core.property (licensor_id, name, code, status)
+    values (v_licensor_id, 'ZZ Fixture Property', 'ZZFXP', 'potential')
     returning id into v_property_id;
   end if;
 
