@@ -51,6 +51,14 @@ class ReleaseAReconciliationContract(unittest.TestCase):
         self.assertNotRegex(SQL, r"(?im)^\s*(?:INSERT\s+INTO|DELETE\s+FROM)\s+dflow\.")
         self.assertNotIn("INSERT INTO dflow.sample_carrier", SQL)
 
+    def test_database_contract_covers_mismatch_rollback_and_fresh_state(self):
+        contract = (ROOT / "supabase/tests/sample_tracking_release_a_reconciliation_contracts.sql").read_text(encoding="utf-8")
+        self.assertIn("DROP TABLE dflow.sample_path_revision CASCADE", contract)
+        self.assertIn("EXCEPTION WHEN SQLSTATE 'P9750'", contract)
+        self.assertIn("did not roll back its catalog changes", contract)
+        for version in ("20260814130000", "20260814193402", "20260817190000"):
+            self.assertIn(version, contract)
+
 
 if __name__ == "__main__":
     unittest.main()
