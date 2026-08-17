@@ -221,7 +221,7 @@ class GuardTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(GuardError):
                 parse_allowlist(value)
 
-    def test_the_block_list_is_exactly_these_four(self) -> None:
+    def test_the_block_list_is_exactly_these_five(self) -> None:
         # Three kinds, deliberately together. 20260726190000/20260726200000 are the
         # already-applied Master Data pair. 20260729120000 is the third kind:
         # never applied, and applying it would REGRESS a live production security
@@ -235,6 +235,7 @@ class GuardTests(unittest.TestCase):
                 "20260726200000",
                 "20260729120000",
                 "20260816045130",
+                "20260802171000",
             },
         )
 
@@ -332,7 +333,7 @@ class GuardTests(unittest.TestCase):
         message = str(caught.exception)
         self.assertIn("6.5", message)
         self.assertIn("20260802170000", message)
-        self.assertIn("20260802171000", message)
+        self.assertIn("20260817232425", message)
         # An allowlist with neither held version still parses, so the rule is
         # targeted and not a blanket refusal.
         parse_allowlist(",".join(BATCH_18))

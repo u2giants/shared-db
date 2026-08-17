@@ -57,6 +57,8 @@ MIGRATION_LINE_RE = re.compile(r"^\s*(?:[•*\-]\s*)?(\d{14})_[^\s]+\.sql\s*$")
 # ever turns out NOT to be applied, that changes the count in AGENTS.md 6.8 and
 # this set must be revisited before anything is promoted.
 HARD_BLOCKED = {
+    # Held historical FR ruling is superseded by guarded forward 20260817232425.
+    "20260802171000",
     # #853/#868 unsafe transaction-framed bridge cutover. The explicit COMMIT
     # can commit DDL before Supabase inserts its migration-ledger row. A pinned
     # CLI 2.105.0 disposable failure test proved SQL present + ledger absent.
@@ -146,11 +148,8 @@ BUNDLE_20260804 = {
 FR_HELD_20260803 = {
     # plm.import_master_data preserves curated licensor/property status.
     "20260802170000",
-    # The FRIENDS TV / FRIDA KAHLO ruling. Sets core.licensor `FR` to
-    # status = 'inactive' -- a remedy the REMOVAL ruling supersedes. Promoting
-    # it alone leaves production at rest in `inactive`, the state the owner
-    # rejected, with no undo.
-    "20260802171000",
+    # Fresh guarded replacement for held historical version 20260802171000.
+    "20260817232425",
 }
 
 # The `FR` removal migrations. EMPTY ON PURPOSE -- as of 2026-08-09 no removal
@@ -797,7 +796,7 @@ def parse_allowlist(raw: str, remote: set[str] | frozenset[str] = frozenset()) -
             raise GuardError(
                 "AGENTS.md 6.5 (OWNER RULING, 2026-08-03) holds "
                 f"{', '.join(sorted(held))}: neither 20260802170000 nor "
-                "20260802171000 may reach production by any route until the FR "
+                "20260817232425 may reach production by any route until the FR "
                 "'FRIENDS TV' removal work ships with them, as ONE bounded "
                 "apply in dependency order. No FR removal migration exists yet, "
                 "so that combined change cannot be assembled and this allowlist "
@@ -812,7 +811,7 @@ def parse_allowlist(raw: str, remote: set[str] | frozenset[str] = frozenset()) -
                 f"{', '.join(sorted(held & set(values)))} but is missing "
                 f"{', '.join(missing)}. The permitted event is exactly one -- a "
                 "single bounded apply carrying the FR compatibility migration, "
-                "20260802170000, 20260802171000 and the FR removal migrations "
+                "20260802170000, 20260817232425 and the FR removal migrations "
                 "together, in dependency order. "
                 "Include the full set or none of it."
             )
