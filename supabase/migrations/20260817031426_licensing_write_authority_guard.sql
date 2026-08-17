@@ -4,6 +4,7 @@ create table plm.licensing_write_authorization (
   id uuid primary key default gen_random_uuid(),
   backend_pid integer not null,
   transaction_id bigint not null,
+  target_table regclass not null check (target_table in ('core.licensor'::regclass, 'core.property'::regclass)),
   write_kind text not null check (write_kind in ('scrape_consolidation', 'licensing_review_create', 'coldlion_status', 'canonical_merge')),
   plan_id uuid not null,
   plan_hash text not null check (plan_hash ~ '^[0-9a-f]{64}$'),
@@ -12,7 +13,7 @@ create table plm.licensing_write_authorization (
   expires_at timestamptz not null,
   consumed_at timestamptz,
   created_at timestamptz not null default clock_timestamp(),
-  unique (backend_pid, transaction_id, write_kind, plan_id, plan_hash)
+  unique (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash)
 );
 
 create table plm.licensing_write_guard_audit (
@@ -56,6 +57,7 @@ begin
   from plm.licensing_write_authorization a
   where a.backend_pid = pg_backend_pid()
     and a.transaction_id = txid_current()
+    and a.target_table = tg_relid
     and a.expires_at > clock_timestamp()
     and a.consumed_at is null
     and a.protected_columns @> v_changed

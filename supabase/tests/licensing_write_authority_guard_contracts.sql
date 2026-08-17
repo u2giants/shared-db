@@ -14,9 +14,9 @@ begin
   if not v_failed then raise exception 'direct canonical Licensor insert was not refused'; end if;
 
   insert into plm.licensing_write_authorization
-    (backend_pid, transaction_id, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
   values
-    (pg_backend_pid(), txid_current(), 'scrape_consolidation', v_plan, repeat('a',64), 'contract-test', array['name','code','status'], clock_timestamp() + interval '1 minute');
+    (pg_backend_pid(), txid_current(), 'core.licensor', 'scrape_consolidation', v_plan, repeat('a',64), 'contract-test', array['name','code','status'], clock_timestamp() + interval '1 minute');
   insert into core.licensor(name, code, status)
   values ('guard-authorized', 'GUARD-AUTH', 'active') returning id into v_licensor;
   if not exists (select 1 from plm.licensing_write_guard_audit where plan_id = v_plan and target_table = 'core.licensor'::regclass) then
@@ -24,9 +24,9 @@ begin
   end if;
 
   insert into plm.licensing_write_authorization
-    (backend_pid, transaction_id, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
   values
-    (pg_backend_pid(), txid_current(), 'coldlion_status', gen_random_uuid(), repeat('b',64), 'contract-test', array['status'], clock_timestamp() + interval '1 minute');
+    (pg_backend_pid(), txid_current(), 'core.licensor', 'coldlion_status', gen_random_uuid(), repeat('b',64), 'contract-test', array['status'], clock_timestamp() + interval '1 minute');
   begin
     update core.licensor set status = 'inactive' where id = v_licensor;
     raise exception 'coldlion_status changed a Licensor';
@@ -41,12 +41,13 @@ begin
     if position('retired until #1090 Step 4' in sqlerrm) = 0 then raise; end if;
   end;
 
+  v_failed := false;
   begin
     perform * from plm.import_master_data('[]', '[]');
-    raise exception 'retired DesignFlow licensing importer unexpectedly ran';
   exception when others then
-    if position('retired by #1090 Step 1.0' in sqlerrm) = 0 then raise; end if;
+    v_failed := position('retired by #1090 Step 1.0' in sqlerrm) > 0;
   end;
+  if not v_failed then raise exception 'retired DesignFlow licensing importer unexpectedly ran'; end if;
 
   if has_table_privilege('service_role', 'plm.licensing_write_authorization', 'INSERT') then
     raise exception 'service_role can forge licensing authorization';
