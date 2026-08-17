@@ -52,28 +52,57 @@ BEGIN
     RAISE EXCEPTION 'Release A reconciliation exposed a direct relation privilege';
   END IF;
 
-  -- A PostgreSQL exception block is a subtransaction. The deliberately dropped
-  -- table and its dependent objects must be restored when the exact mixed-state
-  -- guard refuses the 2-of-3 catalog shape.
-  BEGIN
-    DROP TABLE dflow.sample_path_revision CASCADE;
-    SELECT count(*) INTO v_present
-    FROM (VALUES
-      ('dflow.sample_creation_batch'),('dflow.sample_workflow'),
-      ('dflow.sample_path_revision')
-    ) AS expected(name)
-    WHERE to_regclass(expected.name) IS NOT NULL;
-    IF v_present NOT IN (0,3) THEN
-      RAISE EXCEPTION USING ERRCODE='P9750',
-        MESSAGE='expected Release A mixed-state refusal';
-    END IF;
-    RAISE EXCEPTION 'Release A mixed-state guard did not refuse 2-of-3 tables';
-  EXCEPTION WHEN SQLSTATE 'P9750' THEN
-    IF to_regclass('dflow.sample_path_revision') IS NULL
-       OR to_regprocedure('dflow.validate_sample_path_revision()') IS NULL THEN
-      RAISE EXCEPTION 'Release A mixed-state refusal did not roll back its catalog changes';
-    END IF;
-  END;
 END $$;
 
 ROLLBACK;
+
+-- Run the real migration against an exact 2-of-3 state. Its own guard must
+-- abort the transaction; psql continues only so this test can prove rollback.
+BEGIN;
+DROP TABLE dflow.sample_path_revision CASCADE;
+\set ON_ERROR_STOP off
+\ir ../migrations/20260817190000_sample_tracking_release_a_catalog_reconciliation.sql
+\set ON_ERROR_STOP on
+
+DO $$
+BEGIN
+  IF to_regclass('dflow.sample_path_revision') IS NULL THEN
+    RAISE EXCEPTION 'Release A mixed-state refusal did not restore the dropped table';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger
+    WHERE tgname='sample_path_revision_validate' AND NOT tgisinternal) THEN
+    RAISE EXCEPTION 'Release A mixed-state refusal did not restore the dropped trigger';
+  END IF;
+END $$;
+
+-- Run the real migration against the repairable 0-of-3 preview shape. This is
+-- a throwaway CI database; committing the fixture drop lets the migration's
+-- own BEGIN/COMMIT execute exactly as it will in the governed preview lane.
+BEGIN;
+DROP TABLE dflow.sample_path_revision CASCADE;
+DROP TABLE dflow.sample_workflow CASCADE;
+DROP TABLE dflow.sample_creation_batch CASCADE;
+COMMIT;
+
+\ir ../migrations/20260817190000_sample_tracking_release_a_catalog_reconciliation.sql
+
+DO $$
+DECLARE v_missing text[];
+BEGIN
+  SELECT array_agg(name ORDER BY name) INTO v_missing
+  FROM (VALUES
+    ('dflow.sample_creation_batch'),('dflow.sample_workflow'),
+    ('dflow.sample_path_revision'),('dflow.sample_inventory')
+  ) AS expected(name)
+  WHERE to_regclass(expected.name) IS NULL;
+  IF v_missing IS NOT NULL THEN
+    RAISE EXCEPTION 'Release A 0-of-3 repair did not recreate relations: %',v_missing;
+  END IF;
+  IF (SELECT count(*) FROM pg_trigger
+      WHERE NOT tgisinternal AND tgname IN (
+        'sample_path_revision_validate','sample_workflow_path_revision_required',
+        'sample_path_revision_apply','sample_path_revision_immutable',
+        'sample_shipment_line_header_route')) <> 5 THEN
+    RAISE EXCEPTION 'Release A 0-of-3 repair did not recreate triggers';
+  END IF;
+END $$;
