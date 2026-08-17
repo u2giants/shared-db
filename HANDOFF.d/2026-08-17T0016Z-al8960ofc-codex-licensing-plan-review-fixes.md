@@ -53,7 +53,10 @@ The GLM review covered merged plan commit `1e7daffd7ac6d1507a76dc8452462bef6f876
 - Grok 4.6's first pass found four High, five Medium, and four Low items. All were corrected and indexed in plan §6.2. The same Grok session reread the complete revision and returned **Ready**.
 - Grok review usage: first pass 1,814,332 tokens, $0.21711448; final pass 952,104 tokens, $0.15495568; total $0.37207016.
 - Local review record: `.ai/reviews/grok-licensing-master-data-plan-revised-final.md` (ignored by Git).
-- At this update, final repository checks, commit, push, pull request, and merge were still pending. No database or application implementation has begun.
+- Changed-file checks passed, including 31 STATUS/step matches, owned local links, `git diff --check`, and 22 handoff-contract tests. The general link scan also found an older unrelated broken `orchestrator_take_over.md` link in `AGENTS.md`; this session did not change or rely on it.
+- Revision commit: `5a0e16d` (`docs: harden licensing master data plan`).
+- Pull request: [#1094](https://github.com/u2giants/shared-db/pull/1094). Verify its final MERGED state and merge SHA before beginning implementation.
+- No database or application implementation has begun.
 
 ## 4. Everything tried that did not work
 
@@ -78,10 +81,9 @@ The plan's §6.1 maps every GLM finding to its exact correction.
 
 ## 6. Exact next steps
 
-1. Run `git diff --check`, changed-file Markdown link checks, heading/STATUS checks, and repository document guards. You will know it worked when every changed-file check passes and any unrelated pre-existing finding is identified separately.
-2. Verify `git var GIT_COMMITTER_IDENT` is `Albert Hazan <u2giants@users.noreply.github.com>`, then stage only the revised plan, `AGENTS.md`, architecture doc, predecessor handoff deletion, and this replacement handoff. You will know it worked when `git diff --cached --name-only` contains only those five owned paths.
-3. Commit, push, open the shared-db pull request, wait for all required checks, and merge it. You will know it worked when GitHub reports MERGED and provides the merge SHA.
-4. Implementation starts later at Phase 0 Step 0.1 through `shared-db-orchestrator`, not in this plan-review session.
+1. Verify pull request [#1094](https://github.com/u2giants/shared-db/pull/1094) is MERGED and record its merge SHA in the implementing session's evidence. You will know it worked when GitHub reports `state: MERGED` and all required checks are successful.
+2. Start implementation at Phase 0 Step 0.1 through `shared-db-orchestrator`, not from an older licensing plan. You will know it worked when the new session produces `docs/verification/licensing-master-data-phase0-<date>/`, refreshes the migration ledger/live catalog, and updates the plan STATUS row with evidence.
+3. Complete Step 0.2's exact-object claim before Phase 1 Step 1.0. You will know it worked when the migration lane records name the protected tables, guard, DesignFlow importer, ColdLion promotion functions, grants, tools, services, and workflows listed in the plan.
 
 ## 7. Constraints and gotchas
 
