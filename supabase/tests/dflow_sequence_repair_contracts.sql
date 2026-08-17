@@ -5,13 +5,21 @@ do $$
 declare
   v_next bigint;
 begin
-  if pg_get_serial_sequence('dflow."LicensingTime"', 'id')
-       <> 'dflow."LicensingTime_id_seq"' then
+  if (
+    select pg_get_expr(d.adbin, d.adrelid)
+    from pg_attrdef d
+    join pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum
+    where d.adrelid = 'dflow."LicensingTime"'::regclass and a.attname = 'id'
+  ) is distinct from 'nextval(''dflow."LicensingTime_id_seq"''::regclass)' then
     raise exception 'LicensingTime.id is not backed by its expected sequence';
   end if;
 
-  if pg_get_serial_sequence('dflow.properties_and_characters', 'id')
-       <> 'dflow.properties_and_characters_id_seq' then
+  if (
+    select pg_get_expr(d.adbin, d.adrelid)
+    from pg_attrdef d
+    join pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum
+    where d.adrelid = 'dflow.properties_and_characters'::regclass and a.attname = 'id'
+  ) is distinct from 'nextval(''dflow.properties_and_characters_id_seq''::regclass)' then
     raise exception 'properties_and_characters.id is not backed by its expected sequence';
   end if;
 
