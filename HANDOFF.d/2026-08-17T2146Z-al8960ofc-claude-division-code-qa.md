@@ -9,8 +9,9 @@ owner: claude/division-code-qa (session ended; blocked on Albert's division-2 ru
 - **Written:** 2026-08-17T2146Z
 - **Machine / agent:** al8960ofc / claude
 - **Worktree:** `C:\repos\shared-db-worktrees\division-code-mapping-qa-757b4a`
-- **Status:** OPEN — documentation complete and merged; **no database change made or
-  pending**; three actions are ready to build, four are blocked, one blocker is the owner's.
+- **Status:** BLOCKED (see frontmatter) — documentation complete and merged; **no database
+  change made or pending**; three actions are ready to build, four are blocked, and the
+  blocker that matters is the owner's decision in §5.
 - **Owner of the open item:** Albert Hazan (a decision, not a task)
 - **Contact for the rest:** Uma (DesignFlow developer) — nothing outstanding from him
 
