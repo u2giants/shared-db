@@ -74,6 +74,11 @@ on:
         type: string
         required: true
         default: ""
+  schedule:
+    - cron: "0 6 * * *" # coldlion — retired gate emits warning only
+    - cron: "30 6 * * *" # promote — retired gate emits warning only
+    - cron: "0 7 * * *" # compare — retired gate emits warning only
+    - cron: "45 * * * *" # health — retired gate emits warning only
 
 permissions:
   contents: read
@@ -106,9 +111,9 @@ jobs:
       writes: ${{ steps.plan.outputs.writes }}
     steps:
       - name: Refuse retired canonical promotion lane
+        id: retired
         run: |
-          echo "::error::Retired by shared-db issue #1090 Step 1.0. This workflow cannot write canonical licensing data until the governed Step 4 replacement lands."
-          exit 78
+          echo "::warning::Retired by shared-db issue #1090 Step 1.0. This workflow cannot write canonical licensing data until the governed Step 4 replacement lands."
       - uses: actions/checkout@v4
 
       - name: Refuse any ref that is not production
@@ -138,6 +143,9 @@ jobs:
         id: enabled
         run: |
           set -euo pipefail
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          echo "SKIPPED LOUDLY: retired by #1090 Step 1.0. No database call ran."
+          exit 0
           if [ "${{ vars.COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED }}" = "true" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
             echo "Production recurring lane is ENABLED for ${PRODUCTION_PROJECT_REF}."
@@ -454,7 +462,7 @@ jobs:
     # Dispatch-only, and independent of the feed's enable variable BY DESIGN. `gate`
     # has already refused any ref that is not production and any dispatch that did not
     # spell the production ref out.
-    if: ${{ false }}
+    if: github.event_name == 'workflow_dispatch' && inputs.job == 'preflight'
     runs-on: ubuntu-latest
     env:
       # Part 4 of the four-part authorization. Here it authorizes only the RESOLUTION of

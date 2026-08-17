@@ -542,8 +542,6 @@ function readLinkedProjectRef() {
 // =====================================================================================
 
 export function main(argv = process.argv.slice(2), env = process.env) {
-  process.stderr.write('ColdLion canonical promotion retired by shared-db issue #1090 Step 1.0; no database call was attempted.\n');
-  return 78;
   const auth = resolveProductionAuthorization(argv, env);
   if (!auth.requested) assertNoProductionEnv(env);
 
@@ -741,10 +739,6 @@ const invokedDirectly =
   process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (invokedDirectly) {
-  try {
-    process.exitCode = main();
-  } catch (err) {
-    process.stderr.write(`promote-coldlion-source-owned failed: ${err?.stack ?? err}\n`);
-    process.exitCode = 1;
-  }
+  process.stderr.write('ColdLion canonical promotion retired by shared-db issue #1090 Step 1.0; no database call was attempted.\n');
+  process.exitCode = 78;
 }

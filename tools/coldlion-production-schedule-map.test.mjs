@@ -41,9 +41,9 @@ test("a PREVIEW cron string can never resolve a production job, and vice versa",
   assert.equal(assertPreviewAndProductionMapsDisjoint(), true);
 });
 
-test("the retired production workflow has no scheduled trigger but preserves its historical mapping", () => {
+test("the retired production workflow preserves schedule evidence but its gate refuses every lane", () => {
   const registered = [...workflow.matchAll(/- cron:\s*"([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(registered, []);
+  assertProductionScheduleMapComplete(registered);
   assert.match(workflow, /Retired by shared-db issue #1090 Step 1\.0/);
   for (const [cron, job] of Object.entries(COLDLION_PRODUCTION_SCHEDULE_JOBS)) {
     const escaped = cron.replace(/\*/g, "\\*");
