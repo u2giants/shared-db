@@ -75,10 +75,10 @@ on:
         required: true
         default: ""
   schedule:
-    - cron: "0 6 * * *" # coldlion  — daily full snapshot
-    - cron: "30 6 * * *" # promote   — approved source-owned promotion
-    - cron: "0 7 * * *" # compare   — daily comparison
-    - cron: "45 * * * *" # health    — hourly
+    - cron: "0 6 * * *" # coldlion — retired gate emits warning only
+    - cron: "30 6 * * *" # promote — retired gate emits warning only
+    - cron: "0 7 * * *" # compare — retired gate emits warning only
+    - cron: "45 * * * *" # health — retired gate emits warning only
 
 permissions:
   contents: read
@@ -110,6 +110,10 @@ jobs:
       job: ${{ steps.plan.outputs.job }}
       writes: ${{ steps.plan.outputs.writes }}
     steps:
+      - name: Refuse retired canonical promotion lane
+        id: retired
+        run: |
+          echo "::warning::Retired by shared-db issue #1090 Step 1.0. This workflow cannot write canonical licensing data until the governed Step 4 replacement lands."
       - uses: actions/checkout@v4
 
       - name: Refuse any ref that is not production
@@ -139,6 +143,9 @@ jobs:
         id: enabled
         run: |
           set -euo pipefail
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          echo "SKIPPED LOUDLY: retired by #1090 Step 1.0. No database call ran."
+          exit 0
           if [ "${{ vars.COLDLION_LICENSOR_PROPERTY_PRODUCTION_ENABLED }}" = "true" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
             echo "Production recurring lane is ENABLED for ${PRODUCTION_PROJECT_REF}."

@@ -8,10 +8,15 @@
 
 # AGENTS.md — cross-app coordination playbook
 
-## Active implementation plan
+## Historical item merchandise-group classification
+
+Before interpreting `full_item_master.csv`, changing item-description parsing, or reporting historical MG match counts, read [`docs/item-description-mg-classification-process.md`](docs/item-description-mg-classification-process.md). The active remediation plan is [`plan_item_description_mg_taxonomy_repair.md`](plan_item_description_mg_taxonomy_repair.md); follow its STATUS table and do not recreate the unsafe provisional/fuzzy method. The permanent rule is: parse every description into product type, size, licensor, property, and artwork; build independent post-May-13 maps for MG01, MG01+MG02, and MG01+MG02+MG03; then match old product types from three levels to two to one. A failed full-key match is never an MG01 failure.
+
+## Active contracts and implementation plans
 
 - PopDAM OrderList linked to Master Data: [`plan_popdam_order_list.md`](plan_popdam_order_list.md). Read its STATUS table first. Do not re-derive or re-plan completed steps.
-- **Master-data destination (read before proposing any licensor/property/character/asset/style-guide change):** [`docs/core-master-data-consolidation-aim.md`](docs/core-master-data-consolidation-aim.md). Owner ruling 2026-08-13 — consolidated portal scrapes land in `core.property` / `core.character` / `core.style_guide` / canonical asset; ColdLion supplies only the operational subset and is mapped onto those rows (automated, then manual); canonical properties absent from ColdLion go `inactive`. The licensor -> property edge stays a single foreign key, never a junction table. The mapping screen lives in DB Data Admin.
+- **Settled licensing Master Data architecture (read before any Licensor, Property, Character, Style Guide, Asset, or Franchise work):** [`docs/core-master-data-consolidation-aim.md`](docs/core-master-data-consolidation-aim.md). Owner ruling 2026-08-16: authorized licensor scrapes are canonical for Property spelling, Property ownership, Characters, Style Guides, Asset metadata, Franchises, and direct source-published relationships. ColdLion decides Property Active/Inactive only. New scrape Properties and reviewed ColdLion create-new rows start Potential; a ColdLion-only proposal needs Licensing confirmation of name and owning Licensor before creation, then guarded membership may make it Active. The one stale DesignFlow pull has no authority. Authorized licensor scrapes run weekly. This is a central architecture contract, not an issue or proposal.
+- **Licensing Master Data implementation:** [`plan_licensing_master_data_implementation.md`](plan_licensing_master_data_implementation.md). Read its STATUS table first and start at the named fresh-session step. It supersedes conflicting execution assumptions in older Character/Style Guide and ColdLion plans without deleting their historical evidence.
 - OrderList source contract: [`docs/app-migration-notes/popdam-order-list.md`](docs/app-migration-notes/popdam-order-list.md), with formula detail in [`docs/app-migration-notes/popdam-order-list-formula-audit-20260807.md`](docs/app-migration-notes/popdam-order-list-formula-audit-20260807.md). Owner ruling: Google OrderList and future Coldlion rows are the same orders; `plm.item` is the ultimate item list. One canonical order/line must retain separate Google and Coldlion source refs.
 
 This is the operating contract for **every AI session working on any app that
@@ -83,10 +88,13 @@ AI sessions from breaking each other through the one database they all depend on
 >
 > **Never guess the table. Ask:**
 >
->     select * from api.source_capture_inventory order by source_system, row_count desc;
+>     select * from api.source_capture_inventory order by source_system, retained_row_count desc;
 >
-> Exact live counts for every `plm` landing table, grouped by source system, built
-> from the live catalog so a new scrape's tables appear with no maintenance. Its
+> The view separates retained evidence from current complete-capture coverage.
+> `row_count` remains a compatibility alias for `retained_row_count`; neither is a
+> current-coverage number. Use `latest_complete_row_count` with `count_basis`,
+> `latest_complete_status`, and `count_note` when judging source coverage. A NULL
+> latest-complete count means the exact count cannot be derived, not zero. Its
 > `carries_resolution` column describes a table's shape and never indicates whether
 > a scrape ran. Same discipline as the migration-ledger rule above: check the
 > authoritative inventory before reporting an absence.
@@ -658,6 +666,111 @@ four rules below are non-negotiable for any database change.
    ends; the lease only controls who occupies an author lane.
 
    Audit lanes with `node scripts/manage-migration-author-lanes.mjs --audit`.
+   Audit and refill the three dynamic queues with
+   `node scripts/manage-migration-author-lanes.mjs --queue-audit`. Every open
+   `db-work` issue must contain one authoritative block:
+
+   ````text
+   ```db-work-scope
+   status: ready
+   work_type: structural
+   route: shared-db-orchestrator
+   priority: 100
+   depends_on:
+   objects:
+     - table schema.name
+   ````
+   ```
+
+   Status, work type, and route are independent. Allowed statuses are `ready`,
+   `blocked`, and `owner-decision`. Allowed work types are `structural`,
+   `curated-master-data`, `application-data`, `source-data`, `repo-maintenance`,
+   `documentation`, and `security-settings`. There is no default route. Only
+   `ready + structural + shared-db-orchestrator` can enter a migration-author
+   lane, and it must name every exact database object. Non-structural work must
+   not claim database objects.
+
+   Outside-sourced writes into curated `core.*` Master Data use
+   `work_type: curated-master-data` and
+   `route: curated-master-data-governance`. This preserves §6.4 governance but
+   never grants a migration-author lane. Source-data review such as NBCU rights
+   classification uses `work_type: source-data` and
+   `route: source-data-session`, even while `status: owner-decision`. Changing
+   only the status after Albert answers can never change its owner route.
+
+   Exact object overlap forms a serial queue; unrelated object
+   groups fill up to three author lanes. When a claim releases, rerun the queue
+   audit and dispatch every reported `REFILL REQUIRED NOW` issue in the same
+   turn. Never wait for Albert to ask or approve routine dispatch. Ask him only
+   for a genuine business ruling or material production risk. Recompute after
+   every merge. Preview and merge stay globally serialized.
+
+   An empty author lane is valid only when the audit has classified every open
+   `db-work` issue and reports no eligible issue for it. Unclassified, malformed,
+   blocked, owner-decision, and every non-structural work type never consume a
+   lane; unclassified or malformed issues also prevent a claim that no work
+   exists. While an author waits for CI, review, preview, or merge, continue safe
+   local work or prepare the next queued issue without creating overlapping
+   migration files.
+
+   After an issue reaches an exact reviewed head, atomically assign its external
+   reviewer with:
+
+   ```bash
+   node scripts/manage-migration-author-lanes.mjs --assign-reviewer \
+     --issue <issue> --pr <pr> --head-sha <exact-head>
+   ```
+
+   For new assignments, the machine-independent cursor rotates Grok 4.6 → GLM
+   5.2 → Kimi K3 → repeat. Qwen 3.8 Max is paused until an explicit owner
+   instruction restores it. Historical Qwen assignments, failures, and
+   replacement evidence remain readable and must be recovered or replaced
+   through `scripts/manage-migration-author-lanes.mjs`, never hand-edited. Use
+   only the wrapper returned by the manager and its fixed model settings. Reuse
+   one named session for rebuttals. Require
+   a current exact-head re-read and `APPROVE` or `REVISE` with evidence. Verify
+   every claim independently. Relay disagreements with
+   `templates/delegation/debate-turn.md`, stopping at agreement or the initial
+   review plus three rebuttals. If material disagreement remains, stop the merge
+   and ask Albert one concise decision. Never send secrets or licensed rows.
+
+   **Reviewer transport failures never pause the queue.** Run reviewer wrappers
+   from the full-access orchestrator process, not from a delegated sandbox. Before
+   starting, prove the selected wrapper can read its own authentication file and
+   create its session directory. A permission denial, missing authentication,
+   provider quota error, or wrapper timeout with no verdict is a transport failure,
+   not a review. Stop that process, record `verdict=none` and `artifact=none`, and
+   immediately use `--replace-failed-reviewer` with the matching terminal failure
+   code. Continue with the manager-selected replacement from the full-access
+   orchestrator in the same turn. Never leave an author, preview, merge, or
+   production lane waiting on a reviewer process that cannot authenticate or
+   write its own state. A real `REVISE` verdict is not a transport failure and
+   must never be replaced.
+
+   Append objective reviewer evidence through an `ai-devops` PR to
+   `models_comparison_grok_kim_glm.md`: issue/PR, requested and proven model,
+   verdict, confirmed/disproved findings, defects, false positives, policy/tool
+   adherence, continuity, latency, turns, and only metrics the wrapper reports.
+   Kimi headless metrics and returned model are unavailable; never invent them.
+   After review approval, green checks, preview proof, and guarded merge, the
+   production workflow runs `scripts/production_business_risk_gate.py`. It
+   derives the result from the exact merged PR and required checks, immutable
+   review artifact, pinned preview-apply artifact and ledger, current-main SQL,
+   and the activation record. Caller-written booleans or prose are never
+   evidence. Automatically promote only when those governed records prove: no
+   existing data is deleted or permanently rewritten, no expected user downtime,
+   no material access change, a tested credible recovery path, and no unresolved
+   material objection. Ambiguous SQL stops for Albert. Ask him one plain
+   business-risk question. Never ask him to approve migration numbers, project
+   identifiers, SQL, or other technical details. This policy cannot authorize
+   its own rollout. `config/production-risk-policy-activation.json` remains
+   inactive, and the older exact-approval rule remains binding, until #1015 is
+   independently reviewed, both PRs are merged, the installed skill hash matches
+   canonical ai-devops, and the forward-test proof hash is recorded. The gate
+   verifies those facts again before it can permit automatic promotion.
+   Record Qwen High as requested, but never override the wrapper's qualified
+   fixed configuration.
+
    Audit reports malformed claims without hiding the healthy ones; allocation
    still refuses while any malformed claim exists. **Expiry never unlocks an
    object.** Renew active work or explicitly release a claim after proving its
@@ -1253,7 +1366,7 @@ ColdLion mirror — a previous session got this wrong).
 **ColdLion purchase/sales history (`prodHistory` / `orderHistory`) — read the shape doc before
 writing any loader.** These two endpoints (new to us 2026-08-14) carry order history for buying
 and selling. Their payload is documented from live probing in
-[`docs/coldlion-history-endpoints-shape.md`](docs/coldlion-history-endpoints-shape.md). Three
+[`docs/coldlion-history-endpoints-shape.md`](docs/coldlion-history-endpoints-shape.md). Four
 traps that will silently corrupt a load if you skip it:
 
 - **Hard 7-day window cap (since 2026-08-17).** `fromDate`–`toDate` must be **within 7 days,
@@ -1287,7 +1400,7 @@ For the active ColdLion Licensor/Property source cutover, read the STATUS table 
 before re-deriving or re-planning anything.
 
 **Step 7A (the real recurring feed) is BUILT and preview-proven as of 2026-07-29; the next action
-is Step 8, Albert's production approval.** Two rules that catch sessions out:
+is Step 8, the production business-risk gate in §4.** Two rules that catch sessions out:
 
 - **A one-time 542-link run is NOT the feed switch.** The recurring lane is
   `.github/workflows/coldlion-licensor-property-production.yml` (production-only, currently
@@ -1327,15 +1440,16 @@ must not overlap ColdLion Phase 7.
 
 **If your work touches characters, style guides, or royalty rates, read
 [`docs/style-guides-characters-and-royalties.md`](docs/style-guides-characters-and-royalties.md)
-FIRST.** It documents a layer the merch-group doc does not cover. There are **two axes, and chaining
-them is the classic bug**: ownership is linear — **Licensor → Property → Character** (a
-character has exactly one property) — while style is many-to-many — **a style guide holds many
+FIRST.** Read its historical measurements under the controlling 2026-08-16 architecture in
+[`docs/core-master-data-consolidation-aim.md`](docs/core-master-data-consolidation-aim.md).
+There are **two axes, and chaining them is the classic bug**: Licensor-to-Property is one-to-many;
+Property-to-Character is many-to-many; and style is many-to-many — **a style guide holds many
 characters and a character appears in many style guides**. A style guide is *not* a level
 between property and character. The legacy table
 `dflow.properties_and_characters` is misleadingly named — its `type='PROPERTY'` rows are
 **style guides**, not properties, and its `type='CHARACTER'` rows are character *appearances*
 (one per style guide), not distinct characters — those 9,622 rows are the **style-guide ↔
-character bridge**, not a character list. Batman is one character, under one property, appearing
+character bridge**, not a canonical character list. Batman is one character appearing
 in 15 style guides, each with its own external id. That doc also records the Marvel-only +2% talent-likeness
 royalty rule and the fact that likeness attaches to a **style guide asset (file)**, never to a
 character. Two AI sessions have already corrupted their understanding by reading those column
@@ -1443,9 +1557,15 @@ unset."** If the matching keys disagree — if one lookup key finds a row that a
 not — that is a **possible match, not an absence**: quarantine it as evidence for a human, and
 never resolve it by inserting.
 
-**What this means in practice TODAY.** No per-field curation record exists in this database, and
-no importer can currently tell curated from untouched. So the operative rule right now is not
-advisory: **an import writes a curated field only on INSERT of a genuinely new row, and writes no
+**Durable source-resolution decisions.** `plm.source_resolution` is the capture-independent
+home for a human decision that a Paramount or NBCU source identity matches a canonical property,
+character, style guide, or asset. Source loaders never write it and must leave the deprecated
+resolution columns on capture rows unresolved and null. Human tools use
+`plm.set_source_resolution()`; a later capture cannot bypass that decision.
+
+**What this means in practice TODAY.** The durable resolution record above does not identify
+which ordinary fields on a matched `core.*` row were curated. So the operative rule remains
+non-advisory: **an import writes a curated field only on INSERT of a genuinely new row, and writes no
 curated field at all on a matched row.** Gap-filling a matched row becomes permissible only once
 "deliberately set" is recorded per field and the importer actually consults that record.
 
@@ -1571,6 +1691,37 @@ read §6.4 as reaching an application's own rows in its own tables; it does not,
 (`plm.import_master_data` still force-sets curated status on production; `20260802170000` is merged
 but **not applied there**), and the compliant reference implementations all stand exactly as written
 above. This subsection adds addressees; it removes nothing.
+
+#### 6.4-D OWNER RULING — authorized licensor scrape consolidation is a governed authority path, not an ad-hoc load (Albert Hazan, 2026-08-16)
+
+> "What comes in from the licensor scrape ... is canonical as to which licensor a property belongs
+> to and how the property is spelled ... the scrapes are canonical (and have to be run weekly)."
+> — Albert Hazan, 2026-08-16
+
+**This is the narrow exception that §6.4-C requires an owner to name.** For an authorized licensor
+portal that POP has implemented, the portal is the approved authority for its scoped Licensor,
+Property spelling and ownership, Characters, Style Guides, Asset metadata, Franchises, and direct
+source-published relationships. A future guarded consolidator may therefore update those specific
+facts on a matched canonical row. That is intentional authority application, not gap-filling.
+
+The exception applies only when all of these are true:
+
+1. the full `source_system` identity is explicitly authorized and mapped to its Licensor scope;
+2. the capture is complete, validated, and the exact capture identity is recorded;
+3. durable source resolution identifies the matched canonical row without ambiguity;
+4. a dry-run plan is reviewed and its exact hash is required by the apply;
+5. every changed field is inside the source-authority matrix in
+   [`docs/core-master-data-consolidation-aim.md`](docs/core-master-data-consolidation-aim.md);
+6. the change and the prior value are audited and reversible;
+7. Property status is untouched, because only guarded ColdLion membership controls Active/Inactive.
+
+This does **not** exempt a spreadsheet dump, pasted rows, a one-off API pull, direct SQL, or an AI
+session that decides to imitate the future consolidator. Those remain fully bound by §6.4-C and
+write nothing on matched rows. Until the guarded consolidator in
+[`plan_licensing_master_data_implementation.md`](plan_licensing_master_data_implementation.md) is
+implemented, preview-proven, and applied, the existing matched-row abstention remains the only safe
+behavior for manual sessions. The exception is a contract for that named controlled path, not a
+permission shortcut.
 
 ### 6.5 OWNER RULING — PR #408 is HELD and ships as one production change with the FR removal work (Albert Hazan, 2026-08-03)
 
@@ -1727,8 +1878,10 @@ never by rewriting history.
   hand-curated link requires, so the hand-curation ruling and this section point the same way.
   (Recorded in the
   orchestrator intake as ruling 4.)
-- **`dflow.*` is being retired; `core.*` becomes the source of truth for all applications**, fed
-  from ColdLion as the ultimate upstream. (Recorded in the orchestrator intake as ruling 6.)
+- **`dflow.*` is being retired; `core.*` becomes the source of truth for all applications.**
+  Under the controlling 2026-08-16 architecture, authorized licensor scrapes supply canonical
+  identity, names, ownership and source-published relationships; ColdLion supplies only Property
+  Active/Inactive membership. The stale DesignFlow pull supplies neither.
   **§6.6 is the direct consequence of this.** If `core.*` serves every app, the surface on which
   humans curate `core.*` must not be locked inside one application — which is precisely Albert's
   "it should not be only in 1 particular application". Building further curation into DesignFlow
@@ -1739,20 +1892,11 @@ never by rewriting history.
   matched row** (§6.4), so until `20260802170000` is applied to production, parentage curated
   anywhere — DB Data Admin included — is not durable there.
 
-**The one question this section MUST answer: ColdLion says one parent, a human curated another —
-who wins?** §6.3 makes ColdLion ERP data canonical; §6.4 makes curated data outrank imported data.
-For **licensor→property parentage specifically, the curated value wins**, and this is not an agent's
-judgement call — it follows from §6.1's rule 2, verified against the source: **ColdLion has no
-licensor→property relationship at all.** It cannot state a parent, so there is nothing for §6.3 to
-make canonical. Any parent that appears to come "from ColdLion" is in fact something a POP system
-inferred — from `mgTypeCode`, `mg_code`, co-occurrence, or a prior guess — and inference is exactly
-what the hand-curation ruling bans.
-
-**This carves out ONLY the parent edge. §6.3 is otherwise untouched and still wins:** when ColdLion
-inactivates or removes a licensor or property, **follow it**. Names, codes, and lifecycle status
-remain ColdLion's. If ColdLion ever begins transmitting a genuine licensor→property relationship,
-this carve-out stops being self-evident and becomes an owner question — escalate it, do not decide
-it.
+**Controlling answer, 2026-08-16:** the applicable authorized licensor scrape wins for
+Property spelling and Licensor ownership. ColdLion has no parent authority and decides only
+whether a Property is Active or Inactive. DesignFlow has no authority. See the central licensing
+architecture document; older ColdLion-canonical wording in this section is historical and must
+not be used to design or load licensing Master Data.
 
 ### 6.7 OWNER RULING — branch protection on `main` is ON, and CI guards are no longer advisory (Albert Hazan, 2026-08-04)
 
@@ -1939,6 +2083,12 @@ it as an AI's preference, and do not reorder it.**
    recommendation and it is **already accepted** — it is not open for re-litigation. Marking an
    unmatched code `inactive` silently hides what may be a real, live property; `potential` says
    truthfully that it exists and has not yet been reconciled.
+
+**Relationship to the 2026-08-16 licensing architecture.** The admission moment still follows rule
+3: a reviewed create-new row starts `potential`, never `inactive` or `active` by default. After its
+ColdLion identity is durably mapped and a complete guarded membership cycle proves it is present,
+the newer settled rule permits the separate status function to make it `active`. Thus "Potential at
+admission" remains in force; it does not mean "stay Potential after successful mapping forever."
 
 **A count caveat, stated so nobody launders it into a fact.** The figure was **66** at the
 2026-07-31 handover and is recorded as **33** now. That reduction has **not** been independently
