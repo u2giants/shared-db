@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       main_sha: {description: "Exact current origin/main SHA", required: true, type: string}
+      apply_main_sha: {description: "Exact main SHA used by the historical production apply", required: true, type: string}
       ordered_allowlist: {description: "Exact applied migration versions", required: true, type: string}
       apply_run_id: {description: "Production apply run whose final catalog check failed", required: true, type: string}
       apply_artifact_digest: {description: "Pinned production apply evidence artifact digest", required: true, type: string}
@@ -30,17 +31,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           APPLY_RUN_ID: ${{ inputs.apply_run_id }}
           APPLY_ARTIFACT_DIGEST: ${{ inputs.apply_artifact_digest }}
-          MAIN_SHA: ${{ inputs.main_sha }}
+          APPLY_MAIN_SHA: ${{ inputs.apply_main_sha }}
         run: |
           set -euo pipefail
           run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$APPLY_RUN_ID")"
           test "$(jq -r .event <<<"$run")" = workflow_dispatch
           test "$(jq -r .status <<<"$run")" = completed
           test "$(jq -r .conclusion <<<"$run")" = failure
-          test "$(jq -r .head_sha <<<"$run")" = "$MAIN_SHA"
+          test "$(jq -r .head_sha <<<"$run")" = "$APPLY_MAIN_SHA"
           test "$(jq -r .path <<<"$run")" = .github/workflows/shared-supabase-migrations.yml
           artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$APPLY_RUN_ID/artifacts?per_page=100")"
-          name="production-migration-apply-$MAIN_SHA"
+          name="production-migration-apply-$APPLY_MAIN_SHA"
           count="$(jq --arg n "$name" '[.artifacts[] | select(.name == $n)] | length' <<<"$artifacts")"
           test "$count" = 1
           digest="$(jq -r --arg n "$name" '.artifacts[] | select(.name == $n) | .digest' <<<"$artifacts")"
