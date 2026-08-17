@@ -448,8 +448,15 @@ jobs:
           for f in "${FILES[@]}"; do
             base="$(basename "$f")"
             log="$RUNNER_TEMP/results/$base.log"
+            run_file="$f"
+            if [ "$base" != "licensing_write_authority_guard_contracts.sql" ] && \
+               [ "$base" != "clickup_task_import_contracts.sql" ] && \
+               [ "$base" != "coldlion_promotion_serialization_lock.sql" ]; then
+              run_file="$RUNNER_TEMP/results/$base.wrapper.sql"
+              printf 'begin;\nselect public.ci_authorize_licensing_contract_test();\n\\ir %s\nrollback;\n' "$GITHUB_WORKSPACE/$f" > "$run_file"
+            fi
             echo "::group::$base"
-            if psql -v ON_ERROR_STOP=1 --no-psqlrc -f "$f" > "$log" 2>&1; then
+            if psql -v ON_ERROR_STOP=1 --no-psqlrc -f "$run_file" > "$log" 2>&1; then
               rc=0
             else
               rc=$?
