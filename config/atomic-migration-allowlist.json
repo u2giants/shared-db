@@ -2,7 +2,7 @@
   "schema_version": 1,
   "migrations": {
     "20260816110750": {
-      "sha256": "34ffa0ae237e311f3863511fb62e8e4fd19e0f35a6dc242a5d9ebb733e8358e5",
+      "sha256": "0b178fab222aec93b0c06cd676c83a6d4cdfdeac62a0af68184e6ed24c08eca2",
       "targets": [
         "preview",
         "production"

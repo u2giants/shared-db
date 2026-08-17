@@ -66,7 +66,10 @@ class SafeForwardTests(unittest.TestCase):
         policy = json.loads(ATOMIC_POLICY.read_text(encoding="utf-8"))
         entry = policy["migrations"]["20260816110750"]
         self.assertEqual(entry["targets"], ["preview", "production"])
-        self.assertEqual(entry["sha256"], hashlib.sha256(SAFE.read_bytes()).hexdigest())
+        self.assertEqual(
+            entry["sha256"],
+            hashlib.sha256(atomic.canonical_migration_bytes(SAFE)).hexdigest(),
+        )
 
         for target in entry["targets"]:
             with self.subTest(target=target):
