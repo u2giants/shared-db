@@ -17,6 +17,9 @@ class Tests(unittest.TestCase):
         rows[0]['statements']=['different']
         with patch.object(M,'ledger_rows',return_value=rows):
             with self.assertRaises(M.Refusal): M.reconcile('url',{},args,['select 1'])
+        duplicate=[{'version':'20260817150944','statements':['select 1']},{'version':'20260817150944','statements':['select 1']},{'version':'20260817124545','statements':['select 1']}]
+        with patch.object(M,'ledger_rows',return_value=duplicate):
+            with self.assertRaises(M.Refusal): M.reconcile('url',{},args,['select 1'])
     def test_apply_is_transactional_exact_delete_and_readback(self):
         args=type('A',(),{'orphan_version':'20260817150944','replacement_version':'20260817124545','mode':'apply'})()
         before=[{'version':'20260817150944','statements':['select 1']},{'version':'20260817124545','statements':['select 1']}]
@@ -28,5 +31,16 @@ class Tests(unittest.TestCase):
             self.assertIn("delete from supabase_migrations.schema_migrations where version='20260817150944'",sql)
             self.assertNotIn("delete from supabase_migrations.schema_migrations where version='20260817124545'",sql)
             self.assertIn('commit;',sql)
+    def test_database_failure_stops_before_post_commit_readback(self):
+        args=type('A',(),{'orphan_version':'20260817150944','replacement_version':'20260817124545','mode':'apply'})()
+        before=[{'version':'20260817150944','statements':['select 1']},{'version':'20260817124545','statements':['select 1']}]
+        with patch.object(M,'ledger_rows',return_value=before) as reads, patch.object(M,'psql',side_effect=RuntimeError('transaction rolled back')):
+            with self.assertRaises(RuntimeError): M.reconcile('url',{},args,['select 1'])
+            self.assertEqual(reads.call_count,1)
+    def test_reconciliation_is_preview_only(self):
+        self.assertEqual(M.version('20260817124545'),'20260817124545')
+        source=P.read_text(encoding='utf-8')
+        self.assertIn('args.expected_project_ref != "rjyboqwcdzcocqgmsyel"',source)
+        self.assertNotIn('SUPABASE_DB_PASSWORD_PRODUCTION',source)
 
 if __name__=='__main__': unittest.main()

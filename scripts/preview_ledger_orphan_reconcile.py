@@ -45,21 +45,31 @@ def validate_governance(args, local_statements: list[str]) -> dict:
     if list((repo / "supabase/migrations").glob(f"{args.orphan_version}_*.sql")):
         raise Refusal("orphan version still exists on current main")
 
-    issue, claim, pr, run, artifact = (read_json(p) for p in (args.issue_json, args.claim_json, args.pr_json, args.run_json, args.artifact_json))
-    if issue.get("number") != args.issue or issue.get("state") != "open":
+    if (args.issue, args.claim, args.source_pr) != (1090, 1100, 1108):
+        raise Refusal("this reconciliation is bound only to issue #1090, claim #1100, and PR #1108")
+    issue, claim, pr, pr_files, run, artifact = (read_json(p) for p in (args.issue_json, args.claim_json, args.pr_json, args.pr_files_json, args.run_json, args.artifact_json))
+    if issue.get("number") != 1090 or issue.get("state") != "open":
         raise Refusal("work issue is not the exact open issue")
-    if claim.get("number") != args.claim or claim.get("state") != "open" or f"#{args.issue}" not in claim.get("title", ""):
+    if claim.get("number") != 1100 or claim.get("state") != "open" or "#1090" not in claim.get("title", ""):
         raise Refusal("claim is not the exact open issue claim")
     if not re.search(rf"^version: {re.escape(args.replacement_version)}$", claim.get("body", ""), re.M):
         raise Refusal("claim does not bind the replacement version")
-    if pr.get("number") != args.source_pr or not pr.get("merged") or not pr.get("merge_commit_sha"):
+    if pr.get("number") != 1108 or not pr.get("merged") or not pr.get("merge_commit_sha"):
         raise Refusal("source pull request is not the exact merged PR")
-    if git(repo, "merge-base", "--is-ancestor", pr["merge_commit_sha"], args.main_sha) != "":
-        pass
+    git(repo, "merge-base", "--is-ancestor", pr["merge_commit_sha"], args.main_sha)
+    expected_path = f"supabase/migrations/{args.replacement_version}_{args.migration.name.split('_', 1)[1]}"
+    if not isinstance(pr_files, list) or [row.get("filename") for row in pr_files].count(expected_path) != 1:
+        raise Refusal("source PR does not uniquely author the replacement migration")
+    if any(str(row.get("filename", "")).startswith(f"supabase/migrations/{args.orphan_version}_") for row in pr_files):
+        raise Refusal("source PR still exposes the orphan version")
     if run.get("id") != args.preview_run_id or run.get("status") != "completed" or run.get("conclusion") != "success":
         raise Refusal("preview run is not the exact successful run")
-    if artifact.get("workflow_run", {}).get("id") != args.preview_run_id or artifact.get("digest") != args.preview_artifact_digest or artifact.get("expired"):
+    if run.get("event") != "workflow_dispatch" or not str(run.get("path", "")).startswith(".github/workflows/shared-supabase-migrations.yml"):
+        raise Refusal("preview run is not the governed shared migration workflow")
+    if artifact.get("id") != args.preview_artifact_id or artifact.get("workflow_run", {}).get("id") != args.preview_run_id or artifact.get("digest") != args.preview_artifact_digest or artifact.get("expired"):
         raise Refusal("preview artifact identity or digest mismatch")
+    if artifact.get("name") != f"preview-migration-apply-{run.get('head_sha')}":
+        raise Refusal("preview artifact is not the exact run-head apply evidence")
 
     before_path = args.preview_evidence_dir / "preview-ledger-before.txt"
     after_path = args.preview_evidence_dir / "preview-ledger-after.txt"
@@ -88,7 +98,7 @@ def ledger_rows(url: str, env: dict[str, str], old: str, replacement: str) -> li
 def reconcile(url: str, env: dict[str, str], args, expected: list[str]) -> tuple[list[dict], list[dict]]:
     before = ledger_rows(url, env, args.orphan_version, args.replacement_version)
     by_version = {str(row.get("version")): row for row in before}
-    if set(by_version) != {args.orphan_version, args.replacement_version}:
+    if len(before) != 2 or set(by_version) != {args.orphan_version, args.replacement_version}:
         raise Refusal("ledger must contain exactly the orphan and replacement rows")
     if by_version[args.orphan_version].get("statements") != expected or by_version[args.replacement_version].get("statements") != expected:
         raise Refusal("orphan and replacement statements are not both exact local migration bytes")
@@ -131,8 +141,8 @@ def parse_args():
     p.add_argument("--expected-project-ref", required=True); p.add_argument("--main-sha", required=True)
     p.add_argument("--orphan-version", type=version, required=True); p.add_argument("--replacement-version", type=version, required=True)
     p.add_argument("--issue", type=int, required=True); p.add_argument("--claim", type=int, required=True); p.add_argument("--source-pr", type=int, required=True)
-    p.add_argument("--preview-run-id", type=int, required=True); p.add_argument("--preview-artifact-digest", required=True)
-    p.add_argument("--issue-json", type=Path, required=True); p.add_argument("--claim-json", type=Path, required=True); p.add_argument("--pr-json", type=Path, required=True)
+    p.add_argument("--preview-run-id", type=int, required=True); p.add_argument("--preview-artifact-id", type=int, required=True); p.add_argument("--preview-artifact-digest", required=True)
+    p.add_argument("--issue-json", type=Path, required=True); p.add_argument("--claim-json", type=Path, required=True); p.add_argument("--pr-json", type=Path, required=True); p.add_argument("--pr-files-json", type=Path, required=True)
     p.add_argument("--run-json", type=Path, required=True); p.add_argument("--artifact-json", type=Path, required=True); p.add_argument("--preview-evidence-dir", type=Path, required=True)
     p.add_argument("--evidence-out", type=Path, required=True)
     return p.parse_args()
@@ -147,7 +157,7 @@ def main() -> int:
         governance = validate_governance(args, statements)
         url, env = linked_connection(args.linked_dir, args.expected_project_ref)
         before, after = reconcile(url, env, args, statements)
-        args.evidence_out.write_text(json.dumps({"schema":"shared-db-preview-ledger-orphan-reconciliation/v1","mode":args.mode,"project_ref":args.expected_project_ref,"main_sha":args.main_sha,"issue":args.issue,"claim":args.claim,"source_pr":args.source_pr,"orphan_version":args.orphan_version,"replacement_version":args.replacement_version,"preview_run_id":args.preview_run_id,"preview_artifact_digest":args.preview_artifact_digest,"governance":governance,"before":before,"after":after}, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+        args.evidence_out.write_text(json.dumps({"schema":"shared-db-preview-ledger-orphan-reconciliation/v1","mode":args.mode,"project_ref":args.expected_project_ref,"main_sha":args.main_sha,"issue":args.issue,"claim":args.claim,"source_pr":args.source_pr,"orphan_version":args.orphan_version,"replacement_version":args.replacement_version,"preview_run_id":args.preview_run_id,"preview_artifact_id":args.preview_artifact_id,"preview_artifact_digest":args.preview_artifact_digest,"governance":governance,"before":before,"after":after}, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
         print(f"PREVIEW LEDGER RECONCILIATION {args.mode.upper()} OK: removed={args.orphan_version if args.mode == 'apply' else 'none'} replacement={args.replacement_version}")
         return 0
     except (Refusal, RuntimeError, OSError, ValueError) as exc:
