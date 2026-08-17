@@ -44,6 +44,11 @@ jobs:
         with: {python-version: "3.12"}
       - uses: supabase/setup-cli@v1
         with: {version: 2.105.0}
+      - name: Install and prove PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          psql --version
       - name: Prove exact current main and preview-only intent
         env:
           MAIN_SHA: ${{ inputs.main_sha }}
