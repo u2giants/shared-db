@@ -10,7 +10,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from atomic_migration_apply import load_candidate, linked_connection, psql
+from atomic_migration_apply import TX_RE, linked_connection, psql, split_sql
 from production_migration_guard import parse_remote_versions
 
 
@@ -36,6 +36,18 @@ def git(repo: Path, *args: str) -> str:
     if result.returncode:
         raise Refusal("git evidence check failed")
     return result.stdout.strip()
+
+
+def load_replacement(directory: Path, replacement: str) -> tuple[Path, list[str]]:
+    matches = list(directory.glob(f"{replacement}_*.sql"))
+    if len(matches) != 1:
+        raise Refusal("replacement version must resolve to exactly one migration file")
+    raw = matches[0].read_text(encoding="utf-8")
+    statements = split_sql(raw)
+    controls = [statement for statement in statements if TX_RE.match(re.sub(r"(?s)^\s*(?:--[^\n]*\n|/\*.*?\*/\s*)*", "", statement))]
+    if not statements or controls:
+        raise Refusal("replacement migration is empty or contains transaction control")
+    return matches[0], statements
 
 
 def validate_governance(args, local_statements: list[str]) -> dict:
@@ -153,7 +165,7 @@ def main() -> int:
         args = parse_args()
         if args.orphan_version == args.replacement_version or args.expected_project_ref != "rjyboqwcdzcocqgmsyel":
             raise Refusal("reconciliation is preview-only and requires two different versions")
-        args.migration, _, _, statements = load_candidate(args.repo / "supabase/migrations", args.replacement_version, "preview")
+        args.migration, statements = load_replacement(args.repo / "supabase/migrations", args.replacement_version)
         governance = validate_governance(args, statements)
         url, env = linked_connection(args.linked_dir, args.expected_project_ref)
         before, after = reconcile(url, env, args, statements)

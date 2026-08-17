@@ -1,4 +1,4 @@
-import importlib.util, pathlib, sys, unittest
+import importlib.util, pathlib, sys, tempfile, unittest
 from unittest.mock import patch
 
 P=pathlib.Path(__file__).with_name('preview_ledger_orphan_reconcile.py'); sys.path.insert(0,str(P.parent))
@@ -9,6 +9,14 @@ class Tests(unittest.TestCase):
         self.assertEqual(M.version('20260817150944'),'20260817150944')
         for bad in ('', '123', '2026081715094x', '202608171509440'):
             with self.assertRaises(M.Refusal): M.version(bad)
+    def test_replacement_loader_is_unique_and_rejects_transaction_control(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=pathlib.Path(directory); migration=root/'20260817124545_safe.sql'; migration.write_text('select 1;\n',encoding='utf-8')
+            self.assertEqual(M.load_replacement(root,'20260817124545')[1],['select 1'])
+            migration.write_text('begin; select 1; commit;\n',encoding='utf-8')
+            with self.assertRaises(M.Refusal): M.load_replacement(root,'20260817124545')
+            migration.write_text('select 1;\n',encoding='utf-8'); (root/'20260817124545_duplicate.sql').write_text('select 2;\n',encoding='utf-8')
+            with self.assertRaises(M.Refusal): M.load_replacement(root,'20260817124545')
     def test_check_requires_exact_two_rows_and_statements(self):
         args=type('A',(),{'orphan_version':'20260817150944','replacement_version':'20260817124545','mode':'check'})()
         rows=[{'version':'20260817150944','statements':['select 1']},{'version':'20260817124545','statements':['select 1']}]
