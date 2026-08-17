@@ -631,7 +631,7 @@ function replaceLeaseExpiry(body, expiresAt) {
 }
 
 export function renewExpiredClaim(options, now = new Date(), io = githubIo) {
-  for(const key of ['claim','owner','branch','worktree','pr','headSha','leaseHours'])if(options[key]===undefined||options[key]===null||options[key]==='')throw new LaneError(`claim renewal requires ${key}`)
+  for(const key of ['claim','issue','owner','branch','worktree','pr','headSha','leaseHours'])if(options[key]===undefined||options[key]===null||options[key]==='')throw new LaneError(`claim renewal requires ${key}`)
   if(!Number.isFinite(options.leaseHours)||options.leaseHours<=0||options.leaseHours>24)throw new LaneError('renewal lease hours must be greater than 0 and no more than 24')
   const desiredExpiry=new Date(now.valueOf()+options.leaseHours*3600000)
   const requestId=options.requestId??randomUUID(),ownerSha=io.makeOwnerCommit(`db-coordination claim-lease-renewal ${requestId}`)
@@ -651,6 +651,10 @@ export function renewExpiredClaim(options, now = new Date(), io = githubIo) {
       throw new LaneError('claim has an active lease; refusing unrelated renewal')
     }
     if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError('permanent version reservation is unreadable')
+    const workIssue=io.getIssue(options.issue),scope=workIssue?.state==='open'?parseQueueScope(workIssue.body):null
+    if(!scope||scope.status!=='ready'||scope.workType!=='structural'||scope.route!=='shared-db-orchestrator')throw new LaneError('renewal issue must be one open ready structural shared-db work item')
+    const issueObjects=scope.objects.map(normalizeObject),claimObjects=lease.objects.map(normalizeObject)
+    if(issueObjects.length!==claimObjects.length||issueObjects.some((object)=>!claimObjects.includes(object)))throw new LaneError('renewal issue objects do not exactly match the permanent claim objects')
     const pr=io.getPr(options.pr)
     if(pr?.state!=='open'||pr.head?.ref!==options.branch||pr.head?.sha!==options.headSha)throw new LaneError('open pull request branch or exact head mismatch')
     const fileVersions=migrationVersions(io.getPrFiles(options.pr))
@@ -658,7 +662,7 @@ export function renewExpiredClaim(options, now = new Date(), io = githubIo) {
     const sources=io.prSources(), target=sources.filter((source)=>new RegExp(`^PR #${options.pr}(?:\\s|$)`).test(source.label))
     if(target.length!==1)throw new LaneError('pull request parser source is missing or ambiguous')
     if(target[0].versions?.length!==1||String(target[0].versions[0])!==lease.version)throw new LaneError('parsed pull request version does not match the permanent claim version')
-    const claimed=new Set(lease.objects.map(normalizeObject)),parsed=validateClaimObjects(target[0].objects??[])
+    const claimed=new Set(claimObjects),parsed=(target[0].objects??[]).length?validateClaimObjects(target[0].objects):[]
     const uncovered=parsed.filter((object)=>!claimed.has(object))
     if(uncovered.length)throw new LaneError(`claim does not cover parsed pull request objects: ${uncovered.join(', ')}`)
     const others=claims.filter((claim)=>String(claim.number)!==String(options.claim)),otherPrs=sources.filter((source)=>source!==target[0])
