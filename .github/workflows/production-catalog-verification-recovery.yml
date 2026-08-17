@@ -1,0 +1,98 @@
+name: Production Catalog Verification Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      main_sha: {description: "Exact current origin/main SHA", required: true, type: string}
+      ordered_allowlist: {description: "Exact applied migration versions", required: true, type: string}
+      apply_run_id: {description: "Production apply run whose final catalog check failed", required: true, type: string}
+      apply_artifact_digest: {description: "Pinned production apply evidence artifact digest", required: true, type: string}
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: "${{ inputs.main_sha }}", fetch-depth: 0}
+      - name: Prove exact current main
+        env: {MAIN_SHA: "${{ inputs.main_sha }}"}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$MAIN_SHA"
+          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+      - name: Bind recovery to the exact failed post-apply evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPLY_RUN_ID: ${{ inputs.apply_run_id }}
+          APPLY_ARTIFACT_DIGEST: ${{ inputs.apply_artifact_digest }}
+          MAIN_SHA: ${{ inputs.main_sha }}
+        run: |
+          set -euo pipefail
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$APPLY_RUN_ID")"
+          test "$(jq -r .event <<<"$run")" = workflow_dispatch
+          test "$(jq -r .status <<<"$run")" = completed
+          test "$(jq -r .conclusion <<<"$run")" = failure
+          test "$(jq -r .head_sha <<<"$run")" = "$MAIN_SHA"
+          test "$(jq -r .path <<<"$run")" = .github/workflows/shared-supabase-migrations.yml
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$APPLY_RUN_ID/artifacts?per_page=100")"
+          name="production-migration-apply-$MAIN_SHA"
+          count="$(jq --arg n "$name" '[.artifacts[] | select(.name == $n)] | length' <<<"$artifacts")"
+          test "$count" = 1
+          digest="$(jq -r --arg n "$name" '.artifacts[] | select(.name == $n) | .digest' <<<"$artifacts")"
+          test "$digest" = "$APPLY_ARTIFACT_DIGEST"
+          test "$(jq -r --arg n "$name" '.artifacts[] | select(.name == $n) | .expired' <<<"$artifacts")" = false
+          mkdir -p "$RUNNER_TEMP/apply-evidence"
+          gh run download "$APPLY_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$name" --dir "$RUNNER_TEMP/apply-evidence"
+      - uses: supabase/setup-cli@v1
+        with: {version: 2.105.0}
+      - name: Independently prove the applied production ledger
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PRODUCTION }}
+          ALLOWLIST: ${{ inputs.ordered_allowlist }}
+        run: |
+          set -euo pipefail
+          supabase login --token "$SUPABASE_ACCESS_TOKEN"
+          supabase link --project-ref qsllyeztdwjgirsysgai --password "$SUPABASE_DB_PASSWORD"
+          supabase migration list --linked | tee "$RUNNER_TEMP/production-ledger-recovery.txt"
+          python - <<'PY'
+          import os, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path.cwd() / "scripts"))
+          from production_migration_guard import parse_remote_versions
+          wanted = [x.strip() for x in os.environ["ALLOWLIST"].split(",") if x.strip()]
+          before = parse_remote_versions(Path(os.environ["RUNNER_TEMP"]) / "apply-evidence" / "production-ledger-before.txt")
+          after = parse_remote_versions(Path(os.environ["RUNNER_TEMP"]) / "apply-evidence" / "production-ledger-after.txt")
+          live = parse_remote_versions(Path(os.environ["RUNNER_TEMP"]) / "production-ledger-recovery.txt")
+          if any(v in before for v in wanted): raise SystemExit("allowlist was already present before the bound apply")
+          if any(v not in after for v in wanted): raise SystemExit("bound apply artifact does not show every allowlisted version afterward")
+          if any(v not in live for v in wanted): raise SystemExit("live production ledger is missing an allowlisted version")
+          print("RECOVERY LEDGER OK: bound apply added the exact allowlist and production still holds it")
+          PY
+      - name: Verify exact live catalog state without applying anything
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          ALLOWLIST: ${{ inputs.ordered_allowlist }}
+        run: |
+          set -euo pipefail
+          python scripts/production_catalog_verification.py \
+            --repo "$GITHUB_WORKSPACE" --allowlist "$ALLOWLIST" \
+            --output-dir "$RUNNER_TEMP/catalog-verification" \
+            --project-ref qsllyeztdwjgirsysgai \
+            --remote-ledger "$RUNNER_TEMP/apply-evidence/production-ledger-before.txt" \
+            --mode enforce | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-catalog-recovery-${{ inputs.apply_run_id }}
+          path: |
+            ${{ runner.temp }}/production-ledger-recovery.txt
+            ${{ runner.temp }}/catalog-verification/production-catalog-verification.md
+            ${{ runner.temp }}/catalog-verification/production-catalog-verification.json
+          if-no-files-found: error
+          retention-days: 90
