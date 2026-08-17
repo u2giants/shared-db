@@ -6,18 +6,17 @@ declare
   v_reset_plan uuid := gen_random_uuid();
   v_forward_plan constant uuid := '78f8489b-88ba-5d4c-8430-f7275ae6f201'::uuid;
 begin
-  select id into strict v_fr_id
-  from core.licensor where code = 'FR' and name = 'FRIENDS TV';
-
   insert into plm.licensing_write_authorization (
     backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
     actor, protected_columns, expires_at
   ) values (
-    pg_backend_pid(), txid_current(), 'core.licensor', 'canonical_merge',
-    v_reset_plan, repeat('1', 64), 'contract reset', array['status'],
+    pg_backend_pid(), txid_current(), 'core.licensor', 'licensing_review_create',
+    v_reset_plan, repeat('1', 64), 'contract fixture', array['name','code','status'],
     clock_timestamp() + interval '1 minute'
   );
-  update core.licensor set status = 'active' where id = v_fr_id;
+  insert into core.licensor (name, code, status)
+  values ('guarded-forward-contract', 'GUARDED-FORWARD-CONTRACT', 'active')
+  returning id into v_fr_id;
 
   insert into plm.licensing_write_authorization (
     backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
