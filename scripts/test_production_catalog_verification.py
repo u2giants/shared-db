@@ -126,6 +126,39 @@ class DeriveTargetsTests(unittest.TestCase):
         t = targets_for("insert into plm.widget (note) values ('x');")
         self.assertEqual(t.seeded, ["plm.widget"])
 
+    def test_expression_index_is_derived_with_exact_table(self):
+        t = targets_for(
+            "create index if not exists item_upper_trim_item_number_idx "
+            "on plm.item ((upper(trim(item_number))));"
+        )
+        self.assertEqual(
+            t.indexes,
+            [("plm.item_upper_trim_item_number_idx", "plm.item")],
+        )
+        self.assertIn("plm.item", t.tables)
+        self.assertFalse(t.is_empty())
+
+    def test_unique_concurrent_index_is_derived(self):
+        t = targets_for(
+            "create unique index concurrently if not exists widget_code_idx "
+            "on plm.widget (code);"
+        )
+        self.assertEqual(t.indexes, [("plm.widget_code_idx", "plm.widget")])
+
+    def test_unsupported_index_forms_are_not_silently_dropped(self):
+        for sql in (
+            'create index "MixedCase" on plm.widget (id);',
+            "create index widget_idx on widget (id);",
+            "create index on plm.widget (id);",
+        ):
+            with self.subTest(sql=sql):
+                t = targets_for(sql)
+                self.assertEqual(t.indexes, [])
+                self.assertTrue(
+                    any("not safely parseable" in note for note in t.notes),
+                    t.notes,
+                )
+
     def test_grant_roles_are_probed(self):
         t = targets_for("grant select on table plm.widget to loader_role;")
         self.assertIn("loader_role", t.roles)
@@ -320,6 +353,19 @@ class SqlBuildTests(unittest.TestCase):
         self.assertIn("aclexplode", sql)
         self.assertIn("pg_get_functiondef", sql)
 
+    def test_catalog_sql_reads_exact_index_definition_and_state(self):
+        sql = build_catalog_sql(
+            targets_for(
+                "create index if not exists widget_expr_idx "
+                "on plm.widget ((upper(trim(code))));"
+            )
+        )
+        self.assertIn("pg_get_indexdef", sql)
+        self.assertIn("pg_index", sql)
+        self.assertIn("indisvalid", sql)
+        self.assertIn("indisready", sql)
+        self.assertIn("plm.widget_expr_idx", sql)
+
     def test_function_privileges_are_queried(self):
         # H1: without these the report shows a function existing with a readable
         # definition and says NOTHING about whether its revoke took.
@@ -414,6 +460,20 @@ class SqlBuildTests(unittest.TestCase):
             build_row_count_sql(["plm.x'; drop table y --"])
 
 
+class RecoveryWorkflowTests(unittest.TestCase):
+    def test_current_and_historical_main_are_bound_separately(self):
+        workflow = (
+            REPO / ".github" / "workflows" /
+            "production-catalog-verification-recovery.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn('MAIN_SHA: "${{ inputs.main_sha }}"', workflow)
+        self.assertIn('APPLY_MAIN_SHA: ${{ inputs.apply_main_sha }}', workflow)
+        self.assertIn('git rev-parse origin/main)" = "$MAIN_SHA"', workflow)
+        self.assertIn('jq -r .head_sha <<<"$run")" = "$APPLY_MAIN_SHA"', workflow)
+        self.assertIn('production-migration-apply-$APPLY_MAIN_SHA', workflow)
+        self.assertNotIn('production-migration-apply-$MAIN_SHA', workflow)
+
+
 class ExtractReportTests(unittest.TestCase):
     def test_bare_list_of_rows(self):
         self.assertEqual(extract_report([{"report": {"a": 1}}]), {"a": 1})
@@ -455,6 +515,44 @@ class RenderReportTests(unittest.TestCase):
             {"relations": [{"name": "plm.widget", "to_regclass": "plm.widget"}]}
         )
         self.assertEqual(failures, [])
+
+    def test_index_definition_is_reported_and_enforced(self):
+        targets = targets_for(
+            "create index if not exists widget_expr_idx "
+            "on plm.widget ((upper(trim(code))));"
+        )
+        catalog = {
+            "indexes": [{
+                "name": "plm.widget_expr_idx",
+                "relation": "plm.widget",
+                "exists": True,
+                "actual_relation": "plm.widget",
+                "valid": True,
+                "ready": True,
+                "definition": "CREATE INDEX widget_expr_idx ON plm.widget USING btree (upper(TRIM(BOTH FROM code)))",
+            }],
+            "relations": [{"name": "plm.widget", "to_regclass": "plm.widget"}],
+        }
+        report, failures = self.render(catalog, targets=targets)
+        self.assertEqual(failures, [])
+        self.assertIn("CREATE INDEX widget_expr_idx", report)
+
+    def test_missing_or_wrong_table_index_fails(self):
+        targets = targets_for("create index widget_idx on plm.widget (id);")
+        for row in (
+            {"name": "plm.widget_idx", "exists": False},
+            {"name": "plm.widget_idx", "exists": True,
+             "actual_relation": "plm.other", "valid": True, "ready": True,
+             "definition": "CREATE INDEX widget_idx ON plm.other USING btree (id)"},
+        ):
+            with self.subTest(row=row):
+                _, failures = self.render(
+                    {"indexes": [row], "relations": [
+                        {"name": "plm.widget", "to_regclass": "plm.widget"}
+                    ]},
+                    targets=targets,
+                )
+                self.assertTrue(failures)
 
     def test_absent_evidence_is_a_hard_failure(self):
         # The whole point of #697: "no evidence" must never render as
