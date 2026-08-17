@@ -2,6 +2,8 @@
 -- The table locks close the race between reading MAX(id) and resetting the
 -- associated sequence. Existing values are never moved backwards.
 
+begin;
+
 lock table dflow."LicensingTime" in share row exclusive mode;
 
 select setval(
@@ -23,3 +25,25 @@ select setval(
   ),
   true
 );
+
+do $$
+begin
+  if not (
+    select is_called
+       and last_value >= coalesce((select max(id) from dflow."LicensingTime"), 1)
+    from dflow."LicensingTime_id_seq"
+  ) then
+    raise exception 'LicensingTime sequence remains behind its table';
+  end if;
+
+  if not (
+    select is_called
+       and last_value >= coalesce((select max(id) from dflow.properties_and_characters), 1)
+    from dflow.properties_and_characters_id_seq
+  ) then
+    raise exception 'properties_and_characters sequence remains behind its table';
+  end if;
+end;
+$$;
+
+commit;
