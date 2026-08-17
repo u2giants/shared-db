@@ -2,8 +2,6 @@
 -- The table locks close the race between reading MAX(id) and resetting the
 -- associated sequence. Existing values are never moved backwards.
 
-begin;
-
 lock table dflow."LicensingTime" in share row exclusive mode;
 
 select setval(
@@ -45,5 +43,3 @@ begin
   end if;
 end;
 $$;
-
-commit;
