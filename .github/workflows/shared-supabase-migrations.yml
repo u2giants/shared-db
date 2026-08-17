@@ -292,6 +292,12 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
+      - name: Install and prove PostgreSQL client
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          psql --version
       - name: Capture preview migration record (before)
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -402,12 +408,24 @@ jobs:
           # flag. The bound is the filesystem -- `prepare` left exactly
           # `remote-ledger | allowlist` on disk. NEVER add this flag to a
           # `supabase db push` that runs in $GITHUB_WORKSPACE.
-          supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/preview-dry-run.txt"
-          # THE RESOLVED SET MUST EQUAL THE NAMED SET, exactly and in order.
-          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
-            --dry-run-output "$RUNNER_TEMP/preview-dry-run.txt" \
-            --allowlist "$PREVIEW_ALLOWLIST" \
-            --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
+          ATOMIC_VERSION="$(python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+            --migrations-dir "$RUNNER_TEMP/bounded-preview/supabase/migrations" \
+            --classify-allowlist "$PREVIEW_ALLOWLIST")"
+          if [ -n "$ATOMIC_VERSION" ]; then
+            psql --version
+            EXPECTED_PROJECT_REF="$PREVIEW_PROJECT_REF" python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+              --migrations-dir "$RUNNER_TEMP/bounded-preview/supabase/migrations" \
+              --linked-dir "$RUNNER_TEMP/bounded-preview" --version "$ATOMIC_VERSION" \
+              --target preview --expected-project-ref "$PREVIEW_PROJECT_REF" --mode check \
+              | tee "$RUNNER_TEMP/preview-dry-run.txt"
+          else
+            supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/preview-dry-run.txt"
+            # THE RESOLVED SET MUST EQUAL THE NAMED SET, exactly and in order.
+            python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
+              --dry-run-output "$RUNNER_TEMP/preview-dry-run.txt" \
+              --allowlist "$PREVIEW_ALLOWLIST" \
+              --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
+          fi
       - name: Bounded apply
         if: inputs.mode == 'apply' && inputs.historical_preview_source_pr == ''
         env:
@@ -424,13 +442,30 @@ jobs:
           # A FRESH dry-run immediately before the write, verified against the
           # allowlist, so the run proves what it is about to do rather than
           # inheriting an earlier job's claim.
-          supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/preview-dry-run.txt"
-          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
-            --dry-run-output "$RUNNER_TEMP/preview-dry-run.txt" \
-            --allowlist "$PREVIEW_ALLOWLIST" \
-            --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
-          # THE WRITE. Preview only.
-          supabase db push --include-all 2>&1 | tee "$RUNNER_TEMP/preview-apply.txt"
+          ATOMIC_VERSION="$(python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+            --migrations-dir "$RUNNER_TEMP/bounded-preview/supabase/migrations" \
+            --classify-allowlist "$PREVIEW_ALLOWLIST")"
+          if [ -n "$ATOMIC_VERSION" ]; then
+            psql --version
+            EXPECTED_PROJECT_REF="$PREVIEW_PROJECT_REF" python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+              --migrations-dir "$RUNNER_TEMP/bounded-preview/supabase/migrations" \
+              --linked-dir "$RUNNER_TEMP/bounded-preview" --version "$ATOMIC_VERSION" \
+              --target preview --expected-project-ref "$PREVIEW_PROJECT_REF" --mode check \
+              | tee "$RUNNER_TEMP/preview-dry-run.txt"
+            EXPECTED_PROJECT_REF="$PREVIEW_PROJECT_REF" python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+              --migrations-dir "$RUNNER_TEMP/bounded-preview/supabase/migrations" \
+              --linked-dir "$RUNNER_TEMP/bounded-preview" --version "$ATOMIC_VERSION" \
+              --target preview --expected-project-ref "$PREVIEW_PROJECT_REF" --mode apply \
+              | tee "$RUNNER_TEMP/preview-apply.txt"
+          else
+            supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/preview-dry-run.txt"
+            python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
+              --dry-run-output "$RUNNER_TEMP/preview-dry-run.txt" \
+              --allowlist "$PREVIEW_ALLOWLIST" \
+              --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
+            # THE WRITE. Preview only.
+            supabase db push --include-all 2>&1 | tee "$RUNNER_TEMP/preview-apply.txt"
+          fi
       - name: Recover proof for migrations already present on preview
         if: inputs.mode == 'apply' && inputs.historical_preview_source_pr != ''
         env:
@@ -548,6 +583,12 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
+      - name: Install and prove PostgreSQL client
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          psql --version
       - name: Capture production migration record
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -594,11 +635,23 @@ jobs:
           # against a verified bounded set; the prohibition is on --include-all
           # against the FULL repo set, which this is not. Never add this flag to
           # a `supabase db push` that runs in $GITHUB_WORKSPACE.
-          supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
-          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
-            --dry-run-output "$RUNNER_TEMP/production-dry-run.txt" \
-            --allowlist "$PRODUCTION_ALLOWLIST" \
-            --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
+          ATOMIC_VERSION="$(python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+            --migrations-dir "$RUNNER_TEMP/bounded-production/supabase/migrations" \
+            --classify-allowlist "$PRODUCTION_ALLOWLIST")"
+          if [ -n "$ATOMIC_VERSION" ]; then
+            psql --version
+            EXPECTED_PROJECT_REF="$PRODUCTION_PROJECT_REF" python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+              --migrations-dir "$RUNNER_TEMP/bounded-production/supabase/migrations" \
+              --linked-dir "$RUNNER_TEMP/bounded-production" --version "$ATOMIC_VERSION" \
+              --target production --expected-project-ref "$PRODUCTION_PROJECT_REF" --mode check \
+              | tee "$RUNNER_TEMP/production-dry-run.txt"
+          else
+            supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
+            python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
+              --dry-run-output "$RUNNER_TEMP/production-dry-run.txt" \
+              --allowlist "$PRODUCTION_ALLOWLIST" \
+              --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
+          fi
       - name: Save dry-run evidence
         uses: actions/upload-artifact@v4
         with:
@@ -668,6 +721,12 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
+      - name: Install and prove PostgreSQL client
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          psql --version
       - name: Capture production migration record
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -842,6 +901,12 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
+      - name: Install and prove PostgreSQL client
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          psql --version
       # Re-read the ledger IN THIS JOB. The review job's copy was taken before the
       # approval wait, which can be hours; production moves independently of this
       # repo, so a stale ledger would size the bounded checkout wrongly.
@@ -885,13 +950,30 @@ jobs:
           # push. The earlier production-dry-run job was a different run against a
           # different ledger snapshot; only this one describes the database we are
           # about to write to.
-          supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
-          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
-            --dry-run-output "$RUNNER_TEMP/production-dry-run.txt" \
-            --allowlist "$PRODUCTION_ALLOWLIST" \
-            --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
-          # THE WRITE.
-          supabase db push --include-all 2>&1 | tee "$RUNNER_TEMP/production-apply.txt"
+          ATOMIC_VERSION="$(python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+            --migrations-dir "$RUNNER_TEMP/bounded-production/supabase/migrations" \
+            --classify-allowlist "$PRODUCTION_ALLOWLIST")"
+          if [ -n "$ATOMIC_VERSION" ]; then
+            psql --version
+            EXPECTED_PROJECT_REF="$PRODUCTION_PROJECT_REF" python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+              --migrations-dir "$RUNNER_TEMP/bounded-production/supabase/migrations" \
+              --linked-dir "$RUNNER_TEMP/bounded-production" --version "$ATOMIC_VERSION" \
+              --target production --expected-project-ref "$PRODUCTION_PROJECT_REF" --mode check \
+              | tee "$RUNNER_TEMP/production-dry-run.txt"
+            EXPECTED_PROJECT_REF="$PRODUCTION_PROJECT_REF" python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+              --migrations-dir "$RUNNER_TEMP/bounded-production/supabase/migrations" \
+              --linked-dir "$RUNNER_TEMP/bounded-production" --version "$ATOMIC_VERSION" \
+              --target production --expected-project-ref "$PRODUCTION_PROJECT_REF" --mode apply \
+              | tee "$RUNNER_TEMP/production-apply.txt"
+          else
+            supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
+            python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
+              --dry-run-output "$RUNNER_TEMP/production-dry-run.txt" \
+              --allowlist "$PRODUCTION_ALLOWLIST" \
+              --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
+            # THE WRITE.
+            supabase db push --include-all 2>&1 | tee "$RUNNER_TEMP/production-apply.txt"
+          fi
       - name: Capture production migration record (after)
         if: always()
         env:

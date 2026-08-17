@@ -5,26 +5,29 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, reversionActiveClaim, REVIEW_CURSOR_REF, validateClaimObjects } from './manage-migration-author-lanes.mjs'
+import { acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects } from './manage-migration-author-lanes.mjs'
 
 const NOW = new Date('2026-08-14T20:00:00Z')
 const body = (objects, owner, expires = '2026-08-15T08:00:00.000Z') => claimBody({ version:`2026081420${owner.padStart(4,'0')}`, objects, owner:`agent-${owner}`, branch:`codex/${owner}`, worktree:`C:/w/${owner}`, expiresAt:new Date(expires) })
 
-const scope = (state, priority, objects=[], depends='') => `\`\`\`db-work-scope\nstate: ${state}\npriority: ${priority}\ndepends_on: ${depends}\nobjects:\n${objects.map((x)=>`  - ${x}`).join('\n')}\n\`\`\``
+const scope = (status, workType, route, priority, objects=[], depends='') => `\`\`\`db-work-scope\nstatus: ${status}\nwork_type: ${workType}\nroute: ${route}\npriority: ${priority}\ndepends_on: ${depends}\nobjects:\n${objects.map((x)=>`  - ${x}`).join('\n')}\n\`\`\``
 
-test('queue scope is strict and requires objects for eligible work',()=>{
-  assert.deepEqual(parseQueueScope(scope('eligible',9,['table core.a'],'#12, 13')), {state:'eligible',priority:9,dependencies:[12,13],objects:['table core.a']})
-  assert.throws(()=>parseQueueScope(scope('eligible',1)),/must list exact objects/)
-  assert.throws(()=>parseQueueScope(scope('waiting',1,['table core.a'])),/state must be/)
-  assert.throws(()=>parseQueueScope(`${scope('eligible',1,['table core.a'])}\n${scope('blocked',1)}`),/exactly one/)
+test('queue scope keeps status, work type, and route separate',()=>{
+  assert.deepEqual(parseQueueScope(scope('ready','structural','shared-db-orchestrator',9,['table core.a'],'#12, 13')), {status:'ready',workType:'structural',route:'shared-db-orchestrator',priority:9,dependencies:[12,13],objects:['table core.a']})
+  assert.throws(()=>parseQueueScope(scope('ready','structural','shared-db-orchestrator',1)),/must list exact objects/)
+  assert.throws(()=>parseQueueScope(scope('waiting','structural','shared-db-orchestrator',1,['table core.a'])),/status must be/)
+  assert.throws(()=>parseQueueScope(scope('ready','source-data','shared-db-orchestrator',1)),/not valid/)
+  assert.throws(()=>parseQueueScope(scope('ready','source-data','source-data-session',1,['table plm.nbcu_right'])),/must not claim/)
+  assert.throws(()=>parseQueueScope(`\`\`\`db-work-scope\nstate: eligible\npriority: 1\nobjects:\n  - table core.a\n\`\`\``),/state is retired/)
+  assert.throws(()=>parseQueueScope(`${scope('ready','structural','shared-db-orchestrator',1,['table core.a'])}\n${scope('blocked','repo-maintenance','repo-maintenance',1)}`),/exactly one/)
 })
 
 test('dynamic queues serialize overlapping work and refill every empty lane',()=>{
   const issues=[
-    {number:1,title:'a',body:scope('eligible',10,['table core.a'])},
-    {number:2,title:'a later',body:scope('eligible',8,['table core.a'])},
-    {number:3,title:'b',body:scope('eligible',7,['table core.b'])},
-    {number:4,title:'c',body:scope('eligible',6,['table core.c'])},
+    {number:1,title:'a',body:scope('ready','structural','shared-db-orchestrator',10,['table core.a'])},
+    {number:2,title:'a later',body:scope('ready','structural','shared-db-orchestrator',8,['table core.a'])},
+    {number:3,title:'b',body:scope('ready','structural','shared-db-orchestrator',7,['table core.b'])},
+    {number:4,title:'c',body:scope('ready','structural','shared-db-orchestrator',6,['table core.c'])},
   ]
   const result=buildDynamicQueues(issues,[],NOW)
   assert.equal(result.fullyAudited,true)
@@ -34,23 +37,23 @@ test('dynamic queues serialize overlapping work and refill every empty lane',()=
 
 test('dynamic queues fill inactive lanes before queueing behind active claims',()=>{
   const claims=[{number:31,body:body(['table core.a'],'31')},{number:32,body:body(['table core.b'],'32')}]
-  const one=buildDynamicQueues([{number:40,title:'c',body:scope('eligible',9,['table core.c'])}],claims,NOW)
+  const one=buildDynamicQueues([{number:40,title:'c',body:scope('ready','structural','shared-db-orchestrator',9,['table core.c'])}],claims,NOW)
   assert.deepEqual(one.dispatchable,[40])
   assert.equal(one.queues.find((q)=>q.queued.includes(40)).active,null)
   const two=buildDynamicQueues([
-    {number:40,title:'c',body:scope('eligible',9,['table core.c'])},
-    {number:41,title:'d',body:scope('eligible',8,['table core.d'])},
+    {number:40,title:'c',body:scope('ready','structural','shared-db-orchestrator',9,['table core.c'])},
+    {number:41,title:'d',body:scope('ready','structural','shared-db-orchestrator',8,['table core.d'])},
   ],[{number:31,body:body(['table core.a'],'31')}],NOW)
   assert.deepEqual(new Set(two.dispatchable),new Set([40,41]))
 })
 
-test('blocked, owner-decision, data-only and dependent work never consume a lane',()=>{
+test('status and non-structural routes never consume a migration-author lane',()=>{
   const issues=[
-    {number:10,title:'open dependency',body:scope('blocked',9)},
-    {number:11,title:'dependent',body:scope('eligible',8,['table core.x'],'#10')},
-    {number:12,title:'owner',body:scope('owner-decision',7)},
-    {number:13,title:'data',body:scope('data-only',6)},
-    {number:14,title:'app',body:scope('non-structural',5)},
+    {number:10,title:'open dependency',body:scope('blocked','structural','shared-db-orchestrator',9,['table core.blocked'])},
+    {number:11,title:'dependent',body:scope('ready','structural','shared-db-orchestrator',8,['table core.x'],'#10')},
+    {number:12,title:'owner',body:scope('owner-decision','security-settings','owner-only',7)},
+    {number:13,title:'data',body:scope('ready','application-data','application-session',6)},
+    {number:14,title:'app',body:scope('ready','repo-maintenance','repo-maintenance',5)},
   ]
   const result=buildDynamicQueues(issues,[],NOW)
   assert.deepEqual(result.dispatchable,[])
@@ -59,10 +62,41 @@ test('blocked, owner-decision, data-only and dependent work never consume a lane
 })
 
 test('dependency on an open non-db-work issue prevents dispatch',()=>{
-  const issues=[{number:11,title:'dependent',body:scope('eligible',8,['table core.x'],'#99')}]
+  const issues=[{number:11,title:'dependent',body:scope('ready','structural','shared-db-orchestrator',8,['table core.x'],'#99')}]
   const result=buildDynamicQueues(issues,[],NOW,[11,99])
   assert.deepEqual(result.dispatchable,[])
   assert.match(result.skipped[0].reason,/99/)
+})
+
+test('NBCU rights classification is source-data work and never dispatches',()=>{
+  const result=buildDynamicQueues([{number:732,title:'NBCU rights classification',body:scope('ready','source-data','source-data-session',600)}],[],NOW)
+  assert.deepEqual(result.dispatchable,[])
+  assert.equal(result.skipped[0].route,'source-data-session')
+})
+
+test('application row cleanup is application data and never dispatches',()=>{
+  const result=buildDynamicQueues([{number:20,title:'row cleanup',body:scope('ready','application-data','application-session',10)}],[],NOW)
+  assert.deepEqual(result.dispatchable,[])
+})
+
+test('outside-sourced core.property load keeps governed Master Data route without an author lane',()=>{
+  const result=buildDynamicQueues([{number:21,title:'outside source load',body:scope('ready','curated-master-data','curated-master-data-governance',10)}],[],NOW)
+  assert.deepEqual(result.dispatchable,[])
+  assert.equal(result.skipped[0].route,'curated-master-data-governance')
+})
+
+test('owner-only question with no implementation never dispatches',()=>{
+  const result=buildDynamicQueues([{number:22,title:'owner question',body:scope('owner-decision','repo-maintenance','owner-only',10)}],[],NOW)
+  assert.deepEqual(result.dispatchable,[])
+})
+
+test('answering a data question changes status only and cannot become structural',()=>{
+  const answered=scope('ready','source-data','source-data-session',10)
+  const parsed=parseQueueScope(answered)
+  assert.equal(parsed.status,'ready')
+  assert.equal(parsed.workType,'source-data')
+  assert.equal(parsed.route,'source-data-session')
+  assert.deepEqual(buildDynamicQueues([{number:23,title:'answered data question',body:answered}],[],NOW).dispatchable,[])
 })
 
 test('an unclassified issue prevents proof that an empty lane is justified',()=>{
@@ -99,6 +133,7 @@ function memoryIo() {
     makeOwnerCommit:()=>`sha-${++seq}`,
     createRef:(ref,sha)=>{calls.push(['create',ref,sha]);if(refs.has(ref))return false;refs.set(ref,sha);return true},
     readRef:(ref)=>refs.get(ref)??null,
+    listRefs:(prefix)=>[...refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha})),
     deleteRef:(ref)=>{calls.push(['delete',ref]);refs.delete(ref)},
     reserveVersion:()=>({version:'20260814170219'}),
     createClaim:()=> 'https://github.test/issues/1', closeClaim:()=>{},
@@ -157,9 +192,49 @@ test('terminal provider failure advances exactly once and retry is idempotent',(
   assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'kimi-k3')
 })
 
+test('reviewer execution preflight enforces approved wrapper, clean worktree, and exact head',()=>{
+  const io={commandAvailable:()=>true,localHead:()=>failedReview.headSha,localClean:()=>true}
+  const request={reviewer:'grok-4.6',wrapper:'ai-grok-review',worktree:'C:/review',headSha:failedReview.headSha}
+  assert.equal(reviewerExecutionPreflight(request,io).ready,true)
+  assert.throws(()=>reviewerExecutionPreflight({...request,wrapper:'ai-qwen'},io),/exact wrapper/)
+  assert.throws(()=>reviewerExecutionPreflight(request,{...io,commandAvailable:()=>false}),/cannot execute/)
+  assert.throws(()=>reviewerExecutionPreflight(request,{...io,localHead:()=> 'f'.repeat(40)}),/exact assigned head/)
+  assert.throws(()=>reviewerExecutionPreflight(request,{...io,localClean:()=>false}),/dirty/)
+})
+
+test('two consecutive terminal no-verdict failures form an immutable idempotent chain',()=>{
+  const io=failedReviewIo()
+  const first=replaceFailedReviewer(replacementRequest,io)
+  const secondRequest={...replacementRequest,failedSequence:first.sequence,failureCode:'turn_limit_cancelled'}
+  const second=replaceFailedReviewer(secondRequest,io)
+  assert.equal(first.sequence,2);assert.equal(second.sequence,3);assert.equal(second.reviewer,'kimi-k3')
+  assert.deepEqual(replaceFailedReviewer(replacementRequest,io),first)
+  assert.deepEqual(replaceFailedReviewer(secondRequest,io),second)
+  assert.equal(assignNextReviewer(failedReview,io).sequence,3)
+  assert.equal([...io.refs.keys()].filter((ref)=>ref.startsWith(REVIEW_REPLACEMENT_REF_PREFIX)).length,2)
+})
+
+test('chained replacement rejects mismatch, exact-head drift, and a verdict at every depth',()=>{
+  const io=failedReviewIo(), first=replaceFailedReviewer(replacementRequest,io)
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence+1},io),/does not match/)
+  io.getPr=()=>({state:'open',head:{sha:'ffffffffffffffffffffffffffffffffffffffff'}})
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence,failureCode:'provider_unavailable'},io),/exact open PR head/)
+  io.getPr=()=>({state:'open',head:{sha:failedReview.headSha}})
+  io.getPrReviews=()=>[{body:`APPROVE ${failedReview.headSha}`}]
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence,failureCode:'provider_unavailable'},io),/existing verdict/)
+})
+
+test('concurrent chained replacement write is rejected without changing the cursor or prior links',()=>{
+  const io=failedReviewIo(), first=replaceFailedReviewer(replacementRequest,io), before=io.refs.get(REVIEW_CURSOR_REF), create=io.createRef
+  io.createRef=(ref,sha)=>ref===`${REVIEW_REPLACEMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}-${first.sequence}`?false:create(ref,sha)
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence,failureCode:'wrapper_terminal_failure'},io),/created concurrently/)
+  assert.equal(io.refs.get(REVIEW_CURSOR_REF),before)
+  assert.deepEqual(replaceFailedReviewer(replacementRequest,io),first)
+})
+
 test('reviewer replacement rejects mismatched original assignment and preserves intervening rotation',()=>{
   const io=failedReviewIo()
-  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:2},io),/does not match/)
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:99},io),/does not match/)
   assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
   const replacement=replaceFailedReviewer(replacementRequest,io)
   assert.equal(replacement.priorSequence,2);assert.equal(replacement.sequence,3);assert.equal(replacement.reviewer,'kimi-k3')
@@ -174,7 +249,7 @@ test('reviewer replacement rejects a substantive exact-head verdict',()=>{
 
 test('reviewer replacement retry rejects mismatched failure sequence and missing evidence',()=>{
   const io=failedReviewIo(), done=replaceFailedReviewer(replacementRequest,io)
-  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:2},io),/does not match/)
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:99},io),/does not match/)
   const failureRef=[...io.refs.keys()].find((ref)=>ref.startsWith('refs/db-review-failures/'));io.refs.delete(failureRef)
   assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/evidence is missing/)
   assert.ok(done.replacementSha)
@@ -452,6 +527,11 @@ test('stranded reviewer assignment and replacement mutexes are recoverable',()=>
     assert.equal(recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io).released,'4a69fbbc')
   }
 })
+test('stranded claim lease renewal mutex is recognized and safely recoverable',()=>{
+  const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:'db-coordination claim-lease-renewal renew-853',committer:{date:'2026-08-14T19:55:00Z'}})
+  const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
+  assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
+})
 
 function splitIo(overrides={}) {
   const io=memoryIo(), original=['table plm.style_tracker_item_bridge'], combined=[...original,'index plm.item_upper_trim_item_number_idx']
@@ -522,6 +602,63 @@ test('active claim expansion rolls back an ambiguous update failure while mutex-
 test('REAL main command wires claim-number into the incident-pinned expansion',()=>{
   const io=expansionIo(),args=['--expand-active-claim-from-pr','--claim-number','1063','--pr','1065','--owner','codex-issue-853-orderlist','--head-sha','head','--branch','codex/issue-853-orderlist-index','--worktree','C:\\repos\\shared-db-wt-853-index']
   assert.equal(main(args,NOW,io),0);assert.ok(parseAuthorLease(io.issue.body,NOW).objects.includes('table plm.item'))
+})
+
+function renewalIo(overrides={}){
+  const io=memoryIo(),version='20260816045130',head='a'.repeat(40),objects=['table plm.style_tracker_item_bridge']
+  const issue={number:1058,state:'open',body:claimBody({version,objects,owner:'codex-issue-853-orderlist',branch:'codex/issue-853-orderlist',worktree:'C:\\repos\\shared-db-worktrees\\issue-853-orderlist',expiresAt:new Date('2026-08-14T19:00:00Z')})}
+  io.refs.set(`refs/db-claims/${version}`,'permanent')
+  io.openClaims=()=>[structuredClone(issue)];io.getIssue=()=>structuredClone(issue);io.updateIssue=(_n,fields)=>{Object.assign(issue,fields);return structuredClone(issue)}
+  io.getPr=()=>({state:'open',head:{sha:head,ref:'codex/issue-853-orderlist'}})
+  io.getPrFiles=()=>[{status:'added',filename:`supabase/migrations/${version}_orderlist.sql`}]
+  io.prSources=()=>[{label:'PR #1060 "#853 OrderList"',objects:[...objects],versions:[version]}]
+  return Object.assign(io,{issue,version,head,objects},overrides)
+}
+const renewalOptions={claim:1058,owner:'codex-issue-853-orderlist',branch:'codex/issue-853-orderlist',worktree:'C:\\repos\\shared-db-worktrees\\issue-853-orderlist',pr:1060,headSha:'a'.repeat(40),leaseHours:12,requestId:'renew-853',mutexAttempts:1}
+
+test('#853-shaped expired claim renewal preserves every byte except expires_at',()=>{
+  const io=renewalIo(),before=io.issue.body,result=renewExpiredClaim(renewalOptions,NOW,io)
+  assert.equal(result.idempotent,false);assert.equal(result.version,io.version)
+  assert.equal(io.issue.body.replace(/^expires_at:.*$/m,'expires_at: X'),before.replace(/^expires_at:.*$/m,'expires_at: X'))
+  assert.match(io.issue.body,/expires_at: 2026-08-15T08:00:00.000Z/)
+})
+
+test('claim renewal rejects every exact identity and permanent-version mismatch',()=>{
+  for(const [change,pattern] of [[{owner:'wrong'},/owner/],[{branch:'wrong'},/branch/],[{worktree:'wrong'},/worktree/],[{headSha:'b'.repeat(40)},/head/],[{pr:999},/parser source/]])assert.throws(()=>renewExpiredClaim({...renewalOptions,...change},NOW,renewalIo()),pattern)
+  let io=renewalIo();io.getPrFiles=()=>[{filename:'supabase/migrations/20260816000000_wrong.sql'}];assert.throws(()=>renewExpiredClaim(renewalOptions,NOW,io),/migration version/)
+  io=renewalIo();io.refs.delete(`refs/db-claims/${io.version}`);assert.throws(()=>renewExpiredClaim(renewalOptions,NOW,io),/reservation/)
+})
+
+test('claim renewal requires one open claim and rejects object collisions',()=>{
+  let io=renewalIo();io.openClaims=()=>[];assert.throws(()=>renewExpiredClaim(renewalOptions,NOW,io),/uniquely open/)
+  io=renewalIo();const duplicate=io.openClaims()[0];io.openClaims=()=>[duplicate,{...duplicate}];assert.throws(()=>renewExpiredClaim(renewalOptions,NOW,io),/uniquely open/)
+  io=renewalIo();io.openClaims=()=>[structuredClone(io.issue),{number:77,body:claimBody({version:'20260816070000',objects:io.objects,owner:'other',branch:'other',worktree:'C:/other',expiresAt:new Date('2026-08-17T00:00:00Z')})}];assert.throws(()=>renewExpiredClaim(renewalOptions,NOW,io),/collision/)
+  io=renewalIo();io.prSources=()=>[{label:'PR #1060',objects:io.objects,versions:[io.version]},{label:'PR #999',objects:io.objects,versions:['20260816070000']}];assert.throws(()=>renewExpiredClaim(renewalOptions,NOW,io),/collision/)
+})
+
+test('claim renewal rejects uncovered PR objects, concurrent mutation, and active unrelated leases',()=>{
+  let io=renewalIo();io.prSources=()=>[{label:'PR #1060',objects:[...io.objects,'table plm.item'],versions:[io.version]}];assert.throws(()=>renewExpiredClaim(renewalOptions,NOW,io),/does not cover/)
+  io=renewalIo();const listed=io.openClaims()[0];io.openClaims=()=>[listed];io.getIssue=()=>({...listed,body:`${listed.body}\nchanged`});assert.throws(()=>renewExpiredClaim(renewalOptions,NOW,io),/concurrently/)
+  io=renewalIo();io.issue.body=io.issue.body.replace('2026-08-14T19:00:00.000Z','2026-08-15T09:00:00.000Z');assert.throws(()=>renewExpiredClaim(renewalOptions,NOW,io),/active lease/)
+})
+
+test('claim renewal is idempotent for the exact already-written expiry',()=>{
+  const io=renewalIo();renewExpiredClaim(renewalOptions,NOW,io);const once=io.issue.body
+  const result=renewExpiredClaim(renewalOptions,NOW,io);assert.equal(result.idempotent,true);assert.equal(io.issue.body,once)
+})
+
+test('claim renewal rolls back readback failure while mutex-owned and refuses after ownership loss',()=>{
+  let io=renewalIo(),before=io.issue.body,reads=0,baseGet=io.getIssue
+  io.getIssue=()=>{const value=baseGet();if(++reads===2)value.body+='\nbad';return value}
+  assert.throws(()=>renewExpiredClaim(renewalOptions,NOW,io),/readback/);assert.equal(io.issue.body,before)
+  io=renewalIo();before=io.issue.body;const update=io.updateIssue;io.updateIssue=(n,fields)=>{const result=update(n,fields);io.refs.set(MUTEX_REF,'successor');return result}
+  assert.throws(()=>renewExpiredClaim(renewalOptions,NOW,io),/ROLLBACK NOT ATTEMPTED/);assert.notEqual(io.issue.body,before)
+})
+
+test('claim renewal enforces a bounded lease and real CLI wiring',()=>{
+  for(const leaseHours of [0,24.01,NaN])assert.throws(()=>renewExpiredClaim({...renewalOptions,leaseHours},NOW,renewalIo()),/no more than 24/)
+  const io=renewalIo(),args=['--renew-claim','--claim-number','1058','--owner',renewalOptions.owner,'--branch',renewalOptions.branch,'--worktree',renewalOptions.worktree,'--pr','1060','--head-sha',renewalOptions.headSha,'--lease-hours','12']
+  assert.equal(main(args,NOW,io),0);assert.equal(parseAuthorLease(io.issue.body,NOW).active,true)
 })
 
 function reversionIo(overrides={}){
