@@ -22,6 +22,7 @@ import {
   chunk,
   buildBatchRows,
   buildPayloads,
+  buildMetadataElementRows,
   exactSourceId,
   summarise,
   manifestExpectations,
@@ -327,6 +328,62 @@ test("buildPayloads produces a row array for every load target", () => {
   for (const t of LOAD_ORDER) assert.ok(Array.isArray(p[t]), `${t} must be an array`);
 });
 
+test("the collection payload omits the redundant Paramount vocabulary term", () => {
+  const p = buildPayloads(fixtureCapture);
+  assert.deepEqual(p.pmt_collection, [{
+    collection_source_id: "5001",
+    collection_name: "Fixture Collection",
+  }]);
+  assert.ok(!Object.hasOwn(p.pmt_collection[0], "paramount_term"));
+});
+
+test("legacy style-guide input may contain paramount_term but the loader ignores it", () => {
+  const legacy = {
+    ...fixtureCapture,
+    collections: [{
+      source_id: "5001",
+      name: "Fixture Collection",
+      paramount_term: "Legacy value that must not cross the public loader boundary",
+    }],
+  };
+  const p = buildPayloads(legacy);
+  assert.equal(p.pmt_collection.length, 1);
+  assert.ok(!Object.hasOwn(p.pmt_collection[0], "paramount_term"));
+});
+
+async function readParamountTermMigration() {
+  const { readFileSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  return readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "supabase", "migrations",
+      "20260814223552_pmt_collection_paramount_term_normalization.sql"),
+    "utf8"
+  ).replace(/\r\n/g, "\n");
+}
+
+test("#970 migration removes storage while preserving loader and API security contracts", async () => {
+  const sql = await readParamountTermMigration();
+  const start = sql.indexOf("create or replace function plm.load_pmt_capture_chunk(");
+  const body = sql.slice(start, sql.indexOf("\n$$;", start));
+  assert.ok(start > 0, "whole loader replacement is present");
+  assert.ok(!body.includes("paramount_term"), "loader no longer reads, defaults, or writes the term");
+  assert.ok(body.includes("security definer"));
+  assert.ok(body.includes("set search_path = plm, core, public, extensions"));
+  assert.ok(body.includes("not (p_target = any (c_targets))"));
+  assert.ok(body.includes("'pmt_metadata_element'"), "#965 target survives");
+  assert.ok(body.includes("elsif p_target = 'pmt_metadata_element' then"), "#965 branch survives");
+  assert.ok(!body.includes("paramount_property_name"), "#964 omission survives");
+  assert.match(sql, /revoke all on function plm\.load_pmt_capture_chunk\(uuid, text, jsonb\) from public;/);
+  assert.match(sql, /grant execute on function plm\.load_pmt_capture_chunk\(uuid, text, jsonb\) to service_role;/);
+  assert.match(sql, /create view api\.pmt_style_guides\s+with \(security_invoker = true\)/);
+  assert.match(sql, /'Collection'::text\s+as paramount_term/);
+  assert.match(sql, /execute 'revoke all on api\.pmt_style_guides from public';/);
+  assert.match(sql, /execute 'revoke all on api\.pmt_style_guides from anon';/);
+  assert.match(sql, /execute 'grant select on api\.pmt_style_guides to authenticated, service_role';/);
+  assert.match(sql, /alter table plm\.pmt_collection drop column paramount_term;/);
+});
+
 test("is_licensed_selection is TRUE only for properties an exact Property search selected", () => {
   const p = buildPayloads(fixtureCapture);
   // NOTE === "9001", a STRING. Source IDs are identities and are no longer numbers.
@@ -350,6 +407,68 @@ test("a title with no resolved property produces no title-property mapping row",
   const p = buildPayloads(fixtureCapture);
   assert.equal(p.pmt_authorized_title_property.length, 1);
   assert.equal(p.pmt_authorized_title_property[0].property_source_id, "9001");
+});
+
+// ---------------------------------------------------------------------------
+// The duplicated property-name copies (issue #964, plan_pmt-duplicate-name-columns.md).
+// plm.pmt_property.property_name is the single place a property name is written.
+// pmt_authorized_title_property.paramount_property_name and
+// pmt_property_capture_log.property_name were deprecated by migration 20260814193351;
+// this loader must stop forwarding BOTH, while the source files may still carry them.
+// ---------------------------------------------------------------------------
+test("the loader forwards NEITHER duplicated property-name copy", () => {
+  const p = buildPayloads(fixtureCapture);
+  for (const row of p.pmt_authorized_title_property) {
+    assert.ok(!("paramount_property_name" in row),
+      "pmt_authorized_title_property must not carry paramount_property_name");
+    assert.ok(!("property_name" in row),
+      "pmt_authorized_title_property must not carry property_name either");
+  }
+  for (const row of p.pmt_property_capture_log) {
+    assert.ok(!("property_name" in row),
+      "pmt_property_capture_log must not carry property_name");
+  }
+});
+
+test("the omission is the loader's, not the fixture's -- the source fields still exist", () => {
+  // If these ever stop holding, the tests above would pass vacuously: nothing would be
+  // dropped because nothing was there to drop. The capture CSVs may legitimately keep
+  // carrying these columns; the loader simply must not forward them.
+  assert.equal(typeof fixtureCapture.titleScope[0].paramount_property_name, "string");
+  assert.notEqual(fixtureCapture.titleScope[0].paramount_property_name, "");
+  assert.equal(typeof fixtureCapture.captureLog[0].property_name, "string");
+  assert.notEqual(fixtureCapture.captureLog[0].property_name, "");
+});
+
+test("the database boundary receives no name key: the serialized chunks omit both columns", () => {
+  // This is the exact wire format plm.load_pmt_capture_chunk receives. An absent key
+  // serializes to nothing, so the DB-side r->>'...' reads NULL -- legal only after
+  // migration 20260814193351 dropped the NOT NULL. If either key reappears here, a
+  // capture run against a post-drop database is one migration away from failing.
+  const p = buildPayloads(fixtureCapture);
+  const atpJson = JSON.stringify(p.pmt_authorized_title_property);
+  const logJson = JSON.stringify(p.pmt_property_capture_log);
+  assert.ok(!atpJson.includes("paramount_property_name"));
+  assert.ok(!atpJson.includes("property_name"));
+  assert.ok(!logJson.includes("property_name"));
+});
+
+test("the entity payload remains the SINGLE place the property name is written", () => {
+  const p = buildPayloads(fixtureCapture);
+  const entity = p.pmt_property.find((r) => r.property_source_id === "9001");
+  assert.equal(entity.property_name, "Fixture Property Alpha");
+  // No other target's rows may carry a property-name KEY, or the name's VALUE.
+  for (const t of LOAD_ORDER) {
+    if (t === "pmt_property") continue;
+    for (const row of p[t]) {
+      for (const k of Object.keys(row)) {
+        assert.ok(!(k === "property_name" || k.endsWith("_property_name")),
+          `${t}.${k} reintroduced a property-name copy`);
+      }
+      assert.ok(!Object.values(row).includes("Fixture Property Alpha"),
+        `${t} leaked the property-name value`);
+    }
+  }
 });
 
 test("POSITIVE: the franchise payload NEVER carries a direct-relationship claim", () => {
@@ -417,7 +536,8 @@ test("LOAD_ORDER puts every parent strictly before the links that reference it",
   const at = (t) => LOAD_ORDER.indexOf(t);
   for (const link of ["pmt_asset_property", "pmt_asset_character", "pmt_asset_collection",
                       "pmt_asset_brand", "pmt_asset_franchise", "pmt_authorized_property_asset",
-                      "pmt_relationship_anomaly", "pmt_asset_metadata_value"]) {
+                      "pmt_relationship_anomaly", "pmt_metadata_element",
+                      "pmt_asset_metadata_value"]) {
     assert.ok(at("pmt_asset") < at(link), `pmt_asset must load before ${link}`);
   }
   assert.ok(at("pmt_property") < at("pmt_asset_property"));
@@ -427,6 +547,10 @@ test("LOAD_ORDER puts every parent strictly before the links that reference it",
   assert.ok(at("pmt_franchise") < at("pmt_asset_franchise"));
   assert.ok(at("pmt_authorized_title") < at("pmt_authorized_title_property"));
   assert.ok(at("pmt_property") < at("pmt_property_capture_log"));
+  assert.ok(at("pmt_metadata_element") >= 0, "pmt_metadata_element must be in LOAD_ORDER");
+  assert.ok(at("pmt_metadata_element") < at("pmt_asset_metadata_value"),
+    "pmt_metadata_element must load immediately before value rows");
+  assert.equal(at("pmt_asset_metadata_value") - at("pmt_metadata_element"), 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -538,7 +662,14 @@ test("a MISSING metadata field becomes null and never the string 'undefined'", (
       assert.notEqual(v, undefined, `${k} must be an explicit null, not undefined`);
     }
     assert.equal(row.language, null);
+  }
+  for (const row of p.pmt_metadata_element) {
+    for (const [k, v] of Object.entries(row)) {
+      assert.notEqual(v, "undefined", `${k} turned an absent value into the WORD undefined`);
+      assert.notEqual(v, undefined, `${k} must be an explicit null, not undefined`);
+    }
     assert.equal(row.metadata_category_id, null);
+    assert.equal(row.metadata_element_name, null);
   }
 });
 
@@ -561,8 +692,65 @@ test("a metadata row with no element id, or a bad asset id, is REFUSED", () => {
 test("summarise still reports COUNTS only for the metadata population", () => {
   const s = summarise(buildPayloads(fixtureCapture));
   assert.equal(s.pmt_asset_metadata_value, 4);
+  assert.equal(s.pmt_metadata_element, 2);
   const text = JSON.stringify(s);
   assert.ok(!text.includes("Fixture Shared Label"), "summaries must never carry a value");
+});
+
+// ---------------------------------------------------------------------------
+// Issue #965 -- headings once per capture on pmt_metadata_element.
+// ---------------------------------------------------------------------------
+const HEADING_KEYS = [
+  "metadata_element_name",
+  "metadata_category_id",
+  "metadata_category_name",
+  "domain_id",
+  "source_table_name",
+  "source_column_name",
+];
+
+test("pmt_metadata_element has one row per distinct element id", () => {
+  const p = buildPayloads(fixtureCapture);
+  assert.equal(p.pmt_metadata_element.length, 2);
+  const ids = p.pmt_metadata_element.map((r) => r.metadata_element_id).sort();
+  assert.deepEqual(ids, ["FIXTURE_ELEMENT_A", "FUTURE_UNKNOWN_ELEMENT"]);
+});
+
+test("value rows keep data_type and do not carry the six heading keys", () => {
+  const p = buildPayloads(fixtureCapture);
+  const future = p.pmt_asset_metadata_value.find(
+    (r) => r.metadata_element_id === "FUTURE_UNKNOWN_ELEMENT"
+  );
+  assert.equal(future.data_type, "number");
+  for (const row of p.pmt_asset_metadata_value) {
+    for (const key of HEADING_KEYS) {
+      assert.ok(!(key in row), `value row must not carry ${key}`);
+    }
+  }
+});
+
+test("element rows carry the six headings (or null) and never data_type", () => {
+  const p = buildPayloads(fixtureCapture);
+  for (const row of p.pmt_metadata_element) {
+    for (const key of HEADING_KEYS) {
+      assert.ok(key in row, `element row must carry ${key}`);
+    }
+    assert.ok(!("data_type" in row), "data_type is a per-value fact");
+  }
+});
+
+test("disagreeing headings for one element id are REFUSED, not last-write-wins", () => {
+  const bad = {
+    ...fixtureCapture,
+    assetMetadataValues: [
+      { asset_id: A1, metadata_element_id: "FIXTURE_ELEMENT_A", value_ordinal: 0,
+        metadata_element_name: "Fixture Name One", data_type: "string", source_value: "x" },
+      { asset_id: A1, metadata_element_id: "FIXTURE_ELEMENT_A", value_ordinal: 1,
+        metadata_element_name: "Fixture Name Two", data_type: "string", source_value: "y" },
+    ],
+  };
+  assert.throws(() => buildPayloads(bad), /disagree on metadata_element_name/);
+  assert.equal(buildMetadataElementRows(fixtureCapture.assetMetadataValues).length, 2);
 });
 
 test("sha256 is stable, so the manifest hash gate is deterministic", () => {
@@ -683,4 +871,182 @@ test("no RAISE statement uses %L, which is a format() specifier and prints a str
   for (const r of raiseLines) {
     assert.ok(!r.includes("%L"), `a RAISE still uses %L: ${r.slice(0, 80)}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Issue #964, plan_pmt-duplicate-name-columns.md -- the deprecation migration itself
+// (20260814193351). These pin, OFFLINE, the invariants the database contract test
+// supabase/tests/pmt_no_duplicate_property_name_contracts.sql pins against a live
+// catalog: both writers stopped, guard before relax, index gone, posture intact, and
+// NOTHING destructive in the staged file.
+// ---------------------------------------------------------------------------
+async function readDeprecationMigration() {
+  const { readFileSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  return readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "supabase", "migrations",
+      "20260814193351_pmt_duplicate_name_columns_deprecated.sql"),
+    "utf8"
+  ).replace(/\r\n/g, "\n");
+}
+
+async function readDuplicateNameContract() {
+  const { readFileSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  return readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "supabase", "tests",
+      "pmt_no_duplicate_property_name_contracts.sql"),
+    "utf8"
+  ).replace(/\r\n/g, "\n");
+}
+
+test("the duplicate-name contract exposes the VALUES aliases its loop reads", async () => {
+  const sql = await readDuplicateNameContract();
+  assert.match(sql, /select table_name, column_name from \(values[\s\S]*?\) as v\(table_name, column_name\)/,
+    "section A must alias VALUES as table_name/column_name for r.table_name/r.column_name");
+  assert.doesNotMatch(sql, /\) as v\(tbl, col\)/,
+    "the old aliases make SELECT table_name,column_name fail before assertions run");
+});
+
+test("the deprecation migration replaces the loader WITHOUT the two duplicate-name writes", async () => {
+  const sql = await readDeprecationMigration();
+  const starts = sql.match(/create or replace function plm\.load_pmt_capture_chunk\(/g) ?? [];
+  assert.equal(starts.length, 1, "exactly one whole-function replacement");
+  const start = sql.indexOf("create or replace function plm.load_pmt_capture_chunk(");
+  const body = sql.slice(start, sql.indexOf("\n$$;", start));
+  const normBody = body.replace(/\s+/g, " ");
+
+  assert.ok(!body.includes("paramount_property_name"),
+    "the function body must not write the rights-list copy");
+  assert.ok(!normBody.includes("property_name, reported_asset_count"),
+    "the old capture-log INSERT shape must be gone");
+  assert.ok(normBody.includes("property_name, is_licensed_selection"),
+    "the entity branch keeps its legitimate property_name write");
+  assert.ok(body.includes("security definer"), "SECURITY DEFINER preserved");
+  assert.ok(body.includes("set search_path = plm, core, public, extensions"),
+    "pinned search_path preserved");
+  assert.ok(body.includes("not (p_target = any (c_targets))"), "allow-list guard preserved");
+
+  // The security-definer posture is re-pinned AFTER the replacement, as in every
+  // prior replacement of this function.
+  assert.match(sql, /revoke all on function plm\.load_pmt_capture_chunk\(uuid, text, jsonb\) from public;/);
+  assert.match(sql, /revoke all on function plm\.load_pmt_capture_chunk\(uuid, text, jsonb\) from anon, authenticated;/);
+  assert.match(sql, /grant execute on function plm\.load_pmt_capture_chunk\(uuid, text, jsonb\) to service_role;/);
+});
+
+test("the deprecation migration relaxes BOTH columns behind the drift guard, and drops the index", async () => {
+  const sql = await readDeprecationMigration();
+  assert.match(sql, /alter table plm\.pmt_authorized_title_property alter column paramount_property_name drop not null;/);
+  assert.match(sql, /alter table plm\.pmt_property_capture_log alter column property_name drop not null;/);
+
+  // The refusal guard runs BEFORE either relax, and raises on drift or orphans.
+  const driftAt = sql.indexOf("v_atp_mismatch > 0 or v_log_mismatch > 0");
+  const orphanAt = sql.indexOf("v_orphans > 0");
+  const relaxAt = sql.indexOf("drop not null");
+  assert.ok(driftAt > 0, "drift refusal present");
+  assert.ok(orphanAt > 0, "orphan refusal present");
+  assert.ok(relaxAt > driftAt && relaxAt > orphanAt,
+    "the guard must run before the NOT NULL relax");
+
+  assert.match(sql, /drop index plm\.idx_pmt_atp_name;/);
+});
+
+test("the deprecation migration is STAGED: schema-only, and carries no column drop", async () => {
+  const sql = await readDeprecationMigration();
+  // Strip every function/DO body first: inserts INSIDE the loader are the runtime path.
+  const topLevel = sql.replace(/\$\$[\s\S]*?\$\$/g, "\n-- [body omitted]\n");
+  const seeds = [...topLevel.matchAll(/insert\s+into\s+plm\.pmt_/gi)];
+  assert.equal(seeds.length, 0, "the migration must not seed any plm.pmt_* row at the top level");
+  assert.ok(!/\bdrop\s+column\b/i.test(topLevel),
+    "plan Step 6's column drops are deliberately NOT in this staged migration");
+  assert.ok(!/\brename\s+column\b/i.test(topLevel),
+    "no rename either: Step 1 (duplicate vs distinct fact) is still open");
+});
+
+// ---------------------------------------------------------------------------
+// Issue #965 -- the metadata-element normalization migration (staged A+B+C+D).
+// Version 20260814213043 is reserved by authoritative claim issue #998.
+// ---------------------------------------------------------------------------
+async function readMetadataElementMigration() {
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "supabase", "migrations");
+  const names = readdirSync(dir).filter((n) => n.endsWith("_pmt_metadata_element_normalization.sql"));
+  assert.equal(names.length, 1, "exactly one metadata-element normalization migration");
+  return readFileSync(join(dir, names[0]), "utf8").replace(/\r\n/g, "\n");
+}
+
+test("the metadata-element migration is the SECOND loader rewrite and keeps #964 omissions", async () => {
+  const sql = await readMetadataElementMigration();
+  const starts = sql.match(/create or replace function plm\.load_pmt_capture_chunk\(/g) ?? [];
+  assert.equal(starts.length, 1, "exactly one whole-function replacement");
+  const start = sql.indexOf("create or replace function plm.load_pmt_capture_chunk(");
+  const body = sql.slice(start, sql.indexOf("\n$$;", start));
+  const normBody = body.replace(/\s+/g, " ");
+
+  assert.ok(body.includes("'pmt_metadata_element'"), "element table is on the allow list");
+  assert.ok(body.includes("elsif p_target = 'pmt_metadata_element' then"),
+    "explicit INSERT branch, no dynamic SQL");
+  assert.ok(body.includes("jsonb_build_object("), "descriptor-tuple hash");
+  const valueAt = body.indexOf("elsif p_target = 'pmt_asset_metadata_value'");
+  assert.ok(valueAt > 0, "value INSERT branch present");
+  const valueBranch = body.slice(valueAt, body.indexOf("\n  else", valueAt));
+  assert.ok(!valueBranch.includes("metadata_element_name"),
+    "value-row INSERT must not write the six headings");
+  assert.ok(!valueBranch.includes("metadata_category_id"));
+  assert.ok(valueBranch.includes("data_type"),
+    "value-row INSERT still writes data_type");
+  const elementAt = body.indexOf("elsif p_target = 'pmt_metadata_element'");
+  const elementBranch = body.slice(elementAt, valueAt);
+  const elementInsert = elementBranch.slice(
+    elementBranch.indexOf("insert into plm.pmt_metadata_element"),
+    elementBranch.indexOf("from jsonb_array_elements")
+  );
+  assert.ok(elementInsert.includes("metadata_element_name"),
+    "element INSERT writes the headings");
+  assert.ok(!elementInsert.includes("data_type"),
+    "element INSERT must not write data_type");
+  assert.ok(!body.includes("paramount_property_name"),
+    "#964 rights-list omission must survive this rewrite");
+  assert.ok(!normBody.includes("property_name, reported_asset_count"),
+    "#964 capture-log omission must survive this rewrite");
+  assert.ok(normBody.includes("property_name, is_licensed_selection"),
+    "entity property_name write must survive");
+  assert.ok(body.includes("security definer"), "SECURITY DEFINER preserved");
+  assert.ok(body.includes("set search_path = plm, core, public, extensions"),
+    "pinned search_path preserved");
+  assert.ok(body.includes("not (p_target = any (c_targets))"), "allow-list guard preserved");
+  assert.match(sql, /revoke all on function plm\.load_pmt_capture_chunk\(uuid, text, jsonb\) from public;/);
+  assert.match(sql, /grant execute on function plm\.load_pmt_capture_chunk\(uuid, text, jsonb\) to service_role;/);
+});
+
+test("the metadata-element migration ships the security contract, freeze, FK, and no drop", async () => {
+  const sql = await readMetadataElementMigration();
+  assert.match(sql, /create table plm\.pmt_metadata_element/);
+  assert.ok(!/create table plm\.pmt_metadata_element[\s\S]*?\bdata_type\b/.test(
+    sql.slice(sql.indexOf("create table plm.pmt_metadata_element"),
+      sql.indexOf(";", sql.indexOf("create table plm.pmt_metadata_element")))
+  ), "element table must not have a data_type column");
+  assert.match(sql, /enable row level security/);
+  assert.ok(!/force row level security/i.test(sql));
+  assert.match(sql, /create policy pmt_metadata_element_read/);
+  assert.match(sql, /create policy pmt_metadata_element_service/);
+  assert.match(sql, /revoke truncate, references, trigger, maintain/);
+  assert.match(sql, /create trigger trg_pmt_metadata_element_immutable/);
+  assert.match(sql, /create trigger trg_pmt_asset_metadata_value_immutable/);
+  assert.match(sql, /pmt_amv_element_fkey/);
+  assert.match(sql, /n_distinct > 1/);
+  assert.ok(!/opa_link_ensure_entities/.test(sql));
+  assert.ok(!/do update set/i.test(sql));
+  assert.ok(!/api\.pmt_asset_metadata_value_expanded/.test(sql));
+  assert.ok(!/create\s+(or\s+replace\s+)?view\s+api\./i.test(sql));
+  assert.ok(!/create or replace function plm\.validate_pmt_capture/.test(sql),
+    "validator is not rewritten unless a population is added");
+  const topLevel = sql.replace(/\$\$[\s\S]*?\$\$/g, "\n-- [body omitted]\n");
+  assert.ok(!/\bdrop\s+column\b/i.test(topLevel),
+    "Migration E's six-column drop is a later PR after a proven preview capture");
+  assert.ok(!/\bdrop\s+column\b.*data_type/i.test(sql));
 });

@@ -53,6 +53,30 @@ on:
         description: "Production apply ONLY: pinned sha256 digest from that run's evidence artifact"
         type: string
         required: false
+      source_pr:
+        description: "Activated automatic policy only: merged source PR number"
+        type: string
+        required: false
+      preview_run_id:
+        description: "Activated automatic policy only: exact successful preview-apply run ID"
+        type: string
+        required: false
+      preview_artifact_digest:
+        description: "Activated automatic policy only: pinned preview evidence artifact digest"
+        type: string
+        required: false
+      historical_preview_source_pr:
+        description: "Preview recovery only: original merged PR that authored every allowlisted migration"
+        type: string
+        required: false
+      owner_decision_run_id:
+        description: "Material-risk apply only: immutable owner-decision evidence run ID"
+        type: string
+        required: false
+      owner_decision_artifact_digest:
+        description: "Material-risk apply only: pinned owner-decision evidence artifact digest"
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -224,19 +248,41 @@ jobs:
       # bounded set with `git worktree add --detach <sha>`, which needs the object.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.claim_head_sha }}
+          ref: ${{ inputs.historical_preview_source_pr != '' && inputs.commit_sha || inputs.claim_head_sha }}
           fetch-depth: 0
+      - name: Prove historical preview recovery source
+        if: inputs.historical_preview_source_pr != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
+          MAIN_SHA: ${{ inputs.commit_sha }}
+          PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
+        run: |
+          test -n "$MAIN_SHA"
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$MAIN_SHA"
+          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          python scripts/historical_preview_recovery.py --source-pr "$SOURCE_PR" \
+            --main-sha "$MAIN_SHA" --allowlist "$PREVIEW_ALLOWLIST" \
+            --output "$RUNNER_TEMP/historical-preview-source.json"
       - name: Acquire the exclusive GitHub-backed preview lane
         id: preview_lock
         env:
           GH_TOKEN: ${{ github.token }}
           CLAIM_PR: ${{ inputs.claim_pr }}
           CLAIM_HEAD_SHA: ${{ inputs.claim_head_sha }}
+          HISTORICAL_SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
+          HISTORICAL_MAIN_SHA: ${{ inputs.commit_sha }}
         run: |
           set -euo pipefail
-          test -n "$CLAIM_PR"
-          test -n "$CLAIM_HEAD_SHA"
-          node scripts/manage-migration-author-lanes.mjs --acquire-preview \
+          if [ -n "$HISTORICAL_SOURCE_PR" ]; then
+            CLAIM_PR="$HISTORICAL_SOURCE_PR"
+            CLAIM_HEAD_SHA="$HISTORICAL_MAIN_SHA"
+          fi
+          test -n "$CLAIM_PR"; test -n "$CLAIM_HEAD_SHA"
+          LOCK_KIND=preview
+          if [ -n "$HISTORICAL_SOURCE_PR" ]; then LOCK_KIND=preview-recovery; fi
+          node scripts/manage-migration-author-lanes.mjs --acquire-$LOCK_KIND \
             --owner "github-actions:${GITHUB_RUN_ID}" --pr "$CLAIM_PR" --head-sha "$CLAIM_HEAD_SHA" \
             > "$RUNNER_TEMP/preview-lock.json"
           echo "owner_sha=$(jq -r .ownerSha "$RUNNER_TEMP/preview-lock.json")" >> "$GITHUB_OUTPUT"
@@ -246,6 +292,12 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
+      - name: Install and prove PostgreSQL client
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          psql --version
       - name: Capture preview migration record (before)
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -300,6 +352,7 @@ jobs:
           print("Everything else on disk is already in the preview ledger.")
           PY
       - name: Hard guard preflight
+        if: inputs.historical_preview_source_pr == ''
         env:
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
         run: |
@@ -319,6 +372,7 @@ jobs:
             --allowlist "$PREVIEW_ALLOWLIST" \
             --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
       - name: Build bounded checkout
+        if: inputs.historical_preview_source_pr == ''
         env:
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
           COMMIT_SHA: ${{ steps.commit.outputs.sha }}
@@ -334,7 +388,7 @@ jobs:
       # whole pending queue, which is what the old bare `db push --dry-run`
       # reported and which no apply would ever have matched.
       - name: Bounded dry-run
-        if: inputs.mode == 'dry-run'
+        if: inputs.mode == 'dry-run' && inputs.historical_preview_source_pr == ''
         env:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
@@ -354,14 +408,26 @@ jobs:
           # flag. The bound is the filesystem -- `prepare` left exactly
           # `remote-ledger | allowlist` on disk. NEVER add this flag to a
           # `supabase db push` that runs in $GITHUB_WORKSPACE.
-          supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/preview-dry-run.txt"
-          # THE RESOLVED SET MUST EQUAL THE NAMED SET, exactly and in order.
-          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
-            --dry-run-output "$RUNNER_TEMP/preview-dry-run.txt" \
-            --allowlist "$PREVIEW_ALLOWLIST" \
-            --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
+          ATOMIC_VERSION="$(python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+            --migrations-dir "$RUNNER_TEMP/bounded-preview/supabase/migrations" \
+            --classify-allowlist "$PREVIEW_ALLOWLIST")"
+          if [ -n "$ATOMIC_VERSION" ]; then
+            psql --version
+            EXPECTED_PROJECT_REF="$PREVIEW_PROJECT_REF" python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+              --migrations-dir "$RUNNER_TEMP/bounded-preview/supabase/migrations" \
+              --linked-dir "$RUNNER_TEMP/bounded-preview" --version "$ATOMIC_VERSION" \
+              --target preview --expected-project-ref "$PREVIEW_PROJECT_REF" --mode check \
+              | tee "$RUNNER_TEMP/preview-dry-run.txt"
+          else
+            supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/preview-dry-run.txt"
+            # THE RESOLVED SET MUST EQUAL THE NAMED SET, exactly and in order.
+            python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
+              --dry-run-output "$RUNNER_TEMP/preview-dry-run.txt" \
+              --allowlist "$PREVIEW_ALLOWLIST" \
+              --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
+          fi
       - name: Bounded apply
-        if: inputs.mode == 'apply'
+        if: inputs.mode == 'apply' && inputs.historical_preview_source_pr == ''
         env:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
@@ -376,13 +442,55 @@ jobs:
           # A FRESH dry-run immediately before the write, verified against the
           # allowlist, so the run proves what it is about to do rather than
           # inheriting an earlier job's claim.
-          supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/preview-dry-run.txt"
-          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
-            --dry-run-output "$RUNNER_TEMP/preview-dry-run.txt" \
-            --allowlist "$PREVIEW_ALLOWLIST" \
-            --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
-          # THE WRITE. Preview only.
-          supabase db push --include-all 2>&1 | tee "$RUNNER_TEMP/preview-apply.txt"
+          ATOMIC_VERSION="$(python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+            --migrations-dir "$RUNNER_TEMP/bounded-preview/supabase/migrations" \
+            --classify-allowlist "$PREVIEW_ALLOWLIST")"
+          if [ -n "$ATOMIC_VERSION" ]; then
+            psql --version
+            EXPECTED_PROJECT_REF="$PREVIEW_PROJECT_REF" python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+              --migrations-dir "$RUNNER_TEMP/bounded-preview/supabase/migrations" \
+              --linked-dir "$RUNNER_TEMP/bounded-preview" --version "$ATOMIC_VERSION" \
+              --target preview --expected-project-ref "$PREVIEW_PROJECT_REF" --mode check \
+              | tee "$RUNNER_TEMP/preview-dry-run.txt"
+            EXPECTED_PROJECT_REF="$PREVIEW_PROJECT_REF" python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+              --migrations-dir "$RUNNER_TEMP/bounded-preview/supabase/migrations" \
+              --linked-dir "$RUNNER_TEMP/bounded-preview" --version "$ATOMIC_VERSION" \
+              --target preview --expected-project-ref "$PREVIEW_PROJECT_REF" --mode apply \
+              | tee "$RUNNER_TEMP/preview-apply.txt"
+          else
+            supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/preview-dry-run.txt"
+            python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
+              --dry-run-output "$RUNNER_TEMP/preview-dry-run.txt" \
+              --allowlist "$PREVIEW_ALLOWLIST" \
+              --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
+            # THE WRITE. Preview only.
+            supabase db push --include-all 2>&1 | tee "$RUNNER_TEMP/preview-apply.txt"
+          fi
+      - name: Recover proof for migrations already present on preview
+        if: inputs.mode == 'apply' && inputs.historical_preview_source_pr != ''
+        env:
+          PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path(os.environ["GITHUB_WORKSPACE"]) / "scripts"))
+          from production_migration_guard import local_migrations, parse_remote_versions
+
+          repo = Path(os.environ["GITHUB_WORKSPACE"])
+          temp = Path(os.environ["RUNNER_TEMP"])
+          versions = [v.strip() for v in os.environ["PREVIEW_ALLOWLIST"].split(",") if v.strip()]
+          local = local_migrations(repo)
+          ledger = parse_remote_versions(temp / "preview-ledger-before.txt")
+          missing = [v for v in versions if v not in ledger]
+          if missing:
+              raise SystemExit("REFUSED: historical preview recovery is missing ledger versions: " + ", ".join(missing))
+          names = [local[v].name for v in versions]
+          proof = "HISTORICAL PREVIEW PROOF: already applied; no database write performed\n" + "\n".join(names) + "\n"
+          (temp / "preview-dry-run.txt").write_text(proof, encoding="utf-8")
+          (temp / "preview-apply.txt").write_text(proof, encoding="utf-8")
+          PY
       # ALWAYS, including after a failed apply -- a partial apply is exactly when
       # the row delta matters most.
       - name: Capture preview migration record (after)
@@ -426,6 +534,7 @@ jobs:
             ${{ runner.temp }}/preview-apply.txt
             ${{ runner.temp }}/preview-ledger-after.txt
             ${{ runner.temp }}/bounded-preview/supabase/migration-content-manifest.json
+            ${{ runner.temp }}/historical-preview-source.json
           if-no-files-found: warn
           retention-days: 90
       - name: Release the exclusive preview lane with ownership proof
@@ -474,6 +583,12 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
+      - name: Install and prove PostgreSQL client
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          psql --version
       - name: Capture production migration record
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -520,11 +635,23 @@ jobs:
           # against a verified bounded set; the prohibition is on --include-all
           # against the FULL repo set, which this is not. Never add this flag to
           # a `supabase db push` that runs in $GITHUB_WORKSPACE.
-          supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
-          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
-            --dry-run-output "$RUNNER_TEMP/production-dry-run.txt" \
-            --allowlist "$PRODUCTION_ALLOWLIST" \
-            --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
+          ATOMIC_VERSION="$(python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+            --migrations-dir "$RUNNER_TEMP/bounded-production/supabase/migrations" \
+            --classify-allowlist "$PRODUCTION_ALLOWLIST")"
+          if [ -n "$ATOMIC_VERSION" ]; then
+            psql --version
+            EXPECTED_PROJECT_REF="$PRODUCTION_PROJECT_REF" python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+              --migrations-dir "$RUNNER_TEMP/bounded-production/supabase/migrations" \
+              --linked-dir "$RUNNER_TEMP/bounded-production" --version "$ATOMIC_VERSION" \
+              --target production --expected-project-ref "$PRODUCTION_PROJECT_REF" --mode check \
+              | tee "$RUNNER_TEMP/production-dry-run.txt"
+          else
+            supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
+            python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
+              --dry-run-output "$RUNNER_TEMP/production-dry-run.txt" \
+              --allowlist "$PRODUCTION_ALLOWLIST" \
+              --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
+          fi
       - name: Save dry-run evidence
         uses: actions/upload-artifact@v4
         with:
@@ -563,6 +690,9 @@ jobs:
     permissions:
       contents: read
       actions: read
+      checks: read
+      issues: read
+      pull-requests: read
     env:
       PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
     steps:
@@ -591,6 +721,12 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
+      - name: Install and prove PostgreSQL client
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          psql --version
       - name: Capture production migration record
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -621,6 +757,41 @@ jobs:
             --commit-sha "$REQUESTED_SHA" \
             --allowlist "$PRODUCTION_ALLOWLIST" \
             --output-dir "$RUNNER_TEMP"
+      - name: Detect machine-enforced policy activation
+        id: policy_activation
+        run: |
+          set -euo pipefail
+          active="$(jq -r 'if .active == true then "true" elif .active == false then "false" else error("activation must be boolean") end' config/production-risk-policy-activation.json)"
+          echo "active=$active" >> "$GITHUB_OUTPUT"
+          if [ "$active" = false ]; then
+            echo "New automatic policy is inactive. The production environment's old exact owner-approval rule remains mandatory."
+          fi
+      - name: Derive business risk from governed artifacts
+        if: steps.policy_activation.outputs.active == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+          SOURCE_PR: ${{ inputs.source_pr }}
+          REVIEW_RUN_ID: ${{ inputs.review_run_id }}
+          REVIEW_ARTIFACT_DIGEST: ${{ inputs.review_artifact_digest }}
+          PREVIEW_RUN_ID: ${{ inputs.preview_run_id }}
+          PREVIEW_ARTIFACT_DIGEST: ${{ inputs.preview_artifact_digest }}
+          OWNER_DECISION_RUN_ID: ${{ inputs.owner_decision_run_id }}
+          OWNER_DECISION_ARTIFACT_DIGEST: ${{ inputs.owner_decision_artifact_digest }}
+        run: |
+          set -euo pipefail
+          test -n "$SOURCE_PR"
+          test -n "$PREVIEW_RUN_ID"
+          test -n "$PREVIEW_ARTIFACT_DIGEST"
+          python scripts/production_business_risk_gate.py \
+            --main-sha "$REQUESTED_SHA" --allowlist "$PRODUCTION_ALLOWLIST" \
+            --pr "$SOURCE_PR" --review-run-id "$REVIEW_RUN_ID" \
+            --review-digest "$REVIEW_ARTIFACT_DIGEST" \
+            --preview-run-id "$PREVIEW_RUN_ID" --preview-digest "$PREVIEW_ARTIFACT_DIGEST" \
+            --owner-decision-run-id "$OWNER_DECISION_RUN_ID" \
+            --owner-decision-digest "$OWNER_DECISION_ARTIFACT_DIGEST" \
+            | tee "$RUNNER_TEMP/production-business-risk-evidence.json"
       - name: Upload pre-approval evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -629,6 +800,7 @@ jobs:
           path: |
             ${{ runner.temp }}/production-ledger-before.txt
             ${{ runner.temp }}/production-apply-review-evidence.json
+            ${{ runner.temp }}/production-business-risk-evidence.json
           if-no-files-found: warn
           retention-days: 90
   production-apply:
@@ -639,6 +811,9 @@ jobs:
     permissions:
       contents: write
       actions: read
+      checks: read
+      issues: read
+      pull-requests: read
     # Keep the production environment binding. Environment policy is managed in
     # a separate phase and is not changed by this repository patch.
     environment: production
@@ -691,9 +866,47 @@ jobs:
             --commit-sha "$REQUESTED_SHA" \
             --allowlist "$PRODUCTION_ALLOWLIST" \
             --output-dir "$RUNNER_TEMP"
+      - name: Detect machine-enforced policy activation
+        id: policy_activation
+        run: |
+          set -euo pipefail
+          active="$(jq -r 'if .active == true then "true" elif .active == false then "false" else error("activation must be boolean") end' config/production-risk-policy-activation.json)"
+          echo "active=$active" >> "$GITHUB_OUTPUT"
+      - name: Re-derive business risk after the approval wait
+        if: steps.policy_activation.outputs.active == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+          PRODUCTION_ALLOWLIST: ${{ inputs.production_allowlist }}
+          SOURCE_PR: ${{ inputs.source_pr }}
+          REVIEW_RUN_ID: ${{ inputs.review_run_id }}
+          REVIEW_ARTIFACT_DIGEST: ${{ inputs.review_artifact_digest }}
+          PREVIEW_RUN_ID: ${{ inputs.preview_run_id }}
+          PREVIEW_ARTIFACT_DIGEST: ${{ inputs.preview_artifact_digest }}
+          OWNER_DECISION_RUN_ID: ${{ inputs.owner_decision_run_id }}
+          OWNER_DECISION_ARTIFACT_DIGEST: ${{ inputs.owner_decision_artifact_digest }}
+        run: |
+          set -euo pipefail
+          test -n "$SOURCE_PR"
+          test -n "$PREVIEW_RUN_ID"
+          test -n "$PREVIEW_ARTIFACT_DIGEST"
+          python scripts/production_business_risk_gate.py \
+            --main-sha "$REQUESTED_SHA" --allowlist "$PRODUCTION_ALLOWLIST" \
+            --pr "$SOURCE_PR" --review-run-id "$REVIEW_RUN_ID" \
+            --review-digest "$REVIEW_ARTIFACT_DIGEST" \
+            --preview-run-id "$PREVIEW_RUN_ID" --preview-digest "$PREVIEW_ARTIFACT_DIGEST" \
+            --owner-decision-run-id "$OWNER_DECISION_RUN_ID" \
+            --owner-decision-digest "$OWNER_DECISION_ARTIFACT_DIGEST" \
+            | tee "$RUNNER_TEMP/production-business-risk-evidence.json"
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
+      - name: Install and prove PostgreSQL client
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          psql --version
       # Re-read the ledger IN THIS JOB. The review job's copy was taken before the
       # approval wait, which can be hours; production moves independently of this
       # repo, so a stale ledger would size the bounded checkout wrongly.
@@ -737,13 +950,30 @@ jobs:
           # push. The earlier production-dry-run job was a different run against a
           # different ledger snapshot; only this one describes the database we are
           # about to write to.
-          supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
-          python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
-            --dry-run-output "$RUNNER_TEMP/production-dry-run.txt" \
-            --allowlist "$PRODUCTION_ALLOWLIST" \
-            --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
-          # THE WRITE.
-          supabase db push --include-all 2>&1 | tee "$RUNNER_TEMP/production-apply.txt"
+          ATOMIC_VERSION="$(python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+            --migrations-dir "$RUNNER_TEMP/bounded-production/supabase/migrations" \
+            --classify-allowlist "$PRODUCTION_ALLOWLIST")"
+          if [ -n "$ATOMIC_VERSION" ]; then
+            psql --version
+            EXPECTED_PROJECT_REF="$PRODUCTION_PROJECT_REF" python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+              --migrations-dir "$RUNNER_TEMP/bounded-production/supabase/migrations" \
+              --linked-dir "$RUNNER_TEMP/bounded-production" --version "$ATOMIC_VERSION" \
+              --target production --expected-project-ref "$PRODUCTION_PROJECT_REF" --mode check \
+              | tee "$RUNNER_TEMP/production-dry-run.txt"
+            EXPECTED_PROJECT_REF="$PRODUCTION_PROJECT_REF" python "$GITHUB_WORKSPACE/scripts/atomic_migration_apply.py" \
+              --migrations-dir "$RUNNER_TEMP/bounded-production/supabase/migrations" \
+              --linked-dir "$RUNNER_TEMP/bounded-production" --version "$ATOMIC_VERSION" \
+              --target production --expected-project-ref "$PRODUCTION_PROJECT_REF" --mode apply \
+              | tee "$RUNNER_TEMP/production-apply.txt"
+          else
+            supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/production-dry-run.txt"
+            python "$GITHUB_WORKSPACE/scripts/production_migration_guard.py" verify-dry-run \
+              --dry-run-output "$RUNNER_TEMP/production-dry-run.txt" \
+              --allowlist "$PRODUCTION_ALLOWLIST" \
+              --remote-ledger "$RUNNER_TEMP/production-ledger-before.txt"
+            # THE WRITE.
+            supabase db push --include-all 2>&1 | tee "$RUNNER_TEMP/production-apply.txt"
+          fi
       - name: Capture production migration record (after)
         if: always()
         env:

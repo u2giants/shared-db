@@ -155,13 +155,31 @@ export const CAPTURE_FILES = Object.freeze([
   { file: "links-asset-character-normalized.csv", target: "wb_asset_character_normalized", requiredHeaders: Object.freeze(["asset_namespace", "asset_source_id", "character_namespace", "source_url"]) },
   { file: "links-asset-style-guide-normalized.csv", target: "wb_asset_style_guide_normalized", requiredHeaders: Object.freeze(["asset_namespace", "asset_source_id", "style_guide_namespace", "source_url"]) },
   { file: "links-property-character-normalized.csv", target: "wb_property_character_normalized", requiredHeaders: Object.freeze(["property_namespace", "character_namespace", "property_label", "character_label", "source_url"]) },
-  { file: "links-franchise-property-evidence.csv", target: "wb_franchise_property_evidence", requiredHeaders: Object.freeze(["franchise_namespace", "property_namespace", "evidence_source", "source_url"]) },
+  { file: "links-franchise-property-evidence.csv", target: "wb_franchise_property_evidence", requiredHeaders: Object.freeze(["franchise_namespace", "property_namespace", "evidence_source", "source_url"]), allowEmpty: true },
 ]);
 
 /** The required-header list for one capture file, or null if the file is unknown. */
 export function requiredHeadersFor(file) {
   const entry = CAPTURE_FILES.find((c) => c.file === file);
   return entry ? entry.requiredHeaders : null;
+}
+
+const NULLABLE_ASSET_FIELDS = Object.freeze([
+  "warner_asset_id",
+  "season",
+  "file_size_bytes",
+]);
+
+/** Convert only exact empty optional Asset values to JSON null before hashing. */
+export function normalizeCaptureRows(target, rows) {
+  if (target !== "wb_asset_normalized") return rows;
+  return rows.map((row) => {
+    const normalized = { ...row };
+    for (const field of NULLABLE_ASSET_FIELDS) {
+      if (normalized[field] === "") normalized[field] = null;
+    }
+    return normalized;
+  });
 }
 
 /**
@@ -609,6 +627,11 @@ export function resolveRunConfig(env) {
     );
   }
 
+  const statementTimeoutMs = Number(env.WB_STATEMENT_TIMEOUT_MS ?? "300000");
+  if (!Number.isSafeInteger(statementTimeoutMs) || statementTimeoutMs < 1000 || statementTimeoutMs > 900000) {
+    throw new Error("WB_STATEMENT_TIMEOUT_MS must be a whole number from 1000 through 900000.");
+  }
+
   return {
     repoDir: resolvePath(
       need("WB_SOURCE_REPO", "Point it at the root of the PRIVATE licensor-source-data checkout.")
@@ -623,6 +646,7 @@ export function resolveRunConfig(env) {
     expectedRef: (env.WB_EXPECTED_PROJECT_REF ?? "").trim(),
     databaseUrl: env.DATABASE_URL ?? "",
     maxShrinkFraction: env.WB_MAX_SHRINK_FRACTION ?? null,
+    statementTimeoutMs,
     notes: env.WB_NOTES ?? null,
   };
 }
@@ -636,9 +660,12 @@ export async function prepareCaptures(cfg, deps = {}) {
   await assertPinnedCleanCheckout(cfg.repoDir, cfg.pinnedCommit, runGit);
 
   const captures = [];
-  for (const { file, target } of CAPTURE_FILES) {
-    const rows = await readPinnedCsv(cfg.repoDir, cfg.pinnedCommit, file, runGit);
-    if (!rows.length) {
+  for (const { file, target, allowEmpty = false } of CAPTURE_FILES) {
+    const rows = normalizeCaptureRows(
+      target,
+      await readPinnedCsv(cfg.repoDir, cfg.pinnedCommit, file, runGit)
+    );
+    if (!rows.length && !allowEmpty) {
       throw new Error(
         `REFUSING TO LOAD. warner-bros/${file} parsed to ZERO rows at the pinned commit. ` +
           "An empty capture file is a failed extract, never an empty population."
@@ -651,6 +678,7 @@ export async function prepareCaptures(cfg, deps = {}) {
       rowCount: rows.length,
       chunks,
       manifestSha256: chainDigest(chunks),
+      skipLoad: rows.length === 0 && allowEmpty,
     });
   }
   return captures;
@@ -738,6 +766,40 @@ export async function loadCapture(client, cfg, capture, log = console.log) {
   }
 }
 
+/** Apply a bounded session timeout after connecting; transaction poolers may ignore URL options. */
+export async function configureDatabaseSession(client, statementTimeoutMs) {
+  await client.query("select set_config('statement_timeout',$1,false)", [String(statementTimeoutMs)]);
+}
+
+/** Load prepared streams while recording truthful optional zero-row streams as skipped. */
+export async function loadPreparedCaptures(client, cfg, captures, log = console.log, load = loadCapture) {
+  const results = [];
+  for (const capture of captures) {
+    const truthfulOptionalEmpty =
+      capture.file === "links-franchise-property-evidence.csv" &&
+      capture.target === "wb_franchise_property_evidence" &&
+      capture.rowCount === 0 &&
+      Array.isArray(capture.chunks) &&
+      capture.chunks.length === 0 &&
+      capture.manifestSha256 === chainDigest([]);
+    if (capture.skipLoad && !truthfulOptionalEmpty) {
+      throw new Error(
+        "REFUSING TO SKIP. Only the verified zero-row Franchise-to-Property evidence stream is optional."
+      );
+    }
+    if (capture.rowCount === 0 && !truthfulOptionalEmpty) {
+      throw new Error("REFUSING TO LOAD. An unverified zero-row capture reached the load boundary.");
+    }
+    if (truthfulOptionalEmpty) {
+      log(`  ${capture.target}: SKIPPED -- optional source stream declared 0 rows; no database call made.`);
+      results.push({ target: capture.target, skipped: true, rows: 0 });
+      continue;
+    }
+    results.push(await load(client, cfg, capture, log));
+  }
+  return results;
+}
+
 async function main() {
   const apply = process.argv.includes("--apply");
   const cfg = resolveRunConfig(process.env);
@@ -763,10 +825,9 @@ async function main() {
   const client = new pg.Client({ connectionString: cfg.databaseUrl });
   await client.connect();
   try {
-    for (const capture of captures) {
-      await loadCapture(client, cfg, capture);
-    }
-    console.log("  ALL EIGHT CAPTURES COMPLETE.");
+    await configureDatabaseSession(client, cfg.statementTimeoutMs);
+    await loadPreparedCaptures(client, cfg, captures);
+    console.log("  ALL ELEVEN CAPTURES COMPLETE.");
   } finally {
     await client.end();
   }
