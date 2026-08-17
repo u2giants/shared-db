@@ -579,28 +579,30 @@ test('same-owner split recovery rolls both issue mutations back after partial re
 })
 
 function expansionIo(overrides={}){
-  const io=memoryIo(),issue={number:1063,state:'open',body:claimBody({version:'20260816063532',objects:['index plm.item_upper_trim_item_number_idx'],owner:'codex-issue-853-orderlist',branch:'codex/issue-853-orderlist-index',worktree:'C:\\repos\\shared-db-wt-853-index',expiresAt:new Date('2026-08-17T00:00:00Z')})}
-  io.refs.set('refs/db-claims/20260816063532','reserved');io.getIssue=()=>structuredClone(issue);io.updateIssue=(_n,fields)=>{Object.assign(issue,fields);return structuredClone(issue)}
-  io.getPr=()=>({state:'open',head:{sha:'head',ref:'codex/issue-853-orderlist-index'}});io.getPrFiles=()=>[{status:'added',filename:'supabase/migrations/20260816063532_index.sql'}];io.openClaims=()=>[structuredClone(issue)]
+  const io=memoryIo(),issue={number:1063,state:'open',title:'CLAIM: #853 index',body:claimBody({version:'20260816063532',objects:['index plm.item_upper_trim_item_number_idx'],owner:'codex-issue-853-orderlist',branch:'codex/issue-853-orderlist-index',worktree:'C:\\repos\\shared-db-wt-853-index',expiresAt:new Date('2026-08-17T00:00:00Z')})}
+  const workIssue={number:853,state:'open',body:'```db-work-scope\nstatus: ready\nwork_type: structural\nroute: shared-db-orchestrator\npriority: 1\ndepends_on:\nobjects:\n  - table plm.item\n```'}
+  io.refs.set('refs/db-claims/20260816063532','reserved');io.getIssue=(n)=>structuredClone(Number(n)===853?workIssue:issue);io.updateIssue=(_n,fields)=>{Object.assign(issue,fields);return structuredClone(issue)}
+  io.getPr=()=>({state:'open',head:{sha:'a'.repeat(40),ref:'codex/issue-853-orderlist-index'}});io.getPrFiles=()=>[{status:'added',filename:'supabase/migrations/20260816063532_index.sql'}];io.openClaims=()=>[structuredClone(issue)]
   io.prSources=()=>[{label:'PR #1065 [DRAFT] "index"',objects:['index plm.item_upper_trim_item_number_idx','table plm.item'],versions:['20260816063532']}]
   return Object.assign(io,{issue},overrides)
 }
-const expansionOptions={claim:1063,pr:1065,owner:'codex-issue-853-orderlist',headSha:'head',branch:'codex/issue-853-orderlist-index',worktree:'C:\\repos\\shared-db-wt-853-index',requestId:'expand',mutexAttempts:1}
+const expansionOptions={issue:853,claim:1063,pr:1065,owner:'codex-issue-853-orderlist',headSha:'a'.repeat(40),branch:'codex/issue-853-orderlist-index',worktree:'C:\\repos\\shared-db-wt-853-index',requestId:'expand',mutexAttempts:1}
 test('active claim expansion adds exactly the parser-proven uncovered object',()=>{
   const io=expansionIo(),result=expandActiveClaimFromPr(expansionOptions,NOW,io);assert.deepEqual(result.added,['table plm.item']);assert.deepEqual(parseAuthorLease(io.issue.body,NOW).objects,['index plm.item_upper_trim_item_number_idx','table plm.item'])
 })
-test('active claim expansion rejects arbitrary extras, collisions, stale lease, and changed binding',()=>{
-  let io=expansionIo();io.prSources=()=>[{label:'PR #1065 "x"',objects:['index plm.item_upper_trim_item_number_idx','table plm.item','table plm.extra'],versions:['20260816063532']}];assert.throws(()=>expandActiveClaimFromPr(expansionOptions,NOW,io),/exactly table plm.item/)
-  io=expansionIo();io.openClaims=()=>[io.getIssue(),{number:9,body:claimBody({version:'20260816070000',objects:['table plm.item'],owner:'other',branch:'other',worktree:'C:/other',expiresAt:new Date('2026-08-17T00:00:00Z')})}];assert.throws(()=>expandActiveClaimFromPr(expansionOptions,NOW,io),/collision/)
+test('active claim expansion adds every parser-proven object and rejects collisions, stale lease, and changed binding',()=>{
+  let io=expansionIo();io.prSources=()=>[{label:'PR #1065 "x"',objects:['index plm.item_upper_trim_item_number_idx','table plm.item','table plm.extra'],versions:['20260816063532']}];assert.deepEqual(expandActiveClaimFromPr(expansionOptions,NOW,io).added,['table plm.item','table plm.extra'])
+  io=expansionIo();io.openClaims=()=>[io.getIssue(1063),{number:9,body:claimBody({version:'20260816070000',objects:['table plm.item'],owner:'other',branch:'other',worktree:'C:/other',expiresAt:new Date('2026-08-17T00:00:00Z')})}];assert.throws(()=>expandActiveClaimFromPr(expansionOptions,NOW,io),/collision/)
   io=expansionIo();io.issue.body=io.issue.body.replace('2026-08-17T00:00:00.000Z','2026-08-14T19:00:00.000Z');assert.throws(()=>expandActiveClaimFromPr(expansionOptions,NOW,io),/expired/)
-  io=expansionIo();assert.throws(()=>expandActiveClaimFromPr({...expansionOptions,headSha:'wrong'},NOW,io),/head or branch changed/)
+  io=expansionIo();assert.throws(()=>expandActiveClaimFromPr({...expansionOptions,headSha:'b'.repeat(40)},NOW,io),/head or branch changed/)
+  io=expansionIo();assert.throws(()=>expandActiveClaimFromPr({...expansionOptions,issue:999},NOW,io),/exact issue/)
 })
 test('active claim expansion rolls back an ambiguous update failure while mutex-owned',()=>{
   const io=expansionIo(),before=io.issue.body;io.updateIssue=(_n,fields)=>{Object.assign(io.issue,fields);if(fields.body!==before)throw new LaneError('connection lost');return io.getIssue()}
   assert.throws(()=>expandActiveClaimFromPr(expansionOptions,NOW,io),/connection lost/);assert.equal(io.issue.body,before)
 })
-test('REAL main command wires claim-number into the incident-pinned expansion',()=>{
-  const io=expansionIo(),args=['--expand-active-claim-from-pr','--claim-number','1063','--pr','1065','--owner','codex-issue-853-orderlist','--head-sha','head','--branch','codex/issue-853-orderlist-index','--worktree','C:\\repos\\shared-db-wt-853-index']
+test('REAL main command wires exact issue and claim into generalized expansion',()=>{
+  const io=expansionIo(),args=['--expand-active-claim-from-pr','--issue','853','--claim-number','1063','--pr','1065','--owner','codex-issue-853-orderlist','--head-sha','a'.repeat(40),'--branch','codex/issue-853-orderlist-index','--worktree','C:\\repos\\shared-db-wt-853-index']
   assert.equal(main(args,NOW,io),0);assert.ok(parseAuthorLease(io.issue.body,NOW).objects.includes('table plm.item'))
 })
 
