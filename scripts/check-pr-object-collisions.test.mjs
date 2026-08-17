@@ -16,6 +16,9 @@ import {
   findCollisions,
   formatReport,
   normalizeSql,
+  validateBaseFileAgreement,
+  validateFallbackIdentity,
+  validateFallbackPaths,
 } from './check-pr-object-collisions.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -144,6 +147,38 @@ test('the base-branch compare uses the MERGE BASE, not pull_request.base.sha', (
     baseCompareSpec('u2giants/shared-db', 'HEADSHA', 'main'),
     'repos/u2giants/shared-db/compare/HEADSHA...main',
   )
+})
+
+test('compare and fallback must name the exact same complete file set', () => {
+  assert.deepEqual(
+    validateBaseFileAgreement(
+      [{ filename: 'supabase/migrations/a.sql' }, { filename: 'docs/x.md' }],
+      [{ filename: 'docs/x.md' }, { filename: 'supabase/migrations/a.sql' }],
+    ),
+    ['docs/x.md', 'supabase/migrations/a.sql'],
+  )
+})
+
+test('fails closed when fallback is incomplete or mismatched', () => {
+  assert.throws(() => validateBaseFileAgreement(
+    [{ filename: 'supabase/migrations/a.sql' }, { filename: 'supabase/migrations/b.sql' }],
+    [{ filename: 'supabase/migrations/a.sql' }],
+  ), /disagree/)
+})
+
+test('fallback binds the exact pull request, base, and head identities', () => {
+  const sha = 'a'.repeat(40)
+  assert.doesNotThrow(() => validateFallbackIdentity(
+    { number: 7, head: { sha }, base: { ref: 'main' } }, 'b'.repeat(40), 7, 'main', sha,
+  ))
+  assert.throws(() => validateFallbackIdentity(
+    { number: 8, head: { sha }, base: { ref: 'main' } }, 'b'.repeat(40), 7, 'main', sha,
+  ), /identity mismatch/)
+})
+
+test('fallback rejects a shallow graph or duplicate path evidence', () => {
+  assert.throws(() => validateFallbackPaths(['a.sql'], true), /truncated/)
+  assert.throws(() => validateFallbackPaths(['a.sql', 'a.sql']), /duplicate\/truncated/)
 })
 
 // ---------------------------------------------------------------------------

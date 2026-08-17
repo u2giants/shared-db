@@ -952,6 +952,58 @@ function ghJson(args) {
   }
 }
 
+export function validateBaseFileAgreement(compareFiles, fallbackFiles) {
+  const names = (files) => [...new Set(files.map((file) => file.filename ?? file.path))].sort()
+  const primary = names(compareFiles)
+  const fallback = names(fallbackFiles)
+  if (JSON.stringify(primary) !== JSON.stringify(fallback)) {
+    throw new Skip(`Compare and commit-graph fallback disagree (${primary.join(', ')} != ${fallback.join(', ')})`)
+  }
+  return fallback
+}
+
+export function validateFallbackIdentity(pr, liveBase, number, baseRef, headSha) {
+  if (pr?.number !== number || pr?.head?.sha !== headSha || pr?.base?.ref !== baseRef || !/^[0-9a-f]{40}$/.test(liveBase ?? '')) {
+    throw new Skip('fallback pull-request/base identity mismatch')
+  }
+}
+
+export function validateFallbackPaths(paths, shallow = false) {
+  if (shallow) throw new Skip('fallback commit graph is truncated')
+  if (new Set(paths).size !== paths.length) throw new Skip('fallback returned duplicate/truncated path data')
+  return paths
+}
+
+function git(args) {
+  try {
+    return execFileSync('git', args, {
+      encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim()
+  } catch (error) {
+    throw new Skip(`\`git ${args.join(' ')}\` failed: ${error.message}`)
+  }
+}
+
+function baseFilesFromCommitGraph(repo, number, baseRef, headSha) {
+  const pr = ghJson(['api', `repos/${repo}/pulls/${number}`])
+  const liveBase = ghJson(['api', `repos/${repo}/branches/${encodeURIComponent(baseRef)}`])?.commit?.sha
+  validateFallbackIdentity(pr, liveBase, number, baseRef, headSha)
+  const shallow = git(['rev-parse', '--is-shallow-repository']) === 'true'
+  for (const sha of [headSha, liveBase]) {
+    const commit = ghJson(['api', `repos/${repo}/commits/${sha}`])
+    if (commit?.sha !== sha || commit?.commit?.tree?.sha == null) {
+      throw new Skip(`fallback commit/tree identity mismatch for ${sha}`)
+    }
+    git(['cat-file', '-e', `${sha}^{commit}`])
+  }
+  const mergeBase = git(['merge-base', headSha, liveBase])
+  if (!/^[0-9a-f]{40}$/.test(mergeBase)) throw new Skip('fallback could not prove an exact merge base')
+  const listed = git(['diff', '--name-only', '--diff-filter=AM', '-z', mergeBase, liveBase])
+    .split('\0').filter(Boolean)
+  return validateFallbackPaths(listed, shallow).map((filename) => ({ filename, status: 'modified' }))
+}
+
 function isMigration(file) {
   return (
     typeof file.filename === 'string' &&
@@ -1001,9 +1053,19 @@ export function baseCompareSpec(repo, headSha, baseRef) {
   return `repos/${repo}/compare/${headSha}...${baseRef}`
 }
 
-function baseBranchSource(repo, baseRef, headSha) {
-  const compare = ghJson(['api', baseCompareSpec(repo, headSha, baseRef)])
-  const files = (compare.files ?? []).filter(isMigration)
+function baseBranchSource(repo, number, baseRef, headSha) {
+  let compare
+  let compareFailed = false
+  try {
+    compare = ghJson(['api', baseCompareSpec(repo, headSha, baseRef)])
+    if (!Array.isArray(compare?.files)) throw new Skip('Compare returned incomplete file data')
+  } catch (error) {
+    if (!(error instanceof Skip)) throw error
+    compareFailed = true
+  }
+  const fallback = baseFilesFromCommitGraph(repo, number, baseRef, headSha)
+  if (!compareFailed) validateBaseFileAgreement(compare.files, fallback)
+  const files = (compareFailed ? fallback : compare.files).filter(isMigration)
   if (files.length === 0) return null
   return {
     label: `${baseRef} (merged since this PR branched)`,
@@ -1068,7 +1130,7 @@ export function gatherSources(env = process.env) {
   }
 
   if (baseRef && headSha) {
-    const base = baseBranchSource(repo, baseRef, headSha)
+    const base = baseBranchSource(repo, number, baseRef, headSha)
     if (base) sources.push(base)
   }
 
