@@ -169,9 +169,6 @@ class AtomicMigrationApplyTests(unittest.TestCase):
     def test_wrapper_places_sql_and_exact_ledger_row_in_one_transaction(self):
         wrapper = atomic.build_wrapper("29990101000000", "test", "create table x(id int);", ["create table x(id int)"])
         self.assertLess(wrapper.index("BEGIN;"), wrapper.index("create table"))
-        self.assertIn("set_config('app.shared_db_migration_version'", wrapper)
-        self.assertIn("29990101000000", wrapper)
-        self.assertLess(wrapper.index("set_config('app.shared_db_migration_version'"), wrapper.index("create table"))
         self.assertLess(wrapper.index("create table"), wrapper.index("INSERT INTO supabase_migrations.schema_migrations"))
         self.assertLess(wrapper.index("INSERT INTO"), wrapper.index("COMMIT;"))
 

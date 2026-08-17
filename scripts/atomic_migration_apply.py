@@ -262,11 +262,7 @@ def build_wrapper(version: str, name: str, raw: str, statements: list[str]) -> s
     validate_version(version)
     values = ",\n".join(dollar_quote(s, f"s{i}") for i, s in enumerate(statements))
     return (
-        "\\set ON_ERROR_STOP on\nBEGIN;\n"
-        + "SELECT set_config('app.shared_db_migration_version', "
-        + dollar_quote(version, "migration_version")
-        + ", true);\n"
-        + raw.rstrip() + "\n"
+        "\\set ON_ERROR_STOP on\nBEGIN;\n" + raw.rstrip() + "\n"
         "INSERT INTO supabase_migrations.schema_migrations(version, statements, name) VALUES (\n"
         + dollar_quote(version, "version") + ", ARRAY[\n" + values + "\n]::text[], "
         + dollar_quote(name, "name") + ");\nCOMMIT;\n"
