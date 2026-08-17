@@ -4,6 +4,7 @@
 do $$
 declare
   relation_name text;
+  privilege_name text;
 begin
   foreach relation_name in array array[
     'stage',
@@ -30,12 +31,17 @@ begin
         'authenticated must not have DELETE on pim.%', relation_name;
     end if;
 
-    if has_table_privilege(
-      'anon',
-      format('pim.%I', relation_name),
-      'INSERT, UPDATE, DELETE'
-    ) then
-      raise exception 'anon must not have write privileges on pim.%', relation_name;
+    if exists (select 1 from pg_roles where rolname = 'anon') then
+      foreach privilege_name in array array['INSERT', 'UPDATE', 'DELETE'] loop
+        if has_table_privilege(
+          'anon',
+          format('pim.%I', relation_name),
+          privilege_name
+        ) then
+          raise exception
+            'anon must not have % on pim.%', privilege_name, relation_name;
+        end if;
+      end loop;
     end if;
 
     if exists (
@@ -49,14 +55,16 @@ begin
       raise exception 'PUBLIC must not have write privileges on pim.%', relation_name;
     end if;
 
-    if not has_table_privilege(
-      'authenticated',
-      format('pim.%I', relation_name),
-      'SELECT, INSERT, UPDATE'
-    ) then
-      raise exception
-        'authenticated must retain SELECT, INSERT, UPDATE on pim.%', relation_name;
-    end if;
+    foreach privilege_name in array array['SELECT', 'INSERT', 'UPDATE'] loop
+      if not has_table_privilege(
+        'authenticated',
+        format('pim.%I', relation_name),
+        privilege_name
+      ) then
+        raise exception
+          'authenticated must retain % on pim.%', privilege_name, relation_name;
+      end if;
+    end loop;
   end loop;
 end
 $$;
