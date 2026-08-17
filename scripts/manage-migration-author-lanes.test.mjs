@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, expandActiveClaimFromPr, EXCLUSIVE_REFS, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects } from './manage-migration-author-lanes.mjs'
+import { acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects } from './manage-migration-author-lanes.mjs'
 
 const NOW = new Date('2026-08-14T20:00:00Z')
 const body = (objects, owner, expires = '2026-08-15T08:00:00.000Z') => claimBody({ version:`2026081420${owner.padStart(4,'0')}`, objects, owner:`agent-${owner}`, branch:`codex/${owner}`, worktree:`C:/w/${owner}`, expiresAt:new Date(expires) })
@@ -603,6 +603,29 @@ test('active claim expansion rolls back an ambiguous update failure while mutex-
 })
 test('REAL main command wires exact issue and claim into generalized expansion',()=>{
   const io=expansionIo(),args=['--expand-active-claim-from-pr','--issue','853','--claim-number','1063','--pr','1065','--owner','codex-issue-853-orderlist','--head-sha','a'.repeat(40),'--branch','codex/issue-853-orderlist-index','--worktree','C:\\repos\\shared-db-wt-853-index']
+  assert.equal(main(args,NOW,io),0);assert.ok(parseAuthorLease(io.issue.body,NOW).objects.includes('table plm.item'))
+})
+
+test('issue-scope expansion adds only exact ready structural issue objects before authoring',()=>{
+  const io=expansionIo(),baseGet=io.getIssue;io.prSources=()=>[]
+  io.getIssue=(n)=>{const row=baseGet(n);if(Number(n)===853)row.body=row.body.replace('  - table plm.item','  - table plm.item\n  - table plm.extra');return row}
+  const result=expandActiveClaimFromIssue(expansionOptions,NOW,io)
+  assert.deepEqual(result.added,['table plm.item','table plm.extra'])
+  assert.deepEqual(parseAuthorLease(io.issue.body,NOW).objects.sort(),['index plm.item_upper_trim_item_number_idx','table plm.extra','table plm.item'])
+})
+
+test('issue-scope expansion rejects wrong routing, collisions, and ambiguous updates',()=>{
+  let io=expansionIo(),baseGet=io.getIssue
+  io.getIssue=(n)=>{const row=baseGet(n);if(Number(n)===853)row.body=row.body.replace('status: ready','status: blocked');return row}
+  assert.throws(()=>expandActiveClaimFromIssue(expansionOptions,NOW,io),/not open ready structural/)
+  io=expansionIo();io.openClaims=()=>[io.getIssue(1063),{number:9,body:claimBody({version:'20260816070000',objects:['table plm.item'],owner:'other',branch:'other',worktree:'C:/other',expiresAt:new Date('2026-08-17T00:00:00Z')})}]
+  assert.throws(()=>expandActiveClaimFromIssue(expansionOptions,NOW,io),/collision/)
+  io=expansionIo();io.prSources=()=>[];const before=io.issue.body;io.updateIssue=(_n,fields)=>{Object.assign(io.issue,fields);if(fields.body!==before)throw new LaneError('connection lost');return io.getIssue(1063)}
+  assert.throws(()=>expandActiveClaimFromIssue(expansionOptions,NOW,io),/connection lost/);assert.equal(io.issue.body,before)
+})
+
+test('REAL main command expands an active claim from exact issue scope',()=>{
+  const io=expansionIo();io.prSources=()=>[];const args=['--expand-active-claim-from-issue','--issue','853','--claim-number','1063','--owner','codex-issue-853-orderlist','--branch','codex/issue-853-orderlist-index','--worktree','C:\\repos\\shared-db-wt-853-index']
   assert.equal(main(args,NOW,io),0);assert.ok(parseAuthorLease(io.issue.body,NOW).objects.includes('table plm.item'))
 })
 
