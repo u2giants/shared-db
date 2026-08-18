@@ -218,10 +218,21 @@ begin
        and coalesce(v_stored_phase, '') <> 'ambiguous_submission'  -- already flipped
        and coalesce(v_in_phase, '') <> 'ambiguous_submission' then
 
-      raise exception
-        'update_bulk_operation: legacy write to "%" refused -- the submission lease held by % expired at % with no saved provider_batch_id, so the provider may already hold (and bill) this job. This operation is ambiguous: reconcile it against the provider and write phase = ''ambiguous_submission'', or use the guarded path with p_expected_revision.',
-        p_op_key, v_stored_owner, v_stored_lease
-        using errcode = '55000';
+      v_new := coalesce(v_stored, '{}'::jsonb)
+               || jsonb_build_object(
+                    'state_revision', v_stored_rev + 1,
+                    'external_job', v_stored_job || jsonb_build_object(
+                      'phase', 'ambiguous_submission',
+                      'ambiguous_since', v_now,
+                      'ambiguous_reason', 'submission_lease_expired_without_provider_batch_id',
+                      'ambiguous_prior_phase', coalesce(v_stored_phase, 'unknown'),
+                      'ambiguous_prior_owner', v_stored_owner));
+      v_current := jsonb_set(v_current, array[p_op_key], v_new);
+      insert into admin_config (key, value, updated_at)
+      values ('BULK_OPERATIONS', v_current, now())
+      on conflict (key) do update
+        set value = excluded.value, updated_at = excluded.updated_at;
+      return v_current;
     end if;
 
     if p_only_if_status is not null
@@ -612,6 +623,7 @@ declare
   v_in_owner      text;
   v_in_rev        bigint;
   v_now           timestamptz := now();
+  v_ambiguous     boolean := false;
 begin
   perform pg_advisory_xact_lock(hashtext('BULK_OPERATIONS'));
 
@@ -666,12 +678,26 @@ begin
        and coalesce(v_stored_phase, '') <> 'ambiguous_submission'  -- already flipped
        and coalesce(v_in_phase, '') <> 'ambiguous_submission' then
 
-      raise exception
-        'update_bulk_operations_batch: refused -- key "%" has a submission lease held by % that expired at % with no saved provider_batch_id, so the provider may already hold (and bill) this job. No key in this batch was applied. Reconcile it against the provider and write phase = ''ambiguous_submission'', or use update_bulk_operation with p_expected_revision.',
-        v_key, v_stored_owner, v_stored_lease
-        using errcode = '55000';
+      v_current := jsonb_set(v_current, array[v_key], v_stored
+               || jsonb_build_object(
+                    'state_revision', v_stored_rev + 1,
+                    'external_job', v_stored_job || jsonb_build_object(
+                      'phase', 'ambiguous_submission',
+                      'ambiguous_since', v_now,
+                      'ambiguous_reason', 'submission_lease_expired_without_provider_batch_id',
+                      'ambiguous_prior_phase', coalesce(v_stored_phase, 'unknown'),
+                      'ambiguous_prior_owner', v_stored_owner)));
+      v_ambiguous := true;
     end if;
   end loop;
+
+  if v_ambiguous then
+    insert into admin_config (key, value, updated_at)
+    values ('BULK_OPERATIONS', v_current, now())
+    on conflict (key) do update
+      set value = excluded.value, updated_at = excluded.updated_at;
+    return v_current;
+  end if;
 
   -- Merge each key from p_updates into the current state.
   for v_key in select jsonb_object_keys(p_updates) loop
