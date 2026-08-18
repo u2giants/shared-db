@@ -4,7 +4,7 @@
 -- Covers migrations 20260810010000_popdam_order_list_contract.sql and
 --   20260810060000_popdam_order_list_source_pair_nulls_distinct.sql and
 --   20260810100000_link_dam_order_line_cross_item_ambiguity.sql and
---   20260817235348_popdam_bulk_order_line_relink.sql.
+--   20260818141220_popdam_bulk_order_line_relink.sql.
 --
 -- HOW TO RUN
 --   Against PREVIEW rjyboqwcdzcocqgmsyel ONLY, as the migration owner role:
