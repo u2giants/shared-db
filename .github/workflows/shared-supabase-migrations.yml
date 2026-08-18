@@ -222,7 +222,13 @@ jobs:
       issues: read
       pull-requests: read
     env:
-      PREVIEW_PROJECT_REF: rjyboqwcdzcocqgmsyel
+      # CONFIGURED, not hard-coded. The preview branch is rebuilt from time to time and its
+      # project ref CHANGES when it is: on 2026-08-18 rjyboqwcdzcocqgmsyel was deleted and
+      # replaced by a new branch. A literal here means this lane refuses every run until
+      # someone edits this file, which is exactly what happened. Set the repository
+      # variable PREVIEW_PROJECT_REF instead. The safety property is unchanged and is
+      # asserted below: this job must never write to production.
+      PREVIEW_PROJECT_REF: ${{ vars.PREVIEW_PROJECT_REF }}
       PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE: qsllyeztdwjgirsysgai
     steps:
       # FIRST STEP ON PURPOSE, before any credential is used. A lane that can be
@@ -235,15 +241,19 @@ jobs:
         run: |
           set -euo pipefail
           echo "PROJECT REF THIS JOB WILL WRITE TO: $PREVIEW_PROJECT_REF"
-          if [ "$PREVIEW_PROJECT_REF" != "rjyboqwcdzcocqgmsyel" ]; then
-            echo "REFUSED: preview job is not pointed at the preview project ref." >&2
+          if [ -z "${PREVIEW_PROJECT_REF// /}" ]; then
+            echo "REFUSED: repository variable PREVIEW_PROJECT_REF is not set. Set it to the CURRENT preview branch project ref. An unset ref is never treated as a default." >&2
+            exit 1
+          fi
+          if ! printf '%s' "$PREVIEW_PROJECT_REF" | grep -Eq '^[a-z]{20}$'; then
+            echo "REFUSED: PREVIEW_PROJECT_REF is not a 20-character Supabase project ref." >&2
             exit 1
           fi
           if [ "$PREVIEW_PROJECT_REF" = "$PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE" ]; then
             echo "REFUSED: preview job is pointed at PRODUCTION ($PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE)." >&2
             exit 1
           fi
-          echo "REF OK: preview = rjyboqwcdzcocqgmsyel (production qsllyeztdwjgirsysgai is not this job's target)."
+          echo "REF OK: preview = $PREVIEW_PROJECT_REF (production $PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE is not this job's target)."
           if [ -z "${PREVIEW_ALLOWLIST// /}" ]; then
             echo "REFUSED: preview_allowlist is empty. This lane applies ONLY the versions you name, in dry-run and in apply alike. Name them." >&2
             exit 1
