@@ -17,6 +17,32 @@
 -- deploy make that a normal event, and run_id is not a lock because nothing ever
 -- compared it.
 --
+-- THE ONE DESIGN PRINCIPLE (read this before changing anything below)
+-- -------------------------------------------------------------------
+--   A GUARD MUST NEVER BE COMPUTED FROM A VALUE THE UNPROVEN CALLER CAN SET.
+--
+-- Four independent reviews found four different holes and every one of them was the
+-- same hole: the thing that decided whether the protection applied was itself
+-- writable by the caller the protection was aimed at. No proof at all; then "did you
+-- pass an owner argument" (the owner name is published in admin_config, so anyone can
+-- pass it); then a digest that two write paths could overwrite; then the eight lease
+-- fields were frozen but `phase` -- the field the whole drop-protection is computed
+-- from -- was left writable on exactly the three paths that hold no receipt.
+--
+-- So there is now ONE notion of proof, v_proven, and every guard that protects a
+-- provider-job pointer is gated on it:
+--   * v_token_ok  -- the caller sent back the one-time claim receipt minted when the
+--                    lease was taken; the receipt is never readable from stored state; OR
+--   * an establishing claim -- a lease claim on an operation with no incumbent owner
+--                    and no stored receipt digest, which has nobody to displace.
+-- Everything else -- legacy three-argument calls, the batch writer, a guarded write
+-- that does not claim, and a claim that repeats a publicly readable owner name -- is
+-- UNPROVEN and may only carry the pointer-bearing state forward exactly as stored.
+-- The inputs to every pointer guard (external_job presence, provider_batch_id, phase
+-- and the eight lease fields) are therefore all immutable to an unproven caller. If
+-- you add a guard, check what it reads: if an unproven caller can write that value,
+-- the guard is broken by construction.
+--
 -- WHAT THIS MIGRATION ADDS
 -- ------------------------
 -- 1. A guarded compare-and-swap path on public.update_bulk_operation:
@@ -161,6 +187,7 @@ declare
   v_stored_proof   text;
   v_protected      boolean;
   v_pointer        boolean;
+  v_proven         boolean := false;
 
   v_in_job         jsonb;
   v_in_status      text;
@@ -264,6 +291,25 @@ begin
   v_in_rev    := nullif(p_op_state ->> 'state_revision', '')::bigint;
 
   -- ==========================================================================
+  -- v_proven -- THE ONE NOTION OF PROOF, USED BY EVERY POINTER GUARD.
+  --
+  -- See THE ONE DESIGN PRINCIPLE at the top of this file. A caller is proven only if:
+  --   * it sent back the one-time claim receipt (verified against the stored digest,
+  --     which is all that is ever stored, so the receipt cannot be read out of
+  --     admin_config); or
+  --   * it is CLAIMING a lease on an operation that has no incumbent owner and no
+  --     stored receipt digest -- it is establishing the job and has nobody to displace.
+  --
+  -- Stating an owner name is not proof (the name is readable). Matching the revision
+  -- is not proof (everyone who read the state matches it). Being on the legacy or
+  -- batch path is the absence of proof by construction.
+  -- ==========================================================================
+  v_proven := v_token_ok
+              or (p_submission_owner is not null
+                  and v_stored_owner is null
+                  and v_stored_proof is null);
+
+  -- ==========================================================================
   -- LEGACY PATH -- byte-for-byte the historical behaviour, except that it can no
   -- longer clobber protected external-job state.
   -- ==========================================================================
@@ -342,6 +388,39 @@ begin
         raise exception
           'update_bulk_operation: legacy write to "%" refused -- external_job is ambiguous_submission and requires explicit reconciliation.',
           p_op_key
+          using errcode = '55000';
+      end if;
+
+      -- ----------------------------------------------------------------------
+      -- DESTROY-AND-REMINT VIA phase. THE PROTECTION MUST NOT BE COMPUTED FROM A
+      -- FIELD THIS CALLER CAN WRITE.
+      --
+      -- Everything that stops a pointer being destroyed -- the drop refusal above,
+      -- the guarded path's v_pointer -- is computed from external_job.phase. phase
+      -- was not one of the frozen fields, so the drop protection could simply be
+      -- switched off and then walked around in two calls:
+      --
+      --   1. a legacy (or batch, or same-name claiming) write moves phase from a live
+      --      phase to a non-live one; every other rule is satisfied because every
+      --      other field is carried forward faithfully;
+      --   2. the pointer is now gone, so the next call drops external_job outright;
+      --   3. a fresh claim over the now-clean operation mints a NEW receipt and binds
+      --      a provider_batch_id of the caller's invention. The real holder's genuine
+      --      id is afterwards refused as a replacement and the billed job is orphaned.
+      --
+      -- The digest can no longer be planted IN PLACE; this destroyed and reissued it
+      -- to reach the same end. So: while this operation carries a provider-job
+      -- pointer, its phase may only be moved by a caller that PROVES it is the holder
+      -- (v_proven). A caller that round-trips the object it read carries the same
+      -- phase and is untouched.
+      -- ----------------------------------------------------------------------
+      if not v_proven
+         and (v_in_job -> 'phase') is distinct from (v_stored_job -> 'phase') then
+        raise exception
+          'update_bulk_operation: legacy write to "%" refused -- it would move the external_job phase of a protected job from % to %. The drop and re-point protections are computed from this phase, so moving it is how a pointer gets destroyed and reissued; only a caller that proves it holds the lease (its lease_token) may move it. Carry the phase forward exactly as stored.',
+          p_op_key,
+          coalesce((v_stored_job -> 'phase')::text, '<absent>'),
+          coalesce((v_in_job -> 'phase')::text, '<absent>')
           using errcode = '55000';
       end if;
 
@@ -554,8 +633,10 @@ begin
     end if;
 
 
-    -- A saved provider batch id may be carried forward or deliberately cleared by
-    -- a caller that proved it saw this revision, but never re-pointed.
+    -- A saved provider batch id may only be carried forward EXACTLY. It may not be
+    -- re-pointed and it may not be cleared -- clearing it is how a pointer to a
+    -- billed job is destroyed, and matching the revision proves only that the caller
+    -- read the state, never that it is the holder.
     if v_stored_batch is not null
        and v_in_job is not null
        and v_in_batch is distinct from v_stored_batch then
@@ -607,6 +688,30 @@ begin
     end if;
 
     -- ------------------------------------------------------------------------
+    -- THE PHASE OF A POINTER-BEARING JOB IS MOVED BY THE HOLDER OR BY NOBODY.
+    --
+    -- v_pointer -- the value every drop and re-point refusal is computed from -- is
+    -- derived from external_job.phase. Freezing the eight lease fields while leaving
+    -- phase writable therefore left the protection switchable-off by the callers it
+    -- was aimed at: move phase off a live value, and the operation stops being
+    -- protected, so the next call may drop external_job entirely and a fresh claim
+    -- mints a new receipt and binds an invented provider_batch_id. Destroy and
+    -- reissue reaches the same end as planting the digest in place.
+    --
+    -- This check is deliberately NOT inside the non-claiming branch below. A CLAIM is
+    -- not proof either: a caller repeating the publicly readable submission_owner over
+    -- a live lease claims successfully (the same-name renewal trap) and would
+    -- otherwise be free to move the phase. Only v_proven may move it.
+    -- ------------------------------------------------------------------------
+    if v_in_job is not null
+       and v_pointer
+       and not v_proven
+       and (v_in_job -> 'phase') is distinct from (v_stored_job -> 'phase') then
+      v_ok := false; v_reason := 'phase_protected';
+      exit guarded;
+    end if;
+
+    -- ------------------------------------------------------------------------
     -- A GUARDED WRITE THAT DOES NOT CLAIM THE LEASE MAY NOT MOVE THE LEASE.
     --
     -- p_op_state is free-form JSONB, so without this block a caller could pass
@@ -653,7 +758,12 @@ begin
       -- one moment a real provider job is most likely to exist unrecorded. It is
       -- now gated on the job pointer instead (live phase, unresolved ambiguity, or
       -- a stored provider_batch_id), which does not expire.
+      -- The pointer case is covered path-independently above; what this adds is the
+      -- live-lease case on an operation that has no pointer yet. It is gated on
+      -- v_proven for the same reason: the holder, sending its receipt, is exactly the
+      -- caller that is supposed to drive this phase forward.
       if v_in_job is not null
+         and not v_proven
          and (v_pointer or coalesce(v_stored_lease > v_now, false))
          and (v_in_job -> 'phase') is distinct from (v_stored_job -> 'phase') then
         v_ok := false; v_reason := 'phase_protected';
@@ -762,20 +872,61 @@ begin
       -- credential. Refusing same-name renewal outright would break the legitimate
       -- redeploy retry that keeps a real lease alive.
       --
-      -- When the lease has LAPSED at the moment of renewal, this branch does re-mint
-      -- and the incumbent digest is overwritten. That cannot orphan a billed job: a
-      -- lapsed lease with no saved provider_batch_id never reaches here at all (the
-      -- ambiguity rule above intercepts it, writes the verdict and returns
-      -- ok = false), so the only lapsed claims that reach the mint are ones where the
-      -- provider_batch_id is already saved -- nothing is left for the old receipt to
-      -- protect, since re-pointing a saved id is refused unconditionally -- or ones
-      -- where no owner was ever recorded, which is an unclaimed operation.
-      if v_stored_proof is not null
-         and v_stored_owner = p_submission_owner
-         and coalesce(v_stored_lease > v_now, false) then
+      -- ----------------------------------------------------------------------
+      -- NO REMINT WHILE NOTHING IS BOUND. (The "reaches the mint" argument that used
+      -- to stand here was wrong, and this is the repair.)
+      --
+      -- The old reasoning was: a lapsed lease with no saved provider_batch_id never
+      -- reaches the mint, because the ambiguity rule intercepts it. That is true on
+      -- the FIRST write only. The intercept flips the operation to
+      -- 'ambiguous_submission' -- and an operation that is ALREADY ambiguous no longer
+      -- matches the intercept, so the SECOND call walks straight through it, claims
+      -- the (always lapsed) lease and re-mints. The new receipt then matches the
+      -- caller's token, so it may introduce a provider_batch_id of its own invention,
+      -- and the real holder's genuine id is afterwards refused as a replacement. There
+      -- is no human in that loop: `authenticated` holds execute, so "reconciliation"
+      -- was any signed-in caller.
+      --
+      -- THE RULE, chosen over inventing a separate reconcile operation: while this
+      -- operation has NO saved provider_batch_id, the receipt minted when the lease
+      -- was first taken is the ONLY thing that can ever bind it to a provider job, and
+      -- it is never reissued. A claim over such an operation still SUCCEEDS as a lease
+      -- extension -- ordinary retry traffic keeps working -- but it is handed no
+      -- receipt (lease_receipt_issued = false), exactly like the same-name renewal
+      -- trap below, so it cannot bind anything. Nobody but the original holder can
+      -- resolve an ambiguity into a provider job, which is the correct answer: the
+      -- ambiguity exists precisely because nobody else knows whether a job was billed.
+      --
+      -- Reminting is safe in exactly two states and is confined to them:
+      --   * no receipt was ever minted (v_stored_proof is null) -- nothing to displace;
+      --   * a provider_batch_id is already saved -- the operation is bound, and a
+      --     saved id can never be re-pointed or cleared by anyone, so a new receipt
+      --     buys a takeover of the lease and no power to invent a binding.
+      -- A same-name renewal over a still-LIVE lease keeps the incumbent receipt in
+      -- both of those states as well; see THE SAME-NAME RENEWAL TRAP below.
+      -- ----------------------------------------------------------------------
+      if v_stored_proof is null then
+        -- Nobody has ever held this lease: establish it.
+        v_lease_token := gen_random_uuid()::text;
+        v_minted      := true;
+      elsif v_token_ok then
+        -- The holder itself, re-claiming with its receipt: rotate to a fresh one.
+        v_lease_token := gen_random_uuid()::text;
+        v_minted      := true;
+      elsif v_stored_batch is null then
+        -- Nothing is bound and this caller is not the holder: never reissue the only
+        -- thing that can bind. Succeeds as a lease extension, holder of nothing.
+        v_lease_token := null;
+        v_minted      := false;
+      elsif v_stored_owner = p_submission_owner
+            and coalesce(v_stored_lease > v_now, false) then
+        -- Same-name renewal over a LIVE lease: keep the incumbent receipt.
         v_lease_token := null;
         v_minted      := false;
       else
+        -- A bound operation whose lease has lapsed (or whose owner differs and is not
+        -- live): a takeover may mint, because the binding it might have abused is
+        -- already made and is immutable.
         v_lease_token := gen_random_uuid()::text;
         v_minted      := true;
       end if;
@@ -853,9 +1004,15 @@ comment on function public.update_bulk_operation(text, jsonb, text, bigint, text
   'stored owner is readable); a same-name renewal over a still-LIVE lease keeps the incumbent receipt rather than '
   're-minting, so it succeeds and extends the lease but does NOT make the renewer the holder -- callers must key '
   'off envelope.lease_receipt_issued / envelope.lease_token, never off ok alone. Only this '
-  'function may set phase = ambiguous_submission. While the operation names a provider job or is in a live or '
-  'ambiguous phase, external_job may not be dropped or re-pointed by ANY caller and its phase may not be moved by '
-  'a non-claiming write -- none of which depends on the lease still being live. An expired lease '
+  'function may set phase = ambiguous_submission, and while the operation has NO saved provider_batch_id the '
+  'receipt minted when its lease was first taken is never reissued, so a later claim over it (an ambiguous '
+  'operation included) succeeds as a lease extension but is handed no receipt and can never bind it to a '
+  'provider job. While the operation names a provider job or is in a live or '
+  'ambiguous phase, external_job may not be dropped or re-pointed by ANY caller, and its external_job.phase -- '
+  'the value those protections are computed from -- may only be moved by a caller that proves it holds the lease '
+  '(its lease_token, or an establishing claim on an operation with no incumbent); legacy, batch, non-claiming and '
+  'same-name-renewing callers must carry the phase forward exactly as stored. None of which depends on the lease '
+  'still being live. An expired lease '
   'with no saved provider_batch_id is never an automatic resubmission: the guarded path makes it durably '
   'ambiguous and returns ok = false, while the legacy three-argument path RAISES (55000) and changes nothing, '
   'so the refusal repeats on every later call until the operation is reconciled on the guarded path; declaring '
@@ -1028,6 +1185,29 @@ begin
           using errcode = '55000';
       end if;
 
+      -- ----------------------------------------------------------------------
+      -- AND IT MAY NOT MOVE THE PHASE EITHER -- THE PROTECTION IS COMPUTED FROM IT.
+      --
+      -- v_protected above is derived from external_job.phase. Freezing the lease
+      -- fields while leaving phase writable left this writer able to switch the
+      -- protection off and then walk around it: move phase off a live value here, and
+      -- the very next batch or legacy call may drop external_job outright, after which
+      -- a fresh claim mints a new receipt and binds an invented provider_batch_id. The
+      -- billed job is orphaned by destroying the pointer instead of forging it.
+      --
+      -- A batch caller can hold no proof of anything (there is no lease_token on this
+      -- path at all), so it may never move the phase of a pointer-bearing job. Callers
+      -- that spread the object they loaded carry the same phase and are untouched.
+      -- ----------------------------------------------------------------------
+      if (v_in_job -> 'phase') is distinct from (v_stored_job -> 'phase') then
+        raise exception
+          'update_bulk_operations_batch: refused -- key "%" would move the external_job phase of a protected job from % to %. The drop and re-point protections are computed from this phase, so moving it is how a pointer gets destroyed and reissued, and a batch caller holds no proof of the lease. Carry the phase forward exactly as stored. No key in this batch was applied.',
+          v_key,
+          coalesce((v_stored_job -> 'phase')::text, '<absent>'),
+          coalesce((v_in_job -> 'phase')::text, '<absent>')
+          using errcode = '55000';
+      end if;
+
       if v_stored_batch is not null and v_in_batch is distinct from v_stored_batch then
         raise exception
           'update_bulk_operations_batch: refused -- key "%" would replace saved provider_batch_id % with %.',
@@ -1132,7 +1312,8 @@ comment on function public.update_bulk_operations_batch(jsonb) is
   'Legacy multi-key writer for the admin_config BULK_OPERATIONS JSONB value. Behaviour and return value '
   'are unchanged for every operation with no protected external_job. It raises rather than merging over a '
   'live or ambiguous external_job, any change to a lease-controlling external_job field (submission_owner, '
-  'lease_expires_at, lease_claimed_at, lease_proof, ambiguous_*) on ANY key, '
+  'lease_expires_at, lease_claimed_at, lease_proof, ambiguous_*) on ANY key, any change to external_job.phase on a '
+  'protected key (the drop and re-point protections are computed from that phase), '
   'a saved provider_batch_id (which protects the operation for good, whatever the '
   'lease clock says), a held submission lease, a regressing state_revision, or a stopped operation, and it may '
   'never INTRODUCE a provider_batch_id on an operation that has none. If ANY key in the batch has an expired '

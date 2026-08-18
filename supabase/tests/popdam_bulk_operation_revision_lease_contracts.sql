@@ -83,7 +83,9 @@ declare
   v_failed boolean;
   v_token  text;   -- worker A's one-time claim receipt, handed back in the envelope
   v_token2 text;   -- a second receipt, for the forgery and renewal-trap sections
+  v_token3 text;   -- worker A's receipt in the destroy-and-remint sections (16, 17)
   v_job2   jsonb;
+  v_job3   jsonb;
 begin
   -- ---------------------------------------------------------------------------------
   -- Clean, deterministic starting point for this transaction only.
@@ -738,19 +740,45 @@ begin
   end if;
 
   -- A legacy write that faithfully carries the protected job forward still works.
+  --
+  -- IT MUST CARRY THE STORED external_job OBJECT ITSELF, NOT REBUILD IT. This test
+  -- used to re-express lease_expires_at as `now() + interval '5 minutes'`, which is
+  -- byte-identical to the fixture only because the whole file runs in ONE transaction
+  -- where now() is frozen. A real caller runs on the wall clock, so a rebuilt
+  -- timestamp differs and is refused -- the test proved nothing about the caller it
+  -- claimed to model. So: read what is stored and write exactly that back.
+  select value -> 'ai-tag-groups' -> 'external_job' into v_job
+  from admin_config where key = 'BULK_OPERATIONS';
+
   v_out := public.update_bulk_operation(
     'ai-tag-groups',
     jsonb_build_object(
       'status', 'running',
       'state_revision', 4,
       'progress', jsonb_build_object('done', 7),
-      'external_job', jsonb_build_object(
-        'phase', 'pending',
-        'provider_batch_id', 'batch_live',
-        'submission_owner', 'worker-A',
-        'lease_expires_at', (now() + interval '5 minutes'))));
+      'external_job', v_job));
   if v_out -> 'ai-tag-groups' -> 'progress' ->> 'done' <> '7' then
     raise exception 'a faithful legacy write was refused: %', v_out;
+  end if;
+
+  -- AND THE WALL-CLOCK CALLER IS REFUSED, LOUDLY. A caller that RECONSTRUCTS
+  -- lease_expires_at instead of writing back the stored string moves a
+  -- lease-controlling field, whatever it intended. That is a real coordinated change
+  -- for popdam3#92, so it is asserted here rather than left to be discovered live.
+  v_failed := false;
+  begin
+    perform public.update_bulk_operation(
+      'ai-tag-groups',
+      jsonb_build_object(
+        'status', 'running',
+        'state_revision', 5,
+        'external_job', v_job || jsonb_build_object(
+          'lease_expires_at', ((v_job ->> 'lease_expires_at')::timestamptz + interval '1 second'))));
+  exception when others then
+    v_failed := position('lease-controlling external_job field "lease_expires_at"' in sqlerrm) > 0;
+  end;
+  if not v_failed then
+    raise exception 'a legacy caller rebuilt lease_expires_at to a different instant and was accepted';
   end if;
 
   -- Unprotected keys are entirely untouched by any of this.
@@ -1465,10 +1493,49 @@ begin
     raise exception 'a refused forgery still rotated the stored receipt digest: %', v_job2;
   end if;
 
-  -- 13c. THE CAPABILITY THE PLANT WOULD HAVE BOUGHT. With the digest un-forged, the
-  -- attacker's token proves nothing and it cannot bind this operation to a job of its
-  -- own invention. (Before the fix, step 13a stored the forged digest and this call
-  -- succeeded, planting batch_FORGED.)
+  -- 13c-i. THE CAPABILITY THE PLANT WOULD HAVE BOUGHT -- PROVEN, NOT ASSERTED.
+  --
+  -- This step used to forge a token against the UNALTERED digest and observe that it
+  -- was refused. That would pass even if 13a were deleted, so it proved nothing about
+  -- the two-call attack and left 13a with no demonstrated consequence.
+  --
+  -- Instead: on a SEPARATE key, simulate what step 1 would have stored if the legacy
+  -- path had accepted it, by planting the forged digest with direct SQL -- deliberately
+  -- BYPASSING the functions, because the functions are the thing under test. Then run
+  -- step 2 exactly as the attacker would. It SUCCEEDS. That is the capability 13a and
+  -- 13b are the only things standing between an ordinary caller and.
+  update admin_config
+     set value = jsonb_set(value, array['forgery-capability'], jsonb_build_object(
+           'status', 'running',
+           'state_revision', 6,
+           'external_job', jsonb_build_object(
+             'phase', 'submitting',
+             'submission_owner', 'worker-A',
+             'lease_claimed_at', now(),
+             'lease_expires_at', (now() + interval '5 minutes'),
+             'lease_proof', md5('attacker-token'))))
+   where key = 'BULK_OPERATIONS';
+
+  v_out := public.update_bulk_operation(
+    'forgery-capability',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', (select value -> 'forgery-capability' -> 'external_job'
+                       from admin_config where key = 'BULK_OPERATIONS')
+                      || jsonb_build_object(
+                           'lease_token', 'attacker-token',
+                           'provider_batch_id', 'batch_FORGED')),
+    null,
+    6);
+  if (v_out ->> 'ok')::boolean is not true
+     or v_out ->> 'provider_batch_id' <> 'batch_FORGED' then
+    raise exception
+      'the forgery capability test is inert -- a matching planted digest no longer binds a provider job, so 13a/13b prove nothing: %',
+      v_out;
+  end if;
+
+  -- 13c-ii. AND THE SAME STEP 2 AGAINST THE REAL KEY, WHERE STEP 1 WAS REFUSED, FAILS.
+  -- The digest there is still worker-A's, so the attacker's token proves nothing.
   v_out := public.update_bulk_operation(
     'proof-forgery',
     jsonb_build_object(
@@ -1700,6 +1767,291 @@ begin
   if (v_out ->> 'ok')::boolean is not true
      or v_out ->> 'provider_batch_id' <> 'batch_HOLDER' then
     raise exception 'the incumbent holder lost its receipt to a same-name renewal: %', v_out;
+  end if;
+
+  -- =================================================================================
+  -- 16. DESTROY-AND-REMINT VIA phase (Grok 4.6 sequence 177, finding 1 -- HIGH)
+  --
+  -- Every earlier round froze the field the reviewer named and left the field the
+  -- guard was COMPUTED from writable. Round 4 froze the eight lease fields; drop
+  -- protection is computed from external_job.phase, and phase was not one of them.
+  --
+  -- The attack, in three ordinary calls and no forgery at all:
+  --   1. on a path that holds no receipt (legacy, batch, or a same-name claim), move
+  --      phase off its live value. Everything else is carried forward faithfully, so
+  --      every other rule of round 4 is satisfied;
+  --   2. the operation no longer looks protected, so drop external_job outright;
+  --   3. claim the now-clean operation: a fresh receipt is minted, and with it a
+  --      provider_batch_id of the caller's invention. The real holder's genuine id is
+  --      afterwards refused as a replacement and the billed job is orphaned.
+  --
+  -- Round 4 had NO test that changed phase on a no-receipt path and then dropped
+  -- external_job. That is why this survived three repair rounds of "we tested the
+  -- named field". Step 1 is now refused on every path that holds no receipt.
+  -- =================================================================================
+  v_out := public.update_bulk_operation(
+    'phase-pointer',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', jsonb_build_object('phase', 'submitting', 'run_id', 'run-phase')),
+    null,
+    0,
+    'worker-A',
+    300);
+  if (v_out ->> 'ok')::boolean is not true or v_out ->> 'lease_token' is null then
+    raise exception 'could not set up the phase-pointer fixture: %', v_out;
+  end if;
+  v_token3 := v_out ->> 'lease_token';
+
+  select value -> 'phase-pointer' -> 'external_job' into v_job3
+  from admin_config where key = 'BULK_OPERATIONS';
+
+  -- 16a. STEP 1 ON THE LEGACY PATH. Faithful in every field except phase.
+  v_failed := false;
+  begin
+    perform public.update_bulk_operation(
+      'phase-pointer',
+      jsonb_build_object(
+        'status', 'running',
+        'state_revision', 1,
+        'external_job', v_job3 || jsonb_build_object('phase', 'idle')));
+  exception when others then
+    v_failed := position('would move the external_job phase of a protected job' in sqlerrm) > 0;
+  end;
+  if not v_failed then
+    raise exception 'a legacy write moved the phase of a pointer-bearing job -- the drop protection is computed from that phase, so it can now be destroyed and reminted';
+  end if;
+
+  -- 16b. STEP 1 ON THE BATCH PATH: same verdict, and all-or-nothing.
+  v_failed := false;
+  begin
+    perform public.update_bulk_operations_batch(jsonb_build_object(
+      'phase-sibling',  jsonb_build_object('status', 'queued'),
+      'phase-pointer',  jsonb_build_object(
+        'status', 'running',
+        'state_revision', 1,
+        'external_job', v_job3 || jsonb_build_object('phase', 'idle'))));
+  exception when others then
+    v_failed := position('would move the external_job phase of a protected job' in sqlerrm) > 0;
+  end;
+  if not v_failed then
+    raise exception 'the batch writer moved the phase of a pointer-bearing job';
+  end if;
+  select value into v_stored from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored ? 'phase-sibling' then
+    raise exception 'the refused batch phase move partially applied: %', v_stored;
+  end if;
+
+  -- 16c. STEP 1 ON A SAME-NAME CLAIM. Repeating the publicly readable owner name over
+  -- a LIVE lease claims successfully (the renewal trap, section 15) -- so the claim
+  -- itself must not carry the power to move the phase, or the trap is the attack.
+  v_out := public.update_bulk_operation(
+    'phase-pointer',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', v_job3 || jsonb_build_object('phase', 'idle')),
+    null,
+    1,
+    'worker-A',
+    300);
+  if (v_out ->> 'ok')::boolean is not false or v_out ->> 'reason' <> 'phase_protected' then
+    raise exception 'a same-name claiming write moved the phase of a pointer-bearing job: %', v_out;
+  end if;
+
+  -- Nothing above mutated anything, so STEP 2 still meets a protected operation.
+  select value -> 'phase-pointer' -> 'external_job' into v_job2
+  from admin_config where key = 'BULK_OPERATIONS';
+  if v_job2 ->> 'phase' <> 'submitting' then
+    raise exception 'a refused phase move still moved the phase: %', v_job2;
+  end if;
+  v_failed := false;
+  begin
+    perform public.update_bulk_operation(
+      'phase-pointer', jsonb_build_object('status', 'idle'));
+  exception when others then
+    v_failed := position('would drop a protected external_job' in sqlerrm) > 0;
+  end;
+  if not v_failed then
+    raise exception 'step 2 of the destroy-and-remint attack succeeded: the pointer was dropped';
+  end if;
+
+  -- 16d. A MINTING TAKEOVER MAY NOT MOVE IT EITHER. A bound operation whose lease has
+  -- lapsed may be taken over by a new worker, and that takeover DOES mint a receipt
+  -- (nothing is left to invent -- the binding is already made and immutable). It still
+  -- is not the holder of the job it is walking into, so it may not move the phase.
+  update admin_config
+     set value = jsonb_set(value, array['phase-takeover'], jsonb_build_object(
+           'status', 'running',
+           'state_revision', 3,
+           'external_job', jsonb_build_object(
+             'phase', 'pending',
+             'provider_batch_id', 'batch_bound',
+             'submission_owner', 'worker-A',
+             'lease_claimed_at', (now() - interval '10 minutes'),
+             'lease_expires_at', (now() - interval '30 seconds'),
+             'lease_proof', md5('worker-A-receipt'))))
+   where key = 'BULK_OPERATIONS';
+
+  select value -> 'phase-takeover' -> 'external_job' into v_job2
+  from admin_config where key = 'BULK_OPERATIONS';
+
+  v_out := public.update_bulk_operation(
+    'phase-takeover',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', v_job2 || jsonb_build_object('phase', 'idle')),
+    null,
+    3,
+    'worker-B',
+    300);
+  if (v_out ->> 'ok')::boolean is not false or v_out ->> 'reason' <> 'phase_protected' then
+    raise exception 'a minting takeover moved the phase of a bound job: %', v_out;
+  end if;
+
+  -- The same takeover carrying the phase forward is still allowed, and is issued a
+  -- receipt -- the rule refuses the phase MOVE, never the takeover.
+  v_out := public.update_bulk_operation(
+    'phase-takeover',
+    jsonb_build_object('status', 'running', 'external_job', v_job2),
+    null,
+    3,
+    'worker-B',
+    300);
+  if (v_out ->> 'ok')::boolean is not true
+     or (v_out ->> 'lease_receipt_issued')::boolean is not true then
+    raise exception 'a takeover of a BOUND operation was refused or denied a receipt: %', v_out;
+  end if;
+
+  -- 16e. AND THE REAL HOLDER MOVES THE PHASE NORMALLY, WITH ITS RECEIPT. This is the
+  -- rule working, not a wall: the worker driving the job advances it as always.
+  select value -> 'phase-pointer' -> 'external_job' into v_job3
+  from admin_config where key = 'BULK_OPERATIONS';
+  v_out := public.update_bulk_operation(
+    'phase-pointer',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', v_job3 || jsonb_build_object(
+        'lease_token', v_token3,
+        'phase', 'applying')),
+    null,
+    1);
+  if (v_out ->> 'ok')::boolean is not true or v_out ->> 'external_job_phase' <> 'applying' then
+    raise exception 'the genuine lease holder could not advance its own phase: %', v_out;
+  end if;
+
+  -- =================================================================================
+  -- 17. REMINT THROUGH THE AMBIGUITY DOOR (Grok 4.6 sequence 177, finding 2 -- HIGH)
+  --
+  -- Round 4 argued that a lapsed lease with no saved provider_batch_id never reaches
+  -- the mint, because the ambiguity rule intercepts it. That is true on the FIRST
+  -- write only:
+  --
+  --   lapsed, no batch id, NOT yet ambiguous  -> intercepted, correctly refused
+  --   lapsed, no batch id, ALREADY ambiguous  -> walks straight through
+  --
+  -- So call one trips the intercept and marks the operation ambiguous, and call two
+  -- claims the now-ambiguous operation and re-mints. The new receipt matches the
+  -- caller's token, so it may bind a provider_batch_id it invented, and the real
+  -- holder's genuine id is afterwards refused as a replacement. `authenticated` holds
+  -- execute on these functions, so "reconciliation" was any signed-in caller and there
+  -- was no human anywhere in that loop.
+  --
+  -- THE FIX (chosen over inventing a separate reconcile operation, which would be a
+  -- new object outside claim #1174 and would still need a proof of its own): while an
+  -- operation has NO saved provider_batch_id, the receipt minted when its lease was
+  -- first taken is never reissued. A later claim still succeeds as a lease extension,
+  -- so ordinary retry traffic is untouched, but it is handed no receipt and therefore
+  -- can never bind. The original receipt stays the only binder.
+  -- =================================================================================
+  v_out := public.update_bulk_operation(
+    'remint-door',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', jsonb_build_object('phase', 'submitting', 'run_id', 'run-remint')),
+    null,
+    0,
+    'worker-A',
+    300);
+  if (v_out ->> 'ok')::boolean is not true or v_out ->> 'lease_token' is null then
+    raise exception 'could not set up the remint-door fixture: %', v_out;
+  end if;
+  v_token3 := v_out ->> 'lease_token';
+
+  -- Worker A crashes mid-POST: the lease lapses with nothing saved. (Direct SQL only
+  -- because the test transaction cannot wait for a clock.)
+  update admin_config
+     set value = jsonb_set(
+           value,
+           array['remint-door', 'external_job', 'lease_expires_at'],
+           to_jsonb((now() - interval '30 seconds')::timestamptz))
+   where key = 'BULK_OPERATIONS';
+
+  -- CALL ONE: the intercept fires and makes the ambiguity durable.
+  v_out := public.update_bulk_operation(
+    'remint-door',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', jsonb_build_object('phase', 'submitting', 'run_id', 'run-remint')),
+    null,
+    1);
+  if (v_out ->> 'ok')::boolean is not false or v_out ->> 'reason' <> 'ambiguous_submission' then
+    raise exception 'the ambiguity intercept did not fire on call one: %', v_out;
+  end if;
+
+  select value -> 'remint-door' -> 'external_job' into v_job3
+  from admin_config where key = 'BULK_OPERATIONS';
+
+  -- CALL TWO: the same caller comes straight back and claims the now-ambiguous
+  -- operation. It MAY extend the lease. It MUST NOT be handed a receipt.
+  v_out := public.update_bulk_operation(
+    'remint-door',
+    jsonb_build_object('status', 'running', 'external_job', v_job3),
+    null,
+    2,
+    'worker-B',
+    300);
+  if (v_out ->> 'ok')::boolean is not true then
+    raise exception 'a claim over an ambiguous operation was refused outright: %', v_out;
+  end if;
+  if (v_out ->> 'lease_receipt_issued')::boolean is not false
+     or v_out ->> 'lease_token' is not null then
+    raise exception
+      'a second call through the ambiguity door was re-minted a claim receipt -- it can now bind an invented provider_batch_id: %',
+      v_out;
+  end if;
+
+  select value -> 'remint-door' -> 'external_job' into v_stored
+  from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored ->> 'lease_proof' is distinct from md5(v_token3) then
+    raise exception 'the ambiguity claim rotated the original holder''s receipt digest: %', v_stored;
+  end if;
+
+  -- And with no receipt it cannot invent a binding, which is the whole point.
+  v_out := public.update_bulk_operation(
+    'remint-door',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', v_stored || jsonb_build_object('provider_batch_id', 'batch_INVENTED')),
+    null,
+    3);
+  if (v_out ->> 'ok')::boolean is not false or v_out ->> 'reason' <> 'external_job_protected' then
+    raise exception 'a caller that walked through the ambiguity door bound an invented provider job: %', v_out;
+  end if;
+
+  -- The original holder -- the only party that can know whether the provider was
+  -- actually billed -- still resolves it with the receipt it was issued.
+  v_out := public.update_bulk_operation(
+    'remint-door',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', v_stored || jsonb_build_object(
+        'lease_token', v_token3,
+        'provider_batch_id', 'batch_REAL_AFTER_AMBIGUITY')),
+    null,
+    3);
+  if (v_out ->> 'ok')::boolean is not true
+     or v_out ->> 'provider_batch_id' <> 'batch_REAL_AFTER_AMBIGUITY' then
+    raise exception 'the original receipt no longer resolves the ambiguity it was minted for: %', v_out;
   end if;
 
   raise notice 'popdam_bulk_operation_revision_lease_contracts: all assertions held';
