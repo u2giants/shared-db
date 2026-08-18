@@ -102,6 +102,13 @@ HARD_BLOCKED = {
     "20260816045130",
 }
 
+# Preview contains this authenticated historical migration, but production does
+# not. The repository file exists only to keep source truth aligned with the
+# preview ledger. No production allowlist may carry it.
+PREVIEW_ONLY_HISTORICAL_RESTORATIONS = {
+    "20260817150944",
+}
+
 # The four unblocked above. This is ENFORCED, not documentary: `parse_allowlist`
 # requires an allowlist to contain either ALL FOUR or NONE of them. AGENTS.md
 # section 6.8 forbids unblocking them "one at a time, a few at a time, or just
@@ -151,6 +158,12 @@ FR_HELD_20260803 = {
 # here in the same change that adds the files. Do NOT add a placeholder, and do
 # NOT delete the co-presence check to "unblock" a promotion.
 FR_REMOVAL_VERSIONS: set[str] = set()
+
+# Narrow prerequisite that lets the held owner-ruling migration cross the
+# licensing guard only under its exact migration identity. It remains held with
+# the FR bundle and is not itself removal work, so it must never make an empty
+# FR_REMOVAL_VERSIONS set appear complete.
+FR_COMPATIBILITY_VERSIONS = {"20260817225127"}
 
 
 # ---------------------------------------------------------------------------
@@ -752,6 +765,12 @@ def parse_allowlist(raw: str, remote: set[str] | frozenset[str] = frozenset()) -
     blocked = sorted(set(values) & HARD_BLOCKED)
     if blocked:
         raise GuardError(f"general production lane blocks: {', '.join(blocked)}")
+    preview_only = sorted(set(values) & PREVIEW_ONLY_HISTORICAL_RESTORATIONS)
+    if preview_only:
+        raise GuardError(
+            "preview-only historical restoration may never enter a production allowlist: "
+            + ", ".join(preview_only)
+        )
     if values != sorted(values):
         raise GuardError("production allowlist must be in migration order")
     # AGENTS.md section 6.8: all four or none. Enforced here, in the one function
@@ -772,7 +791,7 @@ def parse_allowlist(raw: str, remote: set[str] | frozenset[str] = frozenset()) -
     # subcommand can route around it.
     held = FR_HELD_20260803 & set(values)
     if held:
-        required = FR_HELD_20260803 | FR_REMOVAL_VERSIONS
+        required = FR_HELD_20260803 | FR_COMPATIBILITY_VERSIONS | FR_REMOVAL_VERSIONS
         missing = sorted(required - set(values))
         if not FR_REMOVAL_VERSIONS:
             raise GuardError(
@@ -792,8 +811,9 @@ def parse_allowlist(raw: str, remote: set[str] | frozenset[str] = frozenset()) -
                 "FR ship set in parts: this allowlist has "
                 f"{', '.join(sorted(held & set(values)))} but is missing "
                 f"{', '.join(missing)}. The permitted event is exactly one -- a "
-                "single bounded apply carrying 20260802170000, 20260802171000 "
-                "and the FR removal migrations together, in dependency order. "
+                "single bounded apply carrying the FR compatibility migration, "
+                "20260802170000, 20260802171000 and the FR removal migrations "
+                "together, in dependency order. "
                 "Include the full set or none of it."
             )
     # Security co-presence (issue #660). ONE-DIRECTIONAL by design -- see the
