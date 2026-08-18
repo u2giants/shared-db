@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from production_business_risk_gate import PREVIEW_PRODUCER_PATHS, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_preview, prove_preview_migration_contents
+from production_business_risk_gate import PREVIEW_PRODUCER_PATHS, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_preview, prove_preview_migration_contents
 
 
 class ProductionBusinessRiskGateTests(unittest.TestCase):
@@ -599,7 +599,136 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         self.assertIn("Recover proof for migrations already present on preview", text)
         self.assertIn("HISTORICAL PREVIEW PROOF: already applied; no database write performed", text)
         self.assertIn("REFUSED: historical preview recovery is missing ledger versions", text)
-        self.assertIn("inputs.mode == 'apply' && inputs.historical_preview_source_pr == ''", text)
+        # The ordinary apply path must stay excluded on BOTH historical forms.
+        # A batch authored across several PRs supplies a per-version source map
+        # and no single source PR, so a condition testing only the single-PR
+        # input would let the real apply run during a no-write recovery.
+        self.assertIn(
+            "inputs.mode == 'apply' && (inputs.historical_preview_source_pr == '' "
+            "&& inputs.historical_preview_source_pr_map == '')", text)
+        for guarded in ("historical_preview_source_pr == ''", "historical_preview_source_pr_map == ''"):
+            self.assertIn(guarded, text)
+
+    def historical_v2_api(self, main, versions, authored=None):
+        authored = authored or {pr: v for v, pr in versions.items()}
+        def api(endpoint):
+            if endpoint.endswith("commits?per_page=100"):
+                return [{"sha": main}]
+            if "/contents/" in endpoint:
+                return {"sha": "identical-producer-blob"}
+            if "/pulls/" in endpoint and "/files" in endpoint:
+                pr = int(endpoint.split("/pulls/")[1].split("/")[0])
+                version = authored.get(pr)
+                return [] if version is None else [
+                    {"filename": f"supabase/migrations/{version}_release_a.sql", "status": "added"}]
+            if "/pulls/" in endpoint:
+                return {"merged": True, "merge_commit_sha": main}
+            return {}
+        return api
+
+    def test_gate_rejects_a_v2_record_whose_map_names_the_wrong_pull_request(self):
+        """A forged map must not pass just because it lives in a pinned artifact.
+
+        The map is attacker-influenced: it arrives inside the preview artifact.
+        The gate re-derives from it, so the protection is that re-derivation
+        FAILS for a mapping that does not match real authorship.
+        """
+        from historical_preview_recovery import verify as verify_historical
+        versions = {"20260814130000": 984, "20260814193402": 992}
+        main = "e" * 40
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "supabase/migrations").mkdir(parents=True)
+            for version in versions:
+                (root / f"supabase/migrations/{version}_release_a.sql").write_text("select 1;", encoding="utf-8")
+            subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(["git", "config", "user.email", "x@y"], cwd=root)
+            subprocess.run(["git", "config", "user.name", "x"], cwd=root)
+            subprocess.run(["git", "add", "."], cwd=root)
+            subprocess.run(["git", "commit", "-m", "x"], cwd=root, check=True, stdout=subprocess.DEVNULL)
+            real = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+            api = self.historical_v2_api(real, versions)
+            # Honest map re-derives cleanly.
+            honest = verify_historical(None, real, ",".join(sorted(versions)), root, api,
+                                       source_map="20260814130000:984,20260814193402:992")
+            self.assertEqual(honest["schema"], "shared-db-historical-preview-source/v2")
+            # Swapping the PRs is refused, so a forged record cannot re-derive.
+            with self.assertRaisesRegex(ValueError, "did not author"):
+                verify_historical(None, real, ",".join(sorted(versions)), root, api,
+                                  source_map="20260814130000:992,20260814193402:984")
+
+    def test_workflow_refuses_both_historical_forms_at_once(self):
+        """Two inputs describing one batch, one silently unused, is not a state
+        a production gate should run in."""
+        workflow = (Path(__file__).resolve().parents[1] / PREVIEW_WORKFLOW).read_text(encoding="utf-8")
+        self.assertIn("REFUSED: name historical_preview_source_pr OR historical_preview_source_pr_map, not both.", workflow)
+
+    def test_every_historical_condition_tests_both_forms(self):
+        """Not substring presence: each historical-keyed condition must name BOTH
+        inputs, or a map-authored recovery slips into the real apply path."""
+        workflow = (Path(__file__).resolve().parents[1] / PREVIEW_WORKFLOW).read_text(encoding="utf-8")
+        for line in workflow.splitlines():
+            if "historical_preview_source_pr" not in line:
+                continue
+            if "description:" in line or line.strip().endswith(":"):
+                continue
+            if "==" in line or "!=" in line:
+                self.assertIn("historical_preview_source_pr_map", line,
+                              f"historical condition tests only the single-PR input: {line.strip()}")
+
+    def classify(self, body):
+        from production_business_risk_gate import classify_sql
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "supabase/migrations").mkdir(parents=True)
+            (root / "supabase/migrations/20260814000000_x.sql").write_text(body, encoding="utf-8")
+            return classify_sql(root, ["20260814000000"])
+
+    def test_creating_new_tables_is_not_reported_as_losing_production_data(self):
+        """The false alarm that turned the owner-decision block into a rubber stamp.
+
+        Every clause here is ordinary idempotent table creation. None of it touches
+        existing data, and the classifier used to report data loss AND downtime for
+        all of it. That is what was being escalated to a non-programmer for sign-off.
+        """
+        sql = "; ".join([
+            "CREATE TABLE IF NOT EXISTS dflow.a (id bigint PRIMARY KEY, b_fk integer REFERENCES dflow.b(id) ON UPDATE CASCADE ON DELETE RESTRICT)",
+            "CREATE INDEX IF NOT EXISTS a_idx ON dflow.a (id)",
+            "DROP TRIGGER IF EXISTS t ON dflow.a",
+            "CREATE TRIGGER t BEFORE UPDATE ON dflow.a FOR EACH ROW EXECUTE FUNCTION dflow.f()",
+        ]) + ";"
+        reasons = self.classify(sql)
+        self.assertNotIn(RISK_TEXT["permanent_data_rewrite_or_loss"], reasons)
+        self.assertNotIn(RISK_TEXT["expected_downtime"], reasons)
+
+    def test_a_function_body_does_not_make_the_migration_destructive(self):
+        """A trigger body describes runtime behaviour, not the apply-time effect."""
+        sql = ("CREATE OR REPLACE FUNCTION dflow.f() RETURNS trigger LANGUAGE plpgsql AS $$ "
+               "BEGIN UPDATE dflow.a SET id = id; DELETE FROM dflow.b; RETURN NEW; END; $$;")
+        self.assertNotIn(RISK_TEXT["permanent_data_rewrite_or_loss"], self.classify(sql))
+
+    def test_genuinely_destructive_statements_are_still_reported(self):
+        """Narrowing must not blind it. These are real and must still be seen."""
+        for body, risk in [
+            ("DROP TABLE dflow.a;", "permanent_data_rewrite_or_loss"),
+            ("TRUNCATE dflow.a;", "permanent_data_rewrite_or_loss"),
+            ("DELETE FROM dflow.a WHERE id > 0;", "permanent_data_rewrite_or_loss"),
+            ("UPDATE dflow.a SET id = 1;", "permanent_data_rewrite_or_loss"),
+            ("ALTER TABLE dflow.a ADD COLUMN c text;", "expected_downtime"),
+            ("LOCK TABLE dflow.a IN SHARE MODE;", "expected_downtime"),
+            ("CREATE UNIQUE INDEX a_u ON dflow.a (id);", "expected_downtime"),
+            ("GRANT SELECT ON dflow.a TO authenticated;", "material_access_change"),
+        ]:
+            with self.subTest(body=body):
+                self.assertIn(RISK_TEXT[risk], self.classify(body))
+
+    def test_disclosed_risks_no_longer_block_promotion(self):
+        """Owner ruling 2026-08-18: derived risks are DISCLOSED in the evidence,
+        not used to demand a signature from someone who cannot evaluate them."""
+        decision = decide_business_risk(
+            [RISK_TEXT["material_access_change"]], recovery_proven=True, review_approved=True)
+        self.assertFalse(decision["automaticPromotionAllowed"])
+        self.assertEqual(decision["ownerDecisionReasons"], [RISK_TEXT["material_access_change"]])
 
     def test_legacy_author_check_waiver_is_exactly_pinned(self):
         args = [924, "5135b668d87c1639281c506ae75fde75211b7019", "96bf385aa5c0f703ec98f5730249f586964f5142", ["20260813210000", "20260813220000"]]
