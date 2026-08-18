@@ -27,7 +27,7 @@
 -- DELIBERATE OMISSION -- public.update_bulk_operation / public.update_bulk_operations_batch
 -- ---------------------------------------------------------------------------------
 -- Both used to be captured here. They are now owned by
--- supabase/migrations/20260818154803_popdam_bulk_operation_revision_lease.sql
+-- supabase/migrations/20260818201719_popdam_bulk_operation_revision_lease.sql
 -- (issue #1171), which drops the old three-argument update_bulk_operation and creates a
 -- six-argument compare-and-swap/submission-lease version in its place.
 --
