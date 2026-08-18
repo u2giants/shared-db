@@ -1,0 +1,31 @@
+name: Business Rule Library
+
+on:
+  pull_request:
+    paths:
+      - 'AGENTS.md'
+      - 'docs/business-rules/**'
+      - 'docs/merch-group-taxonomy-architecture.md'
+      - 'docs/style-guides-characters-and-royalties.md'
+      - 'docs/core-master-data-consolidation-aim.md'
+      - 'scripts/check-business-rule-library*'
+      - '.github/workflows/business-rule-library.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'AGENTS.md'
+      - 'docs/business-rules/**'
+      - 'docs/merch-group-taxonomy-architecture.md'
+      - 'docs/style-guides-characters-and-royalties.md'
+      - 'docs/core-master-data-consolidation-aim.md'
+      - 'scripts/check-business-rule-library*'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/check-business-rule-library.test.mjs
