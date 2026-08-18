@@ -33,16 +33,33 @@
 --    ('prepared','submitting','pending','applying') or 'ambiguous_submission' may
 --    not be silently dropped, re-pointed at a different provider batch, or
 --    un-stopped by any caller, guarded or legacy.
--- 3. Ambiguity instead of automatic resubmission. A submission lease that expires
---    with NO provider_batch_id saved is the exact crash window where OpenRouter may
---    already hold (and bill) the job. Claiming that lease does not hand out a new
---    submission slot: it durably flips the phase to 'ambiguous_submission' and
---    refuses. Recovery is a human/explicit flow, never an automatic second POST.
+-- 2b. Only a call that CLAIMS the lease may move the lease. p_op_state is free-form
+--    JSONB, so a guarded call passing p_submission_owner => null could otherwise
+--    embed a different submission_owner / lease_expires_at inside the payload and
+--    write it over a live lease, leaving two workers each reading a state that
+--    names them as owner. A non-claiming guarded write must now carry every
+--    lease-controlling field forward EXACTLY as stored, and may not drop an
+--    external_job whose lease is still live.
+-- 3. Ambiguity instead of automatic resubmission, on ALL FOUR write paths. A
+--    submission lease that expires with NO provider_batch_id saved is the exact
+--    crash window where OpenRouter may already hold (and bill) the job.
+--      * Guarded claim: refuses, and durably flips the phase to
+--        'ambiguous_submission' instead of handing out a new submission slot.
+--      * Guarded non-claim, legacy three-argument call, and the batch writer: the
+--        caller's payload is NOT applied, the operation is durably flipped to
+--        'ambiguous_submission', and the returned value carries that verdict. The
+--        batch writer applies NO key in that case, so it stays all-or-nothing.
+--    Every later write over an ambiguous operation raises. Recovery is a
+--    human/explicit flow, never an automatic second POST.
 -- 4. Backward compatibility only where it is safe. A three-argument legacy call
 --    still behaves exactly as before -- same conditional-status no-op, same full
 --    'BULK_OPERATIONS' object returned -- for every operation with no protected
 --    external-job state. When protected state exists and the legacy write would
---    clobber it, the call RAISES. It never silently discards the write.
+--    clobber it, the call RAISES. The ONE case where a legacy write is dropped
+--    without raising is the ambiguity flip in point 3, and it is not silent: the
+--    returned BULK_OPERATIONS object shows phase = 'ambiguous_submission' -- the
+--    same "read what came back" detection the historical p_only_if_status no-op
+--    already relies on -- and the next legacy write over that operation RAISES.
 --
 -- WHY update_bulk_operations_batch IS IN SCOPE
 -- -------------------------------------------
@@ -84,6 +101,20 @@ declare
   c_stop_status constant text[] := array['stop','stopping','stopped','stop_requested'];
   c_default_lease constant integer := 120;
 
+  -- Fields inside external_job that describe WHO holds the submission lease and
+  -- what the ambiguity verdict is. Only a call that actually claims the lease
+  -- (p_submission_owner supplied) or the function itself may set them; every other
+  -- caller may carry them forward and nothing else. See the guarded-path block.
+  c_lease_fields constant text[] := array[
+    'submission_owner',
+    'lease_expires_at',
+    'lease_claimed_at',
+    'ambiguous_since',
+    'ambiguous_reason',
+    'ambiguous_prior_phase',
+    'ambiguous_prior_owner'];
+
+  v_field          text;
   v_current        jsonb;
   v_stored         jsonb;
   v_stored_status  text;
@@ -152,6 +183,57 @@ begin
   -- longer clobber protected external-job state.
   -- ==========================================================================
   if p_expected_revision is null and p_submission_owner is null then
+
+    -- ------------------------------------------------------------------------
+    -- THE AMBIGUITY RULE, ON THE LEGACY PATH TOO.
+    --
+    -- An expired submission lease with NO saved provider_batch_id is the crash
+    -- window in which OpenRouter may already hold -- and bill -- the job. The
+    -- guarded path already refuses to hand out a new submission slot there. A
+    -- legacy caller must not be able to walk around that rule: it writes the same
+    -- key, and a legacy write that carries the operation back to a submittable
+    -- state is exactly what drives the duplicate, duplicate-billed POST.
+    --
+    -- A legacy call cannot be handed a proof envelope, and raising here would roll
+    -- the flip back with the rest of the transaction, so this follows the function's
+    -- existing legacy no-op convention: the caller's payload is NOT applied, the
+    -- operation is durably flipped to phase = 'ambiguous_submission' with the same
+    -- markers the guarded path writes, and the whole BULK_OPERATIONS object is
+    -- returned so the caller SEES the ambiguity in the value it already reads. It
+    -- is not silent: every later legacy write over that operation RAISES on the
+    -- ambiguous_submission protection below.
+    --
+    -- A payload that itself declares phase = 'ambiguous_submission' is an explicit
+    -- reconciliation, not an escape, and falls through to the normal rules.
+    -- ------------------------------------------------------------------------
+    if v_stored_job is not null
+       and v_stored_batch is null
+       and v_stored_owner is not null
+       and v_stored_lease is not null
+       and v_stored_lease <= v_now
+       and coalesce(v_stored_phase, '') <> 'ambiguous_submission'  -- already flipped
+       and coalesce(v_in_phase, '') <> 'ambiguous_submission' then
+
+      v_new := coalesce(v_stored, '{}'::jsonb)
+               || jsonb_build_object(
+                    'state_revision', v_stored_rev + 1,
+                    'external_job', v_stored_job || jsonb_build_object(
+                      'phase', 'ambiguous_submission',
+                      'ambiguous_since', v_now,
+                      'ambiguous_reason', 'submission_lease_expired_without_provider_batch_id',
+                      'ambiguous_prior_phase', coalesce(v_stored_phase, 'unknown'),
+                      'ambiguous_prior_owner', v_stored_owner));
+
+      v_current := jsonb_set(v_current, array[p_op_key], v_new);
+
+      insert into admin_config (key, value, updated_at)
+      values ('BULK_OPERATIONS', v_current, now())
+      on conflict (key) do update
+        set value = excluded.value,
+            updated_at = excluded.updated_at;
+
+      return v_current;
+    end if;
 
     if p_only_if_status is not null
        and v_stored_status is distinct from p_only_if_status then
@@ -278,6 +360,43 @@ begin
       exit guarded;
     end if;
 
+    -- THE AMBIGUITY RULE. An expired lease with no saved provider_batch_id means a
+    -- submission may already have been accepted and billed. Do not hand out a new
+    -- submission slot; make the ambiguity durable and refuse. This applies to EVERY
+    -- guarded write, claiming or not: a non-claiming write that simply carried the
+    -- expired lease forward and set the phase back to a submittable one would drive
+    -- exactly the duplicate POST this rule exists to prevent.
+    if v_stored_job is not null
+       and v_stored_batch is null
+       and v_stored_owner is not null
+       and v_stored_lease is not null
+       and v_stored_lease <= v_now
+       and coalesce(v_stored_phase, '') <> 'ambiguous_submission' then  -- not already flipped
+
+      v_new := coalesce(v_stored, '{}'::jsonb)
+               || jsonb_build_object(
+                    'state_revision', v_stored_rev + 1,
+                    'external_job', v_stored_job || jsonb_build_object(
+                      'phase', 'ambiguous_submission',
+                      'ambiguous_since', v_now,
+                      'ambiguous_reason', 'submission_lease_expired_without_provider_batch_id',
+                      'ambiguous_prior_phase', coalesce(v_stored_phase, 'unknown'),
+                      'ambiguous_prior_owner', v_stored_owner));
+
+      v_current := jsonb_set(v_current, array[p_op_key], v_new);
+
+      insert into admin_config (key, value, updated_at)
+      values ('BULK_OPERATIONS', v_current, now())
+      on conflict (key) do update
+        set value = excluded.value,
+            updated_at = excluded.updated_at;
+
+      v_out_op := v_new;
+      v_ok := false; v_reason := 'ambiguous_submission';
+      exit guarded;
+    end if;
+
+
     -- A saved provider batch id may be carried forward or deliberately cleared by
     -- a caller that proved it saw this revision, but never re-pointed.
     if v_stored_batch is not null
@@ -285,6 +404,51 @@ begin
        and v_in_batch is distinct from v_stored_batch then
       v_ok := false; v_reason := 'external_job_protected';
       exit guarded;
+    end if;
+
+    -- ------------------------------------------------------------------------
+    -- A GUARDED WRITE THAT DOES NOT CLAIM THE LEASE MAY NOT MOVE THE LEASE.
+    --
+    -- p_op_state is free-form JSONB, so without this block a caller could pass
+    -- p_submission_owner => null (skipping every lease check below) while embedding
+    -- a DIFFERENT submission_owner / lease_expires_at inside p_op_state, write it
+    -- straight over a live lease, and read back a state naming itself as owner --
+    -- at the same moment the real holder reads a state naming IT as owner. Matching
+    -- the revision proves the caller read this state; it does not prove the caller
+    -- holds the lease. Only claiming the lease proves that.
+    --
+    -- THE RULE: when p_submission_owner is null, every lease-controlling field in
+    -- external_job (c_lease_fields) must be carried forward EXACTLY as stored --
+    -- same values, same present/absent -- and the payload may not restate a
+    -- state_revision other than the stored one. Faithful carry-forward succeeds;
+    -- anything else is refused as lease_fields_immutable. Additionally, an
+    -- external_job whose lease is still LIVE may not be dropped by a non-claiming
+    -- write, because dropping it and re-creating it on the next revision is the
+    -- same lease theft in two steps.
+    -- ------------------------------------------------------------------------
+    if p_submission_owner is null then
+      if v_stored_owner is not null
+         and coalesce(v_stored_lease > v_now, false)
+         and v_in_job is null then
+        v_ok := false; v_reason := 'lease_held';
+        exit guarded;
+      end if;
+
+      if v_in_job is not null then
+        foreach v_field in array c_lease_fields loop
+          if (v_in_job -> v_field) is distinct from (v_stored_job -> v_field) then
+            v_ok := false; v_reason := 'lease_fields_immutable';
+            exit guarded;
+          end if;
+        end loop;
+      end if;
+
+      if p_op_state ? 'state_revision'
+         and coalesce(nullif(p_op_state ->> 'state_revision', '')::bigint, -1)
+             is distinct from v_stored_rev then
+        v_ok := false; v_reason := 'lease_fields_immutable';
+        exit guarded;
+      end if;
     end if;
 
     if coalesce(v_stored_status = any(c_stop_status), false)
@@ -301,38 +465,6 @@ begin
          and coalesce(v_stored_lease > v_now, false)
          and v_stored_owner <> p_submission_owner then
         v_ok := false; v_reason := 'lease_held';
-        exit guarded;
-      end if;
-
-      -- THE AMBIGUITY RULE. An expired lease with no saved provider_batch_id means
-      -- a submission may already have been accepted and billed. Do not hand out a
-      -- new submission slot; make the ambiguity durable and refuse.
-      if v_stored_job is not null
-         and v_stored_batch is null
-         and v_stored_owner is not null
-         and v_stored_lease is not null
-         and v_stored_lease <= v_now then
-
-        v_new := coalesce(v_stored, '{}'::jsonb)
-                 || jsonb_build_object(
-                      'state_revision', v_stored_rev + 1,
-                      'external_job', v_stored_job || jsonb_build_object(
-                        'phase', 'ambiguous_submission',
-                        'ambiguous_since', v_now,
-                        'ambiguous_reason', 'submission_lease_expired_without_provider_batch_id',
-                        'ambiguous_prior_phase', coalesce(v_stored_phase, 'unknown'),
-                        'ambiguous_prior_owner', v_stored_owner));
-
-        v_current := jsonb_set(v_current, array[p_op_key], v_new);
-
-        insert into admin_config (key, value, updated_at)
-        values ('BULK_OPERATIONS', v_current, now())
-        on conflict (key) do update
-          set value = excluded.value,
-              updated_at = excluded.updated_at;
-
-        v_out_op := v_new;
-        v_ok := false; v_reason := 'ambiguous_submission';
         exit guarded;
       end if;
 
@@ -394,8 +526,12 @@ comment on function public.update_bulk_operation(text, jsonb, text, bigint, text
   'Three-argument calls keep the historical behaviour and return the whole BULK_OPERATIONS object. '
   'Supplying p_expected_revision selects the guarded compare-and-swap path, which returns a proof '
   'envelope {ok, reason, state_revision, submission_owner, lease_expires_at, provider_batch_id, operation, operations}. '
-  'p_submission_owner + p_lease_seconds atomically claim a submission lease. An expired lease with no saved '
-  'provider_batch_id becomes external_job.phase = ambiguous_submission and is never an automatic resubmission. '
+  'p_submission_owner + p_lease_seconds atomically claim a submission lease. A guarded write that does NOT '
+  'claim the lease may only carry the lease-controlling external_job fields (submission_owner, lease_expires_at, '
+  'lease_claimed_at, ambiguous_*) forward unchanged, and may not drop a live-leased external_job; anything else '
+  'is refused with reason = lease_fields_immutable. An expired lease with no saved provider_batch_id becomes '
+  'external_job.phase = ambiguous_submission on EVERY path and is never an automatic resubmission; a legacy '
+  'three-argument call in that state has its payload dropped, the operation flipped, and the whole object returned. '
   'See u2giants/shared-db#1171 and u2giants/popdam3#92.';
 
 revoke execute on function public.update_bulk_operation(text, jsonb, text, bigint, text, integer)
@@ -436,6 +572,8 @@ declare
   v_in_owner      text;
   v_in_rev        bigint;
   v_now           timestamptz := now();
+  v_new           jsonb;
+  v_ambiguous     boolean := false;
 begin
   perform pg_advisory_xact_lock(hashtext('BULK_OPERATIONS'));
 
@@ -444,6 +582,74 @@ begin
   where key = 'BULK_OPERATIONS';
 
   v_current := coalesce(v_current, '{}'::jsonb);
+
+  -- ------------------------------------------------------------------------
+  -- THE AMBIGUITY RULE, ON THE BATCH PATH TOO.
+  --
+  -- Same money-losing rule as the single-key writer: an expired submission lease
+  -- with NO saved provider_batch_id may never be carried back to a submittable
+  -- state, because the provider may already hold and bill that job. This pass runs
+  -- BEFORE any merge, so no update in the batch can slip past it.
+  --
+  -- If any key in the batch is in that state, NOTHING the caller asked for is
+  -- applied -- the batch stays all-or-nothing -- and every such key is durably
+  -- flipped to phase = 'ambiguous_submission'. The resulting object is returned so
+  -- the caller sees the verdict in the value it already reads. Retrying the same
+  -- batch then RAISES on the ambiguous_submission protection below, so this is
+  -- loud, not silent. A payload that itself declares phase = 'ambiguous_submission'
+  -- is explicit reconciliation and is left to the normal rules.
+  -- ------------------------------------------------------------------------
+  for v_key in select jsonb_object_keys(p_updates) loop
+    v_in := p_updates -> v_key;
+    v_stored := case when jsonb_typeof(v_current -> v_key) = 'object'
+                     then v_current -> v_key end;
+    v_stored_job := case when jsonb_typeof(v_stored -> 'external_job') = 'object'
+                         then v_stored -> 'external_job' end;
+
+    if v_stored_job is null then
+      continue;
+    end if;
+
+    v_stored_rev   := coalesce(nullif(v_stored ->> 'state_revision', '')::bigint, 0);
+    v_stored_phase := v_stored_job ->> 'phase';
+    v_stored_batch := nullif(v_stored_job ->> 'provider_batch_id', '');
+    v_stored_owner := nullif(v_stored_job ->> 'submission_owner', '');
+    v_stored_lease := nullif(v_stored_job ->> 'lease_expires_at', '')::timestamptz;
+    v_in_job       := case when jsonb_typeof(v_in -> 'external_job') = 'object'
+                           then v_in -> 'external_job' end;
+    v_in_phase     := v_in_job ->> 'phase';
+
+    if v_stored_batch is null
+       and v_stored_owner is not null
+       and v_stored_lease is not null
+       and v_stored_lease <= v_now
+       and coalesce(v_stored_phase, '') <> 'ambiguous_submission'  -- already flipped
+       and coalesce(v_in_phase, '') <> 'ambiguous_submission' then
+
+      v_new := v_stored
+               || jsonb_build_object(
+                    'state_revision', v_stored_rev + 1,
+                    'external_job', v_stored_job || jsonb_build_object(
+                      'phase', 'ambiguous_submission',
+                      'ambiguous_since', v_now,
+                      'ambiguous_reason', 'submission_lease_expired_without_provider_batch_id',
+                      'ambiguous_prior_phase', coalesce(v_stored_phase, 'unknown'),
+                      'ambiguous_prior_owner', v_stored_owner));
+
+      v_current   := jsonb_set(v_current, array[v_key], v_new);
+      v_ambiguous := true;
+    end if;
+  end loop;
+
+  if v_ambiguous then
+    insert into admin_config (key, value, updated_at)
+    values ('BULK_OPERATIONS', v_current, now())
+    on conflict (key) do update
+      set value = excluded.value,
+          updated_at = excluded.updated_at;
+
+    return v_current;
+  end if;
 
   -- Merge each key from p_updates into the current state.
   for v_key in select jsonb_object_keys(p_updates) loop
@@ -538,7 +744,9 @@ comment on function public.update_bulk_operations_batch(jsonb) is
   'Legacy multi-key writer for the admin_config BULK_OPERATIONS JSONB value. Behaviour and return value '
   'are unchanged for every operation with no protected external_job. It raises rather than merging over a '
   'live or ambiguous external_job, a saved provider_batch_id, a held submission lease, a regressing '
-  'state_revision, or a stopped operation. See u2giants/shared-db#1171.';
+  'state_revision, or a stopped operation. If ANY key in the batch has an expired submission lease with no saved '
+  'provider_batch_id, no key in the batch is applied, every such key is durably flipped to '
+  'external_job.phase = ambiguous_submission, and the resulting object is returned. See u2giants/shared-db#1171.';
 
 revoke execute on function public.update_bulk_operations_batch(jsonb) from public, anon;
 grant execute on function public.update_bulk_operations_batch(jsonb)
