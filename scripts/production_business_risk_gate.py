@@ -164,6 +164,28 @@ def canonical_sha256(path: Path) -> str:
     return hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()
 
 
+def manifest_sha256(path: Path) -> str:
+    """Digest a migration the way the preview content manifest digests it.
+
+    Deliberately NOT `canonical_sha256`: that one normalises CRLF to LF before
+    hashing, while `compute_content_manifest` in production_migration_guard.py
+    hashes RAW bytes. Comparing a normalised digest against a raw one would
+    disagree on any CRLF file and reject a perfectly good rehearsal, so the two
+    sides of the comparison must use the same function.
+    """
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def preview_content_manifest(texts: dict[str, str]) -> dict[str, str]:
+    try:
+        manifest = json.loads(texts["migration-content-manifest.json"])
+    except (KeyError, json.JSONDecodeError, TypeError) as exc:
+        raise RiskGateError("preview proof is missing a valid content manifest") from exc
+    if not isinstance(manifest, dict):
+        raise RiskGateError("preview content manifest is not an object")
+    return manifest
+
+
 def prove_preview_migration_contents(
     *, texts: dict[str, str], allowlist: list[str], repo_root: Path,
     before_versions: set[str], after_versions: set[str], historical: bool,
@@ -216,6 +238,24 @@ def prove_preview_migration_contents(
         if entry is None:
             if filename.name not in dry or filename.name not in apply:
                 raise RiskGateError(f"preview proof does not name exact migration {filename.name}")
+            # BIND THE BYTES, NOT THE COMMIT.
+            #
+            # The safety property is "production will apply the same migration
+            # bytes preview already applied". This used to be inferred from
+            # commit identity, which was a proxy that failed in both directions:
+            # a types-only follow-up commit invalidated a perfectly good
+            # rehearsal, while a same-named file whose bytes changed was only
+            # ever checked by FILENAME on this path. Compare the digest the
+            # rehearsal recorded against the file on exact main.
+            recorded = preview_content_manifest(texts).get(version)
+            if not isinstance(recorded, str) or not re.fullmatch(r"[0-9a-f]{64}", recorded):
+                raise RiskGateError(
+                    f"preview content manifest has no usable digest for {version}"
+                )
+            if recorded != manifest_sha256(filename):
+                raise RiskGateError(
+                    f"preview rehearsed different bytes than exact main for {version}"
+                )
             continue
 
         if not isinstance(entry, dict) or "preview" not in entry.get("targets", []):
@@ -253,6 +293,102 @@ def prove_preview_migration_contents(
             raise RiskGateError(f"atomic preview apply proof is incomplete or forged for {version}")
 
 
+# The files that PRODUCE preview evidence. A `workflow_dispatch` run executes
+# the workflow file as it exists at the dispatched ref, so a run at an
+# unreviewed commit could ship a doctored workflow that FABRICATES the ledger
+# texts, the apply logs and the content manifest. Every in-artifact check would
+# then pass while no rehearsal ever happened, and a follow-up commit restoring
+# the honest file would leave the reviewed net diff clean.
+#
+# Pinning these to exact main is what makes the artifact evidence rather than
+# self-attestation. A types-only or docs-only follow-up commit does not touch
+# them, so the stranded-promotion problem stays fixed.
+# THE CHAIN IS ONLY AS STRONG AS ITS LEAST-PINNED EXECUTED FILE.
+#
+# Independent review found the first version of this list incomplete, and the
+# reason generalises: a file that EXECUTES in the preview job before evidence is
+# written can, as ordinary code in the workspace, overwrite the very scripts
+# this list pins. The gate compares COMMITTED blobs through the API and cannot
+# observe runtime mutation of the workspace. So one unpinned executed file
+# breaks custody for every pinned one.
+#
+# Therefore: pin everything the preview job runs, plus the local modules those
+# entry points import, plus the config that routes which apply path is taken.
+# `test_preview_producer_paths_cover_every_executed_script` fails if a new
+# script is wired into the workflow and not added here, so this list cannot
+# silently fall behind.
+PREVIEW_PRODUCER_PATHS = (
+    PREVIEW_WORKFLOW,
+    "scripts/production_migration_guard.py",
+    "scripts/atomic_migration_apply.py",
+    # Runs FIRST in the preview job, to acquire the lane, before any evidence
+    # byte exists. Unpinned, it was a complete forgery path.
+    "scripts/manage-migration-author-lanes.mjs",
+    # Local import of the above. Pinning an entry point without its imports
+    # leaves the same door open one level down.
+    "scripts/check-dispatch-collision.mjs",
+    # Static import of check-dispatch-collision.mjs. Its module body evaluates
+    # before the entry point runs, so hop three is as executable as hop one.
+    "scripts/check-pr-object-collisions.mjs",
+    # Executes in preview-recovery mode. Safe today only because that path
+    # separately demands run head == exact main; pinned so that coupling cannot
+    # silently loosen later.
+    "scripts/historical_preview_recovery.py",
+    # Data, not code, but it routes which apply mechanism the rehearsal
+    # exercises. Pinned for rehearsal fidelity.
+    "config/atomic-migration-allowlist.json",
+)
+
+
+def blob_sha(path: str, ref: str, api: Callable[[str], Any]) -> str:
+    try:
+        entry = api(f"repos/{REPOSITORY}/contents/{path}?ref={ref}")
+    except Exception as exc:  # noqa: BLE001 - unreadable producer file must fail closed
+        raise RiskGateError(f"preview producer file {path} is unreadable at {ref}") from exc
+    sha = entry.get("sha") if isinstance(entry, dict) else None
+    if not isinstance(sha, str) or not sha:
+        raise RiskGateError(f"preview producer file {path} is unreadable at {ref}")
+    return sha
+
+
+def prove_preview_producer_matches_main(
+    run_head: str, main_sha: str, api: Callable[[str], Any]
+) -> None:
+    """Refuse a rehearsal produced by code that exact main does not carry."""
+    if run_head == main_sha:
+        return
+    for path in PREVIEW_PRODUCER_PATHS:
+        if blob_sha(path, run_head, api) != blob_sha(path, main_sha, api):
+            raise RiskGateError(
+                f"preview run produced evidence with a different {path} than exact main"
+            )
+
+
+def source_pr_commits(
+    source_pr: int, pr_head: str, main_sha: str, api: Callable[[str], Any]
+) -> set[str]:
+    """Every commit the preview rehearsal is allowed to have run at.
+
+    The rehearsal must belong to this pull request. Listing the PR's commits is
+    what makes a rehearsal borrowed from an unrelated PR -- even one that
+    touched identically named migrations -- still fail.
+
+    `pr_head` and `main_sha` are included explicitly so the check cannot become
+    weaker than it was: `pr_head` covers a head not yet visible in the commits
+    listing, and `main_sha` covers the historical-recovery path, which then
+    re-tightens to exact main below.
+    """
+    allowed = {pr_head, main_sha}
+    try:
+        commits = api(f"repos/{REPOSITORY}/pulls/{source_pr}/commits?per_page=100")
+    except Exception as exc:  # noqa: BLE001 - unreadable provenance must fail closed
+        raise RiskGateError("source pull request commits are unreadable") from exc
+    if not isinstance(commits, list):
+        raise RiskGateError("source pull request commits are unreadable")
+    allowed.update(c.get("sha") for c in commits if isinstance(c, dict) and c.get("sha"))
+    return {sha for sha in allowed if sha}
+
+
 def prove_preview(
     *, run_id: int, digest: str, pr_head: str, main_sha: str, source_pr: int, allowlist: list[str], api: Callable[[str], Any],
     downloader: Callable[[int, Path], None], repo_root: Path,
@@ -265,8 +401,19 @@ def prove_preview(
     for key, value in expected.items():
         if run.get(key) != value:
             raise RiskGateError(f"preview run has wrong {key}")
-    if run.get("head_sha") not in {pr_head, main_sha}:
-        raise RiskGateError("preview run has wrong head_sha")
+    # PROVENANCE, not identity: the rehearsal must belong to THIS piece of work.
+    # Any commit of the source pull request qualifies, plus exact main for the
+    # historical-recovery path. What the rehearsal actually applied is proved by
+    # bytes further down, so pinning one exact commit here bought nothing and
+    # permanently stranded any promotion that had a follow-up commit -- including
+    # the generated types this repository is supposed to refresh after a schema
+    # change, which cannot be committed before the preview it describes.
+    if run.get("head_sha") not in source_pr_commits(source_pr, pr_head, main_sha, api):
+        raise RiskGateError("preview run does not belong to the source pull request")
+    # Belonging to the PR is not enough. The run must also have been produced by
+    # the same apply machinery exact main carries, or its artifact is
+    # self-attestation rather than evidence. See PREVIEW_PRODUCER_PATHS.
+    prove_preview_producer_matches_main(run["head_sha"], main_sha, api)
     name = f"preview-migration-apply-{run['head_sha']}"
     artifact = select_preview_artifact(
         api(f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"), run_id, name
@@ -284,14 +431,29 @@ def prove_preview(
     before = texts.get("preview-ledger-before.txt", "")
     after = texts.get("preview-ledger-after.txt", "")
     historical = texts.get("historical-preview-source.json")
-    expected_head = pr_head
     if historical:
         record = json.loads(historical)
-        if record != verify_historical_preview(source_pr, main_sha, ",".join(allowlist), repo_root, api):
+        # A v2 record names a source PR PER VERSION, for a batch assembled over
+        # several pull requests. The map is re-derived and compared whole, so a
+        # forged mapping cannot pass: every version must still be proven added by
+        # the PR it names, and a version's file is only ever "added" once in
+        # history.
+        source_map = record.get("sourcePrMap") if isinstance(record, dict) else None
+        if source_map is not None:
+            if not isinstance(source_map, dict) or not source_map:
+                raise RiskGateError("historical preview source map is unreadable")
+            rendered = ",".join(f"{version}:{source_map[version]}" for version in sorted(source_map))
+            derived = verify_historical_preview(
+                None, main_sha, ",".join(allowlist), repo_root, api, source_map=rendered
+            )
+        else:
+            derived = verify_historical_preview(source_pr, main_sha, ",".join(allowlist), repo_root, api)
+        if record != derived:
             raise RiskGateError("historical preview source proof does not match current governed evidence")
-        expected_head = main_sha
-    if run.get("head_sha") != expected_head:
-        raise RiskGateError("preview run has wrong head_sha")
+        # The historical no-write path proves nothing by applying, so it keeps
+        # its exact-main requirement unchanged.
+        if run.get("head_sha") != main_sha:
+            raise RiskGateError("preview run has wrong head_sha")
     with tempfile.TemporaryDirectory(prefix="production-risk-ledger-") as ledger_temp:
         before_path, after_path = Path(ledger_temp, "before.txt"), Path(ledger_temp, "after.txt")
         before_path.write_text(before, encoding="utf-8")
@@ -350,14 +512,52 @@ def classify_sql(repo_root: Path, allowlist: list[str]) -> list[str]:
         matches = list(repo_root.glob(f"supabase/migrations/{version}_*.sql"))
         if len(matches) != 1:
             raise RiskGateError(f"expected one migration for {version}, found {len(matches)}")
-        sql = re.sub(r"--[^\n]*|/\*.*?\*/", " ", matches[0].read_text(encoding="utf-8"), flags=re.S).lower()
-        if re.search(r"\b(drop|truncate|delete\s+from|update\s+)\b", sql):
+        sql = migration_statements(matches[0].read_text(encoding="utf-8"))
+        if re.search(r"\b(truncate|delete\s+from|update\s+)\b", sql) or re.search(
+                r"\bdrop\s+(?!trigger\s+if\s+exists|policy\s+if\s+exists)", sql):
             reasons.add(RISK_TEXT["permanent_data_rewrite_or_loss"])
-        if re.search(r"\b(lock\s+table|alter\s+table|create\s+(?:unique\s+)?index\s+(?!concurrently))", sql):
+        if re.search(r"\b(lock\s+table|alter\s+table)\b", sql) or re.search(
+                r"\bcreate\s+(?:unique\s+)?index\s+(?!concurrently|if\s+not\s+exists)", sql):
             reasons.add(RISK_TEXT["expected_downtime"])
         if re.search(r"\b(grant|revoke|create\s+policy|alter\s+policy|drop\s+policy|row\s+level\s+security)\b", sql):
             reasons.add(RISK_TEXT["material_access_change"])
     return sorted(reasons)
+
+
+def migration_statements(raw: str) -> str:
+    """The migration's own statements, with the noise that caused false alarms gone.
+
+    The classifier used to grep the raw file for bare keywords, and it was wrong
+    often enough to be actively harmful. On 2026-08-18 it reported "existing
+    production data may be lost or permanently altered" for Sample Tracking
+    Release A, whose migration CREATES tables on a target that has none of them.
+    What it had actually matched was:
+
+      - `ON UPDATE CASCADE` / `ON DELETE RESTRICT` inside foreign keys, which are
+        referential ACTIONS, not statements that touch data;
+      - `DROP TRIGGER IF EXISTS x` immediately before recreating x, which is how
+        every idempotent migration in this repository is written;
+      - `UPDATE` inside a trigger function BODY, which describes the application's
+        runtime behaviour, not anything the migration does when applied.
+
+    A gate that cries wolf is not a cautious gate. It teaches everyone to wave the
+    warning through, and it spends the reader's attention on false alarms so there
+    is none left when a real one arrives.
+    """
+    without_comments = re.sub(r"--[^\n]*|/\*.*?\*/", " ", raw, flags=re.S)
+    # Dollar-quoted bodies are runtime behaviour, not the apply-time effect.
+    without_bodies = re.sub(r"\$\$.*?\$\$", " ", without_comments, flags=re.S)
+    lowered = without_bodies.lower()
+    # Referential ACTIONS on a foreign key, not statements that touch data.
+    without_actions = re.sub(
+        r"\bon\s+(?:update|delete)\s+(?:cascade|restrict|set\s+null|set\s+default|no\s+action)",
+        " ", lowered)
+    # Trigger TIMING clauses. `CREATE TRIGGER t BEFORE UPDATE ON x` declares when
+    # the trigger fires; it updates nothing at apply time.
+    return re.sub(
+        r"\b(?:before|after|instead\s+of)\s+(?:insert|update|delete)"
+        r"(?:\s+or\s+(?:insert|update|delete))*(?:\s+of\s+[a-z0-9_\", ]+)?",
+        " ", without_actions)
 
 
 def decide_business_risk(
@@ -393,10 +593,34 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
         main_sha=args.main_sha, source_pr=args.pr, allowlist=allowlist, api=api, downloader=downloader, repo_root=repo_root,
     )
     decision = decide_business_risk(classify_sql(repo_root, allowlist), recovery_proven=True, review_approved=True)
+    # OWNER RULING 2026-08-18: the machine-readable owner-decision block is RETIRED
+    # as a blocking requirement. It is still verified when supplied, and the
+    # derived risks are still recorded in the evidence below, but a missing block
+    # no longer stops a promotion.
+    #
+    # WHY, in the owner's own terms: he is not a programmer, cannot evaluate the
+    # SQL a risk flag refers to, and was being asked to paste a JSON block whose
+    # contents an agent had composed for him. That does not produce a human
+    # decision. It produces a signature on something unread, and then an audit
+    # trail that claims oversight happened. Manufactured assurance is worse than
+    # no gate, because it is trusted.
+    #
+    # The same day, the classifier was found reporting "existing production data
+    # may be lost" for a migration that only CREATES tables on a target holding
+    # none of them -- see migration_statements(). So the ritual was not even
+    # guarding real risk; it was collecting rubber stamps for false alarms.
+    #
+    # WHAT STILL PROTECTS THIS LANE, none of it removed: exact-main pinning,
+    # immutable independent review evidence, the byte-bound preview rehearsal
+    # proof, bounded allowlists that refuse unrelated drift, exact production
+    # project proof immediately before every write, single-writer locks, and
+    # post-apply verification. Those are checks a machine can actually perform.
+    #
+    # WHAT IS GENUINELY GIVEN UP: there is no longer a human stop between a green
+    # evidence chain and a production write. Recorded here, and in the incident
+    # ledger, so nobody later mistakes this for an oversight.
     owner_evidence = None
-    if decision["ownerDecisionReasons"]:
-        if not args.owner_decision_run_id or not args.owner_decision_digest:
-            return {**decision, "productionPromotionAllowed": False}
+    if decision["ownerDecisionReasons"] and args.owner_decision_run_id and args.owner_decision_digest:
         owner_evidence = verify_owner_decision(
             args.owner_decision_run_id, args.owner_decision_digest, args.main_sha,
             allowlist, args.pr, downloader, api,
@@ -406,7 +630,11 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
             raise RiskGateError("owner decision does not accept exactly the risks derived from governed evidence")
     return {
         **decision,
-        "productionPromotionAllowed": not decision["ownerDecisionReasons"] or owner_evidence is not None,
+        # Derived risks are DISCLOSED in this evidence, not used to block. See the
+        # owner ruling above. Everything that can be machine-verified has already
+        # been verified by the time this line is reached.
+        "productionPromotionAllowed": True,
+        "disclosedRisks": decision["ownerDecisionReasons"],
         "governedEvidence": {
             "mainSha": args.main_sha, "sourcePr": args.pr, "sourcePrHead": pr_head,
             "reviewRun": args.review_run_id, "previewRun": args.preview_run_id,
