@@ -261,18 +261,39 @@ begin
     raise exception 'saving the accepted provider batch id was not provable: %', v_out;
   end if;
 
-  -- And a bystander still cannot save one over a live lease it does not hold.
+  -- 2d. AND CLAIMING DOES NOT HELP A BYSTANDER EITHER. On a fresh key with a live
+  -- lease held by worker-A and no saved id yet, worker-B states itself as owner and
+  -- brings a batch id of its own: the lease check refuses it before anything is
+  -- stored, so there is no route -- claiming or not -- for a non-holder to bind this
+  -- operation to a provider job.
   v_out := public.update_bulk_operation(
-    'ai-tag-untagged',
+    'bystander-batch',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', jsonb_build_object('phase', 'submitting', 'run_id', 'run-by')),
+    null,
+    0,
+    'worker-A',
+    300);
+  if (v_out ->> 'ok')::boolean is not true then
+    raise exception 'could not set up the bystander fixture: %', v_out;
+  end if;
+
+  v_out := public.update_bulk_operation(
+    'bystander-batch',
     jsonb_build_object(
       'status', 'running',
       'external_job', jsonb_build_object('phase', 'pending', 'provider_batch_id', 'batch_B')),
-    'running',
-    3,
+    null,
+    1,
     'worker-B',
     120);
   if (v_out ->> 'ok')::boolean is not false or v_out ->> 'reason' <> 'lease_held' then
     raise exception 'a bystander claimed the lease to save a batch id: %', v_out;
+  end if;
+  select value -> 'bystander-batch' into v_stored from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored -> 'external_job' ? 'provider_batch_id' then
+    raise exception 'the refused bystander claim still stored a batch id: %', v_stored;
   end if;
 
   -- A saved provider batch id can never be re-pointed at a different provider job.
