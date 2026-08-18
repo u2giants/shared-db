@@ -25,7 +25,7 @@ begin
     pg_backend_pid(), txid_current(), 'core.licensor',
     'owner_ruling_fr_inactivation', v_forward_plan,
     'd6f39e72b533b01a76977a822d8d30178c96775fa943c63b6699be9db068ddcf',
-    'shared-db migration 20260817232425', array['status'],
+    'shared-db migration 20260818142855', array['status'],
     clock_timestamp() + interval '1 minute'
   );
   update core.licensor set status = 'inactive' where id = v_fr_id;

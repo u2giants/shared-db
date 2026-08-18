@@ -55,7 +55,7 @@ declare
   v_evidence constant text :=
     'Owner ruling given in session on 2026-08-02 and recorded in '
     'docs/owner-ruling-friends-tv-frida-kahlo-20260802.md. Fresh guarded '
-    'replacement 20260817232425 supersedes held version 20260802171000.';
+    'replacement 20260818142855 supersedes held version 20260802171000.';
   v_rows integer;
 begin
   select id into strict v_fr_id
@@ -99,7 +99,7 @@ begin
       pg_backend_pid(), txid_current(), 'core.licensor',
       'owner_ruling_fr_inactivation', v_plan,
       'd6f39e72b533b01a76977a822d8d30178c96775fa943c63b6699be9db068ddcf',
-      'shared-db migration 20260817232425', array['status'],
+      'shared-db migration 20260818142855', array['status'],
       clock_timestamp() + interval '1 minute'
     );
 
@@ -109,7 +109,7 @@ begin
           'ruled_by', v_ruler,
           'ruled_on', '2026-08-02',
           'ruling', 'never a real licensor; created by mistake',
-          'migration', '20260817232425',
+          'migration', '20260818142855',
           'supersedes', '20260802171000'
         ))
     where id = v_fr_id and status = 'active';
