@@ -1513,25 +1513,34 @@ company is always `EDGEHOME` (`SPRUCE` and `UCI` in old rows are legacy labels, 
 `plm."divisionCode"` is the single source of truth. Proven live on item `BRT10DYWP01`
 (2026-08-14) — do not re-verify.
 
-**Division `2` is a DesignFlow-only bucket, and it means `CW001` — RESOLVED 2026-08-17.**
+**Division `2` is a DesignFlow-only MIXED legacy bucket — resolve it per item, never map it.**
 **78% of item headers (15,185 of 19,463) carry `dflow."itemHeader".div_code_fk = 2`**, an id
 that exists only in DesignFlow's numbering. **ColdLion has no division `2` and never did** —
-their system has exactly four codes (`CW001`, `EH001`, `SP001`, and the retired `EP001`). The
-tell is in our own data: every `div_code_fk = 2` row has its ColdLion text column **empty**,
-while ids 1 / 8 / 9 carry `CW001` / `SP001` / `EH001`.
+their system has four codes (`CW001`, `EH001`, `SP001`, `EP001`). The tell is in our own data:
+every `div_code_fk = 2` row has its ColdLion text column **empty**, while ids 1 / 8 / 9 carry
+their codes.
 
-Settled against the canonical source, not by judgement: **19 of 19 division-2 item numbers,
-looked up live in ColdLion, returned `divisionCode: CW001`, `companyCode: EDGEHOME`** (mixed
-newest and random sample, 2026-08-17). So **DesignFlow id `2` → `CW001`** for item purposes,
-which is also what the bridge table's `external_divisoncode` says. This unblocks the
-`public.erp_items_current.division_code` backfill.
+**Do NOT blanket-map `2` → `CW001`.** A 250-item random sample checked against the full
+ColdLion catalogue (2026-08-18) shows division 2 holds items from *every* division:
 
-⚠️ `2` is still **not** a value any shared PLM table may store — translate it to `CW001` on
-the way in. "Deprecated" means dead as a *destination*, not absent from history.
+| ColdLion says | Share of sample |
+|---|---|
+| `CW001` | 83.5% |
+| `EH001` | 8.4% |
+| `SP001` | 6.8% |
+| `EP001` | 1.2% |
+| absent from ColdLion | 1 of 250 |
 
-⚠️ **Separate, unresolved:** ColdLion reports those same items as **active** (`itemStatus: A`,
-`active: Y`) while the DesignFlow mirror marks all 15,185 inactive or unset. One side is wrong
-about what is currently sold. Not a division problem; do not "fix" it as part of one.
+A blanket map would misfile roughly **1 item in 6 — about 2,500 rows**. An earlier 19-item
+sample returned `CW001` every time and produced exactly that wrong conclusion; it is recorded
+here so nobody repeats it.
+
+**The rule (owner ruling, Albert Hazan, 2026-08-18: "go according to ColdLion"):** for any
+item whose DesignFlow division is `2`, take the division **from ColdLion by item number**, not
+from `div_code_fk` and not from a mapping table. `plm."divisionCode"` remains correct for the
+three live ids; it simply has nothing honest to say about id `2`.
+
+⚠️ `2` must never be *stored* in a shared PLM table.
 
 **Also settled:** `EP001` is a **real retired book/education division** (grade bands, page
 counts, flash cards, 2019–2020), *not* a mis-keyed `EH001`. Never "correct" it to `EH001`.
