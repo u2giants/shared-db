@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -312,6 +313,44 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 api=self.preview_api(run, [{"sha": c1}], {}),
                 downloader=lambda *_: self.fail("must not download"), repo_root=Path.cwd(),
             )
+
+    def test_preview_producer_paths_cover_every_executed_script(self):
+        """The list must not be able to fall silently behind the workflow.
+
+        Independent review found PREVIEW_PRODUCER_PATHS incomplete, and the cause
+        generalises: any file that executes in the preview job before evidence is
+        written can overwrite the workspace copies of the pinned scripts, since
+        the gate compares COMMITTED blobs and cannot see runtime mutation. One
+        unpinned executed file breaks custody for all of them.
+
+        So this test derives the truth from the workflow itself. Wiring a new
+        script into the migrations workflow without pinning it fails here rather
+        than quietly reopening the forgery path.
+        """
+        repo_root = Path(__file__).resolve().parents[1]
+        workflow = (repo_root / PREVIEW_WORKFLOW).read_text(encoding="utf-8")
+        executed = set(re.findall(r"(?:node|python|bash)\s+\"?\$?\{?[A-Za-z_]*\}?/?(scripts/[A-Za-z0-9_.-]+)", workflow))
+        executed |= set(re.findall(r"(?:node|python|bash)\s+(scripts/[A-Za-z0-9_.-]+)", workflow))
+        self.assertTrue(executed, "workflow parse found no executed scripts; the pattern has rotted")
+        unpinned = sorted(executed - set(PREVIEW_PRODUCER_PATHS) - {
+            # The gate itself runs in the PRODUCTION-apply jobs, which check out
+            # exact main, not the dispatched preview ref, so it is not part of
+            # the preview evidence-producing surface.
+            "scripts/production_business_risk_gate.py",
+            "scripts/production_apply_review_evidence.py",
+            "scripts/production_catalog_verification.py",
+        })
+        self.assertEqual(
+            unpinned, [],
+            f"these scripts execute in the migrations workflow but are not pinned "
+            f"in PREVIEW_PRODUCER_PATHS: {unpinned}",
+        )
+
+    def test_every_pinned_producer_path_exists(self):
+        """A typo in the tuple would silently pin nothing but fail closed later."""
+        repo_root = Path(__file__).resolve().parents[1]
+        for path in PREVIEW_PRODUCER_PATHS:
+            self.assertTrue((repo_root / path).is_file(), f"pinned producer path missing: {path}")
 
     def test_preview_ledger_delta_rejects_extra_additions_removals_and_prior_version(self):
         cases = [

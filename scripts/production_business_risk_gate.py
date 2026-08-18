@@ -303,10 +303,38 @@ def prove_preview_migration_contents(
 # Pinning these to exact main is what makes the artifact evidence rather than
 # self-attestation. A types-only or docs-only follow-up commit does not touch
 # them, so the stranded-promotion problem stays fixed.
+# THE CHAIN IS ONLY AS STRONG AS ITS LEAST-PINNED EXECUTED FILE.
+#
+# Independent review found the first version of this list incomplete, and the
+# reason generalises: a file that EXECUTES in the preview job before evidence is
+# written can, as ordinary code in the workspace, overwrite the very scripts
+# this list pins. The gate compares COMMITTED blobs through the API and cannot
+# observe runtime mutation of the workspace. So one unpinned executed file
+# breaks custody for every pinned one.
+#
+# Therefore: pin everything the preview job runs, plus the local modules those
+# entry points import, plus the config that routes which apply path is taken.
+# `test_preview_producer_paths_cover_every_executed_script` fails if a new
+# script is wired into the workflow and not added here, so this list cannot
+# silently fall behind.
 PREVIEW_PRODUCER_PATHS = (
     PREVIEW_WORKFLOW,
     "scripts/production_migration_guard.py",
     "scripts/atomic_migration_apply.py",
+    # Runs FIRST in the preview job, to acquire the lane, before any evidence
+    # byte exists. Unpinned, it was a complete forgery path.
+    "scripts/manage-migration-author-lanes.mjs",
+    # Local import of the above. Pinning an entry point without its imports
+    # leaves the same door open one level down.
+    "scripts/check-dispatch-collision.mjs",
+    # Executes in preview-recovery mode. Safe today only because that path
+    # separately demands run head == exact main; pinned so that coupling cannot
+    # silently loosen later.
+    "scripts/historical_preview_recovery.py",
+    "scripts/check-sql.sh",
+    # Data, not code, but it routes which apply mechanism the rehearsal
+    # exercises. Pinned for rehearsal fidelity.
+    "config/atomic-migration-allowlist.json",
 )
 
 
