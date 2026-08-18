@@ -24,16 +24,18 @@ table before implementing, and do not re-derive any of it.
 | `EDGEHOME` is the only company code; `SPRUCE`/`UCI` are legacy labels | ✅ **CONFIRMED 2026-08-17** | [`docs/division-code-round2-answers-and-reference-check-20260817.md`](docs/division-code-round2-answers-and-reference-check-20260817.md) |
 | `EP001` is a **real retired book/education division**, not a mis-keyed `EH001` | ✅ **ESTABLISHED 2026-08-17** — §7b.3's "expect 100% unresolved in EP001" stands, and the reason is now documented | round-2 doc, finding 2 |
 | `plm."divisionCode"` is the single source of truth; the hardcoded map in `designflow-data-syncing/helpers/utility.js` is a second one | 🟡 **AGREED, NOT YET FIXED** (change lives in the app repo, not here) | round-2 doc, answer 9 |
-| **78% of item headers (15,185 of 19,463) sit in DesignFlow division `2`**, which has no ColdLion code under the agreed rule | ⬜ **OPEN — owner decision owed** | round-2 doc, finding 1 |
+| **78% of item headers (15,185 of 19,463) carry `div_code_fk = 2`** — a DesignFlow-only id; ColdLion has no division `2` and reports those items as `CW001` (19/19 sampled live) | ✅ **RESOLVED 2026-08-17** — map `1`/`2` → `CW001`; backfill unblocked | round-2 doc, finding 1 resolved |
+| ColdLion calls those same items **active**; the DesignFlow mirror marks all 15,185 inactive | ⬜ **OPEN, unowned — not a division problem** | round-2 doc, finding 1 resolved |
 
 **Where a fresh session starts:** §7b is still the implementation spec and is unaffected —
 this plan ingests **from ColdLion**, which returns `CW001`/`SP001`/`EH001` directly, so the
 division-`2` problem does not arise on the bronze path.
 
 **The one trap.** Division `2` bites anything that sources item divisions **from DesignFlow
-instead of ColdLion** — specifically the `public.erp_items_current.division_code` backfill,
-which is **blocked** on the owner's answer. Do not "helpfully" fill that column while
-implementing this plan.
+instead of ColdLion**: it is a DesignFlow-internal id with no ColdLion equivalent, so it must
+be **translated to `CW001`**, never stored raw. That is settled, but the
+`public.erp_items_current.division_code` backfill is still its own migration with its own
+preview run — do not fold it into this plan.
 
 ---
 

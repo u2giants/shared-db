@@ -14,7 +14,8 @@ answers, the conclusions drawn from them, and the live reference check Uma asked
 before anything is cleaned up.
 
 > **If you read nothing else:** three findings below change the plan and are not in any
-> earlier document — [78% of items sit in the "dead" division 2](#finding-1-78-of-all-items-live-in-the-deprecated-division-2),
+> earlier document — [78% of items sit in DesignFlow division 2, which ColdLion confirms is
+> `CW001`](#finding-1-78-of-all-items-live-in-designflow-division-2--which-means-cw001),
 > [EP001 is a real retired product line, not a typo](#finding-2-ep001-is-a-real-retired-book-and-education-division),
 > and [only 178 of the 363 unclean rows are actually safe to touch](#the-reference-check-results).
 
@@ -79,7 +80,7 @@ reasoning and once by data. It stays withdrawn.
 
 **Confirms the Block A fix (integer → 9), conditionally.** The check says **142 of the 217
 are referenced**, and the references are overwhelmingly from items *in division 2* — see
-[finding 1](#finding-1-78-of-all-items-live-in-the-deprecated-division-2). This fix is no
+[finding 1](#finding-1-78-of-all-items-live-in-designflow-division-2--which-means-cw001). This fix is no
 longer a simple rewrite.
 
 > **A second, independent reason Block A cannot run as written**, found the same day by
@@ -148,9 +149,11 @@ should read the table.
 > "yes We can update these, but will have to be careful while updating these, we will have
 > to check divisionCode_fk, divisionCode_id_fk and in merchGroup carefully and then map it."
 
-**Approved in principle — but blocked in practice.** See
-[finding 1](#finding-1-78-of-all-items-live-in-the-deprecated-division-2): most items
-cannot be mapped to any ColdLion division code today.
+**Approved, and now unblocked.** It was briefly held because 78% of items carry
+`div_code_fk = 2`, which has no ColdLion code — but that id is DesignFlow-internal, and
+ColdLion says those items are `CW001` (19 of 19 sampled live). Map `1`/`2` → `CW001`,
+`8` → `SP001`, `9` → `EH001`. See
+[finding 1 resolved](#finding-1-resolved-coldlion-says-division-2-is-cw001).
 
 ### 12. Items with company NULL or `2` ("OTHER")
 
@@ -168,7 +171,12 @@ and the real column-name typo `external_divisoncode`.
 
 ## Three findings from the live data
 
-### Finding 1: 78% of all items live in the deprecated division 2
+### Finding 1: 78% of all items live in DesignFlow division 2 — which means CW001
+
+> **RESOLVED the same day, against ColdLion.** This finding was first written as an open
+> owner decision. It is not one. See
+> [the resolution](#finding-1-resolved-coldlion-says-division-2-is-cw001) directly below the
+> table. The counts here stand; the conclusion drawn from them was wrong.
 
 `dflow."itemHeader"`, live 2026-08-17:
 
@@ -181,18 +189,52 @@ and the real column-name typo `external_divisoncode`.
 | `NULL` | — | 2 | 0 |
 
 Division 2 is deprecated as a *destination* — nothing active is filed there — but it is
-where **78% of item history** lives. Two consequences:
+where **78% of item history** lives.
 
-1. **The backfill (question 11) cannot simply run.** The agreed rule is "never accept
-   `2` as a division code" and there is no ColdLion code for it. Mapping id → ColdLion
-   spelling covers only 4,276 of 19,463 item headers. What happens to the other 15,185 is
-   an unanswered question, and it is the reason `erp_items_current.division_code` should
-   not be filled in yet. Options are to map 2 → `CW001` (the bridge table says id 2's
-   `external_divisoncode` **is** `CW001`), to leave those rows blank, or to exclude them.
-   **This needs an owner decision and is not in any answer we have.**
+#### Finding 1 RESOLVED: ColdLion says division 2 is CW001
+
+**`div_code_fk` is DesignFlow's own numbering, not a ColdLion code.** ColdLion has exactly
+four divisions — `CW001`, `EH001`, `SP001`, and the retired `EP001` — and **no division `2`,
+ever**. Our own data shows it: every `div_code_fk = 2` row has its ColdLion text column
+`div_code` **empty**, while ids 1 / 8 / 9 carry `CW001` / `SP001` / `EH001`.
+
+| `div_code_fk` | `div_code` (ColdLion text) | Items |
+|---|---|---|
+| **2** | **(empty on all 15,185)** | 15,185 |
+| 1 | `CW001` | 2,437 |
+| 8 | `SP001` | 755 |
+| 9 | `EH001` | 731 |
+| 1 | (empty) | 333 |
+| others | mixed / empty | 22 |
+
+So the question was never "which of our two rules wins" — it was "what does the canonical
+system say these items are". **Asked directly, live, 2026-08-17: 19 of 19 division-2 item
+numbers returned `divisionCode: CW001`, `companyCode: EDGEHOME` from ColdLion `GET /items`.**
+Sample was the 6 most recently created plus 13 chosen at random across the population
+(`order by md5(item_num_id)`), including `EGP4RSESC01`, `DFP62NBW101`, `MBE88PNUT03`,
+`VSH42MABP`, `3FZ9326`, `HLSAMPLES`, `MJX3AMVBP01`.
+
+**Conclusion: DesignFlow id `2` → `CW001` for item purposes**, agreeing with the bridge
+table's `external_divisoncode`. The backfill is **unblocked**. `2` still must never be
+*stored* in a shared PLM table — translate it on the way in.
+
+Two consequences remain:
+
+1. **The backfill can run**, mapping `1`/`2` → `CW001`, `8` → `SP001`, `9` → `EH001`. It
+   still needs a migration and preview run; it is no longer waiting on a decision.
 2. **The 217-row fix (question 3) is not cosmetic.** Those merch-group rows are referenced
    by 29,250 item-code links from division-2 items. Rewriting their integer from 2 to 9
-   re-files taxonomy that division-2 items depend on.
+   re-files taxonomy that division-2 (i.e. POP Lic) items depend on — and 9 is
+   `EH001`/Spruce non-Lic, a *different* division from what ColdLion says those items are.
+   This makes the Block A fix more suspect, not less.
+
+#### A separate discrepancy found by the same check (NOT a division problem)
+
+ColdLion reports those items as **active** — `itemStatus: A`, `active: Y` — on every one of
+the 19 sampled. The DesignFlow mirror marks all 15,185 division-2 items `is_item_active`
+false or NULL. One of the two systems is wrong about what is currently being sold. Recorded
+here so it is not lost; it is out of scope for division work and must not be "fixed" as part
+of it.
 
 ### Finding 2: EP001 is a real retired book and education division
 
@@ -359,12 +401,17 @@ Stated plainly so nobody reads it as broader proof than it is:
 | Fix the 217 Block A rows → integer `9` | **Blocked, twice over.** 142 are referenced by division-2 items (finding 1), and the same update creates 142 duplicate rows with no constraint to stop it ([duplicate analysis](merchgroup-271-division-conflicts-back-to-uma-20260817.md)). |
 | Retire the 49 EP001 rows | **Ready, but record it as a retirement**, not a correction to `EH001`. |
 | Delete the 4 empty rows | **Blocked.** 3 of them carry 573 item references. |
-| Backfill `erp_items_current.division_code` | **Blocked.** 15,185 of 19,463 items are in division 2, which has no ColdLion code under the agreed rule. |
+| Backfill `erp_items_current.division_code` | **UNBLOCKED 2026-08-17.** Map `1`/`2` → `CW001`, `8` → `SP001`, `9` → `EH001`; ColdLion confirms division-2 items are `CW001` (19/19 sampled). Needs a migration and a preview run, not a decision. |
 | `CHECK` constraint on division shape | **Last.** Cannot be enforced while 363 rows violate it. |
 
-**The one open question for the owner:** what division should 15,185 division-2 items
-carry in the shared item key? The bridge table maps id 2 to `CW001`, but the agreed rule
-says id 2 is dead and must never be accepted. Both cannot be true.
+**No open questions for the owner.** The last one — what division the 15,185 division-2
+items carry — was answered by ColdLion itself on 2026-08-17: `CW001`. See
+[finding 1 resolved](#finding-1-resolved-coldlion-says-division-2-is-cw001).
+
+**Still open, but as engineering work rather than decisions:** the Block A fix (now doubly
+suspect), the 3 blank-division rows holding 573 references, widening the reference check
+beyond `itemHeader`, and the active-flag disagreement between ColdLion and the DesignFlow
+mirror.
 
 ---
 
