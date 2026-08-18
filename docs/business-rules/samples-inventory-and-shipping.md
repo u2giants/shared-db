@@ -1,6 +1,8 @@
 # Samples, inventory, shipping, and custody
 
-**Status:** Proposed
+**Status:** Settled
+
+**Controlling owner decision:** Albert Hazan, 2026-08-13. The linked DesignFlow specification retains detailed acceptance criteria and implementation evidence.
 
 ## Core identities
 
