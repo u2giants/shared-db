@@ -44,8 +44,19 @@
 --
 -- HOW THE SEED RESOLVES ROWS
 -- --------------------------
--- The authoritative 7-category / 19-product-type mapping comes from
--- MerchGroup_Rework.xlsx sheet `Final Version`, columns A-C, restated in §4.2.1. The seed
+-- The authoritative 7-category / 20-product-type mapping is restated in §4.2.1. Nineteen
+-- of the twenty come from MerchGroup_Rework.xlsx sheet `Final Version`, columns A-C. The
+-- twentieth, ('Q','TBD storage') -> STORAGE, comes from an OWNER RULING by Albert Hazan
+-- on 2026-08-18: 'Q' is real and belongs under Storage.
+--
+-- THE WORKBOOK DOES NOT YET CARRY 'Q'. MerchGroup_Rework.xlsx is a business-owned binary
+-- and is NOT edited by this repository. The business must add 'Q TBD storage' under
+-- Storage to the workbook so the two agree. UNTIL THAT HAPPENS, THE AUTHORITY FOR 'Q' IS
+-- THE RECORDED OWNER RULING in docs/business-rules/merchandise-and-product-taxonomy.md,
+-- not the workbook. A future reader who finds only 19 rows in the workbook has found a
+-- stale workbook, not a wrong migration.
+--
+-- The seed
 -- matches on the (mg_code, mg_desc) PAIR within mgTypeCode '01', case-insensitively and
 -- trimmed. Matching on the pair is what keeps the retired material rows out: 'A' alone
 -- would hit "LEATHER/COWHIDE", but ('A','Stretched/Box') cannot.
@@ -71,55 +82,72 @@
 -- type is ever left with a null flag, the per-division assertion below names it and the
 -- migration refuses to apply — loud, not silent.
 --
--- THE EXPECTED SHAPE IS DERIVED, NOT HARD-CODED
--- ---------------------------------------------
--- Measured live on 2026-08-18: divisions CW001, EH001 and SP001 each carry all 19
--- authoritative product types as active MG01 rows, i.e. 57 link rows today. 57 is an
--- OBSERVATION and appears nowhere in the code. What the assertion actually requires is the
--- SHAPE: for EVERY division that carries any active MG01 row, EVERY one of the 19
--- authoritative product types must resolve IN THAT DIVISION and carry its authoritative
--- category. The expected link count is then derived as 19 x (number of such divisions).
+-- DIVISION SCOPE IS DECLARED PER PRODUCT TYPE, NOT ASSUMED UNIFORM
+-- ----------------------------------------------------------------
+-- Verified live on 2026-08-18 against production qsllyeztdwjgirsysgai (read-only):
+--   * each of the 19 workbook product types exists as an ACTIVE MG01 row exactly ONCE in
+--     EACH of the three divisions CW001, EH001 and SP001;
+--   * ('Q','TBD storage') exists exactly ONCE, in CW001 ONLY, and is active there.
+--
+-- So the authoritative list is NOT a flat list cross-joined against whatever divisions
+-- happen to carry rows. Each entry DECLARES the divisions it is expected in
+-- (`expected_divisions`): the 19 declare all three, 'Q' declares CW001 only. The expected
+-- grid is then built by unnesting that declaration, so it has 19x3 + 1 = 58 cells today —
+-- and 58, like the old 57, is an OBSERVATION that appears NOWHERE in this file. The
+-- expectation is DERIVED from the declaration and moves with it.
+--
+-- A naive uniform cross join would demand 'Q' in EH001 and SP001, find it absent and
+-- raise on data that is correct. Declaring the scope is what keeps the assertion strict
+-- without making it wrong.
 --
 -- WHY PER-DIVISION AND NOT "RESOLVED SOMEWHERE" (this is the bug that was here before)
 -- -----------------------------------------------------------------------------------
--- The previous check LEFT JOINed the 19 authoritative rows to core."merchGroup" and
--- failed only when a row came back NULL. A LEFT JOIN emits NO ROW for a division that did
--- not match — it does not emit a NULL row. So if 'K' matched in CW001 and SP001 but EH001
+-- The previous check LEFT JOINed the authoritative rows to core."merchGroup" and failed
+-- only when a row came back NULL. A LEFT JOIN emits NO ROW for a division that did not
+-- match — it does not emit a NULL row. So if 'K' matched in CW001 and SP001 but EH001
 -- stored it as 'Other Table Top', the join still returned two non-null rows for 'K',
 -- nothing was NULL, the migration printed OK and COMMITTED 56 links instead of 57. One
 -- division silently had a hole and every downstream category filter silently dropped its
--- items. Cross-joining the authoritative list against the division list first is what
--- makes a one-division drift impossible to hide.
+-- items. Expanding the DECLARED (type, division) pairs into a grid first, and then
+-- looking for holes in that grid, is what makes a one-division drift impossible to hide.
+-- That fix is NOT weakened by the declaration: a declared cell that does not resolve
+-- still raises and still names the exact (division, code, description) triple.
 --
 -- CAN A DIVISION LEGITIMATELY CARRY ONLY PART OF THE MG01 SET?
 -- -----------------------------------------------------------
--- Decision: NO, and that is asserted rather than assumed. The 19 product types are the
--- company-wide product vocabulary, not a per-division menu; production carries all 19 in
--- all three divisions that have any active MG01 rows at all. A division that carries a
--- PARTIAL set is therefore treated as a data defect and raises with the exact missing
--- (division, code, description) triples. A future division that deliberately sells only a
--- subset must be settled on the issue and expressed in a follow-up governed migration; it
--- must NOT be accommodated by loosening this check, because "some divisions are allowed to
--- be short" is exactly the hole that let the 56-of-57 seed through.
+-- (This paragraph replaces an earlier one that said a short division is ALWAYS a data
+-- defect. That was wrong: 'Q' is real, correct and CW001-only.)
 --
--- CODE 'Q' — "TBD storage" — IS DELIBERATELY NOT MAPPED
--- -----------------------------------------------------
--- Production also carries an MG01 row 'Q' "TBD storage" whose free-text `mgCategory`
--- reads 'Storage'. It is NOT in the workbook's 19 and it is inactive in two of the three
--- divisions. Inventing a mapping for it here would be this migration deciding a business
--- question it was not asked. It is left unmapped and visible: the read contract simply
--- returns no category for it, which is honest, and a later governed change can add it.
+-- Division scope is DECLARED PER PRODUCT TYPE, and a departure from the DECLARED scope
+-- is the defect — not a departure from uniformity. Concretely:
+--   * A DECLARED (type, division) cell that does not resolve to a linked active MG01 row
+--     RAISES and rolls the migration back, naming the exact triple. This is the whole
+--     point of the grid and it is unchanged in strength.
+--   * An active MG01 row that resolves in a division the list did NOT declare (say 'Q'
+--     is rolled out to SP001 next quarter) is reported as a LOUD NOTICE, not a raise.
+--     WHY THE ASYMMETRY: a missing declared cell is a correctness hole — that division's
+--     items silently fall out of every category filter, which is precisely the 56-of-57
+--     failure. An undeclared cell is the opposite: the row WAS found and WAS seeded with
+--     its authoritative category, so the data is right and only the declaration is stale.
+--     Raising there would turn a legitimate business expansion into a replay failure on
+--     every database, i.e. a self-inflicted outage over a non-defect. The notice names
+--     the triples so the declaration gets widened in a follow-up governed migration.
+--
+-- A future division that deliberately sells only a subset is now expressible: declare the
+-- subset. It must still be settled on the issue and expressed in a follow-up governed
+-- migration — never by loosening the grid check, because "some divisions are allowed to
+-- be short" is exactly the hole that let the 56-of-57 seed through.
 --
 -- WHAT APPLIES ON A DATABASE WITH NO MERCHANDISE-GROUP ROWS
 -- ---------------------------------------------------------
 -- EVERYTHING STRUCTURAL: both tables, every constraint and index, RLS, the policies and
 -- the grants, plus the seven authoritative categories (they are division-independent
--- reference data and do not depend on any source row). Only the 19 category-to-MG01
--- LINK rows need source data, so on a database with no MG01 rows the link seed is a
--- natural no-op and its assertion is SKIPPED WITH A LOUD NOTICE rather than raising.
--- On a database that DOES carry active MG01 rows the assertion is strict PER DIVISION:
--- anything short of all 19 resolving in EVERY division that carries active MG01 rows
--- raises and rolls back, naming the exact missing (division, code, description) triples.
+-- reference data and do not depend on any source row). Only the category-to-MG01 LINK
+-- rows need source data, so on a database with no MG01 rows the link seed is a natural
+-- no-op and its assertion is SKIPPED WITH A LOUD NOTICE rather than raising.
+-- On a database that DOES carry active MG01 rows the assertion is strict PER DECLARED
+-- CELL: anything short of every declared (product type, division) pair resolving raises
+-- and rolls back, naming the exact missing (division, code, description) triples.
 -- See the long comment in section 5.
 
 -- IDEMPOTENCE
@@ -263,37 +291,54 @@ on conflict (code) do update
       updated_at = now();
 
 -- -------------------------------------------------------------------------------------
--- 4. Structural seed — the 19 category-to-MG01 mappings, resolved per division.
+-- 4. Structural seed — the 20 category-to-MG01 mappings, resolved per division.
+--
+-- THE FOURTH COLUMN IS THE DECLARED DIVISION SCOPE: the divisions in which this product
+-- type is EXPECTED to exist as an active MG01 row. It is the single authoritative
+-- declaration and section 5 builds its expected grid from it.
+--
+-- THE SEED DELIBERATELY DOES NOT FILTER ON IT. The seed links EVERY active MG01 row whose
+-- (mg_code, mg_desc) pair is authoritative, in whatever division it is found. The
+-- declaration says what MUST exist, not what MAY: if 'Q' turns up in SP001 tomorrow, the
+-- honest outcome is that it gets its correct STORAGE category and section 5 reports the
+-- undeclared cell as a notice — not that it is left categoryless because a list in this
+-- file has not caught up. Filtering the seed on the declaration would silently produce
+-- exactly the unlinked rows this migration exists to prevent.
 -- -------------------------------------------------------------------------------------
 
-with authoritative (mg_code, mg_desc, category_code) as (
+with authoritative (mg_code, mg_desc, category_code, expected_divisions) as (
   values
     -- Wall
-    ('A', 'Stretched/Box',   'WALL'),
-    ('B', 'Framed',          'WALL'),
-    ('C', 'Plaque',          'WALL'),
-    ('D', 'Functional',      'WALL'),
-    ('E', 'Other Wall',      'WALL'),
+    ('A', 'Stretched/Box',   'WALL',      array['CW001','EH001','SP001']),
+    ('B', 'Framed',          'WALL',      array['CW001','EH001','SP001']),
+    ('C', 'Plaque',          'WALL',      array['CW001','EH001','SP001']),
+    ('D', 'Functional',      'WALL',      array['CW001','EH001','SP001']),
+    ('E', 'Other Wall',      'WALL',      array['CW001','EH001','SP001']),
     -- Tabletop
-    ('F', 'Block',           'TABLETOP'),
-    ('G', 'Box',             'TABLETOP'),
-    ('H', 'Photo Frames',    'TABLETOP'),
-    ('J', 'Object',          'TABLETOP'),
-    ('K', 'Other tabletop',  'TABLETOP'),
+    ('F', 'Block',           'TABLETOP',  array['CW001','EH001','SP001']),
+    ('G', 'Box',             'TABLETOP',  array['CW001','EH001','SP001']),
+    ('H', 'Photo Frames',    'TABLETOP',  array['CW001','EH001','SP001']),
+    ('J', 'Object',          'TABLETOP',  array['CW001','EH001','SP001']),
+    ('K', 'Other tabletop',  'TABLETOP',  array['CW001','EH001','SP001']),
     -- Clock
-    ('M', 'Clocks',          'CLOCK'),
+    ('M', 'Clocks',          'CLOCK',     array['CW001','EH001','SP001']),
     -- Storage
-    ('N', 'Soft storage',    'STORAGE'),
-    ('P', 'Hard storage',    'STORAGE'),
-    ('R', 'Other storage',   'STORAGE'),
+    ('N', 'Soft storage',    'STORAGE',   array['CW001','EH001','SP001']),
+    ('P', 'Hard storage',    'STORAGE',   array['CW001','EH001','SP001']),
+    ('R', 'Other storage',   'STORAGE',   array['CW001','EH001','SP001']),
+    -- Storage — OWNER RULING 2026-08-18 (Albert Hazan): 'Q' is real and belongs under
+    -- Storage. Verified live the same day: it exists as an ACTIVE MG01 row in CW001 ONLY,
+    -- which is why its declared scope is one division and not three. The workbook does
+    -- not carry this row yet; the recorded owner ruling is the authority until it does.
+    ('Q', 'TBD storage',     'STORAGE',   array['CW001']),
     -- Workspace
-    ('S', 'Stationery org',  'WORKSPACE'),
-    ('T', 'Desk acc',        'WORKSPACE'),
-    ('U', 'Other workspace', 'WORKSPACE'),
+    ('S', 'Stationery org',  'WORKSPACE', array['CW001','EH001','SP001']),
+    ('T', 'Desk acc',        'WORKSPACE', array['CW001','EH001','SP001']),
+    ('U', 'Other workspace', 'WORKSPACE', array['CW001','EH001','SP001']),
     -- Floor
-    ('V', 'Floor coverings', 'FLOOR'),
+    ('V', 'Floor coverings', 'FLOOR',     array['CW001','EH001','SP001']),
     -- Garden
-    ('W', 'Garden',          'GARDEN')
+    ('W', 'Garden',          'GARDEN',    array['CW001','EH001','SP001'])
 ),
 resolved as (
   select c.id as mg_category_id, mg.mg_id
@@ -319,11 +364,15 @@ declare
   v_categories      integer;
   v_pairs           integer;
   v_source_rows     integer;
+  v_types           integer;
   v_divisions       integer;
   v_expected_links  integer;
   v_actual_links    integer;
   v_missing         text;
   v_drift           text;
+  v_dupes           text;
+  v_undeclared      text;
+  v_seen_divisions  text;
   v_renamed         text;
 begin
   -- STRUCTURE MUST APPLY EVERYWHERE; ONLY THE ROW ASSERTION IS CONDITIONAL.
@@ -332,7 +381,7 @@ begin
   -- This migration is replayed from EMPTY on an ephemeral database in CI
   -- (.github/workflows/database-contract-tests.yml). That database carries the SCHEMA
   -- of core."merchGroup" but not a single row of it. The first version of this block
-  -- raised unconditionally when the 19 authoritative product types did not resolve, so
+  -- raised unconditionally when the authoritative product types did not resolve, so
   -- on the empty database the exception rolled the WHOLE migration back and the two
   -- tables were never created at all. A structural migration is not allowed to depend
   -- on production ROW CONTENT in order to apply its STRUCTURE.
@@ -341,22 +390,29 @@ begin
   --   * NO ACTIVE MG01 merchandise-group rows exist at all -> there is nothing to map.
   --     Skip the mapping assertion with a LOUD notice. Nothing is half-seeded, because
   --     nothing could be seeded.
-  --   * ACTIVE MG01 rows DO exist -> then for EVERY division that carries any of them,
-  --     all 19 authoritative product types must resolve IN THAT DIVISION and carry their
-  --     authoritative category. Anything less raises and rolls back, naming the exact
-  --     missing (division, code, description) triples.
+  --   * ACTIVE MG01 rows DO exist -> then EVERY DECLARED (product type, division) cell
+  --     must resolve to an active MG01 row in THAT division carrying its authoritative
+  --     category. Anything less raises and rolls back, naming the exact missing
+  --     (division, code, description) triples.
   --
-  -- THE SHAPE IS DERIVED, NEVER HARD-CODED. `v_expected_links` = 19 x the number of
-  -- divisions that carry active MG01 rows. Today that evaluates to 57 on production, but
-  -- 57 is nowhere in this file: if a fourth division is onboarded the expectation moves
-  -- with it, and if one division loses a product type the migration stops.
+  -- THE SHAPE IS DERIVED, NEVER HARD-CODED. `v_expected_links` is the number of cells
+  -- produced by unnesting `expected_divisions` over the authoritative list - today
+  -- 19 types x 3 divisions + 'Q' in CW001 only = 58. The number 58 appears NOWHERE in
+  -- this file. Widen or narrow a type's declared scope and the expectation moves with it.
   --
-  -- WHY NOT "did each of the 19 resolve somewhere?" - because a LEFT JOIN from the 19
+  -- WHY NOT "did each type resolve somewhere?" - because a LEFT JOIN from the flat
   -- authoritative rows emits NO ROW for a division that failed to match, not a NULL row.
   -- Under the old check, 'K' matching in two divisions and failing in the third produced
-  -- two non-null rows, no NULLs, an "OK" notice and a COMMITTED 56-of-57 seed. Building
-  -- the expectation as (19 authoritative types x every division with active MG01 rows)
-  -- and then looking for holes in THAT grid is what makes a one-division drift loud.
+  -- two non-null rows, no NULLs, an "OK" notice and a COMMITTED 56-of-57 seed. Expanding
+  -- the DECLARED (type, division) pairs into a grid and then looking for holes in THAT
+  -- grid is what makes a one-division drift loud. Declaring the scope narrows WHICH cells
+  -- are expected; it does not soften what happens to a cell that is expected and missing.
+  --
+  -- DIVISION MATCHING IS ON THE DIVISION CODE STRING (`divisionCode_fk`), because that is
+  -- what the declaration names. An active MG01 row with a blank division code therefore
+  -- cannot satisfy a declared cell - it raises, which is right: a merchandise-group row
+  -- with no division code is itself a defect. To make that diagnosable rather than
+  -- baffling, the failure message lists the division labels actually seen.
   --
   -- The drift check below is unconditional in both cases: it only looks at links that
   -- already exist, so it costs nothing on an empty database and never weakens.
@@ -379,24 +435,44 @@ begin
   from core."merchGroup"
   where "mgTypeCode" = '01' and is_active is true;
 
-  with authoritative (mg_code, mg_desc, category_code) as (
+  with authoritative (mg_code, mg_desc, category_code, expected_divisions) as (
     values
-      ('A','Stretched/Box','WALL'),('B','Framed','WALL'),('C','Plaque','WALL'),
-      ('D','Functional','WALL'),('E','Other Wall','WALL'),
-      ('F','Block','TABLETOP'),('G','Box','TABLETOP'),('H','Photo Frames','TABLETOP'),
-      ('J','Object','TABLETOP'),('K','Other tabletop','TABLETOP'),
-      ('M','Clocks','CLOCK'),
-      ('N','Soft storage','STORAGE'),('P','Hard storage','STORAGE'),
-      ('R','Other storage','STORAGE'),
-      ('S','Stationery org','WORKSPACE'),('T','Desk acc','WORKSPACE'),
-      ('U','Other workspace','WORKSPACE'),
-      ('V','Floor coverings','FLOOR'),
-      ('W','Garden','GARDEN')
+      ('A','Stretched/Box','WALL',array['CW001','EH001','SP001']),
+      ('B','Framed','WALL',array['CW001','EH001','SP001']),
+      ('C','Plaque','WALL',array['CW001','EH001','SP001']),
+      ('D','Functional','WALL',array['CW001','EH001','SP001']),
+      ('E','Other Wall','WALL',array['CW001','EH001','SP001']),
+      ('F','Block','TABLETOP',array['CW001','EH001','SP001']),
+      ('G','Box','TABLETOP',array['CW001','EH001','SP001']),
+      ('H','Photo Frames','TABLETOP',array['CW001','EH001','SP001']),
+      ('J','Object','TABLETOP',array['CW001','EH001','SP001']),
+      ('K','Other tabletop','TABLETOP',array['CW001','EH001','SP001']),
+      ('M','Clocks','CLOCK',array['CW001','EH001','SP001']),
+      ('N','Soft storage','STORAGE',array['CW001','EH001','SP001']),
+      ('P','Hard storage','STORAGE',array['CW001','EH001','SP001']),
+      ('R','Other storage','STORAGE',array['CW001','EH001','SP001']),
+      -- OWNER RULING 2026-08-18: 'Q' is real and is STORAGE. CW001 only (verified live).
+      ('Q','TBD storage','STORAGE',array['CW001']),
+      ('S','Stationery org','WORKSPACE',array['CW001','EH001','SP001']),
+      ('T','Desk acc','WORKSPACE',array['CW001','EH001','SP001']),
+      ('U','Other workspace','WORKSPACE',array['CW001','EH001','SP001']),
+      ('V','Floor coverings','FLOOR',array['CW001','EH001','SP001']),
+      ('W','Garden','GARDEN',array['CW001','EH001','SP001'])
+  ),
+  -- THE EXPECTED GRID, DERIVED FROM THE DECLARATION rather than from a uniform cross
+  -- join. One row per (product type, declared division). 58 cells today; the number is
+  -- computed, never written down.
+  declared as (
+    select
+      a.mg_code, a.mg_desc, a.category_code,
+      upper(btrim(u.division_code)) as division_key
+    from authoritative a
+    cross join lateral unnest(a.expected_divisions) as u(division_code)
   ),
   active_mg01 as (
     select
       mg.mg_id,
-      mg."divisionCode_id_fk" as division_id,
+      upper(btrim(coalesce(mg."divisionCode_fk", ''))) as division_key,
       coalesce(
         nullif(btrim(mg."divisionCode_fk"), ''),
         'division_id ' || coalesce(mg."divisionCode_id_fk"::text, '(null)')
@@ -406,51 +482,93 @@ begin
     from core."merchGroup" mg
     where mg."mgTypeCode" = '01' and mg.is_active is true
   ),
-  divisions as (
-    select distinct division_id, division_label from active_mg01
-  ),
-  -- THE EXPECTED GRID: every authoritative product type x every division that carries
-  -- any active MG01 row. A division that matched only part of the list leaves holes here
-  -- that no amount of matching in OTHER divisions can fill.
-  expected as (
-    select d.division_id, d.division_label, a.mg_code, a.mg_desc, a.category_code
-    from divisions d
-    cross join authoritative a
-  ),
-  graded as (
-    select
-      e.division_label, e.mg_code, e.mg_desc, e.category_code,
-      m.mg_id,
-      c.code as actual_category
-    from expected e
-    left join active_mg01 m
-      on m.division_id is not distinct from e.division_id
-     and m.code_key = upper(e.mg_code)
-     and m.desc_key = lower(e.mg_desc)
+  linked as (
+    select m.*, c.code as actual_category
+    from active_mg01 m
     left join core.mg_category_merch_group l on l.merch_group_mg_id = m.mg_id
     left join core.mg_category c on c.id = l.mg_category_id
   ),
+  graded as (
+    select
+      d.division_key, d.mg_code, d.mg_desc, d.category_code,
+      m.mg_id, m.actual_category
+    from declared d
+    left join linked m
+      on m.division_key = d.division_key
+     and m.code_key = upper(d.mg_code)
+     and m.desc_key = lower(d.mg_desc)
+  ),
   holes as (
     select
-      division_label || ' / ' || mg_code || ' ' || mg_desc
+      division_key || ' / ' || mg_code || ' ' || mg_desc
         || case
              when mg_id is null then ' (no active MG01 row matched)'
              else ' (row ' || mg_id || ' exists but is not linked)'
            end as hole_text
     from graded
     where mg_id is null or actual_category is null
-  )
+  ),
+  -- DRIFT is checked against EVERY linked active MG01 row whose (code, description) pair
+  -- is authoritative, in ANY division - not only inside the declared grid. A link that a
+  -- human re-pointed in an undeclared division must be just as loud as one inside it.
+  drift as (
+    select distinct
+      l.division_label || ' / ' || l.code_key || ' ' || l.desc_key
+        || ' -> ' || l.actual_category as drift_text
+    from linked l
+    join authoritative a
+      on upper(a.mg_code) = l.code_key
+     and lower(a.mg_desc) = l.desc_key
+    where l.actual_category is not null
+      and l.actual_category <> a.category_code
+  ),
+  -- AMBIGUOUS SOURCE ROWS, detected directly instead of inferred from a count. Two ACTIVE
+  -- MG01 rows with the same (code, description) in the same division mean the seed
+  -- attached both; that is the exact failure the `is_active` filter exists to prevent.
+  -- The old check compared link count against grid size, which no longer works now that
+  -- an undeclared-but-real cell may legitimately add a link outside the grid.
+  dupes as (
+    select
+      l.division_label || ' / ' || l.code_key || ' ' || l.desc_key
+        || ' (' || count(*) || ' active rows)' as dupe_text
+    from linked l
+    join authoritative a
+      on upper(a.mg_code) = l.code_key
+     and lower(a.mg_desc) = l.desc_key
+    group by l.division_label, l.code_key, l.desc_key
+    having count(*) > 1
+  ),
+  -- THE REVERSE CHECK: an authoritative product type resolving in a division the list did
+  -- NOT declare. Reported, never raised - see "CAN A DIVISION LEGITIMATELY CARRY ONLY
+  -- PART OF THE MG01 SET?" in the header for why the asymmetry is deliberate.
+  undeclared as (
+    select distinct
+      l.division_label || ' / ' || l.code_key || ' ' || l.desc_key as undeclared_text
+    from linked l
+    join authoritative a
+      on upper(a.mg_code) = l.code_key
+     and lower(a.mg_desc) = l.desc_key
+    where not exists (
+      select 1 from declared d
+      where upper(d.mg_code) = l.code_key
+        and lower(d.mg_desc) = l.desc_key
+        and d.division_key = l.division_key
+    )
+  ),
+  seen as (select distinct division_label from active_mg01)
   select
-    (select count(*) from divisions),
-    (select count(*) from expected),
-    count(*) filter (where g.actual_category = g.category_code),
-    (select string_agg(distinct hole_text, '; ') from holes),
-    string_agg(distinct g.division_label || ' / ' || g.mg_code || ' ' || g.mg_desc
-        || ' -> ' || g.actual_category, '; ')
-      filter (where g.actual_category is not null
-                and g.actual_category <> g.category_code)
-  into v_divisions, v_expected_links, v_actual_links, v_missing, v_drift
-  from graded g;
+    (select count(*) from authoritative),
+    (select count(distinct division_key) from declared),
+    (select count(*) from declared),
+    (select count(*) from graded where actual_category = category_code),
+    (select string_agg(hole_text, '; ' order by hole_text) from holes),
+    (select string_agg(drift_text, '; ' order by drift_text) from drift),
+    (select string_agg(dupe_text, '; ' order by dupe_text) from dupes),
+    (select string_agg(undeclared_text, '; ' order by undeclared_text) from undeclared),
+    (select string_agg(division_label, ', ' order by division_label) from seen)
+  into
+    v_types, v_divisions, v_expected_links, v_actual_links,
+    v_missing, v_drift, v_dupes, v_undeclared, v_seen_divisions;
 
   -- UNCONDITIONAL. An existing link that disagrees with the authoritative mapping is a
   -- drift on ANY database and is never overwritten quietly.
@@ -460,18 +578,11 @@ begin
       'Refusing to overwrite a deliberate change - resolve this on the issue.', v_drift;
   end if;
 
-  -- AMBIGUOUS SOURCE ROWS. The grid is (19 types x divisions), so if a division somehow
-  -- carries TWO active MG01 rows with the same (code, description) pair, the graded set
-  -- has more matched rows than the grid has cells and BOTH rows got a link. That is the
-  -- exact failure the `is_active` filter was added to prevent, so it is asserted rather
-  -- than trusted.
-  if v_actual_links > v_expected_links then
+  if v_dupes is not null then
     raise exception
-      'Issue #1163: % category links resolved but only % (19 product types x % divisions) '
-      'are possible. A division carries more than one ACTIVE mgTypeCode ''01'' row for the '
-      'same code/description pair, so the seed attached both. Resolve the duplicate source '
-      'rows on the issue.',
-      v_actual_links, v_expected_links, v_divisions;
+      'Issue #1163: a division carries more than one ACTIVE mgTypeCode ''01'' row for the '
+      'same code/description pair, so the seed attached a category to both: %. Resolve the '
+      'duplicate source rows on the issue.', v_dupes;
   end if;
 
   if v_source_rows = 0 then
@@ -505,15 +616,17 @@ begin
         ('A','stretched/box'),('B','framed'),('C','plaque'),('D','functional'),
         ('E','other wall'),('F','block'),('G','box'),('H','photo frames'),
         ('J','object'),('K','other tabletop'),('M','clocks'),('N','soft storage'),
-        ('P','hard storage'),('R','other storage'),('S','stationery org'),
+        ('P','hard storage'),('R','other storage'),('Q','tbd storage'),
+        ('S','stationery org'),
         ('T','desk acc'),('U','other workspace'),('V','floor coverings'),('W','garden')
       );
 
     raise exception
-      'Issue #1163: % active mgTypeCode ''01'' rows across % divisions were expected to '
-      'carry all 19 authoritative product types (% links), but only % resolved. '
-      'Missing: %.%',
-      v_source_rows, v_divisions, v_expected_links, v_actual_links, v_missing,
+      'Issue #1163: % active mgTypeCode ''01'' rows were expected to fill all % declared '
+      '(product type, division) cells - % authoritative product types across % declared '
+      'divisions - but only % resolved. Missing: %. Division labels actually present: %.%',
+      v_source_rows, v_expected_links, v_types, v_divisions, v_actual_links, v_missing,
+      coalesce(v_seen_divisions, '(none)'),
       case
         when v_renamed is not null then
           ' NOTE: these merchandise-group rows are ALREADY LINKED but their descriptions '
@@ -527,11 +640,23 @@ begin
       end;
   end if;
 
+  -- THE REVERSE FINDING. Loud, but not fatal: the row was found and correctly categorised,
+  -- so the data is right and only the declaration is stale. See the header for why this
+  -- notices rather than raises.
+  if v_undeclared is not null then
+    raise notice
+      'Issue #1163 NOTICE: these authoritative product types resolve in divisions the '
+      'authoritative list does NOT declare: %. They were seeded with their correct '
+      'category, so nothing is wrong with the data - the DECLARATION is out of date. '
+      'Widen expected_divisions in a follow-up governed migration under its own issue; '
+      'do not edit this applied file.', v_undeclared;
+  end if;
+
   select count(*) into v_pairs from core.mg_category_merch_group;
   raise notice
-    'Issue #1163 OK: % categories, % category-to-MG01 link rows total (% expected across '
-    '% divisions x 19 product types, from % active MG01 source rows).',
-    v_categories, v_pairs, v_expected_links, v_divisions, v_source_rows;
+    'Issue #1163 OK: % categories, % category-to-MG01 link rows total (% declared cells '
+    'from % product types across % declared divisions, from % active MG01 source rows).',
+    v_categories, v_pairs, v_expected_links, v_types, v_divisions, v_source_rows;
 end;
 $$;
 

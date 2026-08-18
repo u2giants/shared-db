@@ -21,20 +21,34 @@
 --       genuinely FIRED on an empty database too. A constraint that nobody has watched
 --       reject anything is not a proven constraint; asserting only that it appears in
 --       pg_constraint proves the DDL ran, not that the rule holds.
---     * Only the 19 MAPPINGS (section C) and the read contract (section E) need real
+--     * Only the MAPPINGS (section C) and the read contract (section E) need real
 --       source rows. Where there are none, each is SKIPPED WITH AN EXPLICIT NOTICE naming
 --       what was skipped and why. A skip is never silent and never counted as a pass.
 --   NOTHING here is weakened to go green: on a populated database every one of these
 --   assertions runs and must pass exactly as it did before.
 --
 -- WHY SECTION C IS A GRID AND NOT A LIST (this is the defect it was rewritten to catch)
---   The earlier version LEFT JOINed the 19 authoritative product types to
---   core."merchGroup" and only complained when a product type resolved NOWHERE. A LEFT
---   JOIN emits NO ROW for a division that failed to match - it does not emit a NULL row.
---   So a product type that matched in CW001 and SP001 but was stored under a different
---   description in EH001 still looked complete, and a 56-of-57 seed passed. Section C now
---   builds the expected GRID (19 authoritative product types x every division that carries
---   any ACTIVE MG01 row) and fails on any hole in it, naming the division.
+--   The earlier version LEFT JOINed the authoritative product types to core."merchGroup"
+--   and only complained when a product type resolved NOWHERE. A LEFT JOIN emits NO ROW
+--   for a division that failed to match - it does not emit a NULL row. So a product type
+--   that matched in CW001 and SP001 but was stored under a different description in EH001
+--   still looked complete, and a 56-of-57 seed passed. Section C builds the expected GRID
+--   and fails on any hole in it, naming the division.
+--
+-- WHY THE GRID IS DECLARED, NOT A UNIFORM CROSS JOIN
+--   Division scope is DECLARED PER PRODUCT TYPE (`expected_divisions`). The 19 workbook
+--   product types are declared in CW001, EH001 and SP001; ('Q','TBD storage') - added by
+--   OWNER RULING on 2026-08-18 and mapped to Storage - is declared in CW001 ONLY, which
+--   is where it actually exists as an active MG01 row. A uniform 20 x 3 cross join would
+--   demand 'Q' in EH001 and SP001 and FAIL on correct data. Declaring the scope narrows
+--   WHICH cells are expected; a declared cell that does not resolve still FAILS and still
+--   names the division, so the grid fix is not weakened. The reverse case - a type
+--   resolving in an UNDECLARED division - is reported as a NOTICE and is neither a pass
+--   nor a fail, because the data is right and only the declaration is stale.
+--
+--   MerchGroup_Rework.xlsx does not yet carry 'Q'. It is a business-owned binary that
+--   this repository does not edit; until the business updates it, the recorded owner
+--   ruling in docs/business-rules/merchandise-and-product-taxonomy.md is the authority.
 --
 -- WHY `is_active`
 --   The migration seeds only ACTIVE MG01 rows, so this file counts and joins only ACTIVE
@@ -47,16 +61,17 @@
 --      grants are least-privilege: anon has nothing, authenticated may SELECT and may NOT
 --      INSERT/UPDATE/DELETE, service_role may read.
 --   B. The seven categories exist exactly once each (acceptance check 1).
---   C. All 19 authoritative category-to-MG01 mappings resolve to the right category in
---      EVERY division that carries active MG01 rows, and the total link count equals
---      19 x that division count - derived, never hard-coded (checks 2, 4, 6).
+--   C. Every DECLARED (authoritative product type, division) cell resolves to the right
+--      category in THAT division, and the total link count equals the number of declared
+--      cells - derived from the declaration, never hard-coded (checks 2, 4, 6).
 --   D. Negative cases (acceptance check 6), all fired for real against a throwaway
 --      fixture: a second category for one product-type row is REJECTED, a duplicate
 --      mapping is REJECTED, a mapping to a non-existent merchandise-group row is
 --      REJECTED, a mapping to a non-existent category is REJECTED, a blank category code
 --      is REJECTED, and duplicate category codes/names are REJECTED.
 --   E. The documented read contract returns category + MG01 code + MG01 product-type name
---      for all 19 product types (acceptance check 5).
+--      for every authoritative product type, counted from the declaration rather than
+--      from a literal (acceptance check 5).
 --
 --   No assertion reads supabase_migrations.schema_migrations. This repo has shipped a
 --   migration that recorded a clean ledger row while its object did nothing, so "it
@@ -83,6 +98,9 @@ declare
   v_txt  text;
   v_source_rows integer;
   v_links integer;
+  v_declared_cells integer;
+  v_types integer;
+  v_undeclared text;
   r      record;
 begin
   -- Is there any source data on this database at all? Sections C and E are meaningless
@@ -252,32 +270,51 @@ begin
     v_fail := v_fail + 1; raise notice 'FAIL expected 7 categories, found %', v_n;
   end if;
 
-  raise notice '=== C. ALL 19 CATEGORY-TO-MG01 MAPPINGS, PER DIVISION (checks 2, 4, 6) ===';
+  raise notice '=== C. EVERY DECLARED CATEGORY-TO-MG01 CELL, PER DIVISION (checks 2, 4, 6) ===';
   if v_source_rows = 0 then
     raise notice 'SKIP C: core."merchGroup" holds NO ACTIVE mgTypeCode ''01'' rows on this '
-      'database, so there is nothing for the 19 authoritative product types to resolve '
+      'database, so there is nothing for the authoritative product types to resolve '
       'against and the migration correctly seeded no link rows. This section is SKIPPED, '
       'NOT passed. It runs and must pass on preview and production.';
   else
   for r in
-    with authoritative (mg_code, mg_desc, category_code) as (
+    -- The authoritative list carries its own DIVISION SCOPE. The 19 workbook product
+    -- types are declared in all three divisions; ('Q','TBD storage') - OWNER RULING
+    -- 2026-08-18, Storage - is declared in CW001 ONLY, because that is where it exists.
+    -- The grid is the UNNEST of that declaration, never a uniform cross join.
+    with authoritative (mg_code, mg_desc, category_code, expected_divisions) as (
       values
-        ('A','Stretched/Box','WALL'),('B','Framed','WALL'),('C','Plaque','WALL'),
-        ('D','Functional','WALL'),('E','Other Wall','WALL'),
-        ('F','Block','TABLETOP'),('G','Box','TABLETOP'),('H','Photo Frames','TABLETOP'),
-        ('J','Object','TABLETOP'),('K','Other tabletop','TABLETOP'),
-        ('M','Clocks','CLOCK'),
-        ('N','Soft storage','STORAGE'),('P','Hard storage','STORAGE'),
-        ('R','Other storage','STORAGE'),
-        ('S','Stationery org','WORKSPACE'),('T','Desk acc','WORKSPACE'),
-        ('U','Other workspace','WORKSPACE'),
-        ('V','Floor coverings','FLOOR'),
-        ('W','Garden','GARDEN')
+        ('A','Stretched/Box','WALL',array['CW001','EH001','SP001']),
+        ('B','Framed','WALL',array['CW001','EH001','SP001']),
+        ('C','Plaque','WALL',array['CW001','EH001','SP001']),
+        ('D','Functional','WALL',array['CW001','EH001','SP001']),
+        ('E','Other Wall','WALL',array['CW001','EH001','SP001']),
+        ('F','Block','TABLETOP',array['CW001','EH001','SP001']),
+        ('G','Box','TABLETOP',array['CW001','EH001','SP001']),
+        ('H','Photo Frames','TABLETOP',array['CW001','EH001','SP001']),
+        ('J','Object','TABLETOP',array['CW001','EH001','SP001']),
+        ('K','Other tabletop','TABLETOP',array['CW001','EH001','SP001']),
+        ('M','Clocks','CLOCK',array['CW001','EH001','SP001']),
+        ('N','Soft storage','STORAGE',array['CW001','EH001','SP001']),
+        ('P','Hard storage','STORAGE',array['CW001','EH001','SP001']),
+        ('R','Other storage','STORAGE',array['CW001','EH001','SP001']),
+        ('Q','TBD storage','STORAGE',array['CW001']),
+        ('S','Stationery org','WORKSPACE',array['CW001','EH001','SP001']),
+        ('T','Desk acc','WORKSPACE',array['CW001','EH001','SP001']),
+        ('U','Other workspace','WORKSPACE',array['CW001','EH001','SP001']),
+        ('V','Floor coverings','FLOOR',array['CW001','EH001','SP001']),
+        ('W','Garden','GARDEN',array['CW001','EH001','SP001'])
+    ),
+    declared as (
+      select a.mg_code, a.mg_desc, a.category_code,
+             upper(btrim(u.division_code)) as division_key
+      from authoritative a
+      cross join lateral unnest(a.expected_divisions) as u(division_code)
     ),
     active_mg01 as (
       select
         mg.mg_id,
-        mg."divisionCode_id_fk" as division_id,
+        upper(btrim(coalesce(mg."divisionCode_fk", ''))) as division_key,
         coalesce(
           nullif(btrim(mg."divisionCode_fk"), ''),
           'division_id ' || coalesce(mg."divisionCode_id_fk"::text, '(null)')
@@ -287,21 +324,14 @@ begin
       from core."merchGroup" mg
       where mg."mgTypeCode" = '01' and mg.is_active is true
     ),
-    divisions as (select distinct division_id, division_label from active_mg01),
-    -- The GRID. Every authoritative product type is expected IN EVERY division that
-    -- carries any active MG01 row. A hole here cannot be filled by another division.
-    expected as (
-      select d.division_id, d.division_label, a.mg_code, a.mg_desc, a.category_code
-      from divisions d cross join authoritative a
-    ),
     graded as (
-      select e.division_label, e.mg_code, e.mg_desc, e.category_code,
+      select d.division_key, d.mg_code, d.mg_desc, d.category_code,
              m.mg_id, c.code as actual_category
-      from expected e
+      from declared d
       left join active_mg01 m
-        on m.division_id is not distinct from e.division_id
-       and m.code_key = upper(e.mg_code)
-       and m.desc_key = lower(e.mg_desc)
+        on m.division_key = d.division_key
+       and m.code_key = upper(d.mg_code)
+       and m.desc_key = lower(d.mg_desc)
       left join core.mg_category_merch_group l on l.merch_group_mg_id = m.mg_id
       left join core.mg_category c on c.id = l.mg_category_id
     )
@@ -313,7 +343,7 @@ begin
       count(*) filter (where g.mg_id is not null)                   as matched_cells,
       count(*) filter (where g.actual_category = g.category_code)   as correct_cells,
       coalesce(
-        string_agg(distinct g.division_label || ' (' ||
+        string_agg(distinct g.division_key || ' (' ||
           case
             when g.mg_id is null then 'no active MG01 row'
             when g.actual_category is null then 'row ' || g.mg_id || ' not linked'
@@ -327,41 +357,104 @@ begin
   loop
     if r.correct_cells = r.expected_cells then
       v_pass := v_pass + 1;
-      raise notice 'PASS % % -> % in all % divisions',
+      raise notice 'PASS % % -> % in all % declared division(s)',
         r.mg_code, r.mg_desc, r.category_code, r.expected_cells;
     else
-      -- Names the exact division(s). This is the assertion that a 56-of-57 seed fails.
+      -- Names the exact division(s). This is the assertion that a 56-of-57 seed fails,
+      -- and declaring the scope does not soften it: a DECLARED cell that is missing is
+      -- still a FAIL naming the division.
       v_fail := v_fail + 1;
-      raise notice 'FAIL % % -> % resolved in % of % divisions; wrong or missing in: %',
+      raise notice 'FAIL % % -> % resolved in % of % declared division(s); wrong or missing in: %',
         r.mg_code, r.mg_desc, r.category_code, r.correct_cells, r.expected_cells,
         r.bad_divisions;
     end if;
   end loop;
 
-  -- Total shape, derived rather than hard-coded: 19 product types x every division that
-  -- carries active MG01 rows. On production today that evaluates to 57; the number 57
-  -- appears nowhere, so onboarding a division moves the expectation instead of breaking it.
-  -- Counted as a distinct GROUP, not as count(distinct col): count(distinct col) drops a
-  -- null division silently, which would make the expectation disagree with the grid above.
-  select count(*) into v_n
-  from (
-    select distinct "divisionCode_id_fk"
-    from core."merchGroup"
-    where "mgTypeCode" = '01' and is_active is true
-  ) d;
+  -- TOTAL SHAPE, DERIVED FROM THE DECLARATION rather than hard-coded. Today this is
+  -- 19 types x 3 divisions + 'Q' in CW001 = 58 declared cells; neither 58 nor 19 nor 3
+  -- is written down as an expectation anywhere - change a declared scope and the
+  -- expectation moves with it.
+  with authoritative (mg_code, mg_desc, category_code, expected_divisions) as (
+    values
+      ('A','Stretched/Box','WALL',array['CW001','EH001','SP001']),
+      ('B','Framed','WALL',array['CW001','EH001','SP001']),
+      ('C','Plaque','WALL',array['CW001','EH001','SP001']),
+      ('D','Functional','WALL',array['CW001','EH001','SP001']),
+      ('E','Other Wall','WALL',array['CW001','EH001','SP001']),
+      ('F','Block','TABLETOP',array['CW001','EH001','SP001']),
+      ('G','Box','TABLETOP',array['CW001','EH001','SP001']),
+      ('H','Photo Frames','TABLETOP',array['CW001','EH001','SP001']),
+      ('J','Object','TABLETOP',array['CW001','EH001','SP001']),
+      ('K','Other tabletop','TABLETOP',array['CW001','EH001','SP001']),
+      ('M','Clocks','CLOCK',array['CW001','EH001','SP001']),
+      ('N','Soft storage','STORAGE',array['CW001','EH001','SP001']),
+      ('P','Hard storage','STORAGE',array['CW001','EH001','SP001']),
+      ('R','Other storage','STORAGE',array['CW001','EH001','SP001']),
+      ('Q','TBD storage','STORAGE',array['CW001']),
+      ('S','Stationery org','WORKSPACE',array['CW001','EH001','SP001']),
+      ('T','Desk acc','WORKSPACE',array['CW001','EH001','SP001']),
+      ('U','Other workspace','WORKSPACE',array['CW001','EH001','SP001']),
+      ('V','Floor coverings','FLOOR',array['CW001','EH001','SP001']),
+      ('W','Garden','GARDEN',array['CW001','EH001','SP001'])
+  ),
+  declared as (
+    select a.mg_code, a.mg_desc, a.category_code,
+           upper(btrim(u.division_code)) as division_key
+    from authoritative a
+    cross join lateral unnest(a.expected_divisions) as u(division_code)
+  ),
+  linked as (
+    select
+      upper(btrim(coalesce(mg."divisionCode_fk", ''))) as division_key,
+      coalesce(
+        nullif(btrim(mg."divisionCode_fk"), ''),
+        'division_id ' || coalesce(mg."divisionCode_id_fk"::text, '(null)')
+      ) as division_label,
+      upper(btrim(mg.mg_code)) as code_key,
+      lower(btrim(mg.mg_desc)) as desc_key
+    from core.mg_category_merch_group l
+    join core."merchGroup" mg on mg.mg_id = l.merch_group_mg_id
+    where mg."mgTypeCode" = '01' and mg.is_active is true
+  )
+  select
+    (select count(*) from declared),
+    (select count(*) from authoritative),
+    (select count(*) from linked l
+       where exists (select 1 from declared d
+                     where d.division_key = l.division_key
+                       and upper(d.mg_code) = l.code_key
+                       and lower(d.mg_desc) = l.desc_key)),
+    (select string_agg(distinct l.division_label || ' / ' || l.code_key || ' ' || l.desc_key,
+                       '; ')
+       from linked l
+       join authoritative a
+         on upper(a.mg_code) = l.code_key and lower(a.mg_desc) = l.desc_key
+       where not exists (select 1 from declared d
+                         where d.division_key = l.division_key
+                           and upper(d.mg_code) = l.code_key
+                           and lower(d.mg_desc) = l.desc_key))
+  into v_declared_cells, v_types, v_links, v_undeclared;
 
-  select count(*) into v_links
-  from core.mg_category_merch_group l
-  join core."merchGroup" mg on mg.mg_id = l.merch_group_mg_id
-  where mg."mgTypeCode" = '01' and mg.is_active is true;
-
-  if v_links = 19 * v_n then
+  if v_links = v_declared_cells then
     v_pass := v_pass + 1;
-    raise notice 'PASS % active-MG01 link rows = 19 product types x % divisions', v_links, v_n;
+    raise notice 'PASS % active-MG01 link rows fill all % declared cells (% product types)',
+      v_links, v_declared_cells, v_types;
   else
     v_fail := v_fail + 1;
-    raise notice 'FAIL % active-MG01 link rows, expected 19 x % divisions = %',
-      v_links, v_n, 19 * v_n;
+    raise notice 'FAIL % of % declared (product type, division) cells carry a link row',
+      v_links, v_declared_cells;
+  end if;
+
+  -- THE REVERSE FINDING, reported and never counted as a pass or a fail. An authoritative
+  -- product type resolving in an UNDECLARED division is correct data with a stale
+  -- declaration, not a defect: the row was found and carries its authoritative category.
+  -- Failing here would break every replay over a legitimate business expansion, whereas a
+  -- MISSING declared cell silently drops that division out of every category filter - so
+  -- only the missing side fails. See the migration header for the full rationale.
+  if v_undeclared is not null then
+    raise notice 'NOTICE: authoritative product types resolve in undeclared divisions: %. '
+      'Data is correct and categorised; widen expected_divisions in a follow-up governed '
+      'migration.', v_undeclared;
   end if;
 
   end if;
@@ -409,12 +502,21 @@ begin
     join core."merchGroup" mg  on mg.mg_id = link.merch_group_mg_id
     where cat.is_active
   ) contract;
-  if v_n = 19 then
+  -- The expectation is the number of AUTHORITATIVE PRODUCT TYPES (20 today), taken from
+  -- the same declaration section C used - not a literal. A product type appears once per
+  -- division as a ROW but collapses to ONE (category, code, description) triple here.
+  if v_types is null then
+    v_fail := v_fail + 1;
+    raise notice 'FAIL E cannot evaluate: the authoritative product-type count was never '
+      'computed, which means section C did not run. Investigate rather than trusting this file.';
+  elsif v_n = v_types then
     v_pass := v_pass + 1;
-    raise notice 'PASS read contract yields exactly 19 distinct category/MG01 code/product-type triples';
+    raise notice 'PASS read contract yields exactly % distinct category/MG01 code/product-type triples',
+      v_types;
   else
     v_fail := v_fail + 1;
-    raise notice 'FAIL read contract yielded % distinct triples, expected 19', v_n;
+    raise notice 'FAIL read contract yielded % distinct triples, expected % (one per authoritative product type)',
+      v_n, v_types;
   end if;
   end if;
 
