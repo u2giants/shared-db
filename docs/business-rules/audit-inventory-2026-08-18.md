@@ -5,10 +5,7 @@
 
 ## Method
 
-**Publication state:** the central library is prepared in this branch. Consumer-repository
-cleanup is prepared locally but is not proven complete until each listed repository has a
-published commit or pull request. The final audit update will record that evidence rather than
-claiming unpublished edits are complete.
+**Publication state:** consumer cleanup is published. PopDAM commit [`d482b9a`](https://github.com/u2giants/popdam3/commit/d482b9a), PopCRM commit [`30d3eaa`](https://github.com/u2giants/popcrm-web/commit/30d3eaa), and PopPIM commit [`fb7aa38`](https://github.com/u2giants/poppim-web/commit/fb7aa38) are on `main`. DesignFlow frontend commit [`e1c6c7c9`](https://github.com/popcre/designflow-frontend/commit/e1c6c7c9) is in [PR #156](https://github.com/popcre/designflow-frontend/pull/156), backend commit [`d7afb56`](https://github.com/popcre/designflow-backend/commit/d7afb56) is in [PR #69](https://github.com/popcre/designflow-backend/pull/69), and Item Master commit [`e7dd0b6`](https://github.com/popcre/designflow-item-master/commit/e7dd0b6) is in [PR #41](https://github.com/popcre/designflow-item-master/pull/41). Uma owns the DesignFlow merges.
 
 Every Markdown file in the scoped repositories was included in a path inventory, excluding generated dependencies and the read-only `shared-db/` mirrors when auditing consumer repos. Candidate files were identified through headings and language concerning business rules, authority, identity, status, workflows, approvals, pricing, royalty, margin, Customers, Contacts, Factories/Vendors, Licensors, Properties, merchandise groups, products, Items, Samples, orders, production, assets, tags, and permissions.
 
@@ -56,11 +53,11 @@ The audit does not delete technical documentation merely because it contains wor
 
 | Source | Classification and action |
 |---|---|
-| `use_plm_tables.md`, `use_master_data_plm_tables.md` | Pointer replacements prepared locally; publication evidence pending. |
-| `docs/MASTER_DATA.md` | Authority correction prepared locally; publication evidence pending. |
-| `docs/PROJECT_BIBLE.md`, `docs/WORKER_LOGIC.md`, `docs/PATH_UTILS.md`, `docs/SCHEMA.md`, `docs/API_CONTRACTS.md`, `docs/architecture.md`, `README.md` | Repeated-rule cleanup prepared locally; publication evidence pending. |
-| `fix_add_tags.md` | Proposed-implementation label and central links prepared locally; publication evidence pending. |
-| `fix_popsg_tagging_handoff.md` | Historical label and central links prepared locally; publication evidence pending. |
+| `use_plm_tables.md`, `use_master_data_plm_tables.md` | Replaced with central-map pointers in PopDAM commit `d482b9a`. |
+| `docs/MASTER_DATA.md` | Authority corrected in PopDAM commit `d482b9a`. |
+| `docs/PROJECT_BIBLE.md`, `docs/WORKER_LOGIC.md`, `docs/PATH_UTILS.md`, `docs/SCHEMA.md`, `docs/API_CONTRACTS.md`, `docs/architecture.md`, `README.md` | Repeated-rule cleanup published in PopDAM commit `d482b9a`. |
+| `fix_add_tags.md` | Proposed-implementation label and central links published in PopDAM commit `d482b9a`. |
+| `fix_popsg_tagging_handoff.md` | Historical label and central links published in PopDAM commit `d482b9a`. |
 | `docs/POPSG.md` | Technical crawl, render, and source-resolution behavior retained. Licensing identity and tagging meaning come from central topics. |
 | `docs/KNOWN_QUIRKS.md` and `AGENTS.md` | Technical incidents and safeguards retained. Embedded customer/licensing/taxonomy facts now route through the central map. |
 | Search, batch, model, deployment, infrastructure, and extraction plans | Technical or Proposed implementation material, not business authority. |
@@ -69,9 +66,9 @@ The audit does not delete technical documentation merely because it contains wor
 
 | Source | Classification and action |
 |---|---|
-| `use_plm_tables.md` | Pointer replacement prepared locally; publication evidence pending. |
-| `docs/architecture.md` | Customer vs. ingested-domain correction prepared locally; publication evidence pending. |
-| `AGENTS.md` | Central-map route prepared locally; publication evidence pending. |
+| `use_plm_tables.md` | Central pointer published in PopCRM commit `30d3eaa`. |
+| `docs/architecture.md` | Customer vs. ingested-domain correction published in PopCRM commit `30d3eaa`. |
+| `AGENTS.md` | Central-map route published in PopCRM commit `30d3eaa`. |
 | `docs/overview-aggregate-inventory.md` | Reporting predicates and performance evidence retained as application implementation. It does not define Customer identity. |
 | Design handoff files | UI design evidence. Labels such as Account/Prospect are not permitted to supersede central Customer definitions. |
 | Audit, deployment, configuration, and remediation plans | Technical or historical, not business authority. |
@@ -80,42 +77,42 @@ The audit does not delete technical documentation merely because it contains wor
 
 | Source | Classification and action |
 |---|---|
-| `use_plm_tables.md` | Pointer replacement prepared locally; publication evidence pending. |
-| `docs/architecture-update-implementation-plan.md` | Proposed/Historical label and central links prepared locally; publication evidence pending. |
+| `use_plm_tables.md` | Central pointer published in PopPIM commit `fb7aa38`. |
+| `docs/architecture-update-implementation-plan.md` | Proposed/Historical label and central links published in PopPIM commit `fb7aa38`. |
 | `gaps.md` | Current application state and missing implementation, not business authority. |
-| `AGENTS.md`, `docs/architecture.md` | Central-map route prepared locally; publication evidence pending. |
+| `AGENTS.md`, `docs/architecture.md` | Central-map route published in PopPIM commit `fb7aa38`. |
 | ClickUp, schema, and secondary-screen documents | Technical integration or implementation evidence. |
 
 ## DesignFlow frontend findings
 
 | Source | Classification and action |
 |---|---|
-| `docs/sample-tracking-restructure-spec.md` | Central pointer replacement prepared locally; publication evidence pending. |
-| Sample Tracking plans | Central links prepared locally; publication evidence pending. |
-| `docs/rfq-math.md`, `src/app/pages/rfq/README.md`, RFQ buyer-margin/generic-royalty plans | Authority separation prepared locally; publication evidence pending. |
-| `src/app/pages/prod_tracking/README.md` | Central link prepared locally; publication evidence pending. |
-| `docs/ai-classification.md` | Central link and authority separation prepared locally; publication evidence pending. |
-| `docs/item-library-redesign.md` | Central links prepared locally; publication evidence pending. |
-| `AGENTS.md`, architecture, dependency, and system maps | Business-authority labels and central routes prepared locally; publication evidence pending. |
+| `docs/sample-tracking-restructure-spec.md` | Central authority banner published in frontend commit `e1c6c7c9`; active implementation evidence retained. |
+| Sample Tracking plans | Central links published in frontend commit `e1c6c7c9`. |
+| `docs/rfq-math.md`, `src/app/pages/rfq/README.md`, RFQ buyer-margin/generic-royalty plans | Authority separation published in frontend commit `e1c6c7c9`. |
+| `src/app/pages/prod_tracking/README.md` | Central link published in frontend commit `e1c6c7c9`. |
+| `docs/ai-classification.md` | Central link and authority separation published in frontend commit `e1c6c7c9`. |
+| `docs/item-library-redesign.md` | Central links published in frontend commit `e1c6c7c9`. |
+| `AGENTS.md`, architecture, dependency, and system maps | Business-authority labels and central routes published in frontend commit `e1c6c7c9`. |
 | Performance, grid, SSRM, theming, saved-view, and QA plans | Technical behavior or test evidence. |
 
 ## DesignFlow backend findings
 
 | Source | Classification and action |
 |---|---|
-| `AGENTS.md` | Central RFQ route prepared locally; publication evidence pending. |
+| `AGENTS.md` | Central RFQ route published in backend commit `d7afb56`. |
 | `docs/api-reference.md` | Endpoint contract only. Route names do not establish business meaning. |
-| `HTS_RAG.md`, `HTS_RAG_PILOT.md` | Proposed/implementation labels and central links prepared locally; publication evidence pending. |
-| Architecture, dependency, and system maps | Business-authority labels and central routes prepared locally; publication evidence pending. |
+| `HTS_RAG.md`, `HTS_RAG_PILOT.md` | Proposed/implementation labels and central links published in backend commit `d7afb56`. |
+| Architecture, dependency, and system maps | Business-authority labels and central routes published in backend commit `d7afb56`. |
 | Security, performance, migration, MCP, and deployment plans | Technical only. |
 
 ## DesignFlow Item Master findings
 
 | Source | Classification and action |
 |---|---|
-| `AGENTS.md` | Central routes prepared locally; publication evidence pending. |
-| `docs/app-migration-notes/coldlion-style-number-validation-20260716.md` | Central Product/Item link prepared locally; publication evidence pending. |
-| Architecture, dependency, API, and system maps | Business-authority labels and central routes prepared locally; publication evidence pending. |
+| `AGENTS.md` | Central routes published in Item Master commit `e7dd0b6`. |
+| `docs/app-migration-notes/coldlion-style-number-validation-20260716.md` | Central Product/Item link published in Item Master commit `e7dd0b6`. |
+| Architecture, dependency, API, and system maps | Business-authority labels and central routes published in Item Master commit `e7dd0b6`. |
 
 ## Conflicts resolved
 
