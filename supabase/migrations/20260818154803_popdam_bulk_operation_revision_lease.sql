@@ -230,7 +230,7 @@ begin
       using errcode = '22023';
   end if;
 
-  if jsonb_typeof(p_op_state) <> 'object' then
+  if coalesce(jsonb_typeof(p_op_state), 'null') <> 'object' then
     raise exception 'update_bulk_operation: the guarded path requires a JSON object in p_op_state'
       using errcode = '22023';
   end if;
@@ -336,7 +336,7 @@ begin
         exit guarded;
       end if;
 
-      if jsonb_typeof(p_op_state -> 'external_job') <> 'object' then
+      if coalesce(jsonb_typeof(p_op_state -> 'external_job'), 'null') <> 'object' then
         raise exception
           'update_bulk_operation: a submission lease claim on "%" requires an external_job object in p_op_state'
           , p_op_key
