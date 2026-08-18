@@ -20,7 +20,21 @@
 --      no caller can drive a duplicate, duplicate-billed provider submission (finding 2
 --      and review finding B)
 --   8. a non-claiming guarded write can neither plant a provider_batch_id where none
---      is stored nor move the phase of a live-leased job (review finding A)
+--      is stored nor move the phase of a job that has a provider-job pointer
+--   9. STATING an owner is not BEING the owner. submission_owner is stored in
+--      admin_config and readable by every caller, so a claim over a free lease mints
+--      a one-time receipt whose md5 digest alone is stored, and only a caller that
+--      sends that receipt back may bind an operation to a provider job. A same-name
+--      renewal keeps the incumbent receipt, so ordinary shared-name retry traffic
+--      still works (Grok high finding 1)
+--  10. neither legacy writer may INTRODUCE a provider_batch_id on an operation that
+--      already has a stored external_job, not only replace one (Grok high finding 2)
+--  11. there is no payload escape from the ambiguity rule: declaring
+--      phase = ambiguous_submission in a legacy or batch payload proves nothing and
+--      is refused; reconciliation is guarded-path only (Grok high finding 3)
+--  12. a provider-job pointer -- a saved provider_batch_id, or a live/ambiguous phase
+--      -- is never dropped or re-pointed by ANY caller, and the lease lapsing does
+--      not unlock it (Kimi blocking finding)
 -- =====================================================================================
 
 begin;
@@ -54,6 +68,7 @@ declare
   v_job    jsonb;
   v_field  text;
   v_failed boolean;
+  v_token  text;   -- worker A's one-time claim receipt, handed back in the envelope
 begin
   -- ---------------------------------------------------------------------------------
   -- Clean, deterministic starting point for this transaction only.
@@ -125,6 +140,24 @@ begin
     raise exception 'saved state does not prove the external_job phase: %', v_out;
   end if;
 
+  -- Claiming a FREE lease mints a one-time claim receipt, returned here and nowhere
+  -- else. This is the only thing that will later distinguish worker A from any
+  -- process that merely repeats the (publicly readable) name 'worker-A'.
+  v_token := v_out ->> 'lease_token';
+  if v_token is null or length(v_token) < 16 then
+    raise exception 'claiming a free lease did not issue a claim receipt: %', v_out;
+  end if;
+
+  -- The receipt itself must NOT be readable from stored state -- only its digest.
+  select value -> 'ai-tag-untagged' -> 'external_job' into v_job
+  from admin_config where key = 'BULK_OPERATIONS';
+  if v_job ? 'lease_token' then
+    raise exception 'the claim receipt was stored in readable form: %', v_job;
+  end if;
+  if v_job ->> 'lease_proof' is distinct from md5(v_token) then
+    raise exception 'stored lease_proof is not the digest of the issued receipt: %', v_job;
+  end if;
+
   -- The envelope must reflect what is STORED, not what was passed in.
   select value -> 'ai-tag-untagged' into v_stored from admin_config where key = 'BULK_OPERATIONS';
   if v_stored -> 'external_job' ->> 'submission_owner' is distinct from 'worker-A'
@@ -192,6 +225,59 @@ begin
     raise exception 'the refused batch-id plant still mutated stored state: %', v_stored;
   end if;
 
+  -- 2b-ii. NOR MAY IT PLANT ONE BY REPEATING THE STORED OWNER NAME.
+  --
+  -- This is the hole the previous version of the rule left: it only asked whether
+  -- p_submission_owner had been supplied and then compared it to the stored
+  -- external_job.submission_owner -- a value published in admin_config to everyone
+  -- who can call this function. Worker B reads the JSON, states 'worker-A' as its
+  -- own p_submission_owner, and brings a batch id of its own. Under the old rule the
+  -- owner compare passed, the write was accepted, the lease was RENEWED and the fake
+  -- id was stored -- after which worker A's real id was refused as a replacement and
+  -- the billed job was orphaned.
+  --
+  -- Worker B cannot produce the claim receipt that worker A's claim minted, so it is
+  -- refused, and nothing about it -- not the id, not the lease, not the revision --
+  -- reaches stored state.
+  v_out := public.update_bulk_operation(
+    'ai-tag-untagged',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', v_job || jsonb_build_object('provider_batch_id', 'batch_FAKE')),
+    'running',
+    1,
+    'worker-A',
+    600);
+  if (v_out ->> 'ok')::boolean is not false
+     or v_out ->> 'reason' <> 'external_job_protected' then
+    raise exception 'repeating the stored owner name planted a provider_batch_id: %', v_out;
+  end if;
+  select value -> 'ai-tag-untagged' into v_stored from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored -> 'external_job' ? 'provider_batch_id'
+     or (v_stored ->> 'state_revision')::bigint <> 1
+     or v_stored -> 'external_job' ->> 'lease_expires_at'
+        is distinct from v_job ->> 'lease_expires_at' then
+    raise exception 'the refused copycat claim still mutated stored state: %', v_stored;
+  end if;
+
+  -- 2b-iii. AND A STOLEN RECEIPT IS NOT A RECEIPT. Sending back the stored DIGEST
+  -- (which anyone can read) rather than the issued receipt proves nothing.
+  v_out := public.update_bulk_operation(
+    'ai-tag-untagged',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', v_job || jsonb_build_object(
+        'provider_batch_id', 'batch_FAKE',
+        'lease_token', v_job ->> 'lease_proof')),
+    'running',
+    1,
+    'worker-A',
+    600);
+  if (v_out ->> 'ok')::boolean is not false
+     or v_out ->> 'reason' <> 'external_job_protected' then
+    raise exception 'the readable lease_proof digest was accepted as a claim receipt: %', v_out;
+  end if;
+
   -- 2c. NOR MAY IT MOVE THE PHASE OF A LIVE-LEASED JOB.
   -- Same shape, same faithful carry-forward, no claim -- it just parks A's healthy
   -- job as ambiguous (denial of service) or walks it back to a submittable phase.
@@ -237,9 +323,9 @@ begin
   end if;
 
   -- Worker A saves the accepted provider batch id and can PROVE it was stored. It
-  -- re-states its ownership on the same call, which is the ONLY proof that the
-  -- caller is the worker that actually POSTed and got this id back. The lease is
-  -- renewed by the same owner, which is allowed.
+  -- sends back the claim receipt it was issued when it took this lease, which is the
+  -- ONLY thing that distinguishes it from any process that can read the same JSON.
+  -- The lease is renewed by the same owner, which is allowed.
   select value -> 'ai-tag-untagged' -> 'external_job' into v_job
   from admin_config where key = 'BULK_OPERATIONS';
 
@@ -249,7 +335,8 @@ begin
       'status', 'running',
       'external_job', v_job || jsonb_build_object(
         'phase', 'pending',
-        'provider_batch_id', 'batch_abc')),
+        'provider_batch_id', 'batch_abc',
+        'lease_token', v_token)),
     'running',
     2,
     'worker-A',
@@ -258,14 +345,33 @@ begin
      or v_out ->> 'provider_batch_id' <> 'batch_abc'
      or v_out ->> 'submission_owner' <> 'worker-A'
      or (v_out ->> 'state_revision')::bigint <> 3 then
-    raise exception 'saving the accepted provider batch id was not provable: %', v_out;
+    raise exception 'the receipt-holding worker could not save its provider batch id: %', v_out;
   end if;
 
-  -- 2d. AND CLAIMING DOES NOT HELP A BYSTANDER EITHER. On a fresh key with a live
-  -- lease held by worker-A and no saved id yet, worker-B states itself as owner and
-  -- brings a batch id of its own: the lease check refuses it before anything is
-  -- stored, so there is no route -- claiming or not -- for a non-holder to bind this
-  -- operation to a provider job.
+  -- A renewal by the same owner keeps the incumbent receipt rather than re-minting,
+  -- so it hands nothing out and invalidates nothing. And the receipt the holder just
+  -- sent must not have been written into stored state.
+  if v_out ? 'lease_token' and v_out ->> 'lease_token' is not null then
+    raise exception 'a same-owner renewal issued a second claim receipt: %', v_out;
+  end if;
+  select value -> 'ai-tag-untagged' -> 'external_job' into v_stored
+  from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored ? 'lease_token' then
+    raise exception 'the claim receipt leaked into stored state: %', v_stored;
+  end if;
+  if v_stored ->> 'lease_proof' is distinct from md5(v_token) then
+    raise exception 'the renewal rotated the incumbent claim receipt: %', v_stored;
+  end if;
+
+  -- 2d. AND CLAIMING DOES NOT HELP A BYSTANDER EITHER -- UNDER ITS OWN NAME OR THE
+  -- HOLDER'S.
+  --
+  -- The earlier version of this test only tried worker-B stating ITSELF, and then
+  -- claimed "there is no route" for a non-holder to bind the operation to a provider
+  -- job. That sentence was false: the rule it exercised compared p_submission_owner
+  -- to the stored owner, and the stored owner is readable, so worker-B simply had to
+  -- say 'worker-A'. Both spellings are exercised below, and both must be refused
+  -- before anything is stored, because neither can produce the claim receipt.
   v_out := public.update_bulk_operation(
     'bystander-batch',
     jsonb_build_object(
@@ -288,12 +394,58 @@ begin
     1,
     'worker-B',
     120);
-  if (v_out ->> 'ok')::boolean is not false or v_out ->> 'reason' <> 'lease_held' then
+  if (v_out ->> 'ok')::boolean is not false
+     or v_out ->> 'reason' <> 'external_job_protected' then
     raise exception 'a bystander claimed the lease to save a batch id: %', v_out;
   end if;
   select value -> 'bystander-batch' into v_stored from admin_config where key = 'BULK_OPERATIONS';
   if v_stored -> 'external_job' ? 'provider_batch_id' then
     raise exception 'the refused bystander claim still stored a batch id: %', v_stored;
+  end if;
+
+  -- The same call, now spelling the OWNER'S name. This is the case the old test
+  -- never tried and the old rule accepted.
+  v_out := public.update_bulk_operation(
+    'bystander-batch',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', jsonb_build_object('phase', 'pending', 'provider_batch_id', 'batch_B')),
+    null,
+    1,
+    'worker-A',
+    120);
+  if (v_out ->> 'ok')::boolean is not false
+     or v_out ->> 'reason' <> 'external_job_protected' then
+    raise exception 'a bystander repeating the holder name saved a batch id: %', v_out;
+  end if;
+  select value -> 'bystander-batch' into v_stored from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored -> 'external_job' ? 'provider_batch_id'
+     or (v_stored ->> 'state_revision')::bigint <> 1 then
+    raise exception 'the refused copycat claim still mutated stored state: %', v_stored;
+  end if;
+
+  -- And a same-name renewal that does NOT bring a batch id is still ordinary retry
+  -- traffic: it succeeds, but it is handed no receipt of its own and does not rotate
+  -- the incumbent one, so the real holder keeps working.
+  select value -> 'bystander-batch' -> 'external_job' into v_job
+  from admin_config where key = 'BULK_OPERATIONS';
+  v_out := public.update_bulk_operation(
+    'bystander-batch',
+    jsonb_build_object('status', 'running', 'external_job', v_job),
+    null,
+    1,
+    'worker-A',
+    300);
+  if (v_out ->> 'ok')::boolean is not true then
+    raise exception 'a same-name lease renewal was refused: %', v_out;
+  end if;
+  if v_out ->> 'lease_token' is not null then
+    raise exception 'a same-name renewal was handed a claim receipt: %', v_out;
+  end if;
+  select value -> 'bystander-batch' -> 'external_job' into v_stored
+  from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored ->> 'lease_proof' is distinct from (v_job ->> 'lease_proof') then
+    raise exception 'a same-name renewal rotated the incumbent receipt: %', v_stored;
   end if;
 
   -- A saved provider batch id can never be re-pointed at a different provider job.
@@ -321,21 +473,99 @@ begin
     raise exception 'a non-claiming guarded write dropped a live-leased external_job: %', v_out;
   end if;
 
+  -- 2e. AND THE LEASE LAPSING DOES NOT UNLOCK THE POINTER.
+  --
+  -- This is where the previous version of this file asserted the WEAK behaviour as
+  -- if it were intended: once the lease expired, a caller that merely matched the
+  -- revision was allowed to drop the whole external_job -- saved provider_batch_id
+  -- and all -- and that was described as "clearing a finished job". It is not. A
+  -- lapsed lease is not evidence that the provider job finished or went away; it is
+  -- the state in which a real, billed job is most likely to exist unrecorded. With
+  -- the pointer destroyed, the next writer sees a clean operation and submits it
+  -- again, which is precisely the duplicate-billing window this migration closes --
+  -- re-opened by nothing more than the clock running out.
   update admin_config
      set value = jsonb_set(value, array['ai-tag-untagged','external_job','lease_expires_at'],
                            to_jsonb((now() - interval '1 second')::text))
    where key = 'BULK_OPERATIONS';
 
-  -- The owner that proved it read revision 3 may deliberately clear a finished job.
+  -- Non-claiming, revision matched, lease long lapsed: still refused.
   v_out := public.update_bulk_operation(
     'ai-tag-untagged',
     jsonb_build_object('status', 'running', 'progress', jsonb_build_object('done', 100)),
     'running',
     3);
+  if (v_out ->> 'ok')::boolean is not false
+     or v_out ->> 'reason' <> 'external_job_protected' then
+    raise exception 'a lapsed lease let a guarded write destroy a provider-job pointer: %', v_out;
+  end if;
+
+  -- Claiming the lapsed lease does not unlock it either.
+  v_out := public.update_bulk_operation(
+    'ai-tag-untagged',
+    jsonb_build_object('status', 'running', 'progress', jsonb_build_object('done', 100)),
+    'running',
+    3,
+    'worker-C',
+    120);
+  if (v_out ->> 'ok')::boolean is not false
+     or v_out ->> 'reason' <> 'external_job_protected' then
+    raise exception 'a new claimer destroyed a provider-job pointer after lapse: %', v_out;
+  end if;
+
+  -- Nor may it be re-pointed at a different provider job after the lapse.
+  select value -> 'ai-tag-untagged' -> 'external_job' into v_job
+  from admin_config where key = 'BULK_OPERATIONS';
+  v_out := public.update_bulk_operation(
+    'ai-tag-untagged',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', v_job || jsonb_build_object('provider_batch_id', 'batch_OTHER')),
+    'running',
+    3,
+    'worker-C',
+    120);
+  if (v_out ->> 'ok')::boolean is not false
+     or v_out ->> 'reason' <> 'external_job_protected' then
+    raise exception 'a lapsed lease let a provider_batch_id be re-pointed: %', v_out;
+  end if;
+
+  -- The pointer survived all three attempts, untouched, at the same revision.
+  select value -> 'ai-tag-untagged' into v_stored from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored -> 'external_job' ->> 'provider_batch_id' <> 'batch_abc'
+     or (v_stored ->> 'state_revision')::bigint <> 3 then
+    raise exception 'the provider-job pointer did not survive the lapse attacks: %', v_stored;
+  end if;
+
+  -- A legacy caller cannot destroy it after the lapse either. The stored phase here
+  -- is 'pending' (live), but the saved provider_batch_id alone is enough: protection
+  -- keys off the pointer, not off the lease and not off the phase.
+  v_failed := false;
+  begin
+    perform public.update_bulk_operation(
+      'ai-tag-untagged',
+      jsonb_build_object('status', 'idle', 'state_revision', 3));
+  exception when others then
+    v_failed := position('would drop a protected external_job' in sqlerrm) > 0;
+  end;
+  if not v_failed then
+    raise exception 'a legacy write destroyed a provider-job pointer after the lease lapsed';
+  end if;
+
+  -- Ordinary non-claiming traffic over the lapsed lease is still fine, as long as it
+  -- carries the pointer forward: the operation is not frozen, only its pointer is.
+  v_out := public.update_bulk_operation(
+    'ai-tag-untagged',
+    jsonb_build_object(
+      'status', 'running',
+      'progress', jsonb_build_object('done', 100),
+      'external_job', v_job),
+    'running',
+    3);
   if (v_out ->> 'ok')::boolean is not true
-     or v_out ->> 'external_job_phase' is not null
+     or v_out ->> 'provider_batch_id' <> 'batch_abc'
      or (v_out ->> 'state_revision')::bigint <> 4 then
-    raise exception 'the proving owner could not clear a completed external_job: %', v_out;
+    raise exception 'faithful carry-forward over a lapsed lease was refused: %', v_out;
   end if;
 
   -- =================================================================================
@@ -684,8 +914,11 @@ begin
 
   v_failed := false;
   begin
+    -- Deliberately an operation with NO external_job: on one that HAS a provider-job
+    -- pointer, the pointer rule refuses a claim with no external_job first (2e), and
+    -- this argument check would never be reached.
     perform public.update_bulk_operation(
-      'ai-tag-untagged', jsonb_build_object('status', 'running'), null, 4, 'worker-A', 120);
+      'thumbnail-scan', jsonb_build_object('status', 'running'), null, 0, 'worker-A', 120);
   exception when others then
     v_failed := position('requires an external_job object' in sqlerrm) > 0;
   end;
@@ -759,7 +992,8 @@ begin
   -- one of them without claiming the lease -- extending the expiry, restamping the
   -- claim time, or forging an ambiguity verdict -- must be refused just as hard.
   foreach v_field in array array['lease_expires_at','lease_claimed_at','ambiguous_since',
-                                 'ambiguous_reason','ambiguous_prior_phase','ambiguous_prior_owner'] loop
+                                 'ambiguous_reason','ambiguous_prior_phase','ambiguous_prior_owner',
+                                 'lease_proof'] loop
     v_out := public.update_bulk_operation(
       'lease-attack',
       jsonb_build_object(
@@ -862,20 +1096,83 @@ begin
     raise exception 'the legacy refusal was not repeatable';
   end if;
 
-  -- A legacy caller that has actually reconciled with the provider may still record
-  -- the verdict explicitly, which is the documented escape.
+  -- 9a-ii. THERE IS NO PAYLOAD ESCAPE, AND THERE MUST NOT BE.
+  --
+  -- The previous version of this file asserted the opposite: that a legacy payload
+  -- declaring phase = 'ambiguous_submission' is "the documented escape" for a caller
+  -- that has reconciled with the provider. It proves nothing of the kind. The string
+  -- is free-form JSONB that any caller can type, and taking the escape did not
+  -- merely record a verdict -- the call fell through to the ordinary rules and wrote
+  -- the WHOLE object, so the same payload could carry a fabricated provider_batch_id,
+  -- a new submission owner and a fresh lease, and it returned the ordinary success
+  -- shape (full BULK_OPERATIONS, status running, no exception) that a write-then-POST
+  -- caller reads as permission to submit. That is the duplicate-billing hole this
+  -- whole rule exists to close, re-opened through the back door.
+  v_failed := false;
+  begin
+    perform public.update_bulk_operation(
+      'legacy-ambiguous',
+      jsonb_build_object(
+        'status', 'running',
+        'state_revision', 3,
+        'external_job', jsonb_build_object(
+          'phase', 'ambiguous_submission',
+          'run_id', 'run-legacy',
+          'provider_batch_id', 'batch_LAUNDERED',
+          'submission_owner', 'worker-B',
+          'lease_expires_at', (now() + interval '5 minutes'))));
+  exception when others then
+    v_failed := position('no saved provider_batch_id' in sqlerrm) > 0;
+  end;
+  if not v_failed then
+    raise exception 'a legacy payload laundered a resubmission through the ambiguity escape';
+  end if;
+
+  select value -> 'legacy-ambiguous' into v_stored from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored -> 'external_job' ? 'provider_batch_id'
+     or v_stored -> 'external_job' ->> 'submission_owner' <> 'worker-A'
+     or v_stored -> 'external_job' ->> 'phase' <> 'submitting' then
+    raise exception 'the refused legacy reconciliation still mutated stored state: %', v_stored;
+  end if;
+
+  -- The batch writer has no escape either.
+  v_failed := false;
+  begin
+    perform public.update_bulk_operations_batch(jsonb_build_object(
+      'legacy-ambiguous', jsonb_build_object(
+        'status', 'running',
+        'state_revision', 3,
+        'external_job', jsonb_build_object(
+          'phase', 'ambiguous_submission',
+          'provider_batch_id', 'batch_LAUNDERED',
+          'submission_owner', 'worker-B',
+          'lease_expires_at', (now() + interval '5 minutes')))));
+  exception when others then
+    v_failed := position('no saved provider_batch_id' in sqlerrm) > 0;
+  end;
+  if not v_failed then
+    raise exception 'a batch payload laundered a resubmission through the ambiguity escape';
+  end if;
+
+  -- Reconciliation is a GUARDED-PATH operation. The function itself records the
+  -- verdict, from stored state, and answers ok = false -- which no caller can mistake
+  -- for permission to POST.
   v_out := public.update_bulk_operation(
     'legacy-ambiguous',
     jsonb_build_object(
       'status', 'running',
-      'state_revision', 3,
-      'external_job', jsonb_build_object(
-        'phase', 'ambiguous_submission',
-        'run_id', 'run-legacy',
-        'submission_owner', 'worker-A',
-        'lease_expires_at', (now() - interval '30 seconds'))));
-  if v_out -> 'legacy-ambiguous' -> 'external_job' ->> 'phase' <> 'ambiguous_submission' then
-    raise exception 'explicit legacy reconciliation was refused: %', v_out;
+      'external_job', jsonb_build_object('phase', 'submitting', 'run_id', 'run-legacy')),
+    null,
+    3);
+  if (v_out ->> 'ok')::boolean is not false
+     or v_out ->> 'reason' <> 'ambiguous_submission'
+     or v_out ->> 'external_job_phase' <> 'ambiguous_submission' then
+    raise exception 'the guarded path did not record the ambiguity verdict: %', v_out;
+  end if;
+  select value -> 'legacy-ambiguous' into v_stored from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored -> 'external_job' ->> 'ambiguous_prior_owner' <> 'worker-A'
+     or v_stored -> 'external_job' ? 'provider_batch_id' then
+    raise exception 'the recorded verdict was not built from stored state: %', v_stored;
   end if;
 
   -- Once ambiguous, a legacy write still cannot resume it.
@@ -947,7 +1244,108 @@ begin
     raise exception 'the batch refusal was not repeatable';
   end if;
 
-  -- 9c. None of this touches ordinary callers: a legitimate legacy write on an
+  -- =================================================================================
+  -- 10. NO LEGACY OR BATCH CALLER MAY *INTRODUCE* A provider_batch_id
+  --
+  -- Both writers only ever refused to REPLACE an id that was already stored. That
+  -- left the window where it actually matters completely unguarded: between the
+  -- moment a worker claims the lease and the moment it saves the id its POST
+  -- returned, NOTHING is stored, so the replacement rule never fired and no rule on
+  -- these paths required the caller to be anybody in particular. Any three-argument
+  -- or batch call repeating the (readable) owner name and revision could bind the
+  -- operation to a job of its own invention -- after which the real id came back and
+  -- was refused as a replacement, orphaning the billed job.
+  -- =================================================================================
+  update admin_config
+     set value = jsonb_set(value, array['introduce-guard'], jsonb_build_object(
+           'status', 'running',
+           'state_revision', 4,
+           'external_job', jsonb_build_object(
+             'phase', 'submitting',
+             'run_id', 'run-intro',
+             'submission_owner', 'worker-A',
+             'lease_expires_at', (now() + interval '5 minutes'))))
+   where key = 'BULK_OPERATIONS';
+
+  -- 10a. Legacy three-argument path: everything carried forward faithfully, same
+  -- owner, same revision -- plus a batch id that this caller cannot possibly know.
+  v_failed := false;
+  begin
+    perform public.update_bulk_operation(
+      'introduce-guard',
+      jsonb_build_object(
+        'status', 'running',
+        'state_revision', 4,
+        'external_job', jsonb_build_object(
+          'phase', 'submitting',
+          'run_id', 'run-intro',
+          'provider_batch_id', 'batch_FAKE',
+          'submission_owner', 'worker-A',
+          'lease_expires_at', (now() + interval '5 minutes'))));
+  exception when others then
+    v_failed := position('would introduce provider_batch_id' in sqlerrm) > 0;
+  end;
+  if not v_failed then
+    raise exception 'a legacy write introduced a provider_batch_id under a live lease';
+  end if;
+
+  -- 10b. Batch writer: identical hole, identical verdict, and all-or-nothing.
+  v_failed := false;
+  begin
+    perform public.update_bulk_operations_batch(jsonb_build_object(
+      'introduce-sibling', jsonb_build_object('status', 'queued'),
+      'introduce-guard',   jsonb_build_object(
+        'status', 'running',
+        'state_revision', 4,
+        'external_job', jsonb_build_object(
+          'phase', 'submitting',
+          'run_id', 'run-intro',
+          'provider_batch_id', 'batch_FAKE',
+          'submission_owner', 'worker-A',
+          'lease_expires_at', (now() + interval '5 minutes')))));
+  exception when others then
+    v_failed := position('would introduce provider_batch_id' in sqlerrm) > 0;
+  end;
+  if not v_failed then
+    raise exception 'the batch writer introduced a provider_batch_id under a live lease';
+  end if;
+
+  select value into v_stored from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored ? 'introduce-sibling' then
+    raise exception 'the refused batch introduce partially applied: %', v_stored;
+  end if;
+  if v_stored -> 'introduce-guard' -> 'external_job' ? 'provider_batch_id' then
+    raise exception 'a refused introduce still stored a provider_batch_id: %', v_stored;
+  end if;
+
+  -- 10c. Faithful carry-forward that does NOT touch the batch id is untouched, and
+  -- so is a brand-new operation created with an id (there is no stored external_job
+  -- for it to be the holder of).
+  v_out := public.update_bulk_operation(
+    'introduce-guard',
+    jsonb_build_object(
+      'status', 'running',
+      'state_revision', 4,
+      'progress', jsonb_build_object('done', 5),
+      'external_job', jsonb_build_object(
+        'phase', 'submitting',
+        'run_id', 'run-intro',
+        'submission_owner', 'worker-A',
+        'lease_expires_at', (now() + interval '5 minutes'))));
+  if v_out -> 'introduce-guard' -> 'progress' ->> 'done' <> '5' then
+    raise exception 'a faithful legacy write was refused by the introduce rule: %', v_out;
+  end if;
+
+  v_out := public.update_bulk_operation(
+    'greenfield-op',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', jsonb_build_object('phase', 'pending', 'provider_batch_id', 'batch_new')));
+  if v_out -> 'greenfield-op' -> 'external_job' ->> 'provider_batch_id' <> 'batch_new' then
+    raise exception 'creating a brand-new operation with a batch id was refused: %', v_out;
+  end if;
+
+  -- 11. None of this touches ordinary callers: a legitimate legacy write on an
   -- unprotected key still succeeds, single and batch.
   v_out := public.update_bulk_operation(
     'plain-op',
