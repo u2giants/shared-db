@@ -293,6 +293,47 @@ def prove_preview_migration_contents(
             raise RiskGateError(f"atomic preview apply proof is incomplete or forged for {version}")
 
 
+# The files that PRODUCE preview evidence. A `workflow_dispatch` run executes
+# the workflow file as it exists at the dispatched ref, so a run at an
+# unreviewed commit could ship a doctored workflow that FABRICATES the ledger
+# texts, the apply logs and the content manifest. Every in-artifact check would
+# then pass while no rehearsal ever happened, and a follow-up commit restoring
+# the honest file would leave the reviewed net diff clean.
+#
+# Pinning these to exact main is what makes the artifact evidence rather than
+# self-attestation. A types-only or docs-only follow-up commit does not touch
+# them, so the stranded-promotion problem stays fixed.
+PREVIEW_PRODUCER_PATHS = (
+    PREVIEW_WORKFLOW,
+    "scripts/production_migration_guard.py",
+    "scripts/atomic_migration_apply.py",
+)
+
+
+def blob_sha(path: str, ref: str, api: Callable[[str], Any]) -> str:
+    try:
+        entry = api(f"repos/{REPOSITORY}/contents/{path}?ref={ref}")
+    except Exception as exc:  # noqa: BLE001 - unreadable producer file must fail closed
+        raise RiskGateError(f"preview producer file {path} is unreadable at {ref}") from exc
+    sha = entry.get("sha") if isinstance(entry, dict) else None
+    if not isinstance(sha, str) or not sha:
+        raise RiskGateError(f"preview producer file {path} is unreadable at {ref}")
+    return sha
+
+
+def prove_preview_producer_matches_main(
+    run_head: str, main_sha: str, api: Callable[[str], Any]
+) -> None:
+    """Refuse a rehearsal produced by code that exact main does not carry."""
+    if run_head == main_sha:
+        return
+    for path in PREVIEW_PRODUCER_PATHS:
+        if blob_sha(path, run_head, api) != blob_sha(path, main_sha, api):
+            raise RiskGateError(
+                f"preview run produced evidence with a different {path} than exact main"
+            )
+
+
 def source_pr_commits(
     source_pr: int, pr_head: str, main_sha: str, api: Callable[[str], Any]
 ) -> set[str]:
@@ -339,6 +380,10 @@ def prove_preview(
     # change, which cannot be committed before the preview it describes.
     if run.get("head_sha") not in source_pr_commits(source_pr, pr_head, main_sha, api):
         raise RiskGateError("preview run does not belong to the source pull request")
+    # Belonging to the PR is not enough. The run must also have been produced by
+    # the same apply machinery exact main carries, or its artifact is
+    # self-attestation rather than evidence. See PREVIEW_PRODUCER_PATHS.
+    prove_preview_producer_matches_main(run["head_sha"], main_sha, api)
     name = f"preview-migration-apply-{run['head_sha']}"
     artifact = select_preview_artifact(
         api(f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"), run_id, name

@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from production_business_risk_gate import RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_preview, prove_preview_migration_contents
+from production_business_risk_gate import PREVIEW_PRODUCER_PATHS, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_preview, prove_preview_migration_contents
 
 
 class ProductionBusinessRiskGateTests(unittest.TestCase):
@@ -225,6 +225,94 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 downloader=lambda *_: self.fail("must not download"), repo_root=Path.cwd(),
             )
 
+    def preview_api(self, run, commits, blobs, artifacts=None):
+        """Fake API covering run, PR commits, producer blobs and artifacts."""
+        def api(endpoint):
+            if endpoint.endswith("commits?per_page=100"):
+                return commits
+            if "/contents/" in endpoint:
+                path, ref = endpoint.split("/contents/", 1)[1].split("?ref=")
+                if (path, ref) in blobs:
+                    return {"sha": blobs[(path, ref)]}
+                raise RuntimeError("no such content")
+            if endpoint.endswith("artifacts?per_page=100"):
+                return {"artifacts": artifacts or []}
+            return run
+        return api
+
+    def test_doctored_producer_commit_cannot_self_attest_a_rehearsal(self):
+        """The forgery the exact-head rule used to prevent.
+
+        A branch author pushes C1 carrying a doctored preview workflow that
+        fabricates the ledger texts, apply logs and content manifest, dispatches
+        preview at C1, then pushes C2 restoring the honest file. The reviewed net
+        diff is clean and C1 is a real commit of the PR, so provenance alone
+        accepts it. Only pinning the producing code to exact main refuses it.
+        """
+        c1, head, main = "1" * 40, "2" * 40, "3" * 40
+        run = {
+            "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
+            "head_sha": c1, "path": ".github/workflows/shared-supabase-migrations.yml",
+        }
+        blobs = {}
+        for path in PREVIEW_PRODUCER_PATHS:
+            blobs[(path, main)] = "honest-" + path
+            blobs[(path, c1)] = "honest-" + path
+        # C1 carries a doctored workflow; everything else is identical.
+        blobs[(PREVIEW_WORKFLOW, c1)] = "doctored-workflow"
+
+        with self.assertRaisesRegex(RiskGateError, "different .* than exact main"):
+            prove_preview(
+                run_id=7, digest="sha256:" + "c" * 64, pr_head=head, main_sha=main,
+                source_pr=1, allowlist=["20260814000000"],
+                api=self.preview_api(run, [{"sha": c1}, {"sha": head}], blobs),
+                downloader=lambda *_: self.fail("doctored producer must not download"),
+                repo_root=Path.cwd(),
+            )
+
+    def test_honest_earlier_commit_with_matching_producer_is_accepted_to_download(self):
+        """The legitimate case: a types-only follow-up moved the head.
+
+        The rehearsal ran at an earlier commit whose producing code matches exact
+        main, so it must survive provenance and reach artifact checking. Proven by
+        the failure being the DIGEST check, which is strictly later.
+        """
+        c1, head, main = "1" * 40, "2" * 40, "3" * 40
+        run = {
+            "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
+            "head_sha": c1, "path": ".github/workflows/shared-supabase-migrations.yml",
+        }
+        blobs = {}
+        for path in PREVIEW_PRODUCER_PATHS:
+            blobs[(path, main)] = "honest-" + path
+            blobs[(path, c1)] = "honest-" + path
+        artifact = {
+            "id": 9, "name": f"preview-migration-apply-{c1}",
+            "digest": "sha256:" + "d" * 64, "expired": False, "workflow_run": {"id": 7},
+        }
+        with self.assertRaisesRegex(RiskGateError, "pinned digest"):
+            prove_preview(
+                run_id=7, digest="sha256:" + "c" * 64, pr_head=head, main_sha=main,
+                source_pr=1, allowlist=["20260814000000"],
+                api=self.preview_api(run, [{"sha": c1}, {"sha": head}], blobs, [artifact]),
+                downloader=lambda *_: self.fail("digest mismatch must not download"),
+                repo_root=Path.cwd(),
+            )
+
+    def test_unreadable_producer_file_fails_closed(self):
+        c1, head, main = "1" * 40, "2" * 40, "3" * 40
+        run = {
+            "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
+            "head_sha": c1, "path": ".github/workflows/shared-supabase-migrations.yml",
+        }
+        with self.assertRaisesRegex(RiskGateError, "unreadable"):
+            prove_preview(
+                run_id=7, digest="sha256:" + "c" * 64, pr_head=head, main_sha=main,
+                source_pr=1, allowlist=["20260814000000"],
+                api=self.preview_api(run, [{"sha": c1}], {}),
+                downloader=lambda *_: self.fail("must not download"), repo_root=Path.cwd(),
+            )
+
     def test_preview_ledger_delta_rejects_extra_additions_removals_and_prior_version(self):
         cases = [
             ({"old"}, {"old", "20260816110750", "extra"}),
@@ -336,6 +424,10 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 return {"artifacts": [artifact]}
             if endpoint.endswith("commits?per_page=100"):
                 return [{"sha": head}]
+            if "/contents/" in endpoint:
+                # Producer files identical at the run head and at main, so this
+                # test still exercises the digest check it is named for.
+                return {"sha": "identical-producer-blob"}
             return run
 
         with self.assertRaisesRegex(RiskGateError, "pinned digest"):
