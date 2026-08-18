@@ -685,7 +685,7 @@ begin
   v_failed := false;
   begin
     perform public.update_bulk_operation(
-      'ai-tag-untagged', jsonb_build_object('status', 'running'), null, 3, 'worker-A', 120);
+      'ai-tag-untagged', jsonb_build_object('status', 'running'), null, 4, 'worker-A', 120);
   exception when others then
     v_failed := position('requires an external_job object' in sqlerrm) > 0;
   end;
