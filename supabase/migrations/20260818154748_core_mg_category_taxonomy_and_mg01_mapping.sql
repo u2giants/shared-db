@@ -51,12 +51,56 @@
 -- would hit "LEATHER/COWHIDE", but ('A','Stretched/Box') cannot.
 --
 -- Every division that carries a matching row gets its own link row, so the mapping is
--- correct per company/division rather than approximated once globally. Measured live on
--- 2026-08-18: divisions 1 (POP Lic), 8 (Spruce Lic) and 9 (Spruce Non-Lic) each carry the
--- 19 authoritative product types, so this seed is expected to create 57 link rows on
--- production today. That number is an OBSERVATION, not a hard-coded expectation — the
--- assertion below checks that all 19 product types resolved somewhere, never that a
--- particular row count came back.
+-- correct per company/division rather than approximated once globally.
+--
+-- ONLY `is_active` MERCHANDISE-GROUP ROWS ARE MATCHED
+-- ---------------------------------------------------
+-- Verified live on 2026-08-18 against production qsllyeztdwjgirsysgai (read-only): every
+-- pre-rebuild MG01 row is `is_active = false`, and the whole live product-type set was
+-- created in one later batch with `is_active = true`. Today an unfiltered join happens to
+-- be safe, because the surviving retired type-01 'A' row reads LEATHER/COWHIDE and cannot
+-- match the pair ('A','Stretched/Box'). It is not safe FOREVER: a future rebuild that
+-- retires a product type by name and re-inserts the SAME name would leave two rows with
+-- the same (mg_code, mg_desc) pair, and an unfiltered seed would silently link BOTH — two
+-- link rows for one live product type, with nothing raising. So the seed, the "is there
+-- any source data" gate and the verification block ALL filter on `is_active is true`, and
+-- they all use the SAME filter so the gate can never disagree with the join.
+--
+-- `is_active` is nullable on core."merchGroup" (its default is false), so `is true` is
+-- deliberate: an unknown activity flag is NOT treated as live. If a genuinely live product
+-- type is ever left with a null flag, the per-division assertion below names it and the
+-- migration refuses to apply — loud, not silent.
+--
+-- THE EXPECTED SHAPE IS DERIVED, NOT HARD-CODED
+-- ---------------------------------------------
+-- Measured live on 2026-08-18: divisions CW001, EH001 and SP001 each carry all 19
+-- authoritative product types as active MG01 rows, i.e. 57 link rows today. 57 is an
+-- OBSERVATION and appears nowhere in the code. What the assertion actually requires is the
+-- SHAPE: for EVERY division that carries any active MG01 row, EVERY one of the 19
+-- authoritative product types must resolve IN THAT DIVISION and carry its authoritative
+-- category. The expected link count is then derived as 19 x (number of such divisions).
+--
+-- WHY PER-DIVISION AND NOT "RESOLVED SOMEWHERE" (this is the bug that was here before)
+-- -----------------------------------------------------------------------------------
+-- The previous check LEFT JOINed the 19 authoritative rows to core."merchGroup" and
+-- failed only when a row came back NULL. A LEFT JOIN emits NO ROW for a division that did
+-- not match — it does not emit a NULL row. So if 'K' matched in CW001 and SP001 but EH001
+-- stored it as 'Other Table Top', the join still returned two non-null rows for 'K',
+-- nothing was NULL, the migration printed OK and COMMITTED 56 links instead of 57. One
+-- division silently had a hole and every downstream category filter silently dropped its
+-- items. Cross-joining the authoritative list against the division list first is what
+-- makes a one-division drift impossible to hide.
+--
+-- CAN A DIVISION LEGITIMATELY CARRY ONLY PART OF THE MG01 SET?
+-- -----------------------------------------------------------
+-- Decision: NO, and that is asserted rather than assumed. The 19 product types are the
+-- company-wide product vocabulary, not a per-division menu; production carries all 19 in
+-- all three divisions that have any active MG01 rows at all. A division that carries a
+-- PARTIAL set is therefore treated as a data defect and raises with the exact missing
+-- (division, code, description) triples. A future division that deliberately sells only a
+-- subset must be settled on the issue and expressed in a follow-up governed migration; it
+-- must NOT be accommodated by loosening this check, because "some divisions are allowed to
+-- be short" is exactly the hole that let the 56-of-57 seed through.
 --
 -- CODE 'Q' — "TBD storage" — IS DELIBERATELY NOT MAPPED
 -- -----------------------------------------------------
@@ -73,8 +117,9 @@
 -- reference data and do not depend on any source row). Only the 19 category-to-MG01
 -- LINK rows need source data, so on a database with no MG01 rows the link seed is a
 -- natural no-op and its assertion is SKIPPED WITH A LOUD NOTICE rather than raising.
--- On a database that DOES carry MG01 rows the assertion is exactly as strict as before:
--- anything short of all 19 resolving, partial matches included, raises and rolls back.
+-- On a database that DOES carry active MG01 rows the assertion is strict PER DIVISION:
+-- anything short of all 19 resolving in EVERY division that carries active MG01 rows
+-- raises and rolls back, naming the exact missing (division, code, description) triples.
 -- See the long comment in section 5.
 
 -- IDEMPOTENCE
@@ -158,9 +203,21 @@ create table if not exists core.mg_category_merch_group (
   updated_at timestamptz not null default now(),
 
   -- ACCEPTANCE CHECK 3, enforced by the database rather than by convention:
-  -- one MG01 product-type row can belong to AT MOST ONE category. A second insert for
-  -- the same merchandise-group row fails outright.
-  constraint mg_category_merch_group_one_category_per_product_type
+  -- one merchandise-group ROW can belong to AT MOST ONE category. A second insert for
+  -- the same mg_id fails outright.
+  --
+  -- THE NAME SAYS "MG ROW", NOT "PRODUCT TYPE", ON PURPOSE. A product type such as
+  -- ('A','Stretched/Box') exists as a SEPARATE ROW in each division, so this constraint
+  -- does NOT stop CW001's 'A' being WALL while EH001's 'A' is CLOCK. Naming it
+  -- "one_category_per_product_type" promised a rule it cannot deliver. Postgres cannot
+  -- express the cross-division rule as a CHECK (a CHECK may not query another table) and
+  -- expressing it would need a trigger or a unique index on core."merchGroup", both of
+  -- which are objects outside this change's claim. So the cross-division rule is enforced
+  -- by the SEED (one authoritative category per (mg_code, mg_desc) pair, applied to every
+  -- division), by the per-division verification in section 5, and by section C of
+  -- supabase/tests/mg_category_taxonomy_contracts.sql — and the constraint is named and
+  -- commented for exactly what it does enforce, nothing more.
+  constraint mg_category_merch_group_one_category_per_mg_row
     unique (merch_group_mg_id)
 );
 
@@ -169,7 +226,9 @@ create index if not exists mg_category_merch_group_category_idx
 
 comment on table core.mg_category_merch_group is
   'Issue #1163. Category -> MG01 product type. One category has many MG01 rows; each MG01 '
-  'row has exactly one category (enforced by the unique constraint on merch_group_mg_id). '
+  'ROW has at most one category (enforced by the unique constraint on merch_group_mg_id; '
+  'the cross-division rule that the SAME product type carries the same category in every '
+  'division is enforced by the seed and by the contract tests, not by that constraint). '
   'Links to core."merchGroup"(mg_id), NOT to the MG01 letter code: codes are unique only '
   'per division+type and collide semantically (mg_id 26 = ''A'' LEATHER/COWHIDE vs '
   'mg_id 2462 = ''A'' Stretched/Box, both mgTypeCode ''01'').';
@@ -177,9 +236,13 @@ comment on table core.mg_category_merch_group is
 comment on column core.mg_category_merch_group.merch_group_mg_id is
   'core."merchGroup".mg_id. Company/division scope is inherited from that row.';
 
-comment on constraint mg_category_merch_group_one_category_per_product_type
+comment on constraint mg_category_merch_group_one_category_per_mg_row
   on core.mg_category_merch_group is
-  'Issue #1163 acceptance check 3: a product type cannot silently belong to two categories.';
+  'Issue #1163 acceptance check 3: ONE merchandise-group ROW cannot belong to two '
+  'categories. It does NOT constrain the same product type across divisions, and it does '
+  'NOT constrain the linked row to mgTypeCode ''01'' — a CHECK cannot query another table, '
+  'and both of those would need an object outside this change''s claim. Section 5 of the '
+  'migration and the contract tests cover them.';
 
 -- -------------------------------------------------------------------------------------
 -- 3. Structural seed — the seven categories.
@@ -239,6 +302,7 @@ resolved as (
     on c.code = a.category_code
   join core."merchGroup" mg
     on mg."mgTypeCode" = '01'
+   and mg.is_active is true          -- see "ONLY is_active ROWS ARE MATCHED" in the header
    and upper(btrim(mg.mg_code)) = upper(a.mg_code)
    and lower(btrim(mg.mg_desc)) = lower(a.mg_desc)
 )
@@ -252,15 +316,19 @@ on conflict (merch_group_mg_id) do nothing;
 
 do $$
 declare
-  v_categories  integer;
-  v_pairs       integer;
-  v_source_rows integer;
-  v_missing     text;
-  v_drift       text;
+  v_categories      integer;
+  v_pairs           integer;
+  v_source_rows     integer;
+  v_divisions       integer;
+  v_expected_links  integer;
+  v_actual_links    integer;
+  v_missing         text;
+  v_drift           text;
+  v_renamed         text;
 begin
   -- STRUCTURE MUST APPLY EVERYWHERE; ONLY THE ROW ASSERTION IS CONDITIONAL.
   -- ------------------------------------------------------------------------------
-  -- WHY THIS CONDITION EXISTS — DO NOT "SIMPLIFY" IT AWAY.
+  -- WHY THIS CONDITION EXISTS - DO NOT "SIMPLIFY" IT AWAY.
   -- This migration is replayed from EMPTY on an ephemeral database in CI
   -- (.github/workflows/database-contract-tests.yml). That database carries the SCHEMA
   -- of core."merchGroup" but not a single row of it. The first version of this block
@@ -270,12 +338,26 @@ begin
   -- on production ROW CONTENT in order to apply its STRUCTURE.
   --
   -- The fix is NOT to drop the guard. It is to distinguish the two situations:
-  --   * NO MG01 merchandise-group rows exist at all -> there is nothing to map. Skip the
-  --     mapping seed assertion with a LOUD notice. Nothing is half-seeded, because
+  --   * NO ACTIVE MG01 merchandise-group rows exist at all -> there is nothing to map.
+  --     Skip the mapping assertion with a LOUD notice. Nothing is half-seeded, because
   --     nothing could be seeded.
-  --   * MG01 rows DO exist -> the seed was supposed to resolve all 19. Anything less,
-  --     INCLUDING A PARTIAL MATCH, still raises and rolls back. That is the case this
-  --     guard was written for and it is unchanged in strength.
+  --   * ACTIVE MG01 rows DO exist -> then for EVERY division that carries any of them,
+  --     all 19 authoritative product types must resolve IN THAT DIVISION and carry their
+  --     authoritative category. Anything less raises and rolls back, naming the exact
+  --     missing (division, code, description) triples.
+  --
+  -- THE SHAPE IS DERIVED, NEVER HARD-CODED. `v_expected_links` = 19 x the number of
+  -- divisions that carry active MG01 rows. Today that evaluates to 57 on production, but
+  -- 57 is nowhere in this file: if a fourth division is onboarded the expectation moves
+  -- with it, and if one division loses a product type the migration stops.
+  --
+  -- WHY NOT "did each of the 19 resolve somewhere?" - because a LEFT JOIN from the 19
+  -- authoritative rows emits NO ROW for a division that failed to match, not a NULL row.
+  -- Under the old check, 'K' matching in two divisions and failing in the third produced
+  -- two non-null rows, no NULLs, an "OK" notice and a COMMITTED 56-of-57 seed. Building
+  -- the expectation as (19 authoritative types x every division with active MG01 rows)
+  -- and then looking for holes in THAT grid is what makes a one-division drift loud.
+  --
   -- The drift check below is unconditional in both cases: it only looks at links that
   -- already exist, so it costs nothing on an empty database and never weakens.
   -- ------------------------------------------------------------------------------
@@ -283,16 +365,19 @@ begin
   select count(*) into v_categories from core.mg_category;
   if v_categories < 7 then
     raise exception
-      'Issue #1163: expected the 7 mgCategory rows, found % — seed did not apply.',
+      'Issue #1163: expected the 7 mgCategory rows, found % - seed did not apply.',
       v_categories;
   end if;
 
   -- The categories themselves are authoritative, division-independent reference data.
   -- They seed unconditionally on every database, so this assertion stays unconditional.
 
+  -- The gate counts ACTIVE MG01 rows, i.e. exactly the population the seed join matches
+  -- against. Counting a different population in the gate than in the join is how a gate
+  -- silently stops guarding, so the two are kept identical on purpose.
   select count(*) into v_source_rows
   from core."merchGroup"
-  where "mgTypeCode" = '01';
+  where "mgTypeCode" = '01' and is_active is true;
 
   with authoritative (mg_code, mg_desc, category_code) as (
     values
@@ -308,62 +393,161 @@ begin
       ('V','Floor coverings','FLOOR'),
       ('W','Garden','GARDEN')
   ),
-  linked as (
-    select a.mg_code, a.mg_desc, a.category_code, mg.mg_id, c.code as actual_category
-    from authoritative a
-    left join core."merchGroup" mg
-      on mg."mgTypeCode" = '01'
-     and upper(btrim(mg.mg_code)) = upper(a.mg_code)
-     and lower(btrim(mg.mg_desc)) = lower(a.mg_desc)
-    left join core.mg_category_merch_group l on l.merch_group_mg_id = mg.mg_id
+  active_mg01 as (
+    select
+      mg.mg_id,
+      mg."divisionCode_id_fk" as division_id,
+      coalesce(
+        nullif(btrim(mg."divisionCode_fk"), ''),
+        'division_id ' || coalesce(mg."divisionCode_id_fk"::text, '(null)')
+      ) as division_label,
+      upper(btrim(mg.mg_code)) as code_key,
+      lower(btrim(mg.mg_desc)) as desc_key
+    from core."merchGroup" mg
+    where mg."mgTypeCode" = '01' and mg.is_active is true
+  ),
+  divisions as (
+    select distinct division_id, division_label from active_mg01
+  ),
+  -- THE EXPECTED GRID: every authoritative product type x every division that carries
+  -- any active MG01 row. A division that matched only part of the list leaves holes here
+  -- that no amount of matching in OTHER divisions can fill.
+  expected as (
+    select d.division_id, d.division_label, a.mg_code, a.mg_desc, a.category_code
+    from divisions d
+    cross join authoritative a
+  ),
+  graded as (
+    select
+      e.division_label, e.mg_code, e.mg_desc, e.category_code,
+      m.mg_id,
+      c.code as actual_category
+    from expected e
+    left join active_mg01 m
+      on m.division_id is not distinct from e.division_id
+     and m.code_key = upper(e.mg_code)
+     and m.desc_key = lower(e.mg_desc)
+    left join core.mg_category_merch_group l on l.merch_group_mg_id = m.mg_id
     left join core.mg_category c on c.id = l.mg_category_id
+  ),
+  holes as (
+    select
+      division_label || ' / ' || mg_code || ' ' || mg_desc
+        || case
+             when mg_id is null then ' (no active MG01 row matched)'
+             else ' (row ' || mg_id || ' exists but is not linked)'
+           end as hole_text
+    from graded
+    where mg_id is null or actual_category is null
   )
   select
-    string_agg(distinct mg_code || ' ' || mg_desc, ', ')
-      filter (where mg_id is null or actual_category is null),
-    string_agg(distinct mg_code || ' ' || mg_desc || ' -> ' || actual_category, ', ')
-      filter (where actual_category is not null and actual_category <> category_code)
-  into v_missing, v_drift
-  from linked;
+    (select count(*) from divisions),
+    (select count(*) from expected),
+    count(*) filter (where g.actual_category = g.category_code),
+    (select string_agg(distinct hole_text, '; ') from holes),
+    string_agg(distinct g.division_label || ' / ' || g.mg_code || ' ' || g.mg_desc
+        || ' -> ' || g.actual_category, '; ')
+      filter (where g.actual_category is not null
+                and g.actual_category <> g.category_code)
+  into v_divisions, v_expected_links, v_actual_links, v_missing, v_drift
+  from graded g;
 
   -- UNCONDITIONAL. An existing link that disagrees with the authoritative mapping is a
   -- drift on ANY database and is never overwritten quietly.
   if v_drift is not null then
     raise exception
       'Issue #1163: existing category links disagree with the authoritative mapping: %. '
-      'Refusing to overwrite a deliberate change — resolve this on the issue.', v_drift;
+      'Refusing to overwrite a deliberate change - resolve this on the issue.', v_drift;
+  end if;
+
+  -- AMBIGUOUS SOURCE ROWS. The grid is (19 types x divisions), so if a division somehow
+  -- carries TWO active MG01 rows with the same (code, description) pair, the graded set
+  -- has more matched rows than the grid has cells and BOTH rows got a link. That is the
+  -- exact failure the `is_active` filter was added to prevent, so it is asserted rather
+  -- than trusted.
+  if v_actual_links > v_expected_links then
+    raise exception
+      'Issue #1163: % category links resolved but only % (19 product types x % divisions) '
+      'are possible. A division carries more than one ACTIVE mgTypeCode ''01'' row for the '
+      'same code/description pair, so the seed attached both. Resolve the duplicate source '
+      'rows on the issue.',
+      v_actual_links, v_expected_links, v_divisions;
   end if;
 
   if v_source_rows = 0 then
     -- Loud, never silent. The structure is in place and the mapping seed is a no-op
     -- because there is no source data on this database to map.
     raise notice
-      'Issue #1163: core."merchGroup" holds NO mgTypeCode ''01'' rows on this database, '
-      'so the 19 category-to-MG01 mappings were NOT seeded and their assertion is '
+      'Issue #1163: core."merchGroup" holds NO ACTIVE mgTypeCode ''01'' rows on this '
+      'database, so the category-to-MG01 mappings were NOT seeded and their assertion is '
       'SKIPPED. The tables, constraints, indexes, RLS and grants applied in full, and '
-      'the 7 categories were seeded. On a database that does carry MG01 rows this same '
-      'block raises instead of skipping.';
+      'the 7 categories were seeded. On a database that does carry active MG01 rows this '
+      'same block raises instead of skipping.';
   elsif v_missing is not null then
-    -- Rows ARE present, so a partial or absent match is a real failure. Hard stop.
+    -- Rows ARE present, so a hole in the grid is a real failure. Hard stop.
+    --
+    -- TELLING A MOVED LINK APART FROM A RENAMED SOURCE DESCRIPTION. If someone upstream
+    -- corrects a description (say all three 'Desk acc' rows become 'Desk accessory'), the
+    -- existing links survive but the join above no longer finds them, so those rows show
+    -- up as missing. That looks identical to a genuinely unseeded row unless we say so.
+    -- The tell is an ALREADY-LINKED active MG01 row whose (code, description) pair is not
+    -- in the authoritative list, so we look for exactly that and name it in the error.
+    -- A description rename is NOT something this migration may absorb: its authoritative
+    -- list is the workbook, and changing it is a governed decision. The fix is a
+    -- follow-up migration under its own issue, never an edit to this applied file.
+    select string_agg(distinct mg.mg_code || ' ' || mg.mg_desc, '; ')
+      into v_renamed
+    from core.mg_category_merch_group l
+    join core."merchGroup" mg on mg.mg_id = l.merch_group_mg_id
+    where mg."mgTypeCode" = '01'
+      and mg.is_active is true
+      and (upper(btrim(mg.mg_code)), lower(btrim(mg.mg_desc))) not in (
+        ('A','stretched/box'),('B','framed'),('C','plaque'),('D','functional'),
+        ('E','other wall'),('F','block'),('G','box'),('H','photo frames'),
+        ('J','object'),('K','other tabletop'),('M','clocks'),('N','soft storage'),
+        ('P','hard storage'),('R','other storage'),('S','stationery org'),
+        ('T','desk acc'),('U','other workspace'),('V','floor coverings'),('W','garden')
+      );
+
     raise exception
-      'Issue #1163: core."merchGroup" holds % mgTypeCode ''01'' rows, but these '
-      'authoritative product types did not resolve or were not linked: %. The '
-      'merchandise-group rows may be named differently on this database. Refusing to '
-      'leave a half-seeded mapping behind.',
-      v_source_rows, v_missing;
+      'Issue #1163: % active mgTypeCode ''01'' rows across % divisions were expected to '
+      'carry all 19 authoritative product types (% links), but only % resolved. '
+      'Missing: %.%',
+      v_source_rows, v_divisions, v_expected_links, v_actual_links, v_missing,
+      case
+        when v_renamed is not null then
+          ' NOTE: these merchandise-group rows are ALREADY LINKED but their descriptions '
+          'are not in the authoritative list: ' || v_renamed || '. That is the signature '
+          'of an upstream DESCRIPTION RENAME, not of a missing link. This migration must '
+          'not be edited to follow the rename - it is already applied elsewhere. Open a '
+          'follow-up shared-db issue to update the authoritative list in a NEW migration.'
+        else
+          ' If instead a human deliberately moved or removed a link, that is exactly what '
+          'this guard exists to block: resolve it on the issue rather than re-applying.'
+      end;
   end if;
 
   select count(*) into v_pairs from core.mg_category_merch_group;
-  raise notice 'Issue #1163 OK: % categories, % category-to-MG01 link rows (% MG01 source rows).',
-    v_categories, v_pairs, v_source_rows;
+  raise notice
+    'Issue #1163 OK: % categories, % category-to-MG01 link rows total (% expected across '
+    '% divisions x 19 product types, from % active MG01 source rows).',
+    v_categories, v_pairs, v_expected_links, v_divisions, v_source_rows;
 end;
 $$;
 
 -- -------------------------------------------------------------------------------------
 -- 6. RLS and grants — same shape as core.product_size (issue #597).
 --
--- Reads for the normal application roles; writes for administrators only. These are
--- structural reference rows, so no browser role gets a write grant.
+-- WHAT ACTUALLY SHIPS HERE, stated precisely rather than aspirationally:
+--   * `anon`  : nothing at all (every privilege revoked).
+--   * `authenticated` : SELECT only. There is no INSERT/UPDATE/DELETE grant, so Postgres
+--     refuses a write from a browser session BEFORE RLS is ever consulted. The
+--     `admin_write` policy exists so that a future decision to grant writes to
+--     administrators is already scoped, but today no browser role can reach it.
+--   * `service_role` : full grants, and it has BYPASSRLS, so server-side jobs and
+--     governed migrations write these rows.
+-- That is the same shape as core.product_size (issue #597) and it is deliberate: these
+-- are structural reference rows, maintained by migration, not by the application.
 -- -------------------------------------------------------------------------------------
 
 alter table core.mg_category             enable row level security;

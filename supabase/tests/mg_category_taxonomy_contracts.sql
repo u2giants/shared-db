@@ -14,27 +14,47 @@
 --   This file runs BOTH against preview/production (populated) and against the
 --   from-empty ephemeral database in .github/workflows/database-contract-tests.yml,
 --   which carries the SCHEMA of core."merchGroup" but not one row of it.
---     * STRUCTURE (sections A and B) must pass on EVERY database, always. Tables,
---       columns, the one-category-per-product-type unique constraint, the foreign keys,
---       RLS, the policies, the grants, and the seven authoritative categories — those
---       categories are division-independent reference data that the migration seeds
---       unconditionally, so they are asserted unconditionally too.
---     * The 19 MAPPINGS (section C), the read contract (section E) and the three
---       negative cases that need a real merchandise-group row (D1, D2, D4) can only
---       hold where the source rows exist. Where they do not, each is SKIPPED WITH AN
---       EXPLICIT NOTICE naming what was skipped and why. A skip is never silent and is
---       never counted as a pass.
+--     * STRUCTURE (sections A and B), the GRANTS (section A), and EVERY negative case
+--       (section D) must pass on EVERY database, always. Section D no longer waits for
+--       production rows to exist: it creates its OWN throwaway merchandise-group row and
+--       category link inside a subtransaction that is ROLLED BACK, so the constraints are
+--       genuinely FIRED on an empty database too. A constraint that nobody has watched
+--       reject anything is not a proven constraint; asserting only that it appears in
+--       pg_constraint proves the DDL ran, not that the rule holds.
+--     * Only the 19 MAPPINGS (section C) and the read contract (section E) need real
+--       source rows. Where there are none, each is SKIPPED WITH AN EXPLICIT NOTICE naming
+--       what was skipped and why. A skip is never silent and never counted as a pass.
 --   NOTHING here is weakened to go green: on a populated database every one of these
 --   assertions runs and must pass exactly as it did before.
 --
+-- WHY SECTION C IS A GRID AND NOT A LIST (this is the defect it was rewritten to catch)
+--   The earlier version LEFT JOINed the 19 authoritative product types to
+--   core."merchGroup" and only complained when a product type resolved NOWHERE. A LEFT
+--   JOIN emits NO ROW for a division that failed to match - it does not emit a NULL row.
+--   So a product type that matched in CW001 and SP001 but was stored under a different
+--   description in EH001 still looked complete, and a 56-of-57 seed passed. Section C now
+--   builds the expected GRID (19 authoritative product types x every division that carries
+--   any ACTIVE MG01 row) and fails on any hole in it, naming the division.
+--
+-- WHY `is_active`
+--   The migration seeds only ACTIVE MG01 rows, so this file counts and joins only ACTIVE
+--   MG01 rows. Using a different population here than the migration uses would let the
+--   test agree with a seed that had matched something else entirely.
+--
+
 -- WHAT IT ASSERTS
---   A. The objects exist, with the constraint that makes acceptance check 3 real.
+--   A. The objects exist, with the constraint that makes acceptance check 3 real, and the
+--      grants are least-privilege: anon has nothing, authenticated may SELECT and may NOT
+--      INSERT/UPDATE/DELETE, service_role may read.
 --   B. The seven categories exist exactly once each (acceptance check 1).
---   C. All 19 authoritative category-to-MG01 mappings resolve to the right category, in
---      EVERY division that carries the product type (acceptance checks 2, 4, 6).
---   D. Negative cases (acceptance check 6): a duplicate mapping is REJECTED, a mapping to
---      a non-existent merchandise-group row is REJECTED, a mapping to a non-existent
---      category is REJECTED, and a blank category code is REJECTED.
+--   C. All 19 authoritative category-to-MG01 mappings resolve to the right category in
+--      EVERY division that carries active MG01 rows, and the total link count equals
+--      19 x that division count - derived, never hard-coded (checks 2, 4, 6).
+--   D. Negative cases (acceptance check 6), all fired for real against a throwaway
+--      fixture: a second category for one product-type row is REJECTED, a duplicate
+--      mapping is REJECTED, a mapping to a non-existent merchandise-group row is
+--      REJECTED, a mapping to a non-existent category is REJECTED, a blank category code
+--      is REJECTED, and duplicate category codes/names are REJECTED.
 --   E. The documented read contract returns category + MG01 code + MG01 product-type name
 --      for all 19 product types (acceptance check 5).
 --
@@ -43,9 +63,13 @@
 --   applied" is not accepted here as evidence of anything.
 --
 -- SIDE EFFECTS
---   Section D inserts deliberately invalid rows inside SAVEPOINT-free sub-blocks that
---   catch the exception, and the one row it does insert successfully is deleted again in
---   the same block. Nothing survives the run.
+--   None survive. Section D creates one throwaway core."merchGroup" row (mg_id
+--   -987654322, an explicit negative id that cannot collide with the identity sequence)
+--   plus its category link, exercises the constraints against them, and then unwinds the
+--   whole thing by raising a sentinel exception inside a plpgsql sub-block - a plpgsql
+--   BEGIN ... EXCEPTION block is a real subtransaction, so catching the sentinel rolls
+--   back every row the block inserted. The block then PROVES the rollback happened rather
+--   than assuming it.
 -- =====================================================================================
 
 -- -------------------------------------------------------------------------------------
@@ -58,11 +82,13 @@ declare
   v_n    integer;
   v_txt  text;
   v_source_rows integer;
+  v_links integer;
   r      record;
 begin
   -- Is there any source data on this database at all? Sections C and E are meaningless
   -- without it; sections A and B are asserted regardless. See the header.
-  select count(*) into v_source_rows from core."merchGroup" where "mgTypeCode" = '01';
+  select count(*) into v_source_rows
+  from core."merchGroup" where "mgTypeCode" = '01' and is_active is true;
 
   raise notice '=== A. OBJECT EXISTENCE ===';
   foreach v_txt in array array['core.mg_category', 'core.mg_category_merch_group'] loop
@@ -76,15 +102,15 @@ begin
   -- The constraint IS acceptance check 3. If it is absent the whole design is decorative.
   select count(*) into v_n
   from pg_constraint
-  where conname = 'mg_category_merch_group_one_category_per_product_type'
+  where conname = 'mg_category_merch_group_one_category_per_mg_row'
     and conrelid = 'core.mg_category_merch_group'::regclass
     and contype = 'u';
   if v_n = 1 then
     v_pass := v_pass + 1;
-    raise notice 'PASS unique constraint on merch_group_mg_id exists (one category per product type)';
+    raise notice 'PASS unique constraint on merch_group_mg_id exists (one category per merchandise-group ROW)';
   else
     v_fail := v_fail + 1;
-    raise notice 'FAIL unique constraint mg_category_merch_group_one_category_per_product_type missing';
+    raise notice 'FAIL unique constraint mg_category_merch_group_one_category_per_mg_row missing';
   end if;
 
   -- The link must be a real foreign key onto the merchandise-group row identity.
@@ -121,6 +147,38 @@ begin
       v_pass := v_pass + 1; raise notice 'PASS authenticated can SELECT core.%', v_txt;
     else
       v_fail := v_fail + 1; raise notice 'FAIL authenticated cannot SELECT core.%', v_txt;
+    end if;
+
+    -- AND authenticated must NOT be able to WRITE. These are structural reference rows
+    -- maintained by migration. Postgres checks the grant BEFORE RLS, so the absence of
+    -- these three privileges - not the policy wording - is what actually stops a browser
+    -- session writing. Same assertion as core_licensor_alias_contracts.sql F3.
+    if has_table_privilege('authenticated', 'core.' || quote_ident(v_txt), 'INSERT')
+       or has_table_privilege('authenticated', 'core.' || quote_ident(v_txt), 'UPDATE')
+       or has_table_privilege('authenticated', 'core.' || quote_ident(v_txt), 'DELETE') then
+      v_fail := v_fail + 1;
+      raise notice 'FAIL authenticated has INSERT/UPDATE/DELETE on core.%', v_txt;
+    else
+      v_pass := v_pass + 1;
+      raise notice 'PASS authenticated cannot INSERT/UPDATE/DELETE core.%', v_txt;
+    end if;
+
+    -- anon must have no write path either.
+    if has_table_privilege('anon', 'core.' || quote_ident(v_txt), 'INSERT')
+       or has_table_privilege('anon', 'core.' || quote_ident(v_txt), 'UPDATE')
+       or has_table_privilege('anon', 'core.' || quote_ident(v_txt), 'DELETE') then
+      v_fail := v_fail + 1;
+      raise notice 'FAIL anon has INSERT/UPDATE/DELETE on core.%', v_txt;
+    else
+      v_pass := v_pass + 1;
+      raise notice 'PASS anon cannot INSERT/UPDATE/DELETE core.%', v_txt;
+    end if;
+
+    -- service_role is the role that actually maintains these rows (it also has BYPASSRLS).
+    if has_table_privilege('service_role', 'core.' || quote_ident(v_txt), 'SELECT') then
+      v_pass := v_pass + 1; raise notice 'PASS service_role can SELECT core.%', v_txt;
+    else
+      v_fail := v_fail + 1; raise notice 'FAIL service_role cannot SELECT core.%', v_txt;
     end if;
 
     -- With RLS on, a missing policy is a table nobody can read. Both must be present.
@@ -194,9 +252,9 @@ begin
     v_fail := v_fail + 1; raise notice 'FAIL expected 7 categories, found %', v_n;
   end if;
 
-  raise notice '=== C. ALL 19 CATEGORY-TO-MG01 MAPPINGS (acceptance checks 2, 4, 6) ===';
+  raise notice '=== C. ALL 19 CATEGORY-TO-MG01 MAPPINGS, PER DIVISION (checks 2, 4, 6) ===';
   if v_source_rows = 0 then
-    raise notice 'SKIP C: core."merchGroup" holds NO mgTypeCode ''01'' rows on this '
+    raise notice 'SKIP C: core."merchGroup" holds NO ACTIVE mgTypeCode ''01'' rows on this '
       'database, so there is nothing for the 19 authoritative product types to resolve '
       'against and the migration correctly seeded no link rows. This section is SKIPPED, '
       'NOT passed. It runs and must pass on preview and production.';
@@ -215,44 +273,96 @@ begin
         ('U','Other workspace','WORKSPACE'),
         ('V','Floor coverings','FLOOR'),
         ('W','Garden','GARDEN')
+    ),
+    active_mg01 as (
+      select
+        mg.mg_id,
+        mg."divisionCode_id_fk" as division_id,
+        coalesce(
+          nullif(btrim(mg."divisionCode_fk"), ''),
+          'division_id ' || coalesce(mg."divisionCode_id_fk"::text, '(null)')
+        ) as division_label,
+        upper(btrim(mg.mg_code)) as code_key,
+        lower(btrim(mg.mg_desc)) as desc_key
+      from core."merchGroup" mg
+      where mg."mgTypeCode" = '01' and mg.is_active is true
+    ),
+    divisions as (select distinct division_id, division_label from active_mg01),
+    -- The GRID. Every authoritative product type is expected IN EVERY division that
+    -- carries any active MG01 row. A hole here cannot be filled by another division.
+    expected as (
+      select d.division_id, d.division_label, a.mg_code, a.mg_desc, a.category_code
+      from divisions d cross join authoritative a
+    ),
+    graded as (
+      select e.division_label, e.mg_code, e.mg_desc, e.category_code,
+             m.mg_id, c.code as actual_category
+      from expected e
+      left join active_mg01 m
+        on m.division_id is not distinct from e.division_id
+       and m.code_key = upper(e.mg_code)
+       and m.desc_key = lower(e.mg_desc)
+      left join core.mg_category_merch_group l on l.merch_group_mg_id = m.mg_id
+      left join core.mg_category c on c.id = l.mg_category_id
     )
     select
-      a.mg_code,
-      a.mg_desc,
-      a.category_code,
-      count(mg.mg_id)                                                as mg_rows,
-      count(l.id)                                                    as linked_rows,
-      count(distinct mg."divisionCode_id_fk")                        as divisions,
-      count(distinct c.code)                                         as distinct_categories,
-      coalesce(min(c.code), '(none)')                                as actual_category
-    from authoritative a
-    left join core."merchGroup" mg
-      on mg."mgTypeCode" = '01'
-     and upper(btrim(mg.mg_code)) = upper(a.mg_code)
-     and lower(btrim(mg.mg_desc)) = lower(a.mg_desc)
-    left join core.mg_category_merch_group l on l.merch_group_mg_id = mg.mg_id
-    left join core.mg_category c on c.id = l.mg_category_id
-    group by a.mg_code, a.mg_desc, a.category_code
-    order by a.mg_code
+      g.mg_code,
+      g.mg_desc,
+      g.category_code,
+      count(*)                                                      as expected_cells,
+      count(*) filter (where g.mg_id is not null)                   as matched_cells,
+      count(*) filter (where g.actual_category = g.category_code)   as correct_cells,
+      coalesce(
+        string_agg(distinct g.division_label || ' (' ||
+          case
+            when g.mg_id is null then 'no active MG01 row'
+            when g.actual_category is null then 'row ' || g.mg_id || ' not linked'
+            else 'row ' || g.mg_id || ' -> ' || g.actual_category
+          end || ')', ', ')
+          filter (where g.actual_category is distinct from g.category_code),
+        '') as bad_divisions
+    from graded g
+    group by g.mg_code, g.mg_desc, g.category_code
+    order by g.mg_code
   loop
-    if r.mg_rows = 0 then
-      v_fail := v_fail + 1;
-      raise notice 'FAIL % % — no MG01 merchandise-group row resolved at all', r.mg_code, r.mg_desc;
-    elsif r.linked_rows <> r.mg_rows then
-      -- acceptance check 4: EVERY division-specific row must be linked, not just one.
-      v_fail := v_fail + 1;
-      raise notice 'FAIL % % — % MG01 rows across % divisions but only % linked',
-        r.mg_code, r.mg_desc, r.mg_rows, r.divisions, r.linked_rows;
-    elsif r.distinct_categories <> 1 or r.actual_category <> r.category_code then
-      v_fail := v_fail + 1;
-      raise notice 'FAIL % % — expected category %, got % (% distinct)',
-        r.mg_code, r.mg_desc, r.category_code, r.actual_category, r.distinct_categories;
-    else
+    if r.correct_cells = r.expected_cells then
       v_pass := v_pass + 1;
-      raise notice 'PASS % % -> % (% rows across % divisions)',
-        r.mg_code, r.mg_desc, r.category_code, r.linked_rows, r.divisions;
+      raise notice 'PASS % % -> % in all % divisions',
+        r.mg_code, r.mg_desc, r.category_code, r.expected_cells;
+    else
+      -- Names the exact division(s). This is the assertion that a 56-of-57 seed fails.
+      v_fail := v_fail + 1;
+      raise notice 'FAIL % % -> % resolved in % of % divisions; wrong or missing in: %',
+        r.mg_code, r.mg_desc, r.category_code, r.correct_cells, r.expected_cells,
+        r.bad_divisions;
     end if;
   end loop;
+
+  -- Total shape, derived rather than hard-coded: 19 product types x every division that
+  -- carries active MG01 rows. On production today that evaluates to 57; the number 57
+  -- appears nowhere, so onboarding a division moves the expectation instead of breaking it.
+  -- Counted as a distinct GROUP, not as count(distinct col): count(distinct col) drops a
+  -- null division silently, which would make the expectation disagree with the grid above.
+  select count(*) into v_n
+  from (
+    select distinct "divisionCode_id_fk"
+    from core."merchGroup"
+    where "mgTypeCode" = '01' and is_active is true
+  ) d;
+
+  select count(*) into v_links
+  from core.mg_category_merch_group l
+  join core."merchGroup" mg on mg.mg_id = l.merch_group_mg_id
+  where mg."mgTypeCode" = '01' and mg.is_active is true;
+
+  if v_links = 19 * v_n then
+    v_pass := v_pass + 1;
+    raise notice 'PASS % active-MG01 link rows = 19 product types x % divisions', v_links, v_n;
+  else
+    v_fail := v_fail + 1;
+    raise notice 'FAIL % active-MG01 link rows, expected 19 x % divisions = %',
+      v_links, v_n, 19 * v_n;
+  end if;
 
   end if;
 
@@ -316,12 +426,24 @@ end;
 $$;
 
 -- -------------------------------------------------------------------------------------
--- D. NEGATIVE CASES — invalid and duplicate mappings must be REJECTED.
+-- D. NEGATIVE CASES - invalid and duplicate mappings must be REJECTED.
 --    Each attempt is expected to raise; if it does NOT raise, that is the failure.
 --
---    D3, D5, D6 and D7 need no source data and run on EVERY database.
---    D1, D2 and D4 act on a REAL merchandise-group row, so on a database with no MG01
---    rows they are SKIPPED WITH A NOTICE rather than quietly counted as passes.
+--    EVERY case here runs on EVERY database, including the from-empty CI one. There are
+--    no skips left in this section.
+--
+--    D1, D2 and D4 need a real merchandise-group row to act on. They used to look for a
+--    seeded production row and SKIP when there was none - which meant CI, the only place
+--    these tests run automatically, never once watched the unique constraint reject
+--    anything. It only checked that the constraint was listed in pg_constraint. So these
+--    three now build their OWN throwaway fixture: one core."merchGroup" row with an
+--    explicit negative mg_id (the column is GENERATED ALWAYS AS IDENTITY, hence
+--    OVERRIDING SYSTEM VALUE, and a negative id cannot collide with the sequence) plus one
+--    category link. Everything is created inside a plpgsql BEGIN ... EXCEPTION block,
+--    which is a real subtransaction: raising the sentinel error at the end of the block
+--    rolls back every row it inserted, while the plpgsql pass/fail counters (ordinary
+--    variables, not table rows) survive. The block then PROVES the rollback rather than
+--    trusting it.
 -- -------------------------------------------------------------------------------------
 do $$
 declare
@@ -329,48 +451,97 @@ declare
   v_fail integer := 0;
   v_cat_wall uuid;
   v_cat_clock uuid;
-  v_existing integer;
-  v_spare integer;
-  v_new uuid;
+  v_fixture_mg constant integer := -987654322;
+  v_leftover integer;
 begin
   select id into v_cat_wall  from core.mg_category where code = 'WALL';
   select id into v_cat_clock from core.mg_category where code = 'CLOCK';
+  if v_cat_wall is null or v_cat_clock is null then
+    raise exception 'Issue #1163 negative cases cannot run: the WALL/CLOCK categories are '
+      'missing, which section B should already have failed on.';
+  end if;
 
-  -- An already-mapped MG01 row (code A, Stretched/Box, any division).
-  select l.merch_group_mg_id into v_existing
-  from core.mg_category_merch_group l
-  join core."merchGroup" mg on mg.mg_id = l.merch_group_mg_id
-  where mg."mgTypeCode" = '01' and upper(btrim(mg.mg_code)) = 'A'
-  limit 1;
+  begin
+    -- --- fixture ------------------------------------------------------------------
+    insert into core."merchGroup"
+      (mg_id, mg_code, mg_desc, "mgTypeCode", is_active, "divisionCode_fk")
+    overriding system value
+    values (v_fixture_mg, 'ZZ', 'issue 1163 throwaway fixture', '01', true, 'ZZ999');
 
-  -- D1: same product type, a SECOND category -> must be rejected.
-  if v_existing is null then
-    raise notice 'SKIP D1 and D2: no seeded category link exists on this database (no '
-      'mgTypeCode ''01'' source rows to map), so there is no real product type to try to '
-      'double-book. SKIPPED, not passed. Both run on preview and production.';
+    insert into core.mg_category_merch_group (mg_category_id, merch_group_mg_id)
+    values (v_cat_wall, v_fixture_mg);
+    v_pass := v_pass + 1;
+    raise notice 'PASS D0: a first category link for a product-type row is accepted';
+
+    -- D1: the SAME merchandise-group row, a SECOND category -> must be rejected.
+    begin
+      insert into core.mg_category_merch_group (mg_category_id, merch_group_mg_id)
+      values (v_cat_clock, v_fixture_mg);
+      v_fail := v_fail + 1;
+      raise notice 'FAIL D1: a product-type row was allowed into a second category';
+    exception when unique_violation then
+      v_pass := v_pass + 1;
+      raise notice 'PASS D1: second category for the same product-type row rejected '
+        '(unique_violation actually fired)';
+    end;
+
+    -- D2: an exact duplicate of the existing mapping -> must be rejected.
+    begin
+      insert into core.mg_category_merch_group (mg_category_id, merch_group_mg_id)
+      values (v_cat_wall, v_fixture_mg);
+      v_fail := v_fail + 1;
+      raise notice 'FAIL D2: duplicate mapping was accepted';
+    exception when unique_violation then
+      v_pass := v_pass + 1;
+      raise notice 'PASS D2: duplicate mapping rejected (unique_violation actually fired)';
+    end;
+
+    -- D4: a mapping to a category that does not exist -> must be rejected.
+    -- Free the fixture row first so the unique constraint cannot be what rejects it; the
+    -- foreign key must be the thing that fires.
+    delete from core.mg_category_merch_group where merch_group_mg_id = v_fixture_mg;
+    begin
+      insert into core.mg_category_merch_group (mg_category_id, merch_group_mg_id)
+      values ('00000000-0000-0000-0000-000000000000'::uuid, v_fixture_mg);
+      v_fail := v_fail + 1;
+      raise notice 'FAIL D4: mapping to a non-existent category was accepted';
+    exception when foreign_key_violation then
+      v_pass := v_pass + 1;
+      raise notice 'PASS D4: mapping to a non-existent category rejected '
+        '(foreign_key_violation actually fired)';
+    end;
+
+    -- Unwind the fixture. SQLSTATE ZZ163 is a private code chosen so that only this
+    -- handler can catch it and no real database error can be mistaken for it.
+    raise exception using errcode = 'ZZ163',
+      message = 'issue #1163 fixture rollback sentinel';
+  exception
+    when sqlstate 'ZZ163' then
+      raise notice 'INFO: D1/D2/D4 fixture rolled back (subtransaction unwound)';
+    when others then
+      -- Never swallow a real error: report it and let the file fail.
+      raise;
+  end;
+
+  -- PROVE the rollback rather than assuming it. If either row survived, this test just
+  -- polluted the database and must say so.
+  select count(*) into v_leftover from core."merchGroup" where mg_id = v_fixture_mg;
+  if v_leftover = 0 then
+    v_pass := v_pass + 1;
+    raise notice 'PASS D-cleanup: the throwaway merchandise-group row did not survive';
   else
-  begin
-    insert into core.mg_category_merch_group (mg_category_id, merch_group_mg_id)
-    values (v_cat_clock, v_existing);
     v_fail := v_fail + 1;
-    raise notice 'FAIL D1: a product type was allowed into a second category';
-    delete from core.mg_category_merch_group
-      where mg_category_id = v_cat_clock and merch_group_mg_id = v_existing;
-  exception when unique_violation then
-    v_pass := v_pass + 1;
-    raise notice 'PASS D1: second category for the same product type rejected (unique_violation)';
-  end;
+    raise notice 'FAIL D-cleanup: throwaway merchandise-group row % SURVIVED', v_fixture_mg;
+  end if;
 
-  -- D2: exact duplicate of an existing mapping -> must be rejected.
-  begin
-    insert into core.mg_category_merch_group (mg_category_id, merch_group_mg_id)
-    values (v_cat_wall, v_existing);
-    v_fail := v_fail + 1;
-    raise notice 'FAIL D2: duplicate mapping was accepted';
-  exception when unique_violation then
+  select count(*) into v_leftover
+  from core.mg_category_merch_group where merch_group_mg_id = v_fixture_mg;
+  if v_leftover = 0 then
     v_pass := v_pass + 1;
-    raise notice 'PASS D2: duplicate mapping rejected (unique_violation)';
-  end;
+    raise notice 'PASS D-cleanup: the throwaway category link did not survive';
+  else
+    v_fail := v_fail + 1;
+    raise notice 'FAIL D-cleanup: throwaway category link SURVIVED';
   end if;
 
   -- D3: mapping to a merchandise-group row that does not exist -> must be rejected.
@@ -384,31 +555,6 @@ begin
     v_pass := v_pass + 1;
     raise notice 'PASS D3: mapping to a non-existent merchandise-group row rejected';
   end;
-
-  -- D4: mapping to a category that does not exist -> must be rejected.
-  select mg_id into v_spare
-  from core."merchGroup" mg
-  where mg."mgTypeCode" = '01'
-    and not exists (
-      select 1 from core.mg_category_merch_group l where l.merch_group_mg_id = mg.mg_id
-    )
-  limit 1;
-  if v_spare is null then
-    raise notice 'SKIP D4: no unmapped mgTypeCode ''01'' merchandise-group row exists on '
-      'this database to attach a bogus category to. SKIPPED, not passed. D3 already '
-      'proves the same foreign key from the other side and did run.';
-  else
-  begin
-    insert into core.mg_category_merch_group (mg_category_id, merch_group_mg_id)
-    values ('00000000-0000-0000-0000-000000000000'::uuid, v_spare);
-    v_fail := v_fail + 1;
-    raise notice 'FAIL D4: mapping to a non-existent category was accepted';
-    delete from core.mg_category_merch_group where merch_group_mg_id = v_spare;
-  exception when foreign_key_violation then
-    v_pass := v_pass + 1;
-    raise notice 'PASS D4: mapping to a non-existent category rejected';
-  end;
-  end if;
 
   -- D5: a blank category code -> must be rejected.
   begin

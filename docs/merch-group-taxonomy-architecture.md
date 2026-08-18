@@ -10,11 +10,15 @@ sessions and are superseded in place — see the correction box in §3.2. The co
 outside §3.2 is unreviewed by that correction and still carries its original 2026-07-19
 measurement date.
 
-**Business rule added 2026-08-18:** §4.2.1 now defines the authoritative relationship
-between `mgCategory` and the MG01 merchandise groups/product types from
-`MerchGroup_Rework.xlsx`. Database normalization is tracked in issue #1163; until that
-lands, the rule is authoritative even though the database still carries `mgCategory` as
-nullable text on merchandise-group rows.
+**Business rule added 2026-08-18:** §4.2.1 defines the authoritative relationship between
+`mgCategory` and the MG01 merchandise groups/product types from `MerchGroup_Rework.xlsx`.
+That rule is now **normalized in the database** (issue #1163): `core.mg_category` holds
+the seven categories and `core.mg_category_merch_group` links each category to the real
+MG01 merchandise-group rows, per division, by `mg_id` rather than by the MG letter code.
+Resolve an item's category by walking from its MG01 row through that link table. The
+free-text `mgCategory` columns on `core."merchGroup"` and `core."merchGroupMaster"` are
+**still there and untouched**; they are an upstream mirror field, not the master, and they
+are not maintained by issue #1163.
 
 **Who this is for:** an engineer who has never seen this system. Read this before touching
 anything named licensor, property, merch group, big theme, little theme, style guide,
