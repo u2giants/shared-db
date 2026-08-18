@@ -164,6 +164,28 @@ def canonical_sha256(path: Path) -> str:
     return hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()
 
 
+def manifest_sha256(path: Path) -> str:
+    """Digest a migration the way the preview content manifest digests it.
+
+    Deliberately NOT `canonical_sha256`: that one normalises CRLF to LF before
+    hashing, while `compute_content_manifest` in production_migration_guard.py
+    hashes RAW bytes. Comparing a normalised digest against a raw one would
+    disagree on any CRLF file and reject a perfectly good rehearsal, so the two
+    sides of the comparison must use the same function.
+    """
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def preview_content_manifest(texts: dict[str, str]) -> dict[str, str]:
+    try:
+        manifest = json.loads(texts["migration-content-manifest.json"])
+    except (KeyError, json.JSONDecodeError, TypeError) as exc:
+        raise RiskGateError("preview proof is missing a valid content manifest") from exc
+    if not isinstance(manifest, dict):
+        raise RiskGateError("preview content manifest is not an object")
+    return manifest
+
+
 def prove_preview_migration_contents(
     *, texts: dict[str, str], allowlist: list[str], repo_root: Path,
     before_versions: set[str], after_versions: set[str], historical: bool,
@@ -216,6 +238,24 @@ def prove_preview_migration_contents(
         if entry is None:
             if filename.name not in dry or filename.name not in apply:
                 raise RiskGateError(f"preview proof does not name exact migration {filename.name}")
+            # BIND THE BYTES, NOT THE COMMIT.
+            #
+            # The safety property is "production will apply the same migration
+            # bytes preview already applied". This used to be inferred from
+            # commit identity, which was a proxy that failed in both directions:
+            # a types-only follow-up commit invalidated a perfectly good
+            # rehearsal, while a same-named file whose bytes changed was only
+            # ever checked by FILENAME on this path. Compare the digest the
+            # rehearsal recorded against the file on exact main.
+            recorded = preview_content_manifest(texts).get(version)
+            if not isinstance(recorded, str) or not re.fullmatch(r"[0-9a-f]{64}", recorded):
+                raise RiskGateError(
+                    f"preview content manifest has no usable digest for {version}"
+                )
+            if recorded != manifest_sha256(filename):
+                raise RiskGateError(
+                    f"preview rehearsed different bytes than exact main for {version}"
+                )
             continue
 
         if not isinstance(entry, dict) or "preview" not in entry.get("targets", []):
@@ -253,6 +293,31 @@ def prove_preview_migration_contents(
             raise RiskGateError(f"atomic preview apply proof is incomplete or forged for {version}")
 
 
+def source_pr_commits(
+    source_pr: int, pr_head: str, main_sha: str, api: Callable[[str], Any]
+) -> set[str]:
+    """Every commit the preview rehearsal is allowed to have run at.
+
+    The rehearsal must belong to this pull request. Listing the PR's commits is
+    what makes a rehearsal borrowed from an unrelated PR -- even one that
+    touched identically named migrations -- still fail.
+
+    `pr_head` and `main_sha` are included explicitly so the check cannot become
+    weaker than it was: `pr_head` covers a head not yet visible in the commits
+    listing, and `main_sha` covers the historical-recovery path, which then
+    re-tightens to exact main below.
+    """
+    allowed = {pr_head, main_sha}
+    try:
+        commits = api(f"repos/{REPOSITORY}/pulls/{source_pr}/commits?per_page=100")
+    except Exception as exc:  # noqa: BLE001 - unreadable provenance must fail closed
+        raise RiskGateError("source pull request commits are unreadable") from exc
+    if not isinstance(commits, list):
+        raise RiskGateError("source pull request commits are unreadable")
+    allowed.update(c.get("sha") for c in commits if isinstance(c, dict) and c.get("sha"))
+    return {sha for sha in allowed if sha}
+
+
 def prove_preview(
     *, run_id: int, digest: str, pr_head: str, main_sha: str, source_pr: int, allowlist: list[str], api: Callable[[str], Any],
     downloader: Callable[[int, Path], None], repo_root: Path,
@@ -265,8 +330,15 @@ def prove_preview(
     for key, value in expected.items():
         if run.get(key) != value:
             raise RiskGateError(f"preview run has wrong {key}")
-    if run.get("head_sha") not in {pr_head, main_sha}:
-        raise RiskGateError("preview run has wrong head_sha")
+    # PROVENANCE, not identity: the rehearsal must belong to THIS piece of work.
+    # Any commit of the source pull request qualifies, plus exact main for the
+    # historical-recovery path. What the rehearsal actually applied is proved by
+    # bytes further down, so pinning one exact commit here bought nothing and
+    # permanently stranded any promotion that had a follow-up commit -- including
+    # the generated types this repository is supposed to refresh after a schema
+    # change, which cannot be committed before the preview it describes.
+    if run.get("head_sha") not in source_pr_commits(source_pr, pr_head, main_sha, api):
+        raise RiskGateError("preview run does not belong to the source pull request")
     name = f"preview-migration-apply-{run['head_sha']}"
     artifact = select_preview_artifact(
         api(f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"), run_id, name
@@ -284,14 +356,14 @@ def prove_preview(
     before = texts.get("preview-ledger-before.txt", "")
     after = texts.get("preview-ledger-after.txt", "")
     historical = texts.get("historical-preview-source.json")
-    expected_head = pr_head
     if historical:
         record = json.loads(historical)
         if record != verify_historical_preview(source_pr, main_sha, ",".join(allowlist), repo_root, api):
             raise RiskGateError("historical preview source proof does not match current governed evidence")
-        expected_head = main_sha
-    if run.get("head_sha") != expected_head:
-        raise RiskGateError("preview run has wrong head_sha")
+        # The historical no-write path proves nothing by applying, so it keeps
+        # its exact-main requirement unchanged.
+        if run.get("head_sha") != main_sha:
+            raise RiskGateError("preview run has wrong head_sha")
     with tempfile.TemporaryDirectory(prefix="production-risk-ledger-") as ledger_temp:
         before_path, after_path = Path(ledger_temp, "before.txt"), Path(ledger_temp, "after.txt")
         before_path.write_text(before, encoding="utf-8")

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import sys
@@ -111,6 +112,119 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                     before_versions=set(), after_versions={version}, historical=False,
                 )
 
+    def plain_preview_fixture(self, body="select 1;\n"):
+        """A NON-atomic migration plus a rehearsal manifest that matches its bytes."""
+        temp = tempfile.TemporaryDirectory()
+        root = Path(temp.name)
+        migrations = root / "supabase/migrations"
+        migrations.mkdir(parents=True)
+        (root / "config").mkdir()
+        (root / "config/atomic-migration-allowlist.json").write_text(
+            '{"schema_version":1,"migrations":{}}', encoding="utf-8"
+        )
+        version = "20260814000000"
+        filename = migrations / f"{version}_exact.sql"
+        filename.write_bytes(body.encode("utf-8"))
+        digest = hashlib.sha256(filename.read_bytes()).hexdigest()
+        texts = {
+            "preview-dry-run.txt": f"Applying migration {version}_exact.sql...",
+            "preview-apply.txt": f"Applying migration {version}_exact.sql...",
+            "migration-content-manifest.json": json.dumps({version: digest}),
+        }
+        return temp, root, version, digest, texts
+
+    def test_types_only_follow_up_commit_does_not_invalidate_a_matching_rehearsal(self):
+        """The exact regression this change exists for.
+
+        A rehearsal ran, then a generated-types commit moved the PR head. No SQL
+        moved, so the rehearsal is still true and must be accepted.
+        """
+        temp, root, version, _, texts = self.plain_preview_fixture()
+        with temp:
+            prove_preview_migration_contents(
+                texts=texts, allowlist=[version], repo_root=root,
+                before_versions={"20260801000000"},
+                after_versions={"20260801000000", version}, historical=False,
+            )
+
+    def test_same_filename_with_different_bytes_on_main_is_rejected(self):
+        """The hole the old filename-only check left open on this path."""
+        temp, root, version, _, texts = self.plain_preview_fixture()
+        with temp:
+            rewritten = root / f"supabase/migrations/{version}_exact.sql"
+            rewritten.write_bytes(b"drop table plm.item;\n")
+            with self.assertRaisesRegex(RiskGateError, "different bytes than exact main"):
+                prove_preview_migration_contents(
+                    texts=texts, allowlist=[version], repo_root=root,
+                    before_versions=set(), after_versions={version}, historical=False,
+                )
+
+    def test_non_atomic_proof_requires_a_usable_content_manifest(self):
+        for name, mutate in {
+            "missing manifest": lambda t: t.pop("migration-content-manifest.json"),
+            "manifest not an object": lambda t: t.__setitem__("migration-content-manifest.json", "[]"),
+            "manifest missing version": lambda t: t.__setitem__("migration-content-manifest.json", "{}"),
+            "manifest digest malformed": lambda t: t.__setitem__(
+                "migration-content-manifest.json", json.dumps({"20260814000000": "nope"})
+            ),
+        }.items():
+            temp, root, version, _, texts = self.plain_preview_fixture()
+            with self.subTest(name=name), temp, self.assertRaises(RiskGateError):
+                mutate(texts)
+                prove_preview_migration_contents(
+                    texts=texts, allowlist=[version], repo_root=root,
+                    before_versions=set(), after_versions={version}, historical=False,
+                )
+
+    def test_crlf_migration_still_matches_its_raw_byte_manifest(self):
+        """canonical_sha256 normalises CRLF; the manifest does not.
+
+        Comparing the two would reject every CRLF migration on a Windows-authored
+        branch, so the gate must digest raw bytes on both sides.
+        """
+        temp, root, version, _, texts = self.plain_preview_fixture(body="select 1;\r\n")
+        with temp:
+            prove_preview_migration_contents(
+                texts=texts, allowlist=[version], repo_root=root,
+                before_versions=set(), after_versions={version}, historical=False,
+            )
+
+    def test_rehearsal_borrowed_from_another_pull_request_is_rejected(self):
+        run = {
+            "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
+            "head_sha": "f" * 40, "path": ".github/workflows/shared-supabase-migrations.yml",
+        }
+
+        def api(endpoint):
+            # The other PR's commits, none of which is this run's head.
+            return [{"sha": "1" * 40}] if endpoint.endswith("commits?per_page=100") else run
+
+        with self.assertRaisesRegex(RiskGateError, "does not belong to the source pull request"):
+            prove_preview(
+                run_id=7, digest="sha256:" + "c" * 64, pr_head="a" * 40,
+                main_sha="d" * 40, source_pr=1, allowlist=["20260814000000"], api=api,
+                downloader=lambda *_: self.fail("foreign rehearsal must not download"),
+                repo_root=Path.cwd(),
+            )
+
+    def test_unreadable_source_pr_commits_fail_closed(self):
+        run = {
+            "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
+            "head_sha": "f" * 40, "path": ".github/workflows/shared-supabase-migrations.yml",
+        }
+
+        def api(endpoint):
+            if endpoint.endswith("commits?per_page=100"):
+                raise RuntimeError("GitHub 503")
+            return run
+
+        with self.assertRaisesRegex(RiskGateError, "unreadable"):
+            prove_preview(
+                run_id=7, digest="sha256:" + "c" * 64, pr_head="a" * 40,
+                main_sha="d" * 40, source_pr=1, allowlist=["20260814000000"], api=api,
+                downloader=lambda *_: self.fail("must not download"), repo_root=Path.cwd(),
+            )
+
     def test_preview_ledger_delta_rejects_extra_additions_removals_and_prior_version(self):
         cases = [
             ({"old"}, {"old", "20260816110750", "extra"}),
@@ -193,10 +307,13 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
             "head_sha": "b" * 40, "path": ".github/workflows/shared-supabase-migrations.yml",
         }
-        with self.assertRaisesRegex(RiskGateError, "wrong head_sha"):
+        def api(endpoint):
+            return [{"sha": "a" * 40}] if endpoint.endswith("commits?per_page=100") else run
+
+        with self.assertRaisesRegex(RiskGateError, "does not belong to the source pull request"):
             prove_preview(
                 run_id=7, digest="sha256:" + "c" * 64, pr_head="a" * 40,
-                main_sha="d" * 40, source_pr=1, allowlist=["20260814000000"], api=lambda _: run,
+                main_sha="d" * 40, source_pr=1, allowlist=["20260814000000"], api=api,
                 downloader=lambda *_: self.fail("forged run must not download"), repo_root=Path.cwd(),
             )
 
@@ -215,7 +332,11 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         }
 
         def api(endpoint):
-            return {"artifacts": [artifact]} if endpoint.endswith("artifacts?per_page=100") else run
+            if endpoint.endswith("artifacts?per_page=100"):
+                return {"artifacts": [artifact]}
+            if endpoint.endswith("commits?per_page=100"):
+                return [{"sha": head}]
+            return run
 
         with self.assertRaisesRegex(RiskGateError, "pinned digest"):
             prove_preview(
