@@ -909,13 +909,12 @@ begin
         -- Nobody has ever held this lease: establish it.
         v_lease_token := gen_random_uuid()::text;
         v_minted      := true;
-      elsif v_token_ok then
-        -- The holder itself, re-claiming with its receipt: rotate to a fresh one.
-        v_lease_token := gen_random_uuid()::text;
-        v_minted      := true;
       elsif v_stored_batch is null then
-        -- Nothing is bound and this caller is not the holder: never reissue the only
-        -- thing that can bind. Succeeds as a lease extension, holder of nothing.
+        -- Nothing is bound: never reissue the only thing that can bind. A caller that
+        -- is not the holder succeeds as a lease extension and is holder of nothing;
+        -- the holder itself already has its receipt and needs no second one, so this
+        -- branch deliberately covers it too rather than rotating a working receipt
+        -- (rotation would break the twin that legitimately shares its owner name).
         v_lease_token := null;
         v_minted      := false;
       elsif v_stored_owner = p_submission_owner
