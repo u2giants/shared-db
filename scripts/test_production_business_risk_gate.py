@@ -314,36 +314,92 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 downloader=lambda *_: self.fail("must not download"), repo_root=Path.cwd(),
             )
 
-    def test_preview_producer_paths_cover_every_executed_script(self):
-        """The list must not be able to fall silently behind the workflow.
+    PREVIEW_JOB_EXCLUSIONS = (
+        # These run ONLY in the production-apply jobs, which check out exact main
+        # and prove HEAD == origin/main before executing. They are not part of
+        # the preview evidence-producing surface.
+        "scripts/production_business_risk_gate.py",
+        "scripts/production_apply_review_evidence.py",
+        "scripts/production_catalog_verification.py",
+        # Validate-only job, which produces no evidence.
+        "scripts/check-sql.sh",
+        "scripts/check-sql.test.mjs",
+    )
 
-        Independent review found PREVIEW_PRODUCER_PATHS incomplete, and the cause
-        generalises: any file that executes in the preview job before evidence is
-        written can overwrite the workspace copies of the pinned scripts, since
-        the gate compares COMMITTED blobs and cannot see runtime mutation. One
-        unpinned executed file breaks custody for all of them.
+    def preview_job_text(self):
+        """Just the preview job, so validate-only steps cannot mask a real gap."""
+        workflow = (Path(__file__).resolve().parents[1] / PREVIEW_WORKFLOW).read_text(encoding="utf-8")
+        start = workflow.index("\n  preview:")
+        rest = workflow[start + 1:]
+        nxt = re.search(r"\n  [a-zA-Z][\w-]*:\n", rest)
+        return rest[: nxt.start()] if nxt else rest
 
-        So this test derives the truth from the workflow itself. Wiring a new
-        script into the migrations workflow without pinning it fails here rather
-        than quietly reopening the forgery path.
+    @staticmethod
+    def scripts_invoked_on(line, roots):
+        """Repo paths invoked on ONE line by node/python/bash.
+
+        Line-at-a-time on purpose: it keeps the pattern free of newline handling
+        and still catches `node --test x`, `python -m y`, quoted paths, and
+        `$GITHUB_WORKSPACE/`-prefixed paths, which are the shapes that previously
+        slipped past a stricter pattern.
         """
-        repo_root = Path(__file__).resolve().parents[1]
-        workflow = (repo_root / PREVIEW_WORKFLOW).read_text(encoding="utf-8")
-        executed = set(re.findall(r"(?:node|python|bash)\s+\"?\$?\{?[A-Za-z_]*\}?/?(scripts/[A-Za-z0-9_.-]+)", workflow))
-        executed |= set(re.findall(r"(?:node|python|bash)\s+(scripts/[A-Za-z0-9_.-]+)", workflow))
-        self.assertTrue(executed, "workflow parse found no executed scripts; the pattern has rotted")
-        unpinned = sorted(executed - set(PREVIEW_PRODUCER_PATHS) - {
-            # The gate itself runs in the PRODUCTION-apply jobs, which check out
-            # exact main, not the dispatched preview ref, so it is not part of
-            # the preview evidence-producing surface.
-            "scripts/production_business_risk_gate.py",
-            "scripts/production_apply_review_evidence.py",
-            "scripts/production_catalog_verification.py",
-        })
+        if not re.search(r"\b(?:node|python|bash)\b", line):
+            return []
+        return re.findall(rf"({roots}/[A-Za-z0-9_.-]+)", line)
+
+    def executed_closure(self):
+        """Every repo script the preview job can execute, including imports.
+
+        Enumerating this by hand is what failed twice: the forgery path was
+        reopened at hop two and again at hop three, because a pinned entry point
+        statically imports another module whose body runs first. So the closure is
+        WALKED, not listed. Invocation shapes are matched loosely on purpose --
+        `node --test x`, `python -m y`, and quoted/`$GITHUB_WORKSPACE`-prefixed
+        paths must all be seen.
+        """
+        root = Path(__file__).resolve().parents[1]
+        text = self.preview_job_text()
+        found = set()
+        for line in text.splitlines():
+            found.update(self.scripts_invoked_on(line, r"(?:scripts|config)"))
+        seen, queue = set(), list(found)
+        while queue:
+            rel = queue.pop()
+            if rel in seen:
+                continue
+            seen.add(rel)
+            path = root / rel
+            if not path.is_file():
+                continue
+            body = path.read_text(encoding="utf-8", errors="ignore")
+            for imported in re.findall(r"from\s+['\"]\./([A-Za-z0-9_.-]+)['\"]", body):
+                queue.append(f"scripts/{imported}")
+            for line in body.splitlines():
+                queue.extend(self.scripts_invoked_on(line, "scripts"))
+        return seen
+
+    def test_preview_producer_paths_cover_the_whole_executed_closure(self):
+        """The list must not be able to fall silently behind reality.
+
+        Independent review reopened the forgery path twice here: once because a
+        script that runs before evidence production was unpinned, and once because
+        a PINNED script imported an unpinned one. Anything executing at the
+        dispatched ref can rewrite the workspace copies of the pinned files, and
+        the gate compares COMMITTED blobs, so it cannot see that. One unpinned
+        executed file breaks custody for every pinned one.
+
+        So this walks the closure instead of trusting a hand-written list.
+        """
+        closure = self.executed_closure()
+        self.assertIn("scripts/manage-migration-author-lanes.mjs", closure,
+                      "closure walk missed a known preview-job script; the parser has rotted")
+        self.assertIn("scripts/check-pr-object-collisions.mjs", closure,
+                      "closure walk did not follow imports; that is the hop-three defect")
+        unpinned = sorted(closure - set(PREVIEW_PRODUCER_PATHS) - set(self.PREVIEW_JOB_EXCLUSIONS))
         self.assertEqual(
             unpinned, [],
-            f"these scripts execute in the migrations workflow but are not pinned "
-            f"in PREVIEW_PRODUCER_PATHS: {unpinned}",
+            f"these execute in the preview job (directly or via import) but are not "
+            f"pinned in PREVIEW_PRODUCER_PATHS: {unpinned}",
         )
 
     def test_every_pinned_producer_path_exists(self):

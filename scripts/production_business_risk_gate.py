@@ -327,11 +327,13 @@ PREVIEW_PRODUCER_PATHS = (
     # Local import of the above. Pinning an entry point without its imports
     # leaves the same door open one level down.
     "scripts/check-dispatch-collision.mjs",
+    # Static import of check-dispatch-collision.mjs. Its module body evaluates
+    # before the entry point runs, so hop three is as executable as hop one.
+    "scripts/check-pr-object-collisions.mjs",
     # Executes in preview-recovery mode. Safe today only because that path
     # separately demands run head == exact main; pinned so that coupling cannot
     # silently loosen later.
     "scripts/historical_preview_recovery.py",
-    "scripts/check-sql.sh",
     # Data, not code, but it routes which apply mechanism the rehearsal
     # exercises. Pinned for rehearsal fidelity.
     "config/atomic-migration-allowlist.json",
