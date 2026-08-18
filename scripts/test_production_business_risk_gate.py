@@ -427,6 +427,19 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                       "closure walk missed a known preview-job script; the parser has rotted")
         self.assertIn("scripts/check-pr-object-collisions.mjs", closure,
                       "closure walk did not follow imports; that is the hop-three defect")
+        # The exclusion list is a hand-written bypass of the walk, so its premise
+        # must itself be checked. Every exclusion claims "this does not run in the
+        # preview job". If one ever does, the walk would stay green while the
+        # script stayed unpinned -- reopening the exact forgery path this test
+        # exists to close. Assert the premise instead of trusting the comment.
+        job_text = self.preview_job_text()
+        for excluded in self.PREVIEW_JOB_EXCLUSIONS:
+            for line in job_text.splitlines():
+                self.assertNotIn(
+                    excluded, self.scripts_invoked_on(line, "scripts"),
+                    f"{excluded} is excluded as not-preview-job, but the preview job "
+                    f"now invokes it; pin it in PREVIEW_PRODUCER_PATHS instead",
+                )
         unpinned = sorted(closure - set(PREVIEW_PRODUCER_PATHS) - set(self.PREVIEW_JOB_EXCLUSIONS))
         self.assertEqual(
             unpinned, [],
