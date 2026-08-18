@@ -8,6 +8,17 @@
 
 # AGENTS.md — cross-app coordination playbook
 
+## Companywide business rules
+
+Business logic is organized by business topic, not by application. Before
+changing behavior, definitions, permissions, workflows, calculations, or source
+authority, start at
+[`docs/business-rules/application-map.md`](docs/business-rules/application-map.md)
+and load only the topics the task touches. Application repos may link to these
+rules but must not maintain competing copies. The collection, status, correction,
+and dissemination process is
+[`docs/business-rules/README.md`](docs/business-rules/README.md).
+
 ## Historical item merchandise-group classification
 
 Before interpreting `full_item_master.csv`, changing item-description parsing, or reporting historical MG match counts, read [`docs/item-description-mg-classification-process.md`](docs/item-description-mg-classification-process.md). The active remediation plan is [`plan_item_description_mg_taxonomy_repair.md`](plan_item_description_mg_taxonomy_repair.md); follow its STATUS table and do not recreate the unsafe provisional/fuzzy method. The permanent rule is: parse every description into product type, size, licensor, property, and artwork; build independent post-May-13 maps for MG01, MG01+MG02, and MG01+MG02+MG03; then match old product types from three levels to two to one. A failed full-key match is never an MG01 failure.
@@ -1403,9 +1414,17 @@ a short window shows only `EH001` and misleads. `1900-01-01` is the empty-date m
 
 ### 6.1 Merch groups / licensors / properties — read this before touching them
 
-Anything involving licensor, property, big theme, little theme, style guide, art type,
-art source, artist, age group, or `mgTypeCode` must start at
-[`docs/merch-group-taxonomy-architecture.md`](docs/merch-group-taxonomy-architecture.md).
+Start from the business object, not the old shared table:
+
+- Licensor, Property, Character, Style Guide, Franchise, licensed Asset, source authority,
+  or Property Active/Inactive starts at
+  [`docs/core-master-data-consolidation-aim.md`](docs/core-master-data-consolidation-aim.md).
+- MG01–MG14, `mgCategory`, product type/subtype, big theme, little theme, art type,
+  art source, artist, age group, division meaning, or `mgTypeCode` starts at
+  [`docs/merch-group-taxonomy-architecture.md`](docs/merch-group-taxonomy-architecture.md).
+
+The merchandise-group document explains legacy shape. It does not override the settled
+2026-08-16 licensing authority rules.
 
 For the active ColdLion Licensor/Property source cutover, read the STATUS table in
 [`plan_coldlion_licensor_property_accelerated_cutover.md`](plan_coldlion_licensor_property_accelerated_cutover.md)

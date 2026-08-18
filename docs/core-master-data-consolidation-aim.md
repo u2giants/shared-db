@@ -1,5 +1,9 @@
 # Licensing Master Data architecture
 
+> **Business authority moved 2026-08-18:** The companywide rule is
+> [`business-rules/licensing-master-data.md`](business-rules/licensing-master-data.md).
+> This file retains the detailed source matrix, architecture, and implementation contract.
+
 **Status:** SETTLED central database and application architecture
 
 **Owner:** Albert Hazan
