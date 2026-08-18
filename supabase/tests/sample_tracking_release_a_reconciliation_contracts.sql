@@ -7,7 +7,7 @@ DECLARE
   v_missing text[];
 BEGIN
   IF (SELECT count(*) FROM supabase_migrations.schema_migrations
-      WHERE version IN ('20260814130000','20260814193402','20260817190000')) <> 3 THEN
+      WHERE version IN ('20260814130000','20260814193402','20260818024441')) <> 3 THEN
     RAISE EXCEPTION 'Release A reconciliation ledger is incomplete';
   END IF;
 
@@ -61,7 +61,7 @@ ROLLBACK;
 BEGIN;
 DROP TABLE dflow.sample_path_revision CASCADE;
 \set ON_ERROR_STOP off
-\ir ../migrations/20260817190000_sample_tracking_release_a_catalog_reconciliation.sql
+\ir ../migrations/20260818024441_sample_tracking_release_a_catalog_reconciliation.sql
 \set ON_ERROR_STOP on
 
 DO $$
@@ -84,7 +84,7 @@ DROP TABLE dflow.sample_workflow CASCADE;
 DROP TABLE dflow.sample_creation_batch CASCADE;
 COMMIT;
 
-\ir ../migrations/20260817190000_sample_tracking_release_a_catalog_reconciliation.sql
+\ir ../migrations/20260818024441_sample_tracking_release_a_catalog_reconciliation.sql
 
 DO $$
 DECLARE v_missing text[];
