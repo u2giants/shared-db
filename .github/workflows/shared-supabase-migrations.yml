@@ -269,8 +269,18 @@ jobs:
           test "$(git rev-parse HEAD)" = "$MAIN_SHA"
           test "$(git rev-parse origin/main)" = "$MAIN_SHA"
           # A batch authored across several pull requests names a source PR per
-          # version; a single-PR batch keeps the original form. The script
-          # refuses both-at-once, so the selector cannot be ambiguous.
+          # version; a single-PR batch keeps the original form.
+          #
+          # BOTH SET IS REFUSED HERE, not left to the script. Passing only
+          # --source-map would mean the script's own mutual-exclusion check never
+          # fires, so the single-PR input would be silently ignored by the proof
+          # while still selecting the lane-lock PR below. Two different inputs
+          # describing one batch, one of them quietly unused, is not a state a
+          # production gate should run in.
+          if [ -n "${SOURCE_MAP:-}" ] && [ -n "${SOURCE_PR:-}" ]; then
+            echo "REFUSED: name historical_preview_source_pr OR historical_preview_source_pr_map, not both." >&2
+            exit 1
+          fi
           if [ -n "${SOURCE_MAP:-}" ]; then
             SELECTOR=(--source-map "$SOURCE_MAP")
           else
