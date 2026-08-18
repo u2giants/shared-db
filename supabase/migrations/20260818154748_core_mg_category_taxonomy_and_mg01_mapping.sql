@@ -66,6 +66,17 @@
 -- question it was not asked. It is left unmapped and visible: the read contract simply
 -- returns no category for it, which is honest, and a later governed change can add it.
 --
+-- WHAT APPLIES ON A DATABASE WITH NO MERCHANDISE-GROUP ROWS
+-- ---------------------------------------------------------
+-- EVERYTHING STRUCTURAL: both tables, every constraint and index, RLS, the policies and
+-- the grants, plus the seven authoritative categories (they are division-independent
+-- reference data and do not depend on any source row). Only the 19 category-to-MG01
+-- LINK rows need source data, so on a database with no MG01 rows the link seed is a
+-- natural no-op and its assertion is SKIPPED WITH A LOUD NOTICE rather than raising.
+-- On a database that DOES carry MG01 rows the assertion is exactly as strict as before:
+-- anything short of all 19 resolving, partial matches included, raises and rolls back.
+-- See the long comment in section 5.
+
 -- IDEMPOTENCE
 -- -----------
 -- Re-runnable. Tables are `create table if not exists`; the category seed upserts on the
@@ -241,11 +252,34 @@ on conflict (merch_group_mg_id) do nothing;
 
 do $$
 declare
-  v_categories integer;
-  v_pairs      integer;
-  v_missing    text;
-  v_drift      text;
+  v_categories  integer;
+  v_pairs       integer;
+  v_source_rows integer;
+  v_missing     text;
+  v_drift       text;
 begin
+  -- STRUCTURE MUST APPLY EVERYWHERE; ONLY THE ROW ASSERTION IS CONDITIONAL.
+  -- ------------------------------------------------------------------------------
+  -- WHY THIS CONDITION EXISTS — DO NOT "SIMPLIFY" IT AWAY.
+  -- This migration is replayed from EMPTY on an ephemeral database in CI
+  -- (.github/workflows/database-contract-tests.yml). That database carries the SCHEMA
+  -- of core."merchGroup" but not a single row of it. The first version of this block
+  -- raised unconditionally when the 19 authoritative product types did not resolve, so
+  -- on the empty database the exception rolled the WHOLE migration back and the two
+  -- tables were never created at all. A structural migration is not allowed to depend
+  -- on production ROW CONTENT in order to apply its STRUCTURE.
+  --
+  -- The fix is NOT to drop the guard. It is to distinguish the two situations:
+  --   * NO MG01 merchandise-group rows exist at all -> there is nothing to map. Skip the
+  --     mapping seed assertion with a LOUD notice. Nothing is half-seeded, because
+  --     nothing could be seeded.
+  --   * MG01 rows DO exist -> the seed was supposed to resolve all 19. Anything less,
+  --     INCLUDING A PARTIAL MATCH, still raises and rolls back. That is the case this
+  --     guard was written for and it is unchanged in strength.
+  -- The drift check below is unconditional in both cases: it only looks at links that
+  -- already exist, so it costs nothing on an empty database and never weakens.
+  -- ------------------------------------------------------------------------------
+
   select count(*) into v_categories from core.mg_category;
   if v_categories < 7 then
     raise exception
@@ -253,8 +287,13 @@ begin
       v_categories;
   end if;
 
-  -- Every one of the 19 authoritative product types must have resolved to at least one
-  -- real merchandise-group row, and must be linked to the right category.
+  -- The categories themselves are authoritative, division-independent reference data.
+  -- They seed unconditionally on every database, so this assertion stays unconditional.
+
+  select count(*) into v_source_rows
+  from core."merchGroup"
+  where "mgTypeCode" = '01';
+
   with authoritative (mg_code, mg_desc, category_code) as (
     values
       ('A','Stretched/Box','WALL'),('B','Framed','WALL'),('C','Plaque','WALL'),
@@ -287,22 +326,36 @@ begin
   into v_missing, v_drift
   from linked;
 
+  -- UNCONDITIONAL. An existing link that disagrees with the authoritative mapping is a
+  -- drift on ANY database and is never overwritten quietly.
   if v_drift is not null then
     raise exception
       'Issue #1163: existing category links disagree with the authoritative mapping: %. '
       'Refusing to overwrite a deliberate change — resolve this on the issue.', v_drift;
   end if;
 
-  if v_missing is not null then
+  if v_source_rows = 0 then
+    -- Loud, never silent. The structure is in place and the mapping seed is a no-op
+    -- because there is no source data on this database to map.
+    raise notice
+      'Issue #1163: core."merchGroup" holds NO mgTypeCode ''01'' rows on this database, '
+      'so the 19 category-to-MG01 mappings were NOT seeded and their assertion is '
+      'SKIPPED. The tables, constraints, indexes, RLS and grants applied in full, and '
+      'the 7 categories were seeded. On a database that does carry MG01 rows this same '
+      'block raises instead of skipping.';
+  elsif v_missing is not null then
+    -- Rows ARE present, so a partial or absent match is a real failure. Hard stop.
     raise exception
-      'Issue #1163: these authoritative MG01 product types did not resolve or were not '
-      'linked: %. The merchandise-group rows may be named differently on this database.',
-      v_missing;
+      'Issue #1163: core."merchGroup" holds % mgTypeCode ''01'' rows, but these '
+      'authoritative product types did not resolve or were not linked: %. The '
+      'merchandise-group rows may be named differently on this database. Refusing to '
+      'leave a half-seeded mapping behind.',
+      v_source_rows, v_missing;
   end if;
 
   select count(*) into v_pairs from core.mg_category_merch_group;
-  raise notice 'Issue #1163 OK: % categories, % category-to-MG01 link rows.',
-    v_categories, v_pairs;
+  raise notice 'Issue #1163 OK: % categories, % category-to-MG01 link rows (% MG01 source rows).',
+    v_categories, v_pairs, v_source_rows;
 end;
 $$;
 

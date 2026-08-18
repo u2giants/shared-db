@@ -10,6 +10,23 @@
 --   single multi-statement batch through the transaction pooler (port 6543) wraps the
 --   blocks in one implicit transaction and can stall.
 --
+-- WHAT HOLDS UNCONDITIONALLY, AND WHAT IS CONDITIONAL
+--   This file runs BOTH against preview/production (populated) and against the
+--   from-empty ephemeral database in .github/workflows/database-contract-tests.yml,
+--   which carries the SCHEMA of core."merchGroup" but not one row of it.
+--     * STRUCTURE (sections A and B) must pass on EVERY database, always. Tables,
+--       columns, the one-category-per-product-type unique constraint, the foreign keys,
+--       RLS, the policies, the grants, and the seven authoritative categories — those
+--       categories are division-independent reference data that the migration seeds
+--       unconditionally, so they are asserted unconditionally too.
+--     * The 19 MAPPINGS (section C), the read contract (section E) and the three
+--       negative cases that need a real merchandise-group row (D1, D2, D4) can only
+--       hold where the source rows exist. Where they do not, each is SKIPPED WITH AN
+--       EXPLICIT NOTICE naming what was skipped and why. A skip is never silent and is
+--       never counted as a pass.
+--   NOTHING here is weakened to go green: on a populated database every one of these
+--   assertions runs and must pass exactly as it did before.
+--
 -- WHAT IT ASSERTS
 --   A. The objects exist, with the constraint that makes acceptance check 3 real.
 --   B. The seven categories exist exactly once each (acceptance check 1).
@@ -40,8 +57,13 @@ declare
   v_fail integer := 0;
   v_n    integer;
   v_txt  text;
+  v_source_rows integer;
   r      record;
 begin
+  -- Is there any source data on this database at all? Sections C and E are meaningless
+  -- without it; sections A and B are asserted regardless. See the header.
+  select count(*) into v_source_rows from core."merchGroup" where "mgTypeCode" = '01';
+
   raise notice '=== A. OBJECT EXISTENCE ===';
   foreach v_txt in array array['core.mg_category', 'core.mg_category_merch_group'] loop
     if to_regclass(v_txt) is null then
@@ -93,6 +115,66 @@ begin
     else
       v_pass := v_pass + 1; raise notice 'PASS anon cannot SELECT core.%', v_txt;
     end if;
+
+    -- The read grant the applications actually depend on.
+    if has_table_privilege('authenticated', 'core.' || quote_ident(v_txt), 'SELECT') then
+      v_pass := v_pass + 1; raise notice 'PASS authenticated can SELECT core.%', v_txt;
+    else
+      v_fail := v_fail + 1; raise notice 'FAIL authenticated cannot SELECT core.%', v_txt;
+    end if;
+
+    -- With RLS on, a missing policy is a table nobody can read. Both must be present.
+    select count(*) into v_n
+    from pg_policies
+    where schemaname = 'core' and tablename = v_txt
+      and policyname in ('shared_read', 'admin_write');
+    if v_n = 2 then
+      v_pass := v_pass + 1; raise notice 'PASS core.% carries both shared_read and admin_write', v_txt;
+    else
+      v_fail := v_fail + 1;
+      raise notice 'FAIL core.% has % of the 2 expected policies (shared_read, admin_write)', v_txt, v_n;
+    end if;
+
+    -- The columns the read contract and the link both depend on.
+    select count(*) into v_n
+    from information_schema.columns
+    where table_schema = 'core' and table_name = v_txt
+      and column_name in (
+        case v_txt when 'mg_category' then 'code' else 'mg_category_id' end,
+        case v_txt when 'mg_category' then 'name' else 'merch_group_mg_id' end,
+        case v_txt when 'mg_category' then 'sort_order' else 'source' end,
+        'id', 'created_at', 'updated_at'
+      );
+    if v_n = 6 then
+      v_pass := v_pass + 1; raise notice 'PASS core.% carries its 6 contract columns', v_txt;
+    else
+      v_fail := v_fail + 1; raise notice 'FAIL core.% carries % of its 6 contract columns', v_txt, v_n;
+    end if;
+  end loop;
+
+  -- The foreign key onto core.mg_category, so a link can never point at nothing.
+  select count(*) into v_n
+  from pg_constraint
+  where conrelid = 'core.mg_category_merch_group'::regclass
+    and contype = 'f'
+    and confrelid = 'core.mg_category'::regclass;
+  if v_n = 1 then
+    v_pass := v_pass + 1; raise notice 'PASS foreign key to core.mg_category(id) exists';
+  else
+    v_fail := v_fail + 1; raise notice 'FAIL no foreign key from mg_category_merch_group to core.mg_category';
+  end if;
+
+  -- The two unique indexes that keep the category list itself clean.
+  foreach v_txt in array array['mg_category_code_key', 'mg_category_name_key',
+                              'mg_category_merch_group_category_idx'] loop
+    select count(*) into v_n
+    from pg_class i join pg_namespace n on n.oid = i.relnamespace
+    where n.nspname = 'core' and i.relname = v_txt and i.relkind = 'i';
+    if v_n = 1 then
+      v_pass := v_pass + 1; raise notice 'PASS index core.% exists', v_txt;
+    else
+      v_fail := v_fail + 1; raise notice 'FAIL index core.% missing', v_txt;
+    end if;
   end loop;
 
   raise notice '=== B. THE SEVEN CATEGORIES EXIST EXACTLY ONCE (acceptance check 1) ===';
@@ -113,6 +195,12 @@ begin
   end if;
 
   raise notice '=== C. ALL 19 CATEGORY-TO-MG01 MAPPINGS (acceptance checks 2, 4, 6) ===';
+  if v_source_rows = 0 then
+    raise notice 'SKIP C: core."merchGroup" holds NO mgTypeCode ''01'' rows on this '
+      'database, so there is nothing for the 19 authoritative product types to resolve '
+      'against and the migration correctly seeded no link rows. This section is SKIPPED, '
+      'NOT passed. It runs and must pass on preview and production.';
+  else
   for r in
     with authoritative (mg_code, mg_desc, category_code) as (
       values
@@ -166,8 +254,11 @@ begin
     end if;
   end loop;
 
+  end if;
+
   -- The whole point of the unique constraint, restated as data: no product-type row may
-  -- appear under two categories.
+  -- appear under two categories. These two hold on an EMPTY table as well (0 offenders),
+  -- so they stay unconditional.
   select count(*) into v_n
   from (
     select merch_group_mg_id
@@ -193,6 +284,10 @@ begin
   end if;
 
   raise notice '=== E. READ CONTRACT (acceptance check 5) ===';
+  if v_source_rows = 0 then
+    raise notice 'SKIP E: no mgTypeCode ''01'' source rows on this database, so the read '
+      'contract has nothing to return. SKIPPED, not passed.';
+  else
   select count(distinct (category_code, mg01_code, mg01_product_type)) into v_n
   from (
     select
@@ -211,6 +306,7 @@ begin
     v_fail := v_fail + 1;
     raise notice 'FAIL read contract yielded % distinct triples, expected 19', v_n;
   end if;
+  end if;
 
   raise notice '--- % passed / % failed ---', v_pass, v_fail;
   if v_fail > 0 then
@@ -222,6 +318,10 @@ $$;
 -- -------------------------------------------------------------------------------------
 -- D. NEGATIVE CASES — invalid and duplicate mappings must be REJECTED.
 --    Each attempt is expected to raise; if it does NOT raise, that is the failure.
+--
+--    D3, D5, D6 and D7 need no source data and run on EVERY database.
+--    D1, D2 and D4 act on a REAL merchandise-group row, so on a database with no MG01
+--    rows they are SKIPPED WITH A NOTICE rather than quietly counted as passes.
 -- -------------------------------------------------------------------------------------
 do $$
 declare
@@ -244,6 +344,11 @@ begin
   limit 1;
 
   -- D1: same product type, a SECOND category -> must be rejected.
+  if v_existing is null then
+    raise notice 'SKIP D1 and D2: no seeded category link exists on this database (no '
+      'mgTypeCode ''01'' source rows to map), so there is no real product type to try to '
+      'double-book. SKIPPED, not passed. Both run on preview and production.';
+  else
   begin
     insert into core.mg_category_merch_group (mg_category_id, merch_group_mg_id)
     values (v_cat_clock, v_existing);
@@ -266,6 +371,7 @@ begin
     v_pass := v_pass + 1;
     raise notice 'PASS D2: duplicate mapping rejected (unique_violation)';
   end;
+  end if;
 
   -- D3: mapping to a merchandise-group row that does not exist -> must be rejected.
   begin
@@ -287,6 +393,11 @@ begin
       select 1 from core.mg_category_merch_group l where l.merch_group_mg_id = mg.mg_id
     )
   limit 1;
+  if v_spare is null then
+    raise notice 'SKIP D4: no unmapped mgTypeCode ''01'' merchandise-group row exists on '
+      'this database to attach a bogus category to. SKIPPED, not passed. D3 already '
+      'proves the same foreign key from the other side and did run.';
+  else
   begin
     insert into core.mg_category_merch_group (mg_category_id, merch_group_mg_id)
     values ('00000000-0000-0000-0000-000000000000'::uuid, v_spare);
@@ -297,6 +408,7 @@ begin
     v_pass := v_pass + 1;
     raise notice 'PASS D4: mapping to a non-existent category rejected';
   end;
+  end if;
 
   -- D5: a blank category code -> must be rejected.
   begin
