@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).parents[1]
-MIGRATION = ROOT / "supabase/migrations/20260817190000_sample_tracking_release_a_catalog_reconciliation.sql"
+MIGRATION = ROOT / "supabase/migrations/20260818024441_sample_tracking_release_a_catalog_reconciliation.sql"
 SQL = MIGRATION.read_text(encoding="utf-8")
 
 
@@ -54,11 +54,11 @@ class ReleaseAReconciliationContract(unittest.TestCase):
     def test_database_contract_covers_mismatch_rollback_and_fresh_state(self):
         contract = (ROOT / "supabase/tests/sample_tracking_release_a_reconciliation_contracts.sql").read_text(encoding="utf-8")
         self.assertIn("DROP TABLE dflow.sample_path_revision CASCADE", contract)
-        self.assertEqual(contract.count("\\ir ../migrations/20260817190000_sample_tracking_release_a_catalog_reconciliation.sql"), 2)
+        self.assertEqual(contract.count("\\ir ../migrations/20260818024441_sample_tracking_release_a_catalog_reconciliation.sql"), 2)
         self.assertNotIn("P9750", contract)
         self.assertIn("did not restore the dropped trigger", contract)
         self.assertIn("0-of-3 repair did not recreate relations", contract)
-        for version in ("20260814130000", "20260814193402", "20260817190000"):
+        for version in ("20260814130000", "20260814193402", "20260818024441"):
             self.assertIn(version, contract)
 
 
