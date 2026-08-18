@@ -137,6 +137,15 @@ declare
     'ambiguous_prior_owner',
     'lease_proof'];
 
+  -- The ambiguity VERDICT fields. The other four members of c_lease_fields are
+  -- stamped by this function on a claim, so whatever the payload said about them is
+  -- discarded; these four are not, so a claiming caller could otherwise rewrite them.
+  c_verdict_fields constant text[] := array[
+    'ambiguous_since',
+    'ambiguous_reason',
+    'ambiguous_prior_phase',
+    'ambiguous_prior_owner'];
+
   v_field          text;
   v_current        jsonb;
   v_stored         jsonb;
@@ -358,6 +367,51 @@ begin
           p_op_key, v_stored_rev, coalesce(v_in_rev::text, '<null>')
           using errcode = '55000';
       end if;
+    end if;
+
+    -- ------------------------------------------------------------------------
+    -- A LEGACY CALLER MAY NEVER MOVE A LEASE-CONTROLLING FIELD. NOT ONE.
+    --
+    -- c_lease_fields used to be enforced in exactly ONE place -- the non-claiming
+    -- branch of the guarded path -- which left the root of trust writable by the two
+    -- paths that hold no proof of anything. external_job.lease_proof is the md5 digest
+    -- the whole receipt scheme trusts, and a three-argument call could overwrite it:
+    --
+    --   1. a legacy call plants external_job.lease_proof = md5('attacker-token');
+    --      nothing checked it, so it was stored;
+    --   2. the same caller returns on the guarded path presenting that token as
+    --      external_job.lease_token, is verified as the holder, and plants a
+    --      fabricated provider_batch_id.
+    --
+    -- The real holder's genuine id is then refused as a replacement and the billed
+    -- provider job is orphaned -- the exact failure this migration exists to prevent.
+    -- Planting the digest also destroys the true holder's receipt on the way past.
+    --
+    -- THE RULE: a legacy caller may not modify ANY member of c_lease_fields. They must
+    -- be carried forward exactly as stored -- same values, same present/absent --
+    -- including on an operation with NO stored external_job, where "as stored" means
+    -- ABSENT. Planting a digest on an operation nobody holds yet buys the same
+    -- fake-provider_batch_id capability as soon as anybody claims it.
+    --
+    -- REFUSE, DO NOT SILENTLY CARRY FORWARD. A legacy caller that innocently
+    -- round-trips the whole object writes back exactly what it read, so it passes this
+    -- check untouched; the only call that fails is one that CHANGED a lease field, and
+    -- that is never innocent. Silently substituting the stored values would hand such a
+    -- caller an ordinary success it reads as "my lease fields were accepted" -- the
+    -- same silent-success class of behaviour the payload ambiguity escape was rejected
+    -- for, and on the same money path.
+    -- ------------------------------------------------------------------------
+    if v_in_job is not null then
+      foreach v_field in array c_lease_fields loop
+        if (v_in_job -> v_field) is distinct from (v_stored_job -> v_field) then
+          raise exception
+            'update_bulk_operation: legacy write to "%" refused -- it would modify the lease-controlling external_job field "%" (stored=%, offered=%). These fields, lease_proof above all, are the root of trust for the claim receipt; a three-argument caller holds no proof and may never move them. Carry them forward exactly as stored, or claim the lease on the guarded path.',
+            p_op_key, v_field,
+            coalesce((v_stored_job -> v_field)::text, '<absent>'),
+            coalesce((v_in_job -> v_field)::text, '<absent>')
+            using errcode = '55000';
+        end if;
+      end loop;
     end if;
 
     -- ------------------------------------------------------------------------
@@ -661,13 +715,61 @@ begin
           using errcode = '22023';
       end if;
 
+      -- ----------------------------------------------------------------------
+      -- A CLAIMING CALLER MAY NOT REWRITE THE AMBIGUITY VERDICT EITHER.
+      --
+      -- The claim below stamps submission_owner, lease_expires_at, lease_claimed_at
+      -- and lease_proof itself, so the payload's versions of those four are simply
+      -- overwritten. The four ambiguous_* fields were NOT stamped, and an ambiguous
+      -- operation always has a lapsed lease, so anybody may claim it -- and could
+      -- carry the required phase = 'ambiguous_submission' forward while rewriting
+      -- ambiguous_prior_owner to somebody else and ambiguous_reason to noise. That is
+      -- the forensic record of who held the lease when a possibly-billed provider job
+      -- went unrecorded, on the one operation a human must reconcile by hand. Only
+      -- this function writes it.
+      -- ----------------------------------------------------------------------
+      foreach v_field in array c_verdict_fields loop
+        if (v_in_job -> v_field) is distinct from (v_stored_job -> v_field) then
+          v_ok := false; v_reason := 'lease_fields_immutable';
+          exit guarded;
+        end if;
+      end loop;
+
       v_lease_until := v_now + make_interval(secs => coalesce(p_lease_seconds, c_default_lease));
 
-      -- Mint a claim receipt only when this call is actually TAKING a free lease.
-      -- A same-name renewal over a still-live lease keeps the incumbent receipt: the
-      -- renewer is not handed one (so it cannot become the holder by repeating a
-      -- public name) and the real holder's receipt is not invalidated (so ordinary
-      -- shared-name retry traffic keeps working).
+      -- ----------------------------------------------------------------------
+      -- THE SAME-NAME RENEWAL TRAP, STATED PLAINLY. THIS IS DELIBERATE.
+      --
+      -- Mint a claim receipt only when this call is actually TAKING a free lease. A
+      -- same-name renewal over a still-LIVE lease keeps the incumbent receipt.
+      --
+      -- What that means for a second process that shares the holder's owner name (a
+      -- redeploy running the same worker twice), while the lease is LIVE: its claim
+      -- SUCCEEDS -- ok = true -- and it extends lease_expires_at and bumps the
+      -- revision, but it is NOT the holder and never becomes one. It is handed no
+      -- receipt (envelope.lease_token is null, envelope.lease_receipt_issued is
+      -- false), so it can never bind this operation to a provider_batch_id. The real
+      -- holder's receipt keeps working. The trap is therefore: A SUCCESSFUL CLAIM IS
+      -- NOT PROOF THAT YOU HOLD THE LEASE. Callers must key off
+      -- lease_receipt_issued / lease_token, never off ok alone, and a renewer that
+      -- receives no receipt must not go on to POST to the provider -- it must treat
+      -- itself as the losing twin and stand down.
+      --
+      -- Why it is nevertheless right. Re-minting on renewal would hand a receipt to
+      -- anyone who repeats the stored submission_owner, and that name is published in
+      -- admin_config to every caller -- it would restore the impostor attack this
+      -- receipt scheme exists to close, this time with the function issuing the
+      -- credential. Refusing same-name renewal outright would break the legitimate
+      -- redeploy retry that keeps a real lease alive.
+      --
+      -- When the lease has LAPSED at the moment of renewal, this branch does re-mint
+      -- and the incumbent digest is overwritten. That cannot orphan a billed job: a
+      -- lapsed lease with no saved provider_batch_id never reaches here at all (the
+      -- ambiguity rule above intercepts it, writes the verdict and returns
+      -- ok = false), so the only lapsed claims that reach the mint are ones where the
+      -- provider_batch_id is already saved -- nothing is left for the old receipt to
+      -- protect, since re-pointing a saved id is refused unconditionally -- or ones
+      -- where no owner was ever recorded, which is an unclaimed operation.
       if v_stored_proof is not null
          and v_stored_owner = p_submission_owner
          and coalesce(v_stored_lease > v_now, false) then
@@ -725,6 +827,10 @@ begin
     -- readable form. Send it back as external_job.lease_token to prove you are the
     -- holder when saving the provider_batch_id.
     'lease_token', case when v_ok and v_minted then v_lease_token end,
+    -- Explicit, never inferred from a null token: false on a successful same-name
+    -- renewal over a live lease, which extends the lease WITHOUT making the renewer
+    -- the holder. See THE SAME-NAME RENEWAL TRAP above.
+    'lease_receipt_issued', v_ok and v_minted,
     'operation', v_out_op,
     'operations', v_current);
 end;
@@ -738,11 +844,15 @@ comment on function public.update_bulk_operation(text, jsonb, text, bigint, text
   'p_submission_owner + p_lease_seconds atomically claim a submission lease. A guarded write that does NOT '
   'claim the lease may only carry the lease-controlling external_job fields (submission_owner, lease_expires_at, '
   'lease_claimed_at, ambiguous_*) forward unchanged, and may not drop a live-leased external_job; anything else '
-  'is refused with reason = lease_fields_immutable. Claiming a free lease mints a one-time claim receipt: only its '
+  'is refused with reason = lease_fields_immutable, and the legacy three-argument path RAISES (55000) if it would '
+  'move any of them, lease_proof included -- no path that holds no proof may touch the root of trust. '
+  'Claiming a free lease mints a one-time claim receipt: only its '
   'md5 digest is stored (external_job.lease_proof) and the raw receipt is returned once as envelope.lease_token. '
   'On an operation that already has a stored external_job, a provider_batch_id may only be INTRODUCED by a caller '
   'that sends that receipt back as external_job.lease_token (stating an owner name proves nothing, because the '
-  'stored owner is readable); a same-name renewal keeps the incumbent receipt rather than re-minting. Only this '
+  'stored owner is readable); a same-name renewal over a still-LIVE lease keeps the incumbent receipt rather than '
+  're-minting, so it succeeds and extends the lease but does NOT make the renewer the holder -- callers must key '
+  'off envelope.lease_receipt_issued / envelope.lease_token, never off ok alone. Only this '
   'function may set phase = ambiguous_submission. While the operation names a provider job or is in a live or '
   'ambiguous phase, external_job may not be dropped or re-pointed by ANY caller and its phase may not be moved by '
   'a non-claiming write -- none of which depends on the lease still being live. An expired lease '
@@ -771,6 +881,21 @@ declare
   c_live_phases constant text[] := array['prepared','submitting','pending','applying'];
   c_stop_status constant text[] := array['stop','stopping','stopped','stop_requested'];
 
+  -- Must stay identical to c_lease_fields in public.update_bulk_operation. These are
+  -- the external_job fields that decide WHO holds the submission lease and what the
+  -- ambiguity verdict is. This writer holds no proof of anything, so it may never
+  -- move one of them.
+  c_lease_fields constant text[] := array[
+    'submission_owner',
+    'lease_expires_at',
+    'lease_claimed_at',
+    'ambiguous_since',
+    'ambiguous_reason',
+    'ambiguous_prior_phase',
+    'ambiguous_prior_owner',
+    'lease_proof'];
+
+  v_field         text;
   v_current       jsonb;
   v_key           text;
   v_stored        jsonb;
@@ -927,6 +1052,43 @@ begin
       end if;
     end if;
 
+    -- ------------------------------------------------------------------------
+    -- A BATCH CALLER MAY NEVER MOVE A LEASE-CONTROLLING FIELD EITHER.
+    --
+    -- Same disqualifying hole as the legacy three-argument path, reachable by anyone
+    -- who can call this function: external_job.lease_proof is the md5 digest the
+    -- claim-receipt scheme trusts, and nothing here checked it. A batch payload could
+    -- plant lease_proof = md5('attacker-token'), and the same caller could then return
+    -- on the guarded path presenting that token, be verified as the lease holder, and
+    -- plant a fabricated provider_batch_id -- after which the real holder's genuine id
+    -- is refused as a replacement and the billed provider job is orphaned. Planting
+    -- the digest also destroys the true holder's receipt.
+    --
+    -- THE RULE: every member of c_lease_fields must be carried forward exactly as
+    -- stored -- same values, same present/absent -- including on a key with NO stored
+    -- external_job, where "as stored" means ABSENT. This is checked on EVERY key,
+    -- protected or not, because an unprotected key with a planted digest becomes the
+    -- same weapon the moment anybody claims it.
+    --
+    -- It RAISES rather than silently substituting the stored values, for the same
+    -- reason every other refusal on this path raises: a batch caller gets no proof
+    -- envelope, reads a quiet return as success, and the money path is
+    -- write-then-POST. A caller that faithfully round-trips what it read passes this
+    -- check untouched; only a caller that CHANGED a lease field is refused.
+    -- ------------------------------------------------------------------------
+    if v_in_job is not null then
+      foreach v_field in array c_lease_fields loop
+        if (v_in_job -> v_field) is distinct from (v_stored_job -> v_field) then
+          raise exception
+            'update_bulk_operations_batch: refused -- key "%" would modify the lease-controlling external_job field "%" (stored=%, offered=%). These fields, lease_proof above all, are the root of trust for the claim receipt; a batch caller holds no proof and may never move them. No key in this batch was applied.',
+            v_key, v_field,
+            coalesce((v_stored_job -> v_field)::text, '<absent>'),
+            coalesce((v_in_job -> v_field)::text, '<absent>')
+            using errcode = '55000';
+        end if;
+      end loop;
+    end if;
+
     -- A batch caller may never INTRODUCE a provider_batch_id either. Refusing only
     -- REPLACEMENT left the window that matters open: while a worker holds a lease and
     -- has not yet saved the id its POST returned, nothing is stored, so nothing was
@@ -969,7 +1131,9 @@ $function$;
 comment on function public.update_bulk_operations_batch(jsonb) is
   'Legacy multi-key writer for the admin_config BULK_OPERATIONS JSONB value. Behaviour and return value '
   'are unchanged for every operation with no protected external_job. It raises rather than merging over a '
-  'live or ambiguous external_job, a saved provider_batch_id (which protects the operation for good, whatever the '
+  'live or ambiguous external_job, any change to a lease-controlling external_job field (submission_owner, '
+  'lease_expires_at, lease_claimed_at, lease_proof, ambiguous_*) on ANY key, '
+  'a saved provider_batch_id (which protects the operation for good, whatever the '
   'lease clock says), a held submission lease, a regressing state_revision, or a stopped operation, and it may '
   'never INTRODUCE a provider_batch_id on an operation that has none. If ANY key in the batch has an expired '
   'submission lease with no saved provider_batch_id it RAISES (55000) and no key in the batch is applied or '
