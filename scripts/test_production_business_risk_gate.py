@@ -322,8 +322,13 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         "scripts/production_apply_review_evidence.py",
         "scripts/production_catalog_verification.py",
         # Validate-only job, which produces no evidence.
+        # Validate-only job. It produces no evidence, runs on a separate runner,
+        # and a forged artifact under the preview name would collide with the
+        # preview job's upload and fail the run. Confirmed by independent review.
         "scripts/check-sql.sh",
         "scripts/check-sql.test.mjs",
+        # Invoked only by check-sql.sh, so validate-only for the same reason.
+        "scripts/historical-migration-restorations.mjs",
     )
 
     def preview_job_text(self):
@@ -343,9 +348,30 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         `$GITHUB_WORKSPACE/`-prefixed paths, which are the shapes that previously
         slipped past a stricter pattern.
         """
-        if not re.search(r"\b(?:node|python|bash)\b", line):
+        interpreted = re.search(r"\b(?:node|python|python3|bash|sh|source)\b", line)
+        # child_process spawns name the script as a plain string argument, with
+        # the interpreter supplied as process.execPath rather than by name.
+        spawned = re.search(r"\b(?:execFileSync|execSync|spawnSync|spawn|execFile)\b", line)
+        if not interpreted and not spawned:
             return []
-        return re.findall(rf"({roots}/[A-Za-z0-9_.-]+)", line)
+        return [m.rstrip(".") for m in re.findall(rf"({roots}/[A-Za-z0-9_.-]+)", line)]
+
+    @staticmethod
+    def local_imports(root, body):
+        """Sibling modules a body pulls in, for BOTH languages.
+
+        JS was covered from the start. Python was not, and the preview job's
+        heredocs already use `from production_migration_guard import ...`. That
+        was covered only by coincidence -- the same module happens to be invoked
+        by name elsewhere -- so a future helper imported but never invoked would
+        have executed unpinned with this test green. That is precisely the defect
+        class that reopened the forgery path twice.
+        """
+        found = [f"scripts/{name}" for name in re.findall(r"from\s+['\"]\./([A-Za-z0-9_.-]+)['\"]", body)]
+        for name in re.findall(r"^\s*(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*)", body, re.M):
+            if (root / "scripts" / f"{name}.py").is_file():
+                found.append(f"scripts/{name}.py")
+        return found
 
     def executed_closure(self):
         """Every repo script the preview job can execute, including imports.
@@ -372,10 +398,16 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             if not path.is_file():
                 continue
             body = path.read_text(encoding="utf-8", errors="ignore")
-            for imported in re.findall(r"from\s+['\"]\./([A-Za-z0-9_.-]+)['\"]", body):
-                queue.append(f"scripts/{imported}")
+            queue.extend(self.local_imports(root, body))
             for line in body.splitlines():
                 queue.extend(self.scripts_invoked_on(line, "scripts"))
+        # Heredocs in the workflow import sibling modules directly rather than
+        # invoking them, so the job text is walked for imports too.
+        queue.extend(self.local_imports(root, text))
+        while queue:
+            rel = queue.pop()
+            if rel not in seen:
+                seen.add(rel)
         return seen
 
     def test_preview_producer_paths_cover_the_whole_executed_closure(self):
