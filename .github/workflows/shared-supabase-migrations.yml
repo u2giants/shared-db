@@ -69,6 +69,10 @@ on:
         description: "Preview recovery only: original merged PR that authored every allowlisted migration"
         type: string
         required: false
+      historical_preview_source_pr_map:
+        description: "Preview recovery only: version:pr pairs, when the batch was authored by several PRs"
+        type: string
+        required: false
       owner_decision_run_id:
         description: "Material-risk apply only: immutable owner-decision evidence run ID"
         type: string
@@ -248,21 +252,31 @@ jobs:
       # bounded set with `git worktree add --detach <sha>`, which needs the object.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.historical_preview_source_pr != '' && inputs.commit_sha || inputs.claim_head_sha }}
+          ref: ${{ (inputs.historical_preview_source_pr != '' || inputs.historical_preview_source_pr_map != '') && inputs.commit_sha || inputs.claim_head_sha }}
           fetch-depth: 0
       - name: Prove historical preview recovery source
-        if: inputs.historical_preview_source_pr != ''
+        if: (inputs.historical_preview_source_pr != '' || inputs.historical_preview_source_pr_map != '')
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
+          SOURCE_MAP: ${{ inputs.historical_preview_source_pr_map }}
           MAIN_SHA: ${{ inputs.commit_sha }}
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
         run: |
+          set -euo pipefail
           test -n "$MAIN_SHA"
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$MAIN_SHA"
           test "$(git rev-parse origin/main)" = "$MAIN_SHA"
-          python scripts/historical_preview_recovery.py --source-pr "$SOURCE_PR" \
+          # A batch authored across several pull requests names a source PR per
+          # version; a single-PR batch keeps the original form. The script
+          # refuses both-at-once, so the selector cannot be ambiguous.
+          if [ -n "${SOURCE_MAP:-}" ]; then
+            SELECTOR=(--source-map "$SOURCE_MAP")
+          else
+            SELECTOR=(--source-pr "$SOURCE_PR")
+          fi
+          python scripts/historical_preview_recovery.py "${SELECTOR[@]}" \
             --main-sha "$MAIN_SHA" --allowlist "$PREVIEW_ALLOWLIST" \
             --output "$RUNNER_TEMP/historical-preview-source.json"
       - name: Acquire the exclusive GitHub-backed preview lane
@@ -272,9 +286,18 @@ jobs:
           CLAIM_PR: ${{ inputs.claim_pr }}
           CLAIM_HEAD_SHA: ${{ inputs.claim_head_sha }}
           HISTORICAL_SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
+          HISTORICAL_SOURCE_MAP: ${{ inputs.historical_preview_source_pr_map }}
           HISTORICAL_MAIN_SHA: ${{ inputs.commit_sha }}
         run: |
           set -euo pipefail
+          # A map-authored batch has no single source PR, so the lock is claimed
+          # against the LAST PR in the map. Any one of them identifies the batch;
+          # the last is chosen because it is the most recent authorship and is
+          # what a reader will recognise. Without this, a map-only recovery run
+          # would fall through to the ordinary preview lock with an empty claim.
+          if [ -z "$HISTORICAL_SOURCE_PR" ] && [ -n "${HISTORICAL_SOURCE_MAP:-}" ]; then
+            HISTORICAL_SOURCE_PR="${HISTORICAL_SOURCE_MAP##*:}"
+          fi
           if [ -n "$HISTORICAL_SOURCE_PR" ]; then
             CLAIM_PR="$HISTORICAL_SOURCE_PR"
             CLAIM_HEAD_SHA="$HISTORICAL_MAIN_SHA"
@@ -352,7 +375,7 @@ jobs:
           print("Everything else on disk is already in the preview ledger.")
           PY
       - name: Hard guard preflight
-        if: inputs.historical_preview_source_pr == ''
+        if: (inputs.historical_preview_source_pr == '' && inputs.historical_preview_source_pr_map == '')
         env:
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
         run: |
@@ -372,7 +395,7 @@ jobs:
             --allowlist "$PREVIEW_ALLOWLIST" \
             --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
       - name: Build bounded checkout
-        if: inputs.historical_preview_source_pr == ''
+        if: (inputs.historical_preview_source_pr == '' && inputs.historical_preview_source_pr_map == '')
         env:
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
           COMMIT_SHA: ${{ steps.commit.outputs.sha }}
@@ -388,7 +411,7 @@ jobs:
       # whole pending queue, which is what the old bare `db push --dry-run`
       # reported and which no apply would ever have matched.
       - name: Bounded dry-run
-        if: inputs.mode == 'dry-run' && inputs.historical_preview_source_pr == ''
+        if: inputs.mode == 'dry-run' && (inputs.historical_preview_source_pr == '' && inputs.historical_preview_source_pr_map == '')
         env:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
@@ -427,7 +450,7 @@ jobs:
               --remote-ledger "$RUNNER_TEMP/preview-ledger-before.txt"
           fi
       - name: Bounded apply
-        if: inputs.mode == 'apply' && inputs.historical_preview_source_pr == ''
+        if: inputs.mode == 'apply' && (inputs.historical_preview_source_pr == '' && inputs.historical_preview_source_pr_map == '')
         env:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PREVIEW }}
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
@@ -467,7 +490,7 @@ jobs:
             supabase db push --include-all 2>&1 | tee "$RUNNER_TEMP/preview-apply.txt"
           fi
       - name: Recover proof for migrations already present on preview
-        if: inputs.mode == 'apply' && inputs.historical_preview_source_pr != ''
+        if: inputs.mode == 'apply' && (inputs.historical_preview_source_pr != '' || inputs.historical_preview_source_pr_map != '')
         env:
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
         run: |

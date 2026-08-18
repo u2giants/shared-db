@@ -599,7 +599,15 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         self.assertIn("Recover proof for migrations already present on preview", text)
         self.assertIn("HISTORICAL PREVIEW PROOF: already applied; no database write performed", text)
         self.assertIn("REFUSED: historical preview recovery is missing ledger versions", text)
-        self.assertIn("inputs.mode == 'apply' && inputs.historical_preview_source_pr == ''", text)
+        # The ordinary apply path must stay excluded on BOTH historical forms.
+        # A batch authored across several PRs supplies a per-version source map
+        # and no single source PR, so a condition testing only the single-PR
+        # input would let the real apply run during a no-write recovery.
+        self.assertIn(
+            "inputs.mode == 'apply' && (inputs.historical_preview_source_pr == '' "
+            "&& inputs.historical_preview_source_pr_map == '')", text)
+        for guarded in ("historical_preview_source_pr == ''", "historical_preview_source_pr_map == ''"):
+            self.assertIn(guarded, text)
 
     def test_legacy_author_check_waiver_is_exactly_pinned(self):
         args = [924, "5135b668d87c1639281c506ae75fde75211b7019", "96bf385aa5c0f703ec98f5730249f586964f5142", ["20260813210000", "20260813220000"]]
