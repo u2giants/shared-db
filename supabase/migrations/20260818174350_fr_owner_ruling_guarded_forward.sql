@@ -1,5 +1,24 @@
 -- #1090 / #1143: fresh, guarded replacement for held migration 20260802171000.
 -- The old version remains readable history but must never be promoted.
+--
+-- AGENTS.md 6.14 (PUBLIC REPO / no personal identifiers) -- CHECKED, AND
+-- `ruled_by = 'Albert Hazan (owner)'` STAYS. Reviewed 2026-08-18; do not
+-- "fix" it, and do not re-raise it.
+--   1. 6.14 exempts "personal names that are THE DATA ITSELF". core.taxonomy_-
+--      owner_ruling.ruled_by is exactly that: the table's stated contract is
+--      that "a ruling without a named person, a timestamp and evidence is not
+--      a ruling" (20260802171000). The name is the stored business value, not
+--      an incidental mention in a comment or a debugging note.
+--   2. Same-table precedent: 20260807030000_owner_ruling_coco_is_a_disney_-
+--      license.sql stores the identical literal in the identical column.
+--   3. THIS MIGRATION EXISTS TO REPRODUCE ON PRODUCTION THE ROW PREVIEW
+--      ALREADY HOLDS from historical 20260802171000. Writing a different
+--      ruled_by would leave preview and production permanently disagreeing on
+--      the content of the same owner ruling -- the divergence AGENTS.md 6.5
+--      goes to some length to close, re-opened for cosmetics.
+--   4. No app.profile UUID for the owner is named anywhere in this repository,
+--      so "use the UUID instead" would mean inventing an identifier that
+--      resolves to nothing.
 
 create table if not exists core.taxonomy_owner_ruling (
   id uuid primary key default gen_random_uuid(),

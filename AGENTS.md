@@ -1803,18 +1803,32 @@ it as an AI's preference.**
 **What is forbidden, stated so it cannot be read narrowly:** historical `20260802171000` is now
 permanently retired from production because the #1090 licensing guard makes its unguarded write
 unsafe. **Neither `20260802170000`, compatibility prerequisite `20260817225127`, nor guarded
-replacement `20260817232425` may reach production until the FR removal work is ready with them.**
+replacement `20260818174350` may reach production until the FR removal work is ready with them.**
 Not alone, not as a subset, not in a wider sweep, and not via `--include-all`. The permitted event
 is one bounded production apply carrying those three versions and every removal/cleanup member in
 dependency order. This is a safety-preserving supersession of the implementation, not a change to
 Albert's settled business ruling.
+
+**All three are enforced by name, and the version numbers here are load-bearing (2026-08-18).**
+`parse_allowlist` in [`scripts/production_migration_guard.py`](scripts/production_migration_guard.py)
+refuses an allowlist containing ANY member of `FR_HELD_20260803` **or** `FR_COMPATIBILITY_VERSIONS`
+until `FR_REMOVAL_VERSIONS` is populated and the whole ship set is present. Until 2026-08-18 the
+code triggered only on `FR_HELD_20260803`, so `20260817225127` promoted **alone** parsed clean —
+narrower than this prose. The prose is authoritative and the code now matches it.
+
+On the same day, `--supersede-active-claim-version` re-reserved the guarded forward migration from
+`20260817232425` to `20260818174350` and updated only the filename, leaving the guard holding a
+version that named no file and the real file in no hold set at all (issue #1182). **A migration
+version in this section is a safety control, not a file index.** If you rename a migration named
+here, change it here and in the guard in the same commit; `test_every_hold_set_member_is_a_real_migration_file`
+now fails the build otherwise.
 
 **Why this is the right answer, so a future session does not "helpfully" unblock it.**
 
 - Albert's ruling on `FR` "FRIENDS TV" is that it **was never a real licensor and must be REMOVED**
   — not kept, not merely flagged. FRIENDS has always been a *property* under `WB` WARNER BROS, so
   genuine FRIENDS items already have a correct home.
-- Guarded replacement `20260817232425` records the ruling and sets `core.licensor` `FR` to
+- Guarded replacement `20260818174350` records the ruling and sets `core.licensor` `FR` to
   **`status = 'inactive'`**. Historical `20260802171000` is retained as evidence but never applied
   to production. The inactive step is a
   *different remedy*, written before the removal ruling existed, and the removal ruling
@@ -1827,12 +1841,12 @@ Albert's settled business ruling.
 
 **How the ruling reaches production without leaving `FR` inactive — read this before you conclude
 the ruling is impossible.** Preview truthfully retains applied historical `20260802171000`; its
-text and ledger row are immutable. Production instead uses guarded forward `20260817232425`,
+text and ledger row are immutable. Production instead uses guarded forward `20260818174350`,
 which records the same ruling while satisfying the licensing authorization/audit contract. Inside
 one bounded promotion, `FR` passes from `active` to `inactive` to removed
 without ever being an observable steady state, and no application, sync, or human sees `FR` as an
 inactive licensor. That is the "moves once" the ruling means: one promotion event, one end state.
-An agent that promotes `20260817232425` on its own produces the forbidden thing — a production that
+An agent that promotes `20260818174350` on its own produces the forbidden thing — a production that
 sits at `inactive`, indefinitely, until a second irreversible change.
 
 **The consequence you must NOT report as a bug.** Until the combined change ships, **production and
