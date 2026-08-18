@@ -1,6 +1,11 @@
 # Merch groups: the Coldlion → DesignFlow → Supabase taxonomy
 
-**Status:** authoritative. Written 2026-07-19 from (a) live calls against the Coldlion ERP
+> **Business authority moved 2026-08-18:** The companywide rule is
+> [`business-rules/merchandise-and-product-taxonomy.md`](business-rules/merchandise-and-product-taxonomy.md).
+> This file retains schema history, workbook evidence, detailed mappings, and remediation
+> instructions.
+
+**Status:** implementation and historical evidence, not business authority. Written 2026-07-19 from (a) live calls against the Coldlion ERP
 API, (b) live queries against the shared Supabase backend `qsllyeztdwjgirsysgai`, and
 (c) a full read of the six `popcre/designflow-*` repos on branch `sandbox-albert`.
 
@@ -10,19 +15,26 @@ sessions and are superseded in place — see the correction box in §3.2. The co
 outside §3.2 is unreviewed by that correction and still carries its original 2026-07-19
 measurement date.
 
-**Business rule added 2026-08-18:** §4.2.1 defines the authoritative relationship between
-`mgCategory` and the MG01 merchandise groups/product types from `MerchGroup_Rework.xlsx`.
-That rule is now **normalized in the database** (issue #1163): `core.mg_category` holds
-the seven categories and `core.mg_category_merch_group` links each category to the real
-MG01 merchandise-group rows, per division, by `mg_id` rather than by the MG letter code.
-Resolve an item's category by walking from its MG01 row through that link table. The
-free-text `mgCategory` columns on `core."merchGroup"` and `core."merchGroupMaster"` are
-**still there and untouched**; they are an upstream mirror field, not the master, and they
-are not maintained by issue #1163.
+**Authority correction 2026-08-18:** this document explains merchandise-group shape and
+the product-axis taxonomy. It is not the authority for current Licensor, Property,
+Character, Style Guide, Franchise, or licensed-Asset truth. For those entities, the
+settled 2026-08-16 business rules in
+[`business-rules/licensing-master-data.md`](business-rules/licensing-master-data.md) win:
+authorized licensor sources own official names, ownership, and direct relationships;
+ColdLion controls Property Active/Inactive only; the stale DesignFlow pull has no authority.
 
-**Who this is for:** an engineer who has never seen this system. Read this before touching
-anything named licensor, property, merch group, big theme, little theme, style guide,
-art type, art source, artist, age group, or `mgTypeCode`.
+**Business rule added 2026-08-18:** §4.2.1 defines the relationship between `mgCategory`
+and the real MG01 product types from `MerchGroup_Rework.xlsx`. That relationship is now
+**normalized in the database** (issue #1163): `core.mg_category` holds the seven categories
+and `core.mg_category_merch_group` links each category to the real MG01 merchandise-group
+rows, per division, by `mg_id` rather than by the MG letter code. Resolve an item's
+category by walking from its MG01 row through that link table. The free-text `mgCategory`
+columns on `core."merchGroup"` and `core."merchGroupMaster"` are **still there and
+untouched**: they are an upstream mirror field, not the master, and issue #1163 does not
+maintain them.
+
+**Who this is for:** an engineer who needs implementation history after first reading the
+applicable companywide topic in [`business-rules/application-map.md`](business-rules/application-map.md).
 
 **Why it exists:** the single most expensive misunderstanding in this codebase is believing
 that "licensor" and "property" are tables. They are not. They are *rows in one table*,
@@ -33,15 +45,13 @@ area traces back to that.
 
 ## 0. The one-paragraph summary
 
-Coldlion (the ERP) stores all classification data as **merch groups**: flat code→name
-dictionaries, numbered `01`–`14`, defined **separately per division**. In the two licensed
-divisions, type `05` means Licensor and type `06` means Property. Coldlion knows *which
-licensors exist* and *which properties exist*, but **not which property belongs to which
-licensor** — it has no field for that. DesignFlow PLM ingests those flat lists into a single
-`merchGroup` table and adds the parent-child edge itself via a self-referencing `parent_id`
-column, maintained outside the ETL. Our Supabase backend then imports DesignFlow's
-already-related taxonomy into `core.licensor` / `core.property`. So: **Coldlion owns the
-vocabulary, DesignFlow owns the relationships, Supabase is a downstream mirror of both.**
+Coldlion (the ERP) stores classification data as **merch groups**: flat code→name
+dictionaries, numbered `01`–`14`, defined **separately per division**. DesignFlow PLM
+historically ingested those lists into one `merchGroup` table and added some parent-child
+relationships itself. That history still explains the product-axis data and legacy PLM
+behavior. It no longer defines current licensing authority. For Licensors, Properties,
+Characters, Style Guides, Franchises, and licensed Assets, use the 2026-08-16 rules linked
+above. ColdLion controls only whether POP currently carries a Property.
 
 ---
 
@@ -134,8 +144,9 @@ Live row counts per division/type, 2026-07-19:
 | 10 | 3 | 3 | 3 | 0 |
 | 11–14 | 0 | 0 | 0 | 0 |
 
-Note **Style Guide is empty in Coldlion for both licensed divisions**. Style guides are
-therefore entirely DesignFlow-owned; nothing flows in from the ERP.
+Note **Style Guide was empty in the measured ColdLion response for both licensed divisions**.
+The old conclusion that Style Guides were therefore DesignFlow-owned is Historical and wrong.
+Authorized Licensor sources now control Style Guide truth.
 
 ---
 
@@ -323,16 +334,28 @@ getPropertyByLicense(selectedTitle) {
 
 ### 4.2.1 `mgCategory` groups MG01 product types
 
+<<<<<<< HEAD
 `mgCategory` is a **hidden product-category grouping above MG01**. It is not an MG number,
 not another row in the MG01 → MG02 → MG03 `parent_id` chain, and not a replacement for an
 actual product type. Its purpose is to group the real MG01 product types into broader
 business categories and to constrain dependent choices such as valid sizes.
+=======
+`mgCategory` is a hidden product-category grouping above MG01. It is not an MG number,
+not another row in the MG01 → MG02 → MG03 `parent_id` chain, and not a replacement for an
+actual product type. It groups the real MG01 product types into broader business categories
+and constrains dependent choices such as valid sizes.
+>>>>>>> origin/main
 
 The relationship is **one category to many MG01 product types**, with **each MG01 product
 type belonging to exactly one category**. An item's category is inherited from its selected
 MG01 product type. MG02 and MG03 refine that product type; they do not choose or override
+<<<<<<< HEAD
 the category. If `mgCategory` is repeated on MG02 or MG03 source rows, it must agree with
 the category assigned through their MG01 ancestor.
+=======
+the category. A repeated category on MG02 or MG03 source rows must agree with their MG01
+ancestor.
+>>>>>>> origin/main
 
 Authoritative mapping from
 [`MerchGroup_Rework.xlsx`](verification/item-mg-reclassification-20260814/data/MerchGroup_Rework.xlsx),
@@ -348,6 +371,7 @@ sheet `Final Version`, columns A–C:
 | **Floor** | `V` Floor coverings |
 | **Garden** | `W` Garden |
 
+<<<<<<< HEAD
 That is **7 categories covering 19 MG01 product types**. The workbook deliberately labels
 the category as `Prod Category- (no one sees this)`: applications may use it for filtering,
 validation, reporting, or dependency rules, but the product-facing classification remains
@@ -359,6 +383,15 @@ merchandise-group row. MG codes are not globally safe keys across all merch-grou
 divisions (§3.2c). The normalized `core.*` implementation requested in issue #1163 must
 therefore link categories to the real MG01 merchandise-group identities, while enforcing
 that a product type cannot silently belong to two categories.
+=======
+That is seven categories covering nineteen MG01 product types. The workbook labels the
+category `Prod Category- (no one sees this)`: applications may use it for filtering,
+validation, reporting, or dependency rules, but the product-facing classification remains
+the actual MG01 product type.
+
+The lookup must preserve company and division context when resolving a live merchandise-
+group row. MG codes are not globally safe across all types and divisions (§3.2c).
+>>>>>>> origin/main
 
 ### 4.3 Division-conditional validation — the cleanest statement of the model
 
