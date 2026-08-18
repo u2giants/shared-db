@@ -4,7 +4,7 @@
 > [`business-rules/licensing-master-data.md`](business-rules/licensing-master-data.md).
 > This file retains the detailed source matrix, architecture, and implementation contract.
 
-**Status:** SETTLED central database and application architecture
+**Status:** implementation architecture supporting the Settled business rule
 
 **Owner:** Albert Hazan
 
@@ -14,9 +14,7 @@
 
 **Applies to:** every POP application using the shared Supabase project
 
-This is a permanent design decision, not an issue, proposal, backlog item, or
-temporary migration plan. Future database structures, source loaders, API
-contracts, admin screens, and application behavior must follow it.
+Future implementation must follow the companywide business rule and use this document for its detailed design contract.
 
 The executable build sequence is
 [`../plan_licensing_master_data_implementation.md`](../plan_licensing_master_data_implementation.md).

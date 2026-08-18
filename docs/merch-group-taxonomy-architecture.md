@@ -5,7 +5,7 @@
 > This file retains schema history, workbook evidence, detailed mappings, and remediation
 > instructions.
 
-**Status:** authoritative. Written 2026-07-19 from (a) live calls against the Coldlion ERP
+**Status:** implementation and historical evidence, not business authority. Written 2026-07-19 from (a) live calls against the Coldlion ERP
 API, (b) live queries against the shared Supabase backend `qsllyeztdwjgirsysgai`, and
 (c) a full read of the six `popcre/designflow-*` repos on branch `sandbox-albert`.
 
@@ -19,16 +19,15 @@ measurement date.
 the product-axis taxonomy. It is not the authority for current Licensor, Property,
 Character, Style Guide, Franchise, or licensed-Asset truth. For those entities, the
 settled 2026-08-16 business rules in
-[`core-master-data-consolidation-aim.md`](core-master-data-consolidation-aim.md) win:
+[`business-rules/licensing-master-data.md`](business-rules/licensing-master-data.md) win:
 authorized licensor sources own official names, ownership, and direct relationships;
 ColdLion controls Property Active/Inactive only; the stale DesignFlow pull has no authority.
 
 **Business rule added 2026-08-18:** §4.2.1 defines the relationship between
 `mgCategory` and the real MG01 product types from `MerchGroup_Rework.xlsx`.
 
-**Who this is for:** an engineer who has never seen this system. Read this before touching
-anything named licensor, property, merch group, big theme, little theme, style guide,
-art type, art source, artist, age group, or `mgTypeCode`.
+**Who this is for:** an engineer who needs implementation history after first reading the
+applicable companywide topic in [`business-rules/application-map.md`](business-rules/application-map.md).
 
 **Why it exists:** the single most expensive misunderstanding in this codebase is believing
 that "licensor" and "property" are tables. They are not. They are *rows in one table*,
@@ -138,8 +137,9 @@ Live row counts per division/type, 2026-07-19:
 | 10 | 3 | 3 | 3 | 0 |
 | 11–14 | 0 | 0 | 0 | 0 |
 
-Note **Style Guide is empty in Coldlion for both licensed divisions**. Style guides are
-therefore entirely DesignFlow-owned; nothing flows in from the ERP.
+Note **Style Guide was empty in the measured ColdLion response for both licensed divisions**.
+The old conclusion that Style Guides were therefore DesignFlow-owned is Historical and wrong.
+Authorized Licensor sources now control Style Guide truth.
 
 ---
 

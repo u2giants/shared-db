@@ -99,6 +99,10 @@ listed in the map.
 | Tariff and HTS classification | [`tariff-and-hts-classification.md`](tariff-and-hts-classification.md) |
 | Digital assets and source-file integrity | [`digital-assets-and-file-integrity.md`](digital-assets-and-file-integrity.md) |
 | Digital-asset classification, tags, and source evidence | [`digital-asset-classification-and-tags.md`](digital-asset-classification-and-tags.md) |
+| Master Data access | [`master-data-access.md`](master-data-access.md) |
+
+The dated audit inventory is evidence of the migration, not a business-rule topic:
+[`audit-inventory-2026-08-18.md`](audit-inventory-2026-08-18.md).
 
 ## Maintenance rule
 

@@ -1,6 +1,6 @@
 # Tariff and HTS classification
 
-**Status:** Settled process controls. Published government rates and lists remain time-sensitive external facts and must be verified from their authoritative source before operational use.
+**Status:** Proposed
 
 ## Business purpose
 
@@ -35,4 +35,4 @@ Internal precedent search remains suggestion-only until measured comparison prov
 
 ## Implementation and evidence
 
-DesignFlow's `docs/ai-classification.md`, backend HTS documents, and RFQ implementation files record system behavior and historical data-import choices. They must link here and remain implementation evidence, not a second business-rule source.
+DesignFlow's [classification reference](https://github.com/popcre/designflow-frontend/blob/develop/docs/ai-classification.md), backend HTS documents, and RFQ implementation files record system behavior and historical data-import choices. They must link here and remain implementation evidence, not a second business-rule source.

@@ -1,6 +1,6 @@
 # Digital-asset classification, tags, and source evidence
 
-**Status:** Settled where stated; unapproved vocabulary and thresholds remain Proposed.
+**Status:** Proposed
 
 ## Purpose
 
@@ -16,15 +16,14 @@ Tags and classifications help people find and understand source artwork. They mu
 
 ## Canonicalization and provenance
 
-Display one canonical tag while retaining aliases and every supporting source. Each accepted or rejected tag keeps its facet, source, evidence, confidence where applicable, rule/model version, actor, and time.
+Display one canonical tag while retaining aliases and every supporting source. Each accepted or rejected tag retains enough evidence to explain the decision.
 
-Removing an automatic tag records a rejection; it does not erase evidence. Automatic reruns replace only output from the same source and version. Manual tags survive every automatic rebuild.
+Removing an automatic tag records a rejection; it does not erase evidence. Manual tags survive automatic rebuilding.
 
 ## Safety rules
 
-- Never create a Licensor or Property tag merely because a folder occupies a particular path depth.
+- Never create a Licensor or Property tag merely because of its folder location.
 - Never use fuzzy similarity alone to establish Licensor, Property, or Character identity.
-- Never use a sampled `quick_hash` alone to prove file identity or copy tags.
 - Never propagate workflow state, language, or color to sibling files by default.
 - Do not convert arbitrary frequent document words into tags.
 - Store bounded evidence snippets, not complete copyrighted document bodies.
@@ -41,4 +40,4 @@ Who may create new manual vocabulary, which non-taxonomy facets are official, pr
 
 ## Implementation and evidence
 
-PopDAM and PopSG implementation plans, including `fix_add_tags.md`, may contain pipelines, thresholds, performance goals, and UI designs. Those are implementation proposals or evidence. This page owns the business rules.
+PopDAM and PopSG implementation plans, including [the tagging plan](https://github.com/u2giants/popdam3/blob/main/fix_add_tags.md), may contain pipelines, thresholds, performance goals, and UI designs. Those are implementation proposals or evidence. The rules on this page remain Proposed until approved.

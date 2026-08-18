@@ -1,6 +1,6 @@
 # Products, items, SKUs, and identifiers
 
-**Status:** Settled where stated.
+**Status:** Proposed
 
 ## Identity
 
@@ -12,7 +12,7 @@ Designs and creative concepts remain business assets even when no buyer selects 
 
 A ColdLion style number is required only when a user requests ColdLion numbering. Draft or earlier-stage Items may exist without one. When supplied, each merchandise-group component used to request the number must exist and be active.
 
-A failure to obtain a ColdLion style number must not destroy the Item or silently invent a number. Safe retry and error evidence must remain available without exposing credentials or full upstream error payloads.
+A failure to obtain a ColdLion style number must not destroy the Item or silently invent a number.
 
 ## Classification and descriptions
 

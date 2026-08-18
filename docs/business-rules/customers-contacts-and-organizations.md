@@ -1,6 +1,6 @@
 # Customers, contacts, and organizations
 
-**Status:** Settled.
+**Status:** Proposed
 
 ## Business identities
 
@@ -42,6 +42,10 @@ Changing a Contact's Customer must clear or reselect any Department that does no
 - CRM and PM may create or curate Potential Customers.
 - Email ingestion is authoritative only for the fact that a message/domain was observed.
 - Factories/Vendors and Licensors retain their own identities and must not be inserted into Customer lists as a shortcut.
+
+`core.factory` is specifically for merchandise vendors that make products. Freight providers, government bodies, banks, couriers, real-estate firms, and other service providers are not Factories merely because an ERP endpoint once returned them together.
+
+The rule that ingested email domains never promote into Customer Master Data is Settled. The broader organization and contact model above is a consolidated proposal until Albert confirms it as the companywide model.
 
 ## Implementation and evidence
 

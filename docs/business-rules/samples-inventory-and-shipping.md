@@ -1,6 +1,6 @@
 # Samples, inventory, shipping, and custody
 
-**Status:** Settled business model. Implementation is incomplete.
+**Status:** Proposed
 
 ## Core identities
 
@@ -52,8 +52,6 @@ The system must keep these states distinct: shown in inventory, requested, await
 - QC users confirm warehouse pulls and supply required physical-sample approval.
 - Customers are destinations, not ordinary users in these flows.
 
-The server must enforce the same permissions as the screen. Hiding an action is not enforcement.
-
 ## Validation and failure
 
 The workflow must not guess a Flow, Path, location, Box, Factory, Customer, or physical-availability state. Batch import validates every row before committing unless the user knowingly chooses a supported partial operation. A failed multi-record action must state exactly what was and was not created.
@@ -64,4 +62,4 @@ History must answer who requested, approved, shipped, received, rerouted, confir
 
 ## Implementation and evidence
 
-The former DesignFlow application specification is retained as implementation evidence at `designflow-frontend/docs/sample-tracking-restructure-spec.md`. It must link here and must not serve as a separate business authority.
+The former [DesignFlow application specification](https://github.com/popcre/designflow-frontend/blob/develop/docs/sample-tracking-restructure-spec.md) is retained as implementation evidence. It must link here and must not serve as a separate business authority.

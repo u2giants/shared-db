@@ -1,14 +1,13 @@
 # Product-development workflow business rules
 
-**Status:** mixed. This file separates settled business concepts from proposals
-that still need owner confirmation.
+**Status:** Proposed
 
 **Why this exists:** the only detailed account of POP's product-development
 workflow currently lives in an old PM/PIM implementation plan. A plan is not a
 safe permanent rulebook. This page is the companywide collection point for the
 workflow, regardless of which application presents it.
 
-## Settled business model
+## Consolidated proposed business model
 
 Product-development work is organized around real business objects, not generic
 tasks alone:
@@ -50,9 +49,8 @@ here until Albert or the responsible business authority confirms them as the
 current company workflow. Do not silently promote a sequence merely because a
 screen or database status already implements it.
 
-The source plan remains at `poppim-web/docs/architecture-update-implementation-plan.md`,
-especially its workflow-rules section. It is historical evidence, not the
-official current rule.
+The workflow-rules section of the [source plan](https://github.com/u2giants/poppim-web/blob/main/docs/architecture-update-implementation-plan.md)
+is historical evidence, not the official current rule.
 
 ## Unknowns to collect
 

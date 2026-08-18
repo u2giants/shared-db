@@ -1,6 +1,6 @@
 # ERP, orders, and source meaning
 
-**Status:** Settled where stated in the source audit.
+**Status:** Settled
 
 ## General rule
 
@@ -16,7 +16,19 @@ ERP merchandise data before the approved cutoff may use codes whose historical m
 
 ## Samples and production indicators
 
-Contractual-sample, DAVID-sample, cost, production, and order-history fields must retain the exact meanings established by the source audit. A source value that is absent or ambiguous must remain Unknown rather than being silently converted to zero, false, or not applicable.
+A Production PO number ending `COS` means extra pieces of a customer's item are being made for the Licensor as contractual samples and/or for POP's internal purposes as DAVID samples.
+
+- These pieces are a real POP cost with no customer revenue and must be classifiable separately.
+- `salesOrderNo = 0` on a `COS` line is correct. It is not a missing link.
+- The Customer on the line is the Customer from the original order, not the sample recipient.
+- `COS` does not distinguish contractual samples from DAVID samples. That split is Unknown unless another source supplies it.
+- Older data also contains other sample markers, so `COS` must not be treated as the only possible indicator.
+
+The production-history feed covers four divisions: `CW001`, `EH001`, `EP001`, and `SP001`. A short time window may show fewer divisions and must not be generalized.
+
+`1900-01-01` is the ERP's empty-date marker. It is not a real business date. Outside `COS`, `salesOrderNo = 0` means there is no linked sales order.
+
+A source value that is absent or ambiguous must remain Unknown rather than being silently converted to zero, false, or not applicable.
 
 ## Implementation and evidence
 

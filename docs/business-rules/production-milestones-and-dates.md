@@ -1,6 +1,6 @@
 # Production milestones and needed dates
 
-**Status:** Settled for the current production schedule model; true per-SKU factory dates remain Unbuilt.
+**Status:** Proposed
 
 ## Schedule anchors
 
@@ -23,4 +23,4 @@ Needed dates are plans. Completed-at dates and actual production events are sepa
 
 ## Implementation and evidence
 
-DesignFlow's `src/app/pages/prod_tracking/README.md` explains the current screen and inherited-row implementation. It must link here and must not redefine the milestone model.
+DesignFlow's [Production Tracking reference](https://github.com/popcre/designflow-frontend/blob/develop/src/app/pages/prod_tracking/README.md) explains the current screen and inherited-row implementation. It must link here and must not redefine the milestone model.

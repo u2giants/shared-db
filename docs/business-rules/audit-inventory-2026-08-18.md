@@ -5,6 +5,11 @@
 
 ## Method
 
+**Publication state:** the central library is prepared in this branch. Consumer-repository
+cleanup is prepared locally but is not proven complete until each listed repository has a
+published commit or pull request. The final audit update will record that evidence rather than
+claiming unpublished edits are complete.
+
 Every Markdown file in the scoped repositories was included in a path inventory, excluding generated dependencies and the read-only `shared-db/` mirrors when auditing consumer repos. Candidate files were identified through headings and language concerning business rules, authority, identity, status, workflows, approvals, pricing, royalty, margin, Customers, Contacts, Factories/Vendors, Licensors, Properties, merchandise groups, products, Items, Samples, orders, production, assets, tags, and permissions.
 
 Each candidate was classified as:
@@ -51,11 +56,11 @@ The audit does not delete technical documentation merely because it contains wor
 
 | Source | Classification and action |
 |---|---|
-| `use_plm_tables.md`, `use_master_data_plm_tables.md` | Former application-specific rulebooks retired and replaced with central-map pointers. |
-| `docs/MASTER_DATA.md` | Application behavior retained; Customer, licensing, and taxonomy authority moved centrally. Stale PLM licensing authority marked Historical. |
-| `docs/PROJECT_BIBLE.md`, `docs/WORKER_LOGIC.md`, `docs/PATH_UTILS.md`, `docs/SCHEMA.md`, `docs/API_CONTRACTS.md`, `docs/architecture.md`, `README.md` | Repeated file-date rule removed or replaced with pointers. One PopDAM implementation definition remains; business authority is central. |
-| `fix_add_tags.md` | Tagging pipeline retained as Proposed implementation; tag authority, provenance, rejection, and AI rules moved centrally. |
-| `fix_popsg_tagging_handoff.md` | Historical implementation record now points to central tagging and licensing authority. |
+| `use_plm_tables.md`, `use_master_data_plm_tables.md` | Pointer replacements prepared locally; publication evidence pending. |
+| `docs/MASTER_DATA.md` | Authority correction prepared locally; publication evidence pending. |
+| `docs/PROJECT_BIBLE.md`, `docs/WORKER_LOGIC.md`, `docs/PATH_UTILS.md`, `docs/SCHEMA.md`, `docs/API_CONTRACTS.md`, `docs/architecture.md`, `README.md` | Repeated-rule cleanup prepared locally; publication evidence pending. |
+| `fix_add_tags.md` | Proposed-implementation label and central links prepared locally; publication evidence pending. |
+| `fix_popsg_tagging_handoff.md` | Historical label and central links prepared locally; publication evidence pending. |
 | `docs/POPSG.md` | Technical crawl, render, and source-resolution behavior retained. Licensing identity and tagging meaning come from central topics. |
 | `docs/KNOWN_QUIRKS.md` and `AGENTS.md` | Technical incidents and safeguards retained. Embedded customer/licensing/taxonomy facts now route through the central map. |
 | Search, batch, model, deployment, infrastructure, and extraction plans | Technical or Proposed implementation material, not business authority. |
@@ -64,9 +69,9 @@ The audit does not delete technical documentation merely because it contains wor
 
 | Source | Classification and action |
 |---|---|
-| `use_plm_tables.md` | Former application-specific rulebook retired and replaced with the central map. |
-| `docs/architecture.md` | Customer vs. ingested-domain contradiction corrected. Business identities now route to the companywide topic; technical API and segmentation details remain. |
-| `AGENTS.md` | Customer/contact implementation safeguards remain, with the central map as business authority. |
+| `use_plm_tables.md` | Pointer replacement prepared locally; publication evidence pending. |
+| `docs/architecture.md` | Customer vs. ingested-domain correction prepared locally; publication evidence pending. |
+| `AGENTS.md` | Central-map route prepared locally; publication evidence pending. |
 | `docs/overview-aggregate-inventory.md` | Reporting predicates and performance evidence retained as application implementation. It does not define Customer identity. |
 | Design handoff files | UI design evidence. Labels such as Account/Prospect are not permitted to supersede central Customer definitions. |
 | Audit, deployment, configuration, and remediation plans | Technical or historical, not business authority. |
@@ -75,42 +80,42 @@ The audit does not delete technical documentation merely because it contains wor
 
 | Source | Classification and action |
 |---|---|
-| `use_plm_tables.md` | Former application-specific rulebook retired and replaced with the central map. |
-| `docs/architecture-update-implementation-plan.md` | Detailed POP/Spruce workflows classified Proposed/Historical. Business-object principles moved centrally. Named people are evidence of past assignments, not permanent role rules. |
+| `use_plm_tables.md` | Pointer replacement prepared locally; publication evidence pending. |
+| `docs/architecture-update-implementation-plan.md` | Proposed/Historical label and central links prepared locally; publication evidence pending. |
 | `gaps.md` | Current application state and missing implementation, not business authority. |
-| `AGENTS.md`, `docs/architecture.md` | Technical implementation router with companywide business-rule entry point. |
+| `AGENTS.md`, `docs/architecture.md` | Central-map route prepared locally; publication evidence pending. |
 | ClickUp, schema, and secondary-screen documents | Technical integration or implementation evidence. |
 
 ## DesignFlow frontend findings
 
 | Source | Classification and action |
 |---|---|
-| `docs/sample-tracking-restructure-spec.md` | Application-specific rulebook retired and replaced with the central Samples topic. |
-| Sample Tracking plans | Implementation plans now point to central Samples authority. |
-| `docs/rfq-math.md`, `src/app/pages/rfq/README.md`, RFQ buyer-margin/generic-royalty plans | Formulas and RFQ business meaning moved centrally; field names, trigger chains, UI behavior, and historical defects remain implementation evidence. |
-| `src/app/pages/prod_tracking/README.md` | Schedule-anchor and inherited-date rules moved centrally; current screen behavior retained. |
-| `docs/ai-classification.md` | Classification authority, confidence, and duty-component rules moved centrally; system design and historical external-data imports retained. |
-| `docs/item-library-redesign.md` | Product/item/taxonomy meaning now routes centrally; layout and interaction design remain application implementation. |
-| `AGENTS.md`, architecture, dependency, and system maps | Explicitly technical maps, not business authority. |
+| `docs/sample-tracking-restructure-spec.md` | Central pointer replacement prepared locally; publication evidence pending. |
+| Sample Tracking plans | Central links prepared locally; publication evidence pending. |
+| `docs/rfq-math.md`, `src/app/pages/rfq/README.md`, RFQ buyer-margin/generic-royalty plans | Authority separation prepared locally; publication evidence pending. |
+| `src/app/pages/prod_tracking/README.md` | Central link prepared locally; publication evidence pending. |
+| `docs/ai-classification.md` | Central link and authority separation prepared locally; publication evidence pending. |
+| `docs/item-library-redesign.md` | Central links prepared locally; publication evidence pending. |
+| `AGENTS.md`, architecture, dependency, and system maps | Business-authority labels and central routes prepared locally; publication evidence pending. |
 | Performance, grid, SSRM, theming, saved-view, and QA plans | Technical behavior or test evidence. |
 
 ## DesignFlow backend findings
 
 | Source | Classification and action |
 |---|---|
-| `AGENTS.md` | RFQ Vendor ownership/status rules point centrally; authentication, routing, and incident safeguards remain technical implementation. |
+| `AGENTS.md` | Central RFQ route prepared locally; publication evidence pending. |
 | `docs/api-reference.md` | Endpoint contract only. Route names do not establish business meaning. |
-| `HTS_RAG.md`, `HTS_RAG_PILOT.md` | Proposed/implementation evidence for tariff classification. Central topic owns authority and shadow-mode principle. |
-| Architecture, dependency, and system maps | Technical maps explicitly separated from business authority. |
+| `HTS_RAG.md`, `HTS_RAG_PILOT.md` | Proposed/implementation labels and central links prepared locally; publication evidence pending. |
+| Architecture, dependency, and system maps | Business-authority labels and central routes prepared locally; publication evidence pending. |
 | Security, performance, migration, MCP, and deployment plans | Technical only. |
 
 ## DesignFlow Item Master findings
 
 | Source | Classification and action |
 |---|---|
-| `AGENTS.md` | Product, taxonomy, licensing, RFQ, and workflow meaning routed centrally; endpoint safeguards remain technical. |
-| `docs/app-migration-notes/coldlion-style-number-validation-20260716.md` | Style-number timing and validation moved to Product/Item identity topic; technical failure handling retained as evidence. |
-| Architecture, dependency, API, and system maps | Technical maps explicitly separated from business authority. |
+| `AGENTS.md` | Central routes prepared locally; publication evidence pending. |
+| `docs/app-migration-notes/coldlion-style-number-validation-20260716.md` | Central Product/Item link prepared locally; publication evidence pending. |
+| Architecture, dependency, API, and system maps | Business-authority labels and central routes prepared locally; publication evidence pending. |
 
 ## Conflicts resolved
 

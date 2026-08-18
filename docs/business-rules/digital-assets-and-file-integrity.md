@@ -1,6 +1,6 @@
 # Digital assets and source-file integrity
 
-**Status:** Settled.
+**Status:** Proposed
 
 ## Source-file date rule
 
@@ -18,8 +18,8 @@ that handles business source files. It is not a PopDAM-only programming rule.
 
 ## Related evidence and implementation guidance
 
-PopDAM's `docs/PROJECT_BIBLE.md`, `docs/PATH_UTILS.md`, and
-`docs/WORKER_LOGIC.md` contain the detailed operating and implementation
+PopDAM's [project guide](https://github.com/u2giants/popdam3/blob/main/docs/PROJECT_BIBLE.md), [path guide](https://github.com/u2giants/popdam3/blob/main/docs/PATH_UTILS.md), and
+[worker guide](https://github.com/u2giants/popdam3/blob/main/docs/WORKER_LOGIC.md) contain the detailed operating and implementation
 requirements. Those documents must link to this rule and may explain how their
 component complies, but they do not own a separate version of the business rule.
 

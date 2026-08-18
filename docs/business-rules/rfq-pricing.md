@@ -1,7 +1,6 @@
 # RFQ pricing, margin, and royalty rules
 
-**Status:** Settled where stated below. Scenario 3 remains unbuilt and is not a
-current workflow.
+**Status:** Proposed
 
 ## Business purpose
 
@@ -54,6 +53,9 @@ the gross sell price. They are not applied one after another.
 - A legacy generic royalty value stored on an old row does not change the
   calculation. Generic pricing must still use zero.
 - Royalty is part of the deduction calculation and must not be counted twice.
+- Marvel artwork containing talent likeness carries two additional royalty percentage points.
+  The likeness decision belongs to the specific Style Guide Asset file, not to the Character.
+  See [`licensing-master-data.md`](licensing-master-data.md).
 
 ## Buyer Target and Buyer Margin
 
@@ -101,7 +103,7 @@ maximum buy cost = gross sell price ×
      - logistics percentage ÷ 100 - margin percentage ÷ 100)
 ```
 
-This third scenario is a settled calculation but is not currently built into
+This third scenario is a proposed calculation and is not currently built into
 the workflow.
 
 ## Duplicate factory rule
@@ -121,6 +123,6 @@ duplicate relationship.
 
 ## Detailed calculation reference
 
-The DesignFlow frontend document `docs/rfq-math.md` records field names,
+The [DesignFlow frontend RFQ reference](https://github.com/popcre/designflow-frontend/blob/develop/docs/rfq-math.md) records field names,
 calculation helpers, screen behavior, and historical defects. It is implementation
-evidence only. The formulas and business meaning above are the companywide rule.
+evidence only. The formulas and business meaning above remain Proposed until business approval is recorded here.
