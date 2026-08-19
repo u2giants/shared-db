@@ -594,6 +594,15 @@ $$;
 --    family rather than over at least one -- the technique section A uses on the 28
 --    tables this migration actually writes.
 --
+--    AND EVERY ARM GUARDS BOTH DIRECTIONS, because a neighbour policy fails two ways:
+--    REWRITTEN (still present, admits somebody else) and DROPPED (gone, so RLS matches
+--    no policy and the table returns zero rows to everyone, silently revoking the access
+--    Albert ruled these people should have). A per-policy comparison catches the first
+--    and is blind to the second -- it simply has one fewer row to check and passes. So
+--    each arm asserts COVERAGE PER TABLE as well: count the tables that LACK a policy and
+--    require zero. The Sega/Peanuts arm was missing that half until this was caught in
+--    review, which is exactly the failure mode this header describes.
+--
 --    Disney is compared ARM BY ARM rather than by string equality, because its arms are
 --    in a different ORDER from Sega's: 20260807190000 wrote administrator / plm access /
 --    sales+licensing, and 20260819015333 wrote plm access / administrator /
@@ -760,17 +769,53 @@ begin
   else v_pass := v_pass + 1; end if;
 
   -- --------------------------------------------------------------- Sega and Peanuts ---
-  -- These two already satisfied the ruling before #1249. EVERY one of their _plm_read
-  -- policies must still carry the house predicate byte for byte, still be a SELECT
-  -- policy, and still apply to authenticated. Rewriting all but one of them would have
-  -- passed the original "some policy has a non-null qual" check.
-  select count(*) into v_n from pg_policies
-   where schemaname = 'plm'
-     and (tablename like 'sega\_%' or tablename like 'peanuts\_%')
-     and policyname like '%\_plm\_read';
+  -- These two already satisfied the ruling before #1249, and they are guarded in BOTH
+  -- directions, because a neighbour policy can fail two different ways:
+  --
+  --   REWRITTEN -- the policy is still there but admits somebody else. Caught by the
+  --                per-policy qual/cmd/roles comparison in the loop below.
+  --   DROPPED   -- the policy is simply gone. RLS stays enabled, so the table falls
+  --                through to "no policy matches" and returns ZERO rows to everyone.
+  --                That silently revokes Licensing's access to that table, which is the
+  --                single most damaging thing that can happen to a neighbour here, and
+  --                it is the exact opposite of what Albert ruled.
+  --
+  -- The loop below only inspects the policies that EXIST, so on its own a DROP leaves it
+  -- green -- it would just have one fewer row to check and pass. Coverage is therefore
+  -- asserted per TABLE first, the same shape used for Paramount above: count the tables
+  -- that LACK a policy, and require that count to be zero. Derived from the catalog, so
+  -- it self-adjusts when Sega or Peanuts legitimately grows and still fails the moment
+  -- one is dropped.
+  select count(*) into v_n
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'plm'
+     and (c.relname like 'sega\_%' or c.relname like 'peanuts\_%')
+     and c.relkind = 'r' and c.relrowsecurity
+     and not exists (
+       select 1 from pg_policies p
+        where p.schemaname = 'plm' and p.tablename = c.relname
+          and p.policyname = c.relname || '_plm_read'
+          and p.cmd = 'SELECT' and p.roles = array['authenticated']::name[]);
+  if v_n <> 0 then
+    v_fail := v_fail + 1;
+    raise warning 'C FAIL: % plm.sega_*/plm.peanuts_* table(s) with RLS enabled have NO '
+      '<table>_plm_read policy -- Licensing silently lost read access to a landing table '
+      'it could read before #1249', v_n;
+  else v_pass := v_pass + 1; end if;
+
+  -- NON-VACUITY, DERIVED. The coverage check above is trivially true if there are no such
+  -- tables at all, so prove there are some -- by counting the TABLES, never by pinning
+  -- how many there ought to be.
+  select count(*) into v_n
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'plm'
+     and (c.relname like 'sega\_%' or c.relname like 'peanuts\_%')
+     and c.relkind = 'r' and c.relrowsecurity;
   if v_n = 0 then
     v_fail := v_fail + 1;
-    raise warning 'C FAIL: the Sega/Peanuts _plm_read policies are gone entirely';
+    raise warning 'C FAIL: there are no plm.sega_*/plm.peanuts_* tables with RLS enabled '
+      'at all, so the Sega/Peanuts coverage check above proved nothing';
   else v_pass := v_pass + 1; end if;
 
   for r in
@@ -795,7 +840,8 @@ begin
   if v_fail > 0 then raise exception 'C FAILED (% failures)', v_fail; end if;
   raise notice 'C passed: every Disney OPA authenticated read policy admits exactly the '
     'three house arms, every plm.pmt_* table with RLS still has a read policy and every '
-    'one of those still admits designer, and every Sega/Peanuts _plm_read still carries '
-    'the house predicate byte for byte.';
+    'one of those still admits designer, and every plm.sega_*/plm.peanuts_* table with '
+    'RLS still HAS its _plm_read policy and every one of those still carries the house '
+    'predicate byte for byte.';
 end;
 $$;
