@@ -1,3 +1,9 @@
+---
+issue: 1184
+status: OPEN
+owner: claude/plan-coldlion-landing-phases-2-6
+---
+
 # OPEN — ColdLion landing phases 2-6: plan written, no code started
 
 **Opened:** 2026-08-19 · **Machine:** al8960ofc · **Agent:** Claude (Opus 5)

@@ -10,6 +10,7 @@
 |---|---|---|---|
 | 0 | Field decisions captured from the owner | ✅ done 2026-08-19 | [`coldlion-field-decisions-20260819.csv`](coldlion-field-decisions-20260819.csv) |
 | 1 | Supersede the design doc for the 2026-08-19 rulings | ⬜ open | |
+| 4a | ⛔ **Resolve the `orderHistory` line key with a live pull** — blocks step 4 | ⬜ open | |
 | 2 | `coldlion.merch_group_header` + `merch_group_detail` | ⬜ open | |
 | 3 | `coldlion.item_header` + `item_merch_group` + `item_detail` | ⬜ open | |
 | 4 | `coldlion.order_history_line` + `order_history_component` | ⬜ open | |
@@ -192,7 +193,7 @@ Re-derive any of them with the method in §12.
 | # | Decision | Authority |
 |---|---|---|
 | D1 | Land **all 14** merch-group slots on items, even though 11-14 measure 0% | Albert, 2026-08-19 |
-| D2 | **Drop merch-group codes and their `Desc` twins from both history feeds** — item attributes, not order attributes | Albert, 2026-08-19, on the 519/519 evidence |
+| D2 | **Drop LINE-LEVEL merch-group codes and their `Desc` twins from both history feeds** — item attributes, not order attributes. **Scope is `merchGroupNN` / `merchGroupNNDesc` ONLY.** `subMerchGroup*` and `ppkMerchGroup*` are a DIFFERENT GRAIN and are KEPT — see the warning below | Albert, 2026-08-19, on the 519/519 evidence |
 | D3 | **Division identity is the letter code** (`CW001`, `SP001`, `EH001`), never a number. No numeric division id in any new table | Albert, 2026-08-19; recorded in `business-rules/merchandise-and-product-taxonomy.md` |
 | D4 | **Only fields marked `ingest`** in the decisions CSV get a typed column | Albert, 2026-08-19 |
 | D5 | **No raw JSON archive column.** Accepted consequence: an `ignore` decision on the two history feeds is effectively permanent, and reversing one means re-pulling 7 years | Albert, 2026-08-19 |
@@ -208,6 +209,21 @@ Re-derive any of them with the method in §12.
   `text` column merely disappoints.
 - Index choice beyond the natural key.
 - Whether `item_detail` and `item_header` share a loader module.
+
+> ### ⚠️ D2 does NOT extend to component merch groups — corrected 2026-08-19 after external review
+>
+> The 519/519 evidence compared **line-level** `merchGroup01`-`06` against the item master. It says
+> nothing about `subMerchGroup*` (sales side) or `ppkMerchGroup*` (production side), which describe
+> the **component styles inside an assortment**, not the master item.
+>
+> `coldlion-history-endpoints-shape.md` §4.1 states component merch groups deliberately DIFFER from
+> the master — that is what an assortment is — and §5.7 states the order-side `subMerchGroup*` is
+> the **better** record of what a component style is. Under D5 (no raw archive) dropping them would
+> be a one-way discard of seven years of assortment taxonomy, with no fallback for the 26% of lines
+> that have no item master row (finding 6).
+>
+> The first draft of this plan and the first generation of the decisions CSV wrongly swept them in.
+> **Both are corrected.** Field counts changed: `orderHistory` 25 → **31**, `prodHistory` 55 → **83**.
 
 **D6 has a live conflict you must not silently resolve.** Albert marked write-back on
 `orderHistory.brandAssuranceNo`, `prodHistory.depositPerc`, and `vendors.femaExpDate` /
@@ -285,7 +301,19 @@ product types, matching `core."merchGroup"` today.
 |---|---|---|
 | `item_header` | one item | `company_code, division_code, item_no` |
 | `item_merch_group` | one merch-group slot on an item | `+ slot_no` (01-14) |
-| `item_detail` | one SKU | `company_code, division_code, item_no, color_code, size_code` |
+| `item_detail` | one SKU | `company_code, division_code, item_no, item_pkey` — ⚠️ see below |
+
+> ### ⚠️ `item_detail` key corrected 2026-08-19 after external review
+>
+> Earlier drafts keyed a SKU on `color_code, size_code`. **The owner marked both `ignore`**, so
+> under D4 they get no column and the key was impossible to build. `itemPkey` is marked `ingest`
+> at 100% fill and is what the API itself uses to locate a detail row
+> (`coldlion-erp-api-reference.md:153`). Key on `item_pkey`.
+>
+> **State this consequence in the migration comment rather than hiding it:** with colour and size
+> ignored and no raw archive (D5), the landing layer cannot answer "what colour and size is this
+> SKU". That is an accepted loss flowing from D4 plus D5, not an oversight. If it later proves
+> wrong, recovery is a re-pull of `/itemDetails`, which is cheap — it is a master feed, not history.
 
 - **The three-part item key is the whole point of this step** (finding 3). `CW001` contains items
   literally numbered `01`. A two-part key silently overwrites.
@@ -294,7 +322,10 @@ product types, matching `core."merchGroup"` today.
 - **All 14 slots** (D1). A slot with no value produces no row — correct, not a bug.
 - `has_image` lives on `item_header`. It is the cheap image-coverage map. No image bytes (D7).
 - Mark the 27 write-back-wanted fields (D6). Flag only, no write path.
-- `1900-01-01` and `1899-12-31` are **empty-date markers** — store NULL, never a real 1900 date.
+- `1900-01-01` is the **owner-confirmed** empty-date marker — store NULL, never a real 1900 date.
+  `1899-12-31` also appeared in the 2026-08-19 samples and is almost certainly the same marker shifted
+  by a timezone conversion, but it is **not** owner-confirmed. Treat it as empty, and say so in the
+  migration comment rather than presenting it as settled.
 - ColdLion sends `""` on some feeds and JSON `null` on others. Normalise both to NULL.
 
 **You'll know it worked when:** after a first sync,
@@ -311,11 +342,31 @@ is the old bug reappearing.
 
 | Table | Grain | Key |
 |---|---|---|
-| `order_history_line` | one sales order line | `sales_order_no, line_no` |
+| `order_history_line` | one sales order line | ⚠️ **UNRESOLVED — see below** |
 | `order_history_component` | one component style in that line | `+ sub_item_no` |
 
+> ### ⛔ BLOCKER — the sales-order line key is not yet known. Resolve before writing this migration.
+>
+> Earlier drafts keyed this table on `sales_order_no, line_no`. **`lineNo` does not exist in the
+> 59-field `orderHistory` payload** — verified against the owner's field list, which has no such
+> column. The key was inherited from the design doc and was never checked.
+>
+> Do NOT guess a substitute. Each obvious candidate silently merges real sales lines:
+> `(sales_order_no)` collapses every line on an order; `(sales_order_no, item_no)` collapses a
+> repeated item; `(sales_order_no, sub_item_no)` collapses every non-prepack line on an order.
+>
+> **Resolve it with a live pull first:** fetch one busy window, group by `salesOrderNo`, and find
+> what actually distinguishes two lines of the same order. If nothing does, ask ColdLion to add a
+> line sequence — they added `prodLineSeq` to `prodHistory` on exactly this request on 2026-08-17,
+> which is why purchase history does not have this problem.
+
 - **Append-only.** Never updated. Identity key plus `source_hash` makes a re-pull a no-op.
-- **25 fields** after D2 removed the 18 merch-group fields. Keep `brandAssuranceNo` (finding 5).
+- **Versioning:** the unique constraint must be `(identity, source_hash)`, not `(identity)` alone.
+  A re-pulled window returning changed data must land as a new version (D8 keeps the 3 most recent),
+  and a plain identity-unique constraint would reject it. The D8 prune is a separate provable job
+  that must never delete the newest version.
+- **31 fields** after D2 removed the 12 line-level merch-group fields. Component `subMerchGroup*`
+  fields are KEPT — see the D2 warning in §8. Keep `brandAssuranceNo` (finding 5).
 - Non-prepack lines: one line row plus a single component row keyed on `item_no`.
 - **No foreign key to `item_header`** (finding 6) — 26% of lines have no item master row. Put that
   in a table comment, or a future session will "fix" it into a broken constraint.
@@ -347,7 +398,8 @@ array length, and the sum assertion passes with zero violations.
 3. `salesOrderNo = 0` means "no linked sales order", not a foreign key. Reading it as one creates
    ~1,500 broken links per sample.
 
-**55 fields** after D2 removed 56 merch-group fields — the single biggest saving in this plan.
+**83 fields** after D2 removed the 28 line-level merch-group fields. Component `ppkMerchGroup*`
+fields are KEPT — see the D2 warning in §8. (An earlier draft said 55 by wrongly dropping them.)
 
 **You'll know it worked when:** one window loads and a self-join on `prod_order_no` with differing
 `prod_line_seq` returns rows — i.e. multi-line orders survive as separate rows rather than being
@@ -508,7 +560,23 @@ The existing suite must stay green — that is what CI runs on the PR.
 3. **The four-division question.** `companyCode=EDGEHOME` returns retired `EP001` as well as the
    three live divisions. Decide per table whether to land `EP001` rows or filter them. Landing them
    is the safer default for a raw layer; filtering is a judgment that belongs in promotion.
-4. **`ingest.coldlion_product_size_landing` retirement** — migrate rows in step 2, drop in a later
+4. **What goes in `change_log.new_raw`?** Phase 1 shipped it `NOT NULL jsonb` with
+   `new_source_hash` defined as the hash of the complete payload. D5 says no raw archive. These are
+   not reconciled and the migration is already applied, so it cannot be edited. Decide deliberately:
+   store the full fetched payload there (a raw archive of *changes only*, which is arguably within
+   D5's spirit since it is evidence of a change rather than a per-row archive), or author a
+   follow-on migration to drop the two `*_raw` columns. **Do not put `'{}'` in to satisfy the
+   constraint** — that turns the evidence column into fiction. History tables write no `change_log`
+   rows, so this affects master feeds only.
+5. **Does `merchGroupDetails.active` exist?** The owner's live sample says yes, 100% filled. The API
+   reference says the payload has no active flag anywhere. The reference is dated 2026-07-23 and is
+   probably stale, but step 2's verification query depends on the column. Confirm against the live
+   spec and correct the reference in the same PR.
+6. **When a merch-group slot is cleared on an item, is the child row deleted?** Upsert-only leaves a
+   stale slot and therefore silently wrong taxonomy. Decide and state it in the table comment.
+7. **Which `last*` copy wins** when a re-pull yields two rows differing only in those fields? The
+   history-shape doc says pick one deterministically; the plan must say which rule.
+8. **`ingest.coldlion_product_size_landing` retirement** — migrate rows in step 2, drop in a later
    migration once nothing reads it. Confirm nothing does.
 
 ---
