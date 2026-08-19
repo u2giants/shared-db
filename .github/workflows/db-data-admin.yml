@@ -42,6 +42,8 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: apps/db-data-admin
@@ -85,6 +87,8 @@ jobs:
   container:
     needs: verify
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -131,6 +135,8 @@ jobs:
     if: github.event_name == 'push'
     needs: container
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 90
     env:
       COOLIFY_URL: ${{ vars.COOLIFY_URL }}
       COOLIFY_APP_UUID: ${{ vars.COOLIFY_APP_UUID }}
@@ -182,6 +188,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     needs: container
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 90
     environment:
       name: production
       url: https://data.designflow.app
