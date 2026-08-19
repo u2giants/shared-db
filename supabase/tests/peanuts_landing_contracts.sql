@@ -48,8 +48,13 @@
 --      sibling defects: a JSON null (a SKIPPED check), a numeric-looking STRING whose
 --      value MATCHES the true row count (a silent WRONG ANSWER), and a fraction or an
 --      oversized value (a raw cast error that wedges the capture).
---   G. api.source_capture_inventory classifies plm.peanuts_*, and every pre-existing
---      source and the ten output columns are unchanged.
+--   G. api.source_capture_inventory classifies plm.peanuts_*, and EVERY pre-existing
+--      source, the row-per-table count and the ten output columns are unchanged.
+--   H. The wedge class, and the guards that previously had no failing test: hostile
+--      finalize_ arguments are RECORDED rather than raised, the asset arithmetic reports
+--      instead of overflowing an integer, a count written 1.0 still publishes, the
+--      extra-key sweep applies sign/integrality/range and not only type, and
+--      begin_peanuts_capture's EXECUTE lockdown is asserted.
 -- =====================================================================================
 
 begin;
@@ -1221,13 +1226,42 @@ begin
     raise exception 'G FAILED: % peanuts tables classified, expected 19', v_before;
   end if;
 
-  for r in select relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
-            where n.nspname = 'plm' and c.relkind = 'r' and c.relname like 'sega\_%' loop
+  -- EVERY plm table, against the classification rule restated here independently. Walking
+  -- only sega_ would let a slip over NBCU, Disney, Paramount, Warner or Coldlion through:
+  -- the Peanuts branch was inserted into a `case`, and a `case` is order-sensitive, so the
+  -- regression has to cover the arms this change sits next to as well as its own.
+  for r in
+    select c.relname,
+           case
+             when c.relname like 'dcp\_%' or c.relname like 'opa\_%' then 'disney'
+             when c.relname like 'pmt\_%'     then 'paramount'
+             when c.relname like 'nbcu\_%'    then 'nbcu'
+             when c.relname like 'wb\_%'      then 'warner'
+             when c.relname like 'erp\_%'     then 'coldlion'
+             when c.relname like 'sega\_%'    then 'sega'
+             when c.relname like 'peanuts\_%' then 'peanuts'
+             else 'other'
+           end as want
+      from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'plm' and c.relkind = 'r'
+  loop
     if (select source_system from api.source_capture_inventory
-         where table_name = r.relname) <> 'sega' then
-      raise exception 'G FAILED: plm.% is no longer classified as sega', r.relname;
+         where table_name = r.relname) is distinct from r.want then
+      raise exception 'G FAILED: plm.% classifies as %, expected %',
+        r.relname,
+        (select source_system from api.source_capture_inventory
+          where table_name = r.relname),
+        r.want;
     end if;
   end loop;
+
+  -- And every plm base table still appears exactly once. A view edit that dropped rows
+  -- would otherwise pass the loop above, which only checks the rows that ARE there.
+  if (select count(*) from api.source_capture_inventory)
+     <> (select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'plm' and c.relkind = 'r') then
+    raise exception 'G FAILED: the view no longer reports one row per plm table';
+  end if;
 
   -- The ten output columns keep their names and order, so SELECT * consumers do not shift.
   if (select string_agg(column_name, ',' order by ordinal_position)
@@ -1310,6 +1344,331 @@ begin
   end if;
 
   raise notice 'G passed: peanuts classified, pre-existing sources and column shape unchanged';
+end;
+$$;
+
+
+-- =====================================================================================
+-- H. THE WEDGE CLASS, AND THE GUARDS THAT PREVIOUSLY HAD NO FAILING TEST.
+--
+-- Every case here was added after review: each one is a shape where finalize_ could abort
+-- BEFORE writing the rejection row, or a guard whose removal left the suite green. A
+-- guard with no test that fails when you delete it is not a guard, so each block below
+-- names the mutation it is the counter-test for.
+-- =====================================================================================
+
+-- H1. HOSTILE ARGUMENTS MUST BE RECORDED, NOT RAISED.
+-- Counter-test for: moving the p_observed_counts / p_error_summary validation back above
+-- the row lock, or restoring `raise exception` there. Either way the capture is left in
+-- 'loading' with no recorded reason and a retry dies identically -- a WEDGE.
+do $$
+declare
+  v_cap    uuid;
+  v_status text;
+  v_err    jsonb;
+  v_i      integer;
+  v_obs_bad jsonb[] := array['[]'::jsonb, '"twelve"'::jsonb, null::jsonb];
+  v_names  text[]   := array['H1a jsonb array','H1b jsonb string','H1c SQL null'];
+begin
+  for v_i in 1 .. 3 loop
+    v_cap := plm.begin_peanuts_capture(
+      'ZZTEST-peanuts-H1-' || v_i, 'ZZTEST-repo', repeat('b', 40), repeat('b', 64),
+      'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+      '2099-01-01Z'::timestamptz, '{"assets":0}'::jsonb, '{}'::jsonb, 'ZZTEST',
+      0, 0, 0, true, true, true);
+
+    perform plm.finalize_peanuts_capture(v_cap, v_obs_bad[v_i], '[]'::jsonb);
+
+    select status, error_summary into v_status, v_err
+      from plm.peanuts_capture where id = v_cap;
+    if v_status <> 'rejected' then
+      raise exception
+        '% FAILED: capture is %, expected rejected -- an unusable argument WEDGED it in loading',
+        v_names[v_i], v_status;
+    end if;
+    if not exists (select 1 from jsonb_array_elements(v_err) e
+                    where e ->> 'code' = 'observed_counts_not_an_object') then
+      raise exception '% FAILED: rejected without naming the reason: %', v_names[v_i], v_err;
+    end if;
+  end loop;
+
+  -- H1d. The other argument, transposed the way a loader actually gets it wrong.
+  v_cap := plm.begin_peanuts_capture(
+    'ZZTEST-peanuts-H1d', 'ZZTEST-repo', repeat('b', 40), repeat('b', 64),
+    'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+    '2099-01-01Z'::timestamptz, '{"assets":0}'::jsonb, '{}'::jsonb, 'ZZTEST',
+    0, 0, 0, true, true, true);
+  perform plm.finalize_peanuts_capture(v_cap, '{}'::jsonb, '{}'::jsonb);
+  select status, error_summary into v_status, v_err
+    from plm.peanuts_capture where id = v_cap;
+  if v_status <> 'rejected'
+     or not exists (select 1 from jsonb_array_elements(v_err) e
+                     where e ->> 'code' = 'error_summary_not_an_array') then
+    raise exception 'H1d FAILED: a non-array p_error_summary was not recorded (% / %)',
+      v_status, v_err;
+  end if;
+
+  raise notice 'H1 passed: an unusable argument is recorded evidence, never a wedge';
+end;
+$$;
+
+-- H2. THE ARITHMETIC MUST NOT OVERFLOW BEFORE IT CAN REPORT.
+-- Counter-test for: dropping the ::bigint casts in the
+-- assets_captured + assets_unreachable comparison. The three columns are `integer`, so
+-- the bare sum raises `integer out of range` BEFORE the rejection UPDATE -- wedging the
+-- capture with no recorded reason, which is the very thing this branch reports.
+do $$
+declare
+  v_cap    uuid;
+  v_status text;
+  v_err    jsonb;
+  v_counts jsonb := jsonb_build_object(
+    'art_programs',0,'style_guides',0,'characters',0,'animation_titles',0,
+    'holidays',0,'initiatives',0,'asset_types',0,'licensing_statuses',0,
+    'metadata_fields',0,'assets',0,'asset_art_programs',0,'asset_characters',0,
+    'asset_animation_titles',0,'asset_holidays',0,'asset_keywords',0,
+    'asset_relationships',0,'style_guide_characters',0,'style_guide_art_programs',0);
+begin
+  -- Both values pass begin_'s `>= 0` guard; their SUM does not fit in an integer.
+  v_cap := plm.begin_peanuts_capture(
+    'ZZTEST-peanuts-H2', 'ZZTEST-repo', repeat('c', 40), repeat('c', 64),
+    'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+    '2099-01-01Z'::timestamptz, v_counts, '{}'::jsonb, 'ZZTEST',
+    2147483647, 2147483647, 1, true, true, true);
+
+  perform plm.finalize_peanuts_capture(v_cap, v_counts, '[]'::jsonb);
+
+  select status, error_summary into v_status, v_err
+    from plm.peanuts_capture where id = v_cap;
+  if v_status <> 'rejected' then
+    raise exception 'H2 FAILED: capture is %, expected rejected', v_status;
+  end if;
+  if not exists (select 1 from jsonb_array_elements(v_err) e
+                  where e ->> 'code' = 'asset_total_arithmetic_mismatch') then
+    raise exception 'H2 FAILED: rejected, but the arithmetic mismatch was not recorded: %',
+      v_err;
+  end if;
+  -- The claimed capture size disagrees with the rows too, and must be recorded alongside
+  -- rather than instead.
+  if not exists (select 1 from jsonb_array_elements(v_err) e
+                  where e ->> 'code' = 'assets_captured_disagrees_with_rows') then
+    raise exception 'H2 FAILED: the row-count disagreement was not recorded: %', v_err;
+  end if;
+
+  raise notice 'H2 passed: the asset arithmetic reports instead of overflowing';
+end;
+$$;
+
+-- H3. AN INTEGRAL COUNT WRITTEN 1.0 MUST PUBLISH.
+-- Counter-test for: replacing ((x ->> key)::numeric)::bigint with (x ->> key)::bigint.
+-- `->>` renders the JSON number as TEXT, so '1.0'::bigint raises invalid-input-syntax and
+-- wedges the capture. This is the defect that bit the NBCU and WildBrain/Sega authors
+-- (#1221/#1222); until this block existed, reverting the numeric hop left the suite GREEN.
+--
+-- The fixture uses 1.0 in BOTH the stored expected_counts and the reported counts,
+-- because the two assignment sites are separate code and a test that exercises only one
+-- of them leaves the other reopenable.
+do $$
+declare
+  v_cap    uuid;
+  v_status text;
+  v_obs    jsonb;
+  v_counts jsonb := jsonb_build_object(
+    'art_programs',0,'style_guides',1.0::numeric,'characters',0,'animation_titles',0,
+    'holidays',0,'initiatives',0,'asset_types',0,'licensing_statuses',0,
+    'metadata_fields',0,'assets',1.0::numeric,'asset_art_programs',0,'asset_characters',0,
+    'asset_animation_titles',0,'asset_holidays',0,'asset_keywords',0,
+    'asset_relationships',0,'style_guide_characters',0,'style_guide_art_programs',0);
+begin
+  -- Prove the fixture is actually the shape under test: a JSON number that renders with a
+  -- decimal point. If a future edit makes this emit plain `1`, the test would silently
+  -- stop testing anything.
+  if (v_counts ->> 'assets') <> '1.0' then
+    raise exception 'H3 FAILED: the fixture is not 1.0, it is % -- the test proves nothing',
+      v_counts ->> 'assets';
+  end if;
+  if jsonb_typeof(v_counts -> 'assets') <> 'number' then
+    raise exception 'H3 FAILED: the fixture is not a JSON number';
+  end if;
+
+  v_cap := plm.begin_peanuts_capture(
+    'ZZTEST-peanuts-H3', 'ZZTEST-repo', repeat('d', 40), repeat('d', 64),
+    'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+    '2099-01-01Z'::timestamptz, v_counts, '{}'::jsonb, 'ZZTEST',
+    4, 1, 3, true, true, true);
+  insert into plm.peanuts_asset (capture_id, source_object_id, file_name, raw)
+  values (v_cap, 'ZZTEST-H3-1', 'zztest-h3.ext', '{}');
+  insert into plm.peanuts_style_guide (
+    capture_id, value_key, value_label, source_field_name, source_field_label,
+    is_multi_select, asset_count, raw)
+  values (v_cap, 'zztest-guide-unused', 'ZZTEST Unused Guide', 'zztest_guide_field',
+          'ZZTEST Guide Label', false, 0, '{}');
+
+  -- Same 1.0-bearing object as the REPORTED counts, exercising the second assignment site.
+  perform plm.finalize_peanuts_capture(v_cap, v_counts, '[]'::jsonb);
+
+  select status, observed_counts into v_status, v_obs
+    from plm.peanuts_capture where id = v_cap;
+  if v_status <> 'complete' then
+    raise exception
+      'H3 FAILED: a capture whose counts are written 1.0 did not publish (status %) -- the raw ::bigint cast is back',
+      v_status;
+  end if;
+  if (v_obs ->> 'assets') <> '1' then
+    raise exception 'H3 FAILED: observed counts are wrong: %', v_obs;
+  end if;
+
+  raise notice 'H3 passed: 1.0 publishes; the numeric hop is exercised on both sites';
+end;
+$$;
+
+-- H4. THE EXTRA-KEY SWEEP APPLIES THE FULL RULE, NOT A TYPE TEST ALONE.
+-- Counter-test for: reverting the sweep to `where ... jsonb_typeof(e.value) <> 'number'`.
+-- A negative, fractional or oversized value under a key outside the eighteen entities
+-- then passes, while the comment above it claims every key is covered.
+do $$
+declare
+  v_cap    uuid;
+  v_status text;
+  v_err    jsonb;
+  v_counts jsonb := jsonb_build_object(
+    'art_programs',0,'style_guides',0,'characters',0,'animation_titles',0,
+    'holidays',0,'initiatives',0,'asset_types',0,'licensing_statuses',0,
+    'metadata_fields',0,'assets',0,'asset_art_programs',0,'asset_characters',0,
+    'asset_animation_titles',0,'asset_holidays',0,'asset_keywords',0,
+    'asset_relationships',0,'style_guide_characters',0,'style_guide_art_programs',0);
+begin
+  v_cap := plm.begin_peanuts_capture(
+    'ZZTEST-peanuts-H4', 'ZZTEST-repo', repeat('e', 40), repeat('e', 64),
+    'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+    '2099-01-01Z'::timestamptz, v_counts, '{}'::jsonb, 'ZZTEST',
+    0, 0, 0, true, true, true);
+
+  -- Plant the extra keys the way an owner UPDATE would: begin_ already refused them, so
+  -- only the gate's own re-validation can catch this.
+  update plm.peanuts_capture
+     set expected_counts = v_counts
+                           || jsonb_build_object('zztest_extra_negative', -1)
+                           || jsonb_build_object('zztest_extra_fraction', 1.5::numeric)
+   where id = v_cap;
+
+  perform plm.finalize_peanuts_capture(
+    v_cap,
+    v_counts || jsonb_build_object('zztest_extra_reported', -2),
+    '[]'::jsonb);
+
+  select status, error_summary into v_status, v_err
+    from plm.peanuts_capture where id = v_cap;
+  if v_status <> 'rejected' then
+    raise exception 'H4 FAILED: capture is %, expected rejected', v_status;
+  end if;
+  if not exists (select 1 from jsonb_array_elements(v_err) e
+                  where e ->> 'entity' = 'zztest_extra_negative'
+                    and e ->> 'code' = 'expected_count_not_a_nonnegative_integer') then
+    raise exception 'H4 FAILED: a NEGATIVE extra expected key was not caught: %', v_err;
+  end if;
+  if not exists (select 1 from jsonb_array_elements(v_err) e
+                  where e ->> 'entity' = 'zztest_extra_fraction'
+                    and e ->> 'code' = 'expected_count_not_a_nonnegative_integer') then
+    raise exception 'H4 FAILED: a FRACTIONAL extra expected key was not caught: %', v_err;
+  end if;
+  if not exists (select 1 from jsonb_array_elements(v_err) e
+                  where e ->> 'entity' = 'zztest_extra_reported'
+                    and e ->> 'code' = 'reported_count_not_a_nonnegative_integer') then
+    raise exception 'H4 FAILED: a NEGATIVE extra reported key was not caught: %', v_err;
+  end if;
+
+  raise notice 'H4 passed: extra keys get type, sign, integrality and range';
+end;
+$$;
+
+-- H5. begin_peanuts_capture IS LOCKED DOWN TOO.
+-- Counter-test for: a default privilege leaking EXECUTE on the INSERT path to the capture
+-- root. F1 asserted this for finalize_ only, which left begin_ unwatched.
+do $$
+declare
+  v_sig text :=
+    'plm.begin_peanuts_capture(text,text,text,text,text,text,text,timestamptz,jsonb,jsonb,text,integer,integer,integer,boolean,boolean,boolean,text)';
+begin
+  if has_function_privilege('anon', v_sig, 'EXECUTE')
+     or has_function_privilege('authenticated', v_sig, 'EXECUTE') then
+    raise exception 'H5 FAILED: begin_peanuts_capture is executable outside service_role';
+  end if;
+  if not has_function_privilege('service_role', v_sig, 'EXECUTE') then
+    raise exception 'H5 FAILED: service_role cannot execute begin_peanuts_capture';
+  end if;
+  if has_function_privilege('public', v_sig, 'EXECUTE') then
+    raise exception 'H5 FAILED: begin_peanuts_capture is still executable by PUBLIC';
+  end if;
+  raise notice 'H5 passed: begin_peanuts_capture is service_role only';
+end;
+$$;
+
+-- H6. THE RELATIONSHIP-WALK CONTRADICTION, AND THE NON-BLOCKER BESIDE IT.
+-- Counter-test for: deleting the relationship_rows_without_graph_walk branch. Until this
+-- block existed that branch had no test at all -- it was reported as covered when it was
+-- not.
+--
+-- Both halves matter. relationship_graph_walked = false is deliberately NOT a publication
+-- blocker (the schema contract's completion rule does not list it), so a test that only
+-- checked the rejection could be "fixed" by making the flag mandatory, which would refuse
+-- legitimate captures. H6b pins the non-blocker half.
+do $$
+declare
+  v_cap    uuid;
+  v_status text;
+  v_err    jsonb;
+  v_counts jsonb := jsonb_build_object(
+    'art_programs',0,'style_guides',0,'characters',0,'animation_titles',0,
+    'holidays',0,'initiatives',0,'asset_types',0,'licensing_statuses',0,
+    'metadata_fields',0,'assets',2,'asset_art_programs',0,'asset_characters',0,
+    'asset_animation_titles',0,'asset_holidays',0,'asset_keywords',0,
+    'asset_relationships',1,'style_guide_characters',0,'style_guide_art_programs',0);
+begin
+  -- H6a. Relationship rows present while the flag says the walk never ran.
+  v_cap := plm.begin_peanuts_capture(
+    'ZZTEST-peanuts-H6a', 'ZZTEST-repo', repeat('7', 40), repeat('7', 64),
+    'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+    '2099-01-01Z'::timestamptz, v_counts, '{}'::jsonb, 'ZZTEST',
+    2, 2, 0, true, true, false);
+  insert into plm.peanuts_asset (capture_id, source_object_id, file_name, raw)
+  values (v_cap, 'ZZTEST-H6-P', 'zztest-h6-parent.ext', '{}'),
+         (v_cap, 'ZZTEST-H6-C', 'zztest-h6-child.ext', '{}');
+  insert into plm.peanuts_asset_relationship (
+    capture_id, source_relationship_id, parent_object_id, child_object_id, link_type, raw)
+  values (v_cap, 'ZZTEST-H6-REL', 'ZZTEST-H6-P', 'ZZTEST-H6-C', 'zztest_link', '{}');
+
+  perform plm.finalize_peanuts_capture(v_cap, v_counts, '[]'::jsonb);
+
+  select status, error_summary into v_status, v_err
+    from plm.peanuts_capture where id = v_cap;
+  if v_status <> 'rejected'
+     or not exists (select 1 from jsonb_array_elements(v_err) e
+                     where e ->> 'code' = 'relationship_rows_without_graph_walk') then
+    raise exception
+      'H6a FAILED: relationship rows with no graph walk were not caught (% / %)',
+      v_status, v_err;
+  end if;
+
+  -- H6b. The same unwalked flag with NO relationship rows still publishes. A partial walk
+  -- must be VISIBLE, not fatal.
+  v_cap := plm.begin_peanuts_capture(
+    'ZZTEST-peanuts-H6b', 'ZZTEST-repo', repeat('7', 40), repeat('7', 64),
+    'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+    '2099-01-01Z'::timestamptz,
+    v_counts || jsonb_build_object('assets', 0, 'asset_relationships', 0),
+    '{}'::jsonb, 'ZZTEST', 0, 0, 0, true, true, false);
+  perform plm.finalize_peanuts_capture(
+    v_cap, v_counts || jsonb_build_object('assets', 0, 'asset_relationships', 0),
+    '[]'::jsonb);
+  select status into v_status from plm.peanuts_capture where id = v_cap;
+  if v_status <> 'complete' then
+    raise exception
+      'H6b FAILED: an unwalked relationship graph with no rows blocked publication (status %) -- it is not a blocker by contract',
+      v_status;
+  end if;
+
+  raise notice 'H6 passed: the walk contradiction is caught; the flag alone is not a blocker';
 end;
 $$;
 

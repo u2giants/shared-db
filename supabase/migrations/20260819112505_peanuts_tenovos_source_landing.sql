@@ -1274,6 +1274,7 @@ declare
   v_d     bigint;
   v_want  bigint;
   v_key   text;
+  v_val   jsonb;
   v_max   numeric := 9223372036854775807::numeric;
   v_pairs text[][] := array[
     ['art_programs',             'peanuts_art_program'],
@@ -1297,12 +1298,20 @@ declare
   ];
   i integer;
 begin
-  if p_observed_counts is null or jsonb_typeof(p_observed_counts) <> 'object' then
-    raise exception 'finalize_peanuts_capture: p_observed_counts must be a JSON object';
-  end if;
-  if p_error_summary is null or jsonb_typeof(p_error_summary) <> 'array' then
-    raise exception 'finalize_peanuts_capture: p_error_summary must be a JSON array';
-  end if;
+  -- ARGUMENT VALIDATION HAPPENS AFTER THE ROW LOCK, DELIBERATELY, AND RECORDS ITS
+  -- REFUSAL INSTEAD OF RAISING.
+  --
+  -- Raising here -- which is what this function did in its first draft, and what the
+  -- sibling gates still do -- aborts before any 'rejected' row is written. A loader that
+  -- transposes the two jsonb arguments, or passes SQL null, then leaves the capture in
+  -- 'loading' with NO recorded reason, and a retry with the same arguments dies
+  -- identically: the capture is WEDGED. That is the same failure class as the raw cast in
+  -- #1221/#1222, arriving through a different door. The lock is taken first so that there
+  -- IS a row to record the refusal on.
+  --
+  -- Note the explicit `is null` test on each argument below. `jsonb_typeof(null)` is
+  -- NULL, so `jsonb_typeof(x) <> 'object'` alone is UNKNOWN for a SQL NULL and the `if`
+  -- would never fire -- the same never-false shape as #1219, one level up.
 
   -- The row lock serialises two loaders finalising the same capture.
   select * into v_cap from plm.peanuts_capture where id = p_capture_id for update;
@@ -1316,6 +1325,32 @@ begin
   if v_cap.status <> 'loading' then
     raise exception 'finalize_peanuts_capture: capture % is %, not loading',
       p_capture_id, v_cap.status;
+  end if;
+
+  -- Now that a row is locked, an unusable argument becomes recorded evidence rather than a
+  -- wedge. Nothing below may run on a non-object p_observed_counts: `?` and `->` against a
+  -- jsonb array or scalar answer about the wrong thing rather than failing.
+  if p_observed_counts is null or jsonb_typeof(p_observed_counts) <> 'object' then
+    v_err := v_err || jsonb_build_object(
+      'code','observed_counts_not_an_object',
+      'json_type', coalesce(jsonb_typeof(p_observed_counts), 'sql_null'));
+  end if;
+  if p_error_summary is null or jsonb_typeof(p_error_summary) <> 'array' then
+    v_err := v_err || jsonb_build_object(
+      'code','error_summary_not_an_array',
+      'json_type', coalesce(jsonb_typeof(p_error_summary), 'sql_null'));
+  end if;
+  if jsonb_array_length(v_err) > 0 then
+    update plm.peanuts_capture
+       set status            = 'rejected',
+           load_completed_at = null,
+           observed_counts   = '{}'::jsonb,
+           error_summary     = v_err
+     where id = p_capture_id;
+    raise warning
+      'finalize_peanuts_capture: capture % REJECTED on its arguments with % error(s): %',
+      p_capture_id, jsonb_array_length(v_err), v_err;
+    return;
   end if;
 
   v_exp := v_cap.expected_counts;
@@ -1351,8 +1386,14 @@ begin
   -- ---- B. THE PAGING-WALL ARITHMETIC. This is the clause that makes assets_unreachable
   -- proof rather than decoration: a capture claiming zero unreachable assets while
   -- sitting below the portal's own total cannot balance, and cannot publish.
-  if v_cap.assets_captured + v_cap.assets_unreachable
-       <> v_cap.portal_reported_asset_total then
+  -- EVERY TERM CAST TO bigint FIRST. These three columns are `integer`, so the bare
+  -- `assets_captured + assets_unreachable` that this line used to carry could itself raise
+  -- `integer out of range` -- BEFORE the rejection UPDATE below, wedging the capture with
+  -- no recorded reason, which is the very failure this branch exists to report. A capture
+  -- begun with assets_captured = 2147483647 and assets_unreachable = 1 is enough; both
+  -- values pass begin_'s `>= 0` guard.
+  if v_cap.assets_captured::bigint + v_cap.assets_unreachable::bigint
+       <> v_cap.portal_reported_asset_total::bigint then
     v_err := v_err || jsonb_build_object(
       'code','asset_total_arithmetic_mismatch',
       'portal_total', v_cap.portal_reported_asset_total,
@@ -1441,23 +1482,46 @@ begin
 
   -- The loop above only inspects the eighteen entity keys this schema knows. A stored
   -- expected_counts or a reported observed_counts may carry OTHER keys -- media_downloaded
-  -- is one, and a future loader may add more -- and a non-number sitting in one of those
-  -- is the same class of defect: a value that looks supplied and compares to nothing.
-  -- Sweep the whole object so no key escapes the type rule.
-  for v_key in select e.key from jsonb_each(v_exp) e
-                where not (v_obs ? e.key)
-                  and jsonb_typeof(e.value) <> 'number' loop
-    v_err := v_err || jsonb_build_object('code','expected_count_not_a_number',
-                                         'entity',v_key,
-                                         'json_type', jsonb_typeof(v_exp -> v_key));
+  -- is one, and a future loader may add more -- and an unusable value sitting in one of
+  -- those is the same class of defect: a value that looks supplied and compares to
+  -- nothing. Sweep the whole object so no key escapes the rule.
+  --
+  -- THE SWEEP APPLIES THE SAME THREE-PART RULE AS THE EIGHTEEN ENTITY KEYS -- type, then
+  -- non-negative integer, then bigint range -- not a type test alone. A type-only sweep
+  -- ignores -1 and 1.5 under an extra key while its comment claims every key is covered,
+  -- and an owner UPDATE can plant exactly those. This matches the corrected Sega sweep in
+  -- 20260819112524 (#1222). Neither shape can skip an entity count, so it is a
+  -- truthfulness fix rather than a publication hole -- but a guard whose comment
+  -- overstates it is how the next reader is misled.
+  for v_key, v_val in select e.key, e.value from jsonb_each(v_exp) e
+                       where not (v_obs ? e.key) loop
+    if jsonb_typeof(v_val) <> 'number' then
+      v_err := v_err || jsonb_build_object('code','expected_count_not_a_number',
+                                           'entity',v_key,
+                                           'json_type', jsonb_typeof(v_val));
+    elsif (v_val #>> '{}')::numeric < 0
+       or (v_val #>> '{}')::numeric <> trunc((v_val #>> '{}')::numeric) then
+      v_err := v_err || jsonb_build_object('code','expected_count_not_a_nonnegative_integer',
+                                           'entity',v_key,'expected', v_val);
+    elsif (v_val #>> '{}')::numeric > v_max then
+      v_err := v_err || jsonb_build_object('code','expected_count_out_of_range',
+                                           'entity',v_key,'expected', v_val,'max', v_max);
+    end if;
   end loop;
-  for v_key in select e.key from jsonb_each(p_observed_counts) e
-                where not (v_obs ? e.key)
-                  and jsonb_typeof(e.value) <> 'number' loop
-    v_err := v_err || jsonb_build_object('code','reported_count_not_a_number',
-                                         'entity',v_key,
-                                         'json_type',
-                                         jsonb_typeof(p_observed_counts -> v_key));
+  for v_key, v_val in select e.key, e.value from jsonb_each(p_observed_counts) e
+                       where not (v_obs ? e.key) loop
+    if jsonb_typeof(v_val) <> 'number' then
+      v_err := v_err || jsonb_build_object('code','reported_count_not_a_number',
+                                           'entity',v_key,
+                                           'json_type', jsonb_typeof(v_val));
+    elsif (v_val #>> '{}')::numeric < 0
+       or (v_val #>> '{}')::numeric <> trunc((v_val #>> '{}')::numeric) then
+      v_err := v_err || jsonb_build_object('code','reported_count_not_a_nonnegative_integer',
+                                           'entity',v_key,'reported', v_val);
+    elsif (v_val #>> '{}')::numeric > v_max then
+      v_err := v_err || jsonb_build_object('code','reported_count_out_of_range',
+                                           'entity',v_key,'reported', v_val,'max', v_max);
+    end if;
   end loop;
 
   -- ---- E. Duplicate source identifiers. The primary keys already make these impossible;
@@ -2000,6 +2064,17 @@ begin
   if not has_function_privilege('service_role',
        'plm.finalize_peanuts_capture(uuid,jsonb,jsonb)', 'EXECUTE') then
     raise exception 'peanuts landing: service_role cannot execute finalize_peanuts_capture';
+  end if;
+  -- begin_ is the INSERT path to the capture root, so its lockdown matters at least as
+  -- much as finalize_'s. Asserting only finalize_ would leave a leaked default EXECUTE on
+  -- begin_ entirely invisible.
+  if has_function_privilege('anon', 'plm.begin_peanuts_capture(text,text,text,text,text,text,text,timestamptz,jsonb,jsonb,text,integer,integer,integer,boolean,boolean,boolean,text)', 'EXECUTE')
+     or has_function_privilege('authenticated', 'plm.begin_peanuts_capture(text,text,text,text,text,text,text,timestamptz,jsonb,jsonb,text,integer,integer,integer,boolean,boolean,boolean,text)', 'EXECUTE') then
+    raise exception
+      'peanuts landing: begin_peanuts_capture is executable outside service_role';
+  end if;
+  if not has_function_privilege('service_role', 'plm.begin_peanuts_capture(text,text,text,text,text,text,text,timestamptz,jsonb,jsonb,text,integer,integer,integer,boolean,boolean,boolean,text)', 'EXECUTE') then
+    raise exception 'peanuts landing: service_role cannot execute begin_peanuts_capture';
   end if;
 
   raise notice 'peanuts privileges: service_role SELECT x19 / INSERT x18, no UPDATE/DELETE/TRUNCATE, anon none';
