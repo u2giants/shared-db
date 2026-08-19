@@ -389,6 +389,38 @@ def source_pr_commits(
     return {sha for sha in allowed if sha}
 
 
+def is_main_line_ancestor(run_head: str, main_sha: str, api: Callable[[str], Any]) -> bool:
+    """True when `run_head` is an ancestor of the promoted main commit.
+
+    A rehearsal dispatched from `main` carries the main commit that was current
+    when it ran, which is almost never the commit being promoted -- the merge of
+    the very work being promoted comes AFTER it. Requiring an exact match, or
+    membership of the source pull request, therefore stranded every promotion
+    whose rehearsal ran before its own merge, permanently: an applied version can
+    never be re-applied to preview, so the rehearsal cannot be redone.
+
+    This does NOT weaken the evidence chain. What the rehearsal actually applied
+    is still proved byte-for-byte against this repository by
+    prove_preview_migration_contents, and the machinery that produced it is still
+    pinned to exact main by prove_preview_producer_matches_main. Ancestry only
+    answers a narrower question: is this run part of THIS repository's main line,
+    rather than a rehearsal borrowed from an unrelated pull request -- which is
+    the thing source_pr_commits exists to refuse.
+
+    Fails closed: an unreadable or non-ancestor comparison returns False.
+    """
+    if not run_head or not main_sha or run_head == main_sha:
+        return False
+    try:
+        comparison = api(f"repos/{REPOSITORY}/compare/{run_head}...{main_sha}")
+    except Exception:  # noqa: BLE001 - unreadable ancestry must fail closed
+        return False
+    if not isinstance(comparison, dict):
+        return False
+    # `ahead` means main_sha is ahead of run_head with run_head as merge base,
+    # i.e. run_head is a strict ancestor on this repository's main line.
+    return comparison.get("status") == "ahead" and comparison.get("behind_by") == 0
+
 def prove_preview(
     *, run_id: int, digest: str, pr_head: str, main_sha: str, source_pr: int, allowlist: list[str], api: Callable[[str], Any],
     downloader: Callable[[int, Path], None], repo_root: Path,
@@ -408,7 +440,9 @@ def prove_preview(
     # permanently stranded any promotion that had a follow-up commit -- including
     # the generated types this repository is supposed to refresh after a schema
     # change, which cannot be committed before the preview it describes.
-    if run.get("head_sha") not in source_pr_commits(source_pr, pr_head, main_sha, api):
+    if run.get("head_sha") not in source_pr_commits(source_pr, pr_head, main_sha, api) and not is_main_line_ancestor(
+        run.get("head_sha", ""), main_sha, api
+    ):
         raise RiskGateError("preview run does not belong to the source pull request")
     # Belonging to the PR is not enough. The run must also have been produced by
     # the same apply machinery exact main carries, or its artifact is

@@ -208,6 +208,75 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 repo_root=Path.cwd(),
             )
 
+    # A rehearsal dispatched from `main` before the promoted work merged carries a
+    # main commit that is an ANCESTOR of the promoted one. Requiring PR membership
+    # stranded those promotions permanently, because an applied version can never be
+    # re-applied to preview. These four tests pin the new path and its refusals.
+    def _ancestor_api(self, run, *, status, behind_by=0, compare_raises=False):
+        def api(endpoint):
+            if endpoint.endswith('commits?per_page=100'):
+                return [{'sha': '1' * 40}]
+            if '/compare/' in endpoint:
+                if compare_raises:
+                    raise RuntimeError('GitHub 503')
+                return {'status': status, 'behind_by': behind_by}
+            return run
+        return api
+
+    def _run(self):
+        return {
+            'status': 'completed', 'conclusion': 'success', 'event': 'workflow_dispatch',
+            'head_sha': 'f' * 40, 'path': '.github/workflows/shared-supabase-migrations.yml',
+        }
+
+    def test_main_line_ancestor_rehearsal_passes_provenance(self):
+        # Reaches the producer-paths check, which proves provenance was accepted.
+        with self.assertRaisesRegex(RiskGateError, 'preview producer file'):
+            prove_preview(
+                run_id=7, digest='sha256:' + 'c' * 64, pr_head='a' * 40,
+                main_sha='d' * 40, source_pr=1, allowlist=['20260814000000'],
+                api=self._ancestor_api(self._run(), status='ahead'),
+                downloader=lambda *_: self.fail('must not download'), repo_root=Path.cwd(),
+            )
+
+    def test_diverged_rehearsal_is_still_refused(self):
+        with self.assertRaisesRegex(RiskGateError, 'does not belong to the source pull request'):
+            prove_preview(
+                run_id=7, digest='sha256:' + 'c' * 64, pr_head='a' * 40,
+                main_sha='d' * 40, source_pr=1, allowlist=['20260814000000'],
+                api=self._ancestor_api(self._run(), status='diverged'),
+                downloader=lambda *_: self.fail('must not download'), repo_root=Path.cwd(),
+            )
+
+    def test_descendant_rehearsal_is_still_refused(self):
+        # `behind` means the run head is AHEAD of promoted main -- a rehearsal of code
+        # main does not carry yet. Never acceptable.
+        with self.assertRaisesRegex(RiskGateError, 'does not belong to the source pull request'):
+            prove_preview(
+                run_id=7, digest='sha256:' + 'c' * 64, pr_head='a' * 40,
+                main_sha='d' * 40, source_pr=1, allowlist=['20260814000000'],
+                api=self._ancestor_api(self._run(), status='behind'),
+                downloader=lambda *_: self.fail('must not download'), repo_root=Path.cwd(),
+            )
+
+    def test_unreadable_ancestry_fails_closed(self):
+        with self.assertRaisesRegex(RiskGateError, 'does not belong to the source pull request'):
+            prove_preview(
+                run_id=7, digest='sha256:' + 'c' * 64, pr_head='a' * 40,
+                main_sha='d' * 40, source_pr=1, allowlist=['20260814000000'],
+                api=self._ancestor_api(self._run(), status='ahead', compare_raises=True),
+                downloader=lambda *_: self.fail('must not download'), repo_root=Path.cwd(),
+            )
+
+    def test_ancestor_with_nonzero_behind_by_is_refused(self):
+        with self.assertRaisesRegex(RiskGateError, 'does not belong to the source pull request'):
+            prove_preview(
+                run_id=7, digest='sha256:' + 'c' * 64, pr_head='a' * 40,
+                main_sha='d' * 40, source_pr=1, allowlist=['20260814000000'],
+                api=self._ancestor_api(self._run(), status='ahead', behind_by=3),
+                downloader=lambda *_: self.fail('must not download'), repo_root=Path.cwd(),
+            )
+
     def test_unreadable_source_pr_commits_fail_closed(self):
         run = {
             "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
