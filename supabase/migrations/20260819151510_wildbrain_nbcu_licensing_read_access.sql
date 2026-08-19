@@ -40,17 +40,24 @@
 --
 -- ADD ONLY. NOTHING IS NARROWED.
 --   * The 28 existing `<table>_service_read` policies are NOT dropped, replaced or
---     renamed. The assertion block proves all 28 are still present afterwards.
+--     renamed. The assertion block proves all 28 are still present afterwards, AND that
+--     each one still carries its original `using (true)` expression -- a name that
+--     survives while its predicate is quietly rewritten to `using (false)` would be a
+--     silently broken loader, and service_role's BYPASSRLS means no behavioural test
+--     could catch it.
 --   * The immutability mechanism is untouched: `authenticated` receives SELECT and only
 --     SELECT, service_role's grants are not changed, and the assertion block proves both.
 --   * anon receives nothing and is asserted to hold nothing.
 --   * Sega, Peanuts, DCP, Warner, Paramount and Disney OPA are NOT touched. Paramount's
 --     wider predicate (it also admits `designer`) is left exactly as it is: narrowing it
---     would take access away from designers, which nobody asked for. Disney OPA's
---     over-broad `using (true)` on plm.opa_property_character is a real defect but it is
---     a BUSINESS decision to remove vendor and viewer access from confidential licensor
---     data, so it is carried separately as issue #1251 and is deliberately not touched
---     here.
+--     would take access away from designers, which nobody asked for.
+--     DISNEY OPA IS ALREADY CORRECT AND MUST BE LEFT ALONE. Migration
+--     20260807190000_opa_security_and_view_corrections.sql:71-79 dropped the original
+--     over-broad `using (true)` policy on plm.opa_property_character and recreated
+--     `opa_property_character_read` with the house predicate on 2026-08-07; that is
+--     applied to production. This file must not add, drop or rewrite
+--     `opa_property_character_read`, and the contract test asserts it still admits
+--     exactly the same three arms the house predicate admits.
 --
 -- EXPLICIT PER-TABLE STATEMENTS, NOT A LOOP
 --   20260810070000 issued the NBCU grants through `execute format('... plm.%I ...')`.
@@ -226,6 +233,7 @@ declare
   v_n       integer;
   v_qual    text;
   v_ref     text;
+  v_svc_ref text;
   v_tables  text[] := array[
     'wildbrain_capture','wildbrain_era','wildbrain_creative_group',
     'wildbrain_asset_category','wildbrain_asset_nature','wildbrain_character',
@@ -251,6 +259,17 @@ begin
   if v_ref is null then
     raise exception 'policy sega_capture_plm_read is missing; there is no house predicate '
       'to compare the 28 new policies against and this migration cannot verify itself';
+  end if;
+
+  -- The second reference: the permissive service-read expression, also read from an
+  -- already-applied policy this file does not touch. Every <table>_service_read on the 28
+  -- tables was created as `using (true)`, so they must all still equal this.
+  select qual into v_svc_ref from pg_policies
+   where schemaname = 'plm' and tablename = 'sega_capture'
+     and policyname = 'sega_capture_service_read';
+  if v_svc_ref is null then
+    raise exception 'policy sega_capture_service_read is missing; there is no reference '
+      'service-read expression to compare the 28 surviving policies against';
   end if;
 
   foreach t in array v_tables loop
@@ -301,7 +320,11 @@ begin
         'predicate %', t, coalesce(v_qual, '<null>'), v_ref;
     end if;
 
-    -- 6. NOTHING WAS TAKEN AWAY. The pre-existing service_role read policy survives.
+    -- 6. NOTHING WAS TAKEN AWAY. The pre-existing service_role read policy survives --
+    --    name, command, role AND EXPRESSION. Checking only the name would let a
+    --    `_service_read` rewritten to `using (false)` pass, and service_role carries
+    --    BYPASSRLS, so no behavioural test would ever notice the loader's read path had
+    --    been silently disabled.
     select count(*) into v_n from pg_policies
      where schemaname = 'plm' and tablename = t and policyname = t || '_service_read'
        and cmd = 'SELECT' and roles = array['service_role']::name[];
@@ -309,6 +332,14 @@ begin
       v_fail := v_fail + 1;
       raise warning 'FAIL policy %_service_read on plm.% no longer exists in its original '
         'form -- this migration must not touch it', t, t;
+    end if;
+
+    select qual into v_qual from pg_policies
+     where schemaname = 'plm' and tablename = t and policyname = t || '_service_read';
+    if v_qual is distinct from v_svc_ref then
+      v_fail := v_fail + 1;
+      raise warning 'FAIL policy %_service_read has predicate %, not the permissive %  -- '
+        'the service read path was rewritten', t, coalesce(v_qual, '<null>'), v_svc_ref;
     end if;
 
     -- 7. RLS is still enabled, so the policy is actually the thing deciding.
@@ -326,7 +357,8 @@ begin
   end if;
 
   raise notice 'OK: 28 tables carry authenticated SELECT and only SELECT, a <table>_plm_read '
-    'policy whose predicate matches the Sega house predicate exactly, an intact '
-    '<table>_service_read policy, RLS enabled, and nothing for anon.';
+    'policy whose predicate matches the Sega house predicate exactly, a <table>_service_read '
+    'policy still carrying its original permissive expression, RLS enabled, and nothing '
+    'for anon.';
 end;
 $$;

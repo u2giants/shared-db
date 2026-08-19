@@ -76,6 +76,7 @@ declare
   v_n       integer;
   v_qual    text;
   v_ref     text;
+  v_svc_ref text;
   v_tables  text[] := array[
     'wildbrain_capture','wildbrain_era','wildbrain_creative_group',
     'wildbrain_asset_category','wildbrain_asset_nature','wildbrain_character',
@@ -102,6 +103,17 @@ begin
     raise exception 'A FAILED (fixture): policy sega_capture_plm_read is missing, so '
       'there is no house predicate to compare against and section A would compare '
       'every new policy against NULL';
+  end if;
+
+  -- The second reference: the permissive service-read expression, read from an
+  -- already-applied policy this PR does not touch.
+  select qual into v_svc_ref from pg_policies
+   where schemaname = 'plm' and tablename = 'sega_capture'
+     and policyname = 'sega_capture_service_read';
+  if v_svc_ref is null then
+    raise exception 'A FAILED (fixture): policy sega_capture_service_read is missing, so '
+      'there is no reference service-read expression and the _service_read comparisons '
+      'below would compare against NULL';
   end if;
 
   foreach t in array v_tables loop
@@ -159,7 +171,12 @@ begin
         'predicate %', t, coalesce(v_qual, '<null>'), v_ref;
     else v_pass := v_pass + 1; end if;
 
-    -- 6. NOTHING WAS TAKEN AWAY: the pre-existing service_role read policy survives.
+    -- 6. NOTHING WAS TAKEN AWAY: the pre-existing service_role read policy survives --
+    --    name, command, role AND EXPRESSION. Name-only was not enough: a `_service_read`
+    --    rewritten to `using (false)` keeps its name, its command and its role, and
+    --    service_role carries BYPASSRLS, so section B could not catch it either. The
+    --    stored expression is therefore compared against the untouched Sega original, the
+    --    same technique used for _plm_read above.
     select count(*) into v_n from pg_policies
      where schemaname = 'plm' and tablename = t and policyname = t || '_service_read'
        and cmd = 'SELECT' and roles = array['service_role']::name[];
@@ -167,6 +184,15 @@ begin
       v_fail := v_fail + 1;
       raise warning 'A FAIL: policy %_service_read on plm.% was dropped, renamed or '
         'rewritten -- #1249 must not touch it', t, t;
+    else v_pass := v_pass + 1; end if;
+
+    select qual into v_qual from pg_policies
+     where schemaname = 'plm' and tablename = t and policyname = t || '_service_read';
+    if v_qual is distinct from v_svc_ref then
+      v_fail := v_fail + 1;
+      raise warning 'A FAIL: policy %_service_read has predicate %, not the permissive % '
+        '-- the loader read path was silently rewritten', t,
+        coalesce(v_qual, '<null>'), v_svc_ref;
     else v_pass := v_pass + 1; end if;
 
     -- 7. EXACTLY TWO policies. A third would mean somebody added a read path this test
@@ -550,51 +576,162 @@ $$;
 
 -- =====================================================================================
 -- C. NOTHING ELSE MOVED. The other landing schemas are untouched by #1249.
---    Their predicates are read from the catalog and compared to what they were before,
---    which for every one of them is "at least as wide as the house predicate". This
---    section is here because the failure mode of a permissions migration is not usually
---    the table it names -- it is the neighbour it also happened to hit.
+--
+--    WHY THIS SECTION IS SHAPED THE WAY IT IS. Its first version asked only whether the
+--    neighbours' policies still EXISTED, which is a nominal guard and not a real one: a
+--    Disney policy rewritten to `using (true)` still counts as one policy, and one
+--    surviving `designer` mention still satisfies "some pmt_* policy mentions designer"
+--    while the other twenty-two are narrowed. Every check below therefore compares a
+--    STORED PREDICATE read from pg_policies, and quantifies over EVERY policy in the
+--    family rather than over at least one -- the technique section A uses on the 28
+--    tables this migration actually writes.
+--
+--    Disney is compared ARM BY ARM rather than by string equality, because its arms are
+--    in a different ORDER from Sega's: 20260807190000 wrote administrator / plm access /
+--    sales+licensing, and 20260819015333 wrote plm access / administrator /
+--    sales+licensing. Same population, different text. Splitting both on OR and comparing
+--    them as SETS asserts the thing that actually matters -- who is admitted -- and fails
+--    immediately on `using (true)`, on a dropped arm, or on an added one.
 -- =====================================================================================
 do $$
 declare
-  v_fail integer := 0;
-  v_n    integer;
+  v_fail      integer := 0;
+  v_pass      integer := 0;
+  v_n         integer;
+  v_qual      text;
+  v_ref       text;
+  v_ref_arms  text[];
+  v_opa_arms  text[];
+  v_missing   text;
+  r           record;
 begin
   raise notice '=== C. NEIGHBOURS ===';
 
-  -- Disney OPA #1251 is a SEPARATE issue awaiting an owner decision. #1249 must not have
-  -- pre-empted it: plm.opa_property_character keeps exactly the policies it had.
+  select qual into v_ref from pg_policies
+   where schemaname = 'plm' and tablename = 'sega_capture'
+     and policyname = 'sega_capture_plm_read';
+  if v_ref is null then
+    raise exception 'C FAILED (fixture): sega_capture_plm_read is missing, so there is no '
+      'house predicate to compare the neighbours against';
+  end if;
+
+  -- The house arms, as a SET: outer parentheses stripped, split on OR, all whitespace
+  -- removed so two spellings of one arm compare equal, and sorted so order cannot matter.
+  -- ONE outer pair of parentheses is stripped, not every parenthesis at either end:
+  -- btrim(qual, '()') would eat the closing paren of the trailing ARRAY[...] call too and
+  -- silently mangle the last arm.
+  select array_agg(replace(btrim(arm), ' ', '') order by replace(btrim(arm), ' ', ''))
+    into v_ref_arms
+  from unnest(string_to_array(
+    case when v_ref like '(%)' then substr(v_ref, 2, length(v_ref) - 2) else v_ref end,
+    ' OR ')) as arm;
+
+  if array_length(v_ref_arms, 1) <> 3 then
+    raise exception 'C FAILED (fixture): the house predicate split into % arm(s), expected '
+      '3 (plm app access, administrator, sales+licensing). The split is wrong and every '
+      'comparison below would be meaningless', coalesce(array_length(v_ref_arms, 1), 0);
+  end if;
+
+  -- ------------------------------------------------------------------ Disney OPA ------
+  -- Disney has been correct since 20260807190000, which dropped the original over-broad
+  -- `using (true)` policy and recreated opa_property_character_read with the house
+  -- predicate (issue #1251 was closed as already-done). #1249 must not add, drop or
+  -- rewrite it, and its ARMS must still be exactly the house arms.
   select count(*) into v_n from pg_policies
    where schemaname = 'plm' and tablename = 'opa_property_character';
   if v_n <> 1 then
     v_fail := v_fail + 1;
-    raise warning 'C FAIL: plm.opa_property_character carries % policies; #1249 must '
-      'leave Disney OPA entirely alone (that is issue #1251)', v_n;
+    raise warning 'C FAIL: plm.opa_property_character carries % policies; #1249 adds and '
+      'removes none', v_n;
+  else v_pass := v_pass + 1; end if;
+
+  select qual into v_qual from pg_policies
+   where schemaname = 'plm' and tablename = 'opa_property_character'
+     and policyname = 'opa_property_character_read'
+     and cmd = 'SELECT' and roles = array['authenticated']::name[];
+  if v_qual is null then
+    v_fail := v_fail + 1;
+    raise warning 'C FAIL: policy opa_property_character_read is missing, was renamed, or '
+      'is no longer an authenticated SELECT policy';
+  else
+    v_pass := v_pass + 1;
+
+    select array_agg(replace(btrim(arm), ' ', '') order by replace(btrim(arm), ' ', ''))
+      into v_opa_arms
+    from unnest(string_to_array(
+      case when v_qual like '(%)' then substr(v_qual, 2, length(v_qual) - 2) else v_qual end,
+      ' OR ')) as arm;
+
+    if v_opa_arms is distinct from v_ref_arms then
+      v_fail := v_fail + 1;
+      raise warning 'C FAIL: opa_property_character_read admits [%] -- the house predicate '
+        'admits [%]. The confidential Disney extract is no longer restricted to '
+        'administrator / plm app access / sales+licensing',
+        array_to_string(v_opa_arms, ' OR '), array_to_string(v_ref_arms, ' OR ');
+    else v_pass := v_pass + 1; end if;
   end if;
 
-  -- Paramount deliberately keeps its wider predicate, which also admits `designer`.
-  -- Narrowing it would take access away from designers, which nobody asked for.
+  -- ------------------------------------------------------------------- Paramount ------
+  -- Paramount deliberately keeps its WIDER predicate, which also admits `designer`.
+  -- Narrowing it would take access away from designers, which nobody asked for -- so
+  -- EVERY pmt_* authenticated read policy must still mention designer, not merely one.
+  -- 20260810020000 creates exactly 23, one per pmt_* landing table.
   select count(*) into v_n from pg_policies
    where schemaname = 'plm' and tablename like 'pmt\_%'
-     and qual like '%designer%';
-  if v_n = 0 then
+     and cmd = 'SELECT' and roles = array['authenticated']::name[];
+  if v_n <> 23 then
     v_fail := v_fail + 1;
-    raise warning 'C FAIL: no plm.pmt_* read policy mentions designer any more -- #1249 '
-      'narrowed Paramount, which it must not';
-  end if;
+    raise warning 'C FAIL: found % pmt_* authenticated read policies, expected 23 '
+      '(20260810020000). One was dropped, or a new pmt_* table arrived without one', v_n;
+  else v_pass := v_pass + 1; end if;
 
-  -- Sega and Peanuts still admit the same population; #1249 rewrote nothing there.
+  select string_agg(policyname, ', ' order by policyname) into v_missing
+  from pg_policies
+   where schemaname = 'plm' and tablename like 'pmt\_%'
+     and cmd = 'SELECT' and roles = array['authenticated']::name[]
+     and coalesce(qual, '') not like '%designer%';
+  if v_missing is not null then
+    v_fail := v_fail + 1;
+    raise warning 'C FAIL: these pmt_* read policies no longer admit designer: % -- '
+      'Paramount was narrowed, which #1249 must not do', v_missing;
+  else v_pass := v_pass + 1; end if;
+
+  -- --------------------------------------------------------------- Sega and Peanuts ---
+  -- These two already satisfied the ruling before #1249. EVERY one of their _plm_read
+  -- policies must still carry the house predicate byte for byte, still be a SELECT
+  -- policy, and still apply to authenticated. Rewriting all but one of them would have
+  -- passed the original "some policy has a non-null qual" check.
   select count(*) into v_n from pg_policies
    where schemaname = 'plm'
      and (tablename like 'sega\_%' or tablename like 'peanuts\_%')
-     and policyname like '%\_plm\_read'
-     and qual is not null;
+     and policyname like '%\_plm\_read';
   if v_n = 0 then
     v_fail := v_fail + 1;
-    raise warning 'C FAIL: the Sega/Peanuts _plm_read policies are gone';
-  end if;
+    raise warning 'C FAIL: the Sega/Peanuts _plm_read policies are gone entirely';
+  else v_pass := v_pass + 1; end if;
 
+  for r in
+    select tablename, policyname, qual, cmd, roles from pg_policies
+     where schemaname = 'plm'
+       and (tablename like 'sega\_%' or tablename like 'peanuts\_%')
+       and policyname like '%\_plm\_read'
+     order by tablename, policyname
+  loop
+    if r.qual is distinct from v_ref
+       or r.cmd <> 'SELECT'
+       or r.roles is distinct from array['authenticated']::name[] then
+      v_fail := v_fail + 1;
+      raise warning 'C FAIL: policy % on plm.% is (% to %) using % -- it no longer matches '
+        'the house predicate %. A neighbour #1249 must not touch was rewritten',
+        r.policyname, r.tablename, r.cmd, array_to_string(r.roles, ','),
+        coalesce(r.qual, '<null>'), v_ref;
+    else v_pass := v_pass + 1; end if;
+  end loop;
+
+  raise notice 'C: % passed / % failed', v_pass, v_fail;
   if v_fail > 0 then raise exception 'C FAILED (% failures)', v_fail; end if;
-  raise notice 'C passed: Disney OPA, Paramount, Sega and Peanuts are untouched.';
+  raise notice 'C passed: Disney OPA still admits exactly the three house arms, all 23 '
+    'Paramount read policies still admit designer, and every Sega/Peanuts _plm_read still '
+    'carries the house predicate byte for byte.';
 end;
 $$;

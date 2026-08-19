@@ -1040,8 +1040,22 @@ $$;
 --    one catalog view -- and covers the four PostgreSQL 17 bits that predate the original
 --    revoke migration (REFERENCES, TRIGGER, MAINTAIN, TRUNCATE).
 --
---    The table must NOT be reachable by the browser roles and must NOT be exposed
---    through any api.* view or public wrapper function.
+--    `anon` must hold NOTHING on the table. `authenticated` must hold SELECT AND ONLY
+--    SELECT -- never a write -- and which signed-in accounts that SELECT actually returns
+--    rows to is decided by the `nbcu_asset_ip_family_plm_read` RLS policy added by
+--    migration 20260819151510 for issue #1249, Albert Hazan's ruling that "scrape data
+--    should be visible to Licensing department users". That policy admits administrator,
+--    `plm` app access, and the sales/licensing roles, and it is proved behaviourally --
+--    by becoming each principal in turn -- in
+--    supabase/tests/wildbrain_nbcu_licensing_read_access_contracts.sql.
+--
+--    DO NOT "RESTORE" A DENY-ALL POSTURE HERE. Until 2026-08-19 this header said the
+--    table must not be reachable by the browser roles at all, and that was correct until
+--    the owner decided otherwise. Re-tightening these assertions would quietly undo his
+--    ruling and lock Licensing back out.
+--
+--    The table must still NOT be exposed through any api.* view or public wrapper
+--    function; `plm` is not PostgREST-exposed and a read surface is a separate decision.
 -- =====================================================================================
 do $$
 declare
