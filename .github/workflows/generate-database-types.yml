@@ -60,7 +60,12 @@ jobs:
   generate:
     runs-on: ubuntu-latest
     env:
-      PREVIEW_PROJECT_REF: rjyboqwcdzcocqgmsyel
+      # CONFIGURED, not hard-coded. The preview branch is rebuilt from time to time and
+      # its project ref CHANGES when it is: on 2026-08-18 rjyboqwcdzcocqgmsyel was deleted
+      # and replaced. A literal here pins this lane to a database that no longer exists.
+      # Set the repository variable PREVIEW_PROJECT_REF instead. An unset value is
+      # REFUSED, never defaulted. See AGENTS.md rule 2.
+      PREVIEW_PROJECT_REF: ${{ vars.PREVIEW_PROJECT_REF }}
       PRODUCTION_PROJECT_REF_NEVER_READ_HERE: qsllyeztdwjgirsysgai
     steps:
       - uses: actions/checkout@v4
@@ -72,15 +77,19 @@ jobs:
         run: |
           set -euo pipefail
           echo "PROJECT REF THIS JOB WILL READ: $PREVIEW_PROJECT_REF"
-          if [ "$PREVIEW_PROJECT_REF" != "rjyboqwcdzcocqgmsyel" ]; then
-            echo "REFUSED: types job is not pointed at the preview project ref." >&2
+          if [ -z "${PREVIEW_PROJECT_REF// /}" ]; then
+            echo "REFUSED: repository variable PREVIEW_PROJECT_REF is not set. Set it to the CURRENT preview branch project ref. An unset ref is never treated as a default." >&2
+            exit 1
+          fi
+          if ! printf '%s' "$PREVIEW_PROJECT_REF" | grep -Eq '^[a-z]{20}$'; then
+            echo "REFUSED: PREVIEW_PROJECT_REF is not a 20-character Supabase project ref." >&2
             exit 1
           fi
           if [ "$PREVIEW_PROJECT_REF" = "$PRODUCTION_PROJECT_REF_NEVER_READ_HERE" ]; then
             echo "REFUSED: types job is pointed at PRODUCTION." >&2
             exit 1
           fi
-          echo "REF OK: preview = rjyboqwcdzcocqgmsyel."
+          echo "REF OK: preview = $PREVIEW_PROJECT_REF (production $PRODUCTION_PROJECT_REF_NEVER_READ_HERE is not this job's target)."
 
       - uses: supabase/setup-cli@v1
         with:
