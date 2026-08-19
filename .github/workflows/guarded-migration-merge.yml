@@ -70,7 +70,39 @@ jobs:
           node scripts/check-pr-object-collisions.mjs
           node scripts/check-migration-pr-lease.mjs
           gh api "repos/u2giants/shared-db/statuses/$REQUESTED_SHA" -f state=success -f context='Migration guarded merge authorization' -f description='Exclusive merge lock held and exact head revalidated'
-          gh pr merge "${{ inputs.pull_request }}" --repo u2giants/shared-db --merge --match-head-commit "${{ inputs.head_sha }}"
+          # The status write above and the mergeability GitHub evaluates below are
+          # EVENTUALLY CONSISTENT. Posting the status and merging back-to-back asked
+          # GitHub to honour an approval it had not recorded yet, so every attempt was
+          # refused with "the base branch policy prohibits the merge" and the revoke step
+          # then set this same context back to failure -- a deadlock the workflow inflicted
+          # on itself. Observed live on PR #1175: success at 21:18:12Z, refusal at
+          # 21:18:14Z, four attempts in a row.
+          #
+          # Wait for THIS context to read back as success before merging, then retry the
+          # merge itself a bounded number of times. Fails closed: if the readback never
+          # turns green, or every merge attempt is refused, the step exits non-zero and the
+          # revoke step withdraws authorization exactly as before. Nothing is merged on an
+          # unproven approval.
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            observed="$(gh api "repos/u2giants/shared-db/commits/$REQUESTED_SHA/status" \
+              --jq '[.statuses[] | select(.context == "Migration guarded merge authorization")] | first | .state' 2>/dev/null || echo '')"
+            [ "$observed" = 'success' ] && break
+            echo "authorization not visible yet (attempt $attempt, observed='${observed:-none}'); waiting"
+            sleep 6
+          done
+          test "$observed" = 'success'
+          merged=0
+          for attempt in 1 2 3 4 5; do
+            if gh pr merge "${{ inputs.pull_request }}" --repo u2giants/shared-db --merge --match-head-commit "${{ inputs.head_sha }}"; then
+              merged=1; break
+            fi
+            echo "guarded merge attempt $attempt was refused; re-proving the head and retrying"
+            test "$(gh pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
+            git fetch origin main
+            test "$(git merge-base HEAD origin/main)" = "$(git rev-parse origin/main)"
+            sleep 10
+          done
+          test "$merged" = '1'
       - name: Revoke authorization if the guarded merge did not complete
         id: revoke_authorization
         if: failure() && steps.merge_lock.outputs.owner_sha != ''

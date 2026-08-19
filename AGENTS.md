@@ -8,6 +8,17 @@
 
 # AGENTS.md — cross-app coordination playbook
 
+## Companywide business rules
+
+Business logic is organized by business topic, not by application. Before
+changing behavior, definitions, permissions, workflows, calculations, or source
+authority, start at
+[`docs/business-rules/application-map.md`](docs/business-rules/application-map.md)
+and load only the topics the task touches. Application repos may link to these
+rules but must not maintain competing copies. The collection, status, correction,
+and dissemination process is
+[`docs/business-rules/README.md`](docs/business-rules/README.md).
+
 ## Historical item merchandise-group classification
 
 Before interpreting `full_item_master.csv`, changing item-description parsing, or reporting historical MG match counts, read [`docs/item-description-mg-classification-process.md`](docs/item-description-mg-classification-process.md). The active remediation plan is [`plan_item_description_mg_taxonomy_repair.md`](plan_item_description_mg_taxonomy_repair.md); follow its STATUS table and do not recreate the unsafe provisional/fuzzy method. The permanent rule is: parse every description into product type, size, licensor, property, and artwork; build independent post-May-13 maps for MG01, MG01+MG02, and MG01+MG02+MG03; then match old product types from three levels to two to one. A failed full-key match is never an MG01 failure.
@@ -15,7 +26,7 @@ Before interpreting `full_item_master.csv`, changing item-description parsing, o
 ## Active contracts and implementation plans
 
 - PopDAM OrderList linked to Master Data: [`plan_popdam_order_list.md`](plan_popdam_order_list.md). Read its STATUS table first. Do not re-derive or re-plan completed steps.
-- **Settled licensing Master Data architecture (read before any Licensor, Property, Character, Style Guide, Asset, or Franchise work):** [`docs/core-master-data-consolidation-aim.md`](docs/core-master-data-consolidation-aim.md). Owner ruling 2026-08-16: authorized licensor scrapes are canonical for Property spelling, Property ownership, Characters, Style Guides, Asset metadata, Franchises, and direct source-published relationships. ColdLion decides Property Active/Inactive only. New scrape Properties and reviewed ColdLion create-new rows start Potential; a ColdLion-only proposal needs Licensing confirmation of name and owning Licensor before creation, then guarded membership may make it Active. The one stale DesignFlow pull has no authority. Authorized licensor scrapes run weekly. This is a central architecture contract, not an issue or proposal.
+- **Companywide business rules (read before interpreting business meaning):** start at [`docs/business-rules/application-map.md`](docs/business-rules/application-map.md). Licensing Master Data starts at [`docs/business-rules/licensing-master-data.md`](docs/business-rules/licensing-master-data.md); its detailed architecture remains in [`docs/core-master-data-consolidation-aim.md`](docs/core-master-data-consolidation-aim.md).
 - **Licensing Master Data implementation:** [`plan_licensing_master_data_implementation.md`](plan_licensing_master_data_implementation.md). Read its STATUS table first and start at the named fresh-session step. It supersedes conflicting execution assumptions in older Character/Style Guide and ColdLion plans without deleting their historical evidence.
 - OrderList source contract: [`docs/app-migration-notes/popdam-order-list.md`](docs/app-migration-notes/popdam-order-list.md), with formula detail in [`docs/app-migration-notes/popdam-order-list-formula-audit-20260807.md`](docs/app-migration-notes/popdam-order-list-formula-audit-20260807.md). Owner ruling: Google OrderList and future Coldlion rows are the same orders; `plm.item` is the ultimate item list. One canonical order/line must retain separate Google and Coldlion source refs.
 
@@ -377,7 +388,7 @@ re-deriving it:
   **new** objects elsewhere, not the power to write DesignFlow. Those grants are a real
   production-infrastructure exposure and #705 records them; they are simply not a write path
   into `designflow`.
-- [`scripts/capture-postgres-schema.sql`](scripts/capture-postgres-schema.sql) line 66 sets
+- [`scripts/capture-postgres-schema.sql`](scripts/capture-postgres-schema.sql) sets
   `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`, which is why that particular run
   could not have written. It is a session-scoped guard that the same session can reset to
   `READ WRITE`, so it is **never** a substitute for the proof rule for any other credential.
@@ -417,7 +428,7 @@ changes for it and do not re-raise it as a blocker.
   `op read 'op://vibe_coding/tcaf3o3u2cx52g6ivvczxbhola/DB_PASSWORD'`. The password is in a
   **custom field named `DB_PASSWORD`**, not `credential`. 1Password item IDs can be re-keyed
   mid-session, so if that ID 404s, re-resolve by title with
-  `op item list --vault vibe_coding --format json` (same pattern as §9, `AGENTS.md:1946-1963`).
+  `op item list --vault vibe_coding --format json` (same pattern as §9 of this file).
   Never write the
   value anywhere.
 
@@ -808,8 +819,155 @@ four rules below are non-negotiable for any database change.
    session** (seen 2026-07-27: 17 PopPIM migrations blocked all preview
    dry-runs until PR #271 landed).
 2. **Preview database first. Production never receives untested schema.** Apply
-   every migration to the preview branch (`rjyboqwcdzcocqgmsyel`), prove it
-   works, *then* promote to production (`qsllyeztdwjgirsysgai`).
+   every migration to the preview branch, prove it works, *then* promote to
+   production (`qsllyeztdwjgirsysgai`). The preview project ref is NOT written
+   down here: preview is rebuilt from time to time and its ref changes when it
+   is — `rjyboqwcdzcocqgmsyel` was deleted on 2026-08-18. The current ref lives
+   in the repository variable `PREVIEW_PROJECT_REF`, and **every** workflow that
+   targets preview reads it from there. An unset variable is refused, never
+   defaulted. The older workflows that used to hard-code the deleted ref
+   (`generate-database-types.yml`, `preview-ledger-orphan-reconciliation.yml`,
+   the `coldlion-*` workflows) were converted to the same pattern, and
+   `scripts/check-workflow-preview-ref.test.mjs` now fails the *Shared Supabase
+   Migrations* guard job if any workflow pins a preview ref literal again.
+
+   **Post-merge rehearsal (the normal order).** Merge first, then rehearse on
+   preview from merged `main`, then promote. Dispatch *Shared Supabase
+   Migrations* with `target=preview`, `mode=apply`,
+   `merged_preview_source_pr=<the merged PR>`, `commit_sha=<the current main
+   tip>` and `preview_allowlist=<the exact versions>`. Do NOT pass `claim_pr`:
+   a merged pull request has no live author claim, and naming both is refused.
+
+   The exclusive preview lock for that run is authorised by **merge-commit
+   ancestry of the main tip**, not by a live author claim — the guarded merge
+   released the claim and deleted the branch, which is exactly why the rule
+   above used to be unexecutable (#1208). It is the same `refs/db-coordination/preview`
+   lock, so it is mutually exclusive with an ordinary preview run and with a
+   historical recovery — every lane that writes preview holds one ref, and this
+   lane adds no second door.
+
+   **What that lock does NOT do, stated exactly.** It does not exclude a merge
+   or a production promotion. `EXCLUSIVE_REFS` gives merge and production their
+   own refs, and only two cross-checks exist — both inside `acquireExclusive` in
+   [`scripts/manage-migration-author-lanes.mjs`](scripts/manage-migration-author-lanes.mjs),
+   findable by their refusal text rather than by a line number, which drifts:
+   a promotion waits for the merge ref (`a guarded merge is active; production
+   promotion must wait`), and a merge waits for the production ref
+   (`production promotion is active; merges are frozen`). Nothing in
+   either direction reads the preview ref. That is pre-existing behaviour of the
+   ordinary preview lane, unchanged here — an earlier draft of this section
+   claimed the exclusion existed, and it never did. Promotions are serialised
+   among themselves by the workflow `concurrency` group, not by this lock.
+
+   The lock fails closed if the PR is not merged, if its
+   merge commit is not carried by the main tip, if the named versions were not
+   *added* by that PR, or if GitHub state cannot be read.
+
+   The evidence that run uploads carries the exact commit it checked out and the
+   preview project ref it wrote to, and the production gate checks both. A
+   rehearsal against a preview database that has since been rebuilt is therefore
+   no longer proof for a production write.
+
+   **A rehearsal runs ONCE. Do not re-run it — recover it.** An applied version
+   can never be applied again, so there is no second bite. If the versions are
+   already in preview's ledger, both ways of trying again are refused, and both
+   refusals are correct:
+
+   * **A fresh dispatch** fails at *Hard guard preflight*: the versions are now
+     in preview's ledger and the guard refuses to re-apply an applied version.
+     The run's conclusion becomes `failure`, and the production gate accepts
+     evidence only from a run whose status is `completed` and whose conclusion is
+     `success`.
+   * **GitHub's "Re-run jobs"** keeps the same run id, so a second
+     `preview-migration-apply-<sha>` upload lands on that one run. The gate
+     requires *exactly one* apply artifact per run — two make the applied commit
+     ambiguous, and an ambiguous commit is not provenance — so it refuses rather
+     than pick one.
+
+   First check whether you need a second run at all: if the original rehearsal
+   completed successfully, its artifact is still the proof, and the promotion
+   should simply name that run in `preview_run_id`. If it did not, **the way
+   forward is the historical-recovery lane, not a weakened guard.** Dispatch
+   `target=preview`, `mode=apply` with `historical_preview_source_pr` (or
+   `historical_preview_source_pr_map` for a batch authored across several pull
+   requests), **`historical_preview_original_run_map`**, plus
+   `commit_sha=<current main tip>` and the same `preview_allowlist`. That lane
+   performs **no database write**.
+
+   `historical_preview_original_run_map` is `version:runId` pairs naming the
+   preview run that **originally applied** each version, and it is **required**.
+   It is not bookkeeping: because a recovery run writes nothing, it can produce
+   no content manifest of its own, so the production gate goes and reads the
+   named run's manifest and byte-compares the digest it recorded against the file
+   on exact main. Find the run id in the Actions history — it is the successful
+   `apply` run whose artifact is `preview-migration-apply-<sha>` for that batch.
+
+   **The named run is pinned on BOTH of its commits.** The commit it advertised
+   in its artifact name *and* `head_sha`, the ref GitHub read the workflow file
+   from, must each be a commit of the authoring pull request or a commit exact
+   main contains, and each must carry the **same producer files as the merge
+   commit of the pull request that authored that version** — a commit the gate
+   re-derives from GitHub, never one the promoter supplies. Without that second
+   pin, anyone who can dispatch this workflow could push a branch whose copy of
+   it performs no database write, hand-write a ledger delta and a content
+   manifest naming exact main's digest, name that run as the "original apply",
+   and promote bytes preview never executed. Pinning the two commits **to each
+   other** — the #1213 round-5 wording, removed in round 7 — was a no-op: one
+   commit used for both pins compared nothing at all (round 6, finding 1).
+
+   A producer file that **did not exist yet** at the merge commit is skipped,
+   and only when it is absent from *both* commits. The producer list grows, so
+   an old recovery cannot be required to carry files added later; a file present
+   on one side only is a real difference in the machinery that ran, and is
+   refused. Absence is read from each commit's **git tree**, so it is a proved
+   fact rather than an inference from a failed API read, and an unreadable or
+   truncated tree refuses (#1213 round 7, finding 1).
+
+   **What this lane proves, stated exactly.** A real, successful run of this
+   workflow, whose dispatch ref and whose checkout both carry the producer code
+   of the merge commit that landed the version, added each named version to
+   *a* preview ledger and recorded a digest equal to the bytes on exact main; and
+   a merged pull request added each version.
+
+   **What it does not prove, and do not let anyone tell you otherwise.**
+   (a) That preview's *catalog* matches its ledger — a half-applied or
+   hand-repaired preview looks identical from here.
+   (b) That **today's** machinery produced the evidence. The original run's
+   producer code is pinned to the authoring pull request's **merge commit**,
+   never to today's main, because an older commit necessarily carries older
+   producer files and that rule would refuse every genuine recovery. It is *not*
+   pinned to the run's own checkout: round 6 of the #1213 review showed that one
+   attacker-chosen pull-request commit used as both the dispatch ref and the
+   checkout compares nothing at all, and this repository squash-merges, so every
+   commit ever pushed to a pull request stays citable forever.
+   (c) **Which preview database it was.** The original run is deliberately not
+   required to bind to the current `PREVIEW_PROJECT_REF`: preview
+   `rjyboqwcdzcocqgmsyel` was deleted and rebuilt as `mvpkijzfmfcxhnzqogzs` on
+   2026-08-18, so requiring it would refuse every recovery that exists, including
+   the stranded merges this lane was built for. A binding it *does* carry must be
+   readable and must not name the production project. The residual: the ledger
+   half of this lane can be satisfied by one database and the byte half by
+   another if a version reappears in the current preview by restore, clone, or a
+   later apply of different bytes.
+
+   The earlier wording here — "as strong as the claim lane was on the day of that
+   rehearsal" — was **withdrawn as false** in #1213 round 5 and must not return in
+   any file. The claim lane pins both of a run's commits to exact main, so a
+   doctored intermediate commit can never be the promoted rehearsal; this lane
+   pins them to the authoring pull request's merge commit, which is weaker at
+   least in the specific, named ways listed above. Do NOT read that list as
+   exhaustive: no code can establish an exhaustive negative about an attack
+   surface, and the "and in no other way" tail this sentence used to carry was
+   removed in #1213 round 7 for claiming one.
+
+   **If a version's file changed after its rehearsal, this lane will refuse it,
+   and that refusal is correct** — preview never ran the bytes you are asking
+   production to apply. The way forward there is a new migration, never a
+   recovery.
+
+   If you find yourself editing a guard, an `if:` condition or an artifact name
+   to make a re-run go through, stop. That is how the trap this section exists to
+   describe was built in the first place (#1194, #1208). Open an issue instead.
 3. **Additive by default (expand, then contract).** Adding a column or table
    cannot break another app. **Renaming or dropping** one that another app reads
    *will*. Default to additive changes. Only rename/drop after explicit owner
@@ -1403,9 +1561,17 @@ a short window shows only `EH001` and misleads. `1900-01-01` is the empty-date m
 
 ### 6.1 Merch groups / licensors / properties — read this before touching them
 
-Anything involving licensor, property, big theme, little theme, style guide, art type,
-art source, artist, age group, or `mgTypeCode` must start at
-[`docs/merch-group-taxonomy-architecture.md`](docs/merch-group-taxonomy-architecture.md).
+Start from the business object, not the old shared table:
+
+- Licensor, Property, Character, Style Guide, Franchise, licensed Asset, source authority,
+  or Property Active/Inactive starts at
+  [`docs/business-rules/licensing-master-data.md`](docs/business-rules/licensing-master-data.md).
+- MG01–MG14, `mgCategory`, product type/subtype, big theme, little theme, art type,
+  art source, artist, age group, division meaning, or `mgTypeCode` starts at
+  [`docs/business-rules/merchandise-and-product-taxonomy.md`](docs/business-rules/merchandise-and-product-taxonomy.md).
+
+The merchandise-group document explains legacy shape. It does not override the settled
+2026-08-16 licensing authority rules.
 
 For the active ColdLion Licensor/Property source cutover, read the STATUS table in
 [`plan_coldlion_licensor_property_accelerated_cutover.md`](plan_coldlion_licensor_property_accelerated_cutover.md)
@@ -1453,7 +1619,7 @@ must not overlap ColdLion Phase 7.
 **If your work touches characters, style guides, or royalty rates, read
 [`docs/style-guides-characters-and-royalties.md`](docs/style-guides-characters-and-royalties.md)
 FIRST.** Read its historical measurements under the controlling 2026-08-16 architecture in
-[`docs/core-master-data-consolidation-aim.md`](docs/core-master-data-consolidation-aim.md).
+[`docs/business-rules/licensing-master-data.md`](docs/business-rules/licensing-master-data.md).
 There are **two axes, and chaining them is the classic bug**: Licensor-to-Property is one-to-many;
 Property-to-Character is many-to-many; and style is many-to-many — **a style guide holds many
 characters and a character appears in many style guides**. A style guide is *not* a level
@@ -1494,11 +1660,34 @@ company is always `EDGEHOME` (`SPRUCE` and `UCI` in old rows are legacy labels, 
 `plm."divisionCode"` is the single source of truth. Proven live on item `BRT10DYWP01`
 (2026-08-14) — do not re-verify.
 
-**The trap: 78% of item headers (15,185 of 19,463) sit in DesignFlow division `2`**, the one
-everyone calls dead. None are active, but that is where item history lives, and division `2`
-has no ColdLion code under the rules above. **`public.erp_items_current.division_code` must
-not be backfilled until the owner rules on those rows** — the bridge table maps id `2` to
-`CW001` while the agreed rule forbids accepting `2`, and both cannot be true.
+**Division `2` is a DesignFlow-only MIXED legacy bucket — resolve it per item, never map it.**
+**78% of item headers (15,185 of 19,463) carry `dflow."itemHeader".div_code_fk = 2`**, an id
+that exists only in DesignFlow's numbering. **ColdLion has no division `2` and never did** —
+their system has four codes (`CW001`, `EH001`, `SP001`, `EP001`). The tell is in our own data:
+every `div_code_fk = 2` row has its ColdLion text column **empty**, while ids 1 / 8 / 9 carry
+their codes.
+
+**Do NOT blanket-map `2` → `CW001`.** A 250-item random sample checked against the full
+ColdLion catalogue (2026-08-18) shows division 2 holds items from *every* division:
+
+| ColdLion says | Share of sample |
+|---|---|
+| `CW001` | 83.5% |
+| `EH001` | 8.4% |
+| `SP001` | 6.8% |
+| `EP001` | 1.2% |
+| absent from ColdLion | 1 of 250 |
+
+A blanket map would misfile roughly **1 item in 6 — about 2,500 rows**. An earlier 19-item
+sample returned `CW001` every time and produced exactly that wrong conclusion; it is recorded
+here so nobody repeats it.
+
+**The rule (owner ruling, Albert Hazan, 2026-08-18: "go according to ColdLion"):** for any
+item whose DesignFlow division is `2`, take the division **from ColdLion by item number**, not
+from `div_code_fk` and not from a mapping table. `plm."divisionCode"` remains correct for the
+three live ids; it simply has nothing honest to say about id `2`.
+
+⚠️ `2` must never be *stored* in a shared PLM table.
 
 **Also settled:** `EP001` is a **real retired book/education division** (grade bands, page
 counts, flash cards, 2019–2020), *not* a mis-keyed `EH001`. Never "correct" it to `EH001`.
@@ -1511,6 +1700,29 @@ counts, flash cards, 2019–2020), *not* a mis-keyed `EH001`. Never "correct" it
 ⚠️ Three rows (`mg_id` 2, 3, 4) carry **no division at all**, look like obvious junk, and hold
 **573 item references** between them. Deleting them on sight is the mistake this section exists
 to prevent.
+
+**OWNER CONFIRMATION (Albert Hazan, in chat, 2026-08-19).** Verbatim: *"Coldlion has the
+correct data. We only have 4 divisions: cw001, ep001, eh001, sp001. And ep001 has been retired
+and will not be used in our systems."*
+
+Three things this settles for good:
+
+1. **ColdLion is authoritative for division, full stop.** Not `div_code_fk`, not a mapping
+   table, not the DesignFlow id space. This confirms the 2026-08-18 ruling above rather than
+   changing it.
+2. **The division list is CLOSED at four codes** — `CW001`, `EP001`, `EH001`, `SP001`. A
+   division value outside that set is a data defect, not a new division. Do not add one
+   without a fresh owner ruling.
+3. **`EP001` is retired and will NOT be used going forward.** It stays a real historical
+   division (the 2019–2020 book/education line) and must never be "corrected" to `EH001`,
+   but nothing new lands in it. New or backfilled rows must not be assigned `EP001`; a
+   pipeline that would assign it is producing a wrong answer and must fail loudly rather than
+   write it. Historical `EP001` rows stay exactly as they are — this is not licence to
+   rewrite or delete them.
+
+**No further questions are owed to Uma on division codes.** Her 2026-08-13 and 2026-08-17
+answers plus this confirmation cover the ground; issue #903 (the unsent 8-question briefing)
+is closed as superseded.
 
 ### 6.2 Coldlion `/vendors` — wrong table, now FIXED upstream (2026-07-22)
 
@@ -1774,26 +1986,44 @@ permission shortcut.
 
 > "hold it and ship it together with the removal work"
 > — Albert Hazan, 2026-08-03, answering whether to promote the two merged migrations
-> `20260802170000` (durable curated licensor/property status) and `20260802171000`
+> `20260802170000` (durable curated licensor/property status) and the ruling originally recorded in `20260802171000`
 > (the FRIENDS TV / FRIDA KAHLO ruling) to production now, or hold them and combine them
 > with the `FR` removal work as ONE production change.
 
 This is a standing decision, ruled by the owner. **It is settled — do not re-ask it, do not treat
 it as an AI's preference.**
 
-**What is forbidden, stated so it cannot be read narrowly:** **neither `20260802170000` nor
-`20260802171000` may reach production by ANY route until the FR removal work is ready to go with
-them.** Not alone, not as a pair, not as part of a wider backlog sweep, not via `--include-all`, not
-re-issued under a fresh timestamp as a "bounded forward" copy (§5.1 already forbids that habit
-separately). The permitted event is exactly one: a single bounded production apply that carries
-`20260802170000`, `20260802171000` **and** the removal migrations together, in dependency order.
+**What is forbidden, stated so it cannot be read narrowly:** historical `20260802171000` is now
+permanently retired from production because the #1090 licensing guard makes its unguarded write
+unsafe. **Neither `20260802170000`, compatibility prerequisite `20260817225127`, nor guarded
+replacement `20260818174350` may reach production until the FR removal work is ready with them.**
+Not alone, not as a subset, not in a wider sweep, and not via `--include-all`. The permitted event
+is one bounded production apply carrying those three versions and every removal/cleanup member in
+dependency order. This is a safety-preserving supersession of the implementation, not a change to
+Albert's settled business ruling.
+
+**All three are enforced by name, and the version numbers here are load-bearing (2026-08-18).**
+`parse_allowlist` in [`scripts/production_migration_guard.py`](scripts/production_migration_guard.py)
+refuses an allowlist containing ANY member of `FR_HELD_20260803` **or** `FR_COMPATIBILITY_VERSIONS`
+until `FR_REMOVAL_VERSIONS` is populated and the whole ship set is present. Until 2026-08-18 the
+code triggered only on `FR_HELD_20260803`, so `20260817225127` promoted **alone** parsed clean —
+narrower than this prose. The prose is authoritative and the code now matches it.
+
+On the same day, `--supersede-active-claim-version` re-reserved the guarded forward migration from
+`20260817232425` to `20260818174350` and updated only the filename, leaving the guard holding a
+version that named no file and the real file in no hold set at all (issue #1182). **A migration
+version in this section is a safety control, not a file index.** If you rename a migration named
+here, change it here and in the guard in the same commit; `test_every_hold_set_member_is_a_real_migration_file`
+now fails the build otherwise.
 
 **Why this is the right answer, so a future session does not "helpfully" unblock it.**
 
 - Albert's ruling on `FR` "FRIENDS TV" is that it **was never a real licensor and must be REMOVED**
   — not kept, not merely flagged. FRIENDS has always been a *property* under `WB` WARNER BROS, so
   genuine FRIENDS items already have a correct home.
-- Migration `20260802171000` sets `core.licensor` `FR` to **`status = 'inactive'`**. That is a
+- Guarded replacement `20260818174350` records the ruling and sets `core.licensor` `FR` to
+  **`status = 'inactive'`**. Historical `20260802171000` is retained as evidence but never applied
+  to production. The inactive step is a
   *different remedy*, written before the removal ruling existed, and the removal ruling
   **supersedes** it.
 - So promoting #408 alone would change production master data **twice**: once into `inactive` — a
@@ -1802,15 +2032,14 @@ separately). The permitted event is exactly one: a single bounded production app
   asked for is strictly worse than waiting.
 - Combining them means production moves once, from today's state to the intended end state.
 
-**How `20260802171000` reaches production without leaving `FR` inactive — read this before you
-conclude the ruling is impossible.** `20260802171000` is applied on preview, so §4 rule 4 freezes
-its text: it cannot be edited to drop the `inactive` statement, and it must not be skipped in the
-ledger. It therefore **does** apply to production as written, inside the combined push. What the
-ruling forbids is not the statement executing — it is production **coming to rest** in a state the
-owner rejected. Inside one bounded `db push`, `FR` passes from `active` to `inactive` to removed
+**How the ruling reaches production without leaving `FR` inactive — read this before you conclude
+the ruling is impossible.** Preview truthfully retains applied historical `20260802171000`; its
+text and ledger row are immutable. Production instead uses guarded forward `20260818174350`,
+which records the same ruling while satisfying the licensing authorization/audit contract. Inside
+one bounded promotion, `FR` passes from `active` to `inactive` to removed
 without ever being an observable steady state, and no application, sync, or human sees `FR` as an
 inactive licensor. That is the "moves once" the ruling means: one promotion event, one end state.
-An agent that promotes `20260802171000` on its own produces the forbidden thing — a production that
+An agent that promotes `20260818174350` on its own produces the forbidden thing — a production that
 sits at `inactive`, indefinitely, until a second irreversible change.
 
 **The consequence you must NOT report as a bug.** Until the combined change ships, **production and
@@ -1846,13 +2075,13 @@ superseded by this section:**
 
 | Where it still says the opposite | Exact text | Status |
 | --- | --- | --- |
-| `supabase/migrations/20260722170000_db_data_admin_single_record_updates.sql`, lines 36–38 | `-- Refused here: name/code (source vocabulary), is_potential (trigger-owned), PLM status (…), aliases, source refs, related Customer, Licensor/Property, merge, bulk, deletion.` | **Applied migration — DO NOT EDIT IT.** |
-| `apps/db-data-admin/src/LicensorTree.tsx`, line 152 (orphan panel copy) | "The relationship is DesignFlow-owned; do not repair it here." | Superseded; correct by a FORWARD change when the curation path is built. |
+| `supabase/migrations/20260722170000_db_data_admin_single_record_updates.sql` (the `-- Refused here:` comment) | `-- Refused here: name/code (source vocabulary), is_potential (trigger-owned), PLM status (…), aliases, source refs, related Customer, Licensor/Property, merge, bulk, deletion.` | **Applied migration — DO NOT EDIT IT.** |
+| `apps/db-data-admin/src/LicensorTree.tsx` (orphan panel copy) | "The relationship is DesignFlow-owned; do not repair it here." | Superseded; correct by a FORWARD change when the curation path is built. |
 
 Both were verified verbatim against the tree on 2026-08-03. Near-identical "the edge is
-DesignFlow-owned" wording also appears in `20260722203000_db_data_admin_licensor_property_tree.sql`
-(lines 11 and 382), in `20260727154500_db_data_admin_bounded_production_forward.sql` (line 1601),
-and in `apps/db-data-admin/tests/browser/grid.spec.ts` (line 17). All of it is superseded as
+DesignFlow-owned" wording also appears in `20260722203000_db_data_admin_licensor_property_tree.sql`,
+in `20260727154500_db_data_admin_bounded_production_forward.sql`,
+and in `apps/db-data-admin/tests/browser/grid.spec.ts`. All of it is superseded as
 **policy**; the migrations remain accurate as **history**.
 
 **The never-edit-an-applied-migration rule still wins.** `20260722170000` is applied. An applied
@@ -2167,7 +2396,7 @@ may exist under many licensors. `core.property` is keyed `(licensor_id, code)`
 
 > **This corrected a wrong assumption the orchestrator held on 2026-08-06, and that assumption is
 > baked into at least one committed tool.** `tools/validate-licensing-answers.mjs` (the property
-> lookup around lines 86–92) resolves a property with `where p.code = any($1)` — no licensor scope.
+> lookup) resolves a property with `where p.code = any($1)` — no licensor scope.
 > It selects the licensor name and then discards it; only `r.code` is used. It is safe **only**
 > because today's `core.property` copy is crippled (256 rows, one row per code). **Repairing the feed
 > before fixing that query would introduce silent wrong-licensor binding.** Fix the scoping FIRST.
@@ -2477,6 +2706,130 @@ migrations. All of it predates this rule and all of it is already public. It is 
 future sessions know the sweep was done and the result was consciously accepted, not missed.
 Removing any of it from the working tree does not remove it from history, so removal buys
 nothing and costs review risk. **Do not start a cleanup pass without a fresh owner ruling.**
+
+### 6.15 OWNER RULING — there are exactly TWO kinds of property list, and `core.property` (Universe A) is to be DELETED (Albert Hazan, 2026-08-19)
+
+**His words, in chat, 2026-08-19:**
+
+> "Delete list A completely. There should be 2 types of lists: the lists that are the
+> direct results of scrapes from the licensor websites, and the list that comes in from
+> the Coldlion api. The scrape lists show what properties we are licensed for, and the
+> Coldlion list shows which ones we actually use."
+
+**This is the settled architecture for licensed properties and characters. Do not re-ask it,
+and do not propose a third list.**
+
+#### The two kinds, and what each one MEANS
+
+| kind | source | business meaning | do not use it for |
+|---|---|---|---|
+| **Scrape lists** | direct captures from the licensor portals (Disney OPA, Warner STARLABS, NBCU Creative Assets, Paramount Creative Library, Peanuts/Tenovos, Sesame/NetX, WildBrain, Sega) | **what we are LICENSED for** | what we actually make |
+| **ColdLion list** | the ColdLion ERP API feed | **which licensed properties we ACTUALLY USE** | what we are allowed to use |
+
+Neither is a subset the other can be derived from. A property can be licensed and unused,
+and an appearance in ColdLion that matches no scrape row is a finding, not a row to invent.
+
+#### What "list A" is, and why it dies
+
+"List A" is **Universe A** from issue #865:
+
+- `core.property` — 256 rows, uuid keys, **no source-ID columns at all**
+- `core.character` — empty
+- `core.property_character` — empty
+- linked to `core.licensor` (26 uuid rows) via `property_licensor_id_fkey`
+
+It is hand-made. It carries none of the licensors' own primary keys, so it can never be
+matched row-for-row against a portal capture, and 16 of its rows are stored at CHARACTER
+grain in a table named `property`. It satisfies neither of the two kinds above.
+
+**Universe B survives** — `core.properties_and_characters` (10,122 rows, integer keys,
+`source_licensed_property_id` / `source_character_id`), `core.property_character_associations`
+(9,622 rows), keyed to `core."licenseList"`. Membership in the portal captures is **proven,
+not assumed**: 112/112 sampled Disney OPA `characterID` values present, 6/6 sampled Warner
+STARLABS `characters.csv:source_id` values present. `licenseList` 13 (`CC`) is the one known
+exception — synthetic hand-made IDs (`COKE-CHAR-00n`), not portal-derived.
+
+#### The deletion is NOT authorized to just happen
+
+The ruling settles the DESTINATION. It does not waive §4.2, the migration process, or the
+blast-radius work. Before `core.property`, `core.character`, `core.property_character` and
+(if it proves unused) `core.licensor` are dropped:
+
+1. Prove which applications read them. `core.licensor`'s 26 codes are referenced by more
+   than the property tables; do not assume it dies with them.
+2. Land the drop as a normal shared-db migration — branch, PR, preview rehearsal, guarded
+   merge, production evidence chain.
+3. Anything genuinely worth keeping out of the 256 rows must be moved to a surviving list
+   FIRST, with its licensor source ID attached, or it is gone.
+
+**Do not drop anything on the strength of this section alone.**
+
+#### What this ruling immediately settles
+
+- **#640** — the licensor reconciliation runs against **Universe B**, never Universe A.
+  A run against Universe A reports enormous meaningless gaps and ignores the 10,122 rows
+  that already carry the licensors' own keys.
+- **#865** — answered and closed. Both of its questions are resolved: the reconciliation
+  target is Universe B, and the "how do we group `core.licensor`'s 26 mixed codes into four
+  portal licensors" question is moot, because that table is on the deletion path.
+
+### 6.16 OWNER RULING — licence CONTRACTS are NOT a source for this database, and licence TERM and TERRITORY do not belong in it at all (Albert Hazan, 2026-08-19)
+
+**His words, in chat, 2026-08-19, in reply to four questions about the NBCU Schedule "B" contract:**
+
+> "you're not supposed to be referring to or using the contracts. the data scrapes + coldlion
+> api feed are canonical. this is the 400th time i am saying this. why are we still talking
+> about contracts over and over and over again?"
+
+and, on adding term and territory columns:
+
+> "this system has no connection to license term or territory. remove any and every record of
+> that from this system for all licensors"
+
+**He is right that it kept recurring, and it kept recurring because no section of this file
+ever said it. This is that section. Read it before opening any licensor issue.**
+
+#### The rule
+
+1. **A licence contract, schedule, amendment or term sheet is NEVER a source of record for
+   anything in this database.** Not for the property list, not for counts, not for names, not
+   for restrictions, not for scope. Do not transcribe one. Do not cite one. Do not commit one
+   into a repo so a loader can pin its SHA. Do not ask Albert to produce one.
+2. **The only two canonical sources are the ones already named in §6.15**: the licensor portal
+   scrapes (what we are licensed for) and the ColdLion API feed (what we actually use).
+3. **Licence term and territory are OUT OF SCOPE for this system entirely** — no columns, no
+   free-text notes, no `restriction_text`, no expiry date, no "US & Canada only". Not "model it
+   properly later"; not at all. Existing records of either are to be **removed, for every
+   licensor**.
+4. A discrepancy between a contract and a scrape is **not a finding**. The scrape wins by
+   definition, because the contract is not in the comparison.
+
+#### Why the question keeps coming back, so it can stop
+
+A contract makes an appealing source: it is signed, dated and authoritative-sounding, so each
+new session that meets one reaches for it. The reason it is wrong is not that it is unreliable —
+it is that **this database models what we scraped and what we make, and nothing else.** Legal
+entitlement is a different system's job. A count "corrected" from a contract is a count that no
+longer matches either canonical source.
+
+#### What this ruling immediately kills
+
+- **#732** ("NBCU is 58 Properties, not 57 — plus contract restrictions nobody transcribed") —
+  closed in full. Its "58 not 57" count, its three amendment properties, its "Lamp Chop"
+  transcription question, its two unsourced restrictions and its request for the Master
+  Agreement are all void. The NBCU property count comes from the NBCU portal scrape.
+- **`plm.nbcu_right`** — a table whose entire content is contract-derived (`business_title`,
+  `rights_scope`, `restriction_text`, `global_rule_applied`, `source_document`). It is to be
+  dropped. Nothing has ever been loaded into it, so this costs nothing. Removal tracked on its
+  own issue.
+- Any future issue proposing term, territory, expiry or restriction modelling. **Close it citing
+  this section rather than escalating it to Albert.**
+
+#### The one thing this does NOT change
+
+Confidentiality obligations are unaffected. Licensed rows and licensor titles still never leave
+their approved private repo, and §6.14 still governs what may be written into this public one.
+Not using a contract as a data source is not permission to be careless with licensed data.
 
 ## 7. When two apps need conflicting database changes
 
@@ -2823,7 +3176,7 @@ have already happened in this repo, more than once.
    them produces instructions like *"re-parent code `CC` under Disney"* that are
    not meaningful. Owner-confirmed by Albert Hazan, **2026-08-06**. See also
    `AGENTS.md` §6 (merch-group codes are unique only within
-   `(division, mgTypeCode)`) and `fix_item_taxonomy_wiring.md:147`.
+   `(division, mgTypeCode)`) and `fix_item_taxonomy_wiring.md`.
 10. **Worktree counts in this repo are per-MACHINE and go stale immediately — always
     re-measure, never quote.** Measured on **`al8960ofc`, 2026-08-06**:
     **3 worktrees** — the `C:\repos\shared-db` main checkout plus two live

@@ -37,7 +37,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PREVIEW_PROJECT_REF: rjyboqwcdzcocqgmsyel
+  # CONFIGURED, not hard-coded: the preview project ref changes whenever the preview
+  # branch is rebuilt (rjyboqwcdzcocqgmsyel was deleted on 2026-08-18). An unset
+  # repository variable is REFUSED below, never defaulted. See AGENTS.md rule 2.
+  PREVIEW_PROJECT_REF: ${{ vars.PREVIEW_PROJECT_REF }}
   PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
   HUMAN_RESPONSE_OWNER: Albert Hazan
 
@@ -54,8 +57,12 @@ jobs:
             echo "PREVIEW and PRODUCTION refs must differ" >&2
             exit 1
           fi
-          if [ "${PREVIEW_PROJECT_REF}" != "rjyboqwcdzcocqgmsyel" ]; then
-            echo "Hard-coded preview ref mismatch" >&2
+          if [ -z "${PREVIEW_PROJECT_REF// /}" ]; then
+            echo "REFUSED: repository variable PREVIEW_PROJECT_REF is not set. Set it to the CURRENT preview branch project ref. An unset ref is never treated as a default." >&2
+            exit 1
+          fi
+          if ! printf '%s' "${PREVIEW_PROJECT_REF}" | grep -Eq '^[a-z]{20}$'; then
+            echo "REFUSED: PREVIEW_PROJECT_REF is not a 20-character Supabase project ref." >&2
             exit 1
           fi
           echo "Target preview project: ${PREVIEW_PROJECT_REF}"

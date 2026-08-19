@@ -93,7 +93,10 @@ concurrency:
 
 env:
   PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
-  PREVIEW_PROJECT_REF: rjyboqwcdzcocqgmsyel
+  # CONFIGURED, not hard-coded: the preview project ref changes whenever the preview
+  # branch is rebuilt (rjyboqwcdzcocqgmsyel was deleted on 2026-08-18). An unset
+  # repository variable is REFUSED below, never defaulted. See AGENTS.md rule 2.
+  PREVIEW_PROJECT_REF: ${{ vars.PREVIEW_PROJECT_REF }}
   PHASE6_MAX_SUCCESS_AGE: "36 hours"
   COLDLION_HUMAN_RESPONSE_OWNER: Albert Hazan
 
@@ -121,6 +124,14 @@ jobs:
           set -euo pipefail
           if [ "${PRODUCTION_PROJECT_REF}" != "qsllyeztdwjgirsysgai" ]; then
             echo "::error::Hard-coded production ref mismatch: ${PRODUCTION_PROJECT_REF}" >&2
+            exit 1
+          fi
+          if [ -z "${PREVIEW_PROJECT_REF// /}" ]; then
+            echo "::error::REFUSED: repository variable PREVIEW_PROJECT_REF is not set, so this lane cannot prove it is not linked to preview. An unset ref is never treated as a default." >&2
+            exit 1
+          fi
+          if ! printf '%s' "${PREVIEW_PROJECT_REF}" | grep -Eq '^[a-z]{20}$'; then
+            echo "::error::REFUSED: PREVIEW_PROJECT_REF is not a 20-character Supabase project ref." >&2
             exit 1
           fi
           if [ "${PRODUCTION_PROJECT_REF}" = "${PREVIEW_PROJECT_REF}" ]; then

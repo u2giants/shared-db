@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -217,7 +217,7 @@ function reviewIo(){
 test('reviewer cursor advances atomically through the durable round robin',()=>{
   const io=reviewIo(), names=[]
   for(let n=1;n<=5;n++)names.push(assignNextReviewer({issue:n,pr:100+n,headSha:`abcdef${n}`},io).reviewer)
-  assert.deepEqual(names,['grok-4.6','glm-5.3','kimi-k3','grok-4.6','glm-5.3'])
+  assert.deepEqual(names,['grok-4.6','kimi-k3','grok-4.6','kimi-k3','grok-4.6'])
   assert.ok(io.refs.has(REVIEW_CURSOR_REF))
 })
 
@@ -237,7 +237,7 @@ test('retired reviewer names stay resolvable so historical review evidence never
 test('the active rotation is exactly the current models, in a stable order',()=>{
   // Order and length are the round robin. A change here silently reassigns every
   // in-flight sequence to a different reviewer, so it must be asserted, not assumed.
-  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3'])
+  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','kimi-k3'])
   assert.equal(REVIEWERS.find((r)=>r.name==='glm-5.3').wrapper,'ai-glm')
 })
 
@@ -267,9 +267,9 @@ const replacementRequest={...failedReview,failedSequence:1,failureCode:'insuffic
 
 test('terminal provider failure advances exactly once and retry is idempotent',()=>{
   const io=failedReviewIo(), first=replaceFailedReviewer(replacementRequest,io), second=replaceFailedReviewer(replacementRequest,io)
-  assert.equal(first.sequence,2);assert.equal(first.reviewer,'glm-5.3');assert.deepEqual(second,first)
-  assert.equal(assignNextReviewer(failedReview,io).reviewer,'glm-5.3')
-  assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'kimi-k3')
+  assert.equal(first.sequence,2);assert.equal(first.reviewer,'kimi-k3');assert.deepEqual(second,first)
+  assert.equal(assignNextReviewer(failedReview,io).reviewer,'kimi-k3')
+  assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'grok-4.6')
 })
 
 test('reviewer execution preflight enforces approved wrapper, clean worktree, and exact head',()=>{
@@ -297,7 +297,7 @@ test('two consecutive terminal no-verdict failures form an immutable idempotent 
   const first=replaceFailedReviewer(replacementRequest,io)
   const secondRequest={...replacementRequest,failedSequence:first.sequence,failureCode:'turn_limit_cancelled'}
   const second=replaceFailedReviewer(secondRequest,io)
-  assert.equal(first.sequence,2);assert.equal(second.sequence,3);assert.equal(second.reviewer,'kimi-k3')
+  assert.equal(first.sequence,2);assert.equal(second.sequence,3);assert.equal(second.reviewer,'grok-4.6')
   assert.deepEqual(replaceFailedReviewer(replacementRequest,io),first)
   assert.deepEqual(replaceFailedReviewer(secondRequest,io),second)
   assert.equal(assignNextReviewer(failedReview,io).sequence,3)
@@ -322,12 +322,22 @@ test('concurrent chained replacement write is rejected without changing the curs
   assert.deepEqual(replaceFailedReviewer(replacementRequest,io),first)
 })
 
-test('reviewer replacement rejects mismatched original assignment and preserves intervening rotation',()=>{
+test('reviewer replacement rejects a mismatched original assignment',()=>{
   const io=failedReviewIo()
   assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:99},io),/does not match/)
+})
+
+// PAUSING glm-5.3 on 2026-08-18 left exactly TWO active reviewers, and that is a real
+// operational consequence, not a test detail. With an even two-name rotation the slot
+// after an intervening assignment can land back on the SAME provider that just failed.
+// replaceFailedReviewer refuses that rather than retry a dead provider -- correct, and it
+// FAILS CLOSED -- but it means a replacement can be unavailable until a third reviewer is
+// restored or added. Asserted here so nobody discovers it mid-incident.
+test('with only two active reviewers a replacement can legitimately have nowhere to go',()=>{
+  assert.equal(ACTIVE_REVIEWERS.length,2,'this test describes the two-reviewer rotation')
+  const io=failedReviewIo()
   assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
-  const replacement=replaceFailedReviewer(replacementRequest,io)
-  assert.equal(replacement.priorSequence,2);assert.equal(replacement.sequence,3);assert.equal(replacement.reviewer,'kimi-k3')
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/same failed provider/)
 })
 
 test('reviewer replacement rejects a substantive exact-head verdict',()=>{
@@ -432,6 +442,124 @@ test('historical preview recovery shares the preview lock and requires current m
   assert.throws(()=>acquireExclusive('preview-recovery',{owner:'recovery',pr:924,headSha:'old'},io),/current main/)
   io.getPr=()=>({merged:false})
   assert.throws(()=>acquireExclusive('preview-recovery',{owner:'recovery',pr:924,headSha:'main'},io),/already-merged/)
+})
+
+// ---------------------------------------------------------------------------
+// POST-MERGE PREVIEW REHEARSAL (#1208)
+// ---------------------------------------------------------------------------
+function rehearsalIo(overrides = {}) {
+  const io = memoryIo()
+  io.compareUrls = []
+  io.getPr = () => ({ merged: true, merge_commit_sha: 'merge-sha' })
+  io.getPrFiles = () => [{ status: 'added', filename: 'supabase/migrations/20260818232639_coldlion.sql' }]
+  io.compareCommits = (base, head) => { io.compareUrls.push(`compare/${base}...${head}`); return { status: 'identical', ahead_by: 0, behind_by: 0 } }
+  return Object.assign(io, overrides)
+}
+const REHEARSAL = { owner: 'gha', pr: 1193, headSha: 'main', versions: ['20260818232639'] }
+
+test('post-merge preview rehearsal shares the preview lock and is authorised by merge-commit ancestry', () => {
+  const io = rehearsalIo()
+  const lock = acquireExclusive('preview-rehearsal', REHEARSAL, io)
+  assert.equal(lock.ref, EXCLUSIVE_REFS.preview)
+  // MUTUAL EXCLUSION, unchanged: while a rehearsal holds preview, the ordinary
+  // preview lane cannot be acquired, and vice versa.
+  io.getPr = (number) => ({ number: Number(number), head: { sha: 'abc', ref: 'codex/1' }, base: { sha: 'main' } })
+  io.openClaims = () => [{ number: 1, body: body(['table core.x'], '1', '2099-01-01T00:00:00Z') }]
+  assert.throws(() => acquireExclusive('preview', { owner: 'b', pr: 2, headSha: 'abc' }, io), /occupied/)
+  releaseOwnedRef(EXCLUSIVE_REFS.preview, lock.ownerSha, io)
+})
+
+test('post-merge preview rehearsal compares merge commit as BASE and main tip as HEAD', () => {
+  // THE ARGUMENT-ORDER TEST. Inverting the compare call inverts the meaning of
+  // `ahead` and would accept a descendant of main -- i.e. unmerged code.
+  const io = rehearsalIo()
+  const lock = acquireExclusive('preview-rehearsal', REHEARSAL, io)
+  releaseOwnedRef(EXCLUSIVE_REFS.preview, lock.ownerSha, io)
+  assert.deepEqual(io.compareUrls, ['compare/merge-sha...main'])
+})
+
+test('post-merge preview rehearsal fails closed on every missing authorisation', () => {
+  const cases = [
+    ['not merged', { getPr: () => ({ merged: false }) }, REHEARSAL, /is not merged/],
+    ['no merge commit', { getPr: () => ({ merged: true }) }, REHEARSAL, /is not merged/],
+    ['pull request unreadable', { getPr: () => null }, REHEARSAL, /cannot read pull request/],
+    ['pull request read throws', { getPr: () => { throw new Error('HTTP 502') } }, REHEARSAL, /cannot read pull request .*HTTP 502/],
+    ['main tip unreadable', { mainSha: () => null }, REHEARSAL, /cannot read the current main tip/],
+    ['not the main tip', {}, { ...REHEARSAL, headSha: 'stale' }, /exact current main SHA/],
+    ['merge commit behind main', { compareCommits: () => ({ status: 'ahead', ahead_by: 3, behind_by: 2 }) }, REHEARSAL, /not contained in the history of main tip/],
+    ['merge commit diverged', { compareCommits: () => ({ status: 'diverged', ahead_by: 1, behind_by: 0 }) }, REHEARSAL, /not contained in the history of main tip/],
+    ['merge commit is a descendant of main', { compareCommits: () => ({ status: 'behind', ahead_by: 0, behind_by: 0 }) }, REHEARSAL, /not contained in the history of main tip/],
+    ['ancestry unreadable', { compareCommits: () => null }, REHEARSAL, /ancestry is unreadable/],
+    ['ancestry read throws', { compareCommits: () => { throw new Error('HTTP 502') } }, REHEARSAL, /ancestry is unreadable .*HTTP 502/],
+    ['no versions named', {}, { ...REHEARSAL, versions: [] }, /requires the exact migration versions/],
+    ['malformed version', {}, { ...REHEARSAL, versions: ['nope'] }, /exact 14-digit migration version/],
+    ['version not added by the PR', {}, { ...REHEARSAL, versions: ['20260818203751'] }, /were not added by pull request #1193/],
+    ['version only modified by the PR', { getPrFiles: () => [{ status: 'modified', filename: 'supabase/migrations/20260818232639_coldlion.sql' }] }, REHEARSAL, /were not added by pull request #1193/],
+    ['pull request files unreadable', { getPrFiles: () => null }, REHEARSAL, /files are unreadable/],
+    ['pull request files read throws', { getPrFiles: () => { throw new Error('HTTP 502') } }, REHEARSAL, /cannot read the files of pull request .*HTTP 502/],
+  ]
+  for (const [label, overrides, metadata, expected] of cases) {
+    const io = rehearsalIo(overrides)
+    assert.throws(() => acquireExclusive('preview-rehearsal', metadata, io), expected, label)
+    // FAIL CLOSED MEANS NO LOCK LEFT BEHIND, and no author mutex either.
+    assert.equal(io.refs.has(EXCLUSIVE_REFS.preview), false, `${label} left the preview lock`)
+    assert.equal(io.refs.has(MUTEX_REF), false, `${label} left the author mutex`)
+  }
+})
+
+test('post-merge preview rehearsal accepts a merge commit that later commits sit on top of', () => {
+  const io = rehearsalIo({ compareCommits: () => ({ status: 'ahead', ahead_by: 4, behind_by: 0 }) })
+  const lock = acquireExclusive('preview-rehearsal', REHEARSAL, io)
+  assert.equal(lock.kind, 'preview-rehearsal')
+  releaseOwnedRef(EXCLUSIVE_REFS.preview, lock.ownerSha, io)
+})
+
+test('post-merge preview rehearsal never needs or reads a live author claim', () => {
+  const io = rehearsalIo({ openClaims: () => { throw new Error('author claims must not be consulted') } })
+  const lock = acquireExclusive('preview-rehearsal', REHEARSAL, io)
+  releaseOwnedRef(EXCLUSIVE_REFS.preview, lock.ownerSha, io)
+})
+
+test('added migration versions ignore anything the pull request did not add', () => {
+  assert.deepEqual(addedMigrationVersions([
+    { status: 'added', filename: 'supabase/migrations/20260818232639_a.sql' },
+    { status: 'modified', filename: 'supabase/migrations/20260818203751_b.sql' },
+    { status: 'added', filename: 'docs/notes.md' },
+    { status: 'renamed', filename: 'supabase/migrations/20260101000000_c.sql' },
+  ]), ['20260818232639'])
+  assert.throws(() => addedMigrationVersions(undefined), /unreadable/)
+})
+
+// EVERY OPERAND OF THE READABILITY GUARD, SEPARATELY (#1213 round 9, the
+// author's own per-condition hunt). The guard is
+// `!comparison || typeof comparison.status !== 'string' || !Number.isInteger(comparison.behind_by)`.
+// A falsy comparison and a missing behind_by each had a case; the middle operand
+// -- a comparison carrying a valid integer behind_by but a status that is not a
+// string -- had none, so it could be deleted with the whole suite green. It is
+// the operand that stops a JSON `null`, a number, or an object status from
+// reaching the membership test below, where `['identical','ahead'].includes(...)`
+// would quietly answer false and produce the WRONG refusal message.
+test('merge-commit ancestry helper refuses every unreadable comparison shape', () => {
+  for (const comparison of [
+    null,
+    undefined,
+    { status: 'ahead' },                      // behind_by missing
+    { status: 'ahead', behind_by: '0' },      // behind_by a string
+    { status: 'ahead', behind_by: 1.5 },      // behind_by not an integer
+    { status: null, behind_by: 0 },           // status not a string
+    { status: 0, behind_by: 0 },
+    { status: ['ahead'], behind_by: 0 },
+    { behind_by: 0 },                         // status missing entirely
+  ]) {
+    assert.throws(
+      () => assertMergeCommitInMainHistory('m', 'main', { compareCommits: () => comparison }),
+      /unreadable/,
+      `expected an unreadable-comparison refusal for ${JSON.stringify(comparison)}`,
+    )
+  }
+  // The honest shape gets PAST this guard, or every case above is vacuous.
+  assert.doesNotThrow(() => assertMergeCommitInMainHistory(
+    'm', 'main', { compareCommits: () => ({ status: 'identical', behind_by: 0 }) }))
 })
 
 test('unreadable claims fail closed',()=>assert.throws(()=>assertLaneAvailable([{number:9,body:'bad'}],[],NOW),/unreadable/))
@@ -848,6 +976,71 @@ test('general active-claim version supersession is idempotent from immutable evi
   const second=supersedeActiveClaimVersion(reversionArgs,NOW,io)
   assert.equal(second.idempotent,true);assert.equal(second.newVersion,first.newVersion);assert.equal(second.newHead,first.newHead)
   assert.equal(io.refs.get(`refs/db-claims/${io.old}`),'1'.repeat(40));assert.equal(io.refs.get(`refs/db-claims/${io.fresh}`),'2'.repeat(40))
+})
+
+// Issue #1165. A stale PR readback after a landed push is eventual consistency,
+// not a failed push, and treating it as failure permanently burns a migration
+// version reservation on every attempt.
+function stalingReversionIo(staleReads,{foreignHead=null,extraVersion=null}={}){
+  const io=reversionIo(),waits=[]
+  io.wait=(ms)=>{waits.push(ms)}
+  const push=io.commitAndPushReversion
+  io.commitAndPushReversion=(...args)=>{
+    const head=push(...args),freshPr=io.getPr,freshFiles=io.getPrFiles
+    let remaining=staleReads
+    io.getPr=()=>remaining>0?({state:'open',head:{sha:foreignHead??io.head,ref:'codex/issue-764-sequence-repair'}}):freshPr()
+    io.getPrFiles=()=>{
+      if(remaining<=0)return freshFiles()
+      remaining-=1
+      const files=[{filename:`supabase/migrations/${io.old}_repair.sql`}]
+      if(extraVersion)files.push({filename:`supabase/migrations/${extraVersion}_other.sql`})
+      return files
+    }
+    return head
+  }
+  return Object.assign(io,{waits})
+}
+
+test('version supersession rides out a bounded stale PR readback instead of burning the reservation',()=>{
+  const io=stalingReversionIo(3),result=supersedeActiveClaimVersion(reversionArgs,NOW,io)
+  assert.equal(result.newVersion,io.fresh);assert.equal(result.newHead,io.newHead);assert.equal(result.idempotent,false)
+  assert.equal(parseAuthorLease(io.issue.body,NOW).version,io.fresh)
+  assert.equal(io.refs.get(`refs/db-claims/${io.old}`),'1'.repeat(40));assert.equal(io.refs.get(`refs/db-claims/${io.fresh}`),'2'.repeat(40))
+  assert.equal(io.waits.length,3)
+})
+
+test('version supersession still refuses and rolls back when the PR readback never catches up',()=>{
+  const io=stalingReversionIo(Number.MAX_SAFE_INTEGER),original=io.issue.body,rewrites=[]
+  io.rewriteVersion=(_,from,to)=>{rewrites.push([from,to])}
+  assert.throws(()=>supersedeActiveClaimVersion(reversionArgs,NOW,io),/did not expose exactly the new reserved migration/)
+  assert.equal(io.issue.body,original)
+  assert.deepEqual(rewrites,[[io.old,io.fresh],[io.fresh,io.old]])
+  assert.equal(io.waits.length,11)
+})
+
+test('version supersession fails closed on the FIRST read for anything that is not exactly stale',()=>{
+  const foreign=stalingReversionIo(5,{foreignHead:'f'.repeat(40)})
+  assert.throws(()=>supersedeActiveClaimVersion(reversionArgs,NOW,foreign),/did not expose exactly the new reserved migration/)
+  assert.equal(foreign.waits.length,0)
+  const collided=stalingReversionIo(5,{extraVersion:'20260816130000'})
+  assert.throws(()=>supersedeActiveClaimVersion(reversionArgs,NOW,collided),/did not expose exactly the new reserved migration/)
+  assert.equal(collided.waits.length,0)
+})
+
+test('readPrAfterPush accepts every partially-propagated combination and no other',()=>{
+  const head='b'.repeat(40),staleHead='a'.repeat(40),branch='codex/x',version='20260816120000',staleVersion='20260816044638'
+  const expected={head,version,branch,staleHead,staleVersion}
+  const io=(sha,files,state='open',ref=branch)=>({wait:()=>{},getPr:()=>({state,head:{sha,ref}}),getPrFiles:()=>files.map((v)=>({filename:`supabase/migrations/${v}_x.sql`}))})
+  assert.ok(readPrAfterPush(1,expected,io(head,[version]),1))
+  for(const [sha,files] of [[staleHead,[staleVersion]],[staleHead,[version]],[head,[staleVersion]]]){
+    assert.equal(readPrAfterPush(1,expected,io(sha,files),1),null,'a stale combination must not be accepted as proof')
+    assert.ok(readPrAfterPush(1,expected,{...io(sha,files),getPr:()=>({state:'open',head:{sha:head,ref:branch}}),getPrFiles:()=>[{filename:`supabase/migrations/${version}_x.sql`}]},2))
+  }
+  assert.equal(readPrAfterPush(1,expected,io('c'.repeat(40),[version]),12),null)
+  assert.equal(readPrAfterPush(1,expected,io(head,[]),12),null)
+  assert.equal(readPrAfterPush(1,expected,io(head,[version,staleVersion]),12),null)
+  assert.equal(readPrAfterPush(1,expected,io(head,[version],'closed'),12),null)
+  assert.equal(readPrAfterPush(1,expected,io(head,[version],'open','other/branch'),12),null)
 })
 
 test('general version supersession CLI binds every identity field',()=>{
