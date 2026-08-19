@@ -67,7 +67,17 @@ jobs:
       - run: VITE_BUILD_DATE="$(date -u +%Y-%m-%d)" npm run build
         env:
           VITE_BUILD_SHA: ${{ github.sha }}
-      - run: npx playwright install --with-deps chromium
+      # A stalled browser download looks exactly like a slow one in the Actions UI, and a
+      # 28-minute hang on a REQUIRED check teaches operators to cancel and re-run instead of
+      # reading the log (issue #1186). Bound it, and retry once for a genuinely flaky mirror.
+      - name: Install the Playwright browser (fails fast rather than hanging)
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          if ! npx playwright install --with-deps chromium; then
+            echo '::warning::playwright install failed; retrying once before failing the job'
+            npx playwright install --with-deps chromium
+          fi
       - run: VITE_BUILD_DATE="$(date -u +%Y-%m-%d)" npm run test:browser
         env:
           VITE_BUILD_SHA: ${{ github.sha }}
