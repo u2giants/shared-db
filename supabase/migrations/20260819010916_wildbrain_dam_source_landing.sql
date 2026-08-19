@@ -556,8 +556,8 @@ comment on table plm.wildbrain_asset_character is
 -- The portal has no style-guide object at all. These rows are parsed out of the asset
 -- keyword field, so relationship_truth is pinned to 'inferred' and derivation_method is
 -- pinned to 'keyword_field_split'. rule_version records WHICH parse produced the row, so
--- a corrected parse is a new capture with a new rule_version rather than a silent
--- rewrite of history.
+-- a corrected parse is a new capture with a new rule_version rather than a silent edit of
+-- an earlier snapshot.
 --
 -- guide_key is the case-folded, whitespace-collapsed, quote-stripped label, and it is the
 -- primary key -- that is where the licensor's case-variant duplicates collapse.
