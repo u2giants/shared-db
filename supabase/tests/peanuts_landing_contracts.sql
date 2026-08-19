@@ -37,7 +37,8 @@
 --      while INSERT on the 18 snapshot tables still works and INSERT on the capture root
 --      does not.
 --   C. The capture publication gate: every clause of the completion rule is falsified
---      one at a time, so no clause can be deleted without a test going red.
+--      one at a time, so no clause can be deleted without a test going red, plus the
+--      zero-media scope guard and the completion rule's own arithmetic.
 --   D. Identity, shape and vocabulary contracts, each pinned to a NAMED constraint.
 --   E. The declared/derived separation: relationship_truth cannot be anything but
 --      'derived', the derived tables cannot carry a zero support count, and the asset
@@ -477,6 +478,101 @@ begin
           10, 8, 2, true, true, true);
 
   raise notice 'C passed: every publication-gate clause is independently falsifiable';
+end;
+$$;
+
+
+-- C6. THE ZERO-MEDIA SCOPE GUARD. Storing Peanuts media bytes is out of scope, and the
+-- column is CONSTRAINED to zero rather than merely defaulted -- a default is advice, a
+-- CHECK is a rule. Until this block existed the whole media-guard family was untested.
+--
+-- C6b asserts the media clause of the completion CHECK STRUCTURALLY, by reading the
+-- constraint definition. That clause is unreachable by an insert while
+-- peanuts_capture_media_zero_chk stands -- the hard-zero CHECK fires first -- so a
+-- behavioural test for it cannot exist without dropping the very constraint that makes
+-- the schema safe. It is defence in depth, and the honest way to pin defence in depth is
+-- to assert that it is still there.
+do $$
+declare
+  v_con   text;
+  v_def   text;
+  -- An explicit fired flag, NOT a bare `raise warning` on the success path. A warning
+  -- does not fail a psql run, so a block that only warns when the bad row is ACCEPTED
+  -- stays green when the constraint is simply deleted -- which is exactly what the
+  -- mutation run caught in this block before this flag existed.
+  v_fired boolean := false;
+begin
+  begin
+    insert into plm.peanuts_capture (
+      capture_key, source_repository, source_commit_sha, source_manifest_sha256,
+      portal_base_url, api_endpoint, source_customer_id, source_captured_at,
+      expected_counts, raw_summary, created_by,
+      portal_reported_asset_total, assets_captured, assets_unreachable, media_downloaded)
+    values ('ZZTEST-peanuts-C6', 'ZZTEST-repo', repeat('6', 40), repeat('6', 64),
+            'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+            '2099-01-01Z', '{}'::jsonb, '{}'::jsonb, 'ZZTEST', 0, 0, 0, 1);
+  exception when check_violation then
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'peanuts_capture_media_zero_chk' then
+      raise exception 'C6 FAILED: expected peanuts_capture_media_zero_chk, % fired', v_con;
+    end if;
+    v_fired := true;
+  end;
+  if not v_fired then
+    raise exception
+      'C6 FAILED: a capture claiming downloaded media was ACCEPTED; the zero-media scope guard is gone';
+  end if;
+
+  -- C6b. The clause is still inside the completion rule.
+  select pg_get_constraintdef(oid) into v_def from pg_constraint
+   where conname = 'peanuts_capture_complete_requirements_chk'
+     and conrelid = 'plm.peanuts_capture'::regclass;
+  if v_def is null then
+    raise exception 'C6b FAILED: peanuts_capture_complete_requirements_chk does not exist';
+  end if;
+  if position('media_downloaded = 0' in v_def) = 0 then
+    raise exception
+      'C6b FAILED: the completion rule no longer requires zero media: %', v_def;
+  end if;
+
+  raise notice 'C6 passed: media is constrained to zero, and the completion rule still says so';
+end;
+$$;
+
+
+-- C7. THE COMPLETION-RULE ARITHMETIC MUST NOT OVERFLOW EITHER.
+-- The function's copy of this arithmetic was fixed in review round two; this pins the
+-- TABLE's copy. Uncast, these two `integer` columns raise a raw `integer out of range`
+-- and the caller never sees the named constraint that was supposed to refuse the row.
+do $$
+declare
+  v_con   text;
+  v_fired boolean := false;
+begin
+  begin
+    insert into plm.peanuts_capture (
+      capture_key, source_repository, source_commit_sha, source_manifest_sha256,
+      portal_base_url, api_endpoint, source_customer_id, source_captured_at,
+      load_completed_at, status, expected_counts, raw_summary, created_by,
+      portal_reported_asset_total, assets_captured, assets_unreachable,
+      deep_paging_partitioned, vocabularies_loaded_from_source)
+    values ('ZZTEST-peanuts-C7', 'ZZTEST-repo', repeat('7', 40), repeat('7', 64),
+            'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+            '2099-01-01Z', '2099-01-02Z', 'complete', '{}'::jsonb, '{}'::jsonb, 'ZZTEST',
+            2147483647, 2147483647, 1, true, true);
+  exception when check_violation then
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'peanuts_capture_complete_requirements_chk' then
+      raise exception
+        'C7 FAILED: expected peanuts_capture_complete_requirements_chk, % fired', v_con;
+    end if;
+    v_fired := true;
+  end;
+  if not v_fired then
+    raise exception
+      'C7 FAILED: an arithmetically impossible complete capture was ACCEPTED';
+  end if;
+  raise notice 'C7 passed: the completion rule refuses by name instead of overflowing';
 end;
 $$;
 
@@ -921,7 +1017,7 @@ declare
   v_a      uuid;
   v_b      uuid;
   v_raised integer := 0;
-  v_want   integer := 8;
+  v_want   integer := 10;
   v_msg    text;
 begin
   v_a := plm.begin_peanuts_capture(
@@ -970,7 +1066,16 @@ begin
       '{"assets":[1]}'::jsonb,
       '{"assets":{"n":1}}'::jsonb,
       '{"assets":-1}'::jsonb,
-      '{"assets":1.5}'::jsonb
+      '{"assets":1.5}'::jsonb,
+      -- Past bigint. begin_ must refuse this BY NAME rather than leave it to finalize_:
+      -- a named early refusal is the difference between a loader told at the start and
+      -- one that discovers it after a full crawl.
+      '{"assets":99999999999999999999999}'::jsonb,
+      -- The ONLY check anywhere on a manifest claiming downloaded media. finalize_'s
+      -- extra-key sweep would accept {"media_downloaded": 5} as a perfectly well-formed
+      -- extra key -- it is a non-negative integer in range -- so if this branch goes, a
+      -- manifest that admits to downloading media loads without a word.
+      '{"assets":0,"media_downloaded":1}'::jsonb
     ];
     v_i    integer;
   begin
@@ -1007,6 +1112,13 @@ begin
     'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
     '2099-01-01Z'::timestamptz, '{"assets":1.0}'::jsonb, '{}'::jsonb, 'ZZTEST',
     0, 0, 0, true, true, true);
+
+  -- A manifest that declares ZERO media is fine; only a nonzero claim is refused.
+  perform plm.begin_peanuts_capture(
+    'ZZTEST-peanuts-F2-zeromedia', 'ZZTEST-repo', repeat('f', 40), repeat('f', 64),
+    'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+    '2099-01-01Z'::timestamptz, '{"assets":0,"media_downloaded":0}'::jsonb,
+    '{}'::jsonb, 'ZZTEST', 0, 0, 0, true, true, true);
 
   raise notice 'F2 passed: % named refusals, idempotency holds, 1.0 still accepted', v_raised;
 end;
@@ -1217,6 +1329,23 @@ declare
   r        record;
   v_before integer;
   v_cap    uuid;
+  v_i      integer;
+  v_want   text;
+  v_got    text;
+  -- THE ONE PLACE A NEW LANDING SCHEMA TOUCHES THIS BLOCK. Prefix -> source_system, in
+  -- the order api.source_capture_inventory tests them (dcp/opa first; first match wins).
+  -- Written independently of the view on purpose: that is what makes this a regression
+  -- test rather than a tautology.
+  v_map text[][] := array[
+    ['dcp\_%',     'disney'],
+    ['opa\_%',     'disney'],
+    ['pmt\_%',     'paramount'],
+    ['nbcu\_%',    'nbcu'],
+    ['wb\_%',      'warner'],
+    ['erp\_%',     'coldlion'],
+    ['sega\_%',    'sega'],
+    ['peanuts\_%', 'peanuts']
+  ];
 begin
   -- Every pre-existing source keeps its classification. If a Peanuts branch had been
   -- inserted above one of these instead of beside it, this goes red.
@@ -1230,28 +1359,31 @@ begin
   -- only sega_ would let a slip over NBCU, Disney, Paramount, Warner or Coldlion through:
   -- the Peanuts branch was inserted into a `case`, and a `case` is order-sensitive, so the
   -- regression has to cover the arms this change sits next to as well as its own.
-  for r in
-    select c.relname,
-           case
-             when c.relname like 'dcp\_%' or c.relname like 'opa\_%' then 'disney'
-             when c.relname like 'pmt\_%'     then 'paramount'
-             when c.relname like 'nbcu\_%'    then 'nbcu'
-             when c.relname like 'wb\_%'      then 'warner'
-             when c.relname like 'erp\_%'     then 'coldlion'
-             when c.relname like 'sega\_%'    then 'sega'
-             when c.relname like 'peanuts\_%' then 'peanuts'
-             else 'other'
-           end as want
-      from pg_class c join pg_namespace n on n.oid = c.relnamespace
-     where n.nspname = 'plm' and c.relkind = 'r'
+  -- Resolved from v_map, declared above -- the SAME single-map structure now used by F1
+  -- in supabase/tests/sega_landing_contracts.sql, so the two files agree on the rule and
+  -- a new landing schema adds one row to each rather than editing a `case` in both.
+  for r in select c.relname
+             from pg_class c join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'plm' and c.relkind = 'r'
   loop
-    if (select source_system from api.source_capture_inventory
-         where table_name = r.relname) is distinct from r.want then
+    v_want := 'other';
+    for v_i in 1 .. array_length(v_map, 1) loop
+      if r.relname like v_map[v_i][1] then
+        v_want := v_map[v_i][2];
+        exit;
+      end if;
+    end loop;
+
+    v_got := (select source_system from api.source_capture_inventory
+               where table_name = r.relname);
+    if v_got is distinct from v_want then
+      if v_want = 'other' and v_got is distinct from 'other' then
+        raise exception
+          'G FAILED: plm.% is classified as ''%'' but v_map in this block does not know its prefix. If you are landing a new source, add one row to v_map above -- do not delete this check.',
+          r.relname, v_got;
+      end if;
       raise exception 'G FAILED: plm.% classifies as %, expected %',
-        r.relname,
-        (select source_system from api.source_capture_inventory
-          where table_name = r.relname),
-        r.want;
+        r.relname, v_got, v_want;
     end if;
   end loop;
 

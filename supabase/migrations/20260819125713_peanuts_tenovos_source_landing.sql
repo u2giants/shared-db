@@ -167,6 +167,11 @@ create table plm.peanuts_capture (
   constraint peanuts_capture_manifest_sha256_chk
     check (source_manifest_sha256 ~ '^[0-9a-f]{64}$'),
   -- Scope guard, not a style preference: this project may never download Peanuts media.
+  -- This is the constraint that makes the media clause of
+  -- peanuts_capture_complete_requirements_chk below, and the media_downloaded_nonzero
+  -- branch of plm.finalize_peanuts_capture, UNREACHABLE in normal operation. Both are
+  -- kept deliberately as defence in depth for a future in which this line is dropped;
+  -- see the note on that branch in the function.
   constraint peanuts_capture_media_zero_chk check (media_downloaded = 0),
   constraint peanuts_capture_portal_total_nonneg_chk
     check (portal_reported_asset_total >= 0),
@@ -187,7 +192,15 @@ create table plm.peanuts_capture (
         and vocabularies_loaded_from_source = true
         and media_downloaded = 0
         and jsonb_array_length(error_summary) = 0
-        and assets_captured + assets_unreachable = portal_reported_asset_total
+        -- CAST BEFORE ADDING. These three columns are `integer`; a bare
+        -- `assets_captured + assets_unreachable` raises a raw `integer out of range`
+        -- instead of a check_violation when an owner writes a row above 2^31-1, so the
+        -- caller sees a PostgreSQL arithmetic error rather than this named constraint.
+        -- Unreachable through any granted role, and plm.finalize_peanuts_capture already
+        -- casts on its own copy of this arithmetic -- the CHECK must match the function
+        -- rather than differ from it in the one place nobody looks.
+        and assets_captured::bigint + assets_unreachable::bigint
+            = portal_reported_asset_total::bigint
       )
     ),
   constraint peanuts_capture_expected_counts_obj_chk
@@ -1364,6 +1377,12 @@ begin
   if not v_cap.vocabularies_loaded_from_source then
     v_err := v_err || jsonb_build_object('code','vocabularies_not_loaded_from_source');
   end if;
+  -- UNREACHABLE WHILE peanuts_capture_media_zero_chk STANDS, AND KEPT ON PURPOSE.
+  -- The column is `not null default 0` with a CHECK pinning it to zero, so no writer can
+  -- put a nonzero value here today and no contract test can reach this branch without
+  -- first dropping that constraint. It is defence in depth for the day someone does.
+  -- Stated plainly rather than listed as tested, because a branch reported as covered
+  -- when it is not is how the next reader is misled.
   if v_cap.media_downloaded <> 0 then
     v_err := v_err || jsonb_build_object('code','media_downloaded_nonzero',
                                          'observed', v_cap.media_downloaded);
