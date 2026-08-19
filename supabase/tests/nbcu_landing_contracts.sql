@@ -1109,7 +1109,7 @@ $$;
 
 -- =====================================================================================
 -- F7. begin_nbcu_capture MUST REFUSE AN EXPECTED_COUNTS DOCUMENT IT CANNOT CHECK LATER.
---     Migration 20260819112451, issue #1219.
+--     Migration 20260819123658, issue #1219.
 --
 -- WHY BOTH F7 AND G7 EXIST, AND WHY NEITHER MAKES THE OTHER REDUNDANT.
 --   F7 covers the door: an argument that can never be verified is refused before a
@@ -1117,7 +1117,7 @@ $$;
 --   expected_counts, because plm.nbcu_capture is writable by its owner and an UPDATE can
 --   reach the value after begin_ ran. #1219 asks for both in those words.
 --
---   AGAINST THE PRE-20260819112451 begin_ BODY EVERY CASE BELOW IS ACCEPTED -- the
+--   AGAINST THE PRE-20260819123658 begin_ BODY EVERY CASE BELOW IS ACCEPTED -- the
 --   function validated only that expected_counts was a non-empty JSON object, so a
 --   document of nulls started a capture happily and the skipped-count publication in G7
 --   followed from it.
@@ -1213,7 +1213,7 @@ $$;
 
 -- =====================================================================================
 -- G7. THE COUNT GATE MAY NEVER BE SKIPPED BY A NON-NUMBER EXPECTED COUNT.
---     Migration 20260819112451, issue #1219.
+--     Migration 20260819123658, issue #1219.
 --
 -- WHY THIS SECTION EXISTS, AND WHAT IT WOULD HAVE CAUGHT.
 --   The gate used to decide a count had been supplied with `v_exp ? v_key`. `jsonb ? key`
@@ -1223,7 +1223,7 @@ $$;
 --   'complete'. `jsonb_build_object('scopes', v_unset)` produces exactly that shape, so
 --   an ordinary loader bug is enough to reach it.
 --
---   MEASURED AGAINST THE PRE-20260819112451 FUNCTION BODY, on PostgreSQL 18:
+--   MEASURED AGAINST THE PRE-20260819123658 FUNCTION BODY, on PostgreSQL 18:
 --     G7.2 and G7.3 return 'complete' -- the count check was skipped and the capture
 --       PUBLISHED. G7.10 does the same for the optional `failures` key.
 --     G7.4 reports count_mismatch, i.e. it silently accepted the STRING "12" as a

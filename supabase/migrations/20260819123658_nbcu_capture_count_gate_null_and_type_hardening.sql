@@ -280,7 +280,7 @@ comment on function plm.begin_nbcu_capture(text,text,text,text,text,timestamptz,
   'Creates or RESUMES exactly one loading NBCU capture. Idempotent for an identical '
   'capture. Refuses to re-open a complete capture and refuses a same-key capture whose '
   'source manifest or commit differs. Sole write path to plm.nbcu_capture on insert. '
-  'Since 20260819112451 (#1219) it also refuses an expected_counts document in which ANY '
+  'Since 20260819123658 (#1219) it also refuses an expected_counts document in which ANY '
   'value is not a JSON number that is a non-negative integer within bigint -- a JSON null '
   'there is not a missing key, and it used to make the publication gate SKIP that count '
   'check silently. finalize_nbcu_capture re-checks the stored object independently, '
@@ -564,7 +564,7 @@ comment on function plm.finalize_nbcu_capture(uuid) is
   'whose status is ''rejected'' returned; the previous complete capture is left untouched. '
   'NEVER a partial publish. THE CALLER MUST CHECK THE RETURNED status -- it does not raise, '
   'because raising would roll back the very rejection record the spec asks it to keep. '
-  'Since 20260819112451 (#1219) an expected count that is present but NOT a JSON number -- '
+  'Since 20260819123658 (#1219) an expected count that is present but NOT a JSON number -- '
   'a JSON null, string, bool, object or array -- is a NAMED rejection '
   '(expected_count_not_a_number), never a skipped check: jsonb ? key is true for a null '
   'value, so the old code compared against SQL NULL and silently published unverified '
@@ -609,14 +609,14 @@ begin
        where n.nspname='plm' and p.proname='finalize_nbcu_capture'
          and p.prosrc like '%expected_count_not_a_number%') <> 1 then
     raise exception
-      'MIGRATION 20260819112451 FAILED: plm.finalize_nbcu_capture does not carry the '
+      'MIGRATION 20260819123658 FAILED: plm.finalize_nbcu_capture does not carry the '
       'expected_count_not_a_number guard after replacement.';
   end if;
   if (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname='plm' and p.proname='begin_nbcu_capture'
          and p.prosrc like '%must be a JSON number%') <> 1 then
     raise exception
-      'MIGRATION 20260819112451 FAILED: plm.begin_nbcu_capture does not carry the '
+      'MIGRATION 20260819123658 FAILED: plm.begin_nbcu_capture does not carry the '
       'JSON-number argument guard after replacement.';
   end if;
 
@@ -638,7 +638,7 @@ begin
       perform plm.begin_nbcu_capture(
         'nbcu:ZZTEST-1219-ARG:'||md5(v_bad::text), 'u2giants/ZZTEST', repeat('c',40),
         repeat('d',64), 'https://portal.example.invalid/', now(), v_bad, '{}'::jsonb,
-        'migration-20260819112451');
+        'migration-20260819123658');
     exception when raise_exception then
       get stacked diagnostics v_msg = message_text;
       v_rejected := v_msg like '%begin_nbcu_capture:%'
@@ -647,19 +647,19 @@ begin
                   or v_msg like '%larger than bigint%');
       if not v_rejected then
         raise exception
-          'MIGRATION 20260819112451 FAILED: begin_nbcu_capture refused % with the WRONG '
+          'MIGRATION 20260819123658 FAILED: begin_nbcu_capture refused % with the WRONG '
           'error: %', v_bad::text, v_msg;
       end if;
     end;
     if not v_rejected then
       raise exception
-        'MIGRATION 20260819112451 FAILED: begin_nbcu_capture ACCEPTED the broken '
+        'MIGRATION 20260819123658 FAILED: begin_nbcu_capture ACCEPTED the broken '
         'expected_counts document %', v_bad::text;
     end if;
   end loop;
   if exists (select 1 from plm.nbcu_capture where capture_key like 'nbcu:ZZTEST-1219-ARG:%') then
     raise exception
-      'MIGRATION 20260819112451 FAILED: a refused begin_nbcu_capture still landed a row.';
+      'MIGRATION 20260819123658 FAILED: a refused begin_nbcu_capture still landed a row.';
   end if;
 
   insert into plm.nbcu_capture (
@@ -668,14 +668,14 @@ begin
   ) values (
     'nbcu:ZZTEST-1219:'||repeat('c',40), 'u2giants/ZZTEST', repeat('c',40), repeat('d',64),
     'https://portal.example.invalid/', now(), 'loading', v_exp, '{}'::jsonb,
-    'migration-20260819112451'
+    'migration-20260819123658'
   ) returning id into v_cap;
 
   -- 1. An all-zero snapshot with zero rows is publishable. Baseline: without this the
   --    two rejection assertions below could pass for the wrong reason.
   v_res := plm.finalize_nbcu_capture(v_cap);
   if (v_res ->> 'status') <> 'complete' then
-    raise exception 'MIGRATION 20260819112451 FAILED: a correct zero snapshot returned %',
+    raise exception 'MIGRATION 20260819123658 FAILED: a correct zero snapshot returned %',
       v_res::text;
   end if;
 
@@ -688,7 +688,7 @@ begin
   if (v_res ->> 'status') <> 'rejected'
      or not (v_res -> 'errors') @> '[{"code":"expected_count_not_a_number","entity":"assets"}]'::jsonb then
     raise exception
-      'MIGRATION 20260819112451 FAILED: a JSON-null expected count was not rejected by name: %',
+      'MIGRATION 20260819123658 FAILED: a JSON-null expected count was not rejected by name: %',
       v_res::text;
   end if;
 
@@ -701,7 +701,7 @@ begin
   if (v_res ->> 'status') <> 'rejected'
      or not (v_res -> 'errors') @> '[{"code":"expected_count_not_a_number","entity":"assets"}]'::jsonb then
     raise exception
-      'MIGRATION 20260819112451 FAILED: a string expected count was not rejected by name: %',
+      'MIGRATION 20260819123658 FAILED: a string expected count was not rejected by name: %',
       v_res::text;
   end if;
 
@@ -714,7 +714,7 @@ begin
      or not (v_res -> 'errors')
             @> '[{"code":"expected_count_not_a_nonnegative_integer","entity":"assets"}]'::jsonb then
     raise exception
-      'MIGRATION 20260819112451 FAILED: a fractional expected count was not rejected by name: %',
+      'MIGRATION 20260819123658 FAILED: a fractional expected count was not rejected by name: %',
       v_res::text;
   end if;
 
@@ -727,7 +727,7 @@ begin
      or not (v_res -> 'errors')
             @> '[{"code":"expected_count_not_a_number","entity":"failures"}]'::jsonb then
     raise exception
-      'MIGRATION 20260819112451 FAILED: a JSON-null failures key was not rejected by name: %',
+      'MIGRATION 20260819123658 FAILED: a JSON-null failures key was not rejected by name: %',
       v_res::text;
   end if;
 
@@ -744,7 +744,7 @@ begin
      or not (v_res -> 'errors')
             @> '[{"code":"count_mismatch","entity":"assets","expected":1,"observed":0}]'::jsonb then
     raise exception
-      'MIGRATION 20260819112451 FAILED: the whole number 1.0 was not compared as the '
+      'MIGRATION 20260819123658 FAILED: the whole number 1.0 was not compared as the '
       'integer 1: %', v_res::text;
   end if;
 
@@ -757,11 +757,11 @@ begin
   v_res := plm.finalize_nbcu_capture(v_cap);
   if (v_res ->> 'status') <> 'complete' then
     raise exception
-      'MIGRATION 20260819112451 FAILED: excluded_unlicensed_assets 0.0 did not compare '
+      'MIGRATION 20260819123658 FAILED: excluded_unlicensed_assets 0.0 did not compare '
       'equal to 0: %', v_res::text;
   end if;
 
   delete from plm.nbcu_capture where id = v_cap;
-  raise notice 'MIGRATION 20260819112451: NBCU count-gate hardening PROVED (8 argument refusals + 7 gate assertions).';
+  raise notice 'MIGRATION 20260819123658: NBCU count-gate hardening PROVED (8 argument refusals + 7 gate assertions).';
 end;
 $$;
