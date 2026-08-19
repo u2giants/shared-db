@@ -2,7 +2,13 @@
 -- NBCU capture publication gate -- close the JSON-null / non-number expected-count hole.
 --
 -- Issue u2giants/shared-db #1219 (SYSTEMIC), claim #1230.
--- OBJECT REPLACED BY THIS MIGRATION: plm.finalize_nbcu_capture(uuid). NOTHING ELSE.
+-- OBJECTS REPLACED BY THIS MIGRATION, AND NOTHING ELSE:
+--   plm.begin_nbcu_capture(text,text,text,text,text,timestamptz,jsonb,jsonb,text,text)
+--   plm.finalize_nbcu_capture(uuid)
+-- #1219 asks for BOTH halves and says why neither replaces the other: begin_ refuses the
+-- broken argument at the door, and finalize_ re-reads the STORED object because
+-- plm.nbcu_capture is writable by its owner, so an UPDATE can reach the value after the
+-- capture started. Trusting that begin_ ran is not sufficient.
 --
 -- THE DEFECT, EXACTLY.
 --   The gate decided a count had been supplied with `v_exp ? v_key`. `jsonb ? key` is
@@ -45,13 +51,22 @@
 --   validation ran at begin_ time: plm.nbcu_capture is writable by the owner, so an
 --   UPDATE can reach the stored value after the capture started.
 --
+-- WHAT begin_nbcu_capture NOW REFUSES.
+--   An expected_counts document in which ANY value is not a JSON number that is a
+--   non-negative integer within bigint. The refusal names the offending keys and their
+--   JSON types, so a loader author sees what to fix instead of a generic message. The
+--   existing "non-empty JSON object" rule is unchanged and still runs first.
+--
+--   Its validation is deliberately BLANKET over every key rather than a list of the
+--   twelve entity names. A key this function has never heard of is still a number in a
+--   counts document, and enumerating names here would go stale the next time an entity
+--   is added -- exactly how the asset_ip_family count arrived in 20260811070000.
+--
 -- WHAT DELIBERATELY DOES NOT CHANGE.
---   * plm.begin_nbcu_capture is NOT touched. It is outside this migration's object
---     claim (#1230 covers plm.finalize_nbcu_capture only), and CI refuses a migration
---     that writes an undeclared object. Issue #1219 also asks for an argument-time
---     refusal there; that half needs its own claim and is reported back, not smuggled
---     in here. The gate below is the load-bearing half regardless -- #1219 requires
---     finalize to re-check the stored object even when begin_ did validate.
+--   * NO static guard is added to scripts/check-sql.sh, though #1219 step 3 asks for
+--     one. A repo-wide rule banning a bare `?` count test would fail CI on main today,
+--     because the WildBrain (#1197) and Sega (#1196) fixes are not merged yet. The
+--     orchestrator is opening a follow-up issue for it.
 --   * excluded_unlicensed_assets and failures stay OPTIONAL keys, exactly as before.
 --     Making them required would refuse captures that are legitimate today. What is
 --     fixed is that when they ARE present they can no longer be a null or a string that
@@ -59,8 +74,196 @@
 --   * Every other block (B, D, E, F, F2) and the verdict are re-derived UNCHANGED from
 --     20260811070000, the current head definition of this function.
 --
--- CONTRACT TESTS: supabase/tests/nbcu_landing_contracts.sql, section G7, added with this
--- migration. Each one FAILS against the pre-fix body.
+-- CONTRACT TESTS: supabase/tests/nbcu_landing_contracts.sql -- section F7 for
+-- begin_nbcu_capture and section G7 for the gate, both added with this migration. Every
+-- assertion in them fails against the pre-fix bodies.
+-- =====================================================================================
+
+-- =====================================================================================
+-- PART 1 OF 2 -- THE ARGUMENT-TIME REFUSAL.
+--
+-- Re-derived from 20260810070000, the current head definition of this function. Only the
+-- expected_counts validation below is new; every other line, including the resume and
+-- idempotency rules, is unchanged.
+-- =====================================================================================
+
+create or replace function plm.begin_nbcu_capture(
+  p_capture_key            text,
+  p_source_repository      text,
+  p_source_commit_sha      text,
+  p_source_manifest_sha256 text,
+  p_portal_base_url        text,
+  p_source_captured_at     timestamptz,
+  p_expected_counts        jsonb,
+  p_raw_summary            jsonb,
+  p_created_by             text,
+  p_read_commit_sha        text default null
+) returns uuid
+language plpgsql
+security definer
+set search_path = plm, core, pg_temp
+as $$
+declare
+  v_existing plm.nbcu_capture%rowtype;
+  v_id       uuid;
+begin
+  -- Validate before touching anything. A malformed argument must fail here, loudly,
+  -- rather than land a half-described capture that the finalization gate then has to
+  -- reason about.
+  if p_capture_key is null or btrim(p_capture_key) = '' then
+    raise exception 'begin_nbcu_capture: capture_key is required';
+  end if;
+  if p_source_repository is null or btrim(p_source_repository) = '' then
+    raise exception 'begin_nbcu_capture: source_repository is required';
+  end if;
+  if p_source_commit_sha !~ '^[0-9a-f]{40}$' then
+    raise exception 'begin_nbcu_capture: source_commit_sha must be a 40-character lowercase hex sha';
+  end if;
+  if p_read_commit_sha is not null and p_read_commit_sha !~ '^[0-9a-f]{40}$' then
+    raise exception 'begin_nbcu_capture: read_commit_sha must be a 40-character lowercase hex sha';
+  end if;
+  if p_source_manifest_sha256 !~ '^[0-9a-f]{64}$' then
+    raise exception 'begin_nbcu_capture: source_manifest_sha256 must be a 64-character lowercase hex sha';
+  end if;
+  if p_expected_counts is null or jsonb_typeof(p_expected_counts) <> 'object'
+     or p_expected_counts = '{}'::jsonb then
+    raise exception 'begin_nbcu_capture: expected_counts must be a non-empty JSON object';
+  end if;
+
+  -- EVERY VALUE MUST BE A JSON NUMBER THAT IS A NON-NEGATIVE INTEGER, AND THE ARGUMENT
+  -- IS REFUSED HERE RATHER THAN LEFT FOR THE PUBLICATION GATE TO SURVIVE.
+  -- A JSON `null` is the exact shape jsonb_build_object('assets', v_unset_count)
+  -- produces, and it is NOT a missing key: the key IS present, so `?` calls it supplied
+  -- while every comparison against it is SQL NULL and therefore never false. That was a
+  -- SKIPPED count check, and a skipped count check is how a truncated capture gets
+  -- published as complete. finalize_nbcu_capture re-checks the STORED object as well --
+  -- plm.nbcu_capture is writable by its owner, so an UPDATE can reach the value after
+  -- this ran -- and neither check makes the other redundant.
+  --
+  -- THREE SEPARATE STATEMENTS, NOT ONE `or`-ED PREDICATE. SQL does not promise to
+  -- short-circuit `or`, so a single combined predicate could evaluate the numeric cast
+  -- against a JSON string and die with a bare cast error instead of these named
+  -- messages. The type test has to have FINISHED before anything casts.
+  if exists (
+    select 1 from jsonb_each(p_expected_counts) e
+     where jsonb_typeof(e.value) <> 'number'
+  ) then
+    raise exception
+      'begin_nbcu_capture: every expected_counts value must be a JSON number; a null, '
+      'string, boolean, object or array there would SKIP that count check at the '
+      'publication gate. Offending key(s): %',
+      (select string_agg(e.key || ' is ' || jsonb_typeof(e.value), ', ' order by e.key)
+         from jsonb_each(p_expected_counts) e
+        where jsonb_typeof(e.value) <> 'number');
+  end if;
+  -- A quoted number ("12") is caught by the test above, not here: it casts cleanly, so
+  -- a value check alone would have accepted a string as a count.
+  if exists (
+    select 1 from jsonb_each(p_expected_counts) e
+     where (e.value #>> '{}')::numeric < 0
+        or (e.value #>> '{}')::numeric <> trunc((e.value #>> '{}')::numeric)
+  ) then
+    raise exception
+      'begin_nbcu_capture: every expected_counts value must be a NON-NEGATIVE INTEGER; '
+      'a negative or fractional expectation is a broken loader, not a count. '
+      'Offending key(s): %',
+      (select string_agg(e.key || ' = ' || (e.value #>> '{}'), ', ' order by e.key)
+         from jsonb_each(p_expected_counts) e
+        where (e.value #>> '{}')::numeric < 0
+           or (e.value #>> '{}')::numeric <> trunc((e.value #>> '{}')::numeric));
+  end if;
+  if exists (
+    select 1 from jsonb_each(p_expected_counts) e
+     where (e.value #>> '{}')::numeric > 9223372036854775807::numeric
+  ) then
+    -- Larger than bigint. Left to the gate it raised `bigint out of range` from a raw
+    -- cast, which wedges a capture in 'loading' with no recorded reason.
+    raise exception
+      'begin_nbcu_capture: an expected_counts value is larger than bigint. '
+      'Offending key(s): %',
+      (select string_agg(e.key || ' = ' || (e.value #>> '{}'), ', ' order by e.key)
+         from jsonb_each(p_expected_counts) e
+        where (e.value #>> '{}')::numeric > 9223372036854775807::numeric);
+  end if;
+  if p_raw_summary is null or jsonb_typeof(p_raw_summary) <> 'object' then
+    raise exception 'begin_nbcu_capture: raw_summary must be a JSON object';
+  end if;
+  if p_source_captured_at is null then
+    raise exception 'begin_nbcu_capture: source_captured_at is required';
+  end if;
+  if p_created_by is null or btrim(p_created_by) = '' then
+    raise exception 'begin_nbcu_capture: created_by is required';
+  end if;
+
+  -- Serialize concurrent starts of the SAME capture_key. Two loader processes racing
+  -- here would otherwise both miss the select and both insert.
+  perform pg_advisory_xact_lock(hashtextextended('plm.nbcu_capture:' || p_capture_key, 0));
+
+  select * into v_existing from plm.nbcu_capture where capture_key = p_capture_key;
+
+  if found then
+    -- Same key, different bytes, is a CONTRADICTION, not a resume. Refuse it: silently
+    -- appending different source data under an existing capture key would make the
+    -- snapshot unreconstructable.
+    if v_existing.source_manifest_sha256 is distinct from p_source_manifest_sha256 then
+      raise exception
+        'begin_nbcu_capture: capture_key % already exists with a DIFFERENT source manifest hash; refusing',
+        p_capture_key;
+    end if;
+    if v_existing.source_commit_sha is distinct from p_source_commit_sha then
+      raise exception
+        'begin_nbcu_capture: capture_key % already exists with a DIFFERENT source commit sha; refusing',
+        p_capture_key;
+    end if;
+
+    if v_existing.status = 'complete' then
+      -- Idempotent: hand back the finished capture untouched. Never re-open it.
+      return v_existing.id;
+    elsif v_existing.status = 'loading' then
+      -- Resume. Only the loader''s own read commit may be refreshed.
+      update plm.nbcu_capture
+         set read_commit_sha = coalesce(p_read_commit_sha, read_commit_sha)
+       where id = v_existing.id;
+      return v_existing.id;
+    else
+      raise exception
+        'begin_nbcu_capture: capture_key % is %; start a NEW capture rather than reusing it',
+        p_capture_key, v_existing.status;
+    end if;
+  end if;
+
+  insert into plm.nbcu_capture (
+    capture_key, source_repository, source_commit_sha, read_commit_sha,
+    source_manifest_sha256, portal_base_url, source_captured_at,
+    status, expected_counts, raw_summary, created_by
+  ) values (
+    p_capture_key, p_source_repository, p_source_commit_sha, p_read_commit_sha,
+    p_source_manifest_sha256, p_portal_base_url, p_source_captured_at,
+    'loading', p_expected_counts, p_raw_summary, p_created_by
+  )
+  returning id into v_id;
+
+  return v_id;
+end;
+$$;
+
+
+comment on function plm.begin_nbcu_capture(text,text,text,text,text,timestamptz,jsonb,jsonb,text,text) is
+  'Creates or RESUMES exactly one loading NBCU capture. Idempotent for an identical '
+  'capture. Refuses to re-open a complete capture and refuses a same-key capture whose '
+  'source manifest or commit differs. Sole write path to plm.nbcu_capture on insert. '
+  'Since 20260819112451 (#1219) it also refuses an expected_counts document in which ANY '
+  'value is not a JSON number that is a non-negative integer within bigint -- a JSON null '
+  'there is not a missing key, and it used to make the publication gate SKIP that count '
+  'check silently. finalize_nbcu_capture re-checks the stored object independently, '
+  'because an owner UPDATE can reach it after this ran. service_role only.';
+
+revoke all on function plm.begin_nbcu_capture(text,text,text,text,text,timestamptz,jsonb,jsonb,text,text) from public;
+grant execute on function plm.begin_nbcu_capture(text,text,text,text,text,timestamptz,jsonb,jsonb,text,text) to service_role;
+
+
+-- =====================================================================================
+-- PART 2 OF 2 -- THE PUBLICATION GATE.
 -- =====================================================================================
 
 create or replace function plm.finalize_nbcu_capture(p_capture_id uuid)
@@ -340,20 +543,73 @@ do $$
 declare
   v_cap uuid;
   v_res jsonb;
+  v_msg text;
+  v_rejected boolean;
+  v_bad jsonb;
   v_exp jsonb := jsonb_build_object(
     'assets',0,'properties',0,'characters',0,'style_guides',0,'scopes',0,
     'ip_family_property',0,'property_character',0,'asset_property',0,
     'asset_character',0,'asset_style_guide',0,'style_guide_property',0,
     'asset_ip_family',0,'excluded_unlicensed_assets',0,'failures',0);
 begin
-  -- The source text must still carry the guard. A future `create or replace` that drops
-  -- it would otherwise pass every behavioural check below only because the counts are 0.
+  -- The source text must still carry the guards. A future `create or replace` that
+  -- dropped one would otherwise pass every behavioural check below only because the
+  -- counts happen to be 0.
   if (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname='plm' and p.proname='finalize_nbcu_capture'
          and p.prosrc like '%expected_count_not_a_number%') <> 1 then
     raise exception
       'MIGRATION 20260819112451 FAILED: plm.finalize_nbcu_capture does not carry the '
       'expected_count_not_a_number guard after replacement.';
+  end if;
+  if (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname='plm' and p.proname='begin_nbcu_capture'
+         and p.prosrc like '%must be a JSON number%') <> 1 then
+    raise exception
+      'MIGRATION 20260819112451 FAILED: plm.begin_nbcu_capture does not carry the '
+      'JSON-number argument guard after replacement.';
+  end if;
+
+  -- 0. THE ARGUMENT-TIME REFUSAL. Every broken shape #1219 names must be refused by
+  --    begin_nbcu_capture, and the refusal must be THIS one -- the handler is pinned to
+  --    the message, because a bare `when others` would also pass on a typo here.
+  foreach v_bad in array array[
+    '{"assets":null}'::jsonb,      -- the JSON-null that skipped the gate
+    '{"assets":"12"}'::jsonb,      -- a numeric-looking STRING: it used to cast cleanly
+    '{"assets":true}'::jsonb,
+    '{"assets":{}}'::jsonb,
+    '{"assets":[]}'::jsonb,
+    '{"assets":0.5}'::jsonb,
+    '{"assets":-1}'::jsonb,
+    '{"assets":92233720368547758070}'::jsonb
+  ] loop
+    v_rejected := false;
+    begin
+      perform plm.begin_nbcu_capture(
+        'nbcu:ZZTEST-1219-ARG:'||md5(v_bad::text), 'u2giants/ZZTEST', repeat('c',40),
+        repeat('d',64), 'https://portal.example.invalid/', now(), v_bad, '{}'::jsonb,
+        'migration-20260819112451');
+    exception when raise_exception then
+      get stacked diagnostics v_msg = message_text;
+      v_rejected := v_msg like '%begin_nbcu_capture:%'
+                and (v_msg like '%must be a JSON number%'
+                  or v_msg like '%NON-NEGATIVE INTEGER%'
+                  or v_msg like '%larger than bigint%');
+      if not v_rejected then
+        raise exception
+          'MIGRATION 20260819112451 FAILED: begin_nbcu_capture refused % with the WRONG '
+          'error: %', v_bad::text, v_msg;
+      end if;
+    end;
+    if not v_rejected then
+      raise exception
+        'MIGRATION 20260819112451 FAILED: begin_nbcu_capture ACCEPTED the broken '
+        'expected_counts document %', v_bad::text;
+    end if;
+  end loop;
+  if exists (select 1 from plm.nbcu_capture where capture_key like 'nbcu:ZZTEST-1219-ARG:%') then
+    raise exception
+      'MIGRATION 20260819112451 FAILED: a refused begin_nbcu_capture still landed a row.';
   end if;
 
   insert into plm.nbcu_capture (
@@ -426,6 +682,6 @@ begin
   end if;
 
   delete from plm.nbcu_capture where id = v_cap;
-  raise notice 'MIGRATION 20260819112451: NBCU count-gate hardening PROVED (5 assertions).';
+  raise notice 'MIGRATION 20260819112451: NBCU count-gate hardening PROVED (8 argument refusals + 5 gate assertions).';
 end;
 $$;

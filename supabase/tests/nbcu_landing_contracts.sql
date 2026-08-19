@@ -1108,6 +1108,108 @@ $$;
 
 
 -- =====================================================================================
+-- F7. begin_nbcu_capture MUST REFUSE AN EXPECTED_COUNTS DOCUMENT IT CANNOT CHECK LATER.
+--     Migration 20260819112451, issue #1219.
+--
+-- WHY BOTH F7 AND G7 EXIST, AND WHY NEITHER MAKES THE OTHER REDUNDANT.
+--   F7 covers the door: an argument that can never be verified is refused before a
+--   capture row is created at all. G7 covers the gate: finalize re-reads the STORED
+--   expected_counts, because plm.nbcu_capture is writable by its owner and an UPDATE can
+--   reach the value after begin_ ran. #1219 asks for both in those words.
+--
+--   AGAINST THE PRE-20260819112451 begin_ BODY EVERY CASE BELOW IS ACCEPTED -- the
+--   function validated only that expected_counts was a non-empty JSON object, so a
+--   document of nulls started a capture happily and the skipped-count publication in G7
+--   followed from it.
+--
+--   EVERY REJECTION IS PINNED to `raise_exception` plus the message that must have
+--   produced it. A bare `when others` passes when ANY error fires, including a typo in
+--   the test's own call, so it would stay green after the guard under test is deleted.
+--   That is the third defect pattern #1219 asks authors to sweep for.
+-- =====================================================================================
+do $$
+declare
+  v_pass integer := 0; v_fail integer := 0;
+  v_msg text; v_rejected boolean; v_n integer; v_cap uuid;
+  v_bad jsonb; v_label text;
+  -- Each pair is one broken value and the fragment of the refusal that must name it.
+  v_cases jsonb := jsonb_build_array(
+    jsonb_build_object('doc','{"assets":null}',                  'want','must be a JSON number','why','JSON null -- the shape jsonb_build_object with an unset variable produces'),
+    jsonb_build_object('doc','{"assets":"12"}',                  'want','must be a JSON number','why','a numeric-looking STRING, which used to cast cleanly and be ACCEPTED as a count'),
+    jsonb_build_object('doc','{"assets":"twelve"}',              'want','must be a JSON number','why','a non-numeric string, which used to die on a raw cast at the gate'),
+    jsonb_build_object('doc','{"assets":true}',                  'want','must be a JSON number','why','a boolean'),
+    jsonb_build_object('doc','{"assets":{}}',                    'want','must be a JSON number','why','an object'),
+    jsonb_build_object('doc','{"assets":[]}',                    'want','must be a JSON number','why','an array'),
+    jsonb_build_object('doc','{"assets":0.5}',                   'want','NON-NEGATIVE INTEGER','why','a fraction'),
+    jsonb_build_object('doc','{"assets":-1}',                    'want','NON-NEGATIVE INTEGER','why','a negative'),
+    jsonb_build_object('doc','{"assets":92233720368547758070}',  'want','larger than bigint','why','a number above bigint, which used to raise `bigint out of range` at the gate'),
+    -- A GOOD key next to a BAD one must not rescue the document. This is the shape a
+    -- real loader produces: eleven counts land, one variable was never set.
+    jsonb_build_object('doc','{"assets":1,"properties":null}',   'want','must be a JSON number','why','one good count beside one null'),
+    -- The optional scalars are validated by the same blanket rule, not exempted.
+    jsonb_build_object('doc','{"assets":1,"failures":null}',     'want','must be a JSON number','why','a null in the optional failures key'),
+    jsonb_build_object('doc','{"assets":1,"excluded_unlicensed_assets":"0"}','want','must be a JSON number','why','a string in the optional excluded_unlicensed_assets key')
+  );
+  v_case jsonb;
+begin
+  raise notice '=== F7. begin_nbcu_capture ARGUMENT REFUSALS (#1219) ===';
+
+  for v_case in select * from jsonb_array_elements(v_cases) loop
+    v_bad := (v_case ->> 'doc')::jsonb;
+    v_label := v_case ->> 'why';
+    v_rejected := false;
+    begin
+      perform plm.begin_nbcu_capture(
+        'nbcu:ZZTEST-F7:'||md5(v_bad::text), 'u2giants/ZZTEST', repeat('7',40),
+        repeat('8',64), 'https://portal.example.invalid/', now(), v_bad, '{}'::jsonb,
+        'contract-test-F7');
+    exception when raise_exception then
+      get stacked diagnostics v_msg = message_text;
+      if v_msg like '%begin_nbcu_capture:%'
+         and v_msg like '%'||(v_case ->> 'want')||'%' then
+        v_rejected := true; v_pass := v_pass+1;
+      else
+        v_fail := v_fail+1;
+        raise warning 'FAIL F7 (%) was refused by the WRONG error: %', v_label, v_msg;
+      end if;
+    end;
+    if not v_rejected and v_msg is null then
+      v_fail := v_fail+1;
+      raise warning 'FAIL F7 (%) was ACCEPTED: %', v_label, v_bad::text;
+    end if;
+    v_msg := null;
+  end loop;
+
+  -- F7.13 A refused call must leave NOTHING behind. The validation runs before the
+  -- advisory lock and the insert, and this proves it stayed there.
+  select count(*) into v_n from plm.nbcu_capture where capture_key like 'nbcu:ZZTEST-F7:%';
+  if v_n <> 0 then
+    v_fail := v_fail+1;
+    raise warning 'FAIL F7.13 a refused begin_nbcu_capture left % capture row(s) behind', v_n;
+  else v_pass := v_pass+1; end if;
+
+  -- F7.14 THE OTHER HALF OF THE GUARD. A document that IS all non-negative integers --
+  -- including a legitimate zero and a large-but-in-range count -- must still be
+  -- ACCEPTED. Without this the twelve refusals above would also pass if begin_ had been
+  -- broken into refusing everything.
+  v_cap := plm.begin_nbcu_capture('nbcu:ZZTEST-F7-OK:'||repeat('7',40),'u2giants/ZZTEST',
+    repeat('7',40), repeat('9',64), 'https://portal.example.invalid/', now(),
+    '{"assets":0,"properties":9007199254740993,"failures":0}'::jsonb, '{}'::jsonb,
+    'contract-test-F7');
+  if v_cap is null then
+    v_fail := v_fail+1;
+    raise warning 'FAIL F7.14 a VALID all-integer expected_counts document was refused';
+  else v_pass := v_pass+1; end if;
+
+  delete from plm.nbcu_capture where capture_key like 'nbcu:ZZTEST-F7%';
+
+  raise notice 'F7: % passed / % failed', v_pass, v_fail;
+  if v_fail > 0 then raise exception 'F7 FAILED (% failures)', v_fail; end if;
+end;
+$$;
+
+
+-- =====================================================================================
 -- G7. THE COUNT GATE MAY NEVER BE SKIPPED BY A NON-NUMBER EXPECTED COUNT.
 --     Migration 20260819112451, issue #1219.
 --
