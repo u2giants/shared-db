@@ -17,13 +17,18 @@
 --
 -- WHAT IT ASSERTS
 --   A. The 12 tables, 2 functions, RLS and the 24 read policies exist.
---   B. Append-only privilege separation genuinely DENIES update and delete, proven by
---      executing them as service_role, not merely by reading a grant table.
+--   B. Append-only privilege separation genuinely DENIES update, delete AND truncate,
+--      proven by executing them as service_role across the capture root, plm.sega_property
+--      and a five-table representative spread -- not merely by reading a grant table.
 --   C. plm.begin_sega_capture idempotency, resume, and its refusals.
 --   D. Every constraint that protects identity, the candidate/evidence separation, and
---      the direct/inferred separation.
+--      the direct/inferred separation. Each negative case asserts WHICH named constraint
+--      fired, not merely that some constraint did.
 --   E. plm.finalize_sega_capture completion preconditions, and that a rejection preserves
---      the previous complete capture.
+--      the previous complete capture -- including (E2N) that NO count check can ever be
+--      SKIPPED: a JSON null, string, boolean, object, array, fraction or negative in an
+--      expected or a loader-reported count is a NAMED rejection at begin AND again at the
+--      publication gate, which re-reads the STORED object rather than trusting begin ran.
 --   F. api.source_capture_inventory still classifies and counts every PRE-EXISTING source
 --      exactly as it did before this migration, and classifies plm.sega_* as 'sega'.
 -- =====================================================================================
@@ -164,7 +169,21 @@ do $$
 declare
   v_cap     uuid;
   v_denied  integer := 0;
-  v_expected integer := 4;
+  v_expected integer := 21;
+  v_t       text;
+  -- A REPRESENTATIVE SPREAD of the eleven snapshot tables, one per structural class, so
+  -- the behavioural half is not proving the model on a single table:
+  --   sega_catalog             -- the self-referencing tree
+  --   sega_asset               -- the high-volume metadata table
+  --   sega_character_evidence  -- the provenance-pinned evidence table
+  --   sega_asset_property      -- the source-declared association table
+  --   sega_tag                 -- the table guarded by a PARTIAL unique index
+  -- plm.sega_property is exercised in full below with real rows, and the CATALOGUE half of
+  -- this test already proves the grant state of all twelve tables. Repeating every table
+  -- here would add rows to the suite, not evidence.
+  v_spread text[] := array[
+    'sega_catalog','sega_asset','sega_character_evidence','sega_asset_property','sega_tag'
+  ];
 begin
   v_cap := plm.begin_sega_capture(
     'ZZTEST-sega-B:' || repeat('a', 40), 'ZZTEST-repo', repeat('a', 40), repeat('a', 64),
@@ -217,6 +236,42 @@ begin
   exception when insufficient_privilege then v_denied := v_denied + 1;
   end;
 
+  -- TRUNCATE is a distinct privilege from DELETE. An append-only snapshot that revokes
+  -- DELETE but leaves TRUNCATE reachable can still be emptied in one statement, so the
+  -- behavioural half has to prove TRUNCATE too -- on the capture root as well.
+  begin
+    truncate table plm.sega_property;
+    raise warning 'B FAIL: service_role TRUNCATE on plm.sega_property SUCCEEDED';
+  exception when insufficient_privilege then v_denied := v_denied + 1;
+  end;
+
+  begin
+    truncate table plm.sega_capture;
+    raise warning 'B FAIL: service_role TRUNCATE on plm.sega_capture SUCCEEDED';
+  exception when insufficient_privilege then v_denied := v_denied + 1;
+  end;
+
+  -- UPDATE / DELETE / TRUNCATE denied across the representative spread. The privilege
+  -- check happens before any row is touched, so an empty table proves the grant exactly as
+  -- a populated one does.
+  foreach v_t in array v_spread loop
+    begin
+      execute format('update plm.%I set capture_id = capture_id', v_t);
+      raise warning 'B FAIL: service_role UPDATE on plm.% SUCCEEDED', v_t;
+    exception when insufficient_privilege then v_denied := v_denied + 1;
+    end;
+    begin
+      execute format('delete from plm.%I', v_t);
+      raise warning 'B FAIL: service_role DELETE on plm.% SUCCEEDED', v_t;
+    exception when insufficient_privilege then v_denied := v_denied + 1;
+    end;
+    begin
+      execute format('truncate table plm.%I', v_t);
+      raise warning 'B FAIL: service_role TRUNCATE on plm.% SUCCEEDED', v_t;
+    exception when insufficient_privilege then v_denied := v_denied + 1;
+    end;
+  end loop;
+
   execute 'reset role';
 
   if current_user <> session_user then
@@ -233,7 +288,7 @@ begin
     raise exception 'B FAILED: a snapshot row was mutated';
   end if;
 
-  raise notice 'B (behaviour) passed: 4 forbidden writes denied, insert still allowed';
+  raise notice 'B (behaviour) passed: % forbidden writes denied across the capture root, plm.sega_property and a five-table spread, TRUNCATE included; INSERT still allowed', v_denied;
 end;
 $$;
 
@@ -370,7 +425,8 @@ do $$
 declare
   v_cap    uuid;
   v_raised integer := 0;
-  v_want   integer := 14;
+  v_con    text;
+  v_want   integer := 15;
 begin
   v_cap := plm.begin_sega_capture(
     'ZZTEST-sega-D:' || repeat('1', 40), 'ZZTEST-repo', repeat('1', 40), repeat('1', 64),
@@ -402,7 +458,18 @@ begin
       capture_id, property_source_id, property_label, source_url, source_hash, raw)
     values (v_cap, '   ', 'ZZTEST blank id', 'https://example.invalid', 'h', '{}');
     raise warning 'D FAIL: a blank property_source_id was accepted';
-  exception when check_violation then v_raised := v_raised + 1; end;
+  exception when check_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_property_source_id_nonblank_chk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_property_source_id_nonblank_chk'
+       and position('sega_property_source_id_nonblank_chk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_property_source_id_nonblank_chk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   -- 2. raw must be a JSON object, not an array or a scalar.
   begin
@@ -410,7 +477,18 @@ begin
       capture_id, property_source_id, property_label, source_url, source_hash, raw)
     values (v_cap, 'ZZTEST-P-RAW', 'ZZTEST raw', 'https://example.invalid', 'h', '[]');
     raise warning 'D FAIL: a non-object raw payload was accepted';
-  exception when check_violation then v_raised := v_raised + 1; end;
+  exception when check_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_property_raw_obj_chk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_property_raw_obj_chk'
+       and position('sega_property_raw_obj_chk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_property_raw_obj_chk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   -- 3. Licensor ordinals start at 1.
   begin
@@ -419,7 +497,18 @@ begin
       normalized_licensor_label, raw)
     values (v_cap, 'ZZTEST-P', 0, 'ZZTEST Licensor', 'zztest licensor', '{}');
     raise warning 'D FAIL: licensor_ordinal 0 was accepted';
-  exception when check_violation then v_raised := v_raised + 1; end;
+  exception when check_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_property_licensor_ordinal_pos_chk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_property_licensor_ordinal_pos_chk'
+       and position('sega_property_licensor_ordinal_pos_chk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_property_licensor_ordinal_pos_chk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   -- 4. The same normalised licensor may not appear twice under a different ordinal.
   insert into plm.sega_property_licensor (
@@ -432,7 +521,18 @@ begin
       normalized_licensor_label, raw)
     values (v_cap, 'ZZTEST-P', 2, 'ZZTEST  Licensor', 'zztest licensor', '{}');
     raise warning 'D FAIL: a duplicate normalised licensor was accepted';
-  exception when unique_violation then v_raised := v_raised + 1; end;
+  exception when unique_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_property_licensor_normalized_uk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_property_licensor_normalized_uk'
+       and position('sega_property_licensor_normalized_uk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_property_licensor_normalized_uk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   -- 5. A catalog node may not be its own parent.
   begin
@@ -441,7 +541,18 @@ begin
       hierarchy_path, hierarchy_depth, source_hash, raw)
     values (v_cap, 'ZZTEST-C2', 'ZZTEST-C2', 'ZZTEST self', '/zztest-self', 2, 'h', '{}');
     raise warning 'D FAIL: a self-parenting catalog node was accepted';
-  exception when check_violation then v_raised := v_raised + 1; end;
+  exception when check_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_catalog_no_self_parent_chk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_catalog_no_self_parent_chk'
+       and position('sega_catalog_no_self_parent_chk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_catalog_no_self_parent_chk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   -- 6. hierarchy_path is unique within a capture; a repeated LEAF LABEL is not.
   begin
@@ -450,7 +561,18 @@ begin
       hierarchy_path, hierarchy_depth, source_hash, raw)
     values (v_cap, 'ZZTEST-C3', null, 'ZZTEST other', '/zztest-root', 1, 'h', '{}');
     raise warning 'D FAIL: a duplicate hierarchy_path was accepted';
-  exception when unique_violation then v_raised := v_raised + 1; end;
+  exception when unique_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_catalog_path_uk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_catalog_path_uk'
+       and position('sega_catalog_path_uk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_catalog_path_uk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   insert into plm.sega_catalog (
     capture_id, catalog_source_id, parent_catalog_source_id, catalog_label,
@@ -470,7 +592,18 @@ begin
     values (v_cap, 'ZZTEST-C1', 'ZZTEST guide', 'zztest_not_a_classification',
             'ZZTEST evidence', 'v1', 0.9, '{}');
     raise warning 'D FAIL: an unknown classification_type was accepted';
-  exception when check_violation then v_raised := v_raised + 1; end;
+  exception when check_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_style_guide_candidate_classification_chk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_style_guide_candidate_classification_chk'
+       and position('sega_style_guide_candidate_classification_chk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_style_guide_candidate_classification_chk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   -- 8. Confidence is a probability.
   begin
@@ -480,7 +613,18 @@ begin
     values (v_cap, 'ZZTEST-C1', 'ZZTEST guide', 'style_guide',
             'ZZTEST evidence', 'v1', 1.5, '{}');
     raise warning 'D FAIL: a confidence above 1 was accepted';
-  exception when check_violation then v_raised := v_raised + 1; end;
+  exception when check_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_style_guide_candidate_confidence_chk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_style_guide_candidate_confidence_chk'
+       and position('sega_style_guide_candidate_confidence_chk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_style_guide_candidate_confidence_chk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   insert into plm.sega_style_guide_candidate (
     capture_id, catalog_source_id, candidate_label, classification_type,
@@ -502,7 +646,18 @@ begin
     values (v_cap, 'ZZTEST-CH1-DUP', 'ZZTEST Character', 'zztest character',
             'zztest_method_a', 'v1', '{}');
     raise warning 'D FAIL: a duplicate candidate label+method was accepted';
-  exception when unique_violation then v_raised := v_raised + 1; end;
+  exception when unique_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_character_candidate_normalized_uk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_character_candidate_normalized_uk'
+       and position('sega_character_candidate_normalized_uk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_character_candidate_normalized_uk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   -- ... but the same label reached by a DIFFERENT method is legitimately a second row.
   insert into plm.sega_character_candidate (
@@ -519,7 +674,18 @@ begin
     values (v_cap, 'ZZTEST-CH1', 'ZZTEST-E-DECLARED', 'ZZTEST-C1',
             'catalog_path', 'ZZTEST evidence', 0.5, 'declared', '{}');
     raise warning 'D FAIL: character evidence claimed to be source-declared';
-  exception when check_violation then v_raised := v_raised + 1; end;
+  exception when check_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_character_evidence_truth_chk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_character_evidence_truth_chk'
+       and position('sega_character_evidence_truth_chk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_character_evidence_truth_chk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   -- 11. Exactly one anchor: not both.
   begin
@@ -529,7 +695,18 @@ begin
     values (v_cap, 'ZZTEST-CH1', 'ZZTEST-E-BOTH', 'ZZTEST-C1', 'ZZTEST-A1',
             'catalog_path', 'ZZTEST evidence', 0.5, '{}');
     raise warning 'D FAIL: character evidence with two anchors was accepted';
-  exception when check_violation then v_raised := v_raised + 1; end;
+  exception when check_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_character_evidence_exactly_one_anchor_chk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_character_evidence_exactly_one_anchor_chk'
+       and position('sega_character_evidence_exactly_one_anchor_chk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_character_evidence_exactly_one_anchor_chk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   -- 12. ... and not neither.
   begin
@@ -539,7 +716,18 @@ begin
     values (v_cap, 'ZZTEST-CH1', 'ZZTEST-E-NONE',
             'filename', 'ZZTEST evidence', 0.5, '{}');
     raise warning 'D FAIL: character evidence with no anchor was accepted';
-  exception when check_violation then v_raised := v_raised + 1; end;
+  exception when check_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_character_evidence_exactly_one_anchor_chk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_character_evidence_exactly_one_anchor_chk'
+       and position('sega_character_evidence_exactly_one_anchor_chk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_character_evidence_exactly_one_anchor_chk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   insert into plm.sega_character_evidence (
     capture_id, character_candidate_key, evidence_key, catalog_source_id,
@@ -558,7 +746,18 @@ begin
       capture_id, asset_source_id, property_source_id, evidence_type, raw)
     values (v_cap, 'ZZTEST-A1', 'ZZTEST-P', 'catalog_containment_inference', '{}');
     raise warning 'D FAIL: an inferred asset-to-property association was accepted';
-  exception when check_violation then v_raised := v_raised + 1; end;
+  exception when check_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_asset_property_evidence_type_chk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_asset_property_evidence_type_chk'
+       and position('sega_asset_property_evidence_type_chk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_asset_property_evidence_type_chk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   -- 14. Tag identity: a fallback tag may not carry a source ID.
   begin
@@ -568,7 +767,40 @@ begin
     values (v_cap, 'ZZTEST-T-BAD', 'ZZTEST-TAGID', 'ZZTEST Tag', 'zztest tag',
             'normalized_label_fallback', '{}');
     raise warning 'D FAIL: a fallback tag carrying a source ID was accepted';
-  exception when check_violation then v_raised := v_raised + 1; end;
+  exception when check_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_tag_identity_agreement_chk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_tag_identity_agreement_chk'
+       and position('sega_tag_identity_agreement_chk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_tag_identity_agreement_chk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
+
+  -- 15. A style-guide CANDIDATE may not claim source-declared provenance. The Sega portal
+  --     exposes no style-guide master record, so the only honest evidence_type is the
+  --     derivation rule that produced the row. Without this the candidate status would rest
+  --     on the table NAME alone.
+  begin
+    insert into plm.sega_style_guide_candidate (
+      capture_id, catalog_source_id, candidate_label, classification_type,
+      evidence_type, evidence_value, rule_version, confidence, raw)
+    values (v_cap, 'ZZTEST-C4', 'ZZTEST guide', 'style_guide',
+            'source_declared', 'ZZTEST evidence', 'v1', 0.9, '{}');
+    raise warning 'D FAIL: a style-guide candidate claimed source-declared provenance';
+  exception when check_violation then
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_style_guide_candidate_evidence_type_chk'
+       and position('sega_style_guide_candidate_evidence_type_chk' in sqlerrm) = 0 then
+      raise exception
+        'D FAILED: expected constraint sega_style_guide_candidate_evidence_type_chk, but % fired (%)',
+        v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   if v_raised <> v_want then
     raise exception 'D FAILED: only % of % constraint refusals fired', v_raised, v_want;
@@ -582,6 +814,7 @@ do $$
 declare
   v_cap    uuid;
   v_raised integer := 0;
+  v_con    text;
 begin
   v_cap := plm.begin_sega_capture(
     'ZZTEST-sega-D2:' || repeat('2', 40), 'ZZTEST-repo', repeat('2', 40), repeat('2', 64),
@@ -601,7 +834,18 @@ begin
     values (v_cap, 'ZZTEST-TK-2', null, 'ZZTEST  tag', 'zztest tag',
             'normalized_label_fallback', '{}');
     raise warning 'D2 FAIL: a duplicate fallback tag label was accepted';
-  exception when unique_violation then v_raised := v_raised + 1; end;
+  exception when unique_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_tag_fallback_normalized_uk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_tag_fallback_normalized_uk'
+       and position('sega_tag_fallback_normalized_uk' in sqlerrm) = 0 then
+      raise exception
+        'D2 FAILED: expected constraint sega_tag_fallback_normalized_uk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   -- Two tags that DO carry portal IDs may normalise identically. The partial unique index
   -- exists precisely so this stays legal.
@@ -850,11 +1094,242 @@ begin
 end;
 $$;
 
+-- E2N. THE PUBLICATION GATE MAY NEVER SKIP A COUNT CHECK.
+--
+-- A key present with JSON `null` is NOT a missing key. `expected_counts ? 'assets'` is TRUE
+-- for {"assets": null}, so a `?`-only test calls the count supplied, while every comparison
+-- against the resulting SQL NULL is UNKNOWN and therefore never false. The check would be
+-- SKIPPED -- and a skipped count check is exactly how a failed or first-page-only asset
+-- crawl becomes the current complete capture and is then reported as latest-complete by
+-- api.source_capture_inventory. jsonb_build_object('assets', v_unset) produces that shape
+-- with no error at all, so this is an ordinary loader bug, not an exotic one.
+--
+-- (i) begin_sega_capture refuses every non-number shape, each with a NAMED message.
+do $$
+declare
+  v_raised integer := 0;
+  v_shape  jsonb;
+  v_shapes jsonb[] := array[
+    'null'::jsonb,          -- the loader's unset-variable shape
+    '"7"'::jsonb,           -- a string, which would also break a naive cast
+    'true'::jsonb,          -- a boolean
+    '{}'::jsonb,            -- an object
+    '[]'::jsonb,            -- an array
+    '1.5'::jsonb,           -- a number, but not a whole row count
+    '-1'::jsonb             -- a number, but not a possible row count
+  ];
+  i integer;
+begin
+  for i in 1 .. array_length(v_shapes, 1) loop
+    v_shape := v_shapes[i];
+    begin
+      perform plm.begin_sega_capture(
+        'ZZTEST-sega-E2N' || i || ':' || repeat('1', 40), 'ZZTEST-repo',
+        repeat('1', 40), repeat('1', 64), 'https://example.invalid',
+        '2099-09-01Z'::timestamptz,
+        jsonb_build_object('properties', 0) || jsonb_build_object('assets', v_shape),
+        '{}'::jsonb, 'ZZTEST', false, true, true, true);
+      raise warning 'E2N FAIL: begin accepted an expected_counts value of %', v_shape;
+    exception when others then
+      -- A NAMED refusal, not any error. A raw cast failure ("invalid input syntax for type
+      -- numeric") would mean the type test did not run first, which is the trap a single
+      -- `or`-ed predicate falls into: SQL does not promise to short-circuit `or`.
+      if sqlerrm not like
+         '%every expected_counts value must be a JSON number that is a non-negative integer%'
+      then
+        raise exception
+          'E2N FAILED: expected_counts value % was refused, but not by name: %',
+          v_shape, sqlerrm;
+      end if;
+      -- The five non-numeric shapes must be refused by the TYPE guard, whose message names
+      -- the skipped-check consequence; the two numeric-but-wrong shapes by the range guard.
+      if jsonb_typeof(v_shape) <> 'number'
+         and sqlerrm not like '%would SKIP that count check%' then
+        raise exception
+          'E2N FAILED: the non-number shape % was refused by the range guard, not the type guard: %',
+          v_shape, sqlerrm;
+      end if;
+      if jsonb_typeof(v_shape) = 'number'
+         and sqlerrm like '%would SKIP that count check%' then
+        raise exception
+          'E2N FAILED: the numeric shape % was refused by the type guard, not the range guard: %',
+          v_shape, sqlerrm;
+      end if;
+      v_raised := v_raised + 1;
+    end;
+  end loop;
+
+  if v_raised <> array_length(v_shapes, 1) then
+    raise exception 'E2N FAILED: only % of % bad expected_counts shapes were refused',
+      v_raised, array_length(v_shapes, 1);
+  end if;
+  raise notice 'E2N (i) passed: % bad expected_counts shapes refused by name at begin',
+    v_raised;
+end;
+$$;
+
+-- (ii) finalize re-checks the STORED object rather than trusting that begin ran. An
+--      owner-level UPDATE reaches plm.sega_capture.expected_counts without going through
+--      begin_sega_capture at all, so the guard has to exist at BOTH ends. This is the exact
+--      scenario the reviewer demonstrated: one property lands, ZERO assets land, every
+--      publishable flag is set, the loader honestly reports "assets": 0, and the gate must
+--      still refuse to publish.
+do $$
+declare
+  v_id    uuid;
+  v_cap   plm.sega_capture%rowtype;
+  v_full  jsonb :=
+    ('{"properties":1,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
+     || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+  v_shape jsonb;
+  v_code  text;
+  v_shapes jsonb[]  := array['null'::jsonb, '"7"'::jsonb, '[]'::jsonb, '-1'::jsonb];
+  v_codes  text[]   := array['expected_count_not_a_number','expected_count_not_a_number',
+                             'expected_count_not_a_number',
+                             'expected_count_not_a_nonnegative_integer'];
+  i integer;
+begin
+  for i in 1 .. array_length(v_shapes, 1) loop
+    v_shape := v_shapes[i];
+    v_code  := v_codes[i];
+
+    v_id := plm.begin_sega_capture(
+      'ZZTEST-sega-E2Nii' || i || ':' || repeat('2', 40), 'ZZTEST-repo',
+      repeat('2', 40), repeat('2', 64), 'https://example.invalid',
+      '2099-09-02Z'::timestamptz, v_full, '{}'::jsonb, 'ZZTEST', false, true, true, true);
+
+    insert into plm.sega_property (
+      capture_id, property_source_id, property_label, source_url, source_hash, raw)
+    values (v_id, 'ZZTEST-P-1', 'ZZTEST property one', 'https://example.invalid',
+            'ZZTESThash1', '{}'::jsonb);
+
+    -- Bypass the begin guard exactly as a privileged writer could.
+    update plm.sega_capture
+       set expected_counts = jsonb_set(expected_counts, '{assets}', v_shape)
+     where id = v_id;
+
+    -- The loader reports the truth: zero assets landed. Every flag is publishable. Only
+    -- the stored expectation is unusable, and that alone must block publication.
+    perform plm.finalize_sega_capture(v_id, v_full, '[]'::jsonb);
+
+    select * into v_cap from plm.sega_capture where id = v_id;
+    if v_cap.status <> 'rejected' then
+      raise exception
+        'E2Nii FAILED: a stored expected_counts.assets of % PUBLISHED as %; the count check was skipped',
+        v_shape, v_cap.status;
+    end if;
+    if not (v_cap.error_summary
+            @> jsonb_build_array(jsonb_build_object('code', v_code, 'entity', 'assets'))) then
+      raise exception 'E2Nii FAILED: shape % was rejected, but not as %: %',
+        v_shape, v_code, v_cap.error_summary;
+    end if;
+    if v_cap.load_completed_at is not null then
+      raise exception 'E2Nii FAILED: a rejected capture carries a completion time';
+    end if;
+  end loop;
+
+  raise notice
+    'E2N (ii) passed: % unusable STORED expected counts each blocked publication by name',
+    array_length(v_shapes, 1);
+end;
+$$;
+
+-- (iii) The loader-REPORTED counts carry the identical trap and get the identical guard.
+do $$
+declare
+  v_id    uuid;
+  v_cap   plm.sega_capture%rowtype;
+  v_full  jsonb :=
+    ('{"properties":0,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
+     || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+  v_shape jsonb;
+  v_code  text;
+  v_shapes jsonb[] := array['null'::jsonb, '"0"'::jsonb, 'true'::jsonb, '{}'::jsonb,
+                            '0.5'::jsonb, '-1'::jsonb];
+  v_codes  text[]  := array['reported_count_not_a_number','reported_count_not_a_number',
+                            'reported_count_not_a_number','reported_count_not_a_number',
+                            'reported_count_not_a_nonnegative_integer',
+                            'reported_count_not_a_nonnegative_integer'];
+  i integer;
+begin
+  for i in 1 .. array_length(v_shapes, 1) loop
+    v_shape := v_shapes[i];
+    v_code  := v_codes[i];
+
+    v_id := plm.begin_sega_capture(
+      'ZZTEST-sega-E2Niii' || i || ':' || repeat('3', 40), 'ZZTEST-repo',
+      repeat('3', 40), repeat('3', 64), 'https://example.invalid',
+      '2099-09-03Z'::timestamptz, v_full, '{}'::jsonb, 'ZZTEST', false, true, true, true);
+
+    -- Everything else about this capture is publishable. Only the loader's claim about
+    -- one entity is unusable -- and an unusable claim is not a passed check.
+    perform plm.finalize_sega_capture(
+      v_id, jsonb_set(v_full, '{assets}', v_shape), '[]'::jsonb);
+
+    select * into v_cap from plm.sega_capture where id = v_id;
+    if v_cap.status <> 'rejected' then
+      raise exception
+        'E2Niii FAILED: a reported assets count of % PUBLISHED as %; the check was skipped',
+        v_shape, v_cap.status;
+    end if;
+    if not (v_cap.error_summary
+            @> jsonb_build_array(jsonb_build_object('code', v_code, 'entity', 'assets'))) then
+      raise exception 'E2Niii FAILED: reported shape % was rejected, but not as %: %',
+        v_shape, v_code, v_cap.error_summary;
+    end if;
+  end loop;
+
+  raise notice
+    'E2N (iii) passed: % unusable loader-reported counts each blocked publication by name',
+    array_length(v_shapes, 1);
+end;
+$$;
+
+-- (iv) The whole-object sweep: a non-number under a key OUTSIDE the eleven entity names is
+--      the same defect and must also be named, not ignored.
+do $$
+declare
+  v_id   uuid;
+  v_cap  plm.sega_capture%rowtype;
+  v_full jsonb :=
+    ('{"properties":0,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
+     || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+begin
+  v_id := plm.begin_sega_capture(
+    'ZZTEST-sega-E2Niv:' || repeat('4', 40), 'ZZTEST-repo',
+    repeat('4', 40), repeat('4', 64), 'https://example.invalid',
+    '2099-09-04Z'::timestamptz, v_full, '{}'::jsonb, 'ZZTEST', false, true, true, true);
+
+  update plm.sega_capture
+     set expected_counts = expected_counts || '{"zztest_future_entity": null}'::jsonb
+   where id = v_id;
+
+  perform plm.finalize_sega_capture(v_id, v_full, '[]'::jsonb);
+
+  select * into v_cap from plm.sega_capture where id = v_id;
+  if v_cap.status <> 'rejected'
+     or not (v_cap.error_summary
+             @> '[{"code":"expected_count_not_a_number","entity":"zztest_future_entity"}]'::jsonb)
+  then
+    raise exception
+      'E2Niv FAILED: a non-number under an unrecognised expected_counts key was tolerated (% / %)',
+      v_cap.status, v_cap.error_summary;
+  end if;
+
+  raise notice 'E2N (iv) passed: the sweep covers keys beyond the eleven entity names';
+end;
+$$;
+
+
 -- E3. The table itself refuses a hand-built 'complete' capture that breaks the rule, so
 -- the guarantee does not depend on the function being the only writer.
 do $$
 declare
   v_raised integer := 0;
+  v_con    text;
 begin
   begin
     insert into plm.sega_capture (
@@ -866,7 +1341,18 @@ begin
             'https://example.invalid', '2099-06-01Z', '2099-06-02Z', 'complete',
             '{}'::jsonb, '{}'::jsonb, 'ZZTEST', true, true, true, true);
     raise warning 'E3 FAIL: a limited capture was stored as complete';
-  exception when check_violation then v_raised := v_raised + 1; end;
+  exception when check_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_capture_complete_requirements_chk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_capture_complete_requirements_chk'
+       and position('sega_capture_complete_requirements_chk' in sqlerrm) = 0 then
+      raise exception
+        'E3 FAILED: expected constraint sega_capture_complete_requirements_chk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   begin
     insert into plm.sega_capture (
@@ -879,7 +1365,18 @@ begin
             '{}'::jsonb, '{}'::jsonb, 'ZZTEST', '[{"code":"zztest"}]'::jsonb,
             false, true, true, true);
     raise warning 'E3 FAIL: a capture carrying errors was stored as complete';
-  exception when check_violation then v_raised := v_raised + 1; end;
+  exception when check_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_capture_complete_requirements_chk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_capture_complete_requirements_chk'
+       and position('sega_capture_complete_requirements_chk' in sqlerrm) = 0 then
+      raise exception
+        'E3 FAILED: expected constraint sega_capture_complete_requirements_chk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   begin
     insert into plm.sega_capture (
@@ -890,7 +1387,18 @@ begin
             'https://example.invalid', '2099-06-01Z', 'loading',
             '{}'::jsonb, '{}'::jsonb, 'ZZTEST', 1);
     raise warning 'E3 FAIL: a media-bearing capture was accepted';
-  exception when check_violation then v_raised := v_raised + 1; end;
+  exception when check_violation then
+    -- Pin WHICH constraint fired. A bare exception class only proves that SOMETHING
+    -- refused the row; it would stay green if a different constraint started catching
+    -- this input and sega_capture_media_zero_chk were dropped.
+    get stacked diagnostics v_con = constraint_name;
+    if coalesce(v_con, '') <> 'sega_capture_media_zero_chk'
+       and position('sega_capture_media_zero_chk' in sqlerrm) = 0 then
+      raise exception
+        'E3 FAILED: expected constraint sega_capture_media_zero_chk, but % fired (%)', v_con, sqlerrm;
+    end if;
+    v_raised := v_raised + 1;
+  end;
 
   if v_raised <> 3 then
     raise exception 'E3 FAILED: only % of 3 table-level refusals fired', v_raised;

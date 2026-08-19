@@ -346,8 +346,15 @@ create table plm.sega_style_guide_candidate (
            ('style_guide','trend_guide','text_guide','packaging_guide','other_guide')),
   constraint sega_style_guide_candidate_label_nonblank_chk
     check (btrim(candidate_label) <> ''),
-  constraint sega_style_guide_candidate_evidence_type_nonblank_chk
-    check (btrim(evidence_type) <> ''),
+  -- CLOSED SET, exactly as plm.sega_character_evidence.evidence_type is closed. A merely
+  -- non-blank column would let a row land as evidence_type = 'source_declared', and then
+  -- only the TABLE NAME would say candidate -- a reader who trusts the column would read
+  -- this pipeline's own catalog-name classification as a portal-declared style guide. The
+  -- Sega portal exposes no Style Guide master record, so there is no honest value here
+  -- other than the derivation rule that produced the row. Adding a future rule is a
+  -- migration, which is the point: a new claim of provenance gets reviewed, not typed.
+  constraint sega_style_guide_candidate_evidence_type_chk
+    check (evidence_type in ('catalog_name_rule')),
   constraint sega_style_guide_candidate_evidence_value_nonblank_chk
     check (btrim(evidence_value) <> ''),
   constraint sega_style_guide_candidate_rule_version_nonblank_chk
@@ -361,7 +368,10 @@ comment on table plm.sega_style_guide_candidate is
   'NON-AUTHORITATIVE INFERRED EVIDENCE. This pipeline''s classification of a Sega catalog '
   'node as a guide of some kind. It is NOT a claim that the portal exposes a Style Guide '
   'master record -- the portal exposes none. Never promote a row here into '
-  'core.style_guide automatically and never present it as a source-declared fact.';
+  'core.style_guide automatically and never present it as a source-declared fact. '
+  'evidence_type is a CLOSED set naming the derivation rule, so no row can ever assert '
+  '''source_declared'' provenance -- the candidate status is enforced by a constraint, '
+  'not merely implied by the table name.';
 
 
 -- =====================================================================================
@@ -767,6 +777,38 @@ begin
      or p_expected_counts = '{}'::jsonb then
     raise exception 'begin_sega_capture: expected_counts must be a non-empty JSON object';
   end if;
+  -- EVERY VALUE MUST BE A JSON NUMBER THAT IS A NON-NEGATIVE INTEGER.
+  --
+  -- A JSON `null` here is NOT a missing key. It is the exact shape a loader produces from
+  -- jsonb_build_object('assets', v_unset_count): the key IS present, so a `?` test at the
+  -- publication gate calls the count supplied, while every comparison against the
+  -- resulting SQL NULL is UNKNOWN and therefore never false. That is a SKIPPED count
+  -- check, and a skipped count check is exactly how a failed or first-page-only asset
+  -- crawl publishes as the current complete capture. Refused here, loudly, at the start --
+  -- and refused AGAIN at the publication gate, which re-reads the STORED object rather
+  -- than trusting that this ever ran.
+  --
+  -- TWO SEPARATE STATEMENTS, NOT ONE `or`-ED PREDICATE. SQL does not promise to
+  -- short-circuit `or`, so a single combined predicate could evaluate the numeric cast on
+  -- a JSON string and die with a raw cast error instead of this named message. The type
+  -- test has to have finished before anything casts.
+  if exists (
+    select 1 from jsonb_each(p_expected_counts) e
+     where jsonb_typeof(e.value) <> 'number'
+  ) then
+    raise exception
+      'begin_sega_capture: every expected_counts value must be a JSON number that is a non-negative integer; a null, string, boolean, object or array there would SKIP that count check at the publication gate; got %',
+      p_expected_counts;
+  end if;
+  if exists (
+    select 1 from jsonb_each(p_expected_counts) e
+     where (e.value #>> '{}')::numeric < 0
+        or (e.value #>> '{}')::numeric <> trunc((e.value #>> '{}')::numeric)
+  ) then
+    raise exception
+      'begin_sega_capture: every expected_counts value must be a JSON number that is a non-negative integer; got %',
+      p_expected_counts;
+  end if;
   if p_raw_summary is null or jsonb_typeof(p_raw_summary) <> 'object' then
     raise exception 'begin_sega_capture: raw_summary must be a JSON object';
   end if;
@@ -959,8 +1001,30 @@ begin
       into v_n using p_capture_id;
     v_obs := v_obs || jsonb_build_object(v_key, v_n);
 
+    -- A KEY PRESENT WITH JSON `null` IS NOT A SUPPLIED COUNT. `v_exp ? v_key` is TRUE for
+    -- {"assets": null}, and every comparison against the resulting SQL NULL is UNKNOWN --
+    -- so a naive `if v_n <> v_want` would NEVER FIRE and the count would go entirely
+    -- unchecked, which is the same publication failure as omitting the key. The value must
+    -- therefore be a JSON NUMBER, and a non-negative integer at that: a fractional or
+    -- negative expectation is a broken loader, not a count.
+    --
+    -- This re-checks the STORED object rather than trusting that begin_sega_capture ran
+    -- its own guard: an owner-level UPDATE can reach plm.sega_capture.expected_counts
+    -- without going through that function at all.
+    --
+    -- The branches are separate, not one `or`-ed predicate: SQL does not promise to
+    -- short-circuit `or`, so a combined test could cast a JSON string and die with a raw
+    -- cast error instead of the named code below.
     if not (v_exp ? v_key) then
       v_err := v_err || jsonb_build_object('code','expected_count_missing','entity',v_key);
+    elsif jsonb_typeof(v_exp -> v_key) <> 'number' then
+      v_err := v_err || jsonb_build_object('code','expected_count_not_a_number',
+                                           'entity',v_key,
+                                           'json_type', jsonb_typeof(v_exp -> v_key));
+    elsif (v_exp ->> v_key)::numeric < 0
+       or (v_exp ->> v_key)::numeric <> trunc((v_exp ->> v_key)::numeric) then
+      v_err := v_err || jsonb_build_object('code','expected_count_not_a_nonnegative_integer',
+                                           'entity',v_key,'expected', v_exp -> v_key);
     else
       v_want := (v_exp ->> v_key)::bigint;
       if v_n <> v_want then
@@ -969,13 +1033,48 @@ begin
       end if;
     end if;
 
+    -- The loader's own reported counts carry the identical trap: {"assets": null} makes
+    -- `?` true and `(p_observed_counts ->> v_key)::bigint` SQL NULL, so the comparison is
+    -- UNKNOWN and the check is skipped. A present non-number is itself a disagreement.
     if not (p_observed_counts ? v_key) then
       v_err := v_err || jsonb_build_object('code','reported_count_missing','entity',v_key);
+    elsif jsonb_typeof(p_observed_counts -> v_key) <> 'number' then
+      v_err := v_err || jsonb_build_object('code','reported_count_not_a_number',
+                                           'entity',v_key,
+                                           'json_type',
+                                           jsonb_typeof(p_observed_counts -> v_key));
+    elsif (p_observed_counts ->> v_key)::numeric < 0
+       or (p_observed_counts ->> v_key)::numeric
+           <> trunc((p_observed_counts ->> v_key)::numeric) then
+      v_err := v_err || jsonb_build_object('code','reported_count_not_a_nonnegative_integer',
+                                           'entity',v_key,
+                                           'reported', p_observed_counts -> v_key);
     elsif (p_observed_counts ->> v_key)::bigint <> v_n then
       v_err := v_err || jsonb_build_object('code','reported_count_mismatch','entity',v_key,
                                            'reported',(p_observed_counts ->> v_key)::bigint,
                                            'observed',v_n);
     end if;
+  end loop;
+
+  -- The loop above only inspects the eleven entity keys this schema knows. A stored
+  -- expected_counts or a reported observed_counts may carry OTHER keys -- media_downloaded
+  -- is one, and a future loader may add more -- and a non-number sitting in one of those
+  -- is the same class of defect: a value that looks supplied and compares to nothing.
+  -- Sweep the whole object so no key escapes the type rule.
+  for v_key in select e.key from jsonb_each(v_exp) e
+                where not (v_obs ? e.key)
+                  and jsonb_typeof(e.value) <> 'number' loop
+    v_err := v_err || jsonb_build_object('code','expected_count_not_a_number',
+                                         'entity',v_key,
+                                         'json_type', jsonb_typeof(v_exp -> v_key));
+  end loop;
+  for v_key in select e.key from jsonb_each(p_observed_counts) e
+                where not (v_obs ? e.key)
+                  and jsonb_typeof(e.value) <> 'number' loop
+    v_err := v_err || jsonb_build_object('code','reported_count_not_a_number',
+                                         'entity',v_key,
+                                         'json_type',
+                                         jsonb_typeof(p_observed_counts -> v_key));
   end loop;
 
   -- ---- D. Duplicate source identifiers. The primary keys already make these impossible;
