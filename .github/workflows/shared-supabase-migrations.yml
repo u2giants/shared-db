@@ -105,6 +105,8 @@ jobs:
   validate:
     name: SQL migration guards
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 30
     steps:
       # fetch-depth: 0 so check-sql.sh Guard B can compare this branch's
       # migration versions against the newest version on the base branch.
@@ -113,8 +115,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Install SQL check dependencies
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
       - name: Run SQL checks
         run: bash scripts/check-sql.sh
       - name: Test SQL migration guards
@@ -232,6 +232,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'preview'
     needs: validate
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 90
     permissions:
       contents: write
       issues: read
@@ -430,12 +432,56 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
-      - name: Install and prove PostgreSQL client
+      - name: Ensure a working PostgreSQL client (psql)
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
-          psql --version
+
+          # WHY THIS IS NOT JUST `apt-get install postgresql-client` (issue #1261)
+          # ---------------------------------------------------------------------
+          # The hosted runner image ALREADY ships a PostgreSQL client, so the apt
+          # install was buying nothing and risking everything. On 2026-08-19 a stalled
+          # `apt-get update` against azure.archive.ubuntu.com consumed an entire
+          # 45-minute job budget five times across three PRs; every later step was
+          # skipped, so NOT ONE LINE OF SQL RAN -- and it surfaced as a plain red X,
+          # indistinguishable from a genuine failure. That is the hosted-runner
+          # starvation mode described in AGENTS.md 5.2-A.
+          #
+          # So: prove the client FIRST and skip apt entirely when it is already there;
+          # if apt is genuinely needed, bound every command with `timeout` and retry
+          # with backoff; and if a working client still cannot be had, fail FAST and
+          # BY NAME so nobody mistakes an infrastructure stall for a fault in the
+          # change under review. This step never continues without a real client --
+          # failing loudly is the point.
+          if command -v psql >/dev/null 2>&1 && psql --version; then
+            echo "psql already present on the runner image; no apt install needed."
+            exit 0
+          fi
+
+          echo "::warning::psql absent from the runner image; falling back to apt."
+          attempts=3
+          for i in $(seq 1 "$attempts"); do
+            if timeout --kill-after=10 60 sudo apt-get update \
+              && timeout --kill-after=10 120 sudo apt-get install -y --no-install-recommends postgresql-client; then
+              if command -v psql >/dev/null 2>&1 && psql --version; then
+                echo "psql installed and proved working on attempt ${i}."
+                exit 0
+              fi
+            fi
+            echo "::warning::psql install attempt ${i} of ${attempts} failed or timed out."
+            # No backoff after the LAST attempt: it would only delay the
+            # named error below by a further 30s. The worst-case budget is
+            # 3*(60+120)+10+20 = 570s, which must stay inside the TIGHTEST
+            # job ceiling that runs this block (`reconcile`, 15 minutes).
+            # Shorten the budget, never raise the ceiling -- a generic job
+            # timeout would swallow the named diagnostic exactly when it
+            # is needed, which is the whole defect of #1261.
+            if [ "$i" -lt "$attempts" ]; then
+              sleep $(( i * 10 ))
+            fi
+          done
+
+          echo "::error::CI INFRASTRUCTURE: PostgreSQL client unavailable after ${attempts} attempts (apt mirror stall on the hosted runner -- NOT a fault in the change under review); NO MIGRATION WAS APPLIED"
+          exit 1
       - name: Capture preview migration record (before)
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -733,6 +779,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'production' && inputs.mode == 'dry-run'
     needs: validate
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 90
     env:
       PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
     steps:
@@ -757,12 +805,56 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
-      - name: Install and prove PostgreSQL client
+      - name: Ensure a working PostgreSQL client (psql)
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
-          psql --version
+
+          # WHY THIS IS NOT JUST `apt-get install postgresql-client` (issue #1261)
+          # ---------------------------------------------------------------------
+          # The hosted runner image ALREADY ships a PostgreSQL client, so the apt
+          # install was buying nothing and risking everything. On 2026-08-19 a stalled
+          # `apt-get update` against azure.archive.ubuntu.com consumed an entire
+          # 45-minute job budget five times across three PRs; every later step was
+          # skipped, so NOT ONE LINE OF SQL RAN -- and it surfaced as a plain red X,
+          # indistinguishable from a genuine failure. That is the hosted-runner
+          # starvation mode described in AGENTS.md 5.2-A.
+          #
+          # So: prove the client FIRST and skip apt entirely when it is already there;
+          # if apt is genuinely needed, bound every command with `timeout` and retry
+          # with backoff; and if a working client still cannot be had, fail FAST and
+          # BY NAME so nobody mistakes an infrastructure stall for a fault in the
+          # change under review. This step never continues without a real client --
+          # failing loudly is the point.
+          if command -v psql >/dev/null 2>&1 && psql --version; then
+            echo "psql already present on the runner image; no apt install needed."
+            exit 0
+          fi
+
+          echo "::warning::psql absent from the runner image; falling back to apt."
+          attempts=3
+          for i in $(seq 1 "$attempts"); do
+            if timeout --kill-after=10 60 sudo apt-get update \
+              && timeout --kill-after=10 120 sudo apt-get install -y --no-install-recommends postgresql-client; then
+              if command -v psql >/dev/null 2>&1 && psql --version; then
+                echo "psql installed and proved working on attempt ${i}."
+                exit 0
+              fi
+            fi
+            echo "::warning::psql install attempt ${i} of ${attempts} failed or timed out."
+            # No backoff after the LAST attempt: it would only delay the
+            # named error below by a further 30s. The worst-case budget is
+            # 3*(60+120)+10+20 = 570s, which must stay inside the TIGHTEST
+            # job ceiling that runs this block (`reconcile`, 15 minutes).
+            # Shorten the budget, never raise the ceiling -- a generic job
+            # timeout would swallow the named diagnostic exactly when it
+            # is needed, which is the whole defect of #1261.
+            if [ "$i" -lt "$attempts" ]; then
+              sleep $(( i * 10 ))
+            fi
+          done
+
+          echo "::error::CI INFRASTRUCTURE: PostgreSQL client unavailable after ${attempts} attempts (apt mirror stall on the hosted runner -- NOT a fault in the change under review); NO MIGRATION WAS APPLIED"
+          exit 1
       - name: Capture production migration record
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -861,6 +953,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'production' && inputs.mode == 'apply'
     needs: validate
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 90
     permissions:
       contents: read
       actions: read
@@ -895,12 +989,56 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
-      - name: Install and prove PostgreSQL client
+      - name: Ensure a working PostgreSQL client (psql)
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
-          psql --version
+
+          # WHY THIS IS NOT JUST `apt-get install postgresql-client` (issue #1261)
+          # ---------------------------------------------------------------------
+          # The hosted runner image ALREADY ships a PostgreSQL client, so the apt
+          # install was buying nothing and risking everything. On 2026-08-19 a stalled
+          # `apt-get update` against azure.archive.ubuntu.com consumed an entire
+          # 45-minute job budget five times across three PRs; every later step was
+          # skipped, so NOT ONE LINE OF SQL RAN -- and it surfaced as a plain red X,
+          # indistinguishable from a genuine failure. That is the hosted-runner
+          # starvation mode described in AGENTS.md 5.2-A.
+          #
+          # So: prove the client FIRST and skip apt entirely when it is already there;
+          # if apt is genuinely needed, bound every command with `timeout` and retry
+          # with backoff; and if a working client still cannot be had, fail FAST and
+          # BY NAME so nobody mistakes an infrastructure stall for a fault in the
+          # change under review. This step never continues without a real client --
+          # failing loudly is the point.
+          if command -v psql >/dev/null 2>&1 && psql --version; then
+            echo "psql already present on the runner image; no apt install needed."
+            exit 0
+          fi
+
+          echo "::warning::psql absent from the runner image; falling back to apt."
+          attempts=3
+          for i in $(seq 1 "$attempts"); do
+            if timeout --kill-after=10 60 sudo apt-get update \
+              && timeout --kill-after=10 120 sudo apt-get install -y --no-install-recommends postgresql-client; then
+              if command -v psql >/dev/null 2>&1 && psql --version; then
+                echo "psql installed and proved working on attempt ${i}."
+                exit 0
+              fi
+            fi
+            echo "::warning::psql install attempt ${i} of ${attempts} failed or timed out."
+            # No backoff after the LAST attempt: it would only delay the
+            # named error below by a further 30s. The worst-case budget is
+            # 3*(60+120)+10+20 = 570s, which must stay inside the TIGHTEST
+            # job ceiling that runs this block (`reconcile`, 15 minutes).
+            # Shorten the budget, never raise the ceiling -- a generic job
+            # timeout would swallow the named diagnostic exactly when it
+            # is needed, which is the whole defect of #1261.
+            if [ "$i" -lt "$attempts" ]; then
+              sleep $(( i * 10 ))
+            fi
+          done
+
+          echo "::error::CI INFRASTRUCTURE: PostgreSQL client unavailable after ${attempts} attempts (apt mirror stall on the hosted runner -- NOT a fault in the change under review); NO MIGRATION WAS APPLIED"
+          exit 1
       - name: Capture production migration record
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -991,6 +1129,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'production' && inputs.mode == 'apply'
     needs: [validate, production-apply-review]
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 90
     permissions:
       contents: write
       actions: read
@@ -1093,12 +1233,56 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
-      - name: Install and prove PostgreSQL client
+      - name: Ensure a working PostgreSQL client (psql)
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
-          psql --version
+
+          # WHY THIS IS NOT JUST `apt-get install postgresql-client` (issue #1261)
+          # ---------------------------------------------------------------------
+          # The hosted runner image ALREADY ships a PostgreSQL client, so the apt
+          # install was buying nothing and risking everything. On 2026-08-19 a stalled
+          # `apt-get update` against azure.archive.ubuntu.com consumed an entire
+          # 45-minute job budget five times across three PRs; every later step was
+          # skipped, so NOT ONE LINE OF SQL RAN -- and it surfaced as a plain red X,
+          # indistinguishable from a genuine failure. That is the hosted-runner
+          # starvation mode described in AGENTS.md 5.2-A.
+          #
+          # So: prove the client FIRST and skip apt entirely when it is already there;
+          # if apt is genuinely needed, bound every command with `timeout` and retry
+          # with backoff; and if a working client still cannot be had, fail FAST and
+          # BY NAME so nobody mistakes an infrastructure stall for a fault in the
+          # change under review. This step never continues without a real client --
+          # failing loudly is the point.
+          if command -v psql >/dev/null 2>&1 && psql --version; then
+            echo "psql already present on the runner image; no apt install needed."
+            exit 0
+          fi
+
+          echo "::warning::psql absent from the runner image; falling back to apt."
+          attempts=3
+          for i in $(seq 1 "$attempts"); do
+            if timeout --kill-after=10 60 sudo apt-get update \
+              && timeout --kill-after=10 120 sudo apt-get install -y --no-install-recommends postgresql-client; then
+              if command -v psql >/dev/null 2>&1 && psql --version; then
+                echo "psql installed and proved working on attempt ${i}."
+                exit 0
+              fi
+            fi
+            echo "::warning::psql install attempt ${i} of ${attempts} failed or timed out."
+            # No backoff after the LAST attempt: it would only delay the
+            # named error below by a further 30s. The worst-case budget is
+            # 3*(60+120)+10+20 = 570s, which must stay inside the TIGHTEST
+            # job ceiling that runs this block (`reconcile`, 15 minutes).
+            # Shorten the budget, never raise the ceiling -- a generic job
+            # timeout would swallow the named diagnostic exactly when it
+            # is needed, which is the whole defect of #1261.
+            if [ "$i" -lt "$attempts" ]; then
+              sleep $(( i * 10 ))
+            fi
+          done
+
+          echo "::error::CI INFRASTRUCTURE: PostgreSQL client unavailable after ${attempts} attempts (apt mirror stall on the hosted runner -- NOT a fault in the change under review); NO MIGRATION WAS APPLIED"
+          exit 1
       # Re-read the ledger IN THIS JOB. The review job's copy was taken before the
       # approval wait, which can be hours; production moves independently of this
       # repo, so a stale ledger would size the bounded checkout wrongly.

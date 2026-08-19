@@ -108,6 +108,8 @@ jobs:
   # ---------------------------------------------------------------------------------
   gate:
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 30
     outputs:
       enabled: ${{ steps.enabled.outputs.enabled }}
       job: ${{ steps.plan.outputs.job }}
@@ -231,6 +233,8 @@ jobs:
     # the production environment and the production DB password (#548).
     if: needs.gate.outputs.enabled == 'true' && needs.gate.outputs.job != 'preflight'
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 90
     environment: production
     env:
       # The four-part production authorization. Part 4 is this variable; parts 1-3 are the
@@ -475,6 +479,8 @@ jobs:
     # spell the production ref out.
     if: github.event_name == 'workflow_dispatch' && inputs.job == 'preflight'
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 30
     env:
       # Part 4 of the four-part authorization. Here it authorizes only the RESOLUTION of
       # the production target; with no --apply and no --linked there is nothing to write
