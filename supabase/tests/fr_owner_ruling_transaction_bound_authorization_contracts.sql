@@ -38,7 +38,7 @@ create table if not exists core.taxonomy_owner_ruling (
 do $$
 declare
   v_checks integer := 0;
-  v_expected_checks constant integer := 31;
+  v_expected_checks constant integer := 32;
   v_case record;
   v_ruled_at constant timestamptz := timestamptz '2026-08-02 12:00:00+00';
   v_ruler constant text := 'contract-test ruler';
@@ -54,6 +54,38 @@ declare
   -- inserts explicitly, which also keeps every binding visible at the point of
   -- the assertion it is meant to falsify.
 begin
+  -- ------------------------------------------------------------------
+  -- CLEAR THE BLANKET CI AUTHORIZATIONS FIRST.
+  -- supabase/ci-bootstrap/020_test_fixture_seed.sql defines
+  -- public.ci_authorize_licensing_contract_test(), and the contract-test
+  -- runner calls it at the top of EVERY test session. It pre-issues 100
+  -- unconsumed 'canonical_merge' authorizations for every column subset of
+  -- core.licensor and core.property, in this very backend and transaction,
+  -- so that legacy tests can write canonical rows without issuing their own.
+  --
+  -- For this file that fixture is poison: half the proofs below assert that a
+  -- write with NO valid authorization is refused, and a blanket
+  -- 'canonical_merge' row silently authorizes exactly those writes. The first
+  -- CI run of this file failed here and was right to -- the wrong-session
+  -- proof passed locally and could never have held on CI.
+  --
+  -- So the outstanding fixture authorizations are removed inside this
+  -- transaction (rolled back at the end, exactly like every other change
+  -- here), and the empty baseline is then PROVEN rather than assumed.
+  -- Consumed rows are left alone: they carry immutable audit evidence.
+  -- ------------------------------------------------------------------
+  delete from plm.licensing_write_authorization where consumed_at is null;
+  if exists (select 1 from plm.licensing_write_authorization where consumed_at is null) then
+    raise exception 'the blanket CI licensing authorizations could not be cleared';
+  end if;
+  begin
+    insert into core.licensor (name, code, status) values ('baseline probe', 'FRBASE', 'active');
+    raise exception 'the licensing guard was already open before this contract began';
+  exception when others then
+    if position('no exact transaction-bound authorization' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+
   v_delta := jsonb_build_object('owner_ruling', jsonb_build_object(
     'ruled_by', v_ruler,
     'ruled_on', '2026-08-02',
