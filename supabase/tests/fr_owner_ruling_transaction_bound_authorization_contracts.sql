@@ -39,7 +39,7 @@ create table if not exists core.taxonomy_owner_ruling (
 do $$
 declare
   v_checks integer := 0;
-  v_expected_checks constant integer := 24;
+  v_expected_checks constant integer := 28;
   v_ruled_at constant timestamptz := timestamptz '2026-08-02 12:00:00+00';
   v_ruler constant text := 'contract-test ruler';
   v_fr uuid;
@@ -346,7 +346,26 @@ begin
          'migration', '20260802171000', 'bogus', 1)),
        'has the wrong key set'),
       (jsonb_build_object('owner_ruling', 5),
-       'owner_ruling metadata must be an object')
+       'owner_ruling metadata must be an object'),
+      -- #1219 shape: PRESENT BUT NULL. These two passed until 2026-08-19
+      -- because the guard compared with `<>` instead of `is distinct from`,
+      -- so a JSON null made the comparison UNKNOWN and the check never fired.
+      (jsonb_build_object('owner_ruling', jsonb_build_object(
+         'ruled_by', v_ruler, 'ruled_on', null,
+         'ruling', 'never a real licensor; created by mistake',
+         'migration', '20260802171000')),
+       'must state the 2026-08-02 ruling date'),
+      (jsonb_build_object('owner_ruling', jsonb_build_object(
+         'ruled_by', v_ruler, 'ruled_on', '2026-08-02',
+         'ruling', null,
+         'migration', '20260802171000')),
+       'must state the exact historical ruling text'),
+      -- `supersedes` is optional, but when present its value is bound.
+      (jsonb_build_object('owner_ruling', jsonb_build_object(
+         'ruled_by', v_ruler, 'ruled_on', '2026-08-02',
+         'ruling', 'never a real licensor; created by mistake',
+         'migration', '20260818174350', 'supersedes', '19990101000000')),
+       'supersedes an unexpected migration')
     ) as t(delta, msg)
   loop
     begin
@@ -376,6 +395,71 @@ begin
     if position('owner ruling for this licensor is not recorded' in sqlerrm) = 0 then raise; end if;
     v_checks := v_checks + 1;
   end;
+  insert into core.taxonomy_owner_ruling
+    (entity_table, entity_id, entity_code, entity_name, ruling, ruled_by, ruled_at, ruling_evidence, action_taken)
+  values
+    ('licensor', v_fr, 'FR', 'FRIENDS TV', 'never a real licensor', v_ruler, v_ruled_at,
+     'contract test fixture', 'contract test fixture');
+
+  -- ==================================================================
+  -- 15b. THE RULING TABLE ITSELF MISSING -- FAIL CLOSED, MEASURED.
+  --
+  --      Two independent reviewers disagreed about what happens when
+  --      core.taxonomy_owner_ruling does not exist at all (the from-empty
+  --      case, #1258): fails closed, or fails open? It was settled by
+  --      running it, not by arguing it. Measured on 2026-08-19:
+  --
+  --        SQLSTATE 42P01, relation "core.taxonomy_owner_ruling" does not
+  --        exist; the UPDATE aborted; FR stayed 'active'; 0 audit rows
+  --        written; 0 authorizations consumed.
+  --
+  --      The guard has no exception handler, so the missing-relation error
+  --      propagates out of the trigger and takes the write with it. This
+  --      proof PINS that. If someone later wraps the ruling lookup in an
+  --      `exception when others` that swallows 42P01, the guard would start
+  --      inactivating FR with no owner ruling behind it anywhere -- and this
+  --      block goes red the moment they try.
+  --
+  --      The table is dropped inside this transaction and rebuilt straight
+  --      after; the whole file is rolled back regardless.
+  -- ==================================================================
+  execute 'drop table core.taxonomy_owner_ruling';
+  declare
+    v_state text;
+  begin
+    update core.licensor
+       set status = 'inactive',
+           metadata = coalesce(metadata,'{}'::jsonb) || v_delta
+     where id = v_fr;
+    raise exception 'the guard applied the ruling with the owner-ruling table absent -- IT FAILS OPEN';
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate;
+    if v_state <> '42P01' then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+  if (select status::text from core.licensor where id = v_fr) <> 'active' then
+    raise exception 'the aborted missing-table write still moved FR';
+  end if;
+  if exists (select 1 from plm.licensing_write_authorization where id = v_auth and consumed_at is not null) then
+    raise exception 'the aborted missing-table write still consumed its authorization';
+  end if;
+
+  create table core.taxonomy_owner_ruling (
+    id uuid primary key default gen_random_uuid(),
+    entity_schema text not null default 'core',
+    entity_table text not null,
+    entity_id uuid,
+    entity_code text,
+    entity_name text,
+    ruling text not null,
+    ruled_by text not null,
+    ruled_at timestamptz not null,
+    ruling_evidence text not null,
+    action_taken text not null,
+    open_questions text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  );
   insert into core.taxonomy_owner_ruling
     (entity_table, entity_id, entity_code, entity_name, ruling, ruled_by, ruled_at, ruling_evidence, action_taken)
   values

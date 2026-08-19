@@ -186,10 +186,16 @@ begin
        or not (v_ruling_keys <@ array['migration','ruled_by','ruled_on','ruling','supersedes']::text[]) then
       raise exception 'owner_ruling_fr_inactivation refused: owner_ruling metadata has the wrong key set: %', coalesce(v_ruling_keys::text, '<null>');
     end if;
-    if v_ruling ->> 'ruled_on' <> '2026-08-02' then
+    -- `is distinct from`, NOT `<>`. A JSON null makes `->>` return SQL NULL, and
+    -- `NULL <> '2026-08-02'` is UNKNOWN -- the `if` would not fire and a
+    -- present-but-null ruling date would sail straight through. Same defect
+    -- class as #1219: a present-but-null value passing a test written for a
+    -- missing one. Every value comparison in this branch uses `is distinct
+    -- from` for that reason. Do not "simplify" them back to `<>`.
+    if v_ruling ->> 'ruled_on' is distinct from '2026-08-02' then
       raise exception 'owner_ruling_fr_inactivation refused: owner_ruling metadata must state the 2026-08-02 ruling date, not %', coalesce(v_ruling ->> 'ruled_on', '<null>');
     end if;
-    if v_ruling ->> 'ruling' <> 'never a real licensor; created by mistake' then
+    if v_ruling ->> 'ruling' is distinct from 'never a real licensor; created by mistake' then
       raise exception 'owner_ruling_fr_inactivation refused: owner_ruling metadata must state the exact historical ruling text';
     end if;
     -- The set is closed BY NAME: the held historical statement and its merged
@@ -198,6 +204,13 @@ begin
     if v_ruling ->> 'migration' is null
        or v_ruling ->> 'migration' not in ('20260802171000', '20260818174350') then
       raise exception 'owner_ruling_fr_inactivation refused: owner_ruling metadata names an unknown ruling migration (%)', coalesce(v_ruling ->> 'migration', '<null>');
+    end if;
+    -- `supersedes` is optional -- only the guarded replacement carries it -- but
+    -- when it IS present its value is bound. An unconstrained key inside a
+    -- record this guard exists to pin is a hole, not a convenience.
+    if v_ruling ? 'supersedes'
+       and v_ruling ->> 'supersedes' is distinct from '20260802171000' then
+      raise exception 'owner_ruling_fr_inactivation refused: owner_ruling metadata supersedes an unexpected migration (%)', coalesce(v_ruling ->> 'supersedes', '<null>');
     end if;
     -- Not a hardcoded person: the metadata must agree with the ruling already
     -- recorded in this database, whoever that names.
