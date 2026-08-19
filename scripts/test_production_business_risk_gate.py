@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from production_business_risk_gate import PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_historical_original_apply_runs, prove_preview, prove_preview_migration_contents, prove_preview_producer_matches_main
+from production_business_risk_gate import authored_merge, exact_main, ProvedTarget, tracked_paths_at, PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_historical_original_apply_runs, prove_preview, prove_preview_migration_contents, prove_preview_producer_matches_main
 
 PREVIEW_PROJECT_REF = "mvpkijzfmfcxhnzqogzs"
 DEAD_PREVIEW_PROJECT_REF = "rjyboqwcdzcocqgmsyel"
@@ -249,12 +249,23 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             )
 
     def preview_api(self, run, commits, blobs, artifacts=None, compare=None, seen=None):
-        """Fake API covering run, PR commits, producer blobs, artifacts, compare."""
+        """Fake API covering run, PR commits, producer blobs, trees, artifacts, compare.
+
+        THE TREE AND THE BLOBS COME FROM ONE SOURCE. `blobs` is keyed by
+        (path, ref), so a path a test did not state for a ref is absent from
+        that ref's tree AND raises from `/contents/`. A helper whose tree and
+        whose blob reads could disagree is a helper that cannot express the
+        repository (#1213 round 7, finding 1).
+        """
         def api(endpoint):
             if seen is not None:
                 seen.append(endpoint)
             if endpoint.endswith("commits?per_page=100"):
                 return commits
+            if "/git/trees/" in endpoint:
+                ref = endpoint.split("/git/trees/", 1)[1].split("?")[0]
+                return {"truncated": False,
+                        "tree": [{"path": p} for (p, r) in blobs if r == ref]}
             if "/compare/" in endpoint:
                 if compare is None:
                     raise RuntimeError("compare not stubbed")
@@ -329,19 +340,55 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             )
 
     def test_unreadable_producer_file_fails_closed(self):
+        """A producer file that BOTH trees list but GitHub will not hand over.
+
+        Absence is now proved from the tree, so this test states a file that is
+        present on both sides and unreadable anyway. Skipping it would be
+        exactly the fail-open the producer pin exists to prevent.
+        """
         c1, head, main = "1" * 40, "2" * 40, "3" * 40
         run = {
             "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
             "head_sha": c1, "path": ".github/workflows/shared-supabase-migrations.yml",
         }
-        with self.assertRaisesRegex(RiskGateError, "unreadable"):
+
+        def api(endpoint):
+            if endpoint.endswith("artifacts?per_page=100"):
+                return {"artifacts": [self.apply_artifact(c1)]}
+            if endpoint.endswith("commits?per_page=100"):
+                return [{"sha": c1}]
+            if "/git/trees/" in endpoint:
+                return {"truncated": False,
+                        "tree": [{"path": p} for p in PREVIEW_PRODUCER_PATHS]}
+            if "/contents/" in endpoint:
+                raise RuntimeError("GitHub 500")
+            return run
+
+        with self.assertRaisesRegex(RiskGateError, "is unreadable at"):
             prove_preview(
-                **self.prove_preview_args(
-                    pr_head=head, main_sha=main,
-                    api=self.preview_api(run, [{"sha": c1}], {}, [self.apply_artifact(c1)]),
-                ),
+                **self.prove_preview_args(pr_head=head, main_sha=main, api=api),
                 downloader=lambda *_: self.fail("must not download"),
             )
+
+    def test_an_unreadable_or_truncated_tree_fails_closed(self):
+        """Absence must be a FACT, never an inference from a failed read.
+
+        If the tree read itself fails, or GitHub truncates the listing, a path
+        missing from what came back is not evidence that the commit lacks it.
+        Either way the gate refuses rather than skipping the comparison.
+        """
+        ref, main = "1" * 40, "3" * 40
+        with self.assertRaisesRegex(RiskGateError, "file tree of .* is unreadable"):
+            tracked_paths_at(ref, lambda endpoint: (_ for _ in ()).throw(RuntimeError("503")))
+        with self.assertRaisesRegex(RiskGateError, "file tree of .* is unreadable"):
+            tracked_paths_at(ref, lambda endpoint: {"tree": "not-a-list"})
+        with self.assertRaisesRegex(RiskGateError, "truncated"):
+            tracked_paths_at(ref, lambda endpoint: {"truncated": True, "tree": []})
+        self.assertEqual(
+            tracked_paths_at(main, lambda endpoint: {"truncated": False,
+                                                     "tree": [{"path": "a"}, {"nope": 1}]}),
+            frozenset({"a"}),
+        )
 
     # ------------------------------------------------------------------
     # POST-MERGE REHEARSAL PROVENANCE AND INSTANCE BINDING (#1208)
@@ -1192,6 +1239,9 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 return {"artifacts": [artifact]}
             if endpoint.endswith("commits?per_page=100"):
                 return [{"sha": head}]
+            if "/git/trees/" in endpoint:
+                return {"truncated": False,
+                        "tree": [{"path": p} for p in PREVIEW_PRODUCER_PATHS]}
             if "/contents/" in endpoint:
                 # Producer files identical at the run head and at main, so this
                 # test still exercises the digest check it is named for.
@@ -1375,7 +1425,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         original_is_recovery=False, original_conclusion="success",
         original_head_sha="default", original_head_in_history=True,
         original_head_blobs=None, original_run_blobs=None, original_instance=None,
-        merge_commit_blobs=None,
+        merge_commit_blobs=None, merge_absent_paths=(), original_absent_paths=(),
     ):
         """End to end through prove_preview, downloads and all.
 
@@ -1406,6 +1456,13 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
           commit" were indistinguishable (#1213 round 6, finding 1).
         * `original_instance` -- the raw `preview-instance.json` that run wrote,
           or None for a run whose producer code predates instance binding.
+        * `merge_absent_paths` / `original_absent_paths` -- producer files that
+          do NOT exist at the merge commit / at the original run's commits.
+          `scripts/preview_instance_binding.py` really is absent at the merge
+          commits of #984, #992 and #1126, and #984/#992 additionally predate
+          `scripts/atomic_migration_apply.py`,
+          `scripts/historical_preview_recovery.py` and
+          `config/atomic-migration-allowlist.json` (verified with `gh api`).
         """
         version = self.HISTORICAL_VERSION
         temp, root, main, merge_sha = self.historical_repo(main_body)
@@ -1436,6 +1493,21 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 )
                 pr_commits = [{"sha": main}, {"sha": original_commit}]
 
+                def producer_tree(ref):
+                    """Which producer files that commit's tree actually holds.
+
+                    `PREVIEW_PRODUCER_PATHS` is TODAY's list. A commit from last
+                    year does not carry a file added this year, and the two
+                    `*_absent_paths` arguments are how a test says so.
+                    """
+                    if ref == merge_sha:
+                        absent = set(merge_absent_paths)
+                    elif ref in (original_head, original_commit):
+                        absent = set(original_absent_paths)
+                    else:
+                        absent = set()
+                    return [p for p in PREVIEW_PRODUCER_PATHS if p not in absent]
+
                 def api(endpoint):
                     if endpoint == f"repos/u2giants/shared-db/actions/runs/{original_run}":
                         run = {"status": "completed", "conclusion": original_conclusion,
@@ -1454,8 +1526,21 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                         return {"artifacts": [self.apply_artifact(main, digest=artifact_digest)]}
                     if endpoint.endswith("commits?per_page=100"):
                         return pr_commits
+                    if "/git/trees/" in endpoint:
+                        ref = endpoint.split("/git/trees/", 1)[1].split("?")[0]
+                        return {"truncated": False,
+                                "tree": [{"path": p} for p in producer_tree(ref)]}
                     if "/contents/" in endpoint:
                         path, ref = endpoint.split("/contents/", 1)[1].split("?ref=")
+                        # RAISE ON A PATH THAT IS NOT IN THAT TREE, exactly as
+                        # GitHub 404s and exactly as `preview_api` already did.
+                        # The round-6 version of this stub answered
+                        # "identical-producer-blob" for EVERY path including
+                        # files that did not exist, which is why three mutation
+                        # runs could not see that the recovery lane refused
+                        # every honest old recovery (#1213 round 7, finding 1).
+                        if path not in producer_tree(ref):
+                            raise RuntimeError("no such content")
                         if merge_commit_blobs and ref == merge_sha:
                             return {"sha": merge_commit_blobs.get(
                                 path, "identical-producer-blob")}
@@ -1663,24 +1748,119 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                         ), downloader=lambda *_: None,
                     )
 
-    def test_producer_comparison_refuses_identity_unless_the_target_is_proved(self):
-        """A comparison that silently succeeds when both arguments are equal is a
-        hazard wherever it is called, so identity must be declared, not inferred.
+    def test_producer_comparison_validates_its_target_instead_of_trusting_a_flag(self):
+        """The honour-system boolean, replaced by something the function checks.
 
-        This is the no-op behind finding 1, closed at the function itself as well
-        as at the caller.
+        Round 7 of the #1213 review: `target_is_proved=True` asserted that the
+        second argument was exact main or a proved merge commit, and checked
+        neither, so a later caller could pass two equal attacker-chosen commits
+        and skip every blob read. The target is TAGGED now and this function
+        re-derives the tag:
+
+        * `exact-main` must literally be the main SHA being promoted.
+        * `authored-merge` must be contained in the history of that main SHA.
+
+        Identity is accepted only AFTER that validation, so the commit standing
+        in for the comparison is one the gate proved, not one the promoter
+        picked.
         """
-        sha = "a" * 40
-        with self.assertRaisesRegex(RiskGateError, "identity is not evidence"):
+        sha, main = "a" * 40, "3" * 40
+        never = lambda endpoint: self.fail("no read for a target that never validates")
+
+        # An untagged / unknown tag is refused outright.
+        with self.assertRaisesRegex(RiskGateError, "untagged target"):
             prove_preview_producer_matches_main(
-                sha, sha, lambda endpoint: self.fail("no blob is read for an identity compare"),
+                sha, ProvedTarget("promoter-says-so", sha), main, never,
                 what="original apply run 555 dispatched at " + sha,
-                against="its own checkout " + sha,
             )
+        # A malformed target commit is refused before any read.
+        for bad in (None, "", "not-a-sha", 12345, "A" * 40):
+            with self.subTest(bad=bad), self.assertRaisesRegex(RiskGateError, "malformed target"):
+                prove_preview_producer_matches_main(
+                    sha, ProvedTarget("exact-main", bad), main, never,
+                    what="original apply run 555 dispatched at " + sha,
+                )
+        # THE FORGE THE BOOLEAN ALLOWED: two equal attacker-chosen commits.
+        # Tagged exact-main, it is not the main being promoted.
+        with self.assertRaisesRegex(RiskGateError, "is not the exact main"):
+            prove_preview_producer_matches_main(
+                sha, exact_main(sha), main, never,
+                what="original apply run 555 dispatched at " + sha,
+            )
+        # Tagged authored-merge, it is not in main's history.
+        with self.assertRaisesRegex(RiskGateError, "not contained in the history of exact main"):
+            prove_preview_producer_matches_main(
+                sha, authored_merge(sha), main,
+                lambda endpoint: {"status": "diverged", "behind_by": 4},
+                what="original apply run 555 dispatched at " + sha,
+            )
+        # And the ancestry read is the ordered compare, not a swapped one.
+        seen = []
+
+        def ancestry(endpoint):
+            seen.append(endpoint)
+            return {"status": "ahead", "behind_by": 0}
+
         prove_preview_producer_matches_main(
-            sha, sha, lambda endpoint: self.fail("no blob is read for an identity compare"),
-            what="preview run dispatched at " + sha, target_is_proved=True,
+            sha, authored_merge(sha), main, ancestry,
+            what="original apply run 555 dispatched at " + sha,
         )
+        self.assertEqual(seen, [f"repos/u2giants/shared-db/compare/{sha}...{main}"])
+        # A validated exact-main target still short-circuits on identity.
+        prove_preview_producer_matches_main(
+            main, exact_main(main), main,
+            lambda endpoint: self.fail("no blob is read for an identity compare"),
+            what="preview run dispatched at " + main,
+        )
+
+    def test_a_producer_added_after_the_merge_commit_still_recovers(self):
+        """THE HIGH FROM ROUND 7, stated as the recovery it killed.
+
+        `scripts/preview_instance_binding.py` was added by this pull request and
+        does not exist at the merge commits of #984, #992 or #1126 -- confirmed
+        with real `gh api` reads. #984 and #992 additionally predate
+        `scripts/atomic_migration_apply.py`,
+        `scripts/historical_preview_recovery.py` and
+        `config/atomic-migration-allowlist.json`. Walking TODAY's producer list
+        at those commits 404s on the first of them and refuses the recovery
+        before a single digest is read -- 100% of the recoveries this lane
+        exists for. A path absent from BOTH trees is skipped now: neither run
+        could have executed a file that does not exist.
+        """
+        absent = (
+            "scripts/preview_instance_binding.py",
+            "scripts/atomic_migration_apply.py",
+            "scripts/historical_preview_recovery.py",
+            "config/atomic-migration-allowlist.json",
+        )
+        self.run_historical_prove_preview(
+            merge_absent_paths=absent, original_absent_paths=absent,
+        )
+
+    def test_a_producer_present_at_the_merge_and_absent_at_the_original_run_is_refused(self):
+        """Skipping two absences is safe. Skipping ONE is not.
+
+        A run that did not carry the apply script the merge commit carries did
+        not execute the machinery that landed. Both directions refuse.
+        """
+        path = "scripts/atomic_migration_apply.py"
+        with self.assertRaisesRegex(RiskGateError, f"{path} absent where .* has it present"):
+            self.run_historical_prove_preview(original_absent_paths=(path,))
+        with self.assertRaisesRegex(RiskGateError, f"{path} present where .* has it absent"):
+            self.run_historical_prove_preview(merge_absent_paths=(path,))
+
+    def test_a_doctored_producer_that_exists_at_both_commits_is_still_compared(self):
+        """The skip must not become a hiding place.
+
+        Absent on both sides is skipped; present on both sides is compared byte
+        for byte, even when other producers are being skipped around it.
+        """
+        with self.assertRaisesRegex(RiskGateError, "different .* than the merge commit"):
+            self.run_historical_prove_preview(
+                merge_absent_paths=("scripts/preview_instance_binding.py",),
+                original_absent_paths=("scripts/preview_instance_binding.py",),
+                original_run_blobs={PREVIEW_WORKFLOW: "doctored-workflow"},
+            )
 
     def test_original_run_bound_to_the_production_project_is_refused(self):
         """Evidence of a PRODUCTION write is never a preview rehearsal, at any age."""

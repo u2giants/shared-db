@@ -60,8 +60,14 @@ export const EXCLUSIVE_REFS = Object.freeze({
   'preview-recovery': 'refs/db-coordination/preview',
   // POST-MERGE REHEARSAL. Deliberately the SAME ref as the ordinary preview
   // lane, so a rehearsal and an ordinary preview run can never both hold
-  // preview, and the mutual exclusion against merges and promotions is exactly
-  // what it is today -- no new interaction, no new hatch.
+  // preview -- no new interaction and no new hatch. NOTE WHAT THIS REF DOES NOT
+  // DO: it is not cross-checked against `merge` or `production` in either
+  // direction (the only cross-checks are the two `EXCLUSIVE_REFS` reads below,
+  // promotion-waits-for-merge and merge-waits-for-production). A rehearsal is
+  // therefore NOT excluded from a guarded merge or a promotion. That is
+  // pre-existing behaviour of the preview lane which this kind inherits
+  // unchanged; an earlier comment here claimed the exclusion existed (#1213
+  // round 7 audit).
   'preview-rehearsal': 'refs/db-coordination/preview',
   merge: 'refs/db-coordination/merge',
   production: 'refs/db-coordination/production',

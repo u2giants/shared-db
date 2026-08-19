@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 import time
 import zipfile
+from collections import namedtuple
 from pathlib import Path
 from typing import Any, Callable
 
@@ -502,9 +503,56 @@ def blob_sha(path: str, ref: str, api: Callable[[str], Any]) -> str:
     return sha
 
 
+def tracked_paths_at(ref: str, api: Callable[[str], Any]) -> frozenset:
+    """Every file path a commit's tree contains, as a POSITIVE fact.
+
+    ABSENCE MUST BE PROVED, NOT INFERRED FROM AN ERROR. The producer list grows
+    over time, so a producer file added this year does not exist at a merge
+    commit from last year. The comparison below has to tell "this file is not in
+    that tree" apart from "GitHub would not answer" -- and a 404 from the
+    Contents API cannot be told apart from a permissions or transport failure by
+    reading its message text. So the tree itself is read once per commit: the
+    read either succeeds, in which case membership is a fact, or it fails and
+    the gate refuses. A truncated tree is refused for the same reason -- a path
+    missing from a truncated listing is not evidence that it is missing from the
+    commit.
+    """
+    try:
+        tree = api(f"repos/{REPOSITORY}/git/trees/{ref}?recursive=1")
+    except Exception as exc:  # noqa: BLE001 - unreadable tree must fail closed
+        raise RiskGateError(f"the file tree of {ref} is unreadable") from exc
+    if not isinstance(tree, dict) or not isinstance(tree.get("tree"), list):
+        raise RiskGateError(f"the file tree of {ref} is unreadable")
+    if tree.get("truncated"):
+        raise RiskGateError(
+            f"the file tree of {ref} is truncated; producer absence cannot be proved from it"
+        )
+    return frozenset(
+        entry["path"] for entry in tree["tree"]
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+    )
+
+
+# A comparison target this gate has proved for itself, never a bare flag.
+# `kind` is one of:
+#   "exact-main"      -- the commit being promoted; must BE `main_sha`.
+#   "authored-merge"  -- the merge commit of the pull request that authored the
+#                        version being recovered; must be contained in the
+#                        history of `main_sha`.
+ProvedTarget = namedtuple("ProvedTarget", ("kind", "sha"))
+
+
+def exact_main(main_sha: str) -> ProvedTarget:
+    return ProvedTarget("exact-main", main_sha)
+
+
+def authored_merge(merge_sha: str) -> ProvedTarget:
+    return ProvedTarget("authored-merge", merge_sha)
+
+
 def prove_preview_producer_matches_main(
-    ref: str, main_sha: str, api: Callable[[str], Any], *, what: str = "preview run",
-    against: str = "exact main", target_is_proved: bool = False,
+    ref: str, target: ProvedTarget, main_sha: str, api: Callable[[str], Any], *,
+    what: str = "preview run", against: str = "exact main",
 ) -> None:
     """Refuse a rehearsal produced by code that exact main does not carry.
 
@@ -523,32 +571,68 @@ def prove_preview_producer_matches_main(
     checkout and let a forged branch dispatch a fabricated rehearsal that named
     main as its applied commit. Both are pinned now.
 
-    THE SECOND ARGUMENT IS NOT ALWAYS MAIN. On the claim and merged-main lanes
-    both commits are pinned to exact main. On the historical-recovery lane the
-    two commits of an ORIGINAL run are each pinned to the MERGE COMMIT of the
-    pull request that authored the version -- a commit `prove_pr_authored` has
-    already proved merged and an ancestor of exact main, and which the promoter
-    therefore cannot choose. `against` names what was compared so the refusal
-    message cannot claim a comparison that was not made.
+    THE TARGET IS NOT ALWAYS MAIN, AND IT IS NOT AN HONOUR-SYSTEM FLAG. On the
+    claim and merged-main lanes both commits are pinned to exact main. On the
+    historical-recovery lane the two commits of an ORIGINAL run are each pinned
+    to the MERGE COMMIT of the pull request that authored the version. Round 7
+    of the #1213 review showed that a `target_is_proved=True` boolean asserted
+    that provenance without checking it, so any later caller could pass two
+    equal attacker-chosen commits and skip every blob read. The target is now
+    TAGGED, and THIS FUNCTION re-derives the tag rather than believing it:
+    `exact-main` must literally be the `main_sha` being promoted, and
+    `authored-merge` must be contained in the history of that `main_sha`
+    (`prove_applied_commit_is_main_line`, the same ancestry check used
+    elsewhere). A commit the promoter invented satisfies neither. What this
+    function does NOT re-derive -- that an `authored-merge` target is the merge
+    commit of the pull request that authored THIS version -- stays the caller's
+    job via `prove_pr_authored`, and is not claimed here.
 
-    IDENTITY IS NOT EVIDENCE. When both arguments are the same commit this
-    function compares nothing, so it must never be reached that way with a
-    comparison target the promoter picked: round 5 of the #1213 review pinned the
-    original run's two commits TO EACH OTHER, and one attacker-chosen commit used
-    for both then satisfied the pin without a single blob being read (round 6,
-    finding 1). Equality is accepted only when the caller declares, with
-    `target_is_proved`, that the second argument is a commit this gate proved
-    independently -- exact main, or a merge commit from `prove_pr_authored`.
-    Every other caller gets a refusal rather than a silent success.
+    IDENTITY IS NOT EVIDENCE ON ITS OWN. When both commits are equal there is
+    nothing to compare: round 5 pinned the original run's two commits TO EACH
+    OTHER, and one attacker-chosen commit used for both then satisfied the pin
+    without a single blob being read (round 6, finding 1). Equality is accepted
+    only after the target above has been validated, so the commit standing in
+    for the comparison is one this gate proved, not one the promoter picked.
+
+    A PRODUCER FILE MAY POSTDATE THE TARGET. `PREVIEW_PRODUCER_PATHS` grows;
+    `scripts/preview_instance_binding.py` was added by this very pull request
+    and does not exist at the merge commits of #984, #992 or #1126, the exact
+    recoveries this lane was built for. Refusing on its absence killed every
+    honest old recovery (round 7, finding 1). A path absent from BOTH trees is
+    therefore skipped -- neither run could have executed a file that does not
+    exist, and a doctored producer that DOES exist at both commits is still
+    compared byte for byte. A path present on ONE side only is refused: that is
+    a real difference in the machinery that ran.
     """
-    if ref == main_sha:
-        if not target_is_proved:
+    if target.kind not in {"exact-main", "authored-merge"}:
+        raise RiskGateError(
+            f"{what} was compared against an untagged target ({target.kind!r})"
+        )
+    if not isinstance(target.sha, str) or not re.fullmatch(r"[0-9a-f]{40}", target.sha):
+        raise RiskGateError(f"{what} was compared against a malformed target commit")
+    if target.kind == "exact-main":
+        if target.sha != main_sha:
             raise RiskGateError(
-                f"{what} was compared against itself ({against}); identity is not evidence"
+                f"{what} names an 'exact main' target {target.sha} that is not the "
+                f"exact main {main_sha} being promoted"
             )
+    else:
+        prove_applied_commit_is_main_line(target.sha, main_sha, api)
+    if ref == target.sha:
         return
+    present_at_ref = tracked_paths_at(ref, api)
+    present_at_target = tracked_paths_at(target.sha, api)
     for path in PREVIEW_PRODUCER_PATHS:
-        if blob_sha(path, ref, api) != blob_sha(path, main_sha, api):
+        at_ref, at_target = path in present_at_ref, path in present_at_target
+        if not at_ref and not at_target:
+            continue
+        if at_ref != at_target:
+            raise RiskGateError(
+                f"{what} produced evidence with {path} "
+                f"{'present' if at_ref else 'absent'} where {against} has it "
+                f"{'present' if at_target else 'absent'}"
+            )
+        if blob_sha(path, ref, api) != blob_sha(path, target.sha, api):
             raise RiskGateError(
                 f"{what} produced evidence with a different {path} than {against}"
             )
@@ -742,10 +826,9 @@ def prove_historical_original_apply_runs(
         # that actually landed. (#1213 review, round 6, finding 1.)
         for commit, role in ((run_head, "dispatched at"), (original_commit, "checked out at")):
             prove_preview_producer_matches_main(
-                commit, merge_sha, api,
+                commit, authored_merge(merge_sha), main_sha, api,
                 what=f"original apply run {run_id} {role} {commit}",
                 against=f"the merge commit {merge_sha} of the pull request that authored {version}",
-                target_is_proved=True,
             )
         texts = artifact_texts(artifact, downloader)
         if texts.get("historical-preview-source.json"):
@@ -865,8 +948,8 @@ def prove_preview(
     # its artifact is self-attestation rather than evidence. See
     # PREVIEW_PRODUCER_PATHS.
     prove_preview_producer_matches_main(
-        applied_commit, main_sha, api, what="preview run checked out at " + applied_commit,
-        target_is_proved=True,
+        applied_commit, exact_main(main_sha), main_sha, api,
+        what="preview run checked out at " + applied_commit,
     )
     # THE WORKFLOW THAT EXECUTED. The artifact name is what the job CHOSE to
     # advertise as its checkout; the dispatch ref is what GitHub read the
@@ -879,8 +962,8 @@ def prove_preview(
             "preview run does not name the commit whose workflow executed (head_sha)"
         )
     prove_preview_producer_matches_main(
-        run_head, main_sha, api, what="preview run dispatched at " + run_head,
-        target_is_proved=True,
+        run_head, exact_main(main_sha), main_sha, api,
+        what="preview run dispatched at " + run_head,
     )
     if artifact.get("digest") != digest:
         raise RiskGateError("preview artifact digest does not match the pinned digest")

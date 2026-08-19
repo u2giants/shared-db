@@ -823,8 +823,13 @@ four rules below are non-negotiable for any database change.
    production (`qsllyeztdwjgirsysgai`). The preview project ref is NOT written
    down here: preview is rebuilt from time to time and its ref changes when it
    is — `rjyboqwcdzcocqgmsyel` was deleted on 2026-08-18. The current ref lives
-   in the repository variable `PREVIEW_PROJECT_REF`, and every lane reads it
-   from there. An unset variable is refused, never defaulted.
+   in the repository variable `PREVIEW_PROJECT_REF`, and every lane of *Shared
+   Supabase Migrations* reads it from there. An unset variable is refused there,
+   never defaulted. Do not read that as a repository-wide fact: several older
+   workflows (`generate-database-types.yml`,
+   `preview-ledger-orphan-reconciliation.yml`, the `coldlion-*` workflows) still
+   hard-code the **deleted** ref `rjyboqwcdzcocqgmsyel` and pin themselves to it.
+   That predates #1213 and is not fixed by it.
 
    **Post-merge rehearsal (the normal order).** Merge first, then rehearse on
    preview from merged `main`, then promote. Dispatch *Shared Supabase
@@ -837,8 +842,21 @@ four rules below are non-negotiable for any database change.
    ancestry of the main tip**, not by a live author claim — the guarded merge
    released the claim and deleted the branch, which is exactly why the rule
    above used to be unexecutable (#1208). It is the same `refs/db-coordination/preview`
-   lock, so it is still mutually exclusive with an ordinary preview run, with
-   merges and with promotions. It fails closed if the PR is not merged, if its
+   lock, so it is mutually exclusive with an ordinary preview run and with a
+   historical recovery — every lane that writes preview holds one ref, and this
+   lane adds no second door.
+
+   **What that lock does NOT do, stated exactly.** It does not exclude a merge
+   or a production promotion. `EXCLUSIVE_REFS` gives merge and production their
+   own refs, and only two cross-checks exist
+   (`scripts/manage-migration-author-lanes.mjs` 1028 and 1063): a promotion
+   waits for the merge ref, and a merge waits for the production ref. Nothing in
+   either direction reads the preview ref. That is pre-existing behaviour of the
+   ordinary preview lane, unchanged here — an earlier draft of this section
+   claimed the exclusion existed, and it never did. Promotions are serialised
+   among themselves by the workflow `concurrency` group, not by this lock.
+
+   The lock fails closed if the PR is not merged, if its
    merge commit is not carried by the main tip, if the named versions were not
    *added* by that PR, or if GitHub state cannot be read.
 
@@ -884,12 +902,23 @@ four rules below are non-negotiable for any database change.
    **The named run is pinned on BOTH of its commits.** The commit it advertised
    in its artifact name *and* `head_sha`, the ref GitHub read the workflow file
    from, must each be a commit of the authoring pull request or a commit exact
-   main contains, and the two must carry the **same producer files as each
-   other**. Without that second pin — added in #1213 round 5 — anyone who can
-   dispatch this workflow could push a branch whose copy of it performs no
-   database write, hand-write a ledger delta and a content manifest naming exact
-   main's digest, name that run as the "original apply", and promote bytes
-   preview never executed.
+   main contains, and each must carry the **same producer files as the merge
+   commit of the pull request that authored that version** — a commit the gate
+   re-derives from GitHub, never one the promoter supplies. Without that second
+   pin, anyone who can dispatch this workflow could push a branch whose copy of
+   it performs no database write, hand-write a ledger delta and a content
+   manifest naming exact main's digest, name that run as the "original apply",
+   and promote bytes preview never executed. Pinning the two commits **to each
+   other** — the #1213 round-5 wording, removed in round 7 — was a no-op: one
+   commit used for both pins compared nothing at all (round 6, finding 1).
+
+   A producer file that **did not exist yet** at the merge commit is skipped,
+   and only when it is absent from *both* commits. The producer list grows, so
+   an old recovery cannot be required to carry files added later; a file present
+   on one side only is a real difference in the machinery that ran, and is
+   refused. Absence is read from each commit's **git tree**, so it is a proved
+   fact rather than an inference from a failed API read, and an unreadable or
+   truncated tree refuses (#1213 round 7, finding 1).
 
    **What this lane proves, stated exactly.** A real, successful run of this
    workflow, whose dispatch ref and whose checkout both carry the producer code
@@ -922,8 +951,11 @@ four rules below are non-negotiable for any database change.
    rehearsal" — was **withdrawn as false** in #1213 round 5 and must not return in
    any file. The claim lane pins both of a run's commits to exact main, so a
    doctored intermediate commit can never be the promoted rehearsal; this lane
-   pins them to the authoring pull request's merge commit, which is weaker in the
-   specific, named ways listed above and in no other way.
+   pins them to the authoring pull request's merge commit, which is weaker at
+   least in the specific, named ways listed above. Do NOT read that list as
+   exhaustive: no code can establish an exhaustive negative about an attack
+   surface, and the "and in no other way" tail this sentence used to carry was
+   removed in #1213 round 7 for claiming one.
 
    **If a version's file changed after its rehearsal, this lane will refuse it,
    and that refusal is correct** — preview never ran the bytes you are asking
