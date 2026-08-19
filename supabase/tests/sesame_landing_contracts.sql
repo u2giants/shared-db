@@ -1575,119 +1575,219 @@ $$;
 
 
 -- =====================================================================================
--- H-C. THE DERIVATION'S OWN HONESTY.
+-- H-C. THE DERIVATION'S OWN HONESTY, MEASURED AGAINST THE EVIDENCE.
 --
--- A derived table with rows in it, while the capture reports ZERO excluded character
--- rows, is only truthful if no asset carries more than one style guide. Anything else
--- means the exclusions were never counted -- and an uncounted exclusion is exactly the
--- invisible gap guide_character_rows_excluded exists to prevent.
+-- guide_character_rows_excluded is the count of character rows the derivation REFUSED to
+-- attribute, because their asset carried several style guides. The evidence for it is
+-- computable: the character appearances sitting on multi-guide assets. Every number in
+-- this section is COMPUTED FROM THE FIXTURE and compared, never written as a literal that
+-- happens to look plausible.
+--
+-- THIS SECTION IS WHERE THE FIRST DRAFT OF THIS FILE FAILED, and the failure is recorded
+-- because it is the one a guard is most likely to have. The original gate tested only
+-- whether a multi-guide ASSET existed and never counted characters, so it REFUSED a
+-- truthful zero -- thousands of assets in this source carry no character at all -- while
+-- RUBBER-STAMPING any nonzero value. The original fixture demonstrated exactly that: its
+-- multi-guide asset carried no character, and the passing call still reported 4, a number
+-- computed from nothing. Found in external review of PR #1274 at commit 23cf4e9.
+--
+-- THE FIXTURE, and why each row is here:
+--   asset 1 -- ONE style guide, TWO characters. Usable by the derivation, and its two
+--              characters also keep the multi-value parse evidence in section D genuine,
+--              so this block is refused by the guard under test rather than by a
+--              different one.
+--   asset 2 -- TWO style guides, ONE character. Unsplittable, so that ONE character row
+--              is the entire excludable population: the evidence count is 1.
 -- =====================================================================================
 do $$
 declare
-  v_cap    uuid;
-  v_status text;
-  v_err    jsonb;
-  v_fail   integer := 0;
-  v_exp    jsonb;
+  v_cap        uuid;
+  v_status     text;
+  v_err        jsonb;
+  v_obs        jsonb;
+  v_fail       integer := 0;
+  v_exp        jsonb;
+  v_excludable bigint;
+  v_key        text;
 begin
   v_exp := jsonb_build_object(
     'categories',0,'brands',0,'sub_brands',0,'characters',2,'style_guides',2,
     'art_styles',0,'asset_types',0,'themes',0,'assets',2,'asset_categories',0,
-    'asset_brands',0,'asset_sub_brands',0,'asset_characters',2,'asset_style_guides',3,
+    'asset_brands',0,'asset_sub_brands',0,'asset_characters',3,'asset_style_guides',3,
     'asset_art_styles',0,'asset_asset_types',0,'asset_themes',0,
     'style_guide_characters',1);
 
-  v_cap := plm.begin_sesame_capture(
-    'ZZTEST-sesame-HC1', 'ZZTEST-repo', repeat('4', 40), repeat('a', 64),
-    'https://example.invalid', 'zztest-slug', '2099-01-01Z',
-    v_exp, '{}'::jsonb, 'ZZTEST');
-  insert into plm.sesame_character (capture_id, value_key, value_label, field_generation,
-                                    asset_count, raw)
-  values (v_cap, 'zztest-char', 'ZZTEST Char', 'current', 1, '{}'),
-         (v_cap, 'zztest-char-2', 'ZZTEST Char Two', 'current', 1, '{}');
-  insert into plm.sesame_style_guide (capture_id, value_key, value_label, field_generation,
-                                      asset_count, guide_family, is_colon_nested, raw)
-  values (v_cap, 'zztest-guide-1', 'ZZTEST Guide 1', 'current', 2, null, false, '{}'),
-         (v_cap, 'zztest-guide-2', 'ZZTEST Fam: Two', 'current', 1, 'ZZTEST Fam', true, '{}');
-  insert into plm.sesame_asset (capture_id, asset_source_id, asset_name, source_hash, raw)
-  values (v_cap, 1, 'ZZTEST Asset 1', 'zztest-hash-1', '{}'),
-         (v_cap, 2, 'ZZTEST Asset 2', 'zztest-hash-2', '{}');
-  -- Asset 1 carries ONE guide (usable for the derivation); asset 2 carries TWO (its
-  -- characters must be excluded, not guessed).
-  insert into plm.sesame_asset_style_guide (
-    capture_id, asset_source_id, value_key, field_generation, value_ordinal, raw)
-  values (v_cap, 1, 'zztest-guide-1', 'current', 0, '{}'),
-         (v_cap, 2, 'zztest-guide-1', 'current', 0, '{}'),
-         (v_cap, 2, 'zztest-guide-2', 'current', 1, '{}');
-  insert into plm.sesame_asset_character (
-    capture_id, asset_source_id, value_key, field_generation, value_ordinal, raw)
-  -- Asset 1 carries TWO characters, so the multi-value parse evidence is genuine here
-  -- too; without it this fixture would be refused by a different guard entirely and the
-  -- derivation contract under test would never be reached.
-  values (v_cap, 1, 'zztest-char', 'current', 0, '{}'),
-         (v_cap, 1, 'zztest-char-2', 'current', 1, '{}');
-  insert into plm.sesame_style_guide_character (
-    capture_id, guide_value_key, character_value_key, asset_count, rule_version, raw)
-  values (v_cap, 'zztest-guide-1', 'zztest-char', 1, 'zztest-v1', '{}');
+  -- Three captures, byte-identical in content, differing ONLY in the number each one
+  -- reports: 0 (dishonest), the true evidence count (honest), and one above it
+  -- (impossible). Building them in a loop guarantees the fixtures cannot drift apart --
+  -- three hand-copied fixtures that quietly differ is how a negative test stops testing
+  -- what its positive twin proves.
+  foreach v_key in array array['zero','true','excessive'] loop
+    v_cap := plm.begin_sesame_capture(
+      'ZZTEST-sesame-HC-' || v_key, 'ZZTEST-repo', repeat('4', 40),
+      md5('ZZTEST-sesame-HC-' || v_key) || md5('ZZTEST-salt'),
+      'https://example.invalid', 'zztest-slug', '2099-01-01Z',
+      v_exp, '{}'::jsonb, 'ZZTEST');
 
-  -- Reporting ZERO exclusions while a multi-guide asset exists is the dishonest case.
-  perform plm.complete_sesame_capture(v_cap, v_exp, 0, true, true, true, 0);
-  select status, error_summary into v_status, v_err
-    from plm.sesame_capture where id = v_cap;
-  if v_status <> 'rejected'
-     or not (v_err @> '[{"code":"guide_character_exclusions_not_counted"}]'::jsonb) then
-    v_fail := v_fail + 1;
-    raise warning 'H-C FAIL: uncounted derivation exclusions published (% / %)',
-      v_status, v_err;
-  end if;
+    insert into plm.sesame_character (capture_id, value_key, value_label,
+                                      field_generation, asset_count, raw)
+    values (v_cap, 'zztest-char',   'ZZTEST Char',     'current', 2, '{}'),
+           (v_cap, 'zztest-char-2', 'ZZTEST Char Two', 'current', 1, '{}');
+    insert into plm.sesame_style_guide (capture_id, value_key, value_label,
+                                        field_generation, asset_count, guide_family,
+                                        is_colon_nested, raw)
+    values (v_cap, 'zztest-guide-1', 'ZZTEST Guide 1',  'current', 2, null, false, '{}'),
+           (v_cap, 'zztest-guide-2', 'ZZTEST Fam: Two', 'current', 1, 'ZZTEST Fam', true, '{}');
+    insert into plm.sesame_asset (capture_id, asset_source_id, asset_name, source_hash, raw)
+    values (v_cap, 1, 'ZZTEST Asset 1', 'zztest-hash-1', '{}'),
+           (v_cap, 2, 'ZZTEST Asset 2', 'zztest-hash-2', '{}');
+    -- Asset 1 carries ONE guide; asset 2 carries TWO.
+    insert into plm.sesame_asset_style_guide (
+      capture_id, asset_source_id, value_key, field_generation, value_ordinal, raw)
+    values (v_cap, 1, 'zztest-guide-1', 'current', 0, '{}'),
+           (v_cap, 2, 'zztest-guide-1', 'current', 0, '{}'),
+           (v_cap, 2, 'zztest-guide-2', 'current', 1, '{}');
+    -- Asset 1 carries TWO characters (derivable); asset 2 carries ONE (excludable).
+    insert into plm.sesame_asset_character (
+      capture_id, asset_source_id, value_key, field_generation, value_ordinal, raw)
+    values (v_cap, 1, 'zztest-char',   'current', 0, '{}'),
+           (v_cap, 1, 'zztest-char-2', 'current', 1, '{}'),
+           (v_cap, 2, 'zztest-char',   'current', 0, '{}');
+    insert into plm.sesame_style_guide_character (
+      capture_id, guide_value_key, character_value_key, asset_count, rule_version, raw)
+    values (v_cap, 'zztest-guide-1', 'zztest-char', 1, 'zztest-v1', '{}');
 
-  -- The positive half: the identical capture, with the exclusion actually counted, does
-  -- publish, and the count is persisted where an auditor can read it.
-  v_cap := plm.begin_sesame_capture(
-    'ZZTEST-sesame-HC2', 'ZZTEST-repo', repeat('5', 40), repeat('b', 64),
-    'https://example.invalid', 'zztest-slug', '2099-01-01Z',
-    v_exp, '{}'::jsonb, 'ZZTEST');
-  insert into plm.sesame_character (capture_id, value_key, value_label, field_generation,
-                                    asset_count, raw)
-  values (v_cap, 'zztest-char', 'ZZTEST Char', 'current', 1, '{}'),
-         (v_cap, 'zztest-char-2', 'ZZTEST Char Two', 'current', 1, '{}');
-  insert into plm.sesame_style_guide (capture_id, value_key, value_label, field_generation,
-                                      asset_count, guide_family, is_colon_nested, raw)
-  values (v_cap, 'zztest-guide-1', 'ZZTEST Guide 1', 'current', 2, null, false, '{}'),
-         (v_cap, 'zztest-guide-2', 'ZZTEST Fam: Two', 'current', 1, 'ZZTEST Fam', true, '{}');
-  insert into plm.sesame_asset (capture_id, asset_source_id, asset_name, source_hash, raw)
-  values (v_cap, 1, 'ZZTEST Asset 1', 'zztest-hash-1', '{}'),
-         (v_cap, 2, 'ZZTEST Asset 2', 'zztest-hash-2', '{}');
-  insert into plm.sesame_asset_style_guide (
-    capture_id, asset_source_id, value_key, field_generation, value_ordinal, raw)
-  values (v_cap, 1, 'zztest-guide-1', 'current', 0, '{}'),
-         (v_cap, 2, 'zztest-guide-1', 'current', 0, '{}'),
-         (v_cap, 2, 'zztest-guide-2', 'current', 1, '{}');
-  insert into plm.sesame_asset_character (
-    capture_id, asset_source_id, value_key, field_generation, value_ordinal, raw)
-  -- Asset 1 carries TWO characters, so the multi-value parse evidence is genuine here
-  -- too; without it this fixture would be refused by a different guard entirely and the
-  -- derivation contract under test would never be reached.
-  values (v_cap, 1, 'zztest-char', 'current', 0, '{}'),
-         (v_cap, 1, 'zztest-char-2', 'current', 1, '{}');
-  insert into plm.sesame_style_guide_character (
-    capture_id, guide_value_key, character_value_key, asset_count, rule_version, raw)
-  values (v_cap, 'zztest-guide-1', 'zztest-char', 1, 'zztest-v1', '{}');
-  perform plm.complete_sesame_capture(v_cap, v_exp, 0, true, true, true, 4);
-  select status, error_summary into v_status, v_err
-    from plm.sesame_capture where id = v_cap;
-  if v_status <> 'complete' then
-    v_fail := v_fail + 1;
-    raise warning 'H-C FAIL: an honestly-counted derivation did not publish (% / %)',
-      v_status, v_err;
-  end if;
-  if (select guide_character_rows_excluded from plm.sesame_capture where id = v_cap) <> 4 then
-    v_fail := v_fail + 1;
-    raise warning 'H-C FAIL: the exclusion count was not persisted on the capture';
-  end if;
+    -- COMPUTE the evidence count from the fixture rather than asserting a literal. The
+    -- test must not carry its own copy of the answer; if the fixture changes, this
+    -- follows it, and if the function's definition of the population disagrees with this
+    -- one, the assertions below say so.
+    select count(*) into v_excludable
+      from plm.sesame_asset_character ac
+     where ac.capture_id = v_cap and ac.field_generation = 'current'
+       and exists (select 1 from plm.sesame_asset_style_guide sg
+                    where sg.capture_id = ac.capture_id
+                      and sg.asset_source_id = ac.asset_source_id
+                      and sg.field_generation = 'current'
+                    group by sg.asset_source_id having count(*) > 1);
+    if v_excludable <> 1 then
+      raise exception
+        'H-C FAILED: the fixture itself is wrong -- % excludable character rows, expected 1',
+        v_excludable;
+    end if;
+
+    if v_key = 'zero' then
+      -- DISHONEST: character rows sit on a multi-guide asset, so the derivation walked
+      -- past them, yet the capture reports none excluded.
+      perform plm.complete_sesame_capture(v_cap, v_exp, 0, true, true, true, 0);
+      select status, error_summary into v_status, v_err
+        from plm.sesame_capture where id = v_cap;
+      if v_status <> 'rejected'
+         or not (v_err @> '[{"code":"guide_character_exclusions_not_counted"}]'::jsonb) then
+        v_fail := v_fail + 1;
+        raise warning 'H-C FAIL (zero): uncounted derivation exclusions published (% / %)',
+          v_status, v_err;
+      end if;
+
+    elsif v_key = 'true' then
+      -- HONEST: the reported number EQUALS the computed evidence. This capture publishes,
+      -- and the number is persisted where an auditor can read it. Without this block a
+      -- guard that rejected everything would still pass the other two.
+      perform plm.complete_sesame_capture(
+        v_cap, v_exp, 0, true, true, true, v_excludable::integer);
+      select status, error_summary, observed_counts into v_status, v_err, v_obs
+        from plm.sesame_capture where id = v_cap;
+      if v_status <> 'complete' then
+        v_fail := v_fail + 1;
+        raise warning 'H-C FAIL (true): an honestly-counted derivation did not publish (% / %)',
+          v_status, v_err;
+      end if;
+      if (select guide_character_rows_excluded from plm.sesame_capture where id = v_cap)
+           is distinct from v_excludable::integer then
+        v_fail := v_fail + 1;
+        raise warning 'H-C FAIL (true): the exclusion count was not persisted on the capture';
+      end if;
+      -- The gate must also RECORD the evidence it measured, not merely act on it. The
+      -- one case the gate cannot catch -- an under-reported nonzero count -- is only
+      -- auditable by a human if both numbers are written down.
+      if (v_obs -> 'guide_character_rows_excludable') is distinct from to_jsonb(v_excludable)
+         or (v_obs -> 'guide_character_rows_excluded_reported')
+              is distinct from to_jsonb(v_excludable) then
+        v_fail := v_fail + 1;
+        raise warning
+          'H-C FAIL (true): the evidence count was not recorded in observed_counts (%)', v_obs;
+      end if;
+
+      -- AND THE TRUTHFUL ZERO. Remove the one excludable character row and the honest
+      -- answer becomes 0 -- which the original predicate refused. Thousands of assets in
+      -- this source carry no character at all, so this is the ordinary case, not a corner.
+      -- It is exercised on a SEPARATE capture so the published one above stays untouched.
+      declare
+        v_cap0 uuid;
+        v_exp0 jsonb := v_exp || '{"asset_characters":2}'::jsonb;
+      begin
+        v_cap0 := plm.begin_sesame_capture(
+          'ZZTEST-sesame-HC-truthful-zero', 'ZZTEST-repo', repeat('4', 40),
+          md5('ZZTEST-sesame-HC-truthful-zero') || md5('ZZTEST-salt'),
+          'https://example.invalid', 'zztest-slug', '2099-01-01Z',
+          v_exp0, '{}'::jsonb, 'ZZTEST');
+        insert into plm.sesame_character (capture_id, value_key, value_label,
+                                          field_generation, asset_count, raw)
+        values (v_cap0, 'zztest-char',   'ZZTEST Char',     'current', 2, '{}'),
+               (v_cap0, 'zztest-char-2', 'ZZTEST Char Two', 'current', 1, '{}');
+        insert into plm.sesame_style_guide (capture_id, value_key, value_label,
+                                            field_generation, asset_count, guide_family,
+                                            is_colon_nested, raw)
+        values (v_cap0, 'zztest-guide-1', 'ZZTEST Guide 1',  'current', 2, null, false, '{}'),
+               (v_cap0, 'zztest-guide-2', 'ZZTEST Fam: Two', 'current', 1, 'ZZTEST Fam', true, '{}');
+        insert into plm.sesame_asset (capture_id, asset_source_id, asset_name, source_hash, raw)
+        values (v_cap0, 1, 'ZZTEST Asset 1', 'zztest-hash-1', '{}'),
+               (v_cap0, 2, 'ZZTEST Asset 2', 'zztest-hash-2', '{}');
+        insert into plm.sesame_asset_style_guide (
+          capture_id, asset_source_id, value_key, field_generation, value_ordinal, raw)
+        values (v_cap0, 1, 'zztest-guide-1', 'current', 0, '{}'),
+               (v_cap0, 2, 'zztest-guide-1', 'current', 0, '{}'),
+               (v_cap0, 2, 'zztest-guide-2', 'current', 1, '{}');
+        -- The multi-guide asset carries NO character, so nothing was excluded.
+        insert into plm.sesame_asset_character (
+          capture_id, asset_source_id, value_key, field_generation, value_ordinal, raw)
+        values (v_cap0, 1, 'zztest-char',   'current', 0, '{}'),
+               (v_cap0, 1, 'zztest-char-2', 'current', 1, '{}');
+        insert into plm.sesame_style_guide_character (
+          capture_id, guide_value_key, character_value_key, asset_count, rule_version, raw)
+        values (v_cap0, 'zztest-guide-1', 'zztest-char', 1, 'zztest-v1', '{}');
+
+        perform plm.complete_sesame_capture(v_cap0, v_exp0, 0, true, true, true, 0);
+        select status, error_summary into v_status, v_err
+          from plm.sesame_capture where id = v_cap0;
+        if v_status <> 'complete' then
+          v_fail := v_fail + 1;
+          raise warning
+            'H-C FAIL (truthful zero): a capture that genuinely excluded NOTHING was refused, so the guard can only be satisfied by inventing a number (% / %)',
+            v_status, v_err;
+        end if;
+      end;
+
+    else
+      -- IMPOSSIBLE: more excluded rows claimed than character rows exist on multi-guide
+      -- assets. No reading of the derivation rule can produce that number, so it is a
+      -- fabrication and must not pass unexamined.
+      perform plm.complete_sesame_capture(
+        v_cap, v_exp, 0, true, true, true, (v_excludable + 1)::integer);
+      select status, error_summary into v_status, v_err
+        from plm.sesame_capture where id = v_cap;
+      if v_status <> 'rejected'
+         or not (v_err @> '[{"code":"guide_character_exclusions_exceed_evidence"}]'::jsonb) then
+        v_fail := v_fail + 1;
+        raise warning
+          'H-C FAIL (excessive): a fabricated exclusion count above the evidence published (% / %)',
+          v_status, v_err;
+      end if;
+    end if;
+  end loop;
 
   if v_fail > 0 then raise exception 'H-C FAILED (% failures)', v_fail; end if;
-  raise notice 'H-C passed: the derivation cannot hide what it refused to guess';
+  raise notice
+    'H-C passed: zero-when-rows-exist refused, a truthful zero PUBLISHES, an above-evidence claim refused, and both numbers recorded';
 end;
 $$;
 

@@ -1751,24 +1751,76 @@ begin
     v_err := v_err || jsonb_build_object('code','asset_character_not_declared','rows',v_n);
   end if;
 
-  -- ---- F. THE DERIVATION'S OWN HONESTY. A derived table with rows in it, built from
-  -- single-guide assets, while the capture claims ZERO character rows were excluded, is
-  -- only truthful if no asset in the capture carries more than one style guide. Anything
-  -- else means the exclusions were never counted -- and an uncounted exclusion is exactly
-  -- the invisible gap this column exists to prevent.
+  -- ---- F. THE DERIVATION'S OWN HONESTY, MEASURED AGAINST THE EVIDENCE.
+  --
+  -- guide_character_rows_excluded is the count of character rows the derivation REFUSED
+  -- to attribute, because their asset carried more than one style guide and could not be
+  -- split. The evidence for that number is computable from the rows in front of us:
+  -- v_d below is the number of current-generation CHARACTER APPEARANCES sitting on
+  -- current-generation MULTI-GUIDE assets. That is exactly the population the derivation
+  -- walks past.
+  --
+  -- THIS PREDICATE WAS WRONG IN THE FIRST DRAFT OF THIS FILE AND THE MISTAKE IS WORTH
+  -- RECORDING, because it is the failure mode a guard is most likely to have. The first
+  -- version tested only whether a multi-guide ASSET existed and never looked at
+  -- characters at all. It therefore:
+  --   * REFUSED A TRUTHFUL CAPTURE. Thousands of assets in this source carry no character
+  --     whatsoever. A capture whose multi-guide assets are all character-free excludes
+  --     NOTHING, so zero is the honest answer -- and the old predicate rejected it unless
+  --     the loader invented a positive number. A guard that can only be satisfied by a
+  --     fabrication is worse than no guard.
+  --   * RUBBER-STAMPED A FAKE. Any nonzero value passed unexamined.
+  -- Found in external review of PR #1274 (Grok 4.6, rotation 229) at commit 23cf4e9.
+  --
+  -- WHAT IS AND IS NOT CAUGHT, stated plainly rather than overclaimed:
+  --   CAUGHT: reporting zero while character appearances on multi-guide assets exist --
+  --           the uncounted-exclusion case this column exists to prevent.
+  --   CAUGHT: reporting MORE than that population. No reading of "excluded character
+  --           rows" can exceed the character rows that are actually there, so this is an
+  --           impossible claim under any definition and is a hard upper bound.
+  --   NOT CAUGHT: reporting a nonzero number BELOW the population. An exact-equality gate
+  --           would catch it, and it was deliberately not written: a loader that counts
+  --           distinct (guide, character) PAIRS rather than rows produces a legitimately
+  --           smaller number, and a gate pinned to the wrong one of two defensible
+  --           definitions would reject every real capture. That is the same trap as the
+  --           depth/parent coupling refused on plm.sesame_category. The evidence count is
+  --           therefore RECORDED in the error payload and in observed_counts below, so a
+  --           human comparing the two numbers can see the gap even where the gate does
+  --           not fire.
+  select count(*) into v_d
+    from plm.sesame_asset_character ac
+   where ac.capture_id = p_capture_id
+     and ac.field_generation = 'current'
+     and exists (
+       select 1 from plm.sesame_asset_style_guide sg
+        where sg.capture_id = ac.capture_id
+          and sg.asset_source_id = ac.asset_source_id
+          and sg.field_generation = 'current'
+        group by sg.asset_source_id having count(*) > 1);
+  -- Recorded on every capture, passing or failing: the number the loader's claim should
+  -- be read against is worth as much as the claim.
+  v_obs := v_obs || jsonb_build_object(
+    'guide_character_rows_excludable', v_d,
+    'guide_character_rows_excluded_reported', p_guide_character_rows_excluded);
+
   select count(*) into v_n
     from plm.sesame_style_guide_character where capture_id = p_capture_id;
-  if v_n > 0 and p_guide_character_rows_excluded = 0 then
-    select count(*) into v_d from (
-      select 1 from plm.sesame_asset_style_guide
-       where capture_id = p_capture_id and field_generation = 'current'
-       group by asset_source_id having count(*) > 1 limit 1) s;
-    if v_d > 0 then
-      v_err := v_err || jsonb_build_object(
-        'code','guide_character_exclusions_not_counted',
-        'derived_rows', v_n,
-        'note','assets carrying more than one style guide exist, so characters were excluded from the derivation, but the capture reports zero exclusions');
-    end if;
+  if v_n > 0 and p_guide_character_rows_excluded = 0 and v_d > 0 then
+    v_err := v_err || jsonb_build_object(
+      'code','guide_character_exclusions_not_counted',
+      'derived_rows', v_n,
+      'excludable_character_rows', v_d,
+      'note','character rows sit on assets carrying more than one style guide, so the derivation excluded them, but the capture reports zero exclusions');
+  end if;
+  -- CAST BEFORE COMPARING. p_guide_character_rows_excluded is `integer` and v_d is
+  -- `bigint`; the comparison is done in bigint so nothing in the integer range can raise
+  -- here. The argument was already refused by name above if it was null or negative.
+  if p_guide_character_rows_excluded::bigint > v_d then
+    v_err := v_err || jsonb_build_object(
+      'code','guide_character_exclusions_exceed_evidence',
+      'reported', p_guide_character_rows_excluded,
+      'excludable_character_rows', v_d,
+      'note','the capture claims it excluded more character rows than sit on multi-guide assets in this capture; no reading of the derivation rule can produce that number');
   end if;
 
   -- ---- G. THE REFUSED RELATIONSHIP, checked in the running database and not only in the
