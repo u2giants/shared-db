@@ -819,8 +819,33 @@ four rules below are non-negotiable for any database change.
    session** (seen 2026-07-27: 17 PopPIM migrations blocked all preview
    dry-runs until PR #271 landed).
 2. **Preview database first. Production never receives untested schema.** Apply
-   every migration to the preview branch (`rjyboqwcdzcocqgmsyel`), prove it
-   works, *then* promote to production (`qsllyeztdwjgirsysgai`).
+   every migration to the preview branch, prove it works, *then* promote to
+   production (`qsllyeztdwjgirsysgai`). The preview project ref is NOT written
+   down here: preview is rebuilt from time to time and its ref changes when it
+   is — `rjyboqwcdzcocqgmsyel` was deleted on 2026-08-18. The current ref lives
+   in the repository variable `PREVIEW_PROJECT_REF`, and every lane reads it
+   from there. An unset variable is refused, never defaulted.
+
+   **Post-merge rehearsal (the normal order).** Merge first, then rehearse on
+   preview from merged `main`, then promote. Dispatch *Shared Supabase
+   Migrations* with `target=preview`, `mode=apply`,
+   `merged_preview_source_pr=<the merged PR>`, `commit_sha=<the current main
+   tip>` and `preview_allowlist=<the exact versions>`. Do NOT pass `claim_pr`:
+   a merged pull request has no live author claim, and naming both is refused.
+
+   The exclusive preview lock for that run is authorised by **merge-commit
+   ancestry of the main tip**, not by a live author claim — the guarded merge
+   released the claim and deleted the branch, which is exactly why the rule
+   above used to be unexecutable (#1208). It is the same `refs/db-coordination/preview`
+   lock, so it is still mutually exclusive with an ordinary preview run, with
+   merges and with promotions. It fails closed if the PR is not merged, if its
+   merge commit is not carried by the main tip, if the named versions were not
+   *added* by that PR, or if GitHub state cannot be read.
+
+   The evidence that run uploads carries the exact commit it checked out and the
+   preview project ref it wrote to, and the production gate checks both. A
+   rehearsal against a preview database that has since been rebuilt is therefore
+   no longer proof for a production write.
 3. **Additive by default (expand, then contract).** Adding a column or table
    cannot break another app. **Renaming or dropping** one that another app reads
    *will*. Default to additive changes. Only rename/drop after explicit owner

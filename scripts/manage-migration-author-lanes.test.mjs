@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -442,6 +442,96 @@ test('historical preview recovery shares the preview lock and requires current m
   assert.throws(()=>acquireExclusive('preview-recovery',{owner:'recovery',pr:924,headSha:'old'},io),/current main/)
   io.getPr=()=>({merged:false})
   assert.throws(()=>acquireExclusive('preview-recovery',{owner:'recovery',pr:924,headSha:'main'},io),/already-merged/)
+})
+
+// ---------------------------------------------------------------------------
+// POST-MERGE PREVIEW REHEARSAL (#1208)
+// ---------------------------------------------------------------------------
+function rehearsalIo(overrides = {}) {
+  const io = memoryIo()
+  io.compareUrls = []
+  io.getPr = () => ({ merged: true, merge_commit_sha: 'merge-sha' })
+  io.getPrFiles = () => [{ status: 'added', filename: 'supabase/migrations/20260818232639_coldlion.sql' }]
+  io.compareCommits = (base, head) => { io.compareUrls.push(`compare/${base}...${head}`); return { status: 'identical', ahead_by: 0, behind_by: 0 } }
+  return Object.assign(io, overrides)
+}
+const REHEARSAL = { owner: 'gha', pr: 1193, headSha: 'main', versions: ['20260818232639'] }
+
+test('post-merge preview rehearsal shares the preview lock and is authorised by merge-commit ancestry', () => {
+  const io = rehearsalIo()
+  const lock = acquireExclusive('preview-rehearsal', REHEARSAL, io)
+  assert.equal(lock.ref, EXCLUSIVE_REFS.preview)
+  // MUTUAL EXCLUSION, unchanged: while a rehearsal holds preview, the ordinary
+  // preview lane cannot be acquired, and vice versa.
+  io.getPr = (number) => ({ number: Number(number), head: { sha: 'abc', ref: 'codex/1' }, base: { sha: 'main' } })
+  io.openClaims = () => [{ number: 1, body: body(['table core.x'], '1', '2099-01-01T00:00:00Z') }]
+  assert.throws(() => acquireExclusive('preview', { owner: 'b', pr: 2, headSha: 'abc' }, io), /occupied/)
+  releaseOwnedRef(EXCLUSIVE_REFS.preview, lock.ownerSha, io)
+})
+
+test('post-merge preview rehearsal compares merge commit as BASE and main tip as HEAD', () => {
+  // THE ARGUMENT-ORDER TEST. Inverting the compare call inverts the meaning of
+  // `ahead` and would accept a descendant of main -- i.e. unmerged code.
+  const io = rehearsalIo()
+  const lock = acquireExclusive('preview-rehearsal', REHEARSAL, io)
+  releaseOwnedRef(EXCLUSIVE_REFS.preview, lock.ownerSha, io)
+  assert.deepEqual(io.compareUrls, ['compare/merge-sha...main'])
+})
+
+test('post-merge preview rehearsal fails closed on every missing authorisation', () => {
+  const cases = [
+    ['not merged', { getPr: () => ({ merged: false }) }, REHEARSAL, /is not merged/],
+    ['no merge commit', { getPr: () => ({ merged: true }) }, REHEARSAL, /is not merged/],
+    ['pull request unreadable', { getPr: () => null }, REHEARSAL, /cannot read pull request/],
+    ['pull request read throws', { getPr: () => { throw new Error('HTTP 502') } }, REHEARSAL, /cannot read pull request .*HTTP 502/],
+    ['main tip unreadable', { mainSha: () => null }, REHEARSAL, /cannot read the current main tip/],
+    ['not the main tip', {}, { ...REHEARSAL, headSha: 'stale' }, /exact current main SHA/],
+    ['merge commit behind main', { compareCommits: () => ({ status: 'ahead', ahead_by: 3, behind_by: 2 }) }, REHEARSAL, /not contained in the history of main tip/],
+    ['merge commit diverged', { compareCommits: () => ({ status: 'diverged', ahead_by: 1, behind_by: 0 }) }, REHEARSAL, /not contained in the history of main tip/],
+    ['merge commit is a descendant of main', { compareCommits: () => ({ status: 'behind', ahead_by: 0, behind_by: 0 }) }, REHEARSAL, /not contained in the history of main tip/],
+    ['ancestry unreadable', { compareCommits: () => null }, REHEARSAL, /ancestry is unreadable/],
+    ['ancestry read throws', { compareCommits: () => { throw new Error('HTTP 502') } }, REHEARSAL, /ancestry is unreadable .*HTTP 502/],
+    ['no versions named', {}, { ...REHEARSAL, versions: [] }, /requires the exact migration versions/],
+    ['malformed version', {}, { ...REHEARSAL, versions: ['nope'] }, /exact 14-digit migration version/],
+    ['version not added by the PR', {}, { ...REHEARSAL, versions: ['20260818203751'] }, /were not added by pull request #1193/],
+    ['version only modified by the PR', { getPrFiles: () => [{ status: 'modified', filename: 'supabase/migrations/20260818232639_coldlion.sql' }] }, REHEARSAL, /were not added by pull request #1193/],
+    ['pull request files unreadable', { getPrFiles: () => null }, REHEARSAL, /files are unreadable/],
+    ['pull request files read throws', { getPrFiles: () => { throw new Error('HTTP 502') } }, REHEARSAL, /cannot read the files of pull request .*HTTP 502/],
+  ]
+  for (const [label, overrides, metadata, expected] of cases) {
+    const io = rehearsalIo(overrides)
+    assert.throws(() => acquireExclusive('preview-rehearsal', metadata, io), expected, label)
+    // FAIL CLOSED MEANS NO LOCK LEFT BEHIND, and no author mutex either.
+    assert.equal(io.refs.has(EXCLUSIVE_REFS.preview), false, `${label} left the preview lock`)
+    assert.equal(io.refs.has(MUTEX_REF), false, `${label} left the author mutex`)
+  }
+})
+
+test('post-merge preview rehearsal accepts a merge commit that later commits sit on top of', () => {
+  const io = rehearsalIo({ compareCommits: () => ({ status: 'ahead', ahead_by: 4, behind_by: 0 }) })
+  const lock = acquireExclusive('preview-rehearsal', REHEARSAL, io)
+  assert.equal(lock.kind, 'preview-rehearsal')
+  releaseOwnedRef(EXCLUSIVE_REFS.preview, lock.ownerSha, io)
+})
+
+test('post-merge preview rehearsal never needs or reads a live author claim', () => {
+  const io = rehearsalIo({ openClaims: () => { throw new Error('author claims must not be consulted') } })
+  const lock = acquireExclusive('preview-rehearsal', REHEARSAL, io)
+  releaseOwnedRef(EXCLUSIVE_REFS.preview, lock.ownerSha, io)
+})
+
+test('added migration versions ignore anything the pull request did not add', () => {
+  assert.deepEqual(addedMigrationVersions([
+    { status: 'added', filename: 'supabase/migrations/20260818232639_a.sql' },
+    { status: 'modified', filename: 'supabase/migrations/20260818203751_b.sql' },
+    { status: 'added', filename: 'docs/notes.md' },
+    { status: 'renamed', filename: 'supabase/migrations/20260101000000_c.sql' },
+  ]), ['20260818232639'])
+  assert.throws(() => addedMigrationVersions(undefined), /unreadable/)
+})
+
+test('merge-commit ancestry helper refuses a comparison without an integer behind_by', () => {
+  assert.throws(() => assertMergeCommitInMainHistory('m', 'main', { compareCommits: () => ({ status: 'ahead' }) }), /unreadable/)
 })
 
 test('unreadable claims fail closed',()=>assert.throws(()=>assertLaneAvailable([{number:9,body:'bad'}],[],NOW),/unreadable/))

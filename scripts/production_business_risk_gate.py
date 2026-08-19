@@ -23,9 +23,17 @@ from production_apply_review_evidence import verify as verify_review
 from production_migration_guard import parse_remote_versions
 from production_review_allowlist import normalize_review_allowlist
 from historical_preview_recovery import verify as verify_historical_preview
+from preview_instance_binding import verify as verify_preview_instance_binding
 from production_owner_decision_evidence import TRANSIENT_GITHUB_ERRORS, verify_artifact as verify_owner_decision
 
 REPOSITORY = "u2giants/shared-db"
+# The production database's identity. It is deliberately a constant and NOT
+# configurable: this value exists so the gate can refuse evidence that claims a
+# PRODUCTION write was a preview rehearsal. The PREVIEW ref is the opposite --
+# preview is rebuilt from time to time, so it is supplied per run and is never
+# defaulted. See --preview-project-ref.
+PRODUCTION_PROJECT_REF = "qsllyeztdwjgirsysgai"
+PREVIEW_APPLY_ARTIFACT = re.compile(r"^preview-migration-apply-([0-9a-f]{40})$")
 PREVIEW_WORKFLOW = ".github/workflows/shared-supabase-migrations.yml"
 ACTIVATION_SCHEMA = "shared-db-production-risk-activation/v1"
 ACTIVE_SCHEMA = "shared-db-production-risk-activation/v2"
@@ -146,15 +154,63 @@ def prove_activation(
         raise RiskGateError("forward-test proof does not match the activated record")
 
 
-def select_preview_artifact(payload: Any, run_id: int, expected_name: str) -> dict[str, Any]:
+def preview_applied_commit(payload: Any, run_id: int) -> tuple[dict[str, Any], str]:
+    """Read the commit the rehearsal ACTUALLY checked out, from the artifact name.
+
+    The old code derived this from the run's ``head_sha``.  That is the ref the
+    workflow FILE was read from, which for a ``--ref main`` dispatch is not the
+    commit the job checked out and applied.  The preview job names its evidence
+    artifact after ``git rev-parse HEAD`` of its own checkout, so the artifact
+    name is the one place the applied commit is already recorded -- and it is
+    recorded by the same upload that carries the evidence, so it cannot be
+    swapped for another run's.
+
+    Exactly one apply artifact must exist.  Two would mean the run's identity is
+    ambiguous, and an ambiguous commit is not provenance.
+    """
     artifacts = payload.get("artifacts") if isinstance(payload, dict) else None
-    matches = [a for a in artifacts or [] if isinstance(a, dict) and a.get("name") == expected_name]
+    if not isinstance(artifacts, list):
+        raise RiskGateError("preview run artifacts are unreadable")
+    matches = [
+        (a, PREVIEW_APPLY_ARTIFACT.match(str(a.get("name", ""))))
+        for a in artifacts if isinstance(a, dict)
+    ]
+    matches = [(a, m) for a, m in matches if m]
     if len(matches) != 1:
-        raise RiskGateError(f"expected exactly one preview artifact {expected_name!r}")
-    artifact = matches[0]
+        raise RiskGateError(
+            f"expected exactly one preview-migration-apply-<commit> artifact on run {run_id}, found {len(matches)}"
+        )
+    artifact, match = matches[0]
     if artifact.get("expired") is not False or artifact.get("workflow_run", {}).get("id") != run_id:
         raise RiskGateError("preview artifact is expired or belongs to another run")
-    return artifact
+    return artifact, match.group(1)
+
+
+def prove_applied_commit_is_main_line(
+    applied_commit: str, main_sha: str, api: Callable[[str], Any]
+) -> None:
+    """Accept a rehearsal commit that exact main CONTAINS, and nothing else.
+
+    ARGUMENT ORDER IS THE ENTIRE CHECK.  GitHub's ``compare/{base}...{head}``
+    reports how HEAD relates to BASE.  With ``base = applied_commit`` and
+    ``head = main_sha``, ``status == "ahead"`` means main is ahead of the applied
+    commit -- i.e. the applied commit is an ancestor of main.  Inverted, the same
+    literal check would accept a DESCENDANT of main, which is unmerged code.
+    ``test_compare_url_argument_order_is_asserted`` fails if the arguments are
+    swapped, and ``test_descendant_of_main_is_refused`` fails if the meaning is.
+    """
+    try:
+        comparison = api(f"repos/{REPOSITORY}/compare/{applied_commit}...{main_sha}")
+    except Exception as exc:  # noqa: BLE001 - unreadable ancestry must fail closed
+        raise RiskGateError("preview run ancestry is unreadable") from exc
+    if not isinstance(comparison, dict):
+        raise RiskGateError("preview run ancestry is unreadable")
+    status, behind = comparison.get("status"), comparison.get("behind_by")
+    if not isinstance(behind, int) or status not in {"ahead", "identical"} or behind != 0:
+        raise RiskGateError(
+            f"preview run commit {applied_commit} is not contained in the history of exact main "
+            f"{main_sha} (compare status {status!r}, behind_by {behind!r})"
+        )
 
 
 def canonical_sha256(path: Path) -> str:
@@ -334,6 +390,10 @@ PREVIEW_PRODUCER_PATHS = (
     # separately demands run head == exact main; pinned so that coupling cannot
     # silently loosen later.
     "scripts/historical_preview_recovery.py",
+    # Writes the instance binding INTO the evidence artifact. If this file could
+    # differ from exact main, the applied commit and the preview project ref in
+    # the evidence would be whatever a doctored checkout chose to write.
+    "scripts/preview_instance_binding.py",
     # Data, not code, but it routes which apply mechanism the rehearsal
     # exercises. Pinned for rehearsal fidelity.
     "config/atomic-migration-allowlist.json",
@@ -390,7 +450,8 @@ def source_pr_commits(
 
 
 def prove_preview(
-    *, run_id: int, digest: str, pr_head: str, main_sha: str, source_pr: int, allowlist: list[str], api: Callable[[str], Any],
+    *, run_id: int, digest: str, pr_head: str, main_sha: str, source_pr: int, allowlist: list[str],
+    preview_project_ref: str, api: Callable[[str], Any],
     downloader: Callable[[int, Path], None], repo_root: Path,
 ) -> None:
     run = api(f"repos/{REPOSITORY}/actions/runs/{run_id}")
@@ -401,6 +462,15 @@ def prove_preview(
     for key, value in expected.items():
         if run.get(key) != value:
             raise RiskGateError(f"preview run has wrong {key}")
+    # THE COMMIT THAT ACTUALLY RAN, not the ref the workflow file was read from.
+    # `run["head_sha"]` is the latter, and on a post-merge rehearsal dispatched
+    # against main the two are different commits. Pinning provenance and the
+    # producing code to head_sha therefore pinned the wrong thing, and the
+    # artifact lookup -- which uses the checked-out commit -- would then fail
+    # anyway. Both now use the same commit, read from the artifact name.
+    artifact, applied_commit = preview_applied_commit(
+        api(f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"), run_id
+    )
     # PROVENANCE, not identity: the rehearsal must belong to THIS piece of work.
     # Any commit of the source pull request qualifies, plus exact main for the
     # historical-recovery path. What the rehearsal actually applied is proved by
@@ -408,16 +478,19 @@ def prove_preview(
     # permanently stranded any promotion that had a follow-up commit -- including
     # the generated types this repository is supposed to refresh after a schema
     # change, which cannot be committed before the preview it describes.
-    if run.get("head_sha") not in source_pr_commits(source_pr, pr_head, main_sha, api):
-        raise RiskGateError("preview run does not belong to the source pull request")
-    # Belonging to the PR is not enough. The run must also have been produced by
-    # the same apply machinery exact main carries, or its artifact is
-    # self-attestation rather than evidence. See PREVIEW_PRODUCER_PATHS.
-    prove_preview_producer_matches_main(run["head_sha"], main_sha, api)
-    name = f"preview-migration-apply-{run['head_sha']}"
-    artifact = select_preview_artifact(
-        api(f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"), run_id, name
-    )
+    #
+    # A POST-MERGE REHEARSAL runs from a main commit that is NOT a commit of the
+    # source PR, so it is accepted on the second branch: a commit exact main
+    # contains. That is strictly stronger than PR membership -- it is code that
+    # is already merged -- and the producer pin below still binds the machinery
+    # to exact main, so the checkout that ran cannot have been a doctored one.
+    if applied_commit not in source_pr_commits(source_pr, pr_head, main_sha, api):
+        prove_applied_commit_is_main_line(applied_commit, main_sha, api)
+    # Belonging to the PR (or to main's own history) is not enough. The run must
+    # also have been produced by the same apply machinery exact main carries, or
+    # its artifact is self-attestation rather than evidence. See
+    # PREVIEW_PRODUCER_PATHS.
+    prove_preview_producer_matches_main(applied_commit, main_sha, api)
     if artifact.get("digest") != digest:
         raise RiskGateError("preview artifact digest does not match the pinned digest")
     with tempfile.TemporaryDirectory(prefix="production-risk-preview-") as temp:
@@ -451,8 +524,9 @@ def prove_preview(
         if record != derived:
             raise RiskGateError("historical preview source proof does not match current governed evidence")
         # The historical no-write path proves nothing by applying, so it keeps
-        # its exact-main requirement unchanged.
-        if run.get("head_sha") != main_sha:
+        # its exact-main requirement unchanged -- now judged against the commit
+        # the job really checked out rather than the workflow-file ref.
+        if applied_commit != main_sha:
             raise RiskGateError("preview run has wrong head_sha")
     with tempfile.TemporaryDirectory(prefix="production-risk-ledger-") as ledger_temp:
         before_path, after_path = Path(ledger_temp, "before.txt"), Path(ledger_temp, "after.txt")
@@ -463,6 +537,18 @@ def prove_preview(
         texts=texts, allowlist=allowlist, repo_root=repo_root,
         before_versions=before_versions, after_versions=after_versions,
         historical=bool(historical),
+    )
+    # WHICH DATABASE, AND FROM WHICH COMMIT. Everything above proves a migration
+    # applied cleanly somewhere, built by code exact main carries. Only this
+    # proves it was THIS preview project, and that the commit named in the
+    # artifact NAME is the commit the job itself recorded inside the evidence --
+    # two independent sources that must agree. Preview rjyboqwcdzcocqgmsyel was
+    # deleted and rebuilt on 2026-08-18; without this, its proof would still be
+    # good for a production write today.
+    verify_preview_instance_binding(
+        texts.get("preview-instance.json"),
+        applied_commit=applied_commit, preview_project_ref=preview_project_ref,
+        production_project_ref=PRODUCTION_PROJECT_REF, run_id=run_id, allowlist=allowlist,
     )
 
 
@@ -590,7 +676,9 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
         return {"automaticPromotionAllowed": False, "ownerDecisionReasons": [RISK_TEXT["unresolved_material_objection"]]}
     prove_preview(
         run_id=args.preview_run_id, digest=args.preview_digest, pr_head=pr_head,
-        main_sha=args.main_sha, source_pr=args.pr, allowlist=allowlist, api=api, downloader=downloader, repo_root=repo_root,
+        main_sha=args.main_sha, source_pr=args.pr, allowlist=allowlist,
+        preview_project_ref=args.preview_project_ref,
+        api=api, downloader=downloader, repo_root=repo_root,
     )
     decision = decide_business_risk(classify_sql(repo_root, allowlist), recovery_proven=True, review_approved=True)
     # OWNER RULING 2026-08-18: the machine-readable owner-decision block is RETIRED
@@ -638,6 +726,7 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
         "governedEvidence": {
             "mainSha": args.main_sha, "sourcePr": args.pr, "sourcePrHead": pr_head,
             "reviewRun": args.review_run_id, "previewRun": args.preview_run_id,
+            "previewProjectRef": args.preview_project_ref,
             "allowlist": allowlist,
             "ownerDecision": owner_evidence,
         },
@@ -655,6 +744,11 @@ def main() -> int:
     parser.add_argument("--review-digest", required=True)
     parser.add_argument("--preview-run-id", type=int, required=True)
     parser.add_argument("--preview-digest", required=True)
+    # NOT DEFAULTED, EVER. Preview is rebuilt from time to time and its project
+    # ref changes when it is; a literal in this file is what stranded the lane on
+    # 2026-08-18. The workflow passes the repository variable PREVIEW_PROJECT_REF,
+    # which is the same value the preview job writes to.
+    parser.add_argument("--preview-project-ref", required=True)
     # GitHub Actions supplies an omitted optional workflow input as an empty
     # string.  Keep it as text so the established no-risk automatic path can
     # reach assess(); a material-risk path still rejects the missing value.

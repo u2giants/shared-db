@@ -5,12 +5,16 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from argparse import Namespace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from production_business_risk_gate import PREVIEW_PRODUCER_PATHS, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_preview, prove_preview_migration_contents
+from production_business_risk_gate import PREVIEW_PRODUCER_PATHS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_preview, prove_preview_migration_contents
+
+PREVIEW_PROJECT_REF = "mvpkijzfmfcxhnzqogzs"
+DEAD_PREVIEW_PROJECT_REF = "rjyboqwcdzcocqgmsyel"
 
 
 class ProductionBusinessRiskGateTests(unittest.TestCase):
@@ -190,47 +194,70 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 before_versions=set(), after_versions={version}, historical=False,
             )
 
-    def test_rehearsal_borrowed_from_another_pull_request_is_rejected(self):
-        run = {
-            "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
-            "head_sha": "f" * 40, "path": ".github/workflows/shared-supabase-migrations.yml",
+    def apply_artifact(self, commit, digest="sha256:" + "d" * 64, artifact_id=9, run_id=7):
+        return {
+            "id": artifact_id, "name": f"preview-migration-apply-{commit}",
+            "digest": digest, "expired": False, "workflow_run": {"id": run_id},
         }
 
-        def api(endpoint):
-            # The other PR's commits, none of which is this run's head.
-            return [{"sha": "1" * 40}] if endpoint.endswith("commits?per_page=100") else run
+    def prove_preview_args(self, **overrides):
+        args = dict(
+            run_id=7, digest="sha256:" + "c" * 64, pr_head="a" * 40, main_sha="d" * 40,
+            source_pr=1, allowlist=["20260814000000"],
+            preview_project_ref=PREVIEW_PROJECT_REF, repo_root=Path.cwd(),
+        )
+        args.update(overrides)
+        return args
 
-        with self.assertRaisesRegex(RiskGateError, "does not belong to the source pull request"):
+    def test_rehearsal_borrowed_from_another_pull_request_is_rejected(self):
+        """Neither a commit of the source PR, nor a commit exact main contains."""
+        foreign = "f" * 40
+        run = {
+            "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
+            "head_sha": foreign, "path": ".github/workflows/shared-supabase-migrations.yml",
+        }
+        api = self.preview_api(
+            run, [{"sha": "1" * 40}], {}, [self.apply_artifact(foreign)],
+            # A rehearsal from an unrelated branch: main does not contain it.
+            compare={"status": "diverged", "ahead_by": 2, "behind_by": 3},
+        )
+        with self.assertRaisesRegex(RiskGateError, "not contained in the history of exact main"):
             prove_preview(
-                run_id=7, digest="sha256:" + "c" * 64, pr_head="a" * 40,
-                main_sha="d" * 40, source_pr=1, allowlist=["20260814000000"], api=api,
+                **self.prove_preview_args(api=api),
                 downloader=lambda *_: self.fail("foreign rehearsal must not download"),
-                repo_root=Path.cwd(),
             )
 
     def test_unreadable_source_pr_commits_fail_closed(self):
+        foreign = "f" * 40
         run = {
             "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
-            "head_sha": "f" * 40, "path": ".github/workflows/shared-supabase-migrations.yml",
+            "head_sha": foreign, "path": ".github/workflows/shared-supabase-migrations.yml",
         }
 
         def api(endpoint):
             if endpoint.endswith("commits?per_page=100"):
                 raise RuntimeError("GitHub 503")
+            if endpoint.endswith("artifacts?per_page=100"):
+                return {"artifacts": [self.apply_artifact(foreign)]}
             return run
 
         with self.assertRaisesRegex(RiskGateError, "unreadable"):
             prove_preview(
-                run_id=7, digest="sha256:" + "c" * 64, pr_head="a" * 40,
-                main_sha="d" * 40, source_pr=1, allowlist=["20260814000000"], api=api,
-                downloader=lambda *_: self.fail("must not download"), repo_root=Path.cwd(),
+                **self.prove_preview_args(api=api),
+                downloader=lambda *_: self.fail("must not download"),
             )
 
-    def preview_api(self, run, commits, blobs, artifacts=None):
-        """Fake API covering run, PR commits, producer blobs and artifacts."""
+    def preview_api(self, run, commits, blobs, artifacts=None, compare=None, seen=None):
+        """Fake API covering run, PR commits, producer blobs, artifacts, compare."""
         def api(endpoint):
+            if seen is not None:
+                seen.append(endpoint)
             if endpoint.endswith("commits?per_page=100"):
                 return commits
+            if "/compare/" in endpoint:
+                if compare is None:
+                    raise RuntimeError("compare not stubbed")
+                return compare
             if "/contents/" in endpoint:
                 path, ref = endpoint.split("/contents/", 1)[1].split("?ref=")
                 if (path, ref) in blobs:
@@ -264,11 +291,13 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RiskGateError, "different .* than exact main"):
             prove_preview(
-                run_id=7, digest="sha256:" + "c" * 64, pr_head=head, main_sha=main,
-                source_pr=1, allowlist=["20260814000000"],
-                api=self.preview_api(run, [{"sha": c1}, {"sha": head}], blobs),
+                **self.prove_preview_args(
+                    pr_head=head, main_sha=main,
+                    api=self.preview_api(
+                        run, [{"sha": c1}, {"sha": head}], blobs, [self.apply_artifact(c1)]
+                    ),
+                ),
                 downloader=lambda *_: self.fail("doctored producer must not download"),
-                repo_root=Path.cwd(),
             )
 
     def test_honest_earlier_commit_with_matching_producer_is_accepted_to_download(self):
@@ -287,17 +316,15 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         for path in PREVIEW_PRODUCER_PATHS:
             blobs[(path, main)] = "honest-" + path
             blobs[(path, c1)] = "honest-" + path
-        artifact = {
-            "id": 9, "name": f"preview-migration-apply-{c1}",
-            "digest": "sha256:" + "d" * 64, "expired": False, "workflow_run": {"id": 7},
-        }
         with self.assertRaisesRegex(RiskGateError, "pinned digest"):
             prove_preview(
-                run_id=7, digest="sha256:" + "c" * 64, pr_head=head, main_sha=main,
-                source_pr=1, allowlist=["20260814000000"],
-                api=self.preview_api(run, [{"sha": c1}, {"sha": head}], blobs, [artifact]),
+                **self.prove_preview_args(
+                    pr_head=head, main_sha=main,
+                    api=self.preview_api(
+                        run, [{"sha": c1}, {"sha": head}], blobs, [self.apply_artifact(c1)]
+                    ),
+                ),
                 downloader=lambda *_: self.fail("digest mismatch must not download"),
-                repo_root=Path.cwd(),
             )
 
     def test_unreadable_producer_file_fails_closed(self):
@@ -308,11 +335,184 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(RiskGateError, "unreadable"):
             prove_preview(
-                run_id=7, digest="sha256:" + "c" * 64, pr_head=head, main_sha=main,
-                source_pr=1, allowlist=["20260814000000"],
-                api=self.preview_api(run, [{"sha": c1}], {}),
-                downloader=lambda *_: self.fail("must not download"), repo_root=Path.cwd(),
+                **self.prove_preview_args(
+                    pr_head=head, main_sha=main,
+                    api=self.preview_api(run, [{"sha": c1}], {}, [self.apply_artifact(c1)]),
+                ),
+                downloader=lambda *_: self.fail("must not download"),
             )
+
+    # ------------------------------------------------------------------
+    # POST-MERGE REHEARSAL PROVENANCE AND INSTANCE BINDING (#1208)
+    # ------------------------------------------------------------------
+    def test_compare_url_argument_order_is_asserted(self):
+        """PR #1194 review point 3.
+
+        The old stub never inspected the compare URL, so swapping the arguments
+        left every provenance test green while inverting the meaning of the
+        check in production. This test reads the URL.
+        """
+        applied, main = "1" * 40, "3" * 40
+        seen = []
+        prove_applied_commit_is_main_line(
+            applied, main,
+            self.preview_api({}, [], {}, [], compare={"status": "ahead", "behind_by": 0}, seen=seen),
+        )
+        self.assertEqual(seen, [f"repos/u2giants/shared-db/compare/{applied}...{main}"])
+
+    def test_descendant_of_main_is_refused(self):
+        """Inverting the compare arguments would make this pass. It must not.
+
+        A commit that is a DESCENDANT of main is unmerged code. Compared in the
+        correct order it reports `behind`, never `ahead`.
+        """
+        with self.assertRaisesRegex(RiskGateError, "not contained in the history of exact main"):
+            prove_applied_commit_is_main_line(
+                "1" * 40, "3" * 40,
+                self.preview_api({}, [], {}, [], compare={"status": "behind", "behind_by": 0}),
+            )
+
+    def test_main_line_ancestry_accepts_ahead_and_identical_only_at_behind_zero(self):
+        for status in ("ahead", "identical"):
+            with self.subTest(status=status):
+                prove_applied_commit_is_main_line(
+                    "1" * 40, "3" * 40,
+                    self.preview_api({}, [], {}, [], compare={"status": status, "behind_by": 0}),
+                )
+        for compare in (
+            {"status": "ahead", "behind_by": 2},
+            {"status": "diverged", "behind_by": 0},
+            {"status": "ahead"},
+            None,
+            "not-an-object",
+        ):
+            with self.subTest(compare=compare), self.assertRaisesRegex(RiskGateError, "unreadable|not contained"):
+                prove_applied_commit_is_main_line(
+                    "1" * 40, "3" * 40, lambda _e, c=compare: c,
+                )
+
+    def test_unreadable_ancestry_fails_closed(self):
+        def api(_endpoint):
+            raise RuntimeError("GitHub 503")
+
+        with self.assertRaisesRegex(RiskGateError, "ancestry is unreadable"):
+            prove_applied_commit_is_main_line("1" * 40, "3" * 40, api)
+
+    def test_applied_commit_comes_from_the_artifact_name_not_the_run_head(self):
+        """PR #1194 review point 1.
+
+        A post-merge rehearsal dispatched with `--ref main` has a run head that
+        is the workflow-file ref. The commit it actually checked out and applied
+        from is the one in the artifact name.
+        """
+        applied = "7" * 40
+        artifact, commit = preview_applied_commit(
+            {"artifacts": [self.apply_artifact(applied)]}, 7
+        )
+        self.assertEqual(commit, applied)
+        self.assertEqual(artifact["id"], 9)
+
+    def test_missing_or_ambiguous_apply_artifact_fails_closed(self):
+        for label, payload in (
+            ("none", {"artifacts": []}),
+            ("dry-run only", {"artifacts": [{"name": "preview-migration-dry-run-" + "7" * 40}]}),
+            ("two", {"artifacts": [self.apply_artifact("7" * 40), self.apply_artifact("8" * 40, artifact_id=10)]}),
+            ("unreadable", {"artifacts": "nope"}),
+        ):
+            with self.subTest(label), self.assertRaisesRegex(RiskGateError, "unreadable|exactly one preview-migration-apply"):
+                preview_applied_commit(payload, 7)
+
+    def preview_evidence_zip(self, path, version, manifest_digest, instance):
+        ledger_before = json.dumps([{"remote": "20260801000000"}])
+        ledger_after = json.dumps([{"remote": "20260801000000"}, {"remote": version}])
+        payload = {
+            "preview-ledger-before.txt": ledger_before,
+            "preview-ledger-after.txt": ledger_after,
+            "preview-dry-run.txt": f"Applying migration {version}_exact.sql...",
+            "preview-apply.txt": f"Applying migration {version}_exact.sql...",
+            "migration-content-manifest.json": json.dumps({version: manifest_digest}),
+        }
+        if instance is not None:
+            payload["preview-instance.json"] = json.dumps(instance)
+        with zipfile.ZipFile(path, "w") as archive:
+            for name, text in payload.items():
+                archive.writestr(name, text)
+        return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+    def run_full_prove_preview(self, *, instance, applied=None, main=None, preview_ref=PREVIEW_PROJECT_REF):
+        """End to end through download, so the instance binding is really read."""
+        applied = applied or "1" * 40
+        main = main or "3" * 40
+        temp, root, version, digest, _ = self.plain_preview_fixture()
+        with temp:
+            zip_dir = tempfile.TemporaryDirectory()
+            with zip_dir:
+                zip_path = Path(zip_dir.name, "evidence.zip")
+                artifact_digest = self.preview_evidence_zip(zip_path, version, digest, instance)
+                blobs = {}
+                for path in PREVIEW_PRODUCER_PATHS:
+                    blobs[(path, main)] = "honest-" + path
+                    blobs[(path, applied)] = "honest-" + path
+                run = {
+                    "status": "completed", "conclusion": "success",
+                    "event": "workflow_dispatch", "head_sha": "9" * 40,
+                    "path": ".github/workflows/shared-supabase-migrations.yml",
+                }
+                api = self.preview_api(
+                    run, [{"sha": "a" * 40}], blobs,
+                    [self.apply_artifact(applied, digest=artifact_digest)],
+                    compare={"status": "ahead", "behind_by": 0},
+                )
+                prove_preview(
+                    run_id=7, digest=artifact_digest, pr_head="a" * 40, main_sha=main,
+                    source_pr=1, allowlist=[version], preview_project_ref=preview_ref,
+                    api=api, repo_root=root,
+                    downloader=lambda _id, dest: Path(dest).write_bytes(zip_path.read_bytes()),
+                )
+
+    def honest_instance(self, applied="1" * 40, project_ref=PREVIEW_PROJECT_REF):
+        return {
+            "schema": "shared-db-preview-instance-binding/v1",
+            "rehearsalMode": "merged-main-rehearsal",
+            "appliedCommit": applied,
+            "previewProjectRef": project_ref,
+            "runId": 7,
+            "allowlist": ["20260814000000"],
+            "sourcePr": 1193,
+            "mergeCommitSha": "b" * 40,
+        }
+
+    def test_post_merge_main_line_rehearsal_is_accepted_end_to_end(self):
+        """The whole point of #1208: a merged, main-line rehearsal promotes."""
+        self.run_full_prove_preview(instance=self.honest_instance())
+
+    def test_preview_evidence_without_an_instance_binding_is_refused(self):
+        """PR #1194 review point 4. Deleting the binding must break this."""
+        with self.assertRaisesRegex(ValueError, "carries no instance binding"):
+            self.run_full_prove_preview(instance=None)
+
+    def test_rebuilt_preview_cannot_inherit_the_deleted_previews_proof(self):
+        """A rehearsal against rjyboqwcdzcocqgmsyel is not proof about mvpkijzfmfcxhnzqogzs."""
+        with self.assertRaisesRegex(ValueError, "never inherits the proof"):
+            self.run_full_prove_preview(
+                instance=self.honest_instance(project_ref=DEAD_PREVIEW_PROJECT_REF)
+            )
+
+    def test_instance_binding_must_name_the_commit_in_the_artifact_name(self):
+        with self.assertRaisesRegex(ValueError, "names applied commit"):
+            self.run_full_prove_preview(instance=self.honest_instance(applied="c" * 40))
+
+    def test_expected_preview_ref_is_never_defaulted_and_never_production(self):
+        with self.assertRaisesRegex(ValueError, "never treated as a default"):
+            self.run_full_prove_preview(instance=self.honest_instance(), preview_ref="")
+        with self.assertRaisesRegex(ValueError, "is the PRODUCTION project ref"):
+            self.run_full_prove_preview(
+                instance=self.honest_instance(project_ref=PRODUCTION_PROJECT_REF),
+                preview_ref=PRODUCTION_PROJECT_REF,
+            )
+
+    def test_instance_binding_writer_is_a_pinned_preview_producer(self):
+        self.assertIn("scripts/preview_instance_binding.py", PREVIEW_PRODUCER_PATHS)
 
     PREVIEW_JOB_EXCLUSIONS = (
         # These run ONLY in the production-apply jobs, which check out exact main
@@ -531,18 +731,19 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 self.assertEqual(len(result["ownerDecisionReasons"]), 1)
 
     def test_forged_preview_claim_is_rejected_before_download(self):
+        forged = "b" * 40
         run = {
             "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
-            "head_sha": "b" * 40, "path": ".github/workflows/shared-supabase-migrations.yml",
+            "head_sha": forged, "path": ".github/workflows/shared-supabase-migrations.yml",
         }
-        def api(endpoint):
-            return [{"sha": "a" * 40}] if endpoint.endswith("commits?per_page=100") else run
-
-        with self.assertRaisesRegex(RiskGateError, "does not belong to the source pull request"):
+        api = self.preview_api(
+            run, [{"sha": "a" * 40}], {}, [self.apply_artifact(forged)],
+            compare={"status": "diverged", "ahead_by": 1, "behind_by": 1},
+        )
+        with self.assertRaisesRegex(RiskGateError, "not contained in the history of exact main"):
             prove_preview(
-                run_id=7, digest="sha256:" + "c" * 64, pr_head="a" * 40,
-                main_sha="d" * 40, source_pr=1, allowlist=["20260814000000"], api=api,
-                downloader=lambda *_: self.fail("forged run must not download"), repo_root=Path.cwd(),
+                **self.prove_preview_args(api=api),
+                downloader=lambda *_: self.fail("forged run must not download"),
             )
 
     def test_preview_artifact_must_match_pinned_run_and_digest_before_download(self):
@@ -572,18 +773,16 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RiskGateError, "pinned digest"):
             prove_preview(
-                run_id=7, digest="sha256:" + "c" * 64, pr_head=head,
-                main_sha="b" * 40, source_pr=1, allowlist=["20260814000000"], api=api,
-                downloader=lambda *_: self.fail("wrong digest must not download"), repo_root=Path.cwd(),
+                **self.prove_preview_args(pr_head=head, main_sha="b" * 40, api=api),
+                downloader=lambda *_: self.fail("wrong digest must not download"),
             )
 
         artifact["digest"] = "sha256:" + "c" * 64
         artifact["workflow_run"] = {"id": 8}
         with self.assertRaisesRegex(RiskGateError, "another run"):
             prove_preview(
-                run_id=7, digest="sha256:" + "c" * 64, pr_head=head,
-                main_sha="b" * 40, source_pr=1, allowlist=["20260814000000"], api=api,
-                downloader=lambda *_: self.fail("wrong run must not download"), repo_root=Path.cwd(),
+                **self.prove_preview_args(pr_head=head, main_sha="b" * 40, api=api),
+                downloader=lambda *_: self.fail("wrong run must not download"),
             )
 
     def test_production_workflow_enforces_gate_twice_and_keeps_old_boundary(self):

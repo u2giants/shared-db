@@ -65,6 +65,10 @@ on:
         description: "Activated automatic policy only: pinned preview evidence artifact digest"
         type: string
         required: false
+      merged_preview_source_pr:
+        description: "Post-merge rehearsal only: MERGED source PR whose migrations this run applies to preview. Requires commit_sha = the current main tip."
+        type: string
+        required: false
       historical_preview_source_pr:
         description: "Preview recovery only: original merged PR that authored every allowlisted migration"
         type: string
@@ -262,8 +266,52 @@ jobs:
       # bounded set with `git worktree add --detach <sha>`, which needs the object.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ (inputs.historical_preview_source_pr != '' || inputs.historical_preview_source_pr_map != '') && inputs.commit_sha || inputs.claim_head_sha }}
+          # A post-merge rehearsal and a historical recovery both check out the
+          # exact main tip named by commit_sha. Only the ordinary pre-merge lane
+          # checks out a pull-request head.
+          ref: ${{ (inputs.merged_preview_source_pr != '' || inputs.historical_preview_source_pr != '' || inputs.historical_preview_source_pr_map != '') && inputs.commit_sha || inputs.claim_head_sha }}
           fetch-depth: 0
+      # POST-MERGE PREVIEW REHEARSAL (#1208). This is the step that makes
+      # "merge first, then rehearse on preview from merged main, then promote"
+      # executable. Its authorisation is merge-commit ancestry of the current
+      # main tip, NOT a live author claim -- the guarded merge released the claim
+      # and deleted the branch, which is precisely why the old order could never
+      # be run. Every check below fails closed and says what was missing.
+      - name: Prove the post-merge rehearsal source
+        id: merged_rehearsal
+        if: inputs.merged_preview_source_pr != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_PR: ${{ inputs.merged_preview_source_pr }}
+          MAIN_SHA: ${{ inputs.commit_sha }}
+          HISTORICAL_SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
+          HISTORICAL_SOURCE_MAP: ${{ inputs.historical_preview_source_pr_map }}
+          CLAIM_PR: ${{ inputs.claim_pr }}
+        run: |
+          set -euo pipefail
+          # TWO LANES DESCRIBING ONE RUN IS NOT A STATE THIS JOB RUNS IN.
+          if [ -n "${HISTORICAL_SOURCE_PR:-}" ] || [ -n "${HISTORICAL_SOURCE_MAP:-}" ]; then
+            echo "REFUSED: merged_preview_source_pr is a post-merge APPLY; the historical inputs are a no-write recovery. Name one." >&2
+            exit 1
+          fi
+          if [ -n "${CLAIM_PR:-}" ]; then
+            echo "REFUSED: merged_preview_source_pr replaces claim_pr. A merged pull request has no live author claim; do not name both." >&2
+            exit 1
+          fi
+          if [ -z "${MAIN_SHA:-}" ]; then
+            echo "REFUSED: a post-merge rehearsal must name commit_sha, the exact current main tip it rehearses." >&2
+            exit 1
+          fi
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$MAIN_SHA"
+          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          MERGE_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_PR}" --jq '.merge_commit_sha // ""')"
+          MERGED="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_PR}" --jq '.merged')"
+          if [ "$MERGED" != "true" ] || [ -z "$MERGE_SHA" ]; then
+            echo "REFUSED: pull request #${SOURCE_PR} is not merged. A post-merge rehearsal never runs from unmerged code." >&2
+            exit 1
+          fi
+          echo "merge_commit_sha=$MERGE_SHA" >> "$GITHUB_OUTPUT"
       - name: Prove historical preview recovery source
         if: (inputs.historical_preview_source_pr != '' || inputs.historical_preview_source_pr_map != '')
         env:
@@ -308,6 +356,9 @@ jobs:
           HISTORICAL_SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
           HISTORICAL_SOURCE_MAP: ${{ inputs.historical_preview_source_pr_map }}
           HISTORICAL_MAIN_SHA: ${{ inputs.commit_sha }}
+          MERGED_SOURCE_PR: ${{ inputs.merged_preview_source_pr }}
+          MERGED_MAIN_SHA: ${{ inputs.commit_sha }}
+          PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
         run: |
           set -euo pipefail
           # A map-authored batch has no single source PR, so the lock is claimed
@@ -322,11 +373,24 @@ jobs:
             CLAIM_PR="$HISTORICAL_SOURCE_PR"
             CLAIM_HEAD_SHA="$HISTORICAL_MAIN_SHA"
           fi
+          # A POST-MERGE REHEARSAL claims the same exclusive preview ref, so it can
+          # never run alongside an ordinary preview run, a merge or a promotion.
+          # What differs is only the AUTHORISATION: merge-commit ancestry of the
+          # main tip instead of a live author claim on a branch that no longer
+          # exists.
+          LANE_VERSIONS=()
+          if [ -n "${MERGED_SOURCE_PR:-}" ]; then
+            CLAIM_PR="$MERGED_SOURCE_PR"
+            CLAIM_HEAD_SHA="$MERGED_MAIN_SHA"
+            LANE_VERSIONS=(--versions "$PREVIEW_ALLOWLIST")
+          fi
           test -n "$CLAIM_PR"; test -n "$CLAIM_HEAD_SHA"
           LOCK_KIND=preview
           if [ -n "$HISTORICAL_SOURCE_PR" ]; then LOCK_KIND=preview-recovery; fi
+          if [ -n "${MERGED_SOURCE_PR:-}" ]; then LOCK_KIND=preview-rehearsal; fi
           node scripts/manage-migration-author-lanes.mjs --acquire-$LOCK_KIND \
             --owner "github-actions:${GITHUB_RUN_ID}" --pr "$CLAIM_PR" --head-sha "$CLAIM_HEAD_SHA" \
+            "${LANE_VERSIONS[@]}" \
             > "$RUNNER_TEMP/preview-lock.json"
           echo "owner_sha=$(jq -r .ownerSha "$RUNNER_TEMP/preview-lock.json")" >> "$GITHUB_OUTPUT"
       - name: Resolve the exact commit under test
@@ -566,6 +630,35 @@ jobs:
           print(f"- added: {', '.join(sorted(after - before)) or '(none)'}")
           print(f"- removed: {', '.join(sorted(before - after)) or '(none)'}")
           PY
+      # WHICH COMMIT, AND WHICH DATABASE. Written from the values THIS job used,
+      # travelling in the same artifact as the ledgers and apply logs, and
+      # re-checked by the production gate. Without it, a rehearsal against the
+      # DELETED preview rjyboqwcdzcocqgmsyel would still read as proof about the
+      # rebuilt one. See scripts/preview_instance_binding.py.
+      - name: Bind this rehearsal to its commit and its preview database
+        if: inputs.mode == 'apply'
+        env:
+          APPLIED_COMMIT: ${{ steps.commit.outputs.sha }}
+          PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
+          MERGED_SOURCE_PR: ${{ inputs.merged_preview_source_pr }}
+          MERGE_COMMIT_SHA: ${{ steps.merged_rehearsal.outputs.merge_commit_sha }}
+          HISTORICAL_SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
+          HISTORICAL_SOURCE_MAP: ${{ inputs.historical_preview_source_pr_map }}
+        run: |
+          set -euo pipefail
+          MODE=claim
+          if [ -n "${MERGED_SOURCE_PR:-}" ]; then MODE=merged-main-rehearsal; fi
+          if [ -n "${HISTORICAL_SOURCE_PR:-}" ] || [ -n "${HISTORICAL_SOURCE_MAP:-}" ]; then MODE=historical-recovery; fi
+          python scripts/preview_instance_binding.py \
+            --applied-commit "$APPLIED_COMMIT" \
+            --preview-project-ref "$PREVIEW_PROJECT_REF" \
+            --production-project-ref "$PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE" \
+            --run-id "$GITHUB_RUN_ID" \
+            --allowlist "$PREVIEW_ALLOWLIST" \
+            --rehearsal-mode "$MODE" \
+            --source-pr "${MERGED_SOURCE_PR:-}" \
+            --merge-commit-sha "${MERGE_COMMIT_SHA:-}" \
+            --output "$RUNNER_TEMP/preview-instance.json"
       - name: Save preview evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -576,6 +669,7 @@ jobs:
             ${{ runner.temp }}/preview-dry-run.txt
             ${{ runner.temp }}/preview-apply.txt
             ${{ runner.temp }}/preview-ledger-after.txt
+            ${{ runner.temp }}/preview-instance.json
             ${{ runner.temp }}/bounded-preview/supabase/migration-content-manifest.json
             ${{ runner.temp }}/historical-preview-source.json
           if-no-files-found: warn
@@ -585,6 +679,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           OWNER_SHA: ${{ steps.preview_lock.outputs.owner_sha }}
+        # Every preview lane kind writes the SAME ref, so one release covers all
+        # three. Named --release-preview because that is the ref's name.
         run: node scripts/manage-migration-author-lanes.mjs --release-preview --owner-sha "$OWNER_SHA"
 
   # ISSUE #646: this job deliberately has NO `environment:`.
@@ -820,6 +916,10 @@ jobs:
           REVIEW_ARTIFACT_DIGEST: ${{ inputs.review_artifact_digest }}
           PREVIEW_RUN_ID: ${{ inputs.preview_run_id }}
           PREVIEW_ARTIFACT_DIGEST: ${{ inputs.preview_artifact_digest }}
+          # CONFIGURED, never a literal. The production gate must know which
+          # preview database the rehearsal was allowed to run against, and the
+          # answer changes whenever preview is rebuilt.
+          PREVIEW_PROJECT_REF: ${{ vars.PREVIEW_PROJECT_REF }}
           OWNER_DECISION_RUN_ID: ${{ inputs.owner_decision_run_id }}
           OWNER_DECISION_ARTIFACT_DIGEST: ${{ inputs.owner_decision_artifact_digest }}
         run: |
@@ -827,11 +927,16 @@ jobs:
           test -n "$SOURCE_PR"
           test -n "$PREVIEW_RUN_ID"
           test -n "$PREVIEW_ARTIFACT_DIGEST"
+          if [ -z "${PREVIEW_PROJECT_REF// /}" ]; then
+            echo "REFUSED: repository variable PREVIEW_PROJECT_REF is not set. The production gate cannot check which preview database the rehearsal ran against, and an unset ref is never treated as a default." >&2
+            exit 1
+          fi
           python scripts/production_business_risk_gate.py \
             --main-sha "$REQUESTED_SHA" --allowlist "$PRODUCTION_ALLOWLIST" \
             --pr "$SOURCE_PR" --review-run-id "$REVIEW_RUN_ID" \
             --review-digest "$REVIEW_ARTIFACT_DIGEST" \
             --preview-run-id "$PREVIEW_RUN_ID" --preview-digest "$PREVIEW_ARTIFACT_DIGEST" \
+            --preview-project-ref "$PREVIEW_PROJECT_REF" \
             --owner-decision-run-id "$OWNER_DECISION_RUN_ID" \
             --owner-decision-digest "$OWNER_DECISION_ARTIFACT_DIGEST" \
             | tee "$RUNNER_TEMP/production-business-risk-evidence.json"
@@ -926,6 +1031,10 @@ jobs:
           REVIEW_ARTIFACT_DIGEST: ${{ inputs.review_artifact_digest }}
           PREVIEW_RUN_ID: ${{ inputs.preview_run_id }}
           PREVIEW_ARTIFACT_DIGEST: ${{ inputs.preview_artifact_digest }}
+          # CONFIGURED, never a literal. The production gate must know which
+          # preview database the rehearsal was allowed to run against, and the
+          # answer changes whenever preview is rebuilt.
+          PREVIEW_PROJECT_REF: ${{ vars.PREVIEW_PROJECT_REF }}
           OWNER_DECISION_RUN_ID: ${{ inputs.owner_decision_run_id }}
           OWNER_DECISION_ARTIFACT_DIGEST: ${{ inputs.owner_decision_artifact_digest }}
         run: |
@@ -933,11 +1042,16 @@ jobs:
           test -n "$SOURCE_PR"
           test -n "$PREVIEW_RUN_ID"
           test -n "$PREVIEW_ARTIFACT_DIGEST"
+          if [ -z "${PREVIEW_PROJECT_REF// /}" ]; then
+            echo "REFUSED: repository variable PREVIEW_PROJECT_REF is not set. The production gate cannot check which preview database the rehearsal ran against, and an unset ref is never treated as a default." >&2
+            exit 1
+          fi
           python scripts/production_business_risk_gate.py \
             --main-sha "$REQUESTED_SHA" --allowlist "$PRODUCTION_ALLOWLIST" \
             --pr "$SOURCE_PR" --review-run-id "$REVIEW_RUN_ID" \
             --review-digest "$REVIEW_ARTIFACT_DIGEST" \
             --preview-run-id "$PREVIEW_RUN_ID" --preview-digest "$PREVIEW_ARTIFACT_DIGEST" \
+            --preview-project-ref "$PREVIEW_PROJECT_REF" \
             --owner-decision-run-id "$OWNER_DECISION_RUN_ID" \
             --owner-decision-digest "$OWNER_DECISION_ARTIFACT_DIGEST" \
             | tee "$RUNNER_TEMP/production-business-risk-evidence.json"
