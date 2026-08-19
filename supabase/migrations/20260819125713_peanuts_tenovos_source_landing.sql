@@ -1,9 +1,9 @@
 -- =====================================================================================
 -- Peanuts (Tenovos) -- source landing schema (release 1).
 --
--- Migration: 20260819112505_peanuts_tenovos_source_landing.sql
+-- Migration: 20260819125713_peanuts_tenovos_source_landing.sql
 -- Issue:     u2giants/shared-db #1217 (schema contract)
--- Claim:     u2giants/shared-db #1231, reserved version 20260819112505
+-- Claim:     u2giants/shared-db #1231, reserved version 20260819125713
 --
 -- SCHEMA ONLY. THIS MIGRATION LOADS NO DATA AND CONTAINS NO PEANUTS VALUES.
 -- -------------------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 -- =====================================================================================
--- Peanuts (Tenovos) landing contract tests -- migration 20260819112505, issue #1217,
+-- Peanuts (Tenovos) landing contract tests -- migration 20260819125713, issue #1217,
 -- claim #1231.
 --
 -- HOW TO RUN
