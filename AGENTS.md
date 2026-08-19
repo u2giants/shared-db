@@ -1701,6 +1701,29 @@ counts, flash cards, 2019–2020), *not* a mis-keyed `EH001`. Never "correct" it
 **573 item references** between them. Deleting them on sight is the mistake this section exists
 to prevent.
 
+**OWNER CONFIRMATION (Albert Hazan, in chat, 2026-08-19).** Verbatim: *"Coldlion has the
+correct data. We only have 4 divisions: cw001, ep001, eh001, sp001. And ep001 has been retired
+and will not be used in our systems."*
+
+Three things this settles for good:
+
+1. **ColdLion is authoritative for division, full stop.** Not `div_code_fk`, not a mapping
+   table, not the DesignFlow id space. This confirms the 2026-08-18 ruling above rather than
+   changing it.
+2. **The division list is CLOSED at four codes** — `CW001`, `EP001`, `EH001`, `SP001`. A
+   division value outside that set is a data defect, not a new division. Do not add one
+   without a fresh owner ruling.
+3. **`EP001` is retired and will NOT be used going forward.** It stays a real historical
+   division (the 2019–2020 book/education line) and must never be "corrected" to `EH001`,
+   but nothing new lands in it. New or backfilled rows must not be assigned `EP001`; a
+   pipeline that would assign it is producing a wrong answer and must fail loudly rather than
+   write it. Historical `EP001` rows stay exactly as they are — this is not licence to
+   rewrite or delete them.
+
+**No further questions are owed to Uma on division codes.** Her 2026-08-13 and 2026-08-17
+answers plus this confirmation cover the ground; issue #903 (the unsent 8-question briefing)
+is closed as superseded.
+
 ### 6.2 Coldlion `/vendors` — wrong table, now FIXED upstream (2026-07-22)
 
 `core.factory` = **merchandise vendors (factories)**. Coldlion's `/vendors` endpoint was returning a
