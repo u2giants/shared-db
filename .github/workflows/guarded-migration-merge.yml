@@ -34,7 +34,33 @@ jobs:
         with:
           node-version: 22
       - name: Install coordination guard tools
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
+        run: |
+          set -euo pipefail
+
+          # Same hosted-runner apt stall that cost five whole job budgets on
+          # 2026-08-19 (issue #1261, AGENTS.md 5.2-A). Prove the tool first, bound
+          # every apt command with `timeout`, retry with backoff, and if ripgrep
+          # still cannot be had, fail FAST and BY NAME so an infrastructure stall is
+          # never mistaken for a guard verdict on the change under review.
+          if command -v rg >/dev/null 2>&1 && rg --version; then
+            echo "ripgrep already present on the runner image; no apt install needed."
+            exit 0
+          fi
+
+          attempts=3
+          for i in $(seq 1 "$attempts"); do
+            if timeout 120 sudo apt-get update               && timeout 180 sudo apt-get install -y --no-install-recommends ripgrep; then
+              if command -v rg >/dev/null 2>&1 && rg --version; then
+                echo "ripgrep installed and proved working on attempt ${i}."
+                exit 0
+              fi
+            fi
+            echo "::warning::ripgrep install attempt ${i} of ${attempts} failed or timed out."
+            sleep $(( i * 15 ))
+          done
+
+          echo "::error::CI INFRASTRUCTURE: ripgrep unavailable after ${attempts} attempts (apt mirror stall on the hosted runner -- NOT a fault in the change under review); NO GUARD WAS EXECUTED"
+          exit 1
       - name: Require current main and rerun every coordination guard
         env:
           GH_TOKEN: ${{ github.token }}
