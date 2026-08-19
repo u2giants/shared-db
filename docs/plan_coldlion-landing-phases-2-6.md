@@ -20,6 +20,10 @@
 
 **A fresh session starts at step 1.** Steps 2-6 are independent of each other once step 1 is done.
 
+**Owner's priority, 2026-08-19: build these tables next** (steps 1-6). The two other candidate jobs
+were weighed and deliberately not chosen first — see §13 open question 9 for the one that is still
+actively losing data, which the owner has seen and has not scheduled.
+
 ---
 
 # Part 1 — Why
@@ -201,6 +205,10 @@ Re-derive any of them with the method in §12.
 | D7 | No image bytes, ever | Albert, 2026-08-18 (#1202) |
 | D8 | Versioning is **forward-only**; retention keeps the 3 most recent versions | Albert, 2026-08-18 (#1202) |
 | D9 | History depth 2019-01-01 to today, one 7-day grid anchored at that date | Albert, 2026-08-18 (#1202) |
+| D10 | **`change_log` keeps the full payload, but only for rows that actually changed.** This is the agreed reconciliation of D5 with the already-shipped phase 1 spine: no per-row archive on feed tables, but a change *is* worth its evidence. Most master rows never change, so the volume stays small | Albert, 2026-08-19 |
+| D11 | **Exclude retired division `EP001`.** Filter it at the loader on every feed | Albert, 2026-08-19 |
+| D12 | **Colour and size stay out of `item_detail`** — reaffirmed after the consequence was spelled out. *"We don't make clothing."* Key on `item_pkey` | Albert, 2026-08-19 |
+| D13 | **`orderHistory.lineCancelledQty` is `ingest`**, reversing the CSV's original `ignore`. The 0.8% fill it was dropped on came from too small a window; wider samples give 11.5% and 24% | Albert, 2026-08-19 |
 
 **OPEN — your judgment; record the reasoning in the migration comment.**
 
@@ -314,6 +322,10 @@ product types, matching `core."merchGroup"` today.
 > ignored and no raw archive (D5), the landing layer cannot answer "what colour and size is this
 > SKU". That is an accepted loss flowing from D4 plus D5, not an oversight. If it later proves
 > wrong, recovery is a re-pull of `/itemDetails`, which is cheap — it is a master feed, not history.
+>
+> **Reaffirmed by the owner on 2026-08-19 after that consequence was put to him explicitly:** colour
+> and size stay out (D12). POP does not make clothing, so a SKU's colour/size axis carries little
+> business meaning here. Do not reopen this.
 
 - **The three-part item key is the whole point of this step** (finding 3). `CW001` contains items
   literally numbered `01`. A two-part key silently overwrites.
@@ -365,6 +377,10 @@ is the old bug reappearing.
   A re-pulled window returning changed data must land as a new version (D8 keeps the 3 most recent),
   and a plain identity-unique constraint would reject it. The D8 prune is a separate provable job
   that must never delete the newest version.
+- `lineCancelledQty` is **in** (D13). It was originally marked ignore on a 0.8% fill figure measured
+  on too small a window; wider samples give 11.5% and 24%. Under D5 that drop would have been
+  permanent. Treat this as the worked example of why a low fill percentage is not, by itself, a
+  reason to discard a field.
 - **31 fields** after D2 removed the 12 line-level merch-group fields. Component `subMerchGroup*`
   fields are KEPT — see the D2 warning in §8. Keep `brandAssuranceNo` (finding 5).
 - Non-prepack lines: one line row plus a single component row keyed on `item_no`.
@@ -437,7 +453,7 @@ this path. Confirm that is still current before building.
 | **No paging** on the two history endpoints; `page`/`size` silently ignored | A paging loop re-fetches forever |
 | Branch on the **wire** HTTP status, never the body's `status` | A refusal is HTTP 400 with `"status": 500` in the body |
 | One request at a time, 2-3 second pause, 60s+ timeout | Rate limiting |
-| `companyCode=EDGEHOME` returns **four** divisions incl. retired `EP001` | A short window showing one division is misleading |
+| `companyCode=EDGEHOME` returns **four** divisions incl. retired `EP001`. **Filter `EP001` out (D11)** | A short window showing one division is misleading; and retired-division rows must never land |
 | `orderHistory` accepts `divisionCode`; **`prodHistory` does not** | No such parameter |
 | Backfill and ongoing sync are **separate code paths** (D8) | The backfill writes no `change_log` rows |
 
@@ -557,17 +573,18 @@ The existing suite must stay green — that is what CI runs on the PR.
 2. **Line identity on pickticket/receiving** (phase 6, not this plan) must be confirmed against a
    live pull; with no line identity, key on `source_hash` and document that in the table comment
    rather than hiding it.
-3. **The four-division question.** `companyCode=EDGEHOME` returns retired `EP001` as well as the
-   three live divisions. Decide per table whether to land `EP001` rows or filter them. Landing them
-   is the safer default for a raw layer; filtering is a judgment that belongs in promotion.
-4. **What goes in `change_log.new_raw`?** Phase 1 shipped it `NOT NULL jsonb` with
-   `new_source_hash` defined as the hash of the complete payload. D5 says no raw archive. These are
-   not reconciled and the migration is already applied, so it cannot be edited. Decide deliberately:
-   store the full fetched payload there (a raw archive of *changes only*, which is arguably within
-   D5's spirit since it is evidence of a change rather than a per-row archive), or author a
-   follow-on migration to drop the two `*_raw` columns. **Do not put `'{}'` in to satisfy the
-   constraint** — that turns the evidence column into fiction. History tables write no `change_log`
-   rows, so this affects master feeds only.
+3. ~~The four-division question.~~ **CLOSED by D11 — exclude `EP001`.** Filter it at the loader,
+   not in a view, so the rows never land. Note this is a deliberate departure from "a raw layer
+   lands everything": the owner does not want retired-division data in the new tables. Consequence
+   to state in the migration comment: totals from these tables will NOT tie out to a ColdLion report
+   run across all four divisions. That is expected, not a loading bug.
+4. ~~What goes in `change_log.new_raw`?~~ **CLOSED by D10 — write the complete fetched payload.**
+   `change_log` rows are written only when `source_hash` changes, so this is not a per-row archive
+   and does not conflict with D5. Do **not** author a migration to drop `previous_raw` / `new_raw`,
+   and never insert `'{}'` to satisfy the NOT NULL constraint. Hash and payload must describe the
+   same thing: compute `source_hash` over the complete fetched record before projection, and store
+   that same complete record in `new_raw`. History tables write no `change_log` rows at all, so D5
+   remains fully in force there — an `ignore` decision on the history feeds is still permanent.
 5. **Does `merchGroupDetails.active` exist?** The owner's live sample says yes, 100% filled. The API
    reference says the payload has no active flag anywhere. The reference is dated 2026-07-23 and is
    probably stale, but step 2's verification query depends on the column. Confirm against the live
@@ -602,6 +619,34 @@ that the goal wins over any conflicting step. Each step in §9 states the intent
 so a slightly wrong step can still be implemented correctly — step 3's gate even names the specific
 wrong answer (a total near 17,703) that indicates the old bug has returned.
 
-**Gap found and fixed during the audit:** the first draft did not say where the loaders should run.
+9. **The broken item sync is still broken.** `public.erp_items_*` has been failing with `403` since
+   2026-05-21 and is out of scope here (§4). It is the only one of the three candidate jobs that is
+   actively losing data every day. The owner has seen this and chose to build the tables first; it
+   is recorded here so the next session does not assume it was forgotten. Raise it again if this
+   plan runs long.
+10. **Two `orderHistory` quantity fields read zero on every row ever sampled** — `lineInvoiceQty`
+    and `lineOpenQty`, 374 of 374 lines in one 2024 window and 5,874 of 5,874 in the earlier census.
+    A question has been drafted for ColdLion. Until they answer, **never build a report on
+    "invoiced" or "open" quantity from this feed** — it would silently read zero for everything.
+
+## Self-audit — second pass, 2026-08-19 (after the owner's four new decisions)
+
+Re-graded against the full checklist. All items still pass.
+
+- **13 sections:** intact; the new decisions extended §8 (D10-D13) and §13 rather than adding
+  sections.
+- **No unanswered questions for the implementer:** two open questions CLOSED (EP001, and what goes
+  in `change_log.new_raw`) — both now carry the decision *and* the consequence to write into the
+  migration comment. Two new open items added (9, 10) are explicitly flagged as *not* blocking.
+- **Locked vs open still labeled:** D10-D13 added to the locked table with dates and authority.
+- **The one thing a fresh session could still get wrong** — reopening the colour/size decision on
+  seeing that a SKU table cannot describe its own SKU — is now pre-empted in step 3 with the owner's
+  own reasoning quoted.
+
+**Gap found and fixed during this second audit:** the plan recorded the owner's priority choice
+(build tables next) but not the job he *didn't* pick, which would have read as an oversight to a
+future session. Open question 9 now states it explicitly, including that he has seen it.
+
+**Gap found and fixed during the first audit:** the first draft did not say where the loaders should run.
 Rather than invent an answer, it is now open question 1 in §13, pointing at the Option B direction
 with an instruction to confirm before building.
