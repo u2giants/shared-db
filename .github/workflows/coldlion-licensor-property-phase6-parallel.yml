@@ -74,6 +74,8 @@ env:
 jobs:
   phase6:
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 

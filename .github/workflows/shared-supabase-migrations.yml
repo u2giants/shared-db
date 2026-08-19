@@ -105,6 +105,8 @@ jobs:
   validate:
     name: SQL migration guards
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 30
     steps:
       # fetch-depth: 0 so check-sql.sh Guard B can compare this branch's
       # migration versions against the newest version on the base branch.
@@ -113,44 +115,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Install SQL check dependencies
-        run: |
-          set -euo pipefail
-
-          # Same hosted-runner apt stall that cost five whole job budgets on
-          # 2026-08-19 (issue #1261, AGENTS.md 5.2-A). Prove the tool first, bound
-          # every apt command with `timeout`, retry with backoff, and if ripgrep
-          # still cannot be had, fail FAST and BY NAME so an infrastructure stall is
-          # never mistaken for a guard verdict on the change under review.
-          if command -v rg >/dev/null 2>&1 && rg --version; then
-            echo "ripgrep already present on the runner image; no apt install needed."
-            exit 0
-          fi
-
-          attempts=3
-          for i in $(seq 1 "$attempts"); do
-            if timeout --kill-after=10 60 sudo apt-get update \
-              && timeout --kill-after=10 120 sudo apt-get install -y --no-install-recommends ripgrep; then
-              if command -v rg >/dev/null 2>&1 && rg --version; then
-                echo "ripgrep installed and proved working on attempt ${i}."
-                exit 0
-              fi
-            fi
-            echo "::warning::ripgrep install attempt ${i} of ${attempts} failed or timed out."
-            # No backoff after the LAST attempt: it would only delay the
-            # named error below by a further 30s. The worst-case budget is
-            # 3*(60+120)+10+20 = 570s, which must stay inside the TIGHTEST
-            # job ceiling that runs this block (`reconcile`, 15 minutes).
-            # Shorten the budget, never raise the ceiling -- a generic job
-            # timeout would swallow the named diagnostic exactly when it
-            # is needed, which is the whole defect of #1261.
-            if [ "$i" -lt "$attempts" ]; then
-              sleep $(( i * 10 ))
-            fi
-          done
-
-          echo "::error::CI INFRASTRUCTURE: ripgrep unavailable after ${attempts} attempts (apt mirror stall on the hosted runner -- NOT a fault in the change under review); NO GUARD WAS EXECUTED"
-          exit 1
       - name: Run SQL checks
         run: bash scripts/check-sql.sh
       - name: Test SQL migration guards
@@ -268,6 +232,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'preview'
     needs: validate
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 90
     permissions:
       contents: write
       issues: read
@@ -813,6 +779,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'production' && inputs.mode == 'dry-run'
     needs: validate
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 90
     env:
       PRODUCTION_PROJECT_REF: qsllyeztdwjgirsysgai
     steps:
@@ -985,6 +953,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'production' && inputs.mode == 'apply'
     needs: validate
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 90
     permissions:
       contents: read
       actions: read
@@ -1159,6 +1129,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'production' && inputs.mode == 'apply'
     needs: [validate, production-apply-review]
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 90
     permissions:
       contents: write
       actions: read

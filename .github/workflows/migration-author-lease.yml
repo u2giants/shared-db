@@ -14,6 +14,8 @@ jobs:
   verify:
     name: Migration author lease
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
