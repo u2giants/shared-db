@@ -28,6 +28,15 @@
 --   statement and not looking. A test that passes through an unasserted condition is a
 --   defect, not a test.
 --
+--   AND EVERY REJECTION IS PINNED TO THE THING THAT DID THE REJECTING -- a constraint
+--   NAME from `get stacked diagnostics ... = constraint_name`, or, for a function that
+--   raises, `when raise_exception` plus a match on the message. A bare
+--   `when check_violation` / `when unique_violation` / `when foreign_key_violation` /
+--   `when others` passes when ANY constraint on the row fires, or when the statement has
+--   a typo, so it stays green after the constraint under test is deleted. That is not a
+--   weaker test; it is a test of nothing, and a green CI line saying otherwise is worse
+--   than no test at all.
+--
 --   Section B is the one to read first. Immutability in this design is delivered by
 --   GRANTS, not by a trigger and not by RLS -- service_role carries BYPASSRLS, so an
 --   RLS-only guard would admit every write. B inspects the catalog AND then actually
@@ -93,6 +102,40 @@ begin
      and (column_name ~ '(media_bytes|base64|download_path|file_path|local_path|blob)');
   if v_n <> 0 then
     v_fail := v_fail + 1; raise warning 'FAIL % media/download column(s) exist', v_n;
+  else v_pass := v_pass + 1; end if;
+
+  -- ALL THREE RECONSTRUCTED TABLES CARRY THE PIN. The migration header says every one of
+  -- them does, and a reader identifies portal-declared tables by the ABSENCE of this
+  -- column -- so an unpinned alias table would read as portal vocabulary.
+  select count(*) into v_n from information_schema.columns
+   where table_schema = 'plm'
+     and table_name in ('wildbrain_guide','wildbrain_guide_alias','wildbrain_asset_guide')
+     and column_name = 'relationship_truth';
+  if v_n <> 3 then
+    v_fail := v_fail + 1;
+    raise warning 'FAIL expected relationship_truth on all 3 reconstructed tables, found %', v_n;
+  else v_pass := v_pass + 1; end if;
+
+  select count(*) into v_n from pg_constraint
+   where conrelid in ('plm.wildbrain_guide'::regclass, 'plm.wildbrain_guide_alias'::regclass,
+                      'plm.wildbrain_asset_guide'::regclass)
+     and contype = 'c'
+     and conname in ('wildbrain_guide_truth_chk','wildbrain_guide_alias_truth_chk',
+                     'wildbrain_asset_guide_truth_chk');
+  if v_n <> 3 then
+    v_fail := v_fail + 1;
+    raise warning 'FAIL expected 3 relationship_truth CHECK pins on the reconstructed tables, found %', v_n;
+  else v_pass := v_pass + 1; end if;
+
+  -- ONE ROOT PER CAPTURE is a partial unique INDEX, not a table constraint -- Postgres
+  -- cannot put a WHERE clause on one -- so it is asserted from pg_index, not pg_constraint.
+  select count(*) into v_n from pg_index i
+    join pg_class c on c.oid = i.indexrelid
+   where c.relname = 'wildbrain_era_one_root_per_capture_uk'
+     and i.indisunique and i.indpred is not null;
+  if v_n <> 1 then
+    v_fail := v_fail + 1;
+    raise warning 'FAIL the one-root-per-capture partial unique index is missing (found %)', v_n;
   else v_pass := v_pass + 1; end if;
 
   raise notice 'A: % passed / % failed', v_pass, v_fail;
@@ -363,6 +406,7 @@ declare
   v_is_root_rejected     boolean := false;
   v_orphan_rejected      boolean := false;
   v_cross_capture_rejected boolean := false;
+  v_second_root_rejected boolean := false;
   v_msg text;
 begin
   raise notice '=== C. ERA HIERARCHY ===';
@@ -400,7 +444,11 @@ begin
             'zztest era orphan', false, '{}'::jsonb);
     set constraints all immediate;
   exception when foreign_key_violation then
-    v_orphan_rejected := true;
+    -- Pinned to the constraint by NAME. A bare `when foreign_key_violation` would also be
+    -- satisfied by the capture FK firing, which would prove nothing about the era parent
+    -- link, and would stay green if this constraint were deleted.
+    get stacked diagnostics v_msg = constraint_name;
+    if v_msg = 'wildbrain_era_parent_fk' then v_orphan_rejected := true; end if;
   end;
   set constraints all deferred;
 
@@ -414,14 +462,31 @@ begin
             'zztest era foreign', false, '{}'::jsonb);
     set constraints all immediate;
   exception when foreign_key_violation then
-    v_cross_capture_rejected := true;
+    get stacked diagnostics v_msg = constraint_name;
+    if v_msg = 'wildbrain_era_parent_fk' then v_cross_capture_rejected := true; end if;
   end;
   set constraints all deferred;
 
+  -- C4b. A SECOND ROOT MUST NOT LAND. Capture A already has ZZTEST-ERA-ROOT. Nothing else
+  -- in this schema stops a second one: it has a null parent, so the self-parent CHECK,
+  -- the is_root CHECK and the composite FK all pass, and it adds one to the era count
+  -- that expected_counts would simply be written to match. Two roots means two trees --
+  -- either an unlicensed one leaked into the crawl or a parent link was lost.
+  begin
+    insert into plm.wildbrain_era
+      (capture_id, era_source_id, parent_era_source_id, era_label, normalized_era_label, is_root, raw)
+    values (v_cap, 'ZZTEST-ERA-ROOT-2', null, 'ZZTEST Era Root Two', 'zztest era root two',
+            true, '{}'::jsonb);
+  exception when unique_violation then
+    get stacked diagnostics v_msg = constraint_name;
+    if v_msg = 'wildbrain_era_one_root_per_capture_uk' then v_second_root_rejected := true; end if;
+  end;
+
   if not v_self_parent_rejected then raise exception 'C1 FAILED: an era was allowed to parent itself'; end if;
   if not v_is_root_rejected then raise exception 'C2 FAILED: is_root was allowed to disagree with the parent link'; end if;
-  if not v_orphan_rejected then raise exception 'C3 FAILED: an era with an unresolved parent was accepted'; end if;
-  if not v_cross_capture_rejected then raise exception 'C4 FAILED: an era referenced a parent in another capture'; end if;
+  if not v_orphan_rejected then raise exception 'C3 FAILED: an era with an unresolved parent was accepted, or a DIFFERENT foreign key fired -- wildbrain_era_parent_fk was not what refused it'; end if;
+  if not v_cross_capture_rejected then raise exception 'C4 FAILED: an era referenced a parent in another capture, or a DIFFERENT foreign key fired'; end if;
+  if not v_second_root_rejected then raise exception 'C4b FAILED: a SECOND root era landed in a capture -- wildbrain_era_one_root_per_capture_uk did not refuse it'; end if;
 
   -- C5. And the VALID shape must still be accepted -- a rejection test proves nothing if
   -- the constraint rejects everything.
@@ -432,7 +497,7 @@ begin
   set constraints all immediate;
   set constraints all deferred;
 
-  raise notice 'C: era hierarchy holds (self-parent, is_root, orphan, cross-capture all rejected; valid child accepted).';
+  raise notice 'C: era hierarchy holds (self-parent, is_root, orphan, cross-capture and second root all rejected BY NAME; valid child accepted).';
 end;
 $$;
 
@@ -449,6 +514,7 @@ declare
   v_zero_alias_rejected      boolean := false;
   v_unknown_alias_rejected   boolean := false;
   v_dup_asset_uuid_rejected  boolean := false;
+  v_declared_alias_rejected  boolean := false;
   v_msg text;
 begin
   raise notice '=== D. DEDUPLICATION AND UNIQUENESS ===';
@@ -483,7 +549,11 @@ begin
     values (v_cap, 'zztest guide alpha', 'ZZTEST GUIDE ALPHA', 'ZZTEST Guide Alpha',
             'zztest-rules-v1', '{}'::jsonb);
   exception when unique_violation then
-    v_dup_guide_label_rejected := true;
+    -- Pinned by name: the collapse happens on the PRIMARY KEY, because the case variant
+    -- derives the same guide_key. A bare `when unique_violation` would also be satisfied
+    -- by the normalized-label unique constraint firing, which is a different guarantee.
+    get stacked diagnostics v_msg = constraint_name;
+    if v_msg = 'wildbrain_guide_pkey' then v_dup_guide_label_rejected := true; end if;
   end;
 
   if not exists (
@@ -537,7 +607,21 @@ begin
       (capture_id, asset_source_id, guide_key, alias_label, raw)
     values (v_cap, 'ZZTEST-ASSET-1', 'zztest guide beta', 'ZZTEST Spelling Nobody Used', '{}'::jsonb);
   exception when foreign_key_violation then
-    v_unknown_alias_rejected := true;
+    -- Pinned: this row also touches the asset FK and the guide FK, and either of those
+    -- firing would satisfy a bare handler while proving nothing about the alias binding.
+    get stacked diagnostics v_msg = constraint_name;
+    if v_msg = 'wildbrain_asset_guide_alias_fk' then v_unknown_alias_rejected := true; end if;
+  end;
+
+  -- D5b. AN ALIAS ROW IS RECONSTRUCTED, NEVER PORTAL VOCABULARY. This table has the same
+  -- shape as a portal dictionary, so the pin is the only thing that says otherwise.
+  begin
+    insert into plm.wildbrain_guide_alias
+      (capture_id, guide_key, alias_label, asset_count, relationship_truth, raw)
+    values (v_cap, 'zztest guide alpha', 'ZZTEST Guide Alpha Declared', 1, 'declared', '{}'::jsonb);
+  exception when check_violation then
+    get stacked diagnostics v_msg = constraint_name;
+    if v_msg = 'wildbrain_guide_alias_truth_chk' then v_declared_alias_rejected := true; end if;
   end;
 
   -- D6. asset_uuid is unique within a capture.
@@ -548,16 +632,18 @@ begin
     values (v_cap, 'ZZTEST-ASSET-2', 'zztest-uuid-0001', 'ZZTEST Asset Two', 'ZZTEST-ERA-CHILD',
             'ZZTEST Universe', repeat('f', 64), '{}'::jsonb);
   exception when unique_violation then
-    v_dup_asset_uuid_rejected := true;
+    get stacked diagnostics v_msg = constraint_name;
+    if v_msg = 'wildbrain_asset_uuid_uk' then v_dup_asset_uuid_rejected := true; end if;
   end;
 
-  if not v_dup_guide_label_rejected then raise exception 'D2 FAILED: a case variant of an existing guide landed as a SECOND guide instead of collapsing'; end if;
+  if not v_dup_guide_label_rejected then raise exception 'D2 FAILED: a case variant of an existing guide landed as a SECOND guide instead of collapsing on wildbrain_guide_pkey'; end if;
   if not v_bad_guide_key_rejected then raise exception 'D3 FAILED: a guide_key that is not the normalization of its label was accepted'; end if;
   if not v_zero_alias_rejected then raise exception 'D4 FAILED: a guide alias with asset_count 0 was accepted'; end if;
-  if not v_unknown_alias_rejected then raise exception 'D5 FAILED: an asset-guide row cited an unknown alias'; end if;
+  if not v_unknown_alias_rejected then raise exception 'D5 FAILED: an asset-guide row cited an unknown alias, or a DIFFERENT foreign key fired -- wildbrain_asset_guide_alias_fk was not what refused it'; end if;
+  if not v_declared_alias_rejected then raise exception 'D5b FAILED: a guide alias was allowed to claim relationship_truth = declared -- reconstructed alias rows would be indistinguishable from portal vocabulary'; end if;
   if not v_dup_asset_uuid_rejected then raise exception 'D6 FAILED: a duplicate asset_uuid was accepted'; end if;
 
-  raise notice 'D: deduplication and uniqueness hold.';
+  raise notice 'D: deduplication and uniqueness hold, each rejection pinned to its named constraint.';
 end;
 $$;
 
@@ -571,6 +657,7 @@ declare
   v_cap uuid;
   v_n integer;
   v_truth_rejected boolean := false;
+  v_msg text;
 begin
   raise notice '=== E. CHARACTER IDENTITY ===';
   select id into strict v_cap from plm.wildbrain_capture where capture_key = 'zztest-wildbrain:A';
@@ -619,12 +706,16 @@ begin
       (capture_id, asset_source_id, character_source_id, relationship_truth, raw)
     values (v_cap, 'ZZTEST-ASSET-1', '900003', 'inferred', '{}'::jsonb);
   exception
-    when check_violation then v_truth_rejected := true;
+    when check_violation then
+      -- Pinned: this row has several CHECKs on it, and only ONE of them is the guarantee
+      -- under test.
+      get stacked diagnostics v_msg = constraint_name;
+      if v_msg = 'wildbrain_asset_character_truth_chk' then v_truth_rejected := true; end if;
     when foreign_key_violation then
       raise exception 'E3 INCONCLUSIVE: the FK fired before the relationship_truth check could';
   end;
   if not v_truth_rejected then
-    raise exception 'E3 FAILED: an inferred link was stored in the portal-declared table';
+    raise exception 'E3 FAILED: an inferred link was stored in the portal-declared table, or a DIFFERENT check fired -- wildbrain_asset_character_truth_chk was not what refused it';
   end if;
 
   raise notice 'E: character identity is the numeric id; out-of-dictionary characters are accepted.';
@@ -854,6 +945,7 @@ declare
   v_cap uuid;
   v_reopen_refused boolean := false;
   v_same uuid;
+  v_msg text;
 begin
   raise notice '=== F5. TERMINAL AND COMPLETE CAPTURES ARE NOT RE-OPENED ===';
   select id into strict v_cap from plm.wildbrain_capture where capture_key = 'zztest-wildbrain:C';
@@ -871,11 +963,17 @@ begin
       p_created_by             => 'zztest',
       p_pagination_verified    => true
     );
-  exception when others then
-    v_reopen_refused := true;
+  -- `when raise_exception` (SQLSTATE P0001), not `when others`, AND the message is
+  -- matched: `when others` would also swallow a typo, an undefined function or a wrong
+  -- argument type and report all of them as a passing test.
+  exception when raise_exception then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg like '%start a NEW capture rather than reusing it%' then
+      v_reopen_refused := true;
+    end if;
   end;
   if not v_reopen_refused then
-    raise exception 'F5 FAILED: a rejected capture was re-opened';
+    raise exception 'F5 FAILED: a rejected capture was re-opened, or it failed for some OTHER reason than the terminal-status refusal';
   end if;
 
   -- The complete one returns its own id, unchanged, and stays complete.
@@ -910,6 +1008,7 @@ do $$
 declare
   v_manifest_refused boolean := false;
   v_commit_refused   boolean := false;
+  v_msg text;
 begin
   raise notice '=== F6. SAME KEY, DIFFERENT BYTES, IS REFUSED ===';
   begin
@@ -923,7 +1022,9 @@ begin
       p_expected_counts        => '{"eras":1}'::jsonb,
       p_raw_summary            => '{"fixture":true}'::jsonb,
       p_created_by             => 'zztest');
-  exception when others then v_manifest_refused := true;
+  exception when raise_exception then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg like '%DIFFERENT source manifest hash%' then v_manifest_refused := true; end if;
   end;
 
   begin
@@ -937,11 +1038,13 @@ begin
       p_expected_counts        => '{"eras":1}'::jsonb,
       p_raw_summary            => '{"fixture":true}'::jsonb,
       p_created_by             => 'zztest');
-  exception when others then v_commit_refused := true;
+  exception when raise_exception then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg like '%DIFFERENT source commit sha%' then v_commit_refused := true; end if;
   end;
 
-  if not v_manifest_refused then raise exception 'F6 FAILED: a differing source manifest was accepted under an existing capture key'; end if;
-  if not v_commit_refused then raise exception 'F6 FAILED: a differing source commit was accepted under an existing capture key'; end if;
+  if not v_manifest_refused then raise exception 'F6 FAILED: a differing source manifest was accepted under an existing capture key, or the refusal was not the manifest-mismatch one'; end if;
+  if not v_commit_refused then raise exception 'F6 FAILED: a differing source commit was accepted under an existing capture key, or the refusal was not the commit-mismatch one'; end if;
   raise notice 'F6: a same-key capture with different bytes is refused.';
 end;
 $$;
@@ -952,20 +1055,31 @@ declare
   v_bad_sha boolean := false;
   v_bad_manifest boolean := false;
   v_media boolean := false;
+  v_null_count boolean := false;
+  v_neg_count boolean := false;
+  v_msg text;
 begin
   raise notice '=== F7. begin_ ARGUMENT VALIDATION ===';
   begin
     perform plm.begin_wildbrain_capture('zztest-wildbrain:F', 'u2giants/zztest-fixture',
       'NOTASHA', repeat('2', 64), 'https://zztest.example.invalid/',
       timestamptz '2026-06-01 00:00:00+00', '{"eras":0}'::jsonb, '{}'::jsonb, 'zztest');
-  exception when others then v_bad_sha := true;
+  exception when raise_exception then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg like '%source_commit_sha must be a 40-character lowercase hex sha%' then
+      v_bad_sha := true;
+    end if;
   end;
 
   begin
     perform plm.begin_wildbrain_capture('zztest-wildbrain:G', 'u2giants/zztest-fixture',
       repeat('1', 40), 'NOTAMANIFEST', 'https://zztest.example.invalid/',
       timestamptz '2026-06-01 00:00:00+00', '{"eras":0}'::jsonb, '{}'::jsonb, 'zztest');
-  exception when others then v_bad_manifest := true;
+  exception when raise_exception then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg like '%source_manifest_sha256 must be a 64-character lowercase hex sha%' then
+      v_bad_manifest := true;
+    end if;
   end;
 
   begin
@@ -973,13 +1087,219 @@ begin
       repeat('1', 40), repeat('2', 64), 'https://zztest.example.invalid/',
       timestamptz '2026-06-01 00:00:00+00', '{"eras":0}'::jsonb, '{}'::jsonb, 'zztest',
       true, null, 1);
-  exception when others then v_media := true;
+  exception when raise_exception then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg like '%media_downloaded must be 0%' then v_media := true; end if;
   end;
 
-  if not v_bad_sha then raise exception 'F7 FAILED: a malformed source commit sha was accepted'; end if;
-  if not v_bad_manifest then raise exception 'F7 FAILED: a malformed manifest sha256 was accepted'; end if;
-  if not v_media then raise exception 'F7 FAILED: a nonzero media_downloaded was accepted'; end if;
-  raise notice 'F7: begin_ rejects malformed shas and any media download.';
+  -- F7d. A JSON `null` EXPECTED COUNT IS REFUSED AT THE DOOR. This is the exact object a
+  -- loader builds from jsonb_build_object('assets', v_unset_count): the key is PRESENT,
+  -- so a `?` test calls it supplied, while every comparison against it is SQL NULL and
+  -- therefore never false -- a silently skipped count check, which is how the portal's
+  -- ignored-offset pager gets a first page published as a whole capture.
+  begin
+    perform plm.begin_wildbrain_capture('zztest-wildbrain:NULLCOUNT', 'u2giants/zztest-fixture',
+      repeat('1', 40), repeat('2', 64), 'https://zztest.example.invalid/',
+      timestamptz '2026-06-01 00:00:00+00',
+      '{"eras":0,"creative_groups":0,"asset_categories":0,"asset_natures":0,"characters":0,
+        "assets":null,"asset_characters":0,"guides":0,"guide_aliases":0,
+        "asset_guides":0}'::jsonb,
+      '{}'::jsonb, 'zztest', true);
+  exception when raise_exception then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg like '%expected_counts value must be a JSON number that is a non-negative integer%' then
+      v_null_count := true;
+    end if;
+  end;
+  if exists (select 1 from plm.wildbrain_capture where capture_key = 'zztest-wildbrain:NULLCOUNT') then
+    raise exception 'F7d FAILED: a capture whose expected_counts carried a JSON null was created anyway';
+  end if;
+
+  -- F7e. ... and a fractional or negative expectation is not a count either.
+  begin
+    perform plm.begin_wildbrain_capture('zztest-wildbrain:NEGCOUNT', 'u2giants/zztest-fixture',
+      repeat('1', 40), repeat('2', 64), 'https://zztest.example.invalid/',
+      timestamptz '2026-06-01 00:00:00+00', '{"eras":-1}'::jsonb, '{}'::jsonb, 'zztest', true);
+  exception when raise_exception then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg like '%expected_counts value must be a JSON number that is a non-negative integer%' then
+      v_neg_count := true;
+    end if;
+  end;
+
+  if not v_bad_sha then raise exception 'F7 FAILED: a malformed source commit sha was accepted, or the refusal named something else'; end if;
+  if not v_bad_manifest then raise exception 'F7 FAILED: a malformed manifest sha256 was accepted, or the refusal named something else'; end if;
+  if not v_media then raise exception 'F7 FAILED: a nonzero media_downloaded was accepted, or the refusal named something else'; end if;
+  if not v_null_count then raise exception 'F7d FAILED: begin_ accepted an expected_counts key whose value was JSON null -- that count would never be checked at the publication gate'; end if;
+  if not v_neg_count then raise exception 'F7e FAILED: begin_ accepted a negative expected count'; end if;
+  raise notice 'F7: begin_ rejects malformed shas, any media download, and a null or negative expected count -- each by its own named message.';
+end;
+$$;
+
+
+-- F8. THE PUBLICATION GATE ITSELF MUST REFUSE A JSON-NULL EXPECTED COUNT, not merely
+--     begin_. F7d proves the front door is shut; this proves the gate does not depend on
+--     it. The null is injected by UPDATE, as the OWNER -- deliberately going round
+--     begin_, because the whole point is that the gate re-reads the stored object rather
+--     than trusting that validation ran when the row was created. Without this the ten
+--     required keys are only nine: `?` says "assets" is supplied, v_want is SQL NULL,
+--     `v_n <> NULL` is UNKNOWN, and the assets count is never compared to anything.
+do $$
+declare
+  v_cap uuid;
+  v_status text;
+  v_err jsonb;
+begin
+  raise notice '=== F8. A JSON-NULL EXPECTED COUNT IS REJECTED AT THE GATE ===';
+  v_cap := plm.begin_wildbrain_capture(
+    p_capture_key            => 'zztest-wildbrain:N',
+    p_source_repository      => 'u2giants/zztest-fixture',
+    p_source_commit_sha      => repeat('b', 40),
+    p_source_manifest_sha256 => repeat('d', 64),
+    p_portal_base_url        => 'https://zztest.example.invalid/',
+    p_source_captured_at     => timestamptz '2026-07-01 00:00:00+00',
+    p_expected_counts        => '{"eras":0,"creative_groups":0,"asset_categories":0,
+                                  "asset_natures":0,"characters":0,"assets":0,
+                                  "asset_characters":0,"guides":0,"guide_aliases":0,
+                                  "asset_guides":0}'::jsonb,
+    p_raw_summary            => '{"fixture":true}'::jsonb,
+    p_created_by             => 'zztest',
+    p_pagination_verified    => true
+  );
+
+  -- Every other key stays a valid zero and matches reality, and pagination is verified,
+  -- so `assets` is the ONLY thing standing between this capture and publication. If the
+  -- null were treated as a supplied count, this capture would complete.
+  update plm.wildbrain_capture
+     set expected_counts = jsonb_set(expected_counts, '{assets}', 'null'::jsonb)
+   where id = v_cap;
+
+  perform plm.finalize_wildbrain_capture(v_cap, null, '[]'::jsonb);
+
+  select status, error_summary into v_status, v_err from plm.wildbrain_capture where id = v_cap;
+  if v_status <> 'rejected' then
+    raise exception
+      'F8 FAILED: a capture whose expected assets count was JSON null reached status % -- the count was never checked', v_status;
+  end if;
+  if not exists (select 1 from jsonb_array_elements(v_err) e
+                  where e ->> 'code' = 'expected_count_not_a_number'
+                    and e ->> 'entity' = 'assets') then
+    raise exception
+      'F8 FAILED: the rejection did not name expected_count_not_a_number for assets: %', v_err;
+  end if;
+
+  raise notice 'F8: a JSON-null expected count rejects at the gate, named by entity.';
+end;
+$$;
+
+-- F9. AN ERA CYCLE MUST REJECT. A -> B -> A satisfies every constraint on the table: the
+--     self-parent CHECK stops only A -> A, the composite FK only stops a parent in
+--     another capture, is_root agrees with the (non-null) parent on both rows, and the
+--     era count is 2 exactly as expected_counts says. Only the gate can see it.
+do $$
+declare
+  v_cap uuid;
+  v_status text;
+  v_err jsonb;
+begin
+  raise notice '=== F9. AN ERA CYCLE IS REJECTED ===';
+  v_cap := plm.begin_wildbrain_capture(
+    p_capture_key            => 'zztest-wildbrain:O',
+    p_source_repository      => 'u2giants/zztest-fixture',
+    p_source_commit_sha      => repeat('e', 40),
+    p_source_manifest_sha256 => repeat('e', 64),
+    p_portal_base_url        => 'https://zztest.example.invalid/',
+    p_source_captured_at     => timestamptz '2026-08-01 00:00:00+00',
+    p_expected_counts        => '{"eras":2,"creative_groups":0,"asset_categories":0,
+                                  "asset_natures":0,"characters":0,"assets":0,
+                                  "asset_characters":0,"guides":0,"guide_aliases":0,
+                                  "asset_guides":0}'::jsonb,
+    p_raw_summary            => '{"fixture":true}'::jsonb,
+    p_created_by             => 'zztest',
+    p_pagination_verified    => true
+  );
+
+  -- Two eras that parent each other. The FK is DEFERRABLE INITIALLY DEFERRED, and both
+  -- parents DO resolve -- in each other -- so making constraints immediate raises
+  -- nothing. That is exactly the danger: the rows are perfectly legal.
+  insert into plm.wildbrain_era
+    (capture_id, era_source_id, parent_era_source_id, era_label, normalized_era_label, is_root, raw)
+  values
+    (v_cap, 'ZZTEST-ERA-LOOP-A', 'ZZTEST-ERA-LOOP-B', 'ZZTEST Era Loop A', 'zztest era loop a', false, '{}'::jsonb),
+    (v_cap, 'ZZTEST-ERA-LOOP-B', 'ZZTEST-ERA-LOOP-A', 'ZZTEST Era Loop B', 'zztest era loop b', false, '{}'::jsonb);
+  set constraints all immediate;
+  set constraints all deferred;
+
+  perform plm.finalize_wildbrain_capture(v_cap, null, '[]'::jsonb);
+
+  select status, error_summary into v_status, v_err from plm.wildbrain_capture where id = v_cap;
+  if v_status <> 'rejected' then
+    raise exception 'F9 FAILED: a capture containing an era cycle reached status %', v_status;
+  end if;
+  if not exists (select 1 from jsonb_array_elements(v_err) e
+                  where e ->> 'code' = 'era_cycle_or_unreachable') then
+    raise exception 'F9 FAILED: the rejection did not name era_cycle_or_unreachable: %', v_err;
+  end if;
+  -- A cycle with no root also means no root at all, and that must be said separately --
+  -- otherwise a future edit could satisfy one message while leaving the other shape open.
+  if not exists (select 1 from jsonb_array_elements(v_err) e where e ->> 'code' = 'no_root_era') then
+    raise exception 'F9 FAILED: a capture with eras but no root era was not named as such: %', v_err;
+  end if;
+
+  raise notice 'F9: an era cycle is refused by the gate; the walk terminates.';
+end;
+$$;
+
+-- F10. RESUMING MUST NOT SILENTLY TURN THE PAGER PROOF OFF. p_pagination_verified
+--      defaults to false, so a crash-and-retry that simply calls begin_ again with the
+--      same identity arguments would otherwise clear a flag the scrape had already
+--      proved, finalize would reject -- and a rejected capture_key can NEVER be reused,
+--      so the same source bytes would need a brand-new key. The flag is sticky-true.
+do $$
+declare
+  v_cap uuid;
+  v_again uuid;
+begin
+  raise notice '=== F10. A RESUME CANNOT CLEAR pagination_verified ===';
+  v_cap := plm.begin_wildbrain_capture(
+    p_capture_key            => 'zztest-wildbrain:P',
+    p_source_repository      => 'u2giants/zztest-fixture',
+    p_source_commit_sha      => repeat('f', 40),
+    p_source_manifest_sha256 => repeat('f', 64),
+    p_portal_base_url        => 'https://zztest.example.invalid/',
+    p_source_captured_at     => timestamptz '2026-09-01 00:00:00+00',
+    p_expected_counts        => '{"eras":0}'::jsonb,
+    p_raw_summary            => '{"fixture":true}'::jsonb,
+    p_created_by             => 'zztest',
+    p_pagination_verified    => true,
+    p_reported_total         => 7
+  );
+
+  -- The retry: identical identity arguments, every optional argument left at its default.
+  v_again := plm.begin_wildbrain_capture(
+    p_capture_key            => 'zztest-wildbrain:P',
+    p_source_repository      => 'u2giants/zztest-fixture',
+    p_source_commit_sha      => repeat('f', 40),
+    p_source_manifest_sha256 => repeat('f', 64),
+    p_portal_base_url        => 'https://zztest.example.invalid/',
+    p_source_captured_at     => timestamptz '2026-09-01 00:00:00+00',
+    p_expected_counts        => '{"eras":0}'::jsonb,
+    p_raw_summary            => '{"fixture":true}'::jsonb,
+    p_created_by             => 'zztest'
+  );
+
+  if v_again is distinct from v_cap then
+    raise exception 'F10 FAILED: a resume minted a NEW capture instead of returning the loading one';
+  end if;
+  if not (select pagination_verified from plm.wildbrain_capture where id = v_cap) then
+    raise exception
+      'F10 FAILED: a resume with the default argument CLEARED pagination_verified -- the capture key is now unusable and the same source bytes need a new one';
+  end if;
+  if (select reported_total from plm.wildbrain_capture where id = v_cap) <> 7 then
+    raise exception 'F10 FAILED: a resume with the default argument erased reported_total';
+  end if;
+
+  raise notice 'F10: pagination_verified survives a resume that omits the argument.';
 end;
 $$;
 
@@ -987,6 +1307,13 @@ $$;
 -- =====================================================================================
 -- G. CAPTURE-ROW INVARIANTS that no write path may bypass, tested as the OWNER -- i.e.
 --    against the strongest possible attacker, one who is not stopped by the grants.
+--
+--    EVERY assertion here is pinned to a constraint NAME. Capture C -- the one section F2
+--    rejected -- is deliberately NOT used: it already has pagination_verified = false and
+--    a non-empty error_summary, so an UPDATE setting status = 'complete' violates THREE
+--    checks at once and a handler that accepted any check_violation would stay green even
+--    if the constraint under test were deleted outright. These tests use a capture that
+--    satisfies every OTHER precondition, so exactly one constraint can possibly fire.
 -- =====================================================================================
 do $$
 declare
@@ -999,11 +1326,36 @@ declare
   v_msg text;
 begin
   raise notice '=== G. CAPTURE-ROW INVARIANTS ===';
-  select id into strict v_cap from plm.wildbrain_capture where capture_key = 'zztest-wildbrain:C';
+  -- A capture that is CLEAN in every respect except the one under test: pagination
+  -- verified, error_summary empty, media and truncation zero, still `loading`. Every
+  -- update below therefore has exactly ONE constraint it can violate, which is what makes
+  -- the constraint name in the assertion meaningful.
+  v_cap := plm.begin_wildbrain_capture(
+    p_capture_key            => 'zztest-wildbrain:Q',
+    p_source_repository      => 'u2giants/zztest-fixture',
+    p_source_commit_sha      => repeat('0', 40),
+    p_source_manifest_sha256 => repeat('0', 64),
+    p_portal_base_url        => 'https://zztest.example.invalid/',
+    p_source_captured_at     => timestamptz '2026-10-01 00:00:00+00',
+    p_expected_counts        => '{"eras":0}'::jsonb,
+    p_raw_summary            => '{"fixture":true}'::jsonb,
+    p_created_by             => 'zztest',
+    p_pagination_verified    => true
+  );
+  if (select pagination_verified from plm.wildbrain_capture where id = v_cap) is not true
+     or (select error_summary from plm.wildbrain_capture where id = v_cap) <> '[]'::jsonb then
+    raise exception
+      'G SETUP FAILED: the fixture capture does not satisfy the other complete-status preconditions, so the tests below could pass on the wrong constraint';
+  end if;
 
+  -- G1. `complete` with no completion time. The row is otherwise publishable, so
+  -- wildbrain_capture_complete_time_chk is the ONLY constraint that can refuse it --
+  -- delete that constraint and this test goes red, which is the entire point.
   begin
     update plm.wildbrain_capture set status = 'complete', load_completed_at = null where id = v_cap;
-  exception when check_violation then v_no_time := true;
+  exception when check_violation then
+    get stacked diagnostics v_msg = constraint_name;
+    if v_msg = 'wildbrain_capture_complete_time_chk' then v_no_time := true; end if;
   end;
 
   begin
@@ -1028,21 +1380,25 @@ begin
 
   begin
     update plm.wildbrain_capture set truncated_child_lists = 1 where id = v_cap;
-  exception when check_violation then v_truncated := true;
+  exception when check_violation then
+    get stacked diagnostics v_msg = constraint_name;
+    if v_msg = 'wildbrain_capture_truncated_zero_chk' then v_truncated := true; end if;
   end;
 
   begin
     update plm.wildbrain_capture set media_downloaded = 1 where id = v_cap;
-  exception when check_violation then v_media := true;
+  exception when check_violation then
+    get stacked diagnostics v_msg = constraint_name;
+    if v_msg = 'wildbrain_capture_media_zero_chk' then v_media := true; end if;
   end;
 
-  if not v_no_time then raise exception 'G FAILED: a complete capture without a completion time was accepted'; end if;
-  if not v_no_pagination then raise exception 'G FAILED: a complete capture with unverified pagination was accepted'; end if;
-  if not v_with_errors then raise exception 'G FAILED: a complete capture with validation errors was accepted'; end if;
-  if not v_truncated then raise exception 'G FAILED: a nonzero truncated_child_lists was accepted'; end if;
-  if not v_media then raise exception 'G FAILED: a nonzero media_downloaded was accepted'; end if;
+  if not v_no_time then raise exception 'G FAILED: a complete capture without a completion time was accepted, or a DIFFERENT constraint refused it -- wildbrain_capture_complete_time_chk was not what fired'; end if;
+  if not v_no_pagination then raise exception 'G FAILED: a complete capture with unverified pagination was accepted, or wildbrain_capture_complete_pagination_chk was not what fired'; end if;
+  if not v_with_errors then raise exception 'G FAILED: a complete capture with validation errors was accepted, or wildbrain_capture_complete_no_errors_chk was not what fired'; end if;
+  if not v_truncated then raise exception 'G FAILED: a nonzero truncated_child_lists was accepted, or wildbrain_capture_truncated_zero_chk was not what fired'; end if;
+  if not v_media then raise exception 'G FAILED: a nonzero media_downloaded was accepted, or wildbrain_capture_media_zero_chk was not what fired'; end if;
 
-  raise notice 'G: the complete-status preconditions and the zero-media/zero-truncation scope hold.';
+  raise notice 'G: the complete-status preconditions and the zero-media/zero-truncation scope hold, each pinned to its own named constraint.';
 end;
 $$;
 

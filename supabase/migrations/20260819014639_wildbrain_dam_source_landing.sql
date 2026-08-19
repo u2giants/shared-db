@@ -264,6 +264,23 @@ create table plm.wildbrain_era (
   constraint wildbrain_era_raw_obj_chk check (jsonb_typeof(raw) = 'object')
 );
 
+-- ONE ROOT PER CAPTURE, ENFORCED. The licensee account sees exactly ONE property, so a
+-- capture holding two roots is either a second, unlicensed tree that leaked into the
+-- crawl or a broken parent link that turned a child into a root. Neither is landable, and
+-- neither is caught by anything else here: the composite self-FK only stops a
+-- cross-capture parent, and the self-parent CHECK only stops A -> A. Both wrong shapes
+-- also satisfy expected_counts, so without this the capture would publish clean.
+-- A partial unique index is the only way Postgres expresses "unique among the rows where
+-- is_root" -- a table constraint cannot carry a WHERE clause. Written NOT CONCURRENTLY on
+-- purpose: this table is empty at migration time and CREATE INDEX CONCURRENTLY cannot run
+-- inside the migration transaction.
+create unique index wildbrain_era_one_root_per_capture_uk
+  on plm.wildbrain_era (capture_id) where is_root;
+
+comment on index plm.wildbrain_era_one_root_per_capture_uk is
+  'A capture may hold at most ONE root era. A second root means a second, unlicensed '
+  'tree was crawled or a parent link was lost; both would otherwise publish clean.';
+
 comment on table plm.wildbrain_era is
   'The portal''s property axis: one licensed root era and its descendants, as a DECLARED '
   'hierarchy. Rows for other WildBrain franchises are out of scope for this database and '
@@ -634,18 +651,28 @@ comment on column plm.wildbrain_guide.rule_version is
 -- This is what makes the deduplication AUDITABLE AND REVERSIBLE rather than lossy. Delete
 -- this table and the case-folding above becomes an irreversible edit of licensor data.
 -- asset_count > 0: an alias no asset used is not evidence of anything.
+--
+-- relationship_truth IS PINNED HERE TOO, AND IT IS NOT DECORATION. Without it this table
+-- has exactly the shape of a portal dictionary -- capture, key, label, count, raw -- and a
+-- reader who identifies the portal-declared tables as "the ones with no relationship_truth
+-- column" would read alias rows as WildBrain's own vocabulary. They are not. Every alias
+-- row is a spelling WE extracted from free keyword text and WE grouped under a guide_key
+-- WE derived. All three reconstructed tables carry the pin, so the rule a reader applies
+-- is uniform and does not depend on having read the prose above.
 -- =====================================================================================
 create table plm.wildbrain_guide_alias (
-  capture_id   uuid    not null references plm.wildbrain_capture(id) on delete restrict,
-  guide_key    text    not null,
-  alias_label  text    not null,
-  asset_count  integer not null,
-  raw          jsonb   not null,
+  capture_id         uuid    not null references plm.wildbrain_capture(id) on delete restrict,
+  guide_key          text    not null,
+  alias_label        text    not null,
+  asset_count        integer not null,
+  relationship_truth text    not null default 'inferred',
+  raw                jsonb   not null,
 
   constraint wildbrain_guide_alias_pkey primary key (capture_id, guide_key, alias_label),
   constraint wildbrain_guide_alias_guide_fk
     foreign key (capture_id, guide_key)
     references plm.wildbrain_guide (capture_id, guide_key) on delete restrict,
+  constraint wildbrain_guide_alias_truth_chk check (relationship_truth = 'inferred'),
   constraint wildbrain_guide_alias_count_pos_chk check (asset_count > 0),
   constraint wildbrain_guide_alias_label_nonblank_chk check (btrim(alias_label) <> ''),
   constraint wildbrain_guide_alias_raw_obj_chk check (jsonb_typeof(raw) = 'object')
@@ -653,7 +680,12 @@ create table plm.wildbrain_guide_alias (
 
 comment on table plm.wildbrain_guide_alias is
   'Every raw spelling the licensor used for a reconstructed guide, with the number of '
-  'assets that carried it. Makes the guide_key deduplication auditable and reversible.';
+  'assets that carried it. Makes the guide_key deduplication auditable and reversible. '
+  'RECONSTRUCTED, NOT PORTAL VOCABULARY: relationship_truth is pinned to ''inferred'' by '
+  'a CHECK so this table can never be mistaken for a portal dictionary.';
+comment on column plm.wildbrain_guide_alias.relationship_truth is
+  'Pinned to ''inferred''. These spellings were extracted by us from free keyword text '
+  'and grouped under a guide_key we derived. The portal has no alias record.';
 
 
 -- =====================================================================================
@@ -766,6 +798,35 @@ begin
      or p_expected_counts = '{}'::jsonb then
     raise exception 'begin_wildbrain_capture: expected_counts must be a non-empty JSON object';
   end if;
+  -- EVERY VALUE MUST BE A JSON NUMBER THAT IS A NON-NEGATIVE INTEGER. A JSON `null` here
+  -- is the exact shape a loader produces from jsonb_build_object('assets', v_unset_count),
+  -- and it is NOT a missing key: the key IS present, so a `?` test would call it supplied
+  -- while every comparison against it is SQL NULL and therefore never false. That is a
+  -- SKIPPED count check, and a skipped count check is precisely how the portal's
+  -- silently-ignored-offset pager publishes a 200-row first page as a whole capture.
+  -- Refused here, loudly, at the start -- and refused again at the publication gate, which
+  -- re-reads the stored object rather than trusting that this ran.
+  -- TWO SEPARATE STATEMENTS, NOT ONE `or`-ED PREDICATE. SQL does not promise to
+  -- short-circuit `or`, so a single predicate could evaluate the numeric cast on a JSON
+  -- string and die with a cast error instead of this named message. The type test has to
+  -- have finished before anything casts.
+  if exists (
+    select 1 from jsonb_each(p_expected_counts) e
+     where jsonb_typeof(e.value) <> 'number'
+  ) then
+    raise exception
+      'begin_wildbrain_capture: every expected_counts value must be a JSON number that is a non-negative integer; a null, string or object there would SKIP that count check at the publication gate; got %',
+      p_expected_counts;
+  end if;
+  if exists (
+    select 1 from jsonb_each(p_expected_counts) e
+     where (e.value #>> '{}')::numeric < 0
+        or (e.value #>> '{}')::numeric <> trunc((e.value #>> '{}')::numeric)
+  ) then
+    raise exception
+      'begin_wildbrain_capture: every expected_counts value must be a JSON number that is a non-negative integer; got %',
+      p_expected_counts;
+  end if;
   if p_raw_summary is null or jsonb_typeof(p_raw_summary) <> 'object' then
     raise exception 'begin_wildbrain_capture: raw_summary must be a JSON object';
   end if;
@@ -820,9 +881,22 @@ begin
     elsif v_existing.status = 'loading' then
       -- Resume. Only the loader's own operational evidence may be refreshed -- never the
       -- identity fields compared above, and never the status or the counts.
+      --
+      -- pagination_verified IS STICKY-TRUE ON RESUME, NEVER OVERWRITTEN.
+      -- The argument defaults to false, so a plain retry -- `begin_` called again with
+      -- the same identity arguments after a crash -- would otherwise silently turn a
+      -- proved pager back off. Finalize would then reject, and a rejected capture_key can
+      -- NEVER be reused, so the same source bytes would need a brand-new key: a silent
+      -- default would destroy the capture. Sticky-true is correct rather than merely
+      -- convenient because the flag is EVIDENCE ABOUT THE SOURCE BYTES, and the three
+      -- identity comparisons above have already refused to resume unless the manifest
+      -- hash, the commit and the captured-at all match -- so the proof still describes
+      -- the very bytes being resumed. There is deliberately no way to un-verify: a loader
+      -- that discovers the pager was broken must fail the capture through error_summary
+      -- at finalize, which keeps the reason as evidence, not by quietly erasing a proof.
       update plm.wildbrain_capture
          set read_commit_sha     = coalesce(p_read_commit_sha, read_commit_sha),
-             pagination_verified = p_pagination_verified,
+             pagination_verified = pagination_verified or p_pagination_verified,
              reported_total      = coalesce(p_reported_total, reported_total)
        where id = v_existing.id;
       return v_existing.id;
@@ -854,8 +928,12 @@ comment on function plm.begin_wildbrain_capture(text,text,text,text,text,timesta
   'Creates or RESUMES exactly one loading WildBrain capture. Idempotent for an identical '
   'capture. Refuses to re-open a complete capture, refuses a terminal one, and refuses a '
   'same-key capture whose source manifest, commit or captured-at differs. Validates both '
-  'SHA formats and the zero-media scope. Sole insert path to plm.wildbrain_capture. '
-  'service_role only.';
+  'SHA formats, the zero-media scope, and that every expected_counts value is a JSON '
+  'number that is a non-negative integer (a JSON null there would silently skip a count '
+  'check at the publication gate). On resume pagination_verified is STICKY-TRUE -- the '
+  'argument can only ever set it, never clear it, because the argument defaults to false '
+  'and a plain retry would otherwise burn the capture key. Sole insert path to '
+  'plm.wildbrain_capture. service_role only.';
 
 
 -- -------------------------------------------------------------------------------------
@@ -968,8 +1046,22 @@ begin
       into v_n using p_capture_id;
     v_obs := v_obs || jsonb_build_object(v_key, v_n);
 
+    -- A KEY PRESENT WITH JSON `null` IS NOT A SUPPLIED COUNT. `v_exp ? v_key` is TRUE for
+    -- {"assets": null}, and every comparison against the resulting SQL NULL is UNKNOWN --
+    -- so a naive `if v_n <> v_want` would never fire and the count would go UNCHECKED,
+    -- which is the same publication failure as omitting the key. jsonb_build_object with
+    -- an unset variable produces exactly that shape. So the value must be a JSON NUMBER,
+    -- and it must be a non-negative integer: a fractional or negative expectation is a
+    -- broken loader, not a count.
     if not (v_exp ? v_key) then
       v_err := v_err || jsonb_build_object('code','expected_count_missing','entity',v_key);
+    elsif jsonb_typeof(v_exp -> v_key) <> 'number' then
+      v_err := v_err || jsonb_build_object('code','expected_count_not_a_number','entity',v_key,
+                                           'json_type', jsonb_typeof(v_exp -> v_key));
+    elsif (v_exp ->> v_key)::numeric < 0
+       or (v_exp ->> v_key)::numeric <> trunc((v_exp ->> v_key)::numeric) then
+      v_err := v_err || jsonb_build_object('code','expected_count_not_a_nonnegative_integer',
+                                           'entity',v_key,'expected', v_exp -> v_key);
     else
       v_want := (v_exp ->> v_key)::bigint;
       if v_n <> v_want then
@@ -985,11 +1077,19 @@ begin
   if p_observed_counts is not null then
     for i in 1 .. array_length(v_pairs, 1) loop
       v_key := v_pairs[i][1];
+      -- Same JSON-null trap as the expected counts above: a present-but-null value would
+      -- make the comparison UNKNOWN and skip the check silently, so a non-number that is
+      -- present is itself a disagreement.
       if (p_observed_counts ? v_key)
-         and (p_observed_counts ->> v_key)::bigint <> (v_obs ->> v_key)::bigint then
+         and jsonb_typeof(p_observed_counts -> v_key) <> 'number' then
+        v_err := v_err || jsonb_build_object('code','loader_observed_count_not_a_number',
+                    'entity', v_key,
+                    'json_type', jsonb_typeof(p_observed_counts -> v_key));
+      elsif (p_observed_counts ? v_key)
+         and (p_observed_counts ->> v_key)::numeric <> (v_obs ->> v_key)::numeric then
         v_err := v_err || jsonb_build_object('code','loader_observed_count_disagrees',
                     'entity', v_key,
-                    'loader_reported', (p_observed_counts ->> v_key)::bigint,
+                    'loader_reported', p_observed_counts -> v_key,
                     'measured', (v_obs ->> v_key)::bigint);
       end if;
     end loop;
@@ -1082,6 +1182,49 @@ begin
     v_err := v_err || jsonb_build_object('code','era_parent_unresolved','count',v_n);
   end if;
 
+  -- ---- G2. EXACTLY ONE ROOT. The licensee account sees one property, so a second root
+  -- is either an unlicensed tree that leaked into the crawl or a lost parent link.
+  -- Re-asserted here for the same reason as D and E: the partial unique index makes it
+  -- impossible, and this refuses to publish if a future migration ever drops it.
+  select count(*) into v_n
+    from plm.wildbrain_era where capture_id = p_capture_id and is_root;
+  if v_n > 1 then
+    v_err := v_err || jsonb_build_object('code','multiple_root_eras','count',v_n);
+  end if;
+  select count(*) into v_want from plm.wildbrain_era where capture_id = p_capture_id;
+  if v_want > 0 and v_n = 0 then
+    v_err := v_err || jsonb_build_object('code','no_root_era','eras',v_want);
+  end if;
+
+  -- ---- G3. NO CYCLE. Nothing above can see one: the self-parent CHECK stops only
+  -- A -> A, the composite FK stops only a cross-capture parent, and A -> B -> A satisfies
+  -- every one of them AND matches expected_counts, so without this a capture containing a
+  -- loop publishes clean and every later walk of the property axis either loops forever
+  -- or silently truncates.
+  --
+  -- Measured as REACHABILITY FROM THE ROOT rather than by chasing parents, because that
+  -- walk provably terminates: parent_era_source_id is a single column, so an era has at
+  -- most one parent, so no member of a cycle can also be a descendant of the root -- it
+  -- would need two parents. The recursion therefore visits each era at most once and can
+  -- never follow the loop. Anything not reached is in a cycle or hangs off one, and both
+  -- are the same verdict: not landable.
+  with recursive reachable as (
+    select e.era_source_id
+      from plm.wildbrain_era e
+     where e.capture_id = p_capture_id
+       and e.parent_era_source_id is null
+    union all
+    select c.era_source_id
+      from plm.wildbrain_era c
+      join reachable r on c.parent_era_source_id = r.era_source_id
+     where c.capture_id = p_capture_id
+  )
+  select count(*) into v_n from reachable;
+  if v_n <> v_want then
+    v_err := v_err || jsonb_build_object('code','era_cycle_or_unreachable',
+                                         'reachable_from_root', v_n, 'eras', v_want);
+  end if;
+
   -- ---- H. Guide key derivation. The same rule the table CHECK pins, re-asserted here so
   -- that weakening the constraint does not silently disable the guarantee.
   select count(*) into v_n
@@ -1142,9 +1285,11 @@ comment on function plm.finalize_wildbrain_capture(uuid,jsonb,jsonb) is
   'refuses to publish on: unverified pagination, a truncated child list, a nonzero media '
   'count, loader-reported errors, duplicate source ids, orphaned relationship endpoints, '
   'an asset with an unresolved era, an era whose parent does not resolve in the same '
-  'capture, a guide_key that is not the normalization of its own normalized label, an '
-  'asset-guide row citing an unknown alias, or any count that differs from '
-  'expected_counts. All pass -> status complete. Any fail -> status rejected with the '
+  'capture, more than one root era, no root era at all, an era cycle (measured as '
+  'reachability from the root), a guide_key that is not the normalization of its own '
+  'normalized label, an asset-guide row citing an unknown alias, an expected count that '
+  'is missing or is not a JSON number that is a non-negative integer, or any count that '
+  'differs from expected_counts. All pass -> status complete. Any fail -> status rejected with the '
   'errors PERSISTED and a server WARNING raised; the previous complete capture stays '
   'current. THE CALLER MUST RE-READ status -- it cannot raise on a validation failure '
   'without rolling back the very rejection record it is required to keep. A character '
