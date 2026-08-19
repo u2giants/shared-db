@@ -195,14 +195,22 @@ begin
         coalesce(v_qual, '<null>'), v_svc_ref;
     else v_pass := v_pass + 1; end if;
 
-    -- 7. EXACTLY TWO policies. A third would mean somebody added a read path this test
-    --    is not describing.
+    -- 7. NO SECOND READ PATH. `_plm_read` must be the ONLY authenticated SELECT policy
+    --    on the table -- a second one would be OR-ed with it and could admit anybody,
+    --    while every assertion above still passed.
+    --
+    --    This counts authenticated SELECT policies, not ALL policies. Pinning the total
+    --    at two would fail the day somebody legitimately adds a WRITE policy to one of
+    --    these tables, which narrows nothing and widens no read. A guard must fail when
+    --    something CHANGES, not merely because something GREW.
     select count(*) into v_n from pg_policies
-     where schemaname = 'plm' and tablename = t;
-    if v_n <> 2 then
+     where schemaname = 'plm' and tablename = t
+       and cmd = 'SELECT' and roles = array['authenticated']::name[];
+    if v_n <> 1 then
       v_fail := v_fail + 1;
-      raise warning 'A FAIL: plm.% carries % policies; expected exactly 2 '
-        '(_service_read and _plm_read)', t, v_n;
+      raise warning 'A FAIL: plm.% carries % authenticated SELECT policies; expected '
+        'exactly 1 (%_plm_read). A second read path is OR-ed with the house predicate '
+        'and can admit anyone', t, v_n, t;
     else v_pass := v_pass + 1; end if;
 
     -- 8. RLS is still ENABLED, or the grant above would be unconditional.
@@ -592,6 +600,16 @@ $$;
 --    sales+licensing. Same population, different text. Splitting both on OR and comparing
 --    them as SETS asserts the thing that actually matters -- who is admitted -- and fails
 --    immediately on `using (true)`, on a dropped arm, or on an added one.
+--
+--    THE RULE EVERY GUARD BELOW OBEYS: a neighbour guard must fail when a neighbour
+--    CHANGES, and must NOT fail merely because a neighbour GREW. Nothing here pins a
+--    literal count or a literal list of table names. The first version of the Paramount
+--    check pinned 23, the number 20260810020000's loop creates; CI found 25, because
+--    20260811030000 added plm.pmt_asset_metadata_value and 20260814213043 added
+--    plm.pmt_metadata_element, each with its own read policy carrying the same four-role
+--    predicate. Nothing was wrong with Paramount -- the expectation was wrong, and a
+--    magic number the next author has to bump with no idea why is exactly the trap this
+--    rule exists to avoid. Every count below is DERIVED from the catalog at run time.
 -- =====================================================================================
 do $$
 declare
@@ -637,52 +655,97 @@ begin
   -- `using (true)` policy and recreated opa_property_character_read with the house
   -- predicate (issue #1251 was closed as already-done). #1249 must not add, drop or
   -- rewrite it, and its ARMS must still be exactly the house arms.
+  -- NO PINNED POLICY COUNT. Requiring exactly one policy would fail the day somebody
+  -- legitimately adds a WRITE policy to this table, which narrows nothing and is none of
+  -- this test's business. What must never happen is a SECOND, WIDER read path appearing
+  -- beside the correct one -- so every authenticated SELECT policy on the table is
+  -- checked below, however many there are.
   select count(*) into v_n from pg_policies
-   where schemaname = 'plm' and tablename = 'opa_property_character';
-  if v_n <> 1 then
+   where schemaname = 'plm' and tablename = 'opa_property_character'
+     and cmd = 'SELECT' and roles = array['authenticated']::name[];
+  if v_n = 0 then
     v_fail := v_fail + 1;
-    raise warning 'C FAIL: plm.opa_property_character carries % policies; #1249 adds and '
-      'removes none', v_n;
+    raise warning 'C FAIL: plm.opa_property_character has NO authenticated read policy at '
+      'all -- the Disney extract became unreadable to the people entitled to it';
   else v_pass := v_pass + 1; end if;
 
-  select qual into v_qual from pg_policies
-   where schemaname = 'plm' and tablename = 'opa_property_character'
-     and policyname = 'opa_property_character_read'
-     and cmd = 'SELECT' and roles = array['authenticated']::name[];
-  if v_qual is null then
+  -- The policy 20260807190000 created must still be there under its own name...
+  if not exists (
+    select 1 from pg_policies
+     where schemaname = 'plm' and tablename = 'opa_property_character'
+       and policyname = 'opa_property_character_read'
+       and cmd = 'SELECT' and roles = array['authenticated']::name[]) then
     v_fail := v_fail + 1;
     raise warning 'C FAIL: policy opa_property_character_read is missing, was renamed, or '
       'is no longer an authenticated SELECT policy';
-  else
-    v_pass := v_pass + 1;
+  else v_pass := v_pass + 1; end if;
 
+  -- ...and EVERY authenticated read path into the Disney extract, that one included, must
+  -- admit exactly the house arms. Arms are compared as a SET because 20260807190000 wrote
+  -- them in a different ORDER from 20260819015333 -- same population, different text.
+  -- `using (true)` yields the single arm 'true', which matches no house arm and fails.
+  for r in
+    select policyname, qual from pg_policies
+     where schemaname = 'plm' and tablename = 'opa_property_character'
+       and cmd = 'SELECT' and roles = array['authenticated']::name[]
+     order by policyname
+  loop
     select array_agg(replace(btrim(arm), ' ', '') order by replace(btrim(arm), ' ', ''))
       into v_opa_arms
     from unnest(string_to_array(
-      case when v_qual like '(%)' then substr(v_qual, 2, length(v_qual) - 2) else v_qual end,
+      case when r.qual like '(%)' then substr(r.qual, 2, length(r.qual) - 2)
+           else coalesce(r.qual, '<null>') end,
       ' OR ')) as arm;
 
     if v_opa_arms is distinct from v_ref_arms then
       v_fail := v_fail + 1;
-      raise warning 'C FAIL: opa_property_character_read admits [%] -- the house predicate '
-        'admits [%]. The confidential Disney extract is no longer restricted to '
-        'administrator / plm app access / sales+licensing',
-        array_to_string(v_opa_arms, ' OR '), array_to_string(v_ref_arms, ' OR ');
+      raise warning 'C FAIL: Disney read policy % admits [%] -- the house predicate admits '
+        '[%]. The confidential Disney extract is no longer restricted to administrator / '
+        'plm app access / sales+licensing',
+        r.policyname, array_to_string(v_opa_arms, ' OR '),
+        array_to_string(v_ref_arms, ' OR ');
     else v_pass := v_pass + 1; end if;
-  end if;
+  end loop;
 
   -- ------------------------------------------------------------------- Paramount ------
   -- Paramount deliberately keeps its WIDER predicate, which also admits `designer`.
   -- Narrowing it would take access away from designers, which nobody asked for -- so
   -- EVERY pmt_* authenticated read policy must still mention designer, not merely one.
-  -- 20260810020000 creates exactly 23, one per pmt_* landing table.
-  select count(*) into v_n from pg_policies
-   where schemaname = 'plm' and tablename like 'pmt\_%'
-     and cmd = 'SELECT' and roles = array['authenticated']::name[];
-  if v_n <> 23 then
+  --
+  -- COVERAGE IS ASSERTED PER TABLE, NOT AS A HARDCODED COUNT. The first version of this
+  -- check required exactly 23, the number 20260810020000's loop creates. CI found 25:
+  -- two more pmt_* landing tables have arrived since, each with its own read policy. A
+  -- literal count is a tripwire for unrelated Paramount work rather than a guard on this
+  -- change, so what is asserted instead is the thing that actually matters -- that no
+  -- pmt_* table with RLS enabled has LOST its authenticated read policy. That
+  -- self-adjusts when Paramount legitimately grows and still fails the moment one is
+  -- dropped.
+  select count(*) into v_n
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'plm' and c.relname like 'pmt\_%'
+     and c.relkind = 'r' and c.relrowsecurity
+     and not exists (
+       select 1 from pg_policies p
+        where p.schemaname = 'plm' and p.tablename = c.relname
+          and p.cmd = 'SELECT' and p.roles = array['authenticated']::name[]);
+  if v_n <> 0 then
     v_fail := v_fail + 1;
-    raise warning 'C FAIL: found % pmt_* authenticated read policies, expected 23 '
-      '(20260810020000). One was dropped, or a new pmt_* table arrived without one', v_n;
+    raise warning 'C FAIL: % plm.pmt_* table(s) with RLS enabled have NO authenticated '
+      'read policy -- Paramount lost a read path it had before #1249', v_n;
+  else v_pass := v_pass + 1; end if;
+
+  -- NON-VACUITY, DERIVED. The coverage check above is trivially true if there are no
+  -- pmt_* tables at all, so prove there are some -- by counting the TABLES, never by
+  -- pinning how many there ought to be.
+  select count(*) into v_n
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'plm' and c.relname like 'pmt\_%'
+     and c.relkind = 'r' and c.relrowsecurity;
+  if v_n = 0 then
+    v_fail := v_fail + 1;
+    raise warning 'C FAIL: there are no plm.pmt_* tables with RLS enabled at all, so the '
+      'Paramount coverage check above proved nothing';
   else v_pass := v_pass + 1; end if;
 
   select string_agg(policyname, ', ' order by policyname) into v_missing
@@ -730,8 +793,9 @@ begin
 
   raise notice 'C: % passed / % failed', v_pass, v_fail;
   if v_fail > 0 then raise exception 'C FAILED (% failures)', v_fail; end if;
-  raise notice 'C passed: Disney OPA still admits exactly the three house arms, all 23 '
-    'Paramount read policies still admit designer, and every Sega/Peanuts _plm_read still '
-    'carries the house predicate byte for byte.';
+  raise notice 'C passed: every Disney OPA authenticated read policy admits exactly the '
+    'three house arms, every plm.pmt_* table with RLS still has a read policy and every '
+    'one of those still admits designer, and every Sega/Peanuts _plm_read still carries '
+    'the house predicate byte for byte.';
 end;
 $$;
