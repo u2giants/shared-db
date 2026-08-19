@@ -146,14 +146,24 @@ jobs:
           echo "::warning::psql absent from the runner image; falling back to apt."
           attempts=3
           for i in $(seq 1 "$attempts"); do
-            if timeout 120 sudo apt-get update               && timeout 180 sudo apt-get install -y --no-install-recommends postgresql-client; then
+            if timeout --kill-after=10 60 sudo apt-get update \
+              && timeout --kill-after=10 120 sudo apt-get install -y --no-install-recommends postgresql-client; then
               if command -v psql >/dev/null 2>&1 && psql --version; then
                 echo "psql installed and proved working on attempt ${i}."
                 exit 0
               fi
             fi
             echo "::warning::psql install attempt ${i} of ${attempts} failed or timed out."
-            sleep $(( i * 15 ))
+            # No backoff after the LAST attempt: it would only delay the
+            # named error below by a further 30s. The worst-case budget is
+            # 3*(60+120)+10+20 = 570s, which must stay inside the TIGHTEST
+            # job ceiling that runs this block (`reconcile`, 15 minutes).
+            # Shorten the budget, never raise the ceiling -- a generic job
+            # timeout would swallow the named diagnostic exactly when it
+            # is needed, which is the whole defect of #1261.
+            if [ "$i" -lt "$attempts" ]; then
+              sleep $(( i * 10 ))
+            fi
           done
 
           echo "::error::CI INFRASTRUCTURE: PostgreSQL client unavailable after ${attempts} attempts (apt mirror stall on the hosted runner -- NOT a fault in the change under review); NO TEST WAS EXECUTED"
