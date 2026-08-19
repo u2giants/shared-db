@@ -99,25 +99,15 @@
 --   the privilege model from the cross-PR object guard and from every human reader, and
 --   was rejected on the Sega landing (#1196) for exactly that reason.
 --
--- ⚠️ OPEN DEPENDENCY -- READ BEFORE LOADING ANYTHING
---   Per the schema contract, service_role holds SELECT ONLY on plm.peanuts_capture: the
---   capture root is meant to be written by security-definer functions
---   (plm.begin_peanuts_capture / plm.finalize_peanuts_capture) exactly as the NBCU,
---   WildBrain and Sega landings do. THOSE FUNCTIONS ARE NOT IN THIS MIGRATION. The
---   object claim for issue #1217 (claim #1231) covers these 19 TABLES and nothing else,
---   and inventing an unclaimed function would defeat the object guard that keeps parallel
---   migration authors from silently overwriting one another.
---   CONSEQUENCE, STATED LOUDLY RATHER THAN PAPERED OVER: until those two functions ship
---   under their own claim, NO capture row can be created, so no snapshot row can be
---   inserted either (every snapshot table has a foreign key to plm.peanuts_capture). This
---   schema is therefore INERT-BY-DESIGN on arrival. It is not a silent failure -- an
---   attempted load fails immediately and visibly with `permission denied for table
---   peanuts_capture`. Do not "fix" it by granting INSERT on plm.peanuts_capture to
---   service_role: that would let a loader mint a capture that skipped every validation
---   the begin/finalize pair exists to perform.
---   The completion rule is ALSO enforced here as a table CHECK
---   (peanuts_capture_complete_requirements_chk), so it holds even against a writer that
---   reaches this table some other way, and does not depend on the functions being correct.
+-- THE WRITE PATH TO THE CAPTURE ROOT
+--   service_role holds SELECT ONLY on plm.peanuts_capture. Capture rows are created and
+--   transitioned exclusively by plm.begin_peanuts_capture and plm.finalize_peanuts_capture
+--   below, both `security definer` with a pinned search_path and EXECUTE granted only to
+--   service_role. Never grant INSERT on plm.peanuts_capture to service_role: that would
+--   let a loader mint a capture that skipped every validation those functions perform.
+--   The completion rule is enforced BOTH in finalize_ and as a table CHECK
+--   (peanuts_capture_complete_requirements_chk), so it still holds against a writer that
+--   reaches the table some other way and does not depend on the functions being correct.
 --
 -- Depends on (exact 14-digit versions):
 --   20260621150714  foundation  -- schema plm
@@ -214,8 +204,7 @@ comment on table plm.peanuts_capture is
   'LICENSED PEANUTS SOURCE EVIDENCE, NOT CANONICAL MASTER DATA. One row per attempted '
   'Peanuts (Tenovos) load. Append-only snapshot root: a refresh adds a new capture and '
   'NEVER edits or deletes an earlier one. service_role holds SELECT only -- writes are '
-  'reserved for the begin/finalize security-definer pair, which ships under its own '
-  'object claim and is NOT in this migration.';
+  'reserved for plm.begin_peanuts_capture and plm.finalize_peanuts_capture.';
 comment on column plm.peanuts_capture.source_commit_sha is
   'The private-repo commit that identifies the DATA. capture_key is built from this.';
 comment on column plm.peanuts_capture.read_commit_sha is
@@ -1004,14 +993,591 @@ comment on table plm.peanuts_style_guide_art_program is
 
 
 -- =====================================================================================
+-- FUNCTIONS -- the sole write path to plm.peanuts_capture.
+--
+-- Both are `security definer` with a pinned search_path, execute REVOKED from public and
+-- granted ONLY to service_role, which can otherwise only READ the capture root.
+--
+-- THE COUNT-VALIDATION RULE, AND WHY IT IS WRITTEN THE LONG WAY IN FOUR SEPARATE
+-- BRANCHES. Three live defects in the sibling landings were found by falsifying this
+-- exact code, and all three are shapes that a shorter version accepts:
+--
+--   (1) #1219 -- A JSON `null` is NOT a missing key. `v_exp ? 'assets'` is TRUE for
+--       {"assets": null}, so a presence test reports the count as supplied, while the
+--       resulting SQL NULL makes every comparison UNKNOWN and therefore never false. The
+--       count check is SKIPPED and a truncated capture publishes as complete.
+--
+--   (2) #1221 / #1222 -- `(v_exp ->> key)::bigint` casts the TEXT of the JSON number. A
+--       perfectly legal integral JSON number written `1.0` renders as the text '1.0' and
+--       raises `invalid input syntax for type bigint`; a value past bigint raises
+--       out-of-range. Either wedges the capture in `loading` with an unnamed crash. This
+--       file range-checks FIRST and then assigns through `::numeric::bigint`, which
+--       accepts 1.0 and cannot overflow because the range was already proven.
+--
+--   (3) A NUMERIC-LOOKING JSON STRING. `{"assets": "12"}` is the dangerous one, because
+--       it is a silent WRONG ANSWER rather than a crash: `->>` yields '12', which casts
+--       cleanly to 12 and compares equal, so a manifest that lost its types publishes as
+--       though it had been checked. It is refused here by an explicit
+--       `jsonb_typeof(...) <> 'number'` test, and the test that proves it uses a string
+--       whose numeric value MATCHES the true row count -- a fixture using "999" would
+--       pass on the mismatch and prove nothing.
+--
+-- EACH TEST IS ITS OWN BRANCH. SQL does not promise to short-circuit `or`, so a single
+-- combined predicate can evaluate a cast on a value the type test was supposed to have
+-- rejected, and die with a raw cast error instead of the named code. The type test must
+-- have FINISHED before anything casts.
+--
+-- AND IT IS ENFORCED TWICE. begin_ refuses a bad manifest at the start; finalize_
+-- re-reads the STORED object and refuses it again, because an owner-level UPDATE can
+-- reach plm.peanuts_capture.expected_counts without going through begin_ at all.
+-- =====================================================================================
+
+create or replace function plm.begin_peanuts_capture(
+  p_capture_key                     text,
+  p_source_repository               text,
+  p_source_commit_sha               text,
+  p_source_manifest_sha256          text,
+  p_portal_base_url                 text,
+  p_api_endpoint                    text,
+  p_source_customer_id              text,
+  p_source_captured_at              timestamptz,
+  p_expected_counts                 jsonb,
+  p_raw_summary                     jsonb,
+  p_created_by                      text,
+  p_portal_reported_asset_total     integer,
+  p_assets_captured                 integer,
+  p_assets_unreachable              integer,
+  p_deep_paging_partitioned         boolean,
+  p_vocabularies_loaded_from_source boolean,
+  p_relationship_graph_walked       boolean,
+  p_read_commit_sha                 text default null
+) returns uuid
+language plpgsql
+security definer
+set search_path = plm, pg_temp
+as $$
+declare
+  v_existing plm.peanuts_capture%rowtype;
+  v_id       uuid;
+begin
+  -- Validate before touching anything. A malformed argument must fail here, loudly,
+  -- rather than land a half-described capture the publication gate then has to reason
+  -- about.
+  if p_capture_key is null or btrim(p_capture_key) = '' then
+    raise exception 'begin_peanuts_capture: capture_key is required';
+  end if;
+  if p_source_repository is null or btrim(p_source_repository) = '' then
+    raise exception 'begin_peanuts_capture: source_repository is required';
+  end if;
+  if p_portal_base_url is null or btrim(p_portal_base_url) = '' then
+    raise exception 'begin_peanuts_capture: portal_base_url is required';
+  end if;
+  if p_api_endpoint is null or btrim(p_api_endpoint) = '' then
+    raise exception 'begin_peanuts_capture: api_endpoint is required';
+  end if;
+  if p_source_customer_id is null or btrim(p_source_customer_id) = '' then
+    raise exception 'begin_peanuts_capture: source_customer_id is required';
+  end if;
+  if p_created_by is null or btrim(p_created_by) = '' then
+    raise exception 'begin_peanuts_capture: created_by is required';
+  end if;
+  if p_source_captured_at is null then
+    raise exception 'begin_peanuts_capture: source_captured_at is required';
+  end if;
+  if p_source_commit_sha is null or p_source_commit_sha !~ '^[0-9a-f]{40}$' then
+    raise exception
+      'begin_peanuts_capture: source_commit_sha must be 40 lowercase hex characters';
+  end if;
+  if p_read_commit_sha is not null and p_read_commit_sha !~ '^[0-9a-f]{40}$' then
+    raise exception
+      'begin_peanuts_capture: read_commit_sha must be 40 lowercase hex characters';
+  end if;
+  if p_source_manifest_sha256 is null or p_source_manifest_sha256 !~ '^[0-9a-f]{64}$' then
+    raise exception
+      'begin_peanuts_capture: source_manifest_sha256 must be 64 lowercase hex characters';
+  end if;
+  if p_expected_counts is null or jsonb_typeof(p_expected_counts) <> 'object'
+     or p_expected_counts = '{}'::jsonb then
+    raise exception
+      'begin_peanuts_capture: expected_counts must be a non-empty JSON object';
+  end if;
+
+  -- (3) then (1): the TYPE test, alone, first. This rejects a JSON null, a string --
+  -- INCLUDING a numeric-looking one such as "12", which would otherwise cast cleanly and
+  -- compare equal -- a boolean, an object and an array.
+  if exists (
+    select 1 from jsonb_each(p_expected_counts) e
+     where jsonb_typeof(e.value) <> 'number'
+  ) then
+    raise exception
+      'begin_peanuts_capture: every expected_counts value must be a JSON NUMBER that is a non-negative integer; a null, a numeric-looking STRING such as "12", a boolean, an object or an array would either skip that count check at the publication gate or pass it on an untyped value; got %',
+      p_expected_counts;
+  end if;
+  -- Only now, with every value proven to be a number, may anything cast.
+  if exists (
+    select 1 from jsonb_each(p_expected_counts) e
+     where (e.value #>> '{}')::numeric < 0
+        or (e.value #>> '{}')::numeric <> trunc((e.value #>> '{}')::numeric)
+  ) then
+    raise exception
+      'begin_peanuts_capture: every expected_counts value must be a non-negative integer; got %',
+      p_expected_counts;
+  end if;
+  -- (2): refuse an out-of-range count with a NAMED message rather than letting a later
+  -- `::bigint` raise a bare out-of-range and wedge the capture in `loading`.
+  if exists (
+    select 1 from jsonb_each(p_expected_counts) e
+     where (e.value #>> '{}')::numeric > 9223372036854775807::numeric
+  ) then
+    raise exception
+      'begin_peanuts_capture: an expected_counts value exceeds the maximum representable count (9223372036854775807); got %',
+      p_expected_counts;
+  end if;
+
+  if p_raw_summary is null or jsonb_typeof(p_raw_summary) <> 'object' then
+    raise exception 'begin_peanuts_capture: raw_summary must be a JSON object';
+  end if;
+
+  -- Zero-media scope. The table pins media_downloaded to zero; a manifest that CLAIMS a
+  -- nonzero media count disagrees with this schema, and that must stop the load.
+  if (p_expected_counts ? 'media_downloaded')
+     and (p_expected_counts ->> 'media_downloaded')::numeric <> 0 then
+    raise exception
+      'begin_peanuts_capture: expected_counts.media_downloaded must be 0; this project never downloads media';
+  end if;
+
+  -- The paging-wall arithmetic is a MANIFEST FACT, fixed here for the life of the
+  -- capture. It is not a progress counter, and it cannot be a progress counter:
+  -- service_role holds no UPDATE on plm.peanuts_capture, so a capture whose totals were
+  -- never supplied could never satisfy the completion rule and could never publish.
+  if p_portal_reported_asset_total is null or p_assets_captured is null
+     or p_assets_unreachable is null then
+    raise exception
+      'begin_peanuts_capture: portal_reported_asset_total, assets_captured and assets_unreachable are required and may not be null';
+  end if;
+  if p_portal_reported_asset_total < 0 or p_assets_captured < 0
+     or p_assets_unreachable < 0 then
+    raise exception 'begin_peanuts_capture: the asset totals may not be negative';
+  end if;
+  if p_deep_paging_partitioned is null or p_vocabularies_loaded_from_source is null
+     or p_relationship_graph_walked is null then
+    raise exception
+      'begin_peanuts_capture: the completeness flags are required and may not be null';
+  end if;
+
+  -- Serialize concurrent starts of the SAME capture_key. Two loader processes racing here
+  -- would otherwise both miss the select and both insert.
+  perform pg_advisory_xact_lock(
+    hashtextextended('plm.peanuts_capture:' || p_capture_key, 0));
+
+  select * into v_existing from plm.peanuts_capture where capture_key = p_capture_key;
+
+  if found then
+    -- Same key, different bytes, is a CONTRADICTION, not a resume. Silently appending
+    -- different source data under an existing capture key would make the snapshot
+    -- unreconstructable.
+    if v_existing.source_manifest_sha256 is distinct from p_source_manifest_sha256 then
+      raise exception
+        'begin_peanuts_capture: capture_key % already exists with a DIFFERENT source manifest hash; refusing',
+        p_capture_key;
+    end if;
+    if v_existing.source_commit_sha is distinct from p_source_commit_sha then
+      raise exception
+        'begin_peanuts_capture: capture_key % already exists with a DIFFERENT source commit sha; refusing',
+        p_capture_key;
+    end if;
+    if v_existing.source_repository is distinct from p_source_repository
+       or v_existing.portal_base_url is distinct from p_portal_base_url
+       or v_existing.api_endpoint is distinct from p_api_endpoint
+       or v_existing.source_customer_id is distinct from p_source_customer_id
+       or v_existing.source_captured_at is distinct from p_source_captured_at then
+      raise exception
+        'begin_peanuts_capture: capture_key % already exists with a DIFFERENT source identity; refusing',
+        p_capture_key;
+    end if;
+    if v_existing.portal_reported_asset_total is distinct from p_portal_reported_asset_total
+       or v_existing.assets_captured is distinct from p_assets_captured
+       or v_existing.assets_unreachable is distinct from p_assets_unreachable
+       or v_existing.deep_paging_partitioned is distinct from p_deep_paging_partitioned
+       or v_existing.vocabularies_loaded_from_source
+            is distinct from p_vocabularies_loaded_from_source
+       or v_existing.relationship_graph_walked
+            is distinct from p_relationship_graph_walked then
+      raise exception
+        'begin_peanuts_capture: capture_key % already exists with DIFFERENT asset totals or completeness flags; refusing',
+        p_capture_key;
+    end if;
+
+    if v_existing.status = 'complete' then
+      -- Idempotent: hand back the finished capture untouched. Never re-open it.
+      return v_existing.id;
+    elsif v_existing.status = 'loading' then
+      -- Resume. Only the loader's own read commit may be refreshed.
+      update plm.peanuts_capture
+         set read_commit_sha = coalesce(p_read_commit_sha, read_commit_sha)
+       where id = v_existing.id;
+      return v_existing.id;
+    else
+      raise exception
+        'begin_peanuts_capture: capture_key % is %; start a NEW capture rather than reusing it',
+        p_capture_key, v_existing.status;
+    end if;
+  end if;
+
+  insert into plm.peanuts_capture (
+    capture_key, source_repository, source_commit_sha, read_commit_sha,
+    source_manifest_sha256, portal_base_url, api_endpoint, source_customer_id,
+    source_captured_at, status, expected_counts, raw_summary, created_by,
+    portal_reported_asset_total, assets_captured, assets_unreachable,
+    deep_paging_partitioned, vocabularies_loaded_from_source, relationship_graph_walked
+  ) values (
+    p_capture_key, p_source_repository, p_source_commit_sha, p_read_commit_sha,
+    p_source_manifest_sha256, p_portal_base_url, p_api_endpoint, p_source_customer_id,
+    p_source_captured_at, 'loading', p_expected_counts, p_raw_summary, p_created_by,
+    p_portal_reported_asset_total, p_assets_captured, p_assets_unreachable,
+    p_deep_paging_partitioned, p_vocabularies_loaded_from_source,
+    p_relationship_graph_walked
+  )
+  returning id into v_id;
+
+  return v_id;
+end;
+$$;
+
+comment on function plm.begin_peanuts_capture(
+  text,text,text,text,text,text,text,timestamptz,jsonb,jsonb,text,
+  integer,integer,integer,boolean,boolean,boolean,text) is
+  'Creates or RESUMES exactly one loading Peanuts capture. Idempotent for an identical '
+  'capture. Refuses to re-open a complete or terminal capture, and refuses a same-key '
+  'capture whose manifest hash, commit, source identity, asset totals or completeness '
+  'flags differ. The asset totals and completeness flags are MANIFEST FACTS fixed here '
+  'for the life of the capture -- nothing may mutate them later, because service_role '
+  'holds no UPDATE on the table. Sole insert path to plm.peanuts_capture. '
+  'service_role only.';
+
+
+create or replace function plm.finalize_peanuts_capture(
+  p_capture_id      uuid,
+  p_observed_counts jsonb,
+  p_error_summary   jsonb
+) returns void
+language plpgsql
+security definer
+set search_path = plm, pg_temp
+as $$
+declare
+  v_cap   plm.peanuts_capture%rowtype;
+  v_exp   jsonb;
+  v_obs   jsonb := '{}'::jsonb;
+  v_err   jsonb := '[]'::jsonb;
+  v_n     bigint;
+  v_d     bigint;
+  v_want  bigint;
+  v_key   text;
+  v_max   numeric := 9223372036854775807::numeric;
+  v_pairs text[][] := array[
+    ['art_programs',             'peanuts_art_program'],
+    ['style_guides',             'peanuts_style_guide'],
+    ['characters',               'peanuts_character'],
+    ['animation_titles',         'peanuts_animation_title'],
+    ['holidays',                 'peanuts_holiday'],
+    ['initiatives',              'peanuts_initiative'],
+    ['asset_types',              'peanuts_asset_type'],
+    ['licensing_statuses',       'peanuts_licensing_status'],
+    ['metadata_fields',          'peanuts_metadata_field'],
+    ['assets',                   'peanuts_asset'],
+    ['asset_art_programs',       'peanuts_asset_art_program'],
+    ['asset_characters',         'peanuts_asset_character'],
+    ['asset_animation_titles',   'peanuts_asset_animation_title'],
+    ['asset_holidays',           'peanuts_asset_holiday'],
+    ['asset_keywords',           'peanuts_asset_keyword'],
+    ['asset_relationships',      'peanuts_asset_relationship'],
+    ['style_guide_characters',   'peanuts_style_guide_character'],
+    ['style_guide_art_programs', 'peanuts_style_guide_art_program']
+  ];
+  i integer;
+begin
+  if p_observed_counts is null or jsonb_typeof(p_observed_counts) <> 'object' then
+    raise exception 'finalize_peanuts_capture: p_observed_counts must be a JSON object';
+  end if;
+  if p_error_summary is null or jsonb_typeof(p_error_summary) <> 'array' then
+    raise exception 'finalize_peanuts_capture: p_error_summary must be a JSON array';
+  end if;
+
+  -- The row lock serialises two loaders finalising the same capture.
+  select * into v_cap from plm.peanuts_capture where id = p_capture_id for update;
+  if not found then
+    raise exception 'finalize_peanuts_capture: no capture %', p_capture_id;
+  end if;
+  if v_cap.status = 'complete' then
+    -- Idempotent. A retry after a successful finalize is a no-op, not an error.
+    return;
+  end if;
+  if v_cap.status <> 'loading' then
+    raise exception 'finalize_peanuts_capture: capture % is %, not loading',
+      p_capture_id, v_cap.status;
+  end if;
+
+  v_exp := v_cap.expected_counts;
+
+  -- ---- A. SCOPE AND COMPLETENESS.
+  if not v_cap.deep_paging_partitioned then
+    v_err := v_err || jsonb_build_object('code','deep_paging_not_partitioned');
+  end if;
+  -- The guard against the loader shortcut that silently discards every vocabulary value
+  -- no asset happens to use.
+  if not v_cap.vocabularies_loaded_from_source then
+    v_err := v_err || jsonb_build_object('code','vocabularies_not_loaded_from_source');
+  end if;
+  if v_cap.media_downloaded <> 0 then
+    v_err := v_err || jsonb_build_object('code','media_downloaded_nonzero',
+                                         'observed', v_cap.media_downloaded);
+  end if;
+  -- relationship_graph_walked is DELIBERATELY NOT a publication blocker: the schema
+  -- contract's completion rule does not list it, and a capture whose per-asset
+  -- relationship walk was skipped is still a truthful capture of everything else. It is
+  -- recorded on the capture so a partial walk is VISIBLE, which is the requirement. What
+  -- IS blocked is the contradiction -- relationship rows present while the flag says the
+  -- walk never ran.
+  if not v_cap.relationship_graph_walked then
+    select count(*) into v_n
+      from plm.peanuts_asset_relationship where capture_id = p_capture_id;
+    if v_n <> 0 then
+      v_err := v_err || jsonb_build_object('code','relationship_rows_without_graph_walk',
+                                           'rows', v_n);
+    end if;
+  end if;
+
+  -- ---- B. THE PAGING-WALL ARITHMETIC. This is the clause that makes assets_unreachable
+  -- proof rather than decoration: a capture claiming zero unreachable assets while
+  -- sitting below the portal's own total cannot balance, and cannot publish.
+  if v_cap.assets_captured + v_cap.assets_unreachable
+       <> v_cap.portal_reported_asset_total then
+    v_err := v_err || jsonb_build_object(
+      'code','asset_total_arithmetic_mismatch',
+      'portal_total', v_cap.portal_reported_asset_total,
+      'captured', v_cap.assets_captured,
+      'unreachable', v_cap.assets_unreachable);
+  end if;
+  -- And the manifest's claimed capture size must match the rows actually present.
+  select count(*) into v_n from plm.peanuts_asset where capture_id = p_capture_id;
+  if v_n <> v_cap.assets_captured::bigint then
+    v_err := v_err || jsonb_build_object('code','assets_captured_disagrees_with_rows',
+                                         'claimed', v_cap.assets_captured, 'rows', v_n);
+  end if;
+
+  -- ---- C. Errors the loader itself reported are fatal. A capture that knows it failed
+  -- may never publish, whatever the counts say.
+  if jsonb_array_length(p_error_summary) > 0 then
+    v_err := v_err || jsonb_build_object('code','loader_reported_errors',
+                                         'count', jsonb_array_length(p_error_summary));
+  end if;
+
+  -- ---- D. Counts, taken from the TABLES, never from a ledger or a summary document.
+  -- Three facts must agree: what the source contract EXPECTED, what the loader CLAIMS it
+  -- wrote, and what is ACTUALLY in the tables. Checking only two of the three lets a
+  -- loader that miscounted its own output pass.
+  --
+  -- Read the long note above plm.begin_peanuts_capture before editing any branch below.
+  -- The branch order -- presence, then TYPE, then sign and integrality, then RANGE, and
+  -- only then a cast -- is the whole defence, and it re-reads the STORED expected_counts
+  -- rather than trusting that begin_ ever ran.
+  for i in 1 .. array_length(v_pairs, 1) loop
+    v_key := v_pairs[i][1];
+    execute format('select count(*) from plm.%I where capture_id = $1', v_pairs[i][2])
+      into v_n using p_capture_id;
+    v_obs := v_obs || jsonb_build_object(v_key, v_n);
+
+    if not (v_exp ? v_key) then
+      v_err := v_err || jsonb_build_object('code','expected_count_missing','entity',v_key);
+    elsif jsonb_typeof(v_exp -> v_key) <> 'number' then
+      -- Catches BOTH the JSON null that would skip the check entirely and the
+      -- numeric-looking string that would pass it on an untyped value.
+      v_err := v_err || jsonb_build_object('code','expected_count_not_a_number',
+                                           'entity',v_key,
+                                           'json_type', jsonb_typeof(v_exp -> v_key));
+    elsif (v_exp ->> v_key)::numeric < 0
+       or (v_exp ->> v_key)::numeric <> trunc((v_exp ->> v_key)::numeric) then
+      v_err := v_err || jsonb_build_object('code','expected_count_not_a_nonnegative_integer',
+                                           'entity',v_key,'expected', v_exp -> v_key);
+    elsif (v_exp ->> v_key)::numeric > v_max then
+      v_err := v_err || jsonb_build_object('code','expected_count_out_of_range',
+                                           'entity',v_key,'expected', v_exp -> v_key);
+    else
+      -- Through ::numeric, never straight to ::bigint: an integral JSON number written
+      -- 1.0 renders as the text '1.0', which ::bigint refuses outright.
+      v_want := ((v_exp ->> v_key)::numeric)::bigint;
+      if v_n <> v_want then
+        v_err := v_err || jsonb_build_object('code','count_mismatch','entity',v_key,
+                                             'expected',v_want,'observed',v_n);
+      end if;
+    end if;
+
+    -- The loader's own reported counts carry the identical traps.
+    if not (p_observed_counts ? v_key) then
+      v_err := v_err || jsonb_build_object('code','reported_count_missing','entity',v_key);
+    elsif jsonb_typeof(p_observed_counts -> v_key) <> 'number' then
+      v_err := v_err || jsonb_build_object('code','reported_count_not_a_number',
+                                           'entity',v_key,
+                                           'json_type',
+                                           jsonb_typeof(p_observed_counts -> v_key));
+    elsif (p_observed_counts ->> v_key)::numeric < 0
+       or (p_observed_counts ->> v_key)::numeric
+           <> trunc((p_observed_counts ->> v_key)::numeric) then
+      v_err := v_err || jsonb_build_object('code','reported_count_not_a_nonnegative_integer',
+                                           'entity',v_key,
+                                           'reported', p_observed_counts -> v_key);
+    elsif (p_observed_counts ->> v_key)::numeric > v_max then
+      v_err := v_err || jsonb_build_object('code','reported_count_out_of_range',
+                                           'entity',v_key,
+                                           'reported', p_observed_counts -> v_key);
+    elsif ((p_observed_counts ->> v_key)::numeric)::bigint <> v_n then
+      v_err := v_err || jsonb_build_object('code','reported_count_mismatch','entity',v_key,
+                                           'reported',
+                                           ((p_observed_counts ->> v_key)::numeric)::bigint,
+                                           'observed',v_n);
+    end if;
+  end loop;
+
+  -- The loop above only inspects the eighteen entity keys this schema knows. A stored
+  -- expected_counts or a reported observed_counts may carry OTHER keys -- media_downloaded
+  -- is one, and a future loader may add more -- and a non-number sitting in one of those
+  -- is the same class of defect: a value that looks supplied and compares to nothing.
+  -- Sweep the whole object so no key escapes the type rule.
+  for v_key in select e.key from jsonb_each(v_exp) e
+                where not (v_obs ? e.key)
+                  and jsonb_typeof(e.value) <> 'number' loop
+    v_err := v_err || jsonb_build_object('code','expected_count_not_a_number',
+                                         'entity',v_key,
+                                         'json_type', jsonb_typeof(v_exp -> v_key));
+  end loop;
+  for v_key in select e.key from jsonb_each(p_observed_counts) e
+                where not (v_obs ? e.key)
+                  and jsonb_typeof(e.value) <> 'number' loop
+    v_err := v_err || jsonb_build_object('code','reported_count_not_a_number',
+                                         'entity',v_key,
+                                         'json_type',
+                                         jsonb_typeof(p_observed_counts -> v_key));
+  end loop;
+
+  -- ---- E. Duplicate source identifiers. The primary keys already make these impossible;
+  -- this asserts that they are still in force rather than trusting that no later
+  -- migration weakened one. It is cheap and it fails loudly.
+  select count(*), count(distinct source_object_id) into v_n, v_d
+    from plm.peanuts_asset where capture_id = p_capture_id;
+  if v_n <> v_d then
+    v_err := v_err || jsonb_build_object('code','duplicate_asset_object_id',
+                                         'rows',v_n,'distinct',v_d);
+  end if;
+  select count(*), count(distinct source_relationship_id) into v_n, v_d
+    from plm.peanuts_asset_relationship where capture_id = p_capture_id;
+  if v_n <> v_d then
+    v_err := v_err || jsonb_build_object('code','duplicate_relationship_id',
+                                         'rows',v_n,'distinct',v_d);
+  end if;
+  select count(*), count(distinct source_field_label) into v_n, v_d
+    from plm.peanuts_metadata_field where capture_id = p_capture_id;
+  if v_n <> v_d then
+    v_err := v_err || jsonb_build_object('code','duplicate_metadata_field_label',
+                                         'rows',v_n,'distinct',v_d);
+  end if;
+
+  -- ---- F. THE DERIVED/DECLARED SEPARATION, asserted rather than assumed. The CHECK
+  -- constraints already pin these; same reasoning as E.
+  select count(*) into v_n from plm.peanuts_style_guide_character
+   where capture_id = p_capture_id and relationship_truth <> 'derived';
+  if v_n <> 0 then
+    v_err := v_err || jsonb_build_object('code','style_guide_character_not_derived',
+                                         'rows',v_n);
+  end if;
+  select count(*) into v_n from plm.peanuts_style_guide_art_program
+   where capture_id = p_capture_id and relationship_truth <> 'derived';
+  if v_n <> 0 then
+    v_err := v_err || jsonb_build_object('code','style_guide_art_program_not_derived',
+                                         'rows',v_n);
+  end if;
+
+  -- ---- G. THE VOCABULARY-SHORTCUT DETECTOR. The flag on the capture is the loader's
+  -- CLAIM; this is the EVIDENCE behind it. If a style-guide vocabulary was loaded and
+  -- every single value in it is one that some asset also uses, the vocabulary was almost
+  -- certainly built from distinct() over assets rather than pulled from the vocabulary
+  -- API -- the exact shortcut that silently discards the hundreds of unused values. A
+  -- genuine vocabulary load carries values with asset_count = 0.
+  select count(*) into v_n from plm.peanuts_style_guide where capture_id = p_capture_id;
+  if v_n > 0 and v_cap.vocabularies_loaded_from_source then
+    select count(*) into v_d from plm.peanuts_style_guide
+     where capture_id = p_capture_id and asset_count = 0;
+    if v_d = 0 then
+      v_err := v_err || jsonb_build_object(
+        'code','vocabulary_shows_no_unused_values',
+        'entity','style_guide',
+        'values', v_n,
+        'note','every value is used by an asset, which is the signature of a distinct()-over-assets shortcut rather than a vocabulary-API load');
+    end if;
+  end if;
+
+  -- ---- H. VERDICT. There is no partial publish: either every check passed, or the
+  -- capture is rejected and the PREVIOUS complete capture stays current.
+  --
+  -- WHY THIS DOES NOT `raise exception` ON A REJECTION, AND WHY THAT IS NOT A SILENT
+  -- FAILURE. The contract requires BOTH "set status='rejected' and persist the errors"
+  -- AND a loud failure. In PostgreSQL an exception aborts the very transaction that wrote
+  -- the rejection row, so raising would roll back the evidence and leave the capture
+  -- sitting in 'loading' with no record of why it failed -- destroying the auditability
+  -- the rejection exists for. The same impossibility was recorded for
+  -- plm.finalize_nbcu_capture (20260810070000) and plm.finalize_sega_capture
+  -- (20260819015333) and is resolved the same way here.
+  -- The failure is loud in three simultaneous, inspectable ways:
+  --   1. a WARNING in the server log,
+  --   2. a PERSISTED status of 'rejected' with the structured errors,
+  --   3. the capture is NOT 'complete', which is the only thing any reader keys on.
+  -- THE CALLER MUST READ BACK plm.peanuts_capture.status. This function returns void by
+  -- contract, so the status column is the return value.
+  if jsonb_array_length(v_err) > 0 then
+    update plm.peanuts_capture
+       set status            = 'rejected',
+           load_completed_at = null,
+           observed_counts   = v_obs,
+           error_summary     = v_err
+     where id = p_capture_id;
+    raise warning 'finalize_peanuts_capture: capture % REJECTED with % error(s): %',
+      p_capture_id, jsonb_array_length(v_err), v_err;
+    return;
+  end if;
+
+  update plm.peanuts_capture
+     set status            = 'complete',
+         load_completed_at = now(),
+         observed_counts   = v_obs,
+         error_summary     = '[]'::jsonb
+   where id = p_capture_id;
+end;
+$$;
+
+comment on function plm.finalize_peanuts_capture(uuid, jsonb, jsonb) is
+  'Publishes or REJECTS one loading Peanuts capture. Re-validates the STORED '
+  'expected_counts rather than trusting begin_peanuts_capture ran, because an owner '
+  'UPDATE can reach that column without the function. Every count must be a JSON NUMBER '
+  'that is a non-negative integer within bigint range -- a null, a numeric-looking '
+  'string, a fraction or an oversized value is a NAMED error code, never a skipped check '
+  'and never a raw cast error. Counts come from the TABLES, and expected, reported and '
+  'actual must all three agree. All pass -> status ''complete''. Any fail -> status '
+  '''rejected'', errors PERSISTED, a server WARNING raised, and the previous complete '
+  'capture left current. NEVER a partial publish. It returns void by contract, so THE '
+  'CALLER MUST READ BACK plm.peanuts_capture.status -- raising instead would roll back '
+  'the rejection record itself (see the comment in the function body). Idempotent on an '
+  'already-complete capture. service_role only.';
+
+
+-- =====================================================================================
 -- RLS, GRANTS, AND THE IMMUTABILITY MECHANISM.
 --
 -- An RLS policy is not a GRANT and a GRANT is not an RLS policy (AGENTS.md section 11).
 -- Both are set here. Supabase''s service_role carries BYPASSRLS, so RLS alone could NOT
 -- constrain the loader -- the GRANTS are what enforce immutability.
 --
---   plm.peanuts_capture -> service_role: SELECT only. See the OPEN DEPENDENCY note in the
---                          file header: the begin/finalize write path is a separate claim.
+--   plm.peanuts_capture -> service_role: SELECT only. All writes go through the two
+--                          security-definer functions above.
 --   the other 18        -> service_role: SELECT + INSERT. No UPDATE, DELETE or TRUNCATE.
 --                          Rows are immutable from the instant they land.
 --   authenticated       -> SELECT only, under the established plm read predicate:
@@ -1274,9 +1840,9 @@ create policy peanuts_style_guide_art_program_plm_read on plm.peanuts_style_guid
 revoke update, delete, truncate on plm.peanuts_capture from service_role;
 revoke insert on plm.peanuts_capture from authenticated;
 revoke update, delete, truncate on plm.peanuts_capture from authenticated;
--- Capture rows are reserved for the begin/finalize security-definer pair (see the OPEN
--- DEPENDENCY note in the file header). A direct INSERT here would let a loader mint a
--- capture that skipped every validation that pair exists to perform.
+-- Capture rows are created and transitioned ONLY by plm.begin_peanuts_capture and
+-- plm.finalize_peanuts_capture. A direct INSERT here would let a loader mint a capture
+-- that skipped every validation begin_ exists to perform.
 revoke insert on plm.peanuts_capture from service_role;
 
 revoke update, delete, truncate on plm.peanuts_art_program from service_role;
@@ -1351,6 +1917,17 @@ revoke update, delete, truncate on plm.peanuts_style_guide_art_program from serv
 revoke insert on plm.peanuts_style_guide_art_program from authenticated;
 revoke update, delete, truncate on plm.peanuts_style_guide_art_program from authenticated;
 
+-- The two functions are the only write path to the capture root, so their EXECUTE
+-- privilege is the privilege that matters. Public loses it; only service_role holds it.
+revoke all on function plm.begin_peanuts_capture(
+  text,text,text,text,text,text,text,timestamptz,jsonb,jsonb,text,
+  integer,integer,integer,boolean,boolean,boolean,text) from public;
+revoke all on function plm.finalize_peanuts_capture(uuid, jsonb, jsonb) from public;
+grant execute on function plm.begin_peanuts_capture(
+  text,text,text,text,text,text,text,timestamptz,jsonb,jsonb,text,
+  integer,integer,integer,boolean,boolean,boolean,text) to service_role;
+grant execute on function plm.finalize_peanuts_capture(uuid, jsonb, jsonb) to service_role;
+
 
 -- Assert the OUTCOME inside the migration, so this file cannot fail silently the way the
 -- NBCU landing did. If the revokes did not take, this raises and the migration fails.
@@ -1410,6 +1987,19 @@ begin
      and grantee = 'anon';
   if v_bad <> 0 then
     raise exception 'peanuts landing: anon holds % grant(s) on peanuts tables', v_bad;
+  end if;
+
+  -- The functions are the write path; assert their EXECUTE privilege too, or the
+  -- immutability model has a hole nobody can see in the table grants.
+  if has_function_privilege('anon', 'plm.finalize_peanuts_capture(uuid,jsonb,jsonb)', 'EXECUTE')
+     or has_function_privilege('authenticated',
+          'plm.finalize_peanuts_capture(uuid,jsonb,jsonb)', 'EXECUTE') then
+    raise exception
+      'peanuts landing: finalize_peanuts_capture is executable outside service_role';
+  end if;
+  if not has_function_privilege('service_role',
+       'plm.finalize_peanuts_capture(uuid,jsonb,jsonb)', 'EXECUTE') then
+    raise exception 'peanuts landing: service_role cannot execute finalize_peanuts_capture';
   end if;
 
   raise notice 'peanuts privileges: service_role SELECT x19 / INSERT x18, no UPDATE/DELETE/TRUNCATE, anon none';
@@ -1477,3 +2067,248 @@ begin
   raise notice 'peanuts shape: 19 tables, no art-program-to-character link, no media, style guide nullable';
 end;
 $$;
+
+
+-- =====================================================================================
+-- api.source_capture_inventory -- EXTENDED, not rewritten.
+--
+-- This body is the CURRENT definition from 20260819015333 (the Sega landing) with the
+-- Peanuts source added and NOTHING else changed. Every pre-existing source keeps its
+-- exact classification, counting rule, basis, status and note, and the ten output columns
+-- keep their names, types and order so existing SELECT * consumers do not shift.
+--
+-- WHAT WAS ADDED, EXHAUSTIVELY:
+--   1. `peanuts_capture_id` in the `latest` CTE -- the newest complete Peanuts capture.
+--   2. `peanuts\_%` -> source_system 'peanuts' in the classifier.
+--   3. Peanuts branches in latest_count, count_basis, latest_complete_status and
+--      count_note, mirroring the NBCU and Sega rules exactly (one latest complete
+--      capture; loading, rejected and abandoned attempts stay retained-only).
+--
+-- ⚠️ WHAT WAS DELIBERATELY NOT ADDED: `plm.wildbrain_*` is still unclassified and still
+-- falls through to source_system 'other' with count_basis 'retained_only'. The WildBrain
+-- landing (20260819014639) never extended this view. That is a real gap, but those tables
+-- belong to another author's object claim, so silently adopting them here would be
+-- exactly the cross-author overwrite this repository's object guard exists to prevent. It
+-- is reported rather than fixed.
+--
+-- It exposes only counts and status. NO Peanuts row value is visible through this view,
+-- so there is no licensed-content exposure here.
+-- =====================================================================================
+create or replace view api.source_capture_inventory as
+with latest as (
+  select
+    (select capture_id from plm.pmt_capture
+      where status = 'complete' and capture_kind = 'full'
+      order by completed_at desc nulls last, started_at desc, capture_id desc limit 1)
+      as pmt_capture_id,
+    (select id from plm.nbcu_capture
+      where status = 'complete'
+      order by source_captured_at desc, load_completed_at desc, id desc limit 1)
+      as nbcu_capture_id,
+    (select crawl_id from plm.dcp_crawl
+      where status = 'complete'
+      order by captured_on desc, finished_at desc, crawl_id desc limit 1)
+      as dcp_crawl_id,
+    (select metadata_run_id from plm.dcp_metadata_run
+      where status = 'complete'
+      order by captured_on desc, finished_at desc, metadata_run_id desc limit 1)
+      as dcp_metadata_run_id,
+    (select id from plm.sega_capture
+      where status = 'complete'
+      order by source_captured_at desc, load_completed_at desc, id desc limit 1)
+      as sega_capture_id,
+    (select id from plm.peanuts_capture
+      where status = 'complete'
+      order by source_captured_at desc, load_completed_at desc, id desc limit 1)
+      as peanuts_capture_id
+), catalog as (
+  select
+    c.oid,
+    c.relname,
+    exists (select 1 from pg_attribute a where a.attrelid = c.oid
+      and a.attnum > 0 and not a.attisdropped and a.attname = 'capture_id') as has_capture_id,
+    exists (select 1 from pg_attribute a where a.attrelid = c.oid
+      and a.attnum > 0 and not a.attisdropped and a.attname = 'crawl_id') as has_crawl_id,
+    exists (select 1 from pg_attribute a where a.attrelid = c.oid
+      and a.attnum > 0 and not a.attisdropped and a.attname = 'metadata_run_id') as has_metadata_run_id,
+    exists (
+      select 1 from pg_attribute a
+      where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+        and a.attname in ('core_property_id','core_character_id','core_licensor_id',
+                          'resolved_at','resolution_status')
+    ) as carries_resolution,
+    obj_description(c.oid, 'pg_class') as table_comment
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'plm' and c.relkind = 'r'
+), classified as (
+  select c.*,
+    case
+      when c.relname like 'dcp\_%' or c.relname like 'opa\_%' then 'disney'
+      when c.relname like 'pmt\_%' then 'paramount'
+      when c.relname like 'nbcu\_%' then 'nbcu'
+      when c.relname like 'wb\_%' then 'warner'
+      when c.relname like 'erp\_%' then 'coldlion'
+      when c.relname like 'sega\_%' then 'sega'
+      when c.relname like 'peanuts\_%' then 'peanuts'
+      else 'other'
+    end as source_system
+  from catalog c
+), counted as (
+  select c.*, l.*,
+    (xpath('/row/cnt/text()', query_to_xml(
+      format('select count(*) as cnt from plm.%I', c.relname), false, true, ''
+    )))[1]::text::bigint as retained_count,
+    case
+      -- OPA tables are deliberately upserted current state, not retained captures.
+      when c.relname like 'opa\_%' then
+        (xpath('/row/cnt/text()', query_to_xml(
+          format('select count(*) as cnt from plm.%I', c.relname), false, true, ''
+        )))[1]::text::bigint
+
+      -- Paramount: one latest complete FULL capture, matching api.pmt_latest_complete_capture.
+      when c.relname = 'pmt_capture' then case when l.pmt_capture_id is null then null else 1::bigint end
+      when c.relname like 'pmt\_%' and c.has_capture_id and l.pmt_capture_id is not null then
+        (xpath('/row/cnt/text()', query_to_xml(format(
+          'select count(*) as cnt from plm.%I where capture_id = %L::uuid',
+          c.relname, l.pmt_capture_id::text), false, true, '')))[1]::text::bigint
+
+      -- NBCU: one latest complete capture; rejected and abandoned attempts stay retained only.
+      when c.relname = 'nbcu_capture' then case when l.nbcu_capture_id is null then null else 1::bigint end
+      when c.relname like 'nbcu\_%' and c.has_capture_id and l.nbcu_capture_id is not null then
+        (xpath('/row/cnt/text()', query_to_xml(format(
+          'select count(*) as cnt from plm.%I where capture_id = %L::uuid',
+          c.relname, l.nbcu_capture_id::text), false, true, '')))[1]::text::bigint
+
+      -- Sega: identical contract to NBCU -- one latest complete capture, and loading,
+      -- rejected and abandoned attempts stay retained only.
+      when c.relname = 'sega_capture' then case when l.sega_capture_id is null then null else 1::bigint end
+      when c.relname like 'sega\_%' and c.has_capture_id and l.sega_capture_id is not null then
+        (xpath('/row/cnt/text()', query_to_xml(format(
+          'select count(*) as cnt from plm.%I where capture_id = %L::uuid',
+          c.relname, l.sega_capture_id::text), false, true, '')))[1]::text::bigint
+
+      -- Peanuts: identical contract to NBCU and Sega -- one latest complete capture, and
+      -- loading, rejected and abandoned attempts stay retained only.
+      when c.relname = 'peanuts_capture' then case when l.peanuts_capture_id is null then null else 1::bigint end
+      when c.relname like 'peanuts\_%' and c.has_capture_id and l.peanuts_capture_id is not null then
+        (xpath('/row/cnt/text()', query_to_xml(format(
+          'select count(*) as cnt from plm.%I where capture_id = %L::uuid',
+          c.relname, l.peanuts_capture_id::text), false, true, '')))[1]::text::bigint
+
+      -- DCP path crawl: asset identity is stable, so membership comes through dcp_asset_crawl.
+      when c.relname = 'dcp_crawl' then case when l.dcp_crawl_id is null then null else 1::bigint end
+      when c.relname = 'dcp_asset' and l.dcp_crawl_id is not null then
+        (select count(*) from plm.dcp_asset_crawl ac where ac.crawl_id = l.dcp_crawl_id)
+      when c.relname like 'dcp\_%' and c.has_crawl_id and l.dcp_crawl_id is not null then
+        (xpath('/row/cnt/text()', query_to_xml(format(
+          'select count(*) as cnt from plm.%I where crawl_id = %L::uuid',
+          c.relname, l.dcp_crawl_id::text), false, true, '')))[1]::text::bigint
+      when c.relname = 'dcp_crawl_gap' and l.dcp_crawl_id is not null then
+        (select count(*) from plm.dcp_crawl_gap g
+          join plm.dcp_crawl_section s on s.id = g.crawl_section_id
+          where s.crawl_id = l.dcp_crawl_id)
+
+      -- DCP metadata has its own complete-run clock, separate from path crawls.
+      when c.relname = 'dcp_metadata_run' then
+        case when l.dcp_metadata_run_id is null then null else 1::bigint end
+      when c.relname like 'dcp\_%' and c.has_metadata_run_id
+           and l.dcp_metadata_run_id is not null then
+        (xpath('/row/cnt/text()', query_to_xml(format(
+          'select count(*) as cnt from plm.%I where metadata_run_id = %L::uuid',
+          c.relname, l.dcp_metadata_run_id::text), false, true, '')))[1]::text::bigint
+      else null
+    end as latest_count
+  from classified c cross join latest l
+)
+select
+  source_system,
+  relname as table_name,
+  retained_count as row_count,
+  carries_resolution,
+  table_comment,
+  retained_count as retained_row_count,
+  latest_count as latest_complete_row_count,
+  case
+    when relname like 'opa\_%' then 'current_snapshot'
+    when relname like 'pmt\_%' and (relname = 'pmt_capture' or has_capture_id) then 'latest_complete'
+    when relname like 'nbcu\_%' and (relname = 'nbcu_capture' or has_capture_id) then 'latest_complete'
+    when relname like 'sega\_%' and (relname = 'sega_capture' or has_capture_id) then 'latest_complete'
+    when relname like 'peanuts\_%' and (relname = 'peanuts_capture' or has_capture_id) then 'latest_complete'
+    when relname in ('dcp_crawl','dcp_asset','dcp_crawl_gap')
+         or (relname like 'dcp\_%' and has_crawl_id) then 'latest_complete'
+    when relname = 'dcp_metadata_run' or (relname like 'dcp\_%' and has_metadata_run_id)
+      then 'latest_complete'
+    else 'retained_only'
+  end as count_basis,
+  case
+    when relname like 'pmt\_%' and (relname = 'pmt_capture' or has_capture_id)
+      then case when pmt_capture_id is null then null else 'complete' end
+    when relname like 'nbcu\_%' and (relname = 'nbcu_capture' or has_capture_id)
+      then case when nbcu_capture_id is null then null else 'complete' end
+    when relname like 'sega\_%' and (relname = 'sega_capture' or has_capture_id)
+      then case when sega_capture_id is null then null else 'complete' end
+    when relname like 'peanuts\_%' and (relname = 'peanuts_capture' or has_capture_id)
+      then case when peanuts_capture_id is null then null else 'complete' end
+    when relname in ('dcp_crawl','dcp_asset','dcp_crawl_gap')
+         or (relname like 'dcp\_%' and has_crawl_id)
+      then case when dcp_crawl_id is null then null else 'complete' end
+    when relname = 'dcp_metadata_run' or (relname like 'dcp\_%' and has_metadata_run_id)
+      then case when dcp_metadata_run_id is null then null else 'complete' end
+    else null
+  end as latest_complete_status,
+  case
+    when relname like 'opa\_%' then
+      'Current upserted OPA snapshot; there is no retained-capture clock for this table.'
+    when relname like 'pmt\_%' and (relname = 'pmt_capture' or has_capture_id)
+         and pmt_capture_id is null then
+      'No complete full Paramount capture exists; latest-complete count is unknown, not zero.'
+    when relname like 'pmt\_%' and (relname = 'pmt_capture' or has_capture_id) then
+      'Latest complete full Paramount capture; failed, abandoned, targeted and test captures excluded.'
+    when relname like 'nbcu\_%' and (relname = 'nbcu_capture' or has_capture_id)
+         and nbcu_capture_id is null then
+      'No complete NBCU capture exists; latest-complete count is unknown, not zero.'
+    when relname like 'nbcu\_%' and (relname = 'nbcu_capture' or has_capture_id) then
+      'Latest complete NBCU capture; loading, rejected and abandoned captures excluded.'
+    when relname like 'sega\_%' and (relname = 'sega_capture' or has_capture_id)
+         and sega_capture_id is null then
+      'No complete Sega capture exists; latest-complete count is unknown, not zero.'
+    when relname like 'sega\_%' and (relname = 'sega_capture' or has_capture_id) then
+      'Latest complete Sega capture; loading, rejected and abandoned captures excluded.'
+    when relname like 'peanuts\_%' and (relname = 'peanuts_capture' or has_capture_id)
+         and peanuts_capture_id is null then
+      'No complete Peanuts capture exists; latest-complete count is unknown, not zero.'
+    when relname like 'peanuts\_%' and (relname = 'peanuts_capture' or has_capture_id) then
+      'Latest complete Peanuts capture; loading, rejected and abandoned captures excluded.'
+    when (relname in ('dcp_crawl','dcp_asset','dcp_crawl_gap')
+          or (relname like 'dcp\_%' and has_crawl_id)) and dcp_crawl_id is null then
+      'No complete DCP crawl exists; latest-complete membership is unknown, not zero.'
+    when relname in ('dcp_crawl','dcp_asset','dcp_crawl_gap')
+         or (relname like 'dcp\_%' and has_crawl_id) then
+      'Latest complete DCP path crawl, using immutable crawl membership where required.'
+    when (relname = 'dcp_metadata_run' or (relname like 'dcp\_%' and has_metadata_run_id))
+         and dcp_metadata_run_id is null then
+      'No complete DCP metadata run exists; latest-complete count is unknown, not zero.'
+    when relname = 'dcp_metadata_run' or (relname like 'dcp\_%' and has_metadata_run_id) then
+      'Latest complete DCP metadata run, separate from the path-crawl clock.'
+    when relname = 'dcp_style_guide' then
+      'Retained style-guide identities only. Historical latest-complete membership cannot be derived from mutable last_seen_crawl_id; NULL is intentional.'
+    when relname like 'dcp\_%' then
+      'Retained DCP rows only; this table has no exact immutable latest-complete membership path.'
+    else
+      'Retained rows only; no source-specific latest-complete contract is defined for this table.'
+  end as count_note
+from counted;
+
+comment on view api.source_capture_inventory is
+  'Source landing inventory with two distinct facts. row_count remains a compatibility alias '
+  'for retained_row_count, which counts every retained row including failed attempts. '
+  'latest_complete_row_count reports current complete-capture coverage only where exact '
+  'membership can be derived; NULL means unavailable or not applicable, never zero. '
+  'count_basis, latest_complete_status and count_note state the rule. carries_resolution '
+  'still describes table shape and never proves that a scrape ran. Counts and status only: '
+  'no licensed source row value is exposed here.';
+
+revoke all on api.source_capture_inventory from public;
+revoke all on api.source_capture_inventory from anon;
+grant select on api.source_capture_inventory to authenticated, service_role;

@@ -21,13 +21,13 @@
 --   portal URL appears here. The fixtures use obviously fake tokens (ZZTEST-*,
 --   example.invalid) chosen so a real row could never be mistaken for one of them.
 --
--- WHY THE FIXTURES INSERT THE CAPTURE ROW DIRECTLY
---   The begin/finalize security-definer pair is NOT part of migration 20260819112505 --
---   it ships under its own object claim (see the OPEN DEPENDENCY note in the migration
---   header). service_role therefore holds SELECT only on plm.peanuts_capture. These tests
---   run as the table OWNER, which can still insert, so the table contracts below are
---   exercised without inventing an unclaimed function. Section B proves that service_role
---   itself still cannot.
+-- WHY SECTIONS B-E INSERT THE CAPTURE ROW DIRECTLY
+--   service_role holds SELECT only on plm.peanuts_capture; the write path is the
+--   begin/finalize pair. These tests run as the table OWNER, which can still insert, so
+--   sections B-E can exercise a TABLE constraint in isolation without routing through a
+--   function that would refuse the row earlier for a different reason -- which would
+--   prove the function, not the constraint. Section B proves service_role itself cannot
+--   insert here, and section F exercises the functions on their own terms.
 --
 -- WHAT IT ASSERTS
 --   A. The 19 tables exist, RLS is enabled on every one, and each carries exactly 2 read
@@ -42,6 +42,14 @@
 --   E. The declared/derived separation: relationship_truth cannot be anything but
 --      'derived', the derived tables cannot carry a zero support count, and the asset
 --      relationship graph refuses a self-edge.
+--   F. plm.begin_peanuts_capture and plm.finalize_peanuts_capture: security posture,
+--      idempotency, and every unusable count shape refused BY NAME at begin AND again at
+--      the publication gate, which re-reads the STORED object. Includes the three live
+--      sibling defects: a JSON null (a SKIPPED check), a numeric-looking STRING whose
+--      value MATCHES the true row count (a silent WRONG ANSWER), and a fraction or an
+--      oversized value (a raw cast error that wedges the capture).
+--   G. api.source_capture_inventory classifies plm.peanuts_*, and every pre-existing
+--      source and the ten output columns are unchanged.
 -- =====================================================================================
 
 begin;
@@ -843,6 +851,465 @@ begin
   end if;
 
   raise notice 'E passed: declared stays verbatim, derived stays derived, many-to-many holds';
+end;
+$$;
+
+
+-- =====================================================================================
+-- F. THE CAPTURE FUNCTIONS.
+--
+-- F1 covers existence and the security posture; F2 falsifies every shape of a bad count
+-- at begin_; F3 falsifies the same shapes again at the PUBLICATION GATE, reaching the
+-- stored object the way an owner UPDATE would -- because begin_ having run is not
+-- evidence that the stored value is still sound.
+--
+-- The three shapes that were live defects in the sibling landings each get their own
+-- named case: F3a (JSON null -> a SKIPPED check), F3b (numeric-looking STRING whose value
+-- MATCHES the true row count -> a silent WRONG ANSWER), F3c/F3d (fraction and oversized
+-- value -> a raw cast error that wedges the capture).
+--
+-- Every handler here is `when raise_exception` or a specific class. There is no
+-- `when others` in this file.
+-- =====================================================================================
+do $$
+declare
+  v_n integer;
+begin
+  foreach v_n in array array[1] loop end loop;  -- no-op, keeps the declare block honest
+
+  select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'plm'
+     and p.proname in ('begin_peanuts_capture','finalize_peanuts_capture');
+  if v_n <> 2 then
+    raise exception 'F1 FAILED: expected 2 peanuts capture functions, found %', v_n;
+  end if;
+
+  select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'plm'
+     and p.proname in ('begin_peanuts_capture','finalize_peanuts_capture')
+     and p.prosecdef
+     and array_to_string(coalesce(p.proconfig, '{}'::text[]), ',') like '%search_path%';
+  if v_n <> 2 then
+    raise exception
+      'F1 FAILED: both functions must be security definer with a pinned search_path (% of 2)',
+      v_n;
+  end if;
+
+  if has_function_privilege('anon',
+       'plm.finalize_peanuts_capture(uuid,jsonb,jsonb)', 'EXECUTE')
+     or has_function_privilege('authenticated',
+       'plm.finalize_peanuts_capture(uuid,jsonb,jsonb)', 'EXECUTE') then
+    raise exception 'F1 FAILED: finalize_peanuts_capture is executable outside service_role';
+  end if;
+  if not has_function_privilege('service_role',
+       'plm.finalize_peanuts_capture(uuid,jsonb,jsonb)', 'EXECUTE') then
+    raise exception 'F1 FAILED: service_role cannot execute finalize_peanuts_capture';
+  end if;
+
+  raise notice 'F1 passed: both functions exist, are security definer, service_role only';
+end;
+$$;
+
+-- F2. begin_peanuts_capture refuses every unusable count shape, and is idempotent.
+do $$
+declare
+  v_a      uuid;
+  v_b      uuid;
+  v_raised integer := 0;
+  v_want   integer := 8;
+  v_msg    text;
+begin
+  v_a := plm.begin_peanuts_capture(
+    'ZZTEST-peanuts-F2', 'ZZTEST-repo', repeat('f', 40), repeat('f', 64),
+    'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+    '2099-01-01Z'::timestamptz, '{"assets":0}'::jsonb, '{}'::jsonb, 'ZZTEST',
+    0, 0, 0, true, true, true);
+
+  -- Idempotent: the identical call resumes the same capture, it does not create a second.
+  v_b := plm.begin_peanuts_capture(
+    'ZZTEST-peanuts-F2', 'ZZTEST-repo', repeat('f', 40), repeat('f', 64),
+    'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+    '2099-01-01Z'::timestamptz, '{"assets":0}'::jsonb, '{}'::jsonb, 'ZZTEST',
+    0, 0, 0, true, true, true);
+  if v_a is distinct from v_b then
+    raise exception 'F2 FAILED: an identical begin_ call created a second capture';
+  end if;
+  if (select count(*) from plm.peanuts_capture
+       where capture_key = 'ZZTEST-peanuts-F2') <> 1 then
+    raise exception 'F2 FAILED: more than one capture row exists for one capture_key';
+  end if;
+
+  -- Same key, different bytes, is a contradiction rather than a resume.
+  begin
+    perform plm.begin_peanuts_capture(
+      'ZZTEST-peanuts-F2', 'ZZTEST-repo', repeat('f', 40), repeat('e', 64),
+      'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+      '2099-01-01Z'::timestamptz, '{"assets":0}'::jsonb, '{}'::jsonb, 'ZZTEST',
+      0, 0, 0, true, true, true);
+    raise warning 'F2 FAIL: a same-key capture with a different manifest hash was accepted';
+  exception when raise_exception then
+    get stacked diagnostics v_msg = message_text;
+    if position('DIFFERENT source manifest hash' in v_msg) = 0 then
+      raise exception 'F2 FAILED: wrong refusal for a changed manifest hash: %', v_msg;
+    end if;
+    v_raised := v_raised + 1;
+  end;
+
+  -- Every unusable expected_counts shape, one at a time. A JSON null and a
+  -- numeric-looking string must BOTH be refused by the TYPE test.
+  declare
+    v_bad  jsonb[] := array[
+      '{"assets":null}'::jsonb,     -- #1219: presence test says supplied, compares to nothing
+      '{"assets":"12"}'::jsonb,     -- the silent wrong answer: casts and compares cleanly
+      '{"assets":true}'::jsonb,
+      '{"assets":[1]}'::jsonb,
+      '{"assets":{"n":1}}'::jsonb,
+      '{"assets":-1}'::jsonb,
+      '{"assets":1.5}'::jsonb
+    ];
+    v_i    integer;
+  begin
+    for v_i in 1 .. array_length(v_bad, 1) loop
+      begin
+        perform plm.begin_peanuts_capture(
+          'ZZTEST-peanuts-F2-bad-' || v_i, 'ZZTEST-repo', repeat('f', 40), repeat('f', 64),
+          'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+          '2099-01-01Z'::timestamptz, v_bad[v_i], '{}'::jsonb, 'ZZTEST',
+          0, 0, 0, true, true, true);
+        raise warning 'F2 FAIL: begin_ accepted an unusable expected_counts: %', v_bad[v_i];
+      exception when raise_exception then
+        get stacked diagnostics v_msg = message_text;
+        -- A NAMED refusal, never a raw cast error. `invalid input syntax` here would mean
+        -- the type test ran too late, which is defect #1221/#1222.
+        if position('begin_peanuts_capture:' in v_msg) = 0
+           or position('invalid input syntax' in v_msg) > 0 then
+          raise exception 'F2 FAILED: unusable count % gave the wrong error: %',
+            v_bad[v_i], v_msg;
+        end if;
+        v_raised := v_raised + 1;
+      end;
+    end loop;
+  end;
+
+  if v_raised <> v_want then
+    raise exception 'F2 FAILED: % of % bad inputs were refused by name', v_raised, v_want;
+  end if;
+
+  -- And the shape that MUST be accepted: an integral JSON number written 1.0. Refusing
+  -- this, or crashing on it, is defect #1221.
+  perform plm.begin_peanuts_capture(
+    'ZZTEST-peanuts-F2-onepointzero', 'ZZTEST-repo', repeat('f', 40), repeat('f', 64),
+    'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+    '2099-01-01Z'::timestamptz, '{"assets":1.0}'::jsonb, '{}'::jsonb, 'ZZTEST',
+    0, 0, 0, true, true, true);
+
+  raise notice 'F2 passed: % named refusals, idempotency holds, 1.0 still accepted', v_raised;
+end;
+$$;
+
+-- F3. The PUBLICATION GATE re-validates the STORED object. Each case writes the bad value
+-- straight into the column, exactly as an owner UPDATE would, so begin_ having run is
+-- irrelevant. Every one of them must end with the capture REJECTED and NOT complete.
+do $$
+declare
+  v_cap    uuid;
+  v_status text;
+  v_err    jsonb;
+  v_obs    jsonb;
+  v_cases  jsonb[] := array[
+    '{"assets":null}'::jsonb,
+    '{"assets":"1"}'::jsonb,
+    '{"assets":1.5}'::jsonb,
+    '{"assets":99999999999999999999999}'::jsonb
+  ];
+  v_names  text[] := array['F3a json-null','F3b numeric string that MATCHES',
+                           'F3c fraction','F3d out of bigint range'];
+  v_i      integer;
+begin
+  for v_i in 1 .. array_length(v_cases, 1) loop
+    v_cap := plm.begin_peanuts_capture(
+      'ZZTEST-peanuts-F3-' || v_i, 'ZZTEST-repo', repeat('a', 40), repeat('a', 64),
+      'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+      '2099-01-01Z'::timestamptz, '{"assets":1}'::jsonb, '{}'::jsonb, 'ZZTEST',
+      1, 1, 0, true, true, true);
+
+    -- Exactly ONE asset row, so that in case F3b the string "1" is NUMERICALLY CORRECT.
+    -- A fixture using "999" would be caught by the mismatch and would prove nothing about
+    -- the type rule.
+    insert into plm.peanuts_asset (capture_id, source_object_id, file_name, raw)
+    values (v_cap, 'ZZTEST-OBJ-F3', 'zztest-f3.ext', '{}');
+    insert into plm.peanuts_style_guide (
+      capture_id, value_key, value_label, source_field_name, source_field_label,
+      is_multi_select, asset_count, raw)
+    values (v_cap, 'zztest-guide-unused', 'ZZTEST Unused Guide', 'zztest_guide_field',
+            'ZZTEST Guide Label', false, 0, '{}');
+
+    -- Reach the stored column directly. This is the owner-UPDATE path that begin_ cannot
+    -- police, and it is the entire reason the gate re-validates.
+    update plm.peanuts_capture set expected_counts = v_cases[v_i] where id = v_cap;
+
+    -- finalize_ must not crash: a raw cast error here would wedge the capture in
+    -- 'loading' with no recorded reason, which is defect #1221/#1222.
+    perform plm.finalize_peanuts_capture(
+      v_cap,
+      jsonb_build_object(
+        'art_programs',0,'style_guides',1,'characters',0,'animation_titles',0,
+        'holidays',0,'initiatives',0,'asset_types',0,'licensing_statuses',0,
+        'metadata_fields',0,'assets',1,'asset_art_programs',0,'asset_characters',0,
+        'asset_animation_titles',0,'asset_holidays',0,'asset_keywords',0,
+        'asset_relationships',0,'style_guide_characters',0,'style_guide_art_programs',0),
+      '[]'::jsonb);
+
+    select status, error_summary into v_status, v_err
+      from plm.peanuts_capture where id = v_cap;
+
+    if v_status <> 'rejected' then
+      raise exception '% FAILED: capture is %, expected rejected -- the count check was SKIPPED',
+        v_names[v_i], v_status;
+    end if;
+    if not exists (
+      select 1 from jsonb_array_elements(v_err) e
+       where e ->> 'entity' = 'assets'
+         and e ->> 'code' in ('expected_count_not_a_number',
+                              'expected_count_not_a_nonnegative_integer',
+                              'expected_count_out_of_range')) then
+      raise exception '% FAILED: rejected, but not for the count: %', v_names[v_i], v_err;
+    end if;
+    -- The evidence must SURVIVE. A `raise exception` on rejection would have rolled the
+    -- rejection row back and left the capture in 'loading'.
+    if jsonb_array_length(v_err) = 0 then
+      raise exception '% FAILED: the rejection persisted no error evidence', v_names[v_i];
+    end if;
+  end loop;
+
+  -- F3e. THE HAPPY PATH. Without this, a gate that rejected everything would pass F3a-d.
+  v_cap := plm.begin_peanuts_capture(
+    'ZZTEST-peanuts-F3-ok', 'ZZTEST-repo', repeat('a', 40), repeat('a', 64),
+    'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+    '2099-01-01Z'::timestamptz,
+    jsonb_build_object(
+      'art_programs',0,'style_guides',1,'characters',0,'animation_titles',0,
+      'holidays',0,'initiatives',0,'asset_types',0,'licensing_statuses',0,
+      'metadata_fields',0,'assets',1,'asset_art_programs',0,'asset_characters',0,
+      'asset_animation_titles',0,'asset_holidays',0,'asset_keywords',0,
+      'asset_relationships',0,'style_guide_characters',0,'style_guide_art_programs',0),
+    '{}'::jsonb, 'ZZTEST', 3, 1, 2, true, true, true);
+  insert into plm.peanuts_asset (capture_id, source_object_id, file_name, raw)
+  values (v_cap, 'ZZTEST-OBJ-OK', 'zztest-ok.ext', '{}');
+  insert into plm.peanuts_style_guide (
+    capture_id, value_key, value_label, source_field_name, source_field_label,
+    is_multi_select, asset_count, raw)
+  values (v_cap, 'zztest-guide-unused', 'ZZTEST Unused Guide', 'zztest_guide_field',
+          'ZZTEST Guide Label', false, 0, '{}');
+  perform plm.finalize_peanuts_capture(
+    v_cap,
+    jsonb_build_object(
+      'art_programs',0,'style_guides',1,'characters',0,'animation_titles',0,
+      'holidays',0,'initiatives',0,'asset_types',0,'licensing_statuses',0,
+      'metadata_fields',0,'assets',1,'asset_art_programs',0,'asset_characters',0,
+      'asset_animation_titles',0,'asset_holidays',0,'asset_keywords',0,
+      'asset_relationships',0,'style_guide_characters',0,'style_guide_art_programs',0),
+    '[]'::jsonb);
+  select status, observed_counts into v_status, v_obs
+    from plm.peanuts_capture where id = v_cap;
+  if v_status <> 'complete' then
+    raise exception 'F3e FAILED: a fully consistent capture did not publish (status %)',
+      v_status;
+  end if;
+  if (v_obs ->> 'assets') <> '1' then
+    raise exception 'F3e FAILED: observed counts came from somewhere other than the tables: %',
+      v_obs;
+  end if;
+
+  -- F3f. Idempotent finalize on an already-complete capture.
+  perform plm.finalize_peanuts_capture(v_cap, '{}'::jsonb, '[]'::jsonb);
+  select status into v_status from plm.peanuts_capture where id = v_cap;
+  if v_status <> 'complete' then
+    raise exception 'F3f FAILED: re-finalizing a complete capture changed it to %', v_status;
+  end if;
+
+  -- F3g. THE PAGING-WALL ARITHMETIC at the gate. A capture claiming nothing unreachable
+  -- while sitting below the portal total must be rejected, not published.
+  v_cap := plm.begin_peanuts_capture(
+    'ZZTEST-peanuts-F3-short', 'ZZTEST-repo', repeat('a', 40), repeat('a', 64),
+    'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+    '2099-01-01Z'::timestamptz,
+    jsonb_build_object(
+      'art_programs',0,'style_guides',0,'characters',0,'animation_titles',0,
+      'holidays',0,'initiatives',0,'asset_types',0,'licensing_statuses',0,
+      'metadata_fields',0,'assets',0,'asset_art_programs',0,'asset_characters',0,
+      'asset_animation_titles',0,'asset_holidays',0,'asset_keywords',0,
+      'asset_relationships',0,'style_guide_characters',0,'style_guide_art_programs',0),
+    '{}'::jsonb, 'ZZTEST', 9, 0, 0, true, true, true);
+  perform plm.finalize_peanuts_capture(
+    v_cap,
+    jsonb_build_object(
+      'art_programs',0,'style_guides',0,'characters',0,'animation_titles',0,
+      'holidays',0,'initiatives',0,'asset_types',0,'licensing_statuses',0,
+      'metadata_fields',0,'assets',0,'asset_art_programs',0,'asset_characters',0,
+      'asset_animation_titles',0,'asset_holidays',0,'asset_keywords',0,
+      'asset_relationships',0,'style_guide_characters',0,'style_guide_art_programs',0),
+    '[]'::jsonb);
+  select status, error_summary into v_status, v_err
+    from plm.peanuts_capture where id = v_cap;
+  if v_status <> 'rejected'
+     or not exists (select 1 from jsonb_array_elements(v_err) e
+                     where e ->> 'code' = 'asset_total_arithmetic_mismatch') then
+    raise exception 'F3g FAILED: a short capture with zero unreachable assets was not rejected (% / %)',
+      v_status, v_err;
+  end if;
+
+  -- F3h. THE VOCABULARY-SHORTCUT DETECTOR. A style-guide vocabulary in which every value
+  -- is used by an asset is the signature of distinct()-over-assets, which silently
+  -- discards the unused values.
+  v_cap := plm.begin_peanuts_capture(
+    'ZZTEST-peanuts-F3-shortcut', 'ZZTEST-repo', repeat('a', 40), repeat('a', 64),
+    'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+    '2099-01-01Z'::timestamptz,
+    jsonb_build_object(
+      'art_programs',0,'style_guides',1,'characters',0,'animation_titles',0,
+      'holidays',0,'initiatives',0,'asset_types',0,'licensing_statuses',0,
+      'metadata_fields',0,'assets',0,'asset_art_programs',0,'asset_characters',0,
+      'asset_animation_titles',0,'asset_holidays',0,'asset_keywords',0,
+      'asset_relationships',0,'style_guide_characters',0,'style_guide_art_programs',0),
+    '{}'::jsonb, 'ZZTEST', 0, 0, 0, true, true, true);
+  insert into plm.peanuts_style_guide (
+    capture_id, value_key, value_label, source_field_name, source_field_label,
+    is_multi_select, asset_count, raw)
+  values (v_cap, 'zztest-guide-used', 'ZZTEST Used Guide', 'zztest_guide_field',
+          'ZZTEST Guide Label', false, 7, '{}');
+  perform plm.finalize_peanuts_capture(
+    v_cap,
+    jsonb_build_object(
+      'art_programs',0,'style_guides',1,'characters',0,'animation_titles',0,
+      'holidays',0,'initiatives',0,'asset_types',0,'licensing_statuses',0,
+      'metadata_fields',0,'assets',0,'asset_art_programs',0,'asset_characters',0,
+      'asset_animation_titles',0,'asset_holidays',0,'asset_keywords',0,
+      'asset_relationships',0,'style_guide_characters',0,'style_guide_art_programs',0),
+    '[]'::jsonb);
+  select status, error_summary into v_status, v_err
+    from plm.peanuts_capture where id = v_cap;
+  if v_status <> 'rejected'
+     or not exists (select 1 from jsonb_array_elements(v_err) e
+                     where e ->> 'code' = 'vocabulary_shows_no_unused_values') then
+    raise exception 'F3h FAILED: a shortcut-shaped vocabulary was not detected (% / %)',
+      v_status, v_err;
+  end if;
+
+  raise notice 'F3 passed: the gate re-validates the stored object, publishes only a clean capture';
+end;
+$$;
+
+
+-- =====================================================================================
+-- G. api.source_capture_inventory -- EXTENDED, NOT REWRITTEN.
+--
+-- The point of this section is that the view still answers exactly as before for every
+-- PRE-EXISTING source, and additionally classifies plm.peanuts_*.
+-- =====================================================================================
+do $$
+declare
+  r        record;
+  v_before integer;
+  v_cap    uuid;
+begin
+  -- Every pre-existing source keeps its classification. If a Peanuts branch had been
+  -- inserted above one of these instead of beside it, this goes red.
+  select count(*) into v_before from api.source_capture_inventory
+   where source_system = 'peanuts';
+  if v_before <> 19 then
+    raise exception 'G FAILED: % peanuts tables classified, expected 19', v_before;
+  end if;
+
+  for r in select relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'plm' and c.relkind = 'r' and c.relname like 'sega\_%' loop
+    if (select source_system from api.source_capture_inventory
+         where table_name = r.relname) <> 'sega' then
+      raise exception 'G FAILED: plm.% is no longer classified as sega', r.relname;
+    end if;
+  end loop;
+
+  -- The ten output columns keep their names and order, so SELECT * consumers do not shift.
+  if (select string_agg(column_name, ',' order by ordinal_position)
+        from information_schema.columns
+       where table_schema = 'api' and table_name = 'source_capture_inventory')
+     <> 'source_system,table_name,row_count,carries_resolution,table_comment,'
+        || 'retained_row_count,latest_complete_row_count,count_basis,'
+        || 'latest_complete_status,count_note' then
+    raise exception 'G FAILED: the view output columns changed shape';
+  end if;
+
+  -- With no complete Peanuts capture, latest-complete is NULL -- "unknown", never zero.
+  select * into r from api.source_capture_inventory where table_name = 'peanuts_asset';
+  if r.count_basis <> 'latest_complete' then
+    raise exception 'G FAILED: peanuts_asset count_basis is %, expected latest_complete',
+      r.count_basis;
+  end if;
+
+  -- Now publish one capture and check the count follows it.
+  v_cap := plm.begin_peanuts_capture(
+    'ZZTEST-peanuts-G', 'ZZTEST-repo', repeat('9', 40), repeat('9', 64),
+    'https://example.invalid', 'https://api.example.invalid', 'ZZTEST-customer',
+    '2099-06-01Z'::timestamptz,
+    jsonb_build_object(
+      'art_programs',0,'style_guides',1,'characters',0,'animation_titles',0,
+      'holidays',0,'initiatives',0,'asset_types',0,'licensing_statuses',0,
+      'metadata_fields',0,'assets',2,'asset_art_programs',0,'asset_characters',0,
+      'asset_animation_titles',0,'asset_holidays',0,'asset_keywords',0,
+      'asset_relationships',0,'style_guide_characters',0,'style_guide_art_programs',0),
+    '{}'::jsonb, 'ZZTEST', 5, 2, 3, true, true, true);
+  insert into plm.peanuts_asset (capture_id, source_object_id, file_name, raw)
+  values (v_cap, 'ZZTEST-G-1', 'zztest-g-one.ext', '{}'),
+         (v_cap, 'ZZTEST-G-2', 'zztest-g-two.ext', '{}');
+  insert into plm.peanuts_style_guide (
+    capture_id, value_key, value_label, source_field_name, source_field_label,
+    is_multi_select, asset_count, raw)
+  values (v_cap, 'zztest-guide-unused', 'ZZTEST Unused Guide', 'zztest_guide_field',
+          'ZZTEST Guide Label', false, 0, '{}');
+  perform plm.finalize_peanuts_capture(
+    v_cap,
+    jsonb_build_object(
+      'art_programs',0,'style_guides',1,'characters',0,'animation_titles',0,
+      'holidays',0,'initiatives',0,'asset_types',0,'licensing_statuses',0,
+      'metadata_fields',0,'assets',2,'asset_art_programs',0,'asset_characters',0,
+      'asset_animation_titles',0,'asset_holidays',0,'asset_keywords',0,
+      'asset_relationships',0,'style_guide_characters',0,'style_guide_art_programs',0),
+    '[]'::jsonb);
+
+  select * into r from api.source_capture_inventory where table_name = 'peanuts_capture';
+  if r.latest_complete_row_count <> 1 or r.count_basis <> 'latest_complete' then
+    raise exception 'G FAILED: peanuts_capture reports % / %',
+      r.latest_complete_row_count, r.count_basis;
+  end if;
+
+  select * into r from api.source_capture_inventory where table_name = 'peanuts_asset';
+  if r.latest_complete_row_count <> 2 then
+    raise exception 'G FAILED: peanuts_asset latest-complete count is %, expected 2',
+      r.latest_complete_row_count;
+  end if;
+  if r.count_note not like 'Latest complete Peanuts capture%' then
+    raise exception 'G FAILED: the peanuts count note is wrong: %', r.count_note;
+  end if;
+  if r.row_count is distinct from r.retained_row_count then
+    raise exception 'G FAILED: the row_count compatibility alias broke';
+  end if;
+
+  -- A peanuts table this fixture never wrote reports ZERO for the current capture, not
+  -- NULL: NULL means "cannot be derived", and for a capture-scoped table it can be.
+  select * into r from api.source_capture_inventory where table_name = 'peanuts_asset_keyword';
+  if r.latest_complete_row_count is distinct from 0::bigint then
+    raise exception 'G FAILED: peanuts_asset_keyword latest-complete count is %, expected 0',
+      r.latest_complete_row_count;
+  end if;
+
+  -- Retained counts still include the rejected attempts from section F.
+  select * into r from api.source_capture_inventory where table_name = 'peanuts_capture';
+  if r.retained_row_count <= 1 then
+    raise exception 'G FAILED: retained count is %, expected the rejected attempts too',
+      r.retained_row_count;
+  end if;
+
+  raise notice 'G passed: peanuts classified, pre-existing sources and column shape unchanged';
 end;
 $$;
 
