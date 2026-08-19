@@ -7,8 +7,8 @@
 --
 -- No `exception when others` swallows anything. Every handler re-raises unless
 -- the message is the exact refusal being proven, so a typo in this file is red,
--- not green. Every proof increments a counter and the counter is asserted at the
--- end, so a block that silently never runs is red too. There is not one
+-- not green. Every proof increments a counter and the counter is asserted at
+-- the end, so a block that silently never runs is red too. There is not one
 -- `raise warning` in this file, by design.
 
 begin;
@@ -17,7 +17,8 @@ begin;
 -- from-empty CI database it does NOT: both 20260802171000 and 20260818174350
 -- abort on their `select ... into strict` for the FR/FK rows, so their
 -- `create table` rolls back with them. Creating it here (inside this
--- transaction, rolled back at the end) is test scaffolding, not a schema change.
+-- transaction, rolled back at the end) is test scaffolding, not a schema
+-- change.
 create table if not exists core.taxonomy_owner_ruling (
   id uuid primary key default gen_random_uuid(),
   entity_schema text not null default 'core',
@@ -38,41 +39,43 @@ create table if not exists core.taxonomy_owner_ruling (
 do $$
 declare
   v_checks integer := 0;
-  v_expected_checks constant integer := 32;
-  v_case record;
+  v_expected_checks constant integer := 24;
   v_ruled_at constant timestamptz := timestamptz '2026-08-02 12:00:00+00';
   v_ruler constant text := 'contract-test ruler';
   v_fr uuid;
+  v_other uuid;
   v_auth uuid;
   v_delta jsonb;
+  v_case record;
   v_audit_before bigint;
-  v_metadata_before jsonb;
-  v_status_before text;
-
-  -- Inserts one valid FR owner-ruling authorization and returns its id.
-  -- Declared as a local helper would need a function; instead each block below
-  -- inserts explicitly, which also keeps every binding visible at the point of
-  -- the assertion it is meant to falsify.
+  v_metadata_now jsonb;
+  v_status_now text;
 begin
+  v_delta := jsonb_build_object('owner_ruling', jsonb_build_object(
+    'ruled_by', v_ruler,
+    'ruled_on', '2026-08-02',
+    'ruling', 'never a real licensor; created by mistake',
+    'migration', '20260802171000'
+  ));
+
   -- ------------------------------------------------------------------
   -- CLEAR THE BLANKET CI AUTHORIZATIONS FIRST.
   -- supabase/ci-bootstrap/020_test_fixture_seed.sql defines
   -- public.ci_authorize_licensing_contract_test(), and the contract-test
   -- runner calls it at the top of EVERY test session. It pre-issues 100
   -- unconsumed 'canonical_merge' authorizations for every column subset of
-  -- core.licensor and core.property, in this very backend and transaction,
-  -- so that legacy tests can write canonical rows without issuing their own.
+  -- core.licensor and core.property, in this very backend and transaction, so
+  -- that legacy tests can write canonical rows without issuing their own.
   --
-  -- For this file that fixture is poison: half the proofs below assert that a
+  -- For this file that fixture is poison: many proofs below assert that a
   -- write with NO valid authorization is refused, and a blanket
   -- 'canonical_merge' row silently authorizes exactly those writes. The first
-  -- CI run of this file failed here and was right to -- the wrong-session
-  -- proof passed locally and could never have held on CI.
+  -- CI run of this file failed on precisely that and was right to.
   --
   -- So the outstanding fixture authorizations are removed inside this
-  -- transaction (rolled back at the end, exactly like every other change
-  -- here), and the empty baseline is then PROVEN rather than assumed.
-  -- Consumed rows are left alone: they carry immutable audit evidence.
+  -- transaction (rolled back at the end, like every other change here), and
+  -- the empty baseline is then PROVEN rather than assumed. Consumed rows are
+  -- left alone: they carry immutable audit evidence.
   -- ------------------------------------------------------------------
   delete from plm.licensing_write_authorization where consumed_at is null;
   if exists (select 1 from plm.licensing_write_authorization where consumed_at is null) then
@@ -86,16 +89,9 @@ begin
     v_checks := v_checks + 1;
   end;
 
-  v_delta := jsonb_build_object('owner_ruling', jsonb_build_object(
-    'ruled_by', v_ruler,
-    'ruled_on', '2026-08-02',
-    'ruling', 'never a real licensor; created by mistake',
-    'migration', '20260802171000'
-  ));
-
   -- ------------------------------------------------------------------
-  -- Fixture: an FR "FRIENDS TV" licensor, created through the ordinary
-  -- guard, plus the recorded 2026-08-02 owner ruling about it.
+  -- Fixture: the FR "FRIENDS TV" licensor and an unrelated licensor, both
+  -- created through the ordinary guard, plus the recorded 2026-08-02 ruling.
   -- ------------------------------------------------------------------
   insert into plm.licensing_write_authorization
     (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
@@ -104,96 +100,56 @@ begin
      'fr-contract-test', array['name','code','status'], clock_timestamp() + interval '5 minutes');
   insert into core.licensor (name, code, status) values ('FRIENDS TV', 'FR', 'active') returning id into v_fr;
 
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.licensor', 'licensing_review_create', gen_random_uuid(), repeat('a',64),
+     'fr-contract-test', array['name','code','status'], clock_timestamp() + interval '5 minutes');
+  insert into core.licensor (name, code, status) values ('NOT FRIENDS TV', 'FRX', 'active') returning id into v_other;
+
   insert into core.taxonomy_owner_ruling
     (entity_table, entity_id, entity_code, entity_name, ruling, ruled_by, ruled_at, ruling_evidence, action_taken)
   values
     ('licensor', v_fr, 'FR', 'FRIENDS TV', 'never a real licensor', v_ruler, v_ruled_at,
      'contract test fixture', 'contract test fixture');
+  -- The unrelated licensor gets a ruling too, so that "a different licensor is
+  -- refused" cannot pass merely because its ruling record is missing.
+  insert into core.taxonomy_owner_ruling
+    (entity_table, entity_id, entity_code, entity_name, ruling, ruled_by, ruled_at, ruling_evidence, action_taken)
+  values
+    ('licensor', v_other, 'FRX', 'NOT FRIENDS TV', 'unrelated', v_ruler, v_ruled_at,
+     'contract test fixture', 'contract test fixture');
 
   -- ==================================================================
-  -- 1. The table constraint refuses a malformed FR authorization.
-  -- ==================================================================
-  begin
-    insert into plm.licensing_write_authorization
-      (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
-    values
-      (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('b',64),
-       'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes');
-    raise exception 'an FR owner-ruling authorization with no bindings was accepted';
-  exception when check_violation then
-    v_checks := v_checks + 1;
-  end;
-
-  -- ==================================================================
-  -- 2. The binding columns are refused on any other write_kind.
-  -- ==================================================================
-  begin
-    insert into plm.licensing_write_authorization
-      (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at,
-       ruling_migration, target_row_id, target_row_code, target_row_name,
-       expected_current_status, expected_new_status, expected_metadata_delta)
-    values
-      (pg_backend_pid(), txid_current(), 'core.licensor', 'canonical_merge', gen_random_uuid(), repeat('b',64),
-       'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes',
-       '20260802171000', v_fr, 'FR', 'FRIENDS TV', 'active', 'inactive', v_delta);
-    raise exception 'owner-ruling bindings were accepted on a non-owner-ruling authorization';
-  exception when check_violation then
-    v_checks := v_checks + 1;
-  end;
-
-  -- ==================================================================
-  -- 3. A different target status is refused by the constraint.
-  -- ==================================================================
-  begin
-    insert into plm.licensing_write_authorization
-      (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at,
-       ruling_migration, target_row_id, target_row_code, target_row_name,
-       expected_current_status, expected_new_status, expected_metadata_delta)
-    values
-      (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('b',64),
-       'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes',
-       '20260802171000', v_fr, 'FR', 'FRIENDS TV', 'active', 'archived', v_delta);
-    raise exception 'an FR owner-ruling authorization targeting archived was accepted';
-  exception when check_violation then
-    v_checks := v_checks + 1;
-  end;
-
-  -- ==================================================================
-  -- 4. A different licensor row is refused at write time.
+  -- 1. A DIFFERENT LICENSOR is refused, even with a valid authorization
+  --    and its own recorded ruling.
   -- ==================================================================
   insert into plm.licensing_write_authorization
-    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at,
-     ruling_migration, target_row_id, target_row_code, target_row_name,
-     expected_current_status, expected_new_status, expected_metadata_delta)
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
   values
     (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('b',64),
-     'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes',
-     '20260802171000', gen_random_uuid(), 'FR', 'FRIENDS TV', 'active', 'inactive', v_delta)
+     'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes')
   returning id into v_auth;
   begin
     update core.licensor
        set status = 'inactive',
            metadata = coalesce(metadata,'{}'::jsonb) || v_delta
-     where id = v_fr;
-    raise exception 'the guard accepted a write to a licensor the authorization was not bound to';
+     where id = v_other;
+    raise exception 'the guard inactivated a licensor that is not FR';
   exception when others then
-    if position('bound to a different licensor row' in sqlerrm) = 0 then raise; end if;
+    if position('permits only licensor code FR' in sqlerrm) = 0 then raise; end if;
     v_checks := v_checks + 1;
   end;
-  delete from plm.licensing_write_authorization where id = v_auth;
 
   -- ==================================================================
-  -- 5. A different session (backend pid) is refused.
+  -- 2. A DIFFERENT SESSION (backend pid) is refused.
   -- ==================================================================
+  delete from plm.licensing_write_authorization where id = v_auth;
   insert into plm.licensing_write_authorization
-    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at,
-     ruling_migration, target_row_id, target_row_code, target_row_name,
-     expected_current_status, expected_new_status, expected_metadata_delta)
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
   values
     (pg_backend_pid() + 1, txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('b',64),
-     'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes',
-     '20260802171000', v_fr, 'FR', 'FRIENDS TV', 'active', 'inactive', v_delta)
-  returning id into v_auth;
+     'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes');
   begin
     update core.licensor set status = 'inactive' where id = v_fr;
     raise exception 'the guard accepted an authorization created by another session';
@@ -201,20 +157,16 @@ begin
     if position('no exact transaction-bound authorization' in sqlerrm) = 0 then raise; end if;
     v_checks := v_checks + 1;
   end;
-  delete from plm.licensing_write_authorization where id = v_auth;
+  delete from plm.licensing_write_authorization where consumed_at is null;
 
   -- ==================================================================
-  -- 6. A different transaction is refused.
+  -- 3. A DIFFERENT TRANSACTION is refused.
   -- ==================================================================
   insert into plm.licensing_write_authorization
-    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at,
-     ruling_migration, target_row_id, target_row_code, target_row_name,
-     expected_current_status, expected_new_status, expected_metadata_delta)
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
   values
     (pg_backend_pid(), txid_current() + 1, 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('b',64),
-     'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes',
-     '20260802171000', v_fr, 'FR', 'FRIENDS TV', 'active', 'inactive', v_delta)
-  returning id into v_auth;
+     'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes');
   begin
     update core.licensor set status = 'inactive' where id = v_fr;
     raise exception 'the guard accepted an authorization created in another transaction';
@@ -222,15 +174,148 @@ begin
     if position('no exact transaction-bound authorization' in sqlerrm) = 0 then raise; end if;
     v_checks := v_checks + 1;
   end;
-  delete from plm.licensing_write_authorization where id = v_auth;
+  delete from plm.licensing_write_authorization where consumed_at is null;
 
   -- ==================================================================
-  -- 6b. Every named metadata-shape refusal, one falsified condition at a
-  --     time. Each case supplies an authorization whose expected delta is
-  --     wrong in exactly one way, and an UPDATE that applies that same
-  --     delta -- so the metadata EQUALITY check passes and the specific
-  --     condition under test is the one that fires. Without 20260819151527
-  --     every one of these writes succeeds.
+  -- 4. AN INSERT is refused, and 5. a WIDER COLUMN SET is refused.
+  -- ==================================================================
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('b',64),
+     'fr-contract-test', array['name','code','status'], clock_timestamp() + interval '5 minutes');
+  begin
+    insert into core.licensor (name, code, status) values ('FRIENDS TV', 'FR2', 'active');
+    raise exception 'an owner-ruling authorization created a new licensor row';
+  exception when others then
+    if position('permits only an UPDATE of core.licensor' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+  delete from plm.licensing_write_authorization where consumed_at is null;
+
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('b',64),
+     'fr-contract-test', array['name','status'], clock_timestamp() + interval '5 minutes');
+  begin
+    update core.licensor set status = 'inactive', name = 'FRIENDS TV RENAMED' where id = v_fr;
+    raise exception 'an owner-ruling authorization licensed a column other than status';
+  exception when others then
+    if position('permits only the status column' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+  delete from plm.licensing_write_authorization where consumed_at is null;
+
+  -- ==================================================================
+  -- 7. A WRONG NAME on the FR row is refused, and 8. a row that is not
+  --    'active' before the write is refused.
+  --
+  --    core.licensor.code is unique and the guard demands 'FR', so there
+  --    can only ever be ONE row this branch will look at. Falsifying its
+  --    name or its starting status therefore means editing that row -- and
+  --    the guard rightly refuses to let this test do that. So the trigger is
+  --    disabled for the SETUP edit only, then re-enabled and PROVEN
+  --    re-enabled before the write under test is attempted. Every write
+  --    being judged here goes through the live guard.
+  -- ==================================================================
+  for v_case in
+    select *
+    from (values
+      ('update core.licensor set name = ''WRONG NAME'' where code = ''FR''',
+       'update core.licensor set name = ''FRIENDS TV'' where code = ''FR''',
+       'permits only licensor name FRIENDS TV'),
+      ('update core.licensor set status = ''archived'' where code = ''FR''',
+       'update core.licensor set status = ''active'' where code = ''FR''',
+       'expects the row to be active before the write')
+    ) as t(setup, restore, msg)
+  loop
+    execute 'alter table core.licensor disable trigger licensor_licensing_write_guard';
+    execute v_case.setup;
+    execute 'alter table core.licensor enable trigger licensor_licensing_write_guard';
+    if not exists (
+      select 1 from pg_trigger
+      where tgname = 'licensor_licensing_write_guard' and not tgisinternal and tgenabled <> 'D'
+    ) then
+      raise exception 'the licensing write guard was left disabled by the setup scaffolding';
+    end if;
+
+    insert into plm.licensing_write_authorization
+      (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+    values
+      (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('b',64),
+       'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes');
+    begin
+      update core.licensor
+         set status = 'inactive',
+             metadata = coalesce(metadata,'{}'::jsonb) || v_delta
+       where id = v_fr;
+      raise exception 'the guard accepted a write it should have refused (setup was: %)', v_case.setup;
+    exception when others then
+      if position(v_case.msg in sqlerrm) = 0 then raise; end if;
+      v_checks := v_checks + 1;
+    end;
+    delete from plm.licensing_write_authorization where consumed_at is null;
+
+    execute 'alter table core.licensor disable trigger licensor_licensing_write_guard';
+    execute v_case.restore;
+    execute 'alter table core.licensor enable trigger licensor_licensing_write_guard';
+  end loop;
+  if not exists (
+    select 1 from core.licensor
+    where id = v_fr and code = 'FR' and name = 'FRIENDS TV' and status::text = 'active'
+  ) then
+    raise exception 'the scaffolding did not restore the FR row to its starting state';
+  end if;
+
+  -- ==================================================================
+  -- From here on, ONE valid authorization stands, and each proof falsifies
+  -- exactly one thing about the WRITE itself.
+  -- ==================================================================
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('c',64),
+     'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes')
+  returning id into v_auth;
+
+  -- 6. A DIFFERENT TARGET VALUE is refused.
+  begin
+    update core.licensor
+       set status = 'archived',
+           metadata = coalesce(metadata,'{}'::jsonb) || v_delta
+     where id = v_fr;
+    raise exception 'the guard accepted a status other than inactive';
+  exception when others then
+    if position('permits only the target status inactive' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+
+  -- 7. A METADATA CHANGE OUTSIDE the historical statement is refused.
+  begin
+    update core.licensor
+       set status = 'inactive',
+           metadata = coalesce(metadata,'{}'::jsonb) || v_delta || jsonb_build_object('smuggled', true)
+     where id = v_fr;
+    raise exception 'the guard accepted an unauthorized metadata change';
+  exception when others then
+    if position('changes metadata outside the owner_ruling record' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+
+  -- 8. A write recording NO owner_ruling metadata at all is refused.
+  begin
+    update core.licensor set status = 'inactive' where id = v_fr;
+    raise exception 'the guard accepted a status flip that recorded no ruling metadata';
+  exception when others then
+    if position('records no owner_ruling metadata' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+
+  -- ==================================================================
+  -- 9-14. Every named owner_ruling metadata refusal, one falsified
+  --       condition at a time. Without 20260819151527 every one of these
+  --       writes succeeds.
   -- ==================================================================
   for v_case in
     select *
@@ -238,18 +323,13 @@ begin
       (jsonb_build_object('owner_ruling', jsonb_build_object(
          'ruled_by', v_ruler, 'ruled_on', '2026-08-02',
          'ruling', 'never a real licensor; created by mistake',
-         'migration', '20260818174350')),
-       'names a different migration than the authorization'),
+         'migration', '19990101000000')),
+       'names an unknown ruling migration'),
       (jsonb_build_object('owner_ruling', jsonb_build_object(
          'ruled_by', 'someone who did not rule', 'ruled_on', '2026-08-02',
          'ruling', 'never a real licensor; created by mistake',
          'migration', '20260802171000')),
        'names a different ruler than the recorded owner ruling'),
-      (jsonb_build_object('owner_ruling', jsonb_build_object(
-         'ruled_by', v_ruler, 'ruled_on', '2026-08-02',
-         'ruling', 'never a real licensor; created by mistake',
-         'migration', '20260802171000'), 'extra', 'smuggled'),
-       'must carry exactly the owner_ruling key'),
       (jsonb_build_object('owner_ruling', jsonb_build_object(
          'ruled_by', v_ruler, 'ruled_on', '2026-08-02',
          'ruling', 'some other ruling entirely',
@@ -266,128 +346,23 @@ begin
          'migration', '20260802171000', 'bogus', 1)),
        'has the wrong key set'),
       (jsonb_build_object('owner_ruling', 5),
-       'owner_ruling must be an object'),
-      ('"not an object at all"'::jsonb,
-       'carries no expected metadata delta')
+       'owner_ruling metadata must be an object')
     ) as t(delta, msg)
   loop
-    insert into plm.licensing_write_authorization
-      (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at,
-       ruling_migration, target_row_id, target_row_code, target_row_name,
-       expected_current_status, expected_new_status, expected_metadata_delta)
-    values
-      (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('d',64),
-       'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes',
-       '20260802171000', v_fr, 'FR', 'FRIENDS TV', 'active', 'inactive', v_case.delta);
     begin
       update core.licensor
          set status = 'inactive',
-             metadata = case
-                          when jsonb_typeof(v_case.delta) = 'object'
-                            then coalesce(metadata,'{}'::jsonb) || v_case.delta
-                          else coalesce(metadata,'{}'::jsonb)
-                        end
+             metadata = coalesce(metadata,'{}'::jsonb) || v_case.delta
        where id = v_fr;
-      raise exception 'the guard accepted a malformed owner-ruling delta: %', v_case.delta;
+      raise exception 'the guard accepted malformed owner_ruling metadata: %', v_case.delta;
     exception when others then
       if position(v_case.msg in sqlerrm) = 0 then raise; end if;
       v_checks := v_checks + 1;
     end;
-    delete from plm.licensing_write_authorization
-     where write_kind = 'owner_ruling_fr_inactivation' and consumed_at is null;
   end loop;
 
   -- ==================================================================
-  -- 7. A different column set is refused (name changed alongside status).
-  -- ==================================================================
-  insert into plm.licensing_write_authorization
-    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at,
-     ruling_migration, target_row_id, target_row_code, target_row_name,
-     expected_current_status, expected_new_status, expected_metadata_delta)
-  values
-    (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('b',64),
-     'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes',
-     '20260802171000', v_fr, 'FR', 'FRIENDS TV', 'active', 'inactive', v_delta)
-  returning id into v_auth;
-  begin
-    update core.licensor set status = 'inactive', name = 'FRIENDS TV RENAMED' where id = v_fr;
-    raise exception 'the guard accepted a name change alongside the authorized status change';
-  exception when others then
-    if position('no exact transaction-bound authorization' in sqlerrm) = 0 then raise; end if;
-    v_checks := v_checks + 1;
-  end;
-
-  -- ==================================================================
-  -- 8. A different target value is refused at write time.
-  -- ==================================================================
-  begin
-    update core.licensor
-       set status = 'archived',
-           metadata = coalesce(metadata,'{}'::jsonb) || v_delta
-     where id = v_fr;
-    raise exception 'the guard accepted a status other than inactive';
-  exception when others then
-    if position('permits only the target status inactive' in sqlerrm) = 0 then raise; end if;
-    v_checks := v_checks + 1;
-  end;
-
-  -- ==================================================================
-  -- 9. A metadata change outside the historical statement is refused.
-  -- ==================================================================
-  begin
-    update core.licensor
-       set status = 'inactive',
-           metadata = coalesce(metadata,'{}'::jsonb) || jsonb_build_object('smuggled', true)
-     where id = v_fr;
-    raise exception 'the guard accepted an unauthorized metadata change';
-  exception when others then
-    if position('resulting metadata is not exactly' in sqlerrm) = 0 then raise; end if;
-    v_checks := v_checks + 1;
-  end;
-
-  -- ==================================================================
-  -- 10. A delta naming a different migration than the authorization is refused.
-  -- ==================================================================
-  begin
-    update core.licensor
-       set status = 'inactive',
-           metadata = coalesce(metadata,'{}'::jsonb) || jsonb_build_object('owner_ruling', jsonb_build_object(
-             'ruled_by', v_ruler, 'ruled_on', '2026-08-02',
-             'ruling', 'never a real licensor; created by mistake',
-             'migration', '20260818174350'))
-     where id = v_fr;
-    raise exception 'the guard accepted a metadata delta naming another migration';
-  exception when others then
-    if position('resulting metadata is not exactly' in sqlerrm) = 0 then raise; end if;
-    v_checks := v_checks + 1;
-  end;
-
-  -- ==================================================================
-  -- 11. Stockpiling a second unconsumed FR authorization is refused.
-  -- ==================================================================
-  insert into plm.licensing_write_authorization
-    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at,
-     ruling_migration, target_row_id, target_row_code, target_row_name,
-     expected_current_status, expected_new_status, expected_metadata_delta)
-  values
-    (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('c',64),
-     'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes',
-     '20260802171000', v_fr, 'FR', 'FRIENDS TV', 'active', 'inactive', v_delta);
-  begin
-    update core.licensor
-       set status = 'inactive',
-           metadata = coalesce(metadata,'{}'::jsonb) || v_delta
-     where id = v_fr;
-    raise exception 'the guard accepted a write with a spare FR authorization outstanding';
-  exception when others then
-    if position('exactly one may be outstanding' in sqlerrm) = 0 then raise; end if;
-    v_checks := v_checks + 1;
-  end;
-  delete from plm.licensing_write_authorization
-   where write_kind = 'owner_ruling_fr_inactivation' and id <> v_auth;
-
-  -- ==================================================================
-  -- 12. Ordering: without the recorded ruling, the write is refused.
+  -- 15. ORDERING: without the recorded ruling, the write is refused.
   --     This is what makes a standalone status flip impossible.
   -- ==================================================================
   delete from core.taxonomy_owner_ruling where entity_id = v_fr;
@@ -408,141 +383,33 @@ begin
      'contract test fixture', 'contract test fixture');
 
   -- ==================================================================
-  -- 13. A delta naming a different ruler than the recorded ruling is refused.
+  -- 16. STOCKPILING a second unconsumed FR authorization is refused.
   -- ==================================================================
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('d',64),
+     'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes');
   begin
     update core.licensor
        set status = 'inactive',
-           metadata = coalesce(metadata,'{}'::jsonb) || jsonb_build_object('owner_ruling', jsonb_build_object(
-             'ruled_by', 'someone else', 'ruled_on', '2026-08-02',
-             'ruling', 'never a real licensor; created by mistake',
-             'migration', '20260802171000'))
+           metadata = coalesce(metadata,'{}'::jsonb) || v_delta
      where id = v_fr;
-    raise exception 'the guard accepted a delta naming a different ruler';
+    raise exception 'the guard accepted a write with a spare FR authorization outstanding';
   exception when others then
-    if position('resulting metadata is not exactly' in sqlerrm) = 0 then raise; end if;
-    v_checks := v_checks + 1;
-  end;
-
-  -- ==================================================================
-  -- 13b. THE FUNCTION DOES NOT LEAN ON THE CONSTRAINT.
-  --      The binding CHECK is `not valid`, so it must not be the only thing
-  --      standing between a malformed authorization and a production write.
-  --      Here the constraint is DROPPED (inside this rolled-back
-  --      transaction) and every binding is falsified again at the
-  --      authorization level. The guard FUNCTION must refuse each one on its
-  --      own. Without 20260819151527 every one of these writes succeeds.
-  -- ==================================================================
-  delete from plm.licensing_write_authorization where id = v_auth;
-  execute 'alter table plm.licensing_write_authorization drop constraint licensing_write_authorization_owner_ruling_binding';
-
-  -- (a) the authorization may not license an INSERT
-  insert into plm.licensing_write_authorization
-    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at,
-     ruling_migration, target_row_id, target_row_code, target_row_name,
-     expected_current_status, expected_new_status, expected_metadata_delta)
-  values
-    (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('e',64),
-     'fr-contract-test', array['name','code','status'], clock_timestamp() + interval '5 minutes',
-     '20260802171000', v_fr, 'FR', 'FRIENDS TV', 'active', 'inactive', v_delta);
-  begin
-    insert into core.licensor (name, code, status) values ('FRIENDS TV', 'FR2', 'active');
-    raise exception 'an owner-ruling authorization created a new licensor row';
-  exception when others then
-    if position('permits only an UPDATE of core.licensor' in sqlerrm) = 0 then raise; end if;
+    if position('exactly one may be outstanding' in sqlerrm) = 0 then raise; end if;
     v_checks := v_checks + 1;
   end;
   delete from plm.licensing_write_authorization
-   where write_kind = 'owner_ruling_fr_inactivation' and consumed_at is null;
-
-  -- (b) the authorization may not license any column but status
-  insert into plm.licensing_write_authorization
-    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at,
-     ruling_migration, target_row_id, target_row_code, target_row_name,
-     expected_current_status, expected_new_status, expected_metadata_delta)
-  values
-    (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('e',64),
-     'fr-contract-test', array['name','status'], clock_timestamp() + interval '5 minutes',
-     '20260802171000', v_fr, 'FR', 'FRIENDS TV', 'active', 'inactive', v_delta);
-  begin
-    update core.licensor set status = 'inactive', name = 'FRIENDS TV RENAMED' where id = v_fr;
-    raise exception 'an owner-ruling authorization licensed a column other than status';
-  exception when others then
-    if position('permits only the status column' in sqlerrm) = 0 then raise; end if;
-    v_checks := v_checks + 1;
-  end;
-  delete from plm.licensing_write_authorization
-   where write_kind = 'owner_ruling_fr_inactivation' and consumed_at is null;
-
-  -- (c) an unknown ruling migration, (d) a wrong code, (e) a wrong name,
-  --     (f) a wrong pre-write status -- each falsified on its own.
-  for v_case in
-    select *
-    from (values
-      ('19990101000000', 'FR',  'FRIENDS TV',       'active',
-       'names no known ruling migration'),
-      ('20260802171000', 'FR2', 'FRIENDS TV',       'active',
-       'permits only licensor code FR'),
-      ('20260802171000', 'FR',  'FRIENDS TV WRONG', 'active',
-       'permits only licensor name FRIENDS TV'),
-      ('20260802171000', 'FR',  'FRIENDS TV',       'inactive',
-       'expects the row to be active before the write')
-    ) as t(ruling_migration, code, nm, current_status, msg)
-  loop
-    insert into plm.licensing_write_authorization
-      (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at,
-       ruling_migration, target_row_id, target_row_code, target_row_name,
-       expected_current_status, expected_new_status, expected_metadata_delta)
-    values
-      (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('e',64),
-       'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes',
-       v_case.ruling_migration, v_fr, v_case.code, v_case.nm, v_case.current_status, 'inactive', v_delta);
-    begin
-      update core.licensor
-         set status = 'inactive',
-             metadata = coalesce(metadata,'{}'::jsonb) || v_delta
-       where id = v_fr;
-      raise exception 'the guard accepted an authorization bound to the wrong thing: % % % %',
-        v_case.ruling_migration, v_case.code, v_case.nm, v_case.current_status;
-    exception when others then
-      if position(v_case.msg in sqlerrm) = 0 then raise; end if;
-      v_checks := v_checks + 1;
-    end;
-    delete from plm.licensing_write_authorization
-     where write_kind = 'owner_ruling_fr_inactivation' and consumed_at is null;
-  end loop;
-
-  -- Put the constraint back exactly as the migration defines it, so the
-  -- remaining sections run against the real configuration.
-  execute 'alter table plm.licensing_write_authorization add constraint licensing_write_authorization_owner_ruling_binding check ('
-       || 'case when write_kind = ''owner_ruling_fr_inactivation'' then '
-       || 'target_table = ''core.licensor''::regclass and protected_columns = array[''status'']::text[] '
-       || 'and ruling_migration in (''20260802171000'', ''20260818174350'') and target_row_id is not null '
-       || 'and target_row_code = ''FR'' and target_row_name = ''FRIENDS TV'' '
-       || 'and expected_current_status = ''active'' and expected_new_status = ''inactive'' '
-       || 'and expected_metadata_delta is not null else ruling_migration is null and target_row_id is null '
-       || 'and target_row_code is null and target_row_name is null and expected_current_status is null '
-       || 'and expected_new_status is null and expected_metadata_delta is null end) not valid';
-
-  insert into plm.licensing_write_authorization
-    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at,
-     ruling_migration, target_row_id, target_row_code, target_row_name,
-     expected_current_status, expected_new_status, expected_metadata_delta)
-  values
-    (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('f',64),
-     'fr-contract-test', array['status'], clock_timestamp() + interval '5 minutes',
-     '20260802171000', v_fr, 'FR', 'FRIENDS TV', 'active', 'inactive', v_delta)
-  returning id into v_auth;
+   where write_kind = 'owner_ruling_fr_inactivation' and consumed_at is null and id <> v_auth;
 
   -- ==================================================================
-  -- 14. ROLLBACK BEHAVIOUR: every refusal above left nothing behind.
-  --     The row is untouched, the authorization is unconsumed, and no
-  --     audit row was written for it.
+  -- 17. ROLLBACK BEHAVIOUR: every refusal above left nothing behind.
   -- ==================================================================
-  select status::text, coalesce(metadata,'{}'::jsonb) into strict v_status_before, v_metadata_before
+  select status::text, coalesce(metadata,'{}'::jsonb) into strict v_status_now, v_metadata_now
   from core.licensor where id = v_fr;
-  if v_status_before <> 'active' or v_metadata_before ? 'owner_ruling' or v_metadata_before ? 'smuggled' then
-    raise exception 'a refused FR write left a partial change behind: status %, metadata %', v_status_before, v_metadata_before;
+  if v_status_now <> 'active' or v_metadata_now ? 'owner_ruling' or v_metadata_now ? 'smuggled' then
+    raise exception 'a refused FR write left a partial change behind: status %, metadata %', v_status_now, v_metadata_now;
   end if;
   if exists (select 1 from plm.licensing_write_authorization where id = v_auth and consumed_at is not null) then
     raise exception 'a refused FR write consumed its authorization';
@@ -550,11 +417,14 @@ begin
   if exists (select 1 from plm.licensing_write_guard_audit where authorization_id = v_auth) then
     raise exception 'a refused FR write wrote guard audit evidence';
   end if;
+  if (select status::text from core.licensor where id = v_other) <> 'active' then
+    raise exception 'a refused FR write changed the unrelated licensor';
+  end if;
   v_checks := v_checks + 1;
 
   -- ==================================================================
-  -- 15. THE AUTHORIZED WRITE: the exact historical statement succeeds,
-  --     consumes its authorization, and leaves audit evidence.
+  -- 18. THE AUTHORIZED WRITE: the exact historical statement succeeds,
+  --     consumes its authorization, and leaves exact audit evidence.
   -- ==================================================================
   select count(*) into v_audit_before from plm.licensing_write_guard_audit;
   update core.licensor
@@ -566,8 +436,7 @@ begin
     raise exception 'the authorized FR owner ruling did not apply';
   end if;
   if not exists (
-    select 1 from plm.licensing_write_authorization
-    where id = v_auth and consumed_at is not null
+    select 1 from plm.licensing_write_authorization where id = v_auth and consumed_at is not null
   ) then
     raise exception 'the authorized FR owner ruling did not consume its authorization';
   end if;
@@ -591,13 +460,11 @@ begin
   v_checks := v_checks + 1;
 
   -- ==================================================================
-  -- 16. ONE USE: replaying the same statement in the same transaction is
-  --     refused, because the authorization is consumed.
+  -- 19. ONE USE: replaying the statement in the same transaction is refused,
+  --     because the authorization is consumed.
   -- ==================================================================
   begin
-    update core.licensor
-       set status = 'active'
-     where id = v_fr;
+    update core.licensor set status = 'active' where id = v_fr;
     raise exception 'the consumed FR authorization was reusable';
   exception when others then
     if position('no exact transaction-bound authorization' in sqlerrm) = 0 then raise; end if;
@@ -605,9 +472,69 @@ begin
   end;
 
   -- ==================================================================
-  -- 17. CLEANUP PROOF / STRICT GUARD RESTORED: no FR authorization is
-  --     left outstanding, and an ordinary unauthorized licensing write is
-  --     refused exactly as it was before.
+  -- 20. THE GUARDED REPLACEMENT'S OWN METADATA SHAPE is accepted.
+  --     20260818174350 is MERGED and due to run inside the FR bundle AFTER
+  --     this migration. Its owner_ruling record carries an extra
+  --     `supersedes` key. If this contract refused that shape, this
+  --     migration would make a held migration unrunnable -- which is exactly
+  --     the defect the first CI run of this branch exposed.
+  --
+  --     Only ONE row can ever satisfy this guard (core.licensor.code is
+  --     unique and the guard demands 'FR'), so proving a second accepted
+  --     shape needs the row reset to 'active'. The guard rightly refuses to
+  --     do that -- section 19 just proved it. So the trigger is disabled for
+  --     the reset ONLY, then re-enabled and PROVEN re-enabled before the
+  --     second write is attempted. The reset is scaffolding; the write that
+  --     follows it goes through the live guard like every other.
+  -- ==================================================================
+  execute 'alter table core.licensor disable trigger licensor_licensing_write_guard';
+  update core.licensor set status = 'active', metadata = '{}'::jsonb where id = v_fr;
+  execute 'alter table core.licensor enable trigger licensor_licensing_write_guard';
+  if not exists (
+    select 1 from pg_trigger
+    where tgname = 'licensor_licensing_write_guard' and not tgisinternal and tgenabled <> 'D'
+  ) then
+    raise exception 'the licensing write guard was left disabled by the reset scaffolding';
+  end if;
+
+  v_delta := jsonb_build_object('owner_ruling', jsonb_build_object(
+    'ruled_by', v_ruler,
+    'ruled_on', '2026-08-02',
+    'ruling', 'never a real licensor; created by mistake',
+    'migration', '20260818174350',
+    'supersedes', '20260802171000'
+  ));
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fr_inactivation', gen_random_uuid(), repeat('e',64),
+     'shared-db migration 20260818174350', array['status'], clock_timestamp() + interval '5 minutes')
+  returning id into v_auth;
+
+  update core.licensor
+     set status = 'inactive',
+         metadata = coalesce(metadata,'{}'::jsonb) || v_delta
+   where id = v_fr;
+
+  if (select status::text from core.licensor where id = v_fr) <> 'inactive' then
+    raise exception 'the guarded replacement metadata shape was refused';
+  end if;
+  if not exists (
+    select 1 from plm.licensing_write_guard_audit
+    where authorization_id = v_auth
+      and target_row_id = v_fr
+      and ruling_migration = '20260818174350'
+      and old_status = 'active'
+      and new_status = 'inactive'
+  ) then
+    raise exception 'the guarded replacement write left no exact audit evidence';
+  end if;
+  v_checks := v_checks + 1;
+
+  -- ==================================================================
+  -- 21. CLEANUP PROOF / STRICT GUARD RESTORED: nothing is left outstanding,
+  --     and an ordinary unauthorized licensing write is refused exactly as
+  --     it was before any of this ran.
   -- ==================================================================
   if exists (
     select 1 from plm.licensing_write_authorization
