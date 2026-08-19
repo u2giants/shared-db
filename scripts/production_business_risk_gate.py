@@ -397,7 +397,69 @@ PREVIEW_PRODUCER_PATHS = (
     # Data, not code, but it routes which apply mechanism the rehearsal
     # exercises. Pinned for rehearsal fidelity.
     "config/atomic-migration-allowlist.json",
+    # READ, NOT EXECUTED -- and therefore invisible to the executed-closure
+    # walk, which follows invocations and imports. The Supabase CLI reads this
+    # file on every `link`, `migration list` and `db push` the preview job runs,
+    # in $GITHUB_WORKSPACE and again inside the bounded checkout. It tells the
+    # CLI which project it believes it is operating on and how to behave, so a
+    # version of it that differs from exact main can shape every evidence byte
+    # the artifact carries, and nothing in the artifact restates it.
+    # `test_preview_producer_paths_cover_runtime_read_data_files` fails if any
+    # sibling data file appears under supabase/ or config/ without being pinned
+    # here or given a written, checkable exemption.
+    "supabase/config.toml",
 )
+
+
+# ---------------------------------------------------------------------------
+# Runtime-READ data files.
+#
+# The executed-closure test walks scripts the preview job RUNS, and their
+# imports. It cannot see a file merely READ at runtime by a tool -- the Supabase
+# CLI, `jq`, `psql`. `supabase/config.toml` was exactly that: read by the CLI on
+# every preview command, pinned by neither commit and covered by no test.
+#
+# The two directories below are the ONLY repository data surfaces the preview
+# job's executed closure touches. That premise is not asserted by comment:
+# `test_preview_runtime_data_dirs_are_the_only_data_surface` scans the closure
+# and the preview job text for any other top-level repository directory.
+#
+# Every file under them must be either pinned in PREVIEW_PRODUCER_PATHS above,
+# or carry a written reason here for why it cannot shape preview evidence. The
+# reasons are checked against the filesystem, so a file added later cannot slip
+# in silently -- it fails the test until someone pins it or writes down why.
+PREVIEW_RUNTIME_DATA_DIRS = ("supabase", "config")
+
+PREVIEW_RUNTIME_DATA_EXEMPTIONS = {
+    "supabase/migrations": (
+        "The PAYLOAD, not a producer. It cannot be pinned to exact main and must "
+        "not be: in the pre-merge claim lane the pull-request head legitimately "
+        "carries migration files that do not exist on main yet, so a "
+        "blob-equality pin would refuse every honest rehearsal. It is proven by "
+        "a STRONGER mechanism instead -- prove_preview_migration_contents "
+        "byte-compares the applied migration text in the evidence manifest "
+        "against the repository copy, and source_pr_commits requires every "
+        "allowlisted version to have been added by the named source pull request."
+    ),
+    "supabase/tests": (
+        "Never read by the preview job. Its only readers are the separate "
+        "database-contract-tests.yml workflow and scripts/check-sql.sh, which "
+        "runs in the validate-only job -- already a PREVIEW_JOB_EXCLUSION whose "
+        "not-in-the-preview-job premise is asserted by "
+        "test_preview_producer_paths_cover_the_whole_executed_closure."
+    ),
+    "supabase/ci-bootstrap": (
+        "Never read by the preview job. Read only by database-contract-tests.yml, "
+        "which builds a throwaway database, touches neither preview nor "
+        "production, and produces no preview evidence artifact."
+    ),
+    "config/production-risk-policy-activation.json": (
+        "Never read by the preview job. It is read by the production-apply jobs "
+        "and by this gate itself, both of which check out exact main and prove "
+        "HEAD == origin/main before executing; prove_activation additionally "
+        "re-reads it against main. Pinning it here would assert nothing new."
+    ),
+}
 
 
 def blob_sha(path: str, ref: str, api: Callable[[str], Any]) -> str:

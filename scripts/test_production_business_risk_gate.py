@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from production_business_risk_gate import PREVIEW_PRODUCER_PATHS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_preview, prove_preview_migration_contents
+from production_business_risk_gate import PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_preview, prove_preview_migration_contents
 
 PREVIEW_PROJECT_REF = "mvpkijzfmfcxhnzqogzs"
 DEAD_PREVIEW_PROJECT_REF = "rjyboqwcdzcocqgmsyel"
@@ -740,6 +740,140 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             unpinned, [],
             f"these execute in the preview job (directly or via import) but are not "
             f"pinned in PREVIEW_PRODUCER_PATHS: {unpinned}",
+        )
+
+    # ---- runtime-READ data files (the class the closure walk cannot see) ----
+    #
+    # The closure walk follows what the preview job EXECUTES. A file that is only
+    # READ at runtime -- by the Supabase CLI, by `jq`, by `psql` -- never appears
+    # in it. `supabase/config.toml` was exactly that file: the CLI reads it on
+    # every `link`, `migration list` and `db push` the preview job runs, and it
+    # was pinned by neither commit and covered by no test. The two tests below
+    # close that class, from both directions.
+
+    @staticmethod
+    def uncommented(text):
+        """Lines with whole-line `#` / `//` comments dropped.
+
+        Deliberately conservative: only lines whose FIRST non-blank character
+        starts a comment are removed. A path named inside a comment is prose, not
+        a read; a path named in code is a read until someone proves otherwise.
+        """
+        out = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#") or stripped.startswith("//"):
+                continue
+            out.append(line)
+        return "\n".join(out)
+
+    def test_preview_producer_paths_cover_runtime_read_data_files(self):
+        """Every data file under the preview job's data surface is pinned or explained.
+
+        Driven by the FILESYSTEM, not by a hand-written list, so a data file added
+        later cannot slip in silently: it fails this test until someone either
+        pins it in PREVIEW_PRODUCER_PATHS or writes down, here, why it cannot
+        shape preview evidence. That written reason is the artifact a reader who
+        does not trust the author can check.
+        """
+        repo_root = Path(__file__).resolve().parents[1]
+        pinned = set(PREVIEW_PRODUCER_PATHS)
+
+        # The specific file this test exists for. Named explicitly so a future
+        # edit that drops it from the tuple fails here with the reason attached,
+        # not with a generic diff.
+        self.assertIn(
+            "supabase/config.toml", pinned,
+            "the Supabase CLI reads supabase/config.toml on every preview link, "
+            "migration list and db push; unpinned, a pre-merge claim-lane rehearsal "
+            "could alter CLI behaviour between rehearsal and promotion",
+        )
+
+        # An exemption must describe something that exists, and must not also be
+        # pinned -- a path that is both is a contradiction a reader cannot resolve.
+        for key, reason in PREVIEW_RUNTIME_DATA_EXEMPTIONS.items():
+            self.assertTrue(
+                (repo_root / key).exists(),
+                f"stale runtime-read exemption: {key} no longer exists. Delete the "
+                f"entry rather than leaving a reason nobody can check.",
+            )
+            self.assertNotIn(
+                key, pinned,
+                f"{key} is both pinned and exempted; one of the two is wrong",
+            )
+            # A one-word "n/a" is not a reason. The bar is a sentence a reviewer
+            # can disagree with.
+            self.assertGreaterEqual(
+                len(reason), 120,
+                f"runtime-read exemption for {key} is too thin to check: {reason!r}",
+            )
+
+        unexplained = []
+        for directory in PREVIEW_RUNTIME_DATA_DIRS:
+            base = repo_root / directory
+            self.assertTrue(base.is_dir(), f"declared data surface missing: {directory}")
+            for path in sorted(base.rglob("*")):
+                if not path.is_file():
+                    continue
+                rel = path.relative_to(repo_root).as_posix()
+                if rel in pinned or rel in PREVIEW_RUNTIME_DATA_EXEMPTIONS:
+                    continue
+                # A directory-level exemption covers everything beneath it.
+                if any(
+                    rel.startswith(f"{key}/") for key in PREVIEW_RUNTIME_DATA_EXEMPTIONS
+                ):
+                    continue
+                unexplained.append(rel)
+        self.assertEqual(
+            unexplained, [],
+            "these files live on the preview job's data surface but are neither "
+            "pinned in PREVIEW_PRODUCER_PATHS nor given a written reason in "
+            f"PREVIEW_RUNTIME_DATA_EXEMPTIONS: {unexplained}. If a tool in the "
+            "preview job can read it, pin it. If it cannot, say why, in words a "
+            "reader can check.",
+        )
+
+    def test_preview_job_reads_no_repository_file_outside_the_pinned_surface(self):
+        """The other direction: nothing the workflow names escapes the pin.
+
+        The test above walks the data directories inward. This one walks the
+        preview job's own text outward, so a NEW step that reads a repository
+        file from some third location -- `types/`, `apps/`, `docs/` -- fails here
+        instead of quietly widening the evidence-producing surface. Only paths
+        that actually resolve to a file in this repository are considered, which
+        drops action references such as `supabase/setup-cli@v1`.
+        """
+        repo_root = Path(__file__).resolve().parents[1]
+        job = self.uncommented(self.preview_job_text())
+        # A repo-relative path is one NOT preceded by another path character, so
+        # `$RUNNER_TEMP/bounded-preview/supabase/migrations` -- a runner-temp copy,
+        # not the checkout -- is correctly not treated as a repository read.
+        pattern = re.compile(r"(?<![\w./$-])((?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+)")
+        referenced = set()
+        for match in pattern.findall(job):
+            rel = match.rstrip(".")
+            if (repo_root / rel).is_file():
+                referenced.add(rel)
+        # Guard against the scan silently matching nothing, which would make this
+        # test pass through an unasserted condition -- a defect in itself.
+        self.assertIn(
+            "scripts/production_migration_guard.py", referenced,
+            "the preview-job path scan matched nothing recognisable; the pattern "
+            "has rotted and this test is no longer checking anything",
+        )
+        allowed = set(PREVIEW_PRODUCER_PATHS) | set(self.PREVIEW_JOB_EXCLUSIONS) | {PREVIEW_WORKFLOW}
+        for key in PREVIEW_RUNTIME_DATA_EXEMPTIONS:
+            allowed.add(key)
+        escaped = sorted(
+            rel for rel in referenced
+            if rel not in allowed
+            and not any(rel.startswith(f"{key}/") for key in PREVIEW_RUNTIME_DATA_EXEMPTIONS)
+        )
+        self.assertEqual(
+            escaped, [],
+            "the preview job names these repository files, but they are neither "
+            f"pinned nor explained: {escaped}. Anything the preview job reads can "
+            "shape its evidence.",
         )
 
     def test_every_pinned_producer_path_exists(self):

@@ -846,6 +846,37 @@ four rules below are non-negotiable for any database change.
    preview project ref it wrote to, and the production gate checks both. A
    rehearsal against a preview database that has since been rebuilt is therefore
    no longer proof for a production write.
+
+   **A rehearsal runs ONCE. Do not re-run it — recover it.** An applied version
+   can never be applied again, so there is no second bite. If the versions are
+   already in preview's ledger, both ways of trying again are refused, and both
+   refusals are correct:
+
+   * **A fresh dispatch** fails at *Hard guard preflight*: the versions are now
+     in preview's ledger and the guard refuses to re-apply an applied version.
+     The run's conclusion becomes `failure`, and the production gate accepts
+     evidence only from a run whose status is `completed` and whose conclusion is
+     `success`.
+   * **GitHub's "Re-run jobs"** keeps the same run id, so a second
+     `preview-migration-apply-<sha>` upload lands on that one run. The gate
+     requires *exactly one* apply artifact per run — two make the applied commit
+     ambiguous, and an ambiguous commit is not provenance — so it refuses rather
+     than pick one.
+
+   First check whether you need a second run at all: if the original rehearsal
+   completed successfully, its artifact is still the proof, and the promotion
+   should simply name that run in `preview_run_id`. If it did not, **the way
+   forward is the historical-recovery lane, not a weakened guard.** Dispatch
+   `target=preview`, `mode=apply` with `historical_preview_source_pr` (or
+   `historical_preview_source_pr_map` for a batch authored across several pull
+   requests) plus `commit_sha=<current main tip>` and the same
+   `preview_allowlist`. That lane performs **no database write**. It proves the
+   named versions are already in preview's ledger and re-issues the evidence, so
+   the promotion can proceed on honest proof of what preview actually holds.
+
+   If you find yourself editing a guard, an `if:` condition or an artifact name
+   to make a re-run go through, stop. That is how the trap this section exists to
+   describe was built in the first place (#1194, #1208). Open an issue instead.
 3. **Additive by default (expand, then contract).** Adding a column or table
    cannot break another app. **Renaming or dropping** one that another app reads
    *will*. Default to additive changes. Only rename/drop after explicit owner
