@@ -859,6 +859,36 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         return {rel for rel in found if (repo_root / rel).is_file()}
 
     @staticmethod
+    def repository_dirs_named_in(text, repo_root):
+        """Top-level repository DIRECTORIES a body names as a whole literal.
+
+        THE GAP THIS CLOSES (#1213 review, round 5, finding 3). The path scanner
+        above keeps whole-literal paths only, which is right for a read spelled
+        `open("config/foo.json")` and useless against a read the producer BUILDS:
+        `Path("policy") / "routing.json"` and `os.path.join("policy",
+        "routing.json")` emit `"policy"` and `"routing.json"` as two separate
+        literals. Neither trips the path scanner -- `"policy"` has no extension,
+        and `"routing.json"` only matches if that name exists at the repository
+        root -- so a whole data directory one step outside the declared surface
+        was invisible to a test that claimed to cover it.
+
+        A producer that names a top-level directory of this repository at all is
+        therefore reported. That is deliberately blunter than "names it AND then
+        reads a child": the child half is exactly the half a constructed path can
+        hide, so requiring it would put the hole back.
+        """
+        # EXACT CASE. `(repo_root / name).is_dir()` is case-INSENSITIVE on
+        # Windows and macOS, so the bare word `Supabase` in a shell message
+        # resolved to the `supabase` directory and reported a read nobody made.
+        # The real directory names are listed once and matched exactly instead.
+        real = {entry.name for entry in repo_root.iterdir() if entry.is_dir()}
+        found = set()
+        for match in re.findall(r"(?<![\w./$-])([A-Za-z0-9_-]+)(?![\w/.])", text):
+            if match in real:
+                found.add(match)
+        return found
+
+    @staticmethod
     def scannable_text(path, body):
         """Reduce a body to the parts where a repository READ can actually appear.
 
@@ -944,6 +974,13 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                     undeclared.add(rel)          # a repository-ROOT data file
                 elif top not in declared:
                     undeclared.add(rel)
+            # CONSTRUCTED READS. A producer that assembles its own path never
+            # emits the whole path as one literal, so the directory half is the
+            # only half a scanner can see. See repository_dirs_named_in.
+            for directory in self.repository_dirs_named_in(body, repo_root):
+                if directory not in declared \
+                        and directory not in PREVIEW_RUNTIME_DATA_EXEMPTIONS:
+                    undeclared.add(directory)
         # The scan must be matching something, or this test passes vacuously.
         self.assertTrue(
             any(
@@ -978,6 +1015,24 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         # `$RUNNER_TEMP/bounded-preview/supabase/migrations` -- a runner-temp copy,
         # not the checkout -- is correctly not treated as a repository read.
         referenced = self.repository_paths_named_in(job, repo_root)
+        # THE EXEMPTION IS ABOUT THE PREVIEW JOB, WHICH IS NOT THE JOB YAML.
+        # Asserting the "never read" premise against the workflow text alone let
+        # a PINNED SCRIPT start reading `supabase/tests/foo.sql` while both this
+        # test and the inward walk stayed green -- the inward walk treats
+        # everything under an exempted directory as exempt, and the job text
+        # never mentions the script's own reads (#1213 review, round 5, finding
+        # 3). The closure's scannable text is added, so a read that moves into a
+        # script is still a read by the preview job.
+        executed = set(referenced)
+        for rel in sorted(self.executed_closure()):
+            path = repo_root / rel
+            if path.is_file():
+                executed |= self.repository_paths_named_in(
+                    self.scannable_text(
+                        path, path.read_text(encoding="utf-8", errors="ignore")
+                    ),
+                    repo_root,
+                )
         # Guard against the scan silently matching nothing, which would make this
         # test pass through an unasserted condition -- a defect in itself.
         self.assertIn(
@@ -996,16 +1051,17 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             if "Never read by the preview job" not in reason:
                 continue
             self.assertNotIn(
-                key, referenced,
+                key, executed,
                 f"{key} is exempted because it is 'Never read by the preview job', "
-                f"but the preview job now names it. Pin it in PREVIEW_PRODUCER_PATHS "
-                f"or rewrite the reason -- do not leave a reason the code contradicts.",
+                f"but the preview job or a script it executes now names it. Pin it in "
+                f"PREVIEW_PRODUCER_PATHS or rewrite the reason -- do not leave a reason "
+                f"the code contradicts.",
             )
-            for rel in sorted(referenced):
+            for rel in sorted(executed):
                 self.assertFalse(
                     rel.startswith(f"{key}/"),
                     f"{key} is exempted as never read by the preview job, but the job "
-                    f"now names {rel} beneath it",
+                    f"or a script it executes now names {rel} beneath it",
                 )
         escaped = sorted(
             rel for rel in referenced
@@ -1278,7 +1334,8 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 archive.writestr(name, text)
         return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
-    def original_run_zip(self, path, *, version, digest, applied=True, recovery=False):
+    def original_run_zip(self, path, *, version, digest, applied=True, recovery=False,
+                         instance=None):
         """The ORIGINAL apply run's evidence: it really moved preview's ledger."""
         before = json.dumps([{"remote": "20260801000000"}])
         after = json.dumps(
@@ -1293,6 +1350,8 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         }
         if recovery:
             payload["historical-preview-source.json"] = json.dumps({"schema": "x"})
+        if instance is not None:
+            payload["preview-instance.json"] = instance
         with zipfile.ZipFile(path, "w") as archive:
             for name, text in payload.items():
                 archive.writestr(name, text)
@@ -1301,12 +1360,31 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         self, *, rehearsed_body="select 1;\n", main_body="select 1;\n",
         original_run=555, record_runs="default", original_applied=True,
         original_is_recovery=False, original_conclusion="success",
+        original_head_sha="default", original_head_in_history=True,
+        original_head_blobs=None, original_run_blobs=None, original_instance=None,
     ):
         """End to end through prove_preview, downloads and all.
 
         `rehearsed_body` is what the ORIGINAL run recorded a digest for;
         `main_body` is what exact main carries now. Equal in the honest case,
         different in the attack.
+
+        THE ORIGINAL RUN HAS TWO COMMITS, and the last four arguments exist so a
+        test can drive them apart, which the first version of this helper could
+        not: it always set `head_sha` equal to the artifact-name commit and always
+        listed that commit as a commit of the source PR, so no forged dispatch was
+        reachable through this path at all (#1213 review, round 5, finding 1).
+
+        * `original_head_sha` -- the ref the ORIGINAL dispatch was aimed at.
+        * `original_head_in_history` -- whether exact main contains it.
+        * `original_head_blobs` -- producer blobs at the DISPATCH REF only, so a
+          doctored workflow at an otherwise honest-looking ref can be expressed.
+        * `original_run_blobs` -- producer blobs at BOTH of the original run's
+          commits, i.e. an old run that is internally consistent but carries
+          producer files today's main no longer has. A pin aimed at today's main
+          rather than at the run's own checkout fails on this.
+        * `original_instance` -- the raw `preview-instance.json` that run wrote,
+          or None for a run whose producer code predates instance binding.
         """
         version = self.HISTORICAL_VERSION
         temp, root, main = self.historical_repo(main_body)
@@ -1329,14 +1407,21 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 self.original_run_zip(
                     original_path, version=version, digest=rehearsed_digest,
                     applied=original_applied, recovery=original_is_recovery,
+                    instance=original_instance,
                 )
                 original_commit = "a" * 40
+                original_head = (
+                    original_commit if original_head_sha == "default" else original_head_sha
+                )
+                pr_commits = [{"sha": main}, {"sha": original_commit}]
 
                 def api(endpoint):
                     if endpoint == f"repos/u2giants/shared-db/actions/runs/{original_run}":
-                        return {"status": "completed", "conclusion": original_conclusion,
-                                "event": "workflow_dispatch", "head_sha": original_commit,
-                                "path": PREVIEW_WORKFLOW}
+                        run = {"status": "completed", "conclusion": original_conclusion,
+                               "event": "workflow_dispatch", "path": PREVIEW_WORKFLOW}
+                        if original_head is not None:
+                            run["head_sha"] = original_head
+                        return run
                     if endpoint.endswith(f"runs/{original_run}/artifacts?per_page=100"):
                         return {"artifacts": [self.apply_artifact(
                             original_commit, artifact_id=99, run_id=original_run)]}
@@ -1347,8 +1432,15 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                     if endpoint.endswith("runs/7/artifacts?per_page=100"):
                         return {"artifacts": [self.apply_artifact(main, digest=artifact_digest)]}
                     if endpoint.endswith("commits?per_page=100"):
-                        return [{"sha": main}, {"sha": original_commit}]
+                        return pr_commits
                     if "/contents/" in endpoint:
+                        path, ref = endpoint.split("/contents/", 1)[1].split("?ref=")
+                        if original_head_blobs and ref == original_head:
+                            return {"sha": original_head_blobs.get(
+                                path, "identical-producer-blob")}
+                        if original_run_blobs and ref in (original_head, original_commit):
+                            return {"sha": original_run_blobs.get(
+                                path, "identical-producer-blob")}
                         return {"sha": "identical-producer-blob"}
                     if "/pulls/" in endpoint and "/files" in endpoint:
                         return [{"filename":
@@ -1357,6 +1449,9 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                     if "/pulls/" in endpoint:
                         return {"merged": True, "merge_commit_sha": main}
                     if "/compare/" in endpoint:
+                        base = endpoint.split("/compare/", 1)[1].split("...")[0]
+                        if base == original_head and not original_head_in_history:
+                            return {"status": "diverged", "behind_by": 3}
                         return {"status": "identical", "behind_by": 0}
                     return {}
 
@@ -1410,6 +1505,109 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
     def test_original_run_must_have_succeeded(self):
         with self.assertRaisesRegex(RiskGateError, "has wrong conclusion"):
             self.run_historical_prove_preview(original_conclusion="failure")
+
+    def test_forged_dispatch_ref_cannot_fabricate_a_historical_original_run(self):
+        """#1213 review, round 5, finding 1. The exact twin of
+        `test_forged_dispatch_ref_cannot_fabricate_a_main_line_rehearsal`, on the
+        recovery lane -- the lane that supplies the BYTES.
+
+        THE FORGE. Preview honestly holds the version from an apply of bytes A.
+        The file on main was later amended to bytes B. An attacker pushes branch
+        `evil` whose copy of the workflow performs no database write and instead
+        hand-writes `preview-ledger-before.txt` without the version,
+        `preview-ledger-after.txt` with it, and a `migration-content-manifest.json`
+        mapping the version to the sha256 of B on exact main, with no
+        `historical-preview-source.json`. They dispatch it at `--ref evil`, name
+        the upload `preview-migration-apply-<any commit of the authoring PR>`,
+        then recover and promote.
+
+        Every other check in `prove_historical_original_apply_runs` passes: the
+        run is a successful dispatch of this workflow, it carries exactly one
+        unexpired apply artifact, it is not itself a recovery, its ledger gains
+        the version, and the digest it recorded equals exact main. Production
+        would apply B; preview ran A.
+
+        Only `head_sha` -- the ref GitHub read the workflow FILE from, which no
+        part of the artifact can restate -- exposes it.
+        """
+        with self.assertRaisesRegex(RiskGateError, "not contained in the history of exact main"):
+            self.run_historical_prove_preview(
+                original_head_sha="e" * 40, original_head_in_history=False
+            )
+
+    def test_original_run_whose_workflow_differs_from_its_own_checkout_is_refused(self):
+        """The subtler half of the same forge: a dispatch ref that IS in main's
+        history, carrying a doctored workflow.
+
+        Main-line containment alone would accept this -- an ancestor of main is
+        ancestor code, and nothing about ancestry says the workflow that ran is
+        the workflow that checkout carries. The producer pin does, by comparing
+        the dispatch ref against the run's OWN checkout, so the pair has to be
+        internally consistent.
+        """
+        with self.assertRaisesRegex(RiskGateError, "different .* than its own checkout"):
+            self.run_historical_prove_preview(
+                original_head_sha="b" * 40,
+                original_head_blobs={PREVIEW_WORKFLOW: "doctored-workflow"},
+            )
+
+    def test_original_run_without_a_readable_head_sha_is_refused(self):
+        """An unreadable dispatch ref is a missing pin, never a passed one."""
+        for head in (None, "", "abc", "z" * 40, 12345):
+            with self.subTest(head=head), self.assertRaisesRegex(
+                RiskGateError, "does not name the commit whose workflow executed"
+            ):
+                self.run_historical_prove_preview(original_head_sha=head)
+
+    def test_an_honest_old_original_run_still_recovers(self):
+        """THE REASON THE PIN IS AIMED AT THE RUN'S OWN CHECKOUT, not today's main.
+
+        This original run was dispatched at one commit of the authoring pull
+        request and checked out another, and its producer files are its own, not
+        today's. Pinning it to today's main would refuse it -- and with it every
+        Sample Tracking recovery this lane exists for -- so the pin must not, and
+        this test fails if someone tightens it that way.
+        """
+        self.run_historical_prove_preview(
+            original_head_sha="b" * 40,
+            original_run_blobs={PREVIEW_WORKFLOW: "the-workflow-as-it-was-then"},
+        )
+
+    def test_original_run_bound_to_the_production_project_is_refused(self):
+        """Evidence of a PRODUCTION write is never a preview rehearsal, at any age."""
+        with self.assertRaisesRegex(RiskGateError, "performed against the PRODUCTION project"):
+            self.run_historical_prove_preview(
+                original_instance=json.dumps({
+                    "schema": "shared-db-preview-instance-binding/v1",
+                    "previewProjectRef": "qsllyeztdwjgirsysgai",
+                })
+            )
+
+    def test_original_run_with_an_unreadable_instance_binding_is_refused(self):
+        with self.assertRaisesRegex(RiskGateError, "unreadable preview instance binding"):
+            self.run_historical_prove_preview(original_instance="{not json")
+
+    def test_original_run_against_the_deleted_preview_is_still_accepted(self):
+        """THE DECISION, PINNED SO IT CANNOT BE CHANGED SILENTLY (#1213 round 5).
+
+        Preview `rjyboqwcdzcocqgmsyel` was deleted and rebuilt as
+        `mvpkijzfmfcxhnzqogzs` on 2026-08-18. EVERY original apply run that exists
+        therefore ran against the predecessor instance, so requiring the original
+        run to bind to the current `PREVIEW_PROJECT_REF` would refuse one hundred
+        percent of the recoveries this lane was built for, including the stranded
+        Sample Tracking merges. It is deliberately not required.
+
+        The residual is written down in `prove_historical_original_apply_runs`
+        and in AGENTS.md: the ledger half of this lane may be satisfied by one
+        database and the byte half by another. If that trade is ever reversed,
+        this test is where the reversal is declared.
+        """
+        self.run_historical_prove_preview(
+            original_instance=json.dumps({
+                "schema": "shared-db-preview-instance-binding/v1",
+                "previewProjectRef": "rjyboqwcdzcocqgmsyel",
+            })
+        )
 
     def test_workflow_refuses_both_historical_forms_at_once(self):
         """Two inputs describing one batch, one silently unused, is not a state

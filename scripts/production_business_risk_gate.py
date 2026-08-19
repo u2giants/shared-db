@@ -469,6 +469,17 @@ PREVIEW_RUNTIME_DATA_EXEMPTIONS = {
         "which builds a throwaway database, touches neither preview nor "
         "production, and produces no preview evidence artifact."
     ),
+    "docs": (
+        "Named by a producer, but never OPENED by one. scripts/manage-migration-"
+        "author-lanes.mjs passes 'docs' to `git grep -l` and `git add` as a "
+        "PATHSPEC when it renames an author's migration version, so git decides "
+        "which files exist there; no docs file is ever read into the preview "
+        "job's behaviour, and that rename runs inside a temporary author "
+        "worktree, not the bounded checkout the evidence artifact is built from. "
+        "Found by the constructed-read walk added in #1213 round 5, which reports "
+        "a top-level directory a producer names even when the child path is "
+        "assembled at runtime and so never appears as a whole literal."
+    ),
     "config/production-risk-policy-activation.json": (
         "Never read by the preview job. It is read by the production-apply jobs "
         "and by this gate itself, both of which check out exact main and prove "
@@ -490,7 +501,8 @@ def blob_sha(path: str, ref: str, api: Callable[[str], Any]) -> str:
 
 
 def prove_preview_producer_matches_main(
-    ref: str, main_sha: str, api: Callable[[str], Any], *, what: str = "preview run"
+    ref: str, main_sha: str, api: Callable[[str], Any], *, what: str = "preview run",
+    against: str = "exact main",
 ) -> None:
     """Refuse a rehearsal produced by code that exact main does not carry.
 
@@ -508,13 +520,22 @@ def prove_preview_producer_matches_main(
     and could not find the artifact; the first version of #1213 pinned only the
     checkout and let a forged branch dispatch a fabricated rehearsal that named
     main as its applied commit. Both are pinned now.
+
+    THE SECOND ARGUMENT IS NOT ALWAYS MAIN. On the claim and merged-main lanes
+    both commits are pinned to exact main. On the historical-recovery lane the
+    two commits of an ORIGINAL run are pinned TO EACH OTHER instead: an older
+    run necessarily carries older producer files, so pinning it to today's main
+    would refuse every genuine recovery, while pinning its dispatch ref to its
+    own checkout still refuses a doctored workflow that advertises an honest
+    checkout. `against` names what was compared so the refusal message cannot
+    claim a comparison that was not made.
     """
     if ref == main_sha:
         return
     for path in PREVIEW_PRODUCER_PATHS:
         if blob_sha(path, ref, api) != blob_sha(path, main_sha, api):
             raise RiskGateError(
-                f"{what} produced evidence with a different {path} than exact main"
+                f"{what} produced evidence with a different {path} than {against}"
             )
 
 
@@ -586,19 +607,33 @@ def prove_historical_original_apply_runs(
       * preview's ledger must have GAINED the version across it, which is what
         distinguishes a run that applied the migration from a run that merely
         named it;
-      * the checkout it ran from must belong to the pull request the record says
-        authored the version, or to exact main's own history; and
+      * BOTH commits it ran must belong to the pull request the record says
+        authored the version, or to exact main's own history -- the checkout it
+        advertised in its artifact name AND ``head_sha``, the ref GitHub read the
+        workflow file from;
+      * those two commits must carry the SAME producer files as each other, so a
+        doctored workflow cannot advertise an honest checkout; and
       * the digest THAT run recorded for the version must equal the bytes on
         exact main.
 
     WHAT IT DELIBERATELY DOES NOT DO. It does not pin the original run's producer
-    files to today's main. It cannot: an older commit necessarily carries older
+    files to TODAY'S main. It cannot: an older commit necessarily carries older
     producer files, so that rule would refuse every genuine recovery, including
-    the one this lane exists for. The binding is therefore as strong as the
-    ordinary claim lane was on the day of the original rehearsal -- a real,
-    checkable byte proof, not a proof that today's machinery produced it. That
-    limit is written down in PREVIEW_RUNTIME_DATA_EXEMPTIONS and in AGENTS.md
-    rather than glossed.
+    the one this lane exists for. It pins the original run's two commits to EACH
+    OTHER instead. Nor does it require the original run to have written to the
+    CURRENT preview database: preview was deleted and rebuilt on 2026-08-18, so
+    that rule would refuse every recovery that exists.
+
+    THE LIMIT, STATED ACCURATELY. The #1213 round-5 review retired the previous
+    wording -- "as strong as the ordinary claim lane was on the day of the
+    rehearsal" -- because it is false of a run created TODAY and then named as
+    the original. What this function proves is: a real, successful run of THIS
+    workflow, dispatched from a commit this repository's history contains,
+    executing the producer code of its own checkout, moved preview's ledger for
+    this version and recorded a digest equal to exact main's bytes. What it does
+    not prove is WHICH preview instance that was, or that today's machinery
+    produced the evidence. Both limits are written down here, in
+    PREVIEW_RUNTIME_DATA_EXEMPTIONS and in AGENTS.md rather than glossed.
 
     A version whose file changed after its rehearsal can no longer be recovered.
     That is the correct outcome and the entire point: preview never ran those
@@ -638,6 +673,32 @@ def prove_historical_original_apply_runs(
         )
         if original_commit not in source_pr_commits(source_pr, "", main_sha, api):
             prove_applied_commit_is_main_line(original_commit, main_sha, api)
+        # THE WORKFLOW THAT EXECUTED, on this side too. `original_commit` is only
+        # what the job CHOSE to advertise in its artifact name; `run["head_sha"]`
+        # is the ref GitHub read the workflow FILE from, and no part of the
+        # artifact can restate it. Without these lines a branch whose copy of the
+        # workflow skips the database write and hand-writes a ledger delta plus a
+        # content manifest naming exact main's digest could be dispatched TODAY,
+        # named as the "original apply", and promoted -- the #1213 first-head
+        # forge, moved onto the new field. (#1213 review, round 5, finding 1.)
+        run_head = run.get("head_sha")
+        if not isinstance(run_head, str) or not re.fullmatch(r"[0-9a-f]{40}", run_head):
+            raise RiskGateError(
+                f"original apply run {run_id} for {version} does not name the commit whose "
+                "workflow executed (head_sha)"
+            )
+        if run_head not in source_pr_commits(source_pr, "", main_sha, api):
+            prove_applied_commit_is_main_line(run_head, main_sha, api)
+        # PINNED TO EACH OTHER, NOT TO TODAY'S MAIN. The question this answers is
+        # "is the workflow that executed the workflow at the claimed checkout?",
+        # never "is it today's workflow" -- the latter would refuse every genuine
+        # recovery, since an older commit necessarily carries older producer
+        # files, and this lane exists for exactly those.
+        prove_preview_producer_matches_main(
+            run_head, original_commit, api,
+            what=f"original apply run {run_id} dispatched at {run_head}",
+            against=f"its own checkout {original_commit}",
+        )
         texts = artifact_texts(artifact, downloader)
         if texts.get("historical-preview-source.json"):
             raise RiskGateError(
@@ -655,6 +716,47 @@ def prove_historical_original_apply_runs(
                 f"original apply run {run_id} did not apply {version} to preview "
                 "(its ledger delta does not add that version)"
             )
+        # THE DATABASE THE ORIGINAL RUN WROTE TO. Decided explicitly in the #1213
+        # round-5 review and deliberately NOT required to be the current preview:
+        # preview `rjyboqwcdzcocqgmsyel` was deleted and rebuilt as
+        # `mvpkijzfmfcxhnzqogzs` on 2026-08-18, so EVERY original apply run that
+        # exists ran against the predecessor instance. Requiring a match with the
+        # current `PREVIEW_PROJECT_REF` would refuse one hundred percent of the
+        # recoveries this lane was built for. What IS required is that a binding,
+        # when the original run's producer code was new enough to write one, is
+        # readable and does not name the PRODUCTION project -- evidence of a
+        # production write is never a preview rehearsal, at any age. Absence is
+        # accepted only because the pin above now proves the executing workflow
+        # was the genuine workflow at that checkout, so a MISSING binding means an
+        # old producer rather than a suppressed field.
+        #
+        # THE RESIDUAL, WRITTEN DOWN RATHER THAN GLOSSED: an original run against
+        # the deleted preview can still be cited, so if the version reappears in
+        # the CURRENT preview's ledger by some route other than an apply of these
+        # bytes -- a restore, a clone, or a later apply of different bytes -- the
+        # ledger half of this lane is satisfied by one database and the byte half
+        # by another. The byte half is still pinned to exact main, so production
+        # cannot be handed bytes nobody rehearsed; what is not proved is that the
+        # CURRENT preview ran them.
+        instance = texts.get("preview-instance.json")
+        if instance:
+            try:
+                binding = json.loads(instance)
+            except (json.JSONDecodeError, TypeError) as exc:
+                raise RiskGateError(
+                    f"original apply run {run_id} for {version} carries an unreadable "
+                    "preview instance binding"
+                ) from exc
+            if not isinstance(binding, dict):
+                raise RiskGateError(
+                    f"original apply run {run_id} for {version} carries a preview instance "
+                    "binding that is not an object"
+                )
+            if binding.get("previewProjectRef") == PRODUCTION_PROJECT_REF:
+                raise RiskGateError(
+                    f"original apply run {run_id} for {version} was performed against the "
+                    "PRODUCTION project; that is not a preview rehearsal"
+                )
         recorded = preview_content_manifest(texts).get(version)
         if not isinstance(recorded, str) or not re.fullmatch(r"[0-9a-f]{64}", recorded):
             raise RiskGateError(

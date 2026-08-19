@@ -163,6 +163,13 @@ def verify(
         raise InstanceBindingError(
             f"preview instance binding belongs to run {record.get('runId')!r}, not run {run_id}"
         )
+    # COMPARED AS A LIST, and the reason is NOT that this preserves "the sequence
+    # preview applied" -- #1213 round 5 judged that claim overstated and it is
+    # withdrawn. `parse_allowlist` already refuses any allowlist that is not
+    # sorted, historical recovery refuses the same, and the CLI applies files in
+    # version order regardless, so list equality and set equality are identical
+    # for every allowlist that can reach this line. The list compare stays
+    # because it is the simpler, stricter spelling, and it defends nothing extra.
     if record.get("allowlist") != list(allowlist):
         raise InstanceBindingError(
             f"preview instance binding covers versions {record.get('allowlist')!r}, "

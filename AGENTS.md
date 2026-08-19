@@ -881,14 +881,43 @@ four rules below are non-negotiable for any database change.
    on exact main. Find the run id in the Actions history — it is the successful
    `apply` run whose artifact is `preview-migration-apply-<sha>` for that batch.
 
-   **What this lane proves, stated exactly.** The named versions are in preview's
-   ledger; a merged pull request added each of them; and the bytes preview
-   actually executed are the bytes on exact main. **What it does not prove:** that
-   preview's *catalog* matches its ledger (a half-applied or hand-repaired
-   preview looks identical from here), and it does not re-pin the original run's
-   producer code to today's main — an older commit necessarily carries older
-   producer files. It is as strong as the claim lane was on the day of that
-   rehearsal, and no stronger.
+   **The named run is pinned on BOTH of its commits.** The commit it advertised
+   in its artifact name *and* `head_sha`, the ref GitHub read the workflow file
+   from, must each be a commit of the authoring pull request or a commit exact
+   main contains, and the two must carry the **same producer files as each
+   other**. Without that second pin — added in #1213 round 5 — anyone who can
+   dispatch this workflow could push a branch whose copy of it performs no
+   database write, hand-write a ledger delta and a content manifest naming exact
+   main's digest, name that run as the "original apply", and promote bytes
+   preview never executed.
+
+   **What this lane proves, stated exactly.** A real, successful run of this
+   workflow, dispatched from a commit this repository's history contains and
+   executing the producer code of its own checkout, added each named version to
+   *a* preview ledger and recorded a digest equal to the bytes on exact main; and
+   a merged pull request added each version.
+
+   **What it does not prove, and do not let anyone tell you otherwise.**
+   (a) That preview's *catalog* matches its ledger — a half-applied or
+   hand-repaired preview looks identical from here.
+   (b) That **today's** machinery produced the evidence. The original run's
+   producer code is pinned to its own checkout, never to today's main, because an
+   older commit necessarily carries older producer files and that rule would
+   refuse every genuine recovery.
+   (c) **Which preview database it was.** The original run is deliberately not
+   required to bind to the current `PREVIEW_PROJECT_REF`: preview
+   `rjyboqwcdzcocqgmsyel` was deleted and rebuilt as `mvpkijzfmfcxhnzqogzs` on
+   2026-08-18, so requiring it would refuse every recovery that exists, including
+   the stranded merges this lane was built for. A binding it *does* carry must be
+   readable and must not name the production project. The residual: the ledger
+   half of this lane can be satisfied by one database and the byte half by
+   another if a version reappears in the current preview by restore, clone, or a
+   later apply of different bytes.
+
+   The earlier wording here — "as strong as the claim lane was on the day of that
+   rehearsal" — was **withdrawn as false** in #1213 round 5. It is true of an
+   honest past run whose artifact survives; it is not true of a run created today
+   and then named as the original, which is exactly what the second pin now stops.
 
    **If a version's file changed after its rehearsal, this lane will refuse it,
    and that refusal is correct** — preview never ran the bytes you are asking
