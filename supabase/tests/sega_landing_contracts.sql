@@ -1428,10 +1428,15 @@ begin
 
   -- The ordinary path must still publish. Without this, a fix that broke every integer
   -- expectation would satisfy every assertion above while nothing could ever complete.
+  -- DELIBERATELY THE OLDEST source_captured_at IN THIS FILE. This is the only capture the
+  -- E2N sections COMPLETE, and api.source_capture_inventory reports the latest complete
+  -- capture ordered by source_captured_at -- so a 2099-09 date here would quietly become
+  -- "current" and section F2, which asserts its own newest complete capture, would fail on
+  -- a fixture collision that has nothing to do with what it tests.
   v_id := plm.begin_sega_capture(
     'ZZTEST-sega-E2Nv-ok:' || repeat('7', 40), 'ZZTEST-repo',
     repeat('7', 40), repeat('7', 64), 'https://example.invalid',
-    '2099-09-07Z'::timestamptz, v_full, '{}'::jsonb, 'ZZTEST', false, true, true, true);
+    '2099-01-05Z'::timestamptz, v_full, '{}'::jsonb, 'ZZTEST', false, true, true, true);
   perform plm.finalize_sega_capture(v_id, v_full, '[]'::jsonb);
   select * into v_cap from plm.sega_capture where id = v_id;
   if v_cap.status <> 'complete' then
