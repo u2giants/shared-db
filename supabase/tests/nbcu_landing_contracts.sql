@@ -488,6 +488,7 @@ $$;
 do $$
 declare
   v_pass integer := 0; v_fail integer := 0; v_a uuid; v_b uuid; v_n integer;
+  v_msg text;
   v_key text := 'nbcu:ZZTEST-F:' || repeat('1',40);
 begin
   raise notice '=== F. begin_nbcu_capture ===';
@@ -506,7 +507,16 @@ begin
     perform plm.begin_nbcu_capture(v_key,'u2giants/ZZTEST',repeat('1',40),repeat('3',64),
       'https://portal.example.invalid/', now(), '{"assets":0}'::jsonb,'{}'::jsonb,'contract-test-F');
     v_fail := v_fail+1; raise warning 'FAIL a MANIFEST MISMATCH was accepted as a resume';
-  exception when others then v_pass := v_pass+1;
+  -- PINNED to the refusal that must have fired. A bare `when others` passes when ANY
+  -- error occurs -- including a typo in the test's own statement -- so it stays green
+  -- after the guard under test is deleted. That is a test of nothing (issue #1219,
+  -- defect pattern 3).
+  exception when raise_exception then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg like '%DIFFERENT source manifest hash%' then v_pass := v_pass+1;
+    else v_fail := v_fail+1;
+      raise warning 'FAIL the manifest-mismatch refusal raised the WRONG error: %', v_msg;
+    end if;
   end;
 
   -- Malformed shas must be refused before anything lands.
@@ -514,13 +524,24 @@ begin
     perform plm.begin_nbcu_capture('nbcu:ZZTEST-F2:short','u2giants/ZZTEST','deadbeef',repeat('2',64),
       'https://portal.example.invalid/', now(), '{"assets":0}'::jsonb,'{}'::jsonb,'contract-test-F');
     v_fail := v_fail+1; raise warning 'FAIL a short commit sha was accepted';
-  exception when others then v_pass := v_pass+1;
+  exception when raise_exception then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg like '%source_commit_sha must be a 40-character lowercase hex sha%'
+      then v_pass := v_pass+1;
+    else v_fail := v_fail+1;
+      raise warning 'FAIL the short-sha refusal raised the WRONG error: %', v_msg;
+    end if;
   end;
   begin
     perform plm.begin_nbcu_capture('nbcu:ZZTEST-F3:x','u2giants/ZZTEST',repeat('4',40),repeat('2',64),
       'https://portal.example.invalid/', now(), '{}'::jsonb,'{}'::jsonb,'contract-test-F');
     v_fail := v_fail+1; raise warning 'FAIL an EMPTY expected_counts document was accepted';
-  exception when others then v_pass := v_pass+1;
+  exception when raise_exception then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg like '%expected_counts must be a non-empty JSON object%' then v_pass := v_pass+1;
+    else v_fail := v_fail+1;
+      raise warning 'FAIL the empty-expected_counts refusal raised the WRONG error: %', v_msg;
+    end if;
   end;
 
   delete from plm.nbcu_capture where capture_key like 'nbcu:ZZTEST-F%';
@@ -1082,5 +1103,251 @@ begin
 
   raise notice 'I: % passed / % failed', v_pass, v_fail;
   if v_fail > 0 then raise exception 'I FAILED (% failures)', v_fail; end if;
+end;
+$$;
+
+
+-- =====================================================================================
+-- G7. THE COUNT GATE MAY NEVER BE SKIPPED BY A NON-NUMBER EXPECTED COUNT.
+--     Migration 20260819112451, issue #1219.
+--
+-- WHY THIS SECTION EXISTS, AND WHAT IT WOULD HAVE CAUGHT.
+--   The gate used to decide a count had been supplied with `v_exp ? v_key`. `jsonb ? key`
+--   is TRUE for a key whose value is JSON `null`, so {"scopes": null} passed that test,
+--   the expected value became SQL NULL, `observed <> NULL` evaluated to UNKNOWN, and the
+--   IF never fired. The count was silently UNCHECKED and the capture published as
+--   'complete'. `jsonb_build_object('scopes', v_unset)` produces exactly that shape, so
+--   an ordinary loader bug is enough to reach it.
+--
+--   MEASURED AGAINST THE PRE-20260819112451 FUNCTION BODY, on PostgreSQL 18:
+--     G7.2 and G7.3 return 'complete' -- the count check was skipped and the capture
+--       PUBLISHED. G7.10 does the same for the optional `failures` key.
+--     G7.4 reports count_mismatch, i.e. it silently accepted the STRING "12" as a
+--       count via the untyped ->> cast; a non-numeric string would have raised instead.
+--     G7.5 raises `invalid input syntax for type bigint: "true"` -- a raw cast error
+--       that aborts this block and fails the section loudly, which is the intended
+--       detection for the second defect. G7.6 and G7.7 are the float and out-of-range
+--       forms of the same crash.
+--   A guard with no test that fails when the guard is removed is not a guard.
+--
+--   Note the shape: finalize deliberately RETURNS a verdict instead of raising, so these
+--   calls are NOT wrapped in an exception handler. No `when others` appears anywhere in
+--   this section -- a broad handler would turn a typo in the test itself into a green
+--   line, which is the third defect pattern issue #1219 asks authors to sweep for.
+-- =====================================================================================
+do $$
+declare
+  v_pass integer := 0; v_fail integer := 0;
+  v_cap uuid; v_res jsonb; v_status text;
+  v_skey text := 'href-sha256:'||repeat('e',64);
+  v_exp  jsonb := jsonb_build_object(
+    'assets',0,'properties',0,'characters',0,'style_guides',0,'scopes',1,
+    'ip_family_property',0,'property_character',0,'asset_property',0,
+    'asset_character',0,'asset_style_guide',0,'style_guide_property',0,
+    'asset_ip_family',0,'excluded_unlicensed_assets',0,'failures',0);
+begin
+  raise notice '=== G7. NON-NUMBER EXPECTED COUNTS (#1219) ===';
+
+  v_cap := plm.begin_nbcu_capture('nbcu:ZZTEST-G7:'||repeat('e',40),'u2giants/ZZTEST',
+    repeat('e',40), repeat('f',64), 'https://portal.example.invalid/', now(),
+    v_exp, '{}'::jsonb, 'contract-test-G7');
+
+  -- One real row, so the null-count cases below are the ACTUAL disaster shape: data
+  -- landed, and the expectation that was supposed to verify it is unusable.
+  insert into plm.nbcu_scope (capture_id, scope_key, scope_label, scope_href,
+    page_count, indexed_rows, unique_assets, terminal, source_files, raw)
+  values (v_cap, v_skey, 'ZZTEST G7 scope','https://portal.example.invalid/scope/7',
+    1,0,0,true,'[]'::jsonb,'{}'::jsonb);
+
+  -- Every reset below clears load_completed_at with the status: nbcu_capture_complete_
+  -- time_chk ties the two together and would reject the UPDATE otherwise.
+
+  -- G7.1 BASELINE. The correct document publishes. Without this the rejections below
+  -- could all pass for the wrong reason (an unrelated always-on error, say).
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'complete' then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.1 a correct expected_counts document did not complete: %', v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  -- G7.2 THE DEFECT. A JSON null for a count that has real rows behind it.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"scopes":null}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'rejected' then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.2 a JSON-NULL expected count PUBLISHED the capture (status %) -- the count check was skipped',
+      v_res ->> 'status';
+  else v_pass := v_pass+1; end if;
+  if not (v_res -> 'errors')
+         @> '[{"code":"expected_count_not_a_number","entity":"scopes"}]'::jsonb then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.2 the rejection was not the NAMED expected_count_not_a_number: %',
+      coalesce((v_res -> 'errors')::text,'<none>');
+  else v_pass := v_pass+1; end if;
+  -- The rejection must SURVIVE, not merely be returned.
+  select status into v_status from plm.nbcu_capture where id = v_cap;
+  if v_status <> 'rejected' then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.2 the persisted status is %, expected rejected', v_status;
+  else v_pass := v_pass+1; end if;
+
+  -- G7.3 A JSON null on a zero-row count is equally unchecked, and equally refused.
+  -- Stated separately because "the count happened to be 0 anyway" is exactly the
+  -- reasoning that makes a skipped check look harmless.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"assets":null}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'rejected'
+     or not (v_res -> 'errors')
+            @> '[{"code":"expected_count_not_a_number","entity":"assets"}]'::jsonb then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.3 a JSON-null zero-row expected count was not rejected by name: %',
+      v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  -- G7.4 A JSON STRING. Pre-fix, ->> handed '12' to ::bigint and the gate ACCEPTED a
+  -- string as a count (reporting a mismatch against 0 rather than the type error); a
+  -- non-numeric string died on the cast instead. Neither is a decision the gate is
+  -- allowed to make -- an expected count that is not a JSON number is broken input.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"assets":"12"}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'rejected'
+     or not (v_res -> 'errors')
+            @> '[{"code":"expected_count_not_a_number","entity":"assets"}]'::jsonb then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.4 a STRING expected count was not rejected by name: %', v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  -- G7.5 Booleans, objects and arrays take the same named path, each reporting its own
+  -- json_type. Asserted rather than assumed -- each is a different jsonb_typeof branch.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"assets":true,"properties":{},"characters":[]}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'rejected'
+     or not (v_res -> 'errors')
+            @> '[{"code":"expected_count_not_a_number","entity":"assets","json_type":"boolean"}]'::jsonb
+     or not (v_res -> 'errors')
+            @> '[{"code":"expected_count_not_a_number","entity":"properties","json_type":"object"}]'::jsonb
+     or not (v_res -> 'errors')
+            @> '[{"code":"expected_count_not_a_number","entity":"characters","json_type":"array"}]'::jsonb then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.5 bool/object/array expected counts were not each rejected by name: %',
+      v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  -- G7.6 A FLOAT and a NEGATIVE are numbers, but they are not counts.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"assets":0.5,"properties":-1}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'rejected'
+     or not (v_res -> 'errors')
+            @> '[{"code":"expected_count_not_a_nonnegative_integer","entity":"assets"}]'::jsonb
+     or not (v_res -> 'errors')
+            @> '[{"code":"expected_count_not_a_nonnegative_integer","entity":"properties"}]'::jsonb then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.6 a fractional or negative expected count was not rejected by name: %',
+      v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  -- G7.7 A number larger than bigint. Pre-fix the ::bigint cast raised `bigint out of
+  -- range` and wedged the capture; it must be a recorded rejection instead.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"assets":92233720368547758070}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'rejected'
+     or not (v_res -> 'errors')
+            @> '[{"code":"expected_count_out_of_range","entity":"assets"}]'::jsonb then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.7 an out-of-bigint-range expected count was not rejected by name: %',
+      v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  -- G7.8 A MISSING key must STILL be its own distinct rejection. The fix must not have
+  -- collapsed "absent" into "not a number".
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp - 'assets'
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'rejected'
+     or not (v_res -> 'errors')
+            @> '[{"code":"expected_count_missing","entity":"assets"}]'::jsonb then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.8 a MISSING expected count lost its own rejection code: %', v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  -- G7.9 A genuine COUNT MISMATCH must still be reported as a mismatch, with the numbers.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"scopes":99}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'rejected'
+     or not (v_res -> 'errors')
+            @> '[{"code":"count_mismatch","entity":"scopes","expected":99,"observed":1}]'::jsonb then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.9 a real count mismatch was not reported as count_mismatch: %',
+      v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  -- G7.10 The OPTIONAL scalar keys carry the same trap. A JSON null in `failures` used to
+  -- make the expected-failures invariant evaluate to UNKNOWN and skip entirely.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"failures":null}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'rejected'
+     or not (v_res -> 'errors')
+            @> '[{"code":"expected_count_not_a_number","entity":"failures"}]'::jsonb then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.10 a JSON-null failures key skipped the invariant: %', v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"excluded_unlicensed_assets":"0"}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'rejected'
+     or not (v_res -> 'errors')
+            @> '[{"code":"expected_count_not_a_number","entity":"excluded_unlicensed_assets"}]'::jsonb then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.10 a STRING excluded_unlicensed_assets skipped the invariant: %',
+      v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  -- G7.11 Both optional keys remain OPTIONAL. Absence is not an error: this migration
+  -- hardened their VALUES, it did not make them required, and a change that quietly made
+  -- them required would refuse captures that are legitimate today.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = (v_exp - 'failures') - 'excluded_unlicensed_assets'
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'complete' then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.11 omitting the OPTIONAL scalar keys was refused: %', v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  delete from plm.nbcu_scope   where capture_id = v_cap;
+  delete from plm.nbcu_capture where id = v_cap;
+
+  raise notice 'G7: % passed / % failed', v_pass, v_fail;
+  if v_fail > 0 then raise exception 'G7 FAILED (% failures)', v_fail; end if;
 end;
 $$;
