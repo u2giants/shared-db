@@ -70,13 +70,31 @@ jobs:
       # A stalled browser download looks exactly like a slow one in the Actions UI, and a
       # 28-minute hang on a REQUIRED check teaches operators to cancel and re-run instead of
       # reading the log (issue #1186). Bound it, and retry once for a genuinely flaky mirror.
+      #
+      # The bound is PER ATTEMPT, via `timeout`, not on the step. The first version of this
+      # put `timeout-minutes: 6` on the step alone, and on 2026-08-19 PR #1263 proved that
+      # wrong: the Ubuntu mirror stalled, the first attempt consumed the entire six minutes,
+      # and the step was killed mid-attempt so the retry NEVER RAN. A retry that a slow first
+      # attempt can starve is not a retry. `timeout-minutes` is kept as a backstop, sized to
+      # cover both attempts plus overhead, so the step still cannot hang if `timeout` itself
+      # is defeated.
       - name: Install the Playwright browser (fails fast rather than hanging)
-        timeout-minutes: 6
+        timeout-minutes: 9
         run: |
           set -euo pipefail
-          if ! npx playwright install --with-deps chromium; then
-            echo '::warning::playwright install failed; retrying once before failing the job'
-            npx playwright install --with-deps chromium
+          attempt() { timeout --signal=TERM --kill-after=30s 4m npx playwright install --with-deps chromium; }
+          # Capture the status explicitly. `if ! attempt; then code=$?` reads 0, because the
+          # `if` has already consumed and reset $?, so the warning would claim "exit 0" on a
+          # real timeout and send the reader looking for the wrong problem.
+          code=0
+          attempt || code=$?
+          if [ "$code" -ne 0 ]; then
+            if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
+              echo "::warning::playwright install exceeded 4 minutes (likely a package-mirror stall); retrying once"
+            else
+              echo "::warning::playwright install failed with exit $code; retrying once"
+            fi
+            attempt
           fi
       - run: VITE_BUILD_DATE="$(date -u +%Y-%m-%d)" npm run test:browser
         env:
