@@ -268,7 +268,7 @@ orderHistory,lineInvoiceQty,ignore,0,,,ALWAYS EMPTY in sample
 orderHistory,lineQty,ingest,100,,,
 orderHistory,lineOpenQty,ignore,0,,,ALWAYS EMPTY in sample
 orderHistory,linePickQty,ignore,0,,,ALWAYS EMPTY in sample
-orderHistory,lineCancelledQty,ignore,0.8,,,very rare
+orderHistory,lineCancelledQty,ingest,0.8,,,owner ruling 2026-08-19: FLIPPED to ingest. The 0.8% fill figure was measured on too small a window; a wider 951-row sample gave 11.5% and a 5874-row census gave 24%. Cancelled quantity is real signal - do not re-drop it on the 0.8% number
 orderHistory,itemDesc,ingest,100,,,
 orderHistory,merchGroup01,ignore,61,,,D2: line-level item attribute (identical on 519/519 order lines)
 orderHistory,merchGroup02,ignore,60.4,,,D2: line-level item attribute (identical on 519/519 order lines)
