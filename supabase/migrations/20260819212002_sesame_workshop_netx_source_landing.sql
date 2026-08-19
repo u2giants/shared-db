@@ -263,9 +263,11 @@ comment on column plm.sesame_capture.multivalue_parse_verified is
   'count. Section D of plm.complete_sesame_capture checks this claim against the rows.';
 comment on column plm.sesame_capture.guide_character_rows_excluded is
   'How many character rows were EXCLUDED from plm.sesame_style_guide_character because '
-  'their asset carried more than one style guide and could not be split. Recorded so the '
-  'gap between the derived table and the asset evidence is auditable rather than '
-  'invisible. It is a count of what we refused to guess.';
+  'their asset carried more than one style guide and could not be split. It is a count '
+  'of what we refused to guess, and it is an EXACT CENSUS, not an estimate: '
+  'plm.complete_sesame_capture computes the population from the rows and REJECTS a '
+  'capture whose reported number differs from it in either direction, so the gap between '
+  'the derived table and the asset evidence can never be understated.';
 comment on column plm.sesame_capture.expected_counts is
   'Per-table row counts the source contract expects. Drift check, NOT a constraint: a '
   'refresh with different real counts supplies different expectations. Every value must '
@@ -1152,7 +1154,9 @@ comment on table plm.sesame_style_guide_character is
   'RECONSTRUCTED BY US, NOT STATED BY THE PORTAL. The ONLY derived table in this schema. '
   'Built exclusively from assets carrying EXACTLY ONE style guide; characters on '
   'multi-guide assets are EXCLUDED, not guessed, and the excluded count is recorded on '
-  'plm.sesame_capture.guide_character_rows_excluded. relationship_truth is pinned to '
+  'plm.sesame_capture.guide_character_rows_excluded, where the publication gate requires '
+  'it to EQUAL the character rows actually sitting on multi-guide assets. '
+  'relationship_truth is pinned to '
   '''derived'' and derivation_method to ''single_guide_asset'' by CHECKs that permit no '
   'other value. There is deliberately NO brand-to-character equivalent anywhere in this '
   'schema and none may be added.';
@@ -1772,21 +1776,34 @@ begin
   --   * RUBBER-STAMPED A FAKE. Any nonzero value passed unexamined.
   -- Found in external review of PR #1274 (Grok 4.6, rotation 229) at commit 23cf4e9.
   --
-  -- WHAT IS AND IS NOT CAUGHT, stated plainly rather than overclaimed:
-  --   CAUGHT: reporting zero while character appearances on multi-guide assets exist --
-  --           the uncounted-exclusion case this column exists to prevent.
-  --   CAUGHT: reporting MORE than that population. No reading of "excluded character
-  --           rows" can exceed the character rows that are actually there, so this is an
-  --           impossible claim under any definition and is a hard upper bound.
-  --   NOT CAUGHT: reporting a nonzero number BELOW the population. An exact-equality gate
-  --           would catch it, and it was deliberately not written: a loader that counts
-  --           distinct (guide, character) PAIRS rather than rows produces a legitimately
-  --           smaller number, and a gate pinned to the wrong one of two defensible
-  --           definitions would reject every real capture. That is the same trap as the
-  --           depth/parent coupling refused on plm.sesame_category. The evidence count is
-  --           therefore RECORDED in the error payload and in observed_counts below, so a
-  --           human comparing the two numbers can see the gap even where the gate does
-  --           not fire.
+  -- AND THE SECOND DRAFT WAS ALSO WRONG, IN A SUBTLER WAY WORTH RECORDING. It rejected a
+  -- reported ZERO and rejected a report ABOVE the population, and accepted every integer
+  -- in between. A capture with a thousand excludable character rows could therefore
+  -- report ONE and publish: the audit column whose entire job is to make the skip list
+  -- visible would understate it by three orders of magnitude, and the lie would be
+  -- detectable only AFTER publication rather than prevented. Found in delta review of
+  -- PR #1274 (Grok 4.6, rotation 231) at commit 8049953.
+  --
+  -- THE REASON GIVEN FOR STOPPING SHORT WAS REFUTED BY THIS FILE'S OWN TEST FIXTURE, and
+  -- that is the part worth remembering. The claim was that a loader counting distinct
+  -- (guide, character) PAIRS rather than appearance ROWS would produce a legitimately
+  -- SMALLER number, so equality would reject honest captures. On the H-C fixture an
+  -- unsplittable asset carries TWO guides and ONE character: the appearance count is 1
+  -- and the pair count is 2. Pair-counting is smaller only where the same pairs repeat
+  -- across many assets; here it is LARGER, and the upper bound already refused it -- so
+  -- the test asserted that the pair count was an impossible fabrication while the comment
+  -- called that same number a legitimate alternative. Both could not be true.
+  --
+  -- NOR IS THIS THE depth/parent SITUATION REFUSED ON plm.sesame_category. That was TWO
+  -- VALID SHAPES THE SOURCE MIGHT HAVE, which we do not get to choose between. This is
+  -- ONE SPECIFIED CENSUS OF OUR OWN SKIP LIST, computed by our own derivation from rows
+  -- we already hold -- the same kind of fact as categories_visited equalling the category
+  -- row count, and enforced the same way.
+  --
+  -- SO THE RULE IS EQUALITY: guide_character_rows_excluded MUST EQUAL v_d exactly. The
+  -- three branches below are ONE RULE reported three ways, because the three mistakes
+  -- have three different causes and an operator should be told which one was made:
+  -- never counted, under-counted, or claimed more than exists.
   select count(*) into v_d
     from plm.sesame_asset_character ac
    where ac.capture_id = p_capture_id
@@ -1803,24 +1820,42 @@ begin
     'guide_character_rows_excludable', v_d,
     'guide_character_rows_excluded_reported', p_guide_character_rows_excluded);
 
-  select count(*) into v_n
-    from plm.sesame_style_guide_character where capture_id = p_capture_id;
-  if v_n > 0 and p_guide_character_rows_excluded = 0 and v_d > 0 then
-    v_err := v_err || jsonb_build_object(
-      'code','guide_character_exclusions_not_counted',
-      'derived_rows', v_n,
-      'excludable_character_rows', v_d,
-      'note','character rows sit on assets carrying more than one style guide, so the derivation excluded them, but the capture reports zero exclusions');
-  end if;
   -- CAST BEFORE COMPARING. p_guide_character_rows_excluded is `integer` and v_d is
-  -- `bigint`; the comparison is done in bigint so nothing in the integer range can raise
-  -- here. The argument was already refused by name above if it was null or negative.
-  if p_guide_character_rows_excluded::bigint > v_d then
-    v_err := v_err || jsonb_build_object(
-      'code','guide_character_exclusions_exceed_evidence',
-      'reported', p_guide_character_rows_excluded,
-      'excludable_character_rows', v_d,
-      'note','the capture claims it excluded more character rows than sit on multi-guide assets in this capture; no reading of the derivation rule can produce that number');
+  -- `bigint`; every comparison below is done in bigint, so nothing in the integer range
+  -- can raise here. The argument was already refused BY NAME above if it was null or
+  -- negative, so only a non-negative in-range integer reaches this point.
+  --
+  -- NOTE WHAT IS DELIBERATELY *NOT* IN THIS CONDITION: a "derived rows exist" conjunct.
+  -- The second draft carried one and it opened a hole of its own -- a capture whose
+  -- derivation produced NO rows at all, sitting on a large excludable population, could
+  -- report zero and publish, because the guard declined to look. Whether the derivation
+  -- produced any output has nothing to do with whether its skip list was counted
+  -- honestly.
+  if p_guide_character_rows_excluded::bigint is distinct from v_d then
+    if p_guide_character_rows_excluded = 0 then
+      -- NEVER COUNTED. The headline case: a skip list exists and the capture reports none
+      -- of it. This is the shape the column was added to prevent.
+      v_err := v_err || jsonb_build_object(
+        'code','guide_character_exclusions_not_counted',
+        'excludable_character_rows', v_d,
+        'note','character rows sit on assets carrying more than one style guide, so the derivation excluded them, but the capture reports zero exclusions');
+    elsif p_guide_character_rows_excluded::bigint > v_d then
+      -- IMPOSSIBLE. More excluded than exist to be excluded.
+      v_err := v_err || jsonb_build_object(
+        'code','guide_character_exclusions_exceed_evidence',
+        'reported', p_guide_character_rows_excluded,
+        'excludable_character_rows', v_d,
+        'note','the capture claims it excluded more character rows than sit on multi-guide assets in this capture; no reading of the derivation rule can produce that number');
+    else
+      -- UNDER-COUNTED, and catchable only by equality. This branch is the reason equality
+      -- is the rule: an audit column that may be reported as any number between one and
+      -- the truth is not an audit column.
+      v_err := v_err || jsonb_build_object(
+        'code','guide_character_exclusions_understate_evidence',
+        'reported', p_guide_character_rows_excluded,
+        'excludable_character_rows', v_d,
+        'note','the capture reports fewer excluded character rows than sit on multi-guide assets in this capture; this count is a census of the derivation own skip list and must be exact');
+    end if;
   end if;
 
   -- ---- G. THE REFUSED RELATIONSHIP, checked in the running database and not only in the
