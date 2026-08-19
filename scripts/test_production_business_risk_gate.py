@@ -11,7 +11,30 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from production_business_risk_gate import authored_merge, exact_main, ProvedTarget, tracked_paths_at, PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_historical_original_apply_runs, prove_preview, prove_preview_migration_contents, prove_preview_producer_matches_main
+from production_business_risk_gate import authored_merge, exact_main, ProvedTarget, tracked_paths_at, PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_historical_original_apply_runs, prove_preview, prove_preview_migration_contents, prove_preview_producer_matches_main, prove_pr_and_checks, REQUIRED_CHECKS
+
+
+def tree_ref(endpoint):
+    """The commit a `/git/trees/` endpoint asks about -- AFTER checking the query.
+
+    THE QUERY STRING IS PART OF THE CONTRACT. Every tree stub in this file used
+    to do `.split("?")[0]` and throw the query away, so deleting `recursive=1`
+    from the production URL left the whole suite green while GitHub would have
+    returned only top-level directory names. Every producer path would then be
+    "absent from both trees", the skip rule would fire ten times, and the pin
+    would return success having compared nothing (#1213 round 8, finding 1).
+    This helper refuses instead, so that mutation turns the suite red -- the same
+    reason `test_compare_url_argument_order_is_asserted` reads the compare URL.
+    """
+    ref, _, query = endpoint.partition("?")
+    ref = ref.split("/git/trees/", 1)[1]
+    if "recursive=1" not in query:
+        raise AssertionError(
+            f"the tree read must be recursive; a top-level-only listing makes every "
+            f"producer path look absent. Got: {endpoint}"
+        )
+    return ref
+
 
 PREVIEW_PROJECT_REF = "mvpkijzfmfcxhnzqogzs"
 DEAD_PREVIEW_PROJECT_REF = "rjyboqwcdzcocqgmsyel"
@@ -263,7 +286,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             if endpoint.endswith("commits?per_page=100"):
                 return commits
             if "/git/trees/" in endpoint:
-                ref = endpoint.split("/git/trees/", 1)[1].split("?")[0]
+                ref = tree_ref(endpoint)
                 return {"truncated": False,
                         "tree": [{"path": p} for (p, r) in blobs if r == ref]}
             if "/compare/" in endpoint:
@@ -358,6 +381,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             if endpoint.endswith("commits?per_page=100"):
                 return [{"sha": c1}]
             if "/git/trees/" in endpoint:
+                tree_ref(endpoint)
                 return {"truncated": False,
                         "tree": [{"path": p} for p in PREVIEW_PRODUCER_PATHS]}
             if "/contents/" in endpoint:
@@ -368,6 +392,99 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             prove_preview(
                 **self.prove_preview_args(pr_head=head, main_sha=main, api=api),
                 downloader=lambda *_: self.fail("must not download"),
+            )
+
+    def test_the_source_pull_request_shape_and_checks_are_enforced(self):
+        """Three more guards this PR's mutation sweep found untested.
+
+        `prove_pr_and_checks` is the gate's first read of the promotion pull
+        request. An unmerged PR, a PR with no exact head SHA, and a PR whose
+        required exact-head checks are not all green must each refuse. All three
+        conditions could be replaced with `if False:` without turning the offline
+        suite red.
+        """
+        main = "3" * 40
+        head = "1" * 40
+        green = {"check_runs": [{"name": n, "conclusion": "success"} for n in REQUIRED_CHECKS]}
+
+        def api_for(pr, checks):
+            def api(endpoint):
+                return checks if "check-runs" in endpoint else pr
+            return api
+
+        with self.assertRaisesRegex(RiskGateError, "source PR is not merged"):
+            prove_pr_and_checks(
+                1, main, ["20260814000000"],
+                api_for({"merged": False, "merge_commit_sha": main,
+                         "head": {"sha": head}}, green), Path.cwd(),
+            )
+        with self.assertRaisesRegex(RiskGateError, "source PR has no exact head"):
+            prove_pr_and_checks(
+                1, main, ["20260814000000"],
+                api_for({"merged": True, "merge_commit_sha": main,
+                         "head": {"sha": "not-a-sha"}}, green), Path.cwd(),
+            )
+        temp, root, real_main, merge_sha = self.historical_repo()
+        with temp, self.assertRaisesRegex(
+            RiskGateError, "required exact-head checks are not successful"
+        ):
+            prove_pr_and_checks(
+                1, real_main, ["20260814000000"],
+                api_for({"merged": True, "merge_commit_sha": merge_sha,
+                         "head": {"sha": head}}, {"check_runs": []}), root,
+            )
+
+    def test_the_sql_classifier_refuses_an_absent_or_ambiguous_migration(self):
+        """The classifier must never silently classify nothing.
+
+        A version with no file on exact main, or with two, is not a migration it
+        can read; returning an empty risk list would understate the risk of the
+        promotion. Deleting this guard changed no test.
+        """
+        temp = tempfile.TemporaryDirectory()
+        with temp:
+            root = Path(temp.name)
+            (root / "supabase/migrations").mkdir(parents=True)
+            with self.assertRaisesRegex(RiskGateError, "expected one migration for .*, found 0"):
+                classify_sql(root, ["20260814000000"])
+            for suffix in ("a", "b"):
+                (root / f"supabase/migrations/20260814000000_{suffix}.sql").write_text("select 1;\n", encoding="utf-8")
+            with self.assertRaisesRegex(RiskGateError, "expected one migration for .*, found 2"):
+                classify_sql(root, ["20260814000000"])
+
+    def test_the_tree_read_is_recursive(self):
+        """The tree URL is pinned, exactly as the compare URL is.
+
+        `recursive=1` is what makes `/git/trees/` list `scripts/...` instead of
+        just `scripts`. Without it every `PREVIEW_PRODUCER_PATHS` entry is absent
+        from BOTH trees, the "absent from both -> skip" rule fires for all of
+        them, and `prove_preview_producer_matches_main` returns success having
+        compared nothing (#1213 round 8, finding 1). Nothing else in the suite
+        looked at this URL, so that mutation was invisible.
+        """
+        seen = []
+        tracked_paths_at(
+            "1" * 40,
+            lambda endpoint: (seen.append(endpoint) or {"truncated": False, "tree": []}),
+        )
+        self.assertEqual(
+            seen, [f"repos/u2giants/shared-db/git/trees/{'1' * 40}?recursive=1"]
+        )
+
+    def test_a_producer_pin_that_compared_nothing_is_refused(self):
+        """Zero byte comparisons is never an honest pass.
+
+        Two different commits always share at least one producer file, so a walk
+        that skipped all ten did not observe two honest trees -- it observed a
+        tree listing that lied about what the commits contain, which is what a
+        non-recursive read returns. Success here would mean the promoted bytes
+        were never pinned to any producing code at all.
+        """
+        ref, main = "1" * 40, "3" * 40
+        with self.assertRaisesRegex(RiskGateError, "without a single producer file"):
+            prove_preview_producer_matches_main(
+                ref, exact_main(main), main,
+                self.preview_api({}, [], {}, []),
             )
 
     def test_an_unreadable_or_truncated_tree_fails_closed(self):
@@ -1240,6 +1357,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             if endpoint.endswith("commits?per_page=100"):
                 return [{"sha": head}]
             if "/git/trees/" in endpoint:
+                tree_ref(endpoint)
                 return {"truncated": False,
                         "tree": [{"path": p} for p in PREVIEW_PRODUCER_PATHS]}
             if "/contents/" in endpoint:
@@ -1376,7 +1494,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         main = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
         return temp, root, main, merge_sha
 
-    def historical_zip(self, path, *, main, record, version):
+    def historical_zip(self, path, *, main, record, version, record_json=None):
         """The RECOVERY run's evidence: no write, so the ledger must not move."""
         ledger = json.dumps([{"remote": "20260801000000"}, {"remote": version}])
         payload = {
@@ -1384,7 +1502,8 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             "preview-ledger-after.txt": ledger,
             "preview-dry-run.txt": f"HISTORICAL PREVIEW PROOF\n{version}_release_a.sql\n",
             "preview-apply.txt": f"HISTORICAL PREVIEW PROOF\n{version}_release_a.sql\n",
-            "historical-preview-source.json": json.dumps(record),
+            "historical-preview-source.json":
+                record_json if record_json is not None else json.dumps(record),
             "preview-instance.json": json.dumps({
                 "schema": "shared-db-preview-instance-binding/v1",
                 "rehearsalMode": "historical-recovery", "appliedCommit": main,
@@ -1426,6 +1545,9 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         original_head_sha="default", original_head_in_history=True,
         original_head_blobs=None, original_run_blobs=None, original_instance=None,
         merge_commit_blobs=None, merge_absent_paths=(), original_absent_paths=(),
+        original_commit_in_pr=True, original_commit_in_history=True,
+        run_shape=None, corrupt_download=False, record_extra=None,
+        record_json=None, recovery_applied_commit=None,
     ):
         """End to end through prove_preview, downloads and all.
 
@@ -1454,6 +1576,31 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
           defaulted every blob to one value and used one commit for the merge
           commit and for main, so "pinned to each other" and "pinned to the merge
           commit" were indistinguishable (#1213 round 6, finding 1).
+        * `original_commit_in_pr` -- whether the ARTIFACT-NAME commit is listed
+          as a commit of the source pull request. The round-7 helper hardcoded it
+          into `pr_commits`, so `original_commit` could never be made foreign and
+          deleting the `prove_applied_commit_is_main_line` guard on it changed no
+          test at all -- the twin guard on `run_head` was tested, this one was
+          not (#1213 round 8, finding 2). Set it False to forge an artifact named
+          `preview-migration-apply-<unrelated-sha>`.
+        * `run_shape` -- overrides for the RECOVERY run's own shape (status,
+          conclusion, event, path). The four-key loop that rejects a run of the
+          wrong shape had no test at all before #1213 round 8: this helper always
+          produced a perfect run and no other test reached `prove_preview` with a
+          working evidence chain.
+        * `corrupt_download` -- the downloaded recovery artifact's bytes no longer
+          hash to the pinned digest. The API-reported digest is checked in a
+          separate line that IS tested; this is the second, post-download check.
+        * `record_extra` -- extra keys merged into the historical record so it can
+          no longer equal what `verify_historical_preview` re-derives.
+        * `record_json` -- the raw `historical-preview-source.json` text, for a
+          record that is not even an object, or whose `sourcePrMap` is not one.
+        * `recovery_applied_commit` -- the commit the RECOVERY run's artifact
+          names. A no-write recovery proves nothing by applying, so it must have
+          run at exact main.
+        * `original_commit_in_history` -- whether exact main contains that same
+          artifact-name commit. False plus `original_commit_in_pr=False` is a
+          forged artifact named after a commit belonging to nothing.
         * `original_instance` -- the raw `preview-instance.json` that run wrote,
           or None for a run whose producer code predates instance binding.
         * `merge_absent_paths` / `original_absent_paths` -- producer files that
@@ -1475,11 +1622,13 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 "originalApplyRuns": {version: original_run}
                 if record_runs == "default" else record_runs,
             }
+            record.update(record_extra or {})
             zips = tempfile.TemporaryDirectory()
             with zips:
                 recovery_path = Path(zips.name, "recovery.zip")
                 artifact_digest = self.historical_zip(
-                    recovery_path, main=main, record=record, version=version
+                    recovery_path, main=main, record=record, version=version,
+                    record_json=record_json,
                 )
                 original_path = Path(zips.name, "original.zip")
                 self.original_run_zip(
@@ -1491,7 +1640,15 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 original_head = (
                     original_commit if original_head_sha == "default" else original_head_sha
                 )
-                pr_commits = [{"sha": main}, {"sha": original_commit}]
+                pr_commits = [{"sha": main}]
+                if original_commit_in_pr:
+                    pr_commits.append({"sha": original_commit})
+                elif original_head not in (None, original_commit):
+                    # The DISPATCH REF stays legitimate so the refusal under test
+                    # can only come from the artifact-name commit. Without this
+                    # the twin `run_head` guard would raise the identical message
+                    # and deleting either one would leave the test green.
+                    pr_commits.append({"sha": original_head})
 
                 def producer_tree(ref):
                     """Which producer files that commit's tree actually holds.
@@ -1521,13 +1678,14 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                     if endpoint == "repos/u2giants/shared-db/actions/runs/7":
                         return {"status": "completed", "conclusion": "success",
                                 "event": "workflow_dispatch", "head_sha": main,
-                                "path": PREVIEW_WORKFLOW}
+                                "path": PREVIEW_WORKFLOW, **(run_shape or {})}
                     if endpoint.endswith("runs/7/artifacts?per_page=100"):
-                        return {"artifacts": [self.apply_artifact(main, digest=artifact_digest)]}
+                        return {"artifacts": [self.apply_artifact(
+                            recovery_applied_commit or main, digest=artifact_digest)]}
                     if endpoint.endswith("commits?per_page=100"):
                         return pr_commits
                     if "/git/trees/" in endpoint:
-                        ref = endpoint.split("/git/trees/", 1)[1].split("?")[0]
+                        ref = tree_ref(endpoint)
                         return {"truncated": False,
                                 "tree": [{"path": p} for p in producer_tree(ref)]}
                     if "/contents/" in endpoint:
@@ -1559,6 +1717,8 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                         return {"merged": True, "merge_commit_sha": merge_sha}
                     if "/compare/" in endpoint:
                         base = endpoint.split("/compare/", 1)[1].split("...")[0]
+                        if base == original_commit and not original_commit_in_history:
+                            return {"status": "diverged", "behind_by": 3}
                         if base == original_head and not original_head_in_history:
                             return {"status": "diverged", "behind_by": 3}
                         return {"status": "identical", "behind_by": 0}
@@ -1566,7 +1726,10 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
 
                 def downloader(artifact_id, dest):
                     source = original_path if artifact_id == 99 else recovery_path
-                    Path(dest).write_bytes(source.read_bytes())
+                    raw = source.read_bytes()
+                    if corrupt_download and artifact_id != 99:
+                        raw = raw + b"tampered"
+                    Path(dest).write_bytes(raw)
 
                 prove_preview(
                     run_id=7, digest=artifact_digest, pr_head=main, main_sha=main,
@@ -1574,6 +1737,81 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                     preview_project_ref=PREVIEW_PROJECT_REF, merge_commit_sha=main,
                     api=api, repo_root=root, downloader=downloader,
                 )
+
+    def test_the_preview_runs_own_shape_is_checked(self):
+        """Found by this PR's own mutation sweep, not by review.
+
+        `prove_preview` opens with a four-key loop rejecting a run that is not a
+        completed, successful, `workflow_dispatch` run of the preview workflow.
+        Replacing that condition with `if False:` left the entire offline suite
+        green: every other test that reaches this function is refused further
+        down, and no test ever handed it a run of the wrong shape with an
+        otherwise working evidence chain. The twin loop in
+        `prove_historical_original_apply_runs` was tested; this one was not.
+        """
+        for key, value in (
+            ("status", "in_progress"), ("conclusion", "failure"),
+            ("event", "push"), ("path", ".github/workflows/something-else.yml"),
+        ):
+            with self.subTest(key=key), self.assertRaisesRegex(
+                RiskGateError, f"preview run has wrong {key}"
+            ):
+                self.run_historical_prove_preview(run_shape={key: value})
+
+    def test_downloaded_preview_bytes_must_hash_to_the_pinned_digest(self):
+        """The SECOND digest check, on the bytes rather than on GitHub's claim.
+
+        The first compares the artifact digest GitHub reports against the pinned
+        one and is tested. This one re-hashes what actually arrived, which is the
+        only line that survives a lying or compromised download path -- and it
+        had no test until this PR's mutation sweep found it.
+        """
+        with self.assertRaisesRegex(
+            RiskGateError, "downloaded preview artifact bytes do not match the pinned digest"
+        ):
+            self.run_historical_prove_preview(corrupt_download=True)
+
+    def test_an_unreadable_historical_record_is_refused(self):
+        """A record that is not an object at all."""
+        with self.assertRaisesRegex(RiskGateError, "historical preview source proof is unreadable"):
+            self.run_historical_prove_preview(record_json="[]")
+
+    def test_an_unreadable_historical_source_map_is_refused(self):
+        """`sourcePrMap` present but not a usable object.
+
+        Both the `is not None` branch selector and the shape check under it
+        survived mutation: nothing drove this helper down the v4 map branch with
+        a broken map.
+        """
+        for label, raw in (
+            ("map is not an object", '{"schema": "shared-db-historical-preview-source/v3", '
+             '"sourcePrMap": "nope", "originalApplyRuns": {"20260814130000": 555}}'),
+            ("map is empty", '{"schema": "shared-db-historical-preview-source/v3", '
+             '"sourcePrMap": {}, "originalApplyRuns": {"20260814130000": 555}}'),
+        ):
+            with self.subTest(label), self.assertRaisesRegex(
+                RiskGateError, "historical preview source map is unreadable"
+            ):
+                self.run_historical_prove_preview(record_json=raw)
+
+    def test_a_record_that_does_not_match_the_re_derivation_is_refused(self):
+        """The whole-record equality check, mutation-proved.
+
+        `verify_historical_preview` re-derives the record from live GitHub state
+        and main. Anything the promoter added, removed or altered makes the two
+        unequal. Every existing test drove a field the re-derivation itself
+        reproduces, so the comparison could be deleted without turning any test
+        red.
+        """
+        with self.assertRaisesRegex(
+            RiskGateError, "does not match current governed evidence"
+        ):
+            self.run_historical_prove_preview(record_extra={"extra": "not re-derived"})
+
+    def test_a_recovery_run_that_did_not_run_at_exact_main_is_refused(self):
+        """A no-write recovery proves nothing by applying, so it must be at main."""
+        with self.assertRaisesRegex(RiskGateError, "preview run has wrong head_sha"):
+            self.run_historical_prove_preview(recovery_applied_commit="a" * 40)
 
     def test_historical_recovery_is_accepted_when_preview_ran_the_promoted_bytes(self):
         """The honest case still promotes: same bytes rehearsed and merged."""
@@ -1642,6 +1880,25 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         with self.assertRaisesRegex(RiskGateError, "not contained in the history of exact main"):
             self.run_historical_prove_preview(
                 original_head_sha="e" * 40, original_head_in_history=False
+            )
+
+    def test_a_foreign_artifact_name_commit_is_refused_before_any_download(self):
+        """The artifact-name commit gets the same ancestry guard as `head_sha`.
+
+        `preview-migration-apply-<sha>` is a STRING the job chose. If that sha is
+        neither a commit of the source pull request nor an ancestor of exact
+        main, it belongs to nothing this repository merged, and the bytes behind
+        it were never reviewed. Until #1213 round 8 the helper hardcoded the
+        artifact-name commit into the PR's commit list, so deleting the
+        `prove_applied_commit_is_main_line` call that guards it changed no test
+        (#1213 round 8, finding 2). The dispatch ref is kept legitimate here so
+        the refusal can only come from the guard under test, and the download
+        must never happen.
+        """
+        with self.assertRaisesRegex(RiskGateError, "not contained in the history of exact main"):
+            self.run_historical_prove_preview(
+                original_head_sha="b" * 40,
+                original_commit_in_pr=False, original_commit_in_history=False,
             )
 
     def test_original_run_whose_workflow_differs_from_the_merge_commit_is_refused(self):

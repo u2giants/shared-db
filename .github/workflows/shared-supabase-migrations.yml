@@ -390,11 +390,18 @@ jobs:
             CLAIM_PR="$HISTORICAL_SOURCE_PR"
             CLAIM_HEAD_SHA="$HISTORICAL_MAIN_SHA"
           fi
-          # A POST-MERGE REHEARSAL claims the same exclusive preview ref, so it can
-          # never run alongside an ordinary preview run, a merge or a promotion.
-          # What differs is only the AUTHORISATION: merge-commit ancestry of the
-          # main tip instead of a live author claim on a branch that no longer
-          # exists.
+          # A POST-MERGE REHEARSAL claims the same exclusive preview ref, so it
+          # cannot run alongside an ordinary preview run or a historical
+          # recovery. IT DOES NOT EXCLUDE A MERGE OR A PROMOTION -- merge and
+          # production hold their own refs and neither reads the preview ref.
+          # That is the pre-existing behaviour of the ordinary preview lane, not
+          # something this lane loosened; an earlier version of this comment
+          # claimed the wider exclusion and it was never true (#1213 round 8,
+          # finding 3). A rehearsal still cannot overlap a production apply,
+          # because both are workflow_dispatch runs of this workflow and share
+          # one `concurrency` group. What differs from an ordinary preview claim
+          # is only the AUTHORISATION: merge-commit ancestry of the main tip
+          # instead of a live author claim on a branch that no longer exists.
           LANE_VERSIONS=()
           if [ -n "${MERGED_SOURCE_PR:-}" ]; then
             CLAIM_PR="$MERGED_SOURCE_PR"

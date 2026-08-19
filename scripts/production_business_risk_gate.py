@@ -518,6 +518,14 @@ def tracked_paths_at(ref: str, api: Callable[[str], Any]) -> frozenset:
     commit.
     """
     try:
+        # `recursive=1` IS LOAD-BEARING, NOT A CONVENIENCE. Without it GitHub
+        # returns only the TOP-LEVEL entries -- `scripts`, `config`, `supabase`,
+        # `.github` -- none of which equals a `PREVIEW_PRODUCER_PATHS` entry. The
+        # absence rule below would then fire for every producer and the pin would
+        # compare nothing at all while every test stayed green (#1213 round 8,
+        # finding 1). `test_the_tree_read_is_recursive` pins this URL and
+        # `prove_preview_producer_matches_main` refuses a walk that compared
+        # nothing, so the no-op is caught twice.
         tree = api(f"repos/{REPOSITORY}/git/trees/{ref}?recursive=1")
     except Exception as exc:  # noqa: BLE001 - unreadable tree must fail closed
         raise RiskGateError(f"the file tree of {ref} is unreadable") from exc
@@ -602,7 +610,11 @@ def prove_preview_producer_matches_main(
     therefore skipped -- neither run could have executed a file that does not
     exist, and a doctored producer that DOES exist at both commits is still
     compared byte for byte. A path present on ONE side only is refused: that is
-    a real difference in the machinery that ran.
+    a real difference in the machinery that ran. That skip is the one rule here
+    that can quietly do nothing, so the walk COUNTS what it compared and refuses
+    a run in which nothing was: two different commits always share at least one
+    producer file, and zero comparisons means the tree listing lied about what
+    the commits contain rather than that the pin passed.
     """
     if target.kind not in {"exact-main", "authored-merge"}:
         raise RiskGateError(
@@ -622,6 +634,7 @@ def prove_preview_producer_matches_main(
         return
     present_at_ref = tracked_paths_at(ref, api)
     present_at_target = tracked_paths_at(target.sha, api)
+    compared = 0
     for path in PREVIEW_PRODUCER_PATHS:
         at_ref, at_target = path in present_at_ref, path in present_at_target
         if not at_ref and not at_target:
@@ -636,6 +649,19 @@ def prove_preview_producer_matches_main(
             raise RiskGateError(
                 f"{what} produced evidence with a different {path} than {against}"
             )
+        compared += 1
+    # A PIN THAT COMPARED NOTHING IS NOT A PIN. The skip above is the only rule
+    # in this function that can silently do nothing, and anything that makes both
+    # trees look empty -- a non-recursive tree URL, a renamed producer list, a
+    # listing shape GitHub changes -- turns every producer into a skip and lets
+    # this function return success without reading one byte. Two commits that
+    # differ must have at least one producer file in common to compare, so zero
+    # is never an honest outcome here.
+    if not compared:
+        raise RiskGateError(
+            f"{what} was compared against {against} without a single producer file "
+            f"being read; the producer pin proved nothing"
+        )
 
 
 def source_pr_commits(

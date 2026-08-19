@@ -388,7 +388,7 @@ re-deriving it:
   **new** objects elsewhere, not the power to write DesignFlow. Those grants are a real
   production-infrastructure exposure and #705 records them; they are simply not a write path
   into `designflow`.
-- [`scripts/capture-postgres-schema.sql`](scripts/capture-postgres-schema.sql) line 66 sets
+- [`scripts/capture-postgres-schema.sql`](scripts/capture-postgres-schema.sql) sets
   `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`, which is why that particular run
   could not have written. It is a session-scoped guard that the same session can reset to
   `READ WRITE`, so it is **never** a substitute for the proof rule for any other credential.
@@ -428,7 +428,7 @@ changes for it and do not re-raise it as a blocker.
   `op read 'op://vibe_coding/tcaf3o3u2cx52g6ivvczxbhola/DB_PASSWORD'`. The password is in a
   **custom field named `DB_PASSWORD`**, not `credential`. 1Password item IDs can be re-keyed
   mid-session, so if that ID 404s, re-resolve by title with
-  `op item list --vault vibe_coding --format json` (same pattern as §9, `AGENTS.md:1946-1963`).
+  `op item list --vault vibe_coding --format json` (same pattern as §9 of this file).
   Never write the
   value anywhere.
 
@@ -848,9 +848,12 @@ four rules below are non-negotiable for any database change.
 
    **What that lock does NOT do, stated exactly.** It does not exclude a merge
    or a production promotion. `EXCLUSIVE_REFS` gives merge and production their
-   own refs, and only two cross-checks exist
-   (`scripts/manage-migration-author-lanes.mjs` 1028 and 1063): a promotion
-   waits for the merge ref, and a merge waits for the production ref. Nothing in
+   own refs, and only two cross-checks exist — both inside `acquireExclusive` in
+   [`scripts/manage-migration-author-lanes.mjs`](scripts/manage-migration-author-lanes.mjs),
+   findable by their refusal text rather than by a line number, which drifts:
+   a promotion waits for the merge ref (`a guarded merge is active; production
+   promotion must wait`), and a merge waits for the production ref
+   (`production promotion is active; merges are frozen`). Nothing in
    either direction reads the preview ref. That is pre-existing behaviour of the
    ordinary preview lane, unchanged here — an earlier draft of this section
    claimed the exclusion existed, and it never did. Promotions are serialised
@@ -2049,13 +2052,13 @@ superseded by this section:**
 
 | Where it still says the opposite | Exact text | Status |
 | --- | --- | --- |
-| `supabase/migrations/20260722170000_db_data_admin_single_record_updates.sql`, lines 36–38 | `-- Refused here: name/code (source vocabulary), is_potential (trigger-owned), PLM status (…), aliases, source refs, related Customer, Licensor/Property, merge, bulk, deletion.` | **Applied migration — DO NOT EDIT IT.** |
-| `apps/db-data-admin/src/LicensorTree.tsx`, line 152 (orphan panel copy) | "The relationship is DesignFlow-owned; do not repair it here." | Superseded; correct by a FORWARD change when the curation path is built. |
+| `supabase/migrations/20260722170000_db_data_admin_single_record_updates.sql` (the `-- Refused here:` comment) | `-- Refused here: name/code (source vocabulary), is_potential (trigger-owned), PLM status (…), aliases, source refs, related Customer, Licensor/Property, merge, bulk, deletion.` | **Applied migration — DO NOT EDIT IT.** |
+| `apps/db-data-admin/src/LicensorTree.tsx` (orphan panel copy) | "The relationship is DesignFlow-owned; do not repair it here." | Superseded; correct by a FORWARD change when the curation path is built. |
 
 Both were verified verbatim against the tree on 2026-08-03. Near-identical "the edge is
-DesignFlow-owned" wording also appears in `20260722203000_db_data_admin_licensor_property_tree.sql`
-(lines 11 and 382), in `20260727154500_db_data_admin_bounded_production_forward.sql` (line 1601),
-and in `apps/db-data-admin/tests/browser/grid.spec.ts` (line 17). All of it is superseded as
+DesignFlow-owned" wording also appears in `20260722203000_db_data_admin_licensor_property_tree.sql`,
+in `20260727154500_db_data_admin_bounded_production_forward.sql`,
+and in `apps/db-data-admin/tests/browser/grid.spec.ts`. All of it is superseded as
 **policy**; the migrations remain accurate as **history**.
 
 **The never-edit-an-applied-migration rule still wins.** `20260722170000` is applied. An applied
@@ -2370,7 +2373,7 @@ may exist under many licensors. `core.property` is keyed `(licensor_id, code)`
 
 > **This corrected a wrong assumption the orchestrator held on 2026-08-06, and that assumption is
 > baked into at least one committed tool.** `tools/validate-licensing-answers.mjs` (the property
-> lookup around lines 86–92) resolves a property with `where p.code = any($1)` — no licensor scope.
+> lookup) resolves a property with `where p.code = any($1)` — no licensor scope.
 > It selects the licensor name and then discards it; only `r.code` is used. It is safe **only**
 > because today's `core.property` copy is crippled (256 rows, one row per code). **Repairing the feed
 > before fixing that query would introduce silent wrong-licensor binding.** Fix the scoping FIRST.
@@ -3026,7 +3029,7 @@ have already happened in this repo, more than once.
    them produces instructions like *"re-parent code `CC` under Disney"* that are
    not meaningful. Owner-confirmed by Albert Hazan, **2026-08-06**. See also
    `AGENTS.md` §6 (merch-group codes are unique only within
-   `(division, mgTypeCode)`) and `fix_item_taxonomy_wiring.md:147`.
+   `(division, mgTypeCode)`) and `fix_item_taxonomy_wiring.md`.
 10. **Worktree counts in this repo are per-MACHINE and go stale immediately — always
     re-measure, never quote.** Measured on **`al8960ofc`, 2026-08-06**:
     **3 worktrees** — the `C:\repos\shared-db` main checkout plus two live
