@@ -290,10 +290,34 @@ begin
 
   select count(*) into v_n from information_schema.role_table_grants
    where table_schema = 'plm' and table_name like 'wildbrain\_%'
-     and grantee in ('anon','authenticated','PUBLIC');
+     and grantee in ('anon','PUBLIC');
   if v_n <> 0 then
     v_fail := v_fail + 1;
-    raise warning 'FAIL % grant(s) to anon/authenticated/PUBLIC survive', v_n;
+    raise warning 'FAIL % grant(s) to anon/PUBLIC survive', v_n;
+  end if;
+
+  -- CHANGED BY MIGRATION 20260819151510 (issue #1249, the owner ruling "scrape data
+  -- should be visible to Licensing department users"). This block asserted that
+  -- `authenticated` held NOTHING on the eleven wildbrain tables. It now holds SELECT on
+  -- all eleven and nothing else, and an RLS policy -- not the grant -- decides who that
+  -- SELECT actually returns rows to. The behavioural half of that ruling lives in
+  -- supabase/tests/wildbrain_nbcu_licensing_read_access_contracts.sql; what stays here is
+  -- the half this file has always owned: the grant must not have widened past reads.
+  select count(*) into v_n from information_schema.role_table_grants
+   where table_schema = 'plm' and table_name like 'wildbrain\_%'
+     and grantee = 'authenticated' and privilege_type = 'SELECT';
+  if v_n <> 11 then
+    v_fail := v_fail + 1;
+    raise warning 'FAIL expected 11 SELECT grants to authenticated (issue #1249), found %', v_n;
+  end if;
+
+  select count(*) into v_n from information_schema.role_table_grants
+   where table_schema = 'plm' and table_name like 'wildbrain\_%'
+     and grantee = 'authenticated' and privilege_type <> 'SELECT';
+  if v_n <> 0 then
+    v_fail := v_fail + 1;
+    raise warning 'FAIL authenticated holds % non-SELECT grant(s) on wildbrain tables -- '
+      '#1249 widened READS only', v_n;
   end if;
 
   -- RLS enabled on all eleven, and one read policy each.
