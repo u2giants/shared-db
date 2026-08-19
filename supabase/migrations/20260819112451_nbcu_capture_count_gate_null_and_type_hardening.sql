@@ -51,6 +51,34 @@
 --   validation ran at begin_ time: plm.nbcu_capture is writable by the owner, so an
 --   UPDATE can reach the stored value after the capture started.
 --
+-- THE THIRD DEFECT, AND WHY IT IS IN THIS FILE RATHER THAN A FOLLOW-UP.
+--   Guarding the TYPE is not enough while the assignment still parses TEXT. `->>` renders
+--   a JSON number as text and `::bigint` parses that text, so a whole, non-negative count
+--   could satisfy every guard above and still raise:
+--
+--     {"assets": 1.0}  ->  '1.0'::bigint  ->  invalid input syntax for type bigint
+--
+--   `1.0 = trunc(1.0)`, so the non-negative-integer test passes it. Any loader arithmetic
+--   that yields a numeric rather than an integer emits that shape; it is not exotic. The
+--   consequence is the OPPOSITE failure direction from the null, and operationally worse
+--   than a refusal: the exception aborts finalize BEFORE the rejection row is written, so
+--   error_summary is never persisted, status never leaves 'loading', and a retry against
+--   the same stored JSON dies identically. The capture is WEDGED. `0.0` in
+--   excluded_unlicensed_assets did the same through `::integer`.
+--
+--   Fixed at every assignment site by going through NUMERIC --
+--   `(v_exp ->> key)::numeric::bigint` -- which parses the value as the NUMBER it is
+--   rather than as the text that renders it. After the trunc() equality guard the
+--   conversion is exact and never rounds a real count. A value too large for the target
+--   type is refused by NAME first (`expected_count_out_of_range`, carrying the offending
+--   value and the limit), because a named refusal writes the rejection row and the
+--   operator can read why. excluded_unlicensed_assets gets its own limit: the column is
+--   `integer`, not bigint.
+--
+--   Found by the external review of PR #1233 at head 6ff9272. The same repair, in the
+--   same shape, was made for WildBrain and Sega in 20260819112524 (#1221 / #1222) -- the
+--   three schemas are deliberately kept convergent.
+--
 -- WHAT begin_nbcu_capture NOW REFUSES.
 --   An expected_counts document in which ANY value is not a JSON number that is a
 --   non-negative integer within bigint. The refusal names the offending keys and their
@@ -280,6 +308,10 @@ declare
   v_n        bigint;
   v_want     bigint;
   v_key      text;
+  -- Named, not inlined: the same limit is quoted in the rejection payload so the
+  -- operator sees the boundary that was crossed, not just that one was.
+  v_max      numeric := 9223372036854775807::numeric;  -- bigint
+  v_max_int  numeric := 2147483647::numeric;           -- integer, for the scalar below
   v_pairs    text[][] := array[
     ['assets','nbcu_asset'], ['properties','nbcu_property'], ['characters','nbcu_character'],
     ['style_guides','nbcu_style_guide'], ['scopes','nbcu_scope'],
@@ -339,13 +371,22 @@ begin
       -- here rather than left to blow up on the ::bigint cast below.
       v_err := v_err || jsonb_build_object('code','expected_count_not_a_nonnegative_integer',
                                            'entity',v_key,'expected', v_exp -> v_key);
-    elsif (v_exp ->> v_key)::numeric > 9223372036854775807::numeric then
-      -- Larger than bigint. The raw cast would raise `bigint out of range` and wedge the
-      -- capture in 'loading' with no recorded reason; this records one instead.
+    elsif (v_exp ->> v_key)::numeric > v_max then
+      -- A whole, non-negative number can still be too large for a bigint. Refuse it HERE,
+      -- by name, because the cast below would raise instead -- and a raise aborts finalize
+      -- BEFORE the rejection row is written, leaving the capture wedged in 'loading' with
+      -- no error_summary and a retry that dies identically.
       v_err := v_err || jsonb_build_object('code','expected_count_out_of_range',
-                                           'entity',v_key,'expected', v_exp -> v_key);
+                                           'entity',v_key,'expected', v_exp -> v_key,
+                                           'max', v_max);
     else
-      v_want := (v_exp ->> v_key)::bigint;
+      -- THROUGH NUMERIC, NOT STRAIGHT FROM TEXT. `->>` renders the JSON number 1.0 as the
+      -- TEXT '1.0', and '1.0'::bigint raises `invalid input syntax for type bigint' --
+      -- even though 1.0 passed every guard above, because it IS a whole non-negative
+      -- number and 1.0 = trunc(1.0). Any loader arithmetic that yields a numeric rather
+      -- than an integer emits that shape; it is not exotic. The trunc() guard above makes
+      -- this conversion exact, so it never rounds a real count.
+      v_want := (v_exp ->> v_key)::numeric::bigint;
       if v_n <> v_want then
         v_err := v_err || jsonb_build_object('code','count_mismatch','entity',v_key,
                                              'expected',v_want,'observed',v_n);
@@ -377,15 +418,24 @@ begin
                  'json_type', jsonb_typeof(v_exp -> 'excluded_unlicensed_assets'));
     elsif (v_exp ->> 'excluded_unlicensed_assets')::numeric < 0
        or (v_exp ->> 'excluded_unlicensed_assets')::numeric
-          <> trunc((v_exp ->> 'excluded_unlicensed_assets')::numeric)
-       or (v_exp ->> 'excluded_unlicensed_assets')::numeric > 2147483647::numeric then
+          <> trunc((v_exp ->> 'excluded_unlicensed_assets')::numeric) then
       v_err := v_err || jsonb_build_object('code','expected_count_not_a_nonnegative_integer',
                  'entity','excluded_unlicensed_assets',
                  'expected', v_exp -> 'excluded_unlicensed_assets');
+    elsif (v_exp ->> 'excluded_unlicensed_assets')::numeric > v_max_int then
+      -- Its own NAMED branch, and its own limit: the column is `integer`, not bigint, so
+      -- a value between int and bigint would have raised `integer out of range` on the
+      -- comparison cast below and wedged the capture exactly like the block A case.
+      v_err := v_err || jsonb_build_object('code','expected_count_out_of_range',
+                 'entity','excluded_unlicensed_assets',
+                 'expected', v_exp -> 'excluded_unlicensed_assets',
+                 'max', v_max_int);
     elsif v_cap.excluded_unlicensed_assets
-          <> (v_exp ->> 'excluded_unlicensed_assets')::integer then
+          <> (v_exp ->> 'excluded_unlicensed_assets')::numeric::integer then
+      -- Through numeric for the same reason as block A: 0.0 renders as the text '0.0'
+      -- and '0.0'::integer raises.
       v_err := v_err || jsonb_build_object('code','excluded_unlicensed_mismatch',
-                 'expected',(v_exp ->> 'excluded_unlicensed_assets')::integer,
+                 'expected',(v_exp ->> 'excluded_unlicensed_assets')::numeric::integer,
                  'observed', v_cap.excluded_unlicensed_assets);
     end if;
   end if;
@@ -681,7 +731,37 @@ begin
       v_res::text;
   end if;
 
+  -- 6. THE THIRD DEFECT. A whole number that is not a bigint literal must COMPARE, not
+  --    abort. `'1.0'::bigint` raises, and a raise here would abort this DO block and fail
+  --    the migration -- which is itself the detection. 1.0 against zero assets is a real
+  --    mismatch and must be reported carrying the integer 1.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"assets":1.0}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'rejected'
+     or not (v_res -> 'errors')
+            @> '[{"code":"count_mismatch","entity":"assets","expected":1,"observed":0}]'::jsonb then
+    raise exception
+      'MIGRATION 20260819112451 FAILED: the whole number 1.0 was not compared as the '
+      'integer 1: %', v_res::text;
+  end if;
+
+  -- 7. The same shape on the OPTIONAL scalar, which casts to `integer`: 0.0 equals the
+  --    capture's excluded_unlicensed_assets of 0, so the capture must PUBLISH.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"excluded_unlicensed_assets":0.0}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'complete' then
+    raise exception
+      'MIGRATION 20260819112451 FAILED: excluded_unlicensed_assets 0.0 did not compare '
+      'equal to 0: %', v_res::text;
+  end if;
+
   delete from plm.nbcu_capture where id = v_cap;
-  raise notice 'MIGRATION 20260819112451: NBCU count-gate hardening PROVED (8 argument refusals + 5 gate assertions).';
+  raise notice 'MIGRATION 20260819112451: NBCU count-gate hardening PROVED (8 argument refusals + 7 gate assertions).';
 end;
 $$;

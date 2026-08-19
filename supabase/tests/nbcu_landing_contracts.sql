@@ -1189,12 +1189,14 @@ begin
   else v_pass := v_pass+1; end if;
 
   -- F7.14 THE OTHER HALF OF THE GUARD. A document that IS all non-negative integers --
-  -- including a legitimate zero and a large-but-in-range count -- must still be
-  -- ACCEPTED. Without this the twelve refusals above would also pass if begin_ had been
-  -- broken into refusing everything.
+  -- including a legitimate zero, a large-but-in-range count, and the whole number 1.0,
+  -- which is a mathematical integer even though it is not an integer LITERAL -- must
+  -- still be ACCEPTED. Without this the twelve refusals above would also pass if begin_
+  -- had been broken into refusing everything. 1.0 belongs on the accept side, not the
+  -- refuse side: the gate converts it through numeric, so it compares as 1 (G7.12).
   v_cap := plm.begin_nbcu_capture('nbcu:ZZTEST-F7-OK:'||repeat('7',40),'u2giants/ZZTEST',
     repeat('7',40), repeat('9',64), 'https://portal.example.invalid/', now(),
-    '{"assets":0,"properties":9007199254740993,"failures":0}'::jsonb, '{}'::jsonb,
+    '{"assets":0,"properties":9007199254740993,"failures":0,"scopes":1.0}'::jsonb, '{}'::jsonb,
     'contract-test-F7');
   if v_cap is null then
     v_fail := v_fail+1;
@@ -1430,6 +1432,68 @@ begin
             @> '[{"code":"expected_count_not_a_number","entity":"excluded_unlicensed_assets"}]'::jsonb then
     v_fail := v_fail+1;
     raise warning 'FAIL G7.10 a STRING excluded_unlicensed_assets skipped the invariant: %',
+      v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  -- G7.12 A WHOLE NUMBER THAT IS NOT A BIGINT LITERAL. `->>` renders the JSON number 1.0
+  -- as the TEXT '1.0', and '1.0'::bigint raises -- even though 1.0 is a whole,
+  -- non-negative number that passes every type and range guard above. The exception
+  -- aborts finalize BEFORE the rejection row is written, so the capture is WEDGED in
+  -- 'loading' with no error_summary and a retry dies identically. That is the opposite
+  -- failure direction from the JSON null and operationally worse than a refusal.
+  -- A raw cast here aborts this whole block, which IS the detection.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"scopes":1.0}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'complete' then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.12 the whole number 1.0 did not compare equal to the one landed row: %',
+      v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  -- And it must still compare CORRECTLY, not merely survive: 1.0 against zero assets is
+  -- a real mismatch and must be reported as one, carrying the integer 1.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"assets":1.0}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'rejected'
+     or not (v_res -> 'errors')
+            @> '[{"code":"count_mismatch","entity":"assets","expected":1,"observed":0}]'::jsonb then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.12 the whole number 1.0 was not compared as the integer 1: %',
+      v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  -- G7.13 The same shape on the OPTIONAL scalar, which casts to `integer` rather than
+  -- bigint. 0.0 equals the capture's excluded_unlicensed_assets of 0 and must publish.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"excluded_unlicensed_assets":0.0}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'complete' then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.13 excluded_unlicensed_assets 0.0 did not compare equal to 0: %',
+      v_res::text;
+  else v_pass := v_pass+1; end if;
+
+  -- G7.14 That scalar has its own, SMALLER limit -- the column is `integer`, not bigint --
+  -- so a value between the two must be a named refusal, not an `integer out of range`
+  -- abort. It is below the bigint limit checked in G7.7, so this is a distinct branch.
+  update plm.nbcu_capture
+     set status='loading', load_completed_at=null,
+         expected_counts = v_exp || '{"excluded_unlicensed_assets":3000000000}'::jsonb
+   where id = v_cap;
+  v_res := plm.finalize_nbcu_capture(v_cap);
+  if (v_res ->> 'status') <> 'rejected'
+     or not (v_res -> 'errors')
+            @> '[{"code":"expected_count_out_of_range","entity":"excluded_unlicensed_assets"}]'::jsonb then
+    v_fail := v_fail+1;
+    raise warning 'FAIL G7.14 an above-integer excluded_unlicensed_assets was not refused by name: %',
       v_res::text;
   else v_pass := v_pass+1; end if;
 
