@@ -530,8 +530,36 @@ test('added migration versions ignore anything the pull request did not add', ()
   assert.throws(() => addedMigrationVersions(undefined), /unreadable/)
 })
 
-test('merge-commit ancestry helper refuses a comparison without an integer behind_by', () => {
-  assert.throws(() => assertMergeCommitInMainHistory('m', 'main', { compareCommits: () => ({ status: 'ahead' }) }), /unreadable/)
+// EVERY OPERAND OF THE READABILITY GUARD, SEPARATELY (#1213 round 9, the
+// author's own per-condition hunt). The guard is
+// `!comparison || typeof comparison.status !== 'string' || !Number.isInteger(comparison.behind_by)`.
+// A falsy comparison and a missing behind_by each had a case; the middle operand
+// -- a comparison carrying a valid integer behind_by but a status that is not a
+// string -- had none, so it could be deleted with the whole suite green. It is
+// the operand that stops a JSON `null`, a number, or an object status from
+// reaching the membership test below, where `['identical','ahead'].includes(...)`
+// would quietly answer false and produce the WRONG refusal message.
+test('merge-commit ancestry helper refuses every unreadable comparison shape', () => {
+  for (const comparison of [
+    null,
+    undefined,
+    { status: 'ahead' },                      // behind_by missing
+    { status: 'ahead', behind_by: '0' },      // behind_by a string
+    { status: 'ahead', behind_by: 1.5 },      // behind_by not an integer
+    { status: null, behind_by: 0 },           // status not a string
+    { status: 0, behind_by: 0 },
+    { status: ['ahead'], behind_by: 0 },
+    { behind_by: 0 },                         // status missing entirely
+  ]) {
+    assert.throws(
+      () => assertMergeCommitInMainHistory('m', 'main', { compareCommits: () => comparison }),
+      /unreadable/,
+      `expected an unreadable-comparison refusal for ${JSON.stringify(comparison)}`,
+    )
+  }
+  // The honest shape gets PAST this guard, or every case above is vacuous.
+  assert.doesNotThrow(() => assertMergeCommitInMainHistory(
+    'm', 'main', { compareCommits: () => ({ status: 'identical', behind_by: 0 }) }))
 })
 
 test('unreadable claims fail closed',()=>assert.throws(()=>assertLaneAvailable([{number:9,body:'bad'}],[],NOW),/unreadable/))

@@ -782,6 +782,23 @@ def prove_historical_original_apply_runs(
             "historical preview recovery does not name the original apply run for each "
             "version; a recovery is never accepted without a byte binding"
         )
+    # DEFENCE IN DEPTH, AND UNREACHABLE END TO END -- SAID OUT LOUD SO NOBODY
+    # SCORES IT AS TESTED. This guard and the two below it (the run-id shape and
+    # the source-pull-request shape) restate rules `parse_original_run_map` and
+    # `parse_source_map` in scripts/historical_preview_recovery.py already
+    # enforce, and re-derivation runs those parsers BEFORE this function is
+    # called. So a record that would trip any of the three is refused earlier,
+    # with a different message, and no test can drive these lines through
+    # `prove_preview`.
+    #
+    # They stay, because this function is also importable and callable on its
+    # own and must not assume its caller validated anything. But "the suite goes
+    # red if I delete it" is FALSE for all three, and #1213 round 9 is precisely
+    # about not calling such a line tested. The rules themselves ARE tested,
+    # per condition, in `PerConditionParserTests` in
+    # scripts/test_historical_preview_recovery.py -- which is where the five
+    # refusal paths of `parse_original_run_map` got their first negative tests of
+    # any kind.
     if sorted(runs) != sorted(allowlist):
         raise RiskGateError(
             "historical original-run map does not cover exactly the promoted allowlist"
@@ -950,7 +967,15 @@ def prove_preview(
         "path": PREVIEW_WORKFLOW,
     }
     for key, value in expected.items():
-        if run.get(key) != value:
+        # `isinstance` FIRST, as the twin loop in
+        # `prove_historical_original_apply_runs` already does. Without it a
+        # GitHub response that is a list, a string or null crashes here with
+        # `AttributeError: 'list' object has no attribute 'get'` instead of
+        # refusing with a message an operator can act on. An unhandled traceback
+        # is not a refusal: it says nothing about WHAT was wrong, and the two
+        # loops must not disagree about how a malformed payload is handled.
+        # (#1213 round 9, author's per-condition hunt.)
+        if not isinstance(run, dict) or run.get(key) != value:
             raise RiskGateError(f"preview run has wrong {key}")
     # THE COMMIT THAT ACTUALLY RAN, not the ref the workflow file was read from.
     # `run["head_sha"]` is the latter, and on a post-merge rehearsal dispatched

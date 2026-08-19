@@ -189,16 +189,67 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 )
 
     def test_non_atomic_proof_requires_a_usable_content_manifest(self):
-        for name, mutate in {
-            "missing manifest": lambda t: t.pop("migration-content-manifest.json"),
-            "manifest not an object": lambda t: t.__setitem__("migration-content-manifest.json", "[]"),
-            "manifest missing version": lambda t: t.__setitem__("migration-content-manifest.json", "{}"),
-            "manifest digest malformed": lambda t: t.__setitem__(
-                "migration-content-manifest.json", json.dumps({"20260814000000": "nope"})
-            ),
-        }.items():
-            temp, root, version, _, texts = self.plain_preview_fixture()
-            with self.subTest(name=name), temp, self.assertRaises(RiskGateError):
+        """The CLAIM lane's digest-shape guard, one operand at a time.
+
+        #1213 round 9, the author's per-condition hunt. This test used a bare
+        `assertRaises(RiskGateError)`, and that alone made TWO of the guard's
+        three conditions deletable with the suite green:
+
+          * drop `not isinstance(recorded, str)` and compare `str(recorded)`
+            instead -- "manifest missing version" still refuses, because the
+            string "None" is not 64 hex characters. Same colour, different guard.
+          * drop the 64-hex operand -- "manifest digest malformed" (`"nope"`) is
+            a `str`, so it sails past and is refused one line later by the byte
+            comparison, with a message claiming preview REHEARSED DIFFERENT BYTES
+            when the truth is that the manifest never carried a digest.
+
+        A bare assertRaises cannot tell those apart, so the message is pinned per
+        case, and the case-sensitivity of the hex class gets its own case: an
+        uppercase digest is the shape a hand-written manifest takes, and it must
+        not be normalised into acceptance.
+        """
+        version = "20260814000000"
+        for name, mutate, message in (
+            ("missing manifest",
+             lambda t: t.pop("migration-content-manifest.json"),
+             "missing a valid content manifest"),
+            ("manifest is not JSON",
+             lambda t: t.__setitem__("migration-content-manifest.json", "not json"),
+             "missing a valid content manifest"),
+            ("manifest not an object",
+             lambda t: t.__setitem__("migration-content-manifest.json", "[]"),
+             "content manifest is not an object"),
+            ("manifest missing version",
+             lambda t: t.__setitem__("migration-content-manifest.json", "{}"),
+             "has no usable digest"),
+            ("digest is null",
+             lambda t: t.__setitem__("migration-content-manifest.json",
+                                     json.dumps({version: None})),
+             "has no usable digest"),
+            ("digest is a number",
+             lambda t: t.__setitem__("migration-content-manifest.json",
+                                     json.dumps({version: 12345})),
+             "has no usable digest"),
+            ("digest malformed",
+             lambda t: t.__setitem__("migration-content-manifest.json",
+                                     json.dumps({version: "nope"})),
+             "has no usable digest"),
+            ("digest too short",
+             lambda t: t.__setitem__("migration-content-manifest.json",
+                                     json.dumps({version: "abc123"})),
+             "has no usable digest"),
+            ("digest uppercase hex",
+             lambda t: t.__setitem__("migration-content-manifest.json",
+                                     json.dumps({version: "A" * 64})),
+             "has no usable digest"),
+            ("digest 64 non-hex characters",
+             lambda t: t.__setitem__("migration-content-manifest.json",
+                                     json.dumps({version: "z" * 64})),
+             "has no usable digest"),
+        ):
+            temp, root, fixture_version, _, texts = self.plain_preview_fixture()
+            self.assertEqual(fixture_version, version)
+            with self.subTest(name=name), temp, self.assertRaisesRegex(RiskGateError, message):
                 mutate(texts)
                 prove_preview_migration_contents(
                     texts=texts, allowlist=[version], repo_root=root,
@@ -498,6 +549,16 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         ref, main = "1" * 40, "3" * 40
         with self.assertRaisesRegex(RiskGateError, "file tree of .* is unreadable"):
             tracked_paths_at(ref, lambda endpoint: (_ for _ in ()).throw(RuntimeError("503")))
+        # BOTH operands of `not isinstance(tree, dict) or not isinstance(tree.get("tree"), list)`.
+        # The second had a case; the first did not, so a response that is not an
+        # object at all -- a list, a string, null -- would have reached
+        # `tree.get` and raised AttributeError rather than refusing with a
+        # message (#1213 round 9, author's per-condition hunt).
+        for payload in ([], "not a tree", None, 12345):
+            with self.subTest(payload=payload), self.assertRaisesRegex(
+                RiskGateError, "file tree of .* is unreadable"
+            ):
+                tracked_paths_at(ref, lambda endpoint, p=payload: p)
         with self.assertRaisesRegex(RiskGateError, "file tree of .* is unreadable"):
             tracked_paths_at(ref, lambda endpoint: {"tree": "not-a-list"})
         with self.assertRaisesRegex(RiskGateError, "truncated"):
@@ -1665,7 +1726,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
 
     HISTORICAL_VERSION = "20260814130000"
 
-    def historical_repo(self, body="select 1;\n"):
+    def historical_repo(self, body="select 1;\n", migration_files="one"):
         """A real git repo, because the recovery proof shells out to git.
 
         TWO commits, and the distinction matters: the FIRST is the merge commit
@@ -1677,9 +1738,21 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         root = Path(temp.name)
         (root / "supabase/migrations").mkdir(parents=True)
-        (root / f"supabase/migrations/{self.HISTORICAL_VERSION}_release_a.sql").write_bytes(
-            body.encode("utf-8")
-        )
+        # HOW MANY FILES CARRY THIS VERSION. The gate refuses zero (the version
+        # is not on exact main at all) and refuses two or more (which of them did
+        # preview rehearse?). This fixture hardcoded exactly one, so neither half
+        # of `len(matches) != 1` could be driven and the guard could be deleted
+        # with the suite green (#1213 round 9, author's hunt).
+        if migration_files != "none":
+            (root / f"supabase/migrations/{self.HISTORICAL_VERSION}_release_a.sql").write_bytes(
+                body.encode("utf-8")
+            )
+        if migration_files == "two":
+            (root / f"supabase/migrations/{self.HISTORICAL_VERSION}_release_b.sql").write_bytes(
+                body.encode("utf-8")
+            )
+        # Git needs SOMETHING to commit when the migration is absent.
+        (root / "README.md").write_text("fixture\n", encoding="utf-8")
         subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
         subprocess.run(["git", "config", "user.email", "x@y"], cwd=root)
         subprocess.run(["git", "config", "user.name", "x"], cwd=root)
@@ -1717,8 +1790,16 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
     def original_run_zip(self, path, *, version, digest, applied=True, recovery=False,
-                         instance=None):
-        """The ORIGINAL apply run's evidence: it really moved preview's ledger."""
+                         instance=None, manifest_json=None):
+        """The ORIGINAL apply run's evidence: it really moved preview's ledger.
+
+        `manifest_json` replaces `migration-content-manifest.json` wholesale, so
+        a test can produce a run whose manifest has no usable digest for the
+        version. Without it that guard was unreachable: the manifest was always
+        `json.dumps({version: digest})` and `digest` was always a real sha256 hex
+        string, so `not isinstance(recorded, str) or not re.fullmatch(64 hex)`
+        could be deleted with the suite green (#1213 round 9, author's hunt).
+        """
         before = json.dumps([{"remote": "20260801000000"}])
         after = json.dumps(
             [{"remote": "20260801000000"}] + ([{"remote": version}] if applied else [])
@@ -1728,7 +1809,9 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             "preview-ledger-after.txt": after,
             "preview-dry-run.txt": f"Applying migration {version}_release_a.sql...",
             "preview-apply.txt": f"Applying migration {version}_release_a.sql...",
-            "migration-content-manifest.json": json.dumps({version: digest}),
+            "migration-content-manifest.json": (
+                json.dumps({version: digest}) if manifest_json is None else manifest_json
+            ),
         }
         if recovery:
             payload["historical-preview-source.json"] = json.dumps({"schema": "x"})
@@ -1746,7 +1829,8 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         original_head_blobs=None, original_run_blobs=None, original_instance=None,
         merge_commit_blobs=None, merge_absent_paths=(), original_absent_paths=(),
         original_commit_in_pr=True, original_commit_in_history=True,
-        run_shape=None, original_run_shape=None, corrupt_download=False, record_extra=None,
+        run_shape=None, original_run_shape=None, original_manifest_json=None,
+        migration_files="one", corrupt_download=False, record_extra=None,
         record_json=None, recovery_applied_commit=None,
     ):
         """End to end through prove_preview, downloads and all.
@@ -1801,6 +1885,11 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
           per-guard mutation sweep cannot see this -- replacing the whole `if`
           with `if False:` still fails the conclusion case -- so each key needs
           its own raising test.
+        * `original_manifest_json` -- the raw content manifest the ORIGINAL run
+          wrote, for a run whose manifest names no usable digest for the version.
+        * `migration_files` -- "one" (honest), "none" (the version is not on exact
+          main at all) or "two" (two files carry the same version, so which one
+          preview rehearsed is unanswerable).
         * `corrupt_download` -- the downloaded recovery artifact's bytes no longer
           hash to the pinned digest. The API-reported digest is checked in a
           separate line that IS tested; this is the second, post-download check.
@@ -1825,7 +1914,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
           `config/atomic-migration-allowlist.json` (verified with `gh api`).
         """
         version = self.HISTORICAL_VERSION
-        temp, root, main, merge_sha = self.historical_repo(main_body)
+        temp, root, main, merge_sha = self.historical_repo(main_body, migration_files)
         with temp:
             rehearsed_digest = hashlib.sha256(rehearsed_body.encode("utf-8")).hexdigest()
             record = {
@@ -1847,7 +1936,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 self.original_run_zip(
                     original_path, version=version, digest=rehearsed_digest,
                     applied=original_applied, recovery=original_is_recovery,
-                    instance=original_instance,
+                    instance=original_instance, manifest_json=original_manifest_json,
                 )
                 original_commit = "a" * 40
                 original_head = (
@@ -1880,6 +1969,10 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
 
                 def api(endpoint):
                     if endpoint == f"repos/u2giants/shared-db/actions/runs/{original_run}":
+                        # `__replace__` returns a NON-DICT payload, which no
+                        # amount of key overriding can express.
+                        if original_run_shape and "__replace__" in original_run_shape:
+                            return original_run_shape["__replace__"]
                         run = {"status": "completed", "conclusion": original_conclusion,
                                "event": "workflow_dispatch", "path": PREVIEW_WORKFLOW,
                                **(original_run_shape or {})}
@@ -1890,6 +1983,8 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                         return {"artifacts": [self.apply_artifact(
                             original_commit, artifact_id=99, run_id=original_run)]}
                     if endpoint == "repos/u2giants/shared-db/actions/runs/7":
+                        if run_shape and "__replace__" in run_shape:
+                            return run_shape["__replace__"]
                         return {"status": "completed", "conclusion": "success",
                                 "event": "workflow_dispatch", "head_sha": main,
                                 "path": PREVIEW_WORKFLOW, **(run_shape or {})}
@@ -2121,6 +2216,129 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 f"the original apply run's artifact was downloaded despite a wrong "
                 f"{key}; the shape check must refuse before any of its bytes are read",
             )
+
+    def test_an_original_run_whose_manifest_has_no_usable_digest_is_refused(self):
+        """#1213 round 9, the author's own per-condition hunt.
+
+        The historical lane's byte binding is this comparison and nothing else:
+        the digest the ORIGINAL run recorded, against the bytes on exact main.
+        The guard immediately before it requires that recorded value to BE a
+        digest -- a 64-character lowercase hex string -- and neither of its two
+        operands had a test, because `original_run_zip` always wrote
+        `{version: <a real sha256>}` and offered no way to write anything else.
+
+        Both operands matter, and for different reasons. A manifest with no entry
+        for the version, or a null one, would otherwise reach the comparison as
+        `None != <main's digest>` and refuse with a message claiming preview
+        rehearsed DIFFERENT BYTES, when the truth is that the run recorded no
+        bytes at all. A manifest whose value is a short or uppercase string is
+        the more dangerous half: it is the shape a hand-written manifest takes,
+        and a guard that accepts it is one `.lower()` away from comparing
+        attacker-chosen text.
+        """
+        # The message is PINNED per case, not accepted as an alternation. A loose
+        # alternation is the same defect one level up: it cannot tell the guard
+        # under test from the guard before it, which is exactly how the instance
+        # binding's source_pr type check became deletable (see
+        # test_merged_main_binding_is_never_accepted_unbound).
+        for label, manifest, message in (
+            # Refused one guard earlier, by the manifest reader itself. Listed
+            # here so the ordering is recorded rather than assumed.
+            ("manifest is not an object", "[]",
+             "content manifest is not an object"),
+            ("manifest is not JSON at all", "not json",
+             "missing a valid content manifest"),
+            # These reach the digest-shape guard, which is the one under test.
+            ("manifest omits the version", "{}", "no usable digest"),
+            ("digest is null", json.dumps({self.HISTORICAL_VERSION: None}),
+             "no usable digest"),
+            ("digest is a number", json.dumps({self.HISTORICAL_VERSION: 12345}),
+             "no usable digest"),
+            ("digest is too short", json.dumps({self.HISTORICAL_VERSION: "abc123"}),
+             "no usable digest"),
+            ("digest is uppercase hex", json.dumps({self.HISTORICAL_VERSION: "A" * 64}),
+             "no usable digest"),
+            ("digest is 64 non-hex characters", json.dumps({self.HISTORICAL_VERSION: "z" * 64}),
+             "no usable digest"),
+        ):
+            with self.subTest(label), self.assertRaisesRegex(RiskGateError, message):
+                self.run_historical_prove_preview(original_manifest_json=manifest)
+
+    @staticmethod
+    def write_empty_atomic_policy(root):
+        """`prove_preview_migration_contents` reads this before the file walk."""
+        (root / "config").mkdir(exist_ok=True)
+        (root / "config/atomic-migration-allowlist.json").write_text(
+            '{"schema_version":1,"migrations":{}}', encoding="utf-8"
+        )
+
+    def test_a_version_absent_or_duplicated_on_exact_main_is_refused(self):
+        """The other half of the same hunt: `len(matches) != 1`, both directions.
+
+        `historical_repo` wrote exactly one migration file and had no parameter
+        to write none or two, so this guard could be deleted with the whole suite
+        green. Zero files means the promoted version is not on exact main at all
+        and there is nothing to compare the rehearsed digest against. Two files
+        sharing one version means the question "which bytes did preview rehearse"
+        has no answer, and picking either one would be a guess presented as proof.
+        """
+        # DRIVEN DIRECTLY, and the reason is recorded rather than hidden. Through
+        # the whole `prove_preview` path both cases are refused EARLIER, by
+        # `prove_pr_authored` inside the re-derivation ("source PR 984 did not
+        # author the exact migration ..."), because a version with no file on
+        # main cannot be shown to have been added by the source pull request.
+        # That is genuine defence in depth -- but it also means the guard below
+        # is unreachable end to end, so calling it "tested" on the strength of
+        # the earlier refusal would be exactly the error this round is about.
+        # It is therefore exercised where it lives.
+        for label, files in (("absent from exact main", "none"), ("duplicated", "two")):
+            temp, root, main, merge_sha = self.historical_repo(migration_files=files)
+            self.write_empty_atomic_policy(root)
+            with temp, self.subTest(label), self.assertRaisesRegex(
+                RiskGateError, "absent or ambiguous on exact main"
+            ):
+                prove_preview_migration_contents(
+                    texts={
+                        "preview-dry-run.txt": "",
+                        "preview-apply.txt": "",
+                        "migration-content-manifest.json": "{}",
+                    },
+                    allowlist=[self.HISTORICAL_VERSION], repo_root=root,
+                    before_versions=set(), after_versions={self.HISTORICAL_VERSION},
+                    historical=False,
+                )
+        # And the honest single-file case still gets PAST this guard, or both
+        # cases above would pass through a fixture that is broken for some other
+        # reason.
+        temp, root, main, merge_sha = self.historical_repo()
+        self.write_empty_atomic_policy(root)
+        with temp, self.assertRaisesRegex(RiskGateError, "no usable digest"):
+            prove_preview_migration_contents(
+                texts={
+                    "preview-dry-run.txt": f"Applying migration {self.HISTORICAL_VERSION}_release_a.sql...",
+                    "preview-apply.txt": f"Applying migration {self.HISTORICAL_VERSION}_release_a.sql...",
+                    "migration-content-manifest.json": "{}",
+                },
+                allowlist=[self.HISTORICAL_VERSION], repo_root=root,
+                before_versions=set(), after_versions={self.HISTORICAL_VERSION},
+                historical=False,
+            )
+
+    def test_a_run_payload_that_is_not_an_object_is_refused_on_both_shape_loops(self):
+        """The `not isinstance(run, dict)` operand of each four-key shape loop.
+
+        Both loops read `if not isinstance(run, dict) or run.get(key) != value`.
+        The four KEYS now have their own cases; the isinstance operand did not,
+        because both helpers always returned a dict. A GitHub API that answers a
+        list, a string or null must refuse, not raise AttributeError on the way
+        past -- an unhandled exception is not a refusal and does not carry the
+        message an operator needs.
+        """
+        for payload in ([], "not a run", None, 12345):
+            with self.subTest(payload=payload), self.assertRaises(RiskGateError):
+                self.run_historical_prove_preview(original_run_shape={"__replace__": payload})
+            with self.subTest(payload=payload, which="recovery"), self.assertRaises(RiskGateError):
+                self.run_historical_prove_preview(run_shape={"__replace__": payload})
 
     def test_forged_dispatch_ref_cannot_fabricate_a_historical_original_run(self):
         """#1213 review, round 5, finding 1. The exact twin of

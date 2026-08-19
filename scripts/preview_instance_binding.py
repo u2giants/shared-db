@@ -177,7 +177,15 @@ def verify(
         )
     if record.get("rehearsalMode") == "merged-main-rehearsal":
         if (
-            not isinstance(source_pr, int)
+            # `isinstance(True, int)` is True in Python, so the bool exclusion is
+            # not pedantry: without it `source_pr=True` reaches the equality
+            # comparison below and the refusal that fires is "not the pull request
+            # being promoted", which says the wrong thing about the wrong guard.
+            # `prove_historical_original_apply_runs` in the production gate
+            # already spells it this way; these two must not disagree about what
+            # counts as a pull-request number. (#1213 round 9, author's hunt.)
+            isinstance(source_pr, bool)
+            or not isinstance(source_pr, int)
             or not isinstance(merge_commit_sha, str)
             or not COMMIT_RE.match(merge_commit_sha.strip().lower())
         ):

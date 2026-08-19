@@ -1,7 +1,10 @@
 import subprocess, sys, tempfile, unittest
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).parent))
-from historical_preview_recovery import SCHEMA_V3, SCHEMA_V4, verify
+from historical_preview_recovery import (
+    SCHEMA_V3, SCHEMA_V4, parse_original_run_map, parse_source_map, parse_versions,
+    prove_pr_authored, verify,
+)
 
 # The original-run map is mandatory: without it a recovery waives byte
 # equality entirely. Every call below therefore supplies one.
@@ -176,6 +179,149 @@ class PerVersionSourceMapTests(unittest.TestCase):
             self.assertEqual(result["schema"], SCHEMA_V3)
             self.assertEqual(result["sourcePr"], 984)
             self.assertNotIn("sourcePrMap", result)
+
+
+
+
+class PerConditionParserTests(unittest.TestCase):
+    """Every condition of every multi-condition guard in this module, alone.
+
+    THE SHAPE THIS EXISTS TO KILL (#1213 round 9, the author's own hunt). The
+    round-9 review found a four-key loop in the production gate where only ONE
+    key had a test, and noted that a per-GUARD mutation sweep cannot see that: a
+    guard counts as covered the moment any one of its conditions reddens the
+    suite. So this module's guards were re-checked one CONDITION at a time, and
+    three of them had no negative test at all:
+
+      * `parse_versions` -- none of its three conditions;
+      * `parse_original_run_map` -- none of its FIVE, in either test file. The
+        module docstring calls `--original-run-map` "not a label -- it is the
+        proof", and every one of its refusal paths was unexercised;
+      * `prove_pr_authored` -- the merged-but-malformed-merge_commit_sha half of
+        a two-operand guard. The shared `api_for` helper hardcodes a good SHA, so
+        that half needed its own closure.
+
+    Each case below drives ONE condition. Deleting any single operand from any of
+    these guards must redden this file.
+    """
+
+    def test_parse_versions_refuses_each_bad_shape_separately(self):
+        for label, raw in (
+            ("empty", ""),
+            ("blank separators only", " , , "),
+            ("out of order", "20260813220000,20260813210000"),
+            ("duplicated", "20260813210000,20260813210000"),
+            ("not fourteen digits", "2026081321000"),
+            ("not digits at all", "not-a-version"),
+        ):
+            with self.subTest(label), self.assertRaisesRegex(
+                ValueError, "unique, ordered 14-digit versions"
+            ):
+                parse_versions(raw)
+        # The honest shape still parses, or every case above passes vacuously.
+        self.assertEqual(
+            parse_versions(" 20260813210000 , 20260813220000 "),
+            ["20260813210000", "20260813220000"],
+        )
+
+    def test_parse_original_run_map_refuses_each_bad_shape_separately(self):
+        versions = ["20260813210000", "20260813220000"]
+        one = ["20260813210000"]
+        for label, raw, vs, message in (
+            ("entry is not version:run", "20260813210000", one,
+             "entries must be version:run-id"),
+            ("run id is not a number", "20260813210000:abc", one,
+             "entries must be version:run-id"),
+            ("version is not fourteen digits", "2026081321:5001", one,
+             "entries must be version:run-id"),
+            ("same version named twice", "20260813210000:5001,20260813210000:5002", one,
+             "names 20260813210000 more than once"),
+            ("run id zero", "20260813210000:0", one,
+             "non-positive run id for 20260813210000"),
+            ("map missing a version", "20260813210000:5001", versions,
+             "must name exactly the allowlisted versions"),
+            ("map names an extra version", "20260813210000:5001,20260813220000:5002", one,
+             "must name exactly the allowlisted versions"),
+            ("map absent entirely", "", one,
+             "must name exactly the allowlisted versions"),
+            ("map is None", None, one,
+             "must name exactly the allowlisted versions"),
+        ):
+            with self.subTest(label), self.assertRaisesRegex(ValueError, message):
+                parse_original_run_map(raw, vs)
+        self.assertEqual(
+            parse_original_run_map("20260813210000:5001,20260813220000:5002", versions),
+            {"20260813210000": 5001, "20260813220000": 5002},
+        )
+
+    def test_parse_source_map_refuses_a_run_id_shaped_entry_and_covers_exactly(self):
+        """The twin parser, so the two cannot drift apart unnoticed."""
+        one = ["20260813210000"]
+        for label, raw, message in (
+            ("entry is not version:pr", "20260813210000", "entries must be version:pull-request"),
+            ("same version twice", "20260813210000:1,20260813210000:2", "more than once"),
+            ("missing a version", "", "exactly the allowlisted versions"),
+        ):
+            with self.subTest(label), self.assertRaisesRegex(ValueError, message):
+                parse_source_map(raw, one)
+        self.assertEqual(parse_source_map("20260813210000:984", one), {"20260813210000": 984})
+
+    def test_a_merged_pull_request_without_a_usable_merge_commit_is_refused(self):
+        """The OTHER operand of `pr.get("merged") is not True or not <40 hex>`.
+
+        `test_unmerged_pull_request_in_the_map_is_refused` drives the first half.
+        The shared `api_for` helper hardcodes a real SHA, so the second half --
+        merged is True but `merge_commit_sha` is missing or malformed -- had no
+        test and no way to be expressed through it. Without this the operand can
+        be deleted and `git merge-base --is-ancestor` is handed whatever the API
+        returned, including None.
+        """
+        for label, sha in (
+            ("no merge commit at all", None),
+            ("empty merge commit", ""),
+            ("not a sha", "not-a-sha"),
+            ("too short", "abc123"),
+            ("uppercase, which git would resolve but the regex must not accept", "A" * 40),
+        ):
+            def api(path, sha=sha):
+                if "/files" in path:
+                    return []
+                return {"merged": True, "merge_commit_sha": sha}
+            with self.subTest(label), self.assertRaisesRegex(ValueError, "is not merged"):
+                prove_pr_authored(924, "b" * 40, ["20260813210000"], Path("."), api)
+
+
+class CommandLineTests(unittest.TestCase):
+    """The two mutually-exclusive-argument guards in `__main__`.
+
+    Neither had a test: both existing suites import `verify` directly, so the
+    entry point's own refusals were never executed. A recovery invoked with
+    neither source argument, or with both, must die with exit 2 rather than
+    reach `verify` with an ambiguous provenance claim.
+    """
+
+    SCRIPT = str(Path(__file__).parent / "historical_preview_recovery.py")
+
+    def run_cli(self, *extra):
+        with tempfile.TemporaryDirectory() as t:
+            return subprocess.run(
+                [sys.executable, self.SCRIPT,
+                 "--original-run-map", "20260813210000:5001",
+                 "--main-sha", "b" * 40,
+                 "--allowlist", "20260813210000",
+                 "--output", str(Path(t, "out.json")), *extra],
+                capture_output=True, text=True,
+            )
+
+    def test_neither_source_pr_nor_source_map_is_refused(self):
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("needs --source-pr or --source-map", result.stdout + result.stderr)
+
+    def test_both_source_pr_and_source_map_is_refused(self):
+        result = self.run_cli("--source-pr", "984", "--source-map", "20260813210000:984")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not both", result.stdout + result.stderr)
 
 
 if __name__=="__main__": unittest.main()

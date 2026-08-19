@@ -95,12 +95,38 @@ class VerifyTests(unittest.TestCase):
             self.check(self.raw(), merge_commit_sha="c" * 40)
 
     def test_merged_main_binding_is_never_accepted_unbound(self):
+        """Each of the three operands, with its OWN message asserted.
+
+        #1213 round 9, the author's per-condition hunt. This test used to accept
+        EITHER "never accepted unbound" OR "not the pull request being promoted",
+        and that alternation made the `not isinstance(source_pr, int)` operand
+        deletable with the whole suite green: with it gone, `source_pr=None` and
+        `source_pr="1193"` simply fall through to the value comparison below,
+        which raises the second message. A loose regex is the same defect as a
+        helper that cannot express a condition -- the assertion cannot tell the
+        guard under test from the one after it.
+
+        The type check must fire FIRST and say so, because the value comparison
+        it would otherwise fall through to is an equality against whatever the
+        record happens to hold, not a statement that the gate was given a usable
+        pull-request number at all.
+        """
         for override in (
-            {"source_pr": None}, {"merge_commit_sha": None},
-            {"merge_commit_sha": "not-a-sha"}, {"source_pr": "1193"},
+            {"source_pr": None}, {"source_pr": "1193"},
+            {"source_pr": True}, {"source_pr": 1193.0},
         ):
             with self.subTest(**override), self.assertRaisesRegex(
-                InstanceBindingError, "never accepted unbound|not the pull request being promoted"
+                InstanceBindingError, "never accepted unbound"
+            ):
+                self.check(self.raw(), **override)
+        for override in ({"merge_commit_sha": None}, {"merge_commit_sha": 12345}):
+            with self.subTest(**override), self.assertRaisesRegex(
+                InstanceBindingError, "never accepted unbound"
+            ):
+                self.check(self.raw(), **override)
+        for override in ({"merge_commit_sha": "not-a-sha"}, {"merge_commit_sha": "abc123"}):
+            with self.subTest(**override), self.assertRaisesRegex(
+                InstanceBindingError, "never accepted unbound"
             ):
                 self.check(self.raw(), **override)
 
