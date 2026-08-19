@@ -525,8 +525,11 @@ The existing suite must stay green — that is what CI runs on the PR.
 
 - **CLIs kept authenticated:** `gh`, `gcloud`, `az`, `supabase`, `vercel`, `op`. Verify with a real
   call before claiming a capability is missing.
-- **Production database (read-only work):** pooler at
-  `postgresql://postgres.qsllyeztdwjgirsysgai@aws-1-us-east-1.pooler.supabase.com:6543/postgres`.
+- **Production database (read-only work):** Supabase pooler host
+  `aws-1-us-east-1.pooler.supabase.com`, port `6543`, database `postgres`, user
+  `postgres.qsllyeztdwjgirsysgai`. Assemble the DSN yourself at use time; this repository is
+  PUBLIC and does not publish `user@host` connection strings (AGENTS.md writes host, port and
+  user separately for exactly this reason).
   Password: 1Password vault `vibe_coding`, item *"Supabase DB Password - shared POP database"*,
   field `password`. Direct 5432 is IPv6-only; use the pooler.
 - **ColdLion API key:** 1Password vault `vibe_coding`, item *"Coldlion ERP API key
