@@ -1,4 +1,5 @@
 import hashlib
+import inspect
 import json
 import re
 import subprocess
@@ -1163,6 +1164,190 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             "pinned in PREVIEW_PRODUCER_PATHS.",
         )
 
+    # ------------------------------------------------------------------
+    # EXEMPTION VERIFICATION REGISTRY (#1213 round 9, finding 2).
+    #
+    # A written reason is a CLAIM. Until something asserts it, it is a claim the
+    # code is free to contradict silently. Three of the five exemptions were
+    # verified by test_preview_job_reads_no_repository_file_outside_the_pinned_
+    # surface, which finds them by searching their reason text for the exact
+    # phrase "Never read by the preview job". The other two -- `docs` and
+    # `supabase/migrations` -- are worded differently and were therefore verified
+    # by NOTHING, and no test noticed, because a phrase FILTER reports nothing
+    # about what it skipped.
+    #
+    # The two registries below close that class, not just the `docs` instance:
+    # every exemption key must appear in exactly one of them, each named test
+    # must exist, and each named test must name its key literally. A new
+    # exemption cannot opt out of verification by being phrased unusually -- it
+    # fails test_every_runtime_data_exemption_is_verified_somewhere until someone
+    # either words it with the phrase or writes it a test.
+    PHRASE_VERIFIED_EXEMPTIONS = frozenset({
+        "supabase/tests",
+        "supabase/ci-bootstrap",
+        "config/production-risk-policy-activation.json",
+    })
+    NAMED_TEST_VERIFIED_EXEMPTIONS = {
+        "docs": "test_the_docs_exemption_is_verified_against_every_producer_that_names_it",
+        "supabase/migrations": "test_the_payload_exemption_is_byte_bound_on_every_lane",
+    }
+
+    def test_every_runtime_data_exemption_is_verified_somewhere(self):
+        """No exemption may escape verification by being worded unusually."""
+        keys = set(PREVIEW_RUNTIME_DATA_EXEMPTIONS)
+        covered = self.PHRASE_VERIFIED_EXEMPTIONS | set(self.NAMED_TEST_VERIFIED_EXEMPTIONS)
+        self.assertEqual(
+            sorted(keys - covered), [],
+            "these runtime-read exemptions carry a written reason that NOTHING "
+            f"asserts: {sorted(keys - covered)}. Either word the reason 'Never "
+            "read by the preview job', which "
+            "test_preview_job_reads_no_repository_file_outside_the_pinned_surface "
+            "enforces, or write a test that checks the reason you did give and "
+            "register it in NAMED_TEST_VERIFIED_EXEMPTIONS.",
+        )
+        self.assertEqual(
+            sorted(covered - keys), [],
+            f"stale exemption-verification registration: {sorted(covered - keys)} is "
+            "no longer an exemption. Delete the entry rather than leaving a test "
+            "registered against nothing.",
+        )
+        self.assertEqual(
+            sorted(self.PHRASE_VERIFIED_EXEMPTIONS & set(self.NAMED_TEST_VERIFIED_EXEMPTIONS)),
+            [],
+            "an exemption is registered in both registries; one of the two is wrong",
+        )
+        for key, test_name in self.NAMED_TEST_VERIFIED_EXEMPTIONS.items():
+            method = getattr(type(self), test_name, None)
+            self.assertTrue(
+                callable(method),
+                f"{key} is registered as verified by {test_name}, which does not exist",
+            )
+            # A REGISTRATION POINTING AT AN UNRELATED TEST IS A RUBBER STAMP.
+            # The named test must at least name the key it claims to verify.
+            self.assertIn(
+                key, inspect.getsource(method),
+                f"{test_name} is registered as the verifier for {key} but never "
+                f"names it; the registration asserts nothing",
+            )
+
+    # EVERY PLACE A PRODUCER NAMES `docs`, CLASSIFIED (#1213 round 9, finding 2).
+    #
+    # The docs exemption claims docs is NAMED by a producer but never OPENED by
+    # one. An inventory is what makes that checkable: a NE\w naming site fails
+    # this test until someone classifies it deliberately, whatever shape it takes
+    # -- including the shapes a line-by-line read detector cannot see, such as
+    # `const d = "docs"` on one line and `readFileSync(path\.join(d, x))` on
+    # another. The first of those two lines is a new site and reddens the count.
+    #
+    #   git-pathspec    -- passed to git after `--`, so GIT decides which files
+    #                      exist there; the process never opens one.
+    #   message-citation -- named inside a string a human reads, in a raised
+    #                      error or a printed line. Nothing is opened.
+    DOCS_NAMING_SITES = {
+        ("scripts/manage-migration-author-lanes.mjs", "git-pathspec"): 2,
+        ("scripts/production_migration_guard.py", "message-citation"): 1,
+    }
+
+    def test_the_docs_exemption_is_verified_against_every_producer_that_names_it(self):
+        """#1213 round 9, finding 2. `docs` claims to be NAMED but never OPENED.
+
+        The claim is true today. scripts/manage-migration-author-lanes.mjs passes
+        the string `docs` to `git grep -l` and to `git add` as a PATHSPEC, after
+        the `--` separator, and scripts/production_migration_guard.py cites a docs
+        filename inside a GuardError message. Neither opens a file. Nothing
+        checked that, because the reason is worded differently from the "Never
+        read by the preview job" phrase the surface test filters on, and a filter
+        reports nothing about what it skipped.
+
+        A later readFileSync of a docs file, or a path.join("docs", name), would
+        have stayed green: `docs` is already in the exemption map, so the
+        constructed-read walk skips it and the inward walk treats everything
+        beneath an exempted directory as exempt.
+
+        Two teeth, because either alone is escapable:
+
+        1. NO READ SHAPE may appear on a line that names docs.
+        2. THE INVENTORY of naming sites must match DOCS_NAMING_SITES exactly.
+           A read assembled across two lines defeats tooth 1 but not tooth 2:
+           the line that first names `docs` is a new site.
+        """
+        repo_root = Path(__file__).resolve().parents[1]
+        # A read, in either language, in the shapes a producer would actually use.
+        read_shapes = re.compile(
+            r"\breadFileSync|readFile|readdir|readdirSync|createReadStream|"
+            r"open|read_text|read_bytes|glob|rglob|iterdir|require|import|"
+            r"path\.join|Path\(|os\.path"
+        )
+        pathspec_shape = re.compile(r"\bexecFileSync\b.*['\"]git['\"].*['\"]--['\"]")
+        found = {}
+        sites = []
+        for rel in sorted(self.executed_closure()):
+            path = repo_root / rel
+            if not path.is_file():
+                continue
+            body = self.uncommented(path.read_text(encoding="utf-8", errors="ignore"))
+            for number, line in enumerate(body.splitlines(), start=1):
+                if not re.search(r"(?<![\w./-])docs(?![\w-])", line):
+                    continue
+                sites.append((rel, number, line.strip()))
+                self.assertIsNone(
+                    read_shapes.search(line),
+                    f"{rel}:{number} names `docs` next to a read: {line.strip()!r}. "
+                    f"The docs entry in PREVIE\w_RUNTIME_DATA_EXEMPTIONS claims no "
+                    f"docs file is ever read into the preview job's behaviour. Pin "
+                    f"docs in PREVIE\w_PRODUCER_PATHS or rewrite the reason -- do "
+                    f"not leave a reason the code contradicts.",
+                )
+                kind = "git-pathspec" if pathspec_shape.search(line) else "message-citation"
+                found[(rel, kind)] = found.get((rel, kind), 0) + 1
+        self.assertEqual(
+            found, dict(self.DOCS_NAMING_SITES),
+            "the inventory of places a preview producer names `docs` changed:\n"
+            f"  expected {dict(self.DOCS_NAMING_SITES)}\n"
+            f"  found    {found}\n"
+            f"  sites    {sites}\n"
+            "Classify the new site deliberately. If it opens a docs file -- even "
+            "through a path assembled across several lines -- the docs exemption "
+            "is false and docs must be pinned in PREVIE\w_PRODUCER_PATHS.",
+        )
+
+    def test_the_payload_exemption_is_byte_bound_on_every_lane(self):
+        """`supabase/migrations` is exempted as THE PAYLOAD, not as unread.
+
+        It is the one exemption that cannot be pinned to exact main: on the
+        pre-merge claim lane the pull-request head legitimately carries migration
+        files main does not have yet. Its reason therefore claims something
+        stronger instead -- that the bytes are bound on EVERY lane. This drives
+        both lanes and fails if either binding stops refusing amended bytes.
+
+        Registered in NAMED_TEST_VERIFIED_EXEMPTIONS because its reason cannot
+        carry the "Never read by the preview job" phrase: the preview job reads
+        supabase/migrations constantly. That is the entire point of it.
+        """
+        self.assertIn("supabase/migrations", PREVIEW_RUNTIME_DATA_EXEMPTIONS)
+        self.assertNotIn("supabase/migrations", PREVIEW_PRODUCER_PATHS)
+
+        # Lane 1 -- claim and merged-main: the promoted run's own content
+        # manifest versus the file on exact main.
+        temp, root, version, _, texts = self.plain_preview_fixture()
+        with temp:
+            (root / f"supabase/migrations/{version}_exact.sql").write_bytes(
+                b"drop table plm.item;\n"
+            )
+            with self.assertRaisesRegex(RiskGateError, "different bytes than exact main"):
+                prove_preview_migration_contents(
+                    texts=texts, allowlist=[version], repo_root=root,
+                    before_versions=set(), after_versions={version}, historical=False,
+                )
+
+        # Lane 2 -- historical recovery, which writes nothing and so has no
+        # manifest of its own: the digest recorded by the run that ORIGINALLY
+        # applied the version, versus the file on exact main.
+        with self.assertRaisesRegex(RiskGateError, "different bytes than exact main"):
+            self.run_historical_prove_preview(
+                rehearsed_body="select 1;\n", main_body="drop table core.customer;\n"
+            )
+
     def test_preview_job_reads_no_repository_file_outside_the_pinned_surface(self):
         """The other direction: nothing the workflow names escapes the pin.
 
@@ -1211,9 +1396,18 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         # instead, immediately below, the way PREVIEW_JOB_EXCLUSIONS already is.
         allowed = set(PREVIEW_PRODUCER_PATHS) | set(self.PREVIEW_JOB_EXCLUSIONS) | {PREVIEW_WORKFLOW}
         allowed.add("supabase/migrations")
+        # WHICH EXEMPTIONS THIS TEST ACTUALLY VERIFIED. The loop below used to
+        # `continue` past any reason worded differently, so an exemption could opt
+        # OUT of verification simply by not containing the magic phrase -- which
+        # is exactly what `docs` did (#1213 round 9, finding 2). Recording the
+        # keys it covers turns the phrase from a filter into an accounted-for
+        # branch, and `test_every_runtime_data_exemption_is_verified_somewhere`
+        # fails on any key that neither this loop nor a named test covers.
+        phrase_verified = set()
         for key, reason in PREVIEW_RUNTIME_DATA_EXEMPTIONS.items():
             if "Never read by the preview job" not in reason:
                 continue
+            phrase_verified.add(key)
             self.assertNotIn(
                 key, executed,
                 f"{key} is exempted because it is 'Never read by the preview job', "
@@ -1227,6 +1421,12 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                     f"{key} is exempted as never read by the preview job, but the job "
                     f"or a script it executes now names {rel} beneath it",
                 )
+        self.assertEqual(
+            phrase_verified, self.PHRASE_VERIFIED_EXEMPTIONS,
+            "the set of exemptions carrying the 'Never read by the preview job' "
+            "phrase changed. Update PHRASE_VERIFIED_EXEMPTIONS and make sure the "
+            "moved key is still verified by something.",
+        )
         escaped = sorted(
             rel for rel in referenced
             if rel not in allowed and not rel.startswith("supabase/migrations/")
@@ -1546,7 +1746,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         original_head_blobs=None, original_run_blobs=None, original_instance=None,
         merge_commit_blobs=None, merge_absent_paths=(), original_absent_paths=(),
         original_commit_in_pr=True, original_commit_in_history=True,
-        run_shape=None, corrupt_download=False, record_extra=None,
+        run_shape=None, original_run_shape=None, corrupt_download=False, record_extra=None,
         record_json=None, recovery_applied_commit=None,
     ):
         """End to end through prove_preview, downloads and all.
@@ -1588,6 +1788,19 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
           wrong shape had no test at all before #1213 round 8: this helper always
           produced a perfect run and no other test reached `prove_preview` with a
           working evidence chain.
+        * `original_run_shape` -- the same, for the ORIGINAL APPLY run. The
+          round-8 helper could set only `original_conclusion`, so three of that
+          loop's four keys -- `status`, `event` and `path` -- could be deleted
+          from `expected`, or made tautologies, with the whole suite still green
+          (#1213 round 9, finding 1). Without an enforceable `path` and `event`
+          the gate accepts a run of some OTHER workflow, dispatched or pushed,
+          that never executed the preview job at all: an attacker's second
+          workflow can write a ledger delta and a content manifest matching exact
+          main from a commit already on the authoring pull request, so `head_sha`,
+          the artifact-name commit and the producer pin all pass honestly. A
+          per-guard mutation sweep cannot see this -- replacing the whole `if`
+          with `if False:` still fails the conclusion case -- so each key needs
+          its own raising test.
         * `corrupt_download` -- the downloaded recovery artifact's bytes no longer
           hash to the pinned digest. The API-reported digest is checked in a
           separate line that IS tested; this is the second, post-download check.
@@ -1668,7 +1881,8 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 def api(endpoint):
                     if endpoint == f"repos/u2giants/shared-db/actions/runs/{original_run}":
                         run = {"status": "completed", "conclusion": original_conclusion,
-                               "event": "workflow_dispatch", "path": PREVIEW_WORKFLOW}
+                               "event": "workflow_dispatch", "path": PREVIEW_WORKFLOW,
+                               **(original_run_shape or {})}
                         if original_head is not None:
                             run["head_sha"] = original_head
                         return run
@@ -1724,7 +1938,14 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                         return {"status": "identical", "behind_by": 0}
                     return {}
 
+                # WHAT WAS DOWNLOADED, so a test can assert a refusal happened
+                # BEFORE the original run's artifact was ever fetched. A guard
+                # that only refuses after reading the attacker's bytes has
+                # already trusted them once.
+                self.downloaded = []
+
                 def downloader(artifact_id, dest):
+                    self.downloaded.append(artifact_id)
                     source = original_path if artifact_id == 99 else recovery_path
                     raw = source.read_bytes()
                     if corrupt_download and artifact_id != 99:
@@ -1852,6 +2073,54 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
     def test_original_run_must_have_succeeded(self):
         with self.assertRaisesRegex(RiskGateError, "has wrong conclusion"):
             self.run_historical_prove_preview(original_conclusion="failure")
+
+    def test_the_original_apply_runs_own_shape_is_checked_on_every_key(self):
+        """#1213 review, round 9, finding 1 -- the TENTH instance, and the first
+        one that lives INSIDE a guard rather than being a whole guard.
+
+        `prove_historical_original_apply_runs` opens with a four-key loop
+        requiring the named original apply run to be a completed, successful,
+        `workflow_dispatch` run of the PREVIEW WORKFLOW. Only `conclusion` had a
+        test (`test_original_run_must_have_succeeded`, above): the helper had no
+        way to vary `status`, `event` or `path`, so those three keys could be
+        deleted from `expected`, or rewritten as tautologies, and all 664 tests
+        stayed green.
+
+        WHY THE MUTATION SWEEP SCORED THIS GUARD AS TESTED. The sweep replaces a
+        whole raising `if` with `if False:`. Doing that here reddens the
+        conclusion test, so the loop counted as covered while three quarters of
+        it was not. The sweep's granularity is the guard; this defect is one
+        condition inside one. That makes the sweep's 41 survivors a FLOOR, not a
+        ceiling.
+
+        THE FORGE THAT `path` AND `event` ARE THE ONLY THING STOPPING. Author a
+        SECOND workflow -- not `shared-supabase-migrations.yml` -- that writes
+        `preview-ledger-before.txt` and `preview-ledger-after.txt` showing the
+        version appearing, plus a `migration-content-manifest.json` whose digest
+        equals exact main, and no `historical-preview-source.json`. Run it, by
+        `push` or by a different `workflow_dispatch`, from a commit ALREADY on the
+        authoring pull request. Every other check then passes honestly: `head_sha`
+        and the artifact-name commit are both PR commits, and the producer pin
+        compares the REAL preview workflow file at that commit, which the attacker
+        never touched. Name that run in `originalApplyRuns` and production applies
+        bytes preview's genuine job never ran.
+
+        The refusal must also come BEFORE the download, or the gate has already
+        read the attacker's artifact once before deciding not to trust it.
+        """
+        for key, value in (
+            ("status", "in_progress"), ("conclusion", "failure"),
+            ("event", "push"), ("path", ".github/workflows/something-else.yml"),
+        ):
+            with self.subTest(key=key), self.assertRaisesRegex(
+                RiskGateError, f"original apply run 555 for .* has wrong {key}"
+            ):
+                self.run_historical_prove_preview(original_run_shape={key: value})
+            self.assertNotIn(
+                99, self.downloaded,
+                f"the original apply run's artifact was downloaded despite a wrong "
+                f"{key}; the shape check must refuse before any of its bytes are read",
+            )
 
     def test_forged_dispatch_ref_cannot_fabricate_a_historical_original_run(self):
         """#1213 review, round 5, finding 1. The exact twin of
