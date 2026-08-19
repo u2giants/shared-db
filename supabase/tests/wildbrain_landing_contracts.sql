@@ -466,15 +466,34 @@ begin
     raise exception 'D1 FAILED: expected exactly 1 asset-character row after a repeat insert, found %', v_n;
   end if;
 
-  -- D2. Two guides may not share a normalized label inside one capture.
+  -- D2. THE CASE-VARIANT COLLAPSE. This is the licensor defect the schema exists to
+  -- absorb: the same guide typed with different capitalisation. Because guide_key is
+  -- pinned to the normalization of the label, a case variant derives the SAME key and
+  -- collides on the primary key -- which is the deduplication actually happening, not a
+  -- rule written down somewhere and hoped for.
+  --
+  -- NOTE FOR ANYONE EXTENDING THIS: the unique constraint on normalized_guide_label
+  -- cannot be reached by a row that also satisfies the key-derivation check -- equal
+  -- normalized labels always derive equal keys, so the primary key fires first. Its value
+  -- is as a second, independent lock, so its existence is asserted from the catalog below
+  -- rather than provoked with a row that could never legally exist.
   begin
     insert into plm.wildbrain_guide
       (capture_id, guide_key, guide_label, normalized_guide_label, rule_version, raw)
-    values (v_cap, 'zztest guide alpha 2', 'ZZTEST Guide Alpha Two', 'zztest guide alpha',
+    values (v_cap, 'zztest guide alpha', 'ZZTEST GUIDE ALPHA', 'ZZTEST Guide Alpha',
             'zztest-rules-v1', '{}'::jsonb);
   exception when unique_violation then
     v_dup_guide_label_rejected := true;
   end;
+
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'plm.wildbrain_guide'::regclass
+       and conname = 'wildbrain_guide_normalized_label_uk'
+       and contype = 'u'
+  ) then
+    raise exception 'D2 FAILED: the unique constraint on normalized_guide_label is missing';
+  end if;
 
   -- D3. THE DEDUPLICATION RULE ITSELF. guide_key must be the case-folded,
   -- whitespace-collapsed, quote-stripped form of its own normalized label. A loader with
@@ -532,7 +551,7 @@ begin
     v_dup_asset_uuid_rejected := true;
   end;
 
-  if not v_dup_guide_label_rejected then raise exception 'D2 FAILED: two guides shared a normalized label'; end if;
+  if not v_dup_guide_label_rejected then raise exception 'D2 FAILED: a case variant of an existing guide landed as a SECOND guide instead of collapsing'; end if;
   if not v_bad_guide_key_rejected then raise exception 'D3 FAILED: a guide_key that is not the normalization of its label was accepted'; end if;
   if not v_zero_alias_rejected then raise exception 'D4 FAILED: a guide alias with asset_count 0 was accepted'; end if;
   if not v_unknown_alias_rejected then raise exception 'D5 FAILED: an asset-guide row cited an unknown alias'; end if;
