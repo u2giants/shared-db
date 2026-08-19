@@ -1,7 +1,7 @@
 -- =====================================================================================
 -- WildBrain DAM -- source landing schema (release 1).
 --
--- Migration: 20260819010916_wildbrain_dam_source_landing.sql
+-- Migration: 20260819014639_wildbrain_dam_source_landing.sql
 -- Issue:     u2giants/shared-db #1197
 -- Claim:     u2giants/shared-db #1209 -- 11 tables + 2 functions. Nothing else.
 -- Ruling:    AGENTS.md 6.13 ruling 1 -- PER-LICENSOR landing tables. This migration does

@@ -1,7 +1,7 @@
 -- =====================================================================================
 -- WildBrain DAM landing -- contract tests.
 --
--- Covers migration 20260819010916_wildbrain_dam_source_landing.sql
+-- Covers migration 20260819014639_wildbrain_dam_source_landing.sql
 -- Issue u2giants/shared-db #1197, claim #1209.
 --
 -- EVERY VALUE IN THIS FILE IS INVENTED.
