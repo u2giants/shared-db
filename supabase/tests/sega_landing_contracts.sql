@@ -1,5 +1,5 @@
 -- =====================================================================================
--- Sega DSI landing contract tests -- migration 20260819010933, issue #1196, claim #1210.
+-- Sega DSI landing contract tests -- migration 20260819015333, issue #1196, claim #1210.
 --
 -- HOW TO RUN
 --   Against a throwaway or preview database, as the migration owner:

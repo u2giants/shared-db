@@ -1,9 +1,9 @@
 -- =====================================================================================
 -- Sega DSI -- source landing schema (release 1).
 --
--- Migration: 20260819010933_sega_dsi_source_landing.sql
+-- Migration: 20260819015333_sega_dsi_source_landing.sql
 -- Issue:     u2giants/shared-db #1196 (schema contract)
--- Claim:     u2giants/shared-db #1210, reserved version 20260819010933
+-- Claim:     u2giants/shared-db #1210, reserved version 20260819015333
 --
 -- SCHEMA ONLY. THIS MIGRATION LOADS NO DATA AND CONTAINS NO SEGA VALUES.
 -- -------------------------------------------------------------------------------------
