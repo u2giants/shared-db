@@ -1169,49 +1169,243 @@ comment on function plm.finalize_sega_capture(uuid, jsonb, jsonb) is
 --                       PLM app access, administrator, sales or licensing.
 --   anon             -> nothing, revoked explicitly.
 -- =====================================================================================
-do $$
-declare
-  t text;
-  tables text[] := array[
-    'sega_capture','sega_property','sega_property_licensor','sega_catalog',
-    'sega_style_guide_candidate','sega_character_candidate','sega_character_evidence',
-    'sega_asset','sega_tag','sega_asset_catalog','sega_asset_tag','sega_asset_property'
-  ];
-begin
-  foreach t in array tables loop
-    -- ENABLE, deliberately NOT FORCE. FORCE would apply RLS to the table owner too, which
-    -- locks the migration runner and every contract-test session out of its own tables
-    -- for no security gain -- service_role is the identity being constrained and it is
-    -- constrained by the GRANTS, not by RLS.
-    execute format('alter table plm.%I enable row level security', t);
-    execute format('revoke all on plm.%I from public', t);
-    execute format('revoke all on plm.%I from anon', t);
-    execute format('revoke all on plm.%I from authenticated', t);
+-- Every statement below is written out in full, one per table. No dynamic SQL: an
+-- auditor -- and the migration guard that verifies a migration only touches objects its
+-- author claimed -- must be able to read exactly which table receives which privilege
+-- without executing anything.
+--
+-- ENABLE, deliberately NOT FORCE. FORCE would apply RLS to the table owner too, which
+-- locks the migration runner and every contract-test session out of its own tables for
+-- no security gain -- service_role is the identity being constrained, and it is
+-- constrained by the GRANTS below, not by RLS.
 
-    if t = 'sega_capture' then
-      execute format('grant select on plm.%I to service_role', t);
-    else
-      execute format('grant select, insert on plm.%I to service_role', t);
-    end if;
-    execute format('grant select on plm.%I to authenticated', t);
+-- plm.sega_capture
+alter table plm.sega_capture enable row level security;
+revoke all on plm.sega_capture from public;
+revoke all on plm.sega_capture from anon;
+revoke all on plm.sega_capture from authenticated;
+grant select on plm.sega_capture to service_role;
+grant select on plm.sega_capture to authenticated;
 
-    -- One permissive policy so a future BYPASSRLS-less service identity can still read.
-    -- It grants nothing on its own: without the GRANT above, SELECT still fails.
-    execute format(
-      'create policy %I on plm.%I for select to service_role using (true)',
-      t || '_service_read', t);
+-- One permissive policy so a future BYPASSRLS-less service identity can still read.
+-- It grants nothing on its own: without the GRANT above, SELECT still fails.
+create policy sega_capture_service_read on plm.sega_capture
+  for select to service_role using (true);
 
-    -- The established plm read predicate, identical to policy plm_read in
-    -- 20260621151155_api_rls_realtime.sql. Licensed source material is readable by the
-    -- same population that already reads plm, and by nobody else.
-    execute format(
-      'create policy %I on plm.%I for select to authenticated using ('
-      || 'app.has_app_access(''plm'') or app.has_role(''administrator'') '
-      || 'or app.has_any_role(array[''sales'', ''licensing'']::app.app_role[]))',
-      t || '_plm_read', t);
-  end loop;
-end;
-$$;
+-- The established plm read predicate, identical to policy plm_read in
+-- 20260621151155_api_rls_realtime.sql. Licensed source material is readable by the
+-- same population that already reads plm, and by nobody else.
+create policy sega_capture_plm_read on plm.sega_capture
+  for select to authenticated using (app.has_app_access('plm') or app.has_role('administrator') or app.has_any_role(array['sales', 'licensing']::app.app_role[]));
+
+-- plm.sega_property
+alter table plm.sega_property enable row level security;
+revoke all on plm.sega_property from public;
+revoke all on plm.sega_property from anon;
+revoke all on plm.sega_property from authenticated;
+grant select, insert on plm.sega_property to service_role;
+grant select on plm.sega_property to authenticated;
+
+-- One permissive policy so a future BYPASSRLS-less service identity can still read.
+-- It grants nothing on its own: without the GRANT above, SELECT still fails.
+create policy sega_property_service_read on plm.sega_property
+  for select to service_role using (true);
+
+-- The established plm read predicate, identical to policy plm_read in
+-- 20260621151155_api_rls_realtime.sql. Licensed source material is readable by the
+-- same population that already reads plm, and by nobody else.
+create policy sega_property_plm_read on plm.sega_property
+  for select to authenticated using (app.has_app_access('plm') or app.has_role('administrator') or app.has_any_role(array['sales', 'licensing']::app.app_role[]));
+
+-- plm.sega_property_licensor
+alter table plm.sega_property_licensor enable row level security;
+revoke all on plm.sega_property_licensor from public;
+revoke all on plm.sega_property_licensor from anon;
+revoke all on plm.sega_property_licensor from authenticated;
+grant select, insert on plm.sega_property_licensor to service_role;
+grant select on plm.sega_property_licensor to authenticated;
+
+-- One permissive policy so a future BYPASSRLS-less service identity can still read.
+-- It grants nothing on its own: without the GRANT above, SELECT still fails.
+create policy sega_property_licensor_service_read on plm.sega_property_licensor
+  for select to service_role using (true);
+
+-- The established plm read predicate, identical to policy plm_read in
+-- 20260621151155_api_rls_realtime.sql. Licensed source material is readable by the
+-- same population that already reads plm, and by nobody else.
+create policy sega_property_licensor_plm_read on plm.sega_property_licensor
+  for select to authenticated using (app.has_app_access('plm') or app.has_role('administrator') or app.has_any_role(array['sales', 'licensing']::app.app_role[]));
+
+-- plm.sega_catalog
+alter table plm.sega_catalog enable row level security;
+revoke all on plm.sega_catalog from public;
+revoke all on plm.sega_catalog from anon;
+revoke all on plm.sega_catalog from authenticated;
+grant select, insert on plm.sega_catalog to service_role;
+grant select on plm.sega_catalog to authenticated;
+
+-- One permissive policy so a future BYPASSRLS-less service identity can still read.
+-- It grants nothing on its own: without the GRANT above, SELECT still fails.
+create policy sega_catalog_service_read on plm.sega_catalog
+  for select to service_role using (true);
+
+-- The established plm read predicate, identical to policy plm_read in
+-- 20260621151155_api_rls_realtime.sql. Licensed source material is readable by the
+-- same population that already reads plm, and by nobody else.
+create policy sega_catalog_plm_read on plm.sega_catalog
+  for select to authenticated using (app.has_app_access('plm') or app.has_role('administrator') or app.has_any_role(array['sales', 'licensing']::app.app_role[]));
+
+-- plm.sega_style_guide_candidate
+alter table plm.sega_style_guide_candidate enable row level security;
+revoke all on plm.sega_style_guide_candidate from public;
+revoke all on plm.sega_style_guide_candidate from anon;
+revoke all on plm.sega_style_guide_candidate from authenticated;
+grant select, insert on plm.sega_style_guide_candidate to service_role;
+grant select on plm.sega_style_guide_candidate to authenticated;
+
+-- One permissive policy so a future BYPASSRLS-less service identity can still read.
+-- It grants nothing on its own: without the GRANT above, SELECT still fails.
+create policy sega_style_guide_candidate_service_read on plm.sega_style_guide_candidate
+  for select to service_role using (true);
+
+-- The established plm read predicate, identical to policy plm_read in
+-- 20260621151155_api_rls_realtime.sql. Licensed source material is readable by the
+-- same population that already reads plm, and by nobody else.
+create policy sega_style_guide_candidate_plm_read on plm.sega_style_guide_candidate
+  for select to authenticated using (app.has_app_access('plm') or app.has_role('administrator') or app.has_any_role(array['sales', 'licensing']::app.app_role[]));
+
+-- plm.sega_character_candidate
+alter table plm.sega_character_candidate enable row level security;
+revoke all on plm.sega_character_candidate from public;
+revoke all on plm.sega_character_candidate from anon;
+revoke all on plm.sega_character_candidate from authenticated;
+grant select, insert on plm.sega_character_candidate to service_role;
+grant select on plm.sega_character_candidate to authenticated;
+
+-- One permissive policy so a future BYPASSRLS-less service identity can still read.
+-- It grants nothing on its own: without the GRANT above, SELECT still fails.
+create policy sega_character_candidate_service_read on plm.sega_character_candidate
+  for select to service_role using (true);
+
+-- The established plm read predicate, identical to policy plm_read in
+-- 20260621151155_api_rls_realtime.sql. Licensed source material is readable by the
+-- same population that already reads plm, and by nobody else.
+create policy sega_character_candidate_plm_read on plm.sega_character_candidate
+  for select to authenticated using (app.has_app_access('plm') or app.has_role('administrator') or app.has_any_role(array['sales', 'licensing']::app.app_role[]));
+
+-- plm.sega_character_evidence
+alter table plm.sega_character_evidence enable row level security;
+revoke all on plm.sega_character_evidence from public;
+revoke all on plm.sega_character_evidence from anon;
+revoke all on plm.sega_character_evidence from authenticated;
+grant select, insert on plm.sega_character_evidence to service_role;
+grant select on plm.sega_character_evidence to authenticated;
+
+-- One permissive policy so a future BYPASSRLS-less service identity can still read.
+-- It grants nothing on its own: without the GRANT above, SELECT still fails.
+create policy sega_character_evidence_service_read on plm.sega_character_evidence
+  for select to service_role using (true);
+
+-- The established plm read predicate, identical to policy plm_read in
+-- 20260621151155_api_rls_realtime.sql. Licensed source material is readable by the
+-- same population that already reads plm, and by nobody else.
+create policy sega_character_evidence_plm_read on plm.sega_character_evidence
+  for select to authenticated using (app.has_app_access('plm') or app.has_role('administrator') or app.has_any_role(array['sales', 'licensing']::app.app_role[]));
+
+-- plm.sega_asset
+alter table plm.sega_asset enable row level security;
+revoke all on plm.sega_asset from public;
+revoke all on plm.sega_asset from anon;
+revoke all on plm.sega_asset from authenticated;
+grant select, insert on plm.sega_asset to service_role;
+grant select on plm.sega_asset to authenticated;
+
+-- One permissive policy so a future BYPASSRLS-less service identity can still read.
+-- It grants nothing on its own: without the GRANT above, SELECT still fails.
+create policy sega_asset_service_read on plm.sega_asset
+  for select to service_role using (true);
+
+-- The established plm read predicate, identical to policy plm_read in
+-- 20260621151155_api_rls_realtime.sql. Licensed source material is readable by the
+-- same population that already reads plm, and by nobody else.
+create policy sega_asset_plm_read on plm.sega_asset
+  for select to authenticated using (app.has_app_access('plm') or app.has_role('administrator') or app.has_any_role(array['sales', 'licensing']::app.app_role[]));
+
+-- plm.sega_tag
+alter table plm.sega_tag enable row level security;
+revoke all on plm.sega_tag from public;
+revoke all on plm.sega_tag from anon;
+revoke all on plm.sega_tag from authenticated;
+grant select, insert on plm.sega_tag to service_role;
+grant select on plm.sega_tag to authenticated;
+
+-- One permissive policy so a future BYPASSRLS-less service identity can still read.
+-- It grants nothing on its own: without the GRANT above, SELECT still fails.
+create policy sega_tag_service_read on plm.sega_tag
+  for select to service_role using (true);
+
+-- The established plm read predicate, identical to policy plm_read in
+-- 20260621151155_api_rls_realtime.sql. Licensed source material is readable by the
+-- same population that already reads plm, and by nobody else.
+create policy sega_tag_plm_read on plm.sega_tag
+  for select to authenticated using (app.has_app_access('plm') or app.has_role('administrator') or app.has_any_role(array['sales', 'licensing']::app.app_role[]));
+
+-- plm.sega_asset_catalog
+alter table plm.sega_asset_catalog enable row level security;
+revoke all on plm.sega_asset_catalog from public;
+revoke all on plm.sega_asset_catalog from anon;
+revoke all on plm.sega_asset_catalog from authenticated;
+grant select, insert on plm.sega_asset_catalog to service_role;
+grant select on plm.sega_asset_catalog to authenticated;
+
+-- One permissive policy so a future BYPASSRLS-less service identity can still read.
+-- It grants nothing on its own: without the GRANT above, SELECT still fails.
+create policy sega_asset_catalog_service_read on plm.sega_asset_catalog
+  for select to service_role using (true);
+
+-- The established plm read predicate, identical to policy plm_read in
+-- 20260621151155_api_rls_realtime.sql. Licensed source material is readable by the
+-- same population that already reads plm, and by nobody else.
+create policy sega_asset_catalog_plm_read on plm.sega_asset_catalog
+  for select to authenticated using (app.has_app_access('plm') or app.has_role('administrator') or app.has_any_role(array['sales', 'licensing']::app.app_role[]));
+
+-- plm.sega_asset_tag
+alter table plm.sega_asset_tag enable row level security;
+revoke all on plm.sega_asset_tag from public;
+revoke all on plm.sega_asset_tag from anon;
+revoke all on plm.sega_asset_tag from authenticated;
+grant select, insert on plm.sega_asset_tag to service_role;
+grant select on plm.sega_asset_tag to authenticated;
+
+-- One permissive policy so a future BYPASSRLS-less service identity can still read.
+-- It grants nothing on its own: without the GRANT above, SELECT still fails.
+create policy sega_asset_tag_service_read on plm.sega_asset_tag
+  for select to service_role using (true);
+
+-- The established plm read predicate, identical to policy plm_read in
+-- 20260621151155_api_rls_realtime.sql. Licensed source material is readable by the
+-- same population that already reads plm, and by nobody else.
+create policy sega_asset_tag_plm_read on plm.sega_asset_tag
+  for select to authenticated using (app.has_app_access('plm') or app.has_role('administrator') or app.has_any_role(array['sales', 'licensing']::app.app_role[]));
+
+-- plm.sega_asset_property
+alter table plm.sega_asset_property enable row level security;
+revoke all on plm.sega_asset_property from public;
+revoke all on plm.sega_asset_property from anon;
+revoke all on plm.sega_asset_property from authenticated;
+grant select, insert on plm.sega_asset_property to service_role;
+grant select on plm.sega_asset_property to authenticated;
+
+-- One permissive policy so a future BYPASSRLS-less service identity can still read.
+-- It grants nothing on its own: without the GRANT above, SELECT still fails.
+create policy sega_asset_property_service_read on plm.sega_asset_property
+  for select to service_role using (true);
+
+-- The established plm read predicate, identical to policy plm_read in
+-- 20260621151155_api_rls_realtime.sql. Licensed source material is readable by the
+-- same population that already reads plm, and by nobody else.
+create policy sega_asset_property_plm_read on plm.sega_asset_property
+  for select to authenticated using (app.has_app_access('plm') or app.has_role('administrator') or app.has_any_role(array['sales', 'licensing']::app.app_role[]));
 
 -- -------------------------------------------------------------------------------------
 -- THE REVOKES THAT ACTUALLY DELIVER IMMUTABILITY.
@@ -1226,28 +1420,57 @@ $$;
 -- REFERENCES and TRIGGER are left in place. REFERENCES only allows creating a foreign key
 -- that points AT these tables, which writes nothing, and no user trigger exists on them.
 -- -------------------------------------------------------------------------------------
-do $$
-declare
-  t text;
-  tables text[] := array[
-    'sega_capture','sega_property','sega_property_licensor','sega_catalog',
-    'sega_style_guide_candidate','sega_character_candidate','sega_character_evidence',
-    'sega_asset','sega_tag','sega_asset_catalog','sega_asset_tag','sega_asset_property'
-  ];
-begin
-  foreach t in array tables loop
-    execute format('revoke update, delete, truncate on plm.%I from service_role', t);
-    execute format('revoke insert on plm.%I from authenticated', t);
-    execute format('revoke update, delete, truncate on plm.%I from authenticated', t);
-    if t = 'sega_capture' then
-      -- Capture rows are created and transitioned ONLY by plm.begin_sega_capture and
-      -- plm.finalize_sega_capture. A direct INSERT here would let a loader mint a capture
-      -- that skipped every validation in begin_*.
-      execute format('revoke insert on plm.%I from service_role', t);
-    end if;
-  end loop;
-end;
-$$;
+revoke update, delete, truncate on plm.sega_capture from service_role;
+revoke insert on plm.sega_capture from authenticated;
+revoke update, delete, truncate on plm.sega_capture from authenticated;
+-- Capture rows are created and transitioned ONLY by plm.begin_sega_capture and
+-- plm.finalize_sega_capture. A direct INSERT here would let a loader mint a capture
+-- that skipped every validation in begin_*.
+revoke insert on plm.sega_capture from service_role;
+
+revoke update, delete, truncate on plm.sega_property from service_role;
+revoke insert on plm.sega_property from authenticated;
+revoke update, delete, truncate on plm.sega_property from authenticated;
+
+revoke update, delete, truncate on plm.sega_property_licensor from service_role;
+revoke insert on plm.sega_property_licensor from authenticated;
+revoke update, delete, truncate on plm.sega_property_licensor from authenticated;
+
+revoke update, delete, truncate on plm.sega_catalog from service_role;
+revoke insert on plm.sega_catalog from authenticated;
+revoke update, delete, truncate on plm.sega_catalog from authenticated;
+
+revoke update, delete, truncate on plm.sega_style_guide_candidate from service_role;
+revoke insert on plm.sega_style_guide_candidate from authenticated;
+revoke update, delete, truncate on plm.sega_style_guide_candidate from authenticated;
+
+revoke update, delete, truncate on plm.sega_character_candidate from service_role;
+revoke insert on plm.sega_character_candidate from authenticated;
+revoke update, delete, truncate on plm.sega_character_candidate from authenticated;
+
+revoke update, delete, truncate on plm.sega_character_evidence from service_role;
+revoke insert on plm.sega_character_evidence from authenticated;
+revoke update, delete, truncate on plm.sega_character_evidence from authenticated;
+
+revoke update, delete, truncate on plm.sega_asset from service_role;
+revoke insert on plm.sega_asset from authenticated;
+revoke update, delete, truncate on plm.sega_asset from authenticated;
+
+revoke update, delete, truncate on plm.sega_tag from service_role;
+revoke insert on plm.sega_tag from authenticated;
+revoke update, delete, truncate on plm.sega_tag from authenticated;
+
+revoke update, delete, truncate on plm.sega_asset_catalog from service_role;
+revoke insert on plm.sega_asset_catalog from authenticated;
+revoke update, delete, truncate on plm.sega_asset_catalog from authenticated;
+
+revoke update, delete, truncate on plm.sega_asset_tag from service_role;
+revoke insert on plm.sega_asset_tag from authenticated;
+revoke update, delete, truncate on plm.sega_asset_tag from authenticated;
+
+revoke update, delete, truncate on plm.sega_asset_property from service_role;
+revoke insert on plm.sega_asset_property from authenticated;
+revoke update, delete, truncate on plm.sega_asset_property from authenticated;
 
 revoke all on function plm.begin_sega_capture(
   text,text,text,text,text,timestamptz,jsonb,jsonb,text,boolean,boolean,boolean,boolean,text)
