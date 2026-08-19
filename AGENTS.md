@@ -869,10 +869,31 @@ four rules below are non-negotiable for any database change.
    forward is the historical-recovery lane, not a weakened guard.** Dispatch
    `target=preview`, `mode=apply` with `historical_preview_source_pr` (or
    `historical_preview_source_pr_map` for a batch authored across several pull
-   requests) plus `commit_sha=<current main tip>` and the same
-   `preview_allowlist`. That lane performs **no database write**. It proves the
-   named versions are already in preview's ledger and re-issues the evidence, so
-   the promotion can proceed on honest proof of what preview actually holds.
+   requests), **`historical_preview_original_run_map`**, plus
+   `commit_sha=<current main tip>` and the same `preview_allowlist`. That lane
+   performs **no database write**.
+
+   `historical_preview_original_run_map` is `version:runId` pairs naming the
+   preview run that **originally applied** each version, and it is **required**.
+   It is not bookkeeping: because a recovery run writes nothing, it can produce
+   no content manifest of its own, so the production gate goes and reads the
+   named run's manifest and byte-compares the digest it recorded against the file
+   on exact main. Find the run id in the Actions history — it is the successful
+   `apply` run whose artifact is `preview-migration-apply-<sha>` for that batch.
+
+   **What this lane proves, stated exactly.** The named versions are in preview's
+   ledger; a merged pull request added each of them; and the bytes preview
+   actually executed are the bytes on exact main. **What it does not prove:** that
+   preview's *catalog* matches its ledger (a half-applied or hand-repaired
+   preview looks identical from here), and it does not re-pin the original run's
+   producer code to today's main — an older commit necessarily carries older
+   producer files. It is as strong as the claim lane was on the day of that
+   rehearsal, and no stronger.
+
+   **If a version's file changed after its rehearsal, this lane will refuse it,
+   and that refusal is correct** — preview never ran the bytes you are asking
+   production to apply. The way forward there is a new migration, never a
+   recovery.
 
    If you find yourself editing a guard, an `if:` condition or an artifact name
    to make a re-run go through, stop. That is how the trap this section exists to

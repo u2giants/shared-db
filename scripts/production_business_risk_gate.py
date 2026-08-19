@@ -249,6 +249,14 @@ def prove_preview_migration_contents(
     dry = texts.get("preview-dry-run.txt", "")
     apply = texts.get("preview-apply.txt", "")
     if historical:
+        # A RECOVERY RUN WRITES NOTHING, so it has no bounded checkout and no
+        # content manifest of its own -- there is nothing here to byte-compare
+        # against. The byte binding for this lane is NOT waived; it is performed
+        # against the ORIGINAL apply run's manifest, in
+        # `prove_historical_original_apply_runs`, which prove_preview calls
+        # before this function. What remains here is what a recovery run CAN
+        # prove: the file is on exact main, the proof names it, and preview's
+        # ledger held it both before and after without moving.
         for version in allowlist:
             matches = list(repo_root.glob(f"supabase/migrations/{version}_*.sql"))
             if len(matches) != 1:
@@ -370,7 +378,7 @@ def prove_preview_migration_contents(
 #
 # Therefore: pin everything the preview job runs, plus the local modules those
 # entry points import, plus the config that routes which apply path is taken.
-# `test_preview_producer_paths_cover_every_executed_script` fails if a new
+# `test_preview_producer_paths_cover_the_whole_executed_closure` fails if a new
 # script is wired into the workflow and not added here, so this list cannot
 # silently fall behind.
 PREVIEW_PRODUCER_PATHS = (
@@ -421,8 +429,10 @@ PREVIEW_PRODUCER_PATHS = (
 #
 # The two directories below are the ONLY repository data surfaces the preview
 # job's executed closure touches. That premise is not asserted by comment:
-# `test_preview_runtime_data_dirs_are_the_only_data_surface` scans the closure
-# and the preview job text for any other top-level repository directory.
+# `test_preview_runtime_data_dirs_are_the_only_data_surface` scans the executed
+# closure's own source and the preview job text for a read of any OTHER
+# top-level repository directory, so a data file added at `policy/`, `types/` or
+# the repository root fails instead of quietly escaping both walks below.
 #
 # Every file under them must be either pinned in PREVIEW_PRODUCER_PATHS above,
 # or carry a written reason here for why it cannot shape preview evidence. The
@@ -435,11 +445,17 @@ PREVIEW_RUNTIME_DATA_EXEMPTIONS = {
         "The PAYLOAD, not a producer. It cannot be pinned to exact main and must "
         "not be: in the pre-merge claim lane the pull-request head legitimately "
         "carries migration files that do not exist on main yet, so a "
-        "blob-equality pin would refuse every honest rehearsal. It is proven by "
-        "a STRONGER mechanism instead -- prove_preview_migration_contents "
-        "byte-compares the applied migration text in the evidence manifest "
-        "against the repository copy, and source_pr_commits requires every "
-        "allowlisted version to have been added by the named source pull request."
+        "blob-equality pin would refuse every honest rehearsal. It is byte-bound "
+        "instead, on every lane and with no exception: on the claim and "
+        "merged-main lanes prove_preview_migration_contents compares the digest "
+        "in the promoted run's own content manifest against the repository copy, "
+        "and on the historical-recovery lane -- which writes nothing and so has "
+        "no manifest of its own -- prove_historical_original_apply_runs compares "
+        "the digest recorded by the run that ORIGINALLY applied each version. "
+        "source_pr_commits additionally requires every allowlisted version to "
+        "have been added by the named source pull request. The one limit, stated "
+        "plainly: the original run's producer code is not re-pinned to today's "
+        "main, because an older commit necessarily carries older producer files."
     ),
     "supabase/tests": (
         "Never read by the preview job. Its only readers are the separate "
@@ -527,6 +543,136 @@ def source_pr_commits(
     return {sha for sha in allowed if sha}
 
 
+def artifact_texts(artifact: dict, downloader: Callable[[int, Path], None]) -> dict[str, str]:
+    """Download one evidence artifact and read its files by BASENAME.
+
+    The upload preserves directory structure (`bounded-preview/supabase/...`),
+    so every reader in this file keys on the basename. Kept in one place so the
+    original-run reader and the promoted-run reader cannot drift apart.
+    """
+    with tempfile.TemporaryDirectory(prefix="production-risk-original-") as temp:
+        zip_path = Path(temp, "evidence.zip")
+        downloader(artifact["id"], zip_path)
+        with zipfile.ZipFile(zip_path) as archive:
+            return {
+                Path(name).name: archive.read(name).decode("utf-8", errors="strict")
+                for name in archive.namelist() if not name.endswith("/")
+            }
+
+
+def prove_historical_original_apply_runs(
+    *, record: dict, allowlist: list[str], repo_root: Path, main_sha: str,
+    api: Callable[[str], Any], downloader: Callable[[int, Path], None],
+) -> None:
+    """Byte-bind a historical recovery to the run that ACTUALLY applied the bytes.
+
+    THE HOLE THIS CLOSES. A recovery run performs no database write: it prints
+    main's filenames and re-reads preview's ledger. Left there, the lane proved
+    authorship and ledger presence and NOTHING about bytes -- so the sequence
+    "rehearse harmless bytes A, amend the file to destructive bytes B, merge,
+    recover proof, promote B" passed every check, at the last gate before a
+    production write on a database nine applications share.
+
+    The fix is not to trust the recovery run harder. It is to make the recovery
+    record NAME the preview run that originally applied each version, and then to
+    read that run's own evidence:
+
+      * it must be a completed, successful, dispatched run of this workflow;
+      * it must carry exactly one unexpired `preview-migration-apply-<sha>`
+        artifact -- the same cardinality rule the promoted run is held to, since
+        two would make its identity ambiguous;
+      * it must NOT itself be a recovery run, or a recovery could cite a
+        recovery forever and never touch a byte;
+      * preview's ledger must have GAINED the version across it, which is what
+        distinguishes a run that applied the migration from a run that merely
+        named it;
+      * the checkout it ran from must belong to the pull request the record says
+        authored the version, or to exact main's own history; and
+      * the digest THAT run recorded for the version must equal the bytes on
+        exact main.
+
+    WHAT IT DELIBERATELY DOES NOT DO. It does not pin the original run's producer
+    files to today's main. It cannot: an older commit necessarily carries older
+    producer files, so that rule would refuse every genuine recovery, including
+    the one this lane exists for. The binding is therefore as strong as the
+    ordinary claim lane was on the day of the original rehearsal -- a real,
+    checkable byte proof, not a proof that today's machinery produced it. That
+    limit is written down in PREVIEW_RUNTIME_DATA_EXEMPTIONS and in AGENTS.md
+    rather than glossed.
+
+    A version whose file changed after its rehearsal can no longer be recovered.
+    That is the correct outcome and the entire point: preview never ran those
+    bytes, so production must not be told that it did.
+    """
+    runs = record.get("originalApplyRuns")
+    if not isinstance(runs, dict) or not runs:
+        raise RiskGateError(
+            "historical preview recovery does not name the original apply run for each "
+            "version; a recovery is never accepted without a byte binding"
+        )
+    if sorted(runs) != sorted(allowlist):
+        raise RiskGateError(
+            "historical original-run map does not cover exactly the promoted allowlist"
+        )
+    source_map = record.get("sourcePrMap")
+    for version in allowlist:
+        run_id = runs.get(version)
+        if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id <= 0:
+            raise RiskGateError(f"historical original apply run for {version} is not a run id")
+        source_pr = source_map.get(version) if isinstance(source_map, dict) else record.get("sourcePr")
+        if not isinstance(source_pr, int) or isinstance(source_pr, bool):
+            raise RiskGateError(f"historical recovery names no source pull request for {version}")
+        try:
+            run = api(f"repos/{REPOSITORY}/actions/runs/{run_id}")
+        except Exception as exc:  # noqa: BLE001 - unreadable original run must fail closed
+            raise RiskGateError(f"original apply run {run_id} is unreadable") from exc
+        expected = {
+            "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
+            "path": PREVIEW_WORKFLOW,
+        }
+        for key, value in expected.items():
+            if not isinstance(run, dict) or run.get(key) != value:
+                raise RiskGateError(f"original apply run {run_id} for {version} has wrong {key}")
+        artifact, original_commit = preview_applied_commit(
+            api(f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"), run_id
+        )
+        if original_commit not in source_pr_commits(source_pr, "", main_sha, api):
+            prove_applied_commit_is_main_line(original_commit, main_sha, api)
+        texts = artifact_texts(artifact, downloader)
+        if texts.get("historical-preview-source.json"):
+            raise RiskGateError(
+                f"original apply run {run_id} for {version} is itself a historical recovery; "
+                "a recovery is only ever bound to a run that actually applied bytes"
+            )
+        with tempfile.TemporaryDirectory(prefix="production-risk-original-ledger-") as ledger_temp:
+            before_path = Path(ledger_temp, "before.txt")
+            after_path = Path(ledger_temp, "after.txt")
+            before_path.write_text(texts.get("preview-ledger-before.txt", ""), encoding="utf-8")
+            after_path.write_text(texts.get("preview-ledger-after.txt", ""), encoding="utf-8")
+            gained = parse_remote_versions(after_path) - parse_remote_versions(before_path)
+        if version not in gained:
+            raise RiskGateError(
+                f"original apply run {run_id} did not apply {version} to preview "
+                "(its ledger delta does not add that version)"
+            )
+        recorded = preview_content_manifest(texts).get(version)
+        if not isinstance(recorded, str) or not re.fullmatch(r"[0-9a-f]{64}", recorded):
+            raise RiskGateError(
+                f"original apply run {run_id} recorded no usable digest for {version}"
+            )
+        matches = list(repo_root.glob(f"supabase/migrations/{version}_*.sql"))
+        if len(matches) != 1:
+            raise RiskGateError(
+                f"allowlisted migration {version} is absent or ambiguous on exact main"
+            )
+        if recorded != manifest_sha256(matches[0]):
+            raise RiskGateError(
+                f"preview applied different bytes than exact main for {version}: original "
+                f"apply run {run_id} recorded {recorded}, exact main is "
+                f"{manifest_sha256(matches[0])}. Preview never ran the bytes being promoted."
+            )
+
+
 def prove_preview(
     *, run_id: int, digest: str, pr_head: str, main_sha: str, source_pr: int, allowlist: list[str],
     preview_project_ref: str, merge_commit_sha: str, api: Callable[[str], Any],
@@ -604,18 +750,47 @@ def prove_preview(
         # forged mapping cannot pass: every version must still be proven added by
         # the PR it names, and a version's file is only ever "added" once in
         # history.
-        source_map = record.get("sourcePrMap") if isinstance(record, dict) else None
+        if not isinstance(record, dict):
+            raise RiskGateError("historical preview source proof is unreadable")
+        source_map = record.get("sourcePrMap")
+        # THE ORIGINAL-RUN MAP IS AN INPUT TO THE RE-DERIVATION, not something
+        # the re-derivation can check -- the same is already true of the source
+        # map. Re-deriving it proves only that the record is internally
+        # consistent. What proves the map is honest is
+        # `prove_historical_original_apply_runs` below, which goes and reads each
+        # named run's own evidence. A record naming a run that did not apply the
+        # version, or that recorded different bytes, is refused there.
+        original_runs = record.get("originalApplyRuns")
+        if not isinstance(original_runs, dict) or not original_runs:
+            raise RiskGateError(
+                "historical preview recovery does not name the original apply run for each "
+                "version; a recovery is never accepted without a byte binding"
+            )
+        rendered_runs = ",".join(
+            f"{version}:{original_runs[version]}" for version in sorted(original_runs)
+        )
         if source_map is not None:
             if not isinstance(source_map, dict) or not source_map:
                 raise RiskGateError("historical preview source map is unreadable")
             rendered = ",".join(f"{version}:{source_map[version]}" for version in sorted(source_map))
             derived = verify_historical_preview(
-                None, main_sha, ",".join(allowlist), repo_root, api, source_map=rendered
+                None, main_sha, ",".join(allowlist), repo_root, api, source_map=rendered,
+                original_run_map=rendered_runs,
             )
         else:
-            derived = verify_historical_preview(source_pr, main_sha, ",".join(allowlist), repo_root, api)
+            derived = verify_historical_preview(
+                source_pr, main_sha, ",".join(allowlist), repo_root, api,
+                original_run_map=rendered_runs,
+            )
         if record != derived:
             raise RiskGateError("historical preview source proof does not match current governed evidence")
+        # THE BYTES. Without this the recovery lane proves authorship and ledger
+        # presence only, and "rehearse A, amend to B, merge, recover, promote B"
+        # walks through the last gate before a production write.
+        prove_historical_original_apply_runs(
+            record=record, allowlist=allowlist, repo_root=repo_root, main_sha=main_sha,
+            api=api, downloader=downloader,
+        )
         # The historical no-write path proves nothing by applying, so it keeps
         # its exact-main requirement unchanged -- now judged against the commit
         # the job really checked out rather than the workflow-file ref.

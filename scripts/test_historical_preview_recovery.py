@@ -1,7 +1,11 @@
 import subprocess, sys, tempfile, unittest
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).parent))
-from historical_preview_recovery import SCHEMA_V1, SCHEMA_V2, verify
+from historical_preview_recovery import SCHEMA_V3, SCHEMA_V4, verify
+
+# The original-run map is mandatory: without it a recovery waives byte
+# equality entirely. Every call below therefore supplies one.
+RUNS = {"20260813210000": "20260813210000:5001"}
 
 class Tests(unittest.TestCase):
     def test_source_pr_must_contain_every_exact_migration(self):
@@ -13,15 +17,16 @@ class Tests(unittest.TestCase):
             sha=subprocess.check_output(["git","rev-parse","HEAD"],cwd=root,text=True).strip()
             def api(path):
                 return {"merged":True,"merge_commit_sha":sha} if "/pulls/924" in path and "/files" not in path else [{"filename":"supabase/migrations/20260813210000_a.sql","status":"added"}]
-            result=verify(924,sha,"20260813210000",root,api)
+            result=verify(924,sha,"20260813210000",root,api,original_run_map=RUNS["20260813210000"])
             self.assertEqual(result["allowlist"],["20260813210000"])
-            self.assertEqual(result["schema"],SCHEMA_V1)
+            self.assertEqual(result["schema"],SCHEMA_V3)
             with self.assertRaisesRegex(ValueError,"did not author"):
-                verify(924,sha,"20260813210000,20260813220000",root,api)
+                verify(924,sha,"20260813210000,20260813220000",root,api,
+                       original_run_map=RUNS["20260813210000"] + ",20260813220000:5002")
             def edited_api(path):
                 return {"merged":True,"merge_commit_sha":sha} if "/files" not in path else [{"filename":"supabase/migrations/20260813210000_a.sql","status":"modified"}]
             with self.assertRaisesRegex(ValueError,"did not author"):
-                verify(924,sha,"20260813210000",root,edited_api)
+                verify(924,sha,"20260813210000",root,edited_api,original_run_map=RUNS["20260813210000"])
 
 
 class PerVersionSourceMapTests(unittest.TestCase):
@@ -63,6 +68,9 @@ class PerVersionSourceMapTests(unittest.TestCase):
             return [{"filename": f"supabase/migrations/{version}_release_a.sql", "status": "added"}]
         return api
 
+    def rendered_runs(self):
+        return ",".join(f"{v}:{9000 + i}" for i, v in enumerate(sorted(self.VERSIONS)))
+
     def rendered(self):
         return ",".join(f"{v}:{pr}" for v, pr in sorted(self.VERSIONS.items()))
 
@@ -70,8 +78,9 @@ class PerVersionSourceMapTests(unittest.TestCase):
         t, root, sha = self.build()
         with t:
             result = verify(None, sha, ",".join(sorted(self.VERSIONS)), root,
-                            self.api_for(sha), source_map=self.rendered())
-            self.assertEqual(result["schema"], SCHEMA_V2)
+                            self.api_for(sha), source_map=self.rendered(),
+                            original_run_map=self.rendered_runs())
+            self.assertEqual(result["schema"], SCHEMA_V4)
             self.assertEqual(result["sourcePrMap"], self.VERSIONS)
             self.assertEqual(result["allowlist"], sorted(self.VERSIONS))
             self.assertEqual(set(result["sourceMergeShas"]), set(self.VERSIONS))
@@ -83,7 +92,8 @@ class PerVersionSourceMapTests(unittest.TestCase):
             swapped = self.rendered().replace("20260814130000:984", "20260814130000:992")
             with self.assertRaisesRegex(ValueError, "did not author"):
                 verify(None, sha, ",".join(sorted(self.VERSIONS)), root,
-                       self.api_for(sha), source_map=swapped)
+                       self.api_for(sha), source_map=swapped,
+                       original_run_map=self.rendered_runs())
 
     def test_map_must_cover_the_batch_exactly(self):
         t, root, sha = self.build()
@@ -95,7 +105,8 @@ class PerVersionSourceMapTests(unittest.TestCase):
                 "duplicate version": self.rendered() + ",20260814130000:984",
             }.items():
                 with self.subTest(name=name), self.assertRaises(ValueError):
-                    verify(None, sha, allow, root, self.api_for(sha), source_map=bad)
+                    verify(None, sha, allow, root, self.api_for(sha), source_map=bad,
+                       original_run_map=self.rendered_runs())
 
     def test_malformed_map_entries_are_refused(self):
         t, root, sha = self.build()
@@ -104,7 +115,8 @@ class PerVersionSourceMapTests(unittest.TestCase):
             for bad in ("984", "20260814130000", "20260814130000:", ":984",
                         "2026081413000:984", "20260814130000:abc"):
                 with self.subTest(entry=bad), self.assertRaises(ValueError):
-                    verify(None, sha, allow, root, self.api_for(sha), source_map=bad)
+                    verify(None, sha, allow, root, self.api_for(sha), source_map=bad,
+                       original_run_map=self.rendered_runs())
 
     def test_unmerged_pull_request_in_the_map_is_refused(self):
         t, root, sha = self.build()
@@ -116,7 +128,8 @@ class PerVersionSourceMapTests(unittest.TestCase):
                 version = {v: k for k, v in self.VERSIONS.items()}.get(pr)
                 return [{"filename": f"supabase/migrations/{version}_release_a.sql", "status": "added"}]
             with self.assertRaisesRegex(ValueError, "not merged"):
-                verify(None, sha, ",".join(sorted(self.VERSIONS)), root, api, source_map=self.rendered())
+                verify(None, sha, ",".join(sorted(self.VERSIONS)), root, api, source_map=self.rendered(),
+                       original_run_map=self.rendered_runs())
 
     def test_pull_request_not_ancestor_of_exact_main_is_refused(self):
         """A PR merged onto some other line of history must not count."""
@@ -131,7 +144,8 @@ class PerVersionSourceMapTests(unittest.TestCase):
                 version = {v: k for k, v in self.VERSIONS.items()}.get(pr)
                 return [{"filename": f"supabase/migrations/{version}_release_a.sql", "status": "added"}]
             with self.assertRaises(subprocess.CalledProcessError):
-                verify(None, sha, ",".join(sorted(self.VERSIONS)), root, api, source_map=self.rendered())
+                verify(None, sha, ",".join(sorted(self.VERSIONS)), root, api, source_map=self.rendered(),
+                       original_run_map=self.rendered_runs())
 
     def test_a_modified_not_added_migration_is_refused(self):
         """Authorship means ADDED. A later edit must not masquerade as authorship."""
@@ -145,7 +159,8 @@ class PerVersionSourceMapTests(unittest.TestCase):
                 status = "modified" if pr == 1126 else "added"
                 return [{"filename": f"supabase/migrations/{version}_release_a.sql", "status": status}]
             with self.assertRaisesRegex(ValueError, "did not author"):
-                verify(None, sha, ",".join(sorted(self.VERSIONS)), root, api, source_map=self.rendered())
+                verify(None, sha, ",".join(sorted(self.VERSIONS)), root, api, source_map=self.rendered(),
+                       original_run_map=self.rendered_runs())
 
     def test_single_pr_form_still_works_and_keeps_its_schema(self):
         """v1 callers must be untouched, so existing evidence stays verifiable."""
@@ -156,8 +171,9 @@ class PerVersionSourceMapTests(unittest.TestCase):
                     return {"merged": True, "merge_commit_sha": sha}
                 return [{"filename": f"supabase/migrations/{v}_release_a.sql", "status": "added"}
                         for v in self.VERSIONS]
-            result = verify(984, sha, ",".join(sorted(self.VERSIONS)), root, api)
-            self.assertEqual(result["schema"], SCHEMA_V1)
+            result = verify(984, sha, ",".join(sorted(self.VERSIONS)), root, api,
+                            original_run_map=self.rendered_runs())
+            self.assertEqual(result["schema"], SCHEMA_V3)
             self.assertEqual(result["sourcePr"], 984)
             self.assertNotIn("sourcePrMap", result)
 

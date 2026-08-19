@@ -169,7 +169,11 @@ def verify(
             f"not the promoted allowlist {list(allowlist)!r}"
         )
     if record.get("rehearsalMode") == "merged-main-rehearsal":
-        if not isinstance(source_pr, int) or not isinstance(merge_commit_sha, str)                 or not COMMIT_RE.match(merge_commit_sha.strip().lower()):
+        if (
+            not isinstance(source_pr, int)
+            or not isinstance(merge_commit_sha, str)
+            or not COMMIT_RE.match(merge_commit_sha.strip().lower())
+        ):
             raise InstanceBindingError(
                 "the promotion pull request and its merge commit were not supplied to the "
                 "production gate; a merged-main rehearsal is never accepted unbound"

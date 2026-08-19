@@ -833,6 +833,135 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             "reader can check.",
         )
 
+    @staticmethod
+    def repository_paths_named_in(text, repo_root):
+        """Repository files a body names, in every spelling the workflow uses.
+
+        THREE SPELLINGS, not one. The first version of this scanner matched only
+        a bare relative path, so `$GITHUB_WORKSPACE/types/database.types.ts`,
+        `./config/x.json` and a slash-less root file all slipped past it -- and a
+        mutation proving the scanner "bites" only bites in the one spelling it
+        happens to use. The runner-temp prefixes must still NOT match: a copy
+        under `$RUNNER_TEMP` is not the checkout.
+        """
+        found = set()
+        # 1. explicit workspace-rooted reads, which is how the heredocs spell it.
+        for match in re.findall(
+            r"\$(?:GITHUB_WORKSPACE|\{GITHUB_WORKSPACE\})/([A-Za-z0-9_.\-/]+)", text
+        ):
+            found.add(match.rstrip("."))
+        # 2. `./`-prefixed and bare relative paths.
+        for match in re.findall(r"(?<![\w./$-])\.?/?((?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+)", text):
+            found.add(match.rstrip("."))
+        # 3. slash-less repository-ROOT files (`AGENTS.md`, a stray `seed.sql`).
+        for match in re.findall(r"(?<![\w./$-])([A-Za-z0-9_-]+\.[A-Za-z0-9]+)(?![\w/])", text):
+            found.add(match.rstrip("."))
+        return {rel for rel in found if (repo_root / rel).is_file()}
+
+    @staticmethod
+    def scannable_text(path, body):
+        """Reduce a body to the parts where a repository READ can actually appear.
+
+        Blunt comment-stripping is not enough, because these scripts explain
+        themselves at length: `AGENTS.md`, `HANDOFF.md` and `docs/*.md` appear in
+        docstrings AND inside prose sentences in error messages. Deleting every
+        string literal instead would delete the real reads too, since a path a
+        script opens IS a string literal.
+
+        So a Python body is tokenised and reduced to string literals whose WHOLE
+        content is a path -- `"config/atomic-migration-allowlist.json"` survives,
+        `"see docs/foo.md section 3"` does not, and a docstring never survives.
+        That is the shape a read has and the shape a citation does not.
+
+        A JavaScript body is treated the same way, for the same reason: a read
+        there is `path.join(root, 'AGENTS.md')` -- a whole-literal path -- while a
+        citation is a sentence that happens to contain one.
+        """
+        if path.suffix in {".mjs", ".js"}:
+            literals = re.findall(r"'([^'\n]*)'|\"([^\"\n]*)\"|`([^`\n]*)`", body)
+            return "\n".join(
+                value.strip()
+                for group in literals for value in group
+                if value and re.fullmatch(r"[A-Za-z0-9_.\-/]+", value.strip())
+            )
+        if path.suffix != ".py":
+            text = re.sub(r"/\*.*?\*/", " ", body, flags=re.S)
+            return ProductionBusinessRiskGateTests.uncommented(text)
+        import ast
+        literals = []
+        try:
+            tree = ast.parse(body)
+        except SyntaxError:  # pragma: no cover - a syntax error fails elsewhere
+            return ""
+        docstrings = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                first = (node.body or [None])[0]
+                if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
+                        and isinstance(first.value.value, str):
+                    docstrings.add(id(first.value))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                    and id(node) not in docstrings:
+                value = node.value.strip()
+                if re.fullmatch(r"[A-Za-z0-9_.\-/]+", value):
+                    literals.append(value)
+        return "\n".join(literals)
+
+    def test_preview_runtime_data_dirs_are_the_only_data_surface(self):
+        """PREVIEW_RUNTIME_DATA_DIRS must be exhaustive, not merely declared.
+
+        The two walks below it are each bounded by that tuple: the inward walk
+        only descends `supabase/` and `config/`, and the outward walk only sees
+        what the JOB TEXT spells out. So a data file at `policy/routing.json`, at
+        `types/`, or at the repository root, read at runtime by a PINNED producer
+        through a path the producer constructs, escapes both -- one directory
+        over from where `supabase/config.toml` was found.
+
+        This closes that gap from the third direction: it reads the executed
+        closure's own source, plus the job text, and fails on a reference to any
+        repository file outside the declared data surface (the closure's own
+        scripts and workflows excepted -- those are pinned by blob, not by
+        directory).
+        """
+        repo_root = Path(__file__).resolve().parents[1]
+        closure = self.executed_closure()
+        bodies = [self.uncommented(self.preview_job_text())]
+        for rel in sorted(closure):
+            path = repo_root / rel
+            if path.is_file():
+                bodies.append(self.scannable_text(path, path.read_text(encoding="utf-8", errors="ignore")))
+        # Code directories, not DATA directories: files here are pinned
+        # individually in PREVIEW_PRODUCER_PATHS and walked by the closure test,
+        # so they are not part of the data-surface question.
+        code_dirs = {"scripts", ".github"}
+        declared = set(PREVIEW_RUNTIME_DATA_DIRS) | code_dirs
+        undeclared = set()
+        for body in bodies:
+            for rel in self.repository_paths_named_in(body, repo_root):
+                top = rel.split("/")[0]
+                if "/" not in rel:
+                    undeclared.add(rel)          # a repository-ROOT data file
+                elif top not in declared:
+                    undeclared.add(rel)
+        # The scan must be matching something, or this test passes vacuously.
+        self.assertTrue(
+            any(
+                rel.startswith("supabase/") or rel.startswith("config/")
+                for body in bodies
+                for rel in self.repository_paths_named_in(body, repo_root)
+            ),
+            "the data-surface scan matched no declared-surface file; the pattern has rotted",
+        )
+        self.assertEqual(
+            sorted(undeclared - set(PREVIEW_PRODUCER_PATHS)), [],
+            "the preview job or a script it executes names these repository files, which "
+            f"lie OUTSIDE PREVIEW_RUNTIME_DATA_DIRS {PREVIEW_RUNTIME_DATA_DIRS}: "
+            f"{sorted(undeclared - set(PREVIEW_PRODUCER_PATHS))}. Either the tuple is no "
+            "longer exhaustive -- widen it and re-run the walks -- or the file must be "
+            "pinned in PREVIEW_PRODUCER_PATHS.",
+        )
+
     def test_preview_job_reads_no_repository_file_outside_the_pinned_surface(self):
         """The other direction: nothing the workflow names escapes the pin.
 
@@ -848,12 +977,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         # A repo-relative path is one NOT preceded by another path character, so
         # `$RUNNER_TEMP/bounded-preview/supabase/migrations` -- a runner-temp copy,
         # not the checkout -- is correctly not treated as a repository read.
-        pattern = re.compile(r"(?<![\w./$-])((?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+)")
-        referenced = set()
-        for match in pattern.findall(job):
-            rel = match.rstrip(".")
-            if (repo_root / rel).is_file():
-                referenced.add(rel)
+        referenced = self.repository_paths_named_in(job, repo_root)
         # Guard against the scan silently matching nothing, which would make this
         # test pass through an unasserted condition -- a defect in itself.
         self.assertIn(
@@ -861,13 +985,31 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             "the preview-job path scan matched nothing recognisable; the pattern "
             "has rotted and this test is no longer checking anything",
         )
+        # ONLY the payload is whitelisted. Whitelisting the other three
+        # exemptions would let a future step that DOES read one of them leave
+        # this test green while falsifying the written reason -- exactly the
+        # failure the registry exists to catch. Their premise is asserted
+        # instead, immediately below, the way PREVIEW_JOB_EXCLUSIONS already is.
         allowed = set(PREVIEW_PRODUCER_PATHS) | set(self.PREVIEW_JOB_EXCLUSIONS) | {PREVIEW_WORKFLOW}
-        for key in PREVIEW_RUNTIME_DATA_EXEMPTIONS:
-            allowed.add(key)
+        allowed.add("supabase/migrations")
+        for key, reason in PREVIEW_RUNTIME_DATA_EXEMPTIONS.items():
+            if "Never read by the preview job" not in reason:
+                continue
+            self.assertNotIn(
+                key, referenced,
+                f"{key} is exempted because it is 'Never read by the preview job', "
+                f"but the preview job now names it. Pin it in PREVIEW_PRODUCER_PATHS "
+                f"or rewrite the reason -- do not leave a reason the code contradicts.",
+            )
+            for rel in sorted(referenced):
+                self.assertFalse(
+                    rel.startswith(f"{key}/"),
+                    f"{key} is exempted as never read by the preview job, but the job "
+                    f"now names {rel} beneath it",
+                )
         escaped = sorted(
             rel for rel in referenced
-            if rel not in allowed
-            and not any(rel.startswith(f"{key}/") for key in PREVIEW_RUNTIME_DATA_EXEMPTIONS)
+            if rel not in allowed and not rel.startswith("supabase/migrations/")
         )
         self.assertEqual(
             escaped, [],
@@ -1077,13 +1219,197 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             real = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
             api = self.historical_v2_api(real, versions)
             # Honest map re-derives cleanly.
+            runs = "20260814130000:9001,20260814193402:9002"
             honest = verify_historical(None, real, ",".join(sorted(versions)), root, api,
-                                       source_map="20260814130000:984,20260814193402:992")
-            self.assertEqual(honest["schema"], "shared-db-historical-preview-source/v2")
+                                       source_map="20260814130000:984,20260814193402:992",
+                                       original_run_map=runs)
+            self.assertEqual(honest["schema"], "shared-db-historical-preview-source/v4")
             # Swapping the PRs is refused, so a forged record cannot re-derive.
             with self.assertRaisesRegex(ValueError, "did not author"):
                 verify_historical(None, real, ",".join(sorted(versions)), root, api,
-                                  source_map="20260814130000:992,20260814193402:984")
+                                  source_map="20260814130000:992,20260814193402:984",
+                                  original_run_map=runs)
+
+    # ---- the historical-recovery byte binding (review round 4, finding 1) ----
+    #
+    # A recovery run writes nothing, so for a long time this lane waived byte
+    # equality entirely: it proved authorship and ledger presence, and the
+    # sequence "rehearse harmless bytes A, amend the file to destructive bytes B,
+    # merge, recover proof, promote B" walked straight through the last gate
+    # before a production write. The record must now name the run that ORIGINALLY
+    # applied each version, and the gate reads that run's own manifest.
+
+    HISTORICAL_VERSION = "20260814130000"
+
+    def historical_repo(self, body="select 1;\n"):
+        """A real git repo, because the recovery proof shells out to git."""
+        temp = tempfile.TemporaryDirectory()
+        root = Path(temp.name)
+        (root / "supabase/migrations").mkdir(parents=True)
+        (root / f"supabase/migrations/{self.HISTORICAL_VERSION}_release_a.sql").write_bytes(
+            body.encode("utf-8")
+        )
+        subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(["git", "config", "user.email", "x@y"], cwd=root)
+        subprocess.run(["git", "config", "user.name", "x"], cwd=root)
+        subprocess.run(["git", "add", "."], cwd=root)
+        subprocess.run(["git", "commit", "-m", "x"], cwd=root, check=True, stdout=subprocess.DEVNULL)
+        main = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+        return temp, root, main
+
+    def historical_zip(self, path, *, main, record, version):
+        """The RECOVERY run's evidence: no write, so the ledger must not move."""
+        ledger = json.dumps([{"remote": "20260801000000"}, {"remote": version}])
+        payload = {
+            "preview-ledger-before.txt": ledger,
+            "preview-ledger-after.txt": ledger,
+            "preview-dry-run.txt": f"HISTORICAL PREVIEW PROOF\n{version}_release_a.sql\n",
+            "preview-apply.txt": f"HISTORICAL PREVIEW PROOF\n{version}_release_a.sql\n",
+            "historical-preview-source.json": json.dumps(record),
+            "preview-instance.json": json.dumps({
+                "schema": "shared-db-preview-instance-binding/v1",
+                "rehearsalMode": "historical-recovery", "appliedCommit": main,
+                "previewProjectRef": PREVIEW_PROJECT_REF, "runId": 7,
+                "allowlist": [version],
+            }),
+        }
+        with zipfile.ZipFile(path, "w") as archive:
+            for name, text in payload.items():
+                archive.writestr(name, text)
+        return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+    def original_run_zip(self, path, *, version, digest, applied=True, recovery=False):
+        """The ORIGINAL apply run's evidence: it really moved preview's ledger."""
+        before = json.dumps([{"remote": "20260801000000"}])
+        after = json.dumps(
+            [{"remote": "20260801000000"}] + ([{"remote": version}] if applied else [])
+        )
+        payload = {
+            "preview-ledger-before.txt": before,
+            "preview-ledger-after.txt": after,
+            "preview-dry-run.txt": f"Applying migration {version}_release_a.sql...",
+            "preview-apply.txt": f"Applying migration {version}_release_a.sql...",
+            "migration-content-manifest.json": json.dumps({version: digest}),
+        }
+        if recovery:
+            payload["historical-preview-source.json"] = json.dumps({"schema": "x"})
+        with zipfile.ZipFile(path, "w") as archive:
+            for name, text in payload.items():
+                archive.writestr(name, text)
+
+    def run_historical_prove_preview(
+        self, *, rehearsed_body="select 1;\n", main_body="select 1;\n",
+        original_run=555, record_runs="default", original_applied=True,
+        original_is_recovery=False, original_conclusion="success",
+    ):
+        """End to end through prove_preview, downloads and all.
+
+        `rehearsed_body` is what the ORIGINAL run recorded a digest for;
+        `main_body` is what exact main carries now. Equal in the honest case,
+        different in the attack.
+        """
+        version = self.HISTORICAL_VERSION
+        temp, root, main = self.historical_repo(main_body)
+        with temp:
+            rehearsed_digest = hashlib.sha256(rehearsed_body.encode("utf-8")).hexdigest()
+            record = {
+                "schema": "shared-db-historical-preview-source/v3",
+                "sourcePr": 984, "sourceMergeSha": main, "mainSha": main,
+                "allowlist": [version],
+                "originalApplyRuns": {version: original_run}
+                if record_runs == "default" else record_runs,
+            }
+            zips = tempfile.TemporaryDirectory()
+            with zips:
+                recovery_path = Path(zips.name, "recovery.zip")
+                artifact_digest = self.historical_zip(
+                    recovery_path, main=main, record=record, version=version
+                )
+                original_path = Path(zips.name, "original.zip")
+                self.original_run_zip(
+                    original_path, version=version, digest=rehearsed_digest,
+                    applied=original_applied, recovery=original_is_recovery,
+                )
+                original_commit = "a" * 40
+
+                def api(endpoint):
+                    if endpoint == f"repos/u2giants/shared-db/actions/runs/{original_run}":
+                        return {"status": "completed", "conclusion": original_conclusion,
+                                "event": "workflow_dispatch", "head_sha": original_commit,
+                                "path": PREVIEW_WORKFLOW}
+                    if endpoint.endswith(f"runs/{original_run}/artifacts?per_page=100"):
+                        return {"artifacts": [self.apply_artifact(
+                            original_commit, artifact_id=99, run_id=original_run)]}
+                    if endpoint == "repos/u2giants/shared-db/actions/runs/7":
+                        return {"status": "completed", "conclusion": "success",
+                                "event": "workflow_dispatch", "head_sha": main,
+                                "path": PREVIEW_WORKFLOW}
+                    if endpoint.endswith("runs/7/artifacts?per_page=100"):
+                        return {"artifacts": [self.apply_artifact(main, digest=artifact_digest)]}
+                    if endpoint.endswith("commits?per_page=100"):
+                        return [{"sha": main}, {"sha": original_commit}]
+                    if "/contents/" in endpoint:
+                        return {"sha": "identical-producer-blob"}
+                    if "/pulls/" in endpoint and "/files" in endpoint:
+                        return [{"filename":
+                                 f"supabase/migrations/{version}_release_a.sql",
+                                 "status": "added"}]
+                    if "/pulls/" in endpoint:
+                        return {"merged": True, "merge_commit_sha": main}
+                    if "/compare/" in endpoint:
+                        return {"status": "identical", "behind_by": 0}
+                    return {}
+
+                def downloader(artifact_id, dest):
+                    source = original_path if artifact_id == 99 else recovery_path
+                    Path(dest).write_bytes(source.read_bytes())
+
+                prove_preview(
+                    run_id=7, digest=artifact_digest, pr_head=main, main_sha=main,
+                    source_pr=984, allowlist=[version],
+                    preview_project_ref=PREVIEW_PROJECT_REF, merge_commit_sha=main,
+                    api=api, repo_root=root, downloader=downloader,
+                )
+
+    def test_historical_recovery_is_accepted_when_preview_ran_the_promoted_bytes(self):
+        """The honest case still promotes: same bytes rehearsed and merged."""
+        self.run_historical_prove_preview()
+
+    def test_historical_recovery_of_amended_bytes_is_refused(self):
+        """THE ATTACK. Rehearse A on preview, amend the file to B, merge, recover.
+
+        Every other historical check passes: the file is on exact main, the proof
+        names it, both ledgers hold it, the source PR added it, the applied commit
+        IS exact main. Only the byte comparison against the ORIGINAL apply run
+        catches it -- and production would otherwise have applied bytes preview
+        never executed.
+        """
+        with self.assertRaisesRegex(RiskGateError, "different bytes than exact main"):
+            self.run_historical_prove_preview(
+                rehearsed_body="select 1;\n", main_body="drop table core.customer;\n"
+            )
+
+    def test_historical_recovery_without_an_original_run_map_is_refused(self):
+        """The pre-#1213 record shape, and any record that simply omits it."""
+        for runs in ({}, None, "not-a-map"):
+            with self.subTest(runs=runs), self.assertRaisesRegex(
+                RiskGateError, "does not name the original apply run"
+            ):
+                self.run_historical_prove_preview(record_runs=runs)
+
+    def test_original_run_that_did_not_move_the_ledger_is_refused(self):
+        """Naming a run that merely MENTIONED the version proves nothing."""
+        with self.assertRaisesRegex(RiskGateError, "did not apply"):
+            self.run_historical_prove_preview(original_applied=False)
+
+    def test_a_recovery_may_not_cite_another_recovery(self):
+        """Otherwise recoveries could cite recoveries forever, touching no byte."""
+        with self.assertRaisesRegex(RiskGateError, "itself a historical recovery"):
+            self.run_historical_prove_preview(original_is_recovery=True)
+
+    def test_original_run_must_have_succeeded(self):
+        with self.assertRaisesRegex(RiskGateError, "has wrong conclusion"):
+            self.run_historical_prove_preview(original_conclusion="failure")
 
     def test_workflow_refuses_both_historical_forms_at_once(self):
         """Two inputs describing one batch, one silently unused, is not a state

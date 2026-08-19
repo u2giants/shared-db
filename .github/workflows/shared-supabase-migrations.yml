@@ -77,6 +77,10 @@ on:
         description: "Preview recovery only: version:pr pairs, when the batch was authored by several PRs"
         type: string
         required: false
+      historical_preview_original_run_map:
+        description: "Preview recovery only (REQUIRED there): version:runId pairs naming the preview run that ORIGINALLY applied each version"
+        type: string
+        required: false
       owner_decision_run_id:
         description: "Material-risk apply only: immutable owner-decision evidence run ID"
         type: string
@@ -318,6 +322,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
           SOURCE_MAP: ${{ inputs.historical_preview_source_pr_map }}
+          ORIGINAL_RUN_MAP: ${{ inputs.historical_preview_original_run_map }}
           MAIN_SHA: ${{ inputs.commit_sha }}
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
         run: |
@@ -344,8 +349,20 @@ jobs:
           else
             SELECTOR=(--source-pr "$SOURCE_PR")
           fi
+          # THE BYTE BINDING. A recovery run writes nothing, so it can never
+          # produce a content manifest of its own. Naming the run that ORIGINALLY
+          # applied each version is what lets the production gate compare the
+          # bytes preview really executed against exact main. Without it the lane
+          # proves authorship and ledger presence only, and "rehearse A, amend to
+          # B, merge, recover, promote B" would pass. It is refused here as well
+          # as in the script, so the failure names the missing INPUT.
+          if [ -z "${ORIGINAL_RUN_MAP:-}" ]; then
+            echo "REFUSED: historical preview recovery requires historical_preview_original_run_map (version:runId pairs naming the preview run that originally applied each version)." >&2
+            exit 1
+          fi
           python scripts/historical_preview_recovery.py "${SELECTOR[@]}" \
             --main-sha "$MAIN_SHA" --allowlist "$PREVIEW_ALLOWLIST" \
+            --original-run-map "$ORIGINAL_RUN_MAP" \
             --output "$RUNNER_TEMP/historical-preview-source.json"
       - name: Acquire the exclusive GitHub-backed preview lane
         id: preview_lock
