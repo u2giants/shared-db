@@ -412,15 +412,31 @@ def blob_sha(path: str, ref: str, api: Callable[[str], Any]) -> str:
 
 
 def prove_preview_producer_matches_main(
-    run_head: str, main_sha: str, api: Callable[[str], Any]
+    ref: str, main_sha: str, api: Callable[[str], Any], *, what: str = "preview run"
 ) -> None:
-    """Refuse a rehearsal produced by code that exact main does not carry."""
-    if run_head == main_sha:
+    """Refuse a rehearsal produced by code that exact main does not carry.
+
+    TWO DIFFERENT COMMITS EXECUTE IN ONE PREVIEW RUN, and both must be pinned:
+
+    * ``run["head_sha"]`` -- the ref the ``workflow_dispatch`` was aimed at.
+      GitHub reads the WORKFLOW FILE from there, so this commit decides which
+      steps exist at all. A doctored YAML here can skip the apply entirely and
+      write matching ledgers, apply logs, content manifest and instance binding
+      by hand.
+    * the commit named in the artifact name -- what ``actions/checkout`` put in
+      the workspace, i.e. the SCRIPTS the honest workflow then executes.
+
+    Pinning only one leaves the other free. #1194 pinned only the dispatch ref
+    and could not find the artifact; the first version of #1213 pinned only the
+    checkout and let a forged branch dispatch a fabricated rehearsal that named
+    main as its applied commit. Both are pinned now.
+    """
+    if ref == main_sha:
         return
     for path in PREVIEW_PRODUCER_PATHS:
-        if blob_sha(path, run_head, api) != blob_sha(path, main_sha, api):
+        if blob_sha(path, ref, api) != blob_sha(path, main_sha, api):
             raise RiskGateError(
-                f"preview run produced evidence with a different {path} than exact main"
+                f"{what} produced evidence with a different {path} than exact main"
             )
 
 
@@ -451,7 +467,7 @@ def source_pr_commits(
 
 def prove_preview(
     *, run_id: int, digest: str, pr_head: str, main_sha: str, source_pr: int, allowlist: list[str],
-    preview_project_ref: str, api: Callable[[str], Any],
+    preview_project_ref: str, merge_commit_sha: str, api: Callable[[str], Any],
     downloader: Callable[[int, Path], None], repo_root: Path,
 ) -> None:
     run = api(f"repos/{REPOSITORY}/actions/runs/{run_id}")
@@ -490,7 +506,22 @@ def prove_preview(
     # also have been produced by the same apply machinery exact main carries, or
     # its artifact is self-attestation rather than evidence. See
     # PREVIEW_PRODUCER_PATHS.
-    prove_preview_producer_matches_main(applied_commit, main_sha, api)
+    prove_preview_producer_matches_main(
+        applied_commit, main_sha, api, what="preview run checked out at " + applied_commit
+    )
+    # THE WORKFLOW THAT EXECUTED. The artifact name is what the job CHOSE to
+    # advertise as its checkout; the dispatch ref is what GitHub read the
+    # workflow file from, and no part of the artifact can lie about it. A forged
+    # branch that checks out main, skips the apply and writes matching evidence
+    # is refused here and nowhere else.
+    run_head = run.get("head_sha")
+    if not isinstance(run_head, str) or not re.fullmatch(r"[0-9a-f]{40}", run_head):
+        raise RiskGateError(
+            "preview run does not name the commit whose workflow executed (head_sha)"
+        )
+    prove_preview_producer_matches_main(
+        run_head, main_sha, api, what="preview run dispatched at " + run_head
+    )
     if artifact.get("digest") != digest:
         raise RiskGateError("preview artifact digest does not match the pinned digest")
     with tempfile.TemporaryDirectory(prefix="production-risk-preview-") as temp:
@@ -549,6 +580,7 @@ def prove_preview(
         texts.get("preview-instance.json"),
         applied_commit=applied_commit, preview_project_ref=preview_project_ref,
         production_project_ref=PRODUCTION_PROJECT_REF, run_id=run_id, allowlist=allowlist,
+        source_pr=source_pr, merge_commit_sha=merge_commit_sha,
     )
 
 
@@ -565,7 +597,7 @@ def is_pinned_historical_disney_source(
 
 def prove_pr_and_checks(
     pr_number: int, main_sha: str, allowlist: list[str], api: Callable[[str], Any], repo_root: Path
-) -> str:
+) -> tuple[str, str]:
     pr = api(f"repos/{REPOSITORY}/pulls/{pr_number}")
     if pr.get("merged") is not True or pr.get("merge_commit_sha") is None:
         raise RiskGateError("source PR is not merged")
@@ -589,7 +621,7 @@ def prove_pr_and_checks(
         missing = [name for name in missing if name != "Migration author lease"]
     if missing:
         raise RiskGateError(f"required exact-head checks are not successful: {', '.join(missing)}")
-    return head
+    return head, str(pr["merge_commit_sha"])
 
 
 def classify_sql(repo_root: Path, allowlist: list[str]) -> list[str]:
@@ -664,7 +696,7 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
     allowlist = normalize_review_allowlist(args.allowlist)
     activation = load_activation(args.activation)
     prove_activation(activation, main_sha=args.main_sha, api=api, repo_root=repo_root)
-    pr_head = prove_pr_and_checks(args.pr, args.main_sha, allowlist, api, repo_root)
+    pr_head, pr_merge_commit = prove_pr_and_checks(args.pr, args.main_sha, allowlist, api, repo_root)
     with tempfile.TemporaryDirectory(prefix="production-risk-review-") as temp:
         review_path = verify_review(
             run_id_text=str(args.review_run_id), expected_digest=args.review_digest,
@@ -677,7 +709,7 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
     prove_preview(
         run_id=args.preview_run_id, digest=args.preview_digest, pr_head=pr_head,
         main_sha=args.main_sha, source_pr=args.pr, allowlist=allowlist,
-        preview_project_ref=args.preview_project_ref,
+        preview_project_ref=args.preview_project_ref, merge_commit_sha=pr_merge_commit,
         api=api, downloader=downloader, repo_root=repo_root,
     )
     decision = decide_business_risk(classify_sql(repo_root, allowlist), recovery_proven=True, review_approved=True)

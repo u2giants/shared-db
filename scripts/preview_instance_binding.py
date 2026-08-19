@@ -111,8 +111,17 @@ def build(
 def verify(
     raw: str | None, *, applied_commit: str, preview_project_ref: str,
     production_project_ref: str, run_id: int, allowlist: list[str],
+    source_pr: int | None = None, merge_commit_sha: str | None = None,
 ) -> dict[str, Any]:
-    """Re-check a record from a downloaded evidence artifact. Fails closed."""
+    """Re-check a record from a downloaded evidence artifact. Fails closed.
+
+    ``source_pr`` and ``merge_commit_sha`` are the pull request being promoted
+    and the merge commit that put it on main. ``build`` has always WRITTEN those
+    two fields for a merged-main rehearsal; until independent review caught it,
+    nothing ever READ them, so a rehearsal belonging to some other merged pull
+    request satisfied the binding. They are mandatory for that mode now, and the
+    caller must supply what to match them against.
+    """
     if not raw:
         raise InstanceBindingError(
             "preview evidence carries no instance binding; it cannot prove which commit "
@@ -159,6 +168,22 @@ def verify(
             f"preview instance binding covers versions {record.get('allowlist')!r}, "
             f"not the promoted allowlist {list(allowlist)!r}"
         )
+    if record.get("rehearsalMode") == "merged-main-rehearsal":
+        if not isinstance(source_pr, int) or not isinstance(merge_commit_sha, str)                 or not COMMIT_RE.match(merge_commit_sha.strip().lower()):
+            raise InstanceBindingError(
+                "the promotion pull request and its merge commit were not supplied to the "
+                "production gate; a merged-main rehearsal is never accepted unbound"
+            )
+        if record.get("sourcePr") != source_pr:
+            raise InstanceBindingError(
+                f"preview rehearsal was performed for pull request {record.get('sourcePr')!r}, "
+                f"not the pull request being promoted (#{source_pr})"
+            )
+        if str(record.get("mergeCommitSha") or "").lower() != merge_commit_sha.strip().lower():
+            raise InstanceBindingError(
+                f"preview rehearsal names merge commit {record.get('mergeCommitSha')!r}, "
+                f"not the merge commit {merge_commit_sha!r} of the pull request being promoted"
+            )
     return record
 
 

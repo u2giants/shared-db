@@ -204,7 +204,8 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         args = dict(
             run_id=7, digest="sha256:" + "c" * 64, pr_head="a" * 40, main_sha="d" * 40,
             source_pr=1, allowlist=["20260814000000"],
-            preview_project_ref=PREVIEW_PROJECT_REF, repo_root=Path.cwd(),
+            preview_project_ref=PREVIEW_PROJECT_REF, merge_commit_sha="b" * 40,
+            repo_root=Path.cwd(),
         )
         args.update(overrides)
         return args
@@ -439,10 +440,16 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 archive.writestr(name, text)
         return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
-    def run_full_prove_preview(self, *, instance, applied=None, main=None, preview_ref=PREVIEW_PROJECT_REF):
+    def run_full_prove_preview(
+        self, *, instance, applied=None, main=None, preview_ref=PREVIEW_PROJECT_REF,
+        run_head=None, source_pr=1, merge_commit_sha="b" * 40,
+    ):
         """End to end through download, so the instance binding is really read."""
         applied = applied or "1" * 40
         main = main or "3" * 40
+        # The real post-merge dispatch is `--ref main`, so the workflow that
+        # EXECUTES is main's own. Tests that forge it override this.
+        run_head = run_head or main
         temp, root, version, digest, _ = self.plain_preview_fixture()
         with temp:
             zip_dir = tempfile.TemporaryDirectory()
@@ -453,9 +460,10 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 for path in PREVIEW_PRODUCER_PATHS:
                     blobs[(path, main)] = "honest-" + path
                     blobs[(path, applied)] = "honest-" + path
+                    blobs.setdefault((path, run_head), "honest-" + path)
                 run = {
                     "status": "completed", "conclusion": "success",
-                    "event": "workflow_dispatch", "head_sha": "9" * 40,
+                    "event": "workflow_dispatch", "head_sha": run_head,
                     "path": ".github/workflows/shared-supabase-migrations.yml",
                 }
                 api = self.preview_api(
@@ -465,8 +473,8 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 )
                 prove_preview(
                     run_id=7, digest=artifact_digest, pr_head="a" * 40, main_sha=main,
-                    source_pr=1, allowlist=[version], preview_project_ref=preview_ref,
-                    api=api, repo_root=root,
+                    source_pr=source_pr, allowlist=[version], preview_project_ref=preview_ref,
+                    merge_commit_sha=merge_commit_sha, api=api, repo_root=root,
                     downloader=lambda _id, dest: Path(dest).write_bytes(zip_path.read_bytes()),
                 )
 
@@ -478,13 +486,100 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             "previewProjectRef": project_ref,
             "runId": 7,
             "allowlist": ["20260814000000"],
-            "sourcePr": 1193,
+            "sourcePr": 1,
             "mergeCommitSha": "b" * 40,
         }
 
     def test_post_merge_main_line_rehearsal_is_accepted_end_to_end(self):
         """The whole point of #1208: a merged, main-line rehearsal promotes."""
         self.run_full_prove_preview(instance=self.honest_instance())
+
+    def test_forged_dispatch_ref_cannot_fabricate_a_main_line_rehearsal(self):
+        """#1213 review, finding 1. The forge the artifact-name pin alone allowed.
+
+        An attacker pushes branch `evil` whose workflow checks out current main
+        (so `git rev-parse HEAD` IS main), skips the apply, hand-writes matching
+        ledgers, apply log, content manifest and preview-instance.json, and
+        uploads them as `preview-migration-apply-<main-sha>`. They then dispatch
+        the workflow with `--ref evil`.
+
+        Everything INSIDE the artifact is consistent, and the applied commit
+        equals main, so a pin aimed only at the artifact name compares nothing
+        and lets it through. Production would then apply for real versions that
+        never touched preview.
+
+        Only `run["head_sha"]` -- the ref GitHub read the workflow FILE from,
+        which no part of the artifact can restate -- exposes it.
+        """
+        main, evil = "3" * 40, "e" * 40
+        run = {
+            "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
+            "head_sha": evil, "path": ".github/workflows/shared-supabase-migrations.yml",
+        }
+        blobs = {}
+        for path in PREVIEW_PRODUCER_PATHS:
+            blobs[(path, main)] = "honest-" + path
+            blobs[(path, evil)] = "honest-" + path
+        # The one file the forger had to change: the workflow that runs.
+        blobs[(PREVIEW_WORKFLOW, evil)] = "doctored-workflow"
+        digest = "sha256:" + "c" * 64
+        with self.assertRaisesRegex(RiskGateError, "different .* than exact main"):
+            prove_preview(
+                **self.prove_preview_args(
+                    pr_head="a" * 40, main_sha=main,
+                    api=self.preview_api(
+                        run, [{"sha": "a" * 40}], blobs,
+                        # Named after main, and the digest MATCHES, so nothing
+                        # later in the gate would have stopped it either.
+                        [self.apply_artifact(main, digest=digest)],
+                        compare={"status": "identical", "behind_by": 0},
+                    ),
+                ),
+                downloader=lambda *_: self.fail("forged dispatch ref must not reach download"),
+            )
+
+    def test_run_without_a_readable_head_sha_fails_closed(self):
+        main = "3" * 40
+        for head in (None, "", "not-a-sha", 123):
+            run = {
+                "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
+                "head_sha": head, "path": ".github/workflows/shared-supabase-migrations.yml",
+            }
+            with self.subTest(head=head), self.assertRaisesRegex(
+                RiskGateError, "commit whose workflow executed"
+            ):
+                prove_preview(
+                    **self.prove_preview_args(
+                        pr_head="a" * 40, main_sha=main,
+                        api=self.preview_api(
+                            run, [{"sha": "a" * 40}], {}, [self.apply_artifact(main)],
+                            compare={"status": "identical", "behind_by": 0},
+                        ),
+                    ),
+                    downloader=lambda *_: self.fail("must not download"),
+                )
+
+    def test_rehearsal_of_another_merged_pull_request_is_refused(self):
+        """#1213 review, finding 2. `sourcePr` was written but never read."""
+        instance = self.honest_instance()
+        instance["sourcePr"] = 999
+        with self.assertRaisesRegex(ValueError, "not the pull request being promoted"):
+            self.run_full_prove_preview(instance=instance, source_pr=1)
+
+    def test_rehearsal_naming_another_merge_commit_is_refused(self):
+        instance = self.honest_instance()
+        instance["mergeCommitSha"] = "f" * 40
+        with self.assertRaisesRegex(ValueError, "not the merge commit"):
+            self.run_full_prove_preview(instance=instance, merge_commit_sha="b" * 40)
+
+    def test_merged_main_rehearsal_missing_its_pull_request_fields_is_refused(self):
+        for field in ("sourcePr", "mergeCommitSha"):
+            instance = self.honest_instance()
+            del instance[field]
+            with self.subTest(field=field), self.assertRaisesRegex(
+                ValueError, "not the pull request being promoted|not the merge commit"
+            ):
+                self.run_full_prove_preview(instance=instance)
 
     def test_preview_evidence_without_an_instance_binding_is_refused(self):
         """PR #1194 review point 4. Deleting the binding must break this."""

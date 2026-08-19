@@ -636,7 +636,11 @@ jobs:
       # DELETED preview rjyboqwcdzcocqgmsyel would still read as proof about the
       # rebuilt one. See scripts/preview_instance_binding.py.
       - name: Bind this rehearsal to its commit and its preview database
-        if: inputs.mode == 'apply'
+        # success() is EXPLICIT because a custom `if:` replaces GitHub's default.
+        # Without it a FAILED bounded apply still wrote an instance binding, and
+        # the `if: always()` upload still shipped it. Evidence is only written
+        # for an apply that actually succeeded.
+        if: success() && inputs.mode == 'apply'
         env:
           APPLIED_COMMIT: ${{ steps.commit.outputs.sha }}
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}

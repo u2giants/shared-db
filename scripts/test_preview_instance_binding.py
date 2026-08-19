@@ -79,13 +79,30 @@ class VerifyTests(unittest.TestCase):
         args = dict(
             applied_commit=COMMIT, preview_project_ref=PREVIEW,
             production_project_ref=PRODUCTION, run_id=7,
-            allowlist=["20260818232639"],
+            allowlist=["20260818232639"], source_pr=1193, merge_commit_sha=MERGE,
         )
         args.update(overrides)
         return verify(raw, **args)
 
     def test_honest_record_verifies(self):
         self.assertEqual(self.check(self.raw())["appliedCommit"], COMMIT)
+
+    def test_merged_main_binding_must_belong_to_the_promoted_pull_request(self):
+        """#1213 review, finding 2. `sourcePr`/`mergeCommitSha` were write-only."""
+        with self.assertRaisesRegex(InstanceBindingError, "not the pull request being promoted"):
+            self.check(self.raw(), source_pr=1194)
+        with self.assertRaisesRegex(InstanceBindingError, "not the merge commit"):
+            self.check(self.raw(), merge_commit_sha="c" * 40)
+
+    def test_merged_main_binding_is_never_accepted_unbound(self):
+        for override in (
+            {"source_pr": None}, {"merge_commit_sha": None},
+            {"merge_commit_sha": "not-a-sha"}, {"source_pr": "1193"},
+        ):
+            with self.subTest(**override), self.assertRaisesRegex(
+                InstanceBindingError, "never accepted unbound|not the pull request being promoted"
+            ):
+                self.check(self.raw(), **override)
 
     def test_missing_binding_is_refused_not_ignored(self):
         for raw in (None, ""):
