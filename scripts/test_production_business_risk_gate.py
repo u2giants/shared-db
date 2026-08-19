@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from production_business_risk_gate import PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_preview, prove_preview_migration_contents
+from production_business_risk_gate import PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_historical_original_apply_runs, prove_preview, prove_preview_migration_contents, prove_preview_producer_matches_main
 
 PREVIEW_PROJECT_REF = "mvpkijzfmfcxhnzqogzs"
 DEAD_PREVIEW_PROJECT_REF = "rjyboqwcdzcocqgmsyel"
@@ -1298,7 +1298,14 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
     HISTORICAL_VERSION = "20260814130000"
 
     def historical_repo(self, body="select 1;\n"):
-        """A real git repo, because the recovery proof shells out to git."""
+        """A real git repo, because the recovery proof shells out to git.
+
+        TWO commits, and the distinction matters: the FIRST is the merge commit
+        that landed the migration, the SECOND is today's exact main. They were
+        the same commit until the #1213 round-6 review, which left every
+        "pinned to the merge commit" test unable to tell that pin apart from
+        "pinned to today's main".
+        """
         temp = tempfile.TemporaryDirectory()
         root = Path(temp.name)
         (root / "supabase/migrations").mkdir(parents=True)
@@ -1310,8 +1317,14 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         subprocess.run(["git", "config", "user.name", "x"], cwd=root)
         subprocess.run(["git", "add", "."], cwd=root)
         subprocess.run(["git", "commit", "-m", "x"], cwd=root, check=True, stdout=subprocess.DEVNULL)
+        merge_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+        (root / "later.txt").write_text("main moved on\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=root)
+        subprocess.run(["git", "commit", "-m", "later"], cwd=root, check=True,
+                       stdout=subprocess.DEVNULL)
         main = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
-        return temp, root, main
+        return temp, root, main, merge_sha
 
     def historical_zip(self, path, *, main, record, version):
         """The RECOVERY run's evidence: no write, so the ledger must not move."""
@@ -1362,6 +1375,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         original_is_recovery=False, original_conclusion="success",
         original_head_sha="default", original_head_in_history=True,
         original_head_blobs=None, original_run_blobs=None, original_instance=None,
+        merge_commit_blobs=None,
     ):
         """End to end through prove_preview, downloads and all.
 
@@ -1382,17 +1396,24 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         * `original_run_blobs` -- producer blobs at BOTH of the original run's
           commits, i.e. an old run that is internally consistent but carries
           producer files today's main no longer has. A pin aimed at today's main
-          rather than at the run's own checkout fails on this.
+          fails on this; a pin aimed at the authoring merge commit passes it only
+          when `merge_commit_blobs` carries the same values.
+        * `merge_commit_blobs` -- producer blobs at the MERGE COMMIT that landed
+          the version, separated from every other ref so a test can state which
+          commit the pin is really aimed at. The round-5 helper could not: it
+          defaulted every blob to one value and used one commit for the merge
+          commit and for main, so "pinned to each other" and "pinned to the merge
+          commit" were indistinguishable (#1213 round 6, finding 1).
         * `original_instance` -- the raw `preview-instance.json` that run wrote,
           or None for a run whose producer code predates instance binding.
         """
         version = self.HISTORICAL_VERSION
-        temp, root, main = self.historical_repo(main_body)
+        temp, root, main, merge_sha = self.historical_repo(main_body)
         with temp:
             rehearsed_digest = hashlib.sha256(rehearsed_body.encode("utf-8")).hexdigest()
             record = {
                 "schema": "shared-db-historical-preview-source/v3",
-                "sourcePr": 984, "sourceMergeSha": main, "mainSha": main,
+                "sourcePr": 984, "sourceMergeSha": merge_sha, "mainSha": main,
                 "allowlist": [version],
                 "originalApplyRuns": {version: original_run}
                 if record_runs == "default" else record_runs,
@@ -1435,6 +1456,9 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                         return pr_commits
                     if "/contents/" in endpoint:
                         path, ref = endpoint.split("/contents/", 1)[1].split("?ref=")
+                        if merge_commit_blobs and ref == merge_sha:
+                            return {"sha": merge_commit_blobs.get(
+                                path, "identical-producer-blob")}
                         if original_head_blobs and ref == original_head:
                             return {"sha": original_head_blobs.get(
                                 path, "identical-producer-blob")}
@@ -1447,7 +1471,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                                  f"supabase/migrations/{version}_release_a.sql",
                                  "status": "added"}]
                     if "/pulls/" in endpoint:
-                        return {"merged": True, "merge_commit_sha": main}
+                        return {"merged": True, "merge_commit_sha": merge_sha}
                     if "/compare/" in endpoint:
                         base = endpoint.split("/compare/", 1)[1].split("...")[0]
                         if base == original_head and not original_head_in_history:
@@ -1535,17 +1559,18 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 original_head_sha="e" * 40, original_head_in_history=False
             )
 
-    def test_original_run_whose_workflow_differs_from_its_own_checkout_is_refused(self):
+    def test_original_run_whose_workflow_differs_from_the_merge_commit_is_refused(self):
         """The subtler half of the same forge: a dispatch ref that IS in main's
         history, carrying a doctored workflow.
 
         Main-line containment alone would accept this -- an ancestor of main is
         ancestor code, and nothing about ancestry says the workflow that ran is
-        the workflow that checkout carries. The producer pin does, by comparing
-        the dispatch ref against the run's OWN checkout, so the pair has to be
-        internally consistent.
+        the workflow that landed. The producer pin does, by comparing the
+        dispatch ref against the merge commit of the pull request that authored
+        the version. Round 5 compared it against the run's own checkout instead,
+        which the attacker also chooses (#1213 round 6, finding 1).
         """
-        with self.assertRaisesRegex(RiskGateError, "different .* than its own checkout"):
+        with self.assertRaisesRegex(RiskGateError, "different .* than the merge commit"):
             self.run_historical_prove_preview(
                 original_head_sha="b" * 40,
                 original_head_blobs={PREVIEW_WORKFLOW: "doctored-workflow"},
@@ -1560,17 +1585,101 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 self.run_historical_prove_preview(original_head_sha=head)
 
     def test_an_honest_old_original_run_still_recovers(self):
-        """THE REASON THE PIN IS AIMED AT THE RUN'S OWN CHECKOUT, not today's main.
+        """THE REASON THE PIN IS AIMED AT THE AUTHORING MERGE COMMIT, not today's main.
 
         This original run was dispatched at one commit of the authoring pull
-        request and checked out another, and its producer files are its own, not
-        today's. Pinning it to today's main would refuse it -- and with it every
-        Sample Tracking recovery this lane exists for -- so the pin must not, and
-        this test fails if someone tightens it that way.
+        request and checked out another, and BOTH carry the producer files that
+        the merge commit carries -- which are NOT the ones today's main carries.
+        Pinning it to today's main would refuse it, and with it every Sample
+        Tracking recovery this lane exists for, so this test fails if anyone
+        tightens it that way.
+
+        As written before the #1213 round-6 review this test proved the opposite
+        of its name: the helper used one commit for the merge commit and for
+        main, and defaulted every blob to one value, so it was itself the shape
+        of the forge -- one pull-request commit on both pins, nothing compared.
         """
+        old = "the-workflow-as-it-was-then"
         self.run_historical_prove_preview(
             original_head_sha="b" * 40,
-            original_run_blobs={PREVIEW_WORKFLOW: "the-workflow-as-it-was-then"},
+            original_run_blobs={PREVIEW_WORKFLOW: old},
+            merge_commit_blobs={PREVIEW_WORKFLOW: old},
+        )
+
+    def test_original_run_at_a_pr_commit_that_differs_from_the_merge_commit_is_refused(self):
+        """#1213 review, round 6, finding 1. THE FORGE ROUND 5 LEFT OPEN.
+
+        Round 5 pinned the original run's two commits TO EACH OTHER, so one
+        attacker-chosen commit used for both compared nothing at all. This
+        repository squash-merges, so every commit ever pushed to a pull request
+        stays in `GET /pulls/{n}/commits` forever -- after the branch is deleted,
+        and available to be dispatched again after the merge by recreating a
+        branch at it.
+
+        THE FORGE. Honestly apply bytes A through the ordinary claim lane so
+        preview's ledger holds the version. Amend the file to destructive bytes
+        B. Push commit `D` whose copy of the workflow skips the database write
+        and hand-writes both ledgers and a content manifest naming the sha256 of
+        B. Dispatch at `D`, so `head_sha` is `D`, and name the upload
+        `preview-migration-apply-<D>`. Restore the honest workflow in a later
+        commit, merge, then recover naming that run.
+
+        Both pins are `D`. Every other check passes. Production applies B while
+        preview ran A. Only a pin to a commit the promoter cannot choose -- the
+        MERGE COMMIT, already proved merged and an ancestor of exact main --
+        exposes it, and that is what this test holds in place.
+        """
+        with self.assertRaisesRegex(RiskGateError, "different .* than the merge commit"):
+            self.run_historical_prove_preview(
+                original_run_blobs={PREVIEW_WORKFLOW: "doctored-workflow-at-one-pr-commit"},
+            )
+
+    def test_one_commit_used_for_both_original_pins_is_not_self_evidence(self):
+        """The same forge stated as the no-op it exploited.
+
+        `original_head_sha` defaults to the artifact-name commit, so this run has
+        ONE commit on both pins -- the exact shape round 5 accepted. It is
+        refused now because neither pin is compared against the other any more.
+        """
+        with self.assertRaisesRegex(RiskGateError, "different .* than the merge commit"):
+            self.run_historical_prove_preview(
+                original_run_blobs={"scripts/atomic_migration_apply.py": "doctored-apply"},
+            )
+
+    def test_a_recovery_record_without_a_usable_merge_commit_is_refused(self):
+        """No merge commit, no pin. It must fail closed, never skip the pin."""
+        temp, root, main, merge_sha = self.historical_repo()
+        with temp:
+            for bad in (None, "", "not-a-sha", 12345):
+                with self.subTest(bad=bad), self.assertRaisesRegex(
+                    RiskGateError, "no usable source merge commit"
+                ):
+                    record = {"sourcePr": 984, "sourceMergeSha": bad,
+                              "originalApplyRuns": {self.HISTORICAL_VERSION: 555}}
+                    prove_historical_original_apply_runs(
+                        record=record, allowlist=[self.HISTORICAL_VERSION], repo_root=root,
+                        main_sha=main, api=lambda endpoint: self.fail(
+                            "an unusable merge commit must be refused before any API call"
+                        ), downloader=lambda *_: None,
+                    )
+
+    def test_producer_comparison_refuses_identity_unless_the_target_is_proved(self):
+        """A comparison that silently succeeds when both arguments are equal is a
+        hazard wherever it is called, so identity must be declared, not inferred.
+
+        This is the no-op behind finding 1, closed at the function itself as well
+        as at the caller.
+        """
+        sha = "a" * 40
+        with self.assertRaisesRegex(RiskGateError, "identity is not evidence"):
+            prove_preview_producer_matches_main(
+                sha, sha, lambda endpoint: self.fail("no blob is read for an identity compare"),
+                what="original apply run 555 dispatched at " + sha,
+                against="its own checkout " + sha,
+            )
+        prove_preview_producer_matches_main(
+            sha, sha, lambda endpoint: self.fail("no blob is read for an identity compare"),
+            what="preview run dispatched at " + sha, target_is_proved=True,
         )
 
     def test_original_run_bound_to_the_production_project_is_refused(self):

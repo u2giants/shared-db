@@ -452,10 +452,12 @@ PREVIEW_RUNTIME_DATA_EXEMPTIONS = {
         "and on the historical-recovery lane -- which writes nothing and so has "
         "no manifest of its own -- prove_historical_original_apply_runs compares "
         "the digest recorded by the run that ORIGINALLY applied each version. "
-        "source_pr_commits additionally requires every allowlisted version to "
-        "have been added by the named source pull request. The one limit, stated "
-        "plainly: the original run's producer code is not re-pinned to today's "
-        "main, because an older commit necessarily carries older producer files."
+        "prove_pr_authored additionally requires every allowlisted version to "
+        "have been added by the named source pull request, and it is re-run "
+        "during re-derivation (source_pr_commits only collects commit SHAs). "
+        "The one limit, stated plainly: the original run's producer code is not "
+        "re-pinned to today's main, because an older commit necessarily carries "
+        "older producer files; it is pinned to that pull request's merge commit."
     ),
     "supabase/tests": (
         "Never read by the preview job. Its only readers are the separate "
@@ -502,7 +504,7 @@ def blob_sha(path: str, ref: str, api: Callable[[str], Any]) -> str:
 
 def prove_preview_producer_matches_main(
     ref: str, main_sha: str, api: Callable[[str], Any], *, what: str = "preview run",
-    against: str = "exact main",
+    against: str = "exact main", target_is_proved: bool = False,
 ) -> None:
     """Refuse a rehearsal produced by code that exact main does not carry.
 
@@ -523,14 +525,27 @@ def prove_preview_producer_matches_main(
 
     THE SECOND ARGUMENT IS NOT ALWAYS MAIN. On the claim and merged-main lanes
     both commits are pinned to exact main. On the historical-recovery lane the
-    two commits of an ORIGINAL run are pinned TO EACH OTHER instead: an older
-    run necessarily carries older producer files, so pinning it to today's main
-    would refuse every genuine recovery, while pinning its dispatch ref to its
-    own checkout still refuses a doctored workflow that advertises an honest
-    checkout. `against` names what was compared so the refusal message cannot
-    claim a comparison that was not made.
+    two commits of an ORIGINAL run are each pinned to the MERGE COMMIT of the
+    pull request that authored the version -- a commit `prove_pr_authored` has
+    already proved merged and an ancestor of exact main, and which the promoter
+    therefore cannot choose. `against` names what was compared so the refusal
+    message cannot claim a comparison that was not made.
+
+    IDENTITY IS NOT EVIDENCE. When both arguments are the same commit this
+    function compares nothing, so it must never be reached that way with a
+    comparison target the promoter picked: round 5 of the #1213 review pinned the
+    original run's two commits TO EACH OTHER, and one attacker-chosen commit used
+    for both then satisfied the pin without a single blob being read (round 6,
+    finding 1). Equality is accepted only when the caller declares, with
+    `target_is_proved`, that the second argument is a commit this gate proved
+    independently -- exact main, or a merge commit from `prove_pr_authored`.
+    Every other caller gets a refusal rather than a silent success.
     """
     if ref == main_sha:
+        if not target_is_proved:
+            raise RiskGateError(
+                f"{what} was compared against itself ({against}); identity is not evidence"
+            )
         return
     for path in PREVIEW_PRODUCER_PATHS:
         if blob_sha(path, ref, api) != blob_sha(path, main_sha, api):
@@ -611,25 +626,30 @@ def prove_historical_original_apply_runs(
         authored the version, or to exact main's own history -- the checkout it
         advertised in its artifact name AND ``head_sha``, the ref GitHub read the
         workflow file from;
-      * those two commits must carry the SAME producer files as each other, so a
-        doctored workflow cannot advertise an honest checkout; and
+      * BOTH of those commits must carry the SAME producer files as the MERGE
+        COMMIT of the pull request that authored the version, so neither a
+        doctored workflow advertising an honest checkout nor one doctored commit
+        used for both pins can pass; and
       * the digest THAT run recorded for the version must equal the bytes on
         exact main.
 
     WHAT IT DELIBERATELY DOES NOT DO. It does not pin the original run's producer
     files to TODAY'S main. It cannot: an older commit necessarily carries older
     producer files, so that rule would refuse every genuine recovery, including
-    the one this lane exists for. It pins the original run's two commits to EACH
-    OTHER instead. Nor does it require the original run to have written to the
-    CURRENT preview database: preview was deleted and rebuilt on 2026-08-18, so
-    that rule would refuse every recovery that exists.
+    the one this lane exists for. It pins both of the original run's commits to
+    the MERGE COMMIT of the pull request that authored the version instead -- a
+    commit this gate re-derives and has already proved merged and an ancestor of
+    exact main, so it is not the promoter's to choose. Nor does it require the
+    original run to have written to the CURRENT preview database: preview was
+    deleted and rebuilt on 2026-08-18, so that rule would refuse every recovery
+    that exists.
 
     THE LIMIT, STATED ACCURATELY. The #1213 round-5 review retired the previous
     wording -- "as strong as the ordinary claim lane was on the day of the
     rehearsal" -- because it is false of a run created TODAY and then named as
     the original. What this function proves is: a real, successful run of THIS
-    workflow, dispatched from a commit this repository's history contains,
-    executing the producer code of its own checkout, moved preview's ledger for
+    workflow, dispatched from and checked out at commits carrying the producer
+    code of the merge commit that landed this version, moved preview's ledger for
     this version and recorded a digest equal to exact main's bytes. What it does
     not prove is WHICH preview instance that was, or that today's machinery
     produced the evidence. Both limits are written down here, in
@@ -657,6 +677,19 @@ def prove_historical_original_apply_runs(
         source_pr = source_map.get(version) if isinstance(source_map, dict) else record.get("sourcePr")
         if not isinstance(source_pr, int) or isinstance(source_pr, bool):
             raise RiskGateError(f"historical recovery names no source pull request for {version}")
+        # RESOLVED BEFORE ANYTHING IS READ. Without a usable merge commit there is
+        # no commit the promoter cannot choose to pin against, so the lane fails
+        # closed here rather than reaching the pin with nothing to compare to.
+        merge_shas = record.get("sourceMergeShas")
+        merge_sha = (
+            merge_shas.get(version) if isinstance(merge_shas, dict)
+            else record.get("sourceMergeSha")
+        )
+        if not isinstance(merge_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", merge_sha):
+            raise RiskGateError(
+                f"historical recovery names no usable source merge commit for {version}; "
+                "the original apply run cannot be pinned"
+            )
         try:
             run = api(f"repos/{REPOSITORY}/actions/runs/{run_id}")
         except Exception as exc:  # noqa: BLE001 - unreadable original run must fail closed
@@ -689,16 +722,31 @@ def prove_historical_original_apply_runs(
             )
         if run_head not in source_pr_commits(source_pr, "", main_sha, api):
             prove_applied_commit_is_main_line(run_head, main_sha, api)
-        # PINNED TO EACH OTHER, NOT TO TODAY'S MAIN. The question this answers is
-        # "is the workflow that executed the workflow at the claimed checkout?",
-        # never "is it today's workflow" -- the latter would refuse every genuine
-        # recovery, since an older commit necessarily carries older producer
-        # files, and this lane exists for exactly those.
-        prove_preview_producer_matches_main(
-            run_head, original_commit, api,
-            what=f"original apply run {run_id} dispatched at {run_head}",
-            against=f"its own checkout {original_commit}",
-        )
+        # PINNED TO THE MERGE COMMIT, NOT TO EACH OTHER AND NOT TO TODAY'S MAIN.
+        # Round 5 pinned these two commits to each other, and the round-6 review
+        # showed that one commit used for BOTH pins compares nothing: this
+        # repository squash-merges, so every commit that was ever on the
+        # authoring pull request stays in its commits listing forever -- even
+        # after the branch is deleted, and even to be dispatched again afterwards
+        # -- and a doctored intermediate commit was therefore citable as both the
+        # dispatch ref and the checkout.
+        #
+        # `merge_sha` is the merge commit of the pull request that authored THIS
+        # version. `prove_pr_authored` has already proved it merged and an
+        # ancestor of the exact main being promoted, and it is re-derived above
+        # rather than taken from the artifact, so the promoter cannot choose it.
+        # This is NOT "pin to today's main": a later change to the gate on main
+        # still recovers, an honest apply from the pull-request tip still matches
+        # because squash/merge carries those producer files onto the merge
+        # commit, and a doctored intermediate commit does not match the workflow
+        # that actually landed. (#1213 review, round 6, finding 1.)
+        for commit, role in ((run_head, "dispatched at"), (original_commit, "checked out at")):
+            prove_preview_producer_matches_main(
+                commit, merge_sha, api,
+                what=f"original apply run {run_id} {role} {commit}",
+                against=f"the merge commit {merge_sha} of the pull request that authored {version}",
+                target_is_proved=True,
+            )
         texts = artifact_texts(artifact, downloader)
         if texts.get("historical-preview-source.json"):
             raise RiskGateError(
@@ -817,7 +865,8 @@ def prove_preview(
     # its artifact is self-attestation rather than evidence. See
     # PREVIEW_PRODUCER_PATHS.
     prove_preview_producer_matches_main(
-        applied_commit, main_sha, api, what="preview run checked out at " + applied_commit
+        applied_commit, main_sha, api, what="preview run checked out at " + applied_commit,
+        target_is_proved=True,
     )
     # THE WORKFLOW THAT EXECUTED. The artifact name is what the job CHOSE to
     # advertise as its checkout; the dispatch ref is what GitHub read the
@@ -830,7 +879,8 @@ def prove_preview(
             "preview run does not name the commit whose workflow executed (head_sha)"
         )
     prove_preview_producer_matches_main(
-        run_head, main_sha, api, what="preview run dispatched at " + run_head
+        run_head, main_sha, api, what="preview run dispatched at " + run_head,
+        target_is_proved=True,
     )
     if artifact.get("digest") != digest:
         raise RiskGateError("preview artifact digest does not match the pinned digest")

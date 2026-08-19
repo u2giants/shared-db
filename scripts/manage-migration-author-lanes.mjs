@@ -990,8 +990,11 @@ export function addedMigrationVersions(files) {
 }
 
 // THE AUTHORISATION for a post-merge rehearsal, in place of a live branch claim.
-// It is strictly stronger: a branch claim proves someone intends to merge, while
-// this proves the work IS merged and IS carried by the main tip being rehearsed.
+// Stated as what it enforces rather than as a strength ranking: a branch claim
+// proves someone intends to merge; this proves the work IS merged and IS carried
+// by the main tip being rehearsed. It does not prove anything a branch claim
+// proves about WHO is rehearsing -- the preview lock, not this function, is what
+// keeps two rehearsals apart.
 export function assertMergeCommitInMainHistory(mergeSha, mainSha, io = githubIo) {
   let comparison
   try {

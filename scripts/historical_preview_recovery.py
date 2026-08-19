@@ -49,8 +49,24 @@ It does not prove preview's CATALOG matches its ledger -- a half-applied or
 manually repaired preview still looks the same from here. And the original run's
 own machinery was whatever main carried on the day it ran; it is not re-pinned
 to today's main, because an old commit necessarily carries older producer files.
-The byte binding is therefore as strong as the ordinary claim lane was on the
-day of the rehearsal, and no stronger.
+
+STATED AS THE GATE ENFORCES IT, not as a strength comparison. The earlier
+sentence here -- "as strong as the ordinary claim lane was on the day of the
+rehearsal, and no stronger" -- was withdrawn as FALSE (#1213 review, rounds 5
+and 6) and must not come back. The claim lane pins both of a run's commits to
+exact main, so a doctored intermediate commit can never be the promoted
+rehearsal; this lane pins them to the authoring pull request's merge commit
+instead, which is weaker in a specific, named way.
+
+PROVED by prove_historical_original_apply_runs in
+production_business_risk_gate.py: a real, successful, dispatched run of the
+preview workflow, whose dispatch ref and checkout both carry the producer code of
+the merge commit that landed the version, moved preview's ledger for that version
+and recorded a digest equal to the bytes on exact main.
+
+NOT PROVED: which preview INSTANCE that run wrote to (preview was deleted and
+rebuilt on 2026-08-18, so requiring today's instance would refuse every recovery
+that exists), and that TODAY'S machinery produced the evidence.
 """
 
 import argparse, json, re, subprocess

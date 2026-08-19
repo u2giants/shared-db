@@ -892,8 +892,8 @@ four rules below are non-negotiable for any database change.
    preview never executed.
 
    **What this lane proves, stated exactly.** A real, successful run of this
-   workflow, dispatched from a commit this repository's history contains and
-   executing the producer code of its own checkout, added each named version to
+   workflow, whose dispatch ref and whose checkout both carry the producer code
+   of the merge commit that landed the version, added each named version to
    *a* preview ledger and recorded a digest equal to the bytes on exact main; and
    a merged pull request added each version.
 
@@ -901,9 +901,13 @@ four rules below are non-negotiable for any database change.
    (a) That preview's *catalog* matches its ledger — a half-applied or
    hand-repaired preview looks identical from here.
    (b) That **today's** machinery produced the evidence. The original run's
-   producer code is pinned to its own checkout, never to today's main, because an
-   older commit necessarily carries older producer files and that rule would
-   refuse every genuine recovery.
+   producer code is pinned to the authoring pull request's **merge commit**,
+   never to today's main, because an older commit necessarily carries older
+   producer files and that rule would refuse every genuine recovery. It is *not*
+   pinned to the run's own checkout: round 6 of the #1213 review showed that one
+   attacker-chosen pull-request commit used as both the dispatch ref and the
+   checkout compares nothing at all, and this repository squash-merges, so every
+   commit ever pushed to a pull request stays citable forever.
    (c) **Which preview database it was.** The original run is deliberately not
    required to bind to the current `PREVIEW_PROJECT_REF`: preview
    `rjyboqwcdzcocqgmsyel` was deleted and rebuilt as `mvpkijzfmfcxhnzqogzs` on
@@ -915,9 +919,11 @@ four rules below are non-negotiable for any database change.
    later apply of different bytes.
 
    The earlier wording here — "as strong as the claim lane was on the day of that
-   rehearsal" — was **withdrawn as false** in #1213 round 5. It is true of an
-   honest past run whose artifact survives; it is not true of a run created today
-   and then named as the original, which is exactly what the second pin now stops.
+   rehearsal" — was **withdrawn as false** in #1213 round 5 and must not return in
+   any file. The claim lane pins both of a run's commits to exact main, so a
+   doctored intermediate commit can never be the promoted rehearsal; this lane
+   pins them to the authoring pull request's merge commit, which is weaker in the
+   specific, named ways listed above and in no other way.
 
    **If a version's file changed after its rehearsal, this lane will refuse it,
    and that refusal is correct** — preview never ran the bytes you are asking
