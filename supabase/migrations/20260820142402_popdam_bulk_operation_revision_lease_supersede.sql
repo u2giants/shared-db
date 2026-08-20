@@ -41,8 +41,12 @@
 -- every statement is `drop function if exists` / `create [or replace] function` /
 -- `grant` / `revoke`, so re-running it converges on the same catalog state.
 --
--- catalog-verification: no-op is NOT declared -- this migration names real catalog objects
--- (two functions plus their grants), so the post-apply verifier has something to assert.
+-- NO pure-data declaration is made here, deliberately: this migration names real catalog
+-- objects (two functions plus their grants), so the post-apply verifier has plenty to
+-- assert. Note the guard does not merely trust such a declaration -- it re-lexes the file
+-- and refuses if the claim disagrees with the statements. An earlier draft of THIS header
+-- mentioned the declaration token in prose and was correctly refused for exactly that
+-- reason, naming all 12 non-data statements.
 --
 -- ORIGINAL HEADER FROM 20260819011639 FOLLOWS, UNCHANGED, because it carries the design
 -- reasoning that five review rounds shaped and it must not be lost.
