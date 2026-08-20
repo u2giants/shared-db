@@ -60,10 +60,12 @@
 --     apply.
 --   * Every object is resolved through `to_regclass`, so a from-empty replay or any
 --     database without `dflow` is a clean no-op rather than an abort (#1258).
---   * Apply-time reads are the sequence state and `max(id)` over `dflow.art_piece` on its
---     primary key -- TWO such reads, one in each block, each a backward B-tree descent
---     rather than a scan. Nothing here scales with production volume, which is the
---     failure mode that made 20260819151536 unappliable.
+--   * Apply-time data reads, in full: `max(id)` over `dflow.art_piece` in each of the two
+--     blocks, plus a guarded `max(id)` over `designflow.art_piece` in the verify block
+--     where that orphan exists -- THREE, each a backward B-tree descent on a primary key
+--     rather than a scan, alongside the sequence state read and the to_regclass lookups.
+--     Nothing here scales with production volume, which is the failure mode that made
+--     20260819151536 unappliable.
 
 do $$
 declare
