@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -356,14 +356,89 @@ test('terminal provider failure advances exactly once and retry is idempotent',(
   assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'muse-spark-1.2-contributor')
 })
 
+const preflightIo=()=>({commandAvailable:()=>true,localHead:()=>failedReview.headSha,localClean:()=>true,reviewerDoctor:()=>({ok:true,failingChecks:[]})})
+const preflightRequest={reviewer:'grok-4.6',wrapper:'ai-grok-review',worktree:'C:/review',headSha:failedReview.headSha}
+
 test('reviewer execution preflight enforces approved wrapper, clean worktree, and exact head',()=>{
-  const io={commandAvailable:()=>true,localHead:()=>failedReview.headSha,localClean:()=>true}
-  const request={reviewer:'grok-4.6',wrapper:'ai-grok-review',worktree:'C:/review',headSha:failedReview.headSha}
+  const io=preflightIo(), request=preflightRequest
   assert.equal(reviewerExecutionPreflight(request,io).ready,true)
   assert.throws(()=>reviewerExecutionPreflight({...request,wrapper:'ai-qwen'},io),/exact wrapper/)
   assert.throws(()=>reviewerExecutionPreflight(request,{...io,commandAvailable:()=>false}),/cannot execute/)
   assert.throws(()=>reviewerExecutionPreflight(request,{...io,localHead:()=> 'f'.repeat(40)}),/exact assigned head/)
   assert.throws(()=>reviewerExecutionPreflight(request,{...io,localClean:()=>false}),/dirty/)
+})
+
+// THE TWO-DAY BENCH (#1287). glm-5.3 was paused on three `provider_unavailable`
+// failures while the provider was working: its local OpenCode server was not
+// running and `ai-glm doctor` said so in one line. The preflight passed because
+// it only checked that the wrapper binary existed. These tests pin the probe and
+// the wording, because the wording is what stops the next wrong pause.
+test('preflight refuses a LOCAL dependency fault and quotes the failing check',()=>{
+  const io={...preflightIo(),reviewerDoctor:()=>({ok:false,failingChecks:['health endpoint answers']})}
+  assert.throws(()=>reviewerExecutionPreflight(preflightRequest,io),/health endpoint answers/)
+  assert.throws(()=>reviewerExecutionPreflight(preflightRequest,io),/LOCAL dependency fault/)
+  // It must say plainly that the reviewer is not at fault, or the next operator
+  // pauses a working provider exactly as before.
+  assert.throws(()=>reviewerExecutionPreflight(preflightRequest,io),/not a grok-4.6 provider fault/)
+  assert.throws(()=>reviewerExecutionPreflight(preflightRequest,io),/Do NOT pause grok-4.6/)
+})
+
+test('preflight refuses to report ready on evidence it never collected',()=>{
+  const {reviewerDoctor,...noDoctor}=preflightIo()
+  assert.throws(()=>reviewerExecutionPreflight(preflightRequest,noDoctor),/has no reviewerDoctor/)
+  // An explicit opt-out is allowed, but the result says the probe did not run
+  // rather than implying the provider was proved healthy.
+  const skipped=reviewerExecutionPreflight({...preflightRequest,skipDoctor:true},noDoctor)
+  assert.equal(skipped.ready,true);assert.equal(skipped.doctorChecked,false)
+  assert.equal(reviewerExecutionPreflight(preflightRequest,preflightIo()).doctorChecked,true)
+})
+
+test('a doctor that names no failing check still refuses, and unnamed is not a pass',()=>{
+  const io={...preflightIo(),reviewerDoctor:()=>({ok:false,failingChecks:[]})}
+  assert.throws(()=>reviewerExecutionPreflight(preflightRequest,io),/an unnamed check/)
+})
+
+test('parseDoctorFailures returns only the failing check names, in order',()=>{
+  const output=['PASS  pinned OpenCode is installed','FAIL  health endpoint answers','PASS  1Password command is available','FAIL  exact model is available'].join('\n')
+  assert.deepEqual(parseDoctorFailures(output),['health endpoint answers','exact model is available'])
+  assert.deepEqual(parseDoctorFailures('PASS  everything'),[])
+  assert.deepEqual(parseDoctorFailures(''),[])
+  assert.deepEqual(parseDoctorFailures('FAIL  trailing spaces   '),['trailing spaces'])
+})
+
+test('local_dependency_unavailable is a distinct terminal code and must name what failed',()=>{
+  assert.ok(TERMINAL_FAILURE_CODES.includes('local_dependency_unavailable'))
+  assert.ok(TERMINAL_FAILURE_CODES.includes('provider_unavailable'))
+  const io=failedReviewIo(), local={...replacementRequest,failureCode:'local_dependency_unavailable'}
+  assert.throws(()=>replaceFailedReviewer(local,io),/requires --failing-check/)
+  // Named but not confirmed unfixable: refuse, and tell the operator to fix the
+  // machine and retry the SAME reviewer rather than spend a rotation slot.
+  const named={...local,failingCheck:'health endpoint answers'}
+  assert.throws(()=>replaceFailedReviewer(named,io),/LOCAL dependency fault/)
+  assert.throws(()=>replaceFailedReviewer(named,io),/retry the SAME reviewer/)
+  // Nothing was recorded against the working provider.
+  assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith('refs/db-review-failures/')),false)
+  assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith(REVIEW_REPLACEMENT_REF_PREFIX)),false)
+})
+
+test('a confirmed-unfixable local fault replaces and writes the failing check into the evidence',()=>{
+  const io=failedReviewIo()
+  const done=replaceFailedReviewer({...replacementRequest,failureCode:'local_dependency_unavailable',failingCheck:'health endpoint answers',confirmLocalDependencyUnfixable:true},io)
+  assert.equal(done.reviewer,'glm-5.3')
+  const failureRef=[...io.refs.keys()].find((ref)=>ref.startsWith('refs/db-review-failures/'))
+  const message=io.getCommit(io.refs.get(failureRef)).message
+  assert.match(message,/code=local_dependency_unavailable/)
+  assert.match(message,/failing-check=health_endpoint_answers/)
+})
+
+test('--failing-check is refused for every code that is not a local fault',()=>{
+  const io=failedReviewIo()
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,failingCheck:'health endpoint answers'},io),/applies only to local_dependency_unavailable/)
+  // An ordinary provider failure still records no failing-check field at all.
+  const done=replaceFailedReviewer(replacementRequest,io)
+  const failureRef=[...io.refs.keys()].find((ref)=>ref.startsWith('refs/db-review-failures/'))
+  assert.ok(done.replacementSha)
+  assert.doesNotMatch(io.getCommit(io.refs.get(failureRef)).message,/failing-check/)
 })
 
 test('paused Qwen evidence remains readable but Qwen receives no new assignment',()=>{
