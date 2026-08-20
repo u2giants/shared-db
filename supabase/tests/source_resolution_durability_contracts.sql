@@ -82,6 +82,15 @@ begin
     where source_system = 'nbcu' and entity_kind = 'property'
       and source_id = 'source-id:zztest-durable';
   delete from core.property where id = v_property;
-  delete from core.licensor where id = v_licensor;
+  -- The canonical Licensor row is NOT deleted here any more (#1339). Migration
+  -- 20260820183334 extended the licensing write guard to cover DELETE on
+  -- core.licensor, and the ONLY delete it will ever authorize is the erasure of
+  -- FR "FRIENDS TV". There is deliberately no authorization shape that lets a
+  -- test remove an arbitrary Licensor, so this cleanup line cannot be "fixed"
+  -- by issuing one -- that would be a hole, not a repair.
+  --
+  -- Nothing leaks: the contract-test runner wraps every file in its own
+  -- `begin; ... rollback;`, so the ZZTEST fixture rows above never outlive the
+  -- transaction whether or not this line exists.
 end;
 $$;
