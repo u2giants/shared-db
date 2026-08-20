@@ -226,3 +226,33 @@ Everything in §2 was read at 23:12Z and `origin/main` moves within minutes. Als
 - `ai-glm` needs its local server up: `ai-glm server start`, then wait — `server status` reports `health: unreachable` for roughly 20 seconds before it comes good.
 - **Commit identity:** `git var GIT_COMMITTER_IDENT` must read `Albert Hazan <u2giants@users.noreply.github.com>`. Verified this session.
 - **Secrets:** swept, nothing new — see the closing report.
+
+---
+
+## 10. Stale handoff files — reported, deliberately NOT deleted
+
+Both name issue **#1225** in their contract block, and I closed #1225 today as already delivered (its five "stranded" migrations are all in production). Their work is therefore done, but **they belong to other sessions and I did not touch them** — the standard is that a session deletes its own file and never another's.
+
+| File | Contract issue | Owner |
+|---|---|---|
+| `HANDOFF.d/2026-08-20T0200Z-edge-dev-claude-orchestrator-closeout.md` | #1225 (CLOSED) | `claude-20260819-092000Z` |
+| `HANDOFF.d/2026-08-20T1528Z-edge-dev-claude-orchestrator-closeout.md` | #1225 (CLOSED) | `claude-20260820-113000Z` |
+
+**Recommended action for the next orchestrator:** retire both, in one docs-only PR, having confirmed nothing in them is still live. Neither owner session is running.
+
+**Note the count is NOT the problem** (owner ruling 2026-08-13). Eight open files with eight live workstreams would be correct. These two are flagged because their issue is closed, not because there are too many.
+
+## 11. Worktrees — every one accounted for
+
+| Worktree | Status |
+|---|---|
+| `C:\repos\shared-db-worktrees\issue-1339-fr-removal` | **LIVE — mine.** PR #1347 mid-review. Clean. **Do not retire.** |
+| `C:\repos\shared-db` (main checkout) | Left **detached at `origin/main`**, clean, all 25 `.ai/reviews` files restored and tracked. |
+| `.claude/worktrees/shared-db-orchestrator-69417c` | Mine, this session. Finished after PR #1354 merges — safe to clean. |
+| `.claude/worktrees/issue-1297-test-n-minus-1-ce7b71` | **Not mine. Holds `main` checked out** — which is why the main repo is detached. Left alone deliberately. |
+| `.claude/worktrees/plm-art-piece-attachment-audit-0df5f8` | Not mine. Left alone deliberately. |
+| `.claude/worktrees/rebase-finish-1212-eea93b` | Not mine. PR #1212 merged today by another session; likely retirable, but **not by me**. |
+| `.claude/worktrees/shared-db-orchestrator-filtering-8c129d` | Not mine — another session on `claude/curated-master-data-forks`. Left alone deliberately. |
+| `C:\repos\shared-db-worktrees\preview-provenance` | Not mine. Left alone deliberately. |
+
+`scripts/reap-merged-worktrees.mjs` refuses while any `orchestrator-marker` issue is open, so worktree reaping is correctly a next-session job — and it must ask GitHub whether the PULL REQUEST merged, never `git branch --merged`, which cannot see a squash merge.
