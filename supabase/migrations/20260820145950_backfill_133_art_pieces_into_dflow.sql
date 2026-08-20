@@ -54,7 +54,7 @@
 --
 -- `20260820133058` advances that sequence to 10000 and is ALREADY APPLIED TO PRODUCTION
 -- (verified by reading production's own ledger and `last_value` on 2026-08-20). Migrations
--- apply in version order, and 20260820133058 < 20260820142141, so no database can reach
+-- apply in version order, and 20260820133058 < 20260820145950, so no database can reach
 -- this file with the sequence still unfixed.
 --
 -- An earlier draft of this migration re-checked that precondition in a `do $$` block. That
