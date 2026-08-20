@@ -1,17 +1,21 @@
--- #1339: the FR ERASURE contract.
+-- #1339: the FR / FRIDA KAHLO ERASURE contract. TWO PARTS -- Part 1 covers
+-- core.licensor, Part 2 covers core.property. They are separate `do` blocks in
+-- one transaction, each with its own counted proofs.
 --
 -- What this file proves, and why each proof exists:
---   * A DELETE of a canonical Licensor is now COVERED by the licensing write
---     guard. Before migration 20260820183334 the guard was
+--   * A DELETE of a canonical Licensor OR Property is now COVERED by the
+--     licensing write guard. Before migration 20260820183334 both triggers were
 --     `before insert or update` only, so an unauthorized delete of the most
---     important row in the licensing model succeeded silently. Every refusal
+--     important rows in the licensing model succeeded silently. Every refusal
 --     below simply does not happen without that migration.
---   * The new `owner_ruling_fr_removal` authorization is narrow: FR only, DELETE
---     only, whole-identity only, ordered behind BOTH recorded owner rulings, and
---     one-use.
---   * No OTHER write kind can authorize a delete, and the removal kind cannot
---     authorize anything else.
---   * The delete leaves immutable audit evidence naming the row that died.
+--   * The two new authorizations are narrow: `owner_ruling_fr_removal` is FR
+--     only, `owner_ruling_fk_removal` is a FRIDA KAHLO parented to FR only.
+--     Both are DELETE only, whole-identity only, ordered behind BOTH recorded
+--     owner rulings, and one-use.
+--   * No OTHER write kind can authorize a delete; neither removal kind can
+--     authorize anything but a delete; and neither can be pointed at the other's
+--     table.
+--   * Each delete leaves immutable audit evidence naming the row that died.
 --
 -- No `exception when others` swallows anything: every handler re-raises unless
 -- the message is the exact refusal being proven, so a typo in this file is red,
@@ -322,6 +326,300 @@ begin
 
   if v_checks <> v_expected_checks then
     raise exception 'FR erasure contract ran % of % proofs -- a block was skipped', v_checks, v_expected_checks;
+  end if;
+end $$;
+
+
+-- ===================================================================
+-- PART 2 -- THE core.property HALF (#1339, owner ruling 2026-08-20:
+-- "FRIDA KAHLO was never supposed to be under Friends ... you can delete it").
+--
+-- Migration 20260820183334 also recreates property_licensing_write_guard as
+-- `before insert or update or delete` and adds the owner_ruling_fk_removal
+-- write kind. Before it, an unauthorized DELETE of ANY canonical Property
+-- succeeded silently. Every refusal below simply does not happen without it.
+--
+-- This block runs in the same transaction as Part 1, so the blanket CI
+-- authorizations Part 1 cleared are still gone -- but the empty baseline is
+-- PROVEN again rather than assumed, because a proof that depends on an earlier
+-- block having run is a proof that can rot silently.
+-- ===================================================================
+do $$
+declare
+  v_checks integer := 0;
+  v_expected_checks constant integer := 15;
+  v_ruled_at constant timestamptz := timestamptz '2026-08-02 12:00:00+00';
+  v_erased_at constant timestamptz := timestamptz '2026-08-20 12:00:00+00';
+  v_ruler constant text := 'contract-test ruler';
+  v_fr uuid;
+  v_unrelated_licensor uuid;
+  v_fk uuid;
+  v_fk_elsewhere uuid;
+  v_plan uuid;
+  v_audit_before bigint;
+begin
+  delete from plm.licensing_write_authorization where consumed_at is null;
+  begin
+    insert into core.property (licensor_id, name, code, status)
+    values (null, 'erasure baseline probe', 'FKPRB', 'potential');
+    raise exception 'the property licensing guard was already open before this contract began';
+  exception when others then
+    if position('no exact transaction-bound authorization' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+
+  -- ==================================================================
+  -- 0. SHAPE: the core.property guard trigger covers DELETE at all.
+  --    This is the half an earlier revision of the migration deliberately
+  --    left open; it must not silently reopen.
+  -- ==================================================================
+  if not exists (
+    select 1 from pg_trigger t
+    where t.tgrelid = 'core.property'::regclass
+      and t.tgname = 'property_licensing_write_guard'
+      and not t.tgisinternal
+      and t.tgtype & 8 > 0 and t.tgtype & 4 > 0 and t.tgtype & 16 > 0
+  ) then
+    raise exception 'the core.property licensing write guard does not cover insert, update AND delete';
+  end if;
+  v_checks := v_checks + 1;
+
+  -- ------------------------------------------------------------------
+  -- Fixture: FR "FRIENDS TV" and an unrelated licensor, a FRIDA KAHLO
+  -- property under each, and the 2026-08-02 rulings. core.licensor.code is
+  -- globally unique and core.property.code is unique per licensor, so the two
+  -- FRIDA KAHLO rows can coexist under different parents -- which is exactly
+  -- what the "wrong parent" proof needs.
+  -- ------------------------------------------------------------------
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.licensor', 'licensing_review_create', gen_random_uuid(), repeat('a',64),
+     'fk-erasure-contract-test', array['name','code','status'], clock_timestamp() + interval '5 minutes');
+  insert into core.licensor (name, code, status) values ('FRIENDS TV', 'FR', 'inactive') returning id into v_fr;
+
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.licensor', 'licensing_review_create', gen_random_uuid(), repeat('a',64),
+     'fk-erasure-contract-test', array['name','code','status'], clock_timestamp() + interval '5 minutes');
+  insert into core.licensor (name, code, status) values ('SOMEONE ELSE', 'FRY', 'active') returning id into v_unrelated_licensor;
+
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.property', 'licensing_review_create', gen_random_uuid(), repeat('a',64),
+     'fk-erasure-contract-test', array['licensor_id','name','code','status'], clock_timestamp() + interval '5 minutes');
+  insert into core.property (licensor_id, name, code, status)
+  values (v_fr, 'FRIDA KAHLO', 'FK', 'potential') returning id into v_fk;
+
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.property', 'licensing_review_create', gen_random_uuid(), repeat('a',64),
+     'fk-erasure-contract-test', array['licensor_id','name','code','status'], clock_timestamp() + interval '5 minutes');
+  insert into core.property (licensor_id, name, code, status)
+  values (v_unrelated_licensor, 'FRIDA KAHLO', 'FK', 'potential') returning id into v_fk_elsewhere;
+
+  -- Both properties get BOTH rulings, so "the wrong parent is refused" can
+  -- never pass merely because that row's ruling records are missing.
+  insert into core.taxonomy_owner_ruling
+    (entity_table, entity_id, entity_code, entity_name, ruling, ruled_by, ruled_at, ruling_evidence, action_taken)
+  values
+    ('property', v_fk_elsewhere, 'FK', 'FRIDA KAHLO', 'correctly parented', v_ruler, v_ruled_at, 'fixture', 'fixture'),
+    ('property', v_fk_elsewhere, 'FK', 'FRIDA KAHLO', 'correctly parented', v_ruler, v_erased_at, 'fixture', 'fixture');
+
+  -- ==================================================================
+  -- 1. AN UNAUTHORIZED DELETE OF THE PROPERTY IS REFUSED, and the row lives.
+  -- ==================================================================
+  delete from plm.licensing_write_authorization where consumed_at is null;
+  begin
+    delete from core.property where id = v_fk;
+    raise exception 'an unauthorized DELETE of the FRIDA KAHLO property succeeded';
+  exception when others then
+    if position('no exact transaction-bound authorization' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+  if not exists (select 1 from core.property where id = v_fk) then
+    raise exception 'the refused property DELETE removed the row anyway';
+  end if;
+  v_checks := v_checks + 1;
+
+  -- ==================================================================
+  -- 2. THE LICENSOR REMOVAL KIND CANNOT DELETE A PROPERTY, and the property
+  --    removal kind cannot delete a licensor. The kinds are pinned per table.
+  -- ==================================================================
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.property', 'owner_ruling_fr_removal', gen_random_uuid(), repeat('b',64),
+     'fk-erasure-contract-test', array['licensor_id','name','code','status'], clock_timestamp() + interval '5 minutes');
+  begin
+    delete from core.property where id = v_fk;
+    raise exception 'the licensor removal kind deleted a property';
+  exception when others then
+    if position('may not authorize a DELETE' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+  delete from plm.licensing_write_authorization where consumed_at is null;
+
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.licensor', 'owner_ruling_fk_removal', gen_random_uuid(), repeat('b',64),
+     'fk-erasure-contract-test', array['name','code','status'], clock_timestamp() + interval '5 minutes');
+  begin
+    delete from core.licensor where id = v_unrelated_licensor;
+    raise exception 'the property removal kind deleted a licensor';
+  exception when others then
+    if position('may not authorize a DELETE' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+  delete from plm.licensing_write_authorization where consumed_at is null;
+
+  -- ==================================================================
+  -- 3. THE PROPERTY REMOVAL KIND CANNOT AUTHORIZE ANYTHING BUT A DELETE.
+  -- ==================================================================
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.property', 'owner_ruling_fk_removal', gen_random_uuid(), repeat('c',64),
+     'fk-erasure-contract-test', array['licensor_id','name','code','status'], clock_timestamp() + interval '5 minutes');
+  begin
+    insert into core.property (licensor_id, name, code, status)
+    values (v_unrelated_licensor, 'SMUGGLED', 'FKSMG', 'potential');
+    raise exception 'an owner_ruling_fk_removal authorization created a property';
+  exception when others then
+    if position('permits only a DELETE of core.property' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+  delete from plm.licensing_write_authorization where consumed_at is null;
+
+  -- ==================================================================
+  -- 4. THE SPURIOUS PARENTAGE IS THE BASIS OF THE RULING, so a FRIDA KAHLO
+  --    correctly parented somewhere else is REFUSED -- even with a valid
+  --    authorization and both of its own recorded rulings.
+  -- ==================================================================
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.property', 'owner_ruling_fk_removal', gen_random_uuid(), repeat('d',64),
+     'fk-erasure-contract-test', array['licensor_id','name','code','status'], clock_timestamp() + interval '5 minutes');
+  begin
+    delete from core.property where id = v_fk_elsewhere;
+    raise exception 'the guard erased a FRIDA KAHLO that was not parented to FR';
+  exception when others then
+    if position('not the spurious FR / FRIENDS TV parent' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+
+  -- ==================================================================
+  -- 5. ORDERING: the delete is refused until BOTH rulings are recorded.
+  --    The authorization from proof 4 is still outstanding and unconsumed.
+  -- ==================================================================
+  begin
+    delete from core.property where id = v_fk;
+    raise exception 'FRIDA KAHLO was erased with no owner ruling recorded at all';
+  exception when others then
+    if position('the original 2026-08-02 owner ruling for this property is not recorded' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+
+  insert into core.taxonomy_owner_ruling
+    (entity_table, entity_id, entity_code, entity_name, ruling, ruled_by, ruled_at, ruling_evidence, action_taken)
+  values
+    ('property', v_fk, 'FK', 'FRIDA KAHLO', 'wrong parent', v_ruler, v_ruled_at, 'fixture', 'fixture');
+
+  begin
+    delete from core.property where id = v_fk;
+    raise exception 'FRIDA KAHLO was erased with only the 2026-08-02 ruling recorded';
+  exception when others then
+    if position('the 2026-08-20 erasure ruling for this property is not recorded' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+
+  insert into core.taxonomy_owner_ruling
+    (entity_table, entity_id, entity_code, entity_name, ruling, ruled_by, ruled_at, ruling_evidence, action_taken)
+  values
+    ('property', v_fk, 'FK', 'FRIDA KAHLO', 'delete it', v_ruler, v_erased_at, 'fixture',
+     'core.property row ERASED by migration 20260820183334');
+
+  -- ==================================================================
+  -- 6. ONE USE MEANS ONE.
+  -- ==================================================================
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.property', 'owner_ruling_fk_removal', gen_random_uuid(), repeat('e',64),
+     'fk-erasure-contract-test', array['licensor_id','name','code','status'], clock_timestamp() + interval '5 minutes');
+  begin
+    delete from core.property where id = v_fk;
+    raise exception 'the guard erased FRIDA KAHLO while two removal authorizations were outstanding';
+  exception when others then
+    if position('another unconsumed FRIDA KAHLO removal authorization exists' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+
+  -- ==================================================================
+  -- 7. THE AUTHORIZED ERASURE, and the evidence it must leave.
+  -- ==================================================================
+  delete from plm.licensing_write_authorization where consumed_at is null;
+  select coalesce(max(id), 0) into v_audit_before from plm.licensing_write_guard_audit;
+  v_plan := gen_random_uuid();
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash, actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.property', 'owner_ruling_fk_removal', v_plan, repeat('7',64),
+     'fk-erasure-contract-test', array['licensor_id','name','code','status'], clock_timestamp() + interval '5 minutes');
+
+  delete from core.property where id = v_fk;
+  if exists (select 1 from core.property where id = v_fk) then
+    raise exception 'the authorized erasure did not remove the property row';
+  end if;
+  v_checks := v_checks + 1;
+
+  if not exists (
+    select 1 from plm.licensing_write_guard_audit
+    where id > v_audit_before
+      and plan_id = v_plan
+      and write_kind = 'owner_ruling_fk_removal'
+      and target_table = 'core.property'::regclass
+      and operation = 'DELETE'
+      and target_row_id = v_fk
+      and ruling_migration = '20260820183334'
+      and old_status = 'potential'
+      and new_status is null
+      and protected_columns = array['licensor_id','name','code','status']::text[]
+  ) then
+    raise exception 'the property erasure left no exact immutable audit evidence';
+  end if;
+  v_checks := v_checks + 1;
+
+  if exists (
+    select 1 from plm.licensing_write_authorization
+    where plan_id = v_plan and consumed_at is null
+  ) then
+    raise exception 'the property erasure authorization was not consumed';
+  end if;
+  v_checks := v_checks + 1;
+
+  -- ==================================================================
+  -- 8. THE STRICT GUARD IS RESTORED. The correctly-parented FRIDA KAHLO is
+  --    still there and still undeletable.
+  -- ==================================================================
+  if not exists (select 1 from core.property where id = v_fk_elsewhere) then
+    raise exception 'the correctly-parented FRIDA KAHLO was removed as collateral';
+  end if;
+  begin
+    delete from core.property where id = v_fk_elsewhere;
+    raise exception 'the strict property guard was not restored after the erasure';
+  exception when others then
+    if position('no exact transaction-bound authorization' in sqlerrm) = 0 then raise; end if;
+    v_checks := v_checks + 1;
+  end;
+
+  if v_checks <> v_expected_checks then
+    raise exception 'FRIDA KAHLO erasure contract ran % of % proofs -- a block was skipped', v_checks, v_expected_checks;
   end if;
 end $$;
 
