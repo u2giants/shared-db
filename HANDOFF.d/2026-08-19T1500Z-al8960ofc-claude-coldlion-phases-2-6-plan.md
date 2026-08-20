@@ -28,15 +28,23 @@ sales history missing entirely.
 
 ## 3. State right now
 
+**Everything this session produced is MERGED to `main`.** Nothing is left on a branch.
+
 | Thing | State |
 |---|---|
-| `docs/plan_coldlion-landing-phases-2-6.md` | Written, committed on the branch. Not merged yet |
-| `docs/coldlion-field-decisions-20260819.csv` | Albert's per-field ingest/ignore decisions, sanitised of sample values |
-| Two owner rulings (D1 all-14 slots, D3 division letter code) | Committed on the branch |
+| `docs/plan_coldlion-landing-phases-2-6.md` | ✅ Merged (PR #1263). Step 4a since resolved — see §6 |
+| `docs/coldlion-field-decisions-20260819.csv` | ✅ Merged. Albert's per-field decisions, sanitised of sample values |
+| Owner rulings D1-D13 | ✅ Merged, recorded in §8 of the plan |
+| `docs/coldlion.md` (new front door) + banners on 3 docs | ✅ Merged (PR #1311) |
+| `docs/coldlion-open-questions.md` chase column + entries 2.7-2.10 | ✅ Merged (PRs #1316, #1323, #1325, #1329) |
+| Branch protection `strict: false` | ✅ Applied. Revert criteria in issue #1286 |
+| `AGENTS.md` split 234 KB -> 122 KB | ✅ Merged (PR #1336). **But see the collision note in §5 — PR #1212 was already doing this, better** |
+| `scripts/check-cancelled-work.mjs` relocation exemption + 3 tests | ✅ Merged with #1336, 19/19 pass |
+| ColdLion answers of 2026-08-20 (merch-group renumbering, active flag, line key) | ✅ Merged (PRs #1325, #1329, #1330, #1336) |
 | Any migration or loader code | **None. Nothing built.** |
 
 **Nothing is deployed. No database object was created or changed by this session.** Every database
-call was read-only.
+call was read-only. The only non-documentation change was the branch-protection setting.
 
 ## 4. Decisions Albert made this session (all locked, all in §8 of the plan)
 
@@ -112,6 +120,19 @@ plan; this list is the plain-English version.
   originally dropped it on the 0.8% figure and reversed once shown the others. Under the no-raw
   ruling that drop would have been permanent. Sample widely before presenting a fill rate as a
   reason to discard.
+- **Starting a refactor without checking for an open PR on the same file — the most expensive
+  mistake of this session.** On 2026-08-20 I measured `AGENTS.md` at 234 KB, opened #1331 and split
+  it in #1336. **PR #1212 had been open since 2026-08-19 doing the same job and doing it better** —
+  78 KB (under the ceiling) versus my 122 KB, plus the `HANDOFF.md` pointer conversion that also
+  closes #1083. My merge left it `CONFLICTING`. `AGENTS.md` §6 is literally titled *How to tell if a
+  change is already in flight* and I did not run it. **One `gh pr list --repo u2giants/shared-db
+  --state open` filtered on the file would have caught it**, and the checkout even contained a
+  `.claude/worktrees/docs-slimming` directory for that branch. Before touching any shared document,
+  list open PRs that touch it.
+- **Recording ColdLion's answer without checking what it explains elsewhere.** Her prepack
+  explanation was filed against the quantity question, and it also silently answered the *line
+  identity* question that was blocking step 4. It took a second pass to notice. When an answer
+  arrives, re-read the other open questions against it.
 - **Applying a ruling wider than its evidence.** The 519/519 merch-group match covered *line-level*
   groups only. The first draft used it to justify dropping `subMerchGroup*`/`ppkMerchGroup*` too,
   which are a different grain and which our own history-shape doc calls the better record. Grok
@@ -120,31 +141,55 @@ plan; this list is the plain-English version.
 
 ## 6. Open items for the next session
 
-1. Start at **step 1** of the plan: supersede the design doc for the 2026-08-19 rulings. It is
-   documentation only and unblocks steps 2-6, which are independent of each other.
-2. **The Grok review is DONE.** It returned REJECT on the first draft and found three real defects,
-   all verified against the owner's field list and all corrected in the plan. Do not re-run it on
-   the same draft. Cost $0.24, 972k tokens, session `coldlion-phases-2-6-plan-review` — resume that
-   session with `ai-grok-review ask` rather than starting a new one.
-3. ⛔ **Step 4 is blocked until the `orderHistory` line key is resolved from a live pull.** There is
-   no `lineNo` in the payload. Do not guess one; every obvious candidate silently merges real sales
-   lines. This is step 4a in the plan's STATUS table.
-4. Two questions are with Albert and unanswered:
-   - Should we ask ColdLion for a **vendor write endpoint**? He wants to own FEMA/NBC certificate
-     expiry dates but there is no write path. They added the 7-day cap and `prodLineSeq` on our
-     request, so asking is plausible. Not blocking.
-   - A drafted question to ColdLion about **`lineInvoiceQty` and `lineOpenQty` always reading zero**
-     was given to him on 2026-08-19 with two real order examples (7124957, 7124958). Unknown whether
-     he has sent it. **Until answered, never build a report on "invoiced" or "open" quantity from
-     `orderHistory`** — it would read zero for everything and look plausible.
-5. **The item sync is still broken** (403 since 2026-05-21, out of scope for this plan). Actively
+1. **Start at step 1 of the plan** — supersede the design doc for the 2026-08-19 rulings.
+   Documentation only, and it unblocks steps 2-6, which are independent of each other.
+2. ✅ **Step 4a is DONE.** The `orderHistory` line key is resolved and is **not** a blocker any
+   more: **line = `(salesOrderNo, itemNo, labelCode)`, component = `+ subItemNo`.** The unlock was
+   ColdLion confirming that **`linePrice` is per COMPONENT, not per line**, so rows that looked like
+   conflicting duplicate lines are one line's components priced individually. Verified on 1,671 rows
+   across 8 windows 2019-2026. Full reasoning in
+   [`../docs/coldlion-history-endpoints-shape.md`](../docs/coldlion-history-endpoints-shape.md) §4.4.
+   **Do not re-derive this.**
+3. **The Grok review is DONE** — REJECT on the first draft, three real defects, all verified and
+   corrected. Do not re-run it on the same draft. Session `coldlion-phases-2-6-plan-review`; resume
+   with `ai-grok-review ask` rather than starting a new one. Cost $0.24.
+4. **Waiting on ColdLion** (register [`../docs/coldlion-open-questions.md`](../docs/coldlion-open-questions.md), §2):
+   - **2.8** where invoiced/open quantity actually lives — JamieLynn is consulting her team.
+   - **2.2** blank component merch groups. Her "expected for older stuff" does **not** fit: 624 rows
+     across 2019-2023 have **zero** blanks, then 2024 is 11.7% and 2025 is 16.1%. Sample set is in
+     the register, ready to send.
+   - **2.6** licence expiry flag — asked once, never answered.
+   - **2.10** expose `Line #` and `Prod Stage` in the API. Both exist inside ColdLion; neither is in
+     the spec. Not blocking; we work around both.
+5. **The item sync is still broken** — `403` since 2026-05-21, out of scope for this plan, actively
    losing data. Albert has seen it and has not scheduled it. Raise it again if this plan runs long.
+6. **Issue #1322** — the DB Data Admin control to mark a property inactive. Must ship **with** the
+   66-code admission, not after it. No schema change needed: `core.property.status` already accepts
+   `inactive`.
 
-## 7. Where the evidence lives
+## 7. Where the evidence lives — and what is NOT kept
 
-All measurements are in §6 of the plan with the method to re-derive them. The sample-bearing CSVs
-Albert marked up are **not in the repo** — this repo is public and they carry licensor names, item
-descriptions, vendor emails and customer names. They are in Albert's Dropbox at `ai/`.
+Measurements are split across three files. Do not look for all of them in one place; an earlier
+version of this section pointed only at the plan and would have sent a reader to the wrong file.
+
+| Finding | Where it is recorded |
+|---|---|
+| The original 7 findings (division in the feed, wrong item key, 519/519 merch-group match, 26% orphan order lines) | §6 of [`../docs/plan_coldlion-landing-phases-2-6.md`](../docs/plan_coldlion-landing-phases-2-6.md), each with the method to re-derive it |
+| **`linePrice` is per component**, and the sales-order line/component keys, verified on 1,671 rows | [`../docs/coldlion-history-endpoints-shape.md`](../docs/coldlion-history-endpoints-shape.md) §4.4, with the worked example |
+| **Blank component merch groups by year** — 624 rows 2019-2023 with zero blanks, 2024 11.7%, 2025 16.1% | Register entry 2.2 in [`../docs/coldlion-open-questions.md`](../docs/coldlion-open-questions.md), with the sample orders |
+| Every field's fill rate, per feed | [`../docs/coldlion-field-decisions-20260819.csv`](../docs/coldlion-field-decisions-20260819.csv) |
+
+⚠️ **The raw API samples are NOT kept.** The 1,671-row `orderHistory` sample and the 2,088-row
+`prodHistory` sample lived in a session scratchpad that is deleted when the session ends. Only the
+conclusions survive. **To re-derive any of the above you must re-pull**, which is cheap for master
+feeds and costs one request per 7-day window for the history feeds. The method is in each record
+above; the numbers were never taken on faith.
+
+⚠️ **The marked-up CSVs Albert filled in are NOT in the repo** — this repository is **public** and
+the sample columns carry licensor names, item descriptions, vendor email addresses and customer
+names. They are in Albert's Dropbox under `ai/`. The committed
+`coldlion-field-decisions-20260819.csv` is the same decisions with every sample value stripped.
+Do not commit the originals.
 
 ## 8. Delete this file when
 
