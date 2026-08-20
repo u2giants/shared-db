@@ -60,9 +60,10 @@
 --     apply.
 --   * Every object is resolved through `to_regclass`, so a from-empty replay or any
 --     database without `dflow` is a clean no-op rather than an abort (#1258).
---   * Apply-time reads are the sequence itself and `max(id)` over `dflow.art_piece` on its
---     primary key -- a single index scan of a 981-row table. Nothing here scales with
---     production volume, which is the failure mode that made 20260819151536 unappliable.
+--   * Apply-time reads are the sequence state and `max(id)` over `dflow.art_piece` on its
+--     primary key -- TWO such reads, one in each block, each a backward B-tree descent
+--     rather than a scan. Nothing here scales with production volume, which is the
+--     failure mode that made 20260819151536 unappliable.
 
 do $$
 declare
@@ -70,6 +71,8 @@ declare
   v_target   bigint;
   v_current  bigint;
   v_max_id   bigint;
+  v_is_called boolean;
+  v_next     bigint;
 begin
   if to_regclass('dflow.art_piece_id_seq') is null then
     raise notice 'dflow.art_piece_id_seq is absent; nothing to advance (from-empty replay).';
@@ -82,14 +85,20 @@ begin
     execute 'select coalesce(max(id), 0) from dflow.art_piece' into v_max_id;
   end if;
 
-  execute 'select last_value from dflow.art_piece_id_seq' into v_current;
+  -- is_called matters: when it is false, nextval returns last_value ITSELF, not
+  -- last_value + 1. Reading only last_value would make both the skip decision and the
+  -- reported next id off by one. That state is unreachable from the measured production
+  -- state, but `setval(seq, max(id), false)` would reach it and would still issue a
+  -- colliding id, so it is handled rather than assumed away.
+  execute 'select last_value, is_called from dflow.art_piece_id_seq' into v_current, v_is_called;
+  v_next := case when v_is_called then v_current + 1 else v_current end;
 
   -- Never below what the table has already issued, never below the floor.
   v_target := greatest(v_floor, v_max_id);
 
-  if v_current >= v_target then
-    raise notice 'dflow.art_piece_id_seq already at % (target %); left unchanged. Sequences are never moved backwards.',
-      v_current, v_target;
+  if v_next > v_target then
+    raise notice 'dflow.art_piece_id_seq would next issue % (target %); left unchanged. Sequences are never moved backwards.',
+      v_next, v_target;
     return;
   end if;
 
@@ -99,16 +108,17 @@ begin
     v_current, v_target, v_target + 1;
 end $$;
 
--- Verification. Catalogue and sequence state only; the single data read is max(id) over a
--- primary key. Deliberately does NOT assert against designflow.* or Cloud SQL: the first is
--- an orphan that is absent from preview and from a from-empty replay, and the second is a
--- different database this migration cannot see. Their ceilings are why 10000 was chosen,
--- and they are recorded in the header rather than asserted here, because an assertion that
--- cannot run everywhere is not a guard.
+-- Verification. Catalogue and sequence state only; the data reads are max(id) over a
+-- primary key, in each case a backward B-tree descent rather than a scan.
+-- Cloud SQL is NOT asserted and cannot be: it is a different database this migration has
+-- no connection to. Its ceiling is why 10000 was chosen and is recorded in the header.
+-- designflow.art_piece IS asserted, guarded by to_regclass, so the check runs where the
+-- orphan exists and skips where it does not.
 do $$
 declare
-  v_current bigint;
-  v_max_id  bigint;
+  v_current    bigint;
+  v_max_id     bigint;
+  v_orphan_max bigint;
 begin
   if to_regclass('dflow.art_piece_id_seq') is null then
     raise notice 'verification skipped: dflow.art_piece_id_seq absent.';
@@ -131,6 +141,25 @@ begin
   if v_current < v_max_id then
     raise exception 'dflow_art_piece_seq_below_max_id: sequence is at % but the table already uses id %. The next insert would collide.',
       v_current, v_max_id;
+  end if;
+
+  -- The orphan ceiling, asserted where the orphan EXISTS and skipped where it does not.
+  -- An earlier draft skipped this entirely, arguing that an assertion which cannot run
+  -- everywhere is not a guard. Review (#1313) correctly called that out as conflating
+  -- "cannot run" with "must be unconditional": a to_regclass-guarded assert runs
+  -- everywhere -- asserting where the object is present, skipping where it is absent --
+  -- and this same file already uses that idiom for dflow.art_piece. Cloud SQL genuinely
+  -- cannot be asserted from here, because it is a different database; that exclusion
+  -- stands and is recorded in the header instead.
+  if to_regclass('designflow.art_piece') is not null then
+    execute 'select coalesce(max(id), 0) from designflow.art_piece' into v_orphan_max;
+    if v_current < v_orphan_max then
+      raise exception 'dflow_art_piece_seq_below_orphan_max: sequence is at % but designflow.art_piece uses id %. New ids would collide with the leftover copy.',
+        v_current, v_orphan_max;
+    end if;
+    raise notice 'orphan ceiling checked: designflow.art_piece max id = %, cleared.', v_orphan_max;
+  else
+    raise notice 'orphan ceiling not checked: designflow.art_piece is absent here (expected on preview and on a from-empty replay).';
   end if;
 
   raise notice 'VERIFIED: dflow.art_piece_id_seq = %, table max id = %, next id = %. Clears dflow (1025), the designflow orphan (1163) and Cloud SQL production (1465 on 2026-08-20).',
