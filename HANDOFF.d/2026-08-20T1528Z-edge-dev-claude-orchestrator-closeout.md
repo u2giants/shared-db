@@ -33,10 +33,15 @@ migration is invisible, and the repository has a standing rule against exactly t
 
 ### 2. #1303 — fix the reviewer wrappers before the next promotion batch? **[SHRUNK]**
 
-**My answer changed during the session and the ask is now much smaller.** Three of the five
-defects were fixed by another session and by me today; two remain (#1297, and the Muse items
-in ai-devops#51). **Don't spend a session on it** — the remaining GLM-class work is done and
-#1297 can ride along with other work. Answer **later** unless you want it swept now.
+**My answer changed twice during the session and the ask has almost vanished.** Of the five
+defects, **four are now fixed**: Grok's artifact suppression, Muse's zero-byte return,
+ai-devops#45, and GLM liveness (by me, `12b0f0e`). **#1297 was fixed by another session while
+this one ran** — PR #1310, closed 13:35Z.
+
+**Only the Muse items remain (ai-devops#51), and they are not shared-db's.** Answer **later**;
+there is no longer a shared-db pass to authorise. The real Muse question is whether to keep it
+in the rotation at all given two blocking failures today — but that follows #1304, a one-line
+repository decision.
 
 ### 3. #1291 — his three existing items. **Untouched and not re-asked.**
 
@@ -132,7 +137,8 @@ backfill. That mattered — see §5.4.
 
 ### Worktrees — three, NONE of them mine, all deliberately untouched
 
-- `.claude/worktrees/issue-1297-test-n-minus-1-ce7b71` — another session working **#1297**.
+- `.claude/worktrees/issue-1297-test-n-minus-1-ce7b71` — the session that **fixed #1297** during
+  this one (PR #1310, closed 13:35Z). Likely retirable now, but it is not mine to judge.
 - `.claude/worktrees/plm-art-piece-attachment-audit-0df5f8` — the session that produced the
   `plm.art_piece_attachment` audit this session acted on.
 - `C:/repos/shared-db-worktrees/preview-provenance` — pre-existing.
@@ -278,7 +284,7 @@ schema out-of-band, or to supersede."*
 | Muse returning zero bytes | **fixed** — but see §4.5 for two new failures |
 | Local vs provider failure (ai-devops#45) | **fixed** |
 | GLM liveness (#1298) | **fixed by me today**, `12b0f0e` — after my first attempt did not work |
-| #1297 stranded replacement | **open**, another session has a worktree on it |
+| #1297 stranded replacement | **FIXED by another session** during this one — PR #1310, closed 13:35Z |
 
 **My first GLM fix (`a273e61`) did not work and I told the owner it did.** I hooked the stamp
 to a `/session/status` branch that returns `{}` for the whole turn. My four tests passed
@@ -373,7 +379,9 @@ both directions.
   converges on the same catalog state.
 - **Risk: the recovery-lane gap (#1321) will strand the next delayed promotion.**
 - **Risk: Muse is a third of the rotation and unreliable here** (ai-devops#51). #1304 is the
-  one-line repository decision behind its first failure.
+  one-line repository decision behind its first failure. **Note the rotation is now more
+  resilient than it was this morning:** #1297 landed during this session (PR #1310), so a
+  failed reviewer is no longer stranded when the cursor wraps onto it.
 - **Uncertain, and I did not establish it:** whether `dflow.art_piece` is serving live traffic
   or shadowing Cloud SQL. GLM asked; the backfill did not depend on it because the data was
   identical. Recorded rather than assumed.
