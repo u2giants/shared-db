@@ -39,8 +39,10 @@ export const REVIEWERS = Object.freeze([
 // crash, not a graceful miss. Retired names stay readable forever; only
 // ACTIVE_REVIEWERS receives new work -- the same pattern used to pause Qwen.
 //
-// 'glm-5.3' occupies the SAME rotation slot 'glm-5.2' held, so ACTIVE_REVIEWERS
-// keeps its length and order and the round robin does not skip or repeat a turn.
+// 'glm-5.3' occupies the SAME rotation slot 'glm-5.2' held, so no in-flight
+// sequence is reassigned out of order. It no longer keeps ACTIVE_REVIEWERS at the
+// same LENGTH -- issue #1290 changed the length from two to three. See the
+// ROTATION SLOTS block below, which is the accurate statement.
 //
 // RESTORED 2026-08-20 (owner instruction, issue #1290): 'glm-5.3'.
 // ITS PAUSE ON 2026-08-18 WAS A FALSE DIAGNOSIS, and the diagnosis is the lesson.
@@ -87,12 +89,28 @@ export const REVIEWERS = Object.freeze([
 // ROTATION SLOTS. 'glm-5.3' still occupies the slot 'glm-5.2' held. Muse is APPENDED,
 // so it takes the slot kimi-k3's pause vacates in ACTIVE_REVIEWERS rather than
 // displacing anyone. ACTIVE_REVIEWERS is therefore ['grok-4.6','glm-5.3',
-// 'muse-spark-1.2-contributor'] -- THREE, and odd. That matters: with an even
-// two-name rotation, `replaceFailedReviewer` could land back on the same provider
-// that just failed and refuse, leaving a replacement with nowhere to go. Note also
-// that ai-grok-review holds a per-REPOSITORY in-flight lock, so only one Grok review
-// runs at a time here; a rotation that is effectively Grok-alone is not a rotation,
-// and twice on 2026-08-19 a second reviewer overturned the first's conclusion.
+// 'muse-spark-1.2-contributor'] -- THREE names instead of two.
+//
+// WHAT THREE NAMES DOES AND DOES NOT FIX. An earlier draft of this block claimed an
+// odd-length rotation removes the `replaceFailedReviewer` same-provider trap. THAT
+// CLAIM WAS FALSE and a review caught it (#1290 review, High). The refuse below --
+// `next durable reviewer is the same failed provider` -- fires whenever there have
+// been N-1 assignments since the failure, for ANY N. Going from two names to three
+// only moves the collision from ONE intervening assignment to TWO. Two is exactly
+// the natural rest point of a three-name parallel dispatch: Grok takes a PR, GLM
+// takes the next, Muse takes the third, the cursor lands on a multiple of three, and
+// a Grok failure then computes back to Grok and is refused.
+//
+// So a third name genuinely buys CAPACITY -- three reviews can be in flight, and for
+// most of 2026-08-19 the rotation was effectively Grok alone because ai-grok-review
+// holds a per-REPOSITORY in-flight lock. It does NOT buy freedom from the wraparound
+// refuse. The real fix is to SKIP the failed provider when selecting a replacement,
+// which is a change to a governed fail-closed function and is tracked separately.
+// Do not re-add an odd-length safety claim here.
+//
+// Capacity is worth having on its own terms: twice on 2026-08-19 a second reviewer
+// overturned the first's conclusion, once by refuting an author's design rationale
+// using the author's own test fixture. A rotation of one is not a rotation.
 export const RETIRED_REVIEWERS = Object.freeze(['qwen-3.8-max', 'glm-5.2', 'kimi-k3'])
 export const ACTIVE_REVIEWERS = Object.freeze(REVIEWERS.filter((row)=>!RETIRED_REVIEWERS.includes(row.name)))
 export const EXCLUSIVE_REFS = Object.freeze({

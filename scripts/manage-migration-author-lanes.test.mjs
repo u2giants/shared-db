@@ -328,25 +328,36 @@ test('reviewer replacement rejects a mismatched original assignment',()=>{
   assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:99},io),/does not match/)
 })
 
-// THE TWO-REVIEWER TRAP, AND WHY THE ROTATION IS NOW ODD.
-// While glm-5.3 was (falsely) paused on 2026-08-18 the rotation was exactly TWO names,
-// and that was a real operational consequence, not a test detail: with an even two-name
-// rotation the slot after an intervening assignment lands back on the SAME provider that
-// just failed. replaceFailedReviewer refuses that rather than retry a dead provider --
-// correct, and it FAILS CLOSED -- but it left a replacement with nowhere to go.
-// Issue #1290 restored glm-5.3, paused kimi-k3 and added muse, making the rotation THREE.
-// This test now proves the trap is GONE: an intervening assignment no longer parks the
-// cursor on the failed provider, so a replacement is available. Keep it. If a future
-// pause takes ACTIVE_REVIEWERS back down to two, this test fails and tells you why that
-// matters before you discover it mid-incident.
-test('an odd rotation gives a failed-reviewer replacement somewhere to go',()=>{
+// THE SAME-PROVIDER WRAPAROUND REFUSE. replaceFailedReviewer picks
+// ACTIVE_REVIEWERS[(sequence-1) % N] and REFUSES when that lands on the provider that
+// just failed. It is correct and fail-closed -- retrying a dead provider is worse --
+// but it means a replacement can be unavailable, and the operator needs to know
+// exactly when.
+//
+// It fires after N-1 assignments since the failure, for ANY N. Going from the
+// two-name roster to the three-name roster in #1290 moved that from ONE intervening
+// assignment to TWO. It did NOT remove it. An earlier version of this test asserted
+// `ACTIVE_REVIEWERS.length % 2 !== 0` as though odd length were the fix; a review
+// showed that is a false invariant, and it is deliberately not asserted here.
+//
+// Two intervening assignments is not an exotic case: it is the natural rest point of a
+// three-name parallel dispatch. Grok takes a PR (and holds ai-grok-review's per-repo
+// in-flight lock), GLM takes the next, Muse takes the third, and the cursor sits on a
+// multiple of three. Both halves are pinned below, with the exact successor named.
+test('one intervening assignment gives a failed reviewer a named replacement',()=>{
   assert.equal(ACTIVE_REVIEWERS.length,3,'this test describes the three-reviewer rotation')
-  assert.notEqual(ACTIVE_REVIEWERS.length%2,0,'an even rotation reintroduces the two-name trap')
   const io=failedReviewIo()
   assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
   const replacement=replaceFailedReviewer(replacementRequest,io)
-  assert.notEqual(replacement.reviewer,failedReview.reviewer)
-  assert.ok(ACTIVE_REVIEWERS.some((r)=>r.name===replacement.reviewer))
+  assert.equal(replacement.reviewer,'muse-spark-1.2-contributor')
+})
+
+test('N-1 intervening assignments still strand a replacement on the failed provider',()=>{
+  const io=failedReviewIo()
+  for(let n=0;n<ACTIVE_REVIEWERS.length-1;n+=1){
+    assignNextReviewer({issue:20+n,pr:120+n,headSha:`abcde${n}f`},io)
+  }
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/same failed provider/)
 })
 
 test('reviewer replacement rejects a substantive exact-head verdict',()=>{
