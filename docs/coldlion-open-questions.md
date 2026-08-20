@@ -80,7 +80,7 @@ column accepts all three and silently triples-counts quantities with no key viol
 | The 10 recent unlinked AMA030 lines | **AMA030 is Amazon.** Amazon orders are stock for their warehouse, not presold, so they have no customer PO. Verified 10 of 10 unlinked | JamieLynn, 2026-08-19 · verified, rules §8 |
 | Why do older lines have `salesOrderNo = 0`? | Hard-linking POs to production orders began ~**2022–2023**; `custPONumber` was manual before, and drops off entirely on `INTRAN`/`REC` | JamieLynn, 2026-08-18 · verified, rules §4–5 |
 | **How far back does the history go?** | **2019-01-01.** History starts there; that is the load boundary. Albert has stated this repeatedly and it was already locked as D9 of `plan_coldlion-landing-phases-2-6.md` — the register simply failed to record it, and listed it as open. **Not a ColdLion question and never was.** | **Albert, restated 2026-08-20** |
-| **Admit the 66 unmatched ColdLion property codes?** | **YES — admit all 66.** Paired with a requirement: `data.designflow.app` gets a control to mark a property inactive **on our side**, since ColdLion has no expiry flag and never will. Admitting without that control is what everyone was afraid of. See §5 | **Albert, 2026-08-20** |
+| **Admit the 66 unmatched ColdLion property codes?** | **YES — admit all 66.** Paired with a requirement: the **DB Data Admin** application (`data.designflow.app`) gets a control to mark a property inactive **on our side**, since ColdLion has no expiry flag and never will. Admitting without that control is what everyone was afraid of. See §5 | **Albert, 2026-08-20** |
 | Is `1900-01-01` the empty-date marker? | Yes | Albert, 2026-08-14 |
 | Division/company code meanings | Answered in two rounds | Uma, 2026-08-13 and 2026-08-17 · `division-code-*.md` |
 | Was `/vendors` the wrong table? | Yes — ColdLion swapped it to the factory table; 97 rows, all active | ColdLion, 2026-07-22 |
@@ -91,7 +91,7 @@ column accepts all three and silently triples-counts quantities with no key viol
   the 51 still marked active in ColdLion. The long-standing objection — that ColdLion has no licence
   expiry flag, so admitting them resurrects lapsed licences such as `EX` (THE EXORCIST) and `LB`
   (THE LOST BOYS) — is answered by owning the flag ourselves rather than by refusing the rows.
-  **The paired requirement is not optional:** `data.designflow.app` must gain a control to set a
+  **The paired requirement is not optional:** the **DB Data Admin** application (`data.designflow.app`) must gain a control to set a
   property inactive on our side. `core.property.status` already supports it — it is an
   `entity_status` enum accepting `active, inactive, archived, deleted, potential`, and all 256 live
   rows are currently `active` (verified read-only against production 2026-08-20). **So this needs no
