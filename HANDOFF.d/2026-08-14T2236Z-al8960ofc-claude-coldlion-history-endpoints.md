@@ -9,6 +9,62 @@ owner: al8960ofc/claude-coldlion-history-endpoints-13b4f3 (session ended)
 **Written:** 2026-08-14T2236Z · **Updated:** 2026-08-17 (same session — ColdLion answered two
 questions; see §0) · **Machine:** al8960ofc · **Agent:** claude · **Status:** OPEN
 
+## 0-B. UPDATE 2026-08-19 (later) — NOTHING IS BLOCKED ANY MORE
+
+ColdLion answered the last two open questions. Both verified.
+
+1. **"all The stages are: ISS, INTRAN, REC."** The list is authoritative and closed — nothing is
+   being silently missed. All three carry real rows. `INTRAN` had looked dead (0 rows in four
+   windows) but returned **129 rows for 2024-07-01**; it is transient, so a few quiet weeks are not
+   evidence of an unused stage. **The historical pull is 3 stages × ~370 windows for `prodHistory`
+   plus ~370 for `orderHistory` — about 1,480 requests, not 740.**
+2. **`AMA030` is Amazon, and Amazon production is stock**, made for their warehouse rather than
+   presold, so it has no customer PO. That was the last unexplained group of unlinked rows
+   (10 of 10 unlinked, verified). Rules §8.
+
+**Four distinct causes of `salesOrderNo = 0` are now documented**, and they are economically
+different — samples (no revenue ever), Amazon stock (revenue later), historical rows and
+`INTRAN`/`REC` lines (linked in reality). A report treating them alike is wrong three ways.
+**Do not infer stock production from `prodTypeCode`:** `Stock*` rows are 92% linked.
+
+**Residual, tiny:** 6 unlinked lines out of 803 in 2024+ non-`COS` non-Amazon data (0.7%), three of
+them quantity-1 charge-like lines. Not worth chasing.
+
+**State of the work:** the shape is fully documented and every blocking question is answered. What
+remains is building the loader, which is another session's job (issue #1031), and Albert sending a
+short courtesy note that blocks nothing.
+
+## 0-A. UPDATE 2026-08-19 — READ THIS FIRST: the feed is bigger than this handoff says
+
+Three ColdLion answers (JamieLynn, via Albert) and the follow-up probing changed the picture again.
+**Everything below §0-A is still true but no longer sufficient.**
+
+**The one that matters: `GET /prodHistory` without `stageCode` returns ONLY the `ISS` (issued)
+lines.** `stageCode=REC` returns **receipt** lines that appear nowhere in the default response —
+zero key overlap across four windows. Order 22717 ordered 4,800 (`ISS`) and received 4,548 (`REC`),
+and only the first half was visible. **A load built on the default response has no receipts in it
+and looks complete.** The stage is not in the payload; the loader must stamp it from the request.
+Full evidence, method and reproduction:
+[`docs/verification/coldlion-prodhistory-stage-discovery-20260819/README.md`](../docs/verification/coldlion-prodhistory-stage-discovery-20260819/README.md).
+
+Also now answered and documented (all verified live, all in
+[`docs/business-rules-erp-data.md`](../docs/business-rules-erp-data.md)):
+- **§6** `merchGroup*` = assortment SKU, `ppkMerchGroup*` = component SKU. The **assortment** groups
+  are the blank ones on prepack rows; never fall back to them.
+- **§7** `lineInvoiceQty` is not carried at component level; use `unshippedQty` / `linePickQty`.
+  **`lineOpenQty` is NOT always zero** — an earlier claim in this repo was sample-limited.
+- **§4–§5** `salesOrderNo = 0` has three causes: age (hard-linking began ~2022–2023), stage (the
+  link never carries down to `INTRAN`/`REC`), and `COS` samples.
+
+**Every open ColdLion question is now in one register:**
+[`docs/coldlion-open-questions.md`](../docs/coldlion-open-questions.md). The blocking one is the
+authoritative list of `stageCode` values.
+
+**Another session has drafted the landing schema** — `docs/coldlion-raw-landing-schema-design.md`.
+It predates the stage finding, so this session added a correction block at its top: it needs a
+`stage_code` column and a stage-aware fetch plan. **Its keys do not collide across stages**, which
+makes the omission silent rather than loud — totals would simply be double-counted.
+
 ## 0. UPDATE 2026-08-17 — the blocker is GONE, and a new constraint arrived
 
 ColdLion acted on the note's first two questions before it was even sent. Albert relayed both;
