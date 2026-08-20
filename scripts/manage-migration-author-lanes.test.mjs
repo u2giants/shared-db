@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -416,14 +416,45 @@ test('a Windows .cmd wrapper is spawned through the command interpreter',()=>{
   assert.deepEqual(doctorSpawnPlan('/opt/ai-glm.cmd','linux'),{file:'/opt/ai-glm.cmd',args:['doctor']})
 })
 
-test('SILENCE IS NOT A PASS: a doctor that reports nothing is not healthy',()=>{
-  assert.deepEqual(summarizeDoctorOutput('PASS  health endpoint answers'),{ok:true,failingChecks:[]})
-  assert.equal(summarizeDoctorOutput('').ok,false)
-  assert.match(summarizeDoctorOutput('').failingChecks[0],/no checks at all/)
-  // Chatty output with no check lines proves nothing either.
-  assert.equal(summarizeDoctorOutput('ai-glm doctor\n\nall good!').ok,false)
+test('SILENCE IS NOT A PASS, but an unfamiliar format is not a failure',()=>{
+  // Real ai-muse output shape.
+  assert.deepEqual(summarizeDoctorOutput('PASS  health endpoint answers'),{ok:true,failingChecks:[],format:'checks'})
   // A failing check always wins over any number of passing ones.
-  assert.deepEqual(summarizeDoctorOutput('PASS  a\nFAIL  b\nPASS  c'),{ok:false,failingChecks:['b']})
+  assert.deepEqual(summarizeDoctorOutput('PASS  a\nFAIL  b\nPASS  c'),{ok:false,failingChecks:['b'],format:'checks'})
+  // Nothing at all proves nothing.
+  assert.equal(summarizeDoctorOutput('').ok,false)
+  assert.equal(summarizeDoctorOutput('   \n\n').ok,false)
+  assert.match(summarizeDoctorOutput('').failingChecks[0],/nothing at all/)
+  assert.equal(summarizeDoctorOutput('').format,'silent')
+  // REAL ai-grok-review output: no check lines anywhere, health signalled by exit
+  // status alone. Refusing this would block a healthy Grok on every review.
+  const grok=['grok binary   : /c/Users/ahazan/.grok/bin/grok','grok version  : grok 1.0.5 (5115b46bc9) [stable]','model         : grok-4.6','','auth          : OK (grok models succeeded)'].join('\n')
+  assert.deepEqual(summarizeDoctorOutput(grok),{ok:true,failingChecks:[],format:'unrecognized'})
+  // An unrecognised format is still refused when it names a failing check.
+  assert.equal(summarizeDoctorOutput(grok+'\nFAIL  auth').ok,false)
+})
+
+// `where.exe` lists an extension-less bash script BEFORE the .cmd shim for most
+// wrappers here. Windows cannot execute the former at all, so taking the first
+// line reported ai-grok-review and ai-muse as local faults while both were
+// healthy -- the same false diagnosis this change exists to end, twice over.
+test('on Windows the runnable shim is chosen, not the unrunnable script listed first',()=>{
+  const both=['C:/Users/ahazan/.local/bin/ai-grok-review','C:/Users/ahazan/.local/bin/ai-grok-review.cmd']
+  assert.equal(pickExecutableCandidate(both,'win32','.COM;.EXE;.BAT;.CMD'),both[1])
+  // On a POSIX machine the extension-less file IS the executable; do not reorder.
+  assert.equal(pickExecutableCandidate(['/usr/local/bin/ai-grok-review'],'linux'),'/usr/local/bin/ai-grok-review')
+  assert.equal(pickExecutableCandidate(both,'linux'),both[0])
+  // Nothing runnable: fall back to the first line rather than pretending it is missing.
+  assert.equal(pickExecutableCandidate(['C:/tools/ai-glm.sh'],'win32','.COM;.EXE;.BAT;.CMD'),'C:/tools/ai-glm.sh')
+  assert.equal(pickExecutableCandidate([],'win32'),null)
+  // A missing PATHEXT must not disable the preference.
+  assert.equal(pickExecutableCandidate(both,'win32',undefined),both[1])
+})
+
+test('REVIEWER_DOCTOR_TIMEOUT_MS is a real positive timeout',()=>{
+  // Node treats 0 and NaN as "no timeout", so a blank or broken override would
+  // silently let a hung doctor hang a governed lane.
+  assert.ok(Number.isFinite(REVIEWER_DOCTOR_TIMEOUT_MS)&&REVIEWER_DOCTOR_TIMEOUT_MS>0)
 })
 
 test('resolveCommandPath returns the first candidate, or null when absent',()=>{
@@ -464,6 +495,15 @@ test('a confirmed-unfixable local fault replaces and writes the failing check in
   const message=io.getCommit(io.refs.get(failureRef)).message
   assert.match(message,/code=local_dependency_unavailable/)
   assert.match(message,/failing-check=health_endpoint_answers/)
+})
+
+test('a confirmed-unfixable local replacement is idempotent with the same flags',()=>{
+  const io=failedReviewIo()
+  const request={...replacementRequest,failureCode:'local_dependency_unavailable',failingCheck:'health endpoint answers',confirmLocalDependencyUnfixable:true}
+  const first=replaceFailedReviewer(request,io)
+  assert.deepEqual(replaceFailedReviewer(request,io),first)
+  // The evidence is written once, not once per retry.
+  assert.equal([...io.refs.keys()].filter((ref)=>ref.startsWith('refs/db-review-failures/')).length,1)
 })
 
 test('--failing-check is refused for every code that is not a local fault',()=>{

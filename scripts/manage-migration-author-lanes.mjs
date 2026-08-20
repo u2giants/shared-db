@@ -610,7 +610,16 @@ export const githubIo = {
 }
 
 // A wrapper's doctor is a local probe; it must never hang a governed lane.
-export const REVIEWER_DOCTOR_TIMEOUT_MS = Number(process.env.REVIEWER_DOCTOR_TIMEOUT_MS ?? 60000)
+// An empty or unparseable override must NOT silently become 0 or NaN: Node treats
+// both as "no timeout", so a hung doctor would hang the lane instead of being
+// refused -- a silent failure produced by the very setting meant to prevent one.
+export const REVIEWER_DOCTOR_TIMEOUT_MS = (()=>{
+  const raw=process.env.REVIEWER_DOCTOR_TIMEOUT_MS
+  if(raw===undefined||String(raw).trim()==='')return 60000
+  const value=Number(raw)
+  if(!Number.isFinite(value)||value<=0)throw new LaneError(`REVIEWER_DOCTOR_TIMEOUT_MS must be a positive number of milliseconds; got "${raw}". Left unchecked this disables the timeout and a hung doctor hangs a governed lane.`)
+  return value
+})()
 
 // Every reviewer wrapper reports one line per check: `PASS  <check>` or
 // `FAIL  <check>`. Return the names of the failing ones, in order.
@@ -618,15 +627,34 @@ export function parseDoctorFailures(output=''){
   return String(output).split(/\r?\n/).map((line)=>/^\s*FAIL\s+(.*\S)\s*$/.exec(line)?.[1]).filter(Boolean)
 }
 
-// SILENCE IS NOT A PASS. A doctor that exits 0 and prints nothing has proved
-// nothing -- and a wrapper that quietly stopped reporting would otherwise be read
-// as healthy forever. Require at least one PASS line before calling it healthy.
+// SILENCE IS NOT A PASS -- but an unfamiliar format is not a failure either.
+//
+// This runs only on a ZERO exit; a non-zero exit is refused by the caller before
+// it gets here. Three cases, measured against the real wrappers on edge-dev:
+//
+//   ai-glm / ai-muse   print `PASS  <check>` / `FAIL  <check>` lines. A FAIL wins
+//                      over any number of PASSes.
+//   ai-grok-review     prints NO check lines at all -- key/value lines and an
+//                      `auth : OK` footer -- and signals health purely by exit
+//                      status. Refusing that would have blocked a healthy Grok on
+//                      every review, which is the false local-fault diagnosis this
+//                      whole change exists to end. So when a wrapper answers with
+//                      output in a format we do not recognise AND exits 0, its own
+//                      exit status is its verdict; `format` records that we could
+//                      not read the detail.
+//   nothing at all     proves nothing. A wrapper that quietly stops reporting must
+//                      never be read as healthy forever. Refused.
+//
+// Do not "tidy" the third case into a pass, and do not tighten the second one
+// without first running `doctor` on every ACTIVE_REVIEWERS wrapper and pasting the
+// output into the change. Both halves were established that way.
 export function summarizeDoctorOutput(output=''){
   const failed=parseDoctorFailures(output)
-  if(failed.length)return {ok:false,failingChecks:failed}
+  if(failed.length)return {ok:false,failingChecks:failed,format:'checks'}
   const passed=String(output).split(/\r?\n/).filter((line)=>/^\s*PASS\s+\S/.test(line)).length
-  if(!passed)return {ok:false,failingChecks:['doctor reported no checks at all; nothing was proved']}
-  return {ok:true,failingChecks:[]}
+  if(passed)return {ok:true,failingChecks:[],format:'checks'}
+  if(String(output).trim())return {ok:true,failingChecks:[],format:'unrecognized'}
+  return {ok:false,failingChecks:['doctor reported nothing at all; nothing was proved'],format:'silent'}
 }
 
 // How a resolved wrapper path is actually spawned. A Windows `.cmd`/`.bat` shim
@@ -638,12 +666,30 @@ export function doctorSpawnPlan(resolved,platform=process.platform){
   return {file:resolved,args:['doctor']}
 }
 
-// The single place a wrapper name becomes a real path. `where.exe` prints one
-// candidate per line and the first is what the shell would run.
+// The single place a wrapper name becomes a real path.
+//
+// ON WINDOWS THE FIRST LINE IS OFTEN THE WRONG ONE. `where.exe ai-grok-review`
+// prints BOTH `...\\ai-grok-review` (an extension-less bash script Windows cannot
+// execute at all) and `...\\ai-grok-review.cmd` (the shim the shell actually runs,
+// via PATHEXT). Taking the first line made the probe fail ENOENT for two of the
+// three active reviewers and report them as local faults while they were healthy.
+// Caught by spot-checking every wrapper after an independent review asked for it,
+// having already been burned once by the same class of bug.
+//
+// So mirror what the shell does: prefer the first candidate whose extension is in
+// PATHEXT, and fall back to the first line when none qualifies.
+export function pickExecutableCandidate(candidates,platform=process.platform,pathext=process.env.PATHEXT){
+  const list=candidates.filter(Boolean)
+  if(platform!=='win32')return list[0]??null
+  const exts=String(pathext||'.COM;.EXE;.BAT;.CMD').split(';').map((e)=>e.trim().toLowerCase()).filter(Boolean)
+  const runnable=list.find((p)=>exts.some((e)=>p.toLowerCase().endsWith(e)))
+  return runnable??list[0]??null
+}
+
 export function resolveCommandPath(command,platform=process.platform){
   try{
     const out=execFileSync(platform==='win32'?'where.exe':'which',[command],{encoding:'utf8',stdio:['ignore','pipe','ignore']})
-    return out.split(/\r?\n/).map((line)=>line.trim()).find(Boolean)??null
+    return pickExecutableCandidate(out.split(/\r?\n/).map((line)=>line.trim()),platform)
   }catch{return null}
 }
 
