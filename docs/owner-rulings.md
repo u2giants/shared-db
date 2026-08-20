@@ -549,6 +549,25 @@ until `FR_REMOVAL_VERSIONS` is populated and the whole ship set is present. Unti
 code triggered only on `FR_HELD_20260803`, so `20260817225127` promoted **alone** parsed clean —
 narrower than this prose. The prose is authoritative and the code now matches it.
 
+**`FR_REMOVAL_VERSIONS` is no longer empty (2026-08-20, issue #1339).** It holds exactly one
+version, `20260820183334`, which ERASES `core.licensor` `FR` "FRIENDS TV" — a real delete, on
+Albert's 2026-08-03 ruling reaffirmed on 2026-08-20 as "erase FRIENDS TV completely". It extends
+the licensing write guard to cover `DELETE` (the guard was `before insert or update` only, so the
+most destructive operation on canonical licensing identity was the one it never saw) and performs
+the removal through a one-use transaction-bound authorization, leaving an immutable audit row and a
+`core.taxonomy_owner_ruling` record — which, once the row is gone, are the only remaining
+explanation of what happened. **The ship set is therefore now assemblable, and it is exactly
+`20260802170000`, `20260817225127`, `20260818174350`, `20260820183334` and (ordering permitting)
+`20260819151527` — all together, in dependency order, or none of them.** This version string is a
+safety control on the same terms as the ones above, so it lives in the guard, in
+`test_the_real_fr_removal_version_is_registered_by_name`, and here.
+
+**One sequencing dependency remains, and it is not a bug in the removal migration.**
+`core.property.licensor_id` is `NOT NULL` and `ON DELETE RESTRICT`, and one Property row (`FK`
+"FRIDA KAHLO") still points at `FR`. Owner ruling 6.15 (2026-08-19) puts that row on **#1238's**
+deletion path, so the removal migration deliberately does not touch it and refuses with a message
+naming #1238 if it is still there. **#1238 must land before this bundle is applied.**
+
 On the same day, `--supersede-active-claim-version` re-reserved the guarded forward migration from
 `20260817232425` to `20260818174350` and updated only the filename, leaving the guard holding a
 version that named no file and the real file in no hold set at all (issue #1182). **A migration
