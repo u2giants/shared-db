@@ -367,6 +367,24 @@ test('N-1 intervening assignments skip the failed provider instead of stranding 
   assert.deepEqual(replaceFailedReviewer(replacementRequest,io),replacement)
 })
 
+test('a chained replacement skips TWO already-failed providers to reach the last name',()=>{
+  const io=failedReviewIo()
+  for(let n=0;n<ACTIVE_REVIEWERS.length-1;n+=1){
+    assignNextReviewer({issue:30+n,pr:130+n,headSha:`abcdf${n}f`},io)
+  }
+  // grok-4.6 failed, then its replacement glm-5.3 fails too. The rotation position
+  // computes back to grok-4.6, so selection must skip BOTH names (offset 2) to land
+  // on muse-spark-1.2-contributor. This is the deepest skip the roster allows.
+  const first=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(first.reviewer,'glm-5.3')
+  assignNextReviewer({issue:40,pr:140,headSha:'abcdf9f'},io)
+  const cursorBefore=parseReviewCursor(io.getCommit(io.refs.get(REVIEW_CURSOR_REF)))
+  const second=replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence},io)
+  assert.equal(second.reviewer,'muse-spark-1.2-contributor')
+  assert.equal(second.sequence,cursorBefore.sequence+3)
+  assert.deepEqual(replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence},io),second)
+})
+
 test('replacement refuses only when every other active reviewer already failed on this head',()=>{
   const io=failedReviewIo()
   const first=replaceFailedReviewer(replacementRequest,io)

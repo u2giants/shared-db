@@ -755,7 +755,9 @@ export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCo
     // SKIP, DO NOT REFUSE (#1297). The rotation position is only a starting point.
     // Every provider that already failed on THIS exact head is excluded, and the
     // cursor is advanced past each excluded name so the durable sequence still
-    // moves forward monotonically and the record stays byte-identical on retry.
+    // moves forward monotonically and stays consistent with the sequence this
+    // replacement allocates. (Byte-identical retries come from the create-only
+    // replacement ref read above, not from this advancement.)
     // Refuse only when no other active reviewer is left.
     const bySequence=new Map([[initial.sequence,initial.reviewer],...parsedReplacements.map((row)=>[row.sequence,row.reviewer])])
     const failedNames=new Set([original.reviewer])
