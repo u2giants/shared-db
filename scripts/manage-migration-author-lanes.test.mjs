@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -396,6 +396,41 @@ test('preflight refuses to report ready on evidence it never collected',()=>{
 test('a doctor that names no failing check still refuses, and unnamed is not a pass',()=>{
   const io={...preflightIo(),reviewerDoctor:()=>({ok:false,failingChecks:[]})}
   assert.throws(()=>reviewerExecutionPreflight(preflightRequest,io),/an unnamed check/)
+})
+
+// A WINDOWS SHIM CANNOT BE SPAWNED DIRECTLY, and getting this wrong would have
+// made the new preflight refuse EVERY review on Albert's machines with a false
+// local-fault diagnosis -- the exact misdiagnosis this change exists to end.
+// Caught by an independent review before it shipped; `execFileSync('ai-glm',...)`
+// fails ENOENT on win32 even though `where.exe` finds the file.
+test('a Windows .cmd wrapper is spawned through the command interpreter',()=>{
+  const win=doctorSpawnPlan('C:/Users/ahazan/.local/bin/ai-glm.cmd','win32')
+  assert.match(win.file,/cmd\.exe$/i)
+  assert.deepEqual(win.args.slice(-2),['C:/Users/ahazan/.local/bin/ai-glm.cmd','doctor'])
+  assert.ok(win.args.includes('/c'),'a batch shim must be run with cmd /c')
+  assert.deepEqual(doctorSpawnPlan('C:/tools/ai-glm.BAT','win32').args.slice(-2),['C:/tools/ai-glm.BAT','doctor'])
+  // Anything that is not a batch shim, on any platform, is executed directly.
+  assert.deepEqual(doctorSpawnPlan('/usr/local/bin/ai-glm','linux'),{file:'/usr/local/bin/ai-glm',args:['doctor']})
+  assert.deepEqual(doctorSpawnPlan('C:/tools/ai-glm.exe','win32'),{file:'C:/tools/ai-glm.exe',args:['doctor']})
+  // A .cmd path on a non-Windows platform is NOT special-cased into cmd.exe.
+  assert.deepEqual(doctorSpawnPlan('/opt/ai-glm.cmd','linux'),{file:'/opt/ai-glm.cmd',args:['doctor']})
+})
+
+test('SILENCE IS NOT A PASS: a doctor that reports nothing is not healthy',()=>{
+  assert.deepEqual(summarizeDoctorOutput('PASS  health endpoint answers'),{ok:true,failingChecks:[]})
+  assert.equal(summarizeDoctorOutput('').ok,false)
+  assert.match(summarizeDoctorOutput('').failingChecks[0],/no checks at all/)
+  // Chatty output with no check lines proves nothing either.
+  assert.equal(summarizeDoctorOutput('ai-glm doctor\n\nall good!').ok,false)
+  // A failing check always wins over any number of passing ones.
+  assert.deepEqual(summarizeDoctorOutput('PASS  a\nFAIL  b\nPASS  c'),{ok:false,failingChecks:['b']})
+})
+
+test('resolveCommandPath returns the first candidate, or null when absent',()=>{
+  assert.equal(resolveCommandPath('definitely-not-a-real-command-1287'),null)
+  const node=resolveCommandPath('node')
+  assert.ok(node&&node.length>0,'node must resolve on any machine running this suite')
+  assert.ok(!/\r|\n/.test(node),'the resolved path must be a single trimmed line')
 })
 
 test('parseDoctorFailures returns only the failing check names, in order',()=>{

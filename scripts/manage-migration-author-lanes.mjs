@@ -578,22 +578,34 @@ export const githubIo = {
   localHead(worktree){return execFileSync('git',['-C',worktree,'rev-parse','HEAD'],{encoding:'utf8'}).trim()},
   localClean(worktree){return execFileSync('git',['-C',worktree,'status','--porcelain'],{encoding:'utf8'}).split(/\r?\n/).filter(Boolean).every((line)=>line.slice(3).replaceAll('\\','/').startsWith('.ai/')) },
   currentMaxVersion(worktree){return execFileSync('git',['-C',worktree,'ls-tree','-r','--name-only','origin/main'],{encoding:'utf8'}).split(/\r?\n/).map((f)=>/^supabase\/migrations\/(\d{14})_/.exec(f)?.[1]).filter(Boolean).sort().at(-1)},
-  commandAvailable(command){try{execFileSync(process.platform==='win32'?'where.exe':'which',[command],{stdio:'ignore'});return true}catch{return false}},
+  commandAvailable(command){return Boolean(resolveCommandPath(command))},
   // Ask the wrapper's own `doctor` whether it can actually work RIGHT NOW.
   // Every wrapper prints one `PASS <check>` / `FAIL <check>` line per check, so
   // the failing check can be quoted verbatim instead of guessed at. Exit status
   // alone is not enough: the operator needs to be told WHICH check failed.
+  //
+  // WINDOWS. Every reviewer wrapper on Albert's machines is a `.cmd` shim, and
+  // `execFileSync` CANNOT spawn a `.cmd` directly -- it fails ENOENT even though
+  // `where.exe` finds the file. Caught by an independent review before this
+  // shipped: the probe would have failed on every review on Windows and reported
+  // a LOCAL FAULT for a provider that was fine, which is the exact misdiagnosis
+  // this whole change exists to end. Resolve the real path and route a batch
+  // shim through `cmd.exe /c`. No shell string is built, so nothing here is
+  // interpolated into a command line.
   reviewerDoctor(wrapper){
+    const resolved=resolveCommandPath(wrapper)
+    if(!resolved)return {ok:false,failingChecks:[`${wrapper} is not on PATH`]}
+    const {file,args}=doctorSpawnPlan(resolved)
     let output=''
-    try{output=execFileSync(wrapper,['doctor'],{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:REVIEWER_DOCTOR_TIMEOUT_MS})}
+    try{output=execFileSync(file,args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:REVIEWER_DOCTOR_TIMEOUT_MS})}
     catch(error){
       if(error?.code==='ETIMEDOUT')return {ok:false,failingChecks:[`doctor did not answer within ${REVIEWER_DOCTOR_TIMEOUT_MS/1000}s`]}
       output=`${error?.stdout??''}${error?.stderr??''}`
       const failed=parseDoctorFailures(output)
-      return {ok:false,failingChecks:failed.length?failed:['doctor exited non-zero without naming a check']}
+      if(failed.length)return {ok:false,failingChecks:failed}
+      return {ok:false,failingChecks:[`doctor could not be run (${error?.code??`exit ${error?.status}`}) and named no check`]}
     }
-    const failed=parseDoctorFailures(output)
-    return {ok:failed.length===0,failingChecks:failed}
+    return summarizeDoctorOutput(output)
   },
 }
 
@@ -604,6 +616,35 @@ export const REVIEWER_DOCTOR_TIMEOUT_MS = Number(process.env.REVIEWER_DOCTOR_TIM
 // `FAIL  <check>`. Return the names of the failing ones, in order.
 export function parseDoctorFailures(output=''){
   return String(output).split(/\r?\n/).map((line)=>/^\s*FAIL\s+(.*\S)\s*$/.exec(line)?.[1]).filter(Boolean)
+}
+
+// SILENCE IS NOT A PASS. A doctor that exits 0 and prints nothing has proved
+// nothing -- and a wrapper that quietly stopped reporting would otherwise be read
+// as healthy forever. Require at least one PASS line before calling it healthy.
+export function summarizeDoctorOutput(output=''){
+  const failed=parseDoctorFailures(output)
+  if(failed.length)return {ok:false,failingChecks:failed}
+  const passed=String(output).split(/\r?\n/).filter((line)=>/^\s*PASS\s+\S/.test(line)).length
+  if(!passed)return {ok:false,failingChecks:['doctor reported no checks at all; nothing was proved']}
+  return {ok:true,failingChecks:[]}
+}
+
+// How a resolved wrapper path is actually spawned. A Windows `.cmd`/`.bat` shim
+// must go through the command interpreter; everything else is executed directly.
+// Kept separate from the spawn so the rule can be tested for both platforms on
+// either platform.
+export function doctorSpawnPlan(resolved,platform=process.platform){
+  if(platform==='win32'&&/\.(cmd|bat)$/i.test(resolved))return {file:process.env.ComSpec||'cmd.exe',args:['/d','/s','/c',resolved,'doctor']}
+  return {file:resolved,args:['doctor']}
+}
+
+// The single place a wrapper name becomes a real path. `where.exe` prints one
+// candidate per line and the first is what the shell would run.
+export function resolveCommandPath(command,platform=process.platform){
+  try{
+    const out=execFileSync(platform==='win32'?'where.exe':'which',[command],{encoding:'utf8',stdio:['ignore','pipe','ignore']})
+    return out.split(/\r?\n/).map((line)=>line.trim()).find(Boolean)??null
+  }catch{return null}
 }
 
 export function acquireRef(ref, ownerSha, io = githubIo) {
