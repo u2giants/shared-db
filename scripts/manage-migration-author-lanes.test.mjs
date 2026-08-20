@@ -217,7 +217,7 @@ function reviewIo(){
 test('reviewer cursor advances atomically through the durable round robin',()=>{
   const io=reviewIo(), names=[]
   for(let n=1;n<=5;n++)names.push(assignNextReviewer({issue:n,pr:100+n,headSha:`abcdef${n}`},io).reviewer)
-  assert.deepEqual(names,['grok-4.6','kimi-k3','grok-4.6','kimi-k3','grok-4.6'])
+  assert.deepEqual(names,['grok-4.6','glm-5.3','muse-spark-1.2-contributor','grok-4.6','glm-5.3'])
   assert.ok(io.refs.has(REVIEW_CURSOR_REF))
 })
 
@@ -237,8 +237,9 @@ test('retired reviewer names stay resolvable so historical review evidence never
 test('the active rotation is exactly the current models, in a stable order',()=>{
   // Order and length are the round robin. A change here silently reassigns every
   // in-flight sequence to a different reviewer, so it must be asserted, not assumed.
-  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','kimi-k3'])
+  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','muse-spark-1.2-contributor'])
   assert.equal(REVIEWERS.find((r)=>r.name==='glm-5.3').wrapper,'ai-glm')
+  assert.equal(REVIEWERS.find((r)=>r.name==='muse-spark-1.2-contributor').wrapper,'ai-muse')
 })
 
 test('reviewer assignment retry returns the same assignment without advancing',()=>{
@@ -267,9 +268,9 @@ const replacementRequest={...failedReview,failedSequence:1,failureCode:'insuffic
 
 test('terminal provider failure advances exactly once and retry is idempotent',()=>{
   const io=failedReviewIo(), first=replaceFailedReviewer(replacementRequest,io), second=replaceFailedReviewer(replacementRequest,io)
-  assert.equal(first.sequence,2);assert.equal(first.reviewer,'kimi-k3');assert.deepEqual(second,first)
-  assert.equal(assignNextReviewer(failedReview,io).reviewer,'kimi-k3')
-  assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'grok-4.6')
+  assert.equal(first.sequence,2);assert.equal(first.reviewer,'glm-5.3');assert.deepEqual(second,first)
+  assert.equal(assignNextReviewer(failedReview,io).reviewer,'glm-5.3')
+  assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'muse-spark-1.2-contributor')
 })
 
 test('reviewer execution preflight enforces approved wrapper, clean worktree, and exact head',()=>{
@@ -297,7 +298,7 @@ test('two consecutive terminal no-verdict failures form an immutable idempotent 
   const first=replaceFailedReviewer(replacementRequest,io)
   const secondRequest={...replacementRequest,failedSequence:first.sequence,failureCode:'turn_limit_cancelled'}
   const second=replaceFailedReviewer(secondRequest,io)
-  assert.equal(first.sequence,2);assert.equal(second.sequence,3);assert.equal(second.reviewer,'grok-4.6')
+  assert.equal(first.sequence,2);assert.equal(second.sequence,3);assert.equal(second.reviewer,'muse-spark-1.2-contributor')
   assert.deepEqual(replaceFailedReviewer(replacementRequest,io),first)
   assert.deepEqual(replaceFailedReviewer(secondRequest,io),second)
   assert.equal(assignNextReviewer(failedReview,io).sequence,3)
@@ -327,17 +328,25 @@ test('reviewer replacement rejects a mismatched original assignment',()=>{
   assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:99},io),/does not match/)
 })
 
-// PAUSING glm-5.3 on 2026-08-18 left exactly TWO active reviewers, and that is a real
-// operational consequence, not a test detail. With an even two-name rotation the slot
-// after an intervening assignment can land back on the SAME provider that just failed.
-// replaceFailedReviewer refuses that rather than retry a dead provider -- correct, and it
-// FAILS CLOSED -- but it means a replacement can be unavailable until a third reviewer is
-// restored or added. Asserted here so nobody discovers it mid-incident.
-test('with only two active reviewers a replacement can legitimately have nowhere to go',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,2,'this test describes the two-reviewer rotation')
+// THE TWO-REVIEWER TRAP, AND WHY THE ROTATION IS NOW ODD.
+// While glm-5.3 was (falsely) paused on 2026-08-18 the rotation was exactly TWO names,
+// and that was a real operational consequence, not a test detail: with an even two-name
+// rotation the slot after an intervening assignment lands back on the SAME provider that
+// just failed. replaceFailedReviewer refuses that rather than retry a dead provider --
+// correct, and it FAILS CLOSED -- but it left a replacement with nowhere to go.
+// Issue #1290 restored glm-5.3, paused kimi-k3 and added muse, making the rotation THREE.
+// This test now proves the trap is GONE: an intervening assignment no longer parks the
+// cursor on the failed provider, so a replacement is available. Keep it. If a future
+// pause takes ACTIVE_REVIEWERS back down to two, this test fails and tells you why that
+// matters before you discover it mid-incident.
+test('an odd rotation gives a failed-reviewer replacement somewhere to go',()=>{
+  assert.equal(ACTIVE_REVIEWERS.length,3,'this test describes the three-reviewer rotation')
+  assert.notEqual(ACTIVE_REVIEWERS.length%2,0,'an even rotation reintroduces the two-name trap')
   const io=failedReviewIo()
   assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
-  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/same failed provider/)
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  assert.notEqual(replacement.reviewer,failedReview.reviewer)
+  assert.ok(ACTIVE_REVIEWERS.some((r)=>r.name===replacement.reviewer))
 })
 
 test('reviewer replacement rejects a substantive exact-head verdict',()=>{
