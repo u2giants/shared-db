@@ -16,6 +16,33 @@ Companions, both verified against live calls — read before implementing:
 - [`merch-group-taxonomy-architecture.md`](merch-group-taxonomy-architecture.md) — why
   `mgTypeCode` cannot be hardcoded.
 
+> ## ⚠️ CORRECTION ADDED 2026-08-19 — `prod_history` needs a STAGE dimension this draft does not have
+>
+> Added by a different session (al8960ofc/claude, the one that probed the endpoints), **without
+> otherwise touching this draft.** The finding post-dates it by a day.
+>
+> **`GET /prodHistory` without `stageCode` returns only the `ISS` (issued) lines.** `stageCode=REC`
+> returns **receipt** lines that appear nowhere in the default response — zero key overlap, verified
+> across four windows. Order 22717 ordered 4,800 on its `ISS` line and received 4,548 on its `REC`
+> line; only the first is in the default response. Full evidence:
+> [`verification/coldlion-prodhistory-stage-discovery-20260819/README.md`](verification/coldlion-prodhistory-stage-discovery-20260819/README.md).
+>
+> **Three changes this design needs:**
+>
+> 1. **A `stage_code` column on `coldlion.prod_history_line` and `..._component`.** The stage is
+>    **not in the payload** — it is knowable only from the request that fetched the row, so the
+>    loader must stamp it. Without it, ordered and received quantities are indistinguishable.
+> 2. **`stage_code` in the natural key**, or at minimum a documented decision not to. Measured:
+>    `(prod_order_no, prod_line_seq)` does **not** collide across stages (0 collisions in three
+>    windows). That makes this failure *silent* — the table accepts both stages without error and
+>    every `SUM(prod_order_qty)` double-counts. No key violation will warn you.
+> 3. **The fetch plan must iterate stages**, not just date windows: `ISS`, `INTRAN` and `REC`. **The stage list is authoritative as of 2026-08-19 — ColdLion confirms there are
+>    exactly three: `ISS`, `INTRAN`, `REC`.** All three carry real rows, so the fetch plan is
+>    3 stages × N seven-day windows per endpoint, not N.
+>
+> Everything else in this draft is unaffected. Its `last*` split, its `prodLineSeq` grain, and its
+> "sum to `prepackQty`" assertion all still hold.
+
 ---
 
 ## 1. What this layer is, and what it must never become
@@ -116,6 +143,14 @@ collides across types inside one division (`1P` is both a licensor and a propert
 | `coldlion.item_header` | one item | company_code, division_code, item_no |
 | `coldlion.item_merch_group` | one merch-group slot on an item | + slot_no (01–14) |
 | `coldlion.item_detail` | one SKU | company_code, division_code, item_no, color_code, size_code |
+
+> **Owner ruling, Albert Hazan, 2026-08-19 — land ALL FOURTEEN slots.** A live
+> probe on 2026-08-19 measured slots 11-14 as empty in every sampled item across
+> all three divisions (and empty on both history feeds too). That measurement is
+> correct and is NOT a reason to drop them. The row-per-slot design means an
+> unused slot costs nothing — it simply produces no row — while a slot omitted
+> from the loader would silently discard real data the day ColdLion starts
+> populating it. Load 01 through 14. Do not "optimise" this back down to 10.
 
 The 14 merch-group slots become 14 rows, not 14 columns, so slot meaning can be resolved
 per division against `merch_group_header` without hardcoding. `item_header` carries `has_image`

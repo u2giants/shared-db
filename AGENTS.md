@@ -28,6 +28,7 @@ Before interpreting `full_item_master.csv`, changing item-description parsing, o
 - PopDAM OrderList linked to Master Data: [`plan_popdam_order_list.md`](plan_popdam_order_list.md). Read its STATUS table first. Do not re-derive or re-plan completed steps.
 - **Companywide business rules (read before interpreting business meaning):** start at [`docs/business-rules/application-map.md`](docs/business-rules/application-map.md). Licensing Master Data starts at [`docs/business-rules/licensing-master-data.md`](docs/business-rules/licensing-master-data.md); its detailed architecture remains in [`docs/core-master-data-consolidation-aim.md`](docs/core-master-data-consolidation-aim.md).
 - **Licensing Master Data implementation:** [`plan_licensing_master_data_implementation.md`](plan_licensing_master_data_implementation.md). Read its STATUS table first and start at the named fresh-session step. It supersedes conflicting execution assumptions in older Character/Style Guide and ColdLion plans without deleting their historical evidence.
+- **ColdLion raw landing layer (issue #1184), phases 2-6:** [`docs/plan_coldlion-landing-phases-2-6.md`](docs/plan_coldlion-landing-phases-2-6.md). Read its STATUS table first — do not re-derive its measurements or re-plan its steps. Phase 1 (the spine) is merged; phases 2-6 build the feed tables and loaders. The owner's per-field ingest/ignore decisions are [`docs/coldlion-field-decisions-20260819.csv`](docs/coldlion-field-decisions-20260819.csv) and are authority, not a suggestion. Step 4 is blocked until the `orderHistory` line key is resolved from a live pull; there is no `lineNo` in the payload and every obvious substitute silently merges sales lines.
 - OrderList source contract: [`docs/app-migration-notes/popdam-order-list.md`](docs/app-migration-notes/popdam-order-list.md), with formula detail in [`docs/app-migration-notes/popdam-order-list-formula-audit-20260807.md`](docs/app-migration-notes/popdam-order-list-formula-audit-20260807.md). Owner ruling: Google OrderList and future Coldlion rows are the same orders; `plm.item` is the ultimate item list. One canonical order/line must retain separate Google and Coldlion source refs.
 
 This is the operating contract for **every AI session working on any app that
@@ -46,6 +47,16 @@ AI sessions from breaking each other through the one database they all depend on
 > under §6.4.
 > **Any other session with a STRUCTURE change opens a GitHub issue and stops:**
 > `gh issue create --repo u2giants/shared-db --label db-work --title "HANDOVER: …" --body-file <file>`.
+> ⛔ **EVERY issue this repo receives carries the `db-work` label AND a `db-work-scope`
+> block — no exceptions, including bug reports, tooling defects and CI complaints
+> that feel unrelated to the queue.** `--label db-work` is not optional decoration and
+> a body block is not a substitute for it: the orchestrator finds work by label, so an
+> unlabelled issue is invisible no matter how well its body is written. That is not
+> hypothetical — #1188, #1238, #1242, #1266 and #1268 all carried valid scope blocks and
+> were still missed for weeks because nobody labelled them. If `gh issue create` fails
+> and you retry, re-check the label on the issue you actually created. The queue audit
+> (`--queue-audit`) now reads **every** open issue, prints `UNLABELLED ISSUES` and exits
+> `2` until each one is labelled.
 > ⚠️ **`COORDINATOR_INTAKE.md` is RETIRED** (2026-08-07) and is now a short pointer file.
 > **It stays on disk on purpose — retired means "pointer plus guard", not "deleted".** The
 > required check `Intake pointer guard`
@@ -1492,6 +1503,16 @@ before believing a red X still applies, to every `paths:`-filtered workflow in t
 
 ### 5.2-A A SECOND flavour of false red: the job never ran at all (hosted-runner starvation, added 2026-08-12, issue #513)
 
+**A THIRD flavour, now removed at the root (2026-08-19, issue #1266).** CI used to
+`apt-get install ripgrep` before running the SQL guards. A hosted-runner package-mirror
+stall then held `SQL migration guards` `in_progress` for **42 minutes** on a 26-line docs
+PR (#1264), and a retry wrapper only turned that into a 6-minute named failure. The guards
+never needed ripgrep: `check-sql.sh` used it for five fixed-string searches that plain
+`grep -qF` performs identically. **CI installs no packages for the SQL guards any more —
+do not reintroduce an `apt-get` step to add a convenience tool.** Every job in every
+workflow also now carries a `timeout-minutes` ceiling, so a stalled step fails on its own
+budget instead of blocking merges for hours.
+
 Dated evidence: on **2026-08-06**, `Cross-PR object collision` on **PR #466** went **red after 44
 minutes without ever executing a step**. The job annotation read:
 
@@ -1550,9 +1571,16 @@ ColdLion mirror — a previous session got this wrong).
 **ColdLion purchase/sales history (`prodHistory` / `orderHistory`) — read the shape doc before
 writing any loader.** These two endpoints (new to us 2026-08-14) carry order history for buying
 and selling. Their payload is documented from live probing in
-[`docs/coldlion-history-endpoints-shape.md`](docs/coldlion-history-endpoints-shape.md). Four
+[`docs/coldlion-history-endpoints-shape.md`](docs/coldlion-history-endpoints-shape.md). Five
 traps that will silently corrupt a load if you skip it:
 
+- **⚠️ The default `prodHistory` response is INCOMPLETE.** Without `stageCode` you get only the
+  `ISS` (issued) lines. **There are exactly three stages — `ISS`, `INTRAN`, `REC`** (authoritative,
+  ColdLion 2026-08-19) and all three carry real rows with **zero key overlap** between them.
+  Omitting them loses everything about what actually *arrived* — order 22717 ordered 4,800 and
+  received 4,548, and only the `ISS` half is in the default. **Fetch all three and record which
+  stage each row came from**, because the payload does not say and the keys do not collide, so a
+  stage-blind table triple-counts quantities with no error. The pull is 3 stages × N windows.
 - **Hard 7-day window cap (since 2026-08-17).** `fromDate`–`toDate` must be **within 7 days,
   inclusive**, on both endpoints; wider is refused outright. Month-wide calls that worked on
   2026-08-14 now fail. **The refusal is malformed** — HTTP 400 on the wire but `"status": 500` /
@@ -1567,6 +1595,12 @@ traps that will silently corrupt a load if you skip it:
   quantity-comparison heuristic** — §4.3 of the doc explains why it is obsolete.
 - **`lineInvoiceQty` / `lineOpenQty` are zero in all 5,874 sampled rows**, as is `depositPerc`
   on `prodHistory`. A report built on them reads zero and looks like a business fact.
+
+**Every open ColdLion question lives in one register:**
+[`docs/coldlion-open-questions.md`](docs/coldlion-open-questions.md) — what is blocking, what is
+merely open, what is already ANSWERED (do not re-ask), and which owner rulings keep getting
+re-litigated. Check it before asking Albert or ColdLion anything, and move answers into its §4
+rather than deleting them.
 
 **What the ERP data MEANS** (as opposed to its shape) lives in
 [`docs/business-rules-erp-data.md`](docs/business-rules-erp-data.md) — a new file, because this
@@ -2039,6 +2073,16 @@ Property spelling and ownership, Characters, Style Guides, Asset metadata, Franc
 source-published relationships. A future guarded consolidator may therefore update those specific
 facts on a matched canonical row. That is intentional authority application, not gap-filling.
 
+#### 6.4-E OWNER RULING — ColdLion owns Licensor names and uncovered ColdLion-only Property truth (Albert Hazan, 2026-08-19)
+
+ColdLion is canonical for official Licensor names. For a ColdLion-only Property under a Licensor
+that has no authorized scrape data, ColdLion's Property name and owning Licensor are canonical
+truth. Inside an authorized scrape's Property coverage, §6.4-D still controls Property spelling,
+ownership, entities, and direct source-published relationships. ColdLion also remains authoritative
+for Property Active/Inactive. Ambiguous identity or scrape coverage waits for review rather than
+guessing. This later ruling narrows and supersedes every statement that ColdLion supplies only
+status or has no naming/ownership authority at all.
+
 The exception applies only when all of these are true:
 
 1. the full `source_system` identity is explicitly authorized and mapped to its Licensor scope;
@@ -2231,9 +2275,10 @@ never by rewriting history.
   (Recorded in the
   orchestrator intake as ruling 4.)
 - **`dflow.*` is being retired; `core.*` becomes the source of truth for all applications.**
-  Under the controlling 2026-08-16 architecture, authorized licensor scrapes supply canonical
-  identity, names, ownership and source-published relationships; ColdLion supplies only Property
-  Active/Inactive membership. The stale DesignFlow pull supplies neither.
+  Under the controlling 2026-08-16 architecture as clarified on 2026-08-19, ColdLion supplies
+  canonical Licensor names, uncovered ColdLion-only Property truth, and Property Active/Inactive.
+  Authorized licensor scrapes supply Property identity, ownership and source-published relationships
+  inside their coverage. The stale DesignFlow pull supplies neither.
   **§6.6 is the direct consequence of this.** If `core.*` serves every app, the surface on which
   humans curate `core.*` must not be locked inside one application — which is precisely Albert's
   "it should not be only in 1 particular application". Building further curation into DesignFlow
@@ -2244,11 +2289,11 @@ never by rewriting history.
   matched row** (§6.4), so until `20260802170000` is applied to production, parentage curated
   anywhere — DB Data Admin included — is not durable there.
 
-**Controlling answer, 2026-08-16:** the applicable authorized licensor scrape wins for
-Property spelling and Licensor ownership. ColdLion has no parent authority and decides only
-whether a Property is Active or Inactive. DesignFlow has no authority. See the central licensing
-architecture document; older ColdLion-canonical wording in this section is historical and must
-not be used to design or load licensing Master Data.
+**Controlling answer, clarified 2026-08-19:** ColdLion owns official Licensor names. The applicable
+authorized licensor scrape wins for Property spelling and ownership inside its coverage. For a
+ColdLion-only Property under a Licensor with no scrape data, ColdLion's Property name and owning
+Licensor are canonical. ColdLion also decides whether a Property is Active or Inactive. DesignFlow
+has no authority. See the central licensing architecture document.
 
 ### 6.7 OWNER RULING — branch protection on `main` is ON, and CI guards are no longer advisory (Albert Hazan, 2026-08-04)
 
@@ -2848,6 +2893,54 @@ blast-radius work. Before `core.property`, `core.character`, `core.property_char
 - **#865** — answered and closed. Both of its questions are resolved: the reconciliation
   target is Universe B, and the "how do we group `core.licensor`'s 26 mixed codes into four
   portal licensors" question is moot, because that table is on the deletion path.
+
+### 6.17 OWNER RULING — DesignFlow's numeric division ids are WRONG and do NOT come to this database; the ColdLion division CODE is the only division there is (Albert Hazan, 2026-08-19)
+
+**His words, in chat, 2026-08-19, after the live ColdLion feed was checked against the
+DesignFlow item headers:**
+
+> "Designflow's division numbers (1, 2, 7, 9) were wrong and will not be moving to the new
+> Supabase db. Coldlion is correct"
+
+#### What the evidence showed, and why the ruling settles it
+
+Issue #1137 had been blocked for two days on "what does DesignFlow division `2` mean", because
+`plm."divisionCode"` mapped id `2` to `CW001` while the agreed rule said id `2` was dead.
+Both answers were wrong, because the question was wrong. Measured 2026-08-19, read-only,
+against `http://x5.coldlion.com/EhpApi`:
+
+- All **19,994** live ColdLion items carry a real division code — `CW001` 13,219, `EH001`
+  4,084, `SP001` 2,217, `EP001` 474. **None is blank and there is no numeric division at all**;
+  the API has no divisions endpoint.
+- Matching all **15,185** `plm."itemHeader"` rows with `div_code_fk = 2` to the live feed by
+  `item_num_id` resolved **15,183** of them (the 2 misses have a blank item number): `CW001`
+  11,175, `EH001` 2,395, `SP001` 1,140, `EP001` 473.
+- So the bridge row saying "id 2 means CW001" is wrong for **4,008 items, 26% of them**. A
+  single-value backfill was never going to be right, whichever value was picked.
+
+#### The rule
+
+1. **DesignFlow division ids `1`, `2`, `7` and `9` — and the numeric division id space as a
+   whole — are WRONG and are NOT migrating to this database.** Do not model them, do not carry
+   them across as a legacy column, do not build a bridge or lookup table to preserve them, and
+   do not write a migration that repairs them in place. They stop at the DesignFlow boundary.
+2. **The ColdLion division CODE is the division.** `CW001`, `EH001`, `SP001`, `EP001` — a
+   four-plus-three character code from the live feed, sourced per item, never a constant and
+   never an id.
+3. **Backfills read the feed, keyed on `item_num_id`.** Never assign a division from a mapping
+   table, a majority vote, or "what the old id used to mean".
+4. This is the §6.15/§6.16 canon applied to divisions: **ColdLion is what we actually use, so
+   ColdLion wins.** A DesignFlow-vs-ColdLion division disagreement is not a finding to
+   investigate; ColdLion is right by definition.
+
+#### What this voids on issue #1137
+
+Withdrawn outright, because they all repair the numeric id space: setting
+`divisionCode_id_fk = 1` on five `mg_id` rows; setting `is_divcode_active = false` on
+`plm."divisionCode"` ids `2` and `7`; the 217-row Block A fix; deleting the 4 empty rows; and
+the `CHECK` constraint on division shape. The `erp_items_current.division_code` backfill goes
+ahead as a **feed-sourced** backfill. Normalising `itemHeader.compan_code_fk` is a company
+code, not a division, and is unaffected.
 
 ### 6.16 OWNER RULING — licence CONTRACTS are NOT a source for this database, and licence TERM and TERRITORY do not belong in it at all (Albert Hazan, 2026-08-19)
 

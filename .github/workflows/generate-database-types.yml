@@ -59,6 +59,8 @@ concurrency:
 jobs:
   generate:
     runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 90
     env:
       # CONFIGURED, not hard-coded. The preview branch is rebuilt from time to time and
       # its project ref CHANGES when it is: on 2026-08-18 rjyboqwcdzcocqgmsyel was deleted
