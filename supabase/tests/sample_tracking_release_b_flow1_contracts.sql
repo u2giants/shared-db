@@ -4,9 +4,9 @@ BEGIN;
 
 DO $$
 DECLARE
-  v_f1 integer := 999901;
-  v_f2 integer := 999902;
-  v_f3 integer := 999903;
+  v_f1 integer;
+  v_f2 integer;
+  v_f3 integer;
   v_parent integer;
   v_child_a integer;
   v_child_b integer;
@@ -43,8 +43,12 @@ BEGIN
   END IF;
 
   -- Fixtures -------------------------------------------------------------
-  INSERT INTO dflow."Factory"(id, factory_name) VALUES
-    (v_f1,'release-b-factory-1'),(v_f2,'release-b-factory-2'),(v_f3,'release-b-factory-3');
+  INSERT INTO dflow."Factory"(factory_name) VALUES('release-b-factory-1')
+  RETURNING id INTO v_f1;
+  INSERT INTO dflow."Factory"(factory_name) VALUES('release-b-factory-2')
+  RETURNING id INTO v_f2;
+  INSERT INTO dflow."Factory"(factory_name) VALUES('release-b-factory-3')
+  RETURNING id INTO v_f3;
 
   INSERT INTO dflow.sample(origin,direction,sample_name,status,quantity_migration_state)
   VALUES('usa_bought','outbound','release-b-parent','created','known')
