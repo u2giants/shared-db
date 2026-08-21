@@ -72,7 +72,7 @@ DesignFlow data will first land in a Supabase **`designflow` staging schema** (f
 
 | # | `designflow` table | Supabase target | Notes |
 |---:|---|---|---|
-| 1 | `customers` | `core.customer` (+ `plm.customer_import` staging) | 55 rows; `customers_status='ACTIVE'` for API parity |
+| 1 | `customers` | `core.customer` (+ `plm.customer_import` staging) + **`plm.customers` compat view** | Develop linked via `company_source_ref`; see [`../app-migration-notes/designflow-customers-core-contract-20260821.md`](../app-migration-notes/designflow-customers-core-contract-20260821.md). Do not blind-rename onto uuid PK. |
 | 2 | `externalCustomer` | `core.customer` lineage via `core.company_source_ref` | ERP-shaped customer rows |
 | 3 | `Factory` | `core.factory` | Shared factory identity |
 | 4 | `vendor` | `core.factory` / vendor contact pattern | PLM vendor accounts; map to `core` factory/vendor model |
