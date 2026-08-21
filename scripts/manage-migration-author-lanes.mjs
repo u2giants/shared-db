@@ -53,14 +53,27 @@ export const REVIEWERS = Object.freeze([
 // full 10 KB review with a coverage statement on the first attempt. One stopped local
 // process cost a two-day reviewer outage.
 //
-// WHY THAT COULD HAPPEN, and what is being done about it: `provider_unavailable`
-// conflates "the remote provider is down" (wait) with "a local dependency of the
-// wrapper is not running" (thirty-second fix), and PAUSING a reviewer requires no
-// evidence about which of the two it was while RESTORING one requires a probe. The
-// cheap check is demanded only on the path nobody is in a hurry to take. A pause entry
-// below must therefore NAME the failing health check, or state explicitly that the
-// health check passed and the failure was elsewhere. Tracked as #1287 here and
-// ai-devops#45 (each wrapper self-checks the dependencies it owns) upstream.
+// WHY THAT COULD HAPPEN, and what was done about it (#1287, CLOSED by the three
+// changes below; ai-devops#45 fixed the wrapper half upstream):
+//
+//   1. `provider_unavailable` conflated "the remote provider is down" (wait) with
+//      "a local dependency of the wrapper is not running" (thirty-second fix).
+//      `local_dependency_unavailable` is now a separate terminal code -- see
+//      TERMINAL_FAILURE_CODES -- and `replaceFailedReviewer` REFUSES to spend a
+//      rotation slot on one until the operator states the local fault cannot be
+//      fixed on this machine. A working provider no longer collects permanent
+//      failure evidence because a background process stopped.
+//   2. Recording a local fault now REQUIRES naming the failing check, and the name
+//      is written into the immutable failure evidence. A failure record that
+//      cannot say what broke is a guess, and the last guess cost two days.
+//   3. `reviewerExecutionPreflight` runs the wrapper's own `doctor` and quotes the
+//      failing check, so the operator is told "your local server is down, start
+//      it" instead of a wrong verdict about a model. It refuses outright rather
+//      than report ready on a probe it never ran.
+//
+// A pause entry below must still NAME the failing health check, or state explicitly
+// that the health check passed and the failure was elsewhere. That rule is now
+// enforced in code for the local-fault path, not left to the writer's memory.
 //
 // PAUSED 2026-08-20 (owner instruction, issue #1290): 'kimi-k3'. ELEVEN terminal
 // failures against FIVE successes in a single session, in three distinct modes:
@@ -129,6 +142,13 @@ export const EXCLUSIVE_REFS = Object.freeze({
   production: 'refs/db-coordination/production',
 })
 
+// Terminal reviewer failure codes. `local_dependency_unavailable` is separate
+// from `provider_unavailable` on purpose: the first is a fault on THIS machine
+// and is usually a thirty-second fix, the second is the provider being down and
+// means waiting. Collapsing them is what produced a two-day pause of a working
+// reviewer (#1287). Keep them distinct.
+export const TERMINAL_FAILURE_CODES = Object.freeze(['insufficient_quota','provider_unavailable','local_dependency_unavailable','wrapper_terminal_failure','turn_limit_cancelled'])
+
 export const QUEUE_STATUSES = new Set(['ready','blocked','owner-decision'])
 export const QUEUE_WORK_TYPES = new Set(['structural','curated-master-data','application-data','source-data','repo-maintenance','documentation','security-settings'])
 export const QUEUE_ROUTES = new Set(['shared-db-orchestrator','curated-master-data-governance','application-session','source-data-session','owner-only','repo-maintenance'])
@@ -151,11 +171,27 @@ const ROUTES_BY_WORK_TYPE = Object.freeze({
 export const NON_STRUCTURAL_EXITS = Object.freeze({
   'application-data': 'reject',
   'source-data': 'reject',
-  'curated-master-data': 'reject',
+  // FORK, not REJECT. Curated Master Data is governed INSIDE this repo by 6.4:
+  // it binds the AI session doing the typing and never leaves for an
+  // application repo. It exits by fork because it must not occupy a
+  // migration-author lane and must not be worked in the orchestrator's own
+  // context - not because it belongs to somebody else.
+  'curated-master-data': 'fork',
   'repo-maintenance': 'fork',
   documentation: 'fork',
   'security-settings': 'fork',
 })
+
+// A REJECT exit must MOVE the task, never merely decline it. `return_to` is the
+// forwarding address: the repository whose session owns the work. Rejecting
+// without one closes the issue into silence, because the session that filed it
+// has usually already ended and nobody reads the notification.
+export const RETURN_ADDRESS_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
+export const RETURNED_MARKER = 'RETURNED TO'
+
+export function requiresReturnAddress(workType) {
+  return NON_STRUCTURAL_EXITS[workType] === 'reject'
+}
 
 export function queueExit(workType) {
   if (workType === 'structural') return 'accept'
@@ -196,7 +232,13 @@ export function parseQueueScope(body = '') {
   if (workType === 'structural' && !objects.length) throw new LaneError('structural db-work-scope must list exact objects')
   if (workType !== 'structural' && objects.length) throw new LaneError(`${workType} db-work-scope must not claim database objects`)
   if (route === 'owner-only' && status !== 'owner-decision') throw new LaneError('owner-only route requires status owner-decision')
-  return { status, workType, route, priority, dependencies, objects: objects.length ? validateClaimObjects(objects) : [] }
+  // Present-but-malformed is a hard error; absent is reported by the audit as a
+  // missing return address rather than thrown, so one unaddressed issue cannot
+  // make every other open issue unauditable.
+  const returnTo = fields.get('return_to') ?? null
+  if (returnTo !== null && !RETURN_ADDRESS_PATTERN.test(returnTo)) throw new LaneError('db-work-scope return_to must be an owner/repo slug')
+  if (returnTo !== null && workType === 'structural') throw new LaneError('structural db-work-scope must not carry a return_to address')
+  return { status, workType, route, priority, dependencies, returnTo, objects: objects.length ? validateClaimObjects(objects) : [] }
 }
 
 export const COORDINATION_LABELS = new Set(['db-claim','orchestrator-marker'])
@@ -227,6 +269,8 @@ export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssu
         route: scope.route,
         exit: queueExit(scope.workType),
         blockedOnOwner: scope.route === 'owner-only',
+        returnTo: scope.returnTo,
+        needsReturnAddress: requiresReturnAddress(scope.workType) && !scope.returnTo,
       })
     }
     if (scope.status !== 'ready') { skipped.push({ issue:issue.number, reason:`status:${scope.status}`, workType:scope.workType, route:scope.route }); continue }
@@ -255,6 +299,44 @@ export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssu
   const emptyLanes = queues.filter((q)=>!q.active).length
   const dispatchable = queues.filter((q)=>!q.active && q.queued.length).map((q)=>q.queued[0])
   return { queues, skipped, unclassified, malformed, unlabelled, notOrchestratorWork, dispatchable, emptyLanes, fullyAudited:!unclassified.length&&!malformed.length&&!unlabelled.length }
+}
+
+// RETURN PATH (AGENTS.md 0.0-C). A rejected task is forwarded to the repository
+// that owns it and only then closed here, so the closing comment always carries
+// a live link to where the work actually went. Order is the whole safety
+// property: the mirror issue is created FIRST, and any failure leaves this issue
+// open and untouched. Never reorder these three steps.
+export function returnIssueToOwner(number, io, { alreadyReturned } = {}) {
+  const issue = io.getIssue(number)
+  if (!issue) throw new LaneError(`issue #${number} could not be read`)
+  if (issue.state && String(issue.state).toLowerCase() === 'closed') throw new LaneError(`issue #${number} is already closed`)
+  const scope = parseQueueScope(issue.body)
+  if (!scope) throw new LaneError(`issue #${number} carries no db-work-scope block, so its owner is unknown`)
+  if (queueExit(scope.workType) !== 'reject') throw new LaneError(`issue #${number} is ${scope.workType} work, which exits by fork, not by return`)
+  if (!scope.returnTo) throw new LaneError(`issue #${number} has no return_to address; add one before returning it`)
+  const priorComments = alreadyReturned ?? io.getIssueComments(number).map((comment)=>comment.body ?? '')
+  const prior = priorComments.find((body)=>body.includes(RETURNED_MARKER))
+  if (prior) throw new LaneError(`issue #${number} was already returned: ${prior.trim()}`)
+
+  const body = [
+    `Returned from ${REPO}#${number} by the shared-db orchestrator.`,
+    '',
+    `This is **${scope.workType}** work. Under the shared-db admission test (AGENTS.md 0.0-C) it changes the CONTENTS of the shared database, not its SHAPE, so the session working in this repository owns it outright — no shared-db issue, no dispatch, no migration.`,
+    '',
+    `Original issue: https://github.com/${REPO}/issues/${number}`,
+    '',
+    '---',
+    '',
+    issue.body ?? '',
+  ].join('\n')
+  const url = io.createIssueIn(scope.returnTo, issue.title, body)
+  if (!url) throw new LaneError('the owning repository did not return an issue URL; nothing was closed here')
+
+  io.commentIssue(number, `${RETURNED_MARKER} ${url}
+
+This is ${scope.workType} work and belongs to ${scope.returnTo} (AGENTS.md 0.0-C). It has been filed there and is closed here. It is not abandoned — follow the link.`)
+  io.closeIssue(number)
+  return { issue: number, returnedTo: scope.returnTo, url, workType: scope.workType }
 }
 
 export class LaneError extends Error {}
@@ -461,6 +543,9 @@ export const githubIo = {
   updateRef(ref, sha) { gh(['api','-X','PATCH',`repos/${REPO}/git/refs/${ref.replace(/^refs\//,'')}`,'-f',`sha=${sha}`,'-F','force=true']) },
   reserveVersion() { return JSON.parse(execFileSync(process.execPath, ['scripts/check-dispatch-collision.mjs', '--reserve-version', '--json'], { encoding: 'utf8' })) },
   createClaim(title, body) { return gh(['issue', 'create', '--repo', REPO, '--label', 'db-claim', '--title', `CLAIM: ${title}`, '--body', body]).trim() },
+  createIssueIn(repo, title, body) { return gh(['issue','create','--repo',repo,'--title',title,'--body',body]).trim() },
+  commentIssue(number, body) { gh(['issue','comment',String(number),'--repo',REPO,'--body',body]) },
+  closeIssue(number) { gh(['issue','close',String(number),'--repo',REPO]) },
   closeClaim(number) { gh(['issue', 'close', String(number), '--repo', REPO, '--comment', 'Expired migration-author lease closed by guarded cleanup. Its migration version remains unavailable.']) },
   reversionFiles(worktree,oldVersion) {
     let referenced=[]
@@ -498,7 +583,119 @@ export const githubIo = {
   localHead(worktree){return execFileSync('git',['-C',worktree,'rev-parse','HEAD'],{encoding:'utf8'}).trim()},
   localClean(worktree){return execFileSync('git',['-C',worktree,'status','--porcelain'],{encoding:'utf8'}).split(/\r?\n/).filter(Boolean).every((line)=>line.slice(3).replaceAll('\\','/').startsWith('.ai/')) },
   currentMaxVersion(worktree){return execFileSync('git',['-C',worktree,'ls-tree','-r','--name-only','origin/main'],{encoding:'utf8'}).split(/\r?\n/).map((f)=>/^supabase\/migrations\/(\d{14})_/.exec(f)?.[1]).filter(Boolean).sort().at(-1)},
-  commandAvailable(command){try{execFileSync(process.platform==='win32'?'where.exe':'which',[command],{stdio:'ignore'});return true}catch{return false}},
+  commandAvailable(command){return Boolean(resolveCommandPath(command))},
+  // Ask the wrapper's own `doctor` whether it can actually work RIGHT NOW.
+  // Every wrapper prints one `PASS <check>` / `FAIL <check>` line per check, so
+  // the failing check can be quoted verbatim instead of guessed at. Exit status
+  // alone is not enough: the operator needs to be told WHICH check failed.
+  //
+  // WINDOWS. Every reviewer wrapper on Albert's machines is a `.cmd` shim, and
+  // `execFileSync` CANNOT spawn a `.cmd` directly -- it fails ENOENT even though
+  // `where.exe` finds the file. Caught by an independent review before this
+  // shipped: the probe would have failed on every review on Windows and reported
+  // a LOCAL FAULT for a provider that was fine, which is the exact misdiagnosis
+  // this whole change exists to end. Resolve the real path and route a batch
+  // shim through `cmd.exe /c`. No shell string is built, so nothing here is
+  // interpolated into a command line.
+  reviewerDoctor(wrapper){
+    const resolved=resolveCommandPath(wrapper)
+    if(!resolved)return {ok:false,failingChecks:[`${wrapper} is not on PATH`]}
+    const {file,args}=doctorSpawnPlan(resolved)
+    let output=''
+    try{output=execFileSync(file,args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:REVIEWER_DOCTOR_TIMEOUT_MS})}
+    catch(error){
+      if(error?.code==='ETIMEDOUT')return {ok:false,failingChecks:[`doctor did not answer within ${REVIEWER_DOCTOR_TIMEOUT_MS/1000}s`]}
+      output=`${error?.stdout??''}${error?.stderr??''}`
+      const failed=parseDoctorFailures(output)
+      if(failed.length)return {ok:false,failingChecks:failed}
+      return {ok:false,failingChecks:[`doctor could not be run (${error?.code??`exit ${error?.status}`}) and named no check`]}
+    }
+    return summarizeDoctorOutput(output)
+  },
+}
+
+// A wrapper's doctor is a local probe; it must never hang a governed lane.
+// An empty or unparseable override must NOT silently become 0 or NaN: Node treats
+// both as "no timeout", so a hung doctor would hang the lane instead of being
+// refused -- a silent failure produced by the very setting meant to prevent one.
+export const REVIEWER_DOCTOR_TIMEOUT_MS = (()=>{
+  const raw=process.env.REVIEWER_DOCTOR_TIMEOUT_MS
+  if(raw===undefined||String(raw).trim()==='')return 60000
+  const value=Number(raw)
+  if(!Number.isFinite(value)||value<=0)throw new LaneError(`REVIEWER_DOCTOR_TIMEOUT_MS must be a positive number of milliseconds; got "${raw}". Left unchecked this disables the timeout and a hung doctor hangs a governed lane.`)
+  return value
+})()
+
+// Every reviewer wrapper reports one line per check: `PASS  <check>` or
+// `FAIL  <check>`. Return the names of the failing ones, in order.
+export function parseDoctorFailures(output=''){
+  return String(output).split(/\r?\n/).map((line)=>/^\s*FAIL\s+(.*\S)\s*$/.exec(line)?.[1]).filter(Boolean)
+}
+
+// SILENCE IS NOT A PASS -- but an unfamiliar format is not a failure either.
+//
+// This runs only on a ZERO exit; a non-zero exit is refused by the caller before
+// it gets here. Three cases, measured against the real wrappers on edge-dev:
+//
+//   ai-glm / ai-muse   print `PASS  <check>` / `FAIL  <check>` lines. A FAIL wins
+//                      over any number of PASSes.
+//   ai-grok-review     prints NO check lines at all -- key/value lines and an
+//                      `auth : OK` footer -- and signals health purely by exit
+//                      status. Refusing that would have blocked a healthy Grok on
+//                      every review, which is the false local-fault diagnosis this
+//                      whole change exists to end. So when a wrapper answers with
+//                      output in a format we do not recognise AND exits 0, its own
+//                      exit status is its verdict; `format` records that we could
+//                      not read the detail.
+//   nothing at all     proves nothing. A wrapper that quietly stops reporting must
+//                      never be read as healthy forever. Refused.
+//
+// Do not "tidy" the third case into a pass, and do not tighten the second one
+// without first running `doctor` on every ACTIVE_REVIEWERS wrapper and pasting the
+// output into the change. Both halves were established that way.
+export function summarizeDoctorOutput(output=''){
+  const failed=parseDoctorFailures(output)
+  if(failed.length)return {ok:false,failingChecks:failed,format:'checks'}
+  const passed=String(output).split(/\r?\n/).filter((line)=>/^\s*PASS\s+\S/.test(line)).length
+  if(passed)return {ok:true,failingChecks:[],format:'checks'}
+  if(String(output).trim())return {ok:true,failingChecks:[],format:'unrecognized'}
+  return {ok:false,failingChecks:['doctor reported nothing at all; nothing was proved'],format:'silent'}
+}
+
+// How a resolved wrapper path is actually spawned. A Windows `.cmd`/`.bat` shim
+// must go through the command interpreter; everything else is executed directly.
+// Kept separate from the spawn so the rule can be tested for both platforms on
+// either platform.
+export function doctorSpawnPlan(resolved,platform=process.platform){
+  if(platform==='win32'&&/\.(cmd|bat)$/i.test(resolved))return {file:process.env.ComSpec||'cmd.exe',args:['/d','/s','/c',resolved,'doctor']}
+  return {file:resolved,args:['doctor']}
+}
+
+// The single place a wrapper name becomes a real path.
+//
+// ON WINDOWS THE FIRST LINE IS OFTEN THE WRONG ONE. `where.exe ai-grok-review`
+// prints BOTH `...\\ai-grok-review` (an extension-less bash script Windows cannot
+// execute at all) and `...\\ai-grok-review.cmd` (the shim the shell actually runs,
+// via PATHEXT). Taking the first line made the probe fail ENOENT for two of the
+// three active reviewers and report them as local faults while they were healthy.
+// Caught by spot-checking every wrapper after an independent review asked for it,
+// having already been burned once by the same class of bug.
+//
+// So mirror what the shell does: prefer the first candidate whose extension is in
+// PATHEXT, and fall back to the first line when none qualifies.
+export function pickExecutableCandidate(candidates,platform=process.platform,pathext=process.env.PATHEXT){
+  const list=candidates.filter(Boolean)
+  if(platform!=='win32')return list[0]??null
+  const exts=String(pathext||'.COM;.EXE;.BAT;.CMD').split(';').map((e)=>e.trim().toLowerCase()).filter(Boolean)
+  const runnable=list.find((p)=>exts.some((e)=>p.toLowerCase().endsWith(e)))
+  return runnable??list[0]??null
+}
+
+export function resolveCommandPath(command,platform=process.platform){
+  try{
+    const out=execFileSync(platform==='win32'?'where.exe':'which',[command],{encoding:'utf8',stdio:['ignore','pipe','ignore']})
+    return pickExecutableCandidate(out.split(/\r?\n/).map((line)=>line.trim()),platform)
+  }catch{return null}
 }
 
 export function acquireRef(ref, ownerSha, io = githubIo) {
@@ -731,20 +928,57 @@ function requireReplacementEvidence(replacement,io){
   if(io.readRef(ref)!==replacement.failureSha)throw new LaneError('immutable reviewer failure evidence is missing or changed')
 }
 
-export function reviewerExecutionPreflight({reviewer,wrapper,worktree,headSha},io=githubIo){
+// THE PREFLIGHT MUST PROVE THE PROVIDER ANSWERS, NOT JUST THAT A FILE EXISTS.
+//
+// It used to check `commandAvailable(wrapper)` and nothing more -- the wrapper
+// binary is on PATH, so the preflight passed. Every review then died at
+// execution with a generic `provider_unavailable`: a message about the MODEL
+// that was actually about a stopped local service on this machine.
+//
+// That misdiagnosis benched glm-5.3 for two days (2026-08-18 to 2026-08-20) on
+// three `provider_unavailable` failures at sequences 161, 164 and 167. The
+// provider was fine the whole time; its local OpenCode server was not running,
+// and `ai-glm doctor` said so in one line. During that window the rotation was
+// effectively one reviewer, and a rotation of one is not a rotation.
+//
+// So the probe runs the wrapper's own `doctor` and QUOTES the failing check.
+// Never soften this into a warning and never drop the check name: a pause that
+// cannot say what failed is a guess, and the last guess cost two days.
+export function reviewerExecutionPreflight({reviewer,wrapper,worktree,headSha,skipDoctor},io=githubIo){
   const approved=ACTIVE_REVIEWERS.find((row)=>row.name===reviewer)
   if(!approved||approved.wrapper!==wrapper)throw new LaneError('reviewer preflight requires an approved reviewer and its exact wrapper')
   if(!/^[0-9a-f]{40}$/i.test(String(headSha??''))||!worktree)throw new LaneError('reviewer preflight requires an exact 40-character head SHA and worktree')
   if(!io.commandAvailable?.(wrapper))throw new LaneError(`reviewer preflight cannot execute ${wrapper}`)
   if(io.localHead(worktree)!==headSha)throw new LaneError('reviewer preflight worktree is not at the exact assigned head')
   if(!io.localClean(worktree))throw new LaneError('reviewer preflight worktree is dirty')
-  return {reviewer,wrapper,worktree,headSha,ready:true}
+  let doctor=null
+  if(!skipDoctor){
+    // No doctor probe available is NOT a pass. Say so rather than reporting
+    // ready:true on evidence that was never collected.
+    if(typeof io.reviewerDoctor!=='function')throw new LaneError(`reviewer preflight cannot probe ${wrapper}: this io has no reviewerDoctor. Nothing was proved about the provider; do not record a failure against the reviewer.`)
+    doctor=io.reviewerDoctor(wrapper)
+    if(!doctor?.ok){
+      const checks=(doctor?.failingChecks??[]).map((c)=>`"${c}"`).join(', ')||'an unnamed check'
+      throw new LaneError(`reviewer preflight: ${wrapper} doctor reports ${checks} -- this is a LOCAL dependency fault on this machine, not a ${reviewer} provider fault. Fix the local service and retry the same reviewer. Do NOT pause ${reviewer} and do NOT record provider_unavailable against it.`)
+    }
+  }
+  return {reviewer,wrapper,worktree,headSha,ready:true,doctorChecked:!skipDoctor,failingChecks:doctor?.failingChecks??[]}
 }
 
-export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCode,confirmNoVerdict,confirmNoArtifact},io=githubIo){
+export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCode,failingCheck,confirmLocalDependencyUnfixable,confirmNoVerdict,confirmNoArtifact},io=githubIo){
   const request={issue:Number(issue),pr:Number(pr),headSha:String(headSha??''),failedSequence:Number(failedSequence)}
   if(!Number.isInteger(request.issue)||!Number.isInteger(request.pr)||!/^[0-9a-f]{40}$/i.test(request.headSha)||!Number.isInteger(request.failedSequence))throw new LaneError('reviewer replacement requires exact issue, PR, 40-character head SHA, and failed sequence')
-  if(!['insufficient_quota','provider_unavailable','wrapper_terminal_failure','turn_limit_cancelled'].includes(String(failureCode??'')))throw new LaneError('reviewer replacement requires a recognized terminal provider/tool failure code')
+  if(!TERMINAL_FAILURE_CODES.includes(String(failureCode??'')))throw new LaneError(`reviewer replacement requires a recognized terminal provider/tool failure code (${TERMINAL_FAILURE_CODES.join(', ')})`)
+  // A LOCAL fault is not the reviewer's fault. Replacing on one spends a
+  // rotation slot and records permanent evidence against a provider that was
+  // working, which is exactly how glm-5.3 was benched for two days. The named
+  // failing check is required so the evidence says what actually broke, and a
+  // replacement is only issued once the operator states plainly that the local
+  // fault cannot be fixed on this machine right now.
+  if(String(failureCode)==='local_dependency_unavailable'){
+    if(!String(failingCheck??'').trim())throw new LaneError('local_dependency_unavailable requires --failing-check naming the exact doctor check that failed. A failure record that cannot name the failing check is a guess.')
+    if(!confirmLocalDependencyUnfixable)throw new LaneError(`this is a LOCAL dependency fault ("${String(failingCheck).trim()}"), not a provider fault. Fix it on this machine and retry the SAME reviewer -- a replacement spends a rotation slot and records permanent evidence against a provider that is working. If it genuinely cannot be fixed here, re-run with --confirm-local-dependency-unfixable.`)
+  }else if(String(failingCheck??'').trim())throw new LaneError('--failing-check applies only to local_dependency_unavailable')
   if(!confirmNoVerdict||!confirmNoArtifact)throw new LaneError('reviewer replacement requires explicit confirmation that the failed session produced no verdict and no artifact')
   const assignmentRef=`refs/db-review-assignments/${request.issue}-${request.pr}-${request.headSha}`
   const failureRef=`${REVIEW_FAILURE_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}-${request.failedSequence}`
@@ -787,7 +1021,11 @@ export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCo
       const body=String(row.body??''), tied=row.commit_id===request.headSha||body.includes(request.headSha)
       return tied&&(/\b(?:APPROVE|REVISE|REQUEST_CHANGES)\b/i.test(body)||['APPROVED','CHANGES_REQUESTED'].includes(String(row.state??'').toUpperCase()))
     }))throw new LaneError('an existing verdict for the exact head forbids reviewer replacement')
-    const failureSha=io.makeOwnerCommit(`db-coordination reviewer-failure issue=${request.issue} pr=${request.pr} head=${request.headSha} sequence=${request.failedSequence} reviewer=${original.reviewer} code=${failureCode} verdict=none artifact=none`)
+    // The failing check rides along in the immutable evidence, so a later reader
+    // can tell a real provider outage from a stopped local service without
+    // re-deriving it from memory.
+    const checkNote=String(failingCheck??'').trim()?` failing-check=${String(failingCheck).trim().replace(/\s+/g,'_')}`:''
+    const failureSha=io.makeOwnerCommit(`db-coordination reviewer-failure issue=${request.issue} pr=${request.pr} head=${request.headSha} sequence=${request.failedSequence} reviewer=${original.reviewer} code=${failureCode}${checkNote} verdict=none artifact=none`)
     // SKIP, DO NOT REFUSE (#1297). The rotation position is only a starting point.
     // Every provider that already failed on THIS exact head is excluded, and the
     // cursor is advanced past each excluded name so the durable sequence still
@@ -1204,6 +1442,7 @@ function parseArgs(argv) {
     if (a === '--claim') out.claim = true
     else if (a === '--audit') out.audit = true
     else if (a === '--queue-audit') out.queueAudit = true
+    else if (a === '--return-issue') out.returnIssue = Number(argv[++i])
     else if (a === '--assign-reviewer') out.assignReviewer = true
     else if (a === '--replace-failed-reviewer') out.replaceFailedReviewer = true
     else if (a === '--reviewer-preflight') out.reviewerPreflight = true
@@ -1219,7 +1458,9 @@ function parseArgs(argv) {
     else if (a === '--confirm-stale') out.confirmStale = true
     else if (/^--acquire-(preview|preview-recovery|preview-rehearsal|merge|production)$/.test(a)) out.acquireExclusive = a.slice(10)
     else if (/^--release-(preview|preview-recovery|preview-rehearsal|merge|production)$/.test(a)) out.releaseExclusive = a.slice(10)
-    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--claim-number','--failed-sequence','--failure-code','--old-version','--reviewer','--wrapper'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
+    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--claim-number','--failed-sequence','--failure-code','--failing-check','--old-version','--reviewer','--wrapper'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
+    else if(a==='--confirm-local-dependency-unfixable')out.confirmLocalDependencyUnfixable=true
+    else if(a==='--skip-doctor')out.skipDoctor=true
     else if(a==='--confirm-no-verdict')out.confirmNoVerdict=true
     else if(a==='--confirm-no-artifact')out.confirmNoArtifact=true
     else if (a === '--versions') { out.versions = next(i).split(',').map((v)=>v.trim()).filter(Boolean); i++ }
@@ -1245,23 +1486,29 @@ export function main(argv, now = new Date(), io = githubIo) {
     if (o.releaseExclusive) { if (!o.ownerSha) throw new LaneError('--owner-sha is required for safe release'); releaseOwnedRef(EXCLUSIVE_REFS[o.releaseExclusive], o.ownerSha, io); return 0 }
     const claims = io.openClaims()
     if(o.assignReviewer){console.log(JSON.stringify(assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha},io),null,2));return 0}
+    if (o.returnIssue) { console.log(JSON.stringify(returnIssueToOwner(o.returnIssue, io), null, 2)); return 0 }
     if (o.queueAudit) {
       const result = buildDynamicQueues(io.openWorkIssues(), claims, now, io.openIssueNumbers())
       console.log(JSON.stringify(result,null,2))
-      if (result.dispatchable.length) { console.error(`REFILL REQUIRED NOW: dispatch issue(s) ${result.dispatchable.map((n)=>`#${n}`).join(', ')}`); return 2 }
-      // Reported as a standing worklist, not a failure: these issues are real
-      // work that simply is not the orchestrator's to do in its own window.
-      // Exit code is unchanged so a healthy audit still returns 0.
+      // Printed BEFORE the refill early-return: a queue with any dispatchable
+      // work would otherwise hide this list entirely, which is exactly how these
+      // items accumulated unseen in the first place.
       if (result.notOrchestratorWork.length) {
         console.error('NOT ORCHESTRATOR WORK: these open issues fail the shape test (AGENTS.md 0.0-C). Reject or fork each one; never work it here.')
         for (const item of result.notOrchestratorWork) {
           const owner = item.blockedOnOwner ? ' [blocked on owner decision]' : ''
-          console.error(`  #${item.issue} ${item.exit.toUpperCase()} — work_type ${item.workType}, route ${item.route}${owner}`)
+          const address = item.exit === 'reject'
+            ? (item.returnTo ? ` -> ${item.returnTo}` : ' -> NO RETURN ADDRESS: add `return_to: owner/repo` before returning it')
+            : ''
+          console.error(`  #${item.issue} ${item.exit.toUpperCase()} — work_type ${item.workType}, route ${item.route}${owner}${address}`)
         }
+        const unaddressed = result.notOrchestratorWork.filter((item)=>item.needsReturnAddress)
+        if (unaddressed.length) console.error(`NO RETURN ADDRESS on ${unaddressed.map((item)=>`#${item.issue}`).join(', ')} — a reject with no forwarding address closes into silence. Return each with --return-issue <n> once addressed.`)
       }
+      if (result.dispatchable.length) { console.error(`REFILL REQUIRED NOW: dispatch issue(s) ${result.dispatchable.map((n)=>`#${n}`).join(', ')}`); return 2 }
       if (result.unlabelled.length) console.error(`UNLABELLED ISSUES: add the \`${WORK_LABEL}\` label to ${result.unlabelled.map((n)=>`#${n}`).join(', ')} — an unlabelled issue is invisible to every label-filtered query`)
       if (result.emptyLanes && !result.fullyAudited) { console.error('EMPTY LANE NOT PROVEN: classify and label every open issue before claiming no eligible work exists'); return 2 }
-      return result.malformed.length || result.unlabelled.length ? 2 : 0
+      return result.malformed.length || result.unlabelled.length || result.notOrchestratorWork.some((item)=>item.needsReturnAddress) ? 2 : 0
     }
     if (o.releaseClaim) {
       if (!o.confirmFinished || !o.owner) throw new LaneError('--release-claim requires exact --owner and --confirm-finished')
@@ -1289,7 +1536,7 @@ export function main(argv, now = new Date(), io = githubIo) {
       for(const problem of malformed)console.error(`MALFORMED ${problem}`)
       return malformed.length || occupied>MAX_AUTHOR_LANES ? 2 : 0
     }
-    if (!o.claim) throw new LaneError('choose --claim, --audit, --queue-audit, --cleanup-stale, or an exclusive-lane command')
+    if (!o.claim) throw new LaneError('choose --claim, --audit, --queue-audit, --return-issue, --cleanup-stale, or an exclusive-lane command')
     for (const k of ['task','owner','branch','worktree']) if (!o[k]) throw new LaneError(`--${k} is required`)
     if (!o.objects.length) throw new LaneError('--objects must name every database object exactly')
     o.leaseHours ??= DEFAULT_LEASE_HOURS
