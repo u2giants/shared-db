@@ -69,6 +69,10 @@ on:
         description: "Post-merge rehearsal only: MERGED source PR whose migrations this run applies to preview. Requires commit_sha = the current main tip."
         type: string
         required: false
+      merged_preview_source_pr_map:
+        description: "Post-merge rehearsal only: version:pr pairs, when the bounded batch was authored by several merged PRs (AGENTS.md 6.5). Requires commit_sha = the current main tip."
+        type: string
+        required: false
       historical_preview_source_pr:
         description: "Preview recovery only: original merged PR that authored every allowlisted migration"
         type: string
@@ -282,7 +286,7 @@ jobs:
           # A post-merge rehearsal and a historical recovery both check out the
           # exact main tip named by commit_sha. Only the ordinary pre-merge lane
           # checks out a pull-request head.
-          ref: ${{ (inputs.merged_preview_source_pr != '' || inputs.historical_preview_source_pr != '' || inputs.historical_preview_source_pr_map != '') && inputs.commit_sha || inputs.claim_head_sha }}
+          ref: ${{ (inputs.merged_preview_source_pr != '' || inputs.merged_preview_source_pr_map != '' || inputs.historical_preview_source_pr != '' || inputs.historical_preview_source_pr_map != '') && inputs.commit_sha || inputs.claim_head_sha }}
           fetch-depth: 0
       # POST-MERGE PREVIEW REHEARSAL (#1208). This is the step that makes
       # "merge first, then rehearse on preview from merged main, then promote"
@@ -292,10 +296,11 @@ jobs:
       # be run. Every check below fails closed and says what was missing.
       - name: Prove the post-merge rehearsal source
         id: merged_rehearsal
-        if: inputs.merged_preview_source_pr != ''
+        if: (inputs.merged_preview_source_pr != '' || inputs.merged_preview_source_pr_map != '')
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_PR: ${{ inputs.merged_preview_source_pr }}
+          SOURCE_MAP: ${{ inputs.merged_preview_source_pr_map }}
           MAIN_SHA: ${{ inputs.commit_sha }}
           HISTORICAL_SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
           HISTORICAL_SOURCE_MAP: ${{ inputs.historical_preview_source_pr_map }}
@@ -318,6 +323,39 @@ jobs:
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$MAIN_SHA"
           test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          # A batch that AGENTS.md 6.5 requires to move as ONE bounded event can
+          # span several authoring pull requests, so it names a source PR per
+          # version. BOTH SET IS REFUSED HERE for the same reason the historical
+          # lane refuses it: two inputs describing one batch, one of them quietly
+          # unused, is not a state a gate should run in.
+          if [ -n "${SOURCE_MAP:-}" ] && [ -n "${SOURCE_PR:-}" ]; then
+            echo "REFUSED: name merged_preview_source_pr OR merged_preview_source_pr_map, not both." >&2
+            exit 1
+          fi
+          if [ -n "${SOURCE_MAP:-}" ]; then
+            # EVERY pull request in the map is proved merged here, not only the
+            # one the lane lock is filed under. The per-version merge-commit
+            # ancestry and authorship proofs run in the lane script below.
+            MAP_PRS="$(printf '%s' "$SOURCE_MAP" | tr ',' '\n' | sed 's/.*://' | tr -d '[:space:]' | sort -u)"
+            test -n "$MAP_PRS"
+            for MAP_PR in $MAP_PRS; do
+              case "$MAP_PR" in *[!0-9]*|"")
+                echo "REFUSED: merged_preview_source_pr_map names a non-numeric pull request: ${MAP_PR}" >&2
+                exit 1 ;;
+              esac
+              MAP_MERGED="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${MAP_PR}" --jq '.merged')"
+              MAP_MERGE_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${MAP_PR}" --jq '.merge_commit_sha // ""')"
+              if [ "$MAP_MERGED" != "true" ] || [ -z "$MAP_MERGE_SHA" ]; then
+                echo "REFUSED: pull request #${MAP_PR} is not merged. A post-merge rehearsal never runs from unmerged code." >&2
+                exit 1
+              fi
+            done
+            # The lane lock, and therefore the evidence binding, is filed under
+            # the LAST pull request in the map -- the same convention the
+            # historical recovery lane already uses, chosen because it is the
+            # most recent authorship and the one a reader recognises.
+            SOURCE_PR="${SOURCE_MAP##*:}"
+          fi
           MERGE_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_PR}" --jq '.merge_commit_sha // ""')"
           MERGED="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_PR}" --jq '.merged')"
           if [ "$MERGED" != "true" ] || [ -z "$MERGE_SHA" ]; then
@@ -325,17 +363,25 @@ jobs:
             exit 1
           fi
           echo "merge_commit_sha=$MERGE_SHA" >> "$GITHUB_OUTPUT"
+          echo "source_pr=$SOURCE_PR" >> "$GITHUB_OUTPUT"
       - name: Prove historical preview recovery source
         if: (inputs.historical_preview_source_pr != '' || inputs.historical_preview_source_pr_map != '')
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
           SOURCE_MAP: ${{ inputs.historical_preview_source_pr_map }}
+          MERGED_SOURCE_MAP: ${{ inputs.merged_preview_source_pr_map }}
           ORIGINAL_RUN_MAP: ${{ inputs.historical_preview_original_run_map }}
           MAIN_SHA: ${{ inputs.commit_sha }}
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
         run: |
           set -euo pipefail
+          # The merged map is the post-merge APPLY lane, exactly as the single
+          # merged PR is; the historical inputs are a no-write recovery.
+          if [ -n "${MERGED_SOURCE_MAP:-}" ]; then
+            echo "REFUSED: merged_preview_source_pr_map is a post-merge APPLY; the historical inputs are a no-write recovery. Name one." >&2
+            exit 1
+          fi
           test -n "$MAIN_SHA"
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$MAIN_SHA"
@@ -382,7 +428,8 @@ jobs:
           HISTORICAL_SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
           HISTORICAL_SOURCE_MAP: ${{ inputs.historical_preview_source_pr_map }}
           HISTORICAL_MAIN_SHA: ${{ inputs.commit_sha }}
-          MERGED_SOURCE_PR: ${{ inputs.merged_preview_source_pr }}
+          MERGED_SOURCE_PR: ${{ steps.merged_rehearsal.outputs.source_pr }}
+          MERGED_SOURCE_MAP: ${{ inputs.merged_preview_source_pr_map }}
           MERGED_MAIN_SHA: ${{ inputs.commit_sha }}
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
         run: |
@@ -416,6 +463,14 @@ jobs:
             CLAIM_PR="$MERGED_SOURCE_PR"
             CLAIM_HEAD_SHA="$MERGED_MAIN_SHA"
             LANE_VERSIONS=(--versions "$PREVIEW_ALLOWLIST")
+            # A batch authored across several merged pull requests passes the
+            # version-to-PR map through to the lane script, which proves EVERY
+            # allowlisted version was added by a merged pull request whose merge
+            # commit is contained in this exact main tip. Per version instead of
+            # per batch; never optional, never skippable.
+            if [ -n "${MERGED_SOURCE_MAP:-}" ]; then
+              LANE_VERSIONS+=(--version-pr-map "$MERGED_SOURCE_MAP")
+            fi
           fi
           test -n "$CLAIM_PR"; test -n "$CLAIM_HEAD_SHA"
           LOCK_KIND=preview
@@ -721,7 +776,7 @@ jobs:
         env:
           APPLIED_COMMIT: ${{ steps.commit.outputs.sha }}
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
-          MERGED_SOURCE_PR: ${{ inputs.merged_preview_source_pr }}
+          MERGED_SOURCE_PR: ${{ steps.merged_rehearsal.outputs.source_pr }}
           MERGE_COMMIT_SHA: ${{ steps.merged_rehearsal.outputs.merge_commit_sha }}
           HISTORICAL_SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
           HISTORICAL_SOURCE_MAP: ${{ inputs.historical_preview_source_pr_map }}
