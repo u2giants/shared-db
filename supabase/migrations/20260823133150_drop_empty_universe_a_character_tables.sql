@@ -5,13 +5,20 @@
 -- keys are removed.  core.property and core.licensor are deliberately untouched.
 --
 -- Reversal: because every precondition below requires the retired tables and
--- every referencing value to be empty, rollback is structural only.  Recreate
--- core.character from 20260621150815_app_core.sql and core.property_character
--- from 20260807170000_opa_property_character_landing.sql, restore the six named
--- foreign keys with their original ON DELETE actions, then restore the two API
--- definitions from 20260722005000_db_data_admin_read_contracts.sql and
--- 20260814000000_licensing_manager_gate.sql.  The focused contract test rehearses
--- that reconstruction inside a rolled-back transaction.
+-- every referencing value to be empty, rollback is structural only. Recreate
+-- core.character from 20260621150815_app_core.sql, including its updated_at
+-- trigger; restore its RLS/policies/authenticated grant from
+-- 20260621151155_api_rls_realtime.sql and service_role grant from
+-- 20260621164759_service_role_grants.sql. Recreate core.property_character in
+-- full from 20260807170000_opa_property_character_landing.sql (index, comments,
+-- RLS, policies and grants included), then restore the six or seven named FKs
+-- with their original ON DELETE actions. Restore the list RPC from
+-- 20260722005000_db_data_admin_read_contracts.sql AND apply its latest safe UUID
+-- cursor correction from 20260722005200_fix_db_data_admin_uuid_cursor_aggregates.sql.
+-- Restore the tree RPC from 20260814000000_licensing_manager_gate.sql, whose body
+-- already carries the preceding division-context fixes. The focused contract
+-- rehearses table/FK/index/trigger/RLS/policy/grant reconstruction inside a
+-- rolled-back transaction.
 
 do $migration$
 declare
@@ -122,7 +129,7 @@ drop table core.property_character restrict;
 drop table core.character restrict;
 
 comment on function api.db_data_admin_licensor_property_list(text, boolean, text, integer) is
-  'DB Data Admin only. Read-only Licensor -> Property hierarchy with source context, PLM division/type context, and loud orphan surfacing. Character counts remain present as zero for response compatibility after Universe A character retirement. Pages over Licensors by name; orphan_properties is always the complete anomaly list.';
+  'DB Data Admin only. Read-only Licensor -> Property hierarchy with source context, PLM division/type context, and loud orphan surfacing. Character counts remain present as zero for response compatibility after Universe A character retirement. Pages over Licensors by name; orphan_properties is always the complete anomaly list. Returns {licensors, orphan_properties, next_cursor, page_size}.';
 
 comment on function api.db_data_admin_licensor_property_tree(text, boolean, text, integer) is
-  'Licensing Manager read-only hierarchy and readiness snapshot. Character counts remain present as zero for response compatibility after Universe A character retirement.';
+  'Licensing Manager read-only Licensor -> Property hierarchy and readiness snapshot with source context and PLM division/type context (division id, division name, and external company-division code). Character counts remain present as zero for response compatibility after Universe A character retirement. Pages over Licensors by name; orphan_properties is always the complete anomaly list. Returns {snapshot, reconciliation, licensors, orphan_properties, next_cursor, page_size}.';

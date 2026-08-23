@@ -63,6 +63,17 @@ create table core.character (
   unique nulls not distinct (property_id, code)
 );
 
+create trigger set_updated_at before update on core.character
+  for each row execute function app.set_updated_at();
+alter table core.character enable row level security;
+create policy shared_read on core.character for select to authenticated
+  using (app.has_any_role(array['administrator','sales','licensing','designer','viewer','vendor']::app.app_role[]));
+create policy admin_write on core.character for all to authenticated
+  using (app.has_role('administrator')) with check (app.has_role('administrator'));
+grant select on table core.character to authenticated;
+grant all on table core.character to service_role;
+revoke all on table core.character from anon;
+
 create table core.property_character (
   property_id uuid not null,
   character_id uuid not null,
@@ -76,6 +87,17 @@ create table core.property_character (
     foreign key (character_id) references core.character(id) on delete cascade,
   constraint property_character_source_chk check (btrim(source) <> '')
 );
+
+create index idx_property_character_character_id
+  on core.property_character (character_id);
+alter table core.property_character enable row level security;
+create policy shared_read on core.property_character for select to authenticated
+  using (app.has_any_role(array['administrator','sales','licensing','designer','viewer','vendor']::app.app_role[]));
+create policy admin_write on core.property_character for all to authenticated
+  using (app.has_role('administrator')) with check (app.has_role('administrator'));
+grant select on table core.property_character to authenticated;
+grant all on table core.property_character to service_role;
+revoke all on table core.property_character from anon;
 
 alter table core.style_guide_character add constraint style_guide_character_character_id_fkey
   foreign key (character_id) references core.character(id) on delete cascade;
@@ -106,6 +128,36 @@ begin
     and c.confrelid = 'core.character'::regclass;
   if v_count <> (case when to_regclass('plm.source_resolution') is null then 6 else 7 end) then
     raise exception 'reversal rehearsal found an unexpected core.character foreign-key count: %', v_count;
+  end if;
+
+  if not exists (
+    select 1 from pg_trigger
+    where tgrelid = 'core.character'::regclass and tgname = 'set_updated_at' and not tgisinternal
+  ) then
+    raise exception 'reversal rehearsal did not restore core.character.set_updated_at';
+  end if;
+
+  select count(*) into v_count from pg_policies
+  where schemaname = 'core' and tablename in ('character','property_character')
+    and policyname in ('shared_read','admin_write');
+  if v_count <> 4 then
+    raise exception 'reversal rehearsal expected four restored RLS policies, found %', v_count;
+  end if;
+
+  if not (select relrowsecurity from pg_class where oid = 'core.character'::regclass)
+     or not (select relrowsecurity from pg_class where oid = 'core.property_character'::regclass) then
+    raise exception 'reversal rehearsal did not restore RLS on both tables';
+  end if;
+
+  if to_regclass('core.idx_property_character_character_id') is null then
+    raise exception 'reversal rehearsal did not restore the property-character reverse index';
+  end if;
+
+  if not has_table_privilege('authenticated', 'core.character', 'select')
+     or not has_table_privilege('authenticated', 'core.property_character', 'select')
+     or not has_table_privilege('service_role', 'core.character', 'insert,update,delete,truncate,references,trigger')
+     or not has_table_privilege('service_role', 'core.property_character', 'insert,update,delete,truncate,references,trigger') then
+    raise exception 'reversal rehearsal did not restore table grants';
   end if;
 end
 $reversal$;

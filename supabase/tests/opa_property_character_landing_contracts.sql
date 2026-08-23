@@ -257,26 +257,9 @@ begin
       v_confdeltype;
   end if;
 
-  select c.confdeltype into v_confdeltype
-  from pg_constraint c
-  join pg_class rel on rel.oid = c.conrelid
-  join pg_namespace n on n.oid = rel.relnamespace
-  where n.nspname = 'core' and rel.relname = 'property_character'
-    and c.conname = 'property_character_property_id_fkey';
-  if v_confdeltype <> 'r' then
-    raise exception 'property_character_property_id_fkey confdeltype=% (expected r=RESTRICT)',
-      v_confdeltype;
-  end if;
-
-  select c.confdeltype into v_confdeltype
-  from pg_constraint c
-  join pg_class rel on rel.oid = c.conrelid
-  join pg_namespace n on n.oid = rel.relnamespace
-  where n.nspname = 'core' and rel.relname = 'property_character'
-    and c.conname = 'property_character_character_id_fkey';
-  if v_confdeltype <> 'c' then
-    raise exception 'property_character_character_id_fkey confdeltype=% (expected c=CASCADE)',
-      v_confdeltype;
+  if to_regclass('core.character') is not null
+     or to_regclass('core.property_character') is not null then
+    raise exception 'retired Universe A tables exist during delete-action contracts';
   end if;
 
   -- Behavioural: a resolved OPA row must BLOCK deletion of the core.property it names.
