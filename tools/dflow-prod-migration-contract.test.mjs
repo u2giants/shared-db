@@ -22,7 +22,10 @@ function viewBody(sql) {
 test('migration is structure-only and uses the reserved version', () => {
   assert.doesNotMatch(migration, /^\s*(?:insert|update|delete|copy|truncate)\b/im);
   assert.match(migration, /20260823232256|Issue #1352/);
-  assert.match(migration, /expected 103 tables/);
+  assert.equal((migration.match(/^CREATE TABLE dflow_prod\./gm) ?? []).length, 103);
+  assert.doesNotMatch(migration, /\bdesignflow\./);
+  assert.doesNotMatch(migration, /\b(?:DO \$ddl\$|pg_get_constraintdef|pg_get_indexdef|pg_get_functiondef)\b/);
+  assert.match(migration, /expected 97 sequences/);
   assert.match(migration, /high-water is id, never actionDate/);
 });
 
@@ -32,7 +35,8 @@ test('new Sample Tracking-only surface is excluded fail-closed', () => {
     'sample_shipment_line', 'sample_stop_closeout', 'sample_visit',
     'sample_visit_event', 'sample_visit_plan',
   ]) {
-    assert.match(migration, new RegExp(`table_name IN\\([^)]*${name}`));
+    assert.match(migration, new RegExp(`'${name}'`));
+    assert.doesNotMatch(migration, new RegExp(`^CREATE TABLE dflow_prod\\."?${name}"?`, 'm'));
   }
 });
 
@@ -49,4 +53,11 @@ test('audit live/archive search and export contract is indexed', () => {
     assert.match(migration, new RegExp(field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
   assert.match(migration, /Indefinite archive/);
+});
+
+test('every sequence default and ownership stays inside dflow_prod', () => {
+  assert.equal((migration.match(/^CREATE SEQUENCE dflow_prod\./gm) ?? []).length, 17);
+  assert.equal((migration.match(/GENERATED (?:ALWAYS|BY DEFAULT) AS IDENTITY/g) ?? []).length, 80);
+  assert.doesNotMatch(migration, /nextval\('dflow\./);
+  assert.doesNotMatch(migration, /OWNED BY dflow\./);
 });

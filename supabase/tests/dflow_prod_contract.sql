@@ -3,6 +3,7 @@ begin;
 do $test$
 declare
   v_tables integer;
+  v_sequences integer;
   v_view text;
 begin
   select count(*) into v_tables
@@ -10,6 +11,22 @@ begin
   where table_schema = 'dflow_prod' and table_type = 'BASE TABLE';
   if v_tables <> 103 then
     raise exception 'expected 103 dflow_prod tables, found %', v_tables;
+  end if;
+
+  select count(*) into v_sequences
+  from information_schema.sequences
+  where sequence_schema = 'dflow_prod';
+  if v_sequences <> 97 then
+    raise exception 'expected 97 dflow_prod sequences, found %', v_sequences;
+  end if;
+
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'dflow_prod'
+      and column_default like '%dflow.%'
+  ) then
+    raise exception 'dflow_prod default still references nonproduction dflow';
   end if;
 
   if to_regclass('dflow_archive."AuditLog"') is null
