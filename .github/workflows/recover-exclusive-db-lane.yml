@@ -1,0 +1,110 @@
+# Operator recovery for a stuck exclusive database lane (Step 6, issue #1366).
+#
+# WHAT THIS IS FOR
+# ----------------
+# Preview, guarded merge, and production promotion are exclusive: one holder at a
+# time, held by a Git ref. When the job holding one CRASHES, the ref stays and the
+# lane is held forever. Every session that needs it then queues silently behind a
+# holder that no longer exists.
+#
+# WHAT THIS WORKFLOW WILL NOT DO
+# ------------------------------
+#   * It NEVER contacts the database. It repairs a GitHub coordination ref and
+#     nothing else. Read that again before adding a step to it.
+#   * It NEVER takes a lane from a live job. Recovery is refused while the recorded
+#     run is queued, in progress, unreadable, has a later attempt running, or has
+#     another active run for the same PR and head.
+#   * It NEVER acts on a clock. There is no lease expiry: a job that has held a
+#     lane for six hours keeps it if GitHub says it is still running.
+#   * It NEVER auto-recovers a lease acquired outside Actions, because such a lease
+#     has no run to prove terminal. Only its recorded owner may release that one.
+#
+# DRY RUN IS THE DEFAULT, and the default is the point. A recovery that turns out
+# to be wrong produces two live holders of one lane, which is the single worst
+# outcome this plan is trying to prevent. Look at the dry run, satisfy yourself it
+# names the crash you are actually looking at, and only then set apply_recovery.
+name: Recover exclusive DB lane
+
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: Which exclusive lane to inspect
+        required: true
+        type: choice
+        options: [preview, merge, production]
+      holder_id:
+        description: Identifier for whoever is taking the lane over (recorded in the new lease)
+        required: true
+        type: string
+      apply_recovery:
+        description: Actually take the lane. Leave false to inspect only.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write   # coordination refs live in this repository
+  actions: read     # reading the recorded run's live state is the whole safety argument
+
+concurrency:
+  group: recover-exclusive-db-lane
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Recover exclusive DB lane
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The lease logic proves itself before it is pointed at a live lane.
+      - name: Prove the lease logic itself
+        run: node --test scripts/lib/exclusive-lease.test.mjs
+
+      - name: Inspect the lane
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/manage-migration-author-lanes.mjs \
+            --recover-exclusive "${{ inputs.lane }}" \
+            --holder-id "${{ inputs.holder_id }}" | tee /tmp/dry-run.json
+          {
+            echo "## Dry run — ${{ inputs.lane }}"
+            echo
+            echo '```json'
+            cat /tmp/dry-run.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Take the lane over
+        if: ${{ inputs.apply_recovery }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/manage-migration-author-lanes.mjs \
+            --recover-exclusive "${{ inputs.lane }}" \
+            --holder-id "${{ inputs.holder_id }}" \
+            --apply-recovery | tee /tmp/applied.json
+          {
+            echo "## Recovered — ${{ inputs.lane }}"
+            echo
+            echo '```json'
+            cat /tmp/applied.json
+            echo '```'
+            echo
+            echo "The generation is now incremented. The previous holder is fenced out:"
+            echo "any later assert or release it attempts will refuse, by design."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Say plainly that nothing was changed
+        if: ${{ !inputs.apply_recovery }}
+        run: |
+          echo "Dry run only. No ref was written and no lane was taken."
+          echo "Re-run with apply_recovery=true once the dry run above matches the crash you are investigating."
