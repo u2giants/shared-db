@@ -82,7 +82,7 @@ test('a malformed or duplicated block is an error, never a silent skip', () => {
 })
 
 // Completion is immutable. Quietly preferring one of two records would hide both
-// a mistake and an attempt to rewrite history.
+// a mistake and a deliberate attempt to overwrite an earlier completion record.
 test('two completion records on one issue is an error, not latest-wins', () => {
   assert.throws(() => findCompletionRecord([comment(merged()), comment(merged({ pr: 100 }))]), /completion is immutable/)
   assert.equal(findCompletionRecord([{ body: 'chatter' }]), null)
