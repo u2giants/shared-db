@@ -6328,9 +6328,13 @@ BEGIN
     RAISE EXCEPTION 'dflow_prod expected 103 base tables, found %', v_tables;
   END IF;
 
+  -- information_schema.sequences omits identity-owned sequences. Count the
+  -- catalog relations so all 97 production sequences are covered.
   SELECT count(*) INTO v_sequences
-  FROM information_schema.sequences
-  WHERE sequence_schema = 'dflow_prod';
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'dflow_prod'
+    AND c.relkind = 'S';
   IF v_sequences <> 97 THEN
     RAISE EXCEPTION 'dflow_prod expected 97 sequences, found %', v_sequences;
   END IF;

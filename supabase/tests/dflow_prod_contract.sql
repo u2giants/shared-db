@@ -14,8 +14,10 @@ begin
   end if;
 
   select count(*) into v_sequences
-  from information_schema.sequences
-  where sequence_schema = 'dflow_prod';
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'dflow_prod'
+    and c.relkind = 'S';
   if v_sequences <> 97 then
     raise exception 'expected 97 dflow_prod sequences, found %', v_sequences;
   end if;
