@@ -1761,6 +1761,8 @@ test('quoted exact identifiers are accepted and canonicalized without losing cas
   ])
   assert.throws(() => validateClaimObjects(['table core..too_broad']), /schema-qualified exact name/)
   assert.throws(() => validateClaimObjects(['table core.valid trailing']), /schema-qualified exact name/)
+  assert.deepEqual(validateClaimObjects(['table "core"."foo"']), ['table core.foo'])
+  assert.deepEqual(validateClaimObjects(['table core."a""b"']), ['table core."a""b"'])
 })
 
 test('claimBody round-trips reads and writes, and omits an empty reads header', () => {

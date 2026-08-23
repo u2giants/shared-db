@@ -318,6 +318,14 @@ test('quoted identifiers preserve exact case and whitespace; unquoted ones are l
     extractObjects('create or replace function PLM.Mixed() returns void;'),
     ['function plm.mixed'],
   )
+  assert.deepEqual(
+    extractObjects('create or replace function "core"."lowercase"() returns void;'),
+    ['function core.lowercase'],
+  )
+  assert.deepEqual(
+    extractObjects('create or replace function core."a""b"() returns void;'),
+    ['function core."a""b"'],
+  )
 })
 
 test('overloads collapse to one key -- deliberately coarse', () => {

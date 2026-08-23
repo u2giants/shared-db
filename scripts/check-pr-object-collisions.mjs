@@ -133,7 +133,7 @@ export function normalizeSql(sql) {
     .replace(/\s+/g, ' ')
 }
 
-const IDENT = String.raw`(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)`
+const IDENT = String.raw`(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*)`
 const QUALIFIED = String.raw`(?:${IDENT}\s*\.\s*)?${IDENT}`
 
 const PATTERNS = [
@@ -286,7 +286,15 @@ export function canonicalIdentifierParts(raw) {
     token.lastIndex = offset
     const match = token.exec(text)
     if (!match || (match[2] === '.' && token.lastIndex === text.length)) return []
-    parts.push(match[1].startsWith('"') ? match[1] : match[1].toLowerCase())
+    if (match[1].startsWith('"')) {
+      const value = match[1].slice(1, -1).replace(/""/g, '"')
+      // PostgreSQL folds an unquoted identifier to lowercase. A quoted name
+      // that is already a legal lowercase unquoted identifier therefore names
+      // the same object and must use the same collision key.
+      parts.push(/^[a-z_][a-z0-9_$]*$/.test(value) ? value : `"${value.replace(/"/g, '""')}"`)
+    } else {
+      parts.push(match[1].toLowerCase())
+    }
     offset = token.lastIndex
     if (!match[2]) break
   }
