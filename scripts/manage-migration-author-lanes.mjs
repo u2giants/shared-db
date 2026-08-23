@@ -16,6 +16,7 @@ export const MUTEX_RECOVERY_ACTIVE_REF = 'refs/db-coordination/author-acquisitio
 export const REVIEW_CURSOR_REF = 'refs/db-coordination/reviewer-round-robin'
 export const REVIEW_FAILURE_REF_PREFIX = 'refs/db-review-failures'
 export const REVIEW_REPLACEMENT_REF_PREFIX = 'refs/db-review-replacements'
+export const REVIEW_ASSIGNMENT_REF_PREFIX = 'refs/db-review-assignments'
 export const REVIEWERS = Object.freeze([
   { name:'grok-4.6', wrapper:'ai-grok-review' }, { name:'glm-5.3', wrapper:'ai-glm' },
   { name:'kimi-k3', wrapper:'ai-kimi' }, { name:'qwen-3.8-max', wrapper:'ai-qwen' },
@@ -416,15 +417,37 @@ export function claimBody({ version, objects, owner, branch, worktree, expiresAt
 export function isTransientGitHubTransport(error) {
   return /HTTP 5\d\d|connection (?:reset|timed out)|TLS handshake timeout|No server is currently available/i.test(String(error?.stderr ?? error?.message ?? error ?? ''))
 }
-export function runGitHubCommand(args,{executor=execFileSync,wait=(ms)=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms),attempts=4}={}) {
+// An EXPECTED failure is one this code asks a question with: "does this ref
+// exist yet?" answers with HTTP 404, and "create this ref" answers with
+// "reference already exists". Both are answers, not faults, but the GitHub CLI
+// prints them to the terminal anyway, so a completely healthy run looked
+// alarming and trained everyone to ignore 404s -- which is exactly how a REAL
+// error on issue #1351 was read as more of the same noise.
+//
+// The cure must not be "swallow stderr". stderr is CAPTURED here (never
+// inherited), attached to the thrown error so the message keeps every detail,
+// and re-printed to this process's stderr for every failure that is NOT the
+// expected answer. Quieter for the answers, LOUDER for the faults: an
+// unexpected gh failure now prints gh's own stderr even when a caller catches
+// the exception.
+// Exactly the message that PROVES absence (see isConfirmedRefAbsence). A bare
+// "not found" without a 404 is ambiguous, stays a hard failure, and must stay
+// noisy.
+export const EXPECTED_REF_ABSENCE=/HTTP 404/i
+export const EXPECTED_REF_PRESENCE=/reference already exists/i
+export function runGitHubCommand(args,{executor=execFileSync,wait=(ms)=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms),attempts=4,expectedFailure=null,reportStderr=(text)=>process.stderr.write(text)}={}) {
   let last
   for(let attempt=0;attempt<attempts;attempt++){
-    try{return executor('gh',args,{encoding:'utf8',maxBuffer:64*1024*1024})}
+    try{return executor('gh',args,{encoding:'utf8',maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe']})}
     catch(error){
       last=error
       if(!isTransientGitHubTransport(error)||attempt===attempts-1){
-        const wrapped=new LaneError(`GitHub command failed: ${String(error.stderr??error.message).trim()}`)
+        const captured=String(error.stderr??'').trim()
+        const detail=captured||String(error.message??'').trim()
+        const wrapped=new LaneError(`GitHub command failed: ${detail}`)
         wrapped.transientTransport=isTransientGitHubTransport(error)
+        wrapped.stderr=captured
+        if(captured&&!(expectedFailure&&expectedFailure.test(detail)))reportStderr(`gh ${args.join(' ')}\n${captured}\n`)
         throw wrapped
       }
       wait(2**attempt*1000)
@@ -432,10 +455,10 @@ export function runGitHubCommand(args,{executor=execFileSync,wait=(ms)=>Atomics.
   }
   throw last
 }
-function gh(args) { return runGitHubCommand(args) }
+function gh(args,options) { return runGitHubCommand(args,options) }
 
 export function createRefWithReadback(ref,sha,{run=gh,readRef}={}) {
-  try{run(['api','-X','POST',`repos/${REPO}/git/refs`,'-f',`ref=${ref}`,'-f',`sha=${sha}`]);return true}
+  try{run(['api','-X','POST',`repos/${REPO}/git/refs`,'-f',`ref=${ref}`,'-f',`sha=${sha}`],{expectedFailure:EXPECTED_REF_PRESENCE});return true}
   catch(error){
     if(/reference already exists/i.test(error.message)){
       if(!readRef)return false
@@ -449,7 +472,7 @@ export function createRefWithReadback(ref,sha,{run=gh,readRef}={}) {
   }
 }
 export function deleteRefWithReadback(ref,{run=gh,readRef}={}) {
-  try{run(['api','-X','DELETE',`repos/${REPO}/git/refs/${ref.replace(/^refs\//,'')}`]);return}
+  try{run(['api','-X','DELETE',`repos/${REPO}/git/refs/${ref.replace(/^refs\//,'')}`],{expectedFailure:EXPECTED_REF_ABSENCE});return}
   catch(error){
     if(isConfirmedRefAbsence(error))return
     if(/reference does not exist/i.test(error.message)&&readRef&&readRef(ref)===null)return
@@ -458,8 +481,8 @@ export function deleteRefWithReadback(ref,{run=gh,readRef}={}) {
     throw error
   }
 }
-function ghJson(args) {
-  const raw = gh(args)
+function ghJson(args,options) {
+  const raw = gh(args,options)
   try { return JSON.parse(raw) } catch { throw new LaneError(`GitHub returned unreadable JSON for gh ${args.join(' ')}`) }
 }
 function ghPaginated(endpoint) {
@@ -521,7 +544,9 @@ export const githubIo = {
   },
   readRef(ref) {
     const short = ref.replace(/^refs\//, '')
-    try { return ghJson(['api', `repos/${REPO}/git/ref/${short}`])?.object?.sha ?? null }
+    // Absence is an expected answer here, so gh's 404 line is not printed --
+    // see runGitHubCommand. Any OTHER failure still prints and still throws.
+    try { return ghJson(['api', `repos/${REPO}/git/ref/${short}`],{expectedFailure:EXPECTED_REF_ABSENCE})?.object?.sha ?? null }
     // Only GitHub CLI's explicit HTTP 404 proves that this exact ref is absent.
     // A transport message that merely says "not found" is ambiguous and must
     // remain a hard failure rather than being mistaken for successful cleanup.
@@ -536,7 +561,7 @@ export const githubIo = {
   // during backoff; replaying the DELETE could then remove that new owner.
   deleteRef(ref) {
     deleteRefWithReadback(ref,{
-      run:(args)=>runGitHubCommand(args,{attempts:1}),
+      run:(args,options)=>runGitHubCommand(args,{...options,attempts:1}),
       readRef:(target)=>this.readRef(target),
     })
   },
@@ -817,12 +842,36 @@ export function parseReviewCursor(commit) {
   return {sequence:Number(match[1]),reviewer:match[2],issue:Number(match[3]),pr:Number(match[4]),headSha:match[5]}
 }
 
+// A reviewer assignment is filed under issue + PR + THE EXACT HEAD IT REVIEWS.
+// That head is not decoration: a verdict is only ever valid for the commit the
+// reviewer actually read, so collapsing the key to issue + PR would let one
+// reviewer's verdict silently cover code they never saw. The key stays.
+//
+// What was broken is FINDABILITY. Nothing indexed the assignments of a pull
+// request, so once a push moved the head, a perfectly good record became
+// invisible and the tool reported it "missing" -- sending people to hunt a
+// data-loss bug that did not exist (issue #1351, sequence 243 on PR #1347).
+// This lookup makes every assignment for a PR findable under any head, so the
+// tool can say what IS recorded instead of claiming nothing is.
+export function findPrReviewAssignments(issue,pr,io){
+  if(typeof io.listRefs!=='function')return null
+  const prefix=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${Number(issue)}-${Number(pr)}-`
+  return (io.listRefs(prefix)??[])
+    .map((row)=>({...parseReviewCursor(io.getCommit(row.sha)),ref:row.ref,assignmentSha:row.sha}))
+    .filter((row)=>row.issue===Number(issue)&&row.pr===Number(pr))
+    .sort((a,b)=>b.sequence-a.sequence)
+}
+
+export function describeMovedAssignmentHead(request,recorded){
+  return `the durable reviewer assignment is NOT missing: sequence=${recorded.sequence} reviewer=${recorded.reviewer} for issue #${request.issue} PR #${request.pr} is recorded under head ${recorded.headSha}, and this request names head ${request.headSha}. The PR head moved after that reviewer was assigned, so the exact code that reviewer was given is no longer this PR's head. A replacement would bind a new reviewer -- and later a verdict -- to a commit the failed reviewer never saw, so it is refused. Assign a reviewer to the current code instead: --assign-reviewer --issue ${request.issue} --pr ${request.pr} --head-sha <the PR's current head>. Nothing was lost and nothing needs reconstructing.`
+}
+
 export function assignNextReviewer({issue,pr,headSha},io=githubIo){
   if(!Number.isInteger(Number(issue))||!Number.isInteger(Number(pr))||!/^[0-9a-f]{7,40}$/i.test(String(headSha??'')))throw new LaneError('review assignment requires issue, PR, and exact head SHA')
   const request={issue:Number(issue),pr:Number(pr),headSha:String(headSha)}, ownerSha=io.makeOwnerCommit(`db-coordination reviewer-assignment-lock issue=${request.issue} pr=${request.pr} head=${request.headSha}`)
   acquireMutex(ownerSha,io)
   try{
-    const assignmentRef=`refs/db-review-assignments/${request.issue}-${request.pr}-${request.headSha}`
+    const assignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`
     const replacementBase=`${REVIEW_REPLACEMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`
     const replacementRows=io.listRefs?.(replacementBase)??[]
     const legacySha=io.readRef(replacementBase)
@@ -980,7 +1029,7 @@ export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCo
     if(!confirmLocalDependencyUnfixable)throw new LaneError(`this is a LOCAL dependency fault ("${String(failingCheck).trim()}"), not a provider fault. Fix it on this machine and retry the SAME reviewer -- a replacement spends a rotation slot and records permanent evidence against a provider that is working. If it genuinely cannot be fixed here, re-run with --confirm-local-dependency-unfixable.`)
   }else if(String(failingCheck??'').trim())throw new LaneError('--failing-check applies only to local_dependency_unavailable')
   if(!confirmNoVerdict||!confirmNoArtifact)throw new LaneError('reviewer replacement requires explicit confirmation that the failed session produced no verdict and no artifact')
-  const assignmentRef=`refs/db-review-assignments/${request.issue}-${request.pr}-${request.headSha}`
+  const assignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`
   const failureRef=`${REVIEW_FAILURE_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}-${request.failedSequence}`
   const replacementBase=`${REVIEW_REPLACEMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`
   const replacementRef=`${replacementBase}-${request.failedSequence}`
@@ -1001,7 +1050,13 @@ export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCo
       return {...parsed,wrapper:reviewer.wrapper,failureCode:String(failureCode),replacementSha:priorReplacement}
     }
     const assignmentSha=io.readRef(assignmentRef)
-    if(!assignmentSha)throw new LaneError('original durable reviewer assignment is missing')
+    if(!assignmentSha){
+      const recordedElsewhere=findPrReviewAssignments(request.issue,request.pr,io)
+      if(recordedElsewhere===null)throw new LaneError(`no durable reviewer assignment exists for issue #${request.issue} PR #${request.pr} at head ${request.headSha}`)
+      const recorded=recordedElsewhere.find((row)=>row.sequence===request.failedSequence)??recordedElsewhere[0]
+      if(recorded)throw new LaneError(describeMovedAssignmentHead(request,recorded))
+      throw new LaneError(`no durable reviewer assignment exists for issue #${request.issue} PR #${request.pr} under ANY head; --assign-reviewer was never run for this pull request, so there is nothing to replace`)
+    }
     const initial=parseReviewCursor(io.getCommit(assignmentSha))
     const replacementRows=io.listRefs?.(replacementBase)??[]
     const legacySha=io.readRef(replacementBase)
@@ -1015,7 +1070,11 @@ export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCo
     if(!cursor||cursor.sequence<request.failedSequence)throw new LaneError('reviewer cursor is behind the failed durable assignment')
     const issueRow=io.getIssue(request.issue), prRow=io.getPr(request.pr)
     if(issueRow?.state!=='open')throw new LaneError('review replacement requires the exact issue to remain open')
-    if(prRow?.state!=='open'||prRow?.head?.sha!==request.headSha)throw new LaneError('review replacement requires the exact open PR head')
+    if(prRow?.state!=='open')throw new LaneError('review replacement requires the exact open PR head')
+    // The mirror of the lookup above: here the assignment WAS found under the
+    // head that was named, but the pull request has since moved past it. Same
+    // truth, said plainly, instead of a technicality.
+    if(prRow?.head?.sha!==request.headSha)throw new LaneError(`review replacement requires the exact open PR head: sequence=${initial.sequence} reviewer=${initial.reviewer} IS recorded for issue #${request.issue} PR #${request.pr} under head ${request.headSha}, but the pull request has since moved to head ${String(prRow?.head?.sha??'unknown')}. Nothing is missing. A push replaced the code under review, so a replacement reviewer would be bound to a commit the failed reviewer never saw. Assign a reviewer to the new code instead: --assign-reviewer --issue ${request.issue} --pr ${request.pr} --head-sha ${String(prRow?.head?.sha??'<current head>')}`)
     const evidence=[...(io.getIssueComments?.(request.issue)??[]),...(io.getIssueComments?.(request.pr)??[]),...(io.getPrReviews?.(request.pr)??[])]
     if(evidence.some((row)=>{
       const body=String(row.body??''), tied=row.commit_id===request.headSha||body.includes(request.headSha)
@@ -1355,6 +1414,31 @@ export function addedMigrationVersions(files) {
     .filter(Boolean)
 }
 
+// A post-merge rehearsal batch that AGENTS.md 6.5 requires to move as one event
+// can span several authoring pull requests. This parses `version:pr,version:pr`
+// -- the same shape `historical_preview_source_pr_map` already uses -- and is
+// deliberately EXACT in both directions. A version with no entry would otherwise
+// be applied having proved nothing about it, and an entry for a version outside
+// the allowlist would drag an unrelated pull request into the evidence. Neither
+// is silently tolerated; both name the offending version in the refusal.
+export function parseVersionPrMap(raw, versions) {
+  const entries = (typeof raw === 'string' ? raw : '').split(',').map((e) => e.trim()).filter(Boolean)
+  if (!entries.length) throw new LaneError('post-merge preview rehearsal version-to-PR map is empty')
+  const map = new Map()
+  for (const entry of entries) {
+    if (!/^\d{14}:\d+$/.test(entry)) throw new LaneError(`post-merge preview rehearsal version-to-PR map entries must be version:pull-request, not ${entry}`)
+    const [version, pr] = entry.split(':')
+    if (map.has(version)) throw new LaneError(`post-merge preview rehearsal version-to-PR map names ${version} more than once`)
+    if (Number(pr) <= 0) throw new LaneError(`post-merge preview rehearsal version-to-PR map has a non-positive pull request for ${version}`)
+    map.set(version, Number(pr))
+  }
+  const missing = versions.filter((v) => !map.has(v))
+  if (missing.length) throw new LaneError(`post-merge preview rehearsal version-to-PR map does not name every allowlisted version: ${missing.join(', ')}`)
+  const stray = [...map.keys()].filter((v) => !versions.includes(v))
+  if (stray.length) throw new LaneError(`post-merge preview rehearsal version-to-PR map names version(s) that are not in the allowlist: ${stray.join(', ')}`)
+  return map
+}
+
 // THE AUTHORISATION for a post-merge rehearsal, in place of a live branch claim.
 // Stated as what it enforces rather than as a strength ranking: a branch claim
 // proves someone intends to merge; this proves the work IS merged and IS carried
@@ -1402,19 +1486,52 @@ export function acquireExclusive(kind, metadata, io = githubIo) {
       const mainSha = io.mainSha?.()
       if (!mainSha) throw new LaneError('post-merge preview rehearsal cannot read the current main tip; GitHub state is unreadable')
       if (metadata.headSha !== mainSha) throw new LaneError(`post-merge preview rehearsal requires the exact current main SHA (asked for ${metadata.headSha}, main is ${mainSha})`)
-      let pr
-      try { pr = io.getPr?.(metadata.pr) } catch (error) { throw new LaneError(`post-merge preview rehearsal cannot read pull request #${metadata.pr} (${error.message})`) }
-      if (!pr) throw new LaneError(`post-merge preview rehearsal cannot read pull request #${metadata.pr}`)
-      if (pr.merged !== true || !pr.merge_commit_sha) throw new LaneError(`post-merge preview rehearsal requires an already-merged source PR; #${metadata.pr} is not merged`)
-      assertMergeCommitInMainHistory(pr.merge_commit_sha, mainSha, io)
+      // The version set is validated FIRST and identically for both forms: one
+      // source PR, or a version-to-PR map for a batch AGENTS.md 6.5 requires to
+      // move as a single bounded event. The map does not weaken anything -- the
+      // very same four proofs (merged, real merge commit, that commit contained
+      // in the main tip's history, and the version ADDED by that PR) simply run
+      // per version instead of once per batch.
       const versions = (metadata.versions ?? []).map((v) => String(v).trim()).filter(Boolean)
       if (!versions.length) throw new LaneError('post-merge preview rehearsal requires the exact migration versions it will apply')
       if (versions.some((v) => !/^\d{14}$/.test(v))) throw new LaneError('post-merge preview rehearsal versions must each be an exact 14-digit migration version')
-      let files
-      try { files = io.getPrFiles?.(metadata.pr) } catch (error) { throw new LaneError(`post-merge preview rehearsal cannot read the files of pull request #${metadata.pr} (${error.message})`) }
-      const added = addedMigrationVersions(files)
-      const missing = versions.filter((v) => !added.includes(v))
-      if (missing.length) throw new LaneError(`post-merge preview rehearsal versions were not added by pull request #${metadata.pr}: ${missing.join(', ')}`)
+      // PRESENT-BUT-EMPTY IS A REFUSAL, not a silent fall-back to the single-PR
+      // form. An operator who passed a map that evaluated to nothing must be
+      // told, never quietly given a different lane than the one they asked for.
+      const hasMap = metadata.versionPrMap !== undefined && metadata.versionPrMap !== null
+      const readPr = (number) => {
+        let pr
+        try { pr = io.getPr?.(number) } catch (error) { throw new LaneError(`post-merge preview rehearsal cannot read pull request #${number} (${error.message})`) }
+        if (!pr) throw new LaneError(`post-merge preview rehearsal cannot read pull request #${number}`)
+        if (pr.merged !== true || !pr.merge_commit_sha) throw new LaneError(`post-merge preview rehearsal requires an already-merged source PR; #${number} is not merged`)
+        assertMergeCommitInMainHistory(pr.merge_commit_sha, mainSha, io)
+        return pr
+      }
+      const readAdded = (number) => {
+        let files
+        try { files = io.getPrFiles?.(number) } catch (error) { throw new LaneError(`post-merge preview rehearsal cannot read the files of pull request #${number} (${error.message})`) }
+        return addedMigrationVersions(files)
+      }
+      if (hasMap) {
+        const map = parseVersionPrMap(metadata.versionPrMap, versions)
+        // The lane lock is claimed against ONE pull request number, so that
+        // number must be a member of the batch it claims to lock. Otherwise the
+        // lock would be filed under a pull request the evidence never mentions.
+        if (![...map.values()].some((number) => String(number) === String(metadata.pr))) {
+          throw new LaneError(`post-merge preview rehearsal lock PR #${metadata.pr} is not one of the pull requests in the version-to-PR map`)
+        }
+        const addedByPr = new Map()
+        for (const [version, number] of [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+          readPr(number)
+          if (!addedByPr.has(number)) addedByPr.set(number, readAdded(number))
+          if (!addedByPr.get(number).includes(version)) throw new LaneError(`post-merge preview rehearsal version ${version} was not added by pull request #${number}`)
+        }
+      } else {
+        readPr(metadata.pr)
+        const added = readAdded(metadata.pr)
+        const missing = versions.filter((v) => !added.includes(v))
+        if (missing.length) throw new LaneError(`post-merge preview rehearsal versions were not added by pull request #${metadata.pr}: ${missing.join(', ')}`)
+      }
     } else if (kind === 'preview-recovery') {
       if (metadata.headSha !== io.mainSha?.()) throw new LaneError('historical preview recovery requires the exact current main SHA')
       const pr = io.getPr?.(metadata.pr)
@@ -1458,7 +1575,7 @@ function parseArgs(argv) {
     else if (a === '--confirm-stale') out.confirmStale = true
     else if (/^--acquire-(preview|preview-recovery|preview-rehearsal|merge|production)$/.test(a)) out.acquireExclusive = a.slice(10)
     else if (/^--release-(preview|preview-recovery|preview-rehearsal|merge|production)$/.test(a)) out.releaseExclusive = a.slice(10)
-    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--claim-number','--failed-sequence','--failure-code','--failing-check','--old-version','--reviewer','--wrapper'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
+    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--claim-number','--failed-sequence','--failure-code','--failing-check','--old-version','--reviewer','--wrapper','--version-pr-map'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
     else if(a==='--confirm-local-dependency-unfixable')out.confirmLocalDependencyUnfixable=true
     else if(a==='--skip-doctor')out.skipDoctor=true
     else if(a==='--confirm-no-verdict')out.confirmNoVerdict=true
@@ -1482,7 +1599,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.reversionClaim){console.log(JSON.stringify(reversionActiveClaim({...o,claim:o.claimNumber},now,io),null,2));return 0}
     if(o.replaceFailedReviewer){console.log(JSON.stringify(replaceFailedReviewer(o,io),null,2));return 0}
     if(o.reviewerPreflight){console.log(JSON.stringify(reviewerExecutionPreflight(o,io),null,2));return 0}
-    if (o.acquireExclusive) { console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha, versions:o.versions }, io), null, 2)); return 0 }
+    if (o.acquireExclusive) { console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha, versions:o.versions, versionPrMap:o.versionPrMap }, io), null, 2)); return 0 }
     if (o.releaseExclusive) { if (!o.ownerSha) throw new LaneError('--owner-sha is required for safe release'); releaseOwnedRef(EXCLUSIVE_REFS[o.releaseExclusive], o.ownerSha, io); return 0 }
     const claims = io.openClaims()
     if(o.assignReviewer){console.log(JSON.stringify(assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha},io),null,2));return 0}

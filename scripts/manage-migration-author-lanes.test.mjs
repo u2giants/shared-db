@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -814,6 +814,95 @@ test('post-merge preview rehearsal never needs or reads a live author claim', ()
   releaseOwnedRef(EXCLUSIVE_REFS.preview, lock.ownerSha, io)
 })
 
+// Deliberately a SECOND import statement, placed here rather than appended to the
+// import list at the top of the file: PR #1359 appends to that same line, and two
+// appends to one line is a merge conflict for no benefit.
+import { parseVersionPrMap } from './manage-migration-author-lanes.mjs'
+
+// ---------------------------------------------------------------------------
+// POST-MERGE REHEARSAL OF A BATCH AUTHORED BY SEVERAL PULL REQUESTS (#1350)
+//
+// AGENTS.md 6.5 requires certain ship sets to be applied as exactly ONE bounded
+// event, and no single pull request authored the whole set. The map form makes
+// that batch expressible WITHOUT weakening anything: every one of the four
+// proofs still runs, per version rather than per batch.
+// ---------------------------------------------------------------------------
+const MULTI_PR_MERGES = { 408: 'merge-408', 1347: 'merge-1347' }
+const MULTI_PR_ADDED = {
+  408: [{ status: 'added', filename: 'supabase/migrations/20260802170000_plm_import.sql' }],
+  1347: [{ status: 'added', filename: 'supabase/migrations/20260820183334_fr_erasure.sql' }],
+}
+function multiPrIo(overrides = {}) {
+  const io = rehearsalIo()
+  io.getPr = (number) => {
+    const sha = MULTI_PR_MERGES[Number(number)]
+    return sha ? { merged: true, merge_commit_sha: sha } : null
+  }
+  io.getPrFiles = (number) => MULTI_PR_ADDED[Number(number)] ?? []
+  return Object.assign(io, overrides)
+}
+const MULTI_PR_REHEARSAL = {
+  owner: 'gha', pr: 1347, headSha: 'main',
+  versions: ['20260802170000', '20260820183334'],
+  versionPrMap: '20260802170000:408,20260820183334:1347',
+}
+
+test('post-merge preview rehearsal accepts a bounded batch authored by several merged PRs', () => {
+  const io = multiPrIo()
+  const lock = acquireExclusive('preview-rehearsal', MULTI_PR_REHEARSAL, io)
+  assert.equal(lock.kind, 'preview-rehearsal')
+  assert.equal(lock.ref, EXCLUSIVE_REFS.preview)
+  // EVERY member's merge commit was compared against the main tip, base first.
+  // One ancestry proof per authoring pull request, not one for the batch.
+  assert.deepEqual(io.compareUrls, ['compare/merge-408...main', 'compare/merge-1347...main'])
+  releaseOwnedRef(EXCLUSIVE_REFS.preview, lock.ownerSha, io)
+})
+
+test('post-merge preview rehearsal map fails closed on every per-version proof', () => {
+  const cases = [
+    ['version missing from the map', {}, { ...MULTI_PR_REHEARSAL, versionPrMap: '20260820183334:1347' }, /does not name every allowlisted version: 20260802170000/],
+    ['stray map entry outside the allowlist', {}, { ...MULTI_PR_REHEARSAL, versionPrMap: '20260802170000:408,20260820183334:1347,20260101000000:99' }, /not in the allowlist: 20260101000000/],
+    ['map entry for an unmerged PR', { getPr: (n) => (Number(n) === 408 ? { merged: false } : { merged: true, merge_commit_sha: 'merge-1347' }) }, MULTI_PR_REHEARSAL, /#408 is not merged/],
+    ['map entry with no merge commit', { getPr: (n) => (Number(n) === 408 ? { merged: true } : { merged: true, merge_commit_sha: 'merge-1347' }) }, MULTI_PR_REHEARSAL, /#408 is not merged/],
+    ['map merge commit is not an ancestor of main', { compareCommits: (base) => (base === 'merge-408' ? { status: 'diverged', ahead_by: 1, behind_by: 4 } : { status: 'identical', ahead_by: 0, behind_by: 0 }) }, MULTI_PR_REHEARSAL, /merge commit merge-408 is not contained in the history of main tip/],
+    ['map PR did not add the version it is named for', { getPrFiles: (n) => (Number(n) === 408 ? [{ status: 'modified', filename: 'supabase/migrations/20260802170000_plm_import.sql' }] : MULTI_PR_ADDED[Number(n)]) }, MULTI_PR_REHEARSAL, /version 20260802170000 was not added by pull request #408/],
+    ['map PR unreadable', { getPr: (n) => (Number(n) === 408 ? null : { merged: true, merge_commit_sha: 'merge-1347' }) }, MULTI_PR_REHEARSAL, /cannot read pull request #408/],
+    ['lock PR is not a member of the batch', {}, { ...MULTI_PR_REHEARSAL, pr: 9999 }, /lock PR #9999 is not one of the pull requests in the version-to-PR map/],
+    ['malformed map entry', {}, { ...MULTI_PR_REHEARSAL, versionPrMap: '20260802170000-408' }, /must be version:pull-request/],
+    ['duplicate version in the map', {}, { ...MULTI_PR_REHEARSAL, versionPrMap: '20260802170000:408,20260802170000:1347' }, /names 20260802170000 more than once/],
+    ['map cannot rescue an empty allowlist', {}, { ...MULTI_PR_REHEARSAL, versions: [] }, /requires the exact migration versions/],
+    ['map cannot rescue a malformed version', {}, { ...MULTI_PR_REHEARSAL, versions: ['nope'], versionPrMap: 'nope:408' }, /exact 14-digit migration version/],
+    ['map cannot rescue a stale main tip', {}, { ...MULTI_PR_REHEARSAL, headSha: 'stale' }, /exact current main SHA/],
+  ]
+  for (const [label, overrides, metadata, expected] of cases) {
+    const io = multiPrIo(overrides)
+    assert.throws(() => acquireExclusive('preview-rehearsal', metadata, io), expected, label)
+    assert.equal(io.refs.has(EXCLUSIVE_REFS.preview), false, `${label} left the preview lock`)
+    assert.equal(io.refs.has(MUTEX_REF), false, `${label} left the author mutex`)
+  }
+})
+
+test('the single-PR rehearsal form is untouched by the map form', () => {
+  // The common case must keep behaving exactly as before: no map, one PR, and
+  // the batch-wide "not added by pull request #N" refusal still fires.
+  const io = rehearsalIo()
+  const lock = acquireExclusive('preview-rehearsal', REHEARSAL, io)
+  releaseOwnedRef(EXCLUSIVE_REFS.preview, lock.ownerSha, io)
+  const missing = rehearsalIo()
+  assert.throws(() => acquireExclusive('preview-rehearsal', { ...REHEARSAL, versions: ['20260818203751'] }, missing), /were not added by pull request #1193/)
+  // A map that is PRESENT but empty refuses; it never falls back silently.
+  const blank = rehearsalIo()
+  assert.throws(() => acquireExclusive('preview-rehearsal', { ...REHEARSAL, versionPrMap: '   ' }, blank), /version-to-PR map is empty/)
+  assert.equal(blank.refs.has(EXCLUSIVE_REFS.preview), false)
+})
+
+test('parseVersionPrMap covers the allowlist exactly in both directions', () => {
+  assert.deepEqual([...parseVersionPrMap('20260802170000:408,20260820183334:1347', ['20260802170000', '20260820183334'])],
+    [['20260802170000', 408], ['20260820183334', 1347]])
+  assert.throws(() => parseVersionPrMap('', ['20260802170000']), /is empty/)
+  assert.throws(() => parseVersionPrMap('20260802170000:0', ['20260802170000']), /non-positive pull request/)
+})
+
 test('added migration versions ignore anything the pull request did not add', () => {
   assert.deepEqual(addedMigrationVersions([
     { status: 'added', filename: 'supabase/migrations/20260818232639_a.sql' },
@@ -1421,4 +1510,124 @@ test('openWorkIssues audits every open issue and excludes only coordination issu
   const result=githubIo.openWorkIssues((endpoint)=>{calls.push(endpoint);return rows})
   assert.deepEqual(result.map((x)=>x.number),[80,81])
   assert.ok(calls.every((endpoint)=>!/labels=/.test(endpoint)),'the audit must not filter by label')
+})
+
+
+// --- issue #1351: an assignment must stay findable after the PR head moves ---
+
+const movedHead='beef1230000000000000000000000000000000ff'
+
+test('a reviewer assignment stays findable after the pull request head moves',()=>{
+  const io=failedReviewIo()
+  const found=findPrReviewAssignments(failedReview.issue,failedReview.pr,io)
+  assert.equal(found.length,1)
+  assert.equal(found[0].headSha,failedReview.headSha)
+  assert.equal(found[0].sequence,1)
+  assert.ok(found[0].ref.startsWith(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-`))
+  // The head moved. The record is still there, and it is still filed under the
+  // exact commit it reviews.
+  io.getPr=()=>({state:'open',head:{sha:movedHead}})
+  assert.deepEqual(findPrReviewAssignments(failedReview.issue,failedReview.pr,io),found)
+})
+
+test('replacement at a moved head reports the record that EXISTS instead of claiming it is missing',()=>{
+  const io=failedReviewIo()
+  io.getPr=()=>({state:'open',head:{sha:movedHead}})
+  // The operator does what the tool demands and names the PR's CURRENT head.
+  // Before this fix that produced "original durable reviewer assignment is
+  // missing" -- a phantom data-loss report (issue #1351).
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,headSha:movedHead},io),(error)=>{
+    assert.ok(error instanceof LaneError)
+    assert.match(error.message,/NOT missing/)
+    assert.match(error.message,/sequence=1/)
+    assert.match(error.message,new RegExp(failedReview.headSha))
+    assert.match(error.message,/--assign-reviewer/)
+    assert.doesNotMatch(error.message,/assignment is missing/)
+    return true
+  })
+})
+
+test('replacement at the assigned head after a push says the code under review changed',()=>{
+  const io=failedReviewIo()
+  io.getPr=()=>({state:'open',head:{sha:movedHead}})
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),(error)=>{
+    assert.match(error.message,/exact open PR head/)
+    assert.match(error.message,/IS recorded/)
+    assert.match(error.message,new RegExp(movedHead))
+    return true
+  })
+})
+
+test('a genuinely absent reviewer assignment still refuses, and says so accurately',()=>{
+  const io=reviewIo()
+  io.getPr=()=>({state:'open',head:{sha:failedReview.headSha}})
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/under ANY head/)
+})
+
+test('the verdict-to-commit binding survives: each head keeps its own assignment record',()=>{
+  const io=failedReviewIo()
+  io.getPr=()=>({state:'open',head:{sha:movedHead}})
+  const second=assignNextReviewer({...failedReview,headSha:movedHead},io)
+  assert.notEqual(second.sequence,1)
+  const found=findPrReviewAssignments(failedReview.issue,failedReview.pr,io)
+  assert.deepEqual(found.map((row)=>row.headSha).sort(),[failedReview.headSha,movedHead].sort())
+  // A new head NEVER inherits the old head's reviewer record.
+  assert.equal(found.find((row)=>row.headSha===movedHead).sequence,second.sequence)
+  assert.equal(found.find((row)=>row.headSha===failedReview.headSha).sequence,1)
+})
+
+// --- issue #1351: expected 404 probes are quiet, real failures are loud ---
+
+test('an expected ref-absence answer does not print, and still throws',()=>{
+  const printed=[]
+  assert.throws(()=>runGitHubCommand(['api','repos/x/git/ref/heads/nope'],{
+    executor:()=>{throw commandFailure('gh: Not Found (HTTP 404)')},
+    wait:()=>{},expectedFailure:EXPECTED_REF_ABSENCE,reportStderr:(text)=>printed.push(text),
+  }),(error)=>error instanceof LaneError&&isConfirmedRefAbsence(error))
+  assert.deepEqual(printed,[])
+})
+
+test('a genuine GitHub failure still prints its own stderr loudly',()=>{
+  const printed=[]
+  // Same call site, same suppression option: only the ANSWER is quiet.
+  assert.throws(()=>runGitHubCommand(['api','repos/x/git/ref/heads/main'],{
+    executor:()=>{throw commandFailure('gh: Bad credentials (HTTP 401)')},
+    wait:()=>{},expectedFailure:EXPECTED_REF_ABSENCE,reportStderr:(text)=>printed.push(text),
+  }),/Bad credentials/)
+  assert.equal(printed.length,1)
+  assert.match(printed[0],/Bad credentials/)
+  assert.match(printed[0],/repos\/x\/git\/ref\/heads\/main/)
+})
+
+test('an ambiguous not-found without a 404 stays loud and stays a hard failure',()=>{
+  const printed=[]
+  assert.throws(()=>runGitHubCommand(['api','endpoint'],{
+    executor:()=>{throw commandFailure('could not resolve host: not found')},
+    wait:()=>{},expectedFailure:EXPECTED_REF_ABSENCE,reportStderr:(text)=>printed.push(text),
+  }),LaneError)
+  assert.equal(printed.length,1)
+})
+
+test('a retried transient failure prints once, at the end, not once per attempt',()=>{
+  const printed=[]
+  assert.throws(()=>runGitHubCommand(['api','endpoint'],{
+    executor:()=>{throw commandFailure('HTTP 502: bad gateway')},
+    wait:()=>{},reportStderr:(text)=>printed.push(text),
+  }),LaneError)
+  assert.equal(printed.length,1)
+})
+
+test('GitHub stderr is captured by the child process, never inherited to the terminal',()=>{
+  // This is what silences the benign 404s at the source. If stderr were
+  // inherited, gh would print them before this code could ever classify them.
+  let seen=null
+  runGitHubCommand(['api','endpoint'],{executor:(command,args,options)=>{seen=options;return '{}'}})
+  assert.deepEqual(seen.stdio,['ignore','pipe','pipe'])
+})
+
+test('ref creation and deletion mark their expected answers as expected',()=>{
+  const seen=[]
+  createRefWithReadback('refs/x','sha',{run:(args,options)=>{seen.push(options?.expectedFailure);return ''}})
+  deleteRefWithReadback('refs/x',{run:(args,options)=>{seen.push(options?.expectedFailure);return ''}})
+  assert.deepEqual(seen,[EXPECTED_REF_PRESENCE,EXPECTED_REF_ABSENCE])
 })
