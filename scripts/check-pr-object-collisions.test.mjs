@@ -309,10 +309,10 @@ test('CRLF comments are still stripped (backlog item B1 trap)', () => {
   assert.ok(!normalizeSql(crlf).includes('ghost'))
 })
 
-test('quoted identifiers are unquoted, unquoted ones lower-cased', () => {
+test('quoted identifiers preserve exact case and whitespace; unquoted ones are lower-cased', () => {
   assert.deepEqual(
     extractObjects('create or replace function "Plm"."Weird Name"() returns void;'),
-    ['function Plm.Weird Name'],
+    ['function "Plm"."Weird Name"'],
   )
   assert.deepEqual(
     extractObjects('create or replace function PLM.Mixed() returns void;'),

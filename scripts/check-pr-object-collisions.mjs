@@ -275,13 +275,30 @@ export function describeCoverage() {
   }
 }
 
-function canonical(raw) {
+export function canonicalIdentifierParts(raw) {
   // Split into identifier parts WITHOUT destroying whitespace inside a quoted
   // identifier (`"Weird Name"` is one legal Postgres name).
-  const parts = String(raw).match(/"[^"]*"|[^.\s]+/g) ?? []
-  return parts
-    .map((part) => (part.startsWith('"') ? part.slice(1, -1) : part.toLowerCase()))
-    .join('.')
+  const text = String(raw)
+  const parts = []
+  const token = /\s*("(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_$]*)\s*(\.|$)/y
+  let offset = 0
+  while (offset < text.length) {
+    token.lastIndex = offset
+    const match = token.exec(text)
+    if (!match || (match[2] === '.' && token.lastIndex === text.length)) return []
+    parts.push(match[1].startsWith('"') ? match[1] : match[1].toLowerCase())
+    offset = token.lastIndex
+    if (!match[2]) break
+  }
+  return offset === text.length ? parts : []
+}
+
+export function canonicalIdentifier(raw) {
+  return canonicalIdentifierParts(raw).join('.')
+}
+
+function canonical(raw) {
+  return canonicalIdentifier(raw)
 }
 
 /**
@@ -340,8 +357,7 @@ export function extractObjects(sql) {
  * Quoted identifiers keep their case and any internal whitespace.
  */
 function canonicalParts(raw) {
-  const parts = String(raw).match(/"[^"]*"|[^.\s]+/g) ?? []
-  return parts.map((part) => (part.startsWith('"') ? part.slice(1, -1) : part.toLowerCase()))
+  return canonicalIdentifierParts(raw)
 }
 
 /** `core.t.c` -> { table: 'core.t', column: 'core.t.c' }; unqualified -> null table. */

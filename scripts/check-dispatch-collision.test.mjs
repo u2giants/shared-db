@@ -90,6 +90,20 @@ test('normalizeObject collapses whitespace and lowercases', () => {
   assert.equal(normalizeObject('  FUNCTION\tplm.Foo  '), 'function plm.foo')
 })
 
+test('normalizeObject preserves quoted identifier case and internal whitespace', () => {
+  assert.equal(normalizeObject('SEQUENCE dflow."itemHeader_item_num_id_pk _seq"'), 'sequence dflow."itemHeader_item_num_id_pk _seq"')
+  assert.equal(normalizeObject('TABLE "MixedSchema"."MixedTable"'), 'table "MixedSchema"."MixedTable"')
+})
+
+test('a quoted SQL object and its exact claim key collide', () => {
+  const parsed = dispatchObjectKeys('create sequence dflow."itemHeader_item_num_id_pk _seq";')
+  const result = findDispatchConflicts(
+    { objects: ['sequence dflow."itemHeader_item_num_id_pk _seq"'] },
+    [{ label: 'PR #1315', objects: parsed }],
+  )
+  assert.deepEqual(result.objectConflicts[0].objects, ['sequence dflow."itemHeader_item_num_id_pk _seq"'])
+})
+
 // --- findDispatchConflicts -------------------------------------------------
 
 // `versions` is an ARRAY: a pull request may carry several migrations, and the
