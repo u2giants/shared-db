@@ -6,7 +6,7 @@
 
 **Created:** 2026-08-21
 
-**Revised:** 2026-08-23 after an independent Grok 4.6 review (`.ai/reviews/grok-coordination-hardening-plan-review-20260823T133248Z-145771.md`, cost $0.18); no implementation step has started
+**Revised:** 2026-08-23 after two independent reviews — Grok 4.6, then GLM-5.3 checking Grok's corrections and the resulting revision (`.ai/reviews/glm-coordination-hardening-plan-review-20260823T150517Z.md`; verdict APPROVE conditional on fixes now applied). Grok 4.6 review (`.ai/reviews/grok-coordination-hardening-plan-review-20260823T133248Z-145771.md`, cost $0.18); no implementation step has started
 
 **Prior revision:** 2026-08-21 after a three-round Codex/Claude adversarial review
 
@@ -25,7 +25,7 @@
 | 5 | Add durable coordination events and repeatable failure scenarios | ⬜ open | Not started |
 | 6 | Add run-liveness recovery, generation fencing and an apply-time advisory lock to exclusive stages | ⬜ open | Not started |
 | 7 | Pilot isolated Supabase branches for early pull-request checks | ⬜ open | **deferred** — split to a follow-up issue; not required for this plan's completion |
-| 8 | Activate core guards and retire compatibility paths; decide pilot expansion independently | ⬜ open | Not started |
+| 8 | Activate core guards and retire compatibility paths (8A); pilot expansion (8B) deferred with Step 7 | ⬜ open | Not started |
 | 9 | Reconcile documentation, evidence, handoff and issue state | ⬜ open | Not started |
 
 **CODE-ANCHOR RULE — read before editing any script.** This plan cites code by
@@ -75,6 +75,8 @@ applied below, each traceable to a verified finding:
 10. **Step 7 deferred to a follow-up issue.** It prevents no failure mode in §1.
 11. **JSON Schema draft 2020-12 replaced by hand-rolled validators** (Steps 4, 5), matching
     `scripts/check-handoff-contract.mjs`. This repository has no root `package.json`.
+**GLM-5.3 follow-up corrections, same day.** GLM confirmed all twelve Grok corrections against the code, then found the fast revision had left contradictions of its own: Step 9 still told the closing session to hold #1366 open for the deferred pilot; the Definition of Done still required leases to "renew"; `claim_renewed` had been dropped even though author-claim renewal is retained functionality; the handoff still carried the very line numbers the revision condemned; §1/§4 still promised the deferred pilot; two commands appeared to publish completion records; and the advisory lock was credited with closing the dying-backend window when it only prevents concurrent live applies. All are corrected below, and the advisory lock's real scope is now stated wherever it appears.
+
 12. **Two misleading code comments added to Step 1's scope** — they still assert that
     sibling-collision safety depends on `strict: true`, which is what produced the original
     unsafe Step 1.
@@ -95,7 +97,7 @@ When this plan is finished:
 - downstream work will start only after its prerequisites have verifiably succeeded;
 - every dispatched agent will receive the same explicit work contract regardless of whether it is Codex or Claude;
 - preview, merge, and production leases will recover safely from crashed jobs without letting an old holder continue after takeover;
-- a pull request may receive an isolated early database test, while the existing shared preview remains the final integration rehearsal;
+- the shared preview remains the final integration rehearsal (isolated per-PR database testing was deferred on 2026-08-23 and is not delivered by this plan);
 - GitHub will retain a reconstructable record of dispatch, claim, review, rehearsal, merge, promotion, release, cancellation, and recovery.
 - the safety controls will preserve the intentional throughput decision in issue #1286: ordinary PRs will not all be forced to restart every required check after every unrelated merge, while structural migrations remain current with `main` at the guarded merge point.
 
@@ -152,8 +154,7 @@ The same review confirmed that several feared gaps were already solved: the GitH
 - Define provider-neutral JSON work contracts and completion reports.
 - Record immutable coordination lifecycle events in GitHub comments.
 - Add deterministic failure scenarios and audit output.
-- Add renewable, fenced exclusive leases and safe stale recovery.
-- Pilot one opt-in Supabase pull-request branch on the next suitable additive migration.
+- Add fenced exclusive leases with safe stale recovery driven by live GitHub run state. No heartbeats, no lease clock.
 - Keep the shared preview as the final integration and production rehearsal gate.
 - Preserve `required_status_checks.strict: false` unless issue #1286's separately governed revert criteria are met in a different, owner-authorized change.
 - Make the dispatcher—not the executing worker—the authority that publishes the immutable work contract before branch work begins.
@@ -210,8 +211,9 @@ The same review confirmed that several feared gaps were already solved: the GitH
 12. **Contract authority was underspecified.** A hash proves that a report refers to a contract, but it is not a safety boundary if the worker may publish or broaden that contract after starting. The dispatcher must publish the contract first, and validation must bind it to the pre-work base and first worker commit.
 13. **The optional pilot was coupled to mandatory activation.** The first plan made Step 8 depend on Step 7 even though Step 7 correctly refuses to invent a migration. Core enforcement could therefore wait indefinitely for unrelated real work.
 14. **Active durable documentation still contradicts the later owner ruling.** `docs/owner-rulings.md:799-836` preserves the accurate 2026-08-06/14 history but still says `strict: true` is current and must never be turned off. `plan_orchestrator-workflow-gaps.md:503-506` likewise tells implementers to expect strict mode. Issue #1286 is the later 2026-08-19 owner-authorized change and therefore supersedes those current-state instructions without erasing their incident history.
-15. **Contract authority cannot rest on issue comments.** GitHub issue comments are editable and deletable, and every session in this repository commits and calls `gh` under one shared identity. A comment therefore cannot prove who issued a work contract. Every other authority record here — claims, mutex ownership, permanent versions, review-failure evidence — is already a Git ref.
-16. **Two misleading comments still tie collision safety to `strict: true`.** `.github/workflows/pr-object-collision.yml` and `scripts/check-pr-object-collisions.mjs` both state that sibling-collision detection is reliable because branch protection requires an up-to-date branch. That text is what produced the original unsafe Step 1.
+15. **Contract authority cannot rest on issue comments.** GitHub issue comments are editable and deletable, and every session in this repository commits and calls `gh` under one shared identity. A comment therefore cannot prove who issued a work contract. Mutex ownership, permanent version reservations, and review-failure evidence are already Git refs.
+16. **The active author claim's authority lives in an editable issue body.** The permanent version reservation is a ref, but owner, branch, and declared objects are read from a `db-claim` issue body that any session can edit under the shared identity. This plan does not close that hole; Step 4's contract-ref work fixes the contract layer only. Record it as a known limitation rather than implying claims are already ref-backed.
+17. **Two misleading comments still tie collision safety to `strict: true`.** `.github/workflows/pr-object-collision.yml` and `scripts/check-pr-object-collisions.mjs` both state that sibling-collision detection is reliable because branch protection requires an up-to-date branch. That text is what produced the original unsafe Step 1.
 
 ### Current branch and deployment state after the review revision
 
@@ -267,7 +269,7 @@ The answer is not a larger autonomous agent team. It is a stronger repository-ow
 6. **Rejected: remove `objects:` immediately.** Open issues, active claims, scripts, and documentation use it today. A compatibility window treats legacy `objects:` as `writes:` and makes new writes explicit without invalidating active work.
 7. **Rejected: treat a closed dependency issue as success.** Closure can mean cancellation, return, duplicate, failure, or manual cleanup. Success requires typed evidence.
 8b. **Rejected on 2026-08-23: heartbeat-renewed leases.** Renewal moves the exclusive ref's SHA, which `releaseOwnedRef` and every calling workflow use as the release key, so the first heartbeat would strand the lane. A heartbeat write outside `MUTEX_REF` could also overwrite an incremented generation, creating the split ownership the fence exists to stop. Live GitHub run state already provides the liveness signal. See Step 6.
-8. **Rejected: recover a stale lease solely because its clock expired.** TTL-only takeover can overlap an old holder. Recovery requires terminal GitHub-run proof, grace time, unchanged generation, and a compare-and-swap update.
+8. **Rejected: recover a stale lease solely because its clock expired.** TTL-only takeover can overlap an old holder. Recovery requires live terminal GitHub-run proof, grace time, unchanged generation, and a global-mutex-serialized update.
 9. **Rejected: store the coordination trace in one mutable Markdown or JSON file.** Parallel sessions would conflict on it. Append-only GitHub issue/PR comments are the durable event log; reports are derived.
 10. **Rejected: require provider-specific hooks as the enforcement point.** Claude hooks and Codex instructions may improve behavior, but repository scripts and required CI checks are the authority.
 11. **Rejected: create a dummy production schema object to test the Supabase branch pilot.** The pilot waits for the next genuine, additive, low-risk migration and adds no fake business object.
@@ -301,7 +303,7 @@ The answer is not a larger autonomous agent team. It is a stronger repository-ow
 17. The dispatcher publishes the work contract to a create-if-absent Git ref before the worker's first branch commit. The worker may not replace or broaden it; changed scope requires the dispatcher to publish a new contract at a new generation. **This is ordering and non-overwrite protection, not proof of identity** — all sessions share one GitHub identity, so this layer is a cooperative protocol unless `--publish-contract` is restricted to a distinct workflow token.
 18. Core guard activation and compatibility retirement depend on Steps 1-6, not on the Supabase pilot. With the pilot deferred, Steps 1-6, 8A, and 9 are the whole plan.
 19. Optional completion-record `invalidates` or `supersedes` pointers are advisory audit signals. They never erase a successful historical record and never automatically block a dependency.
-20. **Added 2026-08-23.** GitHub fencing cannot reach a running database session. Preview and production applies take a registered Postgres advisory lock and fail closed if it is held. This is the only control that prevents a recovered lane from overlapping a dying backend.
+20. **Added 2026-08-23, scope corrected after GLM-5.3 review.** GitHub fencing cannot reach a running database session. Preview and production applies take a registered Postgres advisory lock and fail closed if it is held. This prevents two concurrent live applies. It does **not** on its own close the dying-backend window, because a lock on the applier's own connection dies with that connection; that window is bounded by the 10-minute recovery grace. Fully closing it requires a session-pinned applier — an open judgment in Step 6. Do not claim the stronger guarantee anywhere.
 21. **Added 2026-08-23.** This plan cites code by function name. Line numbers are never authoritative; re-anchor on current `origin/main` before editing.
 
 ### Open implementation judgments — decide using these criteria
@@ -402,11 +404,13 @@ The answer is not a larger autonomous agent team. It is a stronger repository-ow
 - **Do not implement a JSON Schema draft 2020-12 meta-validator.** This repository has no root `package.json` and extracted modules must stay dependency-free Node ESM. `scripts/check-handoff-contract.mjs` already explains why it hand-rolls a small field parser rather than adding a library dependency; follow that precedent. Write explicit required-field, type, enum, and unknown-key checks in plain Node with exhaustive unit tests. A partial hand-rolled 2020-12 implementation that claims to be the standard is worse than an honest bespoke validator. If a real validator is later wanted, that is one pinned dependency and its own owner decision.
 - Work contract required fields: `work_issue`, `work_type`, `route`, `goal`, `base_sha`, `dispatcher`, `worker`, `branch`, `worktree`, `allowed_paths`, `file_writes`, `db_reads`, `db_writes`, `prohibited_actions`, `required_checks`, `assumptions`, and `stop_conditions`.
 - The completion report is **the Step 3 `db-work-completion` record extended**, not a second format. Step 4 adds these fields to it: `contract_ref`, `contract_sha256`, `head_sha`, `files_changed`, `db_reads`, `db_writes`, `checks` (command, exit code, evidence), `assumptions_resolved`, and `stop_conditions_hit`. Step 3's conditional-required rules for `pr`, `merge_sha`, `migration_versions`, and `ruling_url` carry over unchanged. Bump `schema_version` rather than forking the schema, and keep `--complete-work` as the single publishing command.
-- Add `scripts/agent-work-contract.mjs` and `scripts/agent-work-contract.test.mjs`. Commands: `--validate-contract`, `--publish-contract`, `--validate-completion`, and `--publish-completion`.
+- Add `scripts/agent-work-contract.mjs` and `scripts/agent-work-contract.test.mjs`. Commands: `--validate-contract`, `--publish-contract`, and `--validate-completion`. **There is exactly one command that publishes a completion record: Step 3's `--complete-work`.** If `scripts/agent-work-contract.mjs` exposes `--publish-completion` at all, it must delegate to `--complete-work` or refuse; two publishing paths for one record is how divergent completion history gets created.
 - **The contract's authority record is a Git ref, not an issue comment.** `--publish-contract` creates `refs/db-contracts/<work-issue>/<generation>` with the existing atomic create-if-absent primitive `createRefWithReadback`, pointing at a commit whose message carries the canonicalized contract and its `contract_sha256`. Create-if-absent means a second publication for the same generation fails rather than silently overwriting. Completion validation hashes and compares the **ref**, never the comment.
-- **Why the comment cannot be the authority — do not revert this.** GitHub issue comments are editable and deletable, and every session in this repository authenticates and commits under the same `Albert Hazan <u2giants@users.noreply.github.com>` / shared `gh` identity. A worker can post a comment whose JSON names itself as dispatcher, and can edit a contract after the fact. Calling such a comment "immutable" is false. Every other authority record here — claims, mutex ownership, permanent versions, review-failure evidence — is already a ref; this one must be too. Retain `comment.updated_at !== comment.created_at` as a weak secondary tamper signal only.
+- **Why the comment cannot be the authority — do not revert this.** GitHub issue comments are editable and deletable, and every session in this repository authenticates and commits under the same `Albert Hazan <u2giants@users.noreply.github.com>` / shared `gh` identity. A worker can post a comment whose JSON names itself as dispatcher, and can edit a contract after the fact. Calling such a comment "immutable" is false. Mutex ownership, permanent version reservations, and review-failure evidence are already refs; this one must be too. **Be accurate about claims:** the permanent version reservation is a ref, but the active author *claim* is a GitHub issue whose editable body carries owner, branch, and objects. That body has the same mutability weakness under the shared identity, and this plan does not fix it — see §5 gap 17. Retain `comment.updated_at !== comment.created_at` as a weak secondary tamper signal only.
+- **Generations are not dispatcher-only.** Create-if-absent protects each generation individually, but nothing under a shared identity stops a worker creating `refs/db-contracts/<issue>/2` itself. The "dispatcher publishes a new contract at a new generation" rule is a convention, not an enforced control. Say so in the code comments; an implementer must not believe generations are privileged.
+- **Restricting `--publish-contract` to `github-actions[bot]` is not free.** It moves every dispatch out of a laptop CLI call and into a `workflow_dispatch` run. Weigh that cost before choosing it.
 - **Residual limitation, to be stated plainly in §8 and in the final verification document.** A shared identity means a ref pin proves *ordering and non-overwrite*, not *who published*. It stops a worker from widening or backdating a contract; it does not cryptographically prove the publisher was the dispatcher. Full forgery resistance needs a distinct publisher identity — restricting `--publish-contract` to a workflow token such as `github-actions[bot]`. Prefer that if it needs no new secret; otherwise record that this layer is a cooperative protocol against honest-but-mistaken agents and claim nothing more.
-- The dispatching authority publishes the contract before the worker starts: the structural orchestrator for structural work, or the separately started repo/application/source/governance session that owns non-structural work. `--publish-contract` must verify the issue route, dispatcher identity, exact current `base_sha`, and that the named worker branch is absent or still points exactly at `base_sha`; then it creates the contract ref and reads it back before the worker is released to edit. The issue comment is posted as a human-readable copy of the same canonicalized JSON.
+- The dispatching authority publishes the contract before the worker starts: the structural orchestrator for structural work, or the separately started repo/application/source/governance session that owns non-structural work. `--publish-contract` must verify the issue route, exact current `base_sha`, and that the named worker branch is absent or still points exactly at `base_sha`; then it creates the contract ref and reads it back before the worker is released to edit. The issue comment is posted as a human-readable copy of the same canonicalized JSON.
 - **Record the remaining time-of-check gap rather than papering over it.** "Branch absent or still at `base_sha`" proves only that the branch did not exist *on GitHub* at publication. A worker can commit locally, publish, then push; Git commit timestamps are author-controlled and prove nothing. The ref pin bounds the damage, because the contract cannot afterwards be widened to match what was built. Completion validation must not claim it proves work began after publication.
 - The executing worker may never publish a replacement or broader contract for itself. If scope changes, it stops. The dispatcher publishes a new immutable contract against a new authorized base/branch, and execution restarts from that contract. Do not mutate or delete the earlier comment.
 - Publish completion reports as immutable fenced JSON comments on the work issue. Hash the canonicalized contract and require the report to carry that exact hash. Completion validation must prove the contract **ref** predates the worker's first pushed commit after `base_sha`, the publisher matches the declared dispatcher, the branch history descends from the contract's base, and no later contract is silently substituted.
@@ -428,8 +432,8 @@ The answer is not a larger autonomous agent team. It is a stronger repository-ow
 
 - Add `config/db-coordination-event.schema.json`, `scripts/db-coordination-events.mjs`, and `scripts/db-coordination-events.test.mjs`.
 - Event fields: `schema_version`, `event_id`, `event_type`, `timestamp`, `work_issue`, optional `claim_issue`, optional `pr`, `head_sha`, `actor`, `provider`, `holder_id`, `generation`, `db_reads`, `db_writes`, `result`, and `evidence_urls`.
-- Supported event types: `contract_published`, `contract_superseded`, `dispatched`, `claim_acquired`, `claim_expanded`, `review_started`, `review_completed`, `preview_acquired`, `preview_released`, `merge_acquired`, `merge_released`, `production_acquired`, `production_released`, `recovery_started`, `recovery_completed`, `work_completed`, `work_cancelled`, and `work_returned`. A `contract_superseded` event is valid only before new execution begins and points to both contract refs and hashes.
-- **No renewal events.** `claim_renewed` and `preview_renewed` were dropped along with Step 6's heartbeat. A 10-minute renewal cadence would bury the issue timeline that `--coordination-audit` exists to make readable. Emit events for acquire, release, recovery, dispatch, completion, cancellation, and return only.
+- Supported event types: `contract_published`, `contract_superseded`, `dispatched`, `claim_acquired`, `claim_renewed`, `claim_expanded`, `review_started`, `review_completed`, `preview_acquired`, `preview_released`, `merge_acquired`, `merge_released`, `production_acquired`, `production_released`, `recovery_started`, `recovery_completed`, `work_completed`, `work_cancelled`, and `work_returned`. A `contract_superseded` event is valid only before new execution begins and points to both contract refs and hashes.
+- **No stage-heartbeat events.** `preview_renewed` was dropped along with Step 6's heartbeat. **Keep `claim_renewed`:** author-claim renewal is existing, retained functionality (`renewExpiredClaim`, CLI `--renew-claim`, `claim-lease-renewal` owner commits) that Step 2 explicitly preserves. Dropping it would leave the audit vocabulary unable to express a transition the CLI still performs. A 10-minute renewal cadence would bury the issue timeline that `--coordination-audit` exists to make readable. Emit events for acquire, release, recovery, dispatch, completion, cancellation, and return only.
 - Use the same hand-rolled validator approach as Step 4 for this schema. No JSON Schema meta-validator, no new dependency.
 - Integrate event publication into successful state transitions only. Failed attempts may emit `result: refused` after the refusal is known, but must never look like ownership was acquired.
 - Add `--coordination-audit --issue <n>` to rebuild the timeline from GitHub comments and refs, reject duplicate event IDs or impossible transitions, and output both human-readable text and stable JSON.
@@ -462,7 +466,7 @@ The answer is not a larger autonomous agent team. It is a stronger repository-ow
 - **Do not add `--renew-exclusive`, `lease_duration_seconds`, or `renewed_at`.** The previous revision specified a 30-minute lease renewed every 10 minutes. That is unsafe and unnecessary here, for three verified reasons:
   1. **It would make lanes permanently unreleasable.** `releaseOwnedRef` compares the ref's current SHA against the SHA captured at acquisition, and every calling workflow stashes that acquisition SHA at lock time (`guarded-migration-merge.yml`, `shared-supabase-migrations.yml`). A heartbeat moves the ref SHA, so the first renewal would cause release to be refused and the stage to stay locked — the exact failure this step exists to prevent.
   2. **It would introduce the split-ownership window fencing is meant to close.** `updateRef` PATCHes with `force=true` and no expected-SHA; there is no Git-level compare-and-swap. A heartbeat that writes the ref without holding `MUTEX_REF` can overwrite a recovery that already incremented `generation`.
-  3. **It buys no liveness signal GitHub does not already give.** Acquisition already records `github-actions:${GITHUB_RUN_ID}`, apply jobs already cap at 90 minutes, and recovery is already forbidden while the recorded run is active. Under that rule a clock cannot fire while the job lives, so the heartbeat's only function would be to stop a 30-minute clock from looking stale during a legitimate 90-minute apply. If `--assert-exclusive` then treated clock expiry as failure, a dead background renewer would fail a healthy production apply; if it ignored the clock, the duration would be dead code.
+  3. **It buys no liveness signal GitHub does not already give.** The calling workflows already pass `--owner "github-actions:${GITHUB_RUN_ID}"` (Step 6 is what persists it as `github_run_id`; today the owner-commit message does not record it), apply jobs already cap at 90 minutes, and recovery is already forbidden while the recorded run is active. Under that rule a clock cannot fire while the job lives, so the heartbeat's only function would be to stop a 30-minute clock from looking stale during a legitimate 90-minute apply. If `--assert-exclusive` then treated clock expiry as failure, a dead background renewer would fail a healthy production apply; if it ignored the clock, the duration would be dead code.
 - **Liveness is a live query, not a stored timestamp.** Recovery reads `GET /repos/{owner}/{repo}/actions/runs/{github_run_id}` at decision time and inspects both `status`/`conclusion` and the current latest `run_attempt`. Never trust the attempt recorded in the lease blob: a re-run reuses `GITHUB_RUN_ID`, so a stored attempt can make a live run look completed.
 
 **Mutex discipline and release keying.**
@@ -477,15 +481,21 @@ The answer is not a larger autonomous agent team. It is a stronger repository-ow
 **The database fence GitHub cannot provide.**
 
 - **Add a Postgres advisory lock at apply time.** A GitHub token cannot interrupt SQL already executing on Supabase, so recovery after a `cancelled` run plus grace still races a backend whose session has not yet ended; the next holder may then push migrations against the same target. Generation tokens cannot fence that — they fence GitHub, not the database.
-- Register one advisory lock key for preview/production `db push` in `docs/advisory-lock-registry.md`, following the existing ColdLion promotion-lane precedent. Take it with `pg_try_advisory_lock` at apply start and **fail closed** if it is already held. Release is scope-bound to the session.
-- Recovery itself stays GitHub-only, as designed. The advisory lock protects the *next* apply from overlapping a dying backend.
+- Register one advisory lock key for preview/production applies in `docs/advisory-lock-registry.md`, take it with `pg_try_advisory_lock` at apply start, and **fail closed** if it is already held.
+- **Be precise about what this does and does not buy — do not overstate it in the final verification document.** A lock taken on the applier's own connection is released the instant that connection dies, which is exactly when the dying-holder race opens. So this lock reliably prevents **two concurrent live applies**; it does **not** by itself close the dying-backend window. That window is *bounded* by the 10-minute recovery grace, not eliminated.
+- **Closing it properly is a larger change than it looks, and is an explicit open judgment.** `supabase db push` runs as a subprocess opening its own database sessions, so a lock held on a separate workflow connection does not cover the DDL. Genuinely fencing the DDL means pinning the lock to the session that executes it — replacing or wrapping `db push` with a session-pinned applier. Decide during Step 6 whether that is worth it. If it is not, ship the defense-in-depth lock and **say plainly that the residual window is grace-bounded**.
+- Note two registry constraints before choosing a key: `docs/advisory-lock-registry.md` makes `pg_*_advisory_xact_lock` the default and requires a documented reason for a session-scoped lock, and the ColdLion precedent holds its lock *inside* the writing function's own transaction — which is the pattern that actually works, and the reason a workflow-side lock is weaker. A session-scoped lock taken through the transaction pooler (port 6543) is also unreliable.
+- Recovery itself stays GitHub-only, as designed.
+
+- **Release now needs `MUTEX_REF`, so it inherits the recovery refusal.** `acquireMutex` refuses while a mutex recovery is active. A healthy lane therefore cannot be released for the duration of an author-mutex recovery. That is acceptable and brief, but state it in the CLI's error text so an operator is not left guessing.
+- **`EXCLUSIVE_REFS` shares one ref across `preview`, `preview-recovery`, and `preview-rehearsal`.** The new metadata block must record the exact `kind`, or a recovery cannot tell what it is fencing.
 
 **Recovery preconditions** (all must hold): the recorded GitHub run is `completed` with a terminal conclusion on live query; no later active attempt or run exists for the same holder/PR/head; a 10-minute grace has elapsed since that terminal state; the current ref and generation still match what recovery read; and the global mutex grants the transition. If GitHub run state is unreadable, refuse. If the old holder later calls assert or release, refuse it because its generation is stale.
 
 - Add an operator workflow `.github/workflows/recover-exclusive-db-lane.yml` using `workflow_dispatch`, least-privilege permissions, a dry-run default, and an explicit `apply_recovery=true` input. It must never contact the database; it only repairs the GitHub coordination ref after all proofs pass.
 - Preserve `.github/workflows/guarded-migration-merge.yml` as the single current-`main` proof for structural merges. Lease assertions fence ownership; they do not duplicate branch ancestry or collision checks.
 
-**Behavior when done:** crashed jobs no longer hold a stage forever; delayed old jobs cannot continue after a takeover; and a taken-over lane cannot overlap a dying database session.
+**Behavior when done:** crashed jobs no longer hold a stage forever; delayed old jobs cannot continue after a takeover at the GitHub layer; and two live applies cannot run against one target concurrently. The dying-backend overlap window is bounded by the 10-minute grace rather than eliminated, unless the session-pinned applier in the bullets above is also adopted.
 
 **Dependencies:** Steps 4-5 merged. Do not combine this with another edit to `manage-migration-author-lanes.mjs`.
 
@@ -568,7 +578,7 @@ The answer is not a larger autonomous agent team. It is a stronger repository-ow
 **Change:**
 
 - Update this STATUS table immediately after each prior step, citing a commit SHA and a verification artifact or exact rerunnable command.
-- Update `AGENTS.md`, `docs/agents/section-4-anti-collision-rules.md`, `docs/owner-rulings.md`, and any shared-db skills whose trigger reaches this workflow. Remove superseded language instead of leaving competing instructions.
+- Update `AGENTS.md`, `docs/agents/section-4-anti-collision-rules.md`, `docs/owner-rulings.md`, and any shared-db skills whose trigger reaches this workflow. Remove superseded language instead of leaving competing instructions. Specifically: `docs/agents/section-4-anti-collision-rules.md` still advertises the Supabase per-PR branch pilot as part of this plan — point it at the follow-up issue instead.
 - Update `plan_orchestrator-workflow-gaps.md` only for items actually proven complete; retain historical reasoning.
 - Add a final `docs/verification/multi-agent-coordination-hardening-<date>.md` containing branch-protection readback (including preserved `strict: false`), test commands/results, compatibility audit, contract-authority evidence, lease recovery dry-runs, pilot state/decision, and remaining limitations.
 - Run the full relevant offline suites and all repository guards affected by the changes.
@@ -577,9 +587,9 @@ The answer is not a larger autonomous agent team. It is a stronger repository-ow
 
 **Behavior when done:** a fresh session sees one consistent operating contract and can prove the rollout from committed evidence.
 
-**Dependencies:** Documentation reconciliation can proceed after Steps 1-6 and Step 8A. Issue #1366 may close only after Step 7/8B is completed or conclusively blocked by unavailable/paid prerequisites. If Step 7 is merely waiting for a real migration, complete the core documentation but keep the issue and handoff open.
+**Dependencies:** Documentation reconciliation can proceed after Steps 1-6 and Step 8A. Issue #1366 closes once Steps 1-6, 8A, and this step are merged and live. The deferred Supabase pilot (Steps 7/8B) moves to its own follow-up issue and never holds #1366 open.
 
-**Verification gate — you'll know it worked when:** this plan's STATUS table points to evidence for every completed row; affected required CI is green; and `git status --short` is empty after merge. If the pilot is complete or conclusively blocked, issue #1366 has a valid successful completion record, is closed, and this handoff is deleted in the closing PR. If the pilot is waiting, issue #1366 and the handoff remain open and name only that remaining obligation.
+**Verification gate — you'll know it worked when:** this plan's STATUS table points to evidence for every completed row; affected required CI is green; and `git status --short` is empty after merge. Issue #1366 has a valid successful completion record, is closed, and this handoff is deleted in the closing PR; a separate follow-up issue exists for the deferred pilot and is linked as successor work, not as a blocker.
 
 ## 10. Tests required
 
@@ -616,7 +626,7 @@ Run `bash scripts/check-sql.sh` from Git Bash or the CI Linux environment when a
   - required/unknown fields;
   - path containment and exact changed-file ownership;
   - contract hash and head SHA binding;
-  - dispatcher identity and immutable publication before the first worker commit;
+  - contract-ref creation before the first worker commit, and refusal of a second publication at the same generation;
   - worker self-publication, late publication, and scope-broadening refusal;
   - valid dispatcher-issued contract supersession before new execution begins;
   - database claim reconciliation;
@@ -663,7 +673,7 @@ Treat exit code 2 or unreadable/empty remote output as unknown/failure, never su
 5. Before any future preview or production write, prove the exact target using the repository's existing §4.2 procedure.
 6. Preview, merge, and production remain one at a time. Per-PR branches are early tests only.
 7. A permanent migration version is never reused, even if an author lease expires or a branch is abandoned.
-8. Expiry is not enough to free an author claim. The renewable/fenced recovery design in Step 6 applies to exclusive stage leases, not permanent version reservations.
+8. Expiry is not enough to free an author claim. The fenced recovery design in Step 6 applies to exclusive stage leases, not permanent version reservations. Author-claim renewal (`renewExpiredClaim`, `--renew-claim`) is separate, still supported, and unaffected by the removal of stage heartbeats.
 9. GitHub empty output is unknown. Existing incidents show server-side label filters and empty CLI output can lie.
 10. Required workflows must not use `paths:` filters when their verdict can be invalidated by another PR or repository-wide state.
 11. Never overwrite the required-status-check list. Always read, merge exact additions, write, and read back.
@@ -720,10 +730,10 @@ Treat exit code 2 or unreadable/empty remote output as unknown/failure, never su
 - [ ] Dependencies require existence, no cycles, and typed success evidence.
 - [ ] Provider-neutral work contracts are dispatcher-issued before execution, cannot be widened by the worker, and completion reports are validated and required after a compatibility rollout.
 - [ ] Coordination lifecycle events and deterministic scenario tests are green.
-- [ ] Exclusive preview/merge/production leases renew, fence old holders, and recover only after terminal proof plus grace.
+- [ ] Exclusive preview/merge/production leases fence old holders and recover only after live terminal-run proof plus grace. They deliberately do not renew.
 - [ ] Core guard activation completed after Steps 1-6.
 - [ ] Exclusive stages carry no heartbeat; release keys on holder plus generation; a mutex-owned exclusive-lease commit is still recoverable by `recoverStaleAuthorMutex`.
-- [ ] Preview and production applies take a registered Postgres advisory lock and fail closed when it is held.
+- [ ] Preview and production applies take a registered Postgres advisory lock and fail closed when it is held, and the verification document states its real scope: concurrent live applies prevented, dying-backend overlap grace-bounded rather than eliminated.
 - [ ] Work contracts are pinned to create-if-absent Git refs, and the plan states the shared-identity limitation plainly rather than claiming forgery resistance.
 - [ ] One completion schema serves every outcome, with `pr` required only for `merged`.
 - [ ] No code citation in this plan or in the shipped code comments depends on a line number.
@@ -737,7 +747,7 @@ Treat exit code 2 or unreadable/empty remote output as unknown/failure, never su
 1. **Branch-protection overwrite or owner-ruling reversal.** Risk: an API update removes existing contexts or silently flips `strict: false` back to `true`. Prevention: snapshot, exact set union, explicit preservation of `strict: false`, and full readback. Rollback: restore every accidentally changed field from the snapshot while retaining only the intended added contexts; if that cannot be done atomically, block merges until protection matches the snapshot plus those additions.
 2. **Active claim incompatibility.** Risk: a parser change strands an in-flight migration. Prevention: legacy `objects:` as writes and exact active-claim audit. Rollback: revert parser/CLI PR while leaving permanent version refs untouched.
 3. **False dependency block.** Risk: valid work cannot dispatch because evidence parsing is too strict. Prevention: pure fixtures for each completion type and human-readable reasons. Rollback: revert enforcement to report-only; never treat closure alone as success.
-4. **Split ownership during recovery.** Risk: old and new stage holders both write. Prevention: terminal-run proof, grace, generation, mutex/CAS, and pre-write assertion. Rollback: disable the recovery workflow and return to explicit manual release; do not delete a live ref.
+4. **Split ownership during recovery.** Risk: old and new stage holders both write. Prevention: live terminal-run proof, grace, generation, global-mutex-serialized transitions (there is no Git compare-and-swap), and pre-write assertion. Rollback: disable the recovery workflow and return to explicit manual release; do not delete a live ref.
 5. **Recovery misjudges a live run.** Risk: a healthy long apply is taken over, or a dead one is never freed. Prevention: liveness is a live `GET /actions/runs/{id}` at decision time including the current `run_attempt`, never a stored clock or a stored attempt; recovery is refused while the run is active or unreadable. Rollback: disable the recovery workflow and release manually with holder plus generation proof.
 6. **Supabase branch migration-history mismatch.** Risk: historical/out-of-order migrations make a per-PR branch fail for repository-history reasons. Prevention: readiness replay and additive-only pilot. Rollback: disable the pilot variable and retain the shared-preview process unchanged.
 7. **Provider drift.** Risk: Codex or Claude changes subagent behavior. Prevention: contracts, CI, refs, and traces are provider-neutral. Provider hooks remain optional reinforcement.
@@ -751,7 +761,7 @@ Treat exit code 2 or unreadable/empty remote output as unknown/failure, never su
 2. **Which authenticated identity can add the two required GitHub contexts?** Unknown until Step 1 attempts the read-modify-write. If the current repo-maintenance session lacks admin permission, Albert must perform or authorize that exact context-only change. Do not change `strict: false`.
 3. **Can the official Supabase integration expose enough branch identity to bind evidence to the exact PR/head?** Decide from the readiness report. If not, use the supported CLI/API only when it adds no paid requirement and can keep credentials in GitHub secrets.
 
-No business-rule decision is otherwise open. The conflict matrix, orchestrator boundary, `strict: false` preservation, dispatcher contract authority, compatibility policy, lease timings, recovery proof, and pilot independence are locked above.
+No business-rule decision is otherwise open. The conflict matrix, orchestrator boundary, `strict: false` preservation, dispatcher contract authority, compatibility policy, recovery proof, and pilot deferral are locked above. There are no lease timings: heartbeats and lease durations were removed on 2026-08-23.
 
 ---
 

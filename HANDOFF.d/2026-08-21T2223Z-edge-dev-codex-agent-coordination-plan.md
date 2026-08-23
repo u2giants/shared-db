@@ -33,6 +33,7 @@ None found.
 - No concurrent `supabase db push` to one target.
 - No Claude Agent Teams control plane.
 - No TTL-only automatic lock expiry.
+- **2026-08-23, GLM-5.3 review:** the apply-time advisory lock prevents two concurrent live applies; it does **not** close the dying-backend window, which is grace-bounded. Never claim the stronger guarantee. Author-claim renewal stays; only stage heartbeats were removed. Active author claims live in editable issue bodies and are a known unfixed limitation.
 - **2026-08-23, Grok 4.6 review:** no heartbeats and no lease clock; liveness is a live GitHub run query. Contract authority is a Git ref, not an issue comment. One completion schema. An apply-time Postgres advisory lock is required. Steps 7/8B are deferred. Do not restore any of these from the 2026-08-21 text.
 - The dispatcher publishes an agent's work contract to a create-if-absent Git ref before execution; the worker cannot widen it. This bounds widening and backdating; with one shared GitHub identity it does not prove publisher identity.
 - Core coordination activation does not wait for the optional Supabase branch pilot.
@@ -62,6 +63,7 @@ The first plan merged through PR #1367. Albert then asked Codex to run it by Cla
 - Tracking issue #1366 is OPEN, labeled `db-work`, with `work_type: repo-maintenance` and `route: repo-maintenance`.
 - The first plan merged through PR #1367 as `563240c7832595d44e08952cfe31f44f1c252535`.
 - The Claude/Codex review correction merged through PR #1368 as `4d2ad3c62d1b242d59740b9a0a2e1f53b73a06a6`.
+- A second independent review by GLM-5.3 on 2026-08-23 checked Grok's corrections against the code and confirmed all twelve, then found eight internal contradictions the fast revision had left behind and one overclaimed guarantee. All were applied. Its report is at `.ai/reviews/glm-coordination-hardening-plan-review-20260823T150517Z.md` (git-ignored). Its verdict was APPROVE conditional on those fixes.
 - An independent Grok 4.6 review on 2026-08-23 found the plan stale against `origin/main` and found two claimed guarantees undelivered. Twelve corrections were applied; see the plan's 2026-08-23 revision list. The review is saved at `.ai/reviews/grok-coordination-hardening-plan-review-20260823T133248Z-145771.md` (git-ignored) and cost $0.18.
 - No database, preview, production, migration, application row, branch-protection setting, or secret was changed.
 - The plan is not implemented. All STATUS rows are open.
@@ -79,18 +81,18 @@ The first plan merged through PR #1367. Albert then asked Codex to run it by Cla
 
 ## 5. Root causes and key findings
 
-- `scripts/manage-migration-author-lanes.mjs:165-182` currently labels repo maintenance/documentation/security as `fork`; lines 264-278 report them to the orchestrator. That conflicts with the 2026-08-21 owner ruling and is Step 1's first correction.
-- `parseQueueScope` at `scripts/manage-migration-author-lanes.mjs:203-241` has one flat `objects:` set; the queue overlap at lines 284-297 cannot distinguish readers from writers.
-- Dependencies at lines 280-281 are satisfied whenever their number is not open; there is no success proof or cycle validation.
-- `scripts/check-pr-object-collisions.mjs:75-77` explicitly admits different-object semantic dependencies are invisible.
-- Exclusive refs are declared at `scripts/manage-migration-author-lanes.mjs:127-142`; `acquireExclusive` starts at line 1409. They carry ownership but no heartbeat/generation recovery protocol.
+- `NON_STRUCTURAL_EXITS` in `scripts/manage-migration-author-lanes.mjs` currently labels repo maintenance/documentation/security as `fork`, and `buildDynamicQueues` reports them to the orchestrator. That conflicts with the 2026-08-21 owner ruling and is Step 1's first correction.
+- `parseQueueScope` has one flat `objects:` set; the `overlaps` comparison inside `buildDynamicQueues` cannot distinguish readers from writers.
+- Dependencies in `buildDynamicQueues` are satisfied whenever their number is not open; there is no success proof or cycle validation.
+- `scripts/check-pr-object-collisions.mjs` explicitly admits different-object semantic dependencies are invisible.
+- Exclusive refs are declared in `EXCLUSIVE_REFS`; acquisition is `acquireExclusive`. They carry ownership but no generation or run-identity recovery metadata. Note `preview`, `preview-recovery`, and `preview-rehearsal` share one ref, so the new metadata must record the exact kind.
 - Live branch protection on 2026-08-21 omitted `Orchestrator marker guard` and `Cancelled work guard`. Its `required_status_checks.strict: false` value is intentional per issue #1286 and must be preserved.
-- `.github/workflows/guarded-migration-merge.yml:38-48,59-71` already proves a structural migration head contains current `main` before and while the merge lock is held; `Migration guarded merge authorization` is required.
-- `MUTEX_REF`, `createRefWithReadback`, `acquireMutex`, and `requireOwnedRef` at `scripts/manage-migration-author-lanes.mjs:14,437,747,765` are the existing atomic, fenced mutex primitives. Extend them; do not invent a second lock.
-- `assertMergeCommitInMainHistory` at `scripts/manage-migration-author-lanes.mjs:1389-1406` already handles GitHub's actual squash or merge commit SHA.
+- `.github/workflows/guarded-migration-merge.yml` already proves a structural migration head contains current `main` before and while the merge lock is held; `Migration guarded merge authorization` is required.
+- `MUTEX_REF`, `MUTEX_RECOVERY_ACTIVE_REF`, `createRefWithReadback`, `acquireMutex`, `requireOwnedRef`, and `recoverStaleAuthorMutex` are the existing atomic, fenced mutex primitives. Extend them; do not invent a second lock. `updateRef` PATCHes with `force=true` and no expected-SHA, so there is no Git compare-and-swap: the mutex is the only serialization.
+- `assertMergeCommitInMainHistory` already handles GitHub's actual squash or merge commit SHA.
 - A contract hash is not authority if the worker can issue the contract after starting. The dispatcher must publish first; completion validation must reject self-issued, late, or broadened contracts.
 - Step 8A core activation depends only on Steps 1-6. Step 7/8B pilot work is independently gated and may wait for a genuine migration without delaying core safety.
-- `docs/owner-rulings.md:799-836` and `plan_orchestrator-workflow-gaps.md:503-506` still contain the older `strict: true` instruction. Step 1 must preserve that history while adding the later issue #1286 ruling and removing the stale present-tense command.
+- `docs/owner-rulings.md` and `plan_orchestrator-workflow-gaps.md` still contain the older `strict: true` instruction. Step 1 must preserve that history while adding the later issue #1286 ruling and removing the stale present-tense command.
 - Official sources and their design implications are captured in plan §6. Re-open those current URLs before implementing product-dependent details.
 
 ## 6. Exact next steps
@@ -128,7 +130,7 @@ The first plan merged through PR #1367. Albert then asked Codex to run it by Cla
 
 - Supabase Branching availability/cost is unknown and now out of scope; it moves with deferred Step 7 to the follow-up issue.
 - The current GitHub credential's ability to add the two branch-protection contexts is unknown; Step 1 must try only after snapshotting, preserve `strict: false`, and stop that sub-step if admin permission is absent.
-- The largest safety risk is split ownership during stale lease recovery. The plan requires terminal-run proof, grace, generation fencing, compare-and-swap, and immediate pre-write assertion.
+- The largest safety risk is split ownership during stale lease recovery. The plan requires live terminal-run proof, grace, generation fencing, global-mutex-serialized transitions, and immediate pre-write assertion. The remaining database-side overlap is bounded by the grace period, not eliminated.
 - Static SQL cannot prove every indirect read. Explicit declarations remain necessary.
 - Whether `--publish-contract` can be restricted to a distinct publisher identity such as `github-actions[bot]` without a new secret is unknown; decide in Step 4. If not, the contract layer is a cooperative protocol and the plan must say so rather than overstate it.
 - The remaining database-side split-write window is closed by an apply-time Postgres advisory lock, not by GitHub fencing. If that lock is not added in Step 6, the window stays open.
