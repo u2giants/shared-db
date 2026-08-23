@@ -87,8 +87,14 @@ alter table plm.opa_character add constraint opa_character_core_character_id_fke
   foreign key (core_character_id) references core.character(id) on delete restrict;
 alter table plm.pmt_character add constraint pmt_character_core_character_id_fkey
   foreign key (core_character_id) references core.character(id) on delete restrict;
-alter table plm.source_resolution add constraint source_resolution_core_character_id_fkey
-  foreign key (core_character_id) references core.character(id) on delete restrict;
+do $optional_source_resolution$
+begin
+  if to_regclass('plm.source_resolution') is not null then
+    alter table plm.source_resolution add constraint source_resolution_core_character_id_fkey
+      foreign key (core_character_id) references core.character(id) on delete restrict;
+  end if;
+end
+$optional_source_resolution$;
 
 do $reversal$
 declare
@@ -98,8 +104,8 @@ begin
   from pg_constraint c
   where c.contype = 'f'
     and c.confrelid = 'core.character'::regclass;
-  if v_count <> 7 then
-    raise exception 'reversal rehearsal expected 7 foreign keys to core.character, found %', v_count;
+  if v_count <> (case when to_regclass('plm.source_resolution') is null then 6 else 7 end) then
+    raise exception 'reversal rehearsal found an unexpected core.character foreign-key count: %', v_count;
   end if;
 end
 $reversal$;

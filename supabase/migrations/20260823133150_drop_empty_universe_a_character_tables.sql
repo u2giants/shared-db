@@ -29,7 +29,9 @@ begin
   lock table plm.nbcu_character in access exclusive mode;
   lock table plm.opa_character in access exclusive mode;
   lock table plm.pmt_character in access exclusive mode;
-  lock table plm.source_resolution in access exclusive mode;
+  if to_regclass('plm.source_resolution') is not null then
+    execute 'lock table plm.source_resolution in access exclusive mode';
+  end if;
 
   select count(*) into v_count from core.character;
   if v_count <> 0 then
@@ -66,9 +68,14 @@ begin
     raise exception 'Universe A character retirement refused: plm.pmt_character has % populated core_character_id value(s)', v_count;
   end if;
 
-  select count(*) into v_count from plm.source_resolution where core_character_id is not null;
-  if v_count <> 0 then
-    raise exception 'Universe A character retirement refused: plm.source_resolution has % populated core_character_id value(s)', v_count;
+  if to_regclass('plm.source_resolution') is not null then
+    execute 'select count(*) from plm.source_resolution where core_character_id is not null'
+      into v_count;
+    if v_count <> 0 then
+      raise exception 'Universe A character retirement refused: plm.source_resolution has % populated core_character_id value(s)', v_count;
+    end if;
+
+    execute 'alter table plm.source_resolution drop constraint if exists source_resolution_core_character_id_fkey';
   end if;
 
   -- Preserve each current API definition byte-for-byte except for the two
@@ -111,9 +118,6 @@ alter table plm.opa_character
   drop constraint opa_character_core_character_id_fkey;
 alter table plm.pmt_character
   drop constraint pmt_character_core_character_id_fkey;
-alter table plm.source_resolution
-  drop constraint source_resolution_core_character_id_fkey;
-
 drop table core.property_character restrict;
 drop table core.character restrict;
 
