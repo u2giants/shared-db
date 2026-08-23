@@ -1,28 +1,41 @@
 # The six 2026-08-14 migrations that were never applied anywhere — audit
 
 **Date:** 2026-08-23 · **Scope:** investigation only. **Nothing was applied, promoted or pushed.**
-**Evidence:** the SQL on `main`, the merged PRs and their issues, and read-only queries against the
-**production** ledger and catalog (`supabase_migrations.schema_migrations`, `information_schema`,
-`pg_get_viewdef`, row counts).
+**Evidence:** the SQL on `main`, the merged PRs and their issues, the guard scripts under `scripts/`,
+and read-only queries against the **production** ledger and catalog
+(`supabase_migrations.schema_migrations`, `information_schema`, `pg_get_viewdef`, row counts).
+**Independently reviewed by GLM 5.3** (session `unapplied-20260814-migrations`, report under
+`.ai/reviews/`); four of its corrections were verified against the tree and are incorporated below.
 
 ---
 
 ## Bottom line for the owner
 
-**Nothing in production is broken today because of these six, with one real exception (item 1).**
-Everything else is latent risk: work that was reviewed, approved and merged, then never switched on.
-Five of the six change how the *next* licensor capture behaves, and no such capture has run since.
+**One business capability is switched off right now: a new Paramount capture cannot succeed.** The
+Paramount scraper on `main` already sends the new metadata shape, while the database still runs the
+old loader that does not accept it. A capture run today fails at the door. It fails *loudly and
+safely* — nothing is corrupted, nothing is half-written — but Paramount cannot be re-captured until
+the three Paramount migrations land. That is the item to schedule first.
 
-The one thing that is **wrong on screen today**: two Warner data feeds (`api.wb_property_character`,
-`api.wb_property_reconciliation`) point at retired, now-empty tables. Anything asking the database
-"which Warner characters belong to which property?" through those feeds gets **zero rows**, while
-**4,158 real relationships** sit in the current Warner table right next to them. That is not caused
-by the unapplied migration — it is caused by the cleanup being *half done*: the data was moved, the
-old feeds were never repointed, and the migration that finishes the job is one of the six.
+Everything else is latent risk: work that was reviewed, approved and merged, then never switched on.
+
+**The Warner item is a stale contract, not a visible defect.** Two API feeds
+(`api.wb_property_character`, `api.wb_property_reconciliation`) still read retired, now-empty tables
+and answer "no Warner property/character relationships exist", while **4,158 real relationships** sit
+in the current table next to them. But nothing consumes those feeds — verified: zero references in
+`types/`, `apps/` or `tools/`, matching the 2026-08-13 dependency audit. So it is wrong only for an
+ad-hoc query someone runs by hand. Worth fixing; not an outage.
 
 **A seventh migration is in the same state and was not on the list:**
-`20260814224937_source_resolution_durable_home`. Item 6 below cannot run without it, and — as of
-today's Universe A change — **neither of them can run at all any more**. See item 6.
+`20260814224937_source_resolution_durable_home`. It is **already formally retired** in this repo's
+own guard scripts (`RETIRED_VERSION_REASONS`, `HARD_BLOCKED`) — a recorded ruling that it must never
+run. Item 6 depends on it and inherits that ruling.
+
+**The cheapest and highest-value fix in this whole audit takes minutes and touches no database:**
+two of these versions — `20260814233342` and `20260814233423` — appear **nowhere** in the guard
+scripts. They currently classify as `genuinely-pending`, meaning the tooling would happily let a
+future session promote them. One of the two ([item 2](#2)) would silently damage production if
+promoted. They should be added to the retirement sets today.
 
 **Also true, and normal:** two migrations from 2026-08-19 (`popdam_bulk_operation_revision_lease`,
 `wildbrain_inventory_classification_and_finalize_extra_key_sweep`) are applied to preview and are
@@ -38,7 +51,53 @@ separate session is repairing the checker; this report does not touch it.
 
 ## Ordered by urgency
 
-### 1. Warner legacy cleanup — `20260814170749_wb_retire_legacy_capture_paths` (issue #958)
+### 0. Do this first, regardless of any window: guard the two unguarded versions
+
+`20260814233342` and `20260814233423` are absent from `RETIRED_VERSION_REASONS`
+(`scripts/post_batch_app_verification.py:343`) and `HARD_BLOCKED`
+(`scripts/production_migration_guard.py:59`). Add both, in the shape already used for
+`20260814224937`. This is a code change to guard scripts only — no database, no window — and it is
+what makes an accidental `--include-all` promotion impossible.
+
+### 1. The three Paramount migrations — a capture is blocked today; apply as an ordered set
+
+All three rewrite the same loader function, `plm.load_pmt_capture_chunk`, each starting from the
+previous one's body. Production still runs the 2026-08-11 version and **no later applied migration
+has touched it**, so the chain is intact. It is **all three or none** — #970's loader body already
+assumes #964's omissions and #965's new table. Applying a subset would silently drop the earlier
+fixes.
+
+**Why this is now first, not last.** `tools/sync-paramount-creative-library.mjs` (lines 497, 686,
+704) already sends `pmt_metadata_element` rows and already omits the deprecated duplicate name
+columns. The live loader's allow list has no `pmt_metadata_element` and its inserts still expect the
+copies. A Paramount capture run today is **refused** — fail-closed, no partial write, no corruption,
+but no capture either. Paramount has exactly one complete capture (2026-08-13) and none since.
+
+**3.1 `20260814193351_pmt_duplicate_name_columns_deprecated` (issue #964, PR #981).** Stops storing a
+second copy of the Paramount property name on two tables that already link to the real property
+record. The copies agree today (zero mismatches measured), which is the safe moment to stop writing
+them — before a future capture makes them disagree and nobody can say which is right.
+*Destructive elements:* makes the two copy columns nullable (`DROP NOT NULL`), drops one index
+(`plm.idx_pmt_atp_name`). **No column dropped, no data rewritten.** Nothing reads the copies.
+
+**3.2 `20260814213043_pmt_metadata_element_normalization` (issue #965, PR #1006).** Paramount repeats
+the same six metadata heading labels on every value row — 207,522 rows in production carry them.
+This creates one row per heading per capture and points the value rows at it. *Additive:* new table
+`plm.pmt_metadata_element` with full security, backfill, immutability triggers, a foreign key, and
+deprecation comments. **Deliberately does not drop the six heading columns** — staged to wait for a
+proven preview capture.
+
+**3.3 `20260814223552_pmt_collection_paramount_term_normalization` (issue #970, PR #1032).** Paramount
+calls something a "Collection"; POP presents it as a "Style Guide". That word was being stored on
+1,928 rows; this states it once in the view instead. *Destructive element:* `DROP COLUMN
+plm.pmt_collection.paramount_term`, and `api.pmt_style_guides` is dropped and recreated. The
+consumer-visible column name is unchanged — the view still returns `paramount_term`, now as a fixed
+label. Nothing else has redefined that view since.
+
+**Recommendation: apply all three, in version order, in one window**, after a preview rehearsal that
+includes an actual Paramount capture (which also unblocks the deferred heading-column drop).
+
+### 2. Warner legacy cleanup — `20260814170749_wb_retire_legacy_capture_paths` (issue #958) {#2}
 
 **What it does.** Finishes retiring the first-generation Warner (STARLABS) tables after the data was
 moved to the normalized tables. It tightens the capture contract so a new Warner scrape can only
@@ -53,23 +112,29 @@ all eight tables hold **0 rows**; the 4,158 property→character rows live in
 `public.sync_wb_*` and `plm.sync_wb_*` (eight each), plus the two legacy capture functions; and views
 `api.wb_property_character`, `api.wb_property_reconciliation`. No data rewrite.
 
-**Broken today by its absence?** **Yes — this is the live one.** The two API views still read the
-empty legacy table, so they answer "no Warner property/character relationships exist". Second, the
-old loader functions are still callable and the capture guard still accepts retired target names, so
-a stale script could land a fresh Warner scrape into tables nothing reads.
+**Degraded today by its absence?** Mildly, and with no consumer. The two views return zero rows from
+an emptied table, so an ad-hoc query through them is silently wrong; zero code references them. The
+sixteen old loader functions are still callable and the capture guard still accepts retired target
+names, so a stale script could land a fresh Warner scrape into tables nothing reads.
 
-**Still wanted / safe now?** Yes, and nothing changed underneath it — its own safety check (refuse if
-any legacy row or in-flight legacy capture exists) passes on today's production: zero legacy rows and
-no legacy-target capture in flight. **But applying it as written removes those two API feeds without
-a replacement**: the only remaining API view of Warner property↔character
-(`api.wb_inferred_property_character`, added 2026-08-16) is *inferred from asset co-occurrence* and
-explicitly is **not** the direct assertions.
+**Safe now?** Yes. Its own safety check (refuse if any legacy row or in-flight legacy capture exists)
+passes on today's production: zero legacy rows, no legacy-target capture in flight. Nothing after it
+redefines the Warner capture functions.
 
-**Recommendation: needs owner decision — then apply.** Decide first whether a replacement view over
-`plm.wb_property_character_normalized` ships with it. If yes, apply as a pair. If no, apply as-is and
-accept that the direct Warner assertions have no API feed. Either way, rehearse on preview first.
+**The replacement-view question — recommendation reversed after review.** After the drop, the only
+API view of Warner property→character is `api.wb_inferred_property_character` (2026-08-16), which is
+inferred from asset co-occurrence and explicitly is **not** the direct assertions. My first instinct
+was to ship a replacement view over `plm.wb_property_character_normalized` in the same window. That
+is scope creep on a cleanup: the 08-16 migration states in terms that the direct assertions *remain*
+in the `plm` table, `plm` is not browser-reachable by design, and no consumer exists. **Apply #958
+as-is.** If the owner later wants direct assertions on the API surface, that is a new structure
+change with its own issue and claim, shipped as a separate migration after #958 — never as an edit to
+the merged file (`tools/sync-warner-starlabs.test.mjs` asserts that file's contents).
 
-### 2. Source-capture inventory counts — `20260814233342_source_capture_inventory_latest_complete` (issue #969)
+**Recommendation: apply as-is**, after preview rehearsal. Owner input needed only on the optional
+follow-up view.
+
+### 3. Source-capture inventory counts — `20260814233342_source_capture_inventory_latest_complete` (issue #969)
 
 **What it does.** Adds the columns that separate "rows we have ever retained" from "rows in the
 latest complete capture" on `api.source_capture_inventory` — the report used to answer "how much of
@@ -80,90 +145,83 @@ WildBrain 08-19 and 08-20) each rebuild the whole view including this body. Prod
 `latest_complete_row_count`, `count_basis`, `latest_complete_status`, `count_note` and
 `carries_resolution`. The business benefit is already live.
 
-**⚠️ Applying it now would cause damage.** It is a whole-view replacement carrying the 2026-08-14
-body, which has no Sega, Peanuts or WildBrain branches. Running it today would silently downgrade
-those licensors' coverage reporting to "retained only". Nothing warns you.
+**⚠️ Applying it now would cause silent damage.** It is a whole-view `create or replace` carrying the
+08-14 body, which has no Sega, Peanuts or WildBrain branches. The later rebuilds deliberately kept
+the same ten output columns, so the old body would replace the view **cleanly, with no error**,
+downgrading those licensors to "retained only" coverage reporting. Post-apply catalog verification
+cannot catch it: the view still exists — only its body regressed.
 
-**Broken today by its absence?** No — the opposite.
+**Recommendation: retire. Do not apply.** The correct mechanism in this repo is to add the version to
+`RETIRED_VERSION_REASONS` and `HARD_BLOCKED` (see item 0) — **not** to insert a row into the
+migration ledger. A ledger row would assert that the 08-14 view body ran when it did not, and would
+make a clean-slate replay diverge from production. The `-- catalog-verification: no-op` marker is a
+different thing entirely (it declares that an *applied* file contains no catalog DDL) and is not a
+precedent here.
 
-**Recommendation: retire.** Do not apply. Record it as superseded (a documented no-op ledger entry,
-in the style the repo already uses for pure-state migrations) so the drift checker stops counting it
-and nobody promotes it by reflex with `--include-all`.
+**Be clear about what retirement does and does not buy:** the drift checker has no retirement filter,
+so this version still shows as merged-but-not-applied and the workflow stays red. What changes is
+that the report labels it `[RETIRED] … never apply` and the promotion guard refuses it in any
+allowlist.
 
-### 3–5. The three Paramount migrations — apply only as an ordered set
-
-All three rewrite the same loader function, `plm.load_pmt_capture_chunk`, each starting from the
-previous one's body. Production still runs the 2026-08-11 version, and **no later applied migration
-has touched it**, so the chain is intact. Applying them out of order, or only some of them, would
-silently drop the earlier fixes. Paramount has exactly **one** complete capture (2026-08-13) and none
-since, so **none of these affects any data on screen today** — they change what the *next* Paramount
-capture writes.
-
-**3. `20260814193351_pmt_duplicate_name_columns_deprecated` (issue #964, PR #981).** Stops storing a
-second copy of the Paramount property name on two tables that already link to the real property
-record. The copies agree today (zero mismatches measured), which is the safe moment to stop writing
-them — before a future capture makes them disagree and nobody can say which is right.
-*Destructive elements:* makes the two copy columns nullable (`DROP NOT NULL`), drops one index
-(`plm.idx_pmt_atp_name`). **No column dropped, no data rewritten.** Nothing reads the copies.
-**Recommendation: apply**, first of the three.
-
-**4. `20260814213043_pmt_metadata_element_normalization` (issue #965, PR #1006).** Paramount repeats
-the same six metadata heading labels on every value row — 207,522 rows in production carry them.
-This creates one row per heading per capture and points the value rows at it. *Additive:* new table
-`plm.pmt_metadata_element` with full security, backfill, immutability triggers, a foreign key, and
-deprecation comments. **Deliberately does not drop the six heading columns** — that was staged to
-wait for a proven preview capture. **Recommendation: apply**, second, and rehearse a Paramount
-capture on preview so the deferred column drop can eventually proceed.
-
-**5. `20260814223552_pmt_collection_paramount_term_normalization` (issue #970, PR #1032).** Paramount
-calls something a "Collection"; POP presents it as a "Style Guide". That word was being stored on
-1,928 rows; this states it once in the view instead. *Destructive element:* `DROP COLUMN
-plm.pmt_collection.paramount_term`, and the view `api.pmt_style_guides` is dropped and recreated. The
-consumer-visible column name is unchanged — the view still returns `paramount_term`, now as a fixed
-label. Verified today that nothing else has redefined that view since. **Recommendation: apply**,
-third and last of the set.
-
-### 6. Durable source resolutions — `20260814233423_remaining_source_resolution_durable_home` (issue #999, PR #1038)
+### 4. Durable source resolutions — `20260814233423_remaining_source_resolution_durable_home` (issue #999, PR #1038)
 
 **What it does.** Moves human "this source record means this POP record" decisions out of the
 capture-snapshot tables (where the next scrape wipes them) into one permanent home, and installs
 triggers that refuse any future attempt to write a decision back onto a landing row.
 
-**⚠️ Two blockers, and this is the finding that matters most here.**
+**Already ruled on, in part.** The migration that creates the permanent table,
+`20260814224937_source_resolution_durable_home` (issue #963), is **already recorded as retired and
+hard-blocked** in this repo — `scripts/post_batch_app_verification.py:352` and
+`scripts/production_migration_guard.py:111`, on the grounds that it would recreate an obsolete
+`core.character` foreign key after issue #1374 retired the empty Universe A character tables.
+`core.character` was in fact dropped from production today (2026-08-23, `20260823133150`). So that
+file must never run, and `20260814233423` cannot run without it — its first insert into
+`plm.source_resolution` would fail outright.
 
-1. **It cannot run without a seventh unapplied migration.** `20260814224937_source_resolution_durable_home`
-   creates the permanent table. It is merged to `main` and **also unapplied** —
-   `plm.source_resolution` does not exist in production. It was not on the original list of six.
-2. **Nine days of merges broke it.** That permanent table declares a foreign key to `core.character`.
-   `core.character` was **dropped from production today** (2026-08-23,
-   `drop_empty_universe_a_character_tables`, issue #1374). As written, migration 224937 would now
-   **fail outright**, and 233423 with it. Today's migration already anticipated this — it defensively
-   removes that foreign key "if the table exists" — which is the same session noticing the problem
-   from the other side.
+**The rework is additive supersession, not an edit.** Do not edit the merged SQL. Author a new
+migration carrying the 224937 content minus the `core.character` foreign key (that single line is the
+only hard break — every other `core_character_id` reference is a plain uuid column), plus the 233423
+content, following the `20260816045130 → 20260816110750` precedent. Keep `core_character_id` as a
+plain uuid with no foreign key, matching what `20260823133150` did to the `nbcu`/`opa`/`pmt`
+character tables — it kept the columns and dropped only the constraints.
 
-**Broken today by its absence?** No decisions are lost: production holds **zero** resolved rows in
-every landing table checked (OPA property, character and pair tables; Warner normalized). The
-exposure is that the guard rails are not installed, so the *first* human decision anyone records can
-still be written into a capture snapshot, where the next scrape erases it.
+**⚠️ One more trap for whoever does that rework.** The same table also declares
+`core_property_id uuid references core.property(id)`. Under AGENTS.md §6.15, `core.property` is
+itself slated for deletion — so a replacement that keys to it will break again the same way, and any
+stored property decision would dangle. The rework session must put that question to the owner
+explicitly (plain uuids with no canonical foreign keys, versus foreign keys only where the target's
+survival is settled) rather than deciding it silently.
+
+**Anything else broken underneath it?** Checked: `20260823133150` dropped `core.character`,
+`core.property_character`, five `*_core_character_id_fkey` constraints, and rewrote two DB Data Admin
+RPC bodies. `20260814233423` intersects only at `plm.opa_character.core_character_id`, where the
+**column survives**, so the rest of its logic still stands.
+
+**Lost data today?** None. Production holds **zero** resolved rows in every landing table checked.
+The exposure is that the guard rails are not installed, so the *first* human decision anyone records
+can still be written into a capture snapshot, where the next scrape erases it.
 
 **Additive or destructive?** Mostly additive (staging, inserts into the new table, a rebuilt
 `api.opa_property_reconciliation` view, twenty refusal triggers). It does **rewrite data**: it blanks
 the resolution columns on the OPA and Warner landing tables after copying them across — harmless
 today only because those columns are empty.
 
-**Recommendation: needs owner decision — do not apply as written.** Both files need a small rework to
-drop the `core.character` reference before either can ever be applied, then preview rehearsal. Until
-then, treat "record a source-to-POP decision" as not yet supported.
+**Recommendation: retire this version too (item 0) and route the replacement to a fresh workstream**
+with its own issue and claim. Until it ships, treat "record a source-to-POP decision" as not yet
+supported.
 
 ---
 
 ## What I recommend, in order
 
-1. Decide the Warner API-view question (item 1), then rehearse and apply #958 — it is the only live
-   wrong answer in the database.
-2. Retire #969 as superseded and make sure it can never be promoted by accident.
-3. Rehearse and apply the three Paramount migrations **in version order** in one window.
-4. Send the source-resolution pair (#963/#999) back for a small fix before scheduling anything.
+1. **Today, no window needed:** add `20260814233342` and `20260814233423` to the retirement and
+   hard-block sets so neither can be promoted by accident.
+2. Rehearse and apply the **three Paramount migrations in version order** in one window — this is the
+   only item restoring a capability that is currently off.
+3. Rehearse and apply **Warner #958 as-is**; treat a replacement API view as a separate, optional
+   change only if the owner wants direct assertions on the API surface.
+4. Open a fresh issue for the **source-resolution replacement**, including the `core.property`
+   question above. Do not schedule the merged pair.
 5. Close issue #949 only when the checker is repaired, so the alarm stops being throttled shut.
 
 ## Limits of this audit
@@ -171,4 +229,6 @@ then, treat "record a source-to-POP decision" as not yet supported.
 Preview was not queried from this session (the database connection here is production-bound); the
 statement that none of the six reached preview is taken from the task brief and is consistent with
 the absence of any preview-rehearsal evidence for them under `docs/verification/`. The production
-findings above are first-hand.
+findings above are first-hand. GLM 5.3's review was verified line-by-line against the tree before
+being incorporated; its remaining disagreement with an earlier draft — whether the Warner views
+constitute a live defect — was resolved in its favor after confirming zero consumers.
