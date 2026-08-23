@@ -274,7 +274,7 @@ export function parseQueueScope(body = '') {
   // legacy claims/issues, plus 14 days of examples using writes:). A silent alias
   // never gets migrated, because nothing ever reminds anyone it exists.
   if (legacyObjects.length && !process.env.SHARED_DB_SUPPRESS_LEGACY_OBJECTS_WARNING) {
-    process.stderr.write('WARNING: db-work-scope uses the deprecated `objects:` list, which is read as `writes:`. Use `writes:` and `reads:` so readers of the same table can run in parallel. See docs/agents/section-4-anti-collision-rules.md.\n')
+    process.stderr.write('WARNING: db-work-scope uses the deprecated `objects:` list, which is read as `writes:`. Use `writes:` and `reads:` so readers of the same table can run in parallel. See the anti-collision rules in AGENTS.md for the conflict matrix.\n')
   }
   const writes = lists.objects.length ? legacyObjects : (lists.writes.length ? validateClaimObjects(lists.writes) : [])
   const reads = lists.reads.length ? validateClaimObjects(lists.reads) : []
