@@ -1,7 +1,8 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { PropertyTable } from './PropertyTable'
 import type { ApiClient, LicensorTreeResult } from './lib/data-admin'
+import { makeFailingUniverseBClient, makeUniverseBClient } from './test/universe-b-client'
 
 afterEach(cleanup)
 
@@ -39,19 +40,19 @@ const fixture: LicensorTreeResult = {
 }
 
 function makeClient(payload: LicensorTreeResult): ApiClient {
-  return { rpc: vi.fn(async () => ({ data: payload, error: null })) } as unknown as ApiClient
+  return makeUniverseBClient(payload)
 }
 
 function makeFailingClient(message: string): ApiClient {
-  return { rpc: vi.fn(async () => ({ data: null, error: new Error(message) })) } as unknown as ApiClient
+  return makeFailingUniverseBClient(message)
 }
 
 describe('PropertyTable', () => {
-  it('reads the existing tree contract rather than a separate property RPC', async () => {
+  it('reads Universe B directly rather than the doomed Universe A RPC', async () => {
     const client = makeClient(fixture)
     render(<PropertyTable client={client} />)
-    await waitFor(() => expect(client.rpc).toHaveBeenCalled())
-    expect(vi.mocked(client.rpc).mock.calls[0][0]).toBe('db_data_admin_licensor_property_tree')
+    await waitFor(() => expect(client.schema).toHaveBeenCalledWith('core'))
+    expect(client.rpc).toBeUndefined()
   })
 
   it('counts every property, orphans included', async () => {

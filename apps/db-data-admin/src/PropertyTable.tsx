@@ -15,7 +15,6 @@ const propertyColumns: ColumnRegular[] = [
   { prop: 'licensor_code', name: 'Licensor code', size: 130, sortable: true },
   { prop: 'status', name: 'Status', size: 105, sortable: true },
   { prop: 'character_count', name: 'Characters', size: 105, sortable: true },
-  { prop: 'plm_display', name: 'PLM divisions', size: 260 },
   { prop: 'source_display', name: 'Source', size: 280 },
 ]
 
@@ -113,8 +112,8 @@ export function PropertyTable({ client }: Props) {
     </div>
 
     <p className="muted">
-      Read-only. DesignFlow owns the Licensor → Property relationship; this table shows the same
-      records as the Licensors tree, one row per property.
+      Read-only. The licensor portals own this Licensor → Property relationship; this table shows
+      the same Universe B records as the Licensors tree, one row per portal Property.
     </p>
 
     {error && <div className="inline-error" role="alert">{error}</div>}

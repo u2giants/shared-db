@@ -181,33 +181,117 @@ export type LoadedTree = {
   licensors: LicensorNode[]; orphanProperties: PropertyNode[]
 }
 
-// Fully read-only in v1 (DesignFlow owns the Licensor->Property edge). Pages
-// over licensors by name; orphan_properties is always complete per page, so it
-// is captured once and licensors are accumulated.
-export async function loadLicensorTree(client: ApiClient, params: { includeInactive?: boolean } = {}) {
-  const licensors: LicensorNode[] = []
-  let cursor: string | null = null
-  let snapshot: TreeSnapshot | undefined
-  let reconciliation: TreeReconciliation | undefined
-  let orphanProperties: PropertyNode[] = []
-  do {
-    const { data, error } = await client.rpc('db_data_admin_licensor_property_tree', {
-      p_search: null,
-      p_include_inactive: !!params.includeInactive,
-      p_cursor: cursor,
-      p_page_size: 200,
-    })
+type UniverseBLicensor = {
+  licenseList_id: number
+  licenseList_code: string | null
+  licenseList_title: string | null
+  licenseList_status: string | null
+}
+type UniverseBEntity = {
+  id: number
+  licensor_id: number
+  name: string
+  source_licensed_property_id: string | null
+  type: string
+  updated_at: string
+}
+type UniverseBAssociation = { property_id: number; character_id: number }
+
+function normalizeStatus(value: string | null) {
+  const status = value?.trim().toLowerCase()
+  return status === 'inactive' ? 'inactive' : status || 'active'
+}
+
+async function loadUniverseBAssociations(client: ApiClient) {
+  const rows: UniverseBAssociation[] = []
+  const pageSize = 1000
+  for (let start = 0; ; start += pageSize) {
+    const { data, error } = await client.schema('core')
+      .from('property_character_associations')
+      .select('property_id,character_id')
+      .range(start, start + pageSize - 1)
     if (error) throw error
-    const payload = (data ?? {}) as Partial<LicensorTreeResult>
-    if (!snapshot && payload.snapshot) snapshot = payload.snapshot
-    if (!reconciliation && payload.reconciliation) reconciliation = payload.reconciliation
-    if (payload.orphan_properties) orphanProperties = payload.orphan_properties
-    licensors.push(...(payload.licensors ?? []))
-    cursor = payload.next_cursor ?? null
-  } while (cursor)
+    const page = (data ?? []) as UniverseBAssociation[]
+    rows.push(...page)
+    if (page.length < pageSize) return rows
+  }
+}
+
+// Universe B is a mixed portal-source table. Only PROPERTY rows become rows in
+// these screens; CHARACTER rows are represented solely by the association
+// count. The parent edge is its declared integer FK to core."licenseList" --
+// never a name/code guess against the disjoint UUID core.licensor universe.
+export async function loadLicensorTree(client: ApiClient, params: { includeInactive?: boolean } = {}) {
+  const gate = await client.schema('app').rpc('require_licensing_manager_access')
+  if (gate.error) throw gate.error
+
+  const [licensorResult, propertyResult, associations] = await Promise.all([
+    client.schema('core').from('licenseList')
+      .select('licenseList_id,licenseList_code,licenseList_title,licenseList_status')
+      .order('licenseList_title'),
+    client.schema('core').from('properties_and_characters')
+      .select('id,licensor_id,name,source_licensed_property_id,type,updated_at')
+      .eq('type', 'PROPERTY').order('name'),
+    loadUniverseBAssociations(client),
+  ])
+  if (licensorResult.error) throw licensorResult.error
+  if (propertyResult.error) throw propertyResult.error
+
+  const rawLicensors = (licensorResult.data ?? []) as UniverseBLicensor[]
+  const rawProperties = ((propertyResult.data ?? []) as UniverseBEntity[]).filter(row => row.type === 'PROPERTY')
+  const characterCounts = new Map<number, number>()
+  for (const association of associations) {
+    characterCounts.set(association.property_id, (characterCounts.get(association.property_id) ?? 0) + 1)
+  }
+
+  const propertiesByLicensor = new Map<number, PropertyNode[]>()
+  for (const property of rawProperties) {
+    const node: PropertyNode = {
+      id: String(property.id), name: property.name, code: property.source_licensed_property_id,
+      status: 'active', licensor_id: String(property.licensor_id),
+      character_count: characterCounts.get(property.id) ?? 0,
+      source_refs: property.source_licensed_property_id ? [{
+        source_system: 'licensor_portal', source_table: 'core.properties_and_characters',
+        source_id: property.source_licensed_property_id, source_code: property.source_licensed_property_id, source_name: property.name,
+      }] : [],
+      plm_context: [], updated_at: property.updated_at,
+    }
+    const bucket = propertiesByLicensor.get(property.licensor_id) ?? []
+    bucket.push(node); propertiesByLicensor.set(property.licensor_id, bucket)
+  }
+
+  const allLicensors: LicensorNode[] = rawLicensors.map(licensor => {
+    const properties = propertiesByLicensor.get(licensor.licenseList_id) ?? []
+    return {
+      id: String(licensor.licenseList_id), name: licensor.licenseList_title || `(Licensor ${licensor.licenseList_id})`,
+      code: licensor.licenseList_code, status: normalizeStatus(licensor.licenseList_status),
+      property_count: properties.length, properties, source_refs: [], plm_context: [],
+    }
+  })
+  const licensors = params.includeInactive ? allLicensors : allLicensors.filter(licensor => licensor.status !== 'inactive')
+  const knownLicensors = new Set(rawLicensors.map(licensor => licensor.licenseList_id))
+  const orphanProperties = rawProperties
+    .filter(property => !knownLicensors.has(property.licensor_id))
+    .map(property => propertiesByLicensor.get(property.licensor_id)?.find(node => node.id === String(property.id)))
+    .filter((property): property is PropertyNode => Boolean(property))
+  const parentedProperties = rawProperties.length - orphanProperties.length
+  const now = new Date().toISOString()
   return {
-    snapshot: snapshot as TreeSnapshot,
-    reconciliation: reconciliation as TreeReconciliation,
+    snapshot: {
+      snapshot_at: now, store: 'core.licenseList / core.properties_and_characters (Universe B)',
+      source_system: 'licensor_portal', feeder_last_sync_at: null, feeder_last_run_status: null,
+      feeder_days_stale: null, feeder_available: false, live_upstream_reconciliation: false,
+      note: 'Licensor-portal Property rows only. Character-grain rows are never listed as Properties; character totals come from the declared association table.',
+    },
+    reconciliation: {
+      licensor_count: rawLicensors.length,
+      active_licensor_count: rawLicensors.filter(licensor => normalizeStatus(licensor.licenseList_status) !== 'inactive').length,
+      property_count: rawProperties.length, active_property_count: rawProperties.length,
+      properties_with_licensor: parentedProperties,
+      orphan_property_count: orphanProperties.length,
+      expected_orphan_count_is_zero: orphanProperties.length === 0,
+      partition_reconciles: rawProperties.length === parentedProperties + orphanProperties.length,
+    },
     licensors,
     orphanProperties,
   }

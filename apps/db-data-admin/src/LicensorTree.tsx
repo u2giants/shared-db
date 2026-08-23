@@ -18,7 +18,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function SourceContext({ entries }: { entries: PlmContextEntry[] }) {
-  if (!entries.length) return <span className="muted">No PLM source row</span>
+  if (!entries.length) return null
   return <span className="ctx-chips">{entries.map((entry, i) => (
     <span className="ctx-chip" key={`${entry.plm_id ?? i}-${entry.division_code ?? ''}-${entry.mg_code ?? ''}`}>
       {formatDivision(entry)}{entry.mg_code ? ` · ${entry.mg_code}` : ''}
@@ -136,11 +136,11 @@ export function LicensorTree({ client }: Props) {
         </div>
         <div className="tree-meta-row muted">
           <span>Snapshot {new Date(snapshot.snapshot_at).toLocaleString()}</span>
-          <span>Store: canonical Supabase mirror</span>
+          <span>Store: Universe B licensor-portal mirror</span>
           {feederDown
             ? <span className="loud" title={snapshot.note}>Upstream feeder unavailable (observed mirror only)</span>
             : <span title={snapshot.note}>Upstream feeder recently observed (mirror only)</span>}
-          <span className={liveReconciled ? 'muted' : 'loud'} title={snapshot.note}>{liveReconciled ? 'Live upstream reconciliation claimed' : 'Live upstream reconciliation not claimed (no live DesignFlow comparison)'}</span>
+          <span className={liveReconciled ? 'muted' : 'loud'} title={snapshot.note}>{liveReconciled ? 'Live upstream reconciliation claimed' : 'Live upstream reconciliation not claimed (mirror only)'}</span>
           {snapshot.feeder_last_run_status && <span>last run {snapshot.feeder_last_run_status}{snapshot.feeder_days_stale == null ? '' : ` · ${snapshot.feeder_days_stale}d ago`}</span>}
         </div>
       </div>
@@ -149,7 +149,7 @@ export function LicensorTree({ client }: Props) {
     {orphans.length > 0 && (
       <div className="orphan-alert" role="alert">
         <h2><AlertTriangle aria-hidden="true" /> {orphans.length} orphan propert{orphans.length === 1 ? 'y' : 'ies'} — no Licensor</h2>
-        <p>Every canonical Property is expected to sit under exactly one Licensor. These have a null <code>licensor_id</code>. The relationship is DesignFlow-owned; do not repair it here.</p>
+        <p>Every portal Property is expected to sit under exactly one Universe B Licensor. These reference no matching <code>core.licenseList</code> row. Do not infer a parent from a name or code.</p>
         {(() => {
           const showingAll = showAllFor(ORPHAN_KEY)
           const visible = showingAll ? orphans : orphans.slice(0, INITIAL_VISIBLE)

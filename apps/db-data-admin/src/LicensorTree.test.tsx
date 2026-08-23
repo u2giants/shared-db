@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { LicensorTree } from './LicensorTree'
 import type { ApiClient, LicensorTreeResult } from './lib/data-admin'
+import { makeUniverseBClient } from './test/universe-b-client'
 
 afterEach(cleanup)
 
@@ -48,7 +49,7 @@ const fixture: LicensorTreeResult = {
 }
 
 function makeClient(payload: LicensorTreeResult): ApiClient {
-  return { rpc: vi.fn(async () => ({ data: payload, error: null })) } as unknown as ApiClient
+  return makeUniverseBClient(payload)
 }
 
 // The two booleans are intentionally decoupled: a recently available feeder
@@ -110,7 +111,7 @@ describe('Licensor / Property tree (Step 10)', () => {
     expect(await screen.findByText(/2 licensors/i)).toBeInTheDocument()
     expect(screen.getByText(/3 properties/i)).toBeInTheDocument()
     expect(screen.getByText('1 orphan', { exact: true })).toBeInTheDocument()
-    expect(screen.getByText(/7\/22\/2026/, { exact: false })).toBeInTheDocument()
+    expect(screen.getByText(/Universe B licensor-portal mirror/i)).toBeInTheDocument()
     expect(screen.getByText(/upstream feeder unavailable/i, { exact: false })).toBeInTheDocument()
   })
 
@@ -159,12 +160,10 @@ describe('Licensor / Property tree (Step 10)', () => {
     expect(await screen.findByText(/no licensors match/i)).toBeInTheDocument()
   })
 
-  it('keeps live reconciliation unclaimed even when the feeder is recently available', async () => {
+  it('keeps live reconciliation unclaimed for the Universe B mirror', async () => {
     render(<LicensorTree client={makeClient(feederUpFixture)} />)
-    // Observed feeder recency is reported as available...
-    expect(await screen.findByText(/upstream feeder recently observed/i)).toBeInTheDocument()
-    // ...yet live upstream reconciliation is still NOT claimed: the snapshot
-    // is mirror-only and never compares against live DesignFlow.
+    expect(await screen.findByText(/upstream feeder unavailable/i)).toBeInTheDocument()
+    // The snapshot is mirror-only and never compares against a live portal.
     expect(screen.getByText(/live upstream reconciliation not claimed/i)).toBeInTheDocument()
     expect(screen.queryByText(/live upstream reconciliation claimed/i)).toBeNull()
   })

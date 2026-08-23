@@ -32,6 +32,23 @@ const licensorTree = {
   next_cursor: null, page_size: 200,
 }
 
+const universeBLicensors = [
+  { licenseList_id: 1, licenseList_code: 'MRV', licenseList_title: 'Marvel', licenseList_status: 'active' },
+  { licenseList_id: 2, licenseList_code: 'DNY', licenseList_title: 'Disney', licenseList_status: 'active' },
+  { licenseList_id: 3, licenseList_code: 'WB', licenseList_title: 'Warner Bros', licenseList_status: 'inactive' },
+]
+const universeBEntities = [
+  { id: 101, licensor_id: 1, name: 'Avengers', source_licensed_property_id: 'portal-avg', type: 'PROPERTY', updated_at: '2026-08-23T12:00:00Z' },
+  { id: 102, licensor_id: 1, name: 'Spider-Man', source_licensed_property_id: 'portal-spd', type: 'PROPERTY', updated_at: '2026-08-23T12:00:00Z' },
+  { id: 103, licensor_id: 2, name: 'Frozen', source_licensed_property_id: 'portal-frz', type: 'PROPERTY', updated_at: '2026-08-23T12:00:00Z' },
+  { id: 104, licensor_id: 999, name: 'Unassigned IP', source_licensed_property_id: 'portal-una', type: 'PROPERTY', updated_at: '2026-08-23T12:00:00Z' },
+  { id: 201, licensor_id: 1, name: 'Iron Man', source_licensed_property_id: 'portal-avg', type: 'CHARACTER', updated_at: '2026-08-23T12:00:00Z' },
+]
+const universeBAssociations = [
+  { property_id: 101, character_id: 201 },
+  { property_id: 102, character_id: 202 },
+]
+
 async function mockAdmin(page: Page) {
   await page.addInitScript(() => localStorage.setItem('sb-preview-auth-token', JSON.stringify({ access_token: 'mock-token', refresh_token: 'mock-refresh', expires_at: 4102444800, expires_in: 3600, token_type: 'bearer', user: { id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', email: 'albert@popcre.com', aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: '2026-07-22T00:00:00Z' } })))
   await page.route('**/config.js', route => route.fulfill({ contentType: 'application/javascript', body: "window.__DB_DATA_ADMIN_CONFIG__={supabaseUrl:'https://preview.supabase.co',supabaseAnonKey:'mock-anon',authRedirectUrl:'http://127.0.0.1:4173'}" }))
@@ -51,6 +68,13 @@ async function mockAdmin(page: Page) {
     if (name === 'db_data_admin_vendor_list') return route.fulfill({ json: { rows: vendors, next_cursor: null, page_size: 200 } })
     if (name === 'db_data_admin_licensor_property_tree') return route.fulfill({ json: licensorTree })
     return route.fulfill({ json: {} })
+  })
+  await page.route('https://preview.supabase.co/rest/v1/**', async (route: Route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/licenseList')) return route.fulfill({ json: universeBLicensors })
+    if (path.endsWith('/properties_and_characters')) return route.fulfill({ json: universeBEntities })
+    if (path.endsWith('/property_character_associations')) return route.fulfill({ json: universeBAssociations })
+    return route.fallback()
   })
 }
 
@@ -299,9 +323,9 @@ test('renders the flat Properties table with each property parented to its licen
   await expect(page.getByText('Spider-Man')).toBeVisible()
   await expect(page.getByRole('gridcell', { name: '(no licensor)' })).toHaveCount(1)
   await expect(page.getByRole('status')).toContainText('1 property has no licensor')
-  // PLM divisions read as names, not raw ids, and never repeat the fixed
-  // mg_type literal that made every row say "· property ·".
-  await expect(page.getByRole('gridcell', { name: 'POP Lic (CW001) · AVG, Spruce Lic (SP001) · AVG' })).toHaveCount(1)
-  await expect(page.getByRole('gridcell', { name: /· property ·/ })).toHaveCount(0)
+  // Portal source identity survives, while the deliberately returned
+  // CHARACTER-grain row never becomes a Property row.
+  await expect(page.getByRole('gridcell', { name: /licensor_portal\/core.properties_and_characters · portal-avg/ })).toHaveCount(1)
+  await expect(page.getByRole('gridcell', { name: 'Iron Man' })).toHaveCount(0)
   await page.screenshot({ path: '../../docs/verification/db-data-admin-properties-table.png', fullPage: true })
 })

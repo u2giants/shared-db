@@ -1,8 +1,8 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { PropertyTable } from '../PropertyTable'
-import type { ApiClient, LicensorTreeResult } from '../lib/data-admin'
-import { vi } from 'vitest'
+import type { LicensorTreeResult } from '../lib/data-admin'
+import { makeUniverseBClient } from './universe-b-client'
 
 /**
  * Guards the fix for issue #1186.
@@ -49,7 +49,7 @@ const fixture: LicensorTreeResult = {
 
 describe('the jsdom suite runs against the RevoGrid stub, not the real web component', () => {
   it('renders the stub in place of the real grid', async () => {
-    const client = { rpc: vi.fn(async () => ({ data: fixture, error: null })) } as unknown as ApiClient
+    const client = makeUniverseBClient(fixture)
     render(<PropertyTable client={client} />)
 
     const stub = await screen.findByTestId('revogrid-stub')
@@ -57,7 +57,7 @@ describe('the jsdom suite runs against the RevoGrid stub, not the real web compo
   })
 
   it('still reports how many rows reached the grid, so row-count coverage is not lost', async () => {
-    const client = { rpc: vi.fn(async () => ({ data: fixture, error: null })) } as unknown as ApiClient
+    const client = makeUniverseBClient(fixture)
     render(<PropertyTable client={client} />)
 
     const stub = await screen.findByTestId('revogrid-stub')

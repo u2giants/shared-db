@@ -3,14 +3,12 @@ import type { AdminRow, LoadedTree, PlmContextEntry, PropertyNode, TaxonomyNode 
 /**
  * Flat Property grid rows built from the Licensor -> Property tree contract.
  *
- * There is deliberately NO `db_data_admin_property_list` RPC. The existing
- * `api.db_data_admin_licensor_property_tree` already returns every property
- * with its parent, code, status, character count, provenance and PLM context,
- * plus the complete orphan list, so the flat table is a presentation of the
- * same contract rather than a second, drift-prone read path.
+ * There is deliberately one Universe B loader shared with the Licensor tree.
+ * It returns every PROPERTY-grain row with its declared parent, portal source
+ * id and association count, plus the complete orphan list, so this flat table
+ * cannot drift onto a second data source.
  *
- * The table is read-only in v1 for the same reason the tree is: DesignFlow owns
- * the Licensor -> Property edge.
+ * The table is read-only; the portal capture owns this source relationship.
  *
  * No "Updated" column: the tree contract carries `updated_at` on licensors and
  * on orphan properties, but NOT on properties nested under a licensor. Showing
