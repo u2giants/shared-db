@@ -1,0 +1,89 @@
+# Guard: does an agent's completion report actually satisfy the contract it was
+# given? (Step 4, issue #1366)
+#
+# NO `paths:` FILTER, ON PURPOSE (AGENTS.md 5.2). This is a repository-wide check.
+# A path filter would leave the context permanently pending on any pull request
+# that did not touch the filtered files, and GitHub can then reuse a stale verdict
+# for a repository-wide required check. That failure mode is recorded in issue
+# #1286 and in AGENTS.md 5.2; do not "optimise" it back in.
+#
+# REPORT-ONLY IS NOT "IGNORE ERRORS". While
+# config/agent-work-contract-activation.json says mode=report-only, a pull request
+# with NO contract passes. A pull request WITH a malformed contract or a report
+# that contradicts its contract FAILS either way — shipping a broken guard in a
+# quiet mode is how a guard gets trusted without ever having worked.
+name: Agent work contract
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-work-contract-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Agent work contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The offline unit tests come first. A guard whose own logic is broken must
+      # never render a verdict on somebody else's pull request.
+      - name: Prove the contract logic itself
+        run: node --test scripts/agent-work-contract.test.mjs
+
+      - name: Report the activation mode, so nobody has to guess
+        run: |
+          set -euo pipefail
+          MODE=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('config/agent-work-contract-activation.json','utf8')).mode)")
+          echo "mode=$MODE" >> "$GITHUB_ENV"
+          {
+            echo "## Agent work contract — $MODE"
+            echo
+            if [ "$MODE" = "report-only" ]; then
+              echo "A pull request with no contract passes. A malformed contract or a"
+              echo "report that contradicts its contract still FAILS."
+            else
+              echo "Enforced. Every non-grandfathered pull request must carry a valid"
+              echo "contract and a report that satisfies it."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate any contract and report carried by this pull request
+        env:
+          MODE: ${{ env.mode }}
+        run: |
+          set -euo pipefail
+          # Convention: a PR that declares a contract commits it alongside its
+          # report under .agent/. Absent files mean "no contract on this PR",
+          # which report-only tolerates and enforced mode does not.
+          CONTRACT=.agent/contract.json
+          REPORT=.agent/completion.json
+
+          if [ ! -f "$CONTRACT" ] && [ ! -f "$REPORT" ]; then
+            if [ "$MODE" = "report-only" ]; then
+              echo "No contract on this pull request; report-only mode allows it."
+              exit 0
+            fi
+            echo "::error::Enforced mode requires $CONTRACT and $REPORT on every pull request."
+            exit 1
+          fi
+
+          # HALF A PAIR IS ALWAYS AN ERROR, in either mode. A report with no
+          # contract cannot be checked against anything, and a contract with no
+          # report is work that never proved itself.
+          if [ ! -f "$CONTRACT" ]; then echo "::error::$REPORT exists but $CONTRACT does not; a report with no contract cannot be checked."; exit 1; fi
+          if [ ! -f "$REPORT" ]; then echo "::error::$CONTRACT exists but $REPORT does not; the work never reported against its contract."; exit 1; fi
+
+          node scripts/agent-work-contract.mjs --validate-contract --contract-file "$CONTRACT"
+          node scripts/agent-work-contract.mjs --validate-completion --report-file "$REPORT" --contract-file "$CONTRACT"
