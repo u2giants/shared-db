@@ -48,6 +48,9 @@
 --      lease succeeds and extends the lease but reports lease_receipt_issued = false
 --      and issues no token, so the renewer is not, and cannot become, the holder
 --      (Kimi K3 finding F3)
+--  18. the receipt holder may clear only an exact, completed provider job using the
+--      explicit reconciliation flag; wrong revision, provider id, receipt,
+--      nonterminal phase, and ambiguity all raise 55000 without mutation (#1211)
 -- =====================================================================================
 
 begin;
@@ -2052,6 +2055,181 @@ begin
   if (v_out ->> 'ok')::boolean is not true
      or v_out ->> 'provider_batch_id' <> 'batch_REAL_AFTER_AMBIGUITY' then
     raise exception 'the original receipt no longer resolves the ambiguity it was minted for: %', v_out;
+  end if;
+
+  -- =================================================================================
+  -- 18. RECEIPT-PROVEN TERMINAL CLEAR (issue #1211)
+  -- =================================================================================
+  update admin_config
+     set value = jsonb_set(value, array['terminal-clear'], jsonb_build_object(
+           'status', 'completed',
+           'state_revision', 7,
+           'external_job', jsonb_build_object(
+             'phase', 'completed',
+             'run_id', 'run-terminal-clear',
+             'provider_batch_id', 'batch_terminal_clear',
+             'submission_owner', 'worker-terminal',
+             'lease_claimed_at', now(),
+             'lease_expires_at', now() + interval '2 minutes',
+             'lease_proof', md5('terminal-clear-receipt'))))
+   where key = 'BULK_OPERATIONS';
+
+  select value -> 'terminal-clear' into v_stored
+  from admin_config where key = 'BULK_OPERATIONS';
+  v_job := v_stored -> 'external_job';
+
+  -- Wrong provider identity is an error, not a false-success envelope, and the
+  -- exact stored operation survives the refusal.
+  v_failed := false;
+  begin
+    perform public.update_bulk_operation(
+      'terminal-clear',
+      jsonb_build_object(
+        'status', 'completed',
+        'external_job', v_job || jsonb_build_object(
+          'provider_batch_id', 'batch_wrong',
+          'lease_token', 'terminal-clear-receipt',
+          'clear_after_reconciliation', true)),
+      null,
+      7);
+  exception when sqlstate '55000' then
+    v_failed := true;
+  end;
+  if not v_failed then
+    raise exception 'a terminal clear with the wrong provider_batch_id did not raise 55000';
+  end if;
+  select value -> 'terminal-clear' into v_out
+  from admin_config where key = 'BULK_OPERATIONS';
+  if v_out is distinct from v_stored then
+    raise exception 'a refused provider-id mismatch mutated the operation: %', v_out;
+  end if;
+
+  -- Wrong receipt and stale revision are independently fail-closed.
+  v_failed := false;
+  begin
+    perform public.update_bulk_operation(
+      'terminal-clear',
+      jsonb_build_object(
+        'status', 'completed',
+        'external_job', v_job || jsonb_build_object(
+          'lease_token', 'wrong-receipt',
+          'clear_after_reconciliation', true)),
+      null,
+      7);
+  exception when sqlstate '55000' then
+    v_failed := true;
+  end;
+  if not v_failed then
+    raise exception 'a terminal clear with the wrong receipt did not raise 55000';
+  end if;
+
+  v_failed := false;
+  begin
+    perform public.update_bulk_operation(
+      'terminal-clear',
+      jsonb_build_object(
+        'status', 'completed',
+        'external_job', v_job || jsonb_build_object(
+          'lease_token', 'terminal-clear-receipt',
+          'clear_after_reconciliation', true)),
+      null,
+      6);
+  exception when sqlstate '55000' then
+    v_failed := true;
+  end;
+  if not v_failed then
+    raise exception 'a terminal clear with a stale revision did not raise 55000';
+  end if;
+
+  -- A live/nonterminal provider job cannot use the exit even with its real receipt.
+  update admin_config
+     set value = jsonb_set(
+       value,
+       array['terminal-clear', 'external_job', 'phase'],
+       to_jsonb('applying'::text))
+   where key = 'BULK_OPERATIONS';
+  select value -> 'terminal-clear' into v_stored
+  from admin_config where key = 'BULK_OPERATIONS';
+  v_job := v_stored -> 'external_job';
+  v_failed := false;
+  begin
+    perform public.update_bulk_operation(
+      'terminal-clear',
+      jsonb_build_object(
+        'status', 'running',
+        'external_job', v_job || jsonb_build_object(
+          'lease_token', 'terminal-clear-receipt',
+          'clear_after_reconciliation', true)),
+      null,
+      7);
+  exception when sqlstate '55000' then
+    v_failed := true;
+  end;
+  if not v_failed then
+    raise exception 'a nonterminal provider job used the terminal-clear exit';
+  end if;
+
+  -- Ambiguity stays terminal even when every readable identity field and receipt
+  -- matches. This contract is intentionally not an ambiguity-reconciliation API.
+  update admin_config
+     set value = jsonb_set(
+       value,
+       array['terminal-clear', 'external_job', 'phase'],
+       to_jsonb('ambiguous_submission'::text))
+   where key = 'BULK_OPERATIONS';
+  select value -> 'terminal-clear' into v_stored
+  from admin_config where key = 'BULK_OPERATIONS';
+  v_job := v_stored -> 'external_job';
+  v_failed := false;
+  begin
+    perform public.update_bulk_operation(
+      'terminal-clear',
+      jsonb_build_object(
+        'status', 'completed',
+        'external_job', v_job || jsonb_build_object(
+          'lease_token', 'terminal-clear-receipt',
+          'clear_after_reconciliation', true)),
+      null,
+      7);
+  exception when sqlstate '55000' then
+    v_failed := true;
+  end;
+  if not v_failed then
+    raise exception 'an ambiguous provider job used the terminal-clear exit';
+  end if;
+
+  -- Restore the proven completed fixture and exercise the one allowed clear.
+  update admin_config
+     set value = jsonb_set(
+       value,
+       array['terminal-clear', 'external_job', 'phase'],
+       to_jsonb('completed'::text))
+   where key = 'BULK_OPERATIONS';
+  select value -> 'terminal-clear' -> 'external_job' into v_job
+  from admin_config where key = 'BULK_OPERATIONS';
+  v_out := public.update_bulk_operation(
+    'terminal-clear',
+    jsonb_build_object(
+      'status', 'completed',
+      'external_job', v_job || jsonb_build_object(
+        'lease_token', 'terminal-clear-receipt',
+        'clear_after_reconciliation', true)),
+    null,
+    7);
+  if (v_out ->> 'ok')::boolean is not true
+     or (v_out ->> 'state_revision')::bigint <> 8
+     or v_out -> 'operation' ? 'external_job'
+     or v_out ->> 'provider_batch_id' is not null then
+    raise exception 'the exact receipt-proven completed clear did not succeed cleanly: %', v_out;
+  end if;
+  select value -> 'terminal-clear' into v_stored
+  from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored ? 'external_job' or (v_stored ->> 'state_revision')::bigint <> 8 then
+    raise exception 'the proven clear did not remove only external_job and advance the revision: %', v_stored;
+  end if;
+
+  if to_regprocedure('public.update_bulk_operation(text,jsonb,text,bigint,text,integer)') is null then
+    raise exception 'public.update_bulk_operation disappeared after migration replay';
   end if;
 
   raise notice 'popdam_bulk_operation_revision_lease_contracts: all assertions held';
