@@ -2070,12 +2070,35 @@ begin
              'provider_batch_id', 'batch_terminal_clear',
              'submission_owner', 'worker-terminal',
              'lease_claimed_at', now(),
-             'lease_expires_at', now() + interval '2 minutes',
+             'lease_expires_at', now() - interval '1 second',
              'lease_proof', md5('terminal-clear-receipt'))))
    where key = 'BULK_OPERATIONS';
 
   select value -> 'terminal-clear' into v_stored
   from admin_config where key = 'BULK_OPERATIONS';
+  v_job := v_stored -> 'external_job';
+
+  -- A completed job's lapsed lease must not let another signed-in process mint
+  -- the receipt needed by the terminal-clear exit. The original receipt remains
+  -- the only authority that can clear this durable provider-job pointer.
+  v_out := public.update_bulk_operation(
+    'terminal-clear',
+    jsonb_build_object('status', 'completed', 'external_job', v_job),
+    null,
+    7,
+    'takeover-after-completion',
+    120);
+  if (v_out ->> 'ok')::boolean is not true
+     or (v_out ->> 'lease_receipt_issued')::boolean is not false
+     or v_out ->> 'lease_token' is not null then
+    raise exception 'a completed-job takeover was handed terminal-clear authority: %', v_out;
+  end if;
+  select value -> 'terminal-clear' into v_stored
+  from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored -> 'external_job' ->> 'lease_proof' is distinct from md5('terminal-clear-receipt')
+     or (v_stored ->> 'state_revision')::bigint <> 8 then
+    raise exception 'a completed-job takeover rotated the original receipt or revision unexpectedly: %', v_stored;
+  end if;
   v_job := v_stored -> 'external_job';
 
   -- Wrong provider identity is an error, not a false-success envelope, and the
@@ -2091,7 +2114,7 @@ begin
           'lease_token', 'terminal-clear-receipt',
           'clear_after_reconciliation', true)),
       null,
-      7);
+      8);
   exception when sqlstate '55000' then
     v_failed := true;
   end;
@@ -2115,7 +2138,7 @@ begin
           'lease_token', 'wrong-receipt',
           'clear_after_reconciliation', true)),
       null,
-      7);
+      8);
   exception when sqlstate '55000' then
     v_failed := true;
   end;
@@ -2133,7 +2156,7 @@ begin
           'lease_token', 'terminal-clear-receipt',
           'clear_after_reconciliation', true)),
       null,
-      6);
+      7);
   exception when sqlstate '55000' then
     v_failed := true;
   end;
@@ -2161,7 +2184,7 @@ begin
           'lease_token', 'terminal-clear-receipt',
           'clear_after_reconciliation', true)),
       null,
-      7);
+      8);
   exception when sqlstate '55000' then
     v_failed := true;
   end;
@@ -2190,7 +2213,7 @@ begin
           'lease_token', 'terminal-clear-receipt',
           'clear_after_reconciliation', true)),
       null,
-      7);
+      8);
   exception when sqlstate '55000' then
     v_failed := true;
   end;
@@ -2215,16 +2238,16 @@ begin
         'lease_token', 'terminal-clear-receipt',
         'clear_after_reconciliation', true)),
     null,
-    7);
+    8);
   if (v_out ->> 'ok')::boolean is not true
-     or (v_out ->> 'state_revision')::bigint <> 8
+     or (v_out ->> 'state_revision')::bigint <> 9
      or v_out -> 'operation' ? 'external_job'
      or v_out ->> 'provider_batch_id' is not null then
     raise exception 'the exact receipt-proven completed clear did not succeed cleanly: %', v_out;
   end if;
   select value -> 'terminal-clear' into v_stored
   from admin_config where key = 'BULK_OPERATIONS';
-  if v_stored ? 'external_job' or (v_stored ->> 'state_revision')::bigint <> 8 then
+  if v_stored ? 'external_job' or (v_stored ->> 'state_revision')::bigint <> 9 then
     raise exception 'the proven clear did not remove only external_job and advance the revision: %', v_stored;
   end if;
 

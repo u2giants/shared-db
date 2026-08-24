@@ -177,7 +177,7 @@ begin
   -- ==========================================================================
   -- v_proven -- THE ONE NOTION OF PROOF, USED BY EVERY POINTER GUARD.
   --
-  -- See THE ONE DESIGN PRINCIPLE at the top of this file. A caller is proven only if:
+  -- A caller is proven only if:
   --   * it sent back the one-time claim receipt (verified against the stored digest,
   --     which is all that is ever stored, so the receipt cannot be read out of
   --     admin_config); or
@@ -828,11 +828,18 @@ begin
       -- resolve an ambiguity into a provider job, which is the correct answer: the
       -- ambiguity exists precisely because nobody else knows whether a job was billed.
       --
-      -- Reminting is safe in exactly two states and is confined to them:
+      -- Reminting is safe only while establishing a never-held lease or while
+      -- taking over a LIVE, already-bound provider job. It is confined to those
+      -- states:
       --   * no receipt was ever minted (v_stored_proof is null) -- nothing to displace;
-      --   * a provider_batch_id is already saved -- the operation is bound, and a
-      --     saved id can never be re-pointed or cleared by anyone, so a new receipt
-      --     buys a takeover of the lease and no power to invent a binding.
+      --   * a provider_batch_id is already saved AND the stored phase is live -- the
+      --     operation is bound, and a new receipt buys a takeover needed to keep
+      --     processing that live job.
+      --
+      -- A completed/non-live job never re-mints. Otherwise any authenticated caller
+      -- could wait for its short lease to lapse, claim a fresh receipt, and use the
+      -- receipt-proven terminal-clear exit below to erase the durable provider-job
+      -- pointer. The original holder's receipt remains valid for the narrow clear.
       -- A same-name renewal over a still-LIVE lease keeps the incumbent receipt in
       -- both of those states as well; see THE SAME-NAME RENEWAL TRAP below.
       -- ----------------------------------------------------------------------
@@ -846,6 +853,11 @@ begin
         -- the holder itself already has its receipt and needs no second one, so this
         -- branch deliberately covers it too rather than rotating a working receipt
         -- (rotation would break the twin that legitimately shares its owner name).
+        v_lease_token := null;
+        v_minted      := false;
+      elsif not v_stored_live then
+        -- A completed or otherwise non-live bound job is immutable to a takeover.
+        -- The claim may extend bookkeeping, but it receives no authority to clear.
         v_lease_token := null;
         v_minted      := false;
       elsif v_stored_owner = p_submission_owner
@@ -956,8 +968,3 @@ revoke execute on function public.update_bulk_operation(text, jsonb, text, bigin
   from public, anon;
 grant execute on function public.update_bulk_operation(text, jsonb, text, bigint, text, integer)
   to authenticated, service_role, postgres;
-
--- ==========================================================================
--- The legacy multi-key writer. Same signature, same return value, same merge --
--- but it can no longer merge over protected external-job state.
--- ==========================================================================
