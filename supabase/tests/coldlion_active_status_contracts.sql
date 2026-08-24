@@ -1,6 +1,30 @@
 -- Rollback-safe behavioral contracts for 20260824155745 / issue #1429.
 begin;
 
+-- The ephemeral replay baseline intentionally omits some guarded data migrations.
+-- Supply only the table shape this rollback-only contract needs when that happens.
+do $$
+begin
+  if to_regclass('core.taxonomy_owner_ruling') is null then
+    execute $ddl$
+      create table core.taxonomy_owner_ruling (
+        id uuid primary key default gen_random_uuid(),
+        entity_schema text not null default 'core',
+        entity_table text not null,
+        entity_id uuid not null,
+        entity_code text,
+        entity_name text not null,
+        ruling text not null,
+        ruled_by text not null,
+        ruled_at timestamptz not null,
+        ruling_evidence text not null,
+        action_taken text not null
+      )
+    $ddl$;
+  end if;
+end
+$$;
+
 do $$
 declare
   v_lic uuid;

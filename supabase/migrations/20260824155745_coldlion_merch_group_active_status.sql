@@ -156,7 +156,7 @@ begin
 
   for r in select * from coldlion_status_decision where not conflicting and not higher_authority order by entity_type, canonical_id loop
     if r.entity_type='licensor' then
-      if (select status::text from core.licensor where id=r.canonical_id) = case when r.source_active then 'active' else 'inactive' end then
+      if (select status::text from core.licensor where id=r.canonical_id) = (case when r.source_active then 'active' else 'inactive' end) then
         v_unchanged := v_unchanged + 1; continue;
       end if;
       v_plan := gen_random_uuid();
@@ -165,7 +165,7 @@ begin
       values(pg_backend_pid(),txid_current(),'core.licensor','coldlion_status',v_plan,v_hash,'plm.promote_coldlion_source_owned',array['status'],clock_timestamp()+interval '1 minute');
       update core.licensor set status=case when r.source_active then 'active' else 'inactive' end where id=r.canonical_id;
     else
-      if (select status::text from core.property where id=r.canonical_id) = case when r.source_active then 'active' else 'inactive' end then
+      if (select status::text from core.property where id=r.canonical_id) = (case when r.source_active then 'active' else 'inactive' end) then
         v_unchanged := v_unchanged + 1; continue;
       end if;
       v_plan := gen_random_uuid();
