@@ -32,6 +32,41 @@ ALTER TABLE dflow.sample_movement
     )
   );
 
+CREATE OR REPLACE FUNCTION dflow.sample_movement_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE v_balance bigint; v_original_sample integer;
+BEGIN
+  PERFORM pg_advisory_xact_lock(21450, NEW.sample_id_fk);
+  IF NEW.reversal_of_movement_id IS NOT NULL THEN
+    SELECT sample_id_fk INTO v_original_sample
+    FROM dflow.sample_movement WHERE movement_id=NEW.reversal_of_movement_id;
+    IF v_original_sample IS NULL OR v_original_sample <> NEW.sample_id_fk THEN
+      RAISE EXCEPTION 'Correction must reference an existing movement for the same sample'
+        USING ERRCODE='23514';
+    END IF;
+  END IF;
+  IF NOT (
+    NEW.from_location_type='terminal'
+    AND (
+      NEW.from_location_id IN ('created','receipt_overage','reconciled_opening')
+      OR (NEW.lifecycle_action='split_in' AND NEW.from_location_id LIKE 'split_identity:%')
+    )
+  ) THEN
+    SELECT COALESCE(sum(CASE WHEN to_location_type=NEW.from_location_type
+                                  AND to_location_id=NEW.from_location_id
+                             THEN quantity ELSE 0 END),0)
+         - COALESCE(sum(CASE WHEN from_location_type=NEW.from_location_type
+                                  AND from_location_id=NEW.from_location_id
+                             THEN quantity ELSE 0 END),0)
+      INTO v_balance FROM dflow.sample_movement WHERE sample_id_fk=NEW.sample_id_fk;
+    IF v_balance < NEW.quantity THEN
+      RAISE EXCEPTION 'Insufficient sample balance: available %, requested %',v_balance,NEW.quantity
+        USING ERRCODE='23514';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+
 CREATE OR REPLACE FUNCTION dflow.validate_sample_movement_shipment_identity()
 RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
@@ -305,6 +340,8 @@ FROM dflow.sample s;
 REVOKE ALL ON FUNCTION dflow.post_sample_piece_split(integer,jsonb,text,text,text,text,text,text,text)
   FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION dflow.validate_sample_movement_shipment_identity()
+  FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION dflow.sample_movement_guard()
   FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON dflow.sample_global_status FROM anon,authenticated;
 
