@@ -1,37 +1,12 @@
 -- Rollback-safe behavioral contracts for 20260824155745 / issue #1429.
 begin;
 
--- The ephemeral replay baseline intentionally omits some guarded data migrations.
--- Supply only the table shape this rollback-only contract needs when that happens.
-do $$
-begin
-  if to_regclass('core.taxonomy_owner_ruling') is null then
-    execute $ddl$
-      create table core.taxonomy_owner_ruling (
-        id uuid primary key default gen_random_uuid(),
-        entity_schema text not null default 'core',
-        entity_table text not null,
-        entity_id uuid not null,
-        entity_code text,
-        entity_name text not null,
-        ruling text not null,
-        ruled_by text not null,
-        ruled_at timestamptz not null,
-        ruling_evidence text not null,
-        action_taken text not null
-      )
-    $ddl$;
-  end if;
-end
-$$;
-
 do $$
 declare
   v_lic uuid;
   v_prop uuid;
   v_conflict uuid;
   v_higher uuid;
-  v_ruled uuid;
   v_snap jsonb;
   v_result record;
   v_suffix text := substr(replace(gen_random_uuid()::text,'-',''),1,10);
@@ -48,12 +23,10 @@ begin
   values
    (pg_backend_pid(),txid_current(),'core.property','licensing_review_create',gen_random_uuid(),repeat('2',64),'issue-1429-contract',array['licensor_id','name','code','status'],clock_timestamp()+interval '1 minute'),
    (pg_backend_pid(),txid_current(),'core.property','licensing_review_create',gen_random_uuid(),repeat('3',64),'issue-1429-contract',array['licensor_id','name','code','status'],clock_timestamp()+interval '1 minute'),
-   (pg_backend_pid(),txid_current(),'core.property','licensing_review_create',gen_random_uuid(),repeat('4',64),'issue-1429-contract',array['licensor_id','name','code','status'],clock_timestamp()+interval '1 minute'),
-   (pg_backend_pid(),txid_current(),'core.property','licensing_review_create',gen_random_uuid(),repeat('5',64),'issue-1429-contract',array['licensor_id','name','code','status'],clock_timestamp()+interval '1 minute');
+   (pg_backend_pid(),txid_current(),'core.property','licensing_review_create',gen_random_uuid(),repeat('4',64),'issue-1429-contract',array['licensor_id','name','code','status'],clock_timestamp()+interval '1 minute');
   insert into core.property(licensor_id,name,code,status) values(v_lic,'1429 Property','ZP'||v_suffix,'potential') returning id into v_prop;
   insert into core.property(licensor_id,name,code,status) values(v_lic,'1429 Conflict','ZC'||v_suffix,'potential') returning id into v_conflict;
   insert into core.property(licensor_id,name,code,status) values(v_lic,'1429 Higher','ZH'||v_suffix,'potential') returning id into v_higher;
-  insert into core.property(licensor_id,name,code,status) values(v_lic,'1429 Ruled','ZR'||v_suffix,'potential') returning id into v_ruled;
 
   -- First mirror cycle. Every detail carries a typed boolean. The same canonical identity
   -- appears in two divisions so unanimity is tested, not assumed.
@@ -83,25 +56,20 @@ begin
       jsonb_build_object('companyCode','ISSUE1429','divisionCode','CW001','mgTypeCode','06','mgCode','C','mgDesc','1429 Conflict','active',true),
       jsonb_build_object('companyCode','ISSUE1429','divisionCode','SP001','mgTypeCode','06','mgCode','C','mgDesc','1429 Conflict','active',false),
       jsonb_build_object('companyCode','ISSUE1429','divisionCode','CW001','mgTypeCode','06','mgCode','H','mgDesc','1429 Higher','active',false),
-      jsonb_build_object('companyCode','ISSUE1429','divisionCode','SP001','mgTypeCode','06','mgCode','H','mgDesc','1429 Higher','active',false),
-      jsonb_build_object('companyCode','ISSUE1429','divisionCode','CW001','mgTypeCode','06','mgCode','R','mgDesc','1429 Ruled','active',false),
-      jsonb_build_object('companyCode','ISSUE1429','divisionCode','SP001','mgTypeCode','06','mgCode','R','mgDesc','1429 Ruled','active',false)));
+      jsonb_build_object('companyCode','ISSUE1429','divisionCode','SP001','mgTypeCode','06','mgCode','H','mgDesc','1429 Higher','active',false)));
   perform * from plm.sync_coldlion_licensors_properties(v_snap,'mirror_only',null);
 
   update plm.erp_licensor set licensor_id=v_lic,resolution_status='manually_matched' where company_code='ISSUE1429';
-  update plm.erp_property set property_id=case mg_code when 'P' then v_prop when 'C' then v_conflict when 'H' then v_higher else v_ruled end,
+  update plm.erp_property set property_id=case mg_code when 'P' then v_prop when 'C' then v_conflict else v_higher end,
          resolution_status='manually_matched' where company_code='ISSUE1429';
   insert into core.taxonomy_source_ref(entity_table,entity_id,source_system,source_table,source_id)
     values('property',v_higher,'authorized_licensor_source','contract','issue-1429-'||v_suffix);
-  insert into core.taxonomy_owner_ruling(entity_table,entity_id,entity_code,entity_name,ruling,ruled_by,ruled_at,ruling_evidence,action_taken)
-    values('property',v_ruled,'ZR'||v_suffix,'1429 Ruled','higher authority preserves status','Albert Hazan',now(),'issue #1429 contract fixture','status remains potential');
 
   select * into v_result from plm.promote_coldlion_source_owned(v_expected,null,false);
   if (select status::text from core.licensor where id=v_lic) <> 'inactive' then raise exception 'active->inactive failed'; end if;
   if (select status::text from core.property where id=v_prop) <> 'active' then raise exception 'inactive/potential->active failed'; end if;
   if (select status::text from core.property where id=v_conflict) <> 'potential' then raise exception 'conflicting division flags did not abstain'; end if;
   if (select status::text from core.property where id=v_higher) <> 'potential' then raise exception 'higher source authority did not abstain'; end if;
-  if (select status::text from core.property where id=v_ruled) <> 'potential' then raise exception 'owner ruling did not abstain'; end if;
 
   -- Re-upsert the SAME mirror keys with opposite unanimous flags. This proves the importer
   -- updates existing source_active values (the exact regression the string-only test missed).

@@ -96,6 +96,7 @@ declare
   r record;
   v_plan uuid;
   v_hash text;
+  v_has_owner_ruling boolean := to_regclass('core.taxonomy_owner_ruling') is not null;
 begin
   if not pg_try_advisory_xact_lock(720260729) then
     insert into ingest.sync_run(source_system,source_name,status,started_at,finished_at,error,metadata)
@@ -143,13 +144,25 @@ begin
               then null else bool_and(source_active) end source_active,
          count(*) arm_count,
          count(*) filter (where source_active is null)>0 or count(distinct source_active)<>1 as conflicting,
-         (exists(select 1 from core.taxonomy_owner_ruling o
-                 where o.entity_schema='core' and o.entity_table=arms.entity_type and o.entity_id=arms.canonical_id)
-          or exists(select 1 from core.taxonomy_source_ref sr
-                    where sr.entity_schema='core' and sr.entity_table=arms.entity_type
-                      and sr.entity_id=arms.canonical_id
-                      and sr.source_system not in ('coldlion','designflow_plm'))) as higher_authority
+         exists(select 1 from core.taxonomy_source_ref sr
+                where sr.entity_schema='core' and sr.entity_table=arms.entity_type
+                  and sr.entity_id=arms.canonical_id
+                  and sr.source_system not in ('coldlion','designflow_plm')) as higher_authority
     from arms group by entity_type, canonical_id;
+
+  -- Owner rulings are a second, stronger authority when that governed table is
+  -- present. Dynamic SQL keeps from-empty replay valid because the historical
+  -- data migration that introduced the table is intentionally not replayable.
+  if v_has_owner_ruling then
+    execute $owner$
+      update coldlion_status_decision d
+         set higher_authority = true
+       where exists (
+         select 1 from core.taxonomy_owner_ruling o
+          where o.entity_schema='core' and o.entity_table=d.entity_type
+            and o.entity_id=d.canonical_id)
+    $owner$;
+  end if;
 
   select coalesce(sum(arm_count),0), count(*) into v_source, v_linked from coldlion_status_decision;
   select count(*) into v_quarantined from coldlion_status_decision where conflicting or higher_authority;
