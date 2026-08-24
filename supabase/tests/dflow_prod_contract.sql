@@ -62,11 +62,11 @@ begin
 
   select pg_get_viewdef('public.style_tracker_rows_with_bridge'::regclass, true)
     into v_view;
-  if v_view not like '%dflow_prod."RFQItem"%'
-     or v_view not like '%dflow_prod."RFQGroup"%'
-     or v_view like '%dflow."RFQItem"%'
-     or v_view like '%dflow."RFQGroup"%' then
-    raise exception 'style tracker bridge is not isolated to production RFQ objects';
+  if v_view not like '%dflow."RFQItem"%'
+     or v_view not like '%dflow."RFQGroup"%'
+     or v_view like '%dflow_prod."RFQItem"%'
+     or v_view like '%dflow_prod."RFQGroup"%' then
+    raise exception 'style tracker bridge moved before the guarded data cutover';
   end if;
 
   if (select count(*) from dflow_prod."AuditLog") <> 0

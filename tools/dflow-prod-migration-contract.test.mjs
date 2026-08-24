@@ -40,10 +40,8 @@ test('new Sample Tracking-only surface is excluded fail-closed', () => {
   }
 });
 
-test('style tracker bridge body is preserved except for the RFQ schema', () => {
-  const expected = viewBody(prior)
-    .replaceAll('dflow."RFQItem"', 'dflow_prod."RFQItem"')
-    .replaceAll('dflow."RFQGroup"', 'dflow_prod."RFQGroup"');
+test('style tracker bridge stays on populated dflow until the guarded data cutover', () => {
+  const expected = viewBody(prior);
   assert.equal(viewBody(migration).replaceAll('\r\n', '\n'), expected.replaceAll('\r\n', '\n'));
 });
 

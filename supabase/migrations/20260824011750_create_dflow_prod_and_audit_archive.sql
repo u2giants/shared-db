@@ -6302,8 +6302,8 @@ left join lateral (
         i."rfqItem_created_date",
         g.data_added::timestamptz
       )) as linked_at
-    from dflow_prod."RFQItem" i
-    join dflow_prod."RFQGroup" g
+    from dflow."RFQItem" i
+    join dflow."RFQGroup" g
       on g."RFQGroup_id" = i."rfqItem_rfq_group"
     where upper(trim(i."rfqItem_style_number")) = upper(trim(r.row_data ->> 'rfq_code'))
       and nullif(trim(r.row_data ->> 'rfq_code'), '') is not null
