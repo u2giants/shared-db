@@ -115,6 +115,7 @@ begin
     --    per-entity totals = 6 and inserted+updated+unchanged = 6; a clean
     --    return with full accounting means no failures. Importer behavior is
     --    unchanged — only the fresh-database assumption is relaxed.
+    v_active_contract := v_snap;
     select to_jsonb(t) into v_run1 from plm.sync_coldlion_licensors_properties(v_snap, 'mirror_only') t;
 
     if (v_run1 ->> 'rows_seen')::int <> 6
@@ -383,7 +384,6 @@ begin
   --    partial mirror work. Each uses a unique code (P2A-BAD-*) that must NOT appear.
   -- ---------------------------------------------------------------------------------
   begin
-    v_active_contract := v_snap;
     perform plm.sync_coldlion_licensors_properties(
       jsonb_set(v_active_contract, '{details,0}', (v_active_contract #> '{details,0}') - 'active'), 'mirror_only');
     raise exception 'missing active accepted';
