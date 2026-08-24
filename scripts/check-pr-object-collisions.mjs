@@ -78,9 +78,20 @@
 //   * DDL outside supabase/migrations/ -- e.g. SQL embedded in tools/*.mjs.
 //   * A collision with a pull request opened AFTER this run. GitHub does not
 //     re-run a green check when a sibling pull request appears, so the last
-//     merge of a colliding set is the one that must be re-checked. Branch
-//     protection requiring "up to date before merge" is what makes that
-//     reliable; this guard does not substitute for it.
+//     merge of a colliding set is the one that must be re-checked.
+//
+//     WHAT PROVIDES THAT RE-CHECK -- corrected 2026-08-23, issue #1366. Earlier
+//     text here credited branch protection's "up to date before merge"
+//     (`required_status_checks.strict`). That is wrong and it is load-bearing
+//     wrong: `strict` is deliberately FALSE by Albert's 2026-08-19 ruling in
+//     issue #1286 (strict mode restarted every check suite after every unrelated
+//     merge, ~50 minutes/day). The actual re-check for a migration pull request
+//     is `.github/workflows/guarded-migration-merge.yml`, which re-runs collision
+//     and lease validation on a head containing current `main` while holding the
+//     merge lock; a pull request with no migrations is auto-authorized by
+//     `.github/workflows/migration-author-lease.yml`. This script is a DETECTOR
+//     that gives early feedback; guarded merge is the gate. Do not restore strict
+//     mode on the strength of this comment.
 //   * Anything at all when it SKIPS (see posture (a)) -- read the warning.
 //   * It is not evasion-proof. It is a collision DETECTOR for honest authors
 //     working in parallel, not a security control. Splitting the keyword across
@@ -122,7 +133,7 @@ export function normalizeSql(sql) {
     .replace(/\s+/g, ' ')
 }
 
-const IDENT = String.raw`(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)`
+const IDENT = String.raw`(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*)`
 const QUALIFIED = String.raw`(?:${IDENT}\s*\.\s*)?${IDENT}`
 
 const PATTERNS = [
@@ -264,13 +275,38 @@ export function describeCoverage() {
   }
 }
 
-function canonical(raw) {
+export function canonicalIdentifierParts(raw) {
   // Split into identifier parts WITHOUT destroying whitespace inside a quoted
   // identifier (`"Weird Name"` is one legal Postgres name).
-  const parts = String(raw).match(/"[^"]*"|[^.\s]+/g) ?? []
-  return parts
-    .map((part) => (part.startsWith('"') ? part.slice(1, -1) : part.toLowerCase()))
-    .join('.')
+  const text = String(raw)
+  const parts = []
+  const token = /\s*("(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_$]*)\s*(\.|$)/y
+  let offset = 0
+  while (offset < text.length) {
+    token.lastIndex = offset
+    const match = token.exec(text)
+    if (!match || (match[2] === '.' && token.lastIndex === text.length)) return []
+    if (match[1].startsWith('"')) {
+      const value = match[1].slice(1, -1).replace(/""/g, '"')
+      // PostgreSQL folds an unquoted identifier to lowercase. A quoted name
+      // that is already a legal lowercase unquoted identifier therefore names
+      // the same object and must use the same collision key.
+      parts.push(/^[a-z_][a-z0-9_$]*$/.test(value) ? value : `"${value.replace(/"/g, '""')}"`)
+    } else {
+      parts.push(match[1].toLowerCase())
+    }
+    offset = token.lastIndex
+    if (!match[2]) break
+  }
+  return offset === text.length ? parts : []
+}
+
+export function canonicalIdentifier(raw) {
+  return canonicalIdentifierParts(raw).join('.')
+}
+
+function canonical(raw) {
+  return canonicalIdentifier(raw)
 }
 
 /**
@@ -329,8 +365,7 @@ export function extractObjects(sql) {
  * Quoted identifiers keep their case and any internal whitespace.
  */
 function canonicalParts(raw) {
-  const parts = String(raw).match(/"[^"]*"|[^.\s]+/g) ?? []
-  return parts.map((part) => (part.startsWith('"') ? part.slice(1, -1) : part.toLowerCase()))
+  return canonicalIdentifierParts(raw)
 }
 
 /** `core.t.c` -> { table: 'core.t', column: 'core.t.c' }; unqualified -> null table. */

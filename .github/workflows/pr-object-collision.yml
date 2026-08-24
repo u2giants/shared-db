@@ -23,9 +23,32 @@
 # events (opened/synchronize/reopened) and `workflow_dispatch` allows a manual
 # re-run. GitHub will NOT re-run a green check because a SIBLING pull request
 # appeared afterwards. The last member of a colliding set to merge is therefore
-# the one that must be re-checked — which is what branch protection's "require
-# branches to be up to date before merging" enforces. This guard complements
-# that setting; it does not replace it.
+# the one that must be re-checked.
+#
+# WHAT ACTUALLY PROVIDES THAT RE-CHECK — corrected 2026-08-23, issue #1366.
+# THIS JOB IS A DETECTOR, NOT THE GATE. Earlier text here said the re-check came
+# from branch protection's "require branches to be up to date before merging"
+# (`required_status_checks.strict`). That is NOT how this repository works and
+# reading it that way has already produced one unsafe change proposal.
+#
+#   * `required_status_checks.strict` is deliberately FALSE. Albert ruled this on
+#     2026-08-19 in issue #1286, after strict mode restarted the full check suite
+#     on every branch after every unrelated merge, costing roughly 50 minutes a
+#     day. It is an owner-authorized throughput decision, NOT configuration drift.
+#     Do not "fix" it. Issue #1286 alone governs whether it is ever reconsidered.
+#
+#   * The real re-check for a MIGRATION pull request is
+#     `.github/workflows/guarded-migration-merge.yml`, whose required context
+#     `Migration guarded merge authorization` re-runs collision and lease
+#     validation against a head that already contains current `main`, and does so
+#     while holding the merge lock.
+#
+#   * A pull request with NO migrations is auto-authorized by
+#     `.github/workflows/migration-author-lease.yml`, because there is no
+#     structural collision for it to have.
+#
+# So: this guard gives early feedback to honest authors; guarded merge is what
+# actually holds the line at merge time.
 #
 # NO DATABASE CONTACT: this job reads GitHub pull-request metadata and committed
 # .sql text. It needs no database credentials and must never be given any.

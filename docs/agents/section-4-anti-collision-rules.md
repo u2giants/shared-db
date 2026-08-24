@@ -48,6 +48,87 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    ````
    ```
 
+   **READS AND WRITES ARE DECLARED SEPARATELY (Step 2, issue #1366).** Use
+   `writes:` for every object the work CHANGES and `reads:` for every object it
+   DEPENDS ON without changing. The queue serialises on this matrix:
+
+   |            | B reads | B writes |
+   |---|---|---|
+   | **A reads**  | parallel | serialised |
+   | **A writes** | serialised | serialised |
+
+   Two sessions may read the same table at once. Anything involving a write
+   serialises, in both directions.
+
+   ````text
+   ```db-work-scope
+   status: ready
+   work_type: structural
+   route: shared-db-orchestrator
+   priority: 40
+   depends_on:
+   writes:
+     - table plm.wb_asset
+   reads:
+     - table core.licensor
+   ````
+   ```
+
+   Structural work must declare at least one write; reads alone are not enough.
+   Declaring the same object as both is refused — a write already implies
+   exclusive access. Mixing the legacy `objects:` list with `writes:`/`reads:` is
+   refused too.
+
+   **`objects:` is the deprecated spelling of `writes:`** and still works during
+   the compatibility window. It is read as a WRITE, never as a read: an old claim
+   that only said "objects" always meant "I am changing these", and treating it as
+   a read would let a new writer start against work already in flight. Step 8A
+   removes the alias once no open claim uses it.
+
+   **YOU MUST DECLARE INDIRECT AND SEMANTIC READS YOURSELF.** Static SQL analysis
+   finds objects your migration names. It cannot see a view that depends on the
+   column you are dropping, a function that queries the table you are rewriting,
+   or an application that reads a value your data change alters. The parser does
+   not know what it has missed, and it will never tell you the list is complete.
+   If your work depends on an object, declare it — an over-declared read costs a
+   little parallelism; a missed one costs correctness.
+
+   A migration's statically extracted objects are compared against `writes:`
+   only. If it changes something you declared under `reads:`, the guard says so by
+   name and refuses.
+
+   **A DEPENDENCY MUST PROVE IT SUCCEEDED (Step 3, issue #1366).** `depends_on:`
+   used to be satisfied by the dependency simply not being open. That released
+   downstream work when an issue was closed without merging, cancelled, returned,
+   superseded, or when the number was a typo for an issue that never existed.
+
+   A dependency is now satisfied only by a `db-work-completion` record whose
+   outcome is `merged` or `owner-ruling-recorded`. `returned`, `cancelled`,
+   `superseded`, and `failed` are legitimate endings that never release anything;
+   the audit repeats their recorded reason. A missing issue, a self-dependency, a
+   duplicate, or a dependency cycle fails the audit and names the exact path.
+
+   Publish the record with the ONE command that does it, then close the issue:
+
+   ```bash
+   node scripts/manage-migration-author-lanes.mjs --complete-work --issue <n> --report-file report.json
+   ```
+
+   It re-derives the evidence rather than trusting the file: a `merged` record must
+   name a pull request GitHub reports as merged, a `merge_sha` matching GitHub's own
+   `merge_commit_sha` (the squash commit, not the branch head), migration versions
+   matching the files the PR actually added, and a commit contained in `main`. The
+   comment is read back before you are told you may close.
+
+   Completion is immutable. A second record on one issue is an error, not
+   latest-wins.
+
+   Dependencies closed before **2026-08-23** are GRANDFATHERED: they could not have
+   carried a record, so they are accepted and listed under
+   `GRANDFATHERED DEPENDENCIES` to stay countable. The cutoff never rescues a
+   record that says the work did not succeed, and it is never moved forward to
+   unblock something.
+
    Status, work type, and route are independent. Allowed statuses are `ready`,
    `blocked`, and `owner-decision`. Allowed work types are `structural`,
    `curated-master-data`, `application-data`, `source-data`, `repo-maintenance`,
@@ -55,6 +136,25 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    `ready + structural + shared-db-orchestrator` can enter a migration-author
    lane, and it must name every exact database object. Non-structural work must
    not claim database objects.
+
+   **Each non-structural work type has a named exit** (AGENTS.md §0.0-C, and
+   `NON_STRUCTURAL_EXITS` in `scripts/manage-migration-author-lanes.mjs`, which is
+   the enforced form):
+
+   | work type | exit | who does it |
+   |---|---|---|
+   | `structural` | `accept` | this orchestrator, via a migration-author lane |
+   | `curated-master-data` | `fork` | a fresh session **dispatched by this orchestrator**, under §6.4 |
+   | `application-data`, `source-data` | `reject` | the owning application repository, after being forwarded |
+   | `repo-maintenance`, `documentation` | `repo-session` | a **separately started** repository session — not an orchestrator assignment at all |
+   | `security-settings` | `return-to-owner` | Albert |
+
+   **Owner ruling, 2026-08-21 (issue #1366).** The orchestrator does database
+   structure and schema only. `repo-maintenance` and `documentation` are not
+   orchestrator work **even to dispatch**; `--queue-audit` lists them under
+   `OUTSIDE ORCHESTRATOR — OWNED BY REPO SESSION` so nothing accumulates unseen,
+   and that list is not a worklist. The ruling deliberately left
+   `curated-master-data` on `fork`; do not move it without a separate ruling.
 
    **Work whose exit is REJECT — `application-data` and `source-data` — must
    also carry a `return_to:` line naming the owning repository as an

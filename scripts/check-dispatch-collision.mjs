@@ -80,6 +80,7 @@ import { fileURLToPath } from 'node:url'
 // `comment on` and `create type` — a migration doing nothing but an
 // `alter table` reported as touching NO OBJECTS, which read as a clear.
 import {
+  canonicalIdentifier,
   describeDispatchCoverage,
   dispatchObjectKeys,
 } from './check-pr-object-collisions.mjs'
@@ -121,8 +122,12 @@ export function parseClaimBlock(body) {
 
   const lines = fence[1].split(/\r?\n/)
   let version = null
-  const objects = []
-  let inObjects = false
+  // `objects:` is the legacy spelling of `writes:`. A claim that declares objects
+  // has always meant "I am changing these", so reading it any other way would let
+  // a writer start against work already in flight. See LEGACY_OBJECTS_MEANS_WRITES
+  // in manage-migration-author-lanes.mjs.
+  const lists = { objects: [], writes: [], reads: [] }
+  let currentList = null
 
   for (const raw of lines) {
     const line = raw.trim()
@@ -132,21 +137,30 @@ export function parseClaimBlock(body) {
     if (versionMatch) {
       const value = versionMatch[1]
       version = value && value.toLowerCase() !== 'none' ? value : null
-      inObjects = false
+      currentList = null
       continue
     }
-    if (/^objects:\s*$/i.test(line)) {
-      inObjects = true
+    const listHeader = /^(objects|writes|reads):\s*$/i.exec(line)
+    if (listHeader) {
+      currentList = listHeader[1].toLowerCase()
       continue
     }
-    if (inObjects) {
+    if (currentList) {
       const item = /^[-*]\s+(.*\S)\s*$/.exec(line)
-      if (item) objects.push(normalizeObject(item[1]))
-      else inObjects = false
+      if (item) lists[currentList].push(normalizeObject(item[1]))
+      else currentList = null
     }
   }
 
-  return { version, objects: [...new Set(objects)].sort() }
+  const unique = (values) => [...new Set(values)].sort()
+  const legacyObjects = unique(lists.objects)
+  const writes = legacyObjects.length ? legacyObjects : unique(lists.writes)
+  // A write already implies exclusive access, so an object declared both ways is
+  // reported as a write only. Declaring both is rejected at authoring time by
+  // parseQueueScope; tolerating it here keeps a hand-edited claim comparable
+  // rather than silently weakening it to a read.
+  const reads = unique(lists.reads).filter((object) => !writes.includes(object))
+  return { version, writes, reads, legacyObjects, objects: writes }
 }
 
 /**
@@ -155,7 +169,26 @@ export function parseClaimBlock(body) {
  * regardless of spacing or case.
  */
 export function normalizeObject(text) {
-  return String(text).trim().replace(/\s+/g, ' ').toLowerCase()
+  const compact = String(text).trim().replace(/\s+/g, ' ')
+  const match = /^(materialized view|storage bucket|[a-z]+)\s+(.+)$/i.exec(compact)
+  if (!match) return compact.toLowerCase()
+  const kind = match[1].toLowerCase()
+  const target = match[2]
+  let quoted = false
+  let onIndex = -1
+  for (let index = 0; index < target.length - 3; index += 1) {
+    if (target[index] === '"') {
+      if (quoted && target[index + 1] === '"') index += 1
+      else quoted = !quoted
+    } else if (!quoted && /^\s+on\s+/i.test(target.slice(index))) {
+      onIndex = index
+      break
+    }
+  }
+  const on = onIndex >= 0 ? [null, target.slice(0, onIndex), target.slice(onIndex).replace(/^\s+on\s+/i, '')] : null
+  return on
+    ? `${kind} ${canonicalIdentifier(on[1])} on ${canonicalIdentifier(on[2])}`
+    : `${kind} ${canonicalIdentifier(target)}`
 }
 
 /**

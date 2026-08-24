@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -73,8 +73,8 @@ const body = (objects, owner, expires = '2026-08-15T08:00:00.000Z') => claimBody
 const scope = (status, workType, route, priority, objects=[], depends='') => `\`\`\`db-work-scope\nstatus: ${status}\nwork_type: ${workType}\nroute: ${route}\npriority: ${priority}\ndepends_on: ${depends}\nobjects:\n${objects.map((x)=>`  - ${x}`).join('\n')}\n\`\`\``
 
 test('queue scope keeps status, work type, and route separate',()=>{
-  assert.deepEqual(parseQueueScope(scope('ready','structural','shared-db-orchestrator',9,['table core.a'],'#12, 13')), {status:'ready',workType:'structural',route:'shared-db-orchestrator',priority:9,dependencies:[12,13],returnTo:null,objects:['table core.a']})
-  assert.throws(()=>parseQueueScope(scope('ready','structural','shared-db-orchestrator',1)),/must list exact objects/)
+  assert.deepEqual(parseQueueScope(scope('ready','structural','shared-db-orchestrator',9,['table core.a'],'#12, 13')), {status:'ready',workType:'structural',route:'shared-db-orchestrator',priority:9,dependencies:[12,13],returnTo:null,writes:['table core.a'],reads:[],legacyObjects:['table core.a'],objects:['table core.a']})
+  assert.throws(()=>parseQueueScope(scope('ready','structural','shared-db-orchestrator',1)),/must list at least one write/)
   assert.throws(()=>parseQueueScope(scope('waiting','structural','shared-db-orchestrator',1,['table core.a'])),/status must be/)
   assert.throws(()=>parseQueueScope(scope('ready','source-data','shared-db-orchestrator',1)),/not valid/)
   assert.throws(()=>parseQueueScope(scope('ready','source-data','source-data-session',1,['table plm.nbcu_right'])),/must not claim/)
@@ -121,13 +121,40 @@ test('status and non-structural routes never consume a migration-author lane',()
   assert.equal(result.fullyAudited,true)
 })
 
-test('every non-structural work type exits as reject or fork and never as accept',()=>{
+test('every non-structural work type has a named exit and never accept',()=>{
   assert.equal(queueExit('structural'),'accept')
+  const allowed=new Set(['reject','fork','repo-session','return-to-owner'])
   for(const [workType,exit] of Object.entries(NON_STRUCTURAL_EXITS)){
-    assert.ok(exit==='reject'||exit==='fork',`${workType} must exit reject or fork`)
+    assert.ok(allowed.has(exit),`${workType} must exit to a named destination, got ${exit}`)
+    assert.notEqual(exit,'accept',`${workType} must never be accepted by the orchestrator`)
     assert.equal(queueExit(workType),exit)
   }
   assert.throws(()=>queueExit('invented-work-type'),/no orchestrator exit is defined/)
+})
+
+// OWNER RULING 2026-08-21 (issue #1366). Repository maintenance, documentation and
+// security-settings work is not the orchestrator's, not even to dispatch. These
+// exits are the machine-readable form of that ruling; a regression here is how the
+// original routing mistake happened.
+test('the 2026-08-21 owner ruling is enforced: repo work leaves the orchestrator, Master Data does not move',()=>{
+  assert.equal(queueExit('repo-maintenance'),'repo-session')
+  assert.equal(queueExit('documentation'),'repo-session')
+  assert.equal(queueExit('security-settings'),'return-to-owner')
+  // Deliberately unchanged. The ruling did not cover curated Master Data, which
+  // AGENTS.md 6.4 still governs inside this repository.
+  assert.equal(queueExit('curated-master-data'),'fork')
+  for(const workType of ['repo-maintenance','documentation','security-settings']){
+    assert.ok(OUTSIDE_ORCHESTRATOR_EXITS.includes(queueExit(workType)),`${workType} must be outside orchestrator action`)
+  }
+  assert.equal(OUTSIDE_ORCHESTRATOR_EXITS.includes('fork'),false,'fork still means the orchestrator hands the work on inside this repo')
+  assert.equal(OUTSIDE_ORCHESTRATOR_EXITS.includes('reject'),false,'a reject is still an orchestrator action: it must be returned')
+})
+
+test('every work type keeps an exit, so a new one cannot be added without a routing decision',()=>{
+  const expected=['structural','curated-master-data','application-data','source-data','repo-maintenance','documentation','security-settings']
+  const covered=new Set(['structural',...Object.keys(NON_STRUCTURAL_EXITS)])
+  for(const workType of expected) assert.ok(covered.has(workType),`${workType} has no exit`)
+  assert.equal(covered.size,expected.length,'an unexpected work type gained an exit without updating this test')
 })
 
 test('the queue audit names every open issue that fails the shape test with its exit',()=>{
@@ -139,7 +166,7 @@ test('the queue audit names every open issue that fails the shape test with its 
   ]
   const result=buildDynamicQueues(issues,[],NOW)
   assert.deepEqual(result.notOrchestratorWork.map((x)=>x.issue),[51,52,53])
-  assert.deepEqual(result.notOrchestratorWork.map((x)=>x.exit),['reject','fork','fork'])
+  assert.deepEqual(result.notOrchestratorWork.map((x)=>x.exit),['reject','repo-session','return-to-owner'])
   assert.equal(result.notOrchestratorWork.find((x)=>x.issue===53).blockedOnOwner,true)
   assert.equal(result.notOrchestratorWork.some((x)=>x.issue===50),false)
   assert.deepEqual(result.dispatchable,[50])
@@ -147,7 +174,7 @@ test('the queue audit names every open issue that fails the shape test with its 
 
 test('a non-structural issue parked at blocked is still reported rather than silently skipped',()=>{
   const result=buildDynamicQueues([{number:54,title:'parked',body:scope('blocked','documentation','repo-maintenance',5)}],[],NOW)
-  assert.deepEqual(result.notOrchestratorWork.map((x)=>x.exit),['fork'])
+  assert.deepEqual(result.notOrchestratorWork.map((x)=>x.exit),['repo-session'])
   assert.deepEqual(result.dispatchable,[])
 })
 
@@ -206,7 +233,7 @@ test('a failed mirror creation leaves the rejected issue open and untouched',()=
 
 test('return refuses fork work, a missing address, and a second return',()=>{
   const io=(body,comments=[])=>({getIssue:()=>({number:72,title:'t',body,state:'open'}),getIssueComments:()=>comments,createIssueIn:()=>{throw new Error('must not be called')},commentIssue:()=>{},closeIssue:()=>{}})
-  assert.throws(()=>returnIssueToOwner(72,io(scope('ready','repo-maintenance','repo-maintenance',5))),/exits by fork/)
+  assert.throws(()=>returnIssueToOwner(72,io(scope('ready','repo-maintenance','repo-maintenance',5))),/whose exit is repo-session, not return/)
   assert.throws(()=>returnIssueToOwner(72,io(scope('ready','application-data','application-session',5))),/no return_to address/)
   const addressed=scope('ready','application-data','application-session',5).replace('route: application-session','route: application-session\nreturn_to: u2giants/popdam3')
   assert.throws(()=>returnIssueToOwner(72,io(addressed,[{body:`${RETURNED_MARKER} https://github.com/u2giants/popdam3/issues/9`}])),/already returned/)
@@ -1510,4 +1537,403 @@ test('openWorkIssues audits every open issue and excludes only coordination issu
   const result=githubIo.openWorkIssues((endpoint)=>{calls.push(endpoint);return rows})
   assert.deepEqual(result.map((x)=>x.number),[80,81])
   assert.ok(calls.every((endpoint)=>!/labels=/.test(endpoint)),'the audit must not filter by label')
+})
+
+
+// --- issue #1351: an assignment must stay findable after the PR head moves ---
+
+const movedHead='beef1230000000000000000000000000000000ff'
+
+test('a reviewer assignment stays findable after the pull request head moves',()=>{
+  const io=failedReviewIo()
+  const found=findPrReviewAssignments(failedReview.issue,failedReview.pr,io)
+  assert.equal(found.length,1)
+  assert.equal(found[0].headSha,failedReview.headSha)
+  assert.equal(found[0].sequence,1)
+  assert.ok(found[0].ref.startsWith(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-`))
+  // The head moved. The record is still there, and it is still filed under the
+  // exact commit it reviews.
+  io.getPr=()=>({state:'open',head:{sha:movedHead}})
+  assert.deepEqual(findPrReviewAssignments(failedReview.issue,failedReview.pr,io),found)
+})
+
+test('replacement at a moved head reports the record that EXISTS instead of claiming it is missing',()=>{
+  const io=failedReviewIo()
+  io.getPr=()=>({state:'open',head:{sha:movedHead}})
+  // The operator does what the tool demands and names the PR's CURRENT head.
+  // Before this fix that produced "original durable reviewer assignment is
+  // missing" -- a phantom data-loss report (issue #1351).
+  assert.throws(()=>replaceFailedReviewer({...replacementRequest,headSha:movedHead},io),(error)=>{
+    assert.ok(error instanceof LaneError)
+    assert.match(error.message,/NOT missing/)
+    assert.match(error.message,/sequence=1/)
+    assert.match(error.message,new RegExp(failedReview.headSha))
+    assert.match(error.message,/--assign-reviewer/)
+    assert.doesNotMatch(error.message,/assignment is missing/)
+    return true
+  })
+})
+
+test('replacement at the assigned head after a push says the code under review changed',()=>{
+  const io=failedReviewIo()
+  io.getPr=()=>({state:'open',head:{sha:movedHead}})
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),(error)=>{
+    assert.match(error.message,/exact open PR head/)
+    assert.match(error.message,/IS recorded/)
+    assert.match(error.message,new RegExp(movedHead))
+    return true
+  })
+})
+
+test('a genuinely absent reviewer assignment still refuses, and says so accurately',()=>{
+  const io=reviewIo()
+  io.getPr=()=>({state:'open',head:{sha:failedReview.headSha}})
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/under ANY head/)
+})
+
+test('the verdict-to-commit binding survives: each head keeps its own assignment record',()=>{
+  const io=failedReviewIo()
+  io.getPr=()=>({state:'open',head:{sha:movedHead}})
+  const second=assignNextReviewer({...failedReview,headSha:movedHead},io)
+  assert.notEqual(second.sequence,1)
+  const found=findPrReviewAssignments(failedReview.issue,failedReview.pr,io)
+  assert.deepEqual(found.map((row)=>row.headSha).sort(),[failedReview.headSha,movedHead].sort())
+  // A new head NEVER inherits the old head's reviewer record.
+  assert.equal(found.find((row)=>row.headSha===movedHead).sequence,second.sequence)
+  assert.equal(found.find((row)=>row.headSha===failedReview.headSha).sequence,1)
+})
+
+// --- issue #1351: expected 404 probes are quiet, real failures are loud ---
+
+test('an expected ref-absence answer does not print, and still throws',()=>{
+  const printed=[]
+  assert.throws(()=>runGitHubCommand(['api','repos/x/git/ref/heads/nope'],{
+    executor:()=>{throw commandFailure('gh: Not Found (HTTP 404)')},
+    wait:()=>{},expectedFailure:EXPECTED_REF_ABSENCE,reportStderr:(text)=>printed.push(text),
+  }),(error)=>error instanceof LaneError&&isConfirmedRefAbsence(error))
+  assert.deepEqual(printed,[])
+})
+
+test('a genuine GitHub failure still prints its own stderr loudly',()=>{
+  const printed=[]
+  // Same call site, same suppression option: only the ANSWER is quiet.
+  assert.throws(()=>runGitHubCommand(['api','repos/x/git/ref/heads/main'],{
+    executor:()=>{throw commandFailure('gh: Bad credentials (HTTP 401)')},
+    wait:()=>{},expectedFailure:EXPECTED_REF_ABSENCE,reportStderr:(text)=>printed.push(text),
+  }),/Bad credentials/)
+  assert.equal(printed.length,1)
+  assert.match(printed[0],/Bad credentials/)
+  assert.match(printed[0],/repos\/x\/git\/ref\/heads\/main/)
+})
+
+test('an ambiguous not-found without a 404 stays loud and stays a hard failure',()=>{
+  const printed=[]
+  assert.throws(()=>runGitHubCommand(['api','endpoint'],{
+    executor:()=>{throw commandFailure('could not resolve host: not found')},
+    wait:()=>{},expectedFailure:EXPECTED_REF_ABSENCE,reportStderr:(text)=>printed.push(text),
+  }),LaneError)
+  assert.equal(printed.length,1)
+})
+
+test('a retried transient failure prints once, at the end, not once per attempt',()=>{
+  const printed=[]
+  assert.throws(()=>runGitHubCommand(['api','endpoint'],{
+    executor:()=>{throw commandFailure('HTTP 502: bad gateway')},
+    wait:()=>{},reportStderr:(text)=>printed.push(text),
+  }),LaneError)
+  assert.equal(printed.length,1)
+})
+
+test('GitHub stderr is captured by the child process, never inherited to the terminal',()=>{
+  // This is what silences the benign 404s at the source. If stderr were
+  // inherited, gh would print them before this code could ever classify them.
+  let seen=null
+  runGitHubCommand(['api','endpoint'],{executor:(command,args,options)=>{seen=options;return '{}'}})
+  assert.deepEqual(seen.stdio,['ignore','pipe','pipe'])
+})
+
+test('ref creation and deletion mark their expected answers as expected',()=>{
+  const seen=[]
+  createRefWithReadback('refs/x','sha',{run:(args,options)=>{seen.push(options?.expectedFailure);return ''}})
+  deleteRefWithReadback('refs/x',{run:(args,options)=>{seen.push(options?.expectedFailure);return ''}})
+  assert.deepEqual(seen,[EXPECTED_REF_PRESENCE,EXPECTED_REF_ABSENCE])
+})
+
+// --- THE CONFLICT MATRIX (Step 2, issue #1366) ------------------------------
+//
+//              B reads   B writes
+//   A reads      no        YES
+//   A writes     YES       YES
+
+test('read/read does not conflict, so unrelated readers run in parallel', () => {
+  const a = { writes: [], reads: ['table core.a'] }
+  const b = { writes: [], reads: ['table core.a'] }
+  assert.equal(conflicts(a, b), false)
+  assert.equal(conflicts(b, a), false)
+})
+
+test('write/write conflicts in both directions', () => {
+  const a = { writes: ['table core.a'], reads: [] }
+  const b = { writes: ['table core.a'], reads: [] }
+  assert.equal(conflicts(a, b), true)
+  assert.equal(conflicts(b, a), true)
+})
+
+// BOTH DIRECTIONS MATTER. A one-sided check would let a writer start against an
+// active reader whenever the reader happened to be evaluated first.
+test('write/read conflicts whichever way round the two tasks are compared', () => {
+  const writer = { writes: ['table core.a'], reads: [] }
+  const reader = { writes: [], reads: ['table core.a'] }
+  assert.equal(conflicts(writer, reader), true, 'a writer must not run against an active reader')
+  assert.equal(conflicts(reader, writer), true, 'a reader must not start against an active writer')
+})
+
+test('tasks touching different objects never conflict', () => {
+  assert.equal(conflicts({ writes: ['table core.a'], reads: ['table core.c'] }, { writes: ['table core.b'], reads: ['table core.d'] }), false)
+})
+
+test('missing or empty read/write sets are treated as empty rather than throwing', () => {
+  assert.equal(conflicts({}, {}), false)
+  assert.equal(conflicts(undefined, { writes: ['table core.a'], reads: [] }), false)
+  assert.equal(conflicts({ writes: ['table core.a'] }, { reads: ['table core.a'] }), true)
+})
+
+// --- READ/WRITE SCOPE PARSING ----------------------------------------------
+
+const scopeWith = (body) => ['```db-work-scope', 'status: ready', 'work_type: structural', 'route: shared-db-orchestrator', 'priority: 5', 'depends_on:', body, '```'].join('\n')
+const repoScopeWith = (body) => ['```db-work-scope', 'status: ready', 'work_type: repo-maintenance', 'route: repo-maintenance', 'priority: 5', 'depends_on:', body, '```'].join('\n')
+
+test('a scope may declare writes and reads separately', () => {
+  const parsed = parseQueueScope(scopeWith('writes:\n  - table core.a\nreads:\n  - table core.b'))
+  assert.deepEqual(parsed.writes, ['table core.a'])
+  assert.deepEqual(parsed.reads, ['table core.b'])
+  assert.deepEqual(parsed.legacyObjects, [])
+})
+
+// LEGACY_OBJECTS_MEANS_WRITES. Reading an old claim as anything weaker than a
+// write would let a new writer start against work already in flight.
+test('a legacy objects: scope is read as WRITES and is flagged as legacy', () => {
+  const legacy = parseQueueScope(scopeWith('objects:\n  - table core.a'))
+  assert.deepEqual(legacy.writes, ['table core.a'])
+  assert.deepEqual(legacy.reads, [])
+  assert.deepEqual(legacy.legacyObjects, ['table core.a'], 'Step 8A finds retirable claims through this field')
+  assert.equal(conflicts(legacy, { writes: [], reads: ['table core.a'] }), true, 'a legacy claim must still block a reader')
+})
+
+test('mixing the legacy objects: list with writes: or reads: is refused', () => {
+  assert.throws(() => parseQueueScope(scopeWith('objects:\n  - table core.a\nwrites:\n  - table core.b')), /must not mix the legacy objects: list/)
+  assert.throws(() => parseQueueScope(scopeWith('objects:\n  - table core.a\nreads:\n  - table core.b')), /must not mix the legacy objects: list/)
+})
+
+test('declaring one object as both a read and a write is refused at authoring time', () => {
+  assert.throws(() => parseQueueScope(scopeWith('writes:\n  - table core.a\nreads:\n  - table core.a')), /both a read and a write/)
+})
+
+test('a repeated list header is an error, not a silent append', () => {
+  assert.throws(() => parseQueueScope(scopeWith('writes:\n  - table core.a\nwrites:\n  - table core.b')), /repeats the writes: list/)
+})
+
+test('structural work must declare at least one write; reads alone are not enough', () => {
+  assert.throws(() => parseQueueScope(scopeWith('reads:\n  - table core.a')), /must list at least one write/)
+})
+
+test('non-structural work may declare neither reads nor writes', () => {
+  assert.throws(() => parseQueueScope(repoScopeWith('writes:\n  - table core.a')), /must not claim database objects/)
+  assert.throws(() => parseQueueScope(repoScopeWith('reads:\n  - table core.a')), /must not claim database objects/)
+  assert.deepEqual(parseQueueScope(repoScopeWith('')).writes, [])
+})
+
+test('reads and writes are normalised and de-duplicated like objects always were', () => {
+  const parsed = parseQueueScope(scopeWith('writes:\n  - TABLE  core.A\nreads:\n  - VIEW   api.B'))
+  assert.deepEqual(parsed.writes, ['table core.a'])
+  assert.deepEqual(parsed.reads, ['view api.b'])
+})
+
+test('quoted exact identifiers are accepted and canonicalized without losing case or spaces', () => {
+  const parsed = parseQueueScope(scopeWith('writes:\n  - TABLE "MixedSchema"."MixedTable"\n  - SEQUENCE dflow."itemHeader_item_num_id_pk _seq"'))
+  assert.deepEqual(parsed.writes, [
+    'table "MixedSchema"."MixedTable"',
+    'sequence dflow."itemHeader_item_num_id_pk _seq"',
+  ])
+  assert.deepEqual(validateClaimObjects(['column "MixedSchema"."MixedTable"."Mixed Column"']), [
+    'column "MixedSchema"."MixedTable"."Mixed Column"',
+    'table "MixedSchema"."MixedTable"',
+  ])
+  assert.throws(() => validateClaimObjects(['table core..too_broad']), /schema-qualified exact name/)
+  assert.throws(() => validateClaimObjects(['table core.valid trailing']), /schema-qualified exact name/)
+  assert.deepEqual(validateClaimObjects(['table "core"."foo"']), ['table core.foo'])
+  assert.deepEqual(validateClaimObjects(['table core."a""b"']), ['table core."a""b"'])
+})
+
+test('claimBody round-trips reads and writes, and omits an empty reads header', () => {
+  const expiresAt = new Date('2026-08-24T00:00:00Z')
+  const withReads = claimBody({ version: '20260823120000', writes: ['table core.a'], reads: ['table core.b'], owner: 'o', branch: 'b', worktree: 'w', expiresAt })
+  assert.match(withReads, /^writes:$/m)
+  assert.match(withReads, /^reads:$/m)
+  const lease = parseAuthorLease(withReads, new Date('2026-08-23T00:00:00Z'))
+  assert.deepEqual(lease.writes, ['table core.a'])
+  assert.deepEqual(lease.reads, ['table core.b'])
+
+  const writesOnly = claimBody({ version: '20260823120000', writes: ['table core.a'], owner: 'o', branch: 'b', worktree: 'w', expiresAt })
+  assert.doesNotMatch(writesOnly, /^reads:$/m, 'an empty reads header would make every legacy claim look edited')
+})
+
+test('claimBody still accepts the deprecated objects parameter as writes', () => {
+  const body = claimBody({ version: '20260823120000', objects: ['table core.a'], owner: 'o', branch: 'b', worktree: 'w', expiresAt: new Date('2026-08-24T00:00:00Z') })
+  assert.deepEqual(parseAuthorLease(body, new Date('2026-08-23T00:00:00Z')).writes, ['table core.a'])
+})
+
+// THE POINT OF THE WHOLE STEP: two readers of one table share the queue; a
+// writer against that table serialises them.
+test('the queue lets two readers of one table run in parallel but serialises a writer', () => {
+  const reader = (n) => ({
+    number: n,
+    title: 'reader ' + n,
+    body: scopeWith('writes:\n  - table core.own' + n + '\nreads:\n  - table core.shared'),
+  })
+  const readers = buildDynamicQueues([reader(1), reader(2)], [], NOW)
+  assert.equal(readers.dispatchable.length, 2, 'two readers of the same table must be dispatchable at once')
+
+  const writer = { number: 3, title: 'writer', body: scopeWith('writes:\n  - table core.shared') }
+  const mixed = buildDynamicQueues([reader(1), writer], [], NOW)
+  assert.equal(mixed.dispatchable.length, 1, 'a writer and a reader of the same table must serialise')
+})
+
+// --- DEPENDENCY PROOF IN THE QUEUE (Step 3, issue #1366) --------------------
+
+const depScope = (deps) => ['```db-work-scope', 'status: ready', 'work_type: structural', 'route: shared-db-orchestrator', 'priority: 5', 'depends_on: ' + deps, 'writes:', '  - table core.a', '```'].join('\n')
+const completionComment = (record) => ({ body: '```db-work-completion\n' + JSON.stringify(record) + '\n```' })
+const mergedRecord = (issue) => ({ schema_version: 1, work_issue: issue, outcome: 'merged', pr: 1, merge_sha: 'abc1234', migration_versions: [] })
+
+// THE CENTRAL REGRESSION. Before Step 3 the queue asked only "is the dependency
+// number in the open set?", so a closed-without-merging issue released downstream
+// work immediately.
+test('a closed dependency with no completion record does NOT release downstream work', () => {
+  const issues = [{ number: 20, title: 'downstream', body: depScope('#10') }]
+  const states = { 10: { exists: true, open: false, comments: [] } }
+  const result = buildDynamicQueues(issues, [], NOW, [20], states)
+  assert.deepEqual(result.dispatchable, [], 'closure alone must not count as success')
+  assert.match(result.skipped.find((row)=>row.issue===20).detail, /closure alone is not success/)
+})
+
+test('a dependency that never existed BLOCKS instead of releasing instantly', () => {
+  const result = buildDynamicQueues([{ number: 20, title: 'typo', body: depScope('#99999') }], [], NOW, [20], { 99999: { exists: false } })
+  assert.deepEqual(result.dispatchable, [])
+  assert.match(result.skipped.find((row)=>row.issue===20).detail, /does not exist/)
+})
+
+test('a proven merged dependency does release downstream work', () => {
+  const states = { 10: { exists: true, open: false, comments: [completionComment(mergedRecord(10))], mergeInMain: true } }
+  const result = buildDynamicQueues([{ number: 20, title: 'downstream', body: depScope('#10') }], [], NOW, [20], states)
+  assert.deepEqual(result.dispatchable, [20])
+})
+
+test('an unsuccessful outcome blocks and the audit says which outcome', () => {
+  const cancelled = { schema_version: 1, work_issue: 10, outcome: 'cancelled', reason: 'superseded by a different approach' }
+  const states = { 10: { exists: true, open: false, comments: [completionComment(cancelled)] } }
+  const result = buildDynamicQueues([{ number: 20, title: 'downstream', body: depScope('#10') }], [], NOW, [20], states)
+  assert.deepEqual(result.dispatchable, [])
+  assert.match(result.skipped.find((row)=>row.issue===20).detail, /completed as cancelled: superseded/)
+})
+
+// A CYCLE IS NEVER STARTABLE, and an open/closed test can never see it.
+test('a dependency cycle is reported by path and fails the audit', () => {
+  const issues = [
+    { number: 20, title: 'a', body: depScope('#21') },
+    { number: 21, title: 'b', body: depScope('#20') },
+  ]
+  const result = buildDynamicQueues(issues, [], NOW, [20, 21], {})
+  assert.equal(result.dependencyCycles.length, 1)
+  assert.deepEqual(result.dependencyCycles[0], [20, 21, 20])
+  assert.equal(result.fullyAudited, false, 'an audit with a cycle in it is not a clean audit')
+})
+
+test('self-dependency and duplicate dependencies are reported as malformed', () => {
+  const selfDep = buildDynamicQueues([{ number: 20, title: 'a', body: depScope('#20') }], [], NOW, [20], {})
+  assert.equal(selfDep.malformed.length, 1)
+  assert.match(selfDep.malformed[0].reason, /depends on itself/)
+
+  const duplicate = buildDynamicQueues([{ number: 20, title: 'a', body: depScope('#21, 21') }], [], NOW, [20], {})
+  assert.match(duplicate.malformed[0].reason, /duplicate dependencies/)
+})
+
+// EVERY UNKNOWN IS A BLOCK. The failure being replaced was silence.
+test('an unreadable dependency blocks rather than being treated as absent', () => {
+  const result = buildDynamicQueues([{ number: 20, title: 'a', body: depScope('#10') }], [], NOW, [20], { 10: { exists: true, unreadable: 'HTTP 500' } })
+  assert.deepEqual(result.dispatchable, [])
+  assert.match(result.skipped.find((row)=>row.issue===20).detail, /NOT "no dependency"/)
+})
+
+// BACKWARD COMPATIBILITY. Callers and fixtures that pass no dependency state keep
+// the old open-set behaviour rather than blocking everything.
+test('with no dependency state supplied, the old open-set behaviour still applies', () => {
+  const result = buildDynamicQueues([{ number: 20, title: 'a', body: depScope('#10') }], [], NOW, [20, 10])
+  assert.deepEqual(result.dispatchable, [], 'an open dependency still blocks')
+  const released = buildDynamicQueues([{ number: 20, title: 'a', body: depScope('#10') }], [], NOW, [20])
+  assert.deepEqual(released.dispatchable, [20])
+})
+
+// --- completeWork ----------------------------------------------------------
+
+function completionIo({ comments = [], pr = null, files = [], main = 'main1234', ancestry = true } = {}) {
+  const posted = []
+  return {
+    posted,
+    issueComments: () => [...comments, ...posted.map((body)=>({ body }))],
+    commentIssue: (_number, body) => { posted.push(body) },
+    getPr: () => pr,
+    getPrFiles: () => files,
+    readRef: () => main,
+    // assertMergeCommitInMainHistory reaches for compareCommits; ancestry=false
+    // simulates a merge commit that is not actually contained in main.
+    compareCommits: () => (ancestry ? { status: 'identical', behind_by: 0 } : { status: 'diverged', behind_by: 3 }),
+  }
+}
+
+test('completeWork refuses a report whose work_issue does not match --issue', () => {
+  assert.throws(() => completeWork({ issue: 5, report: { schema_version: 1, work_issue: 6, outcome: 'cancelled', reason: 'x' } }, completionIo()), /report is for issue #6/)
+})
+
+test('completeWork refuses to publish a second record, because completion is immutable', () => {
+  const io = completionIo({ comments: [completionComment(mergedRecord(5))] })
+  assert.throws(() => completeWork({ issue: 5, report: { schema_version: 1, work_issue: 5, outcome: 'cancelled', reason: 'x' } }, io), /completion is immutable/)
+})
+
+test('completeWork publishes an unsuccessful outcome and reads it back', () => {
+  const io = completionIo()
+  const published = completeWork({ issue: 5, report: { schema_version: 1, work_issue: 5, outcome: 'returned', reason: 'belongs to popdam3' } }, io)
+  assert.equal(published.outcome, 'returned')
+  assert.equal(io.posted.length, 1)
+  assert.match(io.posted[0], /immutable/)
+})
+
+// A REPORT IS A CLAIM, NOT EVIDENCE. Every checkable field is re-derived.
+test('completeWork refuses a merged report whose pull request is not merged', () => {
+  const io = completionIo({ pr: { merged_at: null } })
+  assert.throws(() => completeWork({ issue: 5, report: mergedRecord(5) }, io), /is not merged/)
+})
+
+test('completeWork refuses a merged report whose sha disagrees with GitHub', () => {
+  const io = completionIo({ pr: { merged_at: 'x', merge_commit_sha: 'deadbee' } })
+  assert.throws(() => completeWork({ issue: 5, report: mergedRecord(5) }, io), /does not match GitHub's merge_commit_sha/)
+})
+
+test('completeWork refuses a merged report whose migration_versions are wrong', () => {
+  const io = completionIo({
+    pr: { merged_at: 'x', merge_commit_sha: 'abc1234' },
+    files: [{ filename: 'supabase/migrations/20260823120000_a.sql' }],
+  })
+  assert.throws(() => completeWork({ issue: 5, report: mergedRecord(5) }, io), /do not match the versions PR #1 actually added/)
+})
+
+test('completeWork refuses a merged report whose commit is not contained in main', () => {
+  const io = completionIo({ pr: { merged_at: 'x', merge_commit_sha: 'abc1234' }, ancestry: false })
+  assert.throws(() => completeWork({ issue: 5, report: mergedRecord(5) }, io), /not contained in the history of main/)
+})
+
+test('completeWork publishes a fully proven merged report and reads it back', () => {
+  const io = completionIo({ pr: { merged_at: 'x', merge_commit_sha: 'abc1234' }, files: [] })
+  const published = completeWork({ issue: 5, report: mergedRecord(5) }, io)
+  assert.equal(published.outcome, 'merged')
+  assert.equal(io.posted.length, 1)
 })

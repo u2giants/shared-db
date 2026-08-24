@@ -6,6 +6,8 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gatherOpenPrObjects, normalizeObject, parseClaimBlock } from './check-dispatch-collision.mjs'
+import { classifyDependencies, findCompletionRecord, findDependencyCycles, validateCompletionRecord, validateDependencyDeclaration, COMPLETION_FENCE, DependencyError } from './lib/work-dependencies.mjs'
+import { assertLease, evaluateRecovery, formatLeaseMessage, parseLeaseMessage, recoveredLeaseMetadata, LeaseError } from './lib/exclusive-lease.mjs'
 
 export const REPO = 'u2giants/shared-db'
 export const MAX_AUTHOR_LANES = 3
@@ -16,6 +18,7 @@ export const MUTEX_RECOVERY_ACTIVE_REF = 'refs/db-coordination/author-acquisitio
 export const REVIEW_CURSOR_REF = 'refs/db-coordination/reviewer-round-robin'
 export const REVIEW_FAILURE_REF_PREFIX = 'refs/db-review-failures'
 export const REVIEW_REPLACEMENT_REF_PREFIX = 'refs/db-review-replacements'
+export const REVIEW_ASSIGNMENT_REF_PREFIX = 'refs/db-review-assignments'
 export const REVIEWERS = Object.freeze([
   { name:'grok-4.6', wrapper:'ai-grok-review' }, { name:'glm-5.3', wrapper:'ai-glm' },
   { name:'kimi-k3', wrapper:'ai-kimi' }, { name:'qwen-3.8-max', wrapper:'ai-qwen' },
@@ -163,24 +166,43 @@ const ROUTES_BY_WORK_TYPE = Object.freeze({
 })
 
 // ORCHESTRATOR ADMISSION TEST (AGENTS.md 0.0-C). A parsed scope block that is
-// not `structural` has exactly two exits and `accept` is never one of them:
-// REJECT sends it back to the session that owns those rows, FORK hands it to a
-// fresh session with an empty context window. The orchestrator's own context is
-// reserved for triage, dispatch, review and merge, so it must never work one of
-// these itself no matter how small it looks.
+// not `structural` never exits by `accept`. Each non-structural work type names
+// WHERE it goes instead, because the old single `fork` value did not say who
+// picks the work up, and an ambiguous exit is what let repository-maintenance
+// work be read as an orchestrator worklist.
+//
+// OWNER RULING 2026-08-21 (issue #1366). The shared-db orchestrator does
+// database STRUCTURE and SCHEMA only. Repository maintenance, documentation and
+// security-settings work is performed by a SEPARATELY STARTED session and is
+// never an orchestrator assignment - not even to dispatch. The orchestrator's
+// own context is reserved for triage, dispatch, review and merge of structural
+// work, so it must never work one of these itself no matter how small it looks.
 export const NON_STRUCTURAL_EXITS = Object.freeze({
   'application-data': 'reject',
   'source-data': 'reject',
-  // FORK, not REJECT. Curated Master Data is governed INSIDE this repo by 6.4:
-  // it binds the AI session doing the typing and never leaves for an
-  // application repo. It exits by fork because it must not occupy a
-  // migration-author lane and must not be worked in the orchestrator's own
-  // context - not because it belongs to somebody else.
+  // FORK, not REJECT, and DELIBERATELY UNCHANGED by issue #1366. Curated Master
+  // Data is governed INSIDE this repo by 6.4: it binds the AI session doing the
+  // typing and never leaves for an application repo. It exits by fork because it
+  // must not occupy a migration-author lane and must not be worked in the
+  // orchestrator's own context - not because it belongs to somebody else.
+  //
+  // The 2026-08-21 ruling was about repository-maintenance work. It did NOT
+  // change how curated Master Data is routed. Do not move this to another exit
+  // without a separate explicit owner ruling.
   'curated-master-data': 'fork',
-  'repo-maintenance': 'fork',
-  documentation: 'fork',
-  'security-settings': 'fork',
+  // REPO-SESSION, not FORK. These are owned by a separately started repository
+  // session. The orchestrator records them so an audit can see them, and then
+  // takes no action at all: it does not work them and it does not dispatch them.
+  'repo-maintenance': 'repo-session',
+  documentation: 'repo-session',
+  // RETURN-TO-OWNER. A security-settings change needs authority the orchestrator
+  // does not have, so it goes to Albert rather than to any session.
+  'security-settings': 'return-to-owner',
 })
+
+// Exits that mean "this is not the orchestrator's work AND the orchestrator has
+// nothing to do about it" - visible to an audit, never a worklist.
+export const OUTSIDE_ORCHESTRATOR_EXITS = Object.freeze(['repo-session', 'return-to-owner'])
 
 // A REJECT exit must MOVE the task, never merely decline it. `return_to` is the
 // forwarding address: the repository whose session owns the work. Rejecting
@@ -205,14 +227,25 @@ export function parseQueueScope(body = '') {
   if (!fences.length) return null
   if (fences.length !== 1) throw new LaneError('exactly one db-work-scope block is required')
   const fence=fences[0]
-  const lines = fence[1].split(/\r?\n/), fields = new Map(), objects = []
-  let inObjects = false
+  const lines = fence[1].split(/\r?\n/), fields = new Map()
+  // THREE list keys, one parser. `objects:` is the legacy spelling and means
+  // `writes:` - see LEGACY_OBJECTS_MEANS_WRITES below. seenListHeaders makes a
+  // repeated list header an error rather than a silent append.
+  const lists = { objects: [], writes: [], reads: [] }
+  const seenListHeaders = new Set()
+  let currentList = null
   for (const raw of lines) {
     const line = raw.trim()
     if (!line) continue
-    if (line === 'objects:') { inObjects = true; continue }
-    if (inObjects && line.startsWith('- ')) { objects.push(line.slice(2).trim()); continue }
-    inObjects = false
+    const listHeader = /^(objects|writes|reads):$/.exec(line)
+    if (listHeader) {
+      if (seenListHeaders.has(listHeader[1])) throw new LaneError(`db-work-scope repeats the ${listHeader[1]}: list`)
+      seenListHeaders.add(listHeader[1])
+      currentList = listHeader[1]
+      continue
+    }
+    if (currentList && line.startsWith('- ')) { lists[currentList].push(line.slice(2).trim()); continue }
+    currentList = null
     const match = /^([a-z_]+):\s*(.*)$/.exec(line)
     if (!match || fields.has(match[1])) throw new LaneError('unreadable db-work-scope block')
     fields.set(match[1], match[2].trim())
@@ -229,8 +262,26 @@ export function parseQueueScope(body = '') {
   if (!Number.isInteger(priority) || priority < 0) throw new LaneError('db-work-scope priority must be a non-negative integer')
   const dependencies = (fields.get('depends_on') ?? '').split(',').map((v)=>v.trim()).filter(Boolean).map((v)=>Number(String(v).replace(/^#/,'')))
   if (dependencies.some((v)=>!Number.isInteger(v) || v <= 0)) throw new LaneError('db-work-scope depends_on must contain issue numbers')
-  if (workType === 'structural' && !objects.length) throw new LaneError('structural db-work-scope must list exact objects')
-  if (workType !== 'structural' && objects.length) throw new LaneError(`${workType} db-work-scope must not claim database objects`)
+  // LEGACY_OBJECTS_MEANS_WRITES. A flat `objects:` list never distinguished a
+  // reader from a writer, so the only safe reading of an existing claim is the
+  // conservative one: every declared object is a WRITE. Reading a legacy claim as
+  // a read would let a new writer run against work already in flight.
+  if (lists.objects.length && (lists.writes.length || lists.reads.length)) {
+    throw new LaneError('db-work-scope must not mix the legacy objects: list with writes:/reads:; objects: means writes:')
+  }
+  const legacyObjects = lists.objects.length ? validateClaimObjects(lists.objects) : []
+  // VISIBLE DEPRECATION. The alias stays until Step 8A's gate is met (zero open
+  // legacy claims/issues, plus 14 days of examples using writes:). A silent alias
+  // never gets migrated, because nothing ever reminds anyone it exists.
+  if (legacyObjects.length && !process.env.SHARED_DB_SUPPRESS_LEGACY_OBJECTS_WARNING) {
+    process.stderr.write('WARNING: db-work-scope uses the deprecated `objects:` list, which is read as `writes:`. Use `writes:` and `reads:` so readers of the same table can run in parallel. See the anti-collision rules in AGENTS.md for the conflict matrix.\n')
+  }
+  const writes = lists.objects.length ? legacyObjects : (lists.writes.length ? validateClaimObjects(lists.writes) : [])
+  const reads = lists.reads.length ? validateClaimObjects(lists.reads) : []
+  const declaredBothWays = writes.filter((object)=>reads.includes(object))
+  if (declaredBothWays.length) throw new LaneError(`db-work-scope declares ${declaredBothWays.join(', ')} as both a read and a write; a write already implies exclusive access`)
+  if (workType === 'structural' && !writes.length) throw new LaneError('structural db-work-scope must list at least one write (use writes:, or the legacy objects:)')
+  if (workType !== 'structural' && (writes.length || reads.length)) throw new LaneError(`${workType} db-work-scope must not claim database objects`)
   if (route === 'owner-only' && status !== 'owner-decision') throw new LaneError('owner-only route requires status owner-decision')
   // Present-but-malformed is a hard error; absent is reported by the audit as a
   // missing return address rather than thrown, so one unaddressed issue cannot
@@ -238,17 +289,42 @@ export function parseQueueScope(body = '') {
   const returnTo = fields.get('return_to') ?? null
   if (returnTo !== null && !RETURN_ADDRESS_PATTERN.test(returnTo)) throw new LaneError('db-work-scope return_to must be an owner/repo slug')
   if (returnTo !== null && workType === 'structural') throw new LaneError('structural db-work-scope must not carry a return_to address')
-  return { status, workType, route, priority, dependencies, returnTo, objects: objects.length ? validateClaimObjects(objects) : [] }
+  // `objects` stays as an alias for `writes` so every existing caller keeps working
+  // during the compatibility window. Step 8A removes it once the queue audit finds
+  // zero open legacy claims.
+  return { status, workType, route, priority, dependencies, returnTo, writes, reads, legacyObjects, objects: writes }
 }
 
 export const COORDINATION_LABELS = new Set(['db-claim','orchestrator-marker'])
 export const WORK_LABEL = 'db-work'
 
-function overlaps(a, b) { const right = new Set(b); return a.some((x)=>right.has(x)) }
+// THE CONFLICT MATRIX (Step 2, issue #1366).
+//
+//              B reads   B writes
+//   A reads      no        YES
+//   A writes     YES       YES
+//
+// Read/read running in parallel is the entire point: two sessions may inspect the
+// same table at once. Anything involving a write serialises, in BOTH directions,
+// because a writer changing an object underneath a reader is exactly the silent
+// corruption these lanes exist to prevent.
+export function conflicts(a, b) {
+  const aWrites = new Set(a?.writes ?? []), bWrites = new Set(b?.writes ?? [])
+  for (const object of aWrites) if (bWrites.has(object)) return true
+  for (const object of (b?.reads ?? [])) if (aWrites.has(object)) return true
+  for (const object of (a?.reads ?? [])) if (bWrites.has(object)) return true
+  return false
+}
 
-export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssueNumbers = issues.map((issue)=>issue.number)) {
+// Two flat lists, compared as writes. Conservative on purpose: a caller that has
+// lost the read/write distinction must not be handed a weaker answer.
+function overlaps(a, b) { return conflicts({ writes: a, reads: [] }, { writes: b, reads: [] }) }
+
+export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssueNumbers = issues.map((issue)=>issue.number), dependencyStates = null) {
   const openNumbers = new Set(allOpenIssueNumbers.map(Number))
   const skipped = [], unclassified = [], malformed = [], unlabelled = [], candidates = [], notOrchestratorWork = []
+  const dependencyEdges = {}
+  const grandfatheredDependencies = []
   for (const issue of issues) {
     // githubIo always supplies a labels array, so real audits always run this
     // check; callers that pass no labels at all are asserting they carry no
@@ -277,16 +353,43 @@ export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssu
     if (scope.workType !== 'structural' || scope.route !== 'shared-db-orchestrator') {
       skipped.push({ issue:issue.number, reason:'not-migration-author-work', workType:scope.workType, route:scope.route }); continue
     }
-    const waiting = scope.dependencies.filter((number)=>openNumbers.has(number))
-    if (waiting.length) { skipped.push({ issue:issue.number, reason:`depends-on-open:${waiting.join(',')}` }); continue }
+    // DEPENDENCY PROOF (Step 3, issue #1366). `dependencyStates` is gathered by the
+    // caller so this function stays pure and exhaustively testable. When it is
+    // absent the old open-set test is used, which keeps every existing caller and
+    // fixture working; the CLI always supplies it.
+    dependencyEdges[issue.number] = scope.dependencies
+    try {
+      validateDependencyDeclaration(issue.number, scope.dependencies)
+    } catch (error) {
+      malformed.push({ issue: issue.number, reason: error.message })
+      continue
+    }
+    if (dependencyStates) {
+      const verdict = classifyDependencies(issue.number, scope.dependencies, dependencyStates)
+      for (const row of verdict.results.filter((r)=>r.status === 'grandfathered')) {
+        grandfatheredDependencies.push({ issue: issue.number, dependency: row.number, detail: row.reason })
+      }
+      if (!verdict.satisfied) {
+        for (const blocked of verdict.blocked) {
+          skipped.push({ issue: issue.number, reason: `${blocked.status}:${blocked.number}`, detail: blocked.reason })
+        }
+        continue
+      }
+    } else {
+      const waiting = scope.dependencies.filter((number)=>openNumbers.has(number))
+      if (waiting.length) { skipped.push({ issue:issue.number, reason:`depends-on-open:${waiting.join(',')}` }); continue }
+    }
     candidates.push({ issue:issue.number, title:issue.title, ...scope })
   }
-  const active = claims.map((claim)=>({ claim:claim.number, issue:null, priority:Number.MAX_SAFE_INTEGER, objects:parseAuthorLease(claim.body,now).objects }))
+  const active = claims.map((claim)=>{
+    const lease = parseAuthorLease(claim.body,now)
+    return { claim:claim.number, issue:null, priority:Number.MAX_SAFE_INTEGER, writes:lease.writes, reads:lease.reads ?? [], objects:lease.writes }
+  })
   const components = [...active, ...candidates].map((item)=>[item])
   for (let i=0;i<components.length;i++) for (let j=i+1;j<components.length;) {
-    if (components[i].some((a)=>components[j].some((b)=>overlaps(a.objects,b.objects)))) components[i].push(...components.splice(j,1)[0]); else j++
+    if (components[i].some((a)=>components[j].some((b)=>conflicts(a,b)))) components[i].push(...components.splice(j,1)[0]); else j++
   }
-  const queues = Array.from({length:MAX_AUTHOR_LANES},(_,index)=>({ lane:index+1, active:null, queued:[], objects:[] }))
+  const queues = Array.from({length:MAX_AUTHOR_LANES},(_,index)=>({ lane:index+1, active:null, queued:[], objects:[], reads:[] }))
   const ordered = components.sort((a,b)=>Number(Boolean(b.some(x=>x.claim)))-Number(Boolean(a.some(x=>x.claim))) || Math.max(...b.map(x=>x.priority))-Math.max(...a.map(x=>x.priority)))
   for (const component of ordered) {
     const activeItem = component.find((x)=>x.claim)
@@ -294,11 +397,15 @@ export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssu
     let lane = activeItem ? free[0] : [...(free.length?free:queues)].sort((a,b)=>a.queued.length-b.queued.length)[0]
     if (activeItem) lane.active = activeItem.claim
     lane.queued.push(...component.filter((x)=>x.issue).sort((a,b)=>b.priority-a.priority || a.issue-b.issue).map((x)=>x.issue))
-    lane.objects.push(...new Set(component.flatMap((x)=>x.objects)))
+    lane.objects.push(...new Set(component.flatMap((x)=>x.writes ?? x.objects ?? [])))
+    lane.reads.push(...new Set(component.flatMap((x)=>x.reads ?? [])))
   }
   const emptyLanes = queues.filter((q)=>!q.active).length
   const dispatchable = queues.filter((q)=>!q.active && q.queued.length).map((q)=>q.queued[0])
-  return { queues, skipped, unclassified, malformed, unlabelled, notOrchestratorWork, dispatchable, emptyLanes, fullyAudited:!unclassified.length&&!malformed.length&&!unlabelled.length }
+  // A CYCLE IS NEVER STARTABLE and is invisible to an open/closed test, so it is
+  // reported as its own finding rather than as N tasks that merely look blocked.
+  const dependencyCycles = findDependencyCycles(dependencyEdges)
+  return { queues, skipped, unclassified, malformed, unlabelled, notOrchestratorWork, dependencyCycles, grandfatheredDependencies, dispatchable, emptyLanes, fullyAudited:!unclassified.length&&!malformed.length&&!unlabelled.length&&!dependencyCycles.length }
 }
 
 // RETURN PATH (AGENTS.md 0.0-C). A rejected task is forwarded to the repository
@@ -312,7 +419,7 @@ export function returnIssueToOwner(number, io, { alreadyReturned } = {}) {
   if (issue.state && String(issue.state).toLowerCase() === 'closed') throw new LaneError(`issue #${number} is already closed`)
   const scope = parseQueueScope(issue.body)
   if (!scope) throw new LaneError(`issue #${number} carries no db-work-scope block, so its owner is unknown`)
-  if (queueExit(scope.workType) !== 'reject') throw new LaneError(`issue #${number} is ${scope.workType} work, which exits by fork, not by return`)
+  if (queueExit(scope.workType) !== 'reject') throw new LaneError(`issue #${number} is ${scope.workType} work, whose exit is ${queueExit(scope.workType)}, not return`)
   if (!scope.returnTo) throw new LaneError(`issue #${number} has no return_to address; add one before returning it`)
   const priorComments = alreadyReturned ?? io.getIssueComments(number).map((comment)=>comment.body ?? '')
   const prior = priorComments.find((body)=>body.includes(RETURNED_MARKER))
@@ -346,7 +453,8 @@ export function validateClaimObjects(objects) {
   const normalized = objects.map(normalizeObject)
   if (new Set(normalized).size !== normalized.length) throw new LaneError('duplicate object claims are not allowed')
   for (const object of [...normalized]) {
-    const match = /^column ([a-z_][a-z0-9_$]*\.[a-z_][a-z0-9_$]*)\.[a-z_][a-z0-9_$]*$/.exec(object)
+    const ident = '(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")+")'
+    const match = new RegExp(`^column (${ident}\\.${ident})\\.${ident}$`).exec(object)
     if (match && !normalized.includes(`table ${match[1]}`)) normalized.push(`table ${match[1]}`)
   }
   if (!normalized.length) throw new LaneError('at least one exact object is required')
@@ -354,7 +462,7 @@ export function validateClaimObjects(objects) {
     const kind = [...CLAIM_KINDS].sort((a,b)=>b.length-a.length).find((k)=>object.startsWith(`${k} `))
     if (!kind) throw new LaneError(`unknown object kind in claim: ${object}`)
     const target = object.slice(kind.length + 1)
-    const ident = '[a-z_][a-z0-9_$]*'
+    const ident = '(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")+")'
     const qualified = new RegExp(`^${ident}\\.${ident}$`)
     const namedOn = new RegExp(`^${ident} on ${ident}\\.${ident}$`)
     if (kind === 'schema' || kind === 'publication' || kind === 'storage bucket') {
@@ -375,7 +483,7 @@ export function parseAuthorLease(body, now = new Date()) {
   const fence = /```db-author-lease\s*\n([\s\S]*?)```/.exec(body)
   if (!fence) return { ...claim, legacy: true, active: true, owner: null, branch: null, worktree: null, expiresAt: null }
   if (!/^\d{14}$/.test(String(claim.version ?? ''))) throw new LaneError('db-claim version must be exactly 14 digits')
-  if (!claim.objects.length) throw new LaneError('db-claim must list at least one exact object')
+  if (!claim.writes.length) throw new LaneError('db-claim must list at least one exact object to write')
   const fields = new Map()
   for (const raw of fence[1].split(/\r?\n/)) {
     const line = raw.trim()
@@ -409,22 +517,57 @@ export function assertLaneAvailable(claims, proposedObjects, now = new Date(), {
   return { active: occupied, stale: parsed.filter((claim) => !claim.lease.legacy && !claim.lease.active) }
 }
 
-export function claimBody({ version, objects, owner, branch, worktree, expiresAt }) {
-  return ['```db-claim', `version: ${version}`, 'objects:', ...objects.map((o) => `  - ${normalizeObject(o)}`), '```', '', '```db-author-lease', `owner: ${owner}`, `branch: ${branch}`, `worktree: ${worktree}`, `expires_at: ${expiresAt.toISOString()}`, '```', '', 'This claim remains authoritative and occupies a lane until explicitly released.', 'Expiry is an audit warning, not an automatic release. The migration version is permanent and is never reused.'].join('\n')
+export function claimBody({ version, objects, writes, reads = [], owner, branch, worktree, expiresAt }) {
+  // `objects` is the deprecated parameter name for `writes`. Accepting both keeps
+  // every existing caller working through the compatibility window; Step 8A drops
+  // the alias once no open claim uses it.
+  const written = (writes ?? objects ?? []).map((o) => normalizeObject(o))
+  const read = (reads ?? []).map((o) => normalizeObject(o)).filter((o) => !written.includes(o))
+  const lines = ['```db-claim', `version: ${version}`, 'writes:', ...written.map((o) => `  - ${o}`)]
+  // Emit `reads:` only when there is one. An always-present empty header would
+  // make every legacy claim look edited in a diff.
+  if (read.length) lines.push('reads:', ...read.map((o) => `  - ${o}`))
+  lines.push('```', '', '```db-author-lease', `owner: ${owner}`, `branch: ${branch}`, `worktree: ${worktree}`, `expires_at: ${expiresAt.toISOString()}`, '```', '',
+    'This claim remains authoritative and occupies a lane until explicitly released.',
+    'Expiry is an audit warning, not an automatic release. The migration version is permanent and is never reused.',
+    'WRITES are exclusive. READS may run in parallel with other reads, and block only against a writer.')
+  return lines.join('\n')
 }
 
 export function isTransientGitHubTransport(error) {
   return /HTTP 5\d\d|connection (?:reset|timed out)|TLS handshake timeout|No server is currently available/i.test(String(error?.stderr ?? error?.message ?? error ?? ''))
 }
-export function runGitHubCommand(args,{executor=execFileSync,wait=(ms)=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms),attempts=4}={}) {
+// An EXPECTED failure is one this code asks a question with: "does this ref
+// exist yet?" answers with HTTP 404, and "create this ref" answers with
+// "reference already exists". Both are answers, not faults, but the GitHub CLI
+// prints them to the terminal anyway, so a completely healthy run looked
+// alarming and trained everyone to ignore 404s -- which is exactly how a REAL
+// error on issue #1351 was read as more of the same noise.
+//
+// The cure must not be "swallow stderr". stderr is CAPTURED here (never
+// inherited), attached to the thrown error so the message keeps every detail,
+// and re-printed to this process's stderr for every failure that is NOT the
+// expected answer. Quieter for the answers, LOUDER for the faults: an
+// unexpected gh failure now prints gh's own stderr even when a caller catches
+// the exception.
+// Exactly the message that PROVES absence (see isConfirmedRefAbsence). A bare
+// "not found" without a 404 is ambiguous, stays a hard failure, and must stay
+// noisy.
+export const EXPECTED_REF_ABSENCE=/HTTP 404/i
+export const EXPECTED_REF_PRESENCE=/reference already exists/i
+export function runGitHubCommand(args,{executor=execFileSync,wait=(ms)=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms),attempts=4,expectedFailure=null,reportStderr=(text)=>process.stderr.write(text)}={}) {
   let last
   for(let attempt=0;attempt<attempts;attempt++){
-    try{return executor('gh',args,{encoding:'utf8',maxBuffer:64*1024*1024})}
+    try{return executor('gh',args,{encoding:'utf8',maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe']})}
     catch(error){
       last=error
       if(!isTransientGitHubTransport(error)||attempt===attempts-1){
-        const wrapped=new LaneError(`GitHub command failed: ${String(error.stderr??error.message).trim()}`)
+        const captured=String(error.stderr??'').trim()
+        const detail=captured||String(error.message??'').trim()
+        const wrapped=new LaneError(`GitHub command failed: ${detail}`)
         wrapped.transientTransport=isTransientGitHubTransport(error)
+        wrapped.stderr=captured
+        if(captured&&!(expectedFailure&&expectedFailure.test(detail)))reportStderr(`gh ${args.join(' ')}\n${captured}\n`)
         throw wrapped
       }
       wait(2**attempt*1000)
@@ -432,10 +575,10 @@ export function runGitHubCommand(args,{executor=execFileSync,wait=(ms)=>Atomics.
   }
   throw last
 }
-function gh(args) { return runGitHubCommand(args) }
+function gh(args,options) { return runGitHubCommand(args,options) }
 
 export function createRefWithReadback(ref,sha,{run=gh,readRef}={}) {
-  try{run(['api','-X','POST',`repos/${REPO}/git/refs`,'-f',`ref=${ref}`,'-f',`sha=${sha}`]);return true}
+  try{run(['api','-X','POST',`repos/${REPO}/git/refs`,'-f',`ref=${ref}`,'-f',`sha=${sha}`],{expectedFailure:EXPECTED_REF_PRESENCE});return true}
   catch(error){
     if(/reference already exists/i.test(error.message)){
       if(!readRef)return false
@@ -449,7 +592,7 @@ export function createRefWithReadback(ref,sha,{run=gh,readRef}={}) {
   }
 }
 export function deleteRefWithReadback(ref,{run=gh,readRef}={}) {
-  try{run(['api','-X','DELETE',`repos/${REPO}/git/refs/${ref.replace(/^refs\//,'')}`]);return}
+  try{run(['api','-X','DELETE',`repos/${REPO}/git/refs/${ref.replace(/^refs\//,'')}`],{expectedFailure:EXPECTED_REF_ABSENCE});return}
   catch(error){
     if(isConfirmedRefAbsence(error))return
     if(/reference does not exist/i.test(error.message)&&readRef&&readRef(ref)===null)return
@@ -458,8 +601,8 @@ export function deleteRefWithReadback(ref,{run=gh,readRef}={}) {
     throw error
   }
 }
-function ghJson(args) {
-  const raw = gh(args)
+function ghJson(args,options) {
+  const raw = gh(args,options)
   try { return JSON.parse(raw) } catch { throw new LaneError(`GitHub returned unreadable JSON for gh ${args.join(' ')}`) }
 }
 function ghPaginated(endpoint) {
@@ -487,6 +630,41 @@ export const githubIo = {
       .filter((x)=>!x.labels.some((name)=>COORDINATION_LABELS.has(name)))
   },
   openIssueNumbers() { return ghPaginated(`repos/${REPO}/issues?state=open&per_page=100`).filter((x)=>!x.pull_request).map((x)=>x.number) },
+  // DEPENDENCY STATE (Step 3, issue #1366). Fetch every REFERENCED dependency, not
+  // just the ones that happen to be open, because a nonexistent number and an
+  // unreadable issue must both BLOCK rather than release. Any failure is recorded
+  // as `unreadable` and never collapsed into "fine".
+  dependencyStates(numbers) {
+    const states = {}
+    for (const number of [...new Set((numbers ?? []).map(Number))]) {
+      let issue
+      try {
+        issue = ghJson(['api', `repos/${REPO}/issues/${number}`])
+      } catch (error) {
+        const detail = String(error?.stderr ?? error?.message ?? error)
+        // A 404 is an ANSWER: the issue does not exist. Anything else is "I could
+        // not find out", which is a different and equally blocking condition.
+        states[number] = /HTTP 404|Not Found/i.test(detail) ? { exists: false } : { exists: true, unreadable: detail }
+        continue
+      }
+      if (issue.pull_request) { states[number] = { exists: true, unreadable: `#${number} is a pull request, not a work issue` }; continue }
+      const state = { exists: true, open: issue.state === 'open', closedAt: issue.closed_at ?? null, comments: [] }
+      if (!state.open) {
+        try {
+          state.comments = ghPaginated(`repos/${REPO}/issues/${number}/comments?per_page=100`).map((c)=>({ body: c.body }))
+        } catch (error) {
+          states[number] = { exists: true, unreadable: `comments unreadable: ${String(error?.message ?? error)}` }
+          continue
+        }
+      }
+      states[number] = state
+    }
+    return states
+  },
+  mergeCommitInMain(sha) {
+    try { assertMergeCommitInMainHistory(sha, this.readRef('refs/heads/main'), this); return true }
+    catch { return false }
+  },
   prSources() { return gatherOpenPrObjects(REPO) },
   openPulls() { return ghPaginated(`repos/${REPO}/pulls?state=open&per_page=100`) },
   getPr(number) { return ghJson(['api', `repos/${REPO}/pulls/${number}`]) },
@@ -521,7 +699,9 @@ export const githubIo = {
   },
   readRef(ref) {
     const short = ref.replace(/^refs\//, '')
-    try { return ghJson(['api', `repos/${REPO}/git/ref/${short}`])?.object?.sha ?? null }
+    // Absence is an expected answer here, so gh's 404 line is not printed --
+    // see runGitHubCommand. Any OTHER failure still prints and still throws.
+    try { return ghJson(['api', `repos/${REPO}/git/ref/${short}`],{expectedFailure:EXPECTED_REF_ABSENCE})?.object?.sha ?? null }
     // Only GitHub CLI's explicit HTTP 404 proves that this exact ref is absent.
     // A transport message that merely says "not found" is ambiguous and must
     // remain a hard failure rather than being mistaken for successful cleanup.
@@ -536,15 +716,33 @@ export const githubIo = {
   // during backoff; replaying the DELETE could then remove that new owner.
   deleteRef(ref) {
     deleteRefWithReadback(ref,{
-      run:(args)=>runGitHubCommand(args,{attempts:1}),
+      run:(args,options)=>runGitHubCommand(args,{...options,attempts:1}),
       readRef:(target)=>this.readRef(target),
     })
   },
   updateRef(ref, sha) { gh(['api','-X','PATCH',`repos/${REPO}/git/refs/${ref.replace(/^refs\//,'')}`,'-f',`sha=${sha}`,'-F','force=true']) },
+  readCommitMessage(sha) { try { return ghJson(['api',`repos/${REPO}/git/commits/${sha}`]).message } catch { return null } },
+  // LIVE run state for lease recovery. `latestAttemptActive` re-reads the CURRENT
+  // attempt rather than trusting the one recorded in the lease: a re-run reuses
+  // GITHUB_RUN_ID, so a stored attempt can make a live run look finished.
+  runState(runId) {
+    try {
+      const run = ghJson(['api',`repos/${REPO}/actions/runs/${runId}`])
+      let latestAttemptActive = false
+      try {
+        const attempts = ghPaginated(`repos/${REPO}/actions/runs/${runId}/attempts?per_page=100`)
+        latestAttemptActive = attempts.some?.((attempt)=>attempt.status && attempt.status !== 'completed') ?? false
+      } catch { /* the attempts endpoint is optional; the run's own status still governs */ }
+      return { status: run.status, conclusion: run.conclusion, completedAt: run.updated_at, latestAttemptActive }
+    } catch (error) {
+      return { unreadable: String(error?.message ?? error) }
+    }
+  },
   reserveVersion() { return JSON.parse(execFileSync(process.execPath, ['scripts/check-dispatch-collision.mjs', '--reserve-version', '--json'], { encoding: 'utf8' })) },
   createClaim(title, body) { return gh(['issue', 'create', '--repo', REPO, '--label', 'db-claim', '--title', `CLAIM: ${title}`, '--body', body]).trim() },
   createIssueIn(repo, title, body) { return gh(['issue','create','--repo',repo,'--title',title,'--body',body]).trim() },
   commentIssue(number, body) { gh(['issue','comment',String(number),'--repo',REPO,'--body',body]) },
+  issueComments(number) { return ghPaginated(`repos/${REPO}/issues/${number}/comments?per_page=100`).map((c)=>({ body: c.body })) },
   closeIssue(number) { gh(['issue','close',String(number),'--repo',REPO]) },
   closeClaim(number) { gh(['issue', 'close', String(number), '--repo', REPO, '--comment', 'Expired migration-author lease closed by guarded cleanup. Its migration version remains unavailable.']) },
   reversionFiles(worktree,oldVersion) {
@@ -817,12 +1015,36 @@ export function parseReviewCursor(commit) {
   return {sequence:Number(match[1]),reviewer:match[2],issue:Number(match[3]),pr:Number(match[4]),headSha:match[5]}
 }
 
+// A reviewer assignment is filed under issue + PR + THE EXACT HEAD IT REVIEWS.
+// That head is not decoration: a verdict is only ever valid for the commit the
+// reviewer actually read, so collapsing the key to issue + PR would let one
+// reviewer's verdict silently cover code they never saw. The key stays.
+//
+// What was broken is FINDABILITY. Nothing indexed the assignments of a pull
+// request, so once a push moved the head, a perfectly good record became
+// invisible and the tool reported it "missing" -- sending people to hunt a
+// data-loss bug that did not exist (issue #1351, sequence 243 on PR #1347).
+// This lookup makes every assignment for a PR findable under any head, so the
+// tool can say what IS recorded instead of claiming nothing is.
+export function findPrReviewAssignments(issue,pr,io){
+  if(typeof io.listRefs!=='function')return null
+  const prefix=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${Number(issue)}-${Number(pr)}-`
+  return (io.listRefs(prefix)??[])
+    .map((row)=>({...parseReviewCursor(io.getCommit(row.sha)),ref:row.ref,assignmentSha:row.sha}))
+    .filter((row)=>row.issue===Number(issue)&&row.pr===Number(pr))
+    .sort((a,b)=>b.sequence-a.sequence)
+}
+
+export function describeMovedAssignmentHead(request,recorded){
+  return `the durable reviewer assignment is NOT missing: sequence=${recorded.sequence} reviewer=${recorded.reviewer} for issue #${request.issue} PR #${request.pr} is recorded under head ${recorded.headSha}, and this request names head ${request.headSha}. The PR head moved after that reviewer was assigned, so the exact code that reviewer was given is no longer this PR's head. A replacement would bind a new reviewer -- and later a verdict -- to a commit the failed reviewer never saw, so it is refused. Assign a reviewer to the current code instead: --assign-reviewer --issue ${request.issue} --pr ${request.pr} --head-sha <the PR's current head>. Nothing was lost and nothing needs reconstructing.`
+}
+
 export function assignNextReviewer({issue,pr,headSha},io=githubIo){
   if(!Number.isInteger(Number(issue))||!Number.isInteger(Number(pr))||!/^[0-9a-f]{7,40}$/i.test(String(headSha??'')))throw new LaneError('review assignment requires issue, PR, and exact head SHA')
   const request={issue:Number(issue),pr:Number(pr),headSha:String(headSha)}, ownerSha=io.makeOwnerCommit(`db-coordination reviewer-assignment-lock issue=${request.issue} pr=${request.pr} head=${request.headSha}`)
   acquireMutex(ownerSha,io)
   try{
-    const assignmentRef=`refs/db-review-assignments/${request.issue}-${request.pr}-${request.headSha}`
+    const assignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`
     const replacementBase=`${REVIEW_REPLACEMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`
     const replacementRows=io.listRefs?.(replacementBase)??[]
     const legacySha=io.readRef(replacementBase)
@@ -980,7 +1202,7 @@ export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCo
     if(!confirmLocalDependencyUnfixable)throw new LaneError(`this is a LOCAL dependency fault ("${String(failingCheck).trim()}"), not a provider fault. Fix it on this machine and retry the SAME reviewer -- a replacement spends a rotation slot and records permanent evidence against a provider that is working. If it genuinely cannot be fixed here, re-run with --confirm-local-dependency-unfixable.`)
   }else if(String(failingCheck??'').trim())throw new LaneError('--failing-check applies only to local_dependency_unavailable')
   if(!confirmNoVerdict||!confirmNoArtifact)throw new LaneError('reviewer replacement requires explicit confirmation that the failed session produced no verdict and no artifact')
-  const assignmentRef=`refs/db-review-assignments/${request.issue}-${request.pr}-${request.headSha}`
+  const assignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`
   const failureRef=`${REVIEW_FAILURE_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}-${request.failedSequence}`
   const replacementBase=`${REVIEW_REPLACEMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`
   const replacementRef=`${replacementBase}-${request.failedSequence}`
@@ -1001,7 +1223,13 @@ export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCo
       return {...parsed,wrapper:reviewer.wrapper,failureCode:String(failureCode),replacementSha:priorReplacement}
     }
     const assignmentSha=io.readRef(assignmentRef)
-    if(!assignmentSha)throw new LaneError('original durable reviewer assignment is missing')
+    if(!assignmentSha){
+      const recordedElsewhere=findPrReviewAssignments(request.issue,request.pr,io)
+      if(recordedElsewhere===null)throw new LaneError(`no durable reviewer assignment exists for issue #${request.issue} PR #${request.pr} at head ${request.headSha}`)
+      const recorded=recordedElsewhere.find((row)=>row.sequence===request.failedSequence)??recordedElsewhere[0]
+      if(recorded)throw new LaneError(describeMovedAssignmentHead(request,recorded))
+      throw new LaneError(`no durable reviewer assignment exists for issue #${request.issue} PR #${request.pr} under ANY head; --assign-reviewer was never run for this pull request, so there is nothing to replace`)
+    }
     const initial=parseReviewCursor(io.getCommit(assignmentSha))
     const replacementRows=io.listRefs?.(replacementBase)??[]
     const legacySha=io.readRef(replacementBase)
@@ -1015,7 +1243,11 @@ export function replaceFailedReviewer({issue,pr,headSha,failedSequence,failureCo
     if(!cursor||cursor.sequence<request.failedSequence)throw new LaneError('reviewer cursor is behind the failed durable assignment')
     const issueRow=io.getIssue(request.issue), prRow=io.getPr(request.pr)
     if(issueRow?.state!=='open')throw new LaneError('review replacement requires the exact issue to remain open')
-    if(prRow?.state!=='open'||prRow?.head?.sha!==request.headSha)throw new LaneError('review replacement requires the exact open PR head')
+    if(prRow?.state!=='open')throw new LaneError('review replacement requires the exact open PR head')
+    // The mirror of the lookup above: here the assignment WAS found under the
+    // head that was named, but the pull request has since moved past it. Same
+    // truth, said plainly, instead of a technicality.
+    if(prRow?.head?.sha!==request.headSha)throw new LaneError(`review replacement requires the exact open PR head: sequence=${initial.sequence} reviewer=${initial.reviewer} IS recorded for issue #${request.issue} PR #${request.pr} under head ${request.headSha}, but the pull request has since moved to head ${String(prRow?.head?.sha??'unknown')}. Nothing is missing. A push replaced the code under review, so a replacement reviewer would be bound to a commit the failed reviewer never saw. Assign a reviewer to the new code instead: --assign-reviewer --issue ${request.issue} --pr ${request.pr} --head-sha ${String(prRow?.head?.sha??'<current head>')}`)
     const evidence=[...(io.getIssueComments?.(request.issue)??[]),...(io.getIssueComments?.(request.pr)??[]),...(io.getPrReviews?.(request.pr)??[])]
     if(evidence.some((row)=>{
       const body=String(row.body??''), tied=row.commit_id===request.headSha||body.includes(request.headSha)
@@ -1406,12 +1638,199 @@ export function assertMergeCommitInMainHistory(mergeSha, mainSha, io = githubIo)
   return comparison
 }
 
+// COMPLETING WORK (Step 3, issue #1366). The ONLY way a db-work-completion record
+// is published. There is deliberately no second publishing path: two commands that
+// both post completion records is how a divergent history gets created.
+//
+// The record is re-derived, not trusted. A caller can write anything into the
+// report file; this command proves the claims against GitHub before publishing,
+// and reads the comment back before letting anyone close the issue.
+export function completeWork({ issue, report }, io = githubIo) {
+  const record = validateCompletionRecord(report)
+  if (record.work_issue !== Number(issue)) {
+    throw new DependencyError(`report is for issue #${record.work_issue} but --issue said #${issue}`)
+  }
+
+  const existing = findCompletionRecord(io.issueComments(issue))
+  if (existing) {
+    // IMMUTABLE. Never edit or replace; a second record would make the history
+    // ambiguous exactly where it must not be.
+    throw new DependencyError(`issue #${issue} already has a ${existing.outcome} completion record; completion is immutable`)
+  }
+
+  // RE-DERIVE THE EVIDENCE. A merged record claims a pull request and a merge
+  // commit; both are checkable, so neither is taken on trust.
+  if (record.outcome === 'merged') {
+    const pr = io.getPr(record.pr)
+    if (!pr?.merged_at) throw new DependencyError(`pull request #${record.pr} is not merged`)
+    // GitHub's own merge_commit_sha, which is the squash commit when the repo
+    // squashes. The source branch head is NOT what lands on main.
+    const actual = pr.merge_commit_sha
+    if (!actual || !actual.startsWith(record.merge_sha) && !record.merge_sha.startsWith(actual)) {
+      throw new DependencyError(`report merge_sha ${record.merge_sha} does not match GitHub's merge_commit_sha ${actual ?? 'none'} for PR #${record.pr}`)
+    }
+    assertMergeCommitInMainHistory(actual, io.readRef('refs/heads/main'), io)
+    const files = io.getPrFiles(record.pr) ?? []
+    const actualVersions = [...new Set(files
+      .map((file)=>/supabase\/migrations\/(\d{14})_/.exec(file.filename ?? ''))
+      .filter(Boolean).map((match)=>match[1]))].sort()
+    const declared = [...record.migration_versions].sort()
+    if (actualVersions.join(',') !== declared.join(',')) {
+      throw new DependencyError(`report migration_versions [${declared.join(', ')}] do not match the versions PR #${record.pr} actually added [${actualVersions.join(', ')}]`)
+    }
+  }
+
+  const body = [
+    'Completion record for this work. Published by `--complete-work`; immutable.',
+    '',
+    '```' + COMPLETION_FENCE,
+    JSON.stringify(record, null, 2),
+    '```',
+    '',
+    'A dependent task is released only by a `merged` or `owner-ruling-recorded` outcome.',
+  ].join('\n')
+  io.commentIssue(issue, body)
+
+  // READ BACK. An unverified write is not evidence, and the caller is about to
+  // close the issue on the strength of this.
+  const readBack = findCompletionRecord(io.issueComments(issue))
+  if (!readBack) throw new DependencyError(`completion comment was posted to #${issue} but could not be read back; do NOT close the issue`)
+  if (readBack.outcome !== record.outcome) throw new DependencyError(`completion read back as ${readBack.outcome}, expected ${record.outcome}`)
+  return readBack
+}
+
+// --- FENCED STAGE OPERATIONS (Step 6, issue #1366) -------------------------
+//
+// EVERY ONE OF THESE TAKES THE GLOBAL MUTEX FIRST. `updateRef` PATCHes with
+// force=true and no expected-sha, so there is NO Git-level compare-and-swap here:
+// the mutex is the only thing making read-then-write atomic. An unserialised
+// release could delete a ref a recovery had already replaced.
+
+/** Read the lease currently on a stage's ref, or null when the lane is free. */
+export function readExclusiveLease(kind, io = githubIo) {
+  const ref = EXCLUSIVE_REFS[kind]
+  if (!ref) throw new LaneError(`unknown exclusive lane: ${kind}`)
+  const sha = io.readRef(ref)
+  if (!sha) return null
+  const message = io.readCommitMessage?.(sha)
+  if (!message) throw new LaneError(`the lease on ${ref} is unreadable; refusing to guess who holds it`)
+  return { ...parseLeaseMessage(message), ref, sha }
+}
+
+/**
+ * Fence a side effect. Run IMMEDIATELY before every preview, merge or production
+ * write: a check performed at acquisition time proves nothing about the moment
+ * the write happens.
+ */
+export function assertExclusive(kind, expected, io = githubIo) {
+  const lease = readExclusiveLease(kind, io)
+  assertLease(lease, expected)
+  return lease
+}
+
+/**
+ * Release by HOLDER and GENERATION, not by the sha captured at acquisition.
+ *
+ * The old contract compared the ref's current sha against the acquisition sha,
+ * which every calling workflow stashed at lock time. That is exactly why a
+ * heartbeat could not be added without stranding lanes, and it is also why a
+ * recovered lane could be released by the holder it replaced. Identity is the
+ * right key; the sha is an implementation detail that legitimately moves.
+ */
+export function releaseExclusive(kind, expected, io = githubIo) {
+  const ref = EXCLUSIVE_REFS[kind]
+  if (!ref) throw new LaneError(`unknown exclusive lane: ${kind}`)
+  const ownerSha = io.makeOwnerCommit(`db-coordination ${kind} release-${randomUUID()}`)
+  acquireMutex(ownerSha, io)
+  try {
+    const lease = readExclusiveLease(kind, io)
+    if (!lease) return { kind, ref, released: false, reason: 'the lane was already free' }
+    // A legacy lease has no identity to check, so it keeps the old sha contract
+    // rather than being releasable by anyone who asks.
+    if (lease.legacy) {
+      if (!expected.ownerSha) throw new LaneError('this lane holds a pre-Step-6 lease; release it with its acquisition sha')
+      requireOwnedRef(MUTEX_REF, ownerSha, io)
+      releaseOwnedRef(ref, expected.ownerSha, io)
+      return { kind, ref, released: true, legacy: true }
+    }
+    assertLease(lease, expected)
+    requireOwnedRef(MUTEX_REF, ownerSha, io)
+    releaseOwnedRef(ref, lease.sha, io)
+    return { kind, ref, released: true, holderId: lease.holderId, generation: lease.generation }
+  } finally { if (io.readRef(MUTEX_REF) === ownerSha) releaseOwnedRef(MUTEX_REF, ownerSha, io) }
+}
+
+/**
+ * Take over a crashed job's lane.
+ *
+ * Refuses unless the recorded run is conclusively finished on a LIVE query, no
+ * later attempt or run is active, the grace has elapsed, and the ref still holds
+ * the exact lease that was evaluated. Dry run by default: a recovery that turns
+ * out to be wrong is the one failure this whole step is trying to avoid.
+ */
+export function recoverExclusive(kind, { holderId, apply = false, now = new Date(), requestId } = {}, io = githubIo) {
+  const ref = EXCLUSIVE_REFS[kind]
+  if (!ref) throw new LaneError(`unknown exclusive lane: ${kind}`)
+  if (!holderId) throw new LaneError('a recovery must name the holder taking over')
+
+  const observed = readExclusiveLease(kind, io)
+  const runState = observed?.githubRunId ? io.runState?.(observed.githubRunId) : null
+  const verdict = evaluateRecovery(observed, runState, now)
+  if (!verdict.recoverable) return { kind, ref, recovered: false, reason: verdict.reason }
+  if (!apply) return { kind, ref, recovered: false, dryRun: true, wouldRecover: true, reason: verdict.reason }
+
+  const ownerCommit = io.makeOwnerCommit(`db-coordination ${kind} recovery-${requestId ?? randomUUID()}`)
+  acquireMutex(ownerCommit, io)
+  try {
+    // RE-READ UNDER THE MUTEX. Everything above was decided outside it, so the
+    // lease could have been released or already recovered in between. Acting on
+    // the stale observation is the split-ownership bug itself.
+    const current = readExclusiveLease(kind, io)
+    if (!current) return { kind, ref, recovered: false, reason: 'the lane was released while recovery was being evaluated; nothing to recover' }
+    if (current.sha !== observed.sha || current.generation !== observed.generation) {
+      return { kind, ref, recovered: false, reason: `the lease changed while recovery was being evaluated (generation ${observed.generation} -> ${current.generation}); refusing rather than racing` }
+    }
+    const next = recoveredLeaseMetadata(current, {
+      holderId,
+      githubRunId: process.env.GITHUB_RUN_ID ?? null,
+      githubRunAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+      acquiredAt: now.toISOString(),
+      previousOwnerSha: current.sha,
+      requestId: requestId ?? randomUUID(),
+    })
+    const replacement = io.makeOwnerCommit(formatLeaseMessage(kind, next))
+    requireOwnedRef(MUTEX_REF, ownerCommit, io)
+    io.updateRef(ref, replacement)
+    const readBack = readExclusiveLease(kind, io)
+    if (readBack?.sha !== replacement || readBack.generation !== next.generation) {
+      throw new LaneError(`recovery of ${ref} did not read back; do NOT treat this lane as owned`)
+    }
+    return { kind, ref, recovered: true, holderId, generation: next.generation, previousOwnerSha: current.sha, reason: verdict.reason }
+  } finally { if (io.readRef(MUTEX_REF) === ownerCommit) releaseOwnedRef(MUTEX_REF, ownerCommit, io) }
+}
+
 export function acquireExclusive(kind, metadata, io = githubIo) {
   const ref = EXCLUSIVE_REFS[kind]
   if (!ref) throw new LaneError(`unknown exclusive lane: ${kind}`)
   if (!metadata.owner || !metadata.headSha || (kind !== 'production' && !metadata.pr)) throw new LaneError('exclusive lane requires owner, exact head SHA, and a PR number except for production')
   const requestId = metadata.requestId ?? randomUUID()
-  const ownerSha = io.makeOwnerCommit(`db-coordination ${kind} ${requestId} pr=${metadata.pr ?? 'none'} head=${metadata.headSha}`)
+  // STRUCTURED LEASE (Step 6, issue #1366). The first line keeps the exact shape
+  // recoverStaleAuthorMutex recognises; the metadata follows. A format that broke
+  // that recognition would make a crash DURING acquisition -- mutex held, exclusive
+  // ref possibly created -- permanently unrecoverable.
+  const holderId = metadata.holderId ?? metadata.owner
+  const ownerSha = io.makeOwnerCommit(formatLeaseMessage(kind, {
+    requestId,
+    holderId,
+    githubRunId: metadata.githubRunId ?? process.env.GITHUB_RUN_ID ?? null,
+    githubRunAttempt: metadata.githubRunAttempt ?? process.env.GITHUB_RUN_ATTEMPT ?? null,
+    owner: metadata.owner,
+    pr: metadata.pr,
+    headSha: metadata.headSha,
+    migrationVersions: metadata.versions ?? metadata.migrationVersions ?? [],
+    acquiredAt: (metadata.now ?? new Date()).toISOString(),
+    generation: metadata.generation ?? 1,
+  }))
   acquireMutex(ownerSha, io)
   try {
     if (kind === 'production') {
@@ -1488,7 +1907,7 @@ export function acquireExclusive(kind, metadata, io = githubIo) {
     }
     requireOwnedRef(MUTEX_REF,ownerSha,io)
     acquireRef(ref, ownerSha, io)
-    return { kind, ref, ownerSha, requestId }
+    return { kind, ref, ownerSha, requestId, holderId, generation: metadata.generation ?? 1 }
   } finally { if (io.readRef(MUTEX_REF) === ownerSha) releaseOwnedRef(MUTEX_REF, ownerSha, io) }
 }
 
@@ -1500,6 +1919,14 @@ function parseArgs(argv) {
     if (a === '--claim') out.claim = true
     else if (a === '--audit') out.audit = true
     else if (a === '--queue-audit') out.queueAudit = true
+    else if (a === '--complete-work') out.completeWork = true
+    else if (a === '--assert-exclusive') out.assertExclusive = next(i++)
+    else if (a === '--recover-exclusive') out.recoverExclusive = next(i++)
+    else if (a === '--release-exclusive') out.releaseExclusive = next(i++)
+    else if (a === '--holder-id') out.holderId = next(i++)
+    else if (a === '--generation') out.generation = Number(next(i++))
+    else if (a === '--apply-recovery') out.applyRecovery = true
+    else if (a === '--report-file') out.reportFile = argv[++i]
     else if (a === '--return-issue') out.returnIssue = Number(argv[++i])
     else if (a === '--assign-reviewer') out.assignReviewer = true
     else if (a === '--replace-failed-reviewer') out.replaceFailedReviewer = true
@@ -1546,27 +1973,113 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.assignReviewer){console.log(JSON.stringify(assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha},io),null,2));return 0}
     if (o.returnIssue) { console.log(JSON.stringify(returnIssueToOwner(o.returnIssue, io), null, 2)); return 0 }
     if (o.queueAudit) {
-      const result = buildDynamicQueues(io.openWorkIssues(), claims, now, io.openIssueNumbers())
+      const issues = io.openWorkIssues()
+      // Gather dependency state before building the queue so the pure function
+      // stays pure. Referenced numbers come from the scope blocks themselves.
+      const referenced = new Set()
+      for (const issue of issues) {
+        let scope = null
+        try { scope = parseQueueScope(issue.body) } catch { /* malformed scopes are reported by the audit itself */ }
+        for (const number of scope?.dependencies ?? []) referenced.add(number)
+      }
+      const dependencyStates = referenced.size && io.dependencyStates ? io.dependencyStates([...referenced]) : null
+      // Re-derive the merge evidence rather than trusting the record's own claim.
+      if (dependencyStates && io.mergeCommitInMain) {
+        for (const [number, state] of Object.entries(dependencyStates)) {
+          if (state.open || state.unreadable || state.exists === false) continue
+          let record = null
+          try { record = findCompletionRecord(state.comments) } catch { continue }
+          if (record?.outcome === 'merged') state.mergeInMain = io.mergeCommitInMain(record.merge_sha)
+        }
+      }
+      const result = buildDynamicQueues(issues, claims, now, io.openIssueNumbers(), dependencyStates)
       console.log(JSON.stringify(result,null,2))
       // Printed BEFORE the refill early-return: a queue with any dispatchable
       // work would otherwise hide this list entirely, which is exactly how these
       // items accumulated unseen in the first place.
       if (result.notOrchestratorWork.length) {
-        console.error('NOT ORCHESTRATOR WORK: these open issues fail the shape test (AGENTS.md 0.0-C). Reject or fork each one; never work it here.')
-        for (const item of result.notOrchestratorWork) {
+        // Split the list by what the orchestrator must DO. The single old
+        // heading told the reader to "reject or fork each one", which reads as a
+        // worklist even for items the orchestrator has no business touching.
+        const actionable = result.notOrchestratorWork.filter((item)=>!OUTSIDE_ORCHESTRATOR_EXITS.includes(item.exit))
+        const outside = result.notOrchestratorWork.filter((item)=>OUTSIDE_ORCHESTRATOR_EXITS.includes(item.exit))
+        const describe = (item) => {
           const owner = item.blockedOnOwner ? ' [blocked on owner decision]' : ''
           const address = item.exit === 'reject'
             ? (item.returnTo ? ` -> ${item.returnTo}` : ' -> NO RETURN ADDRESS: add `return_to: owner/repo` before returning it')
             : ''
-          console.error(`  #${item.issue} ${item.exit.toUpperCase()} — work_type ${item.workType}, route ${item.route}${owner}${address}`)
+          return `  #${item.issue} ${item.exit.toUpperCase()} — work_type ${item.workType}, route ${item.route}${owner}${address}`
+        }
+        if (actionable.length) {
+          console.error('NOT ORCHESTRATOR WORK: these open issues fail the shape test (AGENTS.md 0.0-C). Reject or fork each one; never work it here.')
+          for (const item of actionable) console.error(describe(item))
+        }
+        if (outside.length) {
+          // OWNER RULING 2026-08-21 (issue #1366): the orchestrator handles
+          // structure and schema only. These rows are listed so an audit can see
+          // them and so nothing accumulates unseen - NOT so the orchestrator can
+          // pick them up. There is no orchestrator action for any of them.
+          console.error('OUTSIDE ORCHESTRATOR — OWNED BY REPO SESSION: listed for audit visibility only (owner ruling 2026-08-21, issue #1366). The orchestrator does structure/schema only. Do NOT work these and do NOT dispatch them; a separately started session owns them.')
+          for (const item of outside) console.error(describe(item))
         }
         const unaddressed = result.notOrchestratorWork.filter((item)=>item.needsReturnAddress)
         if (unaddressed.length) console.error(`NO RETURN ADDRESS on ${unaddressed.map((item)=>`#${item.issue}`).join(', ')} — a reject with no forwarding address closes into silence. Return each with --return-issue <n> once addressed.`)
       }
+      // A CYCLE CAN NEVER START. Reported separately from "blocked", because a
+      // blocked task is waiting for something and a cycle is waiting for itself.
+      if (result.dependencyCycles.length) {
+        console.error('DEPENDENCY CYCLE: these issues can never start, because each waits on the next. Break the cycle by removing one depends_on edge.')
+        for (const cycle of result.dependencyCycles) console.error(`  ${cycle.map((n)=>`#${n}`).join(' -> ')}`)
+      }
+      // Print WHY a dependency blocked. "depends-on-open:12" was the whole
+      // diagnostic before; an invalid or unsuccessfully-completed dependency now
+      // says so in words, because those are the cases that used to release work.
+      if (result.grandfatheredDependencies?.length) {
+        console.error('GRANDFATHERED DEPENDENCIES: closed before completion records were required, so accepted without proof. Countable on purpose; Step 8A retires the cutoff when this list is empty.')
+        for (const row of result.grandfatheredDependencies) console.error(`  #${row.issue} — ${row.detail}`)
+      }
+      const dependencyBlocked = result.skipped.filter((row)=>row.detail)
+      if (dependencyBlocked.length) {
+        console.error('DEPENDENCIES NOT PROVEN: closure alone is not success (Step 3, issue #1366).')
+        for (const row of dependencyBlocked) console.error(`  #${row.issue} — ${row.detail}`)
+      }
       if (result.dispatchable.length) { console.error(`REFILL REQUIRED NOW: dispatch issue(s) ${result.dispatchable.map((n)=>`#${n}`).join(', ')}`); return 2 }
       if (result.unlabelled.length) console.error(`UNLABELLED ISSUES: add the \`${WORK_LABEL}\` label to ${result.unlabelled.map((n)=>`#${n}`).join(', ')} — an unlabelled issue is invisible to every label-filtered query`)
       if (result.emptyLanes && !result.fullyAudited) { console.error('EMPTY LANE NOT PROVEN: classify and label every open issue before claiming no eligible work exists'); return 2 }
-      return result.malformed.length || result.unlabelled.length || result.notOrchestratorWork.some((item)=>item.needsReturnAddress) ? 2 : 0
+      return result.malformed.length || result.unlabelled.length || result.dependencyCycles.length || result.notOrchestratorWork.some((item)=>item.needsReturnAddress) ? 2 : 0
+    }
+    if (o.assertExclusive) {
+      const lease = assertExclusive(o.assertExclusive, {
+        holderId: o.holderId, generation: o.generation, kind: o.assertExclusive,
+        headSha: o.headSha, pr: o.pr ? Number(o.pr) : undefined,
+      }, io)
+      console.log(JSON.stringify({ kind: o.assertExclusive, holderId: lease.holderId, generation: lease.generation, headSha: lease.headSha }, null, 2))
+      return 0
+    }
+    if (o.releaseExclusive) {
+      const result = releaseExclusive(o.releaseExclusive, { holderId: o.holderId, generation: o.generation, ownerSha: o.ownerSha }, io)
+      console.log(JSON.stringify(result, null, 2))
+      return 0
+    }
+    if (o.recoverExclusive) {
+      // DRY RUN BY DEFAULT. A recovery that turns out to be wrong produces the
+      // split ownership this whole step exists to prevent.
+      const result = recoverExclusive(o.recoverExclusive, { holderId: o.holderId, apply: Boolean(o.applyRecovery) }, io)
+      console.log(JSON.stringify(result, null, 2))
+      if (!result.recovered && !result.dryRun) { console.error(`RECOVERY REFUSED: ${result.reason}`); return 1 }
+      if (result.dryRun) console.error(`DRY RUN — would recover: ${result.reason}. Re-run with --apply-recovery to take the lane.`)
+      return 0
+    }
+    if (o.completeWork) {
+      if (!o.issue) throw new LaneError('--complete-work requires --issue <n>')
+      if (!o.reportFile) throw new LaneError('--complete-work requires --report-file <path>')
+      let report
+      try { report = JSON.parse(readFileSync(o.reportFile, 'utf8')) }
+      catch (error) { throw new LaneError(`--report-file is not readable JSON: ${error.message}`) }
+      const published = completeWork({ issue: Number(o.issue), report }, io)
+      console.log(JSON.stringify(published, null, 2))
+      console.error(`Completion recorded on #${o.issue} as ${published.outcome}. You may now close the issue.`)
+      return 0
     }
     if (o.releaseClaim) {
       if (!o.confirmFinished || !o.owner) throw new LaneError('--release-claim requires exact --owner and --confirm-finished')
