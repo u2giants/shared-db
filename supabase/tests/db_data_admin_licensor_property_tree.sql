@@ -13,6 +13,7 @@ declare
   v_search text;
   v_base integer := -1000000000 + floor(random() * 100000)::integer * 10000;
   v_role_id uuid;
+  v_licensing_role_id uuid;
   v_admin_profile uuid;
   v_admin_auth uuid;
   v_denied_profile uuid;
@@ -93,6 +94,27 @@ begin
   exception when insufficient_privilege then null;
   end;
 
+  -- Prove the intended narrow path too: licensing role plus PLM access can
+  -- reach this RPC without receiving the broader administrator role.
+  select r.id into v_licensing_role_id
+  from app.role r where r.slug = 'licensing'::app.app_role;
+  if v_licensing_role_id is null then
+    raise exception 'fixture requires the licensing role';
+  end if;
+  delete from app.user_role
+  where profile_id = v_denied_profile and role_id = v_licensing_role_id;
+  delete from app.app_access
+  where profile_id = v_denied_profile and app = 'plm';
+  insert into app.user_role (profile_id, role_id)
+  values (v_denied_profile, v_licensing_role_id);
+  insert into app.app_access (profile_id, app)
+  values (v_denied_profile, 'plm');
+  begin
+    perform api.db_data_admin_licensor_property_tree(v_search, true, null, 2);
+  exception when insufficient_privilege then
+    raise exception 'licensing manager with PLM access was denied';
+  end;
+
   perform set_config('request.jwt.claim.sub', v_admin_auth::text, true);
   begin
     perform api.db_data_admin_licensor_property_tree(v_search, true, null, 2);
@@ -148,6 +170,10 @@ begin
   loop
     select api.db_data_admin_licensor_property_tree(v_search, true, v_cursor, 2) into v_page;
     v_pages := v_pages + 1;
+    if jsonb_array_length(v_page -> 'orphan_properties') <> 1
+       or (v_page -> 'orphan_properties' -> 0 ->> 'id')::integer <> v_orphan_id then
+      raise exception 'complete orphan collection was not returned on page %', v_pages;
+    end if;
     v_all := v_all || (v_page -> 'licensors');
     v_cursor := v_page ->> 'next_cursor';
     exit when v_cursor is null;
@@ -187,11 +213,6 @@ begin
   from jsonb_array_elements(v_all) l;
   if v_property_count <> 3 then
     raise exception 'PROPERTY-only fixture expected three nested rows, got %', v_property_count;
-  end if;
-
-  if jsonb_array_length(v_page -> 'orphan_properties') <> 1
-     or (v_page -> 'orphan_properties' -> 0 ->> 'id')::integer <> v_orphan_id then
-    raise exception 'complete orphan collection was not returned on every page';
   end if;
 
   select count(*)::integer into v_live_licensors from core."licenseList";
