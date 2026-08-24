@@ -11,9 +11,9 @@ export const HISTORICAL_RESTORATIONS = Object.freeze({
     previewProject: 'mvpkijzfmfcxhnzqogzs',
     creatorSha256: '7f4d74d1ffa4d74b239be01bcfa4261610d2107a08f2e3d967feede858b5a96c',
     statementCount: 1,
-    statementBytes: 16170,
-    statementSha256: '9f9ab6f638caed2ae1fe430253a3120c31f3f63fdbe32b54a6a4a96d5520bf3c',
-    fileSha256: '106a23da6a15590c0e38309d2b1b213cf49900e3eeb3e5021afd0e1c5ceff6f9',
+    statementBytes: 15811,
+    statementSha256: 'fa01a4f5cf7a944bfbba2faa0176a696beca64bb69e838869a8e085019a1ab77',
+    fileSha256: '5e9829b2cab7f0462804acce18bccf0d65b9c88363e9e54290581513047f4a52',
     objects: Object.freeze([
       'function dflow.post_sample_piece_split',
       'function dflow.validate_sample_movement_shipment_identity',
@@ -38,10 +38,11 @@ export const HISTORICAL_RESTORATIONS = Object.freeze({
 export function validateHistoricalRestorationFile(filename, raw) {
   const version=path.basename(filename).slice(0,14), record=HISTORICAL_RESTORATIONS[version]
   if(!record||filename.replaceAll('\\','/')!==record.filename)throw new Error('file is not an approved exact historical restoration')
-  const digest=createHash('sha256').update(raw,'utf8').digest('hex')
+  const governedRaw=raw.replaceAll('\r\n','\n')
+  const digest=createHash('sha256').update(governedRaw,'utf8').digest('hex')
   if(digest!==record.fileSha256)throw new Error(`historical restoration file hash mismatch for ${version}`)
-  const statement=raw.endsWith('\n')?raw.slice(0,-1):raw
-  if(raw!==`${statement}\n`||Buffer.byteLength(statement)!==record.statementBytes||createHash('sha256').update(statement,'utf8').digest('hex')!==record.statementSha256)throw new Error(`historical restoration statement bytes mismatch for ${version}`)
+  const statement=governedRaw.endsWith('\n')?governedRaw.slice(0,-1):governedRaw
+  if(governedRaw!==`${statement}\n`||Buffer.byteLength(statement)!==record.statementBytes||createHash('sha256').update(statement,'utf8').digest('hex')!==record.statementSha256)throw new Error(`historical restoration statement bytes mismatch for ${version}`)
   return record
 }
 

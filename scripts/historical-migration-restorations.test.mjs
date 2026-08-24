@@ -15,8 +15,8 @@ test('pins the Sample Tracking preview ledger restoration byte for byte',()=>{
   const row=HISTORICAL_RESTORATIONS['20260824150630']
   assert.equal(row.name,'sample_tracking_piece_split_and_transit_return')
   assert.equal(row.previewProject,'mvpkijzfmfcxhnzqogzs')
-  assert.equal(row.fileSha256,'106a23da6a15590c0e38309d2b1b213cf49900e3eeb3e5021afd0e1c5ceff6f9')
-  assert.equal(row.statementBytes,16170)
+  assert.equal(row.fileSha256,'5e9829b2cab7f0462804acce18bccf0d65b9c88363e9e54290581513047f4a52')
+  assert.equal(row.statementBytes,15811)
   assert.equal(validateHistoricalRestorationFile(row.filename,readFileSync(row.filename,'utf8')),row)
 })
 
