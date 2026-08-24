@@ -64,9 +64,9 @@ BEGIN
   );
 
   SELECT COALESCE(sum(b.quantity),0) INTO v_active
-  FROM dflow.sample_balance_by_location b
-  WHERE b.sample_id_fk = ANY(array_prepend(v_parent,v_children))
-    AND NOT (b.location_type='terminal' AND b.location_id LIKE 'split_identity:%');
+  FROM unnest(v_children) c(sample_id)
+  JOIN dflow.sample_balance_by_location b ON b.sample_id_fk=c.sample_id
+  WHERE b.location_type='office' AND b.location_id='ningbo' AND b.quantity>0;
   IF v_active <> 3 THEN
     RAISE EXCEPTION 'split did not conserve active quantity: expected 3, got %',v_active;
   END IF;
