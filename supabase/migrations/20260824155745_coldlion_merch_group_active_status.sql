@@ -85,7 +85,7 @@ security definer
 set search_path = pg_catalog, plm
 as $$
 declare
-  v_run uuid := gen_random_uuid();
+  v_run uuid;
   v_snapshot uuid;
   v_source integer := 0;
   v_linked integer := 0;
@@ -97,11 +97,33 @@ declare
   v_hash text;
 begin
   if p_is_drill then raise exception 'ColdLion status promotion does not accept drill writes'; end if;
-  perform pg_advisory_xact_lock(720260729);
+  if not pg_try_advisory_xact_lock(720260729) then
+    insert into ingest.sync_run(source_system,source_name,status,started_at,finished_at,metadata)
+    values('coldlion','coldlion_licensors_properties_promote_source_owned','cancelled',now(),now(),
+           jsonb_build_object('mode','skipped_already_running','outcome','skipped_already_running'))
+    returning id into v_run;
+    return query select v_run,'skipped_already_running'::text,0,0,0,0,0,0,0,0;
+    return;
+  end if;
+  if plm.taxonomy_circuit_breaker_is_open('coldlion_licensor_property') then
+    raise exception 'ColdLion status promotion refused: taxonomy circuit breaker is tripped';
+  end if;
+  if p_expected is null or jsonb_typeof(p_expected)<>'object'
+     or lower(btrim(coalesce(p_expected->>'hash',''))) <> '1230f5a12d0f2a3029f1d3df17fc5b5f'
+     or btrim(coalesce(p_expected->>'count','')) <> '542'
+     or btrim(coalesce(p_expected->>'distinct_canonical','')) <> '271' then
+    raise exception 'ColdLion status promotion refused: expected contract does not match the approved Phase 4 link set';
+  end if;
   select id into v_snapshot from ingest.sync_run
    where source_name='coldlion_licensors_properties_api' and status='succeeded'
    order by started_at desc nulls last limit 1;
   if v_snapshot is null then raise exception 'no successful ColdLion mirror snapshot exists'; end if;
+
+  insert into ingest.sync_run(source_system,source_name,status,started_at,metadata)
+  values('coldlion','coldlion_licensors_properties_promote_source_owned','running',now(),
+         jsonb_build_object('mode','coldlion_status','snapshot_run_id',v_snapshot,
+                            'failure_recording','runner_out_of_band'))
+  returning id into v_run;
 
   drop table if exists pg_temp.coldlion_status_decision;
   create temporary table coldlion_status_decision on commit drop as
@@ -147,6 +169,14 @@ begin
     v_changed := v_changed + 1;
   end loop;
 
+  update ingest.sync_run
+     set status = 'succeeded', finished_at = now(),
+         rows_seen = v_source, rows_updated = v_changed, rows_failed = 0,
+         metadata = metadata || jsonb_build_object(
+           'linked_rows',v_linked,'status_changes',v_changed,
+           'unchanged_rows',v_unchanged,'quarantined_rows',v_quarantined)
+   where id = v_run;
+
   return query select v_run, 'coldlion_status'::text, v_source, v_linked, v_changed,
     0, 0, v_unchanged, v_quarantined, 0;
 end
@@ -170,4 +200,4 @@ revoke all on function public.promote_coldlion_source_owned(jsonb,jsonb,boolean)
 grant execute on function public.promote_coldlion_source_owned(jsonb,jsonb,boolean) to service_role;
 
 comment on function plm.promote_coldlion_source_owned(jsonb,jsonb,boolean) is
-  'Issue #1429 status-only ColdLion promotion. Applies unanimous current active flags only for approved typed identities. Conflicting division arms, null historical flags, unresolved identities, and rows with durable owner rulings abstain. Uses transaction-bound exact-column licensing authorizations; never changes names, codes, UUIDs, parents, metadata, or row counts.';
+  'Issue #1429 status-only ColdLion promotion. Applies unanimous current active flags only for approved typed identities. Conflicting division arms, null historical flags, unresolved identities, and rows with durable owner rulings abstain. Uses transaction-bound exact-column licensing authorizations; never changes names, codes, UUIDs, parents, metadata, or row counts. Successful cycles update their ingest.sync_run in-band. Failures propagate without a body-level handler: tools/promote-coldlion-source-owned.mjs owns durable separate-transaction failure evidence through record_taxonomy_sync_alert and buildFailedSyncRunSql.';
