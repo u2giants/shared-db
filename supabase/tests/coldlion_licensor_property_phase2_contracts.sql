@@ -48,6 +48,7 @@ declare
   v_term_bad text;
   v_has_exec_service boolean;
   v_has_exec_auth boolean;
+  v_active_contract jsonb;
 begin
   -- Baseline canonical + source-ref counts (must be unchanged by every mirror_only call).
   select count(*) into v_lic_count_before from core.licensor;
@@ -382,8 +383,9 @@ begin
   --    partial mirror work. Each uses a unique code (P2A-BAD-*) that must NOT appear.
   -- ---------------------------------------------------------------------------------
   begin
+    v_active_contract := v_snap;
     perform plm.sync_coldlion_licensors_properties(
-      jsonb_set(v_snap, '{details,0}', (v_snap #> '{details,0}') - 'active'), 'mirror_only');
+      jsonb_set(v_active_contract, '{details,0}', (v_active_contract #> '{details,0}') - 'active'), 'mirror_only');
     raise exception 'missing active accepted';
   exception when others then
     if position('active as a JSON boolean' in sqlerrm) = 0 then raise; end if;
@@ -391,7 +393,7 @@ begin
 
   begin
     perform plm.sync_coldlion_licensors_properties(
-      jsonb_set(v_snap, '{details,0,active}', to_jsonb('yes'::text)), 'mirror_only');
+      jsonb_set(v_active_contract, '{details,0,active}', to_jsonb('yes'::text)), 'mirror_only');
     raise exception 'non-boolean active accepted';
   exception when others then
     if position('active as a JSON boolean' in sqlerrm) = 0 then raise; end if;
