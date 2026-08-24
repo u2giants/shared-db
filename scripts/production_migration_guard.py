@@ -110,11 +110,17 @@ HARD_BLOCKED = {
     # replacement; this historical version itself must never run.
     "20260814224937",
     # RETIRED and NEVER APPLIED. The companion to 20260814224937: it backfills
-    # and guards plm.source_resolution, so its first INSERT fails 42P01 without
-    # that retired version's table. It cannot be rescued by applying the pair,
-    # because the pair is exactly what issue #1374 made impossible. The same
-    # future workstream that authors the safe source-resolution replacement
-    # supersedes this file; this historical version itself must never run.
+    # and guards plm.source_resolution, so its first reference to that table --
+    # the conflict-gate join at line 152, before any INSERT -- fails 42P01
+    # without the retired version's table. It cannot be rescued by applying the
+    # pair, because the pair is exactly what issue #1374 made impossible, and it
+    # cannot be rescued by a replacement either: any replacement sorts ABOVE
+    # this version, so ordered application always runs this file first. Were it
+    # somehow to run after one, it would clobber it -- blanking resolution
+    # columns, rebuilding api.opa_property_reconciliation from the old body and
+    # installing its own trigger set. The same future workstream that authors
+    # the safe source-resolution replacement supersedes this file; this
+    # historical version itself must never run.
     "20260814233423",
     # RETIRED and NEVER APPLIED, and unsafe in a way no post-apply check can
     # see. It is a whole-view `create or replace` of api.source_capture_inventory

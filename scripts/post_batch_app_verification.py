@@ -354,9 +354,10 @@ RETIRED_VERSION_REASONS = {
         "after issue 1374 retires the empty Universe A character tables"
     ),
     "20260814233423": (
-        "never applied; it cannot run without the objects created by the retired "
-        "20260814224937 and inherits that version's obsolete core.character "
-        "dependency; a replacement source-resolution workstream supersedes both"
+        "never applied; it cannot run without plm.source_resolution from the "
+        "retired 20260814224937, and no replacement can rescue it because every "
+        "replacement sorts above this version; a future source-resolution "
+        "workstream supersedes both"
     ),
     "20260814233342": (
         "never applied and fully superseded; it replaces api.source_capture_inventory "
