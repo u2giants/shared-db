@@ -843,8 +843,12 @@ begin
       -- A same-name renewal over a still-LIVE lease keeps the incumbent receipt in
       -- both of those states as well; see THE SAME-NAME RENEWAL TRAP below.
       -- ----------------------------------------------------------------------
-      if v_stored_proof is null then
-        -- Nobody has ever held this lease: establish it.
+      if v_stored_proof is null
+         and (v_stored_batch is null or v_stored_live) then
+        -- Nobody has ever held this lease: establish it, except for a legacy
+        -- completed/non-live job that is already bound. Such a row predates claim
+        -- receipts, and issuing its first receipt now would hand terminal-clear
+        -- authority to whichever authenticated caller arrived first.
         v_lease_token := gen_random_uuid()::text;
         v_minted      := true;
       elsif v_stored_batch is null then
@@ -961,7 +965,9 @@ comment on function public.update_bulk_operation(text, jsonb, text, bigint, text
   'phase = ambiguous_submission in a legacy payload is not accepted as proof of reconciliation. '
   'A receipt-proven guarded call may remove external_job only when it carries the exact stored job with '
   'phase=completed, the same provider_batch_id, the current revision, its lease_token, and '
-  'clear_after_reconciliation=true. Failed clear proofs raise 55000 and do not mutate state. '
+  'clear_after_reconciliation=true. The worker must retain that one-time receipt until clear; completed '
+  'jobs never re-mint, including legacy bound rows that predate receipts, so lost or absent proof fails closed. '
+  'Failed clear proofs raise 55000 and do not mutate state. '
   'See u2giants/shared-db#1171, u2giants/shared-db#1211, and u2giants/popdam3#92.';
 
 revoke execute on function public.update_bulk_operation(text, jsonb, text, bigint, text, integer)

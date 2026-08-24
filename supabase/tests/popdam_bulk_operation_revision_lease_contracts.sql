@@ -2060,6 +2060,38 @@ begin
   -- =================================================================================
   -- 18. RECEIPT-PROVEN TERMINAL CLEAR (issue #1211)
   -- =================================================================================
+  -- A legacy completed job can be bound without any receipt digest. A later claim
+  -- must not mint its first receipt: doing so would grant terminal-clear authority
+  -- to whichever authenticated process arrived first.
+  update admin_config
+     set value = jsonb_set(value, array['terminal-clear-legacy'], jsonb_build_object(
+           'status', 'completed',
+           'state_revision', 3,
+           'external_job', jsonb_build_object(
+             'phase', 'completed',
+             'run_id', 'run-terminal-clear-legacy',
+             'provider_batch_id', 'batch_terminal_clear_legacy')))
+   where key = 'BULK_OPERATIONS';
+  select value -> 'terminal-clear-legacy' -> 'external_job' into v_job
+  from admin_config where key = 'BULK_OPERATIONS';
+  v_out := public.update_bulk_operation(
+    'terminal-clear-legacy',
+    jsonb_build_object('status', 'completed', 'external_job', v_job),
+    null,
+    3,
+    'legacy-takeover',
+    120);
+  if (v_out ->> 'ok')::boolean is not true
+     or (v_out ->> 'lease_receipt_issued')::boolean is not false
+     or v_out ->> 'lease_token' is not null then
+    raise exception 'a proof-less legacy completed job minted terminal-clear authority: %', v_out;
+  end if;
+  select value -> 'terminal-clear-legacy' into v_stored
+  from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored -> 'external_job' ? 'lease_proof' then
+    raise exception 'a proof-less legacy completed job gained a receipt digest: %', v_stored;
+  end if;
+
   update admin_config
      set value = jsonb_set(value, array['terminal-clear'], jsonb_build_object(
            'status', 'completed',
