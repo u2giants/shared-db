@@ -183,10 +183,10 @@ begin
     v_snap_rename jsonb := $snap${
       "companyCode": "EDGEHOME",
       "headers": [
-        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor"},
-        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property"},
-        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor"},
-        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property"}
+        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","active":true}
       ],
       "pairs": [
         {"divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","entityType":"licensor"},
@@ -195,10 +195,10 @@ begin
         {"divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","entityType":"property"}
       ],
       "details": [
-        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-RENAME","mgDesc":"Renamed Original","mgTypeDesc":"Licensor"},
-        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgCode":"P2A-PROPR","mgDesc":"Prop R","mgTypeDesc":"Property"},
-        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgCode":"P2A-RENAME-SP","mgDesc":"Renamed SP","mgTypeDesc":"Licensor"},
-        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgCode":"P2A-PROPR-SP","mgDesc":"Prop R SP","mgTypeDesc":"Property"}
+        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-RENAME","mgDesc":"Renamed Original","mgTypeDesc":"Licensor","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgCode":"P2A-PROPR","mgDesc":"Prop R","mgTypeDesc":"Property","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgCode":"P2A-RENAME-SP","mgDesc":"Renamed SP","mgTypeDesc":"Licensor","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgCode":"P2A-PROPR-SP","mgDesc":"Prop R SP","mgTypeDesc":"Property","active":true}
       ],
       "pages": [
         {"divisionCode":"CW001","mgTypeCode":"05","pagesFetched":1,"terminalReached":true,"rowCount":1},
@@ -252,10 +252,10 @@ begin
     v_snap_lapsed jsonb := $snap${
       "companyCode": "EDGEHOME",
       "headers": [
-        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor"},
-        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property"},
-        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor"},
-        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property"}
+        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","active":true}
       ],
       "pairs": [
         {"divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","entityType":"licensor"},
@@ -264,10 +264,10 @@ begin
         {"divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","entityType":"property"}
       ],
       "details": [
-        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-LAPSED","mgDesc":"Lapsed Licensor","mgTypeDesc":"Licensor"},
-        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgCode":"P2A-LAPSED-P","mgDesc":"Lapsed Fixture Property","mgTypeDesc":"Property"},
-        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgCode":"P2A-LAPSED-SP","mgDesc":"Lapsed Fixture Licensor SP","mgTypeDesc":"Licensor"},
-        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgCode":"P2A-LAPSED-P-SP","mgDesc":"Lapsed Fixture Property SP","mgTypeDesc":"Property"}
+        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-LAPSED","mgDesc":"Lapsed Licensor","mgTypeDesc":"Licensor","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgCode":"P2A-LAPSED-P","mgDesc":"Lapsed Fixture Property","mgTypeDesc":"Property","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgCode":"P2A-LAPSED-SP","mgDesc":"Lapsed Fixture Licensor SP","mgTypeDesc":"Licensor","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgCode":"P2A-LAPSED-P-SP","mgDesc":"Lapsed Fixture Property SP","mgTypeDesc":"Property","active":true}
       ],
       "pages": [
         {"divisionCode":"CW001","mgTypeCode":"05","pagesFetched":1,"terminalReached":true,"rowCount":1},
@@ -307,10 +307,10 @@ begin
   perform plm.sync_coldlion_licensors_properties($snap${
     "companyCode":"EDGEHOME",
     "headers":[
-      {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor"},
-      {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property"},
-      {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor"},
-      {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property"}
+      {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true},
+      {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property","active":true},
+      {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true},
+      {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","active":true}
     ],
     "pairs":[
       {"divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","entityType":"licensor"},
@@ -319,10 +319,10 @@ begin
       {"divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","entityType":"property"}
     ],
     "details":[
-      {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-1","mgDesc":"Alpha Licensor","mgTypeDesc":"Licensor"},
-      {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgCode":"P2A-2","mgDesc":"Alpha Property","mgTypeDesc":"Property"},
-      {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgCode":"P2A-1","mgDesc":"Alpha Licensor SP","mgTypeDesc":"Licensor"},
-      {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgCode":"P2A-3","mgDesc":"Bravo Property SP","mgTypeDesc":"Property"}
+      {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-1","mgDesc":"Alpha Licensor","mgTypeDesc":"Licensor","active":true},
+      {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgCode":"P2A-2","mgDesc":"Alpha Property","mgTypeDesc":"Property","active":true},
+      {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgCode":"P2A-1","mgDesc":"Alpha Licensor SP","mgTypeDesc":"Licensor","active":true},
+      {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgCode":"P2A-3","mgDesc":"Bravo Property SP","mgTypeDesc":"Property","active":true}
     ],
     "pages":[
       {"divisionCode":"CW001","mgTypeCode":"05","pagesFetched":1,"terminalReached":true,"rowCount":1},
@@ -388,7 +388,7 @@ begin
 
   begin
     perform plm.sync_coldlion_licensors_properties(jsonb_build_object('companyCode','EDGEHOME',
-      'headers','[{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor"}]'::jsonb,
+      'headers','[{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true}]'::jsonb,
       'pairs','[{"divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","entityType":"licensor"}]'::jsonb,
       'details','[]'::jsonb,'pages','[]'::jsonb), 'mirror_only');
     raise exception 'empty details accepted';
@@ -398,9 +398,9 @@ begin
   begin
     perform plm.sync_coldlion_licensors_properties($snap${
       "companyCode":"EDGEHOME",
-      "headers":[{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor"},{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property"},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor"},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property"}],
+      "headers":[{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true},{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property","active":true},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","active":true}],
       "pairs":[{"divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","entityType":"licensor"},{"divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property","entityType":"property"},{"divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor","entityType":"licensor"},{"divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","entityType":"property"}],
-      "details":[{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-BAD-PAGE","mgDesc":"X","mgTypeDesc":"Licensor"}],
+      "details":[{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-BAD-PAGE","mgDesc":"X","mgTypeDesc":"Licensor","active":true}],
       "pages":[{"divisionCode":"CW001","mgTypeCode":"05","pagesFetched":2,"terminalReached":false,"rowCount":1}],
       "config":{"headerDivisions":["CW001","SP001"],"requiredDivisions":["CW001","SP001"],"licensorFloor":1,"propertyFloor":1,"maxCountDropPct":50},"prior":null
     }$snap$, 'mirror_only');
@@ -411,9 +411,9 @@ begin
   begin
     perform plm.sync_coldlion_licensors_properties($snap${
       "companyCode":"EDGEHOME",
-      "headers":[{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor"},{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property"},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor"},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property"},{"companyCode":"EDGEHOME","divisionCode":"EH001","mgTypeCode":"05","mgTypeDesc":"Big Theme"}],
+      "headers":[{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true},{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property","active":true},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","active":true},{"companyCode":"EDGEHOME","divisionCode":"EH001","mgTypeCode":"05","mgTypeDesc":"Big Theme"}],
       "pairs":[{"divisionCode":"EH001","mgTypeCode":"05","mgTypeDesc":"Big Theme","entityType":"licensor"},{"divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","entityType":"licensor"},{"divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property","entityType":"property"},{"divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor","entityType":"licensor"},{"divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","entityType":"property"}],
-      "details":[{"companyCode":"EDGEHOME","divisionCode":"EH001","mgTypeCode":"05","mgCode":"P2A-BAD-SEM","mgDesc":"Big","mgTypeDesc":"Licensor"}],
+      "details":[{"companyCode":"EDGEHOME","divisionCode":"EH001","mgTypeCode":"05","mgCode":"P2A-BAD-SEM","mgDesc":"Big","mgTypeDesc":"Licensor","active":true}],
       "pages":[
         {"divisionCode":"CW001","mgTypeCode":"05","entityType":"licensor","pagesFetched":1,"terminalReached":true,"rowCount":1},
         {"divisionCode":"CW001","mgTypeCode":"06","entityType":"property","pagesFetched":1,"terminalReached":true,"rowCount":1},
@@ -430,9 +430,9 @@ begin
   begin
     perform plm.sync_coldlion_licensors_properties($snap${
       "companyCode":"EDGEHOME",
-      "headers":[{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor"},{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property"},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor"},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property"}],
+      "headers":[{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true},{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property","active":true},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","active":true}],
       "pairs":[{"divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","entityType":"licensor"},{"divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property","entityType":"property"},{"divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor","entityType":"licensor"},{"divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","entityType":"property"}],
-      "details":[{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-BAD-DUP","mgDesc":"One","mgTypeDesc":"Licensor"},{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-BAD-DUP","mgDesc":"Two","mgTypeDesc":"Licensor"}],
+      "details":[{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-BAD-DUP","mgDesc":"One","mgTypeDesc":"Licensor","active":true},{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-BAD-DUP","mgDesc":"Two","mgTypeDesc":"Licensor","active":true}],
       "pages":[
         {"divisionCode":"CW001","mgTypeCode":"05","entityType":"licensor","pagesFetched":1,"terminalReached":true,"rowCount":2},
         {"divisionCode":"CW001","mgTypeCode":"06","entityType":"property","pagesFetched":1,"terminalReached":true,"rowCount":0},
@@ -448,11 +448,11 @@ begin
   begin
     perform plm.sync_coldlion_licensors_properties($snap${
       "companyCode":"EDGEHOME",
-      "headers":[{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor"},{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property"},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor"},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property"}],
+      "headers":[{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true},{"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property","active":true},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor","active":true},{"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","active":true}],
       "pairs":[{"divisionCode":"CW001","mgTypeCode":"05","mgTypeDesc":"Licensor","entityType":"licensor"},{"divisionCode":"CW001","mgTypeCode":"06","mgTypeDesc":"Property","entityType":"property"},{"divisionCode":"SP001","mgTypeCode":"05","mgTypeDesc":"Licensor","entityType":"licensor"},{"divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","entityType":"property"}],
       "details":[
-        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-BAD-DROP","mgDesc":"Only One","mgTypeDesc":"Licensor"},
-        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgCode":"P2A-BAD-DROP-P","mgDesc":"Only Prop","mgTypeDesc":"Property"}
+        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-BAD-DROP","mgDesc":"Only One","mgTypeDesc":"Licensor","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgCode":"P2A-BAD-DROP-P","mgDesc":"Only Prop","mgTypeDesc":"Property","active":true}
       ],
       "pages":[
         {"divisionCode":"CW001","mgTypeCode":"05","entityType":"licensor","pagesFetched":1,"terminalReached":true,"rowCount":1},
