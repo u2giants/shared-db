@@ -29,13 +29,13 @@ ad-hoc query someone runs by hand. Worth fixing; not an outage.
 **A seventh migration is in the same state and was not on the list:**
 `20260814224937_source_resolution_durable_home`. It is **already formally retired** in this repo's
 own guard scripts (`RETIRED_VERSION_REASONS`, `HARD_BLOCKED`) — a recorded ruling that it must never
-run. Item 6 depends on it and inherits that ruling.
+run. Item 4 below depends on it and inherits that ruling.
 
-**The cheapest and highest-value fix in this whole audit takes minutes and touches no database:**
-two of these versions — `20260814233342` and `20260814233423` — appear **nowhere** in the guard
-scripts. They currently classify as `genuinely-pending`, meaning the tooling would happily let a
-future session promote them. One of the two ([item 2](#2)) would silently damage production if
-promoted. They should be added to the retirement sets today.
+**The cheapest and highest-value fix in this whole audit touched no database and is already done
+(PR #1402):** two of these versions — `20260814233342` and `20260814233423` — appeared **nowhere** in
+the guard scripts, so both classified as `genuinely-pending` and the promotion allowlist would have
+accepted them. One of the two ([item 3](#3)) would have silently damaged production if promoted.
+Both are now retired and hard-blocked.
 
 **Also true, and normal:** two migrations from 2026-08-19 (`popdam_bulk_operation_revision_lease`,
 `wildbrain_inventory_classification_and_finalize_extra_key_sweep`) are applied to preview and are
@@ -53,11 +53,12 @@ separate session is repairing the checker; this report does not touch it.
 
 ### 0. Do this first, regardless of any window: guard the two unguarded versions
 
-`20260814233342` and `20260814233423` are absent from `RETIRED_VERSION_REASONS`
+**Shipped as PR #1402.** `20260814233342` and `20260814233423` were absent from `RETIRED_VERSION_REASONS`
 (`scripts/post_batch_app_verification.py:343`) and `HARD_BLOCKED`
-(`scripts/production_migration_guard.py:59`). Add both, in the shape already used for
-`20260814224937`. This is a code change to guard scripts only — no database, no window — and it is
-what makes an accidental `--include-all` promotion impossible.
+(`scripts/production_migration_guard.py:59`). Both were added in the shape already used for
+`20260814224937`, with the pinned set tests updated and a refusal test added for each. Guard scripts
+only — no database, no window — and it is what makes an accidental `--include-all` promotion
+impossible.
 
 ### 1. The three Paramount migrations — a capture is blocked today; apply as an ordered set
 
@@ -97,7 +98,7 @@ label. Nothing else has redefined that view since.
 **Recommendation: apply all three, in version order, in one window**, after a preview rehearsal that
 includes an actual Paramount capture (which also unblocks the deferred heading-column drop).
 
-### 2. Warner legacy cleanup — `20260814170749_wb_retire_legacy_capture_paths` (issue #958) {#2}
+### 2. Warner legacy cleanup — `20260814170749_wb_retire_legacy_capture_paths` (issue #958)
 
 **What it does.** Finishes retiring the first-generation Warner (STARLABS) tables after the data was
 moved to the normalized tables. It tightens the capture contract so a new Warner scrape can only
@@ -134,7 +135,7 @@ the merged file (`tools/sync-warner-starlabs.test.mjs` asserts that file's conte
 **Recommendation: apply as-is**, after preview rehearsal. Owner input needed only on the optional
 follow-up view.
 
-### 3. Source-capture inventory counts — `20260814233342_source_capture_inventory_latest_complete` (issue #969)
+### 3. Source-capture inventory counts {#3} — `20260814233342_source_capture_inventory_latest_complete` (issue #969)
 
 **What it does.** Adds the columns that separate "rows we have ever retained" from "rows in the
 latest complete capture" on `api.source_capture_inventory` — the report used to answer "how much of
@@ -158,10 +159,11 @@ make a clean-slate replay diverge from production. The `-- catalog-verification:
 different thing entirely (it declares that an *applied* file contains no catalog DDL) and is not a
 precedent here.
 
-**Be clear about what retirement does and does not buy:** the drift checker has no retirement filter,
-so this version still shows as merged-but-not-applied and the workflow stays red. What changes is
-that the report labels it `[RETIRED] … never apply` and the promotion guard refuses it in any
-allowlist.
+**What retirement buys:** the drift checker reads the retirement sets directly
+(`check-migration-ledger-drift.mjs:109`). A retired version is still listed for visibility, labelled
+`[RETIRED]` with its reason, but is moved to `intentionallyExcluded` and **does not make the check
+fail** (line 323). The promotion guard also refuses it in any allowlist. So retiring these two
+shrinks the actionable drift list rather than merely relabelling it.
 
 ### 4. Durable source resolutions — `20260814233423_remaining_source_resolution_durable_home` (issue #999, PR #1038)
 
@@ -214,8 +216,8 @@ supported.
 
 ## What I recommend, in order
 
-1. **Today, no window needed:** add `20260814233342` and `20260814233423` to the retirement and
-   hard-block sets so neither can be promoted by accident.
+1. **Done — PR #1402, no window needed:** `20260814233342` and `20260814233423` are now in the
+   retirement and hard-block sets, so neither can be promoted by accident.
 2. Rehearse and apply the **three Paramount migrations in version order** in one window — this is the
    only item restoring a capability that is currently off.
 3. Rehearse and apply **Warner #958 as-is**; treat a replacement API view as a separate, optional
