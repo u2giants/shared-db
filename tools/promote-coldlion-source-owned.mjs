@@ -291,6 +291,10 @@ select jsonb_build_object(
       'higher_status_authority', exists (
         select 1 from core.taxonomy_owner_ruling o
         where o.entity_schema = 'core' and o.entity_table = m.entity_type and o.entity_id = m.canonical_id
+      ) or exists (
+        select 1 from core.taxonomy_source_ref hs
+        where hs.entity_schema = 'core' and hs.entity_table = m.entity_type and hs.entity_id = m.canonical_id
+          and hs.source_system not in ('coldlion', 'designflow_plm')
       ),
       'source_ref_id', r.id,
       'source_ref_name', r.source_name,

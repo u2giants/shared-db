@@ -47,6 +47,7 @@ begin
   if (length(v_def)-length(replace(v_def,v_old,'')))/length(v_old) <> 2 then
     raise exception 'issue #1429 importer patch point 4 expected twice';
   end if;
+  v_def := replace(v_def, v_old, v_new);
   execute v_def;
 end
 $patch$;
@@ -96,15 +97,18 @@ declare
   v_plan uuid;
   v_hash text;
 begin
-  if p_is_drill then raise exception 'ColdLion status promotion does not accept drill writes'; end if;
   if not pg_try_advisory_xact_lock(720260729) then
-    insert into ingest.sync_run(source_system,source_name,status,started_at,finished_at,metadata)
+    insert into ingest.sync_run(source_system,source_name,status,started_at,finished_at,error,metadata)
     values('coldlion','coldlion_licensors_properties_promote_source_owned','cancelled',now(),now(),
-           jsonb_build_object('mode','skipped_already_running','outcome','skipped_already_running'))
+           'another ColdLion promotion already holds advisory lock 720260729; no work was attempted',
+           jsonb_build_object('mode','skipped_already_running','outcome','skipped_already_running',
+                              'advisory_lock_key',720260729,
+                              'counts_toward_consecutive_failure_breaker',false))
     returning id into v_run;
     return query select v_run,'skipped_already_running'::text,0,0,0,0,0,0,0,0;
     return;
   end if;
+  if p_is_drill then raise exception 'ColdLion status promotion does not accept drill writes'; end if;
   if plm.taxonomy_circuit_breaker_is_open('coldlion_licensor_property') then
     raise exception 'ColdLion status promotion refused: taxonomy circuit breaker is tripped';
   end if;
@@ -139,8 +143,12 @@ begin
               then null else bool_and(source_active) end source_active,
          count(*) arm_count,
          count(*) filter (where source_active is null)>0 or count(distinct source_active)<>1 as conflicting,
-         exists(select 1 from core.taxonomy_owner_ruling o
-                where o.entity_schema='core' and o.entity_table=arms.entity_type and o.entity_id=arms.canonical_id) as higher_authority
+         (exists(select 1 from core.taxonomy_owner_ruling o
+                 where o.entity_schema='core' and o.entity_table=arms.entity_type and o.entity_id=arms.canonical_id)
+          or exists(select 1 from core.taxonomy_source_ref sr
+                    where sr.entity_schema='core' and sr.entity_table=arms.entity_type
+                      and sr.entity_id=arms.canonical_id
+                      and sr.source_system not in ('coldlion','designflow_plm'))) as higher_authority
     from arms group by entity_type, canonical_id;
 
   select coalesce(sum(arm_count),0), count(*) into v_source, v_linked from coldlion_status_decision;
