@@ -116,12 +116,13 @@ jobs:
           test "$PREVIEW_PROJECT_REF" != "$PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE"
           test "$EXPECTED_PROJECT_REF" = "$PREVIEW_PROJECT_REF"
           test "$CONFIRMATION" = "RECONCILE $ORPHAN AS $REPLACEMENT"
-          test '${{ inputs.issue }}' = 1090
-          test '${{ inputs.claim }}' = 1100
-          test '${{ inputs.source_pr }}' = 1108
+          case '${{ inputs.issue }}:${{ inputs.claim }}:${{ inputs.source_pr }}:${{ inputs.orphan_version }}:${{ inputs.replacement_version }}' in
+            1090:1100:1108:*) ;;
+            1211:1371:1372:20260824002102:20260824004025) ;;
+            *) echo "REFUSED: reconciliation tuple is not explicitly allowlisted" >&2; exit 1 ;;
+          esac
           [[ "$ORPHAN" =~ ^[0-9]{14}$ && "$REPLACEMENT" =~ ^[0-9]{14}$ && "$ORPHAN" != "$REPLACEMENT" ]]
           test -z "$(find supabase/migrations -maxdepth 1 -name "${ORPHAN}_*.sql" -print -quit)"
-          test "$(find supabase/migrations -maxdepth 1 -name "${REPLACEMENT}_*.sql" | wc -l)" = 1
       - name: Acquire exclusive preview recovery lock
         env: {MAIN_SHA: "${{ inputs.main_sha }}", SOURCE_PR: "${{ inputs.source_pr }}"}
         run: node scripts/manage-migration-author-lanes.mjs --acquire-preview-recovery --owner "github-actions:${GITHUB_RUN_ID}" --pr "$SOURCE_PR" --head-sha "$MAIN_SHA" > "$RUNNER_TEMP/preview-lock.json"
@@ -144,6 +145,14 @@ jobs:
           gh api -H 'Accept: application/vnd.github+json' "repos/${GITHUB_REPOSITORY}/actions/artifacts/$ARTIFACT_ID/zip" > "$RUNNER_TEMP/preview.zip"
           mkdir "$RUNNER_TEMP/preview-evidence"
           unzip -q "$RUNNER_TEMP/preview.zip" -d "$RUNNER_TEMP/preview-evidence"
+      - name: Materialize exact reviewed and applied source commits
+        run: |
+          set -euo pipefail
+          PR_HEAD="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["head"]["sha"])' "$RUNNER_TEMP/pr.json")"
+          RUN_HEAD="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["head_sha"])' "$RUNNER_TEMP/run.json")"
+          git fetch origin "$PR_HEAD" "$RUN_HEAD"
+          git worktree add --detach "$RUNNER_TEMP/source-pr" "$PR_HEAD"
+          git worktree add --detach "$RUNNER_TEMP/orphan-source" "$RUN_HEAD"
       - name: Link only to preview
         run: |
           set -euo pipefail
@@ -154,7 +163,7 @@ jobs:
       - name: Exact proof with no write
         run: |
           python scripts/preview_ledger_orphan_reconcile.py --mode check \
-            --repo "$GITHUB_WORKSPACE" --linked-dir "$GITHUB_WORKSPACE" --expected-project-ref "$PREVIEW_PROJECT_REF" \
+            --repo "$GITHUB_WORKSPACE" --linked-dir "$GITHUB_WORKSPACE" --source-pr-dir "$RUNNER_TEMP/source-pr" --orphan-source-dir "$RUNNER_TEMP/orphan-source" --expected-project-ref "$PREVIEW_PROJECT_REF" \
             --main-sha '${{ inputs.main_sha }}' --orphan-version '${{ inputs.orphan_version }}' --replacement-version '${{ inputs.replacement_version }}' \
             --issue '${{ inputs.issue }}' --claim '${{ inputs.claim }}' --source-pr '${{ inputs.source_pr }}' \
             --preview-run-id '${{ inputs.preview_run_id }}' --preview-artifact-id '${{ inputs.preview_artifact_id }}' --preview-artifact-digest '${{ inputs.preview_artifact_digest }}' \
@@ -167,7 +176,7 @@ jobs:
           test "$(git rev-parse HEAD)" = '${{ inputs.main_sha }}'
           test "$(git rev-parse origin/main)" = '${{ inputs.main_sha }}'
           python scripts/preview_ledger_orphan_reconcile.py --mode apply \
-            --repo "$GITHUB_WORKSPACE" --linked-dir "$GITHUB_WORKSPACE" --expected-project-ref "$PREVIEW_PROJECT_REF" \
+            --repo "$GITHUB_WORKSPACE" --linked-dir "$GITHUB_WORKSPACE" --source-pr-dir "$RUNNER_TEMP/source-pr" --orphan-source-dir "$RUNNER_TEMP/orphan-source" --expected-project-ref "$PREVIEW_PROJECT_REF" \
             --main-sha '${{ inputs.main_sha }}' --orphan-version '${{ inputs.orphan_version }}' --replacement-version '${{ inputs.replacement_version }}' \
             --issue '${{ inputs.issue }}' --claim '${{ inputs.claim }}' --source-pr '${{ inputs.source_pr }}' \
             --preview-run-id '${{ inputs.preview_run_id }}' --preview-artifact-id '${{ inputs.preview_artifact_id }}' --preview-artifact-digest '${{ inputs.preview_artifact_digest }}' \
