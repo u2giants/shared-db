@@ -48,6 +48,13 @@ begin
     raise exception 'issue #1429 importer patch point 4 expected twice';
   end if;
   v_def := replace(v_def, v_old, v_new);
+
+  -- now() is transaction-stable, so two recurring snapshots in one transaction
+  -- otherwise tie and the promoter can select the older lifecycle state.
+  v_old := E'  values (''coldlion'', ''coldlion_licensors_properties_api'', ''running'', now(),';
+  v_new := E'  values (''coldlion'', ''coldlion_licensors_properties_api'', ''running'', clock_timestamp(),';
+  if strpos(v_def, v_old) = 0 then raise exception 'issue #1429 importer patch point 5 not found'; end if;
+  v_def := replace(v_def, v_old, v_new);
   execute v_def;
 end
 $patch$;

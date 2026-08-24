@@ -90,12 +90,12 @@ begin
         {"divisionCode":"SP001","mgTypeCode":"06","mgTypeDesc":"Property","entityType":"property"}
       ],
       "details": [
-        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-1","mgDesc":"Alpha Licensor","mgTypeDesc":"Licensor","itemNoCode":"P2A-1","mgCode2":"P2A-1","mgCategory":""},
-        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"ZZ","mgDesc":"Collision Licensor","mgTypeDesc":"Licensor","itemNoCode":"ZZ","mgCode2":"ZZ","mgCategory":""},
-        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgCode":"P2A-2","mgDesc":"Alpha Property","mgTypeDesc":"Property","itemNoCode":"P2A-2","mgCode2":"P2A-2","mgCategory":""},
-        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgCode":"ZZ","mgDesc":"Collision Property","mgTypeDesc":"Property","itemNoCode":"ZZ","mgCode2":"ZZ","mgCategory":""},
-        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgCode":"P2A-1","mgDesc":"Alpha Licensor SP","mgTypeDesc":"Licensor","itemNoCode":"P2A-1","mgCode2":"P2A-1","mgCategory":""},
-        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgCode":"P2A-3","mgDesc":"Bravo Property SP","mgTypeDesc":"Property","itemNoCode":"P2A-3","mgCode2":"P2A-3","mgCategory":""}
+        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"P2A-1","mgDesc":"Alpha Licensor","mgTypeDesc":"Licensor","itemNoCode":"P2A-1","mgCode2":"P2A-1","mgCategory":"","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"05","mgCode":"ZZ","mgDesc":"Collision Licensor","mgTypeDesc":"Licensor","itemNoCode":"ZZ","mgCode2":"ZZ","mgCategory":"","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgCode":"P2A-2","mgDesc":"Alpha Property","mgTypeDesc":"Property","itemNoCode":"P2A-2","mgCode2":"P2A-2","mgCategory":"","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"CW001","mgTypeCode":"06","mgCode":"ZZ","mgDesc":"Collision Property","mgTypeDesc":"Property","itemNoCode":"ZZ","mgCode2":"ZZ","mgCategory":"","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"05","mgCode":"P2A-1","mgDesc":"Alpha Licensor SP","mgTypeDesc":"Licensor","itemNoCode":"P2A-1","mgCode2":"P2A-1","mgCategory":"","active":true},
+        {"companyCode":"EDGEHOME","divisionCode":"SP001","mgTypeCode":"06","mgCode":"P2A-3","mgDesc":"Bravo Property SP","mgTypeDesc":"Property","itemNoCode":"P2A-3","mgCode2":"P2A-3","mgCategory":"","active":true}
       ],
       "pages": [
         {"divisionCode":"CW001","mgTypeCode":"05","pagesFetched":1,"terminalReached":true,"rowCount":2},
@@ -381,6 +381,22 @@ begin
   -- 9) Empty / incomplete / semantic / duplicate / count-drop guards abort with no
   --    partial mirror work. Each uses a unique code (P2A-BAD-*) that must NOT appear.
   -- ---------------------------------------------------------------------------------
+  begin
+    perform plm.sync_coldlion_licensors_properties(
+      jsonb_set(v_snap, '{details,0}', (v_snap #> '{details,0}') - 'active'), 'mirror_only');
+    raise exception 'missing active accepted';
+  exception when others then
+    if position('active as a JSON boolean' in sqlerrm) = 0 then raise; end if;
+  end;
+
+  begin
+    perform plm.sync_coldlion_licensors_properties(
+      jsonb_set(v_snap, '{details,0,active}', to_jsonb('yes'::text)), 'mirror_only');
+    raise exception 'non-boolean active accepted';
+  exception when others then
+    if position('active as a JSON boolean' in sqlerrm) = 0 then raise; end if;
+  end;
+
   begin
     perform plm.sync_coldlion_licensors_properties(jsonb_build_object('companyCode','EDGEHOME','headers','[]'::jsonb,'details','[{"a":1}]'::jsonb,'pairs','[{"a":1}]'::jsonb,'pages','[]'::jsonb), 'mirror_only');
     raise exception 'empty headers accepted';
