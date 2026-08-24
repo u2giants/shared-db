@@ -181,6 +181,24 @@ BEGIN
      OR btrim(COALESCE(p_request_hash,'')) = '' THEN
     RAISE EXCEPTION 'Piece split identifiers and audit values must be non-empty' USING ERRCODE='22023';
   END IF;
+  -- Flow 1 pieces may be split only while physically held by Ningbo or a
+  -- factory. Synthetic terminal sources (especially terminal/created) are
+  -- balance-exempt opening legs and must never be usable to mint child custody.
+  IF p_source_location_type NOT IN ('office','factory') THEN
+    RAISE EXCEPTION 'Piece split source must be a physical office or factory location'
+      USING ERRCODE='23514';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM jsonb_array_elements(p_children) c
+    WHERE jsonb_typeof(c.value) <> 'object'
+       OR (c.value->>'sample_id') IS NULL
+       OR (c.value->>'quantity') IS NULL
+       OR (c.value->>'quantity')::integer <= 0
+  ) OR (SELECT count(*) FROM jsonb_array_elements(p_children)) <>
+       (SELECT count(DISTINCT (value->>'sample_id')::integer) FROM jsonb_array_elements(p_children)) THEN
+    RAISE EXCEPTION 'Split children must have unique sample_id values and positive quantities'
+      USING ERRCODE='23514';
+  END IF;
 
   PERFORM pg_advisory_xact_lock(21450, sample_id)
   FROM (
@@ -219,18 +237,6 @@ BEGIN
         AND l.split_by_user=p_actor_user AND l.request_hash=p_request_hash
       ORDER BY l.sample_id_fk;
     RETURN;
-  END IF;
-
-  IF EXISTS (
-    SELECT 1 FROM jsonb_array_elements(p_children) c
-    WHERE jsonb_typeof(c.value) <> 'object'
-       OR (c.value->>'sample_id') IS NULL
-       OR (c.value->>'quantity') IS NULL
-       OR (c.value->>'quantity')::integer <= 0
-  ) OR (SELECT count(*) FROM jsonb_array_elements(p_children)) <>
-       (SELECT count(DISTINCT (value->>'sample_id')::integer) FROM jsonb_array_elements(p_children)) THEN
-    RAISE EXCEPTION 'Split children must have unique sample_id values and positive quantities'
-      USING ERRCODE='23514';
   END IF;
 
   SELECT * INTO v_parent_workflow FROM dflow.sample_workflow

@@ -52,6 +52,28 @@ BEGIN
     v_factories := array_append(v_factories,v_factory);
   END LOOP;
 
+  -- A synthetic opening source is balance-exempt in the generic movement
+  -- guard. The split RPC must reject it before writing lineage or movements.
+  SELECT count(*) INTO v_before FROM dflow.sample_movement
+  WHERE sample_id_fk = ANY(array_prepend(v_parent,v_children));
+  BEGIN
+    PERFORM dflow.post_sample_piece_split(
+      v_parent,
+      jsonb_build_array(jsonb_build_object('sample_id',v_children[1],'quantity',1)),
+      'terminal','created','invalid synthetic source',
+      'contract-test','ningbo','issue-1422-invalid-source','hash-invalid-source'
+    );
+    RAISE EXCEPTION 'terminal/created split source was accepted';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  SELECT count(*) INTO v_after FROM dflow.sample_movement
+  WHERE sample_id_fk = ANY(array_prepend(v_parent,v_children));
+  IF v_after <> v_before OR EXISTS (
+    SELECT 1 FROM dflow.sample_piece_lineage WHERE sample_id_fk=ANY(v_children)
+  ) THEN
+    RAISE EXCEPTION 'rejected terminal/created split wrote custody or lineage rows';
+  END IF;
+
   PERFORM dflow.post_sample_piece_split(
     v_parent,
     jsonb_build_array(
@@ -107,6 +129,19 @@ BEGIN
       'issue-1422-split','hash-split');
     RAISE EXCEPTION 'changed split request reused the idempotency key';
   EXCEPTION WHEN unique_violation THEN NULL;
+  END;
+  BEGIN
+    PERFORM dflow.post_sample_piece_split(
+      v_parent,
+      jsonb_build_array(
+        jsonb_build_object('sample_id',v_children[1],'quantity',1),
+        jsonb_build_object('sample_id',v_children[1],'quantity',1),
+        jsonb_build_object('sample_id',v_children[2],'quantity',1)
+      ),
+      'office','ningbo','duplicate replay children','contract-test','ningbo',
+      'issue-1422-split','hash-split');
+    RAISE EXCEPTION 'duplicate child entries were accepted on split replay';
+  EXCEPTION WHEN check_violation THEN NULL;
   END;
 
   -- Three siblings can hold three concurrent active factory visits.
