@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const migration = readFileSync(
-  new URL('../supabase/migrations/20260824002146_create_dflow_prod_and_audit_archive.sql', import.meta.url),
+  new URL('../supabase/migrations/20260824011750_create_dflow_prod_and_audit_archive.sql', import.meta.url),
   'utf8',
 );
 const prior = readFileSync(
