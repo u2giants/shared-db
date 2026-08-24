@@ -191,7 +191,8 @@ begin
   v_proven := v_token_ok
               or (p_submission_owner is not null
                   and v_stored_owner is null
-                  and v_stored_proof is null);
+                  and v_stored_proof is null
+                  and v_stored_batch is null);
 
   -- ==========================================================================
   -- LEGACY PATH -- byte-for-byte the historical behaviour, except that it can no

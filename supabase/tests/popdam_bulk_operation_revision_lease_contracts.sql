@@ -2076,6 +2076,28 @@ begin
   from admin_config where key = 'BULK_OPERATIONS';
   v_out := public.update_bulk_operation(
     'terminal-clear-legacy',
+    jsonb_build_object(
+      'status', 'running',
+      'external_job', jsonb_set(v_job, array['phase'], to_jsonb('pending'::text))),
+    null,
+    3,
+    'legacy-phase-takeover',
+    1);
+  if (v_out ->> 'ok')::boolean is not false
+     or v_out ->> 'reason' <> 'phase_protected' then
+    raise exception 'a proof-less legacy completed job moved back to a live phase: %', v_out;
+  end if;
+  select value -> 'terminal-clear-legacy' into v_stored
+  from admin_config where key = 'BULK_OPERATIONS';
+  if v_stored -> 'external_job' ->> 'phase' <> 'completed'
+     or (v_stored ->> 'state_revision')::bigint <> 3
+     or v_stored -> 'external_job' ? 'lease_proof' then
+    raise exception 'a refused legacy phase takeover mutated the completed job: %', v_stored;
+  end if;
+  v_job := v_stored -> 'external_job';
+
+  v_out := public.update_bulk_operation(
+    'terminal-clear-legacy',
     jsonb_build_object('status', 'completed', 'external_job', v_job),
     null,
     3,
