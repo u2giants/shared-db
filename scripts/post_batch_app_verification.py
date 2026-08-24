@@ -353,6 +353,16 @@ RETIRED_VERSION_REASONS = {
         "never applied; it would recreate an obsolete core.character foreign key "
         "after issue 1374 retires the empty Universe A character tables"
     ),
+    "20260814233423": (
+        "never applied; it cannot run without the objects created by the retired "
+        "20260814224937 and inherits that version's obsolete core.character "
+        "dependency; a replacement source-resolution workstream supersedes both"
+    ),
+    "20260814233342": (
+        "never applied and fully superseded; it replaces api.source_capture_inventory "
+        "wholesale with the 2026-08-14 body, which silently regresses the Sega, "
+        "Peanuts and WildBrain branches added by later applied migrations"
+    ),
 }
 RETIRED_VERSIONS = frozenset(RETIRED_VERSION_REASONS)
 

@@ -109,6 +109,23 @@ HARD_BLOCKED = {
     # schema. A separate future workstream may author a safe source-resolution
     # replacement; this historical version itself must never run.
     "20260814224937",
+    # RETIRED and NEVER APPLIED. The companion to 20260814224937: it backfills
+    # and guards plm.source_resolution, so its first INSERT fails 42P01 without
+    # that retired version's table. It cannot be rescued by applying the pair,
+    # because the pair is exactly what issue #1374 made impossible. The same
+    # future workstream that authors the safe source-resolution replacement
+    # supersedes this file; this historical version itself must never run.
+    "20260814233423",
+    # RETIRED and NEVER APPLIED, and unsafe in a way no post-apply check can
+    # see. It is a whole-view `create or replace` of api.source_capture_inventory
+    # carrying the 2026-08-14 body. Later APPLIED migrations (20260819015333,
+    # 20260819125713, 20260819151536, 20260820004338) rebuilt that view with the
+    # identical ten-column output contract, so this older body would replace it
+    # cleanly, with no error, and silently downgrade Sega, Peanuts and WildBrain
+    # to count_basis 'retained_only'. The view still exists afterwards, so
+    # catalog verification passes while coverage reporting has regressed.
+    # Evidence: docs/verification/unapplied-20260814-migrations-audit-20260823.md
+    "20260814233342",
 }
 
 # Preview contains this authenticated historical migration, but production does
