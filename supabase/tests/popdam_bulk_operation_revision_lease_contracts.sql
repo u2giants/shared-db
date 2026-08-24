@@ -2091,7 +2091,7 @@ begin
   from admin_config where key = 'BULK_OPERATIONS';
   if v_stored -> 'external_job' ->> 'phase' <> 'completed'
      or (v_stored ->> 'state_revision')::bigint <> 3
-     or v_stored -> 'external_job' ? 'lease_proof' then
+     or v_stored -> 'external_job' ->> 'lease_proof' is not null then
     raise exception 'a refused legacy phase takeover mutated the completed job: %', v_stored;
   end if;
   v_job := v_stored -> 'external_job';
@@ -2110,7 +2110,7 @@ begin
   end if;
   select value -> 'terminal-clear-legacy' into v_stored
   from admin_config where key = 'BULK_OPERATIONS';
-  if v_stored -> 'external_job' ? 'lease_proof' then
+  if v_stored -> 'external_job' ->> 'lease_proof' is not null then
     raise exception 'a proof-less legacy completed job gained a receipt digest: %', v_stored;
   end if;
 
