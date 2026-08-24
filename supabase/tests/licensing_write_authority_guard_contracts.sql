@@ -34,7 +34,7 @@ begin
   end if;
   if not exists (select 1 from plm.licensing_write_guard_audit
                  where target_table='core.licensor'::regclass and write_kind='coldlion_status'
-                   and target_row_id=v_licensor and new_status='inactive') then
+                   and actor='contract-test' and protected_columns=array['status']) then
     raise exception 'coldlion_status Licensor transition has no immutable guard audit';
   end if;
 

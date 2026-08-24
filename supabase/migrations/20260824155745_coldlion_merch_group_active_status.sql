@@ -176,7 +176,7 @@ begin
       v_hash := encode(extensions.digest(r.entity_type||r.canonical_id::text||r.source_active::text,'sha256'),'hex');
       insert into plm.licensing_write_authorization(backend_pid,transaction_id,target_table,write_kind,plan_id,plan_hash,actor,protected_columns,expires_at)
       values(pg_backend_pid(),txid_current(),'core.licensor','coldlion_status',v_plan,v_hash,'plm.promote_coldlion_source_owned',array['status'],clock_timestamp()+interval '1 minute');
-      update core.licensor set status=case when r.source_active then 'active' else 'inactive' end where id=r.canonical_id;
+      update core.licensor set status=(case when r.source_active then 'active' else 'inactive' end)::app.entity_status where id=r.canonical_id;
     else
       if (select status::text from core.property where id=r.canonical_id) = (case when r.source_active then 'active' else 'inactive' end) then
         v_unchanged := v_unchanged + 1; continue;
@@ -185,7 +185,7 @@ begin
       v_hash := encode(extensions.digest(r.entity_type||r.canonical_id::text||r.source_active::text,'sha256'),'hex');
       insert into plm.licensing_write_authorization(backend_pid,transaction_id,target_table,write_kind,plan_id,plan_hash,actor,protected_columns,expires_at)
       values(pg_backend_pid(),txid_current(),'core.property','coldlion_status',v_plan,v_hash,'plm.promote_coldlion_source_owned',array['status'],clock_timestamp()+interval '1 minute');
-      update core.property set status=case when r.source_active then 'active' else 'inactive' end where id=r.canonical_id;
+      update core.property set status=(case when r.source_active then 'active' else 'inactive' end)::app.entity_status where id=r.canonical_id;
     end if;
     v_changed := v_changed + 1;
   end loop;

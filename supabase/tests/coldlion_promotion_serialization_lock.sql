@@ -273,7 +273,7 @@ begin
         null, false);
   exception when others then
     -- Expected: it got PAST the lock and was then refused by the approved-contract check.
-    if position('approved Phase 4 set' in sqlerrm) = 0
+    if position('approved Phase 4 link set' in sqlerrm) = 0
        and position('circuit breaker' in sqlerrm) = 0 then
       raise exception 'S8: uncontended call failed for an unexpected reason: %', sqlerrm;
     end if;
