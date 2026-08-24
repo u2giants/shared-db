@@ -103,6 +103,9 @@ jobs:
           ORPHAN: ${{ inputs.orphan_version }}
           REPLACEMENT: ${{ inputs.replacement_version }}
           CONFIRMATION: ${{ inputs.confirmation }}
+          ISSUE: ${{ inputs.issue }}
+          CLAIM: ${{ inputs.claim }}
+          SOURCE_PR: ${{ inputs.source_pr }}
         run: |
           set -euo pipefail
           git fetch origin main
@@ -116,13 +119,19 @@ jobs:
           test "$PREVIEW_PROJECT_REF" != "$PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE"
           test "$EXPECTED_PROJECT_REF" = "$PREVIEW_PROJECT_REF"
           test "$CONFIRMATION" = "RECONCILE $ORPHAN AS $REPLACEMENT"
-          case '${{ inputs.issue }}:${{ inputs.claim }}:${{ inputs.source_pr }}:${{ inputs.orphan_version }}:${{ inputs.replacement_version }}' in
+          case "$ISSUE:$CLAIM:$SOURCE_PR:$ORPHAN:$REPLACEMENT" in
             1090:1100:1108:*) ;;
             1211:1371:1372:20260824002102:20260824004025) ;;
+            1211:1371:1372:20260824004025:20260824004025) ;;
             *) echo "REFUSED: reconciliation tuple is not explicitly allowlisted" >&2; exit 1 ;;
           esac
-          [[ "$ORPHAN" =~ ^[0-9]{14}$ && "$REPLACEMENT" =~ ^[0-9]{14}$ && "$ORPHAN" != "$REPLACEMENT" ]]
-          test -z "$(find supabase/migrations -maxdepth 1 -name "${ORPHAN}_*.sql" -print -quit)"
+          [[ "$ORPHAN" =~ ^[0-9]{14}$ && "$REPLACEMENT" =~ ^[0-9]{14}$ ]]
+          if [ "$ORPHAN" = "$REPLACEMENT" ]; then
+            test "$ORPHAN" = "20260824004025"
+            test -n "$(find supabase/migrations -maxdepth 1 -name "${ORPHAN}_*.sql" -print -quit)"
+          else
+            test -z "$(find supabase/migrations -maxdepth 1 -name "${ORPHAN}_*.sql" -print -quit)"
+          fi
       - name: Acquire exclusive preview recovery lock
         env: {MAIN_SHA: "${{ inputs.main_sha }}", SOURCE_PR: "${{ inputs.source_pr }}"}
         run: node scripts/manage-migration-author-lanes.mjs --acquire-preview-recovery --owner "github-actions:${GITHUB_RUN_ID}" --pr "$SOURCE_PR" --head-sha "$MAIN_SHA" > "$RUNNER_TEMP/preview-lock.json"
@@ -161,25 +170,45 @@ jobs:
           grep -F "$PREVIEW_PROJECT_REF" supabase/.temp/pooler-url
           ! grep -F "$PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE" supabase/.temp/pooler-url
       - name: Exact proof with no write
+        env:
+          MAIN_SHA: ${{ inputs.main_sha }}
+          ORPHAN: ${{ inputs.orphan_version }}
+          REPLACEMENT: ${{ inputs.replacement_version }}
+          ISSUE: ${{ inputs.issue }}
+          CLAIM: ${{ inputs.claim }}
+          SOURCE_PR: ${{ inputs.source_pr }}
+          PREVIEW_RUN_ID: ${{ inputs.preview_run_id }}
+          ARTIFACT_ID: ${{ inputs.preview_artifact_id }}
+          ARTIFACT_DIGEST: ${{ inputs.preview_artifact_digest }}
         run: |
           python scripts/preview_ledger_orphan_reconcile.py --mode check \
             --repo "$GITHUB_WORKSPACE" --linked-dir "$GITHUB_WORKSPACE" --source-pr-dir "$RUNNER_TEMP/source-pr" --orphan-source-dir "$RUNNER_TEMP/orphan-source" --expected-project-ref "$PREVIEW_PROJECT_REF" \
-            --main-sha '${{ inputs.main_sha }}' --orphan-version '${{ inputs.orphan_version }}' --replacement-version '${{ inputs.replacement_version }}' \
-            --issue '${{ inputs.issue }}' --claim '${{ inputs.claim }}' --source-pr '${{ inputs.source_pr }}' \
-            --preview-run-id '${{ inputs.preview_run_id }}' --preview-artifact-id '${{ inputs.preview_artifact_id }}' --preview-artifact-digest '${{ inputs.preview_artifact_digest }}' \
+            --main-sha "$MAIN_SHA" --orphan-version "$ORPHAN" --replacement-version "$REPLACEMENT" \
+            --issue "$ISSUE" --claim "$CLAIM" --source-pr "$SOURCE_PR" \
+            --preview-run-id "$PREVIEW_RUN_ID" --preview-artifact-id "$ARTIFACT_ID" --preview-artifact-digest "$ARTIFACT_DIGEST" \
             --issue-json "$RUNNER_TEMP/issue.json" --claim-json "$RUNNER_TEMP/claim.json" --pr-json "$RUNNER_TEMP/pr.json" --pr-files-json "$RUNNER_TEMP/pr-files.json" \
             --run-json "$RUNNER_TEMP/run.json" --artifact-json "$RUNNER_TEMP/artifact.json" --preview-evidence-dir "$RUNNER_TEMP/preview-evidence" \
             --evidence-out "$RUNNER_TEMP/reconciliation-check.json"
       - name: Transactional one-row reconciliation
+        env:
+          MAIN_SHA: ${{ inputs.main_sha }}
+          ORPHAN: ${{ inputs.orphan_version }}
+          REPLACEMENT: ${{ inputs.replacement_version }}
+          ISSUE: ${{ inputs.issue }}
+          CLAIM: ${{ inputs.claim }}
+          SOURCE_PR: ${{ inputs.source_pr }}
+          PREVIEW_RUN_ID: ${{ inputs.preview_run_id }}
+          ARTIFACT_ID: ${{ inputs.preview_artifact_id }}
+          ARTIFACT_DIGEST: ${{ inputs.preview_artifact_digest }}
         run: |
           git fetch origin main
-          test "$(git rev-parse HEAD)" = '${{ inputs.main_sha }}'
-          test "$(git rev-parse origin/main)" = '${{ inputs.main_sha }}'
+          test "$(git rev-parse HEAD)" = "$MAIN_SHA"
+          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
           python scripts/preview_ledger_orphan_reconcile.py --mode apply \
             --repo "$GITHUB_WORKSPACE" --linked-dir "$GITHUB_WORKSPACE" --source-pr-dir "$RUNNER_TEMP/source-pr" --orphan-source-dir "$RUNNER_TEMP/orphan-source" --expected-project-ref "$PREVIEW_PROJECT_REF" \
-            --main-sha '${{ inputs.main_sha }}' --orphan-version '${{ inputs.orphan_version }}' --replacement-version '${{ inputs.replacement_version }}' \
-            --issue '${{ inputs.issue }}' --claim '${{ inputs.claim }}' --source-pr '${{ inputs.source_pr }}' \
-            --preview-run-id '${{ inputs.preview_run_id }}' --preview-artifact-id '${{ inputs.preview_artifact_id }}' --preview-artifact-digest '${{ inputs.preview_artifact_digest }}' \
+            --main-sha "$MAIN_SHA" --orphan-version "$ORPHAN" --replacement-version "$REPLACEMENT" \
+            --issue "$ISSUE" --claim "$CLAIM" --source-pr "$SOURCE_PR" \
+            --preview-run-id "$PREVIEW_RUN_ID" --preview-artifact-id "$ARTIFACT_ID" --preview-artifact-digest "$ARTIFACT_DIGEST" \
             --issue-json "$RUNNER_TEMP/issue.json" --claim-json "$RUNNER_TEMP/claim.json" --pr-json "$RUNNER_TEMP/pr.json" --pr-files-json "$RUNNER_TEMP/pr-files.json" \
             --run-json "$RUNNER_TEMP/run.json" --artifact-json "$RUNNER_TEMP/artifact.json" --preview-evidence-dir "$RUNNER_TEMP/preview-evidence" \
             --evidence-out "$RUNNER_TEMP/reconciliation-apply.json"
