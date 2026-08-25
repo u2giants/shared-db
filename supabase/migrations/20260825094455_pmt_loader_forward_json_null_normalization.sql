@@ -1,7 +1,7 @@
 -- Issue #1459 -- Forward-repair the Paramount loader above its complete structural lineage.
 --
 -- REQUIRED PRODUCTION ORDER. The safe bounded window is exactly:
---   20260814193351 -> 20260814213043 -> 20260814223552 -> 20260825023702.
+--   20260814193351 -> 20260814213043 -> 20260814223552 -> 20260825094455.
 -- The first three versions establish duplicate-name omission, metadata-element normalization,
 -- and Collection vocabulary. This fourth version re-derives that resulting loader in full and
 -- preserves issue #1418's JSON-null normalization after the third rewrite executes. Applying
