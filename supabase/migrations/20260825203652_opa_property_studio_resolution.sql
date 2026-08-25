@@ -62,10 +62,6 @@ comment on column plm.opa_property_studio_resolution.resolution_status is
 comment on column plm.opa_property_studio_resolution.provenance_type is
   'Authority for the decision. Only direct_source_assertion or owner_reviewed_resolution may support canonical ownership.';
 
-create index opa_property_studio_resolution_canonical_idx
-  on plm.opa_property_studio_resolution (studio_code, licensed_property_id)
-  where resolution_status = 'canonical';
-
 alter table plm.opa_property_studio_resolution enable row level security;
 revoke all on table plm.opa_property_studio_resolution from public, anon, authenticated;
 revoke insert, update, delete, truncate, references, trigger, maintain
@@ -311,7 +307,7 @@ comment on view api.opa_marvel_property is
 comment on view api.opa_lucasfilm_property is
   'Canonical Lucasfilm/Star Wars-studio OPA properties only. Inferred, ambiguous/crossover, unresolved, Pixar, Disney, and Marvel evidence is excluded.';
 
-revoke all on table api.opa_disney_property, api.opa_marvel_property,
+revoke all on api.opa_disney_property, api.opa_marvel_property,
   api.opa_lucasfilm_property from public, anon;
-grant select on table api.opa_disney_property, api.opa_marvel_property,
+grant select on api.opa_disney_property, api.opa_marvel_property,
   api.opa_lucasfilm_property to authenticated, service_role;
