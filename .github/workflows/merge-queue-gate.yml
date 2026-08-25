@@ -1,0 +1,104 @@
+name: Merge Queue Gate
+
+on:
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: shared-db-merge-queue
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Merge queue gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test the queue contract
+        run: node --test scripts/merge-queue-contract.test.mjs
+      - name: Resolve the single queued pull request
+        if: github.event_name == 'merge_group'
+        id: queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_GROUP_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          set -euo pipefail
+          pr="$(node scripts/merge-queue-contract.mjs --resolve-queue-pr)"
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+      - name: Require the previous main migration merge to have completed preview rehearsal
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git cat-file -e "${BASE_SHA}^{commit}"
+          parent="$(git rev-parse "${BASE_SHA}^1")"
+          mapfile -t paths < <(git diff-tree --no-commit-id --name-only -r "$parent" "$BASE_SHA")
+          needs_preview="$(printf '%s\n' "${paths[@]}" | node --input-type=module -e "import {baseNeedsPreview} from './scripts/merge-queue-contract.mjs'; let s=''; for await (const c of process.stdin) s+=c; console.log(baseNeedsPreview(s.split(/\r?\n/).filter(Boolean)) ? 'yes' : 'no')")"
+          if [ "$needs_preview" = no ]; then
+            echo 'Previous main tip added no migration; no preview hold is needed.'
+            exit 0
+          fi
+          state=''
+          for attempt in $(seq 1 100); do
+            state="$(gh api "repos/u2giants/shared-db/commits/$BASE_SHA/status" --jq '[.statuses[] | select(.context == "Post-merge preview rehearsal")] | first | .state')"
+            [ "$state" = success ] && break
+            echo "main $BASE_SHA is waiting for its post-merge preview rehearsal (attempt $attempt/100, state='${state:-none}')"
+            sleep 15
+          done
+          test "$state" = success || { echo "REFUSED: main $BASE_SHA added a migration and did not complete a successful post-merge preview rehearsal within 25 minutes." >&2; exit 1; }
+      - name: Revalidate exact reviewed PR head, claims, collisions, and migration order
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.queue.outputs.pr }}
+          MERGE_GROUP_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          pr_head="$(gh pr view "$PR_NUMBER" --repo u2giants/shared-db --json headRefOid --jq .headRefOid)"
+          git cat-file -e "${MERGE_GROUP_SHA}^{commit}"
+          git cat-file -e "${pr_head}^{commit}"
+          git merge-base --is-ancestor "$pr_head" "$MERGE_GROUP_SHA" || { echo "REFUSED: merge group $MERGE_GROUP_SHA does not contain exact authorized PR head $pr_head." >&2; exit 1; }
+          authorization="$(gh api "repos/u2giants/shared-db/commits/$pr_head/status" --jq '[.statuses[] | select(.context == "Migration guarded merge authorization")] | first | .state')"
+          test "$authorization" = success || { echo "REFUSED: exact PR head $pr_head has no guarded merge authorization." >&2; exit 1; }
+          bash scripts/check-sql.sh
+          node scripts/check-pr-object-collisions.mjs
+          node scripts/check-migration-pr-lease.mjs
+          node scripts/merge-queue-contract.mjs
+      - name: Publish guarded authorization on the merge-group commit
+        if: github.event_name == 'merge_group' && success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_GROUP_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          gh api "repos/u2giants/shared-db/statuses/$MERGE_GROUP_SHA" \
+            -f state=success \
+            -f context='Migration guarded merge authorization' \
+            -f description='Exact reviewed head revalidated on the serialized merge group'
+      - name: Publish fail-closed authorization when queue validation fails
+        if: github.event_name == 'merge_group' && failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_GROUP_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          gh api "repos/u2giants/shared-db/statuses/$MERGE_GROUP_SHA" \
+            -f state=failure \
+            -f context='Migration guarded merge authorization' \
+            -f description='Merge queue validation failed; authorization refused'

@@ -27,6 +27,8 @@ name: Handoff Contract Guard
 
 on:
   pull_request:
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions:
@@ -56,6 +58,7 @@ jobs:
         run: node --test scripts/check-handoff-contract.test.mjs scripts/report-stale-handoffs.test.mjs
 
       - name: Check the handoff files this pull request touches
+        if: github.event_name != 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
           HANDOFF_BASE: origin/${{ github.base_ref }}

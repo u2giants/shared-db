@@ -53,6 +53,7 @@ jobs:
           # An assignment is not an approval, and an approval of an earlier head
           # is not an approval of these bytes (#1816).
           PR_NUMBER="${{ inputs.pull_request }}" REQUESTED_SHA="${{ inputs.head_sha }}" node scripts/check-exact-head-approval.mjs
+          node scripts/merge-queue-contract.mjs
       - name: Acquire the exclusive merge lane
         id: merge_lock
         env:
@@ -63,7 +64,7 @@ jobs:
             --owner "github-actions:${GITHUB_RUN_ID}" --pr "${{ inputs.pull_request }}" \
             --head-sha "${{ inputs.head_sha }}" > "$RUNNER_TEMP/merge-lock.json"
           echo "owner_sha=$(jq -r .ownerSha "$RUNNER_TEMP/merge-lock.json")" >> "$GITHUB_OUTPUT"
-      - name: Re-prove the head and merge while the lock is held
+      - name: Re-prove the head and place the pull request in the merge queue
         id: guarded_merge
         env:
           GH_TOKEN: ${{ github.token }}
@@ -79,6 +80,7 @@ jobs:
           # Re-proven under the lock: a reviewer can withdraw, or a refusal can
           # land, between the first pass and the merge itself.
           node scripts/check-exact-head-approval.mjs
+          node scripts/merge-queue-contract.mjs
           gh api "repos/u2giants/shared-db/statuses/$REQUESTED_SHA" -f state=success -f context='Migration guarded merge authorization' -f description='Exclusive merge lock held and exact head revalidated'
           # The status write above and the mergeability GitHub evaluates below are
           # EVENTUALLY CONSISTENT. Posting the status and merging back-to-back asked
@@ -101,18 +103,18 @@ jobs:
             sleep 6
           done
           test "$observed" = 'success'
-          merged=0
+          queued=0
           for attempt in 1 2 3 4 5; do
-            if gh pr merge "${{ inputs.pull_request }}" --repo u2giants/shared-db --merge --match-head-commit "${{ inputs.head_sha }}"; then
-              merged=1; break
+            if gh pr merge "${{ inputs.pull_request }}" --repo u2giants/shared-db --merge --auto --match-head-commit "${{ inputs.head_sha }}"; then
+              queued=1; break
             fi
-            echo "guarded merge attempt $attempt was refused; re-proving the head and retrying"
+            echo "merge-queue admission attempt $attempt was refused; re-proving the head and retrying"
             test "$(gh pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
             git fetch origin main
             test "$(git merge-base HEAD origin/main)" = "$(git rev-parse origin/main)"
             sleep 10
           done
-          test "$merged" = '1'
+          test "$queued" = '1'
       - name: Revoke authorization if the guarded merge did not complete
         id: revoke_authorization
         if: failure() && steps.merge_lock.outputs.owner_sha != ''

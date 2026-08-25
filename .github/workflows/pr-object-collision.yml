@@ -57,6 +57,8 @@ name: Cross-PR Object Collision
 
 on:
   pull_request:
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions:
@@ -95,6 +97,7 @@ jobs:
         run: node --test scripts/check-dispatch-collision.test.mjs scripts/manage-migration-author-lanes.test.mjs
 
       - name: No other open PR replaces the same database object
+        if: github.event_name != 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/check-pr-object-collisions.mjs

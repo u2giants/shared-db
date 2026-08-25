@@ -1495,4 +1495,25 @@ have already happened in this repo, more than once.
     is real and is preserved; it is **superseded** as a current instruction. Only issue #1286
     governs whether strict mode is ever reconsidered.
 
+18. **MERGE QUEUE IS THE ONLY MERGER ONCE ISSUE #1435 IS ACTIVATED.** The queue is deliberately
+    configured for one `ALLGREEN` pull request per build and per merge. Migration versions still
+    reserve permanently at claim time; the guarded admission refuses a migration PR while any
+    older non-draft migration PR remains open, and Guard B runs again on the synthetic queue commit.
+    This removes the merge race without changing reviewed PR-owned bytes.
+
+    External review remains pinned to the pull request's exact head SHA. The queue adds current
+    `main` in a synthetic commit; it never rewrites that reviewed head. The guarded workflow now
+    authorizes and enqueues the exact head, but never merges it itself. The native queue is the sole
+    merger.
+
+    A migration merge holds the next queue entry until the exact prior `main` SHA carries a
+    successful `Post-merge preview rehearsal` status written by the bounded preview workflow.
+    Ordinary non-migration merges need no invented database rehearsal. The gate waits 25 minutes
+    and then fails closed; re-enqueue after repairing or completing the rehearsal. Never bypass or
+    manually forge that status.
+
+    Activation is two-stage and reversible: merge the workflows first; add `Merge queue gate` as a
+    required context; then run `node scripts/configure-merge-queue.mjs` as a dry run before its
+    explicit `--apply`. It refuses activation until both queue workflows are already on `main`.
+
 ---
