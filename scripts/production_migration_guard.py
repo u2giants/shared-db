@@ -61,7 +61,8 @@ HARD_BLOCKED = {
     # was merged without a preview rehearsal before the preview project was
     # replaced. Current producer bytes therefore cannot create qualifying
     # evidence for that version. 20260825201330 carries the same executable SQL;
-    # the original must never enter any preview or production allowlist.
+    # it was applied alone to production in run 32901820150 after PR #1541 merged.
+    # The original must never enter any preview or production allowlist.
     "20260814170749",
     # These historical originals are superseded and their replacements are live.
     # 20260819011639 cannot satisfy the producer-provenance binding; its executable
