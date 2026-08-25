@@ -222,7 +222,8 @@ and both read the *normalized* tables only. Nothing later redefines what this fi
 **Broken today by its absence?** **No — but it is quietly wrong in two ways.** The two surviving API
 feeds read the emptied tables, so anyone querying them by hand is told "no Warner property/character
 relationships exist" while 4,158 of them sit next to it. Nothing in the codebase consumes those
-feeds (zero references in `types/`, `apps/`, `tools/`), so no screen or report is affected. Second,
+feeds (zero application or tool consumers; generated types still describe the legacy table), so
+no screen or report is affected. Second,
 the sixteen old loader functions remain callable and the capture guard still accepts the retired
 target names, so a stale script could land a fresh Warner scrape into tables nothing reads.
 
