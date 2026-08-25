@@ -1,8 +1,13 @@
 -- Issue #1184: ColdLion raw landing, unblocked structural phases 2-6.
 -- Phase 1 already exists in 20260818232639 and is not recreated here.
 -- Owner decisions D1-D13 in docs/plan_coldlion-landing-phases-2-6.md control.
--- No per-row raw archive (D5); source_hash is SHA-256 of the complete fetched
--- record before projection. No application grants and no foreign keys to core.*.
+-- No per-row raw archive (D5). Current-state source_hash is SHA-256 of the
+-- complete fetched record before projection. Split history tables instead hash
+-- their OWN GRAIN: line_source_hash excludes component and last* fields;
+-- component_source_hash covers the component projection; lookup_source_hash
+-- covers only the seven last* fields. This prevents flattened API rows from
+-- re-fanning one purchase/sales line into one parent per component or lookup.
+-- No application grants and no foreign keys to core.*.
 -- EP001 exclusion and three-version pruning are loader/maintenance contracts;
 -- this migration creates no loader because its runtime is still undecided.
 
@@ -103,34 +108,34 @@ comment on column coldlion.item_detail.retail_price is
   'Write-back wanted by the owner. A supported PUT /itemDetails path exists, but this migration builds no write path. Other write-back-wanted item fields follow the same D6 contract.';
 
 create table coldlion.order_history_line (
-  sales_order_no bigint not null, item_no text not null, label_code text not null,
+  sales_order_no bigint not null, item_no text not null, label_code text,
   cancel_date date, company_code text, customer_code text, po_number text, sales_person_code1 text,
   start_date date, division_code text, pre_pack_code text, line_qty numeric, line_cancelled_qty numeric,
   item_desc text, brand_assurance_no text, short_item_no text, prepack_qty numeric,
   customer_desc text, warehouse_code text, prod_cost numeric, prod_reference_no text,
-  source_hash text not null check (source_hash ~ '^[0-9a-f]{64}$'),
+  line_source_hash text not null check (line_source_hash ~ '^[0-9a-f]{64}$'),
   run_id uuid not null references coldlion.sync_run(id), fetched_at timestamptz not null,
-  unique (sales_order_no, item_no, label_code, source_hash),
+  unique nulls not distinct (sales_order_no, item_no, label_code, line_source_hash),
   check (division_code is null or division_code <> 'EP001')
 );
 
 comment on table coldlion.order_history_line is
-  'Append-only sales-order line. Evidence-backed derived identity is (salesOrderNo,itemNo,labelCode); ColdLion line number is not exposed. No FK to item_header: many historical lines have no item master row.';
+  'Append-only sales-order line. Evidence-backed derived identity is (salesOrderNo,itemNo,labelCode); ColdLion line number is not exposed. Empty labelCode normalises to NULL and the unique constraint uses NULLS NOT DISTINCT, so a replay cannot duplicate it. Because no substitute line number exists, a loader seeing two distinct line-grain hashes for the same order+item+NULL label in one pull must refuse as ambiguous rather than silently merge them. line_source_hash is over line-grain fields only: it excludes component fields including linePrice and therefore one prepack produces one parent. No FK to item_header: many historical lines have no item master row.';
 comment on column coldlion.order_history_line.brand_assurance_no is
   'Write-back wanted by the owner but currently impossible: ColdLion exposes no write endpoint for orderHistory. Flag only; no invented write path.';
 
 create table coldlion.order_history_component (
-  sales_order_no bigint not null, item_no text not null, label_code text not null, sub_item_no text not null,
+  sales_order_no bigint not null, item_no text not null, label_code text, sub_item_no text,
   line_price numeric, quantity numeric, sub_label_code text, sub_upc text,
   sub_merch_group01 text, sub_merch_group02 text, sub_merch_group03 text,
   sub_merch_group04 text, sub_merch_group05 text, sub_merch_group06 text,
-  source_hash text not null check (source_hash ~ '^[0-9a-f]{64}$'),
+  component_source_hash text not null check (component_source_hash ~ '^[0-9a-f]{64}$'),
   run_id uuid not null references coldlion.sync_run(id), fetched_at timestamptz not null,
-  unique (sales_order_no, item_no, label_code, sub_item_no, source_hash)
+  unique nulls not distinct (sales_order_no, item_no, label_code, sub_item_no, component_source_hash)
 );
 
 comment on table coldlion.order_history_component is
-  'Append-only component of an orderHistory line. linePrice is per component, not per line. Loader must assert component quantity sum equals the parent prepackQty before completing a window.';
+  'Append-only component of an orderHistory line. component_source_hash is over this component grain. linePrice is per component, not per line. Empty subItemNo normalises to NULL; on non-prepacks the parent itemNo already supplies the component identity and NULLS NOT DISTINCT makes replay idempotent. Loader must assert component quantity sum equals the parent prepackQty before completing a window.';
 
 create table coldlion.prod_history_line (
   prod_order_no bigint not null, prod_line_seq bigint not null,
@@ -142,20 +147,22 @@ create table coldlion.prod_history_line (
   label_code text, pre_pack_code text, prod_cost numeric, warehouse_sku text, prod_order_qty numeric,
   customer_desc text, total_prod_cost numeric, deposit_perc numeric, ext_cost numeric, receive_date date,
   cust_po_number text, cust_start_date date, cust_cancel_date date, vendor_desc text, prepack_qty numeric,
-  item_desc text, sub_item_no text, short_item_no text, line_price numeric,
-  source_hash text not null check (source_hash ~ '^[0-9a-f]{64}$'),
+  item_desc text, short_item_no text,
+  line_source_hash text not null check (line_source_hash ~ '^[0-9a-f]{64}$'),
   run_id uuid not null references coldlion.sync_run(id), fetched_at timestamptz not null,
-  unique (prod_order_no, prod_line_seq, source_hash),
+  unique (prod_order_no, prod_line_seq, stage_code, line_source_hash),
   check (division_code is null or division_code <> 'EP001')
 );
 
 comment on table coldlion.prod_history_line is
-  'Append-only real purchase line. Distinct prodLineSeq values are distinct purchases and must never be merged. salesOrderNo=0 means no linked sales order and is not a foreign key. stage_code is stamped from the request because Prod Stage is not exposed in the API.';
+  'Append-only real purchase line. Distinct prodLineSeq values are distinct purchases and must never be merged. line_source_hash is over line-grain fields only and excludes component and last* fields, preventing those flattened differences from duplicating a purchase. salesOrderNo=0 means no linked sales order and is not a foreign key. stage_code is stamped from the request because Prod Stage is not exposed in the API, and is part of every production-history grain identity so identical payloads observed in different stages never collide.';
 comment on column coldlion.prod_history_line.deposit_perc is
   'Write-back wanted by the owner but currently impossible: ColdLion exposes no write endpoint for prodHistory. Flag only; no invented write path.';
 
 create table coldlion.prod_history_component (
-  prod_order_no bigint not null, prod_line_seq bigint not null, prepack_item_no text not null,
+  prod_order_no bigint not null, prod_line_seq bigint not null,
+  stage_code text not null check (stage_code in ('ISS','INTRAN','REC')),
+  prepack_item_no text not null,
   prepack_dim_code text, prepack_division_code text, total_ppk_qty numeric, ppk_detail_qty numeric,
   ppk_detail_cost numeric, ppk_detail_qty2 numeric, prepack_item_pkey text,
   ppk_merch_group01 text, ppk_merch_group02 text, ppk_merch_group03 text, ppk_merch_group04 text,
@@ -167,22 +174,27 @@ create table coldlion.prod_history_component (
   ppk_merch_group07_desc text, ppk_merch_group08_desc text, ppk_merch_group09_desc text,
   ppk_merch_group10_desc text, ppk_merch_group11_desc text, ppk_merch_group12_desc text,
   ppk_merch_group13_desc text, ppk_merch_group14_desc text,
-  source_hash text not null check (source_hash ~ '^[0-9a-f]{64}$'),
+  sub_item_no text, line_price numeric,
+  component_source_hash text not null check (component_source_hash ~ '^[0-9a-f]{64}$'),
   run_id uuid not null references coldlion.sync_run(id), fetched_at timestamptz not null,
-  unique (prod_order_no, prod_line_seq, prepack_item_no, source_hash)
+  unique (prod_order_no, prod_line_seq, stage_code, prepack_item_no, component_source_hash)
 );
+
+comment on table coldlion.prod_history_component is
+  'One production-history component. subItemNo and linePrice belong here because the API row grain is purchase line times component and no within-line invariant is proven. component_source_hash covers this component projection. stage_code is stamped from the request and participates in identity.';
 
 create table coldlion.prod_history_last_lookup (
   prod_order_no bigint not null, prod_line_seq bigint not null,
+  stage_code text not null check (stage_code in ('ISS','INTRAN','REC')),
   last_prod_ref_no text, last_due_date date, last_prod_date date, last_warehouse_code text,
   last_vendor_code text, last_vendor_desc text, last_prod_cost numeric,
-  source_hash text not null check (source_hash ~ '^[0-9a-f]{64}$'),
+  lookup_source_hash text not null check (lookup_source_hash ~ '^[0-9a-f]{64}$'),
   run_id uuid not null references coldlion.sync_run(id), fetched_at timestamptz not null,
-  unique (prod_order_no, prod_line_seq, source_hash)
+  unique (prod_order_no, prod_line_seq, stage_code, lookup_source_hash)
 );
 
 comment on table coldlion.prod_history_last_lookup is
-  'The seven last* fields are a most-recent-production lookup, separate from the purchase. lastProdCost is never the cost of this order; extCost on prod_history_line is.';
+  'The seven last* fields are a most-recent-production lookup, separate from the purchase. lookup_source_hash covers only these lookup fields, so a changed lookup never duplicates prod_history_line. lastProdCost is never the cost of this order; extCost on prod_history_line is. stage_code is stamped from the request and participates in identity.';
 
 create table coldlion.customer (
   company_code text not null, customer_code text not null, created_time timestamptz, mod_time timestamptz,
