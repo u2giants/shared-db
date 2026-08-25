@@ -39,6 +39,22 @@ begin
      or to_regprocedure('public.get_dam_search_embedding_status()') is null then
     raise exception 'PopDAM #1427 final RPC contract is incomplete';
   end if;
+  if (select count(*) from pg_constraint where conrelid='public.asset_tags'::regclass
+      and convalidated and conname in ('asset_tags_tag_normalized_check','asset_tags_source_normalized_check',
+        'asset_tags_category_check','asset_tags_status_check','asset_tags_confidence_check','asset_tags_rejection_check')) <> 6 then
+    raise exception 'PopDAM canonical final validated checks are incomplete';
+  end if;
+  if (select count(*) from pg_trigger where not tgisinternal and tgenabled <> 'D' and (
+      (tgrelid='public.asset_tags'::regclass and tgname in ('asset_tags_sync_assets_tags','asset_tags_dam_search_refresh'))
+      or (tgrelid='public.style_group_tags'::regclass and tgname='style_group_tags_dam_search_refresh')
+      or (tgrelid='public.asset_characters'::regclass and tgname='asset_characters_dam_search_refresh'))) <> 4 then
+    raise exception 'PopDAM canonical final trigger wiring is incomplete';
+  end if;
+  if not (select relrowsecurity from pg_class where oid='public.style_group_tags'::regclass)
+     or (select count(*) from pg_policy where polrelid='public.style_group_tags'::regclass
+       and polname in ('Authenticated read style_group_tags','Admin manage style_group_tags')) <> 2 then
+    raise exception 'PopDAM canonical final RLS contract is incomplete';
+  end if;
 end $$;
 
 rollback;

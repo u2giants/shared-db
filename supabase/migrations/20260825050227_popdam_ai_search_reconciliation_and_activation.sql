@@ -4,6 +4,83 @@
 set statement_timeout = '10min';
 begin;
 
+-- A pending reconciliation marker is not proof that hardening is missing.
+-- Preview already carries the complete historical contract, so capture that
+-- truth before replacing the marker. This probe intentionally covers every
+-- lock-taking contract family and its callable/security surface.
+select set_config(
+  'popdam.final_contract_complete',
+  case when
+    (select count(*) = 4 from information_schema.columns
+      where table_schema='public' and table_name='asset_tags'
+        and column_name in ('category','status','evidence','updated_at')
+        and is_nullable='NO')
+    and (select count(*) = 6 from pg_constraint
+      where conrelid='public.asset_tags'::regclass and convalidated
+        and conname in ('asset_tags_tag_normalized_check','asset_tags_source_normalized_check',
+          'asset_tags_category_check','asset_tags_status_check','asset_tags_confidence_check',
+          'asset_tags_rejection_check'))
+    and to_regclass('public.style_group_tags') is not null
+    and to_regclass('public.dam_search_documents') is not null
+    and (select count(*) = 5 from information_schema.columns
+      where table_schema='public' and table_name='style_groups'
+        and column_name in ('group_ai_description','group_ai_description_source',
+          'group_ai_description_model','group_ai_tagged_at','group_ai_evidence_asset_ids'))
+    and (select count(*) = 7 from information_schema.columns
+      where table_schema='public' and table_name='dam_search_documents'
+        and column_name in ('embedding_lease_token','embedding_lease_owner','embedding_lease_expires_at',
+          'embedding_attempts','embedding_max_attempts','embedding_error_category','embedding_next_retry_at'))
+    and (select count(*) = 2 from pg_constraint
+      where conrelid=to_regclass('public.dam_search_documents') and convalidated
+        and conname in ('dam_search_embedding_attempts_check','dam_search_embedding_error_category_check'))
+    and (select count(*) = 3 from pg_constraint
+      where conrelid=to_regclass('public.style_group_tags') and convalidated
+        and conname in ('style_group_tags_unique','style_group_tags_source_normalized_check',
+          'style_group_tags_rejection_check'))
+    and to_regclass('public.style_group_tags_active_group_idx') is not null
+    and to_regclass('public.asset_tags_active_asset_idx') is not null
+    and to_regclass('public.dam_search_embedding_claim_idx') is not null
+    and (select relrowsecurity from pg_class where oid=to_regclass('public.style_group_tags'))
+    and exists (select 1 from pg_policy where polrelid=to_regclass('public.style_group_tags')
+      and polname='Authenticated read style_group_tags' and polcmd='r'
+      and to_regrole('authenticated')=any(polroles) and pg_get_expr(polqual,polrelid)='true')
+    and exists (select 1 from pg_policy where polrelid=to_regclass('public.style_group_tags')
+      and polname='Admin manage style_group_tags' and polcmd='*'
+      and to_regrole('authenticated')=any(polroles)
+      and pg_get_expr(polqual,polrelid) like '%has_role%admin%'
+      and pg_get_expr(polwithcheck,polrelid) like '%has_role%admin%')
+    and to_regprocedure('public.sync_asset_tags_to_array()') is not null
+    and to_regprocedure('public.refresh_dam_search_asset_document(uuid)') is not null
+    and to_regprocedure('public.refresh_dam_search_style_group_document(uuid)') is not null
+    and to_regprocedure('public.refresh_dam_search_documents_batch(uuid[],uuid[],integer)') is not null
+    and to_regprocedure('public.trg_refresh_dam_tag_or_character()') is not null
+    and to_regprocedure('public.replace_style_group_ai_profile(uuid,text,text,text,jsonb,uuid[])') is not null
+    and to_regprocedure('public.replace_asset_ai_tag_result(uuid,text,text,jsonb)') is not null
+    and to_regprocedure('public.get_effective_asset_metadata(uuid)') is not null
+    and to_regprocedure('public.claim_dam_search_embedding_documents(integer,text,integer)') is not null
+    and to_regprocedure('public.upsert_dam_search_embedding(text,uuid,text,uuid,extensions.vector,text)') is not null
+    and to_regprocedure('public.mark_dam_search_embedding_error(text,uuid,text,uuid,text,text)') is not null
+    and to_regprocedure('public.get_dam_search_embedding_status()') is not null
+    and to_regprocedure('public.reset_dam_search_embedding_errors(text,uuid[])') is not null
+    and (select count(*) = 4 from pg_trigger where not tgisinternal and tgenabled <> 'D' and (
+      (tgrelid=to_regclass('public.asset_tags') and tgname='asset_tags_sync_assets_tags'
+        and tgfoid=to_regprocedure('public.sync_asset_tags_to_array()'))
+      or (tgrelid=to_regclass('public.asset_tags') and tgname='asset_tags_dam_search_refresh'
+        and tgfoid=to_regprocedure('public.trg_refresh_dam_tag_or_character()'))
+      or (tgrelid=to_regclass('public.style_group_tags') and tgname='style_group_tags_dam_search_refresh'
+        and tgfoid=to_regprocedure('public.trg_refresh_dam_tag_or_character()'))
+      or (tgrelid=to_regclass('public.asset_characters') and tgname='asset_characters_dam_search_refresh'
+        and tgfoid=to_regprocedure('public.trg_refresh_dam_tag_or_character()'))))
+    and has_table_privilege('authenticated',to_regclass('public.style_group_tags'),'SELECT')
+    and has_table_privilege('service_role',to_regclass('public.style_group_tags'),'SELECT')
+    and has_function_privilege('service_role',to_regprocedure('public.replace_style_group_ai_profile(uuid,text,text,text,jsonb,uuid[])'),'EXECUTE')
+    and has_function_privilege('service_role',to_regprocedure('public.claim_dam_search_embedding_documents(integer,text,integer)'),'EXECUTE')
+    and not has_function_privilege('authenticated',to_regprocedure('public.replace_style_group_ai_profile(uuid,text,text,text,jsonb,uuid[])'),'EXECUTE')
+    and not has_function_privilege('authenticated',to_regprocedure('public.claim_dam_search_embedding_documents(integer,text,integer)'),'EXECUTE')
+    then 'on' else 'off' end,
+  false
+);
+
 -- One canonical probe governs every bounded phase. Preview already has this
 -- complete contract from its truthful historical ledger, so B must not walk
 -- millions of rows there. Production after prerequisite A lacks these objects
@@ -2233,33 +2310,43 @@ commit;
 
 begin;
 
-alter table public.asset_tags add constraint asset_tags_category_nn_recovery_check check (category is not null) not valid;
-alter table public.asset_tags add constraint asset_tags_status_nn_recovery_check check (status is not null) not valid;
-alter table public.asset_tags add constraint asset_tags_evidence_nn_recovery_check check (evidence is not null) not valid;
-alter table public.asset_tags add constraint asset_tags_updated_at_nn_recovery_check check (updated_at is not null) not valid;
-alter table public.asset_tags validate constraint asset_tags_category_nn_recovery_check;
-alter table public.asset_tags validate constraint asset_tags_status_nn_recovery_check;
-alter table public.asset_tags validate constraint asset_tags_evidence_nn_recovery_check;
-alter table public.asset_tags validate constraint asset_tags_updated_at_nn_recovery_check;
-alter table public.asset_tags alter column category set not null;
-alter table public.asset_tags alter column status set not null;
-alter table public.asset_tags alter column evidence set default '{}'::jsonb;
-alter table public.asset_tags alter column evidence set not null;
-alter table public.asset_tags alter column updated_at set default now();
-alter table public.asset_tags alter column updated_at set not null;
-alter table public.asset_tags drop constraint asset_tags_category_nn_recovery_check;
-alter table public.asset_tags drop constraint asset_tags_status_nn_recovery_check;
-alter table public.asset_tags drop constraint asset_tags_evidence_nn_recovery_check;
-alter table public.asset_tags drop constraint asset_tags_updated_at_nn_recovery_check;
+create or replace function pg_temp.popdam_1479_apply_final_ddl(p_sql text)
+returns boolean language plpgsql as $apply$
+begin
+  if current_setting('popdam.final_contract_complete') = 'on' then
+    return false;
+  end if;
+  execute p_sql;
+  return true;
+end $apply$;
 
-alter table public.asset_tags
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags add constraint asset_tags_category_nn_recovery_check check (category is not null) not valid');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags add constraint asset_tags_status_nn_recovery_check check (status is not null) not valid');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags add constraint asset_tags_evidence_nn_recovery_check check (evidence is not null) not valid');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags add constraint asset_tags_updated_at_nn_recovery_check check (updated_at is not null) not valid');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags validate constraint asset_tags_category_nn_recovery_check');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags validate constraint asset_tags_status_nn_recovery_check');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags validate constraint asset_tags_evidence_nn_recovery_check');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags validate constraint asset_tags_updated_at_nn_recovery_check');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags alter column category set not null');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags alter column status set not null');
+select pg_temp.popdam_1479_apply_final_ddl($ddl$alter table public.asset_tags alter column evidence set default '{}'::jsonb$ddl$);
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags alter column evidence set not null');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags alter column updated_at set default now()');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags alter column updated_at set not null');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags drop constraint asset_tags_category_nn_recovery_check');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags drop constraint asset_tags_status_nn_recovery_check');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags drop constraint asset_tags_evidence_nn_recovery_check');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags drop constraint asset_tags_updated_at_nn_recovery_check');
+
+select pg_temp.popdam_1479_apply_final_ddl($ddl$alter table public.asset_tags
   drop constraint if exists asset_tags_tag_normalized_check,
   drop constraint if exists asset_tags_source_normalized_check,
   drop constraint if exists asset_tags_category_check,
   drop constraint if exists asset_tags_status_check,
   drop constraint if exists asset_tags_confidence_check,
-  drop constraint if exists asset_tags_rejection_check;
-alter table public.asset_tags
+  drop constraint if exists asset_tags_rejection_check$ddl$);
+select pg_temp.popdam_1479_apply_final_ddl($ddl$alter table public.asset_tags
   add constraint asset_tags_tag_normalized_check check (tag = btrim(tag) and tag <> '') not valid,
   add constraint asset_tags_source_normalized_check check (source = btrim(source) and source <> '') not valid,
   add constraint asset_tags_category_check check (category in
@@ -2269,15 +2356,15 @@ alter table public.asset_tags
   add constraint asset_tags_rejection_check check (
     (status = 'rejected' and rejected_at is not null) or
     (status <> 'rejected' and rejected_at is null and rejected_by is null)
-  ) not valid;
-alter table public.asset_tags validate constraint asset_tags_tag_normalized_check;
-alter table public.asset_tags validate constraint asset_tags_source_normalized_check;
-alter table public.asset_tags validate constraint asset_tags_category_check;
-alter table public.asset_tags validate constraint asset_tags_status_check;
-alter table public.asset_tags validate constraint asset_tags_confidence_check;
-alter table public.asset_tags validate constraint asset_tags_rejection_check;
+  ) not valid$ddl$);
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags validate constraint asset_tags_tag_normalized_check');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags validate constraint asset_tags_source_normalized_check');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags validate constraint asset_tags_category_check');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags validate constraint asset_tags_status_check');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags validate constraint asset_tags_confidence_check');
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.asset_tags validate constraint asset_tags_rejection_check');
 
-create table if not exists public.style_group_tags (
+select pg_temp.popdam_1479_apply_final_ddl($ddl$create table if not exists public.style_group_tags (
   id uuid primary key default gen_random_uuid(),
   style_group_id uuid not null references public.style_groups(id) on delete cascade,
   tag text not null check (tag = btrim(tag) and tag <> ''),
@@ -2299,48 +2386,49 @@ create table if not exists public.style_group_tags (
     (status = 'rejected' and rejected_at is not null) or
     (status <> 'rejected' and rejected_at is null and rejected_by is null)
   )
-);
-create index if not exists style_group_tags_active_group_idx on public.style_group_tags(style_group_id, tag)
-  where status = 'active';
-create index if not exists asset_tags_active_asset_idx on public.asset_tags(asset_id, tag)
-  where status = 'active';
+)$ddl$);
+select pg_temp.popdam_1479_apply_final_ddl($ddl$create index if not exists style_group_tags_active_group_idx on public.style_group_tags(style_group_id, tag)
+  where status = 'active'$ddl$);
+select pg_temp.popdam_1479_apply_final_ddl($ddl$create index if not exists asset_tags_active_asset_idx on public.asset_tags(asset_id, tag)
+  where status = 'active'$ddl$);
 
-alter table public.style_group_tags enable row level security;
-drop policy if exists "Authenticated read style_group_tags" on public.style_group_tags;
-drop policy if exists "Admin manage style_group_tags" on public.style_group_tags;
-create policy "Authenticated read style_group_tags" on public.style_group_tags
+select pg_temp.popdam_1479_apply_final_ddl('alter table public.style_group_tags enable row level security');
+select pg_temp.popdam_1479_apply_final_ddl('drop policy if exists "Authenticated read style_group_tags" on public.style_group_tags');
+select pg_temp.popdam_1479_apply_final_ddl('drop policy if exists "Admin manage style_group_tags" on public.style_group_tags');
+select pg_temp.popdam_1479_apply_final_ddl($ddl$create policy "Authenticated read style_group_tags" on public.style_group_tags
   for select to authenticated using (true);
-create policy "Admin manage style_group_tags" on public.style_group_tags
+ $ddl$);
+select pg_temp.popdam_1479_apply_final_ddl($ddl$create policy "Admin manage style_group_tags" on public.style_group_tags
   for all to authenticated using (public.has_role(auth.uid(), 'admin'))
-  with check (public.has_role(auth.uid(), 'admin'));
+  with check (public.has_role(auth.uid(), 'admin'))$ddl$);
 
-alter table public.style_groups
+select pg_temp.popdam_1479_apply_final_ddl($ddl$alter table public.style_groups
   add column if not exists group_ai_description text,
   add column if not exists group_ai_description_source text,
   add column if not exists group_ai_description_model text,
   add column if not exists group_ai_tagged_at timestamptz,
-  add column if not exists group_ai_evidence_asset_ids uuid[] not null default '{}'::uuid[];
+  add column if not exists group_ai_evidence_asset_ids uuid[] not null default '{}'::uuid[]$ddl$);
 
-alter table public.dam_search_documents
+select pg_temp.popdam_1479_apply_final_ddl($ddl$alter table public.dam_search_documents
   drop constraint if exists dam_search_embedding_attempts_check,
-  drop constraint if exists dam_search_embedding_error_category_check;
-alter table public.dam_search_documents
+  drop constraint if exists dam_search_embedding_error_category_check$ddl$);
+select pg_temp.popdam_1479_apply_final_ddl($ddl$alter table public.dam_search_documents
   add column if not exists embedding_lease_token uuid,
   add column if not exists embedding_lease_owner text,
   add column if not exists embedding_lease_expires_at timestamptz,
   add column if not exists embedding_attempts integer not null default 0,
   add column if not exists embedding_max_attempts integer not null default 5,
   add column if not exists embedding_error_category text,
-  add column if not exists embedding_next_retry_at timestamptz;
-alter table public.dam_search_documents
+  add column if not exists embedding_next_retry_at timestamptz$ddl$);
+select pg_temp.popdam_1479_apply_final_ddl($ddl$alter table public.dam_search_documents
   add constraint dam_search_embedding_attempts_check check (
     embedding_attempts >= 0 and embedding_max_attempts between 1 and 20),
   add constraint dam_search_embedding_error_category_check check (
-    embedding_error_category is null or embedding_error_category in ('transient','permanent'));
-create index if not exists dam_search_embedding_claim_idx on public.dam_search_documents(indexed_at, document_type, entity_id)
-  where embedding is null;
+    embedding_error_category is null or embedding_error_category in ('transient','permanent'))$ddl$);
+select pg_temp.popdam_1479_apply_final_ddl($ddl$create index if not exists dam_search_embedding_claim_idx on public.dam_search_documents(indexed_at, document_type, entity_id)
+  where embedding is null$ddl$);
 
-create or replace function public.sync_asset_tags_to_array()
+select pg_temp.popdam_1479_apply_final_ddl($applyddl$create or replace function public.sync_asset_tags_to_array()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare v_asset_id uuid;
 begin
@@ -2353,13 +2441,13 @@ begin
     where id = v_asset_id;
   end loop;
   return case when tg_op = 'DELETE' then old else new end;
-end $$;
-drop trigger if exists trg_sync_asset_tags on public.asset_tags;
-drop trigger if exists asset_tags_sync_assets_tags on public.asset_tags;
-create trigger asset_tags_sync_assets_tags after insert or update or delete on public.asset_tags
-for each row execute function public.sync_asset_tags_to_array();
+end $$$applyddl$);
+select pg_temp.popdam_1479_apply_final_ddl('drop trigger if exists trg_sync_asset_tags on public.asset_tags');
+select pg_temp.popdam_1479_apply_final_ddl('drop trigger if exists asset_tags_sync_assets_tags on public.asset_tags');
+select pg_temp.popdam_1479_apply_final_ddl($ddl$create trigger asset_tags_sync_assets_tags after insert or update or delete on public.asset_tags
+for each row execute function public.sync_asset_tags_to_array()$ddl$);
 
-create or replace function public.refresh_dam_search_asset_document(p_asset_id uuid)
+select pg_temp.popdam_1479_apply_final_ddl($applyddl$create or replace function public.refresh_dam_search_asset_document(p_asset_id uuid)
 returns void language plpgsql security definer set search_path = public, dam, extensions as $$
 declare v_text text; v_hash text; v_old_group uuid; v_new_group uuid;
 begin
@@ -2414,9 +2502,9 @@ begin
     if v_old_group is not null then perform public.refresh_dam_search_style_group_document(v_old_group); end if;
     if v_new_group is not null then perform public.refresh_dam_search_style_group_document(v_new_group); end if;
   end if;
-end $$;
+end $$$applyddl$);
 
-create or replace function public.refresh_dam_search_style_group_document(p_style_group_id uuid)
+select pg_temp.popdam_1479_apply_final_ddl($applyddl$create or replace function public.refresh_dam_search_style_group_document(p_style_group_id uuid)
 returns void language plpgsql security definer set search_path = public, dam, extensions as $$
 declare v_text text; v_hash text;
 begin
@@ -2453,9 +2541,9 @@ begin
     embedding_error_category=case when dam_search_documents.content_sha256=excluded.content_sha256 then dam_search_documents.embedding_error_category end,
     embedding_attempts=case when dam_search_documents.content_sha256=excluded.content_sha256 then dam_search_documents.embedding_attempts else 0 end,
     embedding_lease_token=null,embedding_lease_owner=null,embedding_lease_expires_at=null,embedding_next_retry_at=null;
-end $$;
+end $$$applyddl$);
 
-create or replace function public.refresh_dam_search_documents_batch(p_asset_ids uuid[] default '{}', p_style_group_ids uuid[] default '{}', p_limit int default 500)
+select pg_temp.popdam_1479_apply_final_ddl($applyddl$create or replace function public.refresh_dam_search_documents_batch(p_asset_ids uuid[] default '{}', p_style_group_ids uuid[] default '{}', p_limit int default 500)
 returns jsonb language plpgsql security definer set search_path=public as $$
 declare v_id uuid; v_a int:=0; v_g int:=0; v_limit int:=greatest(1,least(coalesce(p_limit,500),1000));
 begin
@@ -2466,9 +2554,9 @@ begin
     perform public.refresh_dam_search_style_group_document(v_id); v_g:=v_g+1;
   end loop;
   return jsonb_build_object('asset_documents',v_a,'style_group_documents',v_g,'bounded_limit',v_limit);
-end $$;
+end $$$applyddl$);
 
-create or replace function public.trg_refresh_dam_tag_or_character()
+select pg_temp.popdam_1479_apply_final_ddl($applyddl$create or replace function public.trg_refresh_dam_tag_or_character()
 returns trigger language plpgsql security definer set search_path=public as $$
 declare v_assets uuid[]:='{}'; v_groups uuid[]:='{}';
 begin
@@ -2483,18 +2571,18 @@ begin
   end if;
   perform public.refresh_dam_search_documents_batch(v_assets,v_groups,4);
   return case when tg_op='DELETE' then old else new end;
-end $$;
-drop trigger if exists asset_tags_dam_search_refresh on public.asset_tags;
-drop trigger if exists style_group_tags_dam_search_refresh on public.style_group_tags;
-drop trigger if exists asset_characters_dam_search_refresh on public.asset_characters;
-create trigger asset_tags_dam_search_refresh after insert or update or delete on public.asset_tags
-for each row execute function public.trg_refresh_dam_tag_or_character();
-create trigger style_group_tags_dam_search_refresh after insert or update or delete on public.style_group_tags
-for each row execute function public.trg_refresh_dam_tag_or_character();
-create trigger asset_characters_dam_search_refresh after insert or update or delete on public.asset_characters
-for each row execute function public.trg_refresh_dam_tag_or_character();
+end $$$applyddl$);
+select pg_temp.popdam_1479_apply_final_ddl('drop trigger if exists asset_tags_dam_search_refresh on public.asset_tags');
+select pg_temp.popdam_1479_apply_final_ddl('drop trigger if exists style_group_tags_dam_search_refresh on public.style_group_tags');
+select pg_temp.popdam_1479_apply_final_ddl('drop trigger if exists asset_characters_dam_search_refresh on public.asset_characters');
+select pg_temp.popdam_1479_apply_final_ddl($ddl$create trigger asset_tags_dam_search_refresh after insert or update or delete on public.asset_tags
+for each row execute function public.trg_refresh_dam_tag_or_character()$ddl$);
+select pg_temp.popdam_1479_apply_final_ddl($ddl$create trigger style_group_tags_dam_search_refresh after insert or update or delete on public.style_group_tags
+for each row execute function public.trg_refresh_dam_tag_or_character()$ddl$);
+select pg_temp.popdam_1479_apply_final_ddl($ddl$create trigger asset_characters_dam_search_refresh after insert or update or delete on public.asset_characters
+for each row execute function public.trg_refresh_dam_tag_or_character()$ddl$);
 
-create or replace function public.replace_style_group_ai_profile(p_style_group_id uuid,p_source text,p_model text,
+select pg_temp.popdam_1479_apply_final_ddl($applyddl$create or replace function public.replace_style_group_ai_profile(p_style_group_id uuid,p_source text,p_model text,
   p_description text,p_tags jsonb default '[]',p_evidence_asset_ids uuid[] default '{}') returns jsonb
 language plpgsql security definer set search_path=public as $$
 declare r jsonb; v_count int;
@@ -2524,9 +2612,9 @@ begin
   perform public.refresh_dam_search_documents_batch('{}',array[p_style_group_id],1);
   select count(*) into v_count from public.style_group_tags where style_group_id=p_style_group_id and source=p_source and model=p_model;
   return jsonb_build_object('style_group_id',p_style_group_id,'tag_count',v_count);
-end $$;
+end $$$applyddl$);
 
-create or replace function public.replace_asset_ai_tag_result(p_asset_id uuid,p_source text,p_model text,p_tags jsonb)
+select pg_temp.popdam_1479_apply_final_ddl($applyddl$create or replace function public.replace_asset_ai_tag_result(p_asset_id uuid,p_source text,p_model text,p_tags jsonb)
 returns jsonb language plpgsql security definer set search_path=public as $$
 declare r jsonb; v_count int;
 begin
@@ -2549,9 +2637,9 @@ begin
   perform public.refresh_dam_search_documents_batch(array[p_asset_id],'{}',2);
   select count(*) into v_count from public.asset_tags where asset_id=p_asset_id and source=p_source and model=p_model;
   return jsonb_build_object('asset_id',p_asset_id,'tag_count',v_count);
-end $$;
+end $$$applyddl$);
 
-create or replace function public.get_effective_asset_metadata(p_asset_id uuid)
+select pg_temp.popdam_1479_apply_final_ddl($applyddl$create or replace function public.get_effective_asset_metadata(p_asset_id uuid)
 returns table(scope text,tag text,category text,source text,status text,confidence numeric,model text,created_by uuid,
   effective_licensor_id uuid,effective_property_id uuid,style_group_id uuid)
 language sql stable security invoker set search_path=public as $$
@@ -2566,10 +2654,10 @@ language sql stable security invoker set search_path=public as $$
     from public.assets a left join public.style_groups sg on sg.id=a.style_group_id join public.asset_tags t on t.asset_id=a.id
     where a.id=p_asset_id
   ) m order by m.scope,lower(m.tag),m.tag;
-$$;
+$$$applyddl$);
 
-drop function if exists public.claim_dam_search_embedding_documents(int);
-create or replace function public.claim_dam_search_embedding_documents(p_limit int default 100,p_worker_id text default null,p_lease_seconds int default 300)
+select pg_temp.popdam_1479_apply_final_ddl('drop function if exists public.claim_dam_search_embedding_documents(int)');
+select pg_temp.popdam_1479_apply_final_ddl($applyddl$create or replace function public.claim_dam_search_embedding_documents(p_limit int default 100,p_worker_id text default null,p_lease_seconds int default 300)
 returns table(document_type text,entity_id uuid,search_text text,content_sha256 text,lease_token uuid,lease_expires_at timestamptz,attempt int)
 language plpgsql security definer set search_path=public as $$
 begin
@@ -2587,10 +2675,10 @@ begin
     embedding_attempts=d.embedding_attempts+1 from candidates c where d.document_type=c.document_type and d.entity_id=c.entity_id
     returning d.*)
   select c.document_type,c.entity_id,left(c.search_text,8000),c.content_sha256,c.embedding_lease_token,c.embedding_lease_expires_at,c.embedding_attempts from claimed c;
-end $$;
+end $$$applyddl$);
 
-drop function if exists public.upsert_dam_search_embedding(text,uuid,text,extensions.vector(384),text);
-create or replace function public.upsert_dam_search_embedding(p_document_type text,p_entity_id uuid,p_content_sha256 text,p_lease_token uuid,
+select pg_temp.popdam_1479_apply_final_ddl('drop function if exists public.upsert_dam_search_embedding(text,uuid,text,extensions.vector(384),text)');
+select pg_temp.popdam_1479_apply_final_ddl($applyddl$create or replace function public.upsert_dam_search_embedding(p_document_type text,p_entity_id uuid,p_content_sha256 text,p_lease_token uuid,
   p_embedding extensions.vector(384),p_embedding_model text default 'gte-small') returns boolean language plpgsql security definer set search_path=public as $$
 begin
   if (select auth.role()) <> 'service_role' then raise exception 'service_role required' using errcode='42501'; end if;
@@ -2598,10 +2686,10 @@ begin
     embedding_error=null,embedding_error_category=null,embedding_next_retry_at=null,embedding_lease_token=null,
     embedding_lease_owner=null,embedding_lease_expires_at=null where document_type=p_document_type and entity_id=p_entity_id
     and content_sha256=p_content_sha256 and embedding_lease_token=p_lease_token and embedding_lease_expires_at>now(); return found;
-end $$;
+end $$$applyddl$);
 
-drop function if exists public.mark_dam_search_embedding_error(text,uuid,text,text);
-create or replace function public.mark_dam_search_embedding_error(p_document_type text,p_entity_id uuid,p_content_sha256 text,p_lease_token uuid,
+select pg_temp.popdam_1479_apply_final_ddl('drop function if exists public.mark_dam_search_embedding_error(text,uuid,text,text)');
+select pg_temp.popdam_1479_apply_final_ddl($applyddl$create or replace function public.mark_dam_search_embedding_error(p_document_type text,p_entity_id uuid,p_content_sha256 text,p_lease_token uuid,
   p_error text,p_category text default 'transient') returns boolean language plpgsql security definer set search_path=public as $$
 begin
   if (select auth.role()) <> 'service_role' or p_category not in ('transient','permanent') then raise exception 'invalid embedding error'; end if;
@@ -2612,18 +2700,18 @@ begin
     embedding_lease_token=null,embedding_lease_owner=null,embedding_lease_expires_at=null
   where document_type=p_document_type and entity_id=p_entity_id and content_sha256=p_content_sha256
     and embedding_lease_token=p_lease_token and embedding_lease_expires_at>now(); return found;
-end $$;
+end $$$applyddl$);
 
-create or replace function public.get_dam_search_embedding_status() returns jsonb language sql stable security definer set search_path=public as $$
+select pg_temp.popdam_1479_apply_final_ddl($applyddl$create or replace function public.get_dam_search_embedding_status() returns jsonb language sql stable security definer set search_path=public as $$
 select jsonb_build_object('total_documents',count(*),'embedded_documents',count(*) filter(where embedding is not null),
  'pending_documents',count(*) filter(where embedding is null and embedding_attempts<embedding_max_attempts and embedding_error_category is distinct from 'permanent'),
  'leased_documents',count(*) filter(where embedding_lease_expires_at>now()),'errored_documents',count(*) filter(where embedding_error is not null),
  'exhausted_documents',count(*) filter(where embedding is null and (embedding_attempts>=embedding_max_attempts or embedding_error_category='permanent')),
  'asset_documents',count(*) filter(where document_type='asset'),'style_group_documents',count(*) filter(where document_type='style_group'),
  'oldest_pending_indexed_at',min(indexed_at) filter(where embedding is null),'newest_indexed_at',max(indexed_at)) from public.dam_search_documents;
-$$;
+$$$applyddl$);
 
-create or replace function public.reset_dam_search_embedding_errors(p_document_type text default null,p_entity_ids uuid[] default null)
+select pg_temp.popdam_1479_apply_final_ddl($applyddl$create or replace function public.reset_dam_search_embedding_errors(p_document_type text default null,p_entity_ids uuid[] default null)
 returns integer language plpgsql security definer set search_path=public as $$
 declare v_count int;
 begin
@@ -2632,31 +2720,31 @@ begin
     embedding_next_retry_at=null,embedding_lease_token=null,embedding_lease_owner=null,embedding_lease_expires_at=null
   where embedding is null and (p_document_type is null or document_type=p_document_type) and (p_entity_ids is null or entity_id=any(p_entity_ids));
   get diagnostics v_count=row_count; return v_count;
-end $$;
+end $$$applyddl$);
 
-revoke all on public.style_group_tags from anon;
-grant select on public.style_group_tags to authenticated,service_role;
-grant select on public.asset_tags to authenticated,service_role;
-revoke all on function public.replace_style_group_ai_profile(uuid,text,text,text,jsonb,uuid[]) from public,anon,authenticated;
-revoke all on function public.replace_asset_ai_tag_result(uuid,text,text,jsonb) from public,anon,authenticated;
-revoke all on function public.refresh_dam_search_documents_batch(uuid[],uuid[],int) from public,anon,authenticated;
-revoke all on function public.claim_dam_search_embedding_documents(int,text,int) from public,anon,authenticated;
-revoke all on function public.upsert_dam_search_embedding(text,uuid,text,uuid,extensions.vector(384),text) from public,anon,authenticated;
-revoke all on function public.mark_dam_search_embedding_error(text,uuid,text,uuid,text,text) from public,anon,authenticated;
-revoke all on function public.get_dam_search_embedding_status() from public,anon,authenticated;
-revoke all on function public.reset_dam_search_embedding_errors(text,uuid[]) from public,anon,authenticated;
-grant execute on function public.replace_style_group_ai_profile(uuid,text,text,text,jsonb,uuid[]) to service_role;
-grant execute on function public.replace_asset_ai_tag_result(uuid,text,text,jsonb) to service_role;
-grant execute on function public.get_effective_asset_metadata(uuid) to authenticated,service_role;
-grant execute on function public.refresh_dam_search_documents_batch(uuid[],uuid[],int) to service_role;
-grant execute on function public.claim_dam_search_embedding_documents(int,text,int) to service_role;
-grant execute on function public.upsert_dam_search_embedding(text,uuid,text,uuid,extensions.vector(384),text) to service_role;
-grant execute on function public.mark_dam_search_embedding_error(text,uuid,text,uuid,text,text) to service_role;
-grant execute on function public.get_dam_search_embedding_status() to service_role;
-grant execute on function public.reset_dam_search_embedding_errors(text,uuid[]) to service_role;
+select pg_temp.popdam_1479_apply_final_ddl('revoke all on public.style_group_tags from anon');
+select pg_temp.popdam_1479_apply_final_ddl('grant select on public.style_group_tags to authenticated,service_role');
+select pg_temp.popdam_1479_apply_final_ddl('grant select on public.asset_tags to authenticated,service_role');
+select pg_temp.popdam_1479_apply_final_ddl('revoke all on function public.replace_style_group_ai_profile(uuid,text,text,text,jsonb,uuid[]) from public,anon,authenticated');
+select pg_temp.popdam_1479_apply_final_ddl('revoke all on function public.replace_asset_ai_tag_result(uuid,text,text,jsonb) from public,anon,authenticated');
+select pg_temp.popdam_1479_apply_final_ddl('revoke all on function public.refresh_dam_search_documents_batch(uuid[],uuid[],int) from public,anon,authenticated');
+select pg_temp.popdam_1479_apply_final_ddl('revoke all on function public.claim_dam_search_embedding_documents(int,text,int) from public,anon,authenticated');
+select pg_temp.popdam_1479_apply_final_ddl('revoke all on function public.upsert_dam_search_embedding(text,uuid,text,uuid,extensions.vector(384),text) from public,anon,authenticated');
+select pg_temp.popdam_1479_apply_final_ddl('revoke all on function public.mark_dam_search_embedding_error(text,uuid,text,uuid,text,text) from public,anon,authenticated');
+select pg_temp.popdam_1479_apply_final_ddl('revoke all on function public.get_dam_search_embedding_status() from public,anon,authenticated');
+select pg_temp.popdam_1479_apply_final_ddl('revoke all on function public.reset_dam_search_embedding_errors(text,uuid[]) from public,anon,authenticated');
+select pg_temp.popdam_1479_apply_final_ddl('grant execute on function public.replace_style_group_ai_profile(uuid,text,text,text,jsonb,uuid[]) to service_role');
+select pg_temp.popdam_1479_apply_final_ddl('grant execute on function public.replace_asset_ai_tag_result(uuid,text,text,jsonb) to service_role');
+select pg_temp.popdam_1479_apply_final_ddl('grant execute on function public.get_effective_asset_metadata(uuid) to authenticated,service_role');
+select pg_temp.popdam_1479_apply_final_ddl('grant execute on function public.refresh_dam_search_documents_batch(uuid[],uuid[],int) to service_role');
+select pg_temp.popdam_1479_apply_final_ddl('grant execute on function public.claim_dam_search_embedding_documents(int,text,int) to service_role');
+select pg_temp.popdam_1479_apply_final_ddl('grant execute on function public.upsert_dam_search_embedding(text,uuid,text,uuid,extensions.vector(384),text) to service_role');
+select pg_temp.popdam_1479_apply_final_ddl('grant execute on function public.mark_dam_search_embedding_error(text,uuid,text,uuid,text,text) to service_role');
+select pg_temp.popdam_1479_apply_final_ddl('grant execute on function public.get_dam_search_embedding_status() to service_role');
+select pg_temp.popdam_1479_apply_final_ddl('grant execute on function public.reset_dam_search_embedding_errors(text,uuid[]) to service_role');
 
-comment on table public.style_group_tags is 'Shared product/artwork tags. Manual rows and rejected tombstones are authoritative; never copy these rows to member assets.';
-comment on function public.get_effective_asset_metadata(uuid) is 'RLS-compatible two-scope metadata with group identity winning for grouped assets; it does not copy identity or tags.';
+select pg_temp.popdam_1479_apply_final_ddl($ddl$comment on table public.style_group_tags is 'Shared product/artwork tags. Manual rows and rejected tombstones are authoritative; never copy these rows to member assets.'$ddl$);
+select pg_temp.popdam_1479_apply_final_ddl($ddl$comment on function public.get_effective_asset_metadata(uuid) is 'RLS-compatible two-scope metadata with group identity winning for grouped assets; it does not copy identity or tags.'$ddl$);
 comment on column public.asset_tags.category is 'File-specific PopDAM tag category; final #1427 contract active.';
 
 commit;

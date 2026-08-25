@@ -15,6 +15,16 @@ complete original #1427 contract idempotently, retains the forward/pending
 indexes as deliberate-held compatibility recovery indexes, and retains the
 active-only production index.
 
+Recovery B records reconciliation and final activation separately. On retry it
+uses a canonical catalog probe covering final nullability and validated checks,
+relations and columns, indexes, enabled trigger wiring, RLS policies, function
+signatures, and service grants. If that complete final contract already exists
+(as it does on preview from the historical migration), every hardening DDL
+statement becomes a no-op and the short final transaction only restores the
+truthful final-active marker. A pending marker therefore requests hardening only
+when the catalog probe is false. Production after prerequisite A fails that
+probe and still executes the complete separately timed hardening sequence.
+
 This is deliberately not the final #1427 contract. It is the short first half
 of a governed two-transaction recovery. It adds the nullable `asset_tags`
 columns and the three indexes needed by the later bounded reconciliation, then
