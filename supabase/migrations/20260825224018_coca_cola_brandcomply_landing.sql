@@ -773,8 +773,9 @@ from counted;
 comment on view api.source_capture_inventory is
   'Bounded metadata inventory for every plm landing table, including Coca-Cola private '
   'capture tables under their latest-complete clock. Historical ten-column contract '
-  'preserved; exact counts require api.source_capture_inventory_exact(text). No licensed '
-  'source row value is exposed here.';
+  'preserved: row_count is the retained_row_count compatibility alias, carries_resolution '
+  'describes table shape, and ordinary exact counts are intentionally NULL. Exact counts '
+  'require api.source_capture_inventory_exact(text). No licensed source row value is exposed here.';
 revoke all on api.source_capture_inventory from public,anon;
 grant select on api.source_capture_inventory to authenticated,service_role;
 
