@@ -1,6 +1,10 @@
 # Email capture and program linkage
 
-**Status:** Settled where marked below. Authority: Albert Hazan, 2026-08-25.
+**Status:** Settled
+
+Authority: Albert Hazan, 2026-08-25. Both rules below are Settled: rule 1 is the
+interim behaviour in force today, and rule 2 is the settled intent that replaces
+it and is not yet implemented.
 
 ## What email belongs in the system
 
