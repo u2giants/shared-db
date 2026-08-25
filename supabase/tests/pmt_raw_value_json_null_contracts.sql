@@ -57,7 +57,7 @@ begin
   end if;
 
   if position('nullif' in v_def)=0
-     or position('''raw_value''::text' in v_def)=0
+     or position('''raw_value''' in v_def)=0
      or position('''null''::jsonb' in v_def)=0
      or v_def not like '%pmt_metadata_element%'
      or v_def like '%insert into plm.pmt_authorized_title_property%paramount_property_name%'

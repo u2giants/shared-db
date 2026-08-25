@@ -324,7 +324,7 @@ declare
     'plm.load_pmt_capture_chunk(uuid,text,jsonb)'::regprocedure));
 begin
   if position('nullif' in v_def)=0
-     or position('''raw_value''::text' in v_def)=0
+     or position('''raw_value''' in v_def)=0
      or position('''null''::jsonb' in v_def)=0 then
     raise exception 'Paramount forward repair lost JSON-null normalization';
   end if;
