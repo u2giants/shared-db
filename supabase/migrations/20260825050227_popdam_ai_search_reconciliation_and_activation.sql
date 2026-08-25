@@ -10,10 +10,16 @@ begin;
 -- and therefore performs the full bounded reconciliation.
 select set_config(
   'popdam.recovery_b_needed',
-  case when to_regclass('public.style_group_tags') is not null
+  case when (to_regclass('public.style_group_tags') is not null
          and to_regclass('public.dam_search_documents') is not null
          and to_regprocedure('public.get_effective_asset_metadata(uuid)') is not null
-         and to_regprocedure('public.claim_dam_search_embedding_documents(integer,text,integer)') is not null
+         and to_regprocedure('public.claim_dam_search_embedding_documents(integer,text,integer)') is not null)
+         or exists (
+           select 1 from pg_attribute a
+           where a.attrelid='public.asset_tags'::regclass and a.attname='category'
+             and col_description(a.attrelid,a.attnum)=
+               'PopDAM #1479 reconciliation complete; final activation pending.'
+         )
        then 'off' else 'on' end,
   true
 );
@@ -1690,8 +1696,6 @@ do $assert$ begin
   end if;
 end $assert$;
 
-drop index if exists public.asset_tags_pending_metadata_normalization_idx;
-
 select pg_temp.popdam_1479_rebuild_batch(10000);
 select pg_temp.popdam_1479_rebuild_batch(10000);
 select pg_temp.popdam_1479_rebuild_batch(10000);
@@ -2215,7 +2219,19 @@ end $assert$;
 
 set local session_replication_role = origin;
 
-drop index if exists public.asset_tags_forward_asset_id_idx;
+-- Durable retry boundary: if concurrent cleanup or final hardening is
+-- interrupted, the next run skips the already-committed large reconciliation.
+comment on column public.asset_tags.category is
+  'PopDAM #1479 reconciliation complete; final activation pending.';
+commit;
+
+-- These recovery-only indexes must be removed without blocking live writers.
+-- CONCURRENTLY is illegal inside a transaction, hence the explicit phase
+-- boundary above. Each statement is independently retry-safe.
+drop index concurrently if exists public.asset_tags_pending_metadata_normalization_idx;
+drop index concurrently if exists public.asset_tags_forward_asset_id_idx;
+
+begin;
 
 alter table public.asset_tags add constraint asset_tags_category_nn_recovery_check check (category is not null) not valid;
 alter table public.asset_tags add constraint asset_tags_status_nn_recovery_check check (status is not null) not valid;
@@ -2641,5 +2657,6 @@ grant execute on function public.reset_dam_search_embedding_errors(text,uuid[]) 
 
 comment on table public.style_group_tags is 'Shared product/artwork tags. Manual rows and rejected tombstones are authoritative; never copy these rows to member assets.';
 comment on function public.get_effective_asset_metadata(uuid) is 'RLS-compatible two-scope metadata with group identity winning for grouped assets; it does not copy identity or tags.';
+comment on column public.asset_tags.category is 'File-specific PopDAM tag category; final #1427 contract active.';
 
 commit;

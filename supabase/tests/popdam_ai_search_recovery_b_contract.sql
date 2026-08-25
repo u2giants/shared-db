@@ -21,6 +21,13 @@ begin
      or to_regclass('public.asset_tags_pending_metadata_normalization_idx') is not null then
     raise exception 'PopDAM recovery-only indexes remain';
   end if;
+  if (
+    select col_description(a.attrelid,a.attnum)
+    from pg_attribute a
+    where a.attrelid='public.asset_tags'::regclass and a.attname='category'
+  ) <> 'File-specific PopDAM tag category; final #1427 contract active.' then
+    raise exception 'PopDAM recovery B did not clear its pending-state marker';
+  end if;
   if exists(select 1 from public.asset_tags where category is null or status is null
     or evidence is null or updated_at is null or tag is distinct from btrim(tag)
     or source is distinct from btrim(source)) then
