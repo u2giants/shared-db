@@ -2,6 +2,21 @@
 -- GitHub: u2giants/shared-db#1479, #1474, #1427; u2giants/popdam3#96, #97.
 -- Prerequisite 20260825041343 installs nullable columns and recovery indexes.
 set statement_timeout = '10min';
+begin;
+
+-- One canonical probe governs every bounded phase. Preview already has this
+-- complete contract from its truthful historical ledger, so B must not walk
+-- millions of rows there. Production after prerequisite A lacks these objects
+-- and therefore performs the full bounded reconciliation.
+select set_config(
+  'popdam.recovery_b_needed',
+  case when to_regclass('public.style_group_tags') is not null
+         and to_regclass('public.dam_search_documents') is not null
+         and to_regprocedure('public.get_effective_asset_metadata(uuid)') is not null
+         and to_regprocedure('public.claim_dam_search_embedding_documents(integer,text,integer)') is not null
+       then 'off' else 'on' end,
+  true
+);
 
 -- Suppress the legacy row trigger without taking a table-level trigger DDL lock.
 -- This setting is transaction-local; any failure restores normal replication role.
@@ -20,6 +35,7 @@ create or replace function pg_temp.popdam_1479_import_legacy_batch(p_limit integ
 returns integer language plpgsql as $fn$
 declare v_count integer; v_last uuid;
 begin
+  if current_setting('popdam.recovery_b_needed') <> 'on' then return 0; end if;
   select last_uuid into v_last from pg_temp.popdam_1479_cursor where phase='legacy_import' for update;
   with batch as (
     select a.id from public.assets a
@@ -44,6 +60,7 @@ create or replace function pg_temp.popdam_1479_dedupe_batch(p_limit integer)
 returns integer language plpgsql as $fn$
 declare v_count integer; v_last uuid;
 begin
+  if current_setting('popdam.recovery_b_needed') <> 'on' then return 0; end if;
   select last_uuid into v_last from pg_temp.popdam_1479_cursor where phase='dedupe' for update;
   with batch_assets as (
     select distinct t.asset_id from public.asset_tags t
@@ -66,6 +83,7 @@ create or replace function pg_temp.popdam_1479_normalize_batch(p_limit integer)
 returns integer language plpgsql as $fn$
 declare v_count integer; v_last uuid; v_next uuid;
 begin
+  if current_setting('popdam.recovery_b_needed') <> 'on' then return 0; end if;
   select last_uuid into v_last from pg_temp.popdam_1479_cursor where phase='normalize' for update;
   with batch as (
     select id from public.asset_tags
@@ -95,6 +113,7 @@ create or replace function pg_temp.popdam_1479_rebuild_batch(p_limit integer)
 returns integer language plpgsql as $fn$
 declare v_count integer; v_last uuid;
 begin
+  if current_setting('popdam.recovery_b_needed') <> 'on' then return 0; end if;
   select last_uuid into v_last from pg_temp.popdam_1479_cursor where phase='compatibility_rebuild' for update;
   with batch_ids as (
     select distinct t.asset_id from public.asset_tags t
@@ -1657,12 +1676,12 @@ select pg_temp.popdam_1479_normalize_batch(5000);
 select pg_temp.popdam_1479_normalize_batch(5000);
 
 do $assert$ begin
-  if exists(select 1 from public.asset_tags where tag is distinct from btrim(tag) or nullif(tag,'') is null
+  if current_setting('popdam.recovery_b_needed') = 'on' and exists(select 1 from public.asset_tags where tag is distinct from btrim(tag) or nullif(tag,'') is null
     or source is distinct from btrim(source) or nullif(source,'') is null or category is null or status is null
     or evidence is null or updated_at is null) then
     raise exception 'PopDAM #1479 normalization incomplete';
   end if;
-  if exists (
+  if current_setting('popdam.recovery_b_needed') = 'on' and exists (
     select 1 from public.assets a cross join lateral unnest(coalesce(a.tags,'{}'::text[])) x(tag)
     where nullif(btrim(x.tag),'') is not null
       and not exists(select 1 from public.asset_tags t where t.asset_id=a.id and t.tag=btrim(x.tag))
@@ -2187,7 +2206,7 @@ select pg_temp.popdam_1479_rebuild_batch(10000);
 select pg_temp.popdam_1479_rebuild_batch(10000);
 
 do $assert$ begin
-  if exists (select 1 from public.assets a join public.asset_tags t on t.asset_id=a.id
+  if current_setting('popdam.recovery_b_needed') = 'on' and exists (select 1 from public.assets a join public.asset_tags t on t.asset_id=a.id
     group by a.id,a.tags having a.tags is distinct from coalesce(array_agg(t.tag order by lower(t.tag),t.tag)
       filter(where t.status='active'),'{}'::text[])) then
     raise exception 'PopDAM #1479 compatibility rebuild incomplete';
@@ -2622,3 +2641,5 @@ grant execute on function public.reset_dam_search_embedding_errors(text,uuid[]) 
 
 comment on table public.style_group_tags is 'Shared product/artwork tags. Manual rows and rejected tombstones are authoritative; never copy these rows to member assets.';
 comment on function public.get_effective_asset_metadata(uuid) is 'RLS-compatible two-scope metadata with group identity winning for grouped assets; it does not copy identity or tags.';
+
+commit;
