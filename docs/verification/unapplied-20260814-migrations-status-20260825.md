@@ -61,10 +61,11 @@ JSON-null repair. **A Paramount capture is unblocked.**
 byte-binding gate — so they were superseded by `20260825124200` and `20260825130500`. The end state
 is the one this report recommended; the route differed.
 
-**Still outstanding:** the Warner cleanup ([section 2](#warner)). Owner ruling #1517 requires the
-stranded original `20260814170749` to remain retired and hard-blocked and reissues the cleanup as
-`20260825201330`. The replacement has not been rehearsed or promoted. Everything below about
-Paramount describes the state before 13:16 on 2026-08-25 and is kept as the record of how it was
+**Warner is also resolved.** Owner ruling #1517 requires the stranded original `20260814170749`
+to remain retired and hard-blocked. Its byte-identical replacement `20260825201330` was rehearsed,
+merged in PR #1541, and applied alone to production in run
+[32901820150](https://github.com/u2giants/shared-db/actions/runs/32901820150). Everything below
+describes the state before these 2026-08-25 resolutions and is kept as the record of how it was
 diagnosed.
 
 ---
@@ -282,9 +283,9 @@ this problem. Mentioned only so the drift list reads cleanly.
    `20260814193351` → `20260814213043` → `20260814223552` → `20260825094455`, in that exact order,
    after a preview rehearsal of the full set. This is what restores Paramount capture. Promoting
    fewer than four is the unsafe path.
-2. **Use only fresh Warner version `20260825201330`** ([section 2](#warner)) — first a separately
-   authorized preview rehearsal, then a separately authorized production promotion. Never name
-   `20260814170749` in either allowlist.
+2. **Completed:** fresh Warner version `20260825201330` ([section 2](#warner)) was rehearsed and
+   promoted alone in production run 32901820150. Never name superseded original `20260814170749`
+   in a preview or production allowlist.
 3. **Resolve the `20260825102727` ordering contradiction on #1459** before PR #1491 merges. A
    replacement that sorts above the forward repair cannot satisfy the required order.
 4. **Keep issue #949 open** until Warner and Paramount are resolved. The alarm now clears on its own,
