@@ -14,6 +14,7 @@ declare
   v_pmt_ineligible uuid := gen_random_uuid();
   v_nbcu_complete uuid := gen_random_uuid();
   v_nbcu_ineligible uuid := gen_random_uuid();
+  v_pmt_source_id text := '9999991533';
   v_role_id uuid;
   v_profile uuid;
   v_auth uuid;
@@ -121,9 +122,9 @@ begin
   insert into plm.pmt_property (
     capture_id, property_source_id, property_name, source_hash, imported_at
   ) values
-    (v_pmt_complete, -1533, v_search || ' Paramount complete', repeat('7', 64),
+    (v_pmt_complete, v_pmt_source_id, v_search || ' Paramount complete', repeat('7', 64),
      '2026-08-24T00:01:00Z'),
-    (v_pmt_ineligible, -1533, v_search || ' Paramount targeted', repeat('8', 64),
+    (v_pmt_ineligible, v_pmt_source_id, v_search || ' Paramount targeted', repeat('8', 64),
      '2026-08-25T00:01:00Z');
 
   insert into plm.nbcu_capture (
