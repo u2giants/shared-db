@@ -14,10 +14,11 @@ begin
     raise exception 'complete #1427 function contract is missing';
   end if;
 
-  -- The historical complete preview contract remains intact, while prerequisite
-  -- A recreates this index for the separately governed bounded recovery B.
+  -- The historical complete preview contract remains intact. Prerequisite A
+  -- recreated this index, and recovery B deliberately retains it so cleanup
+  -- cannot block final activation under persistent live snapshots.
   if to_regclass('public.asset_tags_pending_metadata_normalization_idx') is null then
-    raise exception 'recovery-B normalization accelerator is missing after prerequisite A';
+    raise exception 'deliberate-held normalization recovery index is missing';
   end if;
 
   if not exists (
