@@ -1,7 +1,7 @@
 # PopDAM Scoped AI Metadata + Deterministic Search — 2026-08-25
 
 Canonical forward production migration:
-`20260825034915_popdam_ai_search_batched_forward.sql`.
+`20260825041343_popdam_ai_search_batched_forward.sql`.
 
 Preview truthfully retains historical ledger rows `20260825010603` (the original
 complete contract), `20260825025154` (its later accelerator), and
@@ -57,7 +57,7 @@ Tracked by [shared-db #1427](https://github.com/u2giants/shared-db/issues/1427),
 
 ## Release order and gates
 
-1. Apply only `20260825034915` and run `supabase/tests/popdam_scoped_ai_metadata_search_contracts.sql` plus the batched-forward contract in preview with rollback.
+1. Apply only `20260825041343` and run `supabase/tests/popdam_scoped_ai_metadata_search_contracts.sql` plus the batched-forward contract in preview with rollback.
 2. Promote the final corpus definition through the shared-db orchestrator gates.
 3. Only after production object/ledger proof may PopDAM ship compatible application code.
 4. PopDAM may run one separate application-owned embedding backfill only after its approval gate. Never backfill an intermediate corpus definition.
