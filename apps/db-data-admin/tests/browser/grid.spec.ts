@@ -9,6 +9,11 @@ const customers = [
   { id: '55555555-5555-5555-5555-555555555555', name: 'Zeta Imports', display_name: null, status: 'active', crm_status: 'active', pm_status: 'active', dam_status: 'active', plm_status: null, erp_active: true, alias_count: 0, updated_at: '2026-07-19T12:00:00Z' },
 ]
 const vendors = [{ id: '33333333-3333-3333-3333-333333333333', display_name: 'Atlas Manufacturing', status: 'active', crm_status: 'active', pm_status: 'active', dam_status: 'active', plm_status: null, erp_active: true, alias_count: 3, updated_at: '2026-07-20T12:00:00Z' }]
+const scrapedProperties = [
+  { row_key: 'disney-1', presentation_licensor_key: 'disney', presentation_licensor_name: 'Disney', source_system: 'disney_dcp', source_table: 'plm.dcp_property', source_property_id: 'd-1', source_property_name: 'Frozen', display_label: 'Frozen', source_status: null, provenance_kind: 'metadata_properties_array', latest_seen_at: null, capture_marker: 'run-1' },
+  { row_key: 'marvel-1', presentation_licensor_key: 'marvel', presentation_licensor_name: 'Marvel', source_system: 'marvel_dcp', source_table: 'plm.marvel_dcp_property', source_property_id: 'm-1', source_property_name: 'Avengers', display_label: 'Avengers', source_status: null, provenance_kind: 'metadata_properties_array', latest_seen_at: null, capture_marker: 'run-2' },
+  { row_key: 'star-wars-1', presentation_licensor_key: 'star-wars', presentation_licensor_name: 'Star Wars', source_system: 'lucasfilm_dcp', source_table: 'plm.lucasfilm_dcp_property', source_property_id: 'sw-1', source_property_name: 'The Mandalorian', display_label: 'The Mandalorian', source_status: null, provenance_kind: 'metadata_properties_array', latest_seen_at: null, capture_marker: 'run-3' },
+]
 
 // Step 10 read-only Licensor -> Property tree fixture. The collide property
 // carries mg_code "DNY" (Disney's code) but is parented to Marvel by its
@@ -50,6 +55,7 @@ async function mockAdmin(page: Page) {
     if (name === 'db_data_admin_customer_list') return route.fulfill({ json: { rows: customers, next_cursor: null, page_size: 200 } })
     if (name === 'db_data_admin_vendor_list') return route.fulfill({ json: { rows: vendors, next_cursor: null, page_size: 200 } })
     if (name === 'db_data_admin_licensor_property_tree') return route.fulfill({ json: licensorTree })
+    if (name === 'db_data_admin_scraped_properties') return route.fulfill({ json: { rows: scrapedProperties, next_cursor: null, page_size: 1000 } })
     return route.fulfill({ json: {} })
   })
 }
@@ -290,7 +296,7 @@ test('renders the read-only Licensor -> Property tree with counts, source contex
 test('renders the flat Properties table with each property parented to its licensor', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1000 })
   await mockAdmin(page); await page.goto('/')
-  await page.getByRole('button', { name: 'Properties' }).click()
+  await page.getByRole('button', { name: 'Properties', exact: true }).click()
   // 3 nested properties + 1 orphan; nothing silently dropped.
   await expect(page.getByText('4 of 4 properties')).toBeVisible()
   await expect(page.locator('revo-grid')).toBeVisible()
@@ -304,4 +310,26 @@ test('renders the flat Properties table with each property parented to its licen
   await expect(page.getByRole('gridcell', { name: 'POP Lic (CW001) · AVG, Spruce Lic (SP001) · AVG' })).toHaveCount(1)
   await expect(page.getByRole('gridcell', { name: /· property ·/ })).toHaveCount(0)
   await page.screenshot({ path: '../../docs/verification/db-data-admin-properties-table.png', fullPage: true })
+})
+
+test('renders every scraped Property under distinct presentation Licensor headings with source provenance', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  await mockAdmin(page); await page.goto('/')
+  await page.getByRole('button', { name: 'Scraped Properties' }).click()
+  await expect(page.getByRole('heading', { name: 'Disney', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Marvel', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Star Wars', exact: true })).toBeVisible()
+  await expect(page.getByText('3 of 3 scraped properties')).toBeVisible()
+  await expect(page.getByRole('gridcell', { name: 'The Mandalorian' })).toBeVisible()
+  await expect(page.getByRole('gridcell', { name: 'lucasfilm_dcp', exact: true })).toBeVisible()
+  await page.screenshot({ path: '../../docs/verification/db-data-admin-scraped-properties.png', fullPage: true })
+})
+
+test('shows a licensing-manager denial only on the Scraped Properties screen', async ({ page }) => {
+  await mockAdmin(page)
+  await page.route('https://preview.supabase.co/rest/v1/rpc/db_data_admin_scraped_properties', route => route.fulfill({ status: 403, json: { message: 'licensing manager access required' } }))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Scraped Properties' }).click()
+  await expect(page.getByRole('alert')).toContainText('Licensing Manager')
+  await expect(page.getByRole('button', { name: 'Customers' })).toBeVisible()
 })
