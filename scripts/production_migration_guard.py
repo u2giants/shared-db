@@ -132,6 +132,15 @@ HARD_BLOCKED = {
     # catalog verification passes while coverage reporting has regressed.
     # Evidence: docs/verification/unapplied-20260814-migrations-audit-20260823.md
     "20260814233342",
+    # #1427 original contract. Preview applied it, but production cannot: its
+    # single normalization DO statement timed out and rolled back. The complete
+    # replay-safe forward replacement is 20260825031841.
+    "20260825010603",
+    # #1427 partial accelerator. Preview applied it after the original contract,
+    # while production requires it before that earlier version; ascending-order
+    # promotion correctly refuses the inverse dependency. Superseded in full by
+    # the self-contained 20260825031841 forward replacement.
+    "20260825025154",
 }
 
 # Preview contains this authenticated historical migration, but production does
