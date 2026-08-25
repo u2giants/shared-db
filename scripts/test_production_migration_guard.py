@@ -263,8 +263,8 @@ class GuardTests(unittest.TestCase):
         with self.assertRaisesRegex(GuardError, "20260814170749"):
             parse_allowlist("20260814170749")
         with self.assertRaisesRegex(GuardError, "20260814170749"):
-            parse_allowlist("20260814170749,20260825192220")
-        self.assertEqual(parse_allowlist("20260825192220"), ["20260825192220"])
+            parse_allowlist("20260814170749,20260825201330")
+        self.assertEqual(parse_allowlist("20260825201330"), ["20260825201330"])
 
     def test_the_superseded_1427_paths_cannot_enter_an_allowlist(self) -> None:
         for version in ("20260825010603", "20260825025154", "20260825031841"):

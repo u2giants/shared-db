@@ -60,7 +60,7 @@ HARD_BLOCKED = {
     # #1517 fresh-version recovery. The original 20260814170749 Warner cleanup
     # was merged without a preview rehearsal before the preview project was
     # replaced. Current producer bytes therefore cannot create qualifying
-    # evidence for that version. 20260825192220 carries the same executable SQL;
+    # evidence for that version. 20260825201330 carries the same executable SQL;
     # the original must never enter any preview or production allowlist.
     "20260814170749",
     # These historical originals are superseded and their replacements are live.

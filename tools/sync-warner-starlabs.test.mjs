@@ -41,7 +41,7 @@ const cleanupMigration = readFileSync(
   "utf8",
 );
 const replacementCleanupMigration = readFileSync(
-  new URL("../supabase/migrations/20260825192220_wb_retire_legacy_capture_paths.sql", import.meta.url),
+  new URL("../supabase/migrations/20260825201330_wb_retire_legacy_capture_paths.sql", import.meta.url),
   "utf8",
 );
 
