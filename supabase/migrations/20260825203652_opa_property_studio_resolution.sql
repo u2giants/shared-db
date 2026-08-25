@@ -109,6 +109,11 @@ begin
         when jsonb_typeof(r.value) <> 'object' then 'row is not an object'
         when jsonb_typeof(r.value -> 'licensed_property_id') <> 'number'
           then 'licensed_property_id is not a number'
+        when (r.value ->> 'licensed_property_id') !~ '^-?[0-9]+$'
+          then 'licensed_property_id is not an integer'
+        when (r.value ->> 'licensed_property_id')::numeric not between
+             -9223372036854775808::numeric and 9223372036854775807::numeric
+          then 'licensed_property_id is outside the bigint range'
         when r.value ? 'studio_code'
              and jsonb_typeof(r.value -> 'studio_code') not in ('string', 'null')
           then 'studio_code is not a string or null'
@@ -272,7 +277,12 @@ from plm.opa_property p
 join plm.opa_property_studio_resolution r using (licensed_property_id)
 where r.studio_code = 'disney'
   and r.resolution_status = 'canonical'
-  and r.provenance_type in ('direct_source_assertion', 'owner_reviewed_resolution');
+  and r.provenance_type in ('direct_source_assertion', 'owner_reviewed_resolution')
+  and (
+    app.has_role('administrator')
+    or app.has_app_access('plm')
+    or app.has_any_role(array['sales', 'licensing']::app.app_role[])
+  );
 
 create view api.opa_marvel_property
 with (security_barrier = true) as
@@ -285,7 +295,12 @@ from plm.opa_property p
 join plm.opa_property_studio_resolution r using (licensed_property_id)
 where r.studio_code = 'marvel'
   and r.resolution_status = 'canonical'
-  and r.provenance_type in ('direct_source_assertion', 'owner_reviewed_resolution');
+  and r.provenance_type in ('direct_source_assertion', 'owner_reviewed_resolution')
+  and (
+    app.has_role('administrator')
+    or app.has_app_access('plm')
+    or app.has_any_role(array['sales', 'licensing']::app.app_role[])
+  );
 
 create view api.opa_lucasfilm_property
 with (security_barrier = true) as
@@ -298,10 +313,15 @@ from plm.opa_property p
 join plm.opa_property_studio_resolution r using (licensed_property_id)
 where r.studio_code = 'lucasfilm'
   and r.resolution_status = 'canonical'
-  and r.provenance_type in ('direct_source_assertion', 'owner_reviewed_resolution');
+  and r.provenance_type in ('direct_source_assertion', 'owner_reviewed_resolution')
+  and (
+    app.has_role('administrator')
+    or app.has_app_access('plm')
+    or app.has_any_role(array['sales', 'licensing']::app.app_role[])
+  );
 
 comment on view api.opa_disney_property is
-  'Canonical Disney-studio OPA properties only. Disney OPA identifies the portal operator; it does not default every OPA property to Disney ownership.';
+  'Canonical Disney-studio OPA properties only. Disney OPA identifies the portal operator; it does not default every OPA property to Disney ownership. Read access matches the confidential OPA mirror: administrator, PLM app access, sales, or licensing.';
 comment on view api.opa_marvel_property is
   'Canonical Marvel-studio OPA properties only. Inferred, ambiguous/crossover, unresolved, Pixar, Disney, and Lucasfilm evidence is excluded.';
 comment on view api.opa_lucasfilm_property is

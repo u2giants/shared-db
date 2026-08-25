@@ -11,6 +11,8 @@ declare
   v_raw_before text;
   v_raw_after text;
   v_rejected boolean;
+  v_role text;
+  v_count integer;
 begin
   insert into plm.opa_property (licensed_property_id, property_name)
   values
@@ -75,6 +77,12 @@ begin
     raise exception 'unexpected first sync accounting: %', row_to_json(v_result);
   end if;
 
+  perform set_config(
+    'request.jwt.claims',
+    '{"app_metadata":{"roles":["administrator"]}}',
+    true
+  );
+
   if not exists (select 1 from api.opa_disney_property where licensed_property_id = -1547001)
      or exists (select 1 from api.opa_disney_property where licensed_property_id in (-1547002,-1547003,-1547004,-1547005,-1547006)) then
     raise exception 'Disney canonical view leaked another studio or non-canonical state';
@@ -92,6 +100,48 @@ begin
     raise exception 'multi-studio crossover evidence was collapsed';
   end if;
 
+  -- The canonical views are intentionally owner-defined projections because the
+  -- normalized plm.opa_property table is not directly granted. Their explicit predicate
+  -- must still match the confidential OPA mirror and never expose Disney IDs/names to
+  -- vendor, viewer, designer, or a principal with no role.
+  foreach v_role in array array['vendor', 'viewer', 'designer'] loop
+    execute 'set local role authenticated';
+    perform set_config('request.jwt.claims',
+      format('{"app_metadata":{"roles":["%s"]}}', v_role), true);
+    select count(*) into v_count
+    from (
+      select licensed_property_id from api.opa_disney_property
+      union all select licensed_property_id from api.opa_marvel_property
+      union all select licensed_property_id from api.opa_lucasfilm_property
+    ) canonical
+    where licensed_property_id in (-1547001, -1547002, -1547003);
+    execute 'reset role';
+    if v_count <> 0 then
+      raise exception '% read % canonical OPA studio row(s)', v_role, v_count;
+    end if;
+  end loop;
+
+  execute 'set local role authenticated';
+  perform set_config('request.jwt.claims', '{"app_metadata":{"roles":[]}}', true);
+  select count(*) into v_count from api.opa_disney_property
+    where licensed_property_id = -1547001;
+  execute 'reset role';
+  if v_count <> 0 then
+    raise exception 'principal with no app role read a canonical OPA studio row';
+  end if;
+
+  foreach v_role in array array['administrator', 'sales', 'licensing'] loop
+    execute 'set local role authenticated';
+    perform set_config('request.jwt.claims',
+      format('{"app_metadata":{"roles":["%s"]}}', v_role), true);
+    select count(*) into v_count from api.opa_disney_property
+      where licensed_property_id = -1547001;
+    execute 'reset role';
+    if v_count <> 1 then
+      raise exception '% could not read its authorized canonical OPA studio row', v_role;
+    end if;
+  end loop;
+
   v_rejected := false;
   begin
     perform * from plm.sync_opa_property_studio_resolution(jsonb_build_array(
@@ -103,6 +153,21 @@ begin
     v_rejected := position('unrecognized' in sqlerrm) > 0;
   end;
   if not v_rejected then raise exception 'unrecognized studio did not fail closed'; end if;
+
+  v_rejected := false;
+  begin
+    perform * from plm.sync_opa_property_studio_resolution(jsonb_build_array(
+      jsonb_build_object('licensed_property_id', 1547.5, 'studio_code', 'disney',
+        'resolution_status', 'canonical', 'provenance_type', 'direct_source_assertion',
+        'provenance_reference', 'synthetic-invalid')
+    ));
+  exception when sqlstate 'P0001' then
+    v_rejected := position('not an integer' in sqlerrm) > 0
+      and position('1547.5' in sqlerrm) = 0;
+  end;
+  if not v_rejected then
+    raise exception 'non-integer property ID did not fail closed without echoing its value';
+  end if;
 
   v_rejected := false;
   begin
