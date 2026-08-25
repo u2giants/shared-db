@@ -38,6 +38,33 @@ begin
       v_paramount_matches;
   end if;
 
+  -- The two semantic parents are part of the same exact typed authority. An
+  -- environment may not have run a ColdLion header capture yet, so establish an
+  -- absent key from the approved artifact. Never overwrite: an existing key must
+  -- already mean Property or the post-insert validation refuses the transaction.
+  foreach v_division in array array['CW001','SP001']
+  loop
+    v_mirror_raw:=jsonb_build_object(
+      'authority','required_semantic_parent_for_owner_approved_typed_identity',
+      'approval_issue','#539','implementation_issue','#1177',
+      'approved_mapping_hash','09e18e47d67181b06483d6cf4454e053',
+      'companyCode','EDGEHOME','divisionCode',v_division,
+      'mgTypeCode','06','mgTypeDesc','Property');
+    insert into plm.merch_group_header(company_code,division_code,mg_type_code,
+      mg_type_desc,raw,source_hash)
+    values('EDGEHOME',v_division,'06','Property',v_mirror_raw,md5(v_mirror_raw::text))
+    on conflict(company_code,division_code,mg_type_code) do nothing;
+
+    select count(*),min(h.mg_type_desc) into v_header_count,v_header_desc
+    from plm.merch_group_header h
+    where h.company_code='EDGEHOME' and h.division_code=v_division
+      and h.mg_type_code='06' and lower(btrim(h.mg_type_desc))='property';
+    if v_header_count<>1 then
+      raise exception 'ColdLion %/06 header is absent, ambiguous, or has a non-Property meaning after exact establish-or-validate; refusing overwrite',
+        v_division;
+    end if;
+  end loop;
+
   for v_row in
     select * from (values
       ('AM1','Anchorman: The Legend of Ron Burgundy',
@@ -61,7 +88,7 @@ begin
       where h.company_code='EDGEHOME' and h.division_code=v_division
         and h.mg_type_code='06' and lower(btrim(h.mg_type_desc))='property';
       if v_header_count<>1 then
-        raise exception 'ColdLion %/06 Property header resolved to % rows; refusing to fabricate source type authority',
+        raise exception 'ColdLion %/06 Property header resolved to % rows after exact header validation; refusing',
           v_division,v_header_count;
       end if;
       v_mirror_raw:=jsonb_build_object(

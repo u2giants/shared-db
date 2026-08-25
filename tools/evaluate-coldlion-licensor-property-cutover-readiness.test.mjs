@@ -168,9 +168,13 @@ test("#1177 mirror establishment is exact insert-or-validate, never overwrite", 
     import.meta.url,
   ), "utf8");
   assert.match(sql, /foreach v_division in array array\['CW001','SP001'\]/i);
+  assert.match(sql, /insert into plm\.merch_group_header[\s\S]*on conflict\(company_code,division_code,mg_type_code\) do nothing/i);
+  assert.doesNotMatch(sql, /on conflict\(company_code,division_code,mg_type_code\) do update/i);
+  assert.match(sql, /required_semantic_parent_for_owner_approved_typed_identity/i);
+  assert.match(sql, /header is absent, ambiguous, or has a non-Property meaning after exact establish-or-validate; refusing overwrite/i);
   assert.match(sql, /insert into plm\.erp_property[\s\S]*on conflict\(company_code,division_code,mg_type_code,mg_code\) do nothing/i);
   assert.doesNotMatch(sql, /on conflict\(company_code,division_code,mg_type_code,mg_code\) do update/i);
-  assert.match(sql, /refusing to fabricate source type authority/i);
+  assert.match(sql, /after exact header validation; refusing/i);
   assert.match(sql, /e\.property_id is not null or e\.resolution_status<>'unresolved'/i);
   assert.match(sql, /does not have exactly two unresolved, name-matching CW001\/SP001 typed rows; refusing/i);
 });
