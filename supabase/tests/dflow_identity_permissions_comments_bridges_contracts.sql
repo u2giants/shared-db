@@ -88,31 +88,37 @@ begin
 
   -- Prove each mapping is one-to-one while unresolved rows remain allowed.
   insert into app.profile(display_name) values ('issue-1492-contract') returning id into v_profile;
-  insert into dflow.users(id,name,app_profile_id) values (-149201,'issue-1492-user-a',v_profile);
-  insert into dflow.users(id,name) values (-149202,'issue-1492-user-unresolved');
+  insert into dflow.users(id,name,app_profile_id) overriding system value
+  values (-149201,'issue-1492-user-a',v_profile);
+  insert into dflow.users(id,name) overriding system value
+  values (-149202,'issue-1492-user-unresolved');
   begin
-    insert into dflow.users(id,name,app_profile_id) values (-149203,'issue-1492-user-b',v_profile);
+    insert into dflow.users(id,name,app_profile_id) overriding system value
+    values (-149203,'issue-1492-user-b',v_profile);
     raise exception 'one app profile mapped to two legacy users';
   exception when unique_violation then null;
   end;
 
   select id into v_role from app.role order by id limit 1;
-  insert into dflow."Roles"("Id","Name",app_role_id) values (-149201,'issue-1492-role-a',v_role);
-  insert into dflow."Roles"("Id","Name") values (-149202,'issue-1492-role-unresolved');
+  insert into dflow."Roles"("Id","Name",app_role_id) overriding system value
+  values (-149201,'issue-1492-role-a',v_role);
+  insert into dflow."Roles"("Id","Name") overriding system value
+  values (-149202,'issue-1492-role-unresolved');
   begin
-    insert into dflow."Roles"("Id","Name",app_role_id) values (-149203,'issue-1492-role-b',v_role);
+    insert into dflow."Roles"("Id","Name",app_role_id) overriding system value
+    values (-149203,'issue-1492-role-b',v_role);
     raise exception 'one app role mapped to two legacy roles';
   exception when unique_violation then null;
   end;
 
   insert into app.comment(target_schema,target_table,target_id,body)
   values ('plm','item',gen_random_uuid(),'issue-1492-contract') returning id into v_comment;
-  insert into dflow.comments(id,comment,item_header_id,user_id,inserted_date,app_comment_id)
+  insert into dflow.comments(id,comment,item_header_id,user_id,inserted_date,app_comment_id) overriding system value
   values (-149201,'issue-1492-comment-a',-1492,-149201,now(),v_comment);
-  insert into dflow.comments(id,comment,item_header_id,user_id,inserted_date)
+  insert into dflow.comments(id,comment,item_header_id,user_id,inserted_date) overriding system value
   values (-149202,'issue-1492-comment-unresolved',-1492,-149201,now());
   begin
-    insert into dflow.comments(id,comment,item_header_id,user_id,inserted_date,app_comment_id)
+    insert into dflow.comments(id,comment,item_header_id,user_id,inserted_date,app_comment_id) overriding system value
     values (-149203,'issue-1492-comment-b',-1492,-149201,now(),v_comment);
     raise exception 'one app comment mapped to two legacy comments';
   exception when unique_violation then null;
