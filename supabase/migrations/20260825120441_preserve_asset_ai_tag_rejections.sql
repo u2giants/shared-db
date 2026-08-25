@@ -1,6 +1,17 @@
 -- #1498: replace prior file-AI results without resurrecting rejected tombstones.
 -- Manual/created-by rows remain authoritative, and the public RPC signature is unchanged.
 
+do $$
+begin
+  if to_regclass('public.asset_tags') is null
+     or to_regclass('public.assets') is null
+     or to_regprocedure('public.refresh_dam_search_documents_batch(uuid[],uuid[],integer)') is null
+     or to_regprocedure('public.replace_asset_ai_tag_result(uuid,text,text,jsonb)') is null then
+    raise exception '#1498 prerequisite contract is incomplete';
+  end if;
+end
+$$;
+
 create or replace function public.replace_asset_ai_tag_result(
   p_asset_id uuid,
   p_source text,
