@@ -343,7 +343,7 @@ def _never_rest_by_batch() -> dict[str, tuple[str, ...]]:
 RETIRED_VERSION_REASONS = {
     "20260814170749": (
         "stranded without qualifying preview evidence after the preview project "
-        "replacement; reissued with identical executable SQL as 20260825174921 "
+        "replacement; reissued with identical executable SQL as 20260825192220 "
         "under issue 1517"
     ),
     "20260819011639": (
