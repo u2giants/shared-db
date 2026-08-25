@@ -25,13 +25,13 @@ begin
     (v_asset, 'zz1498.ai', 'ZZ1498/zz1498.ai', 'ai', 'zz1498-' || v_suffix, now(), false),
     (v_other_asset, 'zz1498-other.ai', 'ZZ1498/zz1498-other.ai', 'ai', 'zz1498-other-' || v_suffix, now(), false);
 
-  insert into public.asset_tags(asset_id, tag, source, category, status, model, rejected_at)
+  insert into public.asset_tags(asset_id, tag, source, category, status, model, rejected_at, created_by)
   values
-    (v_asset, v_legacy, 'ai', 'legacy_unscoped', 'active', null, null),
-    (v_asset, v_stale, 'ai', 'scene', 'candidate', 'old-model', null),
-    (v_asset, v_rejected_same, 'ai', 'scene', 'rejected', 'new-model', now()),
-    (v_asset, v_rejected_legacy, 'ai', 'legacy_unscoped', 'rejected', null, now()),
-    (v_other_asset, v_other, 'ai', 'scene', 'active', 'old-model', null);
+    (v_asset, v_legacy, 'ai', 'legacy_unscoped', 'active', null, null, null),
+    (v_asset, v_stale, 'ai', 'scene', 'candidate', 'old-model', null, null),
+    (v_asset, v_rejected_same, 'ai', 'scene', 'rejected', 'new-model', now(), null),
+    (v_asset, v_rejected_legacy, 'ai', 'legacy_unscoped', 'rejected', null, now(), null),
+    (v_other_asset, v_other, 'ai', 'scene', 'active', 'old-model', null, null);
 
   insert into public.asset_tags(asset_id, tag, source, category, status, model, created_by, evidence)
   values(v_asset, v_manual, 'manual', 'other', 'active', null, v_manual_owner,
