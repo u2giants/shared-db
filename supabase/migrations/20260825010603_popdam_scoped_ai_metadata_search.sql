@@ -12,6 +12,12 @@ alter table public.asset_tags
   add column if not exists rejected_by uuid,
   add column if not exists updated_at timestamptz not null default now();
 
+-- The legacy row trigger rebuilds public.assets.tags once per changed tag. Disable it
+-- before reconciliation; the status-aware replacement is installed below and the
+-- compatibility arrays are rebuilt once, in bounded batches, at the end.
+drop trigger if exists trg_sync_asset_tags on public.asset_tags;
+drop trigger if exists asset_tags_sync_assets_tags on public.asset_tags;
+
 -- Reconcile compatibility data before the first status-aware assets.tags rebuild.
 insert into public.asset_tags (asset_id, tag, source, category, status, evidence, created_at, updated_at)
 select a.id, btrim(t.tag), 'manual', 'other', 'active',
@@ -31,14 +37,29 @@ with ranked as (
 )
 select count(*) from removed;
 
-update public.asset_tags
-set tag = btrim(tag),
-    source = case when btrim(coalesce(source,'')) = 'ai' then 'ai' else coalesce(nullif(btrim(source), ''), 'manual') end,
-    category = case when btrim(coalesce(source,'')) = 'ai' then 'legacy_unscoped' else coalesce(category, 'other') end,
-    status = coalesce(status, 'active'),
-    updated_at = coalesce(updated_at, now())
-where tag is distinct from btrim(tag) or source is distinct from btrim(source)
-   or category is null or status is null or source is null or source = '';
+do $$
+declare v_changed integer;
+begin
+  loop
+    with batch as (
+      select id from public.asset_tags
+      where tag is distinct from btrim(tag) or source is distinct from btrim(source)
+         or category is null or status is null or source is null or source = ''
+      order by id limit 5000 for update skip locked
+    ), changed as (
+      update public.asset_tags t
+      set tag = btrim(t.tag),
+          source = case when btrim(coalesce(t.source,'')) = 'ai' then 'ai'
+                        else coalesce(nullif(btrim(t.source), ''), 'manual') end,
+          category = case when btrim(coalesce(t.source,'')) = 'ai' then 'legacy_unscoped'
+                          else coalesce(t.category, 'other') end,
+          status = coalesce(t.status, 'active'),
+          updated_at = coalesce(t.updated_at, now())
+      from batch b where t.id=b.id returning 1
+    ) select count(*) into v_changed from changed;
+    exit when v_changed=0;
+  end loop;
+end $$;
 
 alter table public.asset_tags
   alter column category set not null,
@@ -128,8 +149,6 @@ begin
   end loop;
   return case when tg_op = 'DELETE' then old else new end;
 end $$;
-drop trigger if exists trg_sync_asset_tags on public.asset_tags;
-drop trigger if exists asset_tags_sync_assets_tags on public.asset_tags;
 create trigger asset_tags_sync_assets_tags after insert or update or delete on public.asset_tags
 for each row execute function public.sync_asset_tags_to_array();
 
@@ -427,8 +446,24 @@ grant execute on function public.get_dam_search_embedding_status() to service_ro
 grant execute on function public.reset_dam_search_embedding_errors(text,uuid[]) to service_role;
 
 -- Rebuild compatibility arrays only; the corpus itself is refreshed later in bounded app-owned batches.
-update public.assets a set tags=coalesce((select array_agg(t.tag order by lower(t.tag),t.tag) from public.asset_tags t
-  where t.asset_id=a.id and t.status='active'),'{}'::text[]) where exists(select 1 from public.asset_tags t where t.asset_id=a.id);
+do $$
+declare v_batch integer; v_last uuid;
+begin
+  loop
+    with batch_ids as (
+      select distinct t.asset_id from public.asset_tags t
+      where v_last is null or t.asset_id>v_last order by t.asset_id limit 2000
+    ), desired as (
+      select b.asset_id,coalesce(array_agg(t.tag order by lower(t.tag),t.tag)
+        filter(where t.status='active'),'{}'::text[]) as tags
+      from batch_ids b join public.asset_tags t on t.asset_id=b.asset_id group by b.asset_id
+    ), changed as (
+      update public.assets a set tags=d.tags from desired d
+      where a.id=d.asset_id and a.tags is distinct from d.tags returning 1
+    ) select count(*),max(asset_id) into v_batch,v_last from batch_ids;
+    exit when v_batch=0;
+  end loop;
+end $$;
 
 comment on table public.style_group_tags is 'Shared product/artwork tags. Manual rows and rejected tombstones are authoritative; never copy these rows to member assets.';
 comment on function public.get_effective_asset_metadata(uuid) is 'RLS-compatible two-scope metadata with group identity winning for grouped assets; it does not copy identity or tags.';

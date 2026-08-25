@@ -13,6 +13,7 @@ Tracked by [shared-db #1427](https://github.com/u2giants/shared-db/issues/1427),
 - `get_effective_asset_metadata` reads both scopes without copying group rows or identity onto member assets. Current Style Group licensor/property wins for grouped assets; asset identity is used only while ungrouped.
 - Search documents deterministically include active tags and canonical character names. Changes refresh only directly affected asset/group documents through a bounded, deduplicated contract.
 - Embedding work uses expiring exclusive leases, content-hash and lease-token checked writes, bounded categorized retries, and an admin/service reset. No embedding backfill is part of this migration.
+- Legacy tag normalization disables the obsolete per-row compatibility trigger first, normalizes at most 5,000 tag rows per statement, then rebuilds compatibility arrays in 2,000-asset keyset batches. This preserves the reconciliation while keeping every write below the production statement-timeout boundary.
 
 ## Release order and gates
 
