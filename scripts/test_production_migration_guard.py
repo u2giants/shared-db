@@ -247,8 +247,15 @@ class GuardTests(unittest.TestCase):
                 "20260814233342",
                 "20260814233423",
                 "20260802171000",
+                "20260825010603",
+                "20260825025154",
             },
         )
+
+    def test_the_two_superseded_1427_partial_paths_cannot_enter_an_allowlist(self) -> None:
+        for version in ("20260825010603", "20260825025154"):
+            with self.subTest(version=version), self.assertRaises(GuardError):
+                parse_allowlist(version)
 
     def test_the_unsafe_issue_853_migration_cannot_enter_an_allowlist(self) -> None:
         with self.assertRaises(GuardError):

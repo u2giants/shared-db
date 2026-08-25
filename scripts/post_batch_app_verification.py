@@ -364,6 +364,14 @@ RETIRED_VERSION_REASONS = {
         "wholesale with the 2026-08-14 body, which silently regresses the Sega, "
         "Peanuts and WildBrain branches added by later applied migrations"
     ),
+    "20260825010603": (
+        "preview-only historical #1427 contract; production timed out and rolled "
+        "back, and complete forward replacement 20260825031841 supersedes it"
+    ),
+    "20260825025154": (
+        "preview-only historical #1427 accelerator; its later version cannot precede "
+        "the earlier production-pending contract, and 20260825031841 supersedes both"
+    ),
 }
 RETIRED_VERSIONS = frozenset(RETIRED_VERSION_REASONS)
 

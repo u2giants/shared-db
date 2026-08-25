@@ -1,18 +1,20 @@
 # PopDAM Scoped AI Metadata + Deterministic Search — 2026-08-25
 
-Canonical database migration: `20260825010603_popdam_scoped_ai_metadata_search.sql`.
+Canonical forward production migration:
+`20260825031841_popdam_ai_search_forward_recovery.sql`.
 
-Production timeout recovery: apply
-`20260825025154_popdam_asset_tag_normalization_accelerator.sql` first, then retry
-the canonical migration. The prerequisite adds the same metadata columns with
-`IF NOT EXISTS` and a partial `asset_tags(id)` index containing only rows still
-needing normalization. The index gives each canonical keyset batch a much
-cheaper ordered scan of the dirty-row subset and avoids repeated table/primary-
-key prefix scans. Because every batch remains inside one transaction, dead index
-entries remain until commit; the index does not physically shrink between
-batches. The global 10-minute statement timeout and complete metadata/search
-contract remain unchanged, and the canonical migration remains byte-for-byte
-unchanged.
+Preview truthfully retains historical ledger rows `20260825010603` (the original
+complete contract) and `20260825025154` (its later accelerator). Neither may run
+in production: the original timed out and rolled back, while ascending migration
+order correctly refuses to run the later accelerator before it. Both versions
+are permanently retired from production allowlists and superseded by the single
+self-contained forward migration.
+
+The forward migration detects preview's already-complete object contract and
+records a no-op without rebuilding it. On production it creates the accelerator,
+executes the entire #1427 metadata/search contract and legacy reconciliation,
+then drops the temporary index before commit. There is no inverse dependency and
+no permanent HOT/predicate overhead.
 
 Live read-only sizing proof on 2026-08-25 used production project
 `https://qsllyeztdwjgirsysgai.supabase.co` and this query:
@@ -33,13 +35,10 @@ It returned `total_asset_tags = 2,173,558` and
 columns mean the prerequisite index initially covers the existing rows, while
 the proof shows none also require legacy text cleanup.
 
-Preview cannot rehearse the prerequisite and canonical migration together:
-`20260825010603` is already applied there. The production retry is therefore the
-first combined execution. After the canonical migration is confirmed applied in
-both preview and production, a separately governed follow-up migration must drop
-`public.asset_tags_pending_metadata_normalization_idx`; it is then permanently
-empty and retaining it would add unnecessary predicate evaluation and reduce
-HOT-update opportunities.
+Preview can apply the one forward version idempotently because the complete
+contract marker is already present. The production execution is still the first
+large reconciliation at the measured 2,173,558-row scale; it runs only through
+the governed promotion lane with the unchanged 10-minute statement timeout.
 Tracked by [shared-db #1427](https://github.com/u2giants/shared-db/issues/1427),
 [PopDAM #96](https://github.com/u2giants/popdam3/issues/96), and
 [PopDAM #97](https://github.com/u2giants/popdam3/issues/97).
@@ -56,7 +55,7 @@ Tracked by [shared-db #1427](https://github.com/u2giants/shared-db/issues/1427),
 
 ## Release order and gates
 
-1. Apply the migration and run `supabase/tests/popdam_scoped_ai_metadata_search_contracts.sql` in preview with rollback.
+1. Apply only `20260825031841` and run `supabase/tests/popdam_scoped_ai_metadata_search_contracts.sql` plus the forward-recovery contract in preview with rollback.
 2. Promote the final corpus definition through the shared-db orchestrator gates.
 3. Only after production object/ledger proof may PopDAM ship compatible application code.
 4. PopDAM may run one separate application-owned embedding backfill only after its approval gate. Never backfill an intermediate corpus definition.
