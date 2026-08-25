@@ -12,6 +12,7 @@ import { MergeDialog } from './MergeDialog'
 import { LicensorTree } from './LicensorTree'
 import { PropertyTable } from './PropertyTable'
 import { ProductDepthTable } from './ProductDepthTable'
+import { ScrapedPropertiesTable } from './ScrapedPropertiesTable'
 import { INLINE_EDITABLE_PROPS, INLINE_EDIT_REASON, INLINE_UNDO_REASON, saveInlineRow } from './lib/inline-edit'
 import { FilterHeader, type HeaderProps } from './FilterHeader'
 
@@ -67,7 +68,7 @@ const baseColumns: ColumnRegular[] = [
 
 export function DataAdmin({ client, email, environmentLabel, onSignOut }: Props) {
   const [kind, setKind] = useState<EntityKind>('customer')
-  const [section, setSection] = useState<'entity' | 'taxonomy' | 'property' | 'product-depth'>('entity')
+  const [section, setSection] = useState<'entity' | 'taxonomy' | 'property' | 'scraped-property' | 'product-depth'>('entity')
   const [query, setQuery] = useState<QueryState>(initialQuery)
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
@@ -321,10 +322,13 @@ export function DataAdmin({ client, email, environmentLabel, onSignOut }: Props)
       <button className={section === 'entity' && kind === 'vendor' ? 'active' : ''} onClick={() => { setSection('entity'); setKind('vendor') }}>Vendors</button>
       <button className={section === 'taxonomy' ? 'active' : ''} onClick={() => setSection('taxonomy')}>Licensors</button>
       <button className={section === 'property' ? 'active' : ''} onClick={() => setSection('property')}>Properties</button>
+      <button className={section === 'scraped-property' ? 'active' : ''} onClick={() => setSection('scraped-property')}>Scraped Properties</button>
       <button className={section === 'product-depth' ? 'active' : ''} onClick={() => setSection('product-depth')}>Product Depth</button>
     </nav>
     {section === 'product-depth'
       ? <ProductDepthTable client={client} />
+      : section === 'scraped-property'
+      ? <ScrapedPropertiesTable client={client} />
       : denied
       ? <section className="access-denied" role="alert"><h1>Access denied</h1><p>You are signed in, but this screen requires an active Administrator grant.</p><button className="secondary" onClick={onSignOut}><LogOut /> Sign out</button></section>
       : section === 'taxonomy'
