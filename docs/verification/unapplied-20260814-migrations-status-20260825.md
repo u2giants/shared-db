@@ -41,7 +41,7 @@ absent, which is true only of production).
 >
 > **What in this file still stands:** the analysis of the problem, and sections 2, 3 and 4. The
 > Warner cleanup `20260814170749` (section 2) is structurally stranded and must never be
-> rehearsed or promoted. Owner ruling #1517 replaces it with fresh version `20260825174921`,
+> rehearsed or promoted. Owner ruling #1517 replaces it with fresh version `20260825192220`,
 > carrying identical executable SQL and no replacement API view.
 >
 > Independent reviews behind the ruling: Kimi K3 and GLM 5.3 (AGREE WITH CONDITIONS).
@@ -63,7 +63,7 @@ is the one this report recommended; the route differed.
 
 **Still outstanding:** the Warner cleanup ([section 2](#warner)). Owner ruling #1517 requires the
 stranded original `20260814170749` to remain retired and hard-blocked and reissues the cleanup as
-`20260825174921`. The replacement has not been rehearsed or promoted. Everything below about
+`20260825192220`. The replacement has not been rehearsed or promoted. Everything below about
 Paramount describes the state before 13:16 on 2026-08-25 and is kept as the record of how it was
 diagnosed.
 
@@ -93,7 +93,7 @@ work.
 | `20260825094455` pmt loader forward repair *(not one of the six)* | Merged 08-25, pending | **Apply last** — without it the other three revert a live fix |
 | `20260814233342` source capture inventory | **Already retired** (owner ruling 08-24, PR #1402) | Nothing to do — closed |
 | `20260814233423` remaining source resolution | **Already retired** (owner ruling 08-24, PR #1402) | Nothing to do — closed |
-| `20260814170749` wb retire legacy capture paths | **Retired and hard-blocked** — cannot earn qualifying preview evidence | Never apply; use fresh replacement `20260825174921` under #1517 |
+| `20260814170749` wb retire legacy capture paths | **Retired and hard-blocked** — cannot earn qualifying preview evidence | Never apply; use fresh replacement `20260825192220` under #1517 |
 
 The Paramount window completed. The fresh Warner replacement still requires its own preview
 rehearsal and later production authorization; neither action is implied by authoring this reissue.
@@ -104,7 +104,7 @@ rehearsal and later production authorization; neither action is implied by autho
 
 Both figures below came from the two workflow runs launched for the original report. They are kept
 as dated evidence, not as current drift totals. The Warner original is now retired and its fresh
-replacement is `20260825174921`; use the live drift workflow for current totals.
+replacement is `20260825192220`; use the live drift workflow for current totals.
 
 **Production** — 517 versions merged on `main`, 498 applied, 19 in the drift list: **8
 genuinely-pending**, 11 retired or deliberately held (which no longer make the check fail).
@@ -196,7 +196,7 @@ readable.
 
 ---
 
-## 2. Warner legacy cleanup — original `20260814170749` retired; replacement `20260825174921` {#warner}
+## 2. Warner legacy cleanup — original `20260814170749` retired; replacement `20260825192220` {#warner}
 
 **Plain English.** Warner (STARLABS) source data was moved from a first-generation set of tables to
 a cleaned-up set. This migration finishes the job: it locks the capture contract so a new Warner
@@ -239,7 +239,7 @@ preflight cannot pass while real data exists, and that both later Warner migrati
 
 **Current ruling:** never rehearse or promote the original `20260814170749`. Its authoring-era
 preview no longer exists and current producer bytes cannot create qualifying evidence. Issue #1517
-reissues its executable SQL as `20260825174921`, permanently hard-blocks the original, and adds no
+reissues its executable SQL as `20260825192220`, permanently hard-blocks the original, and adds no
 replacement API view. Rehearsing the fresh version and promoting it are separate governed actions.
 Do not edit the original file — `tools/sync-warner-starlabs.test.mjs` asserts its contents and the
 replacement's executable-SQL equivalence.
@@ -282,7 +282,7 @@ this problem. Mentioned only so the drift list reads cleanly.
    `20260814193351` → `20260814213043` → `20260814223552` → `20260825094455`, in that exact order,
    after a preview rehearsal of the full set. This is what restores Paramount capture. Promoting
    fewer than four is the unsafe path.
-2. **Use only fresh Warner version `20260825174921`** ([section 2](#warner)) — first a separately
+2. **Use only fresh Warner version `20260825192220`** ([section 2](#warner)) — first a separately
    authorized preview rehearsal, then a separately authorized production promotion. Never name
    `20260814170749` in either allowlist.
 3. **Resolve the `20260825102727` ordering contradiction on #1459** before PR #1491 merges. A
