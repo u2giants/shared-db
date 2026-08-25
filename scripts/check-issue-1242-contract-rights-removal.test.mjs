@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-const sql = readFileSync(new URL('../supabase/migrations/20260825125904_drop_contract_rights_preserve_portal_sources.sql', import.meta.url), 'utf8')
+const sql = readFileSync(new URL('../supabase/migrations/20260825130924_drop_contract_rights_preserve_portal_sources.sql', import.meta.url), 'utf8')
 const nbcuContracts = readFileSync(new URL('../supabase/tests/nbcu_landing_contracts.sql', import.meta.url), 'utf8')
 const licensingContracts = readFileSync(new URL('../supabase/tests/wildbrain_nbcu_licensing_read_access_contracts.sql', import.meta.url), 'utf8')
 const privilegeContracts = readFileSync(new URL('../supabase/tests/plm_maintain_revokes_and_default_privileges.sql', import.meta.url), 'utf8')
