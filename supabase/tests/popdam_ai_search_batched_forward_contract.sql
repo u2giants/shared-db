@@ -4,6 +4,10 @@ begin;
 do $$
 declare
   v_column text;
+  v_contract_complete boolean :=
+    to_regclass('public.style_group_tags') is not null
+    and to_regclass('public.dam_search_documents') is not null
+    and to_regprocedure('public.get_effective_asset_metadata(uuid)') is not null;
 begin
   foreach v_column in array array[
     'category', 'status', 'confidence', 'model', 'evidence',
@@ -14,9 +18,9 @@ begin
       where table_schema = 'public'
         and table_name = 'asset_tags'
         and column_name = v_column
-        and is_nullable = 'YES'
+        and (v_contract_complete or is_nullable = 'YES')
     ) then
-      raise exception 'asset_tags.% must exist and remain nullable until recovery B', v_column;
+      raise exception 'asset_tags.% must exist and remain nullable in prerequisite-only state', v_column;
     end if;
   end loop;
 
