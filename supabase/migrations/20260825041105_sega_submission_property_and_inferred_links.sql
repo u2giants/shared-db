@@ -655,8 +655,11 @@ from counted;
 
 comment on view api.source_capture_inventory is
   'Bounded metadata inventory for every plm landing table. Sega asset evidence and Sega '
-  'submission vocabulary use separate latest-complete clocks. Count columns are truthful '
-  'NULLs; exact callers opt into api.source_capture_inventory_exact(text).';
+  'submission vocabulary use separate latest-complete clocks while preserving the historical '
+  'ten-column contract. row_count, retained_row_count and latest_complete_row_count are '
+  'intentionally NULL (unknown, never zero); exact callers opt into '
+  'api.source_capture_inventory_exact(text). carries_resolution describes table shape and '
+  'never proves that a scrape ran. No licensed source row value is exposed here.';
 revoke all on api.source_capture_inventory from public,anon;
 grant select on api.source_capture_inventory to authenticated,service_role;
 

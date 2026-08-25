@@ -51,7 +51,9 @@ declare
     "properties":2,"property_licensors":0,"catalogs":1,
     "style_guide_candidates":0,"character_candidates":0,"character_evidence":0,
     "assets":1,"tags":0,"asset_catalogs":0,"asset_tags":0,
-    "asset_properties":0,"asset_properties_inferred":2,"media_downloaded":0
+    "asset_properties":0,"asset_properties_inferred":2,
+    "style_guide_properties_inferred":0,"character_properties_inferred":0,
+    "media_downloaded":0
   }'::jsonb;
   v_bad integer := 0;
   v_con text;
@@ -161,7 +163,9 @@ declare
     "properties":1,"property_licensors":0,"catalogs":1,
     "style_guide_candidates":0,"character_candidates":0,"character_evidence":0,
     "assets":1,"tags":0,"asset_catalogs":0,"asset_tags":0,
-    "asset_properties":0,"asset_properties_inferred":0,"media_downloaded":0
+    "asset_properties":0,"asset_properties_inferred":0,
+    "style_guide_properties_inferred":0,"character_properties_inferred":0,
+    "media_downloaded":0
   }'::jsonb;
 begin
   v_cap := plm.begin_sega_capture(
