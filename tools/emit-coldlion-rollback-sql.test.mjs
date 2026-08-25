@@ -39,7 +39,7 @@ import { APPROVED_COUNT } from "./coldlion-paramount-five-approved-mapping.mjs";
 // Synthetic stand-ins for the frozen approval artifact. Shape only — the real
 // values live in docs/verification/, which this test deliberately does not read.
 function makeMappings(n = APPROVED_COUNT) {
-  return Array.from({ length: n }, (_, i) => ({
+  const mappings = Array.from({ length: n }, (_, i) => ({
     entity_type: i % 2 === 0 ? "licensor" : "property",
     company_code: "POP",
     division_code: "D1",
@@ -47,6 +47,20 @@ function makeMappings(n = APPROVED_COUNT) {
     mg_code: `MG-${String(i).padStart(4, "0")}`,
     canonical_id: `00000000-0000-0000-0000-${String(i).padStart(12, "0")}`,
   }));
+  if (n === APPROVED_COUNT) {
+    const approved = [
+      ["AM1", "b288be08-a859-4d92-b1ef-23b4e305ed26"],
+      ["AM2", "2ebcdc69-88c9-4565-813b-9ce30a2b880f"],
+      ["MGM", "336e0dac-2001-4a8b-be89-04b1620587ce"],
+      ["WND", "85fa1834-6094-41d0-94c1-24dddf9c8d8b"],
+      ["EP", "c1e2ba88-b5c3-4ed2-9ed3-7d4f75ec8230"],
+    ].flatMap(([mg_code, canonical_id]) => ["CW001", "SP001"].map((division_code) => ({
+      entity_type: "property", company_code: "EDGEHOME", division_code,
+      mg_type_code: "06", mg_code, canonical_id,
+    })));
+    mappings.splice(APPROVED_COUNT - approved.length, approved.length, ...approved);
+  }
+  return mappings;
 }
 
 // --------------------------------------------------------------------------
@@ -164,8 +178,18 @@ test("the delete is bounded to exactly the 552 approved keys and nothing else", 
   assert.match(sql, /if\s+v_n\s*<>\s*552\s+then/i);
   assert.match(sql, /raise exception 'rollback set is % rows, expected 552'/i);
 
-  // Nothing touches the canonical rows or the parent links.
-  assert.doesNotMatch(sql, /\b(?:delete\s+from|update|truncate|drop|alter)\s+core\.(?:licensor|property)\b/i);
+  // Canonical identity and parent survive. Only exact #1177 Property status is inactivated.
+  assert.doesNotMatch(sql, /\bdelete\s+from\s+core\.(?:licensor|property)\b/i);
+  assert.match(sql, /update core\.property set status='inactive' where id=r\.id and status='active'/i);
+  assert.match(sql, /implementation_issue'='#1177'/i);
+  assert.match(sql, /approval_issue'='#539'/i);
+  assert.match(sql, /approved_mapping_hash'='09e18e47d67181b06483d6cf4454e053'/i);
+  assert.doesNotMatch(sql, /update\s+core\.property[\s\S]{0,120}set[\s\S]{0,120}licensor_id\s*=/i);
+  assert.match(sql, /rollback found % of 7 exact live #1177 baseline pins/i);
+  assert.match(sql, /post-rollback baseline counts are not exactly 261\/1047\/542\/504/i);
+  assert.match(sql, /rollback_20260825050407_coldlion_paramount_five_approved_gate/i);
+  assert.match(sql, /promotion function does not carry exact #1177 fingerprint/i);
+  assert.match(sql, /1230f5a12d0f2a3029f1d3df17fc5b5f/i);
   assert.doesNotMatch(sql, /\btruncate\b|\bdrop\s+table\s+core\./i);
 
   // Transactional: the operator can inspect the report and still abort.

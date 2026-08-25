@@ -1,6 +1,6 @@
 {
   "schema": "coldlion_phase4_approved_mapping_input/v2",
-  "target": "rjyboqwcdzcocqgmsyel",
+  "target": "environment-neutral; prove the database target at execution",
   "approved_by": "Albert Hazan",
   "approved_at_utc": "2026-08-18",
   "approved_mapping_hash": "09e18e47d67181b06483d6cf4454e053",

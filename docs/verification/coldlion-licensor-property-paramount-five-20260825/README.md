@@ -17,6 +17,12 @@ The fingerprint uses the established Phase 4 encoding: sorted
 `<entity_type>|<company>/<division>/<mgTypeCode>/<mgCode>|<canonical_id>` rows joined by newline,
 then MD5 over UTF-8. The readiness tool recomputes the fingerprint and refuses any difference.
 
+The same atomic migration supersedes the seven affected `phase4_preview` health pins and updates
+the recurring promotion function to this exact 552/276 fingerprint. The generated emergency
+rollback withdraws only the approved links, clears only their typed mirrors, marks the five
+#1177-created canonical Properties inactive (it never deletes their identity or parent), re-pins
+the exact post-rollback snapshot, and restores the promotion function's historical 542/271 gate.
+
 No other formerly excluded code is admitted. The migration also applies §6.4 matched-row
 abstention: any existing canonical code/name, Property alias, or taxonomy source reference aborts
 the transaction instead of updating a possible match or creating a duplicate.

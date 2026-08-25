@@ -144,6 +144,31 @@ test("widened artifact is fingerprinted and admits only the Paramount five", () 
   assert.throws(() => validateWidenedApprovedMapping(tampered), /fingerprint\/count contract/);
 });
 
+test("#1177 forward atomically widens health pins and the recurring promotion gate", () => {
+  const sql = readFileSync(new URL(
+    "../supabase/migrations/20260825050407_coldlion_paramount_five_approved_gate.sql",
+    import.meta.url,
+  ), "utf8");
+  assert.match(sql, /phase4_preview has % of 7 exact pre-#1177 pins/);
+  for (const count of [261, 1057, 552, 514]) assert.match(sql, new RegExp(`\\b${count}\\b`));
+  for (const metric of ["property_uuid_hash", "property_status_hash", "parent_edge_hash"]) {
+    assert.match(sql, new RegExp(`v_snap->>'${metric}'`));
+  }
+  assert.match(sql, /pg_get_functiondef\('plm\.promote_coldlion_source_owned\(jsonb,jsonb,boolean\)'::regprocedure\)/);
+  assert.match(sql, /09e18e47d67181b06483d6cf4454e053/);
+  assert.match(sql, /'''552'''/);
+  assert.match(sql, /'''276'''/);
+});
+
+test("widened validator refuses malformed typed rows and a stale environment target", () => {
+  const original = JSON.parse(readFileSync(APPROVED_MAPPING_PATH, "utf8"));
+  assert.throws(() => validateWidenedApprovedMapping({ ...original, target: "deleted-preview-ref" }),
+    /header is missing or unauthorized/);
+  const malformed = structuredClone(original);
+  malformed.mappings[0].canonical_id = "not-a-uuid";
+  assert.throws(() => validateWidenedApprovedMapping(malformed), /invalid typed row/);
+});
+
 // ---------------------------------------------------------------------------
 // 1. Green case
 // ---------------------------------------------------------------------------

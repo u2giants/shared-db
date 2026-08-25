@@ -17,8 +17,16 @@ export const APPROVED_MAPPING_PATH = fileURLToPath(new URL(
 
 export function validateWidenedApprovedMapping(doc) {
   if (doc?.schema !== APPROVED_SCHEMA || doc?.approved_by !== "Albert Hazan"
-      || doc?.approved_at_utc !== "2026-08-18" || !Array.isArray(doc?.mappings)) {
+      || doc?.approved_at_utc !== "2026-08-18"
+      || doc?.target !== "environment-neutral; prove the database target at execution"
+      || !Array.isArray(doc?.mappings)) {
     throw new Error("widened approved mapping header is missing or unauthorized");
+  }
+  if (doc.mappings.some((m) => !["licensor", "property"].includes(m?.entity_type)
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(m?.canonical_id ?? "")
+      || [m?.company_code, m?.division_code, m?.mg_type_code, m?.mg_code]
+        .some((v) => typeof v !== "string" || v.length === 0))) {
+    throw new Error("widened approved mapping contains an invalid typed row");
   }
   const keys = doc.mappings.map(compositeKeyOf);
   if (new Set(keys).size !== keys.length) throw new Error("widened mapping has duplicate source keys");
