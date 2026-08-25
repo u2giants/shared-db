@@ -341,6 +341,11 @@ def _never_rest_by_batch() -> dict[str, tuple[str, ...]]:
 
 # Contract §5: never applied at all, at any time, in any batch.
 RETIRED_VERSION_REASONS = {
+    "20260814170749": (
+        "stranded without qualifying preview evidence after the preview project "
+        "replacement; reissued with identical executable SQL as 20260825201330 "
+        "under issue 1517"
+    ),
     "20260819011639": (
         "unpromotable producer provenance; replaced byte-for-byte by "
         "20260820142402, applied to production 2026-08-20 (issue 1171)"
