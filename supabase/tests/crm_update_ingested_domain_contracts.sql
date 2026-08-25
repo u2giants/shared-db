@@ -1,4 +1,4 @@
--- Contract tests for issue #1516 / migration 20260825155225.
+-- Contract tests for issue #1516 / migration 20260825194618.
 -- Fixture changes are transaction-bound and rolled back.
 
 begin;
