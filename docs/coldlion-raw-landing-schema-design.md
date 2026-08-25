@@ -51,6 +51,20 @@ Companions, both verified against live calls — read before implementing:
 
 ---
 
+> **Superseded for phases 2-6 (owner rulings 2026-08-18/19):** The original
+> design below remains as decision history, but feed tables do **not** keep a
+> per-row `raw` archive. They keep `source_hash`, computed over the complete
+> fetched record before projection; complete before/after payloads belong only
+> in `coldlion.change_log` when a current-state row actually changes. Only
+> fields marked `ingest` in `coldlion-field-decisions-20260819.csv` receive
+> columns. Line-level `merchGroupNN` fields are omitted from both history
+> feeds, while component-level `subMerchGroup*` and `ppkMerchGroup*` remain.
+> Item merch-group slots 01-14 are rows, division identity is the letter code,
+> and `item_image_content` is cancelled because ColdLion image bytes are never
+> pulled. These rulings are D1-D13 in
+> `plan_coldlion-landing-phases-2-6.md` and control wherever this historical
+> design conflicts with them.
+
 ## 1. What this layer is, and what it must never become
 
 **Job:** hold a faithful, replayable copy of what the Coldlion API returned, so that a bad load
