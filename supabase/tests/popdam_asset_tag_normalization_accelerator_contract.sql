@@ -5,9 +5,9 @@ begin;
 do $$
 begin
   -- 20260825025154 is retained as truthful preview history. Prerequisite A
-  -- deliberately recreates this index for recovery B, which owns its removal.
-  if to_regclass('public.asset_tags_pending_metadata_normalization_idx') is null then
-    raise exception 'recovery-B normalization accelerator is missing after prerequisite A';
+  -- recreated this index and recovery B removes it after bounded normalization.
+  if to_regclass('public.asset_tags_pending_metadata_normalization_idx') is not null then
+    raise exception 'recovery-B normalization accelerator remains after final activation';
   end if;
 
   if not exists (
