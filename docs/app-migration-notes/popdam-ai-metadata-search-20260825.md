@@ -3,6 +3,17 @@
 Canonical prerequisite-A migration:
 `20260825041343_popdam_ai_search_batched_forward.sql`.
 
+Canonical recovery-B migration:
+`20260825050227_popdam_ai_search_reconciliation_and_activation.sql`.
+
+Recovery B completes #1427. It imports legacy arrays, collapses normalized
+duplicates, normalizes all tag metadata, and rebuilds compatibility arrays with
+monotonic keyset helpers invoked as separate top-level statements. It uses the
+transaction-local replica role only during reconciliation, restores normal
+trigger behavior before final activation, validates completeness, installs the
+complete original #1427 contract idempotently, removes the forward/pending
+recovery indexes, and retains the active-only production index.
+
 This is deliberately not the final #1427 contract. It is the short first half
 of a governed two-transaction recovery. It adds the nullable `asset_tags`
 columns and the three indexes needed by the later bounded reconciliation, then
