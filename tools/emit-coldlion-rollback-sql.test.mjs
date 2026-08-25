@@ -190,6 +190,8 @@ test("the delete is bounded to exactly the 552 approved keys and nothing else", 
   assert.match(sql, /rollback_20260825050407_coldlion_paramount_five_approved_gate/i);
   assert.match(sql, /promotion function does not carry exact #1177 fingerprint/i);
   assert.match(sql, /1230f5a12d0f2a3029f1d3df17fc5b5f/i);
+  assert.doesNotMatch(sql, /(?<!extensions\.)digest\s*\(/i);
+  assert.match(sql, /revoke all on function plm\.promote_coldlion_source_owned\(jsonb,jsonb,boolean\)\s+from public,anon,authenticated,service_role/i);
   assert.doesNotMatch(sql, /\btruncate\b|\bdrop\s+table\s+core\./i);
 
   // Transactional: the operator can inspect the report and still abort.

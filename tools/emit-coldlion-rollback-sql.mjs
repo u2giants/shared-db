@@ -138,7 +138,7 @@ begin
     insert into plm.licensing_write_authorization(backend_pid,transaction_id,target_table,
       write_kind,plan_id,plan_hash,actor,protected_columns,expires_at)
     values(pg_backend_pid(),txid_current(),'core.property','coldlion_status',v_plan,
-      encode(digest('1177/rollback/inactivate/'||r.id::text,'sha256'),'hex'),
+      encode(extensions.digest('1177/rollback/inactivate/'||r.id::text,'sha256'),'hex'),
       'generated #1177 rollback',array['status'],clock_timestamp()+interval '1 minute');
     update core.property set status='inactive' where id=r.id and status='active';
     get diagnostics v_n=row_count;
@@ -205,6 +205,8 @@ begin
   v_def:=replace(v_def,'''552''','''542''');
   v_def:=replace(v_def,'''276''','''271''');
   execute v_def;
+  revoke all on function plm.promote_coldlion_source_owned(jsonb,jsonb,boolean)
+    from public,anon,authenticated,service_role;
 end;
 $$;
 

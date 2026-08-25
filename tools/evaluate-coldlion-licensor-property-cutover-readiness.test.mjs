@@ -158,6 +158,8 @@ test("#1177 forward atomically widens health pins and the recurring promotion ga
   assert.match(sql, /09e18e47d67181b06483d6cf4454e053/);
   assert.match(sql, /'''552'''/);
   assert.match(sql, /'''276'''/);
+  assert.doesNotMatch(sql, /(?<!extensions\.)digest\s*\(/i);
+  assert.match(sql, /revoke all on function plm\.promote_coldlion_source_owned\(jsonb,jsonb,boolean\)\s+from public,anon,authenticated,service_role/i);
 });
 
 test("widened validator refuses malformed typed rows and a stale environment target", () => {

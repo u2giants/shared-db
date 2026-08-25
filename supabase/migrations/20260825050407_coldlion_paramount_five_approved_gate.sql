@@ -95,7 +95,7 @@ begin
     insert into plm.licensing_write_authorization(backend_pid,transaction_id,target_table,
       write_kind,plan_id,plan_hash,actor,protected_columns,expires_at)
     values(pg_backend_pid(),txid_current(),'core.property','licensing_review_create',v_plan_id,
-      encode(digest('1177/create/'||v_row.canonical_id::text,'sha256'),'hex'),
+      encode(extensions.digest('1177/create/'||v_row.canonical_id::text,'sha256'),'hex'),
       'shared-db migration 20260825050407',array['licensor_id','name','code','status'],
       clock_timestamp()+interval '1 minute');
 
@@ -110,7 +110,7 @@ begin
     insert into plm.licensing_write_authorization(backend_pid,transaction_id,target_table,
       write_kind,plan_id,plan_hash,actor,protected_columns,expires_at)
     values(pg_backend_pid(),txid_current(),'core.property','coldlion_status',v_plan_id,
-      encode(digest('1177/activate/'||v_row.canonical_id::text,'sha256'),'hex'),
+      encode(extensions.digest('1177/activate/'||v_row.canonical_id::text,'sha256'),'hex'),
       'shared-db migration 20260825050407',array['status'],clock_timestamp()+interval '1 minute');
     update core.property set status='active' where id=v_property_id and status='potential';
     get diagnostics v_hits=row_count;
@@ -222,4 +222,10 @@ begin
   v_function_def:=replace(v_function_def,'''542''','''552''');
   v_function_def:=replace(v_function_def,'''271''','''276''');
   execute v_function_def;
+  -- CREATE OR REPLACE normally preserves ACLs, but promotion authority is too
+  -- sensitive to depend on that implicit behavior. Reassert the exact current
+  -- internal-function ACL installed by #1429: nobody except the owner may call
+  -- it directly; service_role continues through the unchanged public wrapper.
+  revoke all on function plm.promote_coldlion_source_owned(jsonb,jsonb,boolean)
+    from public,anon,authenticated,service_role;
 end; $migration$;
