@@ -3,7 +3,7 @@
 Canonical database migration: `20260825010603_popdam_scoped_ai_metadata_search.sql`.
 
 Production timeout recovery: apply
-`20260825020826_popdam_asset_tag_normalization_accelerator.sql` first, then retry
+`20260825025154_popdam_asset_tag_normalization_accelerator.sql` first, then retry
 the canonical migration. The prerequisite adds the same metadata columns with
 `IF NOT EXISTS` and a partial `asset_tags(id)` index containing only rows still
 needing normalization. The index gives each canonical keyset batch a much
