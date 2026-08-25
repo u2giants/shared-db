@@ -47,13 +47,14 @@ select
   r.factory_id as core_factory_id
 from dflow."Factory" f
 left join core.factory_source_ref r
-  on r.source_system = 'designflow'
+  on r.source_system = 'designflow_plm'
  and r.source_table = 'Factory'
  and r.source_id = f.id::text;
 
 comment on view dflow.factory_canonical_identity is
-  'Read-only DesignFlow Factory identity bridge. core.factory_source_ref is the sole mapping authority; missing rows remain unresolved.';
+  'Read-only Cloud SQL DesignFlow Factory identity bridge. core.factory_source_ref designflow_plm/Factory refs are the sole mapping authority; missing rows remain unresolved.';
 
+revoke all on dflow.factory_canonical_identity from public;
 revoke all on dflow.factory_canonical_identity from anon;
 revoke all on dflow.factory_canonical_identity from authenticated;
-grant select on dflow.factory_canonical_identity to service_role;
+revoke all on dflow.factory_canonical_identity from service_role;

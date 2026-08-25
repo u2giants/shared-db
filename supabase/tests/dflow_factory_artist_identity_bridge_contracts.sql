@@ -52,7 +52,7 @@ begin
       and not exists (
         select 1 from core.factory_source_ref r
         where r.factory_id = v.core_factory_id
-          and r.source_system = 'designflow' and r.source_table = 'Factory'
+          and r.source_system = 'designflow_plm' and r.source_table = 'Factory'
           and r.source_id = v.legacy_factory_id::text
       )
   ) then
@@ -65,6 +65,15 @@ begin
 
   if has_table_privilege('authenticated', 'dflow.factory_canonical_identity', 'SELECT') then
     raise exception 'authenticated must not read the Factory identity bridge directly';
+  end if;
+
+  if has_table_privilege('service_role', 'dflow.factory_canonical_identity', 'SELECT') then
+    raise exception 'service_role must not receive an unusable direct Factory bridge grant';
+  end if;
+
+  if position('designflow_plm' in pg_get_viewdef('dflow.factory_canonical_identity'::regclass, true)) = 0
+     or position('Factory' in pg_get_viewdef('dflow.factory_canonical_identity'::regclass, true)) = 0 then
+    raise exception 'Factory identity view must use the established designflow_plm/Factory source-ref contract';
   end if;
 
   if not exists (
