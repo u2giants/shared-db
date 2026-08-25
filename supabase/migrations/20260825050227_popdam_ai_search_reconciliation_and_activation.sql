@@ -84,7 +84,7 @@ begin
       evidence=coalesce(t.evidence,'{}'::jsonb),
       updated_at=coalesce(t.updated_at,now())
     from batch b where t.id=b.id returning t.id
-  ) select count(*), max(id) into v_count, v_next from changed;
+  ) select count(*), (array_agg(id order by id desc))[1] into v_count, v_next from changed;
   if v_next is not null then
     update pg_temp.popdam_1479_cursor set last_uuid=v_next,processed=processed+v_count where phase='normalize';
   end if;
