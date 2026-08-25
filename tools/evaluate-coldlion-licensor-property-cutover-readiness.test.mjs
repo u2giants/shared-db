@@ -162,6 +162,19 @@ test("#1177 forward atomically widens health pins and the recurring promotion ga
   assert.match(sql, /revoke all on function plm\.promote_coldlion_source_owned\(jsonb,jsonb,boolean\)\s+from public,anon,authenticated,service_role/i);
 });
 
+test("#1177 mirror establishment is exact insert-or-validate, never overwrite", () => {
+  const sql = readFileSync(new URL(
+    "../supabase/migrations/20260825050407_coldlion_paramount_five_approved_gate.sql",
+    import.meta.url,
+  ), "utf8");
+  assert.match(sql, /foreach v_division in array array\['CW001','SP001'\]/i);
+  assert.match(sql, /insert into plm\.erp_property[\s\S]*on conflict\(company_code,division_code,mg_type_code,mg_code\) do nothing/i);
+  assert.doesNotMatch(sql, /on conflict\(company_code,division_code,mg_type_code,mg_code\) do update/i);
+  assert.match(sql, /refusing to fabricate source type authority/i);
+  assert.match(sql, /e\.property_id is not null or e\.resolution_status<>'unresolved'/i);
+  assert.match(sql, /does not have exactly two unresolved, name-matching CW001\/SP001 typed rows; refusing/i);
+});
+
 test("widened validator refuses malformed typed rows and a stale environment target", () => {
   const original = JSON.parse(readFileSync(APPROVED_MAPPING_PATH, "utf8"));
   assert.throws(() => validateWidenedApprovedMapping({ ...original, target: "deleted-preview-ref" }),

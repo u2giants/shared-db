@@ -26,3 +26,8 @@ the exact post-rollback snapshot, and restores the promotion function's historic
 No other formerly excluded code is admitted. The migration also applies §6.4 matched-row
 abstention: any existing canonical code/name, Property alias, or taxonomy source reference aborts
 the transaction instead of updating a possible match or creating a duplicate.
+
+The ten typed `plm.erp_property` identities use exact insert-or-validate semantics. An absent
+approved CW001/SP001 key is established from this fingerprinted artifact after its existing
+Property header is proven; an existing key is never overwritten and must already have the exact
+type, normalized name, unresolved state, and null canonical link or the transaction refuses.

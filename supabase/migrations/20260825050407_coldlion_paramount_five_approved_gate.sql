@@ -16,6 +16,10 @@ declare
   v_snap jsonb;
   v_function_def text;
   v_pin_count integer;
+  v_division text;
+  v_mirror_raw jsonb;
+  v_header_desc text;
+  v_header_count integer;
   v_reason constant text :=
     'Owner-approved ColdLion mapping under Paramount: issue #539; implemented by issue #1177; '
     'approved artifact md5 09e18e47d67181b06483d6cf4454e053.';
@@ -46,14 +50,43 @@ begin
       ('EP','Emily in Paris','c1e2ba88-b5c3-4ed2-9ed3-7d4f75ec8230'::uuid)
     ) as approved(code,canonical_name,canonical_id)
   loop
+    -- The approved artifact, not a prior capture in this environment, is the
+    -- authority for these ten typed identities. Establish an absent exact key;
+    -- never update an existing row here. The validation immediately below then
+    -- requires both inserted-or-existing rows to agree on every governed field.
+    foreach v_division in array array['CW001','SP001']
+    loop
+      select count(*),min(h.mg_type_desc) into v_header_count,v_header_desc
+      from plm.merch_group_header h
+      where h.company_code='EDGEHOME' and h.division_code=v_division
+        and h.mg_type_code='06' and lower(btrim(h.mg_type_desc))='property';
+      if v_header_count<>1 then
+        raise exception 'ColdLion %/06 Property header resolved to % rows; refusing to fabricate source type authority',
+          v_division,v_header_count;
+      end if;
+      v_mirror_raw:=jsonb_build_object(
+        'authority','owner_approved_mapping_artifact',
+        'approval_issue','#539','implementation_issue','#1177',
+        'approved_mapping_hash','09e18e47d67181b06483d6cf4454e053',
+        'companyCode','EDGEHOME','divisionCode',v_division,
+        'mgTypeCode','06','mgTypeDesc',v_header_desc,
+        'mgCode',v_row.code,'mgDesc',v_row.canonical_name);
+      insert into plm.erp_property(company_code,division_code,mg_type_code,mg_code,
+        mg_type_desc,name,raw,source_hash)
+      values('EDGEHOME',v_division,'06',v_row.code,v_header_desc,v_row.canonical_name,
+        v_mirror_raw,md5(v_mirror_raw::text))
+      on conflict(company_code,division_code,mg_type_code,mg_code) do nothing;
+    end loop;
+
     -- Both typed source rows must exist and agree exactly. The pair is the evidence that
     -- this is one approved Property used in both licensed divisions, never two records.
     select count(*),count(*) filter(where
       e.company_code<>'EDGEHOME' or e.mg_type_code<>'06'
       or e.division_code not in ('CW001','SP001')
+      or lower(btrim(e.mg_type_desc))<>'property'
       or core.normalize_popsg_property_observation(e.name)
          <>core.normalize_popsg_property_observation(v_row.canonical_name)
-      or e.property_id is not null)
+      or e.property_id is not null or e.resolution_status<>'unresolved')
       into v_mirror_count,v_bad_mirrors
     from plm.erp_property e
     where e.company_code='EDGEHOME' and e.mg_type_code='06' and e.mg_code=v_row.code;
