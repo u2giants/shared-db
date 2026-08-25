@@ -4,7 +4,7 @@ Canonical prerequisite-A migration:
 `20260825041343_popdam_ai_search_batched_forward.sql`.
 
 Canonical recovery-B migration:
-`20260825050227_popdam_ai_search_reconciliation_and_activation.sql`.
+`20260825082910_popdam_ai_search_reconciliation_and_activation.sql`.
 
 Recovery B completes #1427. It imports legacy arrays, collapses normalized
 duplicates, normalizes all tag metadata, and rebuilds compatibility arrays with
