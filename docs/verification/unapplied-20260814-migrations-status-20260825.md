@@ -94,10 +94,10 @@ work.
 | `20260825094455` pmt loader forward repair *(not one of the six)* | Merged 08-25, pending | **Apply last** — without it the other three revert a live fix |
 | `20260814233342` source capture inventory | **Already retired** (owner ruling 08-24, PR #1402) | Nothing to do — closed |
 | `20260814233423` remaining source resolution | **Already retired** (owner ruling 08-24, PR #1402) | Nothing to do — closed |
-| `20260814170749` wb retire legacy capture paths | **Retired and hard-blocked** — cannot earn qualifying preview evidence | Never apply; use fresh replacement `20260825201330` under #1517 |
+| `20260814170749` wb retire legacy capture paths | **Retired and hard-blocked** — replacement `20260825201330` is production-live | Never apply the original; replacement completed in run 32901820150 |
 
-The Paramount window completed. The fresh Warner replacement still requires its own preview
-rehearsal and later production authorization; neither action is implied by authoring this reissue.
+The Paramount window and the fresh Warner replacement both completed. The Warner replacement was
+rehearsed separately and later applied alone to production in run 32901820150.
 
 ---
 
