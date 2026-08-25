@@ -229,7 +229,7 @@ class GuardTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(GuardError):
                 parse_allowlist(value)
 
-    def test_the_block_list_is_exactly_these_six(self) -> None:
+    def test_the_block_list_is_exactly_the_governed_versions(self) -> None:
         # Three kinds, deliberately together. 20260726190000/20260726200000 are the
         # already-applied Master Data pair. 20260729120000 is the third kind:
         # never applied, and applying it would REGRESS a live production security
@@ -250,6 +250,7 @@ class GuardTests(unittest.TestCase):
                 "20260825010603",
                 "20260825025154",
                 "20260825031841",
+                "20260814193351",
             },
         )
 
@@ -257,6 +258,15 @@ class GuardTests(unittest.TestCase):
         for version in ("20260825010603", "20260825025154", "20260825031841"):
             with self.subTest(version=version), self.assertRaises(GuardError):
                 parse_allowlist(version)
+
+    def test_the_superseded_paramount_prerequisite_cannot_enter_an_allowlist(self) -> None:
+        """#1459 promotes the byte-identical fresh version, never the stranded one."""
+        with self.assertRaises(GuardError):
+            parse_allowlist("20260814193351")
+        self.assertNotIn("20260825102727", HARD_BLOCKED)
+        original = REPO / "supabase/migrations/20260814193351_pmt_duplicate_name_columns_deprecated.sql"
+        replacement = REPO / "supabase/migrations/20260825102727_pmt_duplicate_name_columns_deprecated_supersede.sql"
+        self.assertEqual(original.read_bytes(), replacement.read_bytes())
 
     def test_the_unsafe_issue_853_migration_cannot_enter_an_allowlist(self) -> None:
         with self.assertRaises(GuardError):

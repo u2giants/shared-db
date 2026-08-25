@@ -146,6 +146,12 @@ HARD_BLOCKED = {
     # Superseded by the governed two-transaction recovery beginning at
     # prerequisite 20260825041343.
     "20260825031841",
+    # #1459 historical prerequisite 1. Preview already applied this exact SQL,
+    # but its later-main rehearsal cannot satisfy the author-merge producer pin.
+    # Fresh version 20260825102727 is the byte-identical, newly reviewed
+    # replacement. The old version must never enter a production allowlist,
+    # because doing so would restore the unrecoverable evidence path.
+    "20260814193351",
 }
 
 # Preview contains this authenticated historical migration, but production does

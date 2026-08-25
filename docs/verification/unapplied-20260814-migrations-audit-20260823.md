@@ -74,7 +74,10 @@ columns. The live loader's allow list has no `pmt_metadata_element` and its inse
 copies. A Paramount capture run today is **refused** — fail-closed, no partial write, no corruption,
 but no capture either. Paramount has exactly one complete capture (2026-08-13) and none since.
 
-**3.1 `20260814193351_pmt_duplicate_name_columns_deprecated` (issue #964, PR #981).** Stops storing a
+**3.1 `20260814193351_pmt_duplicate_name_columns_deprecated` (issue #964, PR #981).** RETIRED from
+production promotion by #1459 after its genuine preview rehearsal proved unrecoverable under the
+producer-file pin. Its byte-identical, freshly reviewed replacement is `20260825102727`; promote
+that replacement instead. Stops storing a
 second copy of the Paramount property name on two tables that already link to the real property
 record. The copies agree today (zero mismatches measured), which is the safe moment to stop writing
 them — before a future capture makes them disagree and nobody can say which is right.
