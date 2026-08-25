@@ -326,16 +326,17 @@ create or replace function public.get_effective_asset_metadata(p_asset_id uuid)
 returns table(scope text,tag text,category text,source text,status text,confidence numeric,model text,created_by uuid,
   effective_licensor_id uuid,effective_property_id uuid,style_group_id uuid)
 language sql stable security invoker set search_path=public as $$
-  select 'style_group',t.tag,t.category,t.source,t.status,t.confidence,t.model,t.created_by,
+  select * from (
+  select 'style_group'::text as scope,t.tag,t.category,t.source,t.status,t.confidence,t.model,t.created_by,
     sg.licensor_id,sg.property_id,a.style_group_id from public.assets a join public.style_groups sg on sg.id=a.style_group_id
     join public.style_group_tags t on t.style_group_id=sg.id where a.id=p_asset_id
   union all
-  select 'asset',t.tag,t.category,t.source,t.status,t.confidence,t.model,t.created_by,
+  select 'asset'::text as scope,t.tag,t.category,t.source,t.status,t.confidence,t.model,t.created_by,
     case when a.style_group_id is null then a.licensor_id else sg.licensor_id end,
     case when a.style_group_id is null then a.property_id else sg.property_id end,a.style_group_id
     from public.assets a left join public.style_groups sg on sg.id=a.style_group_id join public.asset_tags t on t.asset_id=a.id
     where a.id=p_asset_id
-  order by 1,lower(2),2;
+  ) m order by m.scope,lower(m.tag),m.tag;
 $$;
 
 drop function if exists public.claim_dam_search_embedding_documents(int);
