@@ -800,41 +800,41 @@ alter table plm.coke_contract_manufacturer enable row level security;
 alter table plm.coke_royalty_report enable row level security;
 
 create policy coke_capture_staff_read on plm.coke_capture for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_approval_item_staff_read on plm.coke_approval_item for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_approval_metadata_staff_read on plm.coke_approval_metadata_value for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_approval_related_staff_read on plm.coke_approval_related_item for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_approval_stage_staff_read on plm.coke_approval_stage_snapshot for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_approval_comment_staff_read on plm.coke_approval_comment for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_vocabulary_staff_read on plm.coke_vocabulary_value for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_approval_vocabulary_staff_read on plm.coke_approval_vocabulary_value for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_manufacturer_staff_read on plm.coke_manufacturer_profile for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_asset_property_staff_read on plm.coke_asset_property_option for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_asset_staff_read on plm.coke_asset for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_asset_detail_staff_read on plm.coke_asset_detail_value for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_tag_staff_read on plm.coke_tag for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_asset_tag_staff_read on plm.coke_asset_tag for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_contract_staff_read on plm.coke_contract for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_sku_staff_read on plm.coke_sku for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_contract_manufacturer_staff_read on plm.coke_contract_manufacturer for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 create policy coke_royalty_report_staff_read on plm.coke_royalty_report for select to authenticated
-  using (app.has_any_role(auth.uid(),array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
 
 grant select on plm.coke_capture,plm.coke_approval_item,
   plm.coke_approval_metadata_value,plm.coke_approval_related_item,
