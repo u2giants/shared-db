@@ -88,7 +88,7 @@ Re-fetch and re-run the audit before acting; these facts move within minutes.
 - **#1379 / #1358:** DB Data Admin Universe B application work remains an open PR and is repo-maintenance/application scope, not a structural-orchestrator assignment.
 - **#1521:** this handoff's tracking issue; retire this file only after a successor has carried or completed every obligation.
 - **#1496:** closed as an exact duplicate of #1492 so the same six-object scope cannot dispatch twice.
-- **Stale handoff retirement:** predecessor orchestrator file `2026-08-24T2355Z-edge-dev-claude-orchestrator-1419-closeout.md` was deleted only after its unfinished obligations were re-derived and carried into current issues/this handoff. Closed #1184's stale planning handoff was also retired: its durable plan remains under `docs/`, while surviving actions remain independently queued by #1204, #1031, and #1322. Git history preserves both deleted files.
+- **Stale handoff retirement:** predecessor orchestrator file `2026-08-24T2355Z-edge-dev-claude-orchestrator-1419-closeout.md` was deleted only after its unfinished obligations were re-derived and carried into current issues/this handoff. Closed #1184's stale planning handoff was also retired: its durable plan remains under `docs/`, while surviving actions remain independently queued by #1204, #1031, and #1322. The prior committed versions remain retrievable.
 
 ### Preview's actual state
 
