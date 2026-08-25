@@ -64,10 +64,12 @@ begin
 end;
 $$;
 
--- The migration's catalogue verification proves both explicit grants at creation time. The
+-- The migration verification proves both explicit grants and all three role-switched behaviors
+-- at creation time. The
 -- browser ACL above remains direct because inherited EXECUTE must never make anon acceptable.
--- These role-switched calls separately prove the effective behavior after the CI harness has
--- replayed its compatibility fixtures; service_role may inherit EXECUTE in that harness.
+-- This later authenticated call proves the ordinary app path after the CI harness has replayed
+-- its compatibility fixtures. The captured baseline deliberately strips later service_role
+-- grants from pass-1 objects, so service_role is proved before that harness-only transformation.
 do $$
 begin
   begin
@@ -80,10 +82,6 @@ begin
   end;
 
   execute 'set local role authenticated';
-  perform * from api.source_capture_inventory_exact('ZZTEST-not-a-table');
-  execute 'reset role';
-
-  execute 'set local role service_role';
   perform * from api.source_capture_inventory_exact('ZZTEST-not-a-table');
   execute 'reset role';
 end;

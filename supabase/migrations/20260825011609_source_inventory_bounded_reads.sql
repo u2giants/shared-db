@@ -466,7 +466,8 @@ revoke all on api.source_capture_inventory from public;
 revoke all on api.source_capture_inventory from anon;
 grant select on api.source_capture_inventory to authenticated, service_role;
 
--- Catalogue-only apply verification: inspect definitions and ACLs, never execute either surface.
+-- Apply verification. The unknown-table probe exercises only function ACL dispatch; catalogue
+-- filtering returns no row before query_to_xml can execute.
 do $$
 declare
   v_view text := pg_get_viewdef('api.source_capture_inventory'::regclass,true);
@@ -518,6 +519,20 @@ begin
      ) then
     raise exception 'exact function direct ACL is wrong';
   end if;
+  begin
+    execute 'set local role anon';
+    perform * from api.source_capture_inventory_exact('ZZVERIFY-not-a-table');
+    execute 'reset role';
+    raise exception 'anon executed exact inventory';
+  exception when insufficient_privilege then
+    execute 'reset role';
+  end;
+  execute 'set local role authenticated';
+  perform * from api.source_capture_inventory_exact('ZZVERIFY-not-a-table');
+  execute 'reset role';
+  execute 'set local role service_role';
+  perform * from api.source_capture_inventory_exact('ZZVERIFY-not-a-table');
+  execute 'reset role';
   raise notice 'source inventory split verified at catalogue cost only';
 end;
 $$;
