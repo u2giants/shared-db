@@ -24,10 +24,29 @@ begin
      or not has_table_privilege('service_role', 'api.source_capture_inventory', 'SELECT') then
     raise exception 'A FAILED: view read grants changed';
   end if;
-  if has_function_privilege('anon','api.source_capture_inventory_exact(text)','EXECUTE')
-     or not has_function_privilege('authenticated','api.source_capture_inventory_exact(text)','EXECUTE')
-     or not has_function_privilege('service_role','api.source_capture_inventory_exact(text)','EXECUTE') then
-    raise exception 'A FAILED: exact-count function grants changed';
+  if exists (
+       select 1
+       from pg_proc p
+       cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+       where p.oid='api.source_capture_inventory_exact(text)'::regprocedure
+         and a.privilege_type='EXECUTE'
+         and a.grantee in (0,'anon'::regrole)
+     )
+     or not exists (
+       select 1
+       from pg_proc p
+       cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+       where p.oid='api.source_capture_inventory_exact(text)'::regprocedure
+         and a.privilege_type='EXECUTE' and a.grantee='authenticated'::regrole
+     )
+     or not exists (
+       select 1
+       from pg_proc p
+       cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+       where p.oid='api.source_capture_inventory_exact(text)'::regprocedure
+         and a.privilege_type='EXECUTE' and a.grantee='service_role'::regrole
+     ) then
+    raise exception 'A FAILED: exact-count function direct ACL changed';
   end if;
 
   select obj_description('api.source_capture_inventory'::regclass, 'pg_class') into v_text;
@@ -48,6 +67,29 @@ begin
      or v_def not ilike '%p_table_name is null or c.relname = p_table_name%' then
     raise exception 'A FAILED: opt-in exact function lost exact counting or early scoping';
   end if;
+end;
+$$;
+
+-- The direct ACL above proves the grant statements. These role-switched calls separately
+-- prove the effective behavior, including schema access and any inherited role privileges.
+do $$
+begin
+  begin
+    execute 'set local role anon';
+    perform * from api.source_capture_inventory_exact('ZZTEST-not-a-table');
+    execute 'reset role';
+    raise exception 'A FAILED: anon executed the exact-count function';
+  exception when insufficient_privilege then
+    execute 'reset role';
+  end;
+
+  execute 'set local role authenticated';
+  perform * from api.source_capture_inventory_exact('ZZTEST-not-a-table');
+  execute 'reset role';
+
+  execute 'set local role service_role';
+  perform * from api.source_capture_inventory_exact('ZZTEST-not-a-table');
+  execute 'reset role';
 end;
 $$;
 

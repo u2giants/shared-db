@@ -498,10 +498,25 @@ begin
      or not has_table_privilege('service_role','api.source_capture_inventory','SELECT') then
     raise exception 'ordinary view grants changed';
   end if;
-  if has_function_privilege('anon','api.source_capture_inventory_exact(text)','EXECUTE')
-     or not has_function_privilege('authenticated','api.source_capture_inventory_exact(text)','EXECUTE')
-     or not has_function_privilege('service_role','api.source_capture_inventory_exact(text)','EXECUTE') then
-    raise exception 'exact function grants are wrong';
+  if exists (
+       select 1 from pg_proc p
+       cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+       where p.oid='api.source_capture_inventory_exact(text)'::regprocedure
+         and a.privilege_type='EXECUTE' and a.grantee in (0,'anon'::regrole)
+     )
+     or not exists (
+       select 1 from pg_proc p
+       cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+       where p.oid='api.source_capture_inventory_exact(text)'::regprocedure
+         and a.privilege_type='EXECUTE' and a.grantee='authenticated'::regrole
+     )
+     or not exists (
+       select 1 from pg_proc p
+       cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+       where p.oid='api.source_capture_inventory_exact(text)'::regprocedure
+         and a.privilege_type='EXECUTE' and a.grantee='service_role'::regrole
+     ) then
+    raise exception 'exact function direct ACL is wrong';
   end if;
   raise notice 'source inventory split verified at catalogue cost only';
 end;
