@@ -47,10 +47,10 @@ begin
   insert into public.asset_tags(asset_id,tag,source,category,status,model)
   values(v_asset,v_asset_tag,'ai','scene','active','test-model');
 
-  if not v_manual=any((select tags from public.assets where id=v_asset))
-     or not v_asset_tag=any((select tags from public.assets where id=v_asset))
-     or v_rejected=any((select tags from public.assets where id=v_asset))
-     or v_candidate=any((select tags from public.assets where id=v_asset)) then
+  if (select array_position(tags,v_manual) is null from public.assets where id=v_asset)
+     or (select array_position(tags,v_asset_tag) is null from public.assets where id=v_asset)
+     or (select array_position(tags,v_rejected) is not null from public.assets where id=v_asset)
+     or (select array_position(tags,v_candidate) is not null from public.assets where id=v_asset) then
     raise exception 'assets.tags did not include active-only asset-scope rows';
   end if;
 
