@@ -1,4 +1,4 @@
--- #1427 transaction-rolled-back contract checks. Run after migration 20260825000856.
+-- #1427 transaction-rolled-back contract checks. Run after migration 20260825010603.
 begin;
 
 do $$

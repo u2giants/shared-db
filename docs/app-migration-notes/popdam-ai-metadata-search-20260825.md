@@ -1,6 +1,6 @@
 # PopDAM Scoped AI Metadata + Deterministic Search — 2026-08-25
 
-Canonical database migration: `20260825000856_popdam_scoped_ai_metadata_search.sql`.
+Canonical database migration: `20260825010603_popdam_scoped_ai_metadata_search.sql`.
 Tracked by [shared-db #1427](https://github.com/u2giants/shared-db/issues/1427),
 [PopDAM #96](https://github.com/u2giants/popdam3/issues/96), and
 [PopDAM #97](https://github.com/u2giants/popdam3/issues/97).
