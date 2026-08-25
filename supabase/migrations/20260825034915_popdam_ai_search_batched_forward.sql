@@ -53,19 +53,19 @@ with ranked as (
 )
 select count(*) from removed;
 
-create temporary table popdam_forward_1474_cursor (
+create table pg_temp.popdam_forward_1474_cursor (
   singleton boolean primary key default true check (singleton),
   last_tag_id uuid,
   last_asset_id uuid
 ) on commit drop;
-insert into popdam_forward_1474_cursor default values;
+insert into pg_temp.popdam_forward_1474_cursor default values;
 
 create or replace function pg_temp.popdam_forward_1474_normalize_batch(p_limit integer)
 returns integer language plpgsql as $$
 declare v_last uuid; v_count integer; v_next uuid;
 begin
   if current_setting('popdam.forward_1474_needed') <> 'on' then return 0; end if;
-  select last_tag_id into v_last from popdam_forward_1474_cursor where singleton;
+  select last_tag_id into v_last from pg_temp.popdam_forward_1474_cursor where singleton;
   with batch as (
     select id from public.asset_tags
     where (v_last is null or id > v_last)
@@ -82,7 +82,7 @@ begin
     from batch b where t.id=b.id returning t.id
   ) select count(*),max(id) into v_count,v_next from changed;
   if v_next is not null then
-    update popdam_forward_1474_cursor set last_tag_id=v_next where singleton;
+    update pg_temp.popdam_forward_1474_cursor set last_tag_id=v_next where singleton;
   end if;
   return v_count;
 end $$;
@@ -618,7 +618,7 @@ returns integer language plpgsql as $$
 declare v_last uuid; v_count integer; v_next uuid;
 begin
   if current_setting('popdam.forward_1474_needed') <> 'on' then return 0; end if;
-  select last_asset_id into v_last from popdam_forward_1474_cursor where singleton;
+  select last_asset_id into v_last from pg_temp.popdam_forward_1474_cursor where singleton;
   with batch_ids as (
     select distinct t.asset_id from public.asset_tags t
     where v_last is null or t.asset_id>v_last
@@ -633,7 +633,7 @@ begin
   )
   select count(*),max(asset_id) into v_count,v_next from batch_ids;
   if v_next is not null then
-    update popdam_forward_1474_cursor set last_asset_id=v_next where singleton;
+    update pg_temp.popdam_forward_1474_cursor set last_asset_id=v_next where singleton;
   end if;
   return v_count;
 end $$;
@@ -1155,7 +1155,7 @@ select pg_temp.popdam_forward_1474_rebuild_batch(10000);
 do $$
 declare v_last uuid;
 begin
-  select last_asset_id into v_last from popdam_forward_1474_cursor where singleton;
+  select last_asset_id into v_last from pg_temp.popdam_forward_1474_cursor where singleton;
   if current_setting('popdam.forward_1474_needed') = 'on' and exists (
     select 1 from public.asset_tags where v_last is null or asset_id>v_last
   ) then
@@ -1176,7 +1176,7 @@ begin
     drop index if exists public.asset_tags_pending_metadata_normalization_idx;
     drop function if exists pg_temp.popdam_forward_1474_normalize_batch(integer);
     drop function if exists pg_temp.popdam_forward_1474_rebuild_batch(integer);
-    drop table if exists popdam_forward_1474_cursor;
+    drop table if exists pg_temp.popdam_forward_1474_cursor;
     return;
   end if;
 
@@ -1645,6 +1645,6 @@ $contract$;
   drop index if exists public.asset_tags_pending_metadata_normalization_idx;
   drop function if exists pg_temp.popdam_forward_1474_normalize_batch(integer);
   drop function if exists pg_temp.popdam_forward_1474_rebuild_batch(integer);
-  drop table if exists popdam_forward_1474_cursor;
+  drop table if exists pg_temp.popdam_forward_1474_cursor;
 end
 $forward$;
