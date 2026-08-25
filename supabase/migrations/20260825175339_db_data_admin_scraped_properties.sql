@@ -43,16 +43,25 @@ begin
     select p.*,
            row_number() over (
              partition by p.property_source_id
-             order by p.imported_at desc, p.capture_id::text desc
+             order by c.completed_at desc nulls last,
+                      p.imported_at desc,
+                      p.capture_id::text desc
            ) as capture_rank
     from plm.pmt_property p
+    join plm.pmt_capture c on c.capture_id = p.capture_id
+    where c.status = 'complete'
+      and c.capture_kind = 'full'
   ), nbcu_ranked as (
     select p.*,
            row_number() over (
              partition by p.property_key
-             order by p.source_captured_at desc, p.capture_id::text desc
+             order by c.source_captured_at desc,
+                      p.source_captured_at desc,
+                      p.capture_id::text desc
            ) as capture_rank
     from plm.nbcu_property p
+    join plm.nbcu_capture c on c.id = p.capture_id
+    where c.status = 'complete'
   ), sega_ranked as (
     select
       p.*,
@@ -126,7 +135,8 @@ begin
     union all
     select 'warner-bros', 'Warner Bros.', 'warner_starlabs',
            'plm.wb_property',
-           p.source_namespace || ':' || coalesce(p.source_id, p.fallback_key),
+           p.source_namespace || ':' || p.identity_method || ':' ||
+             coalesce(p.source_id, p.fallback_key),
            p.label, null,
            'normalized_' || p.identity_method,
            p.last_seen_at, p.capture_id::text
