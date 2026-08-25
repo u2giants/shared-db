@@ -1,26 +1,13 @@
--- #1427 production-timeout recovery contract checks. Run after 20260825025154.
+-- #1427 historical accelerator/final forward-state contract checks.
 -- Transaction rollback keeps the test non-destructive.
 begin;
 
 do $$
-declare
-  v_predicate text;
 begin
-  if to_regclass('public.asset_tags_pending_metadata_normalization_idx') is null then
-    raise exception 'asset tag normalization accelerator index is missing';
-  end if;
-
-  select pg_get_expr(i.indpred, i.indrelid)
-    into v_predicate
-  from pg_index i
-  where i.indexrelid = 'public.asset_tags_pending_metadata_normalization_idx'::regclass;
-
-  if v_predicate is null
-     or v_predicate not like '%category IS NULL%'
-     or v_predicate not like '%status IS NULL%'
-     or v_predicate not like '%btrim(tag)%'
-     or v_predicate not like '%btrim(source)%' then
-    raise exception 'normalization accelerator predicate is incomplete: %', v_predicate;
+  -- 20260825025154 is retained as truthful preview history, but the complete
+  -- forward replacement removes its temporary index before commit.
+  if to_regclass('public.asset_tags_pending_metadata_normalization_idx') is not null then
+    raise exception 'retired normalization accelerator remains in final state';
   end if;
 
   if not exists (
