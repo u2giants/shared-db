@@ -298,7 +298,7 @@ begin
       raise exception 'load_coke_capture_chunk: capture requires exactly one row';
     end if;
     r := p_rows->0;
-    if (r->>'id')::uuid <> p_capture_id then
+    if r->>'id' is null or (r->>'id')::uuid is distinct from p_capture_id then
       raise exception 'load_coke_capture_chunk: capture id mismatch';
     end if;
     insert into plm.coke_capture(
@@ -620,6 +620,74 @@ select c.id,c.capture_key,c.source_commit_sha,c.source_manifest_sha256,
   c.expected_counts,c.observed_counts,c.approval_index_complete,
   c.asset_index_complete,c.asset_details_complete,c.media_downloaded,c.errors
 from plm.coke_capture c;
+
+-- Keep the opt-in exact inventory on the same Coca-Cola latest-complete clock as the
+-- bounded view below. Asserted replacements fail closed if an earlier landing changes
+-- the inherited function body instead of silently publishing a partial contract.
+do $inventory$
+declare v_before text; v_after text;
+begin
+  select pg_get_functiondef('api.source_capture_inventory_exact(text)'::regprocedure)
+    into v_before;
+  v_after:=replace(v_before,
+    $n$      as sesame_capture_id
+), catalog as ($n$,
+    $r$      as sesame_capture_id,
+    (select id from plm.coke_capture
+      where status = 'complete'
+      order by source_captured_at desc, load_completed_at desc, id desc limit 1)
+      as coke_capture_id
+), catalog as ($r$);
+  if v_after=v_before then raise exception 'exact inventory latest Coca-Cola anchor drifted'; end if;
+  v_before:=v_after;
+  v_after:=replace(v_before,
+    $n$      when c.relname like 'sesame\_%' then 'sesame'
+      else 'other'$n$,
+    $r$      when c.relname like 'sesame\_%' then 'sesame'
+      when c.relname like 'coke\_%' then 'coca-cola'
+      else 'other'$r$);
+  if v_after=v_before then raise exception 'exact inventory Coca-Cola classification anchor drifted'; end if;
+  v_before:=v_after;
+  v_after:=replace(v_before,
+    $n$      -- DCP path crawl: asset identity is stable, so membership comes through dcp_asset_crawl.$n$,
+    $r$      -- Coca-Cola: one latest complete capture; incomplete attempts remain retained only.
+      when c.relname = 'coke_capture' then case when l.coke_capture_id is null then null else 1::bigint end
+      when c.relname like 'coke\_%' and c.has_capture_id and l.coke_capture_id is not null then
+        (xpath('/row/cnt/text()', query_to_xml(format(
+          'select count(*) as cnt from plm.%I where capture_id = %L::uuid',
+          c.relname, l.coke_capture_id::text), false, true, '')))[1]::text::bigint
+
+      -- DCP path crawl: asset identity is stable, so membership comes through dcp_asset_crawl.$r$);
+  if v_after=v_before then raise exception 'exact inventory Coca-Cola count anchor drifted'; end if;
+  v_before:=v_after;
+  v_after:=replace(v_before,
+    $n$    when relname like 'sesame\_%' and (relname = 'sesame_capture' or has_capture_id) then 'latest_complete'$n$,
+    $r$    when relname like 'sesame\_%' and (relname = 'sesame_capture' or has_capture_id) then 'latest_complete'
+    when relname like 'coke\_%' and (relname = 'coke_capture' or has_capture_id) then 'latest_complete'$r$);
+  if v_after=v_before then raise exception 'exact inventory Coca-Cola count-basis anchor drifted'; end if;
+  v_before:=v_after;
+  v_after:=replace(v_before,
+    $n$    when relname like 'sesame\_%' and (relname = 'sesame_capture' or has_capture_id)
+      then case when sesame_capture_id is null then null else 'complete' end$n$,
+    $r$    when relname like 'sesame\_%' and (relname = 'sesame_capture' or has_capture_id)
+      then case when sesame_capture_id is null then null else 'complete' end
+    when relname like 'coke\_%' and (relname = 'coke_capture' or has_capture_id)
+      then case when coke_capture_id is null then null else 'complete' end$r$);
+  if v_after=v_before then raise exception 'exact inventory Coca-Cola status anchor drifted'; end if;
+  v_before:=v_after;
+  v_after:=replace(v_before,
+    $n$    when (relname in ('dcp_crawl','dcp_asset','dcp_crawl_gap')$n$,
+    $r$    when relname like 'coke\_%' and (relname = 'coke_capture' or has_capture_id)
+         and coke_capture_id is null then
+      'No complete Coca-Cola capture exists; latest-complete count is unknown, not zero.'
+    when relname like 'coke\_%' and (relname = 'coke_capture' or has_capture_id) then
+      'Latest complete Coca-Cola capture; loading and rejected captures excluded.'
+    when (relname in ('dcp_crawl','dcp_asset','dcp_crawl_gap')$r$);
+  if v_after=v_before or position('coke_capture_id' in v_after)=0 then
+    raise exception 'exact inventory Coca-Cola clock incomplete';
+  end if;
+  execute v_after;
+end; $inventory$;
 
 -- Register the new landing in the companywide authoritative inventory. Counts stay
 -- intentionally NULL in this bounded view; callers opt into exact counts separately.

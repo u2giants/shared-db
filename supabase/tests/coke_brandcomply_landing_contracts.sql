@@ -106,6 +106,12 @@ begin
       and count_basis='latest_complete' and latest_complete_status='complete')
   then raise exception 'companywide inventory did not register completed coke capture'; end if;
 
+  if not exists (select 1 from api.source_capture_inventory_exact('coke_capture')
+    where table_name='coke_capture' and source_system='coca-cola'
+      and count_basis='latest_complete' and latest_complete_status='complete'
+      and retained_row_count=1 and latest_complete_row_count=1)
+  then raise exception 'exact inventory did not use the completed coke capture clock'; end if;
+
   raise notice 'Coca-Cola landing contracts passed';
 end;
 $$;
