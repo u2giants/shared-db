@@ -123,6 +123,8 @@ jobs:
         run: bash scripts/check-sql.sh
       - name: Test SQL migration guards
         run: node --test scripts/check-sql.test.mjs
+      - name: Test issue 1242 contract-derived rights removal
+        run: node --test scripts/check-issue-1242-contract-rights-removal.test.mjs
       # Asserts that the live plm.promote_coldlion_source_owned migration carries no
       # in-function failure recording (it can never work) AND that the runner keeps the
       # out-of-band path that actually does the job. Runs here because it reads
