@@ -98,6 +98,14 @@ The workflow was written, tested and rehearsed; it is simply not merged. See §7
 
 ## 3. The 542-mapping gate, explained
 
+> **Approved widening, 2026-08-25 (#1177).** The original 542-row decision remains the
+> historical base described below. Albert later approved five exact ColdLion Property codes
+> under Paramount on #539. The current fingerprinted gate is therefore **552 typed mappings**
+> pointing to **276 distinct canonical UUIDs**: the original 542/271 plus ten CW001/SP001 rows
+> for five new Properties. Current artifact:
+> `docs/verification/coldlion-licensor-property-paramount-five-20260825/approved-mapping.json`,
+> md5 `09e18e47d67181b06483d6cf4454e053`. No other exclusion was admitted.
+
 ### In plain English
 
 Somebody had to decide, one row at a time, "this ColdLion licensor really is the same company as
@@ -119,6 +127,9 @@ licenses ColdLion still returns because it has no expiry flag. Adding them autom
 resurrect dead licenses across every app.
 
 ### The specifics **[DOC]**
+
+The bullets below record the original Phase 4 package. The current widened fingerprint is in the
+supersession note above; do not run readiness against the historical 542-row artifact.
 
 - **The artifact:** `docs/verification/coldlion-licensor-property-phase4-20260725/approved-mapping.json`,
   md5 `1230f5a12d0f2a3029f1d3df17fc5b5f`.

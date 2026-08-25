@@ -7,6 +7,7 @@
 
 import { strict as assert } from "node:assert";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import {
   APPROVED_COUNT,
@@ -19,6 +20,11 @@ import {
   evaluateReadiness,
   resolveTargetAuthorization,
 } from "./evaluate-coldlion-licensor-property-cutover-readiness.mjs";
+import {
+  APPROVED_MAPPING_PATH,
+  loadWidenedApprovedMapping,
+  validateWidenedApprovedMapping,
+} from "./coldlion-paramount-five-approved-mapping.mjs";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -51,7 +57,7 @@ function greenProbe(overrides = {}) {
       approved_distinct_canonical: APPROVED_DISTINCT,
       recomputed_mapping_hash: APPROVED_HASH,
       expected_contract_ok: true,
-      actual_coldlion_source_refs: 542,
+      actual_coldlion_source_refs: APPROVED_COUNT,
       difference_counts: { ...ZERO_DIFFS },
       differences: {},
       blocking_reasons: [],
@@ -101,6 +107,43 @@ function identityWith(diffOverrides, extra = {}) {
   };
 }
 
+test("widened artifact is fingerprinted and admits only the Paramount five", () => {
+  const { doc, expected } = loadWidenedApprovedMapping();
+  assert.deepEqual(expected, CONTRACT);
+  assert.equal(doc.mappings.length, 552);
+  const admitted = doc.mappings.filter((m) => ["AM1","AM2","MGM","WND","EP"].includes(m.mg_code));
+  assert.equal(admitted.length, 10);
+  assert.deepEqual(new Set(admitted.map((m) => m.division_code)), new Set(["CW001","SP001"]));
+  assert.deepEqual(
+    Object.fromEntries(admitted.map((m) => [`${m.division_code}/${m.mg_code}`,m.canonical_id])),
+    Object.fromEntries(["CW001","SP001"].flatMap((division) => [
+      [`${division}/AM1`,"b288be08-a859-4d92-b1ef-23b4e305ed26"],
+      [`${division}/AM2`,"2ebcdc69-88c9-4565-813b-9ce30a2b880f"],
+      [`${division}/MGM`,"336e0dac-2001-4a8b-be89-04b1620587ce"],
+      [`${division}/WND`,"85fa1834-6094-41d0-94c1-24dddf9c8d8b"],
+      [`${division}/EP`,"c1e2ba88-b5c3-4ed2-9ed3-7d4f75ec8230"],
+    ])),
+  );
+
+  const original = JSON.parse(readFileSync(new URL(
+    "../docs/verification/coldlion-licensor-property-phase4-20260725/approved-mapping.json",
+    import.meta.url,
+  ), "utf8"));
+  const newByKey = new Map(doc.mappings.map((m) => [
+    `${m.company_code}/${m.division_code}/${m.mg_type_code}/${m.mg_code}`,
+    `${m.entity_type}|${m.canonical_id}`,
+  ]));
+  for (const m of original.mappings) {
+    const key = `${m.company_code}/${m.division_code}/${m.mg_type_code}/${m.mg_code}`;
+    assert.equal(newByKey.get(key), `${m.entity_type}|${m.canonical_id}`,
+      `historical approved mapping changed at ${key}`);
+  }
+
+  const tampered = JSON.parse(readFileSync(APPROVED_MAPPING_PATH, "utf8"));
+  tampered.mappings.at(-1).canonical_id = "00000000-0000-4000-8000-000000000000";
+  assert.throws(() => validateWidenedApprovedMapping(tampered), /fingerprint\/count contract/);
+});
+
 // ---------------------------------------------------------------------------
 // 1. Green case
 // ---------------------------------------------------------------------------
@@ -116,7 +159,7 @@ test("preview_composes_existing_green_results", () => {
   assert.ok(
     report.passed.includes("latest_nondrill_comparison_passed_with_zero_unexplained_differences"),
   );
-  assert.ok(report.passed.includes("all_542_typed_source_rows_resolve_to_approved_uuids"));
+  assert.ok(report.passed.includes("all_552_typed_source_rows_resolve_to_approved_uuids"));
   assert.ok(report.passed.includes("circuit_breaker_is_closed"));
 });
 
@@ -178,10 +221,10 @@ test("production_requires_exact_authorization", () => {
 // 3. Identity proof — the whole point of this command
 // ---------------------------------------------------------------------------
 
-test("all_542_typed_source_rows_resolve_to_approved_uuids", () => {
+test("all_552_typed_source_rows_resolve_to_approved_uuids", () => {
   const report = evaluateGreen();
   const identityCheck = report.checks.find(
-    (c) => c.name === "all_542_typed_source_rows_resolve_to_approved_uuids",
+    (c) => c.name === "all_552_typed_source_rows_resolve_to_approved_uuids",
   );
   assert.equal(identityCheck.pass, true);
   assert.equal(identityCheck.detail.approved_count, APPROVED_COUNT);
@@ -195,7 +238,7 @@ test("all_542_typed_source_rows_resolve_to_approved_uuids", () => {
     probe: identityWith({}, { pass: true, recomputed_mapping_hash: "0".repeat(32) }),
   });
   assert.equal(wrongHash.ready, false);
-  assert.ok(wrongHash.blocked.includes("all_542_typed_source_rows_resolve_to_approved_uuids"));
+  assert.ok(wrongHash.blocked.includes("all_552_typed_source_rows_resolve_to_approved_uuids"));
 });
 
 test("missing_ambiguous_or_different_mapping_blocks", () => {
@@ -218,7 +261,7 @@ test("missing_ambiguous_or_different_mapping_blocks", () => {
     });
     assert.equal(report.ready, false, `${label} must block readiness`);
     assert.ok(
-      report.blocked.includes("all_542_typed_source_rows_resolve_to_approved_uuids"),
+      report.blocked.includes("all_552_typed_source_rows_resolve_to_approved_uuids"),
       `${label} must block the identity check`,
     );
     // The reason must NAME the failing bucket — a generic "not ready" is useless
@@ -281,7 +324,7 @@ test("tampered_approved_mapping_contract_blocks", () => {
   for (const contract of [
     null,
     { ...CONTRACT, hash: "d41d8cd98f00b204e9800998ecf8427e" }, // md5 of the EMPTY set
-    { ...CONTRACT, count: 544 },
+    { ...CONTRACT, count: APPROVED_COUNT + 2 },
     { ...CONTRACT, distinct_canonical: 270 },
   ]) {
     const report = evaluateReadiness({
@@ -290,7 +333,7 @@ test("tampered_approved_mapping_contract_blocks", () => {
       probe: greenProbe(),
     });
     assert.equal(report.ready, false);
-    assert.ok(report.blocked.includes("approved_mapping_contract_is_the_frozen_542_set"));
+    assert.ok(report.blocked.includes("approved_mapping_contract_is_the_frozen_552_set"));
   }
 });
 

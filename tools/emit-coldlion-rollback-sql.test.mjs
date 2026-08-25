@@ -33,7 +33,8 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 
 import { buildRollbackSql } from "./emit-coldlion-rollback-sql.mjs";
-import { APPROVED_COUNT, compositeKeyOf } from "./run-coldlion-licensor-property-phase4.mjs";
+import { compositeKeyOf } from "./run-coldlion-licensor-property-phase4.mjs";
+import { APPROVED_COUNT } from "./coldlion-paramount-five-approved-mapping.mjs";
 
 // Synthetic stand-ins for the frozen approval artifact. Shape only — the real
 // values live in docs/verification/, which this test deliberately does not read.
@@ -49,12 +50,12 @@ function makeMappings(n = APPROVED_COUNT) {
 }
 
 // --------------------------------------------------------------------------
-// 1. It refuses when the mapping count is not exactly 542.
+// 1. It refuses when the mapping count is not exactly the widened approved count.
 // --------------------------------------------------------------------------
 
-test("the count guard FIRES: anything other than exactly 542 mappings emits no SQL", () => {
+test("the count guard FIRES: anything other than exactly 552 mappings emits no SQL", () => {
   // Sanity: the pinned constant is the one the incident runbook names.
-  assert.equal(APPROVED_COUNT, 542);
+  assert.equal(APPROVED_COUNT, 552);
 
   for (const n of [0, 1, APPROVED_COUNT - 1, APPROVED_COUNT + 1]) {
     let emitted = null;
@@ -70,7 +71,7 @@ test("the count guard FIRES: anything other than exactly 542 mappings emits no S
   }
 
   // Non-array inputs are refused too, rather than being coerced into a 0-row delete.
-  for (const bad of [null, undefined, {}, "542", new Set(makeMappings())]) {
+  for (const bad of [null, undefined, {}, "552", new Set(makeMappings())]) {
     assert.throws(() => buildRollbackSql(bad), /refusing to emit rollback SQL/);
   }
 
@@ -124,10 +125,10 @@ test("the composite-key guard FIRES: injection-shaped keys emit no SQL", () => {
 });
 
 // --------------------------------------------------------------------------
-// 3. The emitted SQL deletes ONLY those 542 taxonomy_source_ref rows.
+// 3. The emitted SQL deletes ONLY those 552 taxonomy_source_ref rows.
 // --------------------------------------------------------------------------
 
-test("the delete is bounded to exactly the 542 approved keys and nothing else", () => {
+test("the delete is bounded to exactly the 552 approved keys and nothing else", () => {
   const mappings = makeMappings();
   const sql = buildRollbackSql(mappings);
 
@@ -149,10 +150,10 @@ test("the delete is bounded to exactly the 542 approved keys and nothing else", 
   assert.match(sql, /r\.source_table\s*=\s*'merchGroupDetails'/i);
   assert.match(sql, /r\.source_id\s*=\s*a\.source_id/i);
 
-  // The approved set is precisely the 542 supplied keys — no more, no fewer, no
+  // The approved set is precisely the 552 supplied keys — no more, no fewer, no
   // duplicates, and no unbound placeholder left behind.
   const literals = [...sql.matchAll(/^\s*\('([^']*)'\)[,;]?$/gm)].map((m) => m[1]);
-  assert.equal(literals.length, APPROVED_COUNT, "the VALUES list must hold exactly 542 keys");
+  assert.equal(literals.length, APPROVED_COUNT, "the VALUES list must hold exactly 552 keys");
   const expected = mappings.map(compositeKeyOf);
   assert.deepEqual(literals, expected, "the emitted keys must be the supplied keys, in order");
   assert.equal(new Set(literals).size, APPROVED_COUNT, "the keys must be distinct");
@@ -160,8 +161,8 @@ test("the delete is bounded to exactly the 542 approved keys and nothing else", 
 
   // The temp table itself re-asserts the count at run time, so a truncated file
   // aborts instead of silently deleting fewer rows.
-  assert.match(sql, /if\s+v_n\s*<>\s*542\s+then/i);
-  assert.match(sql, /raise exception 'rollback set is % rows, expected 542'/i);
+  assert.match(sql, /if\s+v_n\s*<>\s*552\s+then/i);
+  assert.match(sql, /raise exception 'rollback set is % rows, expected 552'/i);
 
   // Nothing touches the canonical rows or the parent links.
   assert.doesNotMatch(sql, /\b(?:delete\s+from|update|truncate|drop|alter)\s+core\.(?:licensor|property)\b/i);
