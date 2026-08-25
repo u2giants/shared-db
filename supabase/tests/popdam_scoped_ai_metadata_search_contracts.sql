@@ -7,6 +7,8 @@ declare
   v_group uuid;
   v_other_group uuid;
   v_character uuid;
+  v_licensor uuid := gen_random_uuid();
+  v_property uuid := gen_random_uuid();
   v_manual text := 'zz1427_manual_' || txid_current();
   v_rejected text := 'zz1427_rejected_' || txid_current();
   v_candidate text := 'zz1427_candidate_' || txid_current();
@@ -20,13 +22,16 @@ declare
   v_claim2 record;
   v_result boolean;
 begin
-  select a.id,a.style_group_id into v_asset,v_group from public.assets a
-  where not a.is_deleted and a.style_group_id is not null order by a.id limit 1;
-  select id into v_other_group from public.style_groups where id<>v_group order by id limit 1;
-  select c.id,c.name into v_character,v_character_name from public.characters c order by c.id limit 1;
-  if v_asset is null or v_other_group is null or v_character is null then
-    raise exception '#1427 fixtures require a grouped asset, a second group, and a canonical character';
-  end if;
+  v_asset:=gen_random_uuid(); v_group:=gen_random_uuid(); v_other_group:=gen_random_uuid(); v_character:=gen_random_uuid();
+  v_character_name:='ZZ1427 Canonical Character ' || txid_current();
+  insert into public.licensors(id,name,external_id) values(v_licensor,'ZZ1427 Licensor','zz1427-l-'||txid_current());
+  insert into public.properties(id,licensor_id,name,external_id) values(v_property,v_licensor,'ZZ1427 Property','zz1427-p-'||txid_current());
+  insert into public.characters(id,property_id,name,external_id) values(v_character,v_property,v_character_name,'zz1427-c-'||txid_current());
+  insert into public.style_groups(id,sku,folder_path,licensor_id,property_id,licensor_name,property_name)
+  values(v_group,'ZZ1427-A-'||txid_current(),'ZZ1427/A',null,null,'ZZ1427 Licensor','ZZ1427 Property'),
+        (v_other_group,'ZZ1427-B-'||txid_current(),'ZZ1427/B',null,null,null,null);
+  insert into public.assets(id,filename,relative_path,file_type,quick_hash,modified_at,style_group_id,is_deleted)
+  values(v_asset,'zz1427.ai','ZZ1427/A/zz1427.ai','ai','zz1427-'||txid_current(),now(),v_group,false);
 
   -- Legacy reconciliation is idempotent and all legacy AI rows stay unscoped.
   if exists(select 1 from public.asset_tags where source='ai' and category<>'legacy_unscoped') then
