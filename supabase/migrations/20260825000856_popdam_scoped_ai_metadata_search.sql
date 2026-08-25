@@ -335,7 +335,7 @@ language sql stable security invoker set search_path=public as $$
     case when a.style_group_id is null then a.property_id else sg.property_id end,a.style_group_id
     from public.assets a left join public.style_groups sg on sg.id=a.style_group_id join public.asset_tags t on t.asset_id=a.id
     where a.id=p_asset_id
-  order by scope,lower(tag),tag;
+  order by 1,lower(2),2;
 $$;
 
 drop function if exists public.claim_dam_search_embedding_documents(int);
