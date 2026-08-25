@@ -46,6 +46,11 @@ begin
   select to_jsonb(t) into v_rejected_legacy_before
   from public.asset_tags t where t.asset_id = v_asset and t.tag = v_rejected_legacy;
 
+  if exists (select 1 from public.asset_tags where asset_id = v_asset
+      and tag in (v_legacy, v_stale) and created_by is not null) then
+    raise exception 'AI fixture rows unexpectedly acquired created_by authority';
+  end if;
+
   perform set_config('request.jwt.claim.role', 'service_role', true);
   perform public.replace_asset_ai_tag_result(v_asset, 'ai', 'new-model', jsonb_build_array(
     jsonb_build_object('tag', v_manual, 'category', 'scene', 'status', 'active', 'confidence', 0.9),
@@ -55,7 +60,10 @@ begin
   ));
 
   if exists (select 1 from public.asset_tags where asset_id = v_asset and tag in (v_legacy, v_stale)) then
-    raise exception 'prior model/null-model AI active or candidate row survived replacement';
+    raise exception 'prior model/null-model AI active or candidate row survived replacement: %',
+      (select jsonb_agg(jsonb_build_object('tag', tag, 'source', source, 'status', status,
+        'model', model, 'created_by', created_by))
+       from public.asset_tags where asset_id = v_asset and tag in (v_legacy, v_stale));
   end if;
   if not exists (select 1 from public.asset_tags where asset_id = v_asset and tag = v_current
       and source = 'ai' and model = 'new-model' and status = 'active') then
