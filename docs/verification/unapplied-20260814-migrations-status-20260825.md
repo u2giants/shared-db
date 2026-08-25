@@ -14,6 +14,57 @@ absent, which is true only of production).
 
 ---
 
+> ## ✅ RESOLVED, 2026-08-25 — the Paramount promotion is DONE. Section 1 is history, not a plan.
+>
+> This file recommended retiring the three 2026-08-14 Paramount versions and rebuilding them
+> through the #1459 supersession chain. That route was killed by owner ruling (#679), a
+> four-version window was authorized instead, and the window then ran into a third answer that
+> is the one actually on production. **Read this box, not section 1.**
+>
+> **What is applied to production, run 32851388854:**
+> `20260814193351 → 20260814213043 → 20260825124200 → 20260825130500`.
+>
+> **What is hard-blocked and must never be promoted** (PR #1510): `20260814223552` and
+> `20260825094455`. Both carry correct SQL. Both are unpromotable because their only preview
+> applies ran on commits a squash merge left outside `main`'s history, so the production
+> business-risk gate refuses their byte binding (measured: runs 32845346966, 32850264285), and
+> neither can ever earn a qualifying rehearsal because preview already has them applied. They
+> were replaced by `20260825124200` (the `pmt_collection` vocabulary DDL) and `20260825130500`
+> (the forward loader repair). Promoting either original now would overwrite the repaired
+> `plm.load_pmt_capture_chunk` body with an older rewrite and silently restore the #1418 defect.
+>
+> **Verified on production after the apply:** `plm.pmt_metadata_element` exists,
+> `plm.pmt_collection.paramount_term` is gone, the loader carries the `nullif` repair and
+> references `pmt_metadata_element`, `api.pmt_style_guides` returns the constant label, and
+> `pmt_authorized_title_property.paramount_property_name` is nullable. A Paramount capture can
+> run. **No production Paramount data capture has been authorized or performed.**
+>
+> **What in this file still stands:** the analysis of the problem, and sections 2, 3 and 4. The
+> Warner cleanup `20260814170749` (section 2) is still unscheduled and still safe to apply.
+>
+> Independent reviews behind the ruling: Kimi K3 and GLM 5.3 (AGREE WITH CONDITIONS).
+
+---
+
+## RESOLVED 2026-08-25 13:16 — read this first
+
+**Paramount is no longer broken. The production window completed.** Issue #679's session promoted
+the corrected set (`20260814193351`, `20260814213043`, `20260825124200`, `20260825130500`) in run
+[32851388854](https://github.com/u2giants/shared-db/actions/runs/32851388854). Verified read-only
+against production from this session afterwards: `plm.pmt_metadata_element` now exists,
+`pmt_authorized_title_property.paramount_property_name` is now nullable, and the loader carries the
+JSON-null repair. **A Paramount capture is unblocked.**
+
+`20260814223552` and `20260825094455` could not be promoted directly — both hit the preview
+byte-binding gate — so they were superseded by `20260825124200` and `20260825130500`. The end state
+is the one this report recommended; the route differed.
+
+**Still outstanding:** the Warner cleanup `20260814170749` ([section 2](#warner)), which is stranded
+for the same reason and needs an owner ruling — see issue #949. Everything below about Paramount
+describes the state before 13:16 on 2026-08-25 and is kept as the record of how it was diagnosed.
+
+---
+
 ## Bottom line for Albert
 
 **One thing is genuinely broken in production right now, and it is not one of the six.** A new

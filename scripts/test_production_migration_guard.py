@@ -229,7 +229,7 @@ class GuardTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(GuardError):
                 parse_allowlist(value)
 
-    def test_the_block_list_is_exactly_these_six(self) -> None:
+    def test_the_block_list_matches_the_governed_retirements(self) -> None:
         # Three kinds, deliberately together. 20260726190000/20260726200000 are the
         # already-applied Master Data pair. 20260729120000 is the third kind:
         # never applied, and applying it would REGRESS a live production security
@@ -243,6 +243,8 @@ class GuardTests(unittest.TestCase):
                 "20260726200000",
                 "20260729120000",
                 "20260816045130",
+                "20260819011639",
+                "20260819151536",
                 "20260814224937",
                 "20260814233342",
                 "20260814233423",
@@ -250,6 +252,8 @@ class GuardTests(unittest.TestCase):
                 "20260825010603",
                 "20260825025154",
                 "20260825031841",
+                "20260814223552",
+                "20260825094455",
             },
         )
 

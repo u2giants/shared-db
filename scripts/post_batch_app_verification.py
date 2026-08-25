@@ -341,6 +341,22 @@ def _never_rest_by_batch() -> dict[str, tuple[str, ...]]:
 
 # Contract §5: never applied at all, at any time, in any batch.
 RETIRED_VERSION_REASONS = {
+    "20260819011639": (
+        "unpromotable producer provenance; replaced byte-for-byte by "
+        "20260820142402, applied to production 2026-08-20 (issue 1171)"
+    ),
+    "20260819151536": (
+        "production verification times out and rolls the migration back; replaced "
+        "by 20260820004338, applied to production 2026-08-20 (issue 1280)"
+    ),
+    "20260814223552": (
+        "unpromotable byte binding (PR 1032 merged unrehearsed); replaced by "
+        "20260825124200, applied to production 2026-08-25 (issue 679)"
+    ),
+    "20260825094455": (
+        "unpromotable byte binding (only preview apply ran on a squash-orphaned "
+        "commit); replaced by 20260825130500, applied to production 2026-08-25"
+    ),
     "20260729120000": (
         "applying it would regress a live production security control whose "
         "safe end state is already present"
