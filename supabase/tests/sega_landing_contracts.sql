@@ -1785,7 +1785,7 @@ begin
     raise exception 'F2 FAILED: the fixture rejection did not happen';
   end if;
 
-  select * into r from api.source_capture_inventory where table_name = 'sega_property';
+  select * into r from api.source_capture_inventory_exact('sega_property');
   if r.count_basis <> 'latest_complete' then
     raise exception 'F2 FAILED: sega_property count_basis is %', r.count_basis;
   end if;
@@ -1807,7 +1807,7 @@ begin
     raise exception 'F2 FAILED: the sega count note is wrong: %', r.count_note;
   end if;
 
-  select * into r from api.source_capture_inventory where table_name = 'sega_capture';
+  select * into r from api.source_capture_inventory_exact('sega_capture');
   if r.latest_complete_row_count <> 1 or r.count_basis <> 'latest_complete' then
     raise exception 'F2 FAILED: sega_capture reports % / %',
       r.latest_complete_row_count, r.count_basis;
@@ -1815,7 +1815,7 @@ begin
 
   -- A sega table that this fixture never wrote still reports zero for the current capture,
   -- not NULL: NULL means "cannot be derived", and for a capture-scoped table it can be.
-  select * into r from api.source_capture_inventory where table_name = 'sega_asset_tag';
+  select * into r from api.source_capture_inventory_exact('sega_asset_tag');
   if r.latest_complete_row_count is distinct from 0::bigint then
     raise exception 'F2 FAILED: sega_asset_tag latest-complete count is %, expected 0',
       r.latest_complete_row_count;
