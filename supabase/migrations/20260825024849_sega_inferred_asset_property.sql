@@ -149,6 +149,17 @@ begin
        / length('orphan_asset_property_inferred_link') <> 1 then
     raise exception 'finalize_sega_capture inferred orphan gate was not added exactly once';
   end if;
+  v_before := v_after;
+
+  -- The inherited body described the original eleven count-pair entities. Correct every
+  -- anchored instance now that this migration makes the list twelve, and refuse to apply
+  -- if current main no longer contains the expected wording.
+  v_after := replace(v_before, 'eleven entity keys', 'twelve entity keys');
+  v_after := replace(v_after, 'outside the eleven is', 'outside the twelve is');
+  if v_after = v_before or position('eleven entity keys' in v_after) <> 0
+     or position('outside the eleven is' in v_after) <> 0 then
+    raise exception 'finalize_sega_capture entity-count comment anchor did not update cleanly';
+  end if;
 
   execute v_after;
 end;

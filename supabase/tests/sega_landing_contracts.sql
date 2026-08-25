@@ -172,7 +172,7 @@ declare
   v_denied  integer := 0;
   v_expected integer := 21;
   v_t       text;
-  -- A REPRESENTATIVE SPREAD of the eleven snapshot tables, one per structural class, so
+  -- A REPRESENTATIVE SPREAD of the twelve snapshot tables, one per structural class, so
   -- the behavioural half is not proving the model on a single table:
   --   sega_catalog             -- the self-referencing tree
   --   sega_asset               -- the high-volume metadata table
@@ -1288,7 +1288,7 @@ begin
 end;
 $$;
 
--- (iv) The whole-object sweep: a non-number under a key OUTSIDE the eleven entity names is
+-- (iv) The whole-object sweep: a non-number under a key OUTSIDE the twelve entity names is
 --      the same defect and must also be named, not ignored.
 do $$
 declare
@@ -1320,7 +1320,7 @@ begin
       v_cap.status, v_cap.error_summary;
   end if;
 
-  raise notice 'E2N (iv) passed: the sweep covers keys beyond the eleven entity names';
+  raise notice 'E2N (iv) passed: the sweep covers keys beyond the twelve entity names';
 end;
 $$;
 
@@ -1451,10 +1451,10 @@ begin
 end;
 $$;
 
--- (vi) THE EXTRA-KEY SWEEP IS NOT TYPE-ONLY. A key outside the eleven entity names whose
+-- (vi) THE EXTRA-KEY SWEEP IS NOT TYPE-ONLY. A key outside the twelve entity names whose
 --      value is -1, 1.5 or past bigint is a JSON NUMBER, so the old type-only sweep ignored
 --      it. Neither shape can skip an entity count, so this was never a publication hole --
---      but the sweep's stated claim is that EVERY key outside the eleven is covered, and a
+--      but the sweep's stated claim is that EVERY key outside the twelve is covered, and a
 --      guard whose comment overstates what it does is how the next reader is misled. The
 --      sweep now applies the identical type / non-negative-integer / range rule.
 do $$
@@ -1485,7 +1485,7 @@ begin
       repeat('8', 40), repeat('8', 64), 'https://example.invalid',
       '2099-09-08Z'::timestamptz, v_full, '{}'::jsonb, 'ZZTEST', false, true, true, true);
 
-    -- begin_ only inspects the eleven entity keys, so the extra key is injected the way a
+    -- begin_ only inspects the twelve entity keys, so the extra key is injected the way a
     -- future loader would supply it: by writing the stored object.
     update plm.sega_capture
        set expected_counts = expected_counts
