@@ -149,8 +149,14 @@ test("#1177 forward atomically widens health pins and the recurring promotion ga
     "../supabase/migrations/20260825050407_coldlion_paramount_five_approved_gate.sql",
     import.meta.url,
   ), "utf8");
-  assert.match(sql, /phase4_preview has % of 7 exact pre-#1177 pins/);
-  for (const count of [261, 1057, 552, 514]) assert.match(sql, new RegExp(`\\b${count}\\b`));
+  assert.match(sql, /phase4_preview has % of 7 required live pins/);
+  assert.match(sql, /v_pre_snap:=plm\.compute_taxonomy_immutability_snapshot\(\)/);
+  assert.match(sql, /property_count'\)::integer<>\(v_pre_snap->>'property_count'\)::integer\+5/);
+  for (const metric of ["taxonomy_source_ref_count", "coldlion_source_ref_count", "linked_property_count"]) {
+    assert.match(sql, new RegExp(`${metric}'\\)::integer<>\\(v_pre_snap->>'${metric}'\\)::integer\\+10`));
+  }
+  assert.match(sql, /from issue_1177_locked_pins locked/);
+  assert.doesNotMatch(sql, /post-#1177 baseline counts are not exactly/i);
   for (const metric of ["property_uuid_hash", "property_status_hash", "parent_edge_hash"]) {
     assert.match(sql, new RegExp(`v_snap->>'${metric}'`));
   }

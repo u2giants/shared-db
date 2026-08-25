@@ -185,8 +185,11 @@ test("the delete is bounded to exactly the 552 approved keys and nothing else", 
   assert.match(sql, /approval_issue'='#539'/i);
   assert.match(sql, /approved_mapping_hash'='09e18e47d67181b06483d6cf4454e053'/i);
   assert.doesNotMatch(sql, /update\s+core\.property[\s\S]{0,120}set[\s\S]{0,120}licensor_id\s*=/i);
-  assert.match(sql, /rollback found % of 7 exact live #1177 baseline pins/i);
-  assert.match(sql, /post-rollback baseline counts are not exactly 261\/1047\/542\/504/i);
+  assert.match(sql, /rollback found % of 8 required live affected baseline pins/i);
+  assert.match(sql, /issue_1177_rollback_pre_snapshot/i);
+  assert.match(sql, /issue_1177_rollback_locked_pins/i);
+  assert.match(sql, /exact authorized ref\/link withdrawal with identities and unrelated metrics stable/i);
+  assert.doesNotMatch(sql, /post-rollback baseline counts are not exactly/i);
   assert.match(sql, /rollback_20260825050407_coldlion_paramount_five_approved_gate/i);
   assert.match(sql, /promotion function does not carry exact #1177 fingerprint/i);
   assert.match(sql, /1230f5a12d0f2a3029f1d3df17fc5b5f/i);
@@ -211,7 +214,7 @@ test("every mirror UPDATE clears the link and resolution_status together, never 
   // than string-matching the file as a whole — a whole-file match would pass if
   // one UPDATE cleared the link and a DIFFERENT one set the status, which is
   // exactly the 23514 failure this guard is for.
-  const updates = [...sql.matchAll(/update\s+(plm\.\w+)\s+\w+\s+set\s+([\s\S]*?);/gi)];
+  const updates = [...sql.matchAll(/update\s+(plm\.erp_(?:licensor|property))\s+\w+\s+set\s+([\s\S]*?);/gi)];
   assert.equal(updates.length, 2, "expected exactly two mirror UPDATEs (licensor, property)");
 
   const seen = new Set();

@@ -14,6 +14,7 @@ declare
   v_property_id uuid;
   v_plan_id uuid;
   v_snap jsonb;
+  v_pre_snap jsonb;
   v_function_def text;
   v_pin_count integer;
   v_division text;
@@ -36,6 +37,27 @@ begin
   if v_paramount_matches<>1 then
     raise exception 'Paramount owner-approved alias resolved to % canonical Licensors, expected 1; refusing to guess',
       v_paramount_matches;
+  end if;
+
+  -- Capture the environment's actual starting point and lock the exact seven
+  -- live pin rows that this forward will supersede. Preview may be sparse and
+  -- production may be populated; authority is the exact +5/+10 delta, not an
+  -- inherited absolute count from another database.
+  v_pre_snap:=plm.compute_taxonomy_immutability_snapshot();
+  create temporary table issue_1177_locked_pins(
+    id uuid primary key, metric_key text not null, metric_kind text not null,
+    expected_int integer, expected_text text
+  ) on commit drop;
+  insert into issue_1177_locked_pins(id,metric_key,metric_kind,expected_int,expected_text)
+  select id,metric_key,metric_kind,expected_int,expected_text
+  from plm.taxonomy_baseline_pin
+  where baseline_key='phase4_preview' and superseded_at is null
+    and metric_key in('property_count','taxonomy_source_ref_count','coldlion_source_ref_count',
+      'linked_property_count','property_uuid_hash','property_status_hash','parent_edge_hash')
+  for update;
+  select count(*) into v_pin_count from issue_1177_locked_pins;
+  if v_pin_count<>7 then
+    raise exception 'phase4_preview has % of 7 required live pins; refusing incomplete/concurrent baseline rewrite',v_pin_count;
   end if;
 
   -- The two semantic parents are part of the same exact typed authority. An
@@ -213,41 +235,25 @@ begin
     raise exception 'Paramount five postcondition failed; transaction rolled back';
   end if;
 
-  -- Keep the active Phase 4 preview health contract synchronized in the same
-  -- atomic forward. Refuse if any affected old pin is already different: that is
-  -- real concurrent baseline work, not permission to overwrite it.
-  select count(*) into v_pin_count
-  from plm.taxonomy_baseline_pin p
-  join (values
-    ('property_count','count',256,null::text),
-    ('taxonomy_source_ref_count','count',1047,null),
-    ('coldlion_source_ref_count','count',542,null),
-    ('linked_property_count','count',504,null),
-    ('property_uuid_hash','hash',null,'e0e6c36eb02bb2d320c0deaff7aa8f8c'),
-    ('property_status_hash','hash',null,'f436d4acd79761fedbfc9b5796ac7bce'),
-    ('parent_edge_hash','hash',null,'7459f6826cc59468779e7ead33ec0edc')
-  ) old(metric_key,metric_kind,expected_int,expected_text)
-    on old.metric_key=p.metric_key and old.metric_kind=p.metric_kind
-   and p.expected_int is not distinct from old.expected_int
-   and p.expected_text is not distinct from old.expected_text
-  where p.baseline_key='phase4_preview' and p.superseded_at is null;
-  if v_pin_count<>7 then
-    raise exception 'phase4_preview has % of 7 exact pre-#1177 pins; refusing concurrent/stale baseline overwrite',v_pin_count;
-  end if;
-
   v_snap:=plm.compute_taxonomy_immutability_snapshot();
-  if (v_snap->>'property_count')::integer<>261
-     or (v_snap->>'taxonomy_source_ref_count')::integer<>1057
-     or (v_snap->>'coldlion_source_ref_count')::integer<>552
-     or (v_snap->>'linked_property_count')::integer<>514 then
-    raise exception 'post-#1177 baseline counts are not exactly 261/1057/552/514: %',v_snap;
+  if (v_snap->>'property_count')::integer<>(v_pre_snap->>'property_count')::integer+5
+     or (v_snap->>'taxonomy_source_ref_count')::integer<>(v_pre_snap->>'taxonomy_source_ref_count')::integer+10
+     or (v_snap->>'coldlion_source_ref_count')::integer<>(v_pre_snap->>'coldlion_source_ref_count')::integer+10
+     or (v_snap->>'linked_property_count')::integer<>(v_pre_snap->>'linked_property_count')::integer+10
+     or v_snap->>'licensor_count' is distinct from v_pre_snap->>'licensor_count'
+     or v_snap->>'designflow_source_ref_count' is distinct from v_pre_snap->>'designflow_source_ref_count'
+     or v_snap->>'linked_licensor_count' is distinct from v_pre_snap->>'linked_licensor_count'
+     or v_snap->>'licensor_uuid_hash' is distinct from v_pre_snap->>'licensor_uuid_hash'
+     or v_snap->>'licensor_status_hash' is distinct from v_pre_snap->>'licensor_status_hash' then
+    raise exception 'post-#1177 snapshot is not exact +5 Properties/+10 refs/+10 ColdLion refs/+10 linked Properties with unrelated metrics stable; pre %, post %',v_pre_snap,v_snap;
   end if;
 
-  update plm.taxonomy_baseline_pin
-  set superseded_at=clock_timestamp()
-  where baseline_key='phase4_preview' and superseded_at is null
-    and metric_key in('property_count','taxonomy_source_ref_count','coldlion_source_ref_count',
-      'linked_property_count','property_uuid_hash','property_status_hash','parent_edge_hash');
+  update plm.taxonomy_baseline_pin p set superseded_at=clock_timestamp()
+  from issue_1177_locked_pins locked
+  where p.id=locked.id and p.superseded_at is null
+    and p.metric_key=locked.metric_key and p.metric_kind=locked.metric_kind
+    and p.expected_int is not distinct from locked.expected_int
+    and p.expected_text is not distinct from locked.expected_text;
   get diagnostics v_hits=row_count;
   if v_hits<>7 then raise exception 'superseded % affected pins, expected 7',v_hits; end if;
 
@@ -258,10 +264,10 @@ begin
     'REFRESHED for the five exact Paramount Properties approved in #539 and implemented by #1177; artifact md5 09e18e47d67181b06483d6cf4454e053.',
     '20260825050407_coldlion_paramount_five_approved_gate'
   from (values
-    ('property_count','count',261,null::text),
-    ('taxonomy_source_ref_count','count',1057,null),
-    ('coldlion_source_ref_count','count',552,null),
-    ('linked_property_count','count',514,null),
+    ('property_count','count',(v_snap->>'property_count')::integer,null::text),
+    ('taxonomy_source_ref_count','count',(v_snap->>'taxonomy_source_ref_count')::integer,null),
+    ('coldlion_source_ref_count','count',(v_snap->>'coldlion_source_ref_count')::integer,null),
+    ('linked_property_count','count',(v_snap->>'linked_property_count')::integer,null),
     ('property_uuid_hash','hash',null,v_snap->>'property_uuid_hash'),
     ('property_status_hash','hash',null,v_snap->>'property_status_hash'),
     ('parent_edge_hash','hash',null,v_snap->>'parent_edge_hash')

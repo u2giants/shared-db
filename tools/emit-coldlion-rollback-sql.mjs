@@ -75,6 +75,21 @@ create temp table paramount_five_rollback (property_id uuid primary key) on comm
 insert into paramount_five_rollback(property_id) values
 ${paramountValues};
 
+create temp table issue_1177_rollback_pre_snapshot(snapshot jsonb not null) on commit drop;
+insert into issue_1177_rollback_pre_snapshot values(plm.compute_taxonomy_immutability_snapshot());
+
+create temp table issue_1177_rollback_locked_pins(
+  id uuid primary key, metric_key text not null, metric_kind text not null,
+  expected_int integer, expected_text text
+) on commit drop;
+insert into issue_1177_rollback_locked_pins(id,metric_key,metric_kind,expected_int,expected_text)
+select id,metric_key,metric_kind,expected_int,expected_text
+from plm.taxonomy_baseline_pin
+where baseline_key='phase4_preview' and superseded_at is null
+  and metric_key in('property_count','taxonomy_source_ref_count','coldlion_source_ref_count',
+    'linked_licensor_count','linked_property_count','property_uuid_hash','property_status_hash','parent_edge_hash')
+for update;
+
 -- Sanity: must be exactly ${APPROVED_COUNT}.
 do $$
 declare v_n integer;
@@ -147,33 +162,43 @@ begin
 end;
 $$;
 
--- Rollback changes four counts and the three Property hashes again. Supersede
--- only the seven pins installed by #1177, then pin the exact post-rollback live
+-- Rollback changes environment-specific link/ref counts and Property status.
+-- Supersede the exact eight affected locked pins, then pin the truthful live
 -- snapshot so the health detector does not misclassify the authorized rollback
 -- as unexplained drift and trip the shared breaker.
 do $$
-declare v_n integer; v_snap jsonb;
+declare v_n integer; v_snap jsonb; v_pre jsonb;
 begin
-  select count(*) into v_n from plm.taxonomy_baseline_pin
-  where baseline_key='phase4_preview' and superseded_at is null
-    and source_migration='20260825050407_coldlion_paramount_five_approved_gate'
-    and metric_key in('property_count','taxonomy_source_ref_count','coldlion_source_ref_count',
-      'linked_property_count','property_uuid_hash','property_status_hash','parent_edge_hash');
-  if v_n<>7 then raise exception 'rollback found % of 7 exact live #1177 baseline pins',v_n; end if;
+  select count(*) into v_n from issue_1177_rollback_locked_pins;
+  if v_n<>8 then raise exception 'rollback found % of 8 required live affected baseline pins',v_n; end if;
+  select snapshot into strict v_pre from issue_1177_rollback_pre_snapshot;
   v_snap:=plm.compute_taxonomy_immutability_snapshot();
-  if (v_snap->>'property_count')::integer<>261
-     or (v_snap->>'taxonomy_source_ref_count')::integer<>1047
-     or (v_snap->>'coldlion_source_ref_count')::integer<>542
-     or (v_snap->>'linked_property_count')::integer<>504 then
-    raise exception 'post-rollback baseline counts are not exactly 261/1047/542/504: %',v_snap;
+  if v_snap->>'property_count' is distinct from v_pre->>'property_count'
+     or (v_snap->>'taxonomy_source_ref_count')::integer>(v_pre->>'taxonomy_source_ref_count')::integer
+     or (v_snap->>'coldlion_source_ref_count')::integer>(v_pre->>'coldlion_source_ref_count')::integer
+     or (v_snap->>'linked_property_count')::integer>(v_pre->>'linked_property_count')::integer
+     or (v_snap->>'linked_licensor_count')::integer>(v_pre->>'linked_licensor_count')::integer
+     or ((v_pre->>'taxonomy_source_ref_count')::integer-(v_snap->>'taxonomy_source_ref_count')::integer)
+        <>((v_pre->>'coldlion_source_ref_count')::integer-(v_snap->>'coldlion_source_ref_count')::integer)
+     or ((v_pre->>'linked_property_count')::integer-(v_snap->>'linked_property_count')::integer)
+       +((v_pre->>'linked_licensor_count')::integer-(v_snap->>'linked_licensor_count')::integer)
+        <>((v_pre->>'coldlion_source_ref_count')::integer-(v_snap->>'coldlion_source_ref_count')::integer)
+     or v_snap->>'licensor_count' is distinct from v_pre->>'licensor_count'
+     or v_snap->>'designflow_source_ref_count' is distinct from v_pre->>'designflow_source_ref_count'
+     or v_snap->>'licensor_uuid_hash' is distinct from v_pre->>'licensor_uuid_hash'
+     or v_snap->>'licensor_status_hash' is distinct from v_pre->>'licensor_status_hash'
+     or v_snap->>'property_uuid_hash' is distinct from v_pre->>'property_uuid_hash'
+     or v_snap->>'parent_edge_hash' is distinct from v_pre->>'parent_edge_hash' then
+    raise exception 'post-rollback snapshot is not the exact authorized ref/link withdrawal with identities and unrelated metrics stable; pre %, post %',v_pre,v_snap;
   end if;
-  update plm.taxonomy_baseline_pin set superseded_at=clock_timestamp()
-  where baseline_key='phase4_preview' and superseded_at is null
-    and source_migration='20260825050407_coldlion_paramount_five_approved_gate'
-    and metric_key in('property_count','taxonomy_source_ref_count','coldlion_source_ref_count',
-      'linked_property_count','property_uuid_hash','property_status_hash','parent_edge_hash');
+  update plm.taxonomy_baseline_pin p set superseded_at=clock_timestamp()
+  from issue_1177_rollback_locked_pins locked
+  where p.id=locked.id and p.superseded_at is null
+    and p.metric_key=locked.metric_key and p.metric_kind=locked.metric_kind
+    and p.expected_int is not distinct from locked.expected_int
+    and p.expected_text is not distinct from locked.expected_text;
   get diagnostics v_n=row_count;
-  if v_n<>7 then raise exception 'rollback superseded % #1177 pins, expected 7',v_n; end if;
+  if v_n<>8 then raise exception 'rollback superseded % affected pins, expected 8',v_n; end if;
   insert into plm.taxonomy_baseline_pin(baseline_key,metric_key,metric_kind,expected_int,
     expected_text,effective_from,pinned_by,pinned_reason,source_migration)
   select 'phase4_preview',x.metric_key,x.metric_kind,x.expected_int,x.expected_text,
@@ -181,10 +206,11 @@ begin
     'AUTHORIZED #1177 rollback: five canonical identities retained inactive; approved links withdrawn; exact post-rollback snapshot.',
     'rollback_20260825050407_coldlion_paramount_five_approved_gate'
   from (values
-    ('property_count','count',261,null::text),
-    ('taxonomy_source_ref_count','count',1047,null),
-    ('coldlion_source_ref_count','count',542,null),
-    ('linked_property_count','count',504,null),
+    ('property_count','count',(v_snap->>'property_count')::integer,null::text),
+    ('taxonomy_source_ref_count','count',(v_snap->>'taxonomy_source_ref_count')::integer,null),
+    ('coldlion_source_ref_count','count',(v_snap->>'coldlion_source_ref_count')::integer,null),
+    ('linked_licensor_count','count',(v_snap->>'linked_licensor_count')::integer,null),
+    ('linked_property_count','count',(v_snap->>'linked_property_count')::integer,null),
     ('property_uuid_hash','hash',null,v_snap->>'property_uuid_hash'),
     ('property_status_hash','hash',null,v_snap->>'property_status_hash'),
     ('parent_edge_hash','hash',null,v_snap->>'parent_edge_hash')
