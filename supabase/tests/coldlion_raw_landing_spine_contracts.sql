@@ -140,7 +140,10 @@ end;
 $$;
 
 -- =====================================================================================
--- E. No resolution/matching columns anywhere on the spine, and no invented structure.
+-- E. No resolution/matching columns anywhere, and no invented active structure.
+-- `active` itself is permitted when it is a field returned by ColdLion and selected
+-- by the owner (D4). In particular merchGroupDetails.active was verified live on
+-- 2026-08-20. Curated `is_active`/`active_flag` columns remain forbidden.
 -- =====================================================================================
 do $$
 declare
@@ -153,7 +156,7 @@ begin
     and (
       column_name in (
         'resolution_status', 'resolved_by', 'resolved_at', 'match_status',
-        'licensor_id', 'property_id', 'core_id', 'is_active', 'active',
+        'licensor_id', 'property_id', 'core_id', 'is_active',
         'active_flag', 'parent_licensor_code'
       )
       or column_name like 'resolved%'
@@ -164,7 +167,7 @@ begin
     raise exception 'E FAILED: the landing layer carries curation or invented structure: %', v_offenders;
   end if;
 
-  raise notice 'E PASSED: no resolution columns, no active flag, no licensor-property link.';
+  raise notice 'E PASSED: no resolution columns, invented active flag, or licensor-property link.';
 end;
 $$;
 
