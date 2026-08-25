@@ -40,7 +40,7 @@ end;
 $$;
 
 -- =====================================================================================
--- B. Exactly the three spine tables exist. Phase 1 creates no feed tables.
+-- B. The three spine tables exist. Later phases may add feed tables.
 -- =====================================================================================
 do $$
 declare
@@ -52,11 +52,11 @@ begin
   join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'coldlion' and c.relkind = 'r';
 
-  if v_tables is distinct from array['change_log', 'sync_run', 'window_ledger'] then
-    raise exception 'B FAILED: coldlion holds unexpected tables: %', v_tables;
+  if not array['change_log', 'sync_run', 'window_ledger'] <@ v_tables then
+    raise exception 'B FAILED: one or more ColdLion spine tables are missing: %', v_tables;
   end if;
 
-  raise notice 'B PASSED: exactly sync_run, window_ledger and change_log exist.';
+  raise notice 'B PASSED: sync_run, window_ledger and change_log exist; later feed tables are permitted.';
 end;
 $$;
 
