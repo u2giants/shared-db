@@ -143,7 +143,8 @@ HARD_BLOCKED = {
     "20260825025154",
     # #1471 single-statement forward. Production cleanly rolled it back after
     # the enclosing DO statement reached the unchanged 10-minute timeout.
-    # Superseded by separately timed atomic batches in 20260825034915.
+    # Superseded by the governed two-transaction recovery beginning at
+    # prerequisite 20260825041343.
     "20260825031841",
 }
 

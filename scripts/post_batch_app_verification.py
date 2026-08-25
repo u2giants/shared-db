@@ -374,7 +374,8 @@ RETIRED_VERSION_REASONS = {
     ),
     "20260825031841": (
         "preview-only historical #1471 forward; production timed out and rolled back "
-        "because its full reconciliation remained one statement; use 20260825034915"
+        "because its full reconciliation remained one statement; use prerequisite "
+        "20260825041343 and its governed dependent recovery"
     ),
 }
 RETIRED_VERSIONS = frozenset(RETIRED_VERSION_REASONS)
