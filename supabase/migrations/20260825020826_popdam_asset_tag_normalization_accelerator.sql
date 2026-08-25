@@ -17,9 +17,11 @@ alter table public.asset_tags
 
 -- The original table-wide reconciliation is intentionally unchanged. Its
 -- keyset batches previously restarted from the primary-key head and repeatedly
--- scanned rows that no longer matched. This partial index contains only pending
--- rows and shrinks after each batch, so the enclosing DO statement remains
--- bounded by useful work under the existing global timeout.
+-- scanned rows that no longer matched. This partial index gives each batch a
+-- much cheaper ordered scan of the dirty-row subset. Dead index entries remain
+-- until the enclosing migration transaction commits, so the index does not
+-- physically shrink between internal batches; it avoids repeated table/primary-
+-- key prefix scans without changing the existing global timeout.
 create index if not exists asset_tags_pending_metadata_normalization_idx
   on public.asset_tags (id)
   where tag is distinct from btrim(tag)
