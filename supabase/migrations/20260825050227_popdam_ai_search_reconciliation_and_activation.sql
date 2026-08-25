@@ -2534,7 +2534,7 @@ language sql stable security invoker set search_path=public as $$
 $$;
 
 drop function if exists public.claim_dam_search_embedding_documents(int);
-create function public.claim_dam_search_embedding_documents(p_limit int default 100,p_worker_id text default null,p_lease_seconds int default 300)
+create or replace function public.claim_dam_search_embedding_documents(p_limit int default 100,p_worker_id text default null,p_lease_seconds int default 300)
 returns table(document_type text,entity_id uuid,search_text text,content_sha256 text,lease_token uuid,lease_expires_at timestamptz,attempt int)
 language plpgsql security definer set search_path=public as $$
 begin
@@ -2555,7 +2555,7 @@ begin
 end $$;
 
 drop function if exists public.upsert_dam_search_embedding(text,uuid,text,extensions.vector(384),text);
-create function public.upsert_dam_search_embedding(p_document_type text,p_entity_id uuid,p_content_sha256 text,p_lease_token uuid,
+create or replace function public.upsert_dam_search_embedding(p_document_type text,p_entity_id uuid,p_content_sha256 text,p_lease_token uuid,
   p_embedding extensions.vector(384),p_embedding_model text default 'gte-small') returns boolean language plpgsql security definer set search_path=public as $$
 begin
   if (select auth.role()) <> 'service_role' then raise exception 'service_role required' using errcode='42501'; end if;
@@ -2566,7 +2566,7 @@ begin
 end $$;
 
 drop function if exists public.mark_dam_search_embedding_error(text,uuid,text,text);
-create function public.mark_dam_search_embedding_error(p_document_type text,p_entity_id uuid,p_content_sha256 text,p_lease_token uuid,
+create or replace function public.mark_dam_search_embedding_error(p_document_type text,p_entity_id uuid,p_content_sha256 text,p_lease_token uuid,
   p_error text,p_category text default 'transient') returns boolean language plpgsql security definer set search_path=public as $$
 begin
   if (select auth.role()) <> 'service_role' or p_category not in ('transient','permanent') then raise exception 'invalid embedding error'; end if;
