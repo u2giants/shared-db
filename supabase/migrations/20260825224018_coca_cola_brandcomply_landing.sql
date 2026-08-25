@@ -434,6 +434,14 @@ begin
     'approval_items',(select count(*) from plm.coke_approval_item where capture_id=p_capture_id),
     'approval_metadata_values',(select count(*) from plm.coke_approval_metadata_value where capture_id=p_capture_id),
     'approval_related_items',(select count(*) from plm.coke_approval_related_item where capture_id=p_capture_id),
+    'resolved_related_items',(select count(*) from plm.coke_approval_related_item r
+      where r.capture_id=p_capture_id and r.related_route_id is not null
+        and exists (select 1 from plm.coke_approval_item i where i.capture_id=r.capture_id
+          and i.approval_route_id=r.related_route_id)),
+    'external_related_items',(select count(*) from plm.coke_approval_related_item r
+      where r.capture_id=p_capture_id and (r.related_route_id is null
+        or not exists (select 1 from plm.coke_approval_item i where i.capture_id=r.capture_id
+          and i.approval_route_id=r.related_route_id))),
     'approval_stage_snapshots',(select count(*) from plm.coke_approval_stage_snapshot where capture_id=p_capture_id),
     'approval_comments',(select count(*) from plm.coke_approval_comment where capture_id=p_capture_id),
     'vocabulary_values',(select count(*) from plm.coke_vocabulary_value where capture_id=p_capture_id),
@@ -450,6 +458,15 @@ begin
     'royalty_reports',(select count(*) from plm.coke_royalty_report where capture_id=p_capture_id)
   );
 
+  if not v_capture.expected_counts ?& array[
+    'approval_items','approval_metadata_values','approval_related_items',
+    'asset_property_options','assets','contracts','skus',
+    'contract_manufacturers','royalty_reports'
+  ] then
+    v_errors := v_errors || jsonb_build_array(jsonb_build_object(
+      'code','required_expected_counts_missing'));
+  end if;
+
   for v_key,v_value in select key,value from jsonb_each(v_capture.expected_counts) loop
     if jsonb_typeof(v_value) <> 'number' or (v_value #>> '{}') !~ '^\d+$' then
       v_errors := v_errors || jsonb_build_array(jsonb_build_object('code','invalid_expected_count','key',v_key));
@@ -464,14 +481,8 @@ begin
     end if;
   end loop;
 
-  if exists (
-    select 1 from plm.coke_approval_related_item r
-    where r.capture_id=p_capture_id and r.related_route_id is not null
-      and not exists (select 1 from plm.coke_approval_item i
-        where i.capture_id=r.capture_id and i.approval_route_id=r.related_route_id)
-  ) then
-    v_errors := v_errors || jsonb_build_array(jsonb_build_object('code','orphan_internal_related_route'));
-  end if;
+  -- Related endpoints outside this capture are valid direct-source evidence. They are
+  -- counted as external above, never dropped and never forced through an internal FK.
   if not v_capture.approval_index_complete then
     v_errors := v_errors || jsonb_build_array(jsonb_build_object('code','approval_index_incomplete'));
   end if;
