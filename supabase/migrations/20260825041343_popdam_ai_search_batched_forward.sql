@@ -18,9 +18,9 @@ alter table public.asset_tags
   add column if not exists rejected_by uuid,
   add column if not exists updated_at timestamptz;
 
--- Keyset support for the dependent compatibility rebuild. This deliberately
--- covers all rows while status is still NULL; the dependent migration removes
--- it after the bounded rebuild and retains the final active-only index below.
+-- General keyset support for the dependent compatibility rebuild. Recovery B
+-- uses this index across every asset_tags row, then drops it after the rebuild;
+-- B retains the final active-only lookup index below.
 create index if not exists asset_tags_forward_asset_id_idx
   on public.asset_tags(asset_id, id);
 
@@ -34,6 +34,7 @@ create index if not exists asset_tags_active_asset_idx
 -- This partial index makes each bounded normalization call seek only rows still
 -- pending. Dead entries remain until the dependent transaction commits; the
 -- index cheapens each keyset lookup but does not physically shrink mid-run.
+-- Recovery B drops this pending-only accelerator after normalization completes.
 create index if not exists asset_tags_pending_metadata_normalization_idx
   on public.asset_tags(id)
   where tag is distinct from btrim(tag)

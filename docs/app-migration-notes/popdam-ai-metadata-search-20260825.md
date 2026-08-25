@@ -18,8 +18,9 @@ state:
   verified, rather than disabled before reconciliation is ready;
 - the category column comment records that #1427 recovery B is pending;
 - the general `(asset_id, id)` index supports the later keyset compatibility
-  rebuild, the active-only index is ready for the final contract, and the
-  pending-normalization index supports bounded dirty-row seeks;
+  rebuild and B drops it afterwards; the active-only index is retained for the
+  final contract; the pending-normalization index supports bounded dirty-row
+  seeks and B drops it after normalization;
 - no application may enable the new scoped-AI/search contract until B is
   applied and its final contract tests pass.
 

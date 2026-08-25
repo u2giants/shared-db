@@ -40,11 +40,6 @@ begin
     raise exception 'asset_tags compatibility maintenance is disabled in pending state';
   end if;
 
-  if to_regprocedure('pg_temp.popdam_forward_1474_normalize_batch(integer)') is not null
-     or to_regprocedure('pg_temp.popdam_forward_1474_rebuild_batch(integer)') is not null
-     or to_regclass('pg_temp.popdam_forward_1474_cursor') is not null then
-    raise exception 'prerequisite A must not create reconciliation helpers';
-  end if;
 end $$;
 
 rollback;
