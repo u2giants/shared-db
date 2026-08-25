@@ -7,6 +7,7 @@ declare
   v_cols text[];
   v_text text;
   v_def text;
+  v_acl text;
 begin
   select array_agg(column_name order by ordinal_position) into v_cols
   from information_schema.columns
@@ -46,7 +47,9 @@ begin
        where p.oid='api.source_capture_inventory_exact(text)'::regprocedure
          and a.privilege_type='EXECUTE' and a.grantee='service_role'::regrole
      ) then
-    raise exception 'A FAILED: exact-count function direct ACL changed';
+    select p.proacl::text into v_acl
+    from pg_proc p where p.oid='api.source_capture_inventory_exact(text)'::regprocedure;
+    raise exception 'A FAILED: exact-count function direct ACL changed: %',v_acl;
   end if;
 
   select obj_description('api.source_capture_inventory'::regclass, 'pg_class') into v_text;
