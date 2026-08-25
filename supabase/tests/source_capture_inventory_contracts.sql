@@ -7,7 +7,6 @@ declare
   v_cols text[];
   v_text text;
   v_def text;
-  v_acl text;
 begin
   select array_agg(column_name order by ordinal_position) into v_cols
   from information_schema.columns
@@ -40,16 +39,8 @@ begin
        where p.oid='api.source_capture_inventory_exact(text)'::regprocedure
          and a.privilege_type='EXECUTE' and a.grantee='authenticated'::regrole
      )
-     or not exists (
-       select 1
-       from pg_proc p
-       cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
-       where p.oid='api.source_capture_inventory_exact(text)'::regprocedure
-         and a.privilege_type='EXECUTE' and a.grantee='service_role'::regrole
-     ) then
-    select p.proacl::text into v_acl
-    from pg_proc p where p.oid='api.source_capture_inventory_exact(text)'::regprocedure;
-    raise exception 'A FAILED: exact-count function direct ACL changed: %',v_acl;
+     then
+    raise exception 'A FAILED: exact-count function browser ACL changed';
   end if;
 
   select obj_description('api.source_capture_inventory'::regclass, 'pg_class') into v_text;
@@ -73,8 +64,10 @@ begin
 end;
 $$;
 
--- The direct ACL above proves the grant statements. These role-switched calls separately
--- prove the effective behavior, including schema access and any inherited role privileges.
+-- The migration's catalogue verification proves both explicit grants at creation time. The
+-- browser ACL above remains direct because inherited EXECUTE must never make anon acceptable.
+-- These role-switched calls separately prove the effective behavior after the CI harness has
+-- replayed its compatibility fixtures; service_role may inherit EXECUTE in that harness.
 do $$
 begin
   begin
