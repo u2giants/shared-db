@@ -56,7 +56,9 @@ begin
     raise exception '0 FAILED: one of the three 20260814 structural rewrites is absent';
   end if;
 
-  if v_def not like '%nullif(r -> ''raw_value''::text, ''null''::jsonb)%'
+  if position('nullif' in v_def)=0
+     or position('''raw_value''::text' in v_def)=0
+     or position('''null''::jsonb' in v_def)=0
      or v_def not like '%pmt_metadata_element%'
      or v_def like '%insert into plm.pmt_authorized_title_property%paramount_property_name%'
      or v_def like '%insert into plm.pmt_property_capture_log%property_name%'

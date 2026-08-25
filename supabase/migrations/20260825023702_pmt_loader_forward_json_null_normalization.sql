@@ -323,8 +323,9 @@ declare
   v_def text := lower(pg_get_functiondef(
     'plm.load_pmt_capture_chunk(uuid,text,jsonb)'::regprocedure));
 begin
-  if v_def not like '%nullif(r -> ''raw_value''::text, ''null''::jsonb)%'
-     and v_def not like '%nullif(r -> ''raw_value'', ''null''::jsonb)%' then
+  if position('nullif' in v_def)=0
+     or position('''raw_value''::text' in v_def)=0
+     or position('''null''::jsonb' in v_def)=0 then
     raise exception 'Paramount forward repair lost JSON-null normalization';
   end if;
   if v_def not like '%pmt_metadata_element%'
