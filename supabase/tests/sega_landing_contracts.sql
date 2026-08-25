@@ -926,7 +926,7 @@ begin
     'https://example.invalid', '2099-04-01Z'::timestamptz,
     ('{"properties":1,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb,
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb,
     '{}'::jsonb, 'ZZTEST', false, true, true, true);
 
   insert into plm.sega_property (
@@ -937,7 +937,7 @@ begin
     v_good,
     ('{"properties":1,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb,
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb,
     '[]'::jsonb);
 
   select * into v_cap from plm.sega_capture where id = v_good;
@@ -971,7 +971,7 @@ declare
   v_full   jsonb :=
     ('{"properties":0,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb;
 begin
   -- (a) LIMITED capture.
   v_id := plm.begin_sega_capture(
@@ -1182,7 +1182,7 @@ declare
   v_full  jsonb :=
     ('{"properties":1,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb;
   v_shape jsonb;
   v_code  text;
   v_shapes jsonb[]  := array['null'::jsonb, '"7"'::jsonb, '[]'::jsonb, '-1'::jsonb];
@@ -1244,7 +1244,7 @@ declare
   v_full  jsonb :=
     ('{"properties":0,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb;
   v_shape jsonb;
   v_code  text;
   v_shapes jsonb[] := array['null'::jsonb, '"0"'::jsonb, 'true'::jsonb, '{}'::jsonb,
@@ -1297,7 +1297,7 @@ declare
   v_full jsonb :=
     ('{"properties":0,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb;
 begin
   v_id := plm.begin_sega_capture(
     'ZZTEST-sega-E2Niv:' || repeat('4', 40), 'ZZTEST-repo',
@@ -1356,7 +1356,7 @@ declare
   v_full   jsonb :=
     ('{"properties":0,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb;
   v_shape  jsonb;
   v_code   text;
   v_shapes jsonb[] := array['1.0'::jsonb, '9223372036854775808'::jsonb, '1e20'::jsonb];
@@ -1464,7 +1464,7 @@ declare
   v_full   jsonb :=
     ('{"properties":0,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb;
   v_shape  jsonb;
   v_code   text;
   v_shapes jsonb[] := array['-1'::jsonb, '1.5'::jsonb, '9223372036854775808'::jsonb];
@@ -1752,7 +1752,7 @@ declare
   v_full jsonb :=
     ('{"properties":1,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb;
 begin
   v_old := plm.begin_sega_capture(
     'ZZTEST-sega-F-old:' || repeat('1', 40), 'ZZTEST-repo', repeat('1', 40), repeat('1', 64),
