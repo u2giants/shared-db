@@ -283,6 +283,15 @@ begin
   if jsonb_array_length(p_rows) > 1000 then
     raise exception 'load_coke_capture_chunk: chunk exceeds 1000 rows';
   end if;
+  if p_entity not in (
+    'capture','approval_item','approval_metadata_value','approval_related_item',
+    'approval_stage_snapshot','approval_comment','vocabulary_value',
+    'approval_vocabulary_value','manufacturer_profile','asset_property_option',
+    'asset','asset_detail_value','tag','asset_tag','contract','sku',
+    'contract_manufacturer','royalty_report'
+  ) then
+    raise exception 'load_coke_capture_chunk: unsupported entity %',p_entity;
+  end if;
 
   if p_entity = 'capture' then
     if jsonb_array_length(p_rows) <> 1 then
@@ -306,10 +315,33 @@ begin
       coalesce((r->>'media_downloaded')::integer,0),r->'raw_summary',r->>'created_by')
     on conflict (id) do nothing;
     get diagnostics v_count = row_count;
+    if v_count = 0 then
+      perform 1 from plm.coke_capture c where c.id=p_capture_id
+        and c.capture_key=r->>'capture_key'
+        and c.source_repository=r->>'source_repository'
+        and c.source_commit_sha=r->>'source_commit_sha'
+        and c.source_manifest_sha256=r->>'source_manifest_sha256'
+        and c.portal_base_url=r->>'portal_base_url'
+        and c.account_scope=r->>'account_scope'
+        and c.source_captured_at=(r->>'source_captured_at')::timestamptz
+        and c.expected_counts=r->'expected_counts'
+        and c.approval_index_complete=coalesce((r->>'approval_index_complete')::boolean,false)
+        and c.asset_index_complete=coalesce((r->>'asset_index_complete')::boolean,false)
+        and c.asset_details_complete=coalesce((r->>'asset_details_complete')::boolean,false)
+        and c.media_downloaded=coalesce((r->>'media_downloaded')::integer,0)
+        and c.raw_summary=r->'raw_summary'
+        and c.created_by=r->>'created_by';
+      if not found then
+        raise exception 'load_coke_capture_chunk: capture retry payload differs';
+      end if;
+    end if;
     return v_count;
   end if;
 
-  perform 1 from plm.coke_capture where id=p_capture_id and status='loading';
+  -- The shared row lock serializes each loader transaction against finalization's
+  -- FOR UPDATE lock. Once finalization starts, no chunk that observed `loading` can
+  -- continue inserting behind its counts.
+  perform 1 from plm.coke_capture where id=p_capture_id and status='loading' for share;
   if not found then
     raise exception 'load_coke_capture_chunk: capture is missing or not loading';
   end if;
@@ -404,8 +436,6 @@ begin
         p_capture_id,r->>'report_source_key',r->>'contract_id',r->>'period_label',
         r->>'royalty_amount_display',(r->>'royalty_amount')::numeric,r->>'currency_code',
         r->>'status',r->>'source_path',r->'raw') on conflict do nothing;
-    else
-      raise exception 'load_coke_capture_chunk: unsupported entity %',p_entity;
     end if;
     get diagnostics v_rowcount = row_count;
     v_count := v_count + v_rowcount;
@@ -428,6 +458,10 @@ declare
 begin
   select * into v_capture from plm.coke_capture where id=p_capture_id for update;
   if not found then raise exception 'finalize_coke_capture: no capture'; end if;
+  if v_capture.status = 'complete' then
+    return jsonb_build_object('capture_id',p_capture_id,'status','complete',
+      'observed_counts',v_capture.observed_counts,'errors',v_capture.errors);
+  end if;
   if v_capture.status <> 'loading' then raise exception 'finalize_coke_capture: not loading'; end if;
 
   v_counts := jsonb_build_object(
@@ -460,7 +494,9 @@ begin
 
   if not v_capture.expected_counts ?& array[
     'approval_items','approval_metadata_values','approval_related_items',
-    'asset_property_options','assets','contracts','skus',
+    'approval_stage_snapshots','approval_comments','vocabulary_values',
+    'approval_vocabulary_values','manufacturer_profiles','asset_property_options',
+    'assets','asset_detail_values','tags','asset_tags','contracts','skus',
     'contract_manufacturers','royalty_reports'
   ] then
     v_errors := v_errors || jsonb_build_array(jsonb_build_object(
@@ -524,7 +560,9 @@ left join lateral (select jsonb_object_agg(x.field_key,x.values order by x.field
     from plm.coke_approval_metadata_value v
     where v.capture_id=i.capture_id and v.approval_route_id=i.approval_route_id
     group by v.field_key) x) m on true
-where lower(i.item_type) like '%product%';
+where lower(i.item_type) like '%product%'
+  and lower(i.item_type) not like '%packag%'
+  and lower(i.item_type) not like '%catalog%';
 
 create view api.coke_current_packaging_submission with (security_invoker=true) as
 select i.*,m.metadata from api.coke_current_approval_item i
@@ -582,6 +620,163 @@ select c.id,c.capture_key,c.source_commit_sha,c.source_manifest_sha256,
   c.expected_counts,c.observed_counts,c.approval_index_complete,
   c.asset_index_complete,c.asset_details_complete,c.media_downloaded,c.errors
 from plm.coke_capture c;
+
+-- Register the new landing in the companywide authoritative inventory. Counts stay
+-- intentionally NULL in this bounded view; callers opt into exact counts separately.
+-- The latest-complete clock is the newest successfully finalized Coca-Cola capture.
+create or replace view api.source_capture_inventory as
+with latest as (
+  select
+    (select capture_id from plm.pmt_capture where status='complete' and capture_kind='full'
+      order by completed_at desc nulls last,started_at desc,capture_id desc limit 1) pmt_capture_id,
+    (select id from plm.nbcu_capture where status='complete'
+      order by source_captured_at desc,load_completed_at desc,id desc limit 1) nbcu_capture_id,
+    (select crawl_id from plm.dcp_crawl where status='complete'
+      order by captured_on desc,finished_at desc,crawl_id desc limit 1) dcp_crawl_id,
+    (select metadata_run_id from plm.dcp_metadata_run where status='complete'
+      order by captured_on desc,finished_at desc,metadata_run_id desc limit 1) dcp_metadata_run_id,
+    (select id from plm.sega_capture where status='complete'
+      order by source_captured_at desc,load_completed_at desc,id desc limit 1) sega_capture_id,
+    (select id from plm.sega_submission_capture where status='complete'
+      order by source_captured_at desc,load_completed_at desc,id desc limit 1)
+      sega_submission_capture_id,
+    (select id from plm.peanuts_capture where status='complete'
+      order by source_captured_at desc,load_completed_at desc,id desc limit 1) peanuts_capture_id,
+    (select id from plm.wildbrain_capture where status='complete'
+      order by source_captured_at desc,load_completed_at desc,id desc limit 1) wildbrain_capture_id,
+    (select id from plm.sesame_capture where status='complete'
+      order by source_captured_at desc,load_completed_at desc,id desc limit 1) sesame_capture_id,
+    (select id from plm.coke_capture where status='complete'
+      order by source_captured_at desc,load_completed_at desc,id desc limit 1) coke_capture_id
+), catalog as (
+  select c.oid,c.relname,
+    exists(select 1 from pg_attribute a where a.attrelid=c.oid and a.attnum>0
+      and not a.attisdropped and a.attname='capture_id') has_capture_id,
+    exists(select 1 from pg_attribute a where a.attrelid=c.oid and a.attnum>0
+      and not a.attisdropped and a.attname='submission_capture_id') has_submission_capture_id,
+    exists(select 1 from pg_attribute a where a.attrelid=c.oid and a.attnum>0
+      and not a.attisdropped and a.attname='crawl_id') has_crawl_id,
+    exists(select 1 from pg_attribute a where a.attrelid=c.oid and a.attnum>0
+      and not a.attisdropped and a.attname='metadata_run_id') has_metadata_run_id,
+    exists(select 1 from pg_attribute a where a.attrelid=c.oid and a.attnum>0
+      and not a.attisdropped and a.attname in
+      ('core_property_id','core_character_id','core_licensor_id','resolved_at','resolution_status'))
+      carries_resolution,
+    obj_description(c.oid,'pg_class') table_comment
+  from pg_class c join pg_namespace n on n.oid=c.relnamespace
+  where n.nspname='plm' and c.relkind='r'
+), classified as (
+  select c.*,case
+    when relname like 'dcp\_%' or relname like 'opa\_%' then 'disney'
+    when relname like 'pmt\_%' then 'paramount' when relname like 'nbcu\_%' then 'nbcu'
+    when relname like 'wb\_%' then 'warner' when relname like 'erp\_%' then 'coldlion'
+    when relname like 'sega\_%' then 'sega' when relname like 'peanuts\_%' then 'peanuts'
+    when relname like 'wildbrain\_%' then 'wildbrain'
+    when relname like 'sesame\_%' then 'sesame'
+    when relname like 'coke\_%' then 'coca-cola' else 'other' end source_system
+  from catalog c
+), counted as (
+  select c.*,l.*,null::bigint retained_count,null::bigint latest_count
+  from classified c cross join latest l
+)
+select source_system,relname table_name,retained_count row_count,carries_resolution,
+  table_comment,retained_count retained_row_count,latest_count latest_complete_row_count,
+  case
+    when relname like 'opa\_%' then 'current_snapshot'
+    when relname like 'pmt\_%' and (relname='pmt_capture' or has_capture_id) then 'latest_complete'
+    when relname like 'nbcu\_%' and (relname='nbcu_capture' or has_capture_id) then 'latest_complete'
+    when relname in ('sega_submission_capture','sega_submission_property') then 'latest_complete'
+    when relname like 'sega\_%' and (relname='sega_capture' or has_capture_id) then 'latest_complete'
+    when relname like 'peanuts\_%' and (relname='peanuts_capture' or has_capture_id) then 'latest_complete'
+    when relname like 'wildbrain\_%' and (relname='wildbrain_capture' or has_capture_id) then 'latest_complete'
+    when relname like 'sesame\_%' and (relname='sesame_capture' or has_capture_id) then 'latest_complete'
+    when relname like 'coke\_%' and (relname='coke_capture' or has_capture_id) then 'latest_complete'
+    when relname in ('dcp_crawl','dcp_asset','dcp_crawl_gap')
+      or (relname like 'dcp\_%' and has_crawl_id) then 'latest_complete'
+    when relname='dcp_metadata_run' or (relname like 'dcp\_%' and has_metadata_run_id)
+      then 'latest_complete' else 'retained_only' end count_basis,
+  case
+    when relname like 'pmt\_%' and (relname='pmt_capture' or has_capture_id)
+      then case when pmt_capture_id is null then null else 'complete' end
+    when relname like 'nbcu\_%' and (relname='nbcu_capture' or has_capture_id)
+      then case when nbcu_capture_id is null then null else 'complete' end
+    when relname in ('sega_submission_capture','sega_submission_property')
+      then case when sega_submission_capture_id is null then null else 'complete' end
+    when relname like 'sega\_%' and (relname='sega_capture' or has_capture_id)
+      then case when sega_capture_id is null then null else 'complete' end
+    when relname like 'peanuts\_%' and (relname='peanuts_capture' or has_capture_id)
+      then case when peanuts_capture_id is null then null else 'complete' end
+    when relname like 'wildbrain\_%' and (relname='wildbrain_capture' or has_capture_id)
+      then case when wildbrain_capture_id is null then null else 'complete' end
+    when relname like 'sesame\_%' and (relname='sesame_capture' or has_capture_id)
+      then case when sesame_capture_id is null then null else 'complete' end
+    when relname like 'coke\_%' and (relname='coke_capture' or has_capture_id)
+      then case when coke_capture_id is null then null else 'complete' end
+    when relname in ('dcp_crawl','dcp_asset','dcp_crawl_gap')
+      or (relname like 'dcp\_%' and has_crawl_id)
+      then case when dcp_crawl_id is null then null else 'complete' end
+    when relname='dcp_metadata_run' or (relname like 'dcp\_%' and has_metadata_run_id)
+      then case when dcp_metadata_run_id is null then null else 'complete' end else null end
+    latest_complete_status,
+  (case
+    when relname like 'opa\_%' then
+      'Current upserted OPA snapshot; there is no retained-capture clock for this table.'
+    when relname like 'pmt\_%' and (relname='pmt_capture' or has_capture_id)
+      then case when pmt_capture_id is null
+        then 'No complete full Paramount capture exists; latest-complete count is unknown, not zero.'
+        else 'Latest complete full Paramount capture; failed, abandoned, targeted and test captures excluded.' end
+    when relname like 'nbcu\_%' and (relname='nbcu_capture' or has_capture_id)
+      then case when nbcu_capture_id is null
+        then 'No complete NBCU capture exists; latest-complete count is unknown, not zero.'
+        else 'Latest complete NBCU capture; loading, rejected and abandoned captures excluded.' end
+    when relname in ('sega_submission_capture','sega_submission_property')
+      then case when sega_submission_capture_id is null
+        then 'No complete Sega submission vocabulary capture exists; latest-complete count is unknown, not zero.'
+        else 'Latest complete read-only Sega submission vocabulary capture; rejected attempts excluded.' end
+    when relname like 'sega\_%' and (relname='sega_capture' or has_capture_id)
+      then case when sega_capture_id is null
+        then 'No complete Sega capture exists; latest-complete count is unknown, not zero.'
+        else 'Latest complete Sega capture; loading, rejected and abandoned captures excluded.' end
+    when relname like 'peanuts\_%' and (relname='peanuts_capture' or has_capture_id)
+      then case when peanuts_capture_id is null
+        then 'No complete Peanuts capture exists; latest-complete count is unknown, not zero.'
+        else 'Latest complete Peanuts capture; loading, rejected and abandoned captures excluded.' end
+    when relname like 'wildbrain\_%' and (relname='wildbrain_capture' or has_capture_id)
+      then case when wildbrain_capture_id is null
+        then 'No complete WildBrain capture exists; latest-complete count is unknown, not zero.'
+        else 'Latest complete WildBrain capture; loading, rejected and abandoned captures excluded.' end
+    when relname like 'sesame\_%' and (relname='sesame_capture' or has_capture_id)
+      then case when sesame_capture_id is null
+        then 'No complete Sesame capture exists; latest-complete count is unknown, not zero.'
+        else 'Latest complete Sesame capture; loading, rejected and abandoned captures excluded.' end
+    when relname like 'coke\_%' and (relname='coke_capture' or has_capture_id)
+      then case when coke_capture_id is null
+        then 'No complete Coca-Cola capture exists; latest-complete count is unknown, not zero.'
+        else 'Latest complete Coca-Cola capture; loading, rejected and abandoned captures excluded.' end
+    when relname in ('dcp_crawl','dcp_asset','dcp_crawl_gap')
+      or (relname like 'dcp\_%' and has_crawl_id) then
+      case when dcp_crawl_id is null
+        then 'No complete DCP crawl exists; latest-complete membership is unknown, not zero.'
+        else 'Latest complete DCP path crawl, using immutable crawl membership where required.' end
+    when relname='dcp_metadata_run' or (relname like 'dcp\_%' and has_metadata_run_id) then
+      case when dcp_metadata_run_id is null
+        then 'No complete DCP metadata run exists; latest-complete count is unknown, not zero.'
+        else 'Latest complete DCP metadata run, separate from the path-crawl clock.' end
+    when relname='dcp_style_guide' then
+      'Retained style-guide identities only. Historical latest-complete membership cannot be derived from mutable last_seen_crawl_id; NULL is intentional.'
+    when relname like 'dcp\_%' then
+      'Retained DCP rows only; this table has no exact immutable latest-complete membership path.'
+    else 'Retained rows only; no source-specific latest-complete contract is defined for this table.'
+  end)||' Exact counts are intentionally omitted from ordinary inventory reads; call api.source_capture_inventory_exact(table_name) to opt in.' count_note
+from counted;
+
+comment on view api.source_capture_inventory is
+  'Bounded metadata inventory for every plm landing table, including Coca-Cola private '
+  'capture tables under their latest-complete clock. Historical ten-column contract '
+  'preserved; exact counts require api.source_capture_inventory_exact(text). No licensed '
+  'source row value is exposed here.';
+revoke all on api.source_capture_inventory from public,anon;
+grant select on api.source_capture_inventory to authenticated,service_role;
 
 -- Licensed rows are private to service_role and approved staff. RLS also protects base
 -- tables from direct authenticated access; views use invoker rights and cannot bypass it.
@@ -648,6 +843,20 @@ grant select on plm.coke_capture,plm.coke_approval_item,
   plm.coke_manufacturer_profile,plm.coke_asset_property_option,plm.coke_asset,
   plm.coke_asset_detail_value,plm.coke_tag,plm.coke_asset_tag,plm.coke_contract,
   plm.coke_sku,plm.coke_contract_manufacturer,plm.coke_royalty_report to service_role;
+grant select on plm.coke_capture,plm.coke_approval_item,
+  plm.coke_approval_metadata_value,plm.coke_approval_related_item,
+  plm.coke_approval_stage_snapshot,plm.coke_approval_comment,
+  plm.coke_vocabulary_value,plm.coke_approval_vocabulary_value,
+  plm.coke_manufacturer_profile,plm.coke_asset_property_option,plm.coke_asset,
+  plm.coke_asset_detail_value,plm.coke_tag,plm.coke_asset_tag,plm.coke_contract,
+  plm.coke_sku,plm.coke_contract_manufacturer,plm.coke_royalty_report to authenticated;
+revoke all on plm.coke_capture,plm.coke_approval_item,
+  plm.coke_approval_metadata_value,plm.coke_approval_related_item,
+  plm.coke_approval_stage_snapshot,plm.coke_approval_comment,
+  plm.coke_vocabulary_value,plm.coke_approval_vocabulary_value,
+  plm.coke_manufacturer_profile,plm.coke_asset_property_option,plm.coke_asset,
+  plm.coke_asset_detail_value,plm.coke_tag,plm.coke_asset_tag,plm.coke_contract,
+  plm.coke_sku,plm.coke_contract_manufacturer,plm.coke_royalty_report from public,anon;
 grant select,insert on plm.coke_capture,plm.coke_approval_item,
   plm.coke_approval_metadata_value,plm.coke_approval_related_item,
   plm.coke_approval_stage_snapshot,plm.coke_approval_comment,
@@ -695,6 +904,15 @@ begin
      and grantee in ('service_role','authenticated')
      and privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE');
   if v_bad <> 0 then raise exception 'coke landing: % direct write grants survive',v_bad; end if;
+  select count(*) into v_bad from information_schema.role_table_grants
+   where table_schema='plm' and table_name like 'coke\_%'
+     and grantee='authenticated' and privilege_type='SELECT';
+  if v_bad <> v_tables then
+    raise exception 'coke landing: authenticated SELECT exists on % of % tables',v_bad,v_tables;
+  end if;
+  select count(*) into v_bad from information_schema.role_table_grants
+   where table_schema='plm' and table_name like 'coke\_%' and grantee in ('anon','PUBLIC');
+  if v_bad <> 0 then raise exception 'coke landing: % public/anon grants survive',v_bad; end if;
   if has_function_privilege('anon','plm.load_coke_capture_chunk(uuid,text,jsonb)','EXECUTE')
     or has_function_privilege('authenticated','plm.load_coke_capture_chunk(uuid,text,jsonb)','EXECUTE')
     or not has_function_privilege('service_role','plm.load_coke_capture_chunk(uuid,text,jsonb)','EXECUTE')
