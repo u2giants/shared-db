@@ -460,7 +460,8 @@ begin
     ), changed as (
       update public.assets a set tags=d.tags from desired d
       where a.id=d.asset_id and a.tags is distinct from d.tags returning 1
-    ) select count(*),max(asset_id) into v_batch,v_last from batch_ids;
+    ) select count(*),(array_agg(asset_id order by asset_id desc))[1]
+      into v_batch,v_last from batch_ids;
     exit when v_batch=0;
   end loop;
 end $$;
