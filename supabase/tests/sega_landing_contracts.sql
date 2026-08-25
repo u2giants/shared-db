@@ -16,7 +16,7 @@
 --   mistaken for one of them, and so a grep for them finds only test scaffolding.
 --
 -- WHAT IT ASSERTS
---   A. The 12 tables, 2 functions, RLS and the 24 read policies exist.
+--   A. The 13 tables, 2 functions, RLS and the 26 read policies exist.
 --   B. Append-only privilege separation genuinely DENIES update, delete AND truncate,
 --      proven by executing them as service_role across the capture root, plm.sega_property
 --      and a five-table representative spread -- not merely by reading a grant table.
@@ -46,7 +46,8 @@ declare
   v_tables text[] := array[
     'sega_capture','sega_property','sega_property_licensor','sega_catalog',
     'sega_style_guide_candidate','sega_character_candidate','sega_character_evidence',
-    'sega_asset','sega_tag','sega_asset_catalog','sega_asset_tag','sega_asset_property'
+    'sega_asset','sega_tag','sega_asset_catalog','sega_asset_tag','sega_asset_property',
+    'sega_asset_property_inferred'
   ];
 begin
   foreach v_name in array v_tables loop
@@ -98,7 +99,7 @@ begin
   end if;
 
   if v_fail > 0 then raise exception 'A FAILED (% failures)', v_fail; end if;
-  raise notice 'A passed: 12 tables, 2 functions, RLS and 24 policies present';
+  raise notice 'A passed: 13 tables, 2 functions, RLS and 26 policies present';
 end;
 $$;
 
@@ -121,15 +122,15 @@ begin
   select count(*) into v_n from information_schema.role_table_grants
    where table_schema = 'plm' and table_name like 'sega\_%'
      and grantee = 'service_role' and privilege_type = 'SELECT';
-  if v_n <> 12 then
-    raise exception 'B FAILED: expected 12 service_role SELECT grants, found %', v_n;
+  if v_n <> 13 then
+    raise exception 'B FAILED: expected 13 service_role SELECT grants, found %', v_n;
   end if;
 
   select count(*) into v_n from information_schema.role_table_grants
    where table_schema = 'plm' and table_name like 'sega\_%'
      and grantee = 'service_role' and privilege_type = 'INSERT';
-  if v_n <> 11 then
-    raise exception 'B FAILED: expected 11 service_role INSERT grants, found %', v_n;
+  if v_n <> 12 then
+    raise exception 'B FAILED: expected 12 service_role INSERT grants, found %', v_n;
   end if;
 
   if has_table_privilege('service_role','plm.sega_capture','INSERT') then
@@ -145,8 +146,8 @@ begin
   select count(*) into v_n from information_schema.role_table_grants
    where table_schema = 'plm' and table_name like 'sega\_%'
      and grantee = 'authenticated' and privilege_type = 'SELECT';
-  if v_n <> 12 then
-    raise exception 'B FAILED: expected 12 authenticated SELECT grants, found %', v_n;
+  if v_n <> 13 then
+    raise exception 'B FAILED: expected 13 authenticated SELECT grants, found %', v_n;
   end if;
 
   if has_function_privilege('anon',
@@ -1728,8 +1729,8 @@ begin
   if v_seen = 0 then
     raise exception 'F1 FAILED: no pre-existing plm table was compared; the test is vacuous';
   end if;
-  if (select count(*) from api.source_capture_inventory where source_system = 'sega') <> 12 then
-    raise exception 'F1 FAILED: the inventory reports % sega tables, expected 12',
+  if (select count(*) from api.source_capture_inventory where source_system = 'sega') <> 13 then
+    raise exception 'F1 FAILED: the inventory reports % sega tables, expected 13',
       (select count(*) from api.source_capture_inventory where source_system = 'sega');
   end if;
   if v_fail > 0 then

@@ -106,10 +106,10 @@ begin
   begin
     insert into plm.sega_asset_property_inferred
       (capture_id,asset_source_id,property_source_id,evidence_key,catalog_source_id,
-       match_method,matched_property_key,matched_catalog_key,rule_version,confidence,raw)
-    values (v_cap,'ZZ-A1','ZZ-P1','ZZ-BAD-TRUTH','ZZ-C1','exact_label','x','x','v1',1,'{}');
-    update plm.sega_asset_property_inferred set relationship_truth='direct'
-      where capture_id=v_cap and evidence_key='ZZ-BAD-TRUTH';
+       match_method,matched_property_key,matched_catalog_key,rule_version,confidence,
+       relationship_truth,raw)
+    values (v_other,'ZZ-A1','ZZ-P1','ZZ-BAD-TRUTH','ZZ-C1','exact_label','x','x',
+            'v1',1,'direct','{}');
     raise exception 'B FAILED: non-inferred truth was accepted';
   exception when check_violation then
     get stacked diagnostics v_con=constraint_name;
@@ -121,7 +121,7 @@ begin
     insert into plm.sega_asset_property_inferred
       (capture_id,asset_source_id,property_source_id,evidence_key,catalog_source_id,
        match_method,matched_property_key,matched_catalog_key,rule_version,confidence,raw)
-    values (v_cap,'ZZ-A1','ZZ-P1','ZZ-BAD-METHOD','ZZ-C1','guessed','x','x','v1',1,'{}');
+    values (v_other,'ZZ-A1','ZZ-P1','ZZ-BAD-METHOD','ZZ-C1','guessed','x','x','v1',1,'{}');
     raise exception 'B FAILED: unknown match method was accepted';
   exception when check_violation then v_bad:=v_bad+1; end;
 
@@ -129,7 +129,7 @@ begin
     insert into plm.sega_asset_property_inferred
       (capture_id,asset_source_id,property_source_id,evidence_key,catalog_source_id,
        match_method,matched_property_key,matched_catalog_key,rule_version,confidence,raw)
-    values (v_cap,'ZZ-A1','ZZ-P1','ZZ-BAD-CONF','ZZ-C1','exact_label','x','x','v1',1.001,'{}');
+    values (v_other,'ZZ-A1','ZZ-P1','ZZ-BAD-CONF','ZZ-C1','exact_label','x','x','v1',1.001,'{}');
     raise exception 'B FAILED: out-of-range confidence was accepted';
   exception when check_violation then v_bad:=v_bad+1; end;
 
