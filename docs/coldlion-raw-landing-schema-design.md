@@ -7,7 +7,7 @@
 > twelve questions are already answered there.
 
 **Status:** historical draft. Phase 1 is live; phases 2-6 are implemented by governed
-issue #1184 / migration `20260825011543`. Dated supersession notes in this file control
+issue #1184 / migration `20260825023430`. Dated supersession notes in this file control
 where the original draft conflicts with the later owner decisions.
 **Author session:** 2026-08-18.
 **Owner direction (Albert Hazan, 2026-08-18):** Coldlion data must arrive from the Coldlion
