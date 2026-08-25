@@ -16,7 +16,7 @@
 --   mistaken for one of them, and so a grep for them finds only test scaffolding.
 --
 -- WHAT IT ASSERTS
---   A. The 12 tables, 2 functions, RLS and the 24 read policies exist.
+--   A. The 13 tables, 2 functions, RLS and the 26 read policies exist.
 --   B. Append-only privilege separation genuinely DENIES update, delete AND truncate,
 --      proven by executing them as service_role across the capture root, plm.sega_property
 --      and a five-table representative spread -- not merely by reading a grant table.
@@ -46,7 +46,8 @@ declare
   v_tables text[] := array[
     'sega_capture','sega_property','sega_property_licensor','sega_catalog',
     'sega_style_guide_candidate','sega_character_candidate','sega_character_evidence',
-    'sega_asset','sega_tag','sega_asset_catalog','sega_asset_tag','sega_asset_property'
+    'sega_asset','sega_tag','sega_asset_catalog','sega_asset_tag','sega_asset_property',
+    'sega_asset_property_inferred'
   ];
 begin
   foreach v_name in array v_tables loop
@@ -98,7 +99,7 @@ begin
   end if;
 
   if v_fail > 0 then raise exception 'A FAILED (% failures)', v_fail; end if;
-  raise notice 'A passed: 12 tables, 2 functions, RLS and 24 policies present';
+  raise notice 'A passed: 13 tables, 2 functions, RLS and 26 policies present';
 end;
 $$;
 
@@ -121,15 +122,15 @@ begin
   select count(*) into v_n from information_schema.role_table_grants
    where table_schema = 'plm' and table_name like 'sega\_%'
      and grantee = 'service_role' and privilege_type = 'SELECT';
-  if v_n <> 12 then
-    raise exception 'B FAILED: expected 12 service_role SELECT grants, found %', v_n;
+  if v_n <> 13 then
+    raise exception 'B FAILED: expected 13 service_role SELECT grants, found %', v_n;
   end if;
 
   select count(*) into v_n from information_schema.role_table_grants
    where table_schema = 'plm' and table_name like 'sega\_%'
      and grantee = 'service_role' and privilege_type = 'INSERT';
-  if v_n <> 11 then
-    raise exception 'B FAILED: expected 11 service_role INSERT grants, found %', v_n;
+  if v_n <> 12 then
+    raise exception 'B FAILED: expected 12 service_role INSERT grants, found %', v_n;
   end if;
 
   if has_table_privilege('service_role','plm.sega_capture','INSERT') then
@@ -145,8 +146,8 @@ begin
   select count(*) into v_n from information_schema.role_table_grants
    where table_schema = 'plm' and table_name like 'sega\_%'
      and grantee = 'authenticated' and privilege_type = 'SELECT';
-  if v_n <> 12 then
-    raise exception 'B FAILED: expected 12 authenticated SELECT grants, found %', v_n;
+  if v_n <> 13 then
+    raise exception 'B FAILED: expected 13 authenticated SELECT grants, found %', v_n;
   end if;
 
   if has_function_privilege('anon',
@@ -171,7 +172,7 @@ declare
   v_denied  integer := 0;
   v_expected integer := 21;
   v_t       text;
-  -- A REPRESENTATIVE SPREAD of the eleven snapshot tables, one per structural class, so
+  -- A REPRESENTATIVE SPREAD of the twelve snapshot tables, one per structural class, so
   -- the behavioural half is not proving the model on a single table:
   --   sega_catalog             -- the self-referencing tree
   --   sega_asset               -- the high-volume metadata table
@@ -925,7 +926,7 @@ begin
     'https://example.invalid', '2099-04-01Z'::timestamptz,
     ('{"properties":1,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb,
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb,
     '{}'::jsonb, 'ZZTEST', false, true, true, true);
 
   insert into plm.sega_property (
@@ -936,7 +937,7 @@ begin
     v_good,
     ('{"properties":1,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb,
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb,
     '[]'::jsonb);
 
   select * into v_cap from plm.sega_capture where id = v_good;
@@ -970,7 +971,7 @@ declare
   v_full   jsonb :=
     ('{"properties":0,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb;
 begin
   -- (a) LIMITED capture.
   v_id := plm.begin_sega_capture(
@@ -1181,7 +1182,7 @@ declare
   v_full  jsonb :=
     ('{"properties":1,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb;
   v_shape jsonb;
   v_code  text;
   v_shapes jsonb[]  := array['null'::jsonb, '"7"'::jsonb, '[]'::jsonb, '-1'::jsonb];
@@ -1243,7 +1244,7 @@ declare
   v_full  jsonb :=
     ('{"properties":0,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb;
   v_shape jsonb;
   v_code  text;
   v_shapes jsonb[] := array['null'::jsonb, '"0"'::jsonb, 'true'::jsonb, '{}'::jsonb,
@@ -1287,7 +1288,7 @@ begin
 end;
 $$;
 
--- (iv) The whole-object sweep: a non-number under a key OUTSIDE the eleven entity names is
+-- (iv) The whole-object sweep: a non-number under a key OUTSIDE the twelve entity names is
 --      the same defect and must also be named, not ignored.
 do $$
 declare
@@ -1296,7 +1297,7 @@ declare
   v_full jsonb :=
     ('{"properties":0,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb;
 begin
   v_id := plm.begin_sega_capture(
     'ZZTEST-sega-E2Niv:' || repeat('4', 40), 'ZZTEST-repo',
@@ -1319,7 +1320,7 @@ begin
       v_cap.status, v_cap.error_summary;
   end if;
 
-  raise notice 'E2N (iv) passed: the sweep covers keys beyond the eleven entity names';
+  raise notice 'E2N (iv) passed: the sweep covers keys beyond the twelve entity names';
 end;
 $$;
 
@@ -1355,7 +1356,7 @@ declare
   v_full   jsonb :=
     ('{"properties":0,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb;
   v_shape  jsonb;
   v_code   text;
   v_shapes jsonb[] := array['1.0'::jsonb, '9223372036854775808'::jsonb, '1e20'::jsonb];
@@ -1450,10 +1451,10 @@ begin
 end;
 $$;
 
--- (vi) THE EXTRA-KEY SWEEP IS NOT TYPE-ONLY. A key outside the eleven entity names whose
+-- (vi) THE EXTRA-KEY SWEEP IS NOT TYPE-ONLY. A key outside the twelve entity names whose
 --      value is -1, 1.5 or past bigint is a JSON NUMBER, so the old type-only sweep ignored
 --      it. Neither shape can skip an entity count, so this was never a publication hole --
---      but the sweep's stated claim is that EVERY key outside the eleven is covered, and a
+--      but the sweep's stated claim is that EVERY key outside the twelve is covered, and a
 --      guard whose comment overstates what it does is how the next reader is misled. The
 --      sweep now applies the identical type / non-negative-integer / range rule.
 do $$
@@ -1463,7 +1464,7 @@ declare
   v_full   jsonb :=
     ('{"properties":0,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb;
   v_shape  jsonb;
   v_code   text;
   v_shapes jsonb[] := array['-1'::jsonb, '1.5'::jsonb, '9223372036854775808'::jsonb];
@@ -1484,7 +1485,7 @@ begin
       repeat('8', 40), repeat('8', 64), 'https://example.invalid',
       '2099-09-08Z'::timestamptz, v_full, '{}'::jsonb, 'ZZTEST', false, true, true, true);
 
-    -- begin_ only inspects the eleven entity keys, so the extra key is injected the way a
+    -- begin_ only inspects the twelve entity keys, so the extra key is injected the way a
     -- future loader would supply it: by writing the stored object.
     update plm.sega_capture
        set expected_counts = expected_counts
@@ -1728,8 +1729,8 @@ begin
   if v_seen = 0 then
     raise exception 'F1 FAILED: no pre-existing plm table was compared; the test is vacuous';
   end if;
-  if (select count(*) from api.source_capture_inventory where source_system = 'sega') <> 12 then
-    raise exception 'F1 FAILED: the inventory reports % sega tables, expected 12',
+  if (select count(*) from api.source_capture_inventory where source_system = 'sega') <> 13 then
+    raise exception 'F1 FAILED: the inventory reports % sega tables, expected 13',
       (select count(*) from api.source_capture_inventory where source_system = 'sega');
   end if;
   if v_fail > 0 then
@@ -1751,7 +1752,7 @@ declare
   v_full jsonb :=
     ('{"properties":1,"property_licensors":0,"catalogs":0,"style_guide_candidates":0,'
      || '"character_candidates":0,"character_evidence":0,"assets":0,"tags":0,'
-     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0}')::jsonb;
+     || '"asset_catalogs":0,"asset_tags":0,"asset_properties":0,"asset_properties_inferred":0}')::jsonb;
 begin
   v_old := plm.begin_sega_capture(
     'ZZTEST-sega-F-old:' || repeat('1', 40), 'ZZTEST-repo', repeat('1', 40), repeat('1', 64),
