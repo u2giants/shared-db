@@ -1936,4 +1936,48 @@ begin
 end;
 $$;
 
+-- J. api.source_capture_inventory -- Sesame classification and completed-capture clock.
+do $$
+declare
+  r record;
+  v_latest uuid;
+begin
+  if (select count(*) from api.source_capture_inventory where source_system='sesame') <> 19 then
+    raise exception 'J FAILED: all 19 Sesame landing tables must classify as sesame';
+  end if;
+  if exists (select 1 from api.source_capture_inventory where table_name like 'sesame\_%'
+       and (source_system <> 'sesame' or count_basis <> 'latest_complete')) then
+    raise exception 'J FAILED: a Sesame landing table has the wrong source or count basis';
+  end if;
+  v_latest := plm.latest_sesame_capture();
+  if v_latest is null then
+    raise exception 'J FAILED (fixture): section I left no complete Sesame capture';
+  end if;
+  select * into r from api.source_capture_inventory where table_name='sesame_capture';
+  if r.latest_complete_row_count is distinct from 1::bigint
+     or r.latest_complete_status <> 'complete'
+     or r.count_note not like 'Latest complete Sesame capture%' then
+    raise exception 'J FAILED: sesame_capture reports count/status/note %/%/%',
+      r.latest_complete_row_count,r.latest_complete_status,r.count_note;
+  end if;
+  select * into r from api.source_capture_inventory where table_name='sesame_asset';
+  if r.latest_complete_row_count is distinct from 0::bigint then
+    raise exception 'J FAILED: sesame_asset latest-complete count is %, expected 0',
+      r.latest_complete_row_count;
+  end if;
+  if r.row_count is distinct from r.retained_row_count then
+    raise exception 'J FAILED: row_count compatibility alias changed';
+  end if;
+  if (select string_agg(column_name,',' order by ordinal_position)
+        from information_schema.columns
+       where table_schema='api' and table_name='source_capture_inventory')
+     <> 'source_system,table_name,row_count,carries_resolution,table_comment,'
+        || 'retained_row_count,latest_complete_row_count,count_basis,'
+        || 'latest_complete_status,count_note' then
+    raise exception 'J FAILED: source_capture_inventory output columns changed';
+  end if;
+  raise notice 'J passed: Sesame classification, completed-capture counts and view shape';
+end;
+$$;
+
 rollback;
