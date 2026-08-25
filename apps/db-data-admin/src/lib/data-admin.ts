@@ -212,3 +212,51 @@ export async function loadLicensorTree(client: ApiClient, params: { includeInact
     orphanProperties,
   }
 }
+
+// ---- Retained source-declared Properties -----------------------------------
+
+export type ScrapedPropertyRow = AdminRow & {
+  row_key: string
+  presentation_licensor_key: string
+  presentation_licensor_name: string
+  source_system: string
+  source_table: string
+  source_property_id: string
+  source_property_name: string | null
+  display_label: string
+  source_status: string | null
+  provenance_kind: string
+  latest_seen_at: string | null
+  capture_marker: string | null
+}
+
+export async function loadScrapedProperties(client: ApiClient) {
+  const rows: ScrapedPropertyRow[] = []
+  let cursor: string | null = null
+  do {
+    const { data, error } = await client.rpc('db_data_admin_scraped_properties', {
+      p_search: null,
+      p_cursor: cursor,
+      p_page_size: 1000,
+    })
+    if (error) throw error
+    const payload = (data ?? {}) as { rows?: ScrapedPropertyRow[]; next_cursor?: string | null }
+    rows.push(...(payload.rows ?? []).map(row => ({ ...row, id: row.row_key })))
+    cursor = payload.next_cursor ?? null
+  } while (cursor)
+  return rows
+}
+
+export function groupScrapedProperties(rows: ScrapedPropertyRow[]) {
+  const groups = new Map<string, { key: string; name: string; rows: ScrapedPropertyRow[] }>()
+  for (const row of rows) {
+    const group = groups.get(row.presentation_licensor_key) ?? {
+      key: row.presentation_licensor_key,
+      name: row.presentation_licensor_name,
+      rows: [],
+    }
+    group.rows.push(row)
+    groups.set(row.presentation_licensor_key, group)
+  }
+  return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name))
+}
