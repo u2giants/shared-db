@@ -1,20 +1,22 @@
 # PopDAM Scoped AI Metadata + Deterministic Search — 2026-08-25
 
 Canonical forward production migration:
-`20260825031841_popdam_ai_search_forward_recovery.sql`.
+`20260825034915_popdam_ai_search_batched_forward.sql`.
 
 Preview truthfully retains historical ledger rows `20260825010603` (the original
-complete contract) and `20260825025154` (its later accelerator). Neither may run
-in production: the original timed out and rolled back, while ascending migration
-order correctly refuses to run the later accelerator before it. Both versions
-are permanently retired from production allowlists and superseded by the single
-self-contained forward migration.
+complete contract), `20260825025154` (its later accelerator), and
+`20260825031841` (the first self-contained forward). None may run in production:
+the original and first forward each timed out and rolled back, while ascending
+migration order correctly refuses to run the later accelerator before the
+original. All three are permanently retired from production allowlists and
+superseded by the batched forward migration.
 
-The forward migration detects preview's already-complete object contract and
-records a no-op without rebuilding it. On production it creates the accelerator,
-executes the entire #1427 metadata/search contract and legacy reconciliation,
-then drops the temporary index before commit. There is no inverse dependency and
-no permanent HOT/predicate overhead.
+The batched forward detects preview's already-complete object contract and is
+idempotent there. On production it preserves one atomic transaction but executes
+normalization as 512 separate 5,000-row statements and compatibility rebuilding
+as 512 separate 10,000-asset statements. Each call receives its own unchanged
+10-minute timeout, and transaction-local UUID cursors prevent prefix rescans.
+Temporary cursor state and helper functions are removed before commit.
 
 Live read-only sizing proof on 2026-08-25 used production project
 `https://qsllyeztdwjgirsysgai.supabase.co` and this query:
@@ -51,11 +53,11 @@ Tracked by [shared-db #1427](https://github.com/u2giants/shared-db/issues/1427),
 - `get_effective_asset_metadata` reads both scopes without copying group rows or identity onto member assets. Current Style Group licensor/property wins for grouped assets; asset identity is used only while ungrouped.
 - Search documents deterministically include active tags and canonical character names. Changes refresh only directly affected asset/group documents through a bounded, deduplicated contract.
 - Embedding work uses expiring exclusive leases, content-hash and lease-token checked writes, bounded categorized retries, and an admin/service reset. No embedding backfill is part of this migration.
-- Legacy tag normalization disables the obsolete per-row compatibility trigger first, normalizes 5,000 tag rows per internal batch, then rebuilds compatibility arrays in 2,000-asset keyset batches. The internal batches remain one enclosing `DO` statement, so the production statement timeout applies to their combined duration; the prerequisite index is required to keep its repeated ordered scans bounded.
+- Legacy tag normalization disables the obsolete per-row compatibility trigger first, normalizes 5,000 tag rows per separately timed statement, then rebuilds compatibility arrays in separately timed 10,000-asset keyset statements. UUID cursor state advances monotonically, and guarded completion assertions roll the entire migration back if the measured envelopes are exceeded.
 
 ## Release order and gates
 
-1. Apply only `20260825031841` and run `supabase/tests/popdam_scoped_ai_metadata_search_contracts.sql` plus the forward-recovery contract in preview with rollback.
+1. Apply only `20260825034915` and run `supabase/tests/popdam_scoped_ai_metadata_search_contracts.sql` plus the batched-forward contract in preview with rollback.
 2. Promote the final corpus definition through the shared-db orchestrator gates.
 3. Only after production object/ledger proof may PopDAM ship compatible application code.
 4. PopDAM may run one separate application-owned embedding backfill only after its approval gate. Never backfill an intermediate corpus definition.

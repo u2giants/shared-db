@@ -141,6 +141,10 @@ HARD_BLOCKED = {
     # promotion correctly refuses the inverse dependency. Superseded in full by
     # the self-contained 20260825031841 forward replacement.
     "20260825025154",
+    # #1471 single-statement forward. Production cleanly rolled it back after
+    # the enclosing DO statement reached the unchanged 10-minute timeout.
+    # Superseded by separately timed atomic batches in 20260825034915.
+    "20260825031841",
 }
 
 # Preview contains this authenticated historical migration, but production does

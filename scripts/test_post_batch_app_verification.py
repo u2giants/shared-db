@@ -767,6 +767,7 @@ class BatchResolutionTests(unittest.TestCase):
                 "20260816045130",
                 "20260825010603",
                 "20260825025154",
+                "20260825031841",
             },
         )
         self.assertEqual(HELD_VERSIONS, {"20260802170000", "20260802171000"})
