@@ -107,7 +107,8 @@ begin
   -- pre-existing explicit fallback.
   insert into plm.dcp_property (source_system, source_id, display_name) values
     ('disney_dcpvault', 'zz-contract-1546/trailing/', null),
-    ('disney_dcpvault', 'zz-contract-1546/---___', null);
+    ('disney_dcpvault', 'zz-contract-1546/---___', null),
+    ('disney_dcpvault', 'zz-contract-1546/we''re-ready', null);
   insert into plm.twentieth_century_dcp_property (source_system, source_id, display_name)
   values ('twentieth_century_dcpvault', 'zz-contract-1546/not-targeted', null);
 
@@ -259,6 +260,13 @@ begin
       and r ->> 'display_label' = '[Unlabeled source ID: zz-contract-1546/---___]'
   ) then
     raise exception 'malformed or empty DCP terminal segment did not retain fallback';
+  end if;
+  if not exists (
+    select 1 from jsonb_array_elements(v_rows) r
+    where r ->> 'source_property_id' = 'zz-contract-1546/we''re-ready'
+      and r ->> 'display_label' = 'We''re Ready'
+  ) then
+    raise exception 'common apostrophe contraction was not capitalized conservatively';
   end if;
   if not exists (
     select 1 from jsonb_array_elements(v_rows) r

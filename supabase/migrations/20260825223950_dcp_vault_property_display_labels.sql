@@ -190,6 +190,12 @@ begin
                 replace(
                   replace(
                     replace(
+          replace(
+            replace(
+              replace(
+                replace(
+                  replace(
+                    replace(
                       replace(
                         replace(
                           replace(
@@ -224,7 +230,19 @@ begin
             ),
             ' By ', ' by '
           ),
-          '''S', '''s'
+                    '''S', '''s'
+                  ),
+                  '''T', '''t'
+                ),
+                '''Re', '''re'
+              ),
+              '''Ve', '''ve'
+            ),
+            '''Ll', '''ll'
+          ),
+          '''D', '''d'
+        ),
+        '''M', '''m'
         )
         else null
       end as derived_display_label
