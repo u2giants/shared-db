@@ -2219,17 +2219,17 @@ end $assert$;
 
 set local session_replication_role = origin;
 
--- Durable retry boundary: if concurrent cleanup or final hardening is
+-- Durable retry boundary: if final hardening is
 -- interrupted, the next run skips the already-committed large reconciliation.
 comment on column public.asset_tags.category is
   'PopDAM #1479 reconciliation complete; final activation pending.';
 commit;
 
--- These recovery-only indexes must be removed without blocking live writers.
--- CONCURRENTLY is illegal inside a transaction, hence the explicit phase
--- boundary above. Each statement is independently retry-safe.
-drop index concurrently if exists public.asset_tags_pending_metadata_normalization_idx;
-drop index concurrently if exists public.asset_tags_forward_asset_id_idx;
+-- Deliberately retain both prerequisite-A indexes as compatibility recovery
+-- indexes. Even DROP INDEX CONCURRENTLY can wait indefinitely for persistent
+-- old snapshots, so index cleanup must never gate activation. They are harmless
+-- after reconciliation, keep retry/repair paths indexed, and may be reconsidered
+-- only by a separately governed migration with independent live-traffic proof.
 
 begin;
 

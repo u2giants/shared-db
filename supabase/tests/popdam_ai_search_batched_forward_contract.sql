@@ -34,10 +34,10 @@ begin
     raise exception 'prerequisite-A supporting indexes are incomplete';
   end if;
   if v_contract_complete and (
-       to_regclass('public.asset_tags_forward_asset_id_idx') is not null
-       or to_regclass('public.asset_tags_pending_metadata_normalization_idx') is not null
+       to_regclass('public.asset_tags_forward_asset_id_idx') is null
+       or to_regclass('public.asset_tags_pending_metadata_normalization_idx') is null
      ) then
-    raise exception 'recovery-only indexes survived final activation';
+    raise exception 'deliberate-held compatibility recovery indexes are missing';
   end if;
 
   if not exists (

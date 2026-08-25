@@ -15,9 +15,10 @@ begin
   end if;
 
   -- The historical complete preview contract remains intact. Prerequisite A
-  -- recreated this index and recovery B removes it after bounded normalization.
-  if to_regclass('public.asset_tags_pending_metadata_normalization_idx') is not null then
-    raise exception 'recovery-B normalization accelerator remains after final activation';
+  -- recreated this index, and recovery B deliberately retains it so cleanup
+  -- cannot block final activation under persistent live snapshots.
+  if to_regclass('public.asset_tags_pending_metadata_normalization_idx') is null then
+    raise exception 'deliberate-held normalization recovery index is missing';
   end if;
 
   if not exists (

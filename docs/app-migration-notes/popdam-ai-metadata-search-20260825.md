@@ -11,8 +11,9 @@ duplicates, normalizes all tag metadata, and rebuilds compatibility arrays with
 monotonic keyset helpers invoked as separate top-level statements. It uses the
 transaction-local replica role only during reconciliation, restores normal
 trigger behavior before final activation, validates completeness, installs the
-complete original #1427 contract idempotently, removes the forward/pending
-recovery indexes, and retains the active-only production index.
+complete original #1427 contract idempotently, retains the forward/pending
+indexes as deliberate-held compatibility recovery indexes, and retains the
+active-only production index.
 
 This is deliberately not the final #1427 contract. It is the short first half
 of a governed two-transaction recovery. It adds the nullable `asset_tags`
@@ -28,10 +29,12 @@ state:
 - the existing enabled `assets.tags` compatibility trigger is retained and
   verified, rather than disabled before reconciliation is ready;
 - the category column comment records that #1427 recovery B is pending;
-- the general `(asset_id, id)` index supports the later keyset compatibility
-  rebuild and B drops it afterwards; the active-only index is retained for the
-  final contract; the pending-normalization index supports bounded dirty-row
-  seeks and B drops it after normalization;
+- the general `(asset_id, id)` index supports the keyset compatibility rebuild;
+  the pending-normalization index supports bounded dirty-row seeks; B retains
+  both as explicit compatibility recovery indexes because persistent live
+  snapshots can make even `DROP INDEX CONCURRENTLY` exceed the statement
+  timeout, and cleanup must not gate activation; the active-only index is also
+  retained for the final contract;
 - no application may enable the new scoped-AI/search contract until B is
   applied and its final contract tests pass.
 
