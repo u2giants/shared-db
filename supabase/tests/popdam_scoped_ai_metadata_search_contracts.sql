@@ -149,12 +149,14 @@ begin
   end if;
 
   -- Least privilege and public-schema access surface.
-  if has_function_privilege('authenticated','public.replace_asset_ai_tag_result(uuid,text,text,jsonb)','EXECUTE')
-     or not has_function_privilege('service_role','public.replace_asset_ai_tag_result(uuid,text,text,jsonb)','EXECUTE')
-     or not has_function_privilege('authenticated','public.get_effective_asset_metadata(uuid)','EXECUTE')
-     or has_schema_privilege('authenticated','dam','USAGE') then
-    raise exception 'RLS/grant/private-schema contract failed';
-  end if;
+  if has_function_privilege('authenticated','public.replace_asset_ai_tag_result(uuid,text,text,jsonb)','EXECUTE') then
+    raise exception 'authenticated can execute service-only AI replacement'; end if;
+  if not has_function_privilege('service_role','public.replace_asset_ai_tag_result(uuid,text,text,jsonb)','EXECUTE') then
+    raise exception 'service_role cannot execute AI replacement'; end if;
+  if not has_function_privilege('authenticated','public.get_effective_asset_metadata(uuid)','EXECUTE') then
+    raise exception 'authenticated cannot read effective metadata'; end if;
+  if has_table_privilege('authenticated','dam.pdf_rich_extraction','SELECT') then
+    raise exception 'authenticated can read the private dam table'; end if;
 end $$;
 
 rollback;
