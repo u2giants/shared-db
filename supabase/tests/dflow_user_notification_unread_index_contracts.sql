@@ -1,4 +1,4 @@
--- Contracts for 20260826120144_index_dflow_unread_notifications.sql.
+-- Contracts for 20260826145345_index_dflow_unread_notifications.sql.
 
 begin;
 
