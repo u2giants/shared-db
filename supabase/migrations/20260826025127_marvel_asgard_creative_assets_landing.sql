@@ -329,7 +329,7 @@ begin
   if v_cap.status <> 'loading' then raise exception 'load_marvel_asgard_chunk: capture % is not loading', p_capture_key; end if;
   -- Reject payload fields that could retain media access or user identity. Source URL is
   -- capture-level evidence and is deliberately not accepted inside a chunk.
-  if jsonb_path_exists(p_payload, 'strict $.**.keyvalue() ? (@.key like_regex "^(preview|preview_url|download|download_url|signed_url|token|access_token|refresh_token|account_id|user_id|email)$" flag "i")') then
+  if jsonb_path_exists(p_payload, 'lax $.** ? (@.type() == "object").keyvalue() ? (@.key like_regex "^(preview|preview_url|download|download_url|signed_url|token|access_token|refresh_token|account_id|user_id|email)$" flag "i")') then
     raise exception 'load_marvel_asgard_chunk: forbidden media-access or account-identity field';
   end if;
 
