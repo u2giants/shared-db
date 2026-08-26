@@ -83,7 +83,7 @@ create table plm.marvel_asgard_guide_node (
     deferrable initially deferred
 );
 create unique index marvel_asgard_node_source_key_uidx
-  on plm.marvel_asgard_guide_node (source_node_key)
+  on plm.marvel_asgard_guide_node (style_guide_id, source_node_key)
   where source_node_key is not null;
 
 create table plm.marvel_asgard_asset (
@@ -240,7 +240,7 @@ create table plm.marvel_asgard_character_opa_resolution (
     check (status <> 'confirmed' or opa_character_id is not null)
 );
 create unique index marvel_asgard_character_one_confirmed_opa_idx
-  on plm.marvel_asgard_character_opa_resolution(asgard_character_id, opa_character_id)
+  on plm.marvel_asgard_character_opa_resolution(asgard_character_id)
   where status = 'confirmed';
 
 create table plm.marvel_asgard_guide_opa_property_resolution (
@@ -263,7 +263,7 @@ create table plm.marvel_asgard_guide_opa_property_resolution (
     check (status <> 'confirmed' or opa_property_id is not null)
 );
 create unique index marvel_asgard_guide_one_confirmed_opa_idx
-  on plm.marvel_asgard_guide_opa_property_resolution(asgard_style_guide_id, opa_property_id)
+  on plm.marvel_asgard_guide_opa_property_resolution(asgard_style_guide_id)
   where status = 'confirmed';
 
 create or replace function plm.begin_marvel_asgard_capture(
@@ -329,7 +329,7 @@ begin
   if v_cap.status <> 'loading' then raise exception 'load_marvel_asgard_chunk: capture % is not loading', p_capture_key; end if;
   -- Reject payload fields that could retain media access or user identity. Source URL is
   -- capture-level evidence and is deliberately not accepted inside a chunk.
-  if jsonb_path_exists(p_payload, 'lax $.** ? (@.type() == "object").keyvalue() ? (@.key like_regex "^(preview|preview_url|download|download_url|signed_url|token|access_token|refresh_token|account_id|user_id|email)$" flag "i")') then
+  if jsonb_path_exists(p_payload, 'lax $.** ? (@.type() == "object").keyvalue() ? (@.key like_regex "^(preview(_?url)?|download(_?url)?|signed_?url|thumbnail_?url|url|href|token|access_?token|refresh_?token|account_?id|user_?id|email)$" flag "i")') then
     raise exception 'load_marvel_asgard_chunk: forbidden media-access or account-identity field';
   end if;
 
@@ -340,6 +340,15 @@ begin
   where plm.marvel_asgard_guide_category.source_category_key is not distinct from excluded.source_category_key;
   if exists (select 1 from jsonb_to_recordset(coalesce(p_payload->'categories','[]')) x(source_identity_key text,source_category_key text) join plm.marvel_asgard_guide_category t using(source_identity_key) where t.source_category_key is distinct from x.source_category_key) then raise exception 'load_marvel_asgard_chunk: category identifier conflict'; end if;
 
+  if exists (
+    select 1
+    from jsonb_to_recordset(coalesce(p_payload->'style_guides','[]'))
+      x(category_identity_key text)
+    left join plm.marvel_asgard_guide_category c
+      on c.source_identity_key=x.category_identity_key
+    where c.id is null
+  ) then raise exception 'load_marvel_asgard_chunk: unresolved style-guide category key'; end if;
+
   insert into plm.marvel_asgard_style_guide(source_identity_key,source_guide_key,category_id,exact_label,display_order,first_seen_capture_key,last_seen_capture_key,raw_source)
   select x.source_identity_key,x.source_guide_key,c.id,x.exact_label,x.display_order,p_capture_key,p_capture_key,coalesce(x.raw_source,'{}')
   from jsonb_to_recordset(coalesce(p_payload->'style_guides','[]')) x(source_identity_key text,source_guide_key text,category_identity_key text,exact_label text,display_order integer,raw_source jsonb)
@@ -348,14 +357,58 @@ begin
   where plm.marvel_asgard_style_guide.source_guide_key is not distinct from excluded.source_guide_key;
   if exists (select 1 from jsonb_to_recordset(coalesce(p_payload->'style_guides','[]')) x(source_identity_key text,source_guide_key text) join plm.marvel_asgard_style_guide t using(source_identity_key) where t.source_guide_key is distinct from x.source_guide_key) then raise exception 'load_marvel_asgard_chunk: guide identifier conflict'; end if;
 
+  if exists (
+    select 1
+    from jsonb_to_recordset(coalesce(p_payload->'guide_nodes','[]'))
+      x(style_guide_identity_key text)
+    left join plm.marvel_asgard_style_guide g
+      on g.source_identity_key=x.style_guide_identity_key
+    where g.id is null
+  ) then raise exception 'load_marvel_asgard_chunk: unresolved node style-guide key'; end if;
+
+  -- Pass 1 creates every node identity without guessing a missing parent to be a root.
+  -- Pass 2 below links parents after same-chunk parent rows are visible.
   insert into plm.marvel_asgard_guide_node(source_identity_key,source_node_key,style_guide_id,parent_node_id,depth,exact_label,display_order,materialized_source_path,first_seen_capture_key,last_seen_capture_key,raw_source)
-  select x.source_identity_key,x.source_node_key,g.id,p.id,x.depth,x.exact_label,x.display_order,x.materialized_source_path,p_capture_key,p_capture_key,coalesce(x.raw_source,'{}')
+  select x.source_identity_key,x.source_node_key,g.id,null,x.depth,x.exact_label,x.display_order,x.materialized_source_path,p_capture_key,p_capture_key,coalesce(x.raw_source,'{}')
   from jsonb_to_recordset(coalesce(p_payload->'guide_nodes','[]')) x(source_identity_key text,source_node_key text,style_guide_identity_key text,parent_node_identity_key text,depth smallint,exact_label text,display_order integer,materialized_source_path text,raw_source jsonb)
   join plm.marvel_asgard_style_guide g on g.source_identity_key=x.style_guide_identity_key
-  left join plm.marvel_asgard_guide_node p on p.source_identity_key=x.parent_node_identity_key
-  on conflict(source_identity_key) do update set last_seen_capture_key=p_capture_key,parent_node_id=excluded.parent_node_id,depth=excluded.depth,exact_label=excluded.exact_label,display_order=excluded.display_order,materialized_source_path=excluded.materialized_source_path,raw_source=excluded.raw_source
+  on conflict(source_identity_key) do update set last_seen_capture_key=p_capture_key,depth=excluded.depth,exact_label=excluded.exact_label,display_order=excluded.display_order,materialized_source_path=excluded.materialized_source_path,raw_source=excluded.raw_source
   where plm.marvel_asgard_guide_node.source_node_key is not distinct from excluded.source_node_key and plm.marvel_asgard_guide_node.style_guide_id=excluded.style_guide_id;
-  if exists (select 1 from jsonb_to_recordset(coalesce(p_payload->'guide_nodes','[]')) x(source_identity_key text,source_node_key text) join plm.marvel_asgard_guide_node t using(source_identity_key) where t.source_node_key is distinct from x.source_node_key) then raise exception 'load_marvel_asgard_chunk: node identifier conflict'; end if;
+  if exists (
+    select 1
+    from jsonb_to_recordset(coalesce(p_payload->'guide_nodes','[]'))
+      x(source_identity_key text,source_node_key text,style_guide_identity_key text)
+    join plm.marvel_asgard_guide_node t using(source_identity_key)
+    join plm.marvel_asgard_style_guide g
+      on g.source_identity_key=x.style_guide_identity_key
+    where t.source_node_key is distinct from x.source_node_key
+       or t.style_guide_id<>g.id
+  ) then raise exception 'load_marvel_asgard_chunk: node identifier conflict'; end if;
+  if exists (
+    select 1
+    from jsonb_to_recordset(coalesce(p_payload->'guide_nodes','[]'))
+      x(style_guide_identity_key text,parent_node_identity_key text)
+    join plm.marvel_asgard_style_guide g
+      on g.source_identity_key=x.style_guide_identity_key
+    left join plm.marvel_asgard_guide_node p
+      on p.source_identity_key=x.parent_node_identity_key
+     and p.style_guide_id=g.id
+    where x.parent_node_identity_key is not null and p.id is null
+  ) then raise exception 'load_marvel_asgard_chunk: unresolved or cross-guide parent node key'; end if;
+  with incoming as (
+    select x.source_identity_key,p.id parent_node_id
+    from jsonb_to_recordset(coalesce(p_payload->'guide_nodes','[]'))
+      x(source_identity_key text,style_guide_identity_key text,parent_node_identity_key text)
+    join plm.marvel_asgard_style_guide g
+      on g.source_identity_key=x.style_guide_identity_key
+    left join plm.marvel_asgard_guide_node p
+      on p.source_identity_key=x.parent_node_identity_key
+     and p.style_guide_id=g.id
+  )
+  update plm.marvel_asgard_guide_node n
+     set parent_node_id=incoming.parent_node_id
+    from incoming
+   where n.source_identity_key=incoming.source_identity_key;
 
   insert into plm.marvel_asgard_asset(source_identity_key,style_guide_asset_id,asset_id,original_file_id,exact_filename,file_extension,file_size_bytes,display_order,first_seen_capture_key,last_seen_capture_key,raw_source)
   select x.source_identity_key,x.style_guide_asset_id,x.asset_id,x.original_file_id,x.exact_filename,x.file_extension,x.file_size_bytes,x.display_order,p_capture_key,p_capture_key,coalesce(x.raw_source,'{}')
@@ -378,6 +431,18 @@ begin
   where plm.marvel_asgard_term.term_kind=excluded.term_kind and plm.marvel_asgard_term.source_term_key is not distinct from excluded.source_term_key;
   if exists (select 1 from jsonb_to_recordset(coalesce(p_payload->'terms','[]')) x(source_identity_key text,term_kind text,source_term_key text) join plm.marvel_asgard_term t using(source_identity_key) where t.term_kind<>x.term_kind or t.source_term_key is distinct from x.source_term_key) then raise exception 'load_marvel_asgard_chunk: term identifier conflict'; end if;
 
+  if exists (
+    select 1
+    from jsonb_to_recordset(coalesce(p_payload->'checkpoints','[]'))
+      x(style_guide_identity_key text,guide_node_identity_key text)
+    left join plm.marvel_asgard_style_guide g
+      on g.source_identity_key=x.style_guide_identity_key
+    left join plm.marvel_asgard_guide_node n
+      on n.source_identity_key=x.guide_node_identity_key
+     and n.style_guide_id=g.id
+    where g.id is null or n.id is null
+  ) then raise exception 'load_marvel_asgard_chunk: unresolved checkpoint guide or node key'; end if;
+
   insert into plm.marvel_asgard_capture_checkpoint(capture_key,style_guide_id,guide_node_id,page_number,page_size,expected_page_count,expected_asset_count,observed_asset_count,request_sha256,result_sha256,status,first_attempted_at,last_attempted_at,error_class)
   select p_capture_key,g.id,n.id,x.page_number,x.page_size,x.expected_page_count,x.expected_asset_count,x.observed_asset_count,x.request_sha256,x.result_sha256,x.status,coalesce(x.first_attempted_at,now()),coalesce(x.last_attempted_at,now()),x.error_class
   from jsonb_to_recordset(coalesce(p_payload->'checkpoints','[]')) x(style_guide_identity_key text,guide_node_identity_key text,page_number integer,page_size integer,expected_page_count integer,expected_asset_count integer,observed_asset_count integer,request_sha256 text,result_sha256 text,status text,first_attempted_at timestamptz,last_attempted_at timestamptz,error_class text)
@@ -390,12 +455,47 @@ begin
   from jsonb_to_recordset(coalesce(p_payload->'gaps','[]')) x(object_class text,source_key_or_path text,gap_reason text,is_blocking boolean,first_observed_at timestamptz,last_observed_at timestamptz,resolved_at timestamptz)
   on conflict(capture_key,object_class,source_key_or_path,gap_reason) do update set is_blocking=excluded.is_blocking,last_observed_at=excluded.last_observed_at,resolved_at=excluded.resolved_at;
 
+  if exists (
+    select 1
+    from jsonb_to_recordset(coalesce(p_payload->'node_assets','[]'))
+      x(guide_node_identity_key text,page_number integer,asset_identity_key text)
+    left join plm.marvel_asgard_guide_node n
+      on n.source_identity_key=x.guide_node_identity_key
+    left join plm.marvel_asgard_asset a
+      on a.source_identity_key=x.asset_identity_key
+    left join plm.marvel_asgard_capture_checkpoint c
+      on c.capture_key=p_capture_key and c.guide_node_id=n.id
+     and c.page_number=x.page_number
+    where n.id is null or a.id is null or c.capture_key is null
+  ) then raise exception 'load_marvel_asgard_chunk: unresolved node-asset key or checkpoint'; end if;
+
   insert into plm.marvel_asgard_node_asset_observation(capture_key,guide_node_id,page_number,asset_id,source_display_order,raw_observation_sha256)
   select p_capture_key,n.id,x.page_number,a.id,x.source_display_order,x.raw_observation_sha256
   from jsonb_to_recordset(coalesce(p_payload->'node_assets','[]')) x(guide_node_identity_key text,page_number integer,asset_identity_key text,source_display_order integer,raw_observation_sha256 text)
   join plm.marvel_asgard_guide_node n on n.source_identity_key=x.guide_node_identity_key
   join plm.marvel_asgard_asset a on a.source_identity_key=x.asset_identity_key
   on conflict(capture_key,guide_node_id,asset_id) do nothing;
+  if exists (
+    select 1
+    from jsonb_to_recordset(coalesce(p_payload->'node_assets','[]'))
+      x(guide_node_identity_key text,page_number integer,asset_identity_key text,source_display_order integer,raw_observation_sha256 text)
+    join plm.marvel_asgard_guide_node n on n.source_identity_key=x.guide_node_identity_key
+    join plm.marvel_asgard_asset a on a.source_identity_key=x.asset_identity_key
+    join plm.marvel_asgard_node_asset_observation o
+      on o.capture_key=p_capture_key and o.guide_node_id=n.id and o.asset_id=a.id
+    where o.page_number is distinct from x.page_number
+       or o.source_display_order is distinct from x.source_display_order
+       or o.raw_observation_sha256 is distinct from x.raw_observation_sha256
+  ) then raise exception 'load_marvel_asgard_chunk: node-asset replay conflict'; end if;
+
+  if exists (
+    select 1
+    from jsonb_to_recordset(coalesce(p_payload->'asset_characters','[]'))
+      x(asset_identity_key text,character_identity_key text)
+    left join plm.marvel_asgard_asset a on a.source_identity_key=x.asset_identity_key
+    left join plm.marvel_asgard_character c on c.source_identity_key=x.character_identity_key
+    where a.id is null or c.id is null
+  ) then raise exception 'load_marvel_asgard_chunk: unresolved asset-character key'; end if;
 
   insert into plm.marvel_asgard_asset_character_observation(capture_key,asset_id,character_id,raw_observation)
   select p_capture_key,a.id,c.id,coalesce(x.raw_observation,'{}')
@@ -403,6 +503,25 @@ begin
   join plm.marvel_asgard_asset a on a.source_identity_key=x.asset_identity_key
   join plm.marvel_asgard_character c on c.source_identity_key=x.character_identity_key
   on conflict(capture_key,asset_id,character_id) do nothing;
+  if exists (
+    select 1
+    from jsonb_to_recordset(coalesce(p_payload->'asset_characters','[]'))
+      x(asset_identity_key text,character_identity_key text,raw_observation jsonb)
+    join plm.marvel_asgard_asset a on a.source_identity_key=x.asset_identity_key
+    join plm.marvel_asgard_character c on c.source_identity_key=x.character_identity_key
+    join plm.marvel_asgard_asset_character_observation o
+      on o.capture_key=p_capture_key and o.asset_id=a.id and o.character_id=c.id
+    where o.raw_observation is distinct from coalesce(x.raw_observation,'{}')
+  ) then raise exception 'load_marvel_asgard_chunk: asset-character replay conflict'; end if;
+
+  if exists (
+    select 1
+    from jsonb_to_recordset(coalesce(p_payload->'asset_terms','[]'))
+      x(asset_identity_key text,term_identity_key text)
+    left join plm.marvel_asgard_asset a on a.source_identity_key=x.asset_identity_key
+    left join plm.marvel_asgard_term t on t.source_identity_key=x.term_identity_key
+    where a.id is null or t.id is null
+  ) then raise exception 'load_marvel_asgard_chunk: unresolved asset-term key'; end if;
 
   insert into plm.marvel_asgard_asset_term_observation(capture_key,asset_id,term_id,term_kind,raw_combined_value,raw_observation)
   select p_capture_key,a.id,t.id,t.term_kind,x.raw_combined_value,coalesce(x.raw_observation,'{}')
@@ -410,12 +529,42 @@ begin
   join plm.marvel_asgard_asset a on a.source_identity_key=x.asset_identity_key
   join plm.marvel_asgard_term t on t.source_identity_key=x.term_identity_key
   on conflict(capture_key,asset_id,term_id) do nothing;
+  if exists (
+    select 1
+    from jsonb_to_recordset(coalesce(p_payload->'asset_terms','[]'))
+      x(asset_identity_key text,term_identity_key text,raw_combined_value text,raw_observation jsonb)
+    join plm.marvel_asgard_asset a on a.source_identity_key=x.asset_identity_key
+    join plm.marvel_asgard_term t on t.source_identity_key=x.term_identity_key
+    join plm.marvel_asgard_asset_term_observation o
+      on o.capture_key=p_capture_key and o.asset_id=a.id and o.term_id=t.id
+    where o.raw_combined_value is distinct from x.raw_combined_value
+       or o.raw_observation is distinct from coalesce(x.raw_observation,'{}')
+  ) then raise exception 'load_marvel_asgard_chunk: asset-term replay conflict'; end if;
+
+  if exists (
+    select 1
+    from jsonb_to_recordset(coalesce(p_payload->'asset_likeness','[]'))
+      x(asset_identity_key text)
+    left join plm.marvel_asgard_asset a on a.source_identity_key=x.asset_identity_key
+    where a.id is null
+  ) then raise exception 'load_marvel_asgard_chunk: unresolved asset-likeness key'; end if;
 
   insert into plm.marvel_asgard_asset_likeness_observation(capture_key,asset_id,source_value,likeness_state,raw_observation)
   select p_capture_key,a.id,x.source_value,x.likeness_state,coalesce(x.raw_observation,'{}')
   from jsonb_to_recordset(coalesce(p_payload->'asset_likeness','[]')) x(asset_identity_key text,source_value text,likeness_state text,raw_observation jsonb)
   join plm.marvel_asgard_asset a on a.source_identity_key=x.asset_identity_key
   on conflict(capture_key,asset_id) do nothing;
+  if exists (
+    select 1
+    from jsonb_to_recordset(coalesce(p_payload->'asset_likeness','[]'))
+      x(asset_identity_key text,source_value text,likeness_state text,raw_observation jsonb)
+    join plm.marvel_asgard_asset a on a.source_identity_key=x.asset_identity_key
+    join plm.marvel_asgard_asset_likeness_observation o
+      on o.capture_key=p_capture_key and o.asset_id=a.id
+    where o.source_value is distinct from x.source_value
+       or o.likeness_state is distinct from x.likeness_state
+       or o.raw_observation is distinct from coalesce(x.raw_observation,'{}')
+  ) then raise exception 'load_marvel_asgard_chunk: asset-likeness replay conflict'; end if;
 
   v_result := jsonb_build_object('capture_key',p_capture_key,'chunk_key',p_chunk_key,'accepted',true);
   return v_result;

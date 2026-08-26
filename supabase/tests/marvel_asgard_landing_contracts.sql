@@ -35,15 +35,23 @@ begin
   ));
 
   v_parent := null;
+  v_payload := '[]'::jsonb;
   for v_i in 1..12 loop
-    v_payload := jsonb_build_object('guide_nodes',jsonb_build_array(jsonb_build_object(
+    v_payload := v_payload || jsonb_build_array(jsonb_build_object(
       'source_identity_key','node-'||v_i,'source_node_key','node-source-'||v_i,
       'style_guide_identity_key','guide-1','parent_node_identity_key',v_parent,
       'depth',v_i,'exact_label','Synthetic Node '||v_i,'display_order',v_i,
-      'materialized_source_path','/synthetic/'||v_i,'raw_source','{}'::jsonb)));
-    perform plm.load_marvel_asgard_chunk(v_capture,'marvel_asgard','node-'||v_i,v_payload);
+      'materialized_source_path','/synthetic/'||v_i,'raw_source','{}'::jsonb));
     v_parent := 'node-'||v_i;
   end loop;
+  -- Parent and all eleven descendants arrive in one chunk, deliberately child-after-parent
+  -- within one INSERT input. The loader must link them in its second pass.
+  perform plm.load_marvel_asgard_chunk(v_capture,'marvel_asgard','all-nodes',jsonb_build_object('guide_nodes',v_payload));
+  if exists (
+    select 1 from plm.marvel_asgard_guide_node n
+    where n.source_identity_key<>'node-1' and n.last_seen_capture_key=v_capture
+      and n.parent_node_id is null
+  ) then raise exception 'same-chunk hierarchy was flattened'; end if;
 
   perform plm.load_marvel_asgard_chunk(v_capture,'marvel_asgard','leaf-pages',jsonb_build_object(
     'assets',jsonb_build_array(
@@ -87,11 +95,35 @@ begin
   begin
     perform plm.load_marvel_asgard_chunk(v_capture,'marvel_asgard','conflict',jsonb_build_object('assets',jsonb_build_array(jsonb_build_object('source_identity_key','asset-1','style_guide_asset_id','different','asset_id','asset-source-1','original_file_id','file-1','exact_filename','invented.bin','raw_source','{}'::jsonb))));
     raise exception 'identifier conflict unexpectedly succeeded';
-  exception when others then if sqlerrm='identifier conflict unexpectedly succeeded' then raise; end if; end;
+  exception when others then if sqlerrm not like '%asset identifier conflict%' then raise; end if; end;
   begin
-    perform plm.load_marvel_asgard_chunk(v_capture,'marvel_asgard','secret',jsonb_build_object('assets',jsonb_build_array(jsonb_build_object('download_url','https://synthetic.invalid/file'))));
+    perform plm.load_marvel_asgard_chunk(v_capture,'marvel_asgard','secret',jsonb_build_object('assets',jsonb_build_array(jsonb_build_object('source_identity_key','asset-1','style_guide_asset_id','sga-1','asset_id','asset-source-1','original_file_id','file-1','exact_filename','invented-one.bin','raw_source',jsonb_build_object('downloadUrl','https://synthetic.invalid/file')))));
     raise exception 'forbidden URL unexpectedly accepted';
-  exception when others then if sqlerrm='forbidden URL unexpectedly accepted' then raise; end if; end;
+  exception when others then if sqlerrm not like '%forbidden media-access%' then raise; end if; end;
+  -- Every referenced source identity must resolve; inner joins may not silently drop rows.
+  begin
+    perform plm.load_marvel_asgard_chunk(v_capture,'marvel_asgard','missing-ref',jsonb_build_object('asset_characters',jsonb_build_array(jsonb_build_object('asset_identity_key','asset-1','character_identity_key','missing-character','raw_observation','{}'::jsonb))));
+    raise exception 'missing relationship unexpectedly accepted';
+  exception when others then if sqlerrm not like '%unresolved asset-character key%' then raise; end if; end;
+  begin
+    perform plm.load_marvel_asgard_chunk(v_capture,'marvel_asgard','missing-parent',jsonb_build_object('guide_nodes',jsonb_build_array(jsonb_build_object('source_identity_key','orphan-node','source_node_key','orphan-source','style_guide_identity_key','guide-1','parent_node_identity_key','absent-parent','depth',2,'exact_label','Synthetic Orphan','display_order',1,'materialized_source_path','/absent/orphan','raw_source','{}'::jsonb))));
+    raise exception 'missing parent unexpectedly accepted';
+  exception when others then if sqlerrm not like '%unresolved or cross-guide parent%' then raise; end if; end;
+  -- Exact observation replay is idempotent, but changed direct evidence fails closed.
+  perform plm.load_marvel_asgard_chunk(v_capture,'marvel_asgard','relationships-replay',jsonb_build_object('node_assets',jsonb_build_array(jsonb_build_object('guide_node_identity_key','node-12','page_number',1,'asset_identity_key','asset-1','source_display_order',1,'raw_observation_sha256',repeat('1',64)))));
+  begin
+    perform plm.load_marvel_asgard_chunk(v_capture,'marvel_asgard','relationships-conflict',jsonb_build_object('node_assets',jsonb_build_array(jsonb_build_object('guide_node_identity_key','node-12','page_number',2,'asset_identity_key','asset-1','source_display_order',1,'raw_observation_sha256',repeat('9',64)))));
+    raise exception 'observation conflict unexpectedly accepted';
+  exception when others then if sqlerrm not like '%node-asset replay conflict%' then raise; end if; end;
+  -- A node identity cannot silently move to another guide. A raw source node key may,
+  -- however, legitimately recur under a different guide.
+  begin
+    perform plm.load_marvel_asgard_chunk(v_capture,'marvel_asgard','second-guide',jsonb_build_object(
+      'style_guides',jsonb_build_array(jsonb_build_object('source_identity_key','guide-2','source_guide_key','guide-source-2','category_identity_key','category-1','exact_label','Synthetic Guide Two','display_order',1,'raw_source','{}'::jsonb)),
+      'guide_nodes',jsonb_build_array(jsonb_build_object('source_identity_key','node-other-guide','source_node_key','node-source-1','style_guide_identity_key','guide-2','parent_node_identity_key',null,'depth',1,'exact_label','Synthetic Other Root','display_order',1,'materialized_source_path','/other','raw_source','{}'::jsonb))));
+    perform plm.load_marvel_asgard_chunk(v_capture,'marvel_asgard','node-guide-conflict',jsonb_build_object('guide_nodes',jsonb_build_array(jsonb_build_object('source_identity_key','node-1','source_node_key','node-source-1','style_guide_identity_key','guide-2','parent_node_identity_key',null,'depth',1,'exact_label','Synthetic Root','display_order',1,'materialized_source_path','/other/root','raw_source','{}'::jsonb))));
+    raise exception 'node guide conflict unexpectedly accepted';
+  exception when others then if sqlerrm not like '%node identifier conflict%' then raise; end if; end;
 
   v_result := plm.finalize_marvel_asgard_capture(v_capture,'marvel_asgard');
   if v_result->>'status' <> 'complete' then raise exception 'expected complete capture, got %',v_result; end if;
@@ -119,6 +151,22 @@ begin
     insert into plm.marvel_asgard_character_opa_resolution(asgard_character_id,status) values(v_character,'confirmed');
     raise exception 'authority-free confirmation unexpectedly succeeded';
   exception when check_violation then null; end;
+  insert into plm.opa_character(character_id,character_name) values(-910001,'Synthetic OPA Character One'),(-910002,'Synthetic OPA Character Two');
+  insert into plm.opa_property(licensed_property_id,property_name) values(-920001,'Synthetic OPA Property One'),(-920002,'Synthetic OPA Property Two');
+  insert into plm.marvel_asgard_character_opa_resolution(asgard_character_id,opa_character_id,status,decision_authority,decision_evidence,decided_at)
+  values(v_character,-910001,'confirmed','synthetic reviewer','invented contract evidence',now());
+  begin
+    insert into plm.marvel_asgard_character_opa_resolution(asgard_character_id,opa_character_id,status,decision_authority,decision_evidence,decided_at)
+    values(v_character,-910002,'confirmed','synthetic reviewer','invented conflicting evidence',now());
+    raise exception 'stacked character confirmation unexpectedly succeeded';
+  exception when unique_violation then null; end;
+  insert into plm.marvel_asgard_guide_opa_property_resolution(asgard_style_guide_id,opa_property_id,status,decision_authority,decision_evidence,decided_at)
+  values(v_guide,-920001,'confirmed','synthetic reviewer','invented contract evidence',now());
+  begin
+    insert into plm.marvel_asgard_guide_opa_property_resolution(asgard_style_guide_id,opa_property_id,status,decision_authority,decision_evidence,decided_at)
+    values(v_guide,-920002,'confirmed','synthetic reviewer','invented conflicting evidence',now());
+    raise exception 'stacked guide confirmation unexpectedly succeeded';
+  exception when unique_violation then null; end;
 
   -- Payloads from another source and media/account secrets are refused.
   begin
