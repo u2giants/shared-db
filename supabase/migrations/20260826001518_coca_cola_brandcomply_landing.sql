@@ -1,5 +1,5 @@
 -- Coca-Cola BrandComply private landing schema.
--- Issue #1464; claim #1554; reserved version 20260825224018.
+-- Issue #1464; claim #1554; reserved version 20260826001518.
 --
 -- SCHEMA ONLY. This public migration contains no licensed values or fixtures.
 -- Exact strings and raw JSON arrive only at runtime from u2giants/licensor-source-data.

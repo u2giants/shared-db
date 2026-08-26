@@ -1,4 +1,4 @@
--- Coca-Cola BrandComply landing contracts for migration 20260825224018.
+-- Coca-Cola BrandComply landing contracts for migration 20260826001518.
 -- PUBLIC TEST: every value below is invented (ZZTEST / example.invalid).
 -- No licensed source label, row, contact, filename, comment or payload appears here.
 
