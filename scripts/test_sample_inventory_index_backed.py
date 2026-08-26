@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
-MIGRATION = ROOT / "supabase/migrations/20260825224248_sample_inventory_index_backed.sql"
+MIGRATION = ROOT / "supabase/migrations/20260826002422_sample_inventory_index_backed.sql"
 SQL = MIGRATION.read_text(encoding="utf-8")
 
 class SampleInventoryIndexBackedContract(unittest.TestCase):
