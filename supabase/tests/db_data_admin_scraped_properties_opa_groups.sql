@@ -95,6 +95,18 @@ begin
   insert into plm.lucasfilm_dcp_property (source_system, source_id, display_name)
   values ('lucasfilm_dcpvault', v_search || '/star-wars-dcp', v_search || ' Star Wars DCP');
 
+  insert into plm.dcp_property_licensor_resolution (
+    source_system, source_property_id, presentation_licensor_key,
+    presentation_licensor_name, resolution_status, authority_kind,
+    authority_reference, evidence_reference, source_hash, resolved_at
+  ) values
+    ('disney_dcpvault', v_search || '/disney-dcp', 'disney', 'Disney',
+     'supported_core_ownership', 'synthetic', 'synthetic', 'synthetic', repeat('a',64), now()),
+    ('marvel_dcpvault', v_search || '/marvel-dcp', 'marvel', 'Marvel',
+     'supported_core_ownership', 'synthetic', 'synthetic', 'synthetic', repeat('b',64), now()),
+    ('lucasfilm_dcpvault', v_search || '/star-wars-dcp', 'star-wars', 'Star Wars',
+     'supported_core_ownership', 'synthetic', 'synthetic', 'synthetic', repeat('c',64), now());
+
   v_cursor := null;
   loop
     select api.db_data_admin_scraped_properties(v_search, v_cursor, 1000) into v_page;
