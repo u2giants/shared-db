@@ -31,7 +31,7 @@ begin
   end if;
 
   if v_key_definition !~ '\(user_id_fk, created_date DESC\)'
-     or regexp_replace(v_predicate, '[()]', '', 'g') <> 'unread IS TRUE' then
+     or regexp_replace(v_predicate, '[()]', '', 'g') <> 'unread' then
     raise exception 'unread notification index has the wrong keys or predicate: % / %',
       v_key_definition, v_predicate;
   end if;
