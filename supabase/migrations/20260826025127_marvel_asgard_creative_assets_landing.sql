@@ -465,7 +465,7 @@ begin
   if v_n>0 then v_errors:=v_errors||jsonb_build_object('code','page_asset_reconciliation_failed','count',v_n); end if;
   select count(*) into v_n
   from plm.marvel_asgard_asset_term_observation o
-  cross join lateral regexp_split_to_table(o.raw_combined_value, '\\|') component
+  cross join lateral regexp_split_to_table(o.raw_combined_value, E'\\|') component
   where o.capture_key=p_capture_key and o.term_kind='descriptive_keyword'
     and o.raw_combined_value is not null
     and not exists (
