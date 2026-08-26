@@ -65,8 +65,19 @@ comment on column plm.dcp_property_licensor_resolution.evidence_reference is
 
 alter table plm.dcp_property_licensor_resolution enable row level security;
 revoke all on table plm.dcp_property_licensor_resolution from public, anon, authenticated;
+revoke update, delete, truncate, references, trigger, maintain
+  on table plm.dcp_property_licensor_resolution from service_role;
 grant select, insert on table plm.dcp_property_licensor_resolution
   to service_role;
+
+create policy dcp_property_licensor_resolution_read
+on plm.dcp_property_licensor_resolution
+for select to authenticated
+using (
+  app.has_role('administrator')
+  or app.has_app_access('plm')
+  or app.has_any_role(array['sales', 'licensing']::app.app_role[])
+);
 
 do $migration$
 declare
