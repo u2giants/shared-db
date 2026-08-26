@@ -801,6 +801,40 @@ Then: merge to `main` (this auto-syncs the `shared-db/` folder into all apps) an
 promote to **production only in an approved window**. Docs-only PRs (no schema
 change) need just items 1 and "it reads correctly" — merge them promptly.
 
+### 5.0-D Declare what a re-derived migration was derived from — `-- derived-from:` (issue #1608, added 2026-08-26)
+
+Loader-style migrations here are authored as a **full re-derivation of the
+then-current object body on `main`**. A file that does
+`create or replace function|view` therefore depends on its base being present
+**in the target database** — and on 2026-08-24 one was promoted to production
+without it. The apply did not fail; it replaced the object with a body written
+for a different world, and post-apply catalog verification stayed green because
+the object still existed. Three migrations were retired over it.
+
+If your migration re-replaces an object an earlier migration also replaces, put
+**one machine-readable line** in the header:
+
+```sql
+-- derived-from: 20260814223552
+```
+
+or, if it writes the object from scratch and depends on no earlier rewrite:
+
+```sql
+-- derived-from: none
+```
+
+`scripts/migration_derivation.py` reads it. The Python test suite refuses a pull
+request that omits it (mandatory for every migration stamped 2026-08-27 or
+later), and the promotion lane refuses an allowlist whose member declares a base
+the target ledger does not have. The escape hatch is
+`--derivation-override VERSION:BASE=<what the database will actually hold>`,
+which is recorded verbatim in the run log. The drift report shows such a version
+as `[BASE-ABSENT]`, not as ordinary pending work.
+
+Do **not** add the line to an already-merged migration — that changes its bytes.
+Merged files that need a declaration get one in `LEGACY_DECLARATIONS`.
+
 ### 5.1 Promoting to production when a backlog exists — NEVER `--include-all` on the full repo set, ALWAYS inside the pruned temp checkout (learned 2026-07-23; recipe corrected 2026-07-27; wording made self-consistent 2026-08-09)
 
 > **Moved 2026-08-20** to [`docs/production-promotion-procedure.md`](docs/production-promotion-procedure.md) (issue #1331). Text unchanged; the section number is unchanged, so `AGENTS.md §5.1` still resolves.
