@@ -28,7 +28,9 @@ begin
      or has_table_privilege('authenticated', 'plm.dcp_property_licensor_resolution', 'insert') then
     raise exception 'private DCP licensor resolution grants are too broad';
   end if;
-  if not has_table_privilege('service_role', 'plm.dcp_property_licensor_resolution', 'select,insert,update,delete') then
+  if not has_table_privilege('service_role', 'plm.dcp_property_licensor_resolution', 'select,insert')
+     or has_table_privilege('service_role', 'plm.dcp_property_licensor_resolution', 'update')
+     or has_table_privilege('service_role', 'plm.dcp_property_licensor_resolution', 'delete') then
     raise exception 'service-role resolution loading grant is incomplete';
   end if;
 
