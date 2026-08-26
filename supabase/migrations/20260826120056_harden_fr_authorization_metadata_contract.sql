@@ -58,8 +58,12 @@ begin
   if not found then
     raise exception 'licensing canonical write refused: no exact transaction-bound authorization for %.% columns %', tg_table_schema, tg_table_name, v_changed;
   end if;
-  if v_auth.write_kind = 'coldlion_status' and (tg_table_name <> 'property' or v_changed <> array['status']::text[] or new.status not in ('active','inactive')) then
-    raise exception 'coldlion_status authorization may change only Property status to active or inactive';
+  -- Preserve the later #1429 lifecycle contract: ColdLion may make an
+  -- exact-column UPDATE of status on either canonical Licensor or Property.
+  -- This CREATE OR REPLACE must not regress that forward expansion merely
+  -- because the FR branch was derived from the earlier guard definition.
+  if v_auth.write_kind = 'coldlion_status' and (tg_table_name not in ('licensor','property') or tg_op <> 'UPDATE' or v_changed <> array['status']::text[] or new.status not in ('active','inactive')) then
+    raise exception 'coldlion_status authorization may change only Licensor or Property status to active or inactive';
   end if;
   if v_auth.write_kind in ('scrape_consolidation','licensing_review_create') and tg_table_name = 'property' and tg_op = 'INSERT' and new.status <> 'potential' then
     raise exception '% authorization must create Property as potential', v_auth.write_kind;
