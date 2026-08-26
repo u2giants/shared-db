@@ -34,14 +34,14 @@ begin
     (v_other_asset, 'zz1597-other.ai', 'ZZ1597/B/other.ai', 'ai',
       'zz1597-other-' || txid_current(), now(), v_other_group, false, null, 1);
 
-  insert into public.asset_tags(asset_id, tag, source, category, status)
+  insert into public.asset_tags(asset_id, tag, source, category, status, rejected_at)
   values
-    (v_source, v_new_tag, 'ai', 'legacy_unscoped', 'active'),
-    (v_source, v_manual_tag, 'ai', 'legacy_unscoped', 'active'),
-    (v_source, v_rejected_tag, 'ai', 'legacy_unscoped', 'active'),
-    (v_sibling, v_manual_tag, 'manual', 'other', 'active'),
-    (v_sibling, v_rejected_tag, 'ai', 'legacy_unscoped', 'rejected'),
-    (v_other_asset, v_other_tag, 'manual', 'other', 'active');
+    (v_source, v_new_tag, 'ai', 'legacy_unscoped', 'active', null),
+    (v_source, v_manual_tag, 'ai', 'legacy_unscoped', 'active', null),
+    (v_source, v_rejected_tag, 'ai', 'legacy_unscoped', 'active', null),
+    (v_sibling, v_manual_tag, 'manual', 'other', 'active', null),
+    (v_sibling, v_rejected_tag, 'ai', 'legacy_unscoped', 'rejected', now()),
+    (v_other_asset, v_other_tag, 'manual', 'other', 'active', null);
 
   select to_jsonb(t) into v_manual_before
   from public.asset_tags t where t.asset_id = v_sibling and t.tag = v_manual_tag;
