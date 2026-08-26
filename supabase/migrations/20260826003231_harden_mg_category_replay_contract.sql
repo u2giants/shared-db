@@ -40,8 +40,10 @@ begin
         upper(btrim(mg_code)) as code_key,
         lower(btrim(mg_desc)) as desc_key,
         count(*) as row_count
-      from core."merchGroup"
-      where "mgTypeCode" = '01' and is_active is true
+      from core."merchGroup" mg
+      join core.mg_category_merch_group link
+        on link.merch_group_mg_id = mg.mg_id
+      where mg."mgTypeCode" = '01' and mg.is_active is true
       group by
         upper(btrim(coalesce("divisionCode_fk", ''))),
         upper(btrim(mg_code)),

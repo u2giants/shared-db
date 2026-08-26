@@ -243,6 +243,23 @@ begin
     end if;
   end loop;
 
+  select count(*) into v_n
+  from pg_description d
+  join pg_class c on c.oid = d.objoid
+  join pg_namespace n on n.oid = c.relnamespace
+  join pg_attribute a on a.attrelid = c.oid and a.attnum = d.objsubid
+  where n.nspname = 'core'
+    and c.relname = 'mg_category'
+    and a.attname = 'name'
+    and d.description like 'Migration-authoritative display label%';
+  if v_n = 1 then
+    v_pass := v_pass + 1;
+    raise notice 'PASS mg_category.name documents migration-authoritative replay behavior';
+  else
+    v_fail := v_fail + 1;
+    raise notice 'FAIL mg_category.name does not document migration-authoritative replay behavior';
+  end if;
+
   -- The foreign key onto core.mg_category, so a link can never point at nothing.
   select count(*) into v_n
   from pg_constraint
