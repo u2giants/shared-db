@@ -203,15 +203,13 @@ DECLARE
 BEGIN
   SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname='dblink') INTO v_has_dblink;
   IF NOT v_has_dblink THEN
-    RAISE NOTICE 'FLOW4 EVENT CONCURRENCY SKIP: dblink is not installed, so a genuine two-session overlapping retry cannot run';
-    RETURN;
+    RAISE EXCEPTION 'FLOW4 EVENT CONCURRENCY REQUIRED: dblink is not installed, so the genuine two-session overlapping retry was not proved';
   END IF;
 
   BEGIN
     PERFORM dblink_connect('flow4_event_writer','dbname=' || current_database());
   EXCEPTION WHEN connection_exception THEN
-    RAISE NOTICE 'FLOW4 EVENT CONCURRENCY SKIP: dblink cannot open the required second database session (%)', SQLERRM;
-    RETURN;
+    RAISE EXCEPTION 'FLOW4 EVENT CONCURRENCY REQUIRED: dblink cannot open the required second database session (%)', SQLERRM;
   END;
 
   BEGIN
@@ -274,15 +272,13 @@ DECLARE
 BEGIN
   SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname='dblink') INTO v_has_dblink;
   IF NOT v_has_dblink THEN
-    RAISE NOTICE 'FLOW4 RESERVATION CONCURRENCY SKIP: dblink is not installed, so a genuine two-session overlapping retry cannot run';
-    RETURN;
+    RAISE EXCEPTION 'FLOW4 RESERVATION CONCURRENCY REQUIRED: dblink is not installed, so the genuine two-session overlapping retry was not proved';
   END IF;
 
   BEGIN
     PERFORM dblink_connect('flow4_reserve_writer','dbname=' || current_database());
   EXCEPTION WHEN connection_exception THEN
-    RAISE NOTICE 'FLOW4 RESERVATION CONCURRENCY SKIP: dblink cannot open the required second database session (%)', SQLERRM;
-    RETURN;
+    RAISE EXCEPTION 'FLOW4 RESERVATION CONCURRENCY REQUIRED: dblink cannot open the required second database session (%)', SQLERRM;
   END;
 
   BEGIN
