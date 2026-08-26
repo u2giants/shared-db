@@ -67,7 +67,7 @@ CREATE TABLE dflow.sample_reservation (
   sample_reservation_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   sample_remote_request_item_id uuid NOT NULL REFERENCES dflow.sample_remote_request_item(sample_remote_request_item_id) ON UPDATE CASCADE ON DELETE RESTRICT,
   sample_id_fk integer NOT NULL REFERENCES dflow.sample(sample_id_pk) ON UPDATE CASCADE ON DELETE RESTRICT,
-  reservation_state text NOT NULL DEFAULT 'reserved' CHECK (reservation_state IN ('reserved','packed','released')),
+  reservation_state text NOT NULL DEFAULT 'reserved' CHECK (reservation_state IN ('reserved','packed')),
   open_sample_id integer GENERATED ALWAYS AS (CASE WHEN reservation_state = 'reserved' THEN sample_id_fk END) STORED UNIQUE,
   packed_box_id integer REFERENCES dflow.sample_box(box_id_pk) ON UPDATE CASCADE ON DELETE RESTRICT,
   packed_shipment_line_id bigint REFERENCES dflow.sample_shipment_line(shipment_line_id) ON UPDATE CASCADE ON DELETE RESTRICT,
@@ -78,7 +78,6 @@ CREATE TABLE dflow.sample_reservation (
   reserved_at timestamptz NOT NULL DEFAULT now(),
   packed_at timestamptz,
   CHECK ((reservation_state = 'reserved' AND packed_box_id IS NULL AND packed_shipment_line_id IS NULL AND packed_at IS NULL)
-      OR (reservation_state = 'released' AND packed_box_id IS NULL AND packed_shipment_line_id IS NULL AND packed_at IS NULL)
       OR (reservation_state = 'packed' AND packed_box_id IS NOT NULL AND packed_shipment_line_id IS NOT NULL AND packed_at IS NOT NULL AND btrim(packed_by_user) <> ''))
 );
 
@@ -93,13 +92,15 @@ BEGIN
   IF btrim(coalesce(p_actor_user,''))='' OR btrim(coalesce(p_idempotency_key,''))='' OR btrim(coalesce(p_request_hash,''))='' THEN
     RAISE EXCEPTION 'actor, idempotency key, and request hash are required' USING ERRCODE='22023';
   END IF;
+  SELECT * INTO v_item FROM dflow.sample_remote_request_item WHERE sample_remote_request_item_id=p_item_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'remote request item not found' USING ERRCODE='P0002'; END IF;
+  -- The item lock serializes same-item first writers. Re-checking the key only
+  -- after the lock makes a concurrent exact replay observe the committed row.
   SELECT * INTO v_existing FROM dflow.sample_remote_request_history WHERE sample_remote_request_item_id=p_item_id AND idempotency_key=p_idempotency_key;
   IF FOUND THEN
     IF v_existing.request_hash<>p_request_hash OR v_existing.to_state<>p_to_state THEN RAISE EXCEPTION 'idempotency conflict' USING ERRCODE='23505'; END IF;
     RETURN v_existing;
   END IF;
-  SELECT * INTO v_item FROM dflow.sample_remote_request_item WHERE sample_remote_request_item_id=p_item_id FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'remote request item not found' USING ERRCODE='P0002'; END IF;
   SELECT * INTO v_request FROM dflow.sample_remote_request WHERE sample_remote_request_id=v_item.sample_remote_request_id;
   SELECT * INTO v_workflow FROM dflow.sample_workflow WHERE sample_workflow_id=v_item.workflow_id;
   IF v_workflow.workflow_type<>'nyo_remote_china_inventory_request' OR v_workflow.business_path<>v_item.business_path
@@ -131,10 +132,12 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, dflow AS $$
 DECLARE v_item dflow.sample_remote_request_item; v_existing dflow.sample_reservation; v_result dflow.sample_reservation;
 BEGIN
   IF p_actor_role<>'ningbo' THEN RAISE EXCEPTION 'only Ningbo may reserve a confirmed item' USING ERRCODE='42501'; END IF;
-  SELECT * INTO v_existing FROM dflow.sample_reservation WHERE idempotency_key=p_idempotency_key;
-  IF FOUND THEN IF v_existing.request_hash<>p_request_hash OR v_existing.sample_remote_request_item_id<>p_item_id THEN RAISE EXCEPTION 'idempotency conflict' USING ERRCODE='23505'; END IF; RETURN v_existing; END IF;
   SELECT * INTO v_item FROM dflow.sample_remote_request_item WHERE sample_remote_request_item_id=p_item_id FOR UPDATE;
   IF NOT FOUND OR v_item.sample_id_fk IS NULL THEN RAISE EXCEPTION 'reservable request item not found' USING ERRCODE='P0002'; END IF;
+  -- Serialize first writers on the item, then re-check the operation key so a
+  -- concurrent exact replay deterministically returns the committed reservation.
+  SELECT * INTO v_existing FROM dflow.sample_reservation WHERE idempotency_key=p_idempotency_key;
+  IF FOUND THEN IF v_existing.request_hash<>p_request_hash OR v_existing.sample_remote_request_item_id<>p_item_id THEN RAISE EXCEPTION 'idempotency conflict' USING ERRCODE='23505'; END IF; RETURN v_existing; END IF;
   IF NOT ((v_item.source_type='ningbo_inventory' AND v_item.current_state='confirmed') OR (v_item.source_type IN ('photo','china_warehouse') AND v_item.current_state='received')) THEN
     RAISE EXCEPTION 'item is not physically confirmed in Ningbo' USING ERRCODE='23514';
   END IF;
@@ -162,8 +165,10 @@ BEGIN
   IF v_res.reservation_state='packed' THEN
     SELECT * INTO v_line FROM dflow.sample_shipment_line WHERE shipment_line_id=v_res.packed_shipment_line_id;
     IF v_res.request_hash<>p_request_hash OR v_res.packed_box_id<>p_box_id
+       OR v_line.request_hash<>p_request_hash OR v_line.box_id_fk<>p_box_id
        OR v_line.idempotency_key<>p_idempotency_key
        OR v_line.sample_shipment_id IS DISTINCT FROM p_sample_shipment_id
+       OR v_line.origin_location_type<>'office'
        OR v_line.origin_location_id<>p_origin_location_id
        OR v_line.destination_location_type<>p_destination_type
        OR v_line.destination_location_id<>p_destination_id
@@ -178,7 +183,11 @@ BEGIN
   PERFORM 1 FROM dflow.sample_box WHERE box_id_pk=p_box_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'box not found' USING ERRCODE='P0002'; END IF;
   SELECT * INTO v_line FROM dflow.sample_shipment_line WHERE sample_id_fk=v_res.sample_id_fk AND idempotency_key=p_idempotency_key;
-  IF FOUND AND (v_line.request_hash<>p_request_hash OR v_line.box_id_fk<>p_box_id OR v_line.sample_shipment_id IS DISTINCT FROM p_sample_shipment_id) THEN
+  IF FOUND AND (v_line.request_hash<>p_request_hash OR v_line.box_id_fk<>p_box_id
+     OR v_line.sample_shipment_id IS DISTINCT FROM p_sample_shipment_id
+     OR v_line.origin_location_type<>'office' OR v_line.origin_location_id<>p_origin_location_id
+     OR v_line.destination_location_type<>p_destination_type OR v_line.destination_location_id<>p_destination_id
+     OR v_line.route_leg<>p_route_leg) THEN
     RAISE EXCEPTION 'idempotency conflict' USING ERRCODE='23505';
   END IF;
   INSERT INTO dflow.sample_shipment_item(sample_id_fk,box_id_fk,leg_type,added_date,added_user,quantity_intended)

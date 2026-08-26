@@ -15,6 +15,10 @@ DECLARE
   v_shipment bigint;
   v_before_movement bigint;
   v_first_line bigint;
+  v_event_id bigint;
+  v_event_replay_id bigint;
+  v_event_definition text;
+  v_reserve_definition text;
 BEGIN
   IF to_regclass('dflow.sample_remote_request') IS NULL
      OR to_regclass('dflow.sample_remote_request_item') IS NULL
@@ -55,7 +59,11 @@ BEGIN
   PERFORM dflow.post_sample_remote_request_event(v_ningbo_item,'requested','nyo-user','nyo','item-ningbo','item-hash-ningbo');
   IF (SELECT count(*) FROM dflow.sample_remote_request_history WHERE sample_remote_request_item_id IN (v_warehouse_item,v_ningbo_item) AND to_state='requested') <> 2 THEN RAISE EXCEPTION 'initial requested history is missing'; END IF;
 
-  PERFORM dflow.post_sample_remote_request_event(v_warehouse_item,'awaiting_qc','nyo-user','nyo','warehouse-await','h-await');
+  SELECT sample_remote_request_history_id INTO v_event_id
+  FROM dflow.post_sample_remote_request_event(v_warehouse_item,'awaiting_qc','nyo-user','nyo','warehouse-await','h-await');
+  SELECT sample_remote_request_history_id INTO v_event_replay_id
+  FROM dflow.post_sample_remote_request_event(v_warehouse_item,'awaiting_qc','nyo-user','nyo','warehouse-await','h-await');
+  IF v_event_replay_id <> v_event_id THEN RAISE EXCEPTION 'event replay did not return the committed event'; END IF;
   BEGIN
     PERFORM dflow.post_sample_remote_request_event(v_warehouse_item,'confirmed','wrong-user','ningbo','warehouse-wrong-role','h-wrong');
     RAISE EXCEPTION 'wrong role confirmed warehouse stock';
@@ -98,6 +106,24 @@ BEGIN
   IF pg_get_functiondef('dflow.pack_sample_reservation(uuid,integer,bigint,text,text,text,text,text,text,text,text)'::regprocedure) NOT LIKE '%FOR UPDATE%' THEN
     RAISE EXCEPTION 'packing does not serialize on a row lock';
   END IF;
+
+  v_event_definition := lower(pg_get_functiondef('dflow.post_sample_remote_request_event(uuid,text,text,text,text,text,text,jsonb)'::regprocedure));
+  IF strpos(v_event_definition,'for update') = 0
+     OR strpos(v_event_definition,'from dflow.sample_remote_request_history') = 0
+     OR strpos(v_event_definition,'for update') > strpos(v_event_definition,'from dflow.sample_remote_request_history') THEN
+    RAISE EXCEPTION 'event idempotency lookup occurs before the item row lock';
+  END IF;
+  v_reserve_definition := lower(pg_get_functiondef('dflow.reserve_sample_remote_request_item(uuid,text,text,text,text)'::regprocedure));
+  IF strpos(v_reserve_definition,'for update') = 0
+     OR strpos(v_reserve_definition,'from dflow.sample_reservation') = 0
+     OR strpos(v_reserve_definition,'for update') > strpos(v_reserve_definition,'from dflow.sample_reservation') THEN
+    RAISE EXCEPTION 'reservation idempotency lookup occurs before the item row lock';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid='dflow.sample_reservation'::regclass
+      AND pg_get_constraintdef(oid) LIKE '%released%'
+  ) THEN RAISE EXCEPTION 'reservation advertises an unreachable released lifecycle'; END IF;
 
   PERFORM dflow.post_sample_remote_request_event(v_ningbo_item,'awaiting_ningbo','nyo-user','nyo','ningbo-await','n-await');
   PERFORM dflow.post_sample_remote_request_event(v_ningbo_item,'not_found','ningbo-user','ningbo','ningbo-not-found','n-not-found','physically absent');
