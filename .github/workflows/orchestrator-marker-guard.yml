@@ -115,7 +115,12 @@ jobs:
           The scheduled \`Orchestrator marker guard\` run failed.
 
           Either **more than one \`orchestrator-marker\` issue is open**, or the retired
-          \`coordinator-marker\` label is alive again, or the answer could not be determined.
+          \`coordinator-marker\` label is alive again, or the open marker carries no valid
+          \`orchestrator-routing\` block (AGENTS.md §11c), or the answer could not be determined.
+
+          If the marker is unroutable, an orchestrator **may be live and unreachable**. That is
+          NOT the same as "no orchestrator" — do not start a second one, and do not take a
+          routing target from a handoff or from conversation history.
 
           **Two orchestrators dispatching at once is how this repo produced four competing
           migrations on one function.** Stop dispatching until this is resolved.
