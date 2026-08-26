@@ -3,5 +3,4 @@
 -- the bounded result by attachment_display_name is cheaper than indexing text.
 
 create index if not exists itemattachment_item_num_id_fk_idx
-  on dflow."itemAttachment" (item_num_id_fk);
-
+  on dflow."itemattachment" (item_num_id_fk);

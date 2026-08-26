@@ -46,7 +46,7 @@ begin
     execute $explain$
       explain (costs off)
       select item_num_id_fk, attachment_display_name
-      from dflow."itemAttachment"
+      from dflow."itemattachment"
       where item_num_id_fk = any (array[101, 202, 303]::integer[])
       order by item_num_id_fk, attachment_display_name
     $explain$
