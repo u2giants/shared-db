@@ -123,7 +123,7 @@ Claim #1582 / version `20260826120113` was released and closed after live/main a
 - GitHub CLI is authenticated as `u2giants` for `u2giants/shared-db`.
 - Coordinator: `C:\repos\shared-db-worktrees\orchestrator-1579` on EDGE-DEV.
 - Production Supabase project ref comes from protected private config key `supabase_shared_prod_ref`; Supabase Management API token is in 1Password vault `vibe_coding`, item id `3t2xoqk5luyz7ffgdhj24gvtpq`. Never print either value.
-- Authenticated UI verification used the existing Chrome session at `https://data.designflow.app` as `albert@popcre.com`.
+- Authenticated UI verification used Albert's existing signed-in Chrome session at `https://data.designflow.app`; no personal identifier is required in this public handoff.
 - Canonical Grok wrapper is currently `C:\repos\ai-devops\bin\ai-grok-review`; use Git Bash and `AI_GROK_CALLER=codex`.
 - Secrets sweep: checked session diffs, untracked helpers, prompts, and outputs; no new credential or secret value was introduced or needs storing.
 - Documentation pass: no standing document outside this handoff became false. The durable behavior is already encoded in migrations/tests and issue evidence; no extra AGENTS.md edit is warranted.
