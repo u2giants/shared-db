@@ -2,6 +2,28 @@
 -- public.asset_tags.category and status required.
 -- GitHub: u2giants/shared-db#1597; u2giants/shared-db#1427; u2giants/popdam3#96.
 
+do $$
+begin
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'asset_tags'
+      and column_name = 'category'
+      and is_nullable = 'NO'
+  ) or not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'asset_tags'
+      and column_name = 'status'
+      and is_nullable = 'NO'
+  ) then
+    raise exception 'propagate_group_tags_batch repair requires #1427 asset_tags category/status contract';
+  end if;
+end;
+$$;
+
 create or replace function public.propagate_group_tags_batch(
   p_cursor uuid default null,
   p_batch_size integer default 100
