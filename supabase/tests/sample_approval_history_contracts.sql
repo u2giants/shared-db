@@ -5,6 +5,7 @@ DECLARE
   v_sample integer;
   v_sample_qc integer;
   v_attachment integer;
+  v_other_attachment integer;
   v_before bigint;
   v_first_id bigint;
   v_replay_id bigint;
@@ -35,6 +36,24 @@ BEGIN
   INSERT INTO dflow.sample(origin,direction,sample_name,status,quantity_migration_state)
   VALUES('usa_bought','outbound','approval-qc','created','known')
   RETURNING sample_id_pk INTO v_sample_qc;
+  INSERT INTO dflow.sample_attachment(attachment_type,attachment_link,sample_id_fk)
+  VALUES('photo','contract://other-photo',v_sample_qc)
+  RETURNING sample_attachment_id INTO v_other_attachment;
+  BEGIN
+    INSERT INTO dflow.sample_approval_event(sample_id_fk,sample_attachment_id,approval_type,
+      approval_state,qc_required,actor_user,actor_role,idempotency_key,request_hash)
+    VALUES(v_sample,v_other_attachment,'photo','pending',false,'contract-test','production',
+      'cross-sample-attachment','hash-cross');
+    RAISE EXCEPTION 'cross-sample attachment was accepted';
+  EXCEPTION WHEN foreign_key_violation THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO dflow.sample_approval_event(sample_id_fk,approval_type,approval_state,qc_required,
+      actor_user,actor_role,idempotency_key,request_hash)
+    VALUES(v_sample_qc,'qc','approved',true,'contract-test','production','direct-skip','hash-direct');
+    RAISE EXCEPTION 'direct insert bypassed the approval transition guard';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
   BEGIN
     PERFORM dflow.post_sample_approval_event(v_sample_qc,'photo','approved',true,
       'contract-test','production','skip-photo','hash-sp');
@@ -45,6 +64,26 @@ BEGIN
     'contract-test','production','photo-q1','hash-q1');
   PERFORM dflow.post_sample_approval_event(v_sample_qc,'photo','rejected',true,
     'contract-test','production','photo-q2','hash-q2',NULL,NULL,NULL,'needs rework');
+  BEGIN
+    UPDATE dflow.sample_approval_event SET reason='rewritten'
+    WHERE sample_id_fk=v_sample_qc AND idempotency_key='photo-q2';
+    RAISE EXCEPTION 'approval history update was accepted';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL;
+  END;
+  BEGIN
+    DELETE FROM dflow.sample_approval_event
+    WHERE sample_id_fk=v_sample_qc AND idempotency_key='photo-q2';
+    RAISE EXCEPTION 'approval history delete was accepted';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO dflow.sample_approval_event(sample_id_fk,approval_type,approval_state,qc_required,
+      actor_user,actor_role,idempotency_key,request_hash)
+    VALUES(v_sample_qc,'photo','rejected',true,'contract-test','production',
+      'reasonless-reject','hash-reasonless');
+    RAISE EXCEPTION 'reasonless rejection was accepted';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
   PERFORM dflow.post_sample_approval_event(v_sample_qc,'photo','pending',true,
     'contract-test','production','photo-q3','hash-q3');
   PERFORM dflow.post_sample_approval_event(v_sample_qc,'photo','approved',true,

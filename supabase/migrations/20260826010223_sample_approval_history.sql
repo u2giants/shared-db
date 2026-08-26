@@ -38,6 +38,82 @@ CREATE INDEX sample_approval_event_latest_idx
   ON dflow.sample_approval_event
   (sample_id_fk, approval_type, created_at DESC, sample_approval_event_id DESC);
 
+CREATE OR REPLACE FUNCTION dflow.validate_sample_approval_event()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  v_current dflow.sample_approval_event;
+  v_photo dflow.sample_approval_event;
+BEGIN
+  PERFORM pg_advisory_xact_lock(1520, NEW.sample_id_fk);
+
+  IF NEW.sample_attachment_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM dflow.sample_attachment
+    WHERE sample_attachment_id = NEW.sample_attachment_id
+      AND sample_id_fk = NEW.sample_id_fk
+  ) THEN
+    RAISE EXCEPTION 'Attachment % does not belong to sample %',
+      NEW.sample_attachment_id, NEW.sample_id_fk USING ERRCODE = '23503';
+  END IF;
+
+  SELECT * INTO v_current
+  FROM dflow.sample_approval_event
+  WHERE sample_id_fk = NEW.sample_id_fk AND approval_type = NEW.approval_type
+  ORDER BY created_at DESC, sample_approval_event_id DESC
+  LIMIT 1;
+
+  IF NOT FOUND AND NEW.approval_state <> 'pending' THEN
+    RAISE EXCEPTION 'The first % approval event must be pending', NEW.approval_type
+      USING ERRCODE = '23514';
+  ELSIF FOUND AND NOT (
+    (v_current.approval_state = 'pending' AND NEW.approval_state IN ('approved','rejected')) OR
+    (v_current.approval_state = 'rejected' AND NEW.approval_state = 'pending')
+  ) THEN
+    RAISE EXCEPTION 'Invalid % approval transition from % to %',
+      NEW.approval_type, v_current.approval_state, NEW.approval_state USING ERRCODE = '23514';
+  END IF;
+
+  IF FOUND AND NEW.qc_required IS DISTINCT FROM v_current.qc_required THEN
+    RAISE EXCEPTION 'QC requirement cannot change within an approval history'
+      USING ERRCODE = '23514';
+  END IF;
+
+  IF NEW.approval_type = 'qc' THEN
+    SELECT * INTO v_photo
+    FROM dflow.sample_approval_event
+    WHERE sample_id_fk = NEW.sample_id_fk AND approval_type = 'photo'
+    ORDER BY created_at DESC, sample_approval_event_id DESC
+    LIMIT 1;
+    IF NOT FOUND OR v_photo.approval_state <> 'approved' OR NOT v_photo.qc_required THEN
+      RAISE EXCEPTION 'QC decisions require a currently approved photo with QC required'
+        USING ERRCODE = '23514';
+    END IF;
+    IF NOT NEW.qc_required THEN
+      RAISE EXCEPTION 'QC events must carry qc_required=true' USING ERRCODE = '23514';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER sample_approval_event_validate
+BEFORE INSERT ON dflow.sample_approval_event
+FOR EACH ROW EXECUTE FUNCTION dflow.validate_sample_approval_event();
+
+CREATE OR REPLACE FUNCTION dflow.reject_sample_approval_event_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+BEGIN
+  RAISE EXCEPTION 'Sample approval events are append-only' USING ERRCODE = '55000';
+END $$;
+
+CREATE TRIGGER sample_approval_event_immutable
+BEFORE UPDATE OR DELETE ON dflow.sample_approval_event
+FOR EACH ROW EXECUTE FUNCTION dflow.reject_sample_approval_event_mutation();
+
 CREATE OR REPLACE VIEW dflow.sample_approval_current
 WITH (security_invoker = true) AS
 SELECT DISTINCT ON (sample_id_fk, approval_type)
@@ -77,8 +153,6 @@ SECURITY INVOKER
 AS $$
 DECLARE
   v_existing dflow.sample_approval_event;
-  v_current dflow.sample_approval_event;
-  v_photo dflow.sample_approval_event;
   v_result dflow.sample_approval_event;
 BEGIN
   IF p_sample_id IS NULL OR p_approval_type IS NULL OR p_approval_state IS NULL
@@ -111,51 +185,6 @@ BEGIN
     RETURN v_existing;
   END IF;
 
-  IF p_sample_attachment_id IS NOT NULL AND NOT EXISTS (
-    SELECT 1 FROM dflow.sample_attachment
-    WHERE sample_attachment_id = p_sample_attachment_id AND sample_id_fk = p_sample_id
-  ) THEN
-    RAISE EXCEPTION 'Attachment % does not belong to sample %',
-      p_sample_attachment_id, p_sample_id USING ERRCODE = '23503';
-  END IF;
-
-  SELECT * INTO v_current
-  FROM dflow.sample_approval_event
-  WHERE sample_id_fk = p_sample_id AND approval_type = p_approval_type
-  ORDER BY created_at DESC, sample_approval_event_id DESC
-  LIMIT 1;
-
-  IF NOT FOUND AND p_approval_state <> 'pending' THEN
-    RAISE EXCEPTION 'The first % approval event must be pending', p_approval_type
-      USING ERRCODE = '23514';
-  ELSIF FOUND AND NOT (
-    (v_current.approval_state = 'pending' AND p_approval_state IN ('approved','rejected')) OR
-    (v_current.approval_state = 'rejected' AND p_approval_state = 'pending')
-  ) THEN
-    RAISE EXCEPTION 'Invalid % approval transition from % to %',
-      p_approval_type, v_current.approval_state, p_approval_state USING ERRCODE = '23514';
-  END IF;
-
-  IF FOUND AND p_qc_required IS DISTINCT FROM v_current.qc_required THEN
-    RAISE EXCEPTION 'QC requirement cannot change within an approval cycle'
-      USING ERRCODE = '23514';
-  END IF;
-
-  IF p_approval_type = 'qc' THEN
-    SELECT * INTO v_photo
-    FROM dflow.sample_approval_event
-    WHERE sample_id_fk = p_sample_id AND approval_type = 'photo'
-    ORDER BY created_at DESC, sample_approval_event_id DESC
-    LIMIT 1;
-    IF NOT FOUND OR v_photo.approval_state <> 'approved' OR NOT v_photo.qc_required THEN
-      RAISE EXCEPTION 'QC decisions require a currently approved photo with QC required'
-        USING ERRCODE = '23514';
-    END IF;
-    IF NOT p_qc_required THEN
-      RAISE EXCEPTION 'QC events must carry qc_required=true' USING ERRCODE = '23514';
-    END IF;
-  END IF;
-
   INSERT INTO dflow.sample_approval_event (
     sample_id_fk, sample_attachment_id, approval_type, approval_state, qc_required,
     destination_type, destination_id, reason, actor_user, actor_role,
@@ -173,6 +202,9 @@ REVOKE ALL ON dflow.sample_approval_event, dflow.sample_approval_current
 REVOKE ALL ON FUNCTION dflow.post_sample_approval_event(
   integer,text,text,boolean,text,text,text,text,integer,text,text,text
 ) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION dflow.validate_sample_approval_event(),
+  dflow.reject_sample_approval_event_mutation()
+  FROM PUBLIC, anon, authenticated;
 
 COMMENT ON TABLE dflow.sample_approval_event IS
   'Append-only Flow 3 photo and optional QC decision history. It never represents inventory movement.';
