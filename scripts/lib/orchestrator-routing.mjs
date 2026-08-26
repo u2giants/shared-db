@@ -255,6 +255,17 @@ function freeze(fields, engine, routeId) {
     handoverIssue: /^\d+$/.test(handover) ? Number(handover) : null,
     briefing: fields.briefing,
     /** How to actually reach it, so the caller does not have to know each engine. */
+    /**
+     * How to ATTEMPT delivery. Not a promise that it arrives.
+     *
+     * ⚠️ Validation here is SHAPE ONLY. Nothing in this repository can check
+     * that the session exists, is running, belongs to the declared owner or
+     * machine, is the shared-db orchestrator, or can receive a message -- there
+     * is no session API to ask. A fabricated UUID with otherwise valid fields
+     * resolves identically to a real one. Flagged by independent Codex GPT-5.6
+     * review, 2026-08-26; the wording is exact rather than reassuring because
+     * the caller has to know silence is not delivery.
+     */
     howToReach:
       engine === 'codex'
         ? `Codex \`codex-reply\` with threadId ${routeId}`

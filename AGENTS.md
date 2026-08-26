@@ -1208,6 +1208,12 @@ Open the marker with a complete, valid routing block **recording your own new `r
 A successor that copies its predecessor's id is rejected by the guard — that copy is exactly
 how delegations kept arriving at a closed session.
 
+⚠️ **The inheritance check is a trap, not a proof.** It fires only when the marker declares a
+numeric `handover_issue` whose issue is readable and carries a parseable block. It does not
+catch a reused id from an older ancestor, a wrong predecessor number, a `handover_issue: none`
+that is a lie, or a fabricated id with the right shape. **Recording your own real id is your
+obligation; the guard catches the common copy, not every possible one.**
+
 ### Handing over
 
 Close your marker. The successor opens its own with **its own new `route_id`**. There is no
@@ -1215,14 +1221,21 @@ edit-in-place handover: the old target must stop resolving the moment you stop r
 
 ### What this does NOT do
 
-It publishes an **address**. It does not invent a delivery channel and it does not promise
+It publishes an **address**, and validates only its **shape**. There is no session API here, so
+nothing checks that the session exists, is running, belongs to the declared owner or machine,
+is the orchestrator, or can receive anything — a fabricated id with otherwise valid fields
+resolves exactly like a real one. What a resolved target proves is narrow: **one open marker
+declares this address.** Confirm you got a reply; silence is not delivery, and this tool cannot
+tell the difference.
+
+It does not invent a delivery channel and it does not promise
 delivery. `plan_orchestrator-workflow-gaps.md` §C recorded that nothing here reaches a
 running session; that remains true of this repository. Claude cross-session messaging and
 Codex `codex-reply` are the channels, they live outside this repo, and both needed an
 address the marker never published. **A resolved target means "this is where to send it",
 never "it was received".**
 
-⚠️ **Markers opened before 2026-08-26 are grandfathered by the PR guard only** — they could
+⚠️ **Markers opened before 2026-08-27 are grandfathered by the PR guard only** — they could
 not carry a block that did not exist. `--resolve` **never** grandfathers: such a marker still
 carries no address and still cannot be routed to. Edit it to add the block, or close it.
 

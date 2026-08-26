@@ -246,19 +246,52 @@ test('a SUCCESSOR that inherits its predecessor route_id FAILS', () => {
   assert.equal(main([], io({ issues: own, bodies })), EXIT_OK)
 })
 
-test('an unreadable predecessor does not block a successor with a valid id', () => {
-  // The inheritance check is a trap for a copied id, never a prerequisite.
+test('an UNREADABLE predecessor is UNKNOWN, not a pass', () => {
+  // ⚠️ THIS TEST ASSERTED THE OPPOSITE UNTIL 2026-08-26. It required EXIT_OK on
+  // the reasoning that an unreadable predecessor must not block a successor with
+  // a valid id of its own. Independent Codex GPT-5.6 review showed that is
+  // fail-OPEN and defeats the inheritance check entirely: a successor honestly
+  // declares handover_issue: 1579, copies #1579's stale id, the read of #1579
+  // transiently fails, the copy compares against null and PASSES — routing to
+  // the dead session this whole contract exists to prevent. Availability is not
+  // the property being protected. If the check cannot run, the answer is UNKNOWN.
   const issues = [marker({ handover_issue: '1579' })]
-  assert.equal(
-    main([], {
-      openIssues: () => issues,
-      labels: () => [],
-      issueBody: () => {
-        throw new Unknown('predecessor unreadable')
-      },
-    }),
-    EXIT_OK,
-  )
+  const exit = main([], {
+    openIssues: () => issues,
+    labels: () => [],
+    issueBody: () => {
+      throw new Unknown('predecessor unreadable')
+    },
+  })
+  assert.equal(exit, EXIT_UNKNOWN)
+  assert.notEqual(exit, EXIT_OK, 'an unverifiable inheritance check must never pass')
+})
+
+test('resolve: a RETIRED-LABEL collision refuses to resolve, even with a valid marker', () => {
+  // ⚠️ FOUND 2026-08-26 by independent Codex GPT-5.6 review, and it was real:
+  // `--resolve` originally received only the marker list and never consulted
+  // the guard's own problems or the label check. One valid marker plus an open
+  // `coordinator-marker` issue therefore FAILED the guard and RESOLVED to an
+  // active target on identical input — routing straight past a detected
+  // second-orchestrator signal. Anything that fails the guard must refuse.
+  const issues = [marker(), issue(2, [RETIRED_MARKER_LABEL])]
+  assert.equal(main([], io({ issues })), EXIT_FAIL, 'the normal guard must fail')
+  assert.equal(main(['--resolve'], io({ issues })), EXIT_FAIL, 'and resolution must refuse')
+})
+
+test('resolve: the retired label merely EXISTING refuses to resolve', () => {
+  const issues = [marker()]
+  assert.equal(main(['--resolve'], io({ issues, labels: [{ name: RETIRED_MARKER_LABEL }] })), EXIT_FAIL)
+})
+
+test('resolve: a target is DECLARED, never proven active or reachable', () => {
+  // Shape is all this repo can check — there is no session API. A fabricated
+  // UUID resolves exactly like a real one, so the output must not claim more.
+  const out = formatTarget(resolveTarget(evaluate([marker({ route_id: '00000000-0000-4000-8000-000000000000' })]).markers))
+  assert.match(out, /MARKER-DECLARED TARGET/)
+  assert.doesNotMatch(out, /^ACTIVE ORCHESTRATOR/m)
+  assert.match(out, /NOT PROVEN/)
+  assert.match(out, /silence is not delivery/)
 })
 
 test('a marker predating the contract WARNS but does not fail the guard', () => {

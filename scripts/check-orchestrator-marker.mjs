@@ -305,10 +305,21 @@ export function formatReport({ markers, retired, problems, warnings = [], routin
   return lines.join('\n')
 }
 
-/** Human-readable delegation target for `--resolve`. */
+/**
+ * Human-readable delegation target for `--resolve`.
+ *
+ * ⚠️ THE HEADING SAYS "DECLARED", NOT "ACTIVE", AND THAT IS DELIBERATE. It read
+ * `ACTIVE ORCHESTRATOR` until an independent Codex GPT-5.6 review on 2026-08-26
+ * pointed out that nothing here proves activity. This repository has no session
+ * API: it validates the SHAPE of an id, never that the session exists, is
+ * running, belongs to the named owner or machine, is the shared-db
+ * orchestrator, or can receive anything. A fabricated UUID with otherwise valid
+ * fields resolves exactly like a real one. What is proven is narrow and worth
+ * stating exactly: ONE open marker DECLARES this address.
+ */
 export function formatTarget({ routing, marker }) {
   return [
-    `ACTIVE ORCHESTRATOR — resolved from open marker #${marker} only.`,
+    `MARKER-DECLARED TARGET — resolved from open marker #${marker} only.`,
     '',
     `  identifier:   ${routing.identifier}`,
     `  session_name: ${routing.sessionName}`,
@@ -320,11 +331,15 @@ export function formatTarget({ routing, marker }) {
     `  handover:     ${routing.handoverIssue ? `#${routing.handoverIssue}` : 'none (cold start)'}`,
     `  briefing:     ${routing.briefing}`,
     '',
-    `  REACH IT BY:  ${routing.howToReach}`,
+    `  TRY IT BY:    ${routing.howToReach}`,
     '',
     'This came from the CURRENT open marker. Do not route from a handoff, a closed marker, ' +
       'or conversation history — those are how a delegation reached a session that had ' +
       'already closed. Re-resolve before every delegation; a handover changes this target.',
+    '',
+    'NOT PROVEN: that this session exists, is running, is reachable, or is the orchestrator. ' +
+      'Only that one open marker declares this address. Confirm you got a reply — silence is ' +
+      'not delivery, and this tool cannot tell you the difference.',
   ].join('\n')
 }
 
@@ -388,23 +403,43 @@ export function main(argv = [], io = defaultIo) {
 
   /**
    * The predecessor's routable id, read from the handover issue it names.
-   * A lookup failure yields null rather than throwing: not being able to see
-   * the predecessor must not block a successor that recorded a valid id of its
-   * own. The inheritance check is a trap for a copied id, not a prerequisite.
+   *
+   * ⚠️ A LOOKUP FAILURE IS `Unknown`, NOT `null`. This originally swallowed the
+   * error and returned null "so that an unreadable predecessor cannot block a
+   * successor that recorded a valid id of its own". Independent Codex GPT-5.6
+   * review, 2026-08-26, showed that is fail-OPEN and defeats the check outright:
+   * a successor honestly declares `handover_issue: 1579`, copies #1579's stale
+   * id, GitHub read of #1579 transiently fails, the copy compares against null
+   * and PASSES — routing to the dead session this contract exists to prevent.
+   * Availability is not the property being protected here. If the inheritance
+   * check cannot run, the answer is UNKNOWN.
    */
-  const predecessorRouteIdOf = (number) => {
-    try {
-      return parseRoutingBlock(io.issueBody(repo, number))?.route_id ?? null
-    } catch {
-      return null
-    }
-  }
+  const predecessorRouteIdOf = (number) =>
+    parseRoutingBlock(io.issueBody(repo, number))?.route_id ?? null
 
   let result
   try {
     result = evaluate(io.openIssues(repo))
 
     if (resolving) {
+      // ⚠️ THE SAFETY FINDINGS GATE RESOLUTION. Found 2026-08-26 by independent
+      // Codex GPT-5.6 review: this originally passed only `result.markers` to
+      // `resolveTarget` and never consulted `result.problems` or the label
+      // check. One valid marker PLUS an open `coordinator-marker` issue then
+      // FAILED the guard and RESOLVED to an active target on the same input --
+      // routing straight past a detected second-orchestrator signal. Anything
+      // that fails the guard must refuse to resolve.
+      const unsafe = [...result.problems, ...evaluateLabels(io.labels(repo))]
+      if (unsafe.length > 0) {
+        const message =
+          'UNSAFE — refusing to resolve a delegation target. The marker guard failed on this ' +
+          'repository state, so no address here can be trusted. Resolve the collision first:\n' +
+          unsafe.map((p) => `  - ${p}`).join('\n')
+        if (asJson) console.log(JSON.stringify({ state: 'unsafe', routing: null, message }, null, 2))
+        else console.log(message)
+        return EXIT_FAIL
+      }
+
       const target = resolveTarget(result.markers, predecessorRouteIdOf)
       if (asJson) console.log(JSON.stringify(target, null, 2))
       else console.log(target.state === 'active' ? formatTarget(target) : target.message)
