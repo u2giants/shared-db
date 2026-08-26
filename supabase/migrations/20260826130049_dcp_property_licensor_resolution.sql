@@ -63,10 +63,6 @@ comment on column plm.dcp_property_licensor_resolution.authority_reference is
 comment on column plm.dcp_property_licensor_resolution.evidence_reference is
   'Non-secret pointer to evidence retained in its approved private repository.';
 
-create trigger set_updated_at
-before update on plm.dcp_property_licensor_resolution
-for each row execute function app.set_updated_at();
-
 alter table plm.dcp_property_licensor_resolution enable row level security;
 revoke all on table plm.dcp_property_licensor_resolution from public, anon, authenticated;
 grant select, insert, update, delete on table plm.dcp_property_licensor_resolution
