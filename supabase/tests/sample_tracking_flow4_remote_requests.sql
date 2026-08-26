@@ -149,6 +149,10 @@ ROLLBACK;
 -- drills prove the harder overlapping-retry window: another backend owns the
 -- item lock, commits the same operation, and the blocked API call must wake up
 -- and return that committed row rather than attempt a duplicate transition.
+-- The contract runner is an owner of its throwaway database, so install the
+-- test-only connection helper here; absence of the extension must fail loudly.
+CREATE EXTENSION IF NOT EXISTS dblink;
+
 BEGIN;
 
 DO $$
