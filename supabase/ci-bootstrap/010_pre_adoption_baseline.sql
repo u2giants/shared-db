@@ -1104,6 +1104,11 @@ CREATE TABLE IF NOT EXISTS plm."itemAttachment" (
   licensing_feedback_id_fk integer,
   license_status character varying,
   dsn_ref_num character varying(50));
+-- The active dflow schema uses the exact lowercase quoted identity. Keep the
+-- pre-adoption PLM mirror above for older replay dependencies, and give pass 2
+-- the deployed dflow shape needed by the governed index migration.
+CREATE TABLE IF NOT EXISTS dflow."itemattachment"
+  (LIKE plm."itemAttachment" INCLUDING ALL);
 CREATE TABLE IF NOT EXISTS plm."itemDepth" (
   "itemDepth_id" integer GENERATED ALWAYS AS IDENTITY NOT NULL,
   "itemDepth_code" character varying,
