@@ -1,4 +1,4 @@
--- Contracts for 20260825224248_sample_inventory_index_backed.sql.
+-- Contracts for 20260826002422_sample_inventory_index_backed.sql.
 
 create or replace function pg_temp.explain_sample_inventory(p_query text)
 returns setof text language plpgsql as $$
