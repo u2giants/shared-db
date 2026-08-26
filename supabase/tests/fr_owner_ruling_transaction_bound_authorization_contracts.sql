@@ -676,6 +676,15 @@ begin
     v_checks := v_checks + 1;
   end;
 
+  -- This forward hardening must patch the current guard, not recreate the
+  -- pre-#1339/#1429 body. Keep the two later capability boundaries explicit.
+  if position('if tg_op = ''DELETE'' then' in pg_get_functiondef('app.enforce_licensing_write_authority()'::regprocedure)) = 0 then
+    raise exception 'FR hardening erased canonical licensing DELETE protection';
+  end if;
+  if position('tg_table_name not in (''licensor'',''property'')' in pg_get_functiondef('app.enforce_licensing_write_authority()'::regprocedure)) = 0 then
+    raise exception 'FR hardening erased ColdLion Licensor/Property status capability';
+  end if;
+
   if v_checks <> v_expected_checks then
     raise exception 'FR owner-ruling contract ran % of % proofs -- a block was skipped', v_checks, v_expected_checks;
   end if;
