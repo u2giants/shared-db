@@ -8,6 +8,8 @@ const row = (key: string, licensor: string, source = 'disney_dcp'): ScrapedPrope
   source_system: source, source_table: 'plm.source_property', source_property_id: key,
   source_property_name: `${licensor} property`, display_label: `${licensor} property`, source_status: null,
   provenance_kind: 'metadata_properties_array', latest_seen_at: null, capture_marker: null,
+  source_purpose: 'Creative', review_reason: 'Current approved evidence supports this presentation.',
+  evidence_basis: 'synthetic contract fixture', review_guidance: 'No action required.',
 })
 
 describe('ScrapedPropertiesTable', () => {

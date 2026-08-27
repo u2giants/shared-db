@@ -10,9 +10,10 @@ const customers = [
 ]
 const vendors = [{ id: '33333333-3333-3333-3333-333333333333', display_name: 'Atlas Manufacturing', status: 'active', crm_status: 'active', pm_status: 'active', dam_status: 'active', plm_status: null, erp_active: true, alias_count: 3, updated_at: '2026-07-20T12:00:00Z' }]
 const scrapedProperties = [
-  { row_key: 'disney-1', presentation_licensor_key: 'disney', presentation_licensor_name: 'Disney', source_system: 'disney_dcp', source_table: 'plm.dcp_property', source_property_id: 'd-1', source_property_name: 'Frozen', display_label: 'Frozen', source_status: null, provenance_kind: 'metadata_properties_array', latest_seen_at: null, capture_marker: 'run-1' },
-  { row_key: 'marvel-1', presentation_licensor_key: 'marvel', presentation_licensor_name: 'Marvel', source_system: 'marvel_dcp', source_table: 'plm.marvel_dcp_property', source_property_id: 'm-1', source_property_name: 'Avengers', display_label: 'Avengers', source_status: null, provenance_kind: 'metadata_properties_array', latest_seen_at: null, capture_marker: 'run-2' },
-  { row_key: 'star-wars-1', presentation_licensor_key: 'star-wars', presentation_licensor_name: 'Star Wars', source_system: 'lucasfilm_dcp', source_table: 'plm.lucasfilm_dcp_property', source_property_id: 'sw-1', source_property_name: 'The Mandalorian', display_label: 'The Mandalorian', source_status: null, provenance_kind: 'metadata_properties_array', latest_seen_at: null, capture_marker: 'run-3' },
+  { row_key: 'disney-1', presentation_licensor_key: 'disney', presentation_licensor_name: 'Disney - Creative (DCP Vault)', source_system: 'disney_dcp', source_table: 'plm.dcp_property', source_property_id: 'd-1', source_property_name: 'Frozen', display_label: 'Frozen', source_status: 'supported_core_ownership', provenance_kind: 'dcp_property_licensor_resolution', latest_seen_at: null, capture_marker: 'run-1', source_purpose: 'Creative (DCP Vault)', review_reason: 'Current approved evidence supports this presentation.', evidence_basis: 'dcp_property_licensor_resolution', review_guidance: 'No action unless newer direct evidence supersedes this decision.' },
+  { row_key: 'marvel-asgard-1', presentation_licensor_key: 'marvel-asgard-creative', presentation_licensor_name: 'Marvel - Creative (ASGARD)', source_system: 'marvel_asgard', source_table: 'plm.marvel_asgard_style_guide', source_property_id: 'm-1', source_property_name: 'Avengers', display_label: 'Avengers', source_status: 'active', provenance_kind: 'direct_asgard_style_guide', latest_seen_at: null, capture_marker: 'run-2', source_purpose: 'Source Property vocabulary', review_reason: 'Current approved evidence supports this presentation.', evidence_basis: 'direct_asgard_style_guide', review_guidance: 'No action unless newer direct evidence supersedes this decision.' },
+  { row_key: 'star-wars-1', presentation_licensor_key: 'star-wars', presentation_licensor_name: 'Lucasfilm / Star Wars - Creative (DCP Vault)', source_system: 'lucasfilm_dcp', source_table: 'plm.lucasfilm_dcp_property', source_property_id: 'sw-1', source_property_name: 'The Mandalorian', display_label: 'The Mandalorian', source_status: 'supported_owner_source_label', provenance_kind: 'dcp_property_licensor_resolution', latest_seen_at: null, capture_marker: 'run-3', source_purpose: 'Creative (DCP Vault)', review_reason: 'Current approved evidence supports this presentation.', evidence_basis: 'dcp_property_licensor_resolution', review_guidance: 'No action unless newer direct evidence supersedes this decision.' },
+  { row_key: 'conflict-1', presentation_licensor_key: 'dcp-vault-authority-conflict', presentation_licensor_name: 'DCP Vault - authority conflict', source_system: 'disney_dcp', source_table: 'plm.dcp_property', source_property_id: 'conflict-1', source_property_name: 'Sanitized conflict fixture', display_label: 'Sanitized conflict fixture', source_status: 'authority_conflict', provenance_kind: 'dcp_property_licensor_resolution', latest_seen_at: null, capture_marker: 'run-4', source_purpose: 'Creative (DCP Vault)', review_reason: 'Conflicting approved authority evidence names more than one presentation scope; Licensing must resolve the exact source identity.', evidence_basis: 'approved exact-identity DCP authority decisions', review_guidance: 'Compare the direct authority records and approve one superseding exact-identity decision. Do not infer authority from a property name or landing table.' },
 ]
 
 // Step 10 read-only Licensor -> Property tree fixture. The collide property
@@ -316,12 +317,18 @@ test('renders every scraped Property under distinct presentation Licensor headin
   await page.setViewportSize({ width: 1440, height: 1100 })
   await mockAdmin(page); await page.goto('/')
   await page.getByRole('button', { name: 'Scraped Properties' }).click()
-  await expect(page.getByRole('heading', { name: 'Disney', exact: true })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Marvel', exact: true })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Star Wars', exact: true })).toBeVisible()
-  await expect(page.getByText('3 of 3 scraped properties')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Disney - Creative (DCP Vault)', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Marvel - Creative (ASGARD)', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Lucasfilm / Star Wars - Creative (DCP Vault)', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Marvel - Creative (DCP Vault)', exact: true })).toHaveCount(0)
+  await expect(page.getByText('4 of 4 scraped properties')).toBeVisible()
   await expect(page.getByRole('gridcell', { name: 'The Mandalorian' })).toBeVisible()
   await expect(page.getByRole('gridcell', { name: 'lucasfilm_dcp', exact: true })).toBeVisible()
+  const conflictDetail = page.getByRole('note', { name: 'DCP Vault - authority conflict review details' })
+  await expect(conflictDetail).toContainText('Conflicting approved authority evidence')
+  await expect(conflictDetail).toContainText('approved exact-identity DCP authority decisions')
+  await expect(conflictDetail).toContainText('approve one superseding exact-identity decision')
+  await expect(conflictDetail.locator('[title^="Authority review detail:"]')).toHaveAttribute('title', /Do not infer authority from a property name or landing table/)
   await page.screenshot({ path: '../../docs/verification/db-data-admin-scraped-properties.png', fullPage: true })
 })
 

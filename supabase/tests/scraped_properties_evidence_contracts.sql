@@ -101,10 +101,19 @@ begin
   select api.db_data_admin_scraped_properties(v_search, null, 100) into v_page;
   select r into v_row from jsonb_array_elements(v_page -> 'rows') r
   where r ->> 'source_table' = 'plm.dcp_property';
-  if v_row ->> 'presentation_licensor_name' <> 'Star Wars'
+  if v_row ->> 'presentation_licensor_name' <> 'Lucasfilm / Star Wars - Creative (DCP Vault)'
      or v_row ->> 'source_purpose' <> 'Creative (DCP Vault)'
      or v_row ?| array['authority_reference','evidence_reference','source_hash','approved_by'] then
     raise exception 'latest approved DCP decision or private envelope contract changed';
+  end if;
+
+  if position('Marvel - Creative (ASGARD)' in pg_get_functiondef(v_sig::regprocedure)) = 0
+     or position('plm.marvel_asgard_style_guide' in pg_get_functiondef(v_sig::regprocedure)) = 0
+     or position('Marvel - Creative (DCP Vault)' in pg_get_functiondef(v_sig::regprocedure)) > 0
+     or position('review_reason' in pg_get_functiondef(v_sig::regprocedure)) = 0
+     or position('evidence_basis' in pg_get_functiondef(v_sig::regprocedure)) = 0
+     or position('review_guidance' in pg_get_functiondef(v_sig::regprocedure)) = 0 then
+    raise exception 'Scraped Properties presentation or review-detail contract changed';
   end if;
 
   begin
