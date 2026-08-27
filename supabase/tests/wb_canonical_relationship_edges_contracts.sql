@@ -3,9 +3,9 @@ begin;
 
 do $contracts$
 declare
-  v_property integer;
-  v_character integer;
-  v_licensor integer;
+  v_property uuid := '13800000-0000-4000-8000-000000000021';
+  v_character uuid := '13800000-0000-4000-8000-000000000022';
+  v_licensor uuid := '13800000-0000-4000-8000-000000000020';
   v_capture uuid := '13800000-0000-4000-8000-000000000001';
   v_asset uuid := '13800000-0000-4000-8000-000000000011';
   v_style uuid := '13800000-0000-4000-8000-000000000012';
@@ -31,24 +31,12 @@ begin
     raise exception 'licensed payload field escaped into candidate view';
   end if;
 
-  insert into core."licenseList" ("licenseList_code", "licenseList_title", "licenseList_status")
-  values ('SYN-1380', 'Synthetic Licensor 1380', 'ACTIVE') returning "licenseList_id" into v_licensor;
-  -- Issue #1684 makes this legacy table read-only. Disable only its named EOL
-  -- trigger for rollback-only fixture setup, then restore it before exercising
-  -- the Warner routine.
-  alter table core.properties_and_characters
-    disable trigger properties_and_characters_eol_write_guard;
-  -- The captured CI baseline intentionally has no default/sequence for this legacy
-  -- integer key. Serialize fixture allocation and provide explicit rollback-safe IDs.
-  lock table core.properties_and_characters in share row exclusive mode;
-  select coalesce(max(id), 0) + 1 into v_property from core.properties_and_characters;
-  v_character := v_property + 1;
-  insert into core.properties_and_characters(id,name,type,licensor_id,source_licensed_property_id)
-  values (v_property,'Synthetic Property 1380','PROPERTY',v_licensor,'SYN-PROP-1380');
-  insert into core.properties_and_characters(id,name,type,licensor_id,source_licensed_property_id,source_character_id)
-  values (v_character,'Synthetic Character 1380','CHARACTER',v_licensor,'SYN-PROP-1380','SYN-CHAR-1380');
-  alter table core.properties_and_characters
-    enable trigger properties_and_characters_eol_write_guard;
+  insert into core.licensor(id,code,name,status)
+  values (v_licensor,'SYN-1380','Synthetic Licensor 1380','active');
+  insert into core.property(id,licensor_id,code,name,status)
+  values (v_property,v_licensor,'SYN-PROP-1380','Synthetic Property 1380','active');
+  insert into core.character(id,licensor_id,code,name,status)
+  values (v_character,v_licensor,'SYN-CHAR-1380','Synthetic Character 1380','active');
 
   insert into plm.wb_capture(capture_id,chunk_number,target,status,captured_at,private_source_commit,snapshot_sha256,expected_row_count,captured_by,source_url,started_at)
   values (v_capture,0,'wb_asset_normalized','loading',date '2099-08-23','synthetic',repeat('a',64),1,'synthetic','https://example.invalid',now());
