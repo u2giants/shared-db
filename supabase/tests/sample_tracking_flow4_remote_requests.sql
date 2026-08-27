@@ -211,7 +211,13 @@ BEGIN
   END IF;
 
   BEGIN
-    PERFORM dblink_connect('flow4_event_writer','dbname=' || current_database());
+    -- This suite is required CI against the Supabase CLI throwaway stack. Its
+    -- fixed local postgres credential is public workflow configuration, not a
+    -- shared-database secret. From the server, the mapped 54322 port is 5432.
+    PERFORM dblink_connect('flow4_event_writer',format(
+      'host=127.0.0.1 port=%s dbname=%s user=postgres password=postgres',
+      inet_server_port(),current_database()
+    ));
   EXCEPTION WHEN connection_exception THEN
     RAISE EXCEPTION 'FLOW4 EVENT CONCURRENCY REQUIRED: dblink cannot open the required second database session (%)', SQLERRM;
   END;
@@ -280,7 +286,10 @@ BEGIN
   END IF;
 
   BEGIN
-    PERFORM dblink_connect('flow4_reserve_writer','dbname=' || current_database());
+    PERFORM dblink_connect('flow4_reserve_writer',format(
+      'host=127.0.0.1 port=%s dbname=%s user=postgres password=postgres',
+      inet_server_port(),current_database()
+    ));
   EXCEPTION WHEN connection_exception THEN
     RAISE EXCEPTION 'FLOW4 RESERVATION CONCURRENCY REQUIRED: dblink cannot open the required second database session (%)', SQLERRM;
   END;
