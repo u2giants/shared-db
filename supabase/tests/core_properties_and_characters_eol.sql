@@ -55,7 +55,7 @@ begin
   end;
 
   begin
-    truncate table core.properties_and_characters;
+    truncate table core.properties_and_characters cascade;
     raise exception 'TRUNCATE was not rejected';
   exception when sqlstate '55000' then null;
   end;
