@@ -126,6 +126,7 @@ jobs:
             1422:1423:1424:20260824150630:20260824172136) ;;
             1439:1488:1495:20260825102716:20260825110813) ;;
             1615:1636:1637:20260827031236:20260827095753) ;;
+            1658:1659:1660:20260827134155:20260827171526) ;;
             *) echo "REFUSED: reconciliation tuple is not explicitly allowlisted" >&2; exit 1 ;;
           esac
           [[ "$ORPHAN" =~ ^[0-9]{14}$ && "$REPLACEMENT" =~ ^[0-9]{14}$ ]]
@@ -162,9 +163,14 @@ jobs:
           set -euo pipefail
           PR_HEAD="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["head"]["sha"])' "$RUNNER_TEMP/pr.json")"
           RUN_HEAD="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["head_sha"])' "$RUNNER_TEMP/run.json")"
-          git fetch origin "$PR_HEAD" "$RUN_HEAD"
+          # The applied source commit is read from the immutable artifact NAME, never from a
+          # dispatch input. When the apply was dispatched from the branch itself this equals
+          # RUN_HEAD; when it was dispatched from main against a PR commit it does not. The
+          # reconciler re-checks this sha against the pinned supported case.
+          ORPHAN_HEAD="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["name"].rsplit("-",1)[1])' "$RUNNER_TEMP/artifact.json")"
+          git fetch origin "$PR_HEAD" "$RUN_HEAD" "$ORPHAN_HEAD"
           git worktree add --detach "$RUNNER_TEMP/source-pr" "$PR_HEAD"
-          git worktree add --detach "$RUNNER_TEMP/orphan-source" "$RUN_HEAD"
+          git worktree add --detach "$RUNNER_TEMP/orphan-source" "$ORPHAN_HEAD"
       - name: Link only to preview
         run: |
           set -euo pipefail
