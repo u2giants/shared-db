@@ -31,7 +31,7 @@ check_eol_combined_table_references() {
   node - "$diff_file" <<'NODE'
 const fs = require('node:fs')
 const diff = fs.readFileSync(process.argv[2], 'utf8')
-const allowed = 'supabase/migrations/20260827213010_eol_core_properties_and_characters.sql'
+const allowed = 'supabase/migrations/20260827222039_eol_core_properties_and_characters.sql'
 const deltas = new Map()
 const maintenanceAllowed = new Set([
   'api.db_data_admin_licensor_property_tree',

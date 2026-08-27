@@ -311,7 +311,7 @@ test('issue 1684 EOL guard allows only its exact staging migration', () => {
   withFixture(['20260801120000_fixture.sql'], (dir) => {
     const result = runGuards(dir, {
       mainNewest: '20260801100000',
-      env: { CHECK_SQL_EOL_DIFF_FILE: toBashPath(makeDiff('supabase/migrations/20260827213010_eol_core_properties_and_characters.sql', 'comment on table core.properties_and_characters is \'EOL\';')) },
+      env: { CHECK_SQL_EOL_DIFF_FILE: toBashPath(makeDiff('supabase/migrations/20260827222039_eol_core_properties_and_characters.sql', 'comment on table core.properties_and_characters is \'EOL\';')) },
     })
     assert.equal(result.status, 0, result.stderr)
   })
