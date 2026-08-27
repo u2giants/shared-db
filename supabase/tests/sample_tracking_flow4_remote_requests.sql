@@ -152,6 +152,12 @@ ROLLBACK;
 -- The contract runner is an owner of its throwaway database, so install the
 -- test-only connection helper here; absence of the extension must fail loudly.
 CREATE EXTENSION IF NOT EXISTS dblink;
+DROP ROLE IF EXISTS flow4_concurrency_writer;
+CREATE ROLE flow4_concurrency_writer LOGIN PASSWORD 'flow4-throwaway-concurrency-only';
+GRANT USAGE ON SCHEMA dflow TO flow4_concurrency_writer;
+GRANT SELECT,UPDATE ON dflow.sample_remote_request_item TO flow4_concurrency_writer;
+GRANT SELECT,INSERT ON dflow.sample_remote_request_history,dflow.sample_reservation TO flow4_concurrency_writer;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA dflow TO flow4_concurrency_writer;
 
 BEGIN;
 
@@ -211,11 +217,10 @@ BEGIN
   END IF;
 
   BEGIN
-    -- This suite is required CI against the Supabase CLI throwaway stack. Its
-    -- fixed local postgres credential is public workflow configuration, not a
-    -- shared-database secret. From the server, the mapped 54322 port is 5432.
+    -- A purpose-built login confines the remote writer to exactly the relations
+    -- exercised below. It exists only in this throwaway contract database.
     PERFORM dblink_connect('flow4_event_writer',format(
-      'host=127.0.0.1 port=%s dbname=%s user=postgres password=postgres',
+      'host=127.0.0.1 port=%s dbname=%s user=flow4_concurrency_writer password=flow4-throwaway-concurrency-only',
       inet_server_port(),current_database()
     ));
   EXCEPTION WHEN connection_exception THEN
@@ -287,7 +292,7 @@ BEGIN
 
   BEGIN
     PERFORM dblink_connect('flow4_reserve_writer',format(
-      'host=127.0.0.1 port=%s dbname=%s user=postgres password=postgres',
+      'host=127.0.0.1 port=%s dbname=%s user=flow4_concurrency_writer password=flow4-throwaway-concurrency-only',
       inet_server_port(),current_database()
     ));
   EXCEPTION WHEN connection_exception THEN
@@ -360,3 +365,4 @@ DELETE FROM dflow.sample_workflow WHERE created_by_user='contract-test' AND samp
 );
 DELETE FROM dflow.sample WHERE sample_name IN ('flow4-event-concurrency-contract','flow4-reserve-concurrency-contract');
 COMMIT;
+DROP ROLE flow4_concurrency_writer;
