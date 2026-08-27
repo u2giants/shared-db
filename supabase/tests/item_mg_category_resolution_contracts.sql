@@ -9,12 +9,15 @@ declare
   v_clock_id uuid;
   v_cw_mg integer;
   v_sp_mg integer;
+  v_inactive_mg integer;
   v_old_item integer;
   v_boundary_item integer;
   v_other_depth_item integer;
   v_other_division_item integer;
   v_missing_item integer;
   v_unresolved_item integer;
+  v_inactive_item integer;
+  v_null_date_item integer;
   v_count integer;
   v_code text;
 begin
@@ -35,8 +38,13 @@ begin
   ) values ('ZZ1662', 'Issue 1662 SP fixture', '01', 'EDGEHOME', 'SP001', true)
   returning mg_id into v_sp_mg;
 
+  insert into core."merchGroup" (
+    mg_code, mg_desc, "mgTypeCode", "companyCode_fk", "divisionCode_fk", is_active
+  ) values ('ZZ1662I', 'Issue 1662 inactive fixture', '01', 'EDGEHOME', 'CW001', false)
+  returning mg_id into v_inactive_mg;
+
   insert into core.mg_category_merch_group (mg_category_id, merch_group_mg_id)
-  values (v_wall_id, v_cw_mg), (v_clock_id, v_sp_mg);
+  values (v_wall_id, v_cw_mg), (v_clock_id, v_sp_mg), (v_wall_id, v_inactive_mg);
 
   insert into dflow."itemHeader" (
     created_time_date, div_code, udf_merchgroup01_id, udf_merchgroup02, udf_merchgroup03
@@ -64,6 +72,14 @@ begin
   insert into dflow."itemHeader" (created_time_date, div_code, udf_merchgroup01_id)
   values ('2025-05-14 12:00:00', 'SP001', v_cw_mg)
   returning item_id_pk into v_unresolved_item;
+
+  insert into dflow."itemHeader" (created_time_date, div_code, udf_merchgroup01_id)
+  values ('2025-05-14 12:00:00', 'CW001', v_inactive_mg)
+  returning item_id_pk into v_inactive_item;
+
+  insert into dflow."itemHeader" (created_time_date, div_code, udf_merchgroup01_id)
+  values (null, 'CW001', v_cw_mg)
+  returning item_id_pk into v_null_date_item;
 
   select count(*) into v_count from api.resolve_item_mg_category(v_old_item);
   if v_count <> 0 then
@@ -94,6 +110,16 @@ begin
   select count(*) into v_count from api.resolve_item_mg_category(v_unresolved_item);
   if v_count <> 0 then
     raise exception 'FAIL cross-division MG01 resolved a category';
+  end if;
+
+  select count(*) into v_count from api.resolve_item_mg_category(v_inactive_item);
+  if v_count <> 0 then
+    raise exception 'FAIL inactive MG01 resolved a category';
+  end if;
+
+  select count(*) into v_count from api.resolve_item_mg_category(v_null_date_item);
+  if v_count <> 0 then
+    raise exception 'FAIL item with NULL created_time_date resolved a category';
   end if;
 
   if position('2025-05-14' in pg_get_functiondef('api.resolve_item_mg_category(integer)'::regprocedure)) = 0

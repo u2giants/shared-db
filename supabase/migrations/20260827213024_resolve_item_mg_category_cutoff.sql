@@ -1,3 +1,4 @@
+-- derived-from: none
 -- Issue #1662 — item-level mgCategory resolution.
 --
 -- TEMPORARY CUTOFF: items created before 2025-05-14 deliberately resolve to no
