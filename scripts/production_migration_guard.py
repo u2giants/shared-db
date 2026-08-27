@@ -1839,6 +1839,47 @@ def hard_references(raw: str) -> list[tuple[str, str]]:
     return found
 
 
+RETIRED_OBJECT_RESTORATION_RE = re.compile(
+    r"^\s*--\s*restores-retired-object:\s*"
+    r"([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*)\s+"
+    r"dropped-by:\s*(\d{14})\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def retired_object_restorations(raw: str) -> dict[str, str]:
+    """Return exact declarations for intentional restoration of retired objects."""
+    declarations: dict[str, str] = {}
+    for match in RETIRED_OBJECT_RESTORATION_RE.finditer(raw):
+        obj, dropped_by = match.group(1).lower(), match.group(2)
+        if obj in declarations:
+            raise GuardError(f"duplicate retired-object restoration declaration for {obj}")
+        declarations[obj] = dropped_by
+    return declarations
+
+
+def validate_retired_object_restorations(
+    version: str, raw: str, removed_by: dict[str, str]
+) -> set[str]:
+    """Require each declaration to match both a real create and the exact remover."""
+    created = created_objects(raw)
+    valid: set[str] = set()
+    for obj, declared_drop in retired_object_restorations(raw).items():
+        if obj not in created:
+            raise GuardError(
+                f"{version} declares restoration of {obj} but does not create it"
+            )
+        actual_drop = removed_by.get(obj)
+        if actual_drop != declared_drop:
+            actual = actual_drop or "no recorded prior drop"
+            raise GuardError(
+                f"{version} declares {obj} was dropped by {declared_drop}, "
+                f"but history shows {actual}"
+            )
+        valid.add(obj)
+    return valid
+
+
 def _created_by_applied_dynamic_ddl(
     obj: str, migrations: dict[str, Path], remote: set[str]
 ) -> bool:
@@ -1905,6 +1946,10 @@ def preflight_batch(
         # body and a real missing dependency reports both at once.
         try:
             assert_no_archaic_function_body(version, raw)
+        except GuardError as exc:
+            problems.append(str(exc))
+        try:
+            validate_retired_object_restorations(version, raw, removed_by)
         except GuardError as exc:
             problems.append(str(exc))
         created = created_objects(raw)

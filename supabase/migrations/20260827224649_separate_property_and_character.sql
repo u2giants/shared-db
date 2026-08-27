@@ -2,6 +2,7 @@
 -- distinct UUID Property and Character contracts.
 --
 -- derived-from: 20260823175638, 20260825192610
+-- restores-retired-object: core.character dropped-by: 20260823133150
 -- maintains-eol-dependency: function api.db_data_admin_licensor_property_tree
 -- maintains-eol-dependency: function plm.sync_wb_canonical_relationship_edges
 --
