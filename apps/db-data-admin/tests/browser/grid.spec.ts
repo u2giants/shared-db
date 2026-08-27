@@ -339,6 +339,7 @@ test('renders every scraped Property under distinct presentation Licensor headin
   await expect(reviewCell).toHaveAttribute('title', /No problem found|scrape|approved/i)
   await expect(reviewCell).toHaveCSS('white-space', 'normal')
   await expect(reviewCell).toHaveCSS('-webkit-line-clamp', '2')
+  expect(await page.locator('.review-text-cell[title=""]').count()).toBeGreaterThanOrEqual(3)
   await expect(page.getByRole('gridcell', { name: 'The Mandalorian' })).toBeVisible()
   await expect(page.getByRole('gridcell', { name: 'lucasfilm_dcp', exact: true })).toBeVisible()
   const conflictDetail = page.getByRole('note', { name: 'DCP Vault - authority conflict review details' })
