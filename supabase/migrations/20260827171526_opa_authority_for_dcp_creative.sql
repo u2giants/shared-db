@@ -356,3 +356,55 @@ revoke all on function api.db_data_admin_scraped_properties(text, text, integer)
   from public, anon, service_role;
 grant execute on function api.db_data_admin_scraped_properties(text, text, integer)
   to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- PR #1660 independent review (Muse Spark 1.2, sequence 420) hardening.
+-- ---------------------------------------------------------------------------
+
+-- Finding: nothing in the schema prevented two contradictory ACTIVE approved
+-- resolutions for one exact source Property identity. UNIQUE(identity,
+-- decision_version) and UNIQUE(supersedes_resolution_id) together allow at most
+-- one child per parent, but permitted two disjoint chain roots, so the reader
+-- function's ORDER BY ... LIMIT 1 was picking a winner the database had never
+-- rejected. Binding the root to decision_version = 1 makes the existing identity
+-- unique constraint admit exactly one root per identity; combined with the
+-- one-child rule the approved chain is a single path with exactly one tip.
+alter table plm.dcp_opa_property_resolution
+  add constraint dcp_opa_property_resolution_single_chain_ck check (
+    (decision_version = 1) = (supersedes_resolution_id is null)
+  );
+
+-- Finding: "append-only" was enforced only by REVOKE UPDATE/DELETE from
+-- service_role. The table owner -- the migration role, and any future
+-- SECURITY DEFINER function owned by it -- bypasses both GRANTs and RLS and
+-- could rewrite or erase a recorded decision silently. A trigger is not
+-- bypassed by ownership, so it is the only barrier that actually holds.
+create or replace function plm.reject_dcp_opa_resolution_mutation()
+returns trigger
+language plpgsql
+set search_path = pg_catalog, pg_temp
+as $$
+begin
+  raise exception
+    'plm.% is append-only: % is not permitted. Record a new superseding decision instead.',
+    tg_table_name, tg_op
+    using errcode = 'restrict_violation';
+end;
+$$;
+
+create trigger dcp_opa_property_resolution_append_only
+before update or delete on plm.dcp_opa_property_resolution
+for each row execute function plm.reject_dcp_opa_resolution_mutation();
+
+create trigger dcp_opa_property_resolution_member_append_only
+before update or delete on plm.dcp_opa_property_resolution_member
+for each row execute function plm.reject_dcp_opa_resolution_mutation();
+
+-- Accepted, documented residual risk from the same review: approved_by and
+-- approved_at are free-form and are therefore forgeable by any principal that
+-- can INSERT -- today only service_role. They are not defaulted from auth.uid()
+-- or clock_timestamp() on purpose: they record a HUMAN approval decision made
+-- outside the database, so a database-generated value would be a stronger-looking
+-- claim with no more truth behind it. The real control is that INSERT is granted
+-- to service_role alone, every row carries a mandatory evidence_sha256, and the
+-- append-only triggers above mean a forged row can never be quietly removed.
