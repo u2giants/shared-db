@@ -212,7 +212,7 @@ begin
   v_rejected := false;
   begin
     insert into plm.contract_property(capture_id, exact_property_text)
-    values (v_capture_a, E'\t');
+    values (v_capture_a, '   ');
   exception when check_violation then
     get stacked diagnostics v_constraint = constraint_name;
     v_rejected := v_constraint = 'contract_property_exact_text_not_blank';
