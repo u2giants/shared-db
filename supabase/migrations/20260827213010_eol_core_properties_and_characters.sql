@@ -1,6 +1,7 @@
 -- Issue #1684, Phase 1: make the mixed Property/Character table read-only
 -- while consumers are cut over to separate canonical datasets. No rows are
 -- copied, changed, or removed by this staging migration.
+-- derived-from: none
 
 comment on table core.properties_and_characters is
   'EOL under issue #1684. Reads remain available during consumer cutover. Do not add dependencies or write rows; this mixed table will be removed after Properties and Characters are separated.';
