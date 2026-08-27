@@ -162,6 +162,13 @@ create trigger assets_effective_tags_sync
 after insert or update of style_group_id, is_deleted or delete on public.assets
 for each row execute function public.sync_asset_effective_tags();
 
+-- The initial projection backfill writes roughly 2.3M rows across the two arms
+-- above. The default per-statement timeout on the migration connection is two
+-- minutes, which cancelled this statement on the first preview apply. Raise it
+-- for this transaction only; lock_timeout stays at 5s so the migration still
+-- fails fast rather than queueing behind a long-running writer.
+set local statement_timeout = '30min';
+
 insert into public.asset_effective_tags (asset_id, tag, scope)
 select a.id, t.tag, 'asset'
 from public.assets a
@@ -175,6 +182,8 @@ join public.style_group_tags t on t.style_group_id = a.style_group_id
 where a.is_deleted = false
   and t.status = 'active'
 on conflict do nothing;
+
+reset statement_timeout;
 
 -- F1 (#1664 review): the legacy get_filter_counts base restricts to assets that
 -- pass the THUMBNAIL_MIN_DATE incident gate. The effective path must apply the
