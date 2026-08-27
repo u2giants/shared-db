@@ -92,6 +92,9 @@ BEGIN
 
   PERFORM dflow.pack_sample_reservation(v_reservation,v_box,v_shipment,'ningbo','office','nyo','ningbo_to_nyc','ningbo-user','ningbo','warehouse-pack','h-pack');
   SELECT packed_shipment_line_id INTO v_first_line FROM dflow.sample_reservation WHERE sample_reservation_id=v_reservation;
+  IF (SELECT sample_reservation_id FROM dflow.reserve_sample_remote_request_item(v_warehouse_item,'ningbo-user','ningbo','warehouse-reserve','h-reserve')) <> v_reservation THEN
+    RAISE EXCEPTION 'reservation replay after packing did not return the committed reservation';
+  END IF;
   PERFORM dflow.pack_sample_reservation(v_reservation,v_box,v_shipment,'ningbo','office','nyo','ningbo_to_nyc','ningbo-user','ningbo','warehouse-pack','h-pack');
   IF (SELECT count(*) FROM dflow.sample_shipment_item WHERE sample_id_fk=v_warehouse_sample AND box_id_fk=v_box) <> 1
      OR (SELECT count(*) FROM dflow.sample_shipment_line WHERE sample_id_fk=v_warehouse_sample AND idempotency_key='warehouse-pack') <> 1

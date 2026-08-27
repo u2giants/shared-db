@@ -164,7 +164,7 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'reservation not found' USING ERRCODE='P0002'; END IF;
   IF v_res.reservation_state='packed' THEN
     SELECT * INTO v_line FROM dflow.sample_shipment_line WHERE shipment_line_id=v_res.packed_shipment_line_id;
-    IF v_res.request_hash<>p_request_hash OR v_res.packed_box_id<>p_box_id
+    IF v_res.packed_box_id<>p_box_id
        OR v_line.request_hash<>p_request_hash OR v_line.box_id_fk<>p_box_id
        OR v_line.idempotency_key<>p_idempotency_key
        OR v_line.sample_shipment_id IS DISTINCT FROM p_sample_shipment_id
@@ -198,7 +198,7 @@ BEGIN
   VALUES(v_res.sample_id_fk,p_box_id,1,'office',p_origin_location_id,p_destination_type,p_destination_id,p_route_leg,'packed',p_idempotency_key,p_request_hash,p_actor_user,p_actor_role,p_sample_shipment_id)
   ON CONFLICT (sample_id_fk,idempotency_key) DO UPDATE SET idempotency_key=excluded.idempotency_key
   RETURNING shipment_line_id INTO v_line_id;
-  UPDATE dflow.sample_reservation SET reservation_state='packed',packed_box_id=p_box_id,packed_shipment_line_id=v_line_id,packed_by_user=p_actor_user,packed_at=now(),request_hash=p_request_hash WHERE sample_reservation_id=p_reservation_id RETURNING * INTO v_res;
+  UPDATE dflow.sample_reservation SET reservation_state='packed',packed_box_id=p_box_id,packed_shipment_line_id=v_line_id,packed_by_user=p_actor_user,packed_at=now() WHERE sample_reservation_id=p_reservation_id RETURNING * INTO v_res;
   UPDATE dflow.sample_remote_request_item SET current_state='packed',updated_at=now() WHERE sample_remote_request_item_id=v_item.sample_remote_request_item_id;
   INSERT INTO dflow.sample_remote_request_history(sample_remote_request_item_id,from_state,to_state,actor_user,actor_role,idempotency_key,request_hash)
   VALUES(v_item.sample_remote_request_item_id,'reserved_for_next_box','packed',p_actor_user,p_actor_role,p_idempotency_key,p_request_hash);
