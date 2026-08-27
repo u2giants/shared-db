@@ -40,10 +40,8 @@ describe('explainScrapedProperty', () => {
     expect(result.review_guidance).toContain('keep this DCP record out of Marvel Creative')
   })
 
-  it('describes the direct source evidence when no problem exists', () => {
+  it('leaves all review fields blank when no problem exists', () => {
     const result = explainScrapedProperty(row())
-    expect(result.review_reason).toContain('approved DCP Vault classification')
-    expect(result.evidence_basis).toContain('exact DCP Vault source property ID')
-    expect(result.review_guidance).toContain('No action is needed')
+    expect(result).toEqual({ review_reason: '', evidence_basis: '', review_guidance: '' })
   })
 })

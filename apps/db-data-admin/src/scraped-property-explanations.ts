@@ -2,8 +2,11 @@ import type { ScrapedPropertyRow } from './lib/data-admin'
 
 type ReviewExplanation = Pick<ScrapedPropertyRow, 'review_reason' | 'evidence_basis' | 'review_guidance'>
 
-const presentationName = (row: ScrapedPropertyRow) => row.presentation_licensor_name
-  .replace(/\s+-\s+(Creative|Submissions)\s+\(.+\)$/i, '')
+const noReviewNeeded: ReviewExplanation = {
+  review_reason: '',
+  evidence_basis: '',
+  review_guidance: '',
+}
 
 export function explainScrapedProperty(row: ScrapedPropertyRow): ReviewExplanation {
   if (row.presentation_licensor_key === 'dcp-vault-non-authoritative-marvel-tag') {
@@ -66,35 +69,16 @@ export function explainScrapedProperty(row: ScrapedPropertyRow): ReviewExplanati
   }
 
   if (row.source_table === 'plm.opa_property') {
-    const studio = presentationName(row)
-    return {
-      review_reason: `No problem found. Disney OPA listed this property directly under the ${studio} parent selection.`,
-      evidence_basis: `The OPA scrape captured this exact Property ID while the ${studio} parent selection was open.`,
-      review_guidance: 'No action is needed unless Disney OPA later moves or removes this exact Property ID.',
-    }
+    return noReviewNeeded
   }
 
   if (row.source_table === 'plm.marvel_asgard_style_guide') {
-    return {
-      review_reason: 'No problem found. This Marvel Creative property came directly from Marvel ASGARD, the approved source for Marvel creative assets.',
-      evidence_basis: 'The ASGARD scrape captured this exact property record from the Marvel Style Guides library.',
-      review_guidance: 'No action is needed unless Marvel ASGARD later changes or removes this exact property record.',
-    }
+    return noReviewNeeded
   }
 
   if (row.source_purpose === 'Creative (DCP Vault)') {
-    const studio = presentationName(row)
-    return {
-      review_reason: `No problem found. The approved DCP Vault classification assigns this exact property to ${studio}.`,
-      evidence_basis: `An approved classification decision for this exact DCP Vault source property ID assigns it to ${studio}.`,
-      review_guidance: 'No action is needed unless newer direct DCP Vault evidence proves that the studio assignment is wrong.',
-    }
+    return noReviewNeeded
   }
 
-  const source = row.source_system.replaceAll('_', ' ')
-  return {
-    review_reason: `No problem found. This property is shown under ${presentationName(row)} because that source supplied it there.`,
-    evidence_basis: `The ${source} scrape supplied this exact source property ID.`,
-    review_guidance: 'No action is needed unless the source later changes or removes this exact property record.',
-  }
+  return noReviewNeeded
 }
