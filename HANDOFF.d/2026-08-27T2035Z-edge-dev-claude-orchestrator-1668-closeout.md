@@ -55,7 +55,7 @@ Put this whole list to Albert in ONE message before starting work. Do not meet t
 
 `u2giants/shared-db` is the **governance repository for the shape of POP Creations' shared Supabase database** — every table, column, view, function, trigger, RLS policy, index, constraint and grant. It holds no application code of consequence; what it holds is migrations plus the machinery that decides whether a migration is allowed to reach the live database.
 
-Several separate applications read and write that one database: PopDAM (digital asset management), DesignFlow / `data.designflow.app` (licensing and product development), ColdLion (a customer-facing feed), and a CRM surface. Those applications own their own row data. They do **not** own the schema — every structural change is authored here, in a branch, in a pull request.
+Several separate applications read and write that one database: PopDAM (digital asset management), DesignFlow, whose `data.designflow.app` surface is the DB Data Admin application (licensing and product development), ColdLion (a customer-facing feed), and a CRM surface. Those applications own their own row data. They do **not** own the schema — every structural change is authored here, in a branch, in a pull request.
 
 - **Repos:** `u2giants/shared-db` (this one), `u2giants/popdam3`, DesignFlow under the `popcre` org.
 - **Databases:** Supabase. Preview project ref `mvpkijzfmfcxhnzqogzs`. Production project ref `qsllyeztdwjgirsysgai` — **never written to by any session directly, ever.**
