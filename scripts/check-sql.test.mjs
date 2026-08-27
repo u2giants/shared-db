@@ -217,6 +217,34 @@ function makeBaseVersions(versions) {
   return file
 }
 
+function makeDiff(file, addedLine) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'check-sql-diff-'))
+  const diff = path.join(dir, 'change.diff')
+  writeFileSync(diff, `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -0,0 +1 @@\n+${addedLine}\n`)
+  return diff
+}
+
+test('issue 1684 EOL guard rejects a new combined-table dependency', () => {
+  withFixture(['20260801120000_fixture.sql'], (dir) => {
+    const result = runGuards(dir, {
+      mainNewest: '20260801100000',
+      env: { CHECK_SQL_EOL_DIFF_FILE: toBashPath(makeDiff('apps/example/query.ts', 'select * from core.properties_and_characters')) },
+    })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /new runtime or migration references/)
+  })
+})
+
+test('issue 1684 EOL guard allows only its exact staging migration', () => {
+  withFixture(['20260801120000_fixture.sql'], (dir) => {
+    const result = runGuards(dir, {
+      mainNewest: '20260801100000',
+      env: { CHECK_SQL_EOL_DIFF_FILE: toBashPath(makeDiff('supabase/migrations/20260827213010_eol_core_properties_and_characters.sql', 'comment on table core.properties_and_characters is \'EOL\';')) },
+    })
+    assert.equal(result.status, 0, result.stderr)
+  })
+})
+
 const baseEnv = () => ({ CHECK_SQL_BASE_VERSIONS: toBashPath(makeBaseVersions(['20260101000000'])) })
 
 test('Guard B2 passes a migration timestamped after everything the ledger holds', () => {

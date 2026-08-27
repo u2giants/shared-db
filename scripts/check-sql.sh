@@ -8,6 +8,56 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # `bash scripts/check-sql.sh` set none of them and behave exactly as before.
 migration_dir="${CHECK_SQL_MIGRATION_DIR:-$root_dir/supabase/migrations}"
 
+# Issue #1684 Phase 1: reject every new runtime or migration dependency on the
+# EOL mixed table. The diff makes existing historical references the exact
+# grandfathered set. The one staging migration is the only new migration
+# allowlisted; the final drop must receive its own reviewed exception later.
+check_eol_combined_table_references() {
+  local diff_file="${CHECK_SQL_EOL_DIFF_FILE:-}"
+  local remove_diff=0
+  if [[ -z "$diff_file" ]]; then
+    # Fixture-driven migration-guard tests have no meaningful repository diff.
+    [[ -n "${CHECK_SQL_MIGRATION_DIR:-}" ]] && return 0
+    local eol_base="origin/${GITHUB_BASE_REF:-main}"
+    if ! git -C "$root_dir" rev-parse --verify --quiet "$eol_base" >/dev/null; then
+      echo "ERROR: issue #1684 EOL guard cannot resolve base $eol_base." >&2
+      return 2
+    fi
+    diff_file="$(mktemp)"
+    remove_diff=1
+    git -C "$root_dir" diff --unified=0 --no-ext-diff "$eol_base" -- . > "$diff_file"
+  fi
+
+  node - "$diff_file" <<'NODE'
+const fs = require('node:fs')
+const diff = fs.readFileSync(process.argv[2], 'utf8')
+const allowed = 'supabase/migrations/20260827213010_eol_core_properties_and_characters.sql'
+const failures = []
+let current = ''
+for (const line of diff.split(/\r?\n/)) {
+  const header = line.match(/^\+\+\+ b\/(.+)$/)
+  if (header) { current = header[1]; continue }
+  if (!line.startsWith('+') || line.startsWith('+++')) continue
+  if (current === allowed || current === 'scripts/check-sql.sh') continue
+  if (current.startsWith('docs/') || current.startsWith('HANDOFF.d/')) continue
+  if (current.startsWith('supabase/tests/') || /\.test\.[cm]?js$/.test(current)) continue
+  if (/core\s*\.\s*["']?properties_and_characters\b/i.test(line.slice(1))) {
+    failures.push(`${current}: ${line.slice(1).trim()}`)
+  }
+}
+if (failures.length) {
+  console.error('ERROR: new runtime or migration references to core.properties_and_characters are forbidden by issue #1684:')
+  for (const failure of failures) console.error(`  ${failure}`)
+  console.error(`Only the exact EOL staging migration is allowlisted: ${allowed}`)
+  process.exit(1)
+}
+console.log('Issue #1684 EOL reference guard passed: no new dependency was introduced.')
+NODE
+  local result=$?
+  [[ "$remove_diff" -eq 0 ]] || rm -f "$diff_file"
+  return "$result"
+}
+
 # No two migrations may share a version (the leading 14-digit timestamp).
 # Supabase's ledger `supabase_migrations.schema_migrations` keys on the version
 # ALONE, not the filename, so a duplicate is silently skipped on first apply and
@@ -373,16 +423,12 @@ fi
 rm -f "$base_versions_file"
 
 if [[ -n "${CHECK_SQL_MIGRATIONS_ONLY:-}" ]]; then
-  if [[ -z "${CHECK_SQL_MIGRATION_DIR:-}" ]]; then
-    node "$root_dir/scripts/check-properties-and-characters-eol-references.mjs"
-  fi
+  check_eol_combined_table_references
   echo "Migration guards passed (CHECK_SQL_MIGRATIONS_ONLY set; content checks skipped)."
   exit 0
 fi
 
-if [[ -z "${CHECK_SQL_MIGRATION_DIR:-}" ]]; then
-  node "$root_dir/scripts/check-properties-and-characters-eol-references.mjs"
-fi
+check_eol_combined_table_references
 
 required_files=(
   "20260621150714_foundation.sql"
