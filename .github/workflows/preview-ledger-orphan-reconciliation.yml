@@ -126,12 +126,14 @@ jobs:
             1422:1423:1424:20260824150630:20260824172136) ;;
             1439:1488:1495:20260825102716:20260825110813) ;;
             1615:1636:1637:20260827031236:20260827095753) ;;
+            1467:1580:1585:20260827183106:20260827183106) ;;
+            1645:1656:1664:20260827183011:20260827183011) ;;
             1658:1659:1660:20260827134155:20260827171526) ;;
             *) echo "REFUSED: reconciliation tuple is not explicitly allowlisted" >&2; exit 1 ;;
           esac
           [[ "$ORPHAN" =~ ^[0-9]{14}$ && "$REPLACEMENT" =~ ^[0-9]{14}$ ]]
           if [ "$ORPHAN" = "$REPLACEMENT" ]; then
-            test "$ORPHAN" = "20260824004025"
+            case "$ORPHAN" in 20260824004025|20260827183106|20260827183011) ;; *) echo "REFUSED: same-version rehearsal reset is not allowlisted for this version" >&2; exit 1 ;; esac
             test -n "$(find supabase/migrations -maxdepth 1 -name "${ORPHAN}_*.sql" -print -quit)"
           else
             test -z "$(find supabase/migrations -maxdepth 1 -name "${ORPHAN}_*.sql" -print -quit)"
