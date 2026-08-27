@@ -1,26 +1,12 @@
-import { RevoGrid, Template, type ColumnRegular } from '@revolist/react-datagrid'
+import { RevoGrid, Template } from '@revolist/react-datagrid'
 import { RefreshCw, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FilterHeader } from './FilterHeader'
 import { groupScrapedProperties, loadScrapedProperties, type ApiClient, type ScrapedPropertyRow } from './lib/data-admin'
 import { getDistinctColumnValues, rowMatchesFilters } from './lib/grid-filters'
+import { scrapedPropertiesColumns } from './scraped-properties-columns'
 
 type Props = { client: ApiClient }
-
-const columns: ColumnRegular[] = [
-  { prop: 'display_label', name: 'Property', size: 260, sortable: true },
-  { prop: 'source_system', name: 'Source system', size: 190, sortable: true },
-  { prop: 'source_property_id', name: 'Source ID', size: 180, sortable: true },
-  { prop: 'source_status', name: 'Source status', size: 130, sortable: true },
-  { prop: 'provenance_kind', name: 'Provenance', size: 220, sortable: true },
-  { prop: 'source_purpose', name: 'Purpose', size: 210, sortable: true },
-  { prop: 'review_reason', name: 'Review reason', size: 300, sortable: true },
-  { prop: 'evidence_basis', name: 'Evidence basis', size: 240, sortable: true },
-  { prop: 'review_guidance', name: 'Decision guidance', size: 360, sortable: true },
-  { prop: 'source_table', name: 'Source table', size: 210, sortable: true },
-  { prop: 'latest_seen_at', name: 'Latest seen', size: 180, sortable: true },
-  { prop: 'capture_marker', name: 'Capture marker', size: 180, sortable: true },
-]
 
 export function ScrapedPropertiesTable({ client }: Props) {
   const [rows, setRows] = useState<ScrapedPropertyRow[]>([])
@@ -46,12 +32,12 @@ export function ScrapedPropertiesTable({ client }: Props) {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load() }, [load])
 
-  const distinctValues = useMemo(() => Object.fromEntries(columns.map(column => {
+  const distinctValues = useMemo(() => Object.fromEntries(scrapedPropertiesColumns.map(column => {
     const prop = String(column.prop)
     return [prop, getDistinctColumnValues(rows, prop)]
   })), [rows])
 
-  const gridColumns = useMemo(() => columns.map(column => ({
+  const gridColumns = useMemo(() => scrapedPropertiesColumns.map(column => ({
     ...column,
     readonly: true,
     columnTemplate: Template(FilterHeader, {

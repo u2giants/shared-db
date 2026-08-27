@@ -323,6 +323,15 @@ test('renders every scraped Property under distinct presentation Licensor headin
   await expect(page.getByRole('heading', { name: 'Lucasfilm / Star Wars - Creative (DCP Vault)', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Marvel - Creative (DCP Vault)', exact: true })).toHaveCount(0)
   await expect(page.getByText('5 of 5 scraped properties')).toBeVisible()
+  const scrapedGrid = page.locator('revo-grid').first()
+  await expect.poll(() => scrapedGrid.evaluate(element => (
+    element as HTMLElement & { columns: Array<{ name: string }> }
+  ).columns.slice(0, 4).map(column => column.name))).toEqual([
+    'Property',
+    'Review reason',
+    'Evidence basis',
+    'Decision guidance',
+  ])
   await expect(page.getByRole('gridcell', { name: 'The Mandalorian' })).toBeVisible()
   await expect(page.getByRole('gridcell', { name: 'lucasfilm_dcp', exact: true })).toBeVisible()
   const conflictDetail = page.getByRole('note', { name: 'DCP Vault - authority conflict review details' })

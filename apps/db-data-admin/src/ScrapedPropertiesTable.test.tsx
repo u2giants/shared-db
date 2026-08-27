@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ScrapedPropertiesTable } from './ScrapedPropertiesTable'
 import { groupScrapedProperties, type ApiClient, type ScrapedPropertyRow } from './lib/data-admin'
+import { scrapedPropertiesColumns } from './scraped-properties-columns'
 
 const row = (key: string, licensor: string, source = 'disney_dcp'): ScrapedPropertyRow => ({
   id: key, row_key: key, presentation_licensor_key: licensor.toLowerCase().replaceAll(' ', '-'), presentation_licensor_name: licensor,
@@ -13,6 +14,15 @@ const row = (key: string, licensor: string, source = 'disney_dcp'): ScrapedPrope
 })
 
 describe('ScrapedPropertiesTable', () => {
+  it('puts review decision context immediately after Property', () => {
+    expect(scrapedPropertiesColumns.slice(0, 4).map(column => column.name)).toEqual([
+      'Property',
+      'Review reason',
+      'Evidence basis',
+      'Decision guidance',
+    ])
+  })
+
   it('keeps Disney, Marvel, and Star Wars in independent presentation groups', () => {
     expect(groupScrapedProperties([row('1', 'Disney'), row('2', 'Marvel'), row('3', 'Star Wars', 'lucasfilm_dcp')]).map(group => group.name)).toEqual(['Disney', 'Marvel', 'Star Wars'])
   })
