@@ -81,7 +81,7 @@ export function ScrapedPropertiesTable({ client }: Props) {
             <strong>{row.review_reason}</strong> Evidence basis: {row.evidence_basis}. {row.review_guidance}
           </p>)}
         </div>}
-        <div className="grid-wrap"><RevoGrid theme="material" readonly accessible resize columns={gridColumns} source={group.rows} rowHeaders /></div>
+        <div className="grid-wrap"><RevoGrid theme="material" readonly accessible resize rowSize={58} columns={gridColumns} source={group.rows} rowHeaders /></div>
       </section>)}
       {loading && <div className="grid-loading">Loading…</div>}
     </div>

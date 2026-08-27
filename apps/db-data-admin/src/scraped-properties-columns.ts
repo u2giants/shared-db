@@ -1,10 +1,13 @@
-import type { ColumnRegular } from '@revolist/react-datagrid'
+import { Template, type ColumnRegular } from '@revolist/react-datagrid'
+import { ReviewTextCell } from './ReviewTextCell'
+
+const reviewTextTemplate = Template(ReviewTextCell)
 
 export const scrapedPropertiesColumns: ColumnRegular[] = [
   { prop: 'display_label', name: 'Property', size: 260, sortable: true },
-  { prop: 'review_reason', name: 'Review reason', size: 300, sortable: true },
-  { prop: 'evidence_basis', name: 'Evidence basis', size: 240, sortable: true },
-  { prop: 'review_guidance', name: 'Decision guidance', size: 360, sortable: true },
+  { prop: 'review_reason', name: 'Review reason', size: 260, sortable: true, cellTemplate: reviewTextTemplate },
+  { prop: 'evidence_basis', name: 'Evidence basis', size: 240, sortable: true, cellTemplate: reviewTextTemplate },
+  { prop: 'review_guidance', name: 'Decision guidance', size: 280, sortable: true, cellTemplate: reviewTextTemplate },
   { prop: 'source_system', name: 'Source system', size: 190, sortable: true },
   { prop: 'source_property_id', name: 'Source ID', size: 180, sortable: true },
   { prop: 'source_status', name: 'Source status', size: 130, sortable: true },
