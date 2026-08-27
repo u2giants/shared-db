@@ -1834,9 +1834,12 @@ def _created_by_applied_dynamic_ddl(
 ) -> bool:
     """True when an APPLIED migration creates `obj` inside a dollar-quoted body.
 
-    Only the remote-applied prefix is consulted, so this can never satisfy a
-    dependency production does not already hold. See the call site in
-    `preflight_batch` for why it exists and why it is not a widening of
+    Only the remote-applied prefix is consulted, so no PENDING file can feed
+    this path. It reads a widened body, so a dollar-quoted block that is not
+    executed DDL could still contradict a refusal wrongly -- the same residual
+    the module header already owns: this check may REJECT, never APPROVE, and
+    the rehearsal against a production-shaped database stays the real gate. See
+    the call site in `preflight_batch` for why it is not a widening of
     `available`.
     """
     for version in sorted(remote):
