@@ -7,7 +7,7 @@ begin
   -- 20260825025154 is retained as truthful preview history. Prerequisite A
   -- recreated this index and recovery B deliberately retained it, because live
   -- old snapshots could prevent even a concurrent drop from completing. Issue
-  -- #1467 (20260827132608) retired that hold once the activated CHECK and NOT
+  -- #1467 (20260827183106) retired that hold once the activated CHECK and NOT
   -- NULL constraints made the partial predicate unsatisfiable, so the index must
   -- now be ABSENT.
   if to_regclass('public.asset_tags_pending_metadata_normalization_idx') is not null then

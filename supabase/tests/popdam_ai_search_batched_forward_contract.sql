@@ -27,7 +27,7 @@ begin
   if to_regclass('public.asset_tags_active_asset_idx') is null then
     raise exception 'final active asset tag index is missing';
   end if;
-  -- Issue #1467 (20260827132608) retired the normalization accelerator once the
+  -- Issue #1467 (20260827183106) retired the normalization accelerator once the
   -- activated constraints made its partial predicate unsatisfiable, so only the
   -- forward index is still required, and the accelerator must be ABSENT.
   if not v_contract_complete and to_regclass('public.asset_tags_forward_asset_id_idx') is null then
