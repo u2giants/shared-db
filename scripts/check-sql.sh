@@ -39,7 +39,7 @@ for (const line of diff.split(/\r?\n/)) {
   if (header) { current = header[1]; continue }
   if (!line.startsWith('+') || line.startsWith('+++')) continue
   if (current === allowed || current === 'scripts/check-sql.sh') continue
-  if (current.startsWith('docs/') || current.startsWith('HANDOFF.d/')) continue
+  if (current.endsWith('.md')) continue
   if (current.startsWith('supabase/tests/') || /\.test\.[cm]?js$/.test(current)) continue
   if (/core\s*\.\s*["']?properties_and_characters\b/i.test(line.slice(1))) {
     failures.push(`${current}: ${line.slice(1).trim()}`)
