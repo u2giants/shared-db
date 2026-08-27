@@ -21,7 +21,7 @@ and dissemination process is
 
 ## Historical item merchandise-group classification
 
-Before interpreting `full_item_master.csv`, changing item-description parsing, or reporting historical MG match counts, read [`docs/item-description-mg-classification-process.md`](docs/item-description-mg-classification-process.md). The active remediation plan is [`plan_item_description_mg_taxonomy_repair.md`](plan_item_description_mg_taxonomy_repair.md); follow its STATUS table and do not recreate the unsafe provisional/fuzzy method. The permanent rule is: parse every description into product type, size, licensor, property, and artwork; build independent post-May-13 maps for MG01, MG01+MG02, and MG01+MG02+MG03; then match old product types from three levels to two to one. A failed full-key match is never an MG01 failure.
+Before interpreting `full_item_master.csv`, changing item-description parsing, or reporting historical MG match counts, read [`docs/item-description-mg-classification-process.md`](docs/item-description-mg-classification-process.md) and the completed [`plan_mg_taxonomy_three_axis_repair.md`](plan_mg_taxonomy_three_axis_repair.md). The implemented method separates MG01 physical form, MG02's family-specific subtype or material, and MG03 explicit embellishment. It validates newer codes independently at each depth, builds three independent post-May-13 maps, and matches historical items from three axes to two to one. Missing embellishment is unreadable, not plain; invalid child evidence never erases a valid parent; and a failed full-key match is never an MG01 failure. The older `plan_item_description_mg_taxonomy_repair.md` is retained as superseded history.
 
 ## Active contracts and implementation plans
 
@@ -801,6 +801,40 @@ Then: merge to `main` (this auto-syncs the `shared-db/` folder into all apps) an
 promote to **production only in an approved window**. Docs-only PRs (no schema
 change) need just items 1 and "it reads correctly" — merge them promptly.
 
+### 5.0-D Declare what a re-derived migration was derived from — `-- derived-from:` (issue #1608, added 2026-08-26)
+
+Loader-style migrations here are authored as a **full re-derivation of the
+then-current object body on `main`**. A file that does
+`create or replace function|view` therefore depends on its base being present
+**in the target database** — and on 2026-08-24 one was promoted to production
+without it. The apply did not fail; it replaced the object with a body written
+for a different world, and post-apply catalog verification stayed green because
+the object still existed. Three migrations were retired over it.
+
+If your migration re-replaces an object an earlier migration also replaces, put
+**one machine-readable line** in the header:
+
+```sql
+-- derived-from: 20260814223552
+```
+
+or, if it writes the object from scratch and depends on no earlier rewrite:
+
+```sql
+-- derived-from: none
+```
+
+`scripts/migration_derivation.py` reads it. The Python test suite refuses a pull
+request that omits it (mandatory for every migration stamped 2026-08-27 or
+later), and the promotion lane refuses an allowlist whose member declares a base
+the target ledger does not have. The escape hatch is
+`--derivation-override VERSION:BASE=<what the database will actually hold>`,
+which is recorded verbatim in the run log. The drift report shows such a version
+as `[BASE-ABSENT]`, not as ordinary pending work.
+
+Do **not** add the line to an already-merged migration — that changes its bytes.
+Merged files that need a declaration get one in `LEGACY_DECLARATIONS`.
+
 ### 5.1 Promoting to production when a backlog exists — NEVER `--include-all` on the full repo set, ALWAYS inside the pruned temp checkout (learned 2026-07-23; recipe corrected 2026-07-27; wording made self-consistent 2026-08-09)
 
 > **Moved 2026-08-20** to [`docs/production-promotion-procedure.md`](docs/production-promotion-procedure.md) (issue #1331). Text unchanged; the section number is unchanged, so `AGENTS.md §5.1` still resolves.
@@ -1156,7 +1190,7 @@ status: active
 identifier: shared-db.orch
 engine: codex
 session_name: shared-db.orch EDGE-DEV resume-1579
-route_id: 01a0387e-2895-72d3-97c2-55838595c69e
+route_id: 00000000-0000-7000-8000-00000000a1a1
 owner: u2giants
 machine: EDGE-DEV
 started: 2026-08-26T14:39:25Z

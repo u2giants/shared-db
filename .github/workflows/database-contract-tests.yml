@@ -583,6 +583,15 @@ jobs:
           PGDATABASE: postgres
         run: bash supabase/tests/source_resolution_first_writer_race.sh
 
+      - name: Prove Flow 4 concurrent replay serialization
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 54322
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: bash supabase/tests/sample_tracking_flow4_remote_requests_concurrency.sh
+
       - name: Upload every test's output
         if: always()
         uses: actions/upload-artifact@v4
