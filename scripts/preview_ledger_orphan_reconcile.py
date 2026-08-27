@@ -41,15 +41,6 @@ SUPPORTED_CASES = {
         "issue_state": "open",
         "claim_state": "open",
     },
-    (1645, 1656, 1664, "20260827183011", "20260827183011"): {
-        "mode": "rehearsal_reset",
-        "original_run_head": "c6e39c83c4af42650c46a5dc3555d1b509365f6f",
-        "preview_run_id": 33103829704,
-        "preview_artifact_id": 9659704671,
-        "preview_artifact_digest": "sha256:f3a725c809980ab0682ad12c09bb0000b3488ee838bd381566e059634207419c",
-        "issue_state": "open",
-        "claim_state": "open",
-    },
     (1422, 1423, 1424): {
         "mode": "replacement_pending",
         "orphan_version": "20260824150630",
