@@ -48,13 +48,6 @@ begin
     raise exception 'explicit Property/Character association does not use only UUID endpoints';
   end if;
 
-  if exists (
-    select 1 from pg_constraint
-    where confrelid = to_regclass('core.properties_and_characters')
-  ) then
-    raise exception 'a foreign key still depends on the retired mixed table';
-  end if;
-
   if (select count(*) from core.property_character_associations) <> 0
      or (select count(*) from plm.item_character_associations) <> 0
      or (select count(*) from plm.wb_asset_canonical_property_edge) <> 0
@@ -77,6 +70,13 @@ begin
                 and column_name='canonical_property_id') <> 'uuid'
      ) then
     raise exception 'dependent PLM endpoints were not converted to UUID identities';
+  end if;
+
+  if has_table_privilege('authenticated','core.character','insert')
+     or has_table_privilege('service_role','core.character','insert')
+     or has_table_privilege('authenticated','core.property_character_associations','insert')
+     or has_table_privilege('service_role','core.property_character_associations','insert') then
+    raise exception 'empty curated Character contracts permit ungoverned direct writes';
   end if;
 
   select pg_get_functiondef('api.db_data_admin_licensor_property_tree(text,boolean,text,integer)'::regprocedure)

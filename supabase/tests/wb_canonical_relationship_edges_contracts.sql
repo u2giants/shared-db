@@ -27,6 +27,11 @@ begin
   if not coalesce((select 'security_invoker=true'=any(reloptions) from pg_class where oid='api.wb_canonical_relationship_candidates'::regclass),false) then
     raise exception 'candidate view is not security invoker';
   end if;
+  if (select udt_name from information_schema.columns
+      where table_schema='api' and table_name='wb_canonical_relationship_candidates'
+        and column_name='canonical_property_id') <> 'uuid' then
+    raise exception 'candidate view did not expose the canonical Property UUID contract';
+  end if;
   if exists(select 1 from information_schema.columns where table_schema='api' and table_name='wb_canonical_relationship_candidates' and column_name in ('label','raw','source_url')) then
     raise exception 'licensed payload field escaped into candidate view';
   end if;

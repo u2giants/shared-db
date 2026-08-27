@@ -1,7 +1,7 @@
 -- Issue #1684 final separation: retire the mixed integer entity and restore
 -- distinct UUID Property and Character contracts.
 --
--- derived-from: 20260827222039
+-- derived-from: 20260823175638, 20260825192610
 -- maintains-eol-dependency: function api.db_data_admin_licensor_property_tree
 -- maintains-eol-dependency: function plm.sync_wb_canonical_relationship_edges
 --
@@ -42,6 +42,8 @@ create unique index character_licensor_code_key
   where code is not null;
 create index character_licensor_id_idx on core.character (licensor_id);
 create index character_name_idx on core.character (name);
+create trigger set_updated_at before update on core.character
+  for each row execute function app.set_updated_at();
 
 alter table core.character enable row level security;
 create policy shared_read on core.character
@@ -49,12 +51,10 @@ create policy shared_read on core.character
   using (app.has_any_role(array[
     'administrator', 'sales', 'licensing', 'designer', 'viewer', 'vendor'
   ]::app.app_role[]));
-create policy admin_write on core.character
-  for all to authenticated
-  using (app.has_role('administrator'))
-  with check (app.has_role('administrator'));
 grant select on core.character to authenticated;
-grant all on core.character to service_role;
+grant select on core.character to service_role;
+revoke insert, update, delete, truncate on core.character
+  from public, anon, authenticated, service_role;
 
 comment on table core.character is
   'Canonical Character identities, distinct from Properties. Empty at creation under issue #1684; populate only from normalized authoritative sources through governed curated Master Data.';
@@ -68,18 +68,18 @@ create table core.property_character_associations (
 );
 create index property_character_associations_character_id_idx
   on core.property_character_associations (character_id);
+create trigger set_updated_at before update on core.property_character_associations
+  for each row execute function app.set_updated_at();
 alter table core.property_character_associations enable row level security;
 create policy shared_read on core.property_character_associations
   for select to authenticated
   using (app.has_any_role(array[
     'administrator', 'sales', 'licensing', 'designer', 'viewer', 'vendor'
   ]::app.app_role[]));
-create policy admin_write on core.property_character_associations
-  for all to authenticated
-  using (app.has_role('administrator'))
-  with check (app.has_role('administrator'));
 grant select on core.property_character_associations to authenticated;
-grant all on core.property_character_associations to service_role;
+grant select on core.property_character_associations to service_role;
+revoke insert, update, delete, truncate on core.property_character_associations
+  from public, anon, authenticated, service_role;
 comment on table core.property_character_associations is
   'Explicit many-to-many canonical Property-to-Character membership. Empty at issue #1684 separation; rebuild only from direct normalized source authority.';
 
@@ -100,6 +100,8 @@ alter table plm.wb_character_canonical_property_edge
   drop constraint wb_character_canonical_property_edge_canonical_property_id_fkey;
 alter table plm.wb_style_guide_canonical_property_edge
   drop constraint wb_style_guide_canonical_property_ed_canonical_property_id_fkey;
+
+drop view api.wb_canonical_relationship_candidates;
 
 alter table plm.wb_asset_canonical_property_edge
   alter column canonical_property_id type uuid using null::uuid;
@@ -230,6 +232,27 @@ $function$;
 
 comment on function plm.sync_wb_canonical_relationship_edges(text, jsonb) is
   'Guarded loader for private Warner evidence resolved to core.property UUID identities. Issue #1684 retired every legacy mixed-table edge; rebuild only from normalized source evidence.';
+
+create view api.wb_canonical_relationship_candidates
+with (security_invoker = true) as
+select 'asset'::text as edge_kind, source_entity_id, canonical_property_id,
+       assertion_type, evidence_source, evidence_hash, observed_at
+from plm.wb_asset_canonical_property_edge
+where source_active and within_entitlement
+union all
+select 'style_guide', source_entity_id, canonical_property_id,
+       assertion_type, evidence_source, evidence_hash, observed_at
+from plm.wb_style_guide_canonical_property_edge
+where source_active and within_entitlement
+union all
+select 'character', source_entity_id, canonical_property_id,
+       assertion_type, evidence_source, evidence_hash, observed_at
+from plm.wb_character_canonical_property_edge
+where source_active and within_entitlement;
+grant select on api.wb_canonical_relationship_candidates to authenticated, service_role;
+revoke all on api.wb_canonical_relationship_candidates from anon;
+comment on view api.wb_canonical_relationship_candidates is
+  'Promotable Warner reconciliation evidence resolved to core.property UUIDs. Active and within-entitlement evidence only; never automatic canonical promotion.';
 
 create or replace function api.db_data_admin_licensor_property_tree(
   p_search text default null,
