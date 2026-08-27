@@ -43,12 +43,22 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
 from production_migration_guard import strip_sql  # noqa: E402
 
 DOLLAR_OPEN = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)?\$")
+NAME = r'(?:[A-Za-z_]\w*|"[^"]+")(?:\.(?:[A-Za-z_]\w*|"[^"]+"))*'
 RELATION = re.compile(
     r"\bcreate\s+(?:unique\s+)?(table|index|materialized\s+view|view)\s+"
-    r"(?:if\s+not\s+exists\s+)?([A-Za-z_][\w.]*)",
+    r"(?:if\s+not\s+exists\s+)?(" + NAME + r")",
     re.I,
 )
-ROUTINE = re.compile(r"create\s+(or\s+replace\s+)?(function|procedure)\b", re.I)
+DROPPED = re.compile(
+    r"\bdrop\s+(?:table|index|materialized\s+view|view)\s+"
+    r"(?:if\s+exists\s+)?(" + NAME + r")",
+    re.I,
+)
+# Captures the routine name so we can ask whether the migration calls it.
+ROUTINE = re.compile(
+    r"create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+(" + NAME + r")",
+    re.I,
+)
 CONTEXT_CHARS = 260
 
 
@@ -75,18 +85,46 @@ def dollar_bodies(sql: str):
         index = end + len(tag)
 
 
-def scan_file(path: str) -> dict[tuple[str, str], str]:
+def bare(name):
+    return name.replace('"', "")
+
+
+def scan_file(path):
     raw = io.open(path, encoding="utf-8", errors="replace").read()
     visible = strip_sql(raw)
-    found: dict[tuple[str, str], str] = {}
+    flat = declutter(raw)
+    # Match on the leaf name: a migration may create `x` unqualified and
+    # drop `public.x` qualified. A relation dropped in the same migration
+    # is not a durable post-apply target.
+    dropped = {bare(m.group(1)).lower().split(".")[-1] for m in DROPPED.finditer(flat)}
+    found = {}
 
-    def walk(sql: str, apply_time: bool) -> None:
+    def invoked(routine):
+        """True when the migration itself runs the routine it just defined.
+
+        A `create procedure` body is call-time DDL *only* if nobody calls it.
+        The three `reconcile_*` migrations end with `call public.reconcile_x();`,
+        which makes those bodies apply-time after all. Missing that inverts the
+        classification and under-reports the corpus.
+        """
+        leaf = re.escape(bare(routine).split(".")[-1])
+        pattern = r"(?:\bcall\s+|\bperform\s+|\bselect\s+)(?:[\w\"]+\.)?" + leaf + r"\s*\("
+        return re.search(pattern, flat, re.I) is not None
+
+    def walk(sql, apply_time):
         for tag, body, context in dollar_bodies(sql):
-            nested_apply_time = apply_time and not ROUTINE.search(context)
+            routine = ROUTINE.search(context)
+            nested_apply_time = apply_time and (
+                routine is None or invoked(routine.group(1))
+            )
             if nested_apply_time:
                 for match in RELATION.finditer(declutter(body)):
-                    name = match.group(2)
-                    if name.startswith("pg_temp.") or name in visible:
+                    name = bare(match.group(2))
+                    if (
+                        name.startswith("pg_temp.")
+                        or name in visible
+                        or name.lower().split(".")[-1] in dropped
+                    ):
                         continue
                     # Keyed on (kind, name) only. A nested body is reported by
                     # its innermost tag; the enclosing `do $migration$` that
@@ -101,6 +139,7 @@ def scan_file(path: str) -> dict[tuple[str, str], str]:
 def main() -> int:
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     total = 0
+    unique = set()
     for path in sorted(glob.glob(os.path.join(root, "supabase", "migrations", "*.sql"))):
         hits = scan_file(path)
         if not hits:
@@ -109,7 +148,11 @@ def main() -> int:
         for (kind, name), tag in sorted(hits.items()):
             print(f"   {kind:<8} {name:<46} inside {tag}")
             total += 1
-    print(f"\n{total} apply-time relation(s) invisible to strip_sql()")
+            unique.add((kind, name))
+    print(
+        f"\n{total} apply-time creation(s), {len(unique)} unique relation(s), "
+        "invisible to strip_sql()"
+    )
     return 0
 
 

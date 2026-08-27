@@ -29,10 +29,13 @@
 | 8 | Reviewer chain: one reviewer for structure-only, liveness probe before waiting, hard wait cap | ⬜ open | — |
 | 9 | Measurement — re-run the time-to-close baseline and record it | ⬜ open | — |
 
-**Independent reviews, 2026-08-27 — two, and both found the plan's central fact wrong.**
+**Independent reviews, 2026-08-27 — three, and all three found the plan's central fact wrong.**
 
 - **GLM-5.3** (session `shared-db-throughput-plan-review`, report `.ai/reviews/glm-shared-db-throughput-plan-review-20260827T194444Z.md`): **APPROVE WITH CHANGES**, Steps 1-3 **REJECTED as written**. Steps 2-6 and 8 carry amendments from it. It correctly refuted §3's original three-file list.
 - **Grok 4.6** (session `shared-db-throughput-plan-grok`, report `.ai/reviews/grok-shared-db-throughput-plan-grok-20260827T200630Z-2068325.md`): **REJECT**. It found that the *replacement* count was still incomplete, that Step 1 could disarm an existing #1645 rescue at `production_migration_guard.py:1832`, that Open Question 1 named the wrong hard-blocked migration, and that Step 3's line reference pointed at the wrong function. All four were re-verified by hand and all four were right. §3.1, §6.1, Step 1, Step 3 and Open Question 1 are rewritten accordingly.
+
+- **Codex (GPT-5.6)** (session `01a044ed-646e-7c12-8564-b31b93c09ccb`, brief and transcript in the session scratchpad): **REJECT**. It found that version 4 was *also* wrong — the three `reconcile_*` migrations end with `call public.reconcile_x();`, so their procedure bodies run at **apply** time after all (`20260710135600_reconcile_style_tracker_tables.sql:432`); that the scanner counted a deliberately temporary index as durable (`20260825031841_popdam_ai_search_forward_recovery.sql:36,503`); that quoted identifiers such as `dflow."AdditionalUserEmail"` were unmatchable; and that "14 relations" was 14 hits over 10 unique names. All four were re-verified by hand and all four were right. The scanner and §3.1 are rewritten accordingly — see **version 5**.
+- Asked separately whether Grok's "delete Step 1" recommendation should be taken, Codex answered **REPLACE**: delete the SQL-analysis approach, keep a small explicit verification manifest that `derive_targets()` unions in but that never feeds `created_objects()` or `available`, so it can only increase verification and can never create a false ACCEPT. **That decision is open with the owner** and is Open Question 4.
 
 **Read §3.1 before starting Step 1, and before writing any scan of your own.**
 
@@ -112,22 +115,34 @@ This section has been rewritten three times. Every earlier version was produced 
 
 **Version 3: "one migration, `20260825082910`, four objects." Right about the file, wrong as a corpus count.** The scan behind it used `\$[A-Za-z_]*\$`, which cannot match `$ddl_0$` because the character class has no digits — and it was only ever run against one file, so it was never a corpus scan at all. The Grok 4.6 review caught this.
 
-**Version 4 — the current answer. Do not trust it because it is written here; re-run it.**
+**Version 4: "4 migrations, 14 relations." Wrong in the most dangerous direction — it under-reported by roughly fifteen times.** The scanner excluded any DDL inside a `create procedure` body as call-time. That rule is right only when nobody calls the procedure. All three `reconcile_*` migrations define a procedure, **call it, and drop it**, in the same file:
+
+```sql
+call public.reconcile_style_tracker_tables();
+drop procedure public.reconcile_style_tracker_tables();
+```
+(`20260710135600_reconcile_style_tracker_tables.sql:432-433`.) Their bodies are apply-time DDL, and `20260710135950_reconcile_dflow_baseline.sql` alone carries 168 of them. Version 4 also counted a temporary index that the same migration drops, and its name pattern could not match a quoted identifier such as `dflow."AdditionalUserEmail"`. The Codex review caught all of it.
+
+**Version 5 — the current answer. Do not trust it because it is written here; re-run it.**
 
 ```bash
 python scripts/scan_apply_time_ddl.py
 ```
 
-**4 migrations, 14 relations** are created at apply time inside a dollar-quoted body and are invisible to `strip_sql()`:
+**8 migrations, 210 apply-time creations, 201 unique relations** are created at apply time inside a dollar-quoted body and are invisible to `strip_sql()`:
 
-| Migration | Objects | Tag | Hard-blocked? |
+| Migration | Creations | Tag | Hard-blocked? |
 |---|---|---|---|
-| `20260707171500_masterdata_designer_resolution.sql` | `idx_style_tracker_item_bridge_creative_designer` | `$ddl$` inside `do $migration$` | no |
+| `20260707171500_masterdata_designer_resolution.sql` | 1 index | `$ddl$` inside `do $migration$` | no |
 | `20260708183000_masterdata_audit_log.sql` | `public.style_tracker_audit_log` + 3 indexes | `$ddl$` inside `do $migration$` | no |
-| `20260825031841_popdam_ai_search_forward_recovery.sql` | `public.style_group_tags` + 4 indexes | `$contract$` / `$forward$` | **yes** |
+| `20260710135600_reconcile_style_tracker_tables.sql` | 22 | `$ddl_N$` inside a **called** `create procedure` | no |
+| `20260710135900_reconcile_ai_tag_bakeoff.sql` | 6 | `$ddl_N$` inside a **called** `create procedure` | no |
+| `20260710135950_reconcile_dflow_baseline.sql` | **168** | `$ddl_N$` inside a **called** `create procedure` | no |
+| `20260727154500_db_data_admin_bounded_production_forward.sql` | `app.db_data_admin_feature_gate` | `$ddl_0$` | no |
+| `20260825031841_popdam_ai_search_forward_recovery.sql` | `public.style_group_tags` + 3 indexes | `$contract$` / `$forward$` | **yes** |
 | `20260825082910_popdam_ai_search_reconciliation_and_activation.sql` | `public.style_group_tags` + 3 indexes | `$ddl$` | no |
 
-Two things in that table matter more than the count:
+210 creations, 201 unique names: the two August 25 migrations create the same four objects, and a handful of indexes repeat. **The blast radius is roughly fifteen times what three earlier drafts claimed**, and most of it sits in one file. Three things in that table matter more than the count:
 
 1. **`public.style_group_tags` — the #1645 object — has three creators in this repository**, and the only plain-text one (`20260825010603`, line 80) is permanently `HARD_BLOCKED` (`production_migration_guard.py:174`). Both dollar-quoted creators are invisible to the lexer. That is exactly the trap the owner described: the scanner sees only the banned file and blames it.
 2. **The #1645 case is not a `do $$` block.** It is a value passed to a helper that executes it:
@@ -145,7 +160,9 @@ begin
 
 Any implementation that special-cases `DO` blocks will miss the one file this plan exists for. Earlier drafts of §6.1 and Step 1 described the `do $$` idiom and were wrong about it.
 
-**What is deliberately NOT in that table, and why.** Three migrations — `20260710135600`, `20260710135900`, `20260710135950` — contain `execute $ddl_0$ CREATE TABLE …` inside a `create procedure … as $guard$` body. Those create nothing when the migration applies; they create when someone calls the procedure. **Feeding them to `created_objects()` would put objects into `available` that production does not have — a false ACCEPT, the precise failure `created_objects` was written to prevent.** A naive "any DDL inside any dollar body" extractor swallows them. This is the single most important correctness constraint on Step 1.
+3. **Call-time exclusion is a rule about invocation, not about syntax.** DDL inside a `create procedure … as $guard$` body creates nothing at apply time — *unless the same migration calls the procedure*, which all three `reconcile_*` files do. **Feeding a genuinely uncalled body to `created_objects()` would put objects into `available` that production does not have — a false ACCEPT, the precise failure `created_objects` was written to prevent. Excluding a called one under-reports the corpus by 196 objects.** Both directions have now been got wrong in this document. Any implementation must decide by tracing the call, not by looking at the surrounding keyword.
+
+**What is deliberately NOT in that table, and why.** A relation the same migration creates and then drops — `asset_tags_pending_metadata_normalization_idx` at `20260825031841_popdam_ai_search_forward_recovery.sql:36` and `:503` — is not a durable post-apply target. Requiring it would make the `to_regclass is NULL` hard-fail at `production_catalog_verification.py:2473` reject a **successful** apply. Version 4 listed it.
 
 **What a future session must take from this:**
 
@@ -341,7 +358,9 @@ The `grep` must return a hit in **both** files. The queue audit must **not** lis
 
 ### Step 1 — Close the blind spots that actually exist
 
-> **Scope corrected three times on 2026-08-27. Read §3.1 before starting, and run `python scripts/scan_apply_time_ddl.py` before writing a line of code.** The target set was overstated (three files, all phantoms), then wrongly emptied ("zero"), then undercounted ("one file, four objects"). It is **4 migrations, 14 relations**. Do not re-derive it with a regex.
+> **Scope corrected four times on 2026-08-27. Read §3.1 before starting, and run `python scripts/scan_apply_time_ddl.py` before writing a line of code.** The target set was overstated (three files, all phantoms), then wrongly emptied ("zero"), then undercounted twice ("one file, four objects", then "4 migrations, 14 relations"). It is **8 migrations, 210 creations, 201 unique relations**, and 168 of them sit in one file. Do not re-derive it with a regex.
+>
+> **Before building this step at all, read Open Question 4.** Two of the three reviewers said the SQL-analysis approach should not be built; the third (Grok) said delete it outright. If the owner takes Codex's REPLACE answer, this step becomes a declared manifest and most of what follows is discarded.
 
 > **Two things in the tree constrain this step before you touch it.**
 > 1. `_created_by_applied_dynamic_ddl()` (`production_migration_guard.py:1832`, called at `:1953`) **already rescues the #1645 case** for applied migrations, with a test at `scripts/test_production_migration_guard.py:1083`. Treat it as load-bearing. Anything that turns its `continue` into a refusal reinstates the outage this plan exists to prevent.
@@ -670,7 +689,7 @@ Add `scripts/issue-lead-time.mjs` that reproduces the §1 baseline, and write `d
 node scripts/issue-lead-time.mjs --repo u2giants/shared-db --limit 400
 ```
 
-Record the 2026-08-27 baseline in that file as the "before" row: median 4.0h, mean 21.1h, p90 60.3h, >24h 18%, >72h 10%, n=400. Re-run it 30 days after Step 4 merges and add the "after" row. **Do not claim improvement before the second run exists** — a number with no artifact behind it is exactly the failure mode this plan's evidence rule exists to prevent.
+Record the 2026-08-27 baseline in that file as the "before" row: median 4.0h, mean 21.5h, p90 60.3h, >24h 18%, >72h 10%, n=400. Re-run it 30 days after Step 4 merges and add the "after" row. **Do not claim improvement before the second run exists** — a number with no artifact behind it is exactly the failure mode this plan's evidence rule exists to prevent.
 
 **Verification gate**
 ```bash
@@ -804,14 +823,21 @@ Named explicitly; do not assume they have been read elsewhere.
    **Decide by evidence before starting Step 3:** re-run the failing check on #1645's branch, capture the job log, and record the exact script and line in ledger entry `BL-0001`. If it is a third mechanism, **update this plan rather than implementing around it.**
 2. **Is one reviewer genuinely enough for structure-only changes?** The transcripts show reviewers catching real errors, but also show the second and third reviewer adding hours and, in at least one case, being wrong. **Now largely settled** by the Step 8.1 amendment: migrations keep two reviewers, scripts and docs get one. What remains open is only whether *scripts* changes are safe at one. **Criterion:** at the Step 9 re-measurement, if any scripts-only change reached `main` with a defect a second reviewer would have caught, revert to two. **Owner: whoever runs Step 9** — the original wording left this check unassigned, which is how it would quietly never have happened.
 3. **Do the Node and Python lexers need to become one?** Deferred (§7.3). **Criterion:** if Step 4's cross-lexer agreement test finds more than two disagreements, open a follow-up issue to unify them.
-4. **Does `AGENTS.md` need splitting?** It is ~101 KB against an 80 KB ceiling. Out of scope here (§7.9), but it is a real constraint and Step 7 adds ~4 KB. If Step 7 pushes it materially further over, open a separate issue; do not solve it inside this plan.
+4. **Should Step 1 be built at all? — OWNER DECISION, blocks Step 1.** All three reviewers rejected Step 1 as written, and two went further. **Grok 4.6: delete it** — `_created_by_applied_dynamic_ddl` (`production_migration_guard.py:1832`) already rescues the #1645 false refusal for applied migrations, so the step adds a large, easy-to-get-wrong surface for a bug that is already handled, and the residual risk is a false ACCEPT. **Codex (GPT-5.6): replace it** — delete the SQL-analysis approach and add a small, reviewed, version-keyed manifest of durable post-apply targets that `derive_targets()` unions into its existing sets but that is **never** fed to `created_objects()` or `available`, so it can only increase verification and can never manufacture a false ACCEPT.
+
+   Codex named the concrete residual gap that deletion alone would leave: `derive_targets()` reads only stripped SQL (`production_catalog_verification.py:1399-1400`), so `public.style_group_tags` and its indexes (`20260825082910…:2367-2392,2428`), its dynamically enabled RLS and policies (`:2395-2401`), and other dynamic RLS such as `20260701154948_core_person_role_lookups.sql:60-108` may never reach the post-apply hard check at `:2473`. That is silent **under**-verification — quieter than a false refusal, and in the long run more dangerous.
+
+   **The four-wrong-answers record in §3.1 is itself evidence for REPLACE.** Four sessions, three independent reviewers, and the corpus count was still wrong at every publication. A declared list is smaller, reviewable, and fails safe.
+
+   **Criterion:** the owner picks BUILD, DELETE or REPLACE before any work starts on Step 1. Nothing else in the plan depends on the answer — Steps 2-9 stand either way, and Step 2 remains the single highest-value step under all three answers.
+5. **Does `AGENTS.md` need splitting?** It is ~101 KB against an 80 KB ceiling. Out of scope here (§7.9), but it is a real constraint and Step 7 adds ~4 KB. If Step 7 pushes it materially further over, open a separate issue; do not solve it inside this plan.
 
 ---
 
 ## Self-audit (recorded per the `implementation-plan-writer` standard)
 
 **1. Could a brand-new AI session with no project knowledge and no context from this conversation execute this plan to perfection, without asking anything?**
-**Not "to perfection" — two independent reviews falsified that claim, and saying otherwise here is the same over-confidence the plan warns about elsewhere.** What is true is that a fresh session has everything it needs to start correctly and to catch this plan being wrong. §2 explains what the repository is, who uses it, where it runs, and the branch model, for someone who has never seen it. §5 gives the current state of every file the plan touches with function-name anchors and current line numbers, plus an explicit re-anchoring command in §11 because those numbers will move. §9 gives every step named target files, the intended behaviour, dependencies, and a runnable verification gate. §12 names the CLIs, the identity check, the worktree command, and how to run the tests. The one genuine unknown — the precise scanner behind the owner's #1645 quote — is stated as open question 1 with a decision procedure and an instruction to update the plan rather than implement around it, instead of being papered over.
+**Not "to perfection" — three independent reviews falsified that claim, and saying otherwise here is the same over-confidence the plan warns about elsewhere.** What is true is that a fresh session has everything it needs to start correctly and to catch this plan being wrong. §2 explains what the repository is, who uses it, where it runs, and the branch model, for someone who has never seen it. §5 gives the current state of every file the plan touches with function-name anchors and current line numbers, plus an explicit re-anchoring command in §11 because those numbers will move. §9 gives every step named target files, the intended behaviour, dependencies, and a runnable verification gate. §12 names the CLIs, the identity check, the worktree command, and how to run the tests. The one genuine unknown — the precise scanner behind the owner's #1645 quote — is stated as open question 1 with a decision procedure and an instruction to update the plan rather than implement around it, instead of being papered over.
 
 **2. Does the plan carry every piece of background, nuance and reasoning currently held — including what was ruled out and why?**
 Yes. §6 records all four failure shapes with verbatim transcript quotes and in-repo code evidence. §7 records nine rejected approaches, including the two most tempting ones (flip `keep_dollar`, loosen the noisy guards) with the specific reason each is wrong — flipping the default would create false dependencies across 546 migrations, and a worked-around guard protects nothing, which is the repository's own recorded conclusion. §8 separates eight locked decisions from four open ones. §7.5 records why the live catalog must never be the sole authority, citing issue #892 by name.
@@ -821,7 +847,7 @@ Yes. §1 states the goal in business terms first, gives a measured baseline (med
 
 **Post-review amendments, 2026-08-27 — two rounds, and the second was needed because the first was also wrong.**
 
-The original self-audit passed while the plan's one hard factual claim was false. It graded *structure* and never re-derived *fact*. An independent GLM-5.3 review then refuted the three cited migrations — correctly — and Steps 2, 3, 4, 5, 6, 8 and Open Question 1 carry good amendments from it. But the replacement claim written in response, "the count is zero", was produced by the same kind of bare-`$$` regex and was **also wrong**; a peer session caught it the same day by scanning for tagged dollar quotes, and it never reached `main`. The true answer is one migration, `20260825082910`, four objects, including the #1645 object (§3.1).
+The original self-audit passed while the plan's one hard factual claim was false. It graded *structure* and never re-derived *fact*. An independent GLM-5.3 review then refuted the three cited migrations — correctly — and Steps 2, 3, 4, 5, 6, 8 and Open Question 1 carry good amendments from it. But the replacement claim written in response, "the count is zero", was produced by the same kind of bare-`$$` regex and was **also wrong**; a peer session caught it the same day by scanning for tagged dollar quotes, and it never reached `main`. A Grok 4.6 review then falsified *that* replacement, and a Codex review falsified the one after it. The true answer is whatever `python scripts/scan_apply_time_ddl.py` prints today — currently 8 migrations and 201 unique relations, including the #1645 object (§3.1). **Four wrong answers, each published confidently, is the finding.** It is the strongest evidence in this document that the guard-truth problem is real, and the strongest argument against building any further SQL text analysis to solve it.
 
 A second independent review (Grok 4.6) then found that the *replacement* was still incomplete — the corpus was never scanned, only one file was checked, the tag pattern could not match a digit, the plan blamed the wrong hard-blocked migration for #1645, Step 3 pointed at the wrong function, and Step 1 as written could have disarmed an existing rescue and rebuilt the outage. Every one of those was re-verified by hand before being accepted. The plan now ships `scripts/scan_apply_time_ddl.py` so the claim is a command rather than a sentence.
 
