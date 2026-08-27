@@ -279,41 +279,11 @@ test('keeps the admin grid usable at a narrow viewport', async ({ page }) => {
   await page.screenshot({ path: '../../docs/verification/db-data-admin-step7-narrow.png', fullPage: true })
 })
 
-test('renders the read-only Licensor -> Property tree with counts, source context, and a loud orphan', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 1000 })
+test('shows licensing source data only through Scraped Properties', async ({ page }) => {
   await mockAdmin(page); await page.goto('/')
-  await page.getByRole('button', { name: 'Licensors' }).click()
-  await page.getByLabel('Include inactive').check()
-  await expect(page.getByText('3 licensors')).toBeVisible()
-  await expect(page.getByText('4 properties')).toBeVisible()
-  await expect(page.getByText(/upstream feeder unavailable/i)).toBeVisible()
-  // Orphan surfaced loudly and separately.
-  await expect(page.getByRole('alert').filter({ hasText: 'Unassigned IP' })).toBeVisible()
-  // Expand a licensor to reveal a property; Spider-Man (mg_code DNY) nests
-  // under Marvel, not Disney.
-  await page.getByRole('button', { name: /expand licensor marvel/i }).click()
-  await expect(page.getByText('Spider-Man')).toBeVisible()
-  await expect(page.locator('[aria-label="Properties of Marvel"]')).toContainText('Spider-Man')
-  await page.screenshot({ path: '../../docs/verification/db-data-admin-step10-licensor-tree.png', fullPage: true })
-})
-
-test('renders the flat Properties table with each property parented to its licensor', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 1000 })
-  await mockAdmin(page); await page.goto('/')
-  await page.getByRole('button', { name: 'Properties', exact: true }).click()
-  // 3 nested properties + 1 orphan; nothing silently dropped.
-  await expect(page.getByText('4 of 4 properties')).toBeVisible()
-  await expect(page.locator('revo-grid')).toBeVisible()
-  // Spider-Man carries mg_code DNY but belongs to Marvel: the flat table must
-  // take the licensor from the tree edge, never from the PLM code.
-  await expect(page.getByText('Spider-Man')).toBeVisible()
-  await expect(page.getByRole('gridcell', { name: '(no licensor)' })).toHaveCount(1)
-  await expect(page.getByRole('status')).toContainText('1 property has no licensor')
-  // PLM divisions read as names, not raw ids, and never repeat the fixed
-  // mg_type literal that made every row say "· property ·".
-  await expect(page.getByRole('gridcell', { name: 'POP Lic (CW001) · AVG, Spruce Lic (SP001) · AVG' })).toHaveCount(1)
-  await expect(page.getByRole('gridcell', { name: /· property ·/ })).toHaveCount(0)
-  await page.screenshot({ path: '../../docs/verification/db-data-admin-properties-table.png', fullPage: true })
+  await expect(page.getByRole('button', { name: 'Scraped Properties' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Licensors' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Properties', exact: true })).toHaveCount(0)
 })
 
 test('renders every scraped Property under distinct presentation Licensor headings with source provenance', async ({ page }) => {
