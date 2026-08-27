@@ -2,6 +2,15 @@
 
 begin;
 
+-- F3 (#1664 review): the trigger DDL below takes SHARE ROW EXCLUSIVE on three
+-- live tables and holds it through the backfill. Fail fast rather than queue
+-- behind a long-running writer and stall every asset write indefinitely.
+-- The triggers must be created BEFORE the backfill: creating them afterwards
+-- would leave a window in which rows committed after the backfill snapshot
+-- fire no trigger and are permanently missing from the projection. Measured
+-- corpus at time of authoring: ~138k assets, ~2.2M active asset tags.
+set local lock_timeout = '5s';
+
 create table public.asset_effective_tags (
   asset_id uuid not null references public.assets(id) on delete cascade,
   tag text not null,
@@ -36,7 +45,42 @@ language plpgsql
 security definer
 set search_path = public, pg_temp
 as $$
+declare
+  v_lock_keys text[];
+  v_lock_ids bigint[];
+  v_lock_id bigint;
 begin
+  -- F2 (#1664 review): re-derivation reads a snapshot of the *other* source
+  -- table, so a concurrent regroup and group-tag write can each omit the same
+  -- (asset, tag, style_group) key with no unique conflict to force a retry.
+  -- Each branch below serialises every writer touching the same asset or style
+  -- group on a transaction-scoped advisory lock, acquired in sorted id order so
+  -- two writers holding overlapping sets cannot deadlock against each other.
+  if tg_table_name = 'asset_tags' then
+    v_lock_keys := array['aet_asset:' || coalesce(new.asset_id, old.asset_id)::text];
+  elsif tg_table_name = 'style_group_tags' then
+    v_lock_keys := array['aet_group:' || new.style_group_id::text,
+                         'aet_group:' || old.style_group_id::text];
+  elsif tg_table_name = 'assets' then
+    v_lock_keys := array['aet_asset:' || coalesce(new.id, old.id)::text,
+                         'aet_group:' || new.style_group_id::text,
+                         'aet_group:' || old.style_group_id::text];
+  else
+    raise exception 'sync_asset_effective_tags called from unsupported table %', tg_table_name;
+  end if;
+
+  select coalesce(
+           array_agg(distinct hashtextextended(k, 0) order by hashtextextended(k, 0)),
+           '{}'::bigint[]
+         )
+    into v_lock_ids
+  from unnest(v_lock_keys) k
+  where k is not null;
+
+  foreach v_lock_id in array v_lock_ids loop
+    perform pg_advisory_xact_lock(v_lock_id);
+  end loop;
+
   if tg_table_name = 'asset_tags' then
     if tg_op in ('DELETE', 'UPDATE') then
       delete from public.asset_effective_tags e
@@ -132,6 +176,30 @@ where a.is_deleted = false
   and t.status = 'active'
 on conflict do nothing;
 
+-- F1 (#1664 review): the legacy get_filter_counts base restricts to assets that
+-- pass the THUMBNAIL_MIN_DATE incident gate. The effective path must apply the
+-- same gate or a count taken through one entry point will not match the list
+-- taken through the other. The configured value lives in public.admin_config,
+-- which has RLS enabled and NO select policy for `authenticated` (only an anon
+-- SCAN_REQUEST policy), so an invoker read silently returns no row and falls
+-- back to the default. This definer accessor reads exactly that one key.
+create or replace function public.assets_thumbnail_min_date()
+returns timestamptz
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select coalesce(
+    (select (value #>> '{}')::timestamptz from public.admin_config where key = 'THUMBNAIL_MIN_DATE'),
+    '2020-01-01'::timestamptz
+  );
+$$;
+
+revoke all on function public.assets_thumbnail_min_date() from public;
+revoke all on function public.assets_thumbnail_min_date() from anon;
+grant execute on function public.assets_thumbnail_min_date() to authenticated;
+
 create or replace function public.filter_effective_assets(p_filters jsonb default '{}'::jsonb)
 returns setof public.assets
 language sql
@@ -143,6 +211,11 @@ as $$
   from public.assets a
   left join public.style_groups sg on sg.id = a.style_group_id
   where a.is_deleted = false
+    and (
+      a.modified_at >= public.assets_thumbnail_min_date()
+      or a.file_created_at >= public.assets_thumbnail_min_date()
+      or a.thumbnail_url is not null
+    )
     and (
       not (p_filters ? 'search')
       or nullif(p_filters ->> 'search', '') is null
@@ -314,7 +387,18 @@ end;
 $$;
 
 -- Preserve the incident-tested covering-index path unless an effective filter
--- is actually requested. The body below is the existing implementation.
+-- is actually requested. The body below is the existing implementation,
+-- transcribed verbatim from the live baseline, plus the delegation prologue.
+-- derived-from: none
+--
+-- F4 (#1664 review): this function stays SECURITY DEFINER. It must, because it
+-- reads public.admin_config, which grants no select policy to `authenticated`.
+-- Consequence to keep in mind: filter_effective_assets and
+-- get_effective_filter_counts are declared security invoker, but when reached
+-- THROUGH this entry point they execute in the definer's context, so RLS on
+-- public.assets is bypassed. That is safe only because the sole select policy
+-- on public.assets is `is_deleted = false`, which both bodies hard-code. Any
+-- future tightening of that policy MUST be mirrored into both bodies.
 create or replace function public.get_filter_counts(p_filters jsonb default '{}'::jsonb)
 returns jsonb
 language plpgsql

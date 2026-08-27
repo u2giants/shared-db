@@ -17,6 +17,7 @@ declare
   v_file_tag text := 'zz1645_file_' || txid_current();
   v_candidate text := 'zz1645_candidate_' || txid_current();
   v_rejected text := 'zz1645_rejected_' || txid_current();
+  v_delete_tag text := 'zz1645_delete_' || txid_current();
   v_counts jsonb;
 begin
   -- DAM identity foreign keys were cut over from the retired public mirrors to
@@ -136,6 +137,53 @@ begin
   where style_group_id = v_group and tag = v_group_tag;
   if exists (select 1 from public.asset_effective_tags where tag = v_group_tag) then
     raise exception 'active-to-candidate transition did not remove projection rows';
+  end if;
+
+  -- F6 (#1664 review): group deletion converges only because the assets
+  -- style_group_id FK is ON DELETE SET NULL and the column-list trigger fires
+  -- on that update. That path had no coverage.
+  insert into public.style_group_tags (style_group_id, tag, category, source, status)
+  values (v_other_group, v_delete_tag, 'theme', 'manual', 'active');
+  if not exists (
+    select 1 from public.asset_effective_tags
+    where asset_id = v_grouped_a and tag = v_delete_tag and scope = 'style_group'
+  ) then
+    raise exception 'group tag did not project onto the regrouped member';
+  end if;
+
+  delete from public.style_groups where id = v_other_group;
+  if exists (select 1 from public.asset_effective_tags where tag = v_delete_tag) then
+    raise exception 'group deletion left orphaned style_group projection rows';
+  end if;
+  if (select style_group_id from public.assets where id = v_grouped_a) is not null then
+    raise exception 'group deletion did not null the member style_group_id';
+  end if;
+
+  -- F1 (#1664 review): the effective path must apply the same THUMBNAIL_MIN_DATE
+  -- incident gate the legacy count base applies, or counts and lists diverge.
+  update public.assets
+     set modified_at = '1999-01-01'::timestamptz,
+         file_created_at = '1999-01-01'::timestamptz,
+         thumbnail_url = null
+   where id = v_ungrouped;
+  if exists (
+    select 1 from public.filter_effective_assets(jsonb_build_object('licensorId', v_licensor))
+    where id = v_ungrouped
+  ) then
+    raise exception 'effective list ignored the THUMBNAIL_MIN_DATE incident gate';
+  end if;
+  update public.assets set thumbnail_url = 'https://example.invalid/zz1645.png'
+   where id = v_ungrouped;
+  if not exists (
+    select 1 from public.filter_effective_assets(jsonb_build_object('licensorId', v_licensor))
+    where id = v_ungrouped
+  ) then
+    raise exception 'a thumbnail did not restore an otherwise gated-out asset';
+  end if;
+
+  if not has_function_privilege('authenticated', 'public.assets_thumbnail_min_date()', 'EXECUTE')
+     or has_function_privilege('anon', 'public.assets_thumbnail_min_date()', 'EXECUTE') then
+    raise exception 'thumbnail min-date accessor privileges are incorrect';
   end if;
 
   if to_regclass('public.asset_effective_tags_tag_asset_idx') is null
