@@ -13,6 +13,10 @@ const columns: ColumnRegular[] = [
   { prop: 'source_property_id', name: 'Source ID', size: 180, sortable: true },
   { prop: 'source_status', name: 'Source status', size: 130, sortable: true },
   { prop: 'provenance_kind', name: 'Provenance', size: 220, sortable: true },
+  { prop: 'source_purpose', name: 'Purpose', size: 210, sortable: true },
+  { prop: 'review_reason', name: 'Review reason', size: 300, sortable: true },
+  { prop: 'evidence_basis', name: 'Evidence basis', size: 240, sortable: true },
+  { prop: 'review_guidance', name: 'Decision guidance', size: 360, sortable: true },
   { prop: 'source_table', name: 'Source table', size: 210, sortable: true },
   { prop: 'latest_seen_at', name: 'Latest seen', size: 180, sortable: true },
   { prop: 'capture_marker', name: 'Capture marker', size: 180, sortable: true },
@@ -64,7 +68,7 @@ export function ScrapedPropertiesTable({ client }: Props) {
   const visibleRows = useMemo(() => {
     const term = search.trim().toLowerCase()
     return rows.filter(row => rowMatchesFilters(row, filters, setFilterState)).filter(row =>
-      !term || `${row.display_label} ${row.presentation_licensor_name} ${row.source_system} ${row.source_property_id} ${row.provenance_kind}`.toLowerCase().includes(term),
+      !term || `${row.display_label} ${row.presentation_licensor_name} ${row.source_system} ${row.source_property_id} ${row.provenance_kind} ${row.review_reason} ${row.evidence_basis} ${row.review_guidance}`.toLowerCase().includes(term),
     )
   }, [filters, rows, search, setFilterState])
   const groups = useMemo(() => groupScrapedProperties(visibleRows), [visibleRows])
@@ -82,6 +86,14 @@ export function ScrapedPropertiesTable({ client }: Props) {
       {groups.map(group => <section key={group.key} className="scraped-property-group" aria-labelledby={`scraped-${group.key}`}>
         <h2 id={`scraped-${group.key}`}>{group.name}</h2>
         <p className="muted">{group.rows.length} {group.rows.length === 1 ? 'property' : 'properties'}</p>
+        {group.rows.some(row => /conflict|unresolved|ambiguous_crossover/i.test(row.source_status ?? '')) && <div role="note" aria-label={`${group.name} review details`}>
+          {[...new Map(group.rows.filter(row => /conflict|unresolved|ambiguous_crossover/i.test(row.source_status ?? '')).map(row => [
+            `${row.review_reason}|${row.evidence_basis}|${row.review_guidance}`,
+            row,
+          ])).values()].map(row => <p key={`${row.review_reason}|${row.evidence_basis}|${row.review_guidance}`} className="muted" title={`Authority review detail: ${row.review_reason} Evidence basis: ${row.evidence_basis}. Decision guidance: ${row.review_guidance}`}>
+            <strong>{row.review_reason}</strong> Evidence basis: {row.evidence_basis}. {row.review_guidance}
+          </p>)}
+        </div>}
         <div className="grid-wrap"><RevoGrid theme="material" readonly accessible resize columns={gridColumns} source={group.rows} rowHeaders /></div>
       </section>)}
       {loading && <div className="grid-loading">Loading…</div>}
