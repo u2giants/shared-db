@@ -19,7 +19,7 @@
 | Step | Outcome | State | Evidence |
 |---|---|---|---|
 | 0 | Plan written, registered in `AGENTS.md` and `HANDOFF.d/`, tracking issue opened | ✅ done 2026-08-27 | merge commit `172d2bb` (PR #1679, all 16 required checks green); issue #1680 open and labelled `db-work`; `grep -n plan_orchestrator_throughput_guard_truth AGENTS.md HANDOFF.d/*.md` returns a hit in both files |
-| 1 | Close the two blind spots that actually exist (dynamic RLS/policies; the `preflight_batch` collapse) | ⬜ open, **rescoped 2026-08-27 — see §3.1** | — |
+| 1 | Apply-time DDL inside tagged dollar-quoted bodies stops being invisible; dynamic RLS/policies recovered; `preflight_batch` distinguishes absent from not-derivable | ⬜ open, **scope corrected twice on 2026-08-27 — read §3.1 first** | — |
 | 2 | `scripts/catalog-truth.mjs` — one command that answers "does this object actually exist, and what created it" | ⬜ open | — |
 | 3 | Guards must consult catalog truth before concluding "missing", and must say so in their failure text | ⬜ open | — |
 | 4 | False-alarm corpus — every historical false positive becomes a permanent regression test | ⬜ open | — |
@@ -29,7 +29,7 @@
 | 8 | Reviewer chain: one reviewer for structure-only, liveness probe before waiting, hard wait cap | ⬜ open | — |
 | 9 | Measurement — re-run the time-to-close baseline and record it | ⬜ open | — |
 
-**Independent review, 2026-08-27** (GLM-5.3, session `shared-db-throughput-plan-review`, report `.ai/reviews/glm-shared-db-throughput-plan-review-20260827T194444Z.md`): **APPROVE WITH CHANGES**, with Steps 1-3 **REJECTED as originally written**. The review refuted this plan's own headline factual claim. §3.1 records the correction; Steps 1, 2, 3, 4, 5, 6 and 8 and Open Question 1 carry amendments from it. **Read §3.1 before starting Step 1.**
+**Independent review, 2026-08-27** (GLM-5.3, session `shared-db-throughput-plan-review`, report `.ai/reviews/glm-shared-db-throughput-plan-review-20260827T194444Z.md`): **APPROVE WITH CHANGES**, with Steps 1-3 **REJECTED as originally written**. Steps 2, 3, 4, 5, 6 and 8 and Open Question 1 carry amendments from it. The review also refuted this plan's original §3 file list — correctly — but the replacement claim written in response ("the count is zero") was **also wrong**, and was caught by a peer session the same day. §3.1 records all three versions. **Read §3.1 before starting Step 1, and before writing any scan of your own.**
 
 **A fresh session starts at Step 0.** Steps 1→4 are the load-bearing ones; if context runs out, that is the cut point (see §9 phases).
 
@@ -86,29 +86,53 @@ python - <<'PY'
 import re, glob
 for f in sorted(glob.glob('supabase/migrations/*.sql')):
     t = open(f, encoding='utf-8', errors='replace').read()
-    for m in re.finditer(r'\$\$(.*?)\$\$', t, re.S):
-        if re.search(r'create\s+(table|view|index|materialized)', m.group(1), re.I):
+    # Dollar tags are NOT always empty. $ddl$ ... $ddl$ is a dollar quote too.
+    for m in re.finditer(r'\$([A-Za-z_][A-Za-z0-9_]*)?\$(.*?)\$\1?\$', t, re.S):
+        if re.search(r'create\s+(table|view|index|materialized)', m.group(2), re.I):
             print('relation created INSIDE a dollar-quoted body:', f); break
 PY
 ```
 
-As of `42f0b77` this prints three files. **All three are false positives, and the script above is wrong. Do not use it.** See §3.1.
+The script above is the **corrected** version. The version originally published in this plan used a bare `\$\$` pattern; it was wrong in both directions, and §3.1 is the record of what that cost.
 
-### 3.1 The reproduction script above was itself the bug — corrected finding
+### 3.1 Two wrong answers before the right one — read this before trusting any scan in this document
 
-The independent GLM-5.3 review of 2026-08-27 checked those three files by reading them. **None of them creates a relation inside a dollar-quoted body.** Re-verified by hand at `254f0db`:
+This section has been rewritten twice. Both earlier versions were produced by a regex, and both were wrong. The history is kept deliberately, because it is the single best evidence in this plan for why §6.1 matters.
 
-| File | What the script "found" | What is actually there |
+**Version 1 (plan as first written): "exactly three files."** A bare `\$\$` regex named `20260717163500`, `20260728174500` and `20260810140000`. All three are **false positives**, and that part still stands after hand-verification at `254f0db`:
+
+| File | What the bare-`$$` script "found" | What is actually there |
 |---|---|---|
-| `20260810140000_production_lane_canary.sql` | a `create table` inside `$$…$$` | `create table if not exists plm.production_lane_canary` is **top-level, line 70**. The `$$` at **line 16 is inside a `--` comment** — the comment literally discusses the `$$`-in-a-comment lexer bug — and the naive regex phantom-pairs it with the real `do $$` at line 107, swallowing the top-level statement. |
-| `20260728174500_clickup_incremental_task_import_reissue.sql` | a `create index` inside `$$…$$` | `create index if not exists pim_product_clickup_list_updated_idx` is **top-level, line 115**. The `$$` at **line 46 is inside a comment**; the file's real do-block is **tagged** (`do $backfill$`, line 136), which a bare `\$\$` regex cannot see at all, and it contains only DML. |
-| `20260717163500_reconcile_dflow_backend_startup_contract.sql` | `CREATE INDEX` statements | It creates **no relations at all**. The only `CREATE INDEX` text sits inside **single-quoted comparison values** at lines 116, 125 and 143 (`and indexdef = 'CREATE INDEX …'`) — the same shape as the recorded `'CREATE TABLE AS'` → table named `as` scar at `check-pr-object-collisions.mjs:677`. |
+| `20260810140000_production_lane_canary.sql` | a `create table` inside a dollar-quoted body | `create table if not exists plm.production_lane_canary` is **top-level, line 70**. The `$$` at **line 16 is inside a `--` comment** — which literally discusses the `$$`-in-a-comment lexer bug — and the regex phantom-paired it with the real `do $$` at line 107, swallowing the top-level statement. |
+| `20260728174500_clickup_incremental_task_import_reissue.sql` | a `create index` inside a dollar-quoted body | `create index if not exists pim_product_clickup_list_updated_idx` is **top-level, line 115**. The `$$` at **line 46 is inside a comment**; the file's real block is tagged (`do $backfill$`, line 136) and contains only DML. |
+| `20260717163500_reconcile_dflow_backend_startup_contract.sql` | `CREATE INDEX` statements | It creates **no relations**. The only `CREATE INDEX` text sits inside **single-quoted comparison values** at lines 116, 125 and 143 (`and indexdef = 'CREATE INDEX …'`) — the same shape as the `'CREATE TABLE AS'` → table named `as` scar at `check-pr-object-collisions.mjs:677`. |
 
-A supporting sweep found no `execute format('create table|view|index …')` anywhere under `supabase/migrations/`, and every sampled tagged-do-block migration puts its DDL top-level.
+**Version 2 (after an independent GLM-5.3 review): "the count is zero." Also wrong, and wrong the same way.** Having shown the three files were phantoms, the re-check searched again with a bare `$$` pattern, found nothing, and concluded the pattern was absent from the repository. **A bare `$$` pattern cannot see a tagged dollar quote,** so it was structurally incapable of returning anything else. The retraction reproduced the exact bug it was retracting. It was caught within the hour by a peer session scanning with a general dollar-tag pattern, and never reached `main`.
 
-**Corrected finding: as of `254f0db`, the number of migrations that create a relation inside a dollar-quoted body is ZERO.**
+**Version 3 — the current answer, verified two independent ways at `origin/main`.** Scanning with `\$[A-Za-z_]*\$` returns **one** file, and it is load-bearing:
 
-**This is the most valuable result in the plan and it must not be softened.** A session writing a document *about* text-lexing false positives wrote a three-line regex scanner, believed its output, and published it as evidence — committing the exact failure §6.1 describes, inside the plan meant to stop it. It is now corpus fixtures 13 and 14 (§9 Step 4). It also proves the §6.1 *class* is live and expensive while removing its supposed instance set — which is why Step 1 is rescoped in §9.
+`supabase/migrations/20260825082910_popdam_ai_search_reconciliation_and_activation.sql` creates four durable objects inside `$ddl$ … $ddl$` bodies, passed to a `pg_temp` helper that executes them at apply time:
+
+| Line | Object |
+|---|---|
+| 2367 | `create table if not exists public.style_group_tags` |
+| 2390 | `create index style_group_tags_active_group_idx` |
+| 2392 | `create index asset_tags_active_asset_idx` |
+| 2428 | `create index dam_search_embedding_claim_idx` |
+
+Confirmed against the real lexer, not a regex — run this and read the output:
+
+```bash
+python -c "import sys,io,glob; sys.path.insert(0,'scripts'); from production_migration_guard import strip_sql; f=glob.glob('supabase/migrations/20260825082910*')[0]; raw=io.open(f,encoding='utf-8',errors='replace').read(); s=strip_sql(raw); print([(n, n in raw, n in s) for n in ['style_group_tags','asset_tags_active_asset_idx','dam_search_embedding_claim_idx']])"
+```
+
+Every name is present in the raw file and **absent** after `strip_sql`. **`public.style_group_tags` is invisible to every consumer of `strip_sql()`, and it is the #1645 object, created on 2026-08-25** — which matches the owner's "production has actually had that table since 25 August" exactly. §6.1's mechanism is confirmed; only the file list was ever wrong.
+
+**What a future session must take from this:**
+
+1. **Never characterise a lexer's blind spot with a regex.** Three attempts, two wrong answers, and the two wrong answers came from the same shortcut. Use `strip_sql` itself, as the command above does.
+2. **A dollar quote is `$tag$`, not `$$`.** Any pattern written as `\$\$` is wrong by construction. Corpus fixtures 14 and 15 make that permanent.
+3. **A retraction is a finding and needs the same evidence bar as the claim it retracts.** Version 2 was published as a correction, with confidence, on the strength of a scan that could not have found anything.
 
 ## 4. Scope — in and out
 
@@ -167,12 +191,14 @@ Four failure shapes, ranked by cost. Each is evidenced.
 
 Downstream, `derive_targets()` (`production_catalog_verification.py:1365`) calls `strip_sql(raw)` and then only recognises objects it can see. Its docstring is honest about being conservative — "when it cannot tell, it stays silent" — but the *callers* do not distinguish **"this migration does not create X"** from **"I could not see whether this migration creates X."** That collapse is the root cause the owner hit on #1645: a scanner concluded a table was missing and attributed it to a hard-blocked migration, when production had held the table since 25 August.
 
-**The blast radius for `create table` inside a dollar-quoted body is ZERO — see §3.1.** The live instances of this class are elsewhere, and the two are not the same failure:
+**The blast radius is one migration and four objects — `20260825082910`, including `public.style_group_tags`, the #1645 object (§3.1).** Small and enumerable, which makes this cheap to fix and cheap to verify. Two *separate* failures follow from the same blindness, and they must not be conflated:
 
 - **False refusal** lives in `production_migration_guard.preflight_batch` (~line 1858) via `created_objects()` (~line 1635): an object it cannot derive makes a `hard_references` dependency look unsatisfied, and the guard refuses. This is the shape that blocks work.
 - **Silent under-verification** lives in `derive_targets()`: an object it cannot derive is simply never probed after apply. Quieter, and arguably worse.
 
 The plan originally conflated the two; do not repeat that. Note also that `parse_dynamic_acl` (~line 1275) already reads do-block content to recover dynamic grants — precedent to extend, not a new capability to invent.
+
+Beyond `create table`, the same blindness hides **dynamic RLS and policies**: `execute format('alter table %s enable row level security', t)` and dynamic `create policy` in `20260621151155_api_rls_realtime.sql` (lines 259, 305, 309, 345–461) and `20260701154948_core_person_role_lookups.sql` (lines 66, 86, 95). Post-apply verification can pass green while the RLS state of a dynamically-secured table was never checked. That is security-relevant, not merely noisy.
 
 This exact defect class has bitten this repository **at least four times already**, each recorded in `strip_sql()`'s own docstring:
 - a `$$` inside a *comment* opened a phantom dollar-quote and deleted every statement in between, hiding all 17 objects created by an **already-applied** migration (`20260727154500`) and all three created by `20260728174500`;
@@ -291,17 +317,18 @@ The `grep` must return a hit in **both** files. The queue audit must **not** lis
 
 ### Step 1 — Close the blind spots that actually exist
 
-> **RESCOPED 2026-08-27 after independent review.** The original Step 1 built an `apply_time_ddl_bodies()` extractor for `create table` inside `do $$` blocks, and its verification gate named three migrations. §3.1 shows there are no such migrations, which made that gate **unsatisfiable** — and its most natural "fix" would have been to reproduce the phantom-pairing bug and freeze it into a permanent test. Do not build that extractor: its payoff set is empty. The two blind spots below are verified to exist. **If you cannot verify them at your `main`, defer this step entirely** — Steps 2, 4, 6 and 7 do not depend on it, and Step 4's corpus carries the regression locks either way.
+> **Scope corrected twice on 2026-08-27. Read §3.1 before starting.** This step's target set was first overstated (three files, all phantoms), then wrongly emptied ("zero"), and is now verified: **one migration, `20260825082910`, four objects, including the #1645 object.** Do not re-derive that set with a regex; §3.1 gives the command that uses the real lexer.
 
 **What to change**
 
-1. **Dynamic RLS and policies inside do-blocks — the real blind spot.** `execute format('alter table %s enable row level security', t)` and dynamic `create policy … on %s` are live today: `20260621151155_api_rls_realtime.sql` (lines 259, 305, 309, 345–461) and `20260701154948_core_person_role_lookups.sql` (lines 66, 86, 95). `derive_targets()` recovers dynamic **grants** via `parse_dynamic_acl` (~line 1275) but not dynamic RLS enables or policies, so post-apply verification can pass green while the RLS state of a dynamically-secured table was never checked — a security-relevant gap, not just a noise one. **Extend the existing dynamic-ACL path**; do not write a new lexer. Confirm both files still contain those statements before starting; if they do not, mark this sub-step N/A with the command that proved it.
-2. **The collapse site in `preflight_batch`.** In `scripts/production_migration_guard.py`, `preflight_batch` (~line 1858) treats an object absent from `created_objects()` (~line 1635) as an unsatisfied `hard_references` dependency. Make that path distinguish **absent** from **not-derivable**, and make its refusal message say which. This is the site that produces false refusals.
-3. Do **not** change `strip_sql`'s default behaviour (**L2**), and do **not** add the `apply_time_ddl_bodies()` extractor (§3.1).
-4. **Introduce the third state.** Today a scanner has "found" and "not found". Add `unresolved` — a name the lexer saw in a position it could not classify. Every consumer that today concludes *"this migration does not create X"* must be able to say instead *"I could not tell."* At minimum: `derive_targets()` returns an `unresolved` collection alongside `notes`, and it is surfaced in the Markdown report written by the module.
-5. In `scripts/check-pr-object-collisions.mjs`, do **not** rewrite the Node lexer, and do **not** assert that it agrees with the Python lexer in general — **they deliberately disagree.** `check-pr-object-collisions.mjs` (~lines 655–683) *keeps* do-block bodies for collision policy while `strip_sql` *strips* them for dependency policy, each with a recorded reason. **Scope the agreement assertion to the Step 4 corpus fixtures only**; a blanket agreement test fails structurally on day one. (Unifying the two lexers is explicitly deferred — §7.3.)
+1. In `scripts/production_migration_guard.py`, beside `strip_sql()` (line 1474), add a new exported function — suggested name `apply_time_ddl_bodies(raw: str) -> list[str]` — returning the **contents of every dollar-quoted body that contains apply-time DDL** (`create table`, `create view`, `create materialized view`, `create index`, `alter table … add column`). It must use the same single left-to-right lexer discipline, and it **must handle tagged quotes** (`$ddl$`, `$backfill$`), not just `$$` — a `$$`-only implementation would miss the one file that matters and would repeat §3.1's mistake in code. Do **not** change `strip_sql`'s default behaviour (**L2**).
+2. In `scripts/production_catalog_verification.py`, `derive_targets()` (line 1365): after the existing pass over `split_statements(strip_sql(raw))`, run the same recognisers over the statements returned by `apply_time_ddl_bodies(raw)`. Objects found this way go into the **same** `tables` / `views` / `indexes` sets.
+3. **Dynamic RLS and policies.** `derive_targets()` recovers dynamic **grants** via `parse_dynamic_acl` (~line 1275) but not dynamic `enable row level security` or `create policy` (§6.1). Extend that existing path; do not write a new lexer.
+4. **The collapse site in `preflight_batch`.** `preflight_batch` (~line 1858) treats an object absent from `created_objects()` (~line 1635) as an unsatisfied `hard_references` dependency. Make that path distinguish **absent** from **not-derivable**, and make its refusal message say which. This is the site that produces false refusals; `derive_targets` produces silent under-verification instead.
+5. **Introduce the third state.** Today a scanner has "found" and "not found". Add `unresolved` — a name the lexer saw in a position it could not classify. Every consumer that today concludes *"this migration does not create X"* must be able to say instead *"I could not tell."* At minimum: `derive_targets()` returns an `unresolved` collection alongside `notes`, and it is surfaced in the Markdown report written by the module.
+6. In `scripts/check-pr-object-collisions.mjs`, do **not** rewrite the Node lexer, and do **not** assert that it agrees with the Python lexer in general — **they deliberately disagree.** `check-pr-object-collisions.mjs` (~lines 655–683) *keeps* do-block bodies for collision policy while `strip_sql` *strips* them for dependency policy, each with a recorded reason. **Scope the agreement assertion to the Step 4 corpus fixtures only**; a blanket agreement test fails structurally on day one. (Unifying the two lexers is explicitly deferred — §7.3.)
 
-**How it should behave when done:** a table whose RLS is enabled dynamically inside a do-block is verified after apply like any other object, and a `preflight_batch` refusal states whether the dependency is genuinely absent or merely not derivable. For every migration, the existing derived object list is otherwise **unchanged** — this must not become a source of new false dependencies (**L2**).
+**How it should behave when done:** `derive_targets()` on `20260825082910` returns `public.style_group_tags` and its three indexes; a table whose RLS is enabled dynamically inside a do-block is verified after apply like any other; a `preflight_batch` refusal states whether the dependency is genuinely absent or merely not derivable. For every other migration, the derived list is **unchanged** — this must not become a source of new false dependencies (**L2**).
 
 **Verification gate**
 ```bash
@@ -310,9 +337,14 @@ python -m pytest scripts/test_production_migration_guard.py scripts/test_product
 ```bash
 node --test scripts/*.test.mjs
 ```
-Both suites must be **green**, and the full suite count must not drop below the ~677 tests passing on `main`. Plus: a test asserting the two migrations in sub-step 1 yield their dynamically-secured tables, a test asserting `preflight_batch` reports not-derivable distinctly from absent, and the snapshot test asserting `strip_sql()`'s output is byte-identical to before across all 546 migrations.
+Both suites must be **green**, and the full suite count must not drop below the ~677 tests passing on `main`. Plus, all four required:
 
-**There is no "three files from §3" gate.** The original one was unsatisfiable — §3.1. Do not re-derive it with a regex.
+- `derive_targets()` on `20260825082910` yields `public.style_group_tags`, `style_group_tags_active_group_idx`, `asset_tags_active_asset_idx`, `dam_search_embedding_claim_idx`;
+- `apply_time_ddl_bodies()` recovers a `$ddl$`-tagged body **and** a `$$` body — a `$$`-only implementation must fail this test;
+- the two migrations in sub-step 3 yield their dynamically-secured tables;
+- `strip_sql()`'s output is byte-identical to before across all 546 migrations (snapshot).
+
+**Do not re-derive the target set with a regex.** §3.1 explains what that cost twice; use the lexer command it gives.
 
 **Depends on:** Step 0. **Judgment call:** which DDL verbs count as apply-time. Criterion: *does this statement change the catalog at the moment the migration runs?* `create table` yes; a `select` inside a function body no.
 
@@ -327,6 +359,8 @@ A single command that takes an object name and answers **all three questions at 
 ```bash
 node scripts/catalog-truth.mjs public.style_group_tags
 ```
+
+(That object is not an arbitrary example: it is the #1645 object, created inside a `$ddl$` body in `20260825082910` and invisible to `strip_sql` — §3.1.)
 
 Output must contain, for each requested object:
 
@@ -415,7 +449,7 @@ Backfill these, all confirmed from history:
 | 2 | `DROP TRIGGER IF EXISTS` immediately followed by `CREATE TRIGGER` | same gate | same |
 | 3 | Prose comment containing "an attempt to rewrite history" | `check-cancelled-work.mjs` R-SEC-1c row | script lines ~60–78, PR #1388, narrowed 2026-08-23 |
 | 4 | A pure file **move** of text listed as cancelled work | `check-cancelled-work.mjs` | transcript, 2026-08-24 |
-| 5 | `create table` inside `do $$ … $$` | `strip_sql` consumers | §3, §6.1 — the #1645 class |
+| 5 | `create table` inside a **tagged** `$ddl$ … $ddl$` body passed to a `pg_temp` executor | `strip_sql` consumers | `20260825082910` lines 2367–2428 — the live #1645 case, §3.1 |
 | 6 | `$$` appearing inside a `--` comment | `strip_sql` (fixed) — regression lock | `strip_sql` docstring; hid 17 objects of `20260727154500` |
 | 7 | English prose inside `comment on … is '…'` naming `core.style_guide_character` | `strip_sql` (fixed) — regression lock | `strip_sql` docstring; 30 phantom refs across 23 files |
 | 8 | Literal `'CREATE TABLE AS'` used as a comparison value | `check-pr-object-collisions.mjs` (fixed) — regression lock | script ~line 677 |
@@ -423,12 +457,13 @@ Backfill these, all confirmed from history:
 | 10 | `create trigger %I … on plm.%I` (format placeholders) | `check-pr-object-collisions.mjs` (fixed) — regression lock | script ~line 678 |
 | 11 | `'plm.seq'::regclass` — the one literal that IS a real reference | `strip_sql` — **must still be seen**, a negative-negative | `strip_sql` docstring |
 | 12 | A `pg_temp.` session-temporary table | `derive_targets` — must be excluded from durable verification | `production_catalog_verification.py` ~line 1401 |
-| 13 | A `$$` inside a `--` comment **plus** a real `do $$` later in the file, with top-level DDL between them | **This plan's own §3 script** — phantom pairing produced three false positives | §3.1, 2026-08-27 |
-| 14 | A **tagged** dollar-quote (`do $backfill$ … $backfill$`) containing DML | any bare `\$\$` matcher — must be neither missed nor mispaired | `20260728174500`, line 136 |
+| 13 | A `$$` inside a `--` comment **plus** a real `do $$` later in the file, with top-level DDL between them | **This plan's own §3 script, version 1** — phantom pairing produced three false positives | §3.1, 2026-08-27 |
+| 14 | A **tagged** dollar-quote (`do $backfill$ … $backfill$`) containing only DML | any bare `\$\$` matcher — must be neither missed nor mispaired | `20260728174500`, line 136 |
+| 15 | A **tagged** `$ddl$ … $ddl$` body containing `create table`, passed to a `pg_temp` executor | **this plan's own §3 script, version 2** — a bare `\$\$` scan cannot see it, which is how "the count is zero" was published | `20260825082910`, §3.1 |
 
-Fixture 5 stays in the corpus as a **lexer** fixture — the shape must still be handled correctly — but §3.1 removes its claim to being a live incident; label it accordingly.
+Fixtures 13 and 15 are this plan's own two wrong answers. Keep them labelled as such: they are the cheapest available proof that a regex is not an acceptable instrument for reasoning about a lexer.
 
-**How it should behave when done:** adding a fifteenth fixture is the *cheapest possible* response to the next false alarm — one file, one row in the ledger, done. A future change that reintroduces any of the twelve fails CI immediately, with the incident named in the failure output.
+**How it should behave when done:** adding a sixteenth fixture is the *cheapest possible* response to the next false alarm — one file, one row in the ledger, done. A future change that reintroduces any of the twelve fails CI immediately, with the incident named in the failure output.
 
 **Verification gate**
 ```bash
@@ -604,9 +639,9 @@ The command above must produce `docs/verification/issue-lead-time-<date>.md`, an
 
 | File | Must assert |
 |---|---|
-| `scripts/guard-false-alarm-corpus.test.mjs` | Each of the 14 §4 fixtures passes every Node text guard **without firing**. Fixture 11 (`::regclass`) asserts the literal **is** still seen — a negative-negative. |
-| `scripts/test_guard_false_alarm_corpus.py` | Same 14 fixtures against `production_business_risk_gate.py` and `production_migration_guard.py`. |
-| `scripts/test_production_migration_guard.py` (extend) | Dynamically-secured tables in `20260621151155` and `20260701154948` are recovered; `preflight_batch` reports *not-derivable* distinctly from *absent*; `strip_sql()`'s existing behaviour is **byte-identical** to before for all 546 migrations (snapshot test). |
+| `scripts/guard-false-alarm-corpus.test.mjs` | Each of the 15 §4 fixtures passes every Node text guard **without firing**. Fixture 11 (`::regclass`) asserts the literal **is** still seen — a negative-negative. |
+| `scripts/test_guard_false_alarm_corpus.py` | Same 15 fixtures against `production_business_risk_gate.py` and `production_migration_guard.py`. |
+| `scripts/test_production_migration_guard.py` (extend) | `apply_time_ddl_bodies()` recovers a `$ddl$`-tagged body as well as a `$$` one — a `$$`-only implementation must fail this test; `derive_targets()` on `20260825082910` yields `public.style_group_tags` and its three indexes; dynamically-secured tables in `20260621151155` and `20260701154948` are recovered; `preflight_batch` reports *not-derivable* distinctly from *absent*; `strip_sql()`'s existing behaviour is **byte-identical** to before for all 546 migrations (snapshot test). |
 | `scripts/catalog-truth.test.mjs` | An object with a hard-blocked original **and** an applied reissue lists **both** creating files. Present object → EXISTS from all three sources. Absent object → clean ABSENT. **Unreachable database → exit 2 with an explicit error, never "absent".** Hard-blocked migration whose object exists → reported as present *and* blocked. |
 | `scripts/check-blocker-ledger.test.mjs` | Rejects a missing required field, a dangling `corpus_fixture` path, and an unresolvable `fixed_by` SHA. |
 | `scripts/triage-gate.test.mjs` | Given a known guard name, prints the guard's purpose, the matching ledger entries, and the `LIKELY FALSE ALARM` verdict. Given an unknown one, prints `NO KNOWN MATCH` and exits 0. |
@@ -685,11 +720,11 @@ Named explicitly; do not assume they have been read elsewhere.
 - [ ] Tracking issue open, labelled `db-work`, carrying a `db-work-scope` block, visible to `--queue-audit`.
 - [ ] `AGENTS.md` lists this plan under "Active contracts and implementation plans", and carries new §5.2-B and §5.2-C.
 - [ ] `HANDOFF.d/2026-08-27T2000Z-edge-dev-claude-plan-throughput-guard-truth.md` exists and links to this plan; this plan links back. Root `HANDOFF.md` untouched.
-- [ ] Step 1 either closes both verified blind spots (dynamic RLS/policies; the `preflight_batch` absent-vs-not-derivable split) or is explicitly marked deferred with the command that justified deferring. `strip_sql()`'s output for all 546 migrations is byte-identical to before. **There is no "three §3 migrations" criterion — §3.1.**
+- [ ] `apply_time_ddl_bodies()` exists and handles **tagged** quotes; `derive_targets()` on `20260825082910` yields `public.style_group_tags` and its three indexes; dynamic RLS/policies are recovered; `preflight_batch` reports *not-derivable* distinctly from *absent*; `strip_sql()`'s output for all 546 migrations is byte-identical to before.
 - [ ] `scripts/catalog-truth.mjs` exists, is tested, and **exits 2 rather than reporting "absent"** when it cannot read a database.
 - [ ] Every "object missing" failure message in a **credentialed** guard names the three sources, with exit codes provably unchanged.
-- [ ] 14 corpus fixtures exist (including the two from §3.1); the corpus is proven to bite (a deliberately reverted narrowing makes it fail); it runs in `tools-offline-tests.yml`.
-- [ ] `config/blocker-ledger.json` backfilled (≥18 entries: 14 false alarms + ≥4 reviewer-harness); `scripts/check-blocker-ledger.mjs` green and running in `tools-offline-tests.yml`; the file header states which figures are estimates. No generated Markdown.
+- [ ] 15 corpus fixtures exist (including the three from §3.1); the corpus is proven to bite (a deliberately reverted narrowing makes it fail); it runs in `tools-offline-tests.yml`.
+- [ ] `config/blocker-ledger.json` backfilled (≥19 entries: 15 false alarms + ≥4 reviewer-harness); `scripts/check-blocker-ledger.mjs` green and running in `tools-offline-tests.yml`; the file header states which figures are estimates. No generated Markdown.
 - [ ] `scripts/triage-gate.mjs` exists and returns the right verdict for `cancelled-work-guard`.
 - [ ] Reviewer rules written into `AGENTS.md` §5.
 - [ ] `docs/verification/issue-lead-time-<date>.md` holds the 2026-08-27 baseline.
@@ -708,14 +743,16 @@ Named explicitly; do not assume they have been read elsewhere.
 | Guard messages get longer and noisier | Medium | Acceptable trade. Keep the three-source block to five lines. |
 | A step drifts into a database change | Low | §4 and §11 forbid it; the tracking issue is scoped as repository maintenance. Stop and open an issue. |
 | Work collides with another session in `shared-db` | Medium | Worktree from `origin/main`; the coordination machinery from `plan_multi_agent_database_coordination_hardening.md` is already live; stage only your own hunks. |
-| A future session re-derives §3 with a naive regex and reinstates the retracted three-file claim | **High — it already happened once** | §3.1 states the corrected result and the reason; corpus fixtures 13 and 14 make the phantom-pairing and tagged-quote shapes permanent test failures. |
+| A future session characterises the lexer's blind spot with a regex and publishes a wrong file list — in either direction | **High — it has already happened twice, in this document** | §3.1 records both wrong answers and gives a lexer-based command to use instead; corpus fixtures 13, 14 and 15 make the phantom-pairing and tagged-quote shapes permanent test failures. |
 | `hours_lost` in the ledger is guessed and later quoted as fact | Medium | The file header must say the figures are estimates for **ranking only**. Never cite them as measurement. |
 
 ### Open questions
 
-1. **What actually blocked #1645? Unresolved — and this plan's first answer was probably wrong.** §6.1 attributed it to lexer blindness. §3.1 removes the instance set that story depended on, and the review offers a better-supported alternative: **the hard-block bookkeeping trap**. The `HARD_BLOCKED` pair `20260814223552` / `20260825094455` (`production_migration_guard.py` ~lines 96–101) has replacements recorded as applied to production on **2026-08-25** in `docs/verification/unapplied-20260814-migrations-status-20260825.md` (CI run 32851388854) — which matches the owner's "banned migration" and "since 25 August" exactly, with no lexer involved. Note also that the owner was relaying a *session's* diagnosis, and §6.3 of this same plan documents that those get announced before they are proven.
+1. **Which job produced the #1645 failure text?** The **mechanism** is now evidenced, not assumed: `public.style_group_tags` is created inside a `$ddl$` body in `20260825082910` and is invisible after `strip_sql` (§3.1, with a command that proves it). What is still unnamed is the specific job whose output the owner quoted, because that session is not in the 2026-08-27 transcript archive.
 
-   **This is a working hypothesis, not a finding. The earlier claim of "certainty" was itself an instance of the §5.2-C failure this plan exists to stop.** **Decide by evidence before starting Step 3:** re-run the failing check on #1645's branch, capture the job log, and record the exact script and line in ledger entry `BL-0001`. If the mechanism is the bookkeeping trap rather than the lexer, **update this plan rather than implementing around it** — and note that Step 2 already fixes the bookkeeping trap, which is why Step 2 is the highest-value step in the plan.
+   A second mechanism may also have contributed and should be ruled in or out at the same time: **the hard-block bookkeeping trap**. The `HARD_BLOCKED` pair `20260814223552` / `20260825094455` (`production_migration_guard.py` ~lines 96–101) has replacements recorded as applied on **2026-08-25** in `docs/verification/unapplied-20260814-migrations-status-20260825.md` (CI run 32851388854), which also matches "banned migration" and "since 25 August". Step 2 fixes that trap regardless of the answer.
+
+   **Decide by evidence before starting Step 3:** re-run the failing check on #1645's branch, capture the job log, and record the exact script and line in ledger entry `BL-0001`. If it is a third mechanism, **update this plan rather than implementing around it.**
 2. **Is one reviewer genuinely enough for structure-only changes?** The transcripts show reviewers catching real errors, but also show the second and third reviewer adding hours and, in at least one case, being wrong. **Now largely settled** by the Step 8.1 amendment: migrations keep two reviewers, scripts and docs get one. What remains open is only whether *scripts* changes are safe at one. **Criterion:** at the Step 9 re-measurement, if any scripts-only change reached `main` with a defect a second reviewer would have caught, revert to two. **Owner: whoever runs Step 9** — the original wording left this check unassigned, which is how it would quietly never have happened.
 3. **Do the Node and Python lexers need to become one?** Deferred (§7.3). **Criterion:** if Step 4's cross-lexer agreement test finds more than two disagreements, open a follow-up issue to unify them.
 4. **Does `AGENTS.md` need splitting?** It is ~101 KB against an 80 KB ceiling. Out of scope here (§7.9), but it is a real constraint and Step 7 adds ~4 KB. If Step 7 pushes it materially further over, open a separate issue; do not solve it inside this plan.
@@ -733,6 +770,14 @@ Yes. §6 records all four failure shapes with verbatim transcript quotes and in-
 **3. Is the ultimate goal stated clearly enough that the implementer could make a correct judgment call if a step turns out to be wrong?**
 Yes. §1 states the goal in business terms first, gives a measured baseline (median 4.0h, p90 60.3h, n=400, taken 2026-08-27) and a numeric target, then states the override explicitly: the goal wins over any step, **and** never reach the goal by weakening a guard. That second clause is the one an implementer needs, because every step in this plan is adjacent to a safety mechanism and the fast wrong answer is always to turn one off.
 
-**Post-review amendment, 2026-08-27.** The self-audit above passed, and was still wrong on the point that mattered most. It graded the plan's *structure* and never re-derived its one hard *factual* claim. An independent GLM-5.3 review read the three cited migrations and refuted all three (§3.1), which also made a Step 1 verification gate unsatisfiable; Steps 1, 2, 3, 4, 5, 6, 8 and Open Question 1 carry amendments from the same review. **The lesson belongs in the plan, not only in its history: a self-audit that checks whether every section exists is not a check that any section is true.** Any future audit of this document must re-run at least one of its factual claims against the repository, and must not accept a regex as evidence about a lexer.
+**Post-review amendments, 2026-08-27 — two rounds, and the second was needed because the first was also wrong.**
+
+The original self-audit passed while the plan's one hard factual claim was false. It graded *structure* and never re-derived *fact*. An independent GLM-5.3 review then refuted the three cited migrations — correctly — and Steps 2, 3, 4, 5, 6, 8 and Open Question 1 carry good amendments from it. But the replacement claim written in response, "the count is zero", was produced by the same kind of bare-`$$` regex and was **also wrong**; a peer session caught it the same day by scanning for tagged dollar quotes, and it never reached `main`. The true answer is one migration, `20260825082910`, four objects, including the #1645 object (§3.1).
+
+Three lessons, all now written into the plan rather than only into its history:
+
+1. **A self-audit that checks whether every section exists is not a check that any section is true.** Any future audit of this document must re-run at least one factual claim against the repository.
+2. **Never characterise a lexer with a regex.** §3.1 gives the command that uses the real lexer; fixtures 13, 14 and 15 lock the shapes.
+3. **A retraction needs the same evidence bar as the claim it retracts.** Version 2 of §3.1 was published confidently on the strength of a scan structurally incapable of finding anything.
 
 **Checklist grade:** all 13 sections present; goal in business English with the override; rejected approaches recorded; every step has files and a verification gate; locked vs open labelled; explicit out-of-scope list; tests named by behaviour; identifiers, paths and SHAs defined; secrets by location only; definition of done includes commit/push/CI/merge verification; plan ↔ handoff cross-links present. **Pass.**
