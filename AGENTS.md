@@ -21,7 +21,7 @@ and dissemination process is
 
 ## Historical item merchandise-group classification
 
-Before interpreting `full_item_master.csv`, changing item-description parsing, or reporting historical MG match counts, read [`docs/item-description-mg-classification-process.md`](docs/item-description-mg-classification-process.md). The active remediation plan is [`plan_item_description_mg_taxonomy_repair.md`](plan_item_description_mg_taxonomy_repair.md); follow its STATUS table and do not recreate the unsafe provisional/fuzzy method. The permanent rule is: parse every description into product type, size, licensor, property, and artwork; build independent post-May-13 maps for MG01, MG01+MG02, and MG01+MG02+MG03; then match old product types from three levels to two to one. A failed full-key match is never an MG01 failure.
+Before interpreting `full_item_master.csv`, changing item-description parsing, or reporting historical MG match counts, read [`docs/item-description-mg-classification-process.md`](docs/item-description-mg-classification-process.md) and the completed [`plan_mg_taxonomy_three_axis_repair.md`](plan_mg_taxonomy_three_axis_repair.md). The implemented method separates MG01 physical form, MG02's family-specific subtype or material, and MG03 explicit embellishment. It validates newer codes independently at each depth, builds three independent post-May-13 maps, and matches historical items from three axes to two to one. Missing embellishment is unreadable, not plain; invalid child evidence never erases a valid parent; and a failed full-key match is never an MG01 failure. The older `plan_item_description_mg_taxonomy_repair.md` is retained as superseded history.
 
 ## Active contracts and implementation plans
 
@@ -43,6 +43,11 @@ AI sessions from breaking each other through the one database they all depend on
 > **Started in `shared-db` and you are not the orchestrator? Stop and hand over.**
 > This repo runs **one orchestrator session**, which dispatches every task to
 > sub-agents in isolated worktrees.
+> **To find out who that is and where to send work, run
+> `node scripts/check-orchestrator-marker.mjs --resolve` — §11c.** It is the only
+> sanctioned source of a routing target. Never take one from conversation history,
+> a `HANDOFF.d/` file, or a closed marker: that is how an authorized request was
+> once delegated to an orchestrator session that had already closed.
 > **Scope: STRUCTURE, not data (§0.0-B, owner ruling 2026-08-13).** This repo and its
 > orchestrator govern the *shape* of the database — schema, tables, columns, views, functions,
 > triggers, RLS, indexes, migrations. An application session changing its own *rows* does not
@@ -796,6 +801,40 @@ Then: merge to `main` (this auto-syncs the `shared-db/` folder into all apps) an
 promote to **production only in an approved window**. Docs-only PRs (no schema
 change) need just items 1 and "it reads correctly" — merge them promptly.
 
+### 5.0-D Declare what a re-derived migration was derived from — `-- derived-from:` (issue #1608, added 2026-08-26)
+
+Loader-style migrations here are authored as a **full re-derivation of the
+then-current object body on `main`**. A file that does
+`create or replace function|view` therefore depends on its base being present
+**in the target database** — and on 2026-08-24 one was promoted to production
+without it. The apply did not fail; it replaced the object with a body written
+for a different world, and post-apply catalog verification stayed green because
+the object still existed. Three migrations were retired over it.
+
+If your migration re-replaces an object an earlier migration also replaces, put
+**one machine-readable line** in the header:
+
+```sql
+-- derived-from: 20260814223552
+```
+
+or, if it writes the object from scratch and depends on no earlier rewrite:
+
+```sql
+-- derived-from: none
+```
+
+`scripts/migration_derivation.py` reads it. The Python test suite refuses a pull
+request that omits it (mandatory for every migration stamped 2026-08-27 or
+later), and the promotion lane refuses an allowlist whose member declares a base
+the target ledger does not have. The escape hatch is
+`--derivation-override VERSION:BASE=<what the database will actually hold>`,
+which is recorded verbatim in the run log. The drift report shows such a version
+as `[BASE-ABSENT]`, not as ordinary pending work.
+
+Do **not** add the line to an already-merged migration — that changes its bytes.
+Merged files that need a declaration get one in `LEGACY_DECLARATIONS`.
+
 ### 5.1 Promoting to production when a backlog exists — NEVER `--include-all` on the full repo set, ALWAYS inside the pruned temp checkout (learned 2026-07-23; recipe corrected 2026-07-27; wording made self-consistent 2026-08-09)
 
 > **Moved 2026-08-20** to [`docs/production-promotion-procedure.md`](docs/production-promotion-procedure.md) (issue #1331). Text unchanged; the section number is unchanged, so `AGENTS.md §5.1` still resolves.
@@ -1126,6 +1165,117 @@ links from the 63 migrated issues and from merged PR bodies:
 
 ---
 
+## 11c. The orchestrator ROUTING CONTRACT — how you find who to send work to
+
+**Added 2026-08-26, issue #1605.** The marker answers "has someone claimed the role". Until this
+contract it did **not** answer "where do I send work", and a session with no answer to that
+resolved the destination from conversation history and an old handoff — and delegated an
+authorized structural request to an orchestrator session that **had already closed**. The
+request went nowhere and nobody was told.
+
+### The standard identifier is `shared-db.orch`
+
+Owner instruction, Albert Hazan, 2026-08-26. It is a **fixed constant**, not a naming
+suggestion. The orchestrator's session display name must begin with it, so the orchestrator
+is identifiable in a session list and by any tool that can only see session titles.
+
+⚠️ **The name is a discovery HINT and never an authority.** Session titles are not unique
+and nothing enforces them. **Route on the marker, never on a name.**
+
+### Every open marker carries a routing block
+
+````
+```orchestrator-routing
+status: active
+identifier: shared-db.orch
+engine: codex
+session_name: shared-db.orch EDGE-DEV resume-1579
+route_id: 00000000-0000-7000-8000-00000000a1a1
+owner: u2giants
+machine: EDGE-DEV
+started: 2026-08-26T14:39:25Z
+handover_issue: 1579
+briefing: HANDOFF.d/2026-08-26T1409Z-edge-dev-codex-orchestrator-1579-fresh-session.md
+```
+````
+
+`route_id` is the **declared address**, and its shape depends on the engine. The guard validates
+that shape and nothing else — see the "what this does NOT do" note at the end of this section:
+
+| `engine` | `route_id` | How another session reaches it |
+|---|---|---|
+| `codex` | the Codex thread UUID from the session rollout `session_id` | `codex-reply` with that `threadId` |
+| `claude` | the Claude `sessionId`, e.g. `local_<uuid>` | a Claude cross-session message to that session |
+
+`handover_issue` is the predecessor marker, or `none` for a cold start. Every field is
+required; **blank is never a default** — state a value or `none`.
+
+### Resolve the destination this way, and only this way
+
+```bash
+node scripts/check-orchestrator-marker.mjs --resolve
+```
+
+It reads the **current open marker and nothing else**. That is what makes closing or handing
+over a marker invalidate the old routing target automatically, rather than by everyone
+remembering to stop using it. **Re-resolve before every delegation.**
+
+| Exit | State | What it means and what to do |
+|---|---|---|
+| 0 | `declared` | One valid marker. Its `route_id` is where to TRY. It is not proof anyone is there. |
+| 3 | `none` | Zero markers — **no active orchestrator**. **QUEUE the work** until a successor starts. Not permission to dispatch, and not permission to start orchestrating without claiming a marker yourself. |
+| 1 | `unsafe` | Anything that fails the marker guard — two or more markers, or the retired `coordinator-marker` label alive. Do not guess which is live; do not route to either. |
+| 1 | `invalid` | A marker is open but names no usable target. An orchestrator **may be live and unreachable** — stop. |
+| 2 | `unknown` | GitHub could not be read. **Assume a marker exists.** |
+
+⚠️ **`none` and `invalid` are different answers with opposite consequences, and neither may
+be collapsed into the other.** `none` means nobody is running. `invalid` means somebody may
+be running and you cannot reach them. Treating `invalid` as `none` is how a second
+orchestrator starts; treating `none` as a green light is how work gets dispatched to nobody.
+
+⚠️ **Never fall back to conversation history, a closed marker, a `HANDOFF.d/` file, or a
+remembered id for a routing target.** Those are precisely what produced the failure this
+contract exists to prevent. If `--resolve` will not give you an address, you do not have one.
+
+### Starting as the orchestrator
+
+Open the marker with a complete, valid routing block **recording your own new `route_id`**.
+A successor that copies its predecessor's id is rejected by the guard — that copy is exactly
+how delegations kept arriving at a closed session.
+
+⚠️ **The inheritance check is a trap, not a proof.** It fires only when the marker declares a
+numeric `handover_issue` whose issue is readable and carries a parseable block. It does not
+catch a reused id from an older ancestor, a wrong predecessor number, a `handover_issue: none`
+that is a lie, or a fabricated id with the right shape. **Recording your own real id is your
+obligation; the guard catches the common copy, not every possible one.**
+
+### Handing over
+
+Close your marker. The successor opens its own with **its own new `route_id`**. There is no
+edit-in-place handover: the old target must stop resolving the moment you stop running.
+
+### What this does NOT do
+
+It publishes an **address**, and validates only its **shape**. There is no session API here, so
+nothing checks that the session exists, is running, belongs to the declared owner or machine,
+is the orchestrator, or can receive anything — a fabricated id with otherwise valid fields
+resolves exactly like a real one. What a resolved target proves is narrow: **one open marker
+declares this address.** Confirm you got a reply; silence is not delivery, and this tool cannot
+tell the difference.
+
+It does not invent a delivery channel and it does not promise
+delivery. `plan_orchestrator-workflow-gaps.md` §C recorded that nothing here reaches a
+running session; that remains true of this repository. Claude cross-session messaging and
+Codex `codex-reply` are the channels, they live outside this repo, and both needed an
+address the marker never published. **A resolved target means "this is where to send it",
+never "it was received".**
+
+⚠️ **Markers opened before 2026-08-27 are grandfathered by the PR guard only** — they could
+not carry a block that did not exist. `--resolve` **never** grandfathers: such a marker still
+carries no address and still cannot be routed to. Edit it to add the block, or close it.
+
+---
+
 ## 12. Standing facts an incoming session must know
 
 > **Re-homed from `COORDINATOR_INTAKE.md` on 2026-08-07, verbatim.** These ten rules
@@ -1145,6 +1295,7 @@ have already happened in this repo, more than once.
 
 1. **One orchestrator.** All work is dispatched to sub-agents in isolated
    worktrees. If you were not started as the orchestrator, you are not it.
+   **Resolve who it is with `--resolve`, never from memory — §11c.**
 2. **SUPERSEDED 2026-08-14, RAISED 2026-08-25:** up to **five** unrelated
    migrations may be authored concurrently under exact object claims and atomic
    version reservations. Preview, merges and production promotion remain one at
