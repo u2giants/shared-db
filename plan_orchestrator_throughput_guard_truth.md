@@ -2,6 +2,8 @@
 
 **Repository:** `u2giants/shared-db` (branch for this plan: `claude/plan-throughput-guard-truth`, cut from `origin/main` at `42f0b77`)
 
+**Tracking issue:** [u2giants/shared-db#1680](https://github.com/u2giants/shared-db/issues/1680)
+
 **Created:** 2026-08-27
 
 **Work class:** **repository maintenance.** This plan does **not** authorize a database structure change, a data change, a migration, a preview apply, or a production apply. It changes scripts, tests, workflows and documentation only. Do **not** route its implementation to the structure/schema orchestrator (`AGENTS.md` §0.0-B, §0.0-C, owner ruling 2026-08-21 / issue #1366).
@@ -16,7 +18,7 @@
 
 | Step | Outcome | State | Evidence |
 |---|---|---|---|
-| 0 | Plan written, registered in `AGENTS.md` and `HANDOFF.d/`, tracking issue opened | ⬜ open | — |
+| 0 | Plan written, registered in `AGENTS.md` and `HANDOFF.d/`, tracking issue opened | ✅ done 2026-08-27 | issue #1680; `grep -n plan_orchestrator_throughput_guard_truth AGENTS.md HANDOFF.d/*.md` returns a hit in both; merge commit recorded below |
 | 1 | One SQL lexer, shared by every scanner; dollar-quoted DDL is never invisible | ⬜ open | — |
 | 2 | `scripts/catalog-truth.mjs` — one command that answers "does this object actually exist, and what created it" | ⬜ open | — |
 | 3 | Guards must consult catalog truth before concluding "missing", and must say so in their failure text | ⬜ open | — |
@@ -251,7 +253,7 @@ Read this before "improving" the plan.
    gh issue create --repo u2giants/shared-db --label db-work --title "Cut issue lead time: guard truth, false-alarm corpus, blocker ledger" --body-file <file>
    ```
    The body **must** carry a `db-work-scope` block (`AGENTS.md` — every issue in this repo carries the `db-work` label *and* a scope block, no exceptions; #1188/#1238/#1242/#1266/#1268 were all missed for weeks because the label was omitted). Scope it as **repository maintenance, no structure change**.
-2. Put the issue number at the top of this file.
+2. Put the issue number at the top of this file. **Done — #1680.**
 3. Confirm the `AGENTS.md` "Active contracts and implementation plans" entry and the `HANDOFF.d/` backlink both exist (they are created by the plan-writing commit; verify, do not duplicate).
 
 **Behaviour when done:** a session that runs the orchestrator queue audit sees this work; a session that reads `AGENTS.md` finds this plan.

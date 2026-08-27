@@ -1,3 +1,9 @@
+---
+issue: 1680
+status: OPEN
+owner: claude/plan-throughput-guard-truth
+---
+
 # Handoff — plan written to cut `shared-db` issue lead time (guard truth, false-alarm corpus, blocker ledger)
 
 **UTC:** 2026-08-27T20:00Z · **Machine:** edge-dev · **Agent:** Claude (Opus 5) · **Branch:** `claude/plan-throughput-guard-truth` (from `origin/main` @ `42f0b77`)
