@@ -413,9 +413,11 @@ CATALOG_CONTRACTS = {
       and to_regclass('public.dam_search_embedding_claim_idx') is not null
       and to_regclass('public.asset_tags_forward_asset_id_idx') is not null
       -- The normalization accelerator was retired by issue #1467 (20260827132608)
-      -- and is deliberately no longer part of this contract. Asserting its ABSENCE
-      -- here would fail production verification in the window between merge and
-      -- promotion; supabase/tests assert the absence where every migration has run.
+      -- and is deliberately no longer part of this contract. It is removed rather
+      -- than inverted because this contract is bound to sidecar 20260825082910,
+      -- which is already promoted: the catalog-verification recovery lane re-runs
+      -- that historical allowlist against current main, where an inverted clause
+      -- would be a latent failure. supabase/tests assert the absence instead.
     """,
     "popdam_1427_functions_triggers_v1": """
       to_regprocedure('public.get_effective_asset_metadata(uuid)') is not null
