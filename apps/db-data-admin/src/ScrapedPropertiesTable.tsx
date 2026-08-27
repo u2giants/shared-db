@@ -86,11 +86,11 @@ export function ScrapedPropertiesTable({ client }: Props) {
       {groups.map(group => <section key={group.key} className="scraped-property-group" aria-labelledby={`scraped-${group.key}`}>
         <h2 id={`scraped-${group.key}`}>{group.name}</h2>
         <p className="muted">{group.rows.length} {group.rows.length === 1 ? 'property' : 'properties'}</p>
-        {group.rows.some(row => /conflict|unresolved/i.test(row.source_status ?? '')) && <div role="note" aria-label={`${group.name} review details`}>
-          {[...new Map(group.rows.filter(row => /conflict|unresolved/i.test(row.source_status ?? '')).map(row => [
+        {group.rows.some(row => /conflict|unresolved|ambiguous_crossover/i.test(row.source_status ?? '')) && <div role="note" aria-label={`${group.name} review details`}>
+          {[...new Map(group.rows.filter(row => /conflict|unresolved|ambiguous_crossover/i.test(row.source_status ?? '')).map(row => [
             `${row.review_reason}|${row.evidence_basis}|${row.review_guidance}`,
             row,
-          ])).values()].map(row => <p key={`${row.review_reason}|${row.evidence_basis}`} className="muted" title={`Authority review detail: ${row.review_reason} Evidence basis: ${row.evidence_basis}. Decision guidance: ${row.review_guidance}`}>
+          ])).values()].map(row => <p key={`${row.review_reason}|${row.evidence_basis}|${row.review_guidance}`} className="muted" title={`Authority review detail: ${row.review_reason} Evidence basis: ${row.evidence_basis}. Decision guidance: ${row.review_guidance}`}>
             <strong>{row.review_reason}</strong> Evidence basis: {row.evidence_basis}. {row.review_guidance}
           </p>)}
         </div>}

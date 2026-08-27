@@ -1,5 +1,6 @@
 -- Issue #1631: correct the failed Scraped Properties live acceptance.
 -- This changes presentation only. Licensed rows and private decision evidence stay server-side.
+-- derived-from: 20260826200252
 
 do $migration$
 declare
@@ -43,6 +44,10 @@ begin
 
   if position(v_asgard_anchor in v_definition) = 0
      or position(v_name_needle in v_definition) = 0
+     or position($needle$when s.source_table = 'plm.marvel_dcp_property' then 'Retained DCP evidence - not Marvel Creative authority'$needle$ in v_definition) = 0
+     or position($needle$case when s.source_status in ('authority_conflict','scope_conflict','ambiguous_crossover') then 'Conflicting evidence requires Licensing review.'$needle$ in v_definition) = 0
+     or position($needle$s.provenance_kind::text as evidence_basis,$needle$ in v_definition) = 0
+     or position($needle$then 'Review direct source identity and approve an evidence-backed decision; do not infer from names or landing tables.'$needle$ in v_definition) = 0
      or position($needle$'review_reason', n.review_reason$needle$ in v_definition) = 0
      or position($needle$'review_guidance', n.review_guidance$needle$ in v_definition) = 0 then
     raise exception using errcode = '55000',
@@ -88,6 +93,15 @@ begin
           when s.source_status = 'scope_conflict' then 'Compare the approved Disney and Lucasfilm route records, then approve or reject the exact memberships. Do not use a name keyword as scope evidence.'
           else 'Review direct source identity and approve an evidence-backed decision; do not infer from names or landing tables.' end$replacement$
   );
+
+  if position('Marvel - Creative (ASGARD)' in v_definition) = 0
+     or position('Creative (ASGARD)' in v_definition) = 0
+     or position('Conflicting approved authority evidence names more than one presentation scope' in v_definition) = 0
+     or position('approved exact-identity DCP authority decisions' in v_definition) = 0
+     or position('approve one superseding exact-identity decision' in v_definition) = 0 then
+    raise exception using errcode = '55000',
+      message = 'Scraped Properties #1631 replacement postconditions failed';
+  end if;
 
   execute v_definition;
 end;
