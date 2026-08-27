@@ -11,15 +11,24 @@ set -euo pipefail
 
 event_ready="${RUNNER_TEMP:?required}/flow4-event-writer-ready"
 reserve_ready="$RUNNER_TEMP/flow4-reserve-writer-ready"
+pack_ready="$RUNNER_TEMP/flow4-pack-writer-ready"
+competing_pack_ready="$RUNNER_TEMP/flow4-competing-pack-lock-ready"
 event_log="$RUNNER_TEMP/flow4-event-writer.log"
 reserve_log="$RUNNER_TEMP/flow4-reserve-writer.log"
-rm -f "$event_ready" "$reserve_ready" "$event_log" "$reserve_log"
+pack_log="$RUNNER_TEMP/flow4-pack-writer.log"
+competing_pack_log="$RUNNER_TEMP/flow4-competing-pack-lock.log"
+rm -f "$event_ready" "$reserve_ready" "$pack_ready" "$competing_pack_ready" \
+  "$event_log" "$reserve_log" "$pack_log" "$competing_pack_log"
 
 cleanup() {
   psql -v ON_ERROR_STOP=1 --no-psqlrc >/dev/null <<'SQL' || true
 delete from dflow.sample_remote_request_history
  where sample_remote_request_item_id in ('16070000-0000-4000-8000-000000000001','16070000-0000-4000-8000-000000000002');
 delete from dflow.sample_reservation where sample_reservation_id='16070000-0000-4000-8000-000000000003';
+delete from dflow.sample_shipment_line where idempotency_key in ('pack-overlap','pack-competing');
+delete from dflow.sample_shipment_item where box_id_fk=160700001;
+delete from dflow.sample_shipment where sample_shipment_id=160700000001;
+delete from dflow.sample_box where box_id_pk=160700001;
 delete from dflow.sample_remote_request_item where sample_remote_request_id='16070000-0000-4000-8000-000000000000';
 delete from dflow.sample_remote_request where sample_remote_request_id='16070000-0000-4000-8000-000000000000';
 delete from dflow.sample_workflow where created_by_user='flow4-concurrency-contract';
@@ -140,3 +149,83 @@ reserve_committed=$(psql -v ON_ERROR_STOP=1 --no-psqlrc -Atqc "select sample_res
   echo "reservation overlap failed: returned=$reserve_returned committed=$reserve_committed blocked_ms=$reserve_elapsed" >&2; exit 1;
 }
 echo "FLOW4 RESERVATION CONCURRENCY PASS returned=$reserve_returned blocked_ms=$reserve_elapsed"
+
+psql -v ON_ERROR_STOP=1 --no-psqlrc <<'SQL'
+insert into dflow.sample_box(box_id_pk,box_label,status,origin_office,dest_office)
+values(160700001,'flow4-pack-concurrency-box','open','ningbo','nyo');
+insert into dflow.sample_shipment(
+  sample_shipment_id,origin_location_type,origin_location_id,destination_location_type,
+  destination_location_id,state,actor_user,actor_role,idempotency_key,request_hash
+) values(
+  160700000001,'office','ningbo','office','nyo','packed','ningbo-user','ningbo',
+  'flow4-pack-concurrency-shipment','flow4-pack-concurrency-shipment-hash'
+);
+SQL
+
+# The first client completes the pack operation but holds the reservation lock
+# until commit. The replay client must block, then return that exact committed
+# reservation/line identity without creating another membership or line.
+export FLOW4_PACK_READY="$pack_ready"
+psql -v ON_ERROR_STOP=1 --no-psqlrc >"$pack_log" 2>&1 <<'SQL' &
+begin;
+select sample_reservation_id
+  from dflow.pack_sample_reservation(
+    '16070000-0000-4000-8000-000000000003',160700001,160700000001,
+    'ningbo','office','nyo','ningbo_to_nyc','ningbo-user','ningbo',
+    'pack-overlap','pack-overlap-hash'
+  );
+\! touch "$FLOW4_PACK_READY"
+select pg_sleep(1.25);
+commit;
+SQL
+pack_pid=$!
+for _ in $(seq 1 100); do [[ -f "$pack_ready" ]] && break; sleep 0.02; done
+[[ -f "$pack_ready" ]] || { echo 'pack writer never proved it held the reservation lock' >&2; exit 1; }
+pack_started=$(date +%s%3N)
+pack_returned=$(psql -v ON_ERROR_STOP=1 --no-psqlrc -Atqc "select sample_reservation_id::text||'|'||packed_shipment_line_id::text from dflow.pack_sample_reservation('16070000-0000-4000-8000-000000000003',160700001,160700000001,'ningbo','office','nyo','ningbo_to_nyc','ningbo-user','ningbo','pack-overlap','pack-overlap-hash')")
+pack_elapsed=$(( $(date +%s%3N) - pack_started ))
+wait "$pack_pid" || { cat "$pack_log" >&2; exit 1; }
+pack_committed=$(psql -v ON_ERROR_STOP=1 --no-psqlrc -Atqc "select sample_reservation_id::text||'|'||packed_shipment_line_id::text from dflow.sample_reservation where sample_reservation_id='16070000-0000-4000-8000-000000000003'")
+pack_counts=$(psql -v ON_ERROR_STOP=1 --no-psqlrc -Atqc "select (select count(*) from dflow.sample_shipment_item where box_id_fk=160700001)::text||'|'||(select count(*) from dflow.sample_shipment_line where idempotency_key='pack-overlap')::text")
+[[ "$pack_returned" == "$pack_committed" && "$pack_counts" == "1|1" && "$pack_elapsed" -ge 700 ]] || {
+  echo "pack replay overlap failed: returned=$pack_returned committed=$pack_committed counts=$pack_counts blocked_ms=$pack_elapsed" >&2; exit 1;
+}
+echo "FLOW4 PACK REPLAY CONCURRENCY PASS returned=$pack_returned counts=$pack_counts blocked_ms=$pack_elapsed"
+
+# A different pack identity must also wait for the reservation lock, then fail
+# with the contract's 23505 conflict while leaving the committed pack singular.
+export FLOW4_COMPETING_PACK_READY="$competing_pack_ready"
+psql -v ON_ERROR_STOP=1 --no-psqlrc >"$competing_pack_log" 2>&1 <<'SQL' &
+begin;
+select 1 from dflow.sample_reservation
+ where sample_reservation_id='16070000-0000-4000-8000-000000000003' for update;
+\! touch "$FLOW4_COMPETING_PACK_READY"
+select pg_sleep(1.25);
+commit;
+SQL
+competing_pack_pid=$!
+for _ in $(seq 1 100); do [[ -f "$competing_pack_ready" ]] && break; sleep 0.02; done
+[[ -f "$competing_pack_ready" ]] || { echo 'competing pack blocker never proved it held the reservation lock' >&2; exit 1; }
+competing_pack_started=$(date +%s%3N)
+set +e
+competing_pack_output=$(psql --no-psqlrc -v ON_ERROR_STOP=1 2>&1 <<'SQL'
+\set VERBOSITY verbose
+select sample_reservation_id from dflow.pack_sample_reservation(
+  '16070000-0000-4000-8000-000000000003',160700001,160700000001,
+  'ningbo','office','nyo','ningbo_to_nyc','ningbo-user','ningbo',
+  'pack-competing','pack-competing-hash'
+);
+SQL
+)
+competing_pack_status=$?
+set -e
+competing_pack_elapsed=$(( $(date +%s%3N) - competing_pack_started ))
+wait "$competing_pack_pid" || { cat "$competing_pack_log" >&2; exit 1; }
+competing_pack_counts=$(psql -v ON_ERROR_STOP=1 --no-psqlrc -Atqc "select (select count(*) from dflow.sample_shipment_item where box_id_fk=160700001)::text||'|'||(select count(*) from dflow.sample_shipment_line where box_id_fk=160700001)::text")
+[[ "$competing_pack_status" -ne 0 && "$competing_pack_output" == *"23505"* \
+   && "$competing_pack_counts" == "1|1" && "$competing_pack_elapsed" -ge 700 ]] || {
+  echo "competing pack overlap failed: status=$competing_pack_status counts=$competing_pack_counts blocked_ms=$competing_pack_elapsed" >&2
+  echo "$competing_pack_output" >&2
+  exit 1
+}
+echo "FLOW4 COMPETING PACK CONCURRENCY PASS sqlstate=23505 counts=$competing_pack_counts blocked_ms=$competing_pack_elapsed"
