@@ -412,7 +412,7 @@ CATALOG_CONTRACTS = {
       and to_regclass('public.asset_tags_active_asset_idx') is not null
       and to_regclass('public.dam_search_embedding_claim_idx') is not null
       and to_regclass('public.asset_tags_forward_asset_id_idx') is not null
-      -- The normalization accelerator was retired by issue #1467 (20260827132608)
+      -- The normalization accelerator was retired by issue #1467 (20260827183106)
       -- and is deliberately no longer part of this contract. It is removed rather
       -- than inverted because this contract is bound to sidecar 20260825082910,
       -- which is already promoted: the catalog-verification recovery lane re-runs
