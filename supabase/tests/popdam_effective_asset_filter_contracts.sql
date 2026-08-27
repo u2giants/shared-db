@@ -19,13 +19,16 @@ declare
   v_rejected text := 'zz1645_rejected_' || txid_current();
   v_counts jsonb;
 begin
-  insert into public.licensors (id, name, external_id)
-  values (v_licensor, 'ZZ1645 Licensor', 'zz1645-l-' || txid_current()),
-         (v_other_licensor, 'ZZ1645 Other Licensor', 'zz1645-ol-' || txid_current());
+  -- DAM identity foreign keys were cut over from the retired public mirrors to
+  -- the canonical core taxonomy in 20260723113000. Keep this synthetic fixture
+  -- on the same authority boundary that assets and style_groups enforce.
+  insert into core.licensor (id, name, code, status)
+  values (v_licensor, 'ZZ1645 Licensor', 'ZZ1645L-' || txid_current(), 'active'),
+         (v_other_licensor, 'ZZ1645 Other Licensor', 'ZZ1645OL-' || txid_current(), 'active');
 
-  insert into public.properties (id, licensor_id, name, external_id)
-  values (v_property, v_licensor, 'ZZ1645 Property', 'zz1645-p-' || txid_current()),
-         (v_other_property, v_other_licensor, 'ZZ1645 Other Property', 'zz1645-op-' || txid_current());
+  insert into core.property (id, licensor_id, name, code, status)
+  values (v_property, v_licensor, 'ZZ1645 Property', 'ZZ1645P-' || txid_current(), 'active'),
+         (v_other_property, v_other_licensor, 'ZZ1645 Other Property', 'ZZ1645OP-' || txid_current(), 'active');
 
   insert into public.style_groups
     (id, sku, folder_path, licensor_id, property_id, licensor_name, property_name)
