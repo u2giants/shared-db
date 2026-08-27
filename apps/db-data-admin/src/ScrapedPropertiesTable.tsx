@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FilterHeader } from './FilterHeader'
 import { groupScrapedProperties, loadScrapedProperties, type ApiClient, type ScrapedPropertyRow } from './lib/data-admin'
 import { getDistinctColumnValues, rowMatchesFilters } from './lib/grid-filters'
+import { explainScrapedProperty } from './scraped-property-explanations'
 import { scrapedPropertiesColumns } from './scraped-properties-columns'
 
 type Props = { client: ApiClient }
@@ -19,7 +20,7 @@ export function ScrapedPropertiesTable({ client }: Props) {
 
   const load = useCallback(async () => {
     setLoading(true); setError(null); setDenied(false)
-    try { setRows(await loadScrapedProperties(client)) }
+    try { setRows((await loadScrapedProperties(client)).map(row => ({ ...row, ...explainScrapedProperty(row) }))) }
     catch (cause) {
       const message = cause instanceof Error ? cause.message : (cause && typeof cause === 'object' && 'message' in cause ? String(cause.message) : '')
       if (/permission|licensing|access/i.test(message)) setDenied(true)
