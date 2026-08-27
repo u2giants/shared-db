@@ -19,7 +19,7 @@
 | Step | Outcome | State | Evidence |
 |---|---|---|---|
 | 0 | Plan written, registered in `AGENTS.md` and `HANDOFF.d/`, tracking issue opened | ✅ done 2026-08-27 | merge commit `172d2bb` (PR #1679, all 16 required checks green); issue #1680 open and labelled `db-work`; `grep -n plan_orchestrator_throughput_guard_truth AGENTS.md HANDOFF.d/*.md` returns a hit in both files |
-| 1 | Apply-time DDL inside tagged dollar-quoted bodies stops being invisible; dynamic RLS/policies recovered; `preflight_batch` distinguishes absent from not-derivable | ⬜ open, **scope corrected twice on 2026-08-27 — read §3.1 first** | — |
+| 1 | Apply-time DDL inside tagged dollar-quoted bodies stops being invisible; dynamic RLS/policies recovered; `preflight_batch` distinguishes absent from not-derivable **without disarming the existing #1645 rescue** | ⬜ open, **scope corrected three times on 2026-08-27 — read §3.1 first** | target set: `python scripts/scan_apply_time_ddl.py` — 4 migrations, 14 objects |
 | 2 | `scripts/catalog-truth.mjs` — one command that answers "does this object actually exist, and what created it" | ⬜ open | — |
 | 3 | Guards must consult catalog truth before concluding "missing", and must say so in their failure text | ⬜ open | — |
 | 4 | False-alarm corpus — every historical false positive becomes a permanent regression test | ⬜ open | — |
@@ -29,7 +29,12 @@
 | 8 | Reviewer chain: one reviewer for structure-only, liveness probe before waiting, hard wait cap | ⬜ open | — |
 | 9 | Measurement — re-run the time-to-close baseline and record it | ⬜ open | — |
 
-**Independent review, 2026-08-27** (GLM-5.3, session `shared-db-throughput-plan-review`, report `.ai/reviews/glm-shared-db-throughput-plan-review-20260827T194444Z.md`): **APPROVE WITH CHANGES**, with Steps 1-3 **REJECTED as originally written**. Steps 2, 3, 4, 5, 6 and 8 and Open Question 1 carry amendments from it. The review also refuted this plan's original §3 file list — correctly — but the replacement claim written in response ("the count is zero") was **also wrong**, and was caught by a peer session the same day. §3.1 records all three versions. **Read §3.1 before starting Step 1, and before writing any scan of your own.**
+**Independent reviews, 2026-08-27 — two, and both found the plan's central fact wrong.**
+
+- **GLM-5.3** (session `shared-db-throughput-plan-review`, report `.ai/reviews/glm-shared-db-throughput-plan-review-20260827T194444Z.md`): **APPROVE WITH CHANGES**, Steps 1-3 **REJECTED as written**. Steps 2-6 and 8 carry amendments from it. It correctly refuted §3's original three-file list.
+- **Grok 4.6** (session `shared-db-throughput-plan-grok`, report `.ai/reviews/grok-shared-db-throughput-plan-grok-20260827T200630Z-2068325.md`): **REJECT**. It found that the *replacement* count was still incomplete, that Step 1 could disarm an existing #1645 rescue at `production_migration_guard.py:1832`, that Open Question 1 named the wrong hard-blocked migration, and that Step 3's line reference pointed at the wrong function. All four were re-verified by hand and all four were right. §3.1, §6.1, Step 1, Step 3 and Open Question 1 are rewritten accordingly.
+
+**Read §3.1 before starting Step 1, and before writing any scan of your own.**
 
 **A fresh session starts at Step 0.** Steps 1→4 are the load-bearing ones; if context runs out, that is the cut point (see §9 phases).
 
@@ -50,7 +55,9 @@ When this plan is done, the following will be true and is not true today:
 3. **A session that hits a red check runs one command and gets the answer** — is this a known false alarm, what does the live catalog say, what is this guard actually for — instead of reading a 2,000-line Python file from scratch.
 4. **We can see where the time goes.** There is a ledger of blockers with a cost against each, so the next thing to fix is chosen from evidence rather than from whoever complained loudest.
 
-**Business measure.** Baseline taken 2026-08-27 over the last 400 closed issues in `u2giants/shared-db`: median time-to-close **4.0 hours**, mean **21.1 hours**, p90 **60.3 hours**; **18%** of issues take more than a day and **10%** take more than three days. The long tail is the target. Success is halving the p90 (60.3h → ≤30h) and cutting the >72h share (10% → ≤5%) without weakening a single safety guarantee.
+**Business measure.** Baseline taken 2026-08-27 over the last 400 closed issues in `u2giants/shared-db`: median time-to-close **4.0 hours**, mean **21.5 hours**, p90 **60.3 hours**; **18%** of issues take more than a day and **10%** take more than three days. The long tail is the target. Success is halving the p90 (60.3h → ≤30h) and cutting the >72h share (10% → ≤5%) without weakening a single safety guarantee.
+
+**The artifact behind those numbers** is `docs/verification/issue-lead-time-baseline-20260827.md`, which carries the exact command. Re-run it before quoting them; the Grok 4.6 review was right that an earlier draft set a numeric target with nothing re-derivable behind it, and the mean has already moved (21.1 → 21.5) as issues closed during the day.
 
 > **If a step in this plan conflicts with this goal, the goal wins — stop and flag it.**
 > In particular: **never reach the goal by removing, loosening, or bypassing a safety guard.** A guard that is *wrong* gets made *correct* (usually by giving it access to the truth it was guessing at). A guard that is *right* and inconvenient stays. If a step as written would reduce safety, stop and open an issue instead of implementing it. `AGENTS.md` is the authority and it outranks this document.
@@ -82,57 +89,70 @@ An analysis of those 38 sessions (8 of them orchestrator sessions, identifiable 
 **How to reproduce the headline symptom** (do this first, in Step 1's verification):
 
 ```bash
-python - <<'PY'
-import re, glob
-for f in sorted(glob.glob('supabase/migrations/*.sql')):
-    t = open(f, encoding='utf-8', errors='replace').read()
-    # Dollar tags are NOT always empty. $ddl$ ... $ddl$ is a dollar quote too.
-    for m in re.finditer(r'\$([A-Za-z_][A-Za-z0-9_]*)?\$(.*?)\$\1?\$', t, re.S):
-        if re.search(r'create\s+(table|view|index|materialized)', m.group(2), re.I):
-            print('relation created INSIDE a dollar-quoted body:', f); break
-PY
+python scripts/scan_apply_time_ddl.py
 ```
 
-The script above is the **corrected** version. The version originally published in this plan used a bare `\$\$` pattern; it was wrong in both directions, and §3.1 is the record of what that cost.
+That script is the artifact behind §3.1. It is **not** a regex over `$$`: it uses the repository's own `strip_sql()` to decide what the lexer can already see, walks dollar-quoted bodies at every nesting depth, blanks comments and single-quoted literals so that prose and assertions are not mistaken for DDL, and — the distinction three earlier attempts all missed — excludes bodies whose enclosing context is `create function` / `create procedure`, because DDL there runs when the routine is **called**, not when the migration **applies**. Its header comment explains each choice and names the false positive it exists to prevent.
 
-### 3.1 Two wrong answers before the right one — read this before trusting any scan in this document
+Three earlier versions of this claim were produced with a regex and **all three were wrong**. §3.1 is the record of what that cost.
 
-This section has been rewritten twice. Both earlier versions were produced by a regex, and both were wrong. The history is kept deliberately, because it is the single best evidence in this plan for why §6.1 matters.
+### 3.1 Three wrong answers before the right one — read this before trusting any scan in this document
 
-**Version 1 (plan as first written): "exactly three files."** A bare `\$\$` regex named `20260717163500`, `20260728174500` and `20260810140000`. All three are **false positives**, and that part still stands after hand-verification at `254f0db`:
+This section has been rewritten three times. Every earlier version was produced by a regex, and every earlier version was wrong. The history is kept deliberately, because it is the single best evidence in this plan for why §6.1 matters: **a plan about text-lexing false positives generated three of its own.**
+
+**Version 1 (plan as first written): "exactly three files."** A bare `\$\$` regex named `20260717163500`, `20260728174500` and `20260810140000`. All three are **false positives**, and that finding still stands:
 
 | File | What the bare-`$$` script "found" | What is actually there |
 |---|---|---|
-| `20260810140000_production_lane_canary.sql` | a `create table` inside a dollar-quoted body | `create table if not exists plm.production_lane_canary` is **top-level, line 70**. The `$$` at **line 16 is inside a `--` comment** — which literally discusses the `$$`-in-a-comment lexer bug — and the regex phantom-paired it with the real `do $$` at line 107, swallowing the top-level statement. |
+| `20260810140000_production_lane_canary.sql` | a `create table` inside a dollar-quoted body | `create table if not exists plm.production_lane_canary` is **top-level, line 70**. The `$$` at **line 16 is inside a `--` comment** — which literally discusses the `$$`-in-a-comment lexer bug — and the regex phantom-paired it with the real `do $$` at line 107. A later scan of this same file also matched the prose `-- the schema default grant that CREATE TABLE just applied` at line 90 and reported a table named `just`. |
 | `20260728174500_clickup_incremental_task_import_reissue.sql` | a `create index` inside a dollar-quoted body | `create index if not exists pim_product_clickup_list_updated_idx` is **top-level, line 115**. The `$$` at **line 46 is inside a comment**; the file's real block is tagged (`do $backfill$`, line 136) and contains only DML. |
 | `20260717163500_reconcile_dflow_backend_startup_contract.sql` | `CREATE INDEX` statements | It creates **no relations**. The only `CREATE INDEX` text sits inside **single-quoted comparison values** at lines 116, 125 and 143 (`and indexdef = 'CREATE INDEX …'`) — the same shape as the `'CREATE TABLE AS'` → table named `as` scar at `check-pr-object-collisions.mjs:677`. |
 
-**Version 2 (after an independent GLM-5.3 review): "the count is zero." Also wrong, and wrong the same way.** Having shown the three files were phantoms, the re-check searched again with a bare `$$` pattern, found nothing, and concluded the pattern was absent from the repository. **A bare `$$` pattern cannot see a tagged dollar quote,** so it was structurally incapable of returning anything else. The retraction reproduced the exact bug it was retracting. It was caught within the hour by a peer session scanning with a general dollar-tag pattern, and never reached `main`.
+**Version 2 (after the GLM-5.3 review): "the count is zero." Also wrong, and wrong the same way.** Having shown the three files were phantoms, the re-check searched again with a bare `$$` pattern, found nothing, and concluded the shape was absent from the repository. **A bare `$$` pattern cannot see a tagged dollar quote,** so it was structurally incapable of returning anything else. The retraction reproduced the exact bug it was retracting. A peer session caught it within the hour; it never reached `main`.
 
-**Version 3 — the current answer, verified two independent ways at `origin/main`.** Scanning with `\$[A-Za-z_]*\$` returns **one** file, and it is load-bearing:
+**Version 3: "one migration, `20260825082910`, four objects." Right about the file, wrong as a corpus count.** The scan behind it used `\$[A-Za-z_]*\$`, which cannot match `$ddl_0$` because the character class has no digits — and it was only ever run against one file, so it was never a corpus scan at all. The Grok 4.6 review caught this.
 
-`supabase/migrations/20260825082910_popdam_ai_search_reconciliation_and_activation.sql` creates four durable objects inside `$ddl$ … $ddl$` bodies, passed to a `pg_temp` helper that executes them at apply time:
-
-| Line | Object |
-|---|---|
-| 2367 | `create table if not exists public.style_group_tags` |
-| 2390 | `create index style_group_tags_active_group_idx` |
-| 2392 | `create index asset_tags_active_asset_idx` |
-| 2428 | `create index dam_search_embedding_claim_idx` |
-
-Confirmed against the real lexer, not a regex — run this and read the output:
+**Version 4 — the current answer. Do not trust it because it is written here; re-run it.**
 
 ```bash
-python -c "import sys,io,glob; sys.path.insert(0,'scripts'); from production_migration_guard import strip_sql; f=glob.glob('supabase/migrations/20260825082910*')[0]; raw=io.open(f,encoding='utf-8',errors='replace').read(); s=strip_sql(raw); print([(n, n in raw, n in s) for n in ['style_group_tags','asset_tags_active_asset_idx','dam_search_embedding_claim_idx']])"
+python scripts/scan_apply_time_ddl.py
 ```
 
-Every name is present in the raw file and **absent** after `strip_sql`. **`public.style_group_tags` is invisible to every consumer of `strip_sql()`, and it is the #1645 object, created on 2026-08-25** — which matches the owner's "production has actually had that table since 25 August" exactly. §6.1's mechanism is confirmed; only the file list was ever wrong.
+**4 migrations, 14 relations** are created at apply time inside a dollar-quoted body and are invisible to `strip_sql()`:
+
+| Migration | Objects | Tag | Hard-blocked? |
+|---|---|---|---|
+| `20260707171500_masterdata_designer_resolution.sql` | `idx_style_tracker_item_bridge_creative_designer` | `$ddl$` inside `do $migration$` | no |
+| `20260708183000_masterdata_audit_log.sql` | `public.style_tracker_audit_log` + 3 indexes | `$ddl$` inside `do $migration$` | no |
+| `20260825031841_popdam_ai_search_forward_recovery.sql` | `public.style_group_tags` + 4 indexes | `$contract$` / `$forward$` | **yes** |
+| `20260825082910_popdam_ai_search_reconciliation_and_activation.sql` | `public.style_group_tags` + 3 indexes | `$ddl$` | no |
+
+Two things in that table matter more than the count:
+
+1. **`public.style_group_tags` — the #1645 object — has three creators in this repository**, and the only plain-text one (`20260825010603`, line 80) is permanently `HARD_BLOCKED` (`production_migration_guard.py:174`). Both dollar-quoted creators are invisible to the lexer. That is exactly the trap the owner described: the scanner sees only the banned file and blames it.
+2. **The #1645 case is not a `do $$` block.** It is a value passed to a helper that executes it:
+
+```sql
+select pg_temp.popdam_1479_apply_final_ddl($ddl$create table if not exists public.style_group_tags (...)$ddl$);
+```
+```sql
+create or replace function pg_temp.popdam_1479_apply_final_ddl(p_sql text)
+returns boolean language plpgsql as $apply$
+begin
+  ...
+  execute p_sql;
+```
+
+Any implementation that special-cases `DO` blocks will miss the one file this plan exists for. Earlier drafts of §6.1 and Step 1 described the `do $$` idiom and were wrong about it.
+
+**What is deliberately NOT in that table, and why.** Three migrations — `20260710135600`, `20260710135900`, `20260710135950` — contain `execute $ddl_0$ CREATE TABLE …` inside a `create procedure … as $guard$` body. Those create nothing when the migration applies; they create when someone calls the procedure. **Feeding them to `created_objects()` would put objects into `available` that production does not have — a false ACCEPT, the precise failure `created_objects` was written to prevent.** A naive "any DDL inside any dollar body" extractor swallows them. This is the single most important correctness constraint on Step 1.
 
 **What a future session must take from this:**
 
-1. **Never characterise a lexer's blind spot with a regex.** Three attempts, two wrong answers, and the two wrong answers came from the same shortcut. Use `strip_sql` itself, as the command above does.
-2. **A dollar quote is `$tag$`, not `$$`.** Any pattern written as `\$\$` is wrong by construction. Corpus fixtures 14 and 15 make that permanent.
-3. **A retraction is a finding and needs the same evidence bar as the claim it retracts.** Version 2 was published as a correction, with confidence, on the strength of a scan that could not have found anything.
+1. **Never characterise a lexer's blind spot with a regex.** Four attempts, three wrong answers, and every wrong answer came from the same shortcut. Run `scripts/scan_apply_time_ddl.py`, or extend it.
+2. **A dollar quote is `$tag$`, not `$$`, and a tag may contain digits.** `\$\$` and `\$[A-Za-z_]*\$` are both wrong by construction. Corpus fixtures 13-16 lock these shapes.
+3. **Apply-time and call-time are different questions.** Nesting context decides it, not the presence of DDL text.
+4. **A retraction is a finding and needs the same evidence bar as the claim it retracts.** Versions 2 and 3 were both published confidently on the strength of scans incapable of returning a correct answer.
 
 ## 4. Scope — in and out
 
@@ -187,11 +207,15 @@ Four failure shapes, ranked by cost. Each is evidenced.
 
 ### 6.1 Guards judge **text**, and treat "I did not see it" as "it does not exist" — the largest class
 
-`scripts/production_migration_guard.py:1474` `strip_sql()` **deletes dollar-quoted bodies on purpose**, with a sound reason recorded in its own docstring: names inside a function body resolve at CALL time, not apply time, so they are not batch-ordering dependencies. That reasoning is correct **for function bodies**. It is wrong for the `do $$ begin ... create table ... end $$;` idiom, where the DDL really does run at apply time.
+`scripts/production_migration_guard.py:1474` `strip_sql()` **deletes dollar-quoted bodies on purpose**, with a sound reason recorded in its own docstring: names inside a function body resolve at CALL time, not apply time, so they are not batch-ordering dependencies. That reasoning is correct **for routine bodies**. It is wrong wherever the DDL runs at apply time — a `do $tag$ … execute $ddl$ CREATE TABLE … $ddl$ … $tag$` block, or a DDL string passed as an argument to a helper that executes it. **The #1645 case is the second shape, not the first** (§3.1). Anything built here that special-cases `DO` will miss it.
 
 Downstream, `derive_targets()` (`production_catalog_verification.py:1365`) calls `strip_sql(raw)` and then only recognises objects it can see. Its docstring is honest about being conservative — "when it cannot tell, it stays silent" — but the *callers* do not distinguish **"this migration does not create X"** from **"I could not see whether this migration creates X."** That collapse is the root cause the owner hit on #1645: a scanner concluded a table was missing and attributed it to a hard-blocked migration, when production had held the table since 25 August.
 
-**The blast radius is one migration and four objects — `20260825082910`, including `public.style_group_tags`, the #1645 object (§3.1).** Small and enumerable, which makes this cheap to fix and cheap to verify. Two *separate* failures follow from the same blindness, and they must not be conflated:
+**The blast radius is 4 migrations and 14 relations, re-derivable with `python scripts/scan_apply_time_ddl.py` (§3.1).** Still small and enumerable, which makes this cheap to fix and cheap to verify — but it is not one file, and the number has now been wrong three times, so re-run the scanner rather than quoting this sentence.
+
+**Part of this is already fixed, and the fix is load-bearing.** `production_migration_guard.py:1832` defines `_created_by_applied_dynamic_ddl()`, called at `:1953` inside `preflight_batch`. When a refusal blames a missing object, it re-reads the **already-applied** migrations with dollar bodies kept; if one of them creates the object, the refusal is dropped. Its docstring names `20260825082910`, `public.style_group_tags` and the hard-blocked `20260825010603` explicitly. `scripts/test_production_migration_guard.py:1083` locks the behaviour. It is deliberately a **rescue, not a widening**: it is consulted only against the remote-applied prefix, so it may REJECT and never APPROVE. **Step 1 must not replace that silent `continue` with a refusal of any kind** — that reinstates #1645.
+
+What remains unfixed after that rescue: the **silent under-verification** in `derive_targets()`, the dynamic RLS/policy blind spot, and the fact that an UNAPPLIED migration's dollar-quoted creations are still invisible. Two *separate* failures follow from the same blindness, and they must not be conflated:
 
 - **False refusal** lives in `production_migration_guard.preflight_batch` (~line 1858) via `created_objects()` (~line 1635): an object it cannot derive makes a `hard_references` dependency look unsatisfied, and the guard refuses. This is the shape that blocks work.
 - **Silent under-verification** lives in `derive_targets()`: an object it cannot derive is simply never probed after apply. Quieter, and arguably worse.
@@ -317,36 +341,60 @@ The `grep` must return a hit in **both** files. The queue audit must **not** lis
 
 ### Step 1 — Close the blind spots that actually exist
 
-> **Scope corrected twice on 2026-08-27. Read §3.1 before starting.** This step's target set was first overstated (three files, all phantoms), then wrongly emptied ("zero"), and is now verified: **one migration, `20260825082910`, four objects, including the #1645 object.** Do not re-derive that set with a regex; §3.1 gives the command that uses the real lexer.
+> **Scope corrected three times on 2026-08-27. Read §3.1 before starting, and run `python scripts/scan_apply_time_ddl.py` before writing a line of code.** The target set was overstated (three files, all phantoms), then wrongly emptied ("zero"), then undercounted ("one file, four objects"). It is **4 migrations, 14 relations**. Do not re-derive it with a regex.
+
+> **Two things in the tree constrain this step before you touch it.**
+> 1. `_created_by_applied_dynamic_ddl()` (`production_migration_guard.py:1832`, called at `:1953`) **already rescues the #1645 case** for applied migrations, with a test at `scripts/test_production_migration_guard.py:1083`. Treat it as load-bearing. Anything that turns its `continue` into a refusal reinstates the outage this plan exists to prevent.
+> 2. `20260710135600`, `20260710135900` and `20260710135950` create tables inside a `create procedure … as $guard$` body. Those run at **call** time. Admitting them as creators is a **false ACCEPT** — strictly worse than the false refusal being fixed.
 
 **What to change**
 
-1. In `scripts/production_migration_guard.py`, beside `strip_sql()` (line 1474), add a new exported function — suggested name `apply_time_ddl_bodies(raw: str) -> list[str]` — returning the **contents of every dollar-quoted body that contains apply-time DDL** (`create table`, `create view`, `create materialized view`, `create index`, `alter table … add column`). It must use the same single left-to-right lexer discipline, and it **must handle tagged quotes** (`$ddl$`, `$backfill$`), not just `$$` — a `$$`-only implementation would miss the one file that matters and would repeat §3.1's mistake in code. Do **not** change `strip_sql`'s default behaviour (**L2**).
-2. In `scripts/production_catalog_verification.py`, `derive_targets()` (line 1365): after the existing pass over `split_statements(strip_sql(raw))`, run the same recognisers over the statements returned by `apply_time_ddl_bodies(raw)`. Objects found this way go into the **same** `tables` / `views` / `indexes` sets.
-3. **Dynamic RLS and policies.** `derive_targets()` recovers dynamic **grants** via `parse_dynamic_acl` (~line 1275) but not dynamic `enable row level security` or `create policy` (§6.1). Extend that existing path; do not write a new lexer.
-4. **The collapse site in `preflight_batch`.** `preflight_batch` (~line 1858) treats an object absent from `created_objects()` (~line 1635) as an unsatisfied `hard_references` dependency. Make that path distinguish **absent** from **not-derivable**, and make its refusal message say which. This is the site that produces false refusals; `derive_targets` produces silent under-verification instead.
-5. **Introduce the third state.** Today a scanner has "found" and "not found". Add `unresolved` — a name the lexer saw in a position it could not classify. Every consumer that today concludes *"this migration does not create X"* must be able to say instead *"I could not tell."* At minimum: `derive_targets()` returns an `unresolved` collection alongside `notes`, and it is surfaced in the Markdown report written by the module.
-6. In `scripts/check-pr-object-collisions.mjs`, do **not** rewrite the Node lexer, and do **not** assert that it agrees with the Python lexer in general — **they deliberately disagree.** `check-pr-object-collisions.mjs` (~lines 655–683) *keeps* do-block bodies for collision policy while `strip_sql` *strips* them for dependency policy, each with a recorded reason. **Scope the agreement assertion to the Step 4 corpus fixtures only**; a blanket agreement test fails structurally on day one. (Unifying the two lexers is explicitly deferred — §7.3.)
+1. In `scripts/production_migration_guard.py`, beside `strip_sql()` (line 1474), add a new exported function — suggested name `apply_time_ddl_statements(raw: str) -> list[str]` — returning **statements**, not bodies, so callers do not have to re-split (`split_statements` is documented safe only after `strip_sql`, `:911`). Do **not** change `strip_sql`'s default behaviour (**L2**).
 
-**How it should behave when done:** `derive_targets()` on `20260825082910` returns `public.style_group_tags` and its three indexes; a table whose RLS is enabled dynamically inside a do-block is verified after apply like any other; a `preflight_batch` refusal states whether the dependency is genuinely absent or merely not derivable. For every other migration, the derived list is **unchanged** — this must not become a source of new false dependencies (**L2**).
+   **The operational definition of "apply-time", which is the whole difficulty.** Walk dollar-quoted bodies left to right at every nesting depth, tracking one boolean per level. A body is **apply-time** when its own enclosing context is not `create [or replace] function|procedure`, **and** every body enclosing it was also apply-time. Concretely:
+
+   | Shape | Runs when | Admit? |
+   |---|---|---|
+   | `select helper($ddl$CREATE TABLE…$ddl$)` | apply | **yes** — the #1645 case |
+   | `do $migration$ … execute $ddl$ CREATE TABLE… $ddl$ … $migration$` | apply | **yes** — `20260708183000` |
+   | `create procedure p() as $guard$ execute $ddl_0$ CREATE TABLE… $ddl_0$ $guard$` | when `p()` is called | **no** — admitting it is a false ACCEPT |
+
+   Tags may contain digits (`$ddl_0$`). Blank `--`/`/* */` comments and single-quoted literals inside each body before matching, or `and indexdef = 'CREATE INDEX …'` and the prose `CREATE TABLE just applied` come back as objects (§3.1, version 1). `scripts/scan_apply_time_ddl.py` already implements exactly this walk and is the reference; the production function should share its logic rather than reimplement it.
+
+2. In `scripts/production_catalog_verification.py`, `derive_targets()` (line 1365): after the existing pass over `split_statements(strip_sql(raw))`, run the same recognisers over `apply_time_ddl_statements(raw)`. Objects found this way go into the **same** `tables` / `views` / `indexes` sets. This is the **silent under-verification** fix and is the safe half of the step — it makes post-apply verification probe more, never fewer, objects.
+
+3. **Dynamic RLS and policies.** `derive_targets()` recovers dynamic **grants** via `parse_dynamic_acl` (~line 1275) but not dynamic `enable row level security` or `create policy` (§6.1). Note that `parse_dynamic_acl` walks `DYNAMIC_DO_BODY_RE` (`:472`) and therefore sees **only `do $tag$` blocks** — it will not see `20260825082910`'s policies, which are helper arguments, nor its single-quoted `'alter table public.style_group_tags enable row level security'` (line 2395), which `strip_sql` blanks as a literal. Extend that path to consume `apply_time_ddl_statements` too; do not write a third lexer.
+
+4. **The collapse site in `preflight_batch`.** `preflight_batch` (~line 1858) treats an object absent from `created_objects()` (~line 1635) as an unsatisfied `hard_references` dependency. Make the refusal **message** distinguish **absent** from **not-derivable**. **Constraint, not a nicety: this changes wording only.** Where `_created_by_applied_dynamic_ddl` fires, the code must still `continue` silently. Adding a "not-derivable" refusal on that path is the #1645 outage rebuilt under a new name, and the test at `test_production_migration_guard.py:1083` must stay green unmodified.
+
+5. **Introduce the third state.** Today a scanner has "found" and "not found". Add `unresolved` — a name the lexer saw in a position it could not classify. **It is a reporting state, not a refusal state.** Concretely: a dollar-quoted body that contains DDL text but whose apply-time/call-time classification is ambiguous (for example DDL assembled by string concatenation, or `execute` of a variable whose value is not a literal). `derive_targets()` returns an `unresolved` collection alongside `notes`; it is printed in the module's Markdown report; **no guard may refuse on it.** The 14 objects in §3.1 are *not* `unresolved` — they are classifiable and must come back **found**.
+
+6. In `scripts/check-pr-object-collisions.mjs`, do **not** rewrite the Node lexer, and do **not** assert that it agrees with the Python lexer in general — **they deliberately disagree.** It *keeps* do-block bodies for collision policy while `strip_sql` *strips* them for dependency policy, each with a recorded reason. Note it uses the same digit-less tag class (`:689`) and so is also blind to `$ddl_0$`; recording that is in scope, fixing it is not. **Scope the agreement assertion to the Step 4 corpus fixtures only.** (Unifying the two lexers is deferred — §7.3.)
+
+**How it should behave when done:** `derive_targets()` on each of the four §3.1 migrations returns the objects listed there; a table whose RLS is enabled dynamically is verified after apply like any other; a `preflight_batch` refusal states whether the dependency is genuinely absent or merely not derivable, while the applied-dynamic rescue still silences it entirely. For the **three `reconcile_*` procedure files and every other migration, the derived list is unchanged** — this must not become a source of new false dependencies or false availability (**L2**).
 
 **Verification gate**
+```bash
+python scripts/scan_apply_time_ddl.py
+```
 ```bash
 python -m pytest scripts/test_production_migration_guard.py scripts/test_production_business_risk_gate.py -q
 ```
 ```bash
 node --test scripts/*.test.mjs
 ```
-Both suites must be **green**, and the full suite count must not drop below the ~677 tests passing on `main`. Plus, all four required:
+Both suites **green**, the full suite count not below the ~677 passing on `main`, and all six of these required:
 
 - `derive_targets()` on `20260825082910` yields `public.style_group_tags`, `style_group_tags_active_group_idx`, `asset_tags_active_asset_idx`, `dam_search_embedding_claim_idx`;
-- `apply_time_ddl_bodies()` recovers a `$ddl$`-tagged body **and** a `$$` body — a `$$`-only implementation must fail this test;
-- the two migrations in sub-step 3 yield their dynamically-secured tables;
+- `derive_targets()` on `20260708183000` yields `public.style_tracker_audit_log` **and its three indexes from a single multi-statement `$ddl$` body** — this is the test that catches a body-vs-statement mix-up, because `20260825082910` puts one statement per body and will pass either way;
+- `apply_time_ddl_statements()` recovers a `$ddl$` body, a `$$` body **and** a `$ddl_0$` body — any implementation whose tag pattern lacks digits must fail this test;
+- `apply_time_ddl_statements()` returns **nothing** for `20260710135600`, `20260710135900` and `20260710135950` — the call-time exclusion;
+- `test_applied_dynamic_ddl_creation_contradicts_the_refusal` (`test_production_migration_guard.py:1083`) still passes **unmodified**;
 - `strip_sql()`'s output is byte-identical to before across all 546 migrations (snapshot).
 
-**Do not re-derive the target set with a regex.** §3.1 explains what that cost twice; use the lexer command it gives.
+**Do not re-derive the target set with a regex.** §3.1 explains what that cost three times.
 
-**Depends on:** Step 0. **Judgment call:** which DDL verbs count as apply-time. Criterion: *does this statement change the catalog at the moment the migration runs?* `create table` yes; a `select` inside a function body no.
+**Depends on:** Step 0. **Judgment call:** which DDL verbs count. Criterion: *does this statement change the catalog at the moment the migration runs?* The nesting rule in sub-step 1 decides *when*; this decides *what*. `create table`/`view`/`materialized view`/`index` and `alter table … add column` yes; a `select` or an `insert` no.
 
 ---
 
@@ -399,7 +447,7 @@ Plus three hand checks, recorded in `docs/verification/catalog-truth-<date>.md`:
 
 Find every place that concludes an object is absent and turn that conclusion into a **three-source statement**. The known sites:
 
-- `scripts/production_catalog_verification.py` — the `to_regclass is NULL` hard-fail (~line 1947, message at ~line 2470: *"to_regclass is NULL — the apply reported…"*).
+- `scripts/production_catalog_verification.py` — the `to_regclass is NULL` hard-fail at **~line 2473** (*"to_regclass is NULL — the apply reported success and the object is not there"*). **An earlier draft of this plan said line 1947; that is the privilege `RECORD` path and is the wrong function.** Re-anchor by searching for the message text, not the number.
 - `scripts/check-migration-ledger-drift.mjs` — both drift directions.
 - Any guard that names a hard-blocked migration as the cause of a missing object (this is the #1645 site; if the implementer cannot locate it from the failure text, reproduce it by re-running the failing check on issue #1645's branch and capture the exact job log first).
 
@@ -460,10 +508,11 @@ Backfill these, all confirmed from history:
 | 13 | A `$$` inside a `--` comment **plus** a real `do $$` later in the file, with top-level DDL between them | **This plan's own §3 script, version 1** — phantom pairing produced three false positives | §3.1, 2026-08-27 |
 | 14 | A **tagged** dollar-quote (`do $backfill$ … $backfill$`) containing only DML | any bare `\$\$` matcher — must be neither missed nor mispaired | `20260728174500`, line 136 |
 | 15 | A **tagged** `$ddl$ … $ddl$` body containing `create table`, passed to a `pg_temp` executor | **this plan's own §3 script, version 2** — a bare `\$\$` scan cannot see it, which is how "the count is zero" was published | `20260825082910`, §3.1 |
+| 16 | A `create procedure … as $guard$ execute $ddl_0$ CREATE TABLE … $ddl_0$ $guard$` body — **call-time DDL that must NOT be reported as a creator**, with a digit in the tag | **this plan's own §3 script, version 3** — a `\$[A-Za-z_]*\$` class cannot match `$ddl_0$`; and a naive extractor that did match it would admit a false ACCEPT | `20260710135600`, §3.1 |
 
-Fixtures 13 and 15 are this plan's own two wrong answers. Keep them labelled as such: they are the cheapest available proof that a regex is not an acceptable instrument for reasoning about a lexer.
+Fixtures 13, 15 and 16 are this plan's own three wrong answers. Keep them labelled as such: they are the cheapest available proof that a regex is not an acceptable instrument for reasoning about a lexer. **Fixture 16 is the only one that guards the false-ACCEPT direction** — it must assert that the object is *absent* from the derived set, not present.
 
-**How it should behave when done:** adding a sixteenth fixture is the *cheapest possible* response to the next false alarm — one file, one row in the ledger, done. A future change that reintroduces any of the twelve fails CI immediately, with the incident named in the failure output.
+**How it should behave when done:** adding a seventeenth fixture is the *cheapest possible* response to the next false alarm — one file, one row in the ledger, done. A future change that reintroduces any of the twelve fails CI immediately, with the incident named in the failure output.
 
 **Verification gate**
 ```bash
@@ -639,9 +688,9 @@ The command above must produce `docs/verification/issue-lead-time-<date>.md`, an
 
 | File | Must assert |
 |---|---|
-| `scripts/guard-false-alarm-corpus.test.mjs` | Each of the 15 §4 fixtures passes every Node text guard **without firing**. Fixture 11 (`::regclass`) asserts the literal **is** still seen — a negative-negative. |
-| `scripts/test_guard_false_alarm_corpus.py` | Same 15 fixtures against `production_business_risk_gate.py` and `production_migration_guard.py`. |
-| `scripts/test_production_migration_guard.py` (extend) | `apply_time_ddl_bodies()` recovers a `$ddl$`-tagged body as well as a `$$` one — a `$$`-only implementation must fail this test; `derive_targets()` on `20260825082910` yields `public.style_group_tags` and its three indexes; dynamically-secured tables in `20260621151155` and `20260701154948` are recovered; `preflight_batch` reports *not-derivable* distinctly from *absent*; `strip_sql()`'s existing behaviour is **byte-identical** to before for all 546 migrations (snapshot test). |
+| `scripts/guard-false-alarm-corpus.test.mjs` | Each of the 16 §4 fixtures passes every Node text guard **without firing**. Fixture 11 (`::regclass`) asserts the literal **is** still seen — a negative-negative. Fixture 16 asserts a call-time creation is **not** admitted as a creator. |
+| `scripts/test_guard_false_alarm_corpus.py` | Same 16 fixtures against `production_business_risk_gate.py` and `production_migration_guard.py`. |
+| `scripts/test_production_migration_guard.py` (extend) | `apply_time_ddl_statements()` recovers a `$ddl$`, a `$$` **and** a `$ddl_0$` body — a `$$`-only or digit-less implementation must fail; it returns **nothing** for the three `reconcile_*` procedure files (call-time exclusion — the false-ACCEPT guard); `derive_targets()` on `20260825082910` **and** on `20260708183000` yields every object §3.1 lists for them, the second proving multi-statement bodies are split; dynamically-secured tables in `20260621151155` and `20260701154948` are recovered; `preflight_batch` reports *not-derivable* distinctly from *absent* **while `test_applied_dynamic_ddl_creation_contradicts_the_refusal` (`:1083`) still passes unmodified**; `strip_sql()`'s existing behaviour is **byte-identical** to before for all 546 migrations (snapshot test). |
 | `scripts/catalog-truth.test.mjs` | An object with a hard-blocked original **and** an applied reissue lists **both** creating files. Present object → EXISTS from all three sources. Absent object → clean ABSENT. **Unreachable database → exit 2 with an explicit error, never "absent".** Hard-blocked migration whose object exists → reported as present *and* blocked. |
 | `scripts/check-blocker-ledger.test.mjs` | Rejects a missing required field, a dangling `corpus_fixture` path, and an unresolvable `fixed_by` SHA. |
 | `scripts/triage-gate.test.mjs` | Given a known guard name, prints the guard's purpose, the matching ledger entries, and the `LIKELY FALSE ALARM` verdict. Given an unknown one, prints `NO KNOWN MATCH` and exits 0. |
@@ -720,11 +769,11 @@ Named explicitly; do not assume they have been read elsewhere.
 - [ ] Tracking issue open, labelled `db-work`, carrying a `db-work-scope` block, visible to `--queue-audit`.
 - [ ] `AGENTS.md` lists this plan under "Active contracts and implementation plans", and carries new §5.2-B and §5.2-C.
 - [ ] `HANDOFF.d/2026-08-27T2000Z-edge-dev-claude-plan-throughput-guard-truth.md` exists and links to this plan; this plan links back. Root `HANDOFF.md` untouched.
-- [ ] `apply_time_ddl_bodies()` exists and handles **tagged** quotes; `derive_targets()` on `20260825082910` yields `public.style_group_tags` and its three indexes; dynamic RLS/policies are recovered; `preflight_batch` reports *not-derivable* distinctly from *absent*; `strip_sql()`'s output for all 546 migrations is byte-identical to before.
+- [ ] `apply_time_ddl_statements()` exists, handles **tagged and digit** quotes, and excludes routine bodies; `derive_targets()` recovers every object listed in §3.1 for all four migrations; the three `reconcile_*` files gain **no** objects; dynamic RLS/policies are recovered; `preflight_batch` reports *not-derivable* distinctly from *absent* and the existing #1645 rescue test passes unmodified; `strip_sql()`'s output for all 546 migrations is byte-identical to before.
 - [ ] `scripts/catalog-truth.mjs` exists, is tested, and **exits 2 rather than reporting "absent"** when it cannot read a database.
 - [ ] Every "object missing" failure message in a **credentialed** guard names the three sources, with exit codes provably unchanged.
-- [ ] 15 corpus fixtures exist (including the three from §3.1); the corpus is proven to bite (a deliberately reverted narrowing makes it fail); it runs in `tools-offline-tests.yml`.
-- [ ] `config/blocker-ledger.json` backfilled (≥19 entries: 15 false alarms + ≥4 reviewer-harness); `scripts/check-blocker-ledger.mjs` green and running in `tools-offline-tests.yml`; the file header states which figures are estimates. No generated Markdown.
+- [ ] 16 corpus fixtures exist (including the four from §3.1); the corpus is proven to bite (a deliberately reverted narrowing makes it fail); it runs in `tools-offline-tests.yml`.
+- [ ] `config/blocker-ledger.json` backfilled (≥20 entries: 16 false alarms + ≥4 reviewer-harness); `scripts/check-blocker-ledger.mjs` green and running in `tools-offline-tests.yml`; the file header states which figures are estimates. No generated Markdown.
 - [ ] `scripts/triage-gate.mjs` exists and returns the right verdict for `cancelled-work-guard`.
 - [ ] Reviewer rules written into `AGENTS.md` §5.
 - [ ] `docs/verification/issue-lead-time-<date>.md` holds the 2026-08-27 baseline.
@@ -743,14 +792,14 @@ Named explicitly; do not assume they have been read elsewhere.
 | Guard messages get longer and noisier | Medium | Acceptable trade. Keep the three-source block to five lines. |
 | A step drifts into a database change | Low | §4 and §11 forbid it; the tracking issue is scoped as repository maintenance. Stop and open an issue. |
 | Work collides with another session in `shared-db` | Medium | Worktree from `origin/main`; the coordination machinery from `plan_multi_agent_database_coordination_hardening.md` is already live; stage only your own hunks. |
-| A future session characterises the lexer's blind spot with a regex and publishes a wrong file list — in either direction | **High — it has already happened twice, in this document** | §3.1 records both wrong answers and gives a lexer-based command to use instead; corpus fixtures 13, 14 and 15 make the phantom-pairing and tagged-quote shapes permanent test failures. |
+| A future session characterises the lexer's blind spot with a regex and publishes a wrong file list — in either direction | **High — it has already happened three times, in this document** | §3.1 records all three wrong answers and ships `scripts/scan_apply_time_ddl.py` to use instead; corpus fixtures 13-16 make the phantom-pairing, tagged-quote, digit-tag and call-time shapes permanent test failures. |
 | `hours_lost` in the ledger is guessed and later quoted as fact | Medium | The file header must say the figures are estimates for **ranking only**. Never cite them as measurement. |
 
 ### Open questions
 
-1. **Which job produced the #1645 failure text?** The **mechanism** is now evidenced, not assumed: `public.style_group_tags` is created inside a `$ddl$` body in `20260825082910` and is invisible after `strip_sql` (§3.1, with a command that proves it). What is still unnamed is the specific job whose output the owner quoted, because that session is not in the 2026-08-27 transcript archive.
+1. **Which job produced the #1645 failure text?** The **mechanism** is now evidenced, not assumed, and the evidence is in the repository's own code: `production_migration_guard.py:1932-1940` records that `20260825082910` creates `public.style_group_tags` inside a `$ddl$` body, that the object therefore never enters `available`, and that the scanner then blamed **`20260825010603`** — permanently `HARD_BLOCKED` at `:174`, and the only file that creates the table in plain text. `§3.1` confirms it independently and adds a third creator, the also-hard-blocked `20260825031841`. What is still unnamed is only the specific job whose output the owner quoted, because that session is not in the 2026-08-27 transcript archive.
 
-   A second mechanism may also have contributed and should be ruled in or out at the same time: **the hard-block bookkeeping trap**. The `HARD_BLOCKED` pair `20260814223552` / `20260825094455` (`production_migration_guard.py` ~lines 96–101) has replacements recorded as applied on **2026-08-25** in `docs/verification/unapplied-20260814-migrations-status-20260825.md` (CI run 32851388854), which also matches "banned migration" and "since 25 August". Step 2 fixes that trap regardless of the answer.
+   **An earlier draft of this plan named `20260814223552` / `20260825094455` here. That is wrong** — that `HARD_BLOCKED` pair is the Paramount `pmt_collection` bookkeeping trap (`docs/verification/unapplied-20260814-migrations-status-20260825.md:27-32`), a real trap for a **different** object, unrelated to #1645. Step 2 fixes it regardless; do not use it to explain #1645.
 
    **Decide by evidence before starting Step 3:** re-run the failing check on #1645's branch, capture the job log, and record the exact script and line in ledger entry `BL-0001`. If it is a third mechanism, **update this plan rather than implementing around it.**
 2. **Is one reviewer genuinely enough for structure-only changes?** The transcripts show reviewers catching real errors, but also show the second and third reviewer adding hours and, in at least one case, being wrong. **Now largely settled** by the Step 8.1 amendment: migrations keep two reviewers, scripts and docs get one. What remains open is only whether *scripts* changes are safe at one. **Criterion:** at the Step 9 re-measurement, if any scripts-only change reached `main` with a defect a second reviewer would have caught, revert to two. **Owner: whoever runs Step 9** — the original wording left this check unassigned, which is how it would quietly never have happened.
@@ -762,7 +811,7 @@ Named explicitly; do not assume they have been read elsewhere.
 ## Self-audit (recorded per the `implementation-plan-writer` standard)
 
 **1. Could a brand-new AI session with no project knowledge and no context from this conversation execute this plan to perfection, without asking anything?**
-Yes. §2 explains what the repository is, who uses it, where it runs, and the branch model, for someone who has never seen it. §5 gives the current state of every file the plan touches with function-name anchors and current line numbers, plus an explicit re-anchoring command in §11 because those numbers will move. §9 gives every step named target files, the intended behaviour, dependencies, and a runnable verification gate. §12 names the CLIs, the identity check, the worktree command, and how to run the tests. The one genuine unknown — the precise scanner behind the owner's #1645 quote — is stated as open question 1 with a decision procedure and an instruction to update the plan rather than implement around it, instead of being papered over.
+**Not "to perfection" — two independent reviews falsified that claim, and saying otherwise here is the same over-confidence the plan warns about elsewhere.** What is true is that a fresh session has everything it needs to start correctly and to catch this plan being wrong. §2 explains what the repository is, who uses it, where it runs, and the branch model, for someone who has never seen it. §5 gives the current state of every file the plan touches with function-name anchors and current line numbers, plus an explicit re-anchoring command in §11 because those numbers will move. §9 gives every step named target files, the intended behaviour, dependencies, and a runnable verification gate. §12 names the CLIs, the identity check, the worktree command, and how to run the tests. The one genuine unknown — the precise scanner behind the owner's #1645 quote — is stated as open question 1 with a decision procedure and an instruction to update the plan rather than implement around it, instead of being papered over.
 
 **2. Does the plan carry every piece of background, nuance and reasoning currently held — including what was ruled out and why?**
 Yes. §6 records all four failure shapes with verbatim transcript quotes and in-repo code evidence. §7 records nine rejected approaches, including the two most tempting ones (flip `keep_dollar`, loosen the noisy guards) with the specific reason each is wrong — flipping the default would create false dependencies across 546 migrations, and a worked-around guard protects nothing, which is the repository's own recorded conclusion. §8 separates eight locked decisions from four open ones. §7.5 records why the live catalog must never be the sole authority, citing issue #892 by name.
@@ -774,10 +823,13 @@ Yes. §1 states the goal in business terms first, gives a measured baseline (med
 
 The original self-audit passed while the plan's one hard factual claim was false. It graded *structure* and never re-derived *fact*. An independent GLM-5.3 review then refuted the three cited migrations — correctly — and Steps 2, 3, 4, 5, 6, 8 and Open Question 1 carry good amendments from it. But the replacement claim written in response, "the count is zero", was produced by the same kind of bare-`$$` regex and was **also wrong**; a peer session caught it the same day by scanning for tagged dollar quotes, and it never reached `main`. The true answer is one migration, `20260825082910`, four objects, including the #1645 object (§3.1).
 
-Three lessons, all now written into the plan rather than only into its history:
+A second independent review (Grok 4.6) then found that the *replacement* was still incomplete — the corpus was never scanned, only one file was checked, the tag pattern could not match a digit, the plan blamed the wrong hard-blocked migration for #1645, Step 3 pointed at the wrong function, and Step 1 as written could have disarmed an existing rescue and rebuilt the outage. Every one of those was re-verified by hand before being accepted. The plan now ships `scripts/scan_apply_time_ddl.py` so the claim is a command rather than a sentence.
+
+Four lessons, all now written into the plan rather than only into its history:
 
 1. **A self-audit that checks whether every section exists is not a check that any section is true.** Any future audit of this document must re-run at least one factual claim against the repository.
-2. **Never characterise a lexer with a regex.** §3.1 gives the command that uses the real lexer; fixtures 13, 14 and 15 lock the shapes.
-3. **A retraction needs the same evidence bar as the claim it retracts.** Version 2 of §3.1 was published confidently on the strength of a scan structurally incapable of finding anything.
+2. **Never characterise a lexer with a regex.** §3.1 ships `scripts/scan_apply_time_ddl.py`; fixtures 13-16 lock the shapes.
+3. **A retraction needs the same evidence bar as the claim it retracts.** Versions 2 and 3 of §3.1 were both published confidently on the strength of scans structurally incapable of returning a correct answer.
+4. **Before changing a guard, read what the guard already does.** The #1645 rescue at `production_migration_guard.py:1832` had been in the tree the whole time, with a test naming the exact migration and object. Two drafts of Step 1 were written without it, and the second would have reinstated the outage.
 
 **Checklist grade:** all 13 sections present; goal in business English with the override; rejected approaches recorded; every step has files and a verification gate; locked vs open labelled; explicit out-of-scope list; tests named by behaviour; identifiers, paths and SHAs defined; secrets by location only; definition of done includes commit/push/CI/merge verification; plan ↔ handoff cross-links present. **Pass.**
