@@ -73,8 +73,16 @@ year 2019-2026 plus the two most recent. Raw payloads are customer order data an
 
 **ColdLion:** *"Changed the doc."*
 
-**Verified — partially done.** `prodHistory.stageCode` now carries a description:
-`"Production stage code. Example: ISS, INTRAN, REC"`.
+> **✅ UPDATED 2026-08-27 — ColdLion finished this one.** Re-checked the live spec: `stageCode` now
+> reads `"Production stage code"` and carries a real `enum` of `["ISS","INTRAN","REC"]`. The
+> "Example" wording is gone. **The stageCode half of this question is closed.** What remains is that
+> it is the only enum in the entire spec, and no response field carries a description in any of the
+> seven definitions — the reply narrows the ask to `mgTypeCode`, `divisionCode`, `active` and the
+> undocumented response fields. See
+> [`coldlion-19k-row-resample-20260827.md`](coldlion-19k-row-resample-20260827.md).
+
+**Verified 2026-08-26 — partially done at the time.** `prodHistory.stageCode` then carried the
+description `"Production stage code. Example: ISS, INTRAN, REC"`.
 
 Two gaps remain, and they matter for exactly the reason we asked:
 
@@ -102,6 +110,11 @@ This is an improvement, not a close. It belongs in our reply (§5).
 | `stageCode` (string) | `ProdHistory` | `ISS` on 20 / 20 rows of a `stageCode=ISS` request |
 
 **Loader consequence — both workarounds can retire:**
+
+> **⚠️ SUPERSEDED 2026-08-27.** `salesOrderLineNo` is **not** a safe primary key. On 19,008 rows
+> it is 0 on 103 of them (51 in 2026), and `(salesOrderNo, salesOrderLineNo, subItemNo)` collides
+> on 395 rows (2.08%), with 138 rows byte-identical across all 59 fields. No combination of the
+> returned fields is unique. Keep the derived key until ColdLion tells us what makes a row unique.
 
 - The derived sales-order line key `(salesOrderNo, itemNo, labelCode)` is replaced by the
   authoritative `(salesOrderNo, salesOrderLineNo)`, with `subItemNo` still identifying the
@@ -151,9 +164,11 @@ register entry 2.11. What we owe them, from the evidence above and in
 3. **`stageCode` is documented as an example, not an allowed-value list** — ask for the complete
    set, and for the same treatment on every other fixed-choice field and parameter (no `enum`
    appears anywhere in the spec today).
-4. **The 7-day-cap refusal is malformed** — HTTP 400 on the wire with `"status": 500` /
-   `"Internal Server Error"` in the body. Already reported as an observation; worth repeating
-   here since it invites clients to retry a permanent input error forever.
+4. ❌ **RETRACTED 2026-08-27 — sent in error.** This claimed the 7-day-cap refusal is
+   malformed (HTTP 400 with `"status": 500` in the body). **False:** re-tested live on both
+   endpoints with 8-day and 31-day ranges, the response is a clean 400 in both the wire status
+   and the body, with a clear message naming the rule. **Correct this with ColdLion.** See
+   [`coldlion-19k-row-resample-20260827.md`](coldlion-19k-row-resample-20260827.md).
 5. **Negative quantities and costs** — `linePickQty`, `unshippedQty` and `subQty` reach -564.
    Confirm these are genuine reversals rather than a report artefact, since we will be loading
    them as-is. **None appeared in the 291-row re-measure** — they are in the production feed, not
