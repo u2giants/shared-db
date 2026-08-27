@@ -37,6 +37,8 @@ h1 { margin: 18px 0 12px; font-size: clamp(36px, 6vw, 62px); line-height: 1; let
 .scraped-property-group { margin: 24px 0 32px; }
 .scraped-property-group h2 { margin-bottom: 4px; }
 .scraped-property-group .grid-wrap { height: 280px; min-height: 280px; }
+.review-text-cell { height: 100%; padding: 7px 8px; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; cursor: help; }
+.review-text-cell:focus-visible { outline: 2px solid #2955c8; outline-offset: -2px; border-radius: 3px; }
 .filter-header { position: relative; height: 48px; padding: 2px 4px; display: flex; flex-direction: column; gap: 2px; overflow: visible; }
 .filter-header-title { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
 .filter-header-title > span { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

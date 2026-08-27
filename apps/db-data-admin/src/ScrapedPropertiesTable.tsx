@@ -1,22 +1,13 @@
-import { RevoGrid, Template, type ColumnRegular } from '@revolist/react-datagrid'
+import { RevoGrid, Template } from '@revolist/react-datagrid'
 import { RefreshCw, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FilterHeader } from './FilterHeader'
 import { groupScrapedProperties, loadScrapedProperties, type ApiClient, type ScrapedPropertyRow } from './lib/data-admin'
 import { getDistinctColumnValues, rowMatchesFilters } from './lib/grid-filters'
+import { explainScrapedProperty } from './scraped-property-explanations'
+import { scrapedPropertiesColumns } from './scraped-properties-columns'
 
 type Props = { client: ApiClient }
-
-const columns: ColumnRegular[] = [
-  { prop: 'display_label', name: 'Property', size: 260, sortable: true },
-  { prop: 'source_system', name: 'Source system', size: 190, sortable: true },
-  { prop: 'source_property_id', name: 'Source ID', size: 180, sortable: true },
-  { prop: 'source_status', name: 'Source status', size: 130, sortable: true },
-  { prop: 'provenance_kind', name: 'Provenance', size: 220, sortable: true },
-  { prop: 'source_table', name: 'Source table', size: 210, sortable: true },
-  { prop: 'latest_seen_at', name: 'Latest seen', size: 180, sortable: true },
-  { prop: 'capture_marker', name: 'Capture marker', size: 180, sortable: true },
-]
 
 export function ScrapedPropertiesTable({ client }: Props) {
   const [rows, setRows] = useState<ScrapedPropertyRow[]>([])
@@ -29,7 +20,7 @@ export function ScrapedPropertiesTable({ client }: Props) {
 
   const load = useCallback(async () => {
     setLoading(true); setError(null); setDenied(false)
-    try { setRows(await loadScrapedProperties(client)) }
+    try { setRows((await loadScrapedProperties(client)).map(row => ({ ...row, ...explainScrapedProperty(row) }))) }
     catch (cause) {
       const message = cause instanceof Error ? cause.message : (cause && typeof cause === 'object' && 'message' in cause ? String(cause.message) : '')
       if (/permission|licensing|access/i.test(message)) setDenied(true)
@@ -42,12 +33,12 @@ export function ScrapedPropertiesTable({ client }: Props) {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load() }, [load])
 
-  const distinctValues = useMemo(() => Object.fromEntries(columns.map(column => {
+  const distinctValues = useMemo(() => Object.fromEntries(scrapedPropertiesColumns.map(column => {
     const prop = String(column.prop)
     return [prop, getDistinctColumnValues(rows, prop)]
   })), [rows])
 
-  const gridColumns = useMemo(() => columns.map(column => ({
+  const gridColumns = useMemo(() => scrapedPropertiesColumns.map(column => ({
     ...column,
     readonly: true,
     columnTemplate: Template(FilterHeader, {
@@ -64,7 +55,7 @@ export function ScrapedPropertiesTable({ client }: Props) {
   const visibleRows = useMemo(() => {
     const term = search.trim().toLowerCase()
     return rows.filter(row => rowMatchesFilters(row, filters, setFilterState)).filter(row =>
-      !term || `${row.display_label} ${row.presentation_licensor_name} ${row.source_system} ${row.source_property_id} ${row.provenance_kind}`.toLowerCase().includes(term),
+      !term || `${row.display_label} ${row.presentation_licensor_name} ${row.source_system} ${row.source_property_id} ${row.provenance_kind} ${row.review_reason} ${row.evidence_basis} ${row.review_guidance}`.toLowerCase().includes(term),
     )
   }, [filters, rows, search, setFilterState])
   const groups = useMemo(() => groupScrapedProperties(visibleRows), [visibleRows])
@@ -82,7 +73,15 @@ export function ScrapedPropertiesTable({ client }: Props) {
       {groups.map(group => <section key={group.key} className="scraped-property-group" aria-labelledby={`scraped-${group.key}`}>
         <h2 id={`scraped-${group.key}`}>{group.name}</h2>
         <p className="muted">{group.rows.length} {group.rows.length === 1 ? 'property' : 'properties'}</p>
-        <div className="grid-wrap"><RevoGrid theme="material" readonly accessible resize columns={gridColumns} source={group.rows} rowHeaders /></div>
+        {group.rows.some(row => /conflict|unresolved|ambiguous_crossover/i.test(row.source_status ?? '')) && <div role="note" aria-label={`${group.name} review details`}>
+          {[...new Map(group.rows.filter(row => /conflict|unresolved|ambiguous_crossover/i.test(row.source_status ?? '')).map(row => [
+            `${row.review_reason}|${row.evidence_basis}|${row.review_guidance}`,
+            row,
+          ])).values()].map(row => <p key={`${row.review_reason}|${row.evidence_basis}|${row.review_guidance}`} className="muted" title={`Authority review detail: ${row.review_reason} Evidence basis: ${row.evidence_basis}. Decision guidance: ${row.review_guidance}`}>
+            <strong>{row.review_reason}</strong> Evidence basis: {row.evidence_basis}. {row.review_guidance}
+          </p>)}
+        </div>}
+        <div className="grid-wrap"><RevoGrid theme="material" readonly accessible resize rowSize={58} columns={gridColumns} source={group.rows} rowHeaders /></div>
       </section>)}
       {loading && <div className="grid-loading">Loading…</div>}
     </div>

@@ -228,6 +228,10 @@ export type ScrapedPropertyRow = AdminRow & {
   provenance_kind: string
   latest_seen_at: string | null
   capture_marker: string | null
+  source_purpose: string
+  review_reason: string
+  evidence_basis: string
+  review_guidance: string
 }
 
 export async function loadScrapedProperties(client: ApiClient) {
