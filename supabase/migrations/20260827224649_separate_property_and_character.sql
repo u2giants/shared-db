@@ -361,7 +361,7 @@ begin
       'properties', n.properties, 'updated_at', null
     ) order by n.rn) filter (where n.rn <= v_page_size), '[]'::jsonb),
     count(*), max(n.sort_value) filter (where n.rn = v_page_size),
-    max(n.id) filter (where n.rn = v_page_size)
+    (array_agg(n.id) filter (where n.rn = v_page_size))[1]
   into v_licensors, v_fetched, v_last_sort, v_last_id from numbered n;
 
   if v_fetched > v_page_size and v_last_id is not null then
