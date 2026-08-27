@@ -373,8 +373,15 @@ fi
 rm -f "$base_versions_file"
 
 if [[ -n "${CHECK_SQL_MIGRATIONS_ONLY:-}" ]]; then
+  if [[ -z "${CHECK_SQL_MIGRATION_DIR:-}" ]]; then
+    node "$root_dir/scripts/check-properties-and-characters-eol-references.mjs"
+  fi
   echo "Migration guards passed (CHECK_SQL_MIGRATIONS_ONLY set; content checks skipped)."
   exit 0
+fi
+
+if [[ -z "${CHECK_SQL_MIGRATION_DIR:-}" ]]; then
+  node "$root_dir/scripts/check-properties-and-characters-eol-references.mjs"
 fi
 
 required_files=(
