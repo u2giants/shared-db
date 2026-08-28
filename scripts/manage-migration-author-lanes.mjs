@@ -777,7 +777,7 @@ export const githubIo = {
     const failed=protectedContexts.filter((name)=>byName.get(name)!=='SUCCESS')
     if(failed.length)throw new LaneError(`required full CI is not successful on the current head: ${failed.join(', ')}`)
     const evidence=[...(this.getIssueComments(issue)??[]),...(this.getIssueComments(pr)??[]),...(this.getPrReviews(pr)??[])]
-    const approved=evidence.some((row)=>{const body=String(row.body??''),tied=row.commit_id===head||body.includes(head),verdict=/\bAPPROVE\b/i.test(body)||String(row.state??'').toUpperCase()==='APPROVED';return tied&&verdict&&(body.includes(bundleId)||listReviewAssignments(issue,pr,this).some((assignment)=>assignment.headSha===head))})
+    const approved=evidence.some((row)=>{const body=String(row.body??''),tied=row.commit_id===head||body.includes(head),verdict=/\bAPPROVE\b/i.test(body)||String(row.state??'').toUpperCase()==='APPROVED';return tied&&verdict&&(body.includes(bundleId)||findPrReviewAssignments(issue,pr,this).some((assignment)=>assignment.headSha===head))})
     if(!approved)throw new LaneError('an independent APPROVE tied to the exact head and bundle-compatible assignment is required')
     const states=dependencies.length?this.dependencyStates(dependencies):{},closure=classifyDependencies(issue,dependencies,states)
     if(!closure.satisfied)throw new LaneError(`migration dependency closure is incomplete: ${closure.blocked.map((row)=>`#${row.number}`).join(', ')}`)
@@ -1040,7 +1040,7 @@ export const githubIo = {
   },
   orchestratorFlowAdapter(){ return githubFlowAdapter(this) },
   flowSnapshot(){
-    return {issues:this.openClaims().map((claim)=>{const lease=parseAuthorLease(claim.body),issue=claimWorkIssue(claim),work=this.getIssue(issue),declared=/^blocked_on:\s*(issue:#\d+|artifact:[^\s]+)\s*$/m.exec(work?.body??'')?.[1]??null,reference=declared??lease.blockedOn,resolved=reference?.startsWith('issue:#')?this.getIssue(Number(reference.slice(7)))?.state==='closed':false;let preview_edge_satisfied=false;try{deriveLivePreviewCandidate(issue,this);preview_edge_satisfied=true}catch{/* not ready remains reportable through explicit preparation */}return{issue,claim:claim.number,owner:lease.owner,capacity_state:lease.capacityState,blocker:reference?{durable:true,resolved,reference}:null,preview_edge_satisfied}})}
+    return {issues:this.openClaims().map((claim)=>{const lease=parseAuthorLease(claim.body),issue=claimWorkIssue(claim),work=this.getIssue(issue),declared=/^blocked_on:\s*(issue:#\d+|artifact:[^\s]+)\s*$/m.exec(work?.body??'')?.[1]??null,reference=declared??lease.blockedOn,resolved=reference?.startsWith('issue:#')?this.getIssue(Number(reference.slice(7)))?.state==='closed':false;let preview_edge_satisfied=false,preview_error=null;try{deriveLivePreviewCandidate(issue,this);preview_edge_satisfied=true}catch(error){preview_error=error.message}return{issue,claim:claim.number,owner:lease.owner,capacity_state:lease.capacityState,blocker:reference?{durable:true,resolved,reference}:null,preview_edge_satisfied,preview_error}})}
   },
 }
 
@@ -2682,7 +2682,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.recoverMutex){console.log(JSON.stringify(recoverStaleAuthorMutex({expectedSha:o.expectedSha,confirmStale:o.confirmStale,serializedRecovery:process.env.GITHUB_ACTIONS==='true'&&process.env.AUTHOR_MUTEX_RECOVERY_SERIALIZED==='true',now},io),null,2));return 0}
     if(o.reconcileFlow){
       if(typeof io.orchestratorFlowAdapter!=='function')throw new LaneError('reconcile runtime adapter is unavailable')
-      console.log(JSON.stringify(reconcileFlow(io.flowSnapshot(),io.orchestratorFlowAdapter()),null,2));return 0
+      const result=reconcileFlow(io.flowSnapshot(),io.orchestratorFlowAdapter());console.log(JSON.stringify(result,null,2));return result.status==='UNVERIFIABLE'?2:0
     }
     if(o.preparePreviewDispatch){
       if(typeof io.orchestratorFlowAdapter!=='function')throw new LaneError('preview preparation runtime adapter is unavailable')

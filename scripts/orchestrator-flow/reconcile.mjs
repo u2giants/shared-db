@@ -70,9 +70,11 @@ export function repairPreviewReady(readyId,issue,io){
 export function reconcileFlow(input,io){
   const marker=io.resolveMarker(),mutating=Boolean(marker?.live&&marker.calling_task===marker.task),actions=[]
   for(const issue of input.issues??[]){
+    if(issue.preview_error)actions.push({issue:issue.issue,action:'preview-unverifiable',reason:issue.preview_error})
     if(issue.blocker?.durable&&!issue.blocker.resolved&&issue.capacity_state==='active')actions.push({issue:issue.issue,action:'relinquish-capacity',result:mutating?io.relinquishCapacity(issue):null})
     if(issue.blocker?.resolved&&issue.capacity_state==='relinquished')actions.push({issue:issue.issue,action:'resume-capacity',result:mutating?io.resumeCapacity(issue):null})
     if(issue.preview_edge_satisfied)actions.push({issue:issue.issue,action:mutating?'persist-preview-ready':'report-preview-ready',result:mutating?io.persistReady(issue):null})
   }
-  return {status:mutating?'RECONCILED':'REPORT_ONLY',mutating,actions}
+  const unavailable=actions.some((action)=>action.action==='preview-unverifiable')
+  return {status:unavailable?'UNVERIFIABLE':mutating?'RECONCILED':'REPORT_ONLY',mutating,actions}
 }
