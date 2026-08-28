@@ -472,10 +472,6 @@ PREVIEW_PRODUCER_PATHS = (
     # Invoked by the manager before preview preparation to prove the live sole
     # orchestrator identity. Its result gates whether preparation may proceed.
     "scripts/check-orchestrator-marker.mjs",
-    # Named by executable coordination source as the durable design contract.
-    # Pinning is conservative: the runtime does not parse it, but the guarded
-    # surface scanner correctly refuses an unaccounted root-level file.
-    "plan_orchestrator-workflow-gaps.md",
     # Imported by the manager for append-only capacity and issue-flow events.
     # A different event vocabulary could forge or suppress the coordination
     # evidence that preview-stage authorization consumes.
