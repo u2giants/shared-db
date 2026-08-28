@@ -1021,6 +1021,40 @@ export const githubIo = {
     }
     return summarizeDoctorOutput(output)
   },
+  orchestratorFlowAdapter(){ return githubFlowAdapter(this) },
+  flowSnapshot(){
+    return {issues:this.openClaims().map((claim)=>{const lease=parseAuthorLease(claim.body);return{issue:claim.number,capacity_state:lease.capacityState,blocker:lease.blockedOn?{durable:true,resolved:false,reference:lease.blockedOn}:null}})}
+  },
+}
+
+const PREVIEW_CANDIDATE_FENCE='db-preview-ready-candidate'
+function parsePreviewCandidate(comments){
+  const rows=(comments??[]).flatMap((comment)=>[...String(comment.body??comment).matchAll(new RegExp('```'+PREVIEW_CANDIDATE_FENCE+'\\s*\\n([\\s\\S]*?)```','g'))].map((match)=>{try{return JSON.parse(match[1])}catch{throw new LaneError('preview-ready candidate is not valid JSON')}}))
+  if(rows.length!==1)throw new LaneError(`exactly one immutable ${PREVIEW_CANDIDATE_FENCE} block is required on the work issue`)
+  return rows[0]
+}
+function githubFlowAdapter(io){
+  const payload=(sha)=>{const message=io.getCommit(sha)?.message??'';const match=/^db-preview-(?:ready|outcome) ([\s\S]+)$/.exec(message);if(!match)throw new LaneError('preview coordination ref does not point to a recognized immutable payload');return JSON.parse(match[1])}
+  return {
+    resolveMarker(){
+      let resolved;try{resolved=JSON.parse(execFileSync(process.execPath,['scripts/check-orchestrator-marker.mjs','--resolve','--json'],{encoding:'utf8'}))}catch(error){throw new LaneError(`live orchestrator marker could not be resolved (${error.message})`)}
+      const calling=process.env.ORCHESTRATOR_ROUTE_ID??''
+      return {live:resolved.state==='declared',task:resolved.routing?.routeId??null,calling_task:calling}
+    },
+    actor:()=>process.env.ORCHESTRATOR_ROUTE_ID??'unknown-orchestrator',now:()=>new Date().toISOString(),
+    appendEvent(event){io.commentIssue(event.work_issue,formatEventComment(event))},
+    createRef(ref,digest,record){const kind=ref.startsWith('refs/db-preview-ready-outcomes/')?'outcome':'ready',sha=io.makeOwnerCommit(`db-preview-${kind} ${JSON.stringify({digest,record})}`);return io.createRef(ref,sha)},
+    readRef(ref){const sha=io.refreshRef?.(ref)??io.readRef(ref);return sha?payload(sha):null},
+    listReady(issue){return io.listRefs('refs/db-preview-ready/').map((row)=>payload(row.sha)).filter((row)=>Number(row.record?.issue)===Number(issue))},
+    selectCurrent(issue){
+      const candidate=parsePreviewCandidate(io.issueComments(issue)),pr=io.getPr(candidate.pr),main=io.mainSha()
+      if(!pr?.head?.sha||pr.head.sha!==candidate.head_sha)throw new LaneError('preview candidate head no longer matches the live pull request')
+      if(candidate.route!=='ordinary_preview_apply'&&candidate.route_context!==main)throw new LaneError('preview recovery candidate is not bound to current main')
+      return candidate
+    },
+    withMutex(fn){const ownerSha=io.makeOwnerCommit(`db-coordination preview-ready-preparation issue=0`);acquireMutex(ownerSha,io);try{return fn()}finally{if(io.readRef(MUTEX_REF)===ownerSha)releaseOwnedRef(MUTEX_REF,ownerSha,io)}},
+    events(issue){return (io.issueComments(issue)??[]).flatMap((comment)=>parseEventComment(comment.body??comment))},
+  }
 }
 
 // A wrapper's doctor is a local probe; it must never hang a governed lane.

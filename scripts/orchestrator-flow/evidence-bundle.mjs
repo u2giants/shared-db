@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -92,7 +93,7 @@ export function main(argv){
   const inputIndex=argv.indexOf('--input');if(inputIndex<0||!argv[inputIndex+1]){console.error('REFUSED: --input <json> is required');return 2}
   try{
     const root=process.cwd(),input=JSON.parse(readFileSync(argv[inputIndex+1],'utf8'))
-    const adapters={readFile:(file)=>readFileSync(path.resolve(root,file),'utf8'),fileExists:(file)=>{try{readFileSync(path.resolve(root,file));return true}catch{return false}},isClean:()=>false}
+    const adapters={readFile:(file)=>readFileSync(path.resolve(root,file),'utf8'),fileExists:(file)=>{try{readFileSync(path.resolve(root,file));return true}catch{return false}},isClean:()=>execFileSync('git',['status','--porcelain=v1'],{cwd:root,encoding:'utf8'}).trim()===''}
     console.log(JSON.stringify(buildEvidenceBundle(input,adapters),null,2));return 0
   }catch(error){console.error(`REFUSED: ${error.message}`);return 2}
 }

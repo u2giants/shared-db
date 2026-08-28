@@ -59,14 +59,12 @@ export function terminalizeReady(readyId,outcome,proof,io){
 }
 
 export function repairPreviewReady(readyId,issue,io){
-  assertMarker(io);return io.withMutex(()=>{
-    const bindings=io.events(Number(issue)).filter((event)=>event.schema_version===2&&event.event_type==='preview_ready'&&event.ready_id===readyId)
-    if(bindings.length!==1)throw new ReconcileError('repair requires one readable v2 full-tuple event binding')
-    const current=readyRecord(io.selectCurrent(Number(issue)))
-    if(current.ready_id===readyId)throw new ReconcileError('current ready identity is corrupt; owner decision required without mutation')
-    if(!io.createRef(outcomeRef(readyId),'superseded',{outcome:'superseded',successor:current.ready_id}))throw new ReconcileError('stale ready outcome already exists')
-    return preparePreviewDispatch(issue,io)
-  })
+  assertMarker(io)
+  const bindings=io.events(Number(issue)).filter((event)=>event.schema_version===2&&event.event_type==='preview_ready'&&event.ready_id===readyId)
+  if(bindings.length!==1)throw new ReconcileError('repair requires one readable v2 full-tuple event binding')
+  const current=readyRecord(io.selectCurrent(Number(issue)))
+  if(current.ready_id===readyId)throw new ReconcileError('current ready identity is corrupt; owner decision required without mutation')
+  return preparePreviewDispatch(issue,io)
 }
 
 export function reconcileFlow(input,io){
