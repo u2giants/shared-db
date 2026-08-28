@@ -1943,6 +1943,8 @@ class ApplyLaneTests(unittest.TestCase):
         procedure = (REPO / "docs" / "production-promotion-procedure.md").read_text(encoding="utf-8")
         for required in ("successful review-evidence workflow run ID", "artifact digest", "rehearse from MERGED main"):
             self.assertIn(required, procedure)
+        for required in ("Historical recovery is apply-only", "historical-input `mode=dry-run` applies nothing", "--prepare-preview-dispatch <issue>", "fresh repository-variable and preview-ledger read"):
+            self.assertIn(required, procedure)
         self.assertIn("workflow_dispatch", WORKFLOW_TEXT)
 
     def test_issue_646_dry_run_is_off_the_production_environment(self) -> None:

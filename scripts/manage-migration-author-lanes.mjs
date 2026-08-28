@@ -9,6 +9,7 @@ import { gatherOpenPrObjects, normalizeObject, parseClaimBlock } from './check-d
 import { classifyDependencies, findCompletionRecord, findDependencyCycles, validateCompletionRecord, validateDependencyDeclaration, COMPLETION_FENCE, DependencyError } from './lib/work-dependencies.mjs'
 import { assertLease, evaluateRecovery, formatLeaseMessage, parseLeaseMessage, recoveredLeaseMetadata, LeaseError } from './lib/exclusive-lease.mjs'
 import { coordinationEvent, formatEventComment, parseEventComment, auditTimeline, renderTimeline } from './db-coordination-events.mjs'
+import { reconcileFlow, preparePreviewDispatch, repairPreviewReady } from './orchestrator-flow/reconcile.mjs'
 
 export const REPO = 'u2giants/shared-db'
 // AUTHOR LANE CAP. Raised from three to five on 2026-08-25 (owner instruction).
@@ -2585,6 +2586,9 @@ function parseArgs(argv) {
     else if (a === '--relinquish-author-lease') out.relinquishAuthorLease = true
     else if (a === '--resume-author-lease') out.resumeAuthorLease = true
     else if (a === '--flow-audit') out.flowAudit = true
+    else if (a === '--reconcile-flow') out.reconcileFlow = true
+    else if (a === '--prepare-preview-dispatch') out.preparePreviewDispatch = Number(next(i++))
+    else if (a === '--repair-preview-ready') out.repairPreviewReady = next(i++)
     else if (a === '--json') out.json = true
     else if (a === '--reissue-merged-stranded-claim') out.reissueMergedClaim = true
     else if (a === '--reversion-active-claim' || a === '--supersede-active-claim-version') out.reversionClaim = true
@@ -2608,6 +2612,19 @@ export function main(argv, now = new Date(), io = githubIo) {
   try {
     const o = parseArgs(argv)
     if(o.recoverMutex){console.log(JSON.stringify(recoverStaleAuthorMutex({expectedSha:o.expectedSha,confirmStale:o.confirmStale,serializedRecovery:process.env.GITHUB_ACTIONS==='true'&&process.env.AUTHOR_MUTEX_RECOVERY_SERIALIZED==='true',now},io),null,2));return 0}
+    if(o.reconcileFlow){
+      if(typeof io.orchestratorFlowAdapter!=='function')throw new LaneError('reconcile runtime adapter is unavailable')
+      console.log(JSON.stringify(reconcileFlow(io.flowSnapshot(),io.orchestratorFlowAdapter()),null,2));return 0
+    }
+    if(o.preparePreviewDispatch){
+      if(typeof io.orchestratorFlowAdapter!=='function')throw new LaneError('preview preparation runtime adapter is unavailable')
+      console.log(JSON.stringify(preparePreviewDispatch(o.preparePreviewDispatch,io.orchestratorFlowAdapter()),null,2));return 0
+    }
+    if(o.repairPreviewReady){
+      if(!o.issue)throw new LaneError('--repair-preview-ready requires --issue <n>')
+      if(typeof io.orchestratorFlowAdapter!=='function')throw new LaneError('preview repair runtime adapter is unavailable')
+      console.log(JSON.stringify(repairPreviewReady(o.repairPreviewReady,Number(o.issue),io.orchestratorFlowAdapter()),null,2));return 0
+    }
     if(o.flowAudit){
       if(!o.issue)throw new LaneError('--flow-audit requires --issue <n>')
       const events=(io.getIssueComments(Number(o.issue))??[]).flatMap((comment)=>parseEventComment(comment.body??comment))

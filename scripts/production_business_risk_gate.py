@@ -490,6 +490,11 @@ PREVIEW_PRODUCER_PATHS = (
     # Data, not code, but it routes which apply mechanism the rehearsal
     # exercises. Pinned for rehearsal fidelity.
     "config/atomic-migration-allowlist.json",
+    # Phase 2 review identity and invalidation policy. These are read-only
+    # policy inputs, but changing either changes whether prior evidence may be
+    # reused, so preview proof must bind their exact bytes.
+    "config/orchestrator-evidence-schema-v1.json",
+    "config/orchestrator-global-invalidators-v1.json",
     # READ, NOT EXECUTED -- and therefore invisible to the executed-closure
     # walk, which follows invocations and imports. The Supabase CLI reads this
     # file on every `link`, `migration list` and `db push` the preview job runs,
@@ -1395,6 +1400,12 @@ def classify_sql(repo_root: Path, allowlist: list[str]) -> list[str]:
         if re.search(r"\b(grant|revoke|create\s+policy|alter\s+policy|drop\s+policy|row\s+level\s+security)\b", sql):
             reasons.add(RISK_TEXT["material_access_change"])
     return sorted(reasons)
+
+
+def diagnose_risk_coverage(repo_root: Path, allowlist: list[str]) -> dict[str, Any]:
+    """Read-only Phase 2 qualification entrypoint; assess() remains authoritative."""
+    findings = classify_sql(repo_root, allowlist)
+    return {"status": "covered", "finding_count": len(findings), "findings": findings}
 
 
 def migration_statements(raw: str) -> str:
