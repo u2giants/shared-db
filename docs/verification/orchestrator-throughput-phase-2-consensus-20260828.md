@@ -212,3 +212,7 @@ The current conversation instructed Codex to start a fresh Grok session; this is
 | Mutating preparation was attached to the read-only selector | Claude | selector remains read-only; marker-bound Step 8 reconciler alone owns initial readiness, preparation refresh and lifecycle mutation |
 | Ordinary reconcile still implied automatic churn supersession | Claude | ordinary reconcile is report-only for drift; explicit preparation is the sole successor-first refresh path |
 | Duplicate unresolved ready refs had no recovery | Claude | preparation creates/readbacks the one live successor first, then terminalizes provably stale duplicates; ambiguity fails closed |
+| Step 5 gate required Step 8 mutation before reconciler existed | Grok, Claude | Step 5 gate is read-only; every readiness mutation/recovery/failure-injection gate moved to Step 8 |
+| Phase C docs named a Phase D command | Claude | Phase C documents read-only decisions only; Step 8 lands and synchronizes marker-bound prepare instructions |
+| Preparation CLI was not wired through the manager | Claude | Step 8 names manager flag, argument validation, marker resolution, delegation and operator sequence |
+| Crash then second tip move could leave zero current successors | Grok, Claude | preparation always creates/readbacks newest live successor first even when zero existing refs match, then terminalizes proven stale refs |
