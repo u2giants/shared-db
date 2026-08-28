@@ -275,6 +275,8 @@ Create:
 - `scripts/orchestrator-flow/baseline-schema.mjs`
 - `scripts/orchestrator-flow/baseline-schema.test.mjs`
 
+Change `.github/workflows/migration-author-lease.yml` in this same Phase A PR so its required job runs all `scripts/orchestrator-flow/*.test.mjs`. Use the repository's established guarded-glob pattern: `shopt -s nullglob`, collect the array, fail clearly when empty, require the named `baseline-schema.test.mjs` backstop, then pass the array to `node --test` alongside the existing nine suites. Every later phase adds its newly named test file to the presence-backstop list in the same PR that creates it. This CI wiring lands before any Phase A cut; it is not deferred to Step 10.
+
 The JSON carries the issue table and timeline in §3 with source task ID, observation window, event timestamps, issue/PR/workflow IDs, `measurement_kind`, and explicit `unknown` fields. It must distinguish observed wall time from active effort and must not embed transcript text that contains secrets or licensed data. Add rerunnable GitHub proof commands for durable issue/PR/run facts; local transcript timestamps are labeled private-source observations.
 
 Define states independently:
@@ -287,7 +289,7 @@ Define states independently:
 Extend the existing `scripts/db-coordination-events.mjs` vocabulary for these transitions; do not create a second event store. The baseline schema may define payload validation, but durable lifecycle events remain in that module.
 
 **Dependencies:** none.
-**Verification gate:** schema tests reject conflated claim/lease state, invented durations, impossible event order and a “five active workers” assertion when only three worker events exist.
+**Verification gate:** schema tests reject conflated claim/lease state, invented durations, impossible event order and a “five active workers” assertion when only three worker events exist; the required `Migration author lease` job runs the guarded test array, fails on an empty glob/missing named backstop, and includes `baseline-schema.test.mjs` in its output.
 
 ### Step 2 — separate protected claims from active-author leases
 
@@ -381,6 +383,8 @@ Create:
 
 Inputs are read-only: current `main` migration set, preview ledger, active claims, bundle IDs, original preview artifacts and typed recovery records. Output includes ordered nodes, edges, reason, next legal route and blockers.
 
+Runtime preview-ledger truth comes from the existing read-only Management API path, not guesswork or a new workflow: reuse `scripts/check-migration-ledger-drift.mjs`'s `PROJECT_REFS.preview`, constant `APPLIED_VERSIONS_SQL` and `fetchAppliedVersions()` (or factor a shared read-only helper without duplicating SQL). The operator supplies the existing `SUPABASE_ACCESS_TOKEN` through the protected environment/1Password procedure; the command proves the preview project ref before the single constant SELECT and never writes. Missing token, wrong project, HTTP failure or malformed rows is `UNVERIFIABLE` exit 2. Prior artifacts/events provide provenance and route evidence but never replace the fresh ledger read immediately before manual dispatch.
+
 Required behavior:
 
 - preview contains an unmerged version from issue A and issue B is next → B becomes `preview-wait` with edge `B -> A merge-and-bind`;
@@ -393,20 +397,26 @@ Required behavior:
 
 Do **not** add an automatic GitHub dispatcher, admission token/ref, workflow-to-workflow call, new check context or concurrency-group change in Phase 2. Those designs were debated and rejected because they can attach false required-check failures to a PR head, displace the one pending shared workflow run, execute proposed validator code from the proposed ref, or require new write permissions in a required PR job.
 
-The selector is read-only and produces one immutable route-decision artifact:
+The selector is read-only and produces one route decision:
 
 - `PREVIEW_WAIT`: dependency edges plus the exact event that can satisfy each edge;
 - `PREVIEW_READY`: exact current PR head, bundle ID, preview route, complete **preview-target-only** existing workflow input manifest and a human-readable manual-dispatch instruction; production fields are absent;
 - `UNVERIFIABLE`: exit 2 with missing/ambiguous evidence.
 
-A wait creates no workflow/check run, lock or apply/rebind artifact. Persist its dependency edges through the existing coordination-event store. When an edge becomes satisfied, Step 8 re-runs the selector and creates immutable `refs/db-preview-ready/<issue>-<head>-<bundle>` with the exact route/input manifest, then emits `preview_ready`; create-if-absent makes retries idempotent. The live orchestrator records exactly one terminal `refs/db-preview-ready-outcomes/<ready-id>/<dispatched|superseded|cancelled>` after manual dispatch, drift or cancellation. Head/bundle drift terminally supersedes the old record before a new current record is created.
+A wait creates no workflow/check run, lock or apply/rebind artifact. In the Step 5 PR, add `preview_wait` and `preview_ready` to `scripts/db-coordination-events.mjs::EVENT_TYPES` with exported writers; they are lifecycle events, never `STAGE_PAIRS` exclusive-stage pairs.
 
-The orchestrator uses the repository's existing manual `shared-supabase-migrations.yml` dispatch procedure. Immediately before dispatch it must re-run `select-preview-route.mjs` against live state and require the stored head, bundle, route and preview input manifest to match exactly; drift is `UNVERIFIABLE`, never a copied stale instruction. Dispatch remains deliberately manual and serialized; the workflow continues to revalidate live state and acquire the existing preview lease. “Automatic resume” means automatic dependency detection, durable readiness and live-task wake-up—not automatic workflow dispatch. If no orchestrator is live, the ready edge remains derivable from durable wait events/current state; the next sole-orchestrator `--queue-audit` recomputes it and creates/readbacks the ready ref before reporting work.
+Step 8 materializes readiness under a matching live marker. The closed route enum is `ordinary_preview_apply | merged_rehearsal | historical_rebind`. Define `ready-id` from issue + exact current PR head + bundle ID + route, encoded as a ref-safe deterministic digest. Create immutable `refs/db-preview-ready/<ready-id>` containing the full tuple and route-required preview manifest. Create exactly one terminal `refs/db-preview-ready-outcomes/<ready-id>` via create-if-absent, whose payload is `dispatched | superseded | cancelled`; sibling outcome paths are forbidden, so two terminal writers yield one first-writer result. Drift of head, bundle **or route** first records the old outcome `superseded`, then create-if-absent materializes the new current ready record; old records are never rewritten.
+
+Closed, merged or cancelled issues cannot leave actionable orphan readiness. Reconciliation derives the terminal fact from live GitHub state and creates the one terminal outcome (`dispatched` when exact dispatch evidence exists, otherwise `cancelled`; stale content remains `superseded`) without deleting or rewriting the ready ref. `--queue-audit` reports malformed records and ready refs whose issue/PR no longer has a live actionable state; it may terminalize them only from exact live proof while a matching sole-orchestrator marker is present. Without that marker it reports only. Ambiguous lifecycle evidence is `UNVERIFIABLE` exit 2.
+
+The ready manifest contains every field required by its preview route: ordinary includes `target=preview`, `mode`, `preview_allowlist`, `claim_pr`, `claim_head_sha`; merged/historical also include `commit_sha` and their matching `merged_preview_*` or `historical_preview_*` maps. It omits production-only fields: `target=production`, `production_allowlist`, `confirmation`, `review_*`, and `owner_decision_*`. Do not infer preview relevance from the YAML's human label alone—`commit_sha` is required by preview recovery routes.
+
+The orchestrator uses the repository's existing manual `shared-supabase-migrations.yml` dispatch procedure. Immediately before dispatch it must re-run `select-preview-route.mjs` against a fresh ledger read/live state and require the stored head, bundle, route and preview input manifest to match exactly; drift is `UNVERIFIABLE`, never a copied stale instruction. Dispatch remains deliberately manual and serialized. “Automatic resume” means automatic dependency detection, durable readiness and live-task wake-up—not automatic workflow dispatch. If no orchestrator is live, `--queue-audit` derives/reports readiness only and mutates nothing; the next sole-orchestrator with a matching live marker recomputes and creates/readbacks the ready ref once.
 
 Preserve `.github/workflows/shared-supabase-migrations.yml`, its workflow-level concurrency expression, required check names, production procedure, permissions and dispatch inputs unchanged in Step 5. A future automatic dispatcher is a separate design requiring its own security review and is outside this plan.
 
 **Dependencies:** Steps 3–4.
-**Verification gate:** transcript fixtures reproduce #1720 waiting behind #1713, #1720 historical-route selection and #1646 dependency closure. Selector/reconcile tests prove wait creates no Actions/check/apply artifact; a satisfying event creates/readbacks one exact ready ref/event; terminal outcomes are unique; stale head/bundle supersedes; repeated reconciliation emits no duplicate; and a later queue audit recovers readiness after no live marker. `git diff --exit-code origin/main -- .github/workflows/shared-supabase-migrations.yml docs/production-promotion-procedure.md` proves Step 5 did not alter dispatch safety.
+**Verification gate:** transcript fixtures reproduce #1720 waiting behind #1713, #1720 historical-route selection and #1646 dependency closure. Selector/reconcile tests prove the ref-safe `ready-id` changes with issue, head, bundle or route; wait creates no Actions/check/apply artifact; no marker reports readiness without mutation; a matching marker creates/readbacks one exact ready ref/event; two terminal writers produce one outcome ref; stale head/bundle/route supersedes; issue close/cancel/merge terminalizes an orphan from exact proof; repeated reconciliation emits no duplicate; and a later matching orchestrator recovers readiness after a no-marker audit. Event tests require exported `preview_wait`/`preview_ready` writers in `EVENT_TYPES` and forbid them from `STAGE_PAIRS`. Route-manifest fixtures require every ordinary/recovery preview input and reject every production-only field. Runtime-ledger fixtures prove a fresh preview-project read immediately before dispatch and exit 2 for missing credentials, wrong project, transport failure or malformed rows. `scripts/test_production_migration_guard.py` protects the existing workflow concurrency, target ordering, permissions, dispatch-input and production-procedure invariants without a branch-wide diff assertion.
 
 ### Step 6 — replace the global reviewer-assignment critical section
 
@@ -433,7 +443,7 @@ During shadow/dual-run, legacy derived busy state remains authoritative. An unre
 **Dependencies:** Step 3 bundle identity. Can be implemented in parallel with Step 5 after schema freeze.
 **Verification gate:** concurrency tests prove distinct execution keys reserve concurrently; aliases sharing a wrapper/provider serialize; interruption holds no `MUTEX_REF`; active reviewers precede overflow and arbitrary inactive names fail. Verdict/PR-close/head-move releases normally and remains recoverable after a dead releaser; no-verdict recovery stays stricter. All-busy creates a ref-safe monotonic wait; two wakers yield one claim/assignment/outcome; terminal waits never wake again; failure injection before/after successor creation and old-generation terminalization always leaves exactly one current queue generation with original priority. Unreadable reservation truth preserves legacy shadow behavior and fails closed after activation without paid overflow.
 
-Before the Phase C fresh-session cut, update `docs/agents/section-4-anti-collision-rules.md`, `AGENTS.md`, the `shared-db-orchestrator` skill and drift fixtures for read-only preview dependency decisions, `PREVIEW_READY` wake-up, unchanged manual dispatch, execution-key reservation, overflow and durable review-wait lifecycle. Do not defer these operator-visible semantics to Step 10.
+Before the Phase C fresh-session cut, update `docs/agents/section-4-anti-collision-rules.md`, `AGENTS.md`, the `shared-db-orchestrator` skill and drift fixtures for read-only preview dependency decisions, `PREVIEW_READY` wake-up, the mandatory immediate pre-dispatch selector plus fresh-ledger recheck, unchanged manual dispatch, execution-key reservation, overflow and durable review-wait lifecycle. Do not defer these operator-visible semantics to Step 10.
 
 **Fresh-session cut:** prove doc/skill drift green, update STATUS and start Phase D.
 
@@ -472,8 +482,10 @@ Create `scripts/orchestrator-flow/reconcile.mjs` and tests; expose `--reconcile-
 
 There is no repository coordination heartbeat, and none is added to `EXCLUSIVE_REFS`. The live sole-orchestrator session invokes reconciliation explicitly after queue/stage events and from `--queue-audit`; an optional Codex task wake-up may prompt that session but is not coordination authority. With no live matching marker, audit derives/reports readiness but mutates nothing; the next live matching orchestrator recomputes and creates the ready ref. Overlapping reconciliations use the existing short mutex/create-if-absent pattern, not invented compare-and-swap. Reconciliation may always report `REFILL REQUIRED NOW`; it may create/resume a structural author only through the same guarded `--claim`/resume dispatch path after resolving the live sole-orchestrator marker to the calling task.
 
+The same reconcile pass closes readiness lifecycle gaps: exact issue/PR close, merge, cancellation or dispatch evidence creates the sole terminal outcome; stale head/bundle/route creates `superseded`; malformed or ambiguous orphan state is reported as `UNVERIFIABLE`. Historical ready refs remain append-only evidence and are never deleted.
+
 **Dependencies:** Steps 2, 5 and 7.
-**Verification gate:** a fixture with #1658/#1645/#1684/#1720/#1646 all protected but externally blocked reports zero active authors and five protected claims, fills up to the proven active cap, then resumes correctly without losing claims. A satisfied preview edge creates one exact ready ref/event and no workflow run; no marker or a marker resolving elsewhere reports readiness without mutation; the next matching marker materializes it once. Overlapping reconciliation and reviewer claim/outcome recovery are idempotent under two wakers, terminal reservations, stale heads and dead claimants; preview/merge/production refs never gain heartbeat writers.
+**Verification gate:** a fixture with #1658/#1645/#1684/#1720/#1646 all protected but externally blocked reports zero active authors and five protected claims, fills up to the proven active cap, then resumes correctly without losing claims. A satisfied preview edge creates one exact ready ref/event and no workflow run; no marker or a marker resolving elsewhere reports readiness without mutation; the next matching marker materializes it once. Closing/cancelling/merging the issue and recording an exact dispatch each produce the single correct terminal outcome; malformed/ambiguous orphans fail closed. Overlapping reconciliation and reviewer claim/outcome recovery are idempotent under two wakers, terminal reservations, stale heads and dead claimants; preview/merge/production refs never gain heartbeat writers.
 
 ### Step 9 — integrate Phase 1 blocker ledger and define success
 
@@ -517,7 +529,7 @@ Roll out in reversible stages:
 4. **Preview scheduler:** convert known dependency failures to durable waits and emit exact ready work for manual dispatch; keep one preview lock.
 5. **Evidence reuse:** enable `INTEGRATION_REFRESH_ONLY` review preservation last, after shadow corpus proves no false reuse.
 
-Wire every new Node test into required CI in the same implementation PR: extend the exact `node --test` command in `.github/workflows/migration-author-lease.yml` to include `scripts/orchestrator-flow/*.test.mjs` (and any new non-globbed top-level test). Do not rely on a local-only command; issue #731 proves unlisted tests otherwise merge without running. Extend `scripts/test_production_migration_guard.py` with the Step 5 invariants that existing dispatch concurrency, permissions, inputs, required contexts and deliberately-first steps remain unchanged.
+Audit the Phase A CI wiring: every created orchestrator-flow test must appear through the guarded array and named-file backstop in the required `Migration author lease` job. Do not repair missing coverage only at landing—each earlier phase PR must already have been blocked. Issue #731 is the regression case. Extend `scripts/test_production_migration_guard.py` with the Step 5 invariants that existing dispatch concurrency, permissions, inputs, required contexts and deliberately-first steps remain unchanged.
 
 Run focused tests after each step and the repository-required suites on a frozen tree. Update `AGENTS.md`, `docs/agents/section-4-anti-collision-rules.md`, the orchestrator skill/drift fixtures and issue #1738. Obtain one independent reviewer for repository-maintenance implementation. Open a PR, wait for all code checks, merge, verify merge SHA and post-merge checks, then observe at least one shadow/live transition fixture or non-production rehearsal without database mutation.
 
@@ -581,7 +593,7 @@ Run focused tests after each step and the repository-required suites on a frozen
 - Runtime: repository Node and Python on Windows; use project-supported commands.
 - Coordination truth: GitHub refs under `refs/db-*`, GitHub issues/PRs/runs, live branch-protection state, and existing workflow artifacts.
 - Skill synchronization: authenticated `popcre/ai-devops` checkout resolved through `AI_DEVOPS_DIR`/the repository's drift tooling; no skill edit is attempted without that checkout, and Phase A stops before its cut if synchronization cannot be proven.
-- Database: implementation should need no database write. Read-only preview/production queries, if a test genuinely requires them, use the existing Management API and 1Password vault `vibe_coding`; never expose values.
+- Database: implementation needs no database write. Step 5 runtime uses the existing `SUPABASE_ACCESS_TOKEN` protected environment/1Password `vibe_coding` procedure for one read-only preview-ledger SELECT through `check-migration-ledger-drift.mjs`'s Management API helper; prove `PROJECT_REFS.preview`, never expose the token/rows, and treat unavailable evidence as exit 2. No production ledger read is needed for route selection.
 - Private transcript source: local Codex archive for task `01a0461f-d1bf-7e02-8c84-ee8783f965b0`; do not commit the raw JSONL.
 - Planning branch/worktree: `codex/issue-1738-phase2-consensus` / `C:\repos\shared-db-worktrees\issue-1738-phase2-consensus`.
 
@@ -598,7 +610,7 @@ Run focused tests after each step and the repository-required suites on a frozen
 - [ ] Active capacity reaches eight only after two distinct provider/wrapper identities are qualified, Albert approves the exact recommendation, at least six active rotation reviewers are proven, and all-busy review safely waits.
 - [ ] Reviews and downstream proof bind to canonical evidence bundle IDs.
 - [ ] Unrelated `main` movement triggers integration refresh only; changed/uncertain inputs fail closed.
-- [ ] Preview dependencies are explicit, ordered and automatically wake the sole orchestrator with an exact ready instruction, without a red apply attempt or automatic dispatch.
+- [ ] Preview dependencies are explicit and ordered; a matching sole orchestrator persists one exact durable ready instruction and may receive an optional task wake, without a red apply attempt or automatic dispatch.
 - [ ] Reviewer assignment is concurrent across providers and interruption-isolated.
 - [ ] Qualification catches every transcript-derived late incompatibility before the expensive/irreversible stage.
 - [ ] Blocker/resume/refill reconciliation is idempotent and marker-bound.

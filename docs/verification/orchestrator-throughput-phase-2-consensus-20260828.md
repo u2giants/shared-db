@@ -35,6 +35,8 @@
 | Doctor-before-assignment could shrink reviewer coverage | Grok | local doctor remains post-assignment local-dependency path |
 | Auto-refill relied on nonexistent heartbeat/stale marker | Grok | explicit live-orchestrator reconciliation; no marker means no mutation |
 
+Only the preview-wait/live-protection rows in this initial round are superseded by the final no-run design. All other dispositions remain current. The superseded row is retained solely as debate history: waiting now creates no workflow/check context at all.
+
 ## Claude second-round objections and disposition
 
 | Objection | Disposition in current plan |
@@ -45,6 +47,8 @@
 | Kimi's execution-context denial would recur after generic doctor handling | Step 6 uses only the current assigning process's doctor result for one attempt, never a persisted ban |
 | Existing workflow test set was incomplete | §10 names the exact nine-suite workflow baseline, including lease, events and coordination scenarios |
 | A neutral wait could become a skipped required context | Step 5 requires the wait context absent from Python `REQUIRED_CHECKS` and managed branch protection |
+
+Only the neutral-wait row in this second round is superseded by the final no-run design. All other dispositions remain current. There is now no wait check context to classify or protect.
 
 Plan and handoff prose are explicitly non-authoritative at runtime; versioned code/config and synchronized standing instructions remain policy inputs.
 
