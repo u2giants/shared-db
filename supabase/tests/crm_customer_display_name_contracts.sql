@@ -137,7 +137,7 @@ begin
   from api.crm_update_customer(
     p_customer_id => v_customer_id,
     p_domain => 'issue-1615.example.invalid');
-  if v_row.domain <> 'issue-1615.example.invalid' then
+  if v_row.domain is distinct from 'issue-1615.example.invalid' then
     raise exception 'non-null domain update was not preserved';
   end if;
 
@@ -145,7 +145,7 @@ begin
   from api.crm_update_customer(
     p_customer_id => v_customer_id,
     p_domain => null);
-  if v_row.domain <> 'issue-1615.example.invalid' then
+  if v_row.domain is distinct from 'issue-1615.example.invalid' then
     raise exception 'null domain did not preserve the current domain';
   end if;
 
@@ -154,7 +154,7 @@ begin
     p_customer_id => v_customer_id,
     p_domain => null,
     p_clear_domain => false);
-  if v_row.domain <> 'issue-1615.example.invalid' then
+  if v_row.domain is distinct from 'issue-1615.example.invalid' then
     raise exception 'p_clear_domain=false did not preserve the current domain';
   end if;
 
@@ -167,10 +167,11 @@ begin
   end;
 
   select c.* into v_row from core.customer c where c.id = v_customer_id;
-  if v_row.domain <> 'issue-1615.example.invalid' then
+  if v_row.domain is distinct from 'issue-1615.example.invalid' then
     raise exception 'rejected non-admin clear changed the domain';
   end if;
 
+  execute 'reset role';
   select r.id into v_admin_role_id
   from app.role r
   where r.slug = 'administrator';
@@ -179,6 +180,7 @@ begin
   end if;
   insert into app.user_role (profile_id, role_id)
   values (v_allowed_profile, v_admin_role_id);
+  perform set_config('role', 'authenticated', true);
 
   select * into v_row
   from api.crm_update_customer(
