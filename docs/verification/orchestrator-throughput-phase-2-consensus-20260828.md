@@ -148,14 +148,17 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 
 ## Unresolved objections
 
-- Pending Grok and Claude re-review of the revised plan.
+- Grok 4.6 approved commit `18cdcba`, then its skill-enforced three-rebuttal ceiling was exhausted. Later material revisions therefore have no same-head Grok verdict.
+- Claude Opus 5 rejects commit `1302d03`: the proposed admission validator would share the required PR status context and execute from the proposed ref; permissions/consumption are unresolved; nonempty bogus admissions can still occupy the shared queue; the existing production procedure was misclassified as a create; and new Node tests are not wired into required CI.
+- Codex agrees these are material. Three-way consensus has not been reached, and this branch must not be merged as a consensus plan.
 
 ## Evidence still needed
 
-- Re-review verdicts on the current revised tree.
-- Focused existing manager/exclusive-lease test baseline before final merge.
+- A replacement design that avoids dispatch-time admission checks on the PR head, or explicit owner-approved infrastructure for a trusted dispatcher.
+- A new Grok debate session only if the reviewer protocol permits it; do not bypass the exhausted rebuttal ceiling.
+- Same-head Grok and Claude approval before final merge.
 
 ## Last verified path state
 
 - Initial external reviews read commit `1eacdacd52a5d6bbd212f718967391df1381138d` and rejected it.
-- Revision is on branch `codex/issue-1738-phase2-consensus`; reviewers must re-read the plan, handoff and this ledger on every rebuttal.
+- Grok's last approved head was `18cdcba`; Claude's latest rejected head was `1302d03`. The current revision is newer and unapproved on branch `codex/issue-1738-phase2-consensus`.
