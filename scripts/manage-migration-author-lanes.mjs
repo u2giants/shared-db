@@ -1599,14 +1599,23 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
     const priorSha=io.readRef(assignmentRef)
     if(priorSha){
       const prior=parseReviewCursor(io.getCommit(priorSha)),leaseRef=reviewActiveRef(prior.reviewer),preflightLease=preflightBusy.leases.get(prior.reviewer),stalePrior=preflightBusy.stale.find((row)=>row.ref===leaseRef&&row.sha===priorSha)
-      if(preflightLease?.sha===priorSha&&preflightLease.lease.issue===prior.issue&&preflightLease.lease.pr===prior.pr&&preflightLease.lease.headSha===prior.headSha&&preflightLease.lease.sequence===prior.sequence&&!stalePrior)return {...prior,slot:request.slot,wrapper:REVIEWERS.find((r)=>r.name===prior.reviewer)?.wrapper}
+      // Eligibility is re-checked on EVERY retry return below, not only the
+      // first one reached: the orchestrator engine backing a retry can differ
+      // from the one that made the original assignment (a concurrent
+      // orchestrator, or the same one switching engines), so a provider that
+      // was independent when assigned can become a same-provider conflict by
+      // the time a retry lands here. Every return path below must fail the
+      // same way a fresh assignment would, never hand back a stale answer.
+      if(!eligibleNames.has(prior.reviewer))throw new LaneError(`durable assignment sequence ${prior.sequence} belongs to a retired reviewer or orchestrator-conflicting reviewer ${prior.reviewer}; its active lease was not recreated. Record a governed replacement for this exact head`)
+      if(preflightLease?.sha===priorSha&&preflightLease.lease.issue===prior.issue&&preflightLease.lease.pr===prior.pr&&preflightLease.lease.headSha===prior.headSha&&preflightLease.lease.sequence===prior.sequence&&!stalePrior){
+        return {...prior,slot:request.slot,wrapper:REVIEWERS.find((r)=>r.name===prior.reviewer)?.wrapper}
+      }
       if(stalePrior){
         if(io.atomicReviewRefs){assertReviewLeaseStillStale(stalePrior,io.readReviewStates([stalePrior.assignment]));io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:ownerSha},{ref:leaseRef,expected:priorSha,sha:null}]);const after=io.readReviewRefs([MUTEX_REF,leaseRef]);if(after.get(MUTEX_REF)!==ownerSha||after.get(leaseRef)!==null)throw new LaneError('stale assignment lease release readback mismatch')}
         else if(io.readRef(leaseRef)===priorSha)releaseOwnedRef(leaseRef,priorSha,io)
       }
       const live=io.getPr(prior.pr)
       if(live?.state==='open'&&live?.head?.sha===prior.headSha&&!hasVerdictForHead(prior.issue,prior.pr,prior.headSha,io)){
-        if(!eligibleNames.has(prior.reviewer))throw new LaneError(`durable assignment sequence ${prior.sequence} belongs to a retired reviewer or orchestrator-conflicting reviewer ${prior.reviewer}; its active lease was not recreated. Record a governed replacement for this exact head`)
         requireOwnedRef(MUTEX_REF,ownerSha,io)
         if(!io.createRef(leaseRef,priorSha)&&readRefAfterWrite(leaseRef,priorSha,io)!==priorSha)throw new LaneError(`reviewer ${prior.reviewer} has a conflicting active lease`)
       }

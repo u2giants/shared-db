@@ -2556,3 +2556,24 @@ test('an invalid review slot is refused',()=>{
   assert.throws(()=>assignNextReviewer({issue:205,pr:305,headSha:'a'.repeat(40),slot:0},io),/positive integer/)
   assert.throws(()=>assignNextReviewer({issue:205,pr:305,headSha:'a'.repeat(40),slot:1.5},io),/positive integer/)
 })
+
+test('retrying a slot-2 assignment must still refuse a reviewer that is no longer independent from the live orchestrator',()=>{
+  // Occupy grok-4.6, glm-5.3 and kimi-k3 with unrelated live review work so the
+  // rotation's next two picks for our real request land on muse (slot 1) then
+  // codex-gpt-5.6-sol (slot 2), while the orchestrator engine is still 'claude'
+  // and codex is eligible.
+  const io=reviewIo()
+  for(let n=0;n<3;n++)assignNextReviewer({issue:600+n,pr:700+n,headSha:`${n}`.repeat(40)},io)
+  const request={issue:206,pr:306,headSha:'9'.repeat(40)}
+  const first=assignNextReviewer(request,io)
+  assert.equal(first.reviewer,'muse-spark-1.2-contributor')
+  const second=assignNextReviewer({...request,slot:2},io)
+  assert.equal(second.reviewer,'codex-gpt-5.6-sol')
+  // A live lease for codex now exists for this exact head/slot. A retry of the
+  // same slot-2 request must re-check eligibility every time, not just on a
+  // fresh assignment -- if the orchestrator engine has since become Codex,
+  // handing back the still-live Codex assignment on retry would let a Codex
+  // orchestrator review its own work.
+  io.resolveOrchestratorEngine=()=> 'codex'
+  assert.throws(()=>assignNextReviewer({...request,slot:2},io),/orchestrator-conflicting reviewer codex-gpt-5\.6-sol/)
+})
