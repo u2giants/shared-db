@@ -486,6 +486,9 @@ begin
 end;
 $$;
 
+-- Trigger functions are internal enforcement machinery, never a callable API.
+revoke all on function plm.reject_dcp_opa_resolution_mutation() from public;
+
 create trigger dcp_opa_property_resolution_append_only
 before update or delete on plm.dcp_opa_property_resolution
 for each row execute function plm.reject_dcp_opa_resolution_mutation();
