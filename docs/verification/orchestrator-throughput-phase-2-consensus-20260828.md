@@ -156,7 +156,7 @@ Only the preview-wait/workflow-dispatch/live-protection row in this third round 
 | Admission check could displace deliberately-first target steps | Claude | upstream validate step; target-ref and exact-confirmation remain first in their own jobs |
 | Empty unauthorized dispatch could stall/replace sanctioned group | Claude | empty admission gets unique unauthorized group; PR branch and sanctioned global group preserved |
 | Ambiguous dispatch lost `UNVERIFIABLE` rule | Claude | unreadable/ambiguous dispatch, admission or validation is explicit exit 2 |
-| Production procedure file was unnamed | Claude | **SUPERSEDED automatic-dispatch design:** Phase A protects existing production semantics; Phase C puts the historical-dry-run warning in AGENTS/anti-collision/skill operator guidance |
+| Production procedure file was unnamed | Claude | **SUPERSEDED automatic-dispatch design:** Phase A protects existing semantics; Step 5 adds/pins the historical-dry-run warning in the procedure and synchronized operator guidance |
 | Ledger contradicted operator trust boundary | Claude | older disposition corrected; workflow validator, not operator script, is pinned authority |
 | Admission validator file/tests were unnamed | Claude | named validator and test plus existing production guard test cover all four target paths/concurrency |
 
@@ -204,4 +204,8 @@ The current conversation instructed Codex to start a fresh Grok session; this is
 | Selector import rule contradicted its identity cross-check | Claude | literal import is allowed only for equality comparison; using it as query/default/fallback is forbidden |
 | Ledger-helper refactor omitted affected files and invalidator inventory | Claude | Step 5 names drift module/test, shared helper/test and global invalidator/discovery updates |
 | Successor ready ID could inherit a stale dry-run | Claude | each ready ID owns its dry-run evidence; a new commit-bound ID must dry-run again before apply |
-| Main churn could create unbounded readiness history | Claude | materialization is operator-attempt-bound, one unresolved ref is allowed, and three supersessions pause the issue |
+| Main churn could create unbounded readiness history | Claude | edge satisfaction creates once; audit drift is report-only; explicit pre-dispatch preparation alone refreshes and refuses multiple unresolved refs |
+| Step 5 omitted CI workflow and helper test/injection seam | Claude | modify list names required CI; required tests name the helper; adapters are `readRepoVariable` and `fetchAppliedVersions` |
+| Churn pause had no storage or recovery and contradicted Step 8 | Claude | pause/counter/index removed; Step 8 owns initial materialization and explicit preparation owns later refresh |
+| Warning was routed away from the procedure operators read | Claude | Step 5 updates the existing rehearsal-aware procedure and pins it plus synchronized operator instructions |
+| Separate dry-run doubles main-tip exposure | Claude | standing merge protocol still requires it; apply's internal dry-run is complementary, and any new ready ID must repeat external dry-run |
