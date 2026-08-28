@@ -87,7 +87,7 @@ Only the preview-wait/workflow-dispatch/live-protection row in this third round 
 
 ## Fifth-round objections and disposition — MIXED CURRENT AND SUPERSEDED ITEMS
 
-> Superseded here: preview-only wait/entry workflow and every wait-run/displacement disposition. Current here: durable reviewer-wait generation, overflow policy and Phase C operator/skill synchronization.
+> Superseded here: preview-only wait/entry workflow and every wait-run/displacement disposition. Current here: durable reviewer-wait generation, overflow policy, Phase C operator/skill synchronization, and the rule that authenticated live protection is an operator gate while CI uses injected fixtures.
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -102,7 +102,7 @@ Only the preview-wait/workflow-dispatch/live-protection row in this third round 
 
 ## Sixth-round objections and disposition — MIXED CURRENT AND SUPERSEDED ITEMS
 
-> Superseded here: dispatcher ownership, dispatch admission and automatic ready dispatch. Current here: reviewer reservation release, unreadable-reservation fail-closed behavior and wait-generation rollover.
+> Superseded here: dispatcher ownership, dispatch admission and automatic ready dispatch. Current here: reviewer reservation release, unreadable-reservation fail-closed behavior, wait-generation rollover, and the no-run/no-check/no-artifact waiting invariant.
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -118,7 +118,7 @@ Only the preview-wait/workflow-dispatch/live-protection row in this third round 
 
 ## Seventh-round objections and disposition — MIXED CURRENT AND SUPERSEDED ITEMS
 
-> Superseded here: shared dispatcher/admission/producer-custody and workflow-wait dispositions. Current here: reviewer reservation recovery and successor-first wait-generation recovery.
+> Superseded here: shared dispatcher/admission/producer-custody and workflow-wait implementation dispositions. Current here: the no-run/no-check/no-artifact wording, reviewer reservation recovery and successor-first wait-generation recovery.
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -132,7 +132,7 @@ Only the preview-wait/workflow-dispatch/live-protection row in this third round 
 
 ## Eighth-round objections and disposition — MIXED CURRENT AND SUPERSEDED ITEMS
 
-> Superseded here: dispatch concurrency regrouping, admission records, operator-executable inventory and production dispatcher/helper. Current here: completeness testing and newest-state wait-generation recovery.
+> Superseded here: unauthorized dispatch regrouping, admission records, operator-executable inventory and production dispatcher/helper. Current here: preserving the existing concurrency expression and `cancel-in-progress: false`, completeness testing and newest-state wait-generation recovery.
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -156,7 +156,7 @@ Only the preview-wait/workflow-dispatch/live-protection row in this third round 
 | Admission check could displace deliberately-first target steps | Claude | upstream validate step; target-ref and exact-confirmation remain first in their own jobs |
 | Empty unauthorized dispatch could stall/replace sanctioned group | Claude | empty admission gets unique unauthorized group; PR branch and sanctioned global group preserved |
 | Ambiguous dispatch lost `UNVERIFIABLE` rule | Claude | unreadable/ambiguous dispatch, admission or validation is explicit exit 2 |
-| Production procedure file was unnamed | Claude | **SUPERSEDED automatic-dispatch design:** `docs/production-promotion-procedure.md` remains unchanged and is protected by Phase A behavioral assertions |
+| Production procedure file was unnamed | Claude | **SUPERSEDED automatic-dispatch design:** Phase A preserves its manual semantics, adds the historical-dry-run no-evidence warning and protects both behaviorally |
 | Ledger contradicted operator trust boundary | Claude | older disposition corrected; workflow validator, not operator script, is pinned authority |
 | Admission validator file/tests were unnamed | Claude | named validator and test plus existing production guard test cover all four target paths/concurrency |
 
@@ -197,3 +197,7 @@ The current conversation instructed Codex to start a fresh Grok session; this is
 | Three policy/provenance inputs had no manifest disposition | Claude | `source_pr`, `preview_run_id` and `preview_artifact_digest` are explicitly excluded from manual preview routes |
 | Event test required an unexported implementation detail | Claude | the gate is behavioral; no `STAGE_PAIRS` export is required |
 | Historical recovery was incorrectly given a dry-run phase | Grok | ordinary/merged routes remain dry-run then apply; historical rebind is apply-only, with a fresh live recheck before its one run |
+| Main movement could terminally supersede and regenerate the same ready ID | Claude | merged/historical ready identity includes current-main `commit_sha`; either route gets a new ID after tip movement |
+| Historical route omitted current-main freshness | Claude | both commit-bound routes prove current-main immediately before every required run |
+| Workflow permits green historical dry-run no-op | Claude | selector forbids it, procedure warns it is no evidence, Phase A pins both; workflow mutation remains outside Phase 2 |
+| Live variable and drift literal could diverge silently | Claude | selector queries only the live variable but fails closed and instructs same-change repair when identities disagree |
