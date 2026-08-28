@@ -1042,6 +1042,39 @@ class PreflightNegativeTests(unittest.TestCase):
         self.assertIn("public.sync_clickup_tasks", message)
         self.assertIn("grant/revoke target", message)
 
+    def test_reference_after_same_file_drop_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = write_migrations(
+                Path(directory),
+                {
+                    "20260101000000_create.sql": "create table core.old_table(id integer);\n",
+                    "20260102000000_bad.sql": (
+                        "drop table core.old_table restrict;\n"
+                        "alter table core.old_table add column impossible integer;\n"
+                    ),
+                },
+            )
+            migrations = local_migrations(root)
+            with self.assertRaises(GuardError) as caught:
+                preflight_batch(migrations, ["20260102000000"], {"20260101000000"})
+        self.assertIn("references missing core.old_table (alter table)", str(caught.exception))
+
+    def test_drop_trigger_before_restrict_drop_uses_statement_order(self) -> None:
+        """Regression for #1684: preserve the EOL teardown and final RESTRICT."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = write_migrations(
+                Path(directory),
+                {
+                    "20260101000000_create.sql": "create table core.old_table(id integer);\n",
+                    "20260102000000_retire.sql": (
+                        "drop trigger old_table_eol_guard on core.old_table;\n"
+                        "drop table core.old_table restrict;\n"
+                    ),
+                },
+            )
+            migrations = local_migrations(root)
+            preflight_batch(migrations, ["20260102000000"], {"20260101000000"})
+
     def test_real_18_file_batch_passes(self) -> None:
         migrations = local_migrations(REPO)
         remote = production_ledger_versions()

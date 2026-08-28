@@ -1757,7 +1757,7 @@ def object_events(raw: str) -> list[tuple[int, str, bool]]:
             # `drop table a.b, c.d` removes both.
             for obj in re.finditer(IDENT, segment):
                 events.append(
-                    (match.start() + obj.start(), f"{obj.group(1)}.{obj.group(2)}", False)
+                    (match.end() + obj.start(), f"{obj.group(1)}.{obj.group(2)}", False)
                 )
     for match in DROP_ROUTINE_RE.finditer(text):
         # A routine list is different from every other DROP list: commas inside
@@ -1826,16 +1826,37 @@ def dropped_objects(raw: str) -> set[str]:
     return {obj for obj, created in final.items() if not created}
 
 
-def hard_references(raw: str) -> list[tuple[str, str]]:
+def hard_reference_events(raw: str) -> list[tuple[int, str, str]]:
+    """Non-deferrable references in statement order.
+
+    Ordering matters inside one migration: dropping a trigger on a table and
+    then dropping that table is valid, while touching the table after its drop
+    is not.  The batch preflight therefore consumes these positions together
+    with ``object_events`` instead of judging every reference against only the
+    file's final catalog state.
+    """
     text = strip_sql(raw)
-    found: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
+    found: list[tuple[int, str, str]] = []
     for reason, pattern in REFERENCE_RES:
         for match in pattern.finditer(text):
-            key = (f"{match.group(1)}.{match.group(2)}", reason)
-            if key not in seen:
-                seen.add(key)
-                found.append(key)
+            found.append(
+                # A bounded regex may begin at an earlier keyword (for example
+                # an unrelated GRANT before a CREATE FUNCTION).  The catalog
+                # lookup happens at the qualified target, so order by that
+                # identifier rather than by the regex's broad match start.
+                (match.start(1), f"{match.group(1)}.{match.group(2)}", reason)
+            )
+    return sorted(found, key=lambda item: item[0])
+
+
+def hard_references(raw: str) -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for _position, obj, reason in hard_reference_events(raw):
+        key = (obj, reason)
+        if key not in seen:
+            seen.add(key)
+            found.append(key)
     return found
 
 
@@ -1952,15 +1973,26 @@ def preflight_batch(
             validate_retired_object_restorations(version, raw, removed_by)
         except GuardError as exc:
             problems.append(str(exc))
-        created = created_objects(raw)
-        dropped = dropped_objects(raw)
-        available |= created
-        available -= dropped
-        for obj in created:
-            removed_by.pop(obj, None)
-        for obj in dropped:
-            removed_by[obj] = version
-        for obj, reason in hard_references(raw):
+        # Judge references against the catalog state at their exact statement
+        # position.  The old final-state shortcut falsely rejected a valid
+        # `drop trigger ... on table; drop table ... restrict` because the
+        # table was (correctly) absent at end-of-file.
+        ordered_events = [
+            (position, 0, obj, created, "")
+            for position, obj, created in object_events(raw)
+        ] + [
+            (position, 1, obj, False, reason)
+            for position, obj, reason in hard_reference_events(raw)
+        ]
+        for _position, kind, obj, created, reason in sorted(ordered_events):
+            if kind == 0:
+                if created:
+                    available.add(obj)
+                    removed_by.pop(obj, None)
+                else:
+                    available.discard(obj)
+                    removed_by[obj] = version
+                continue
             if obj in available:
                 continue
             # #609 F5. A POSITIVE, RECORDED REMOVAL. This is the one case the
