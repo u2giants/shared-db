@@ -1,0 +1,35 @@
+name: Verify Production Ledger Recovery 1750
+
+on:
+  workflow_dispatch:
+    inputs:
+      main_sha: {description: "Exact current origin/main SHA", required: true, type: string}
+
+permissions:
+  contents: read
+
+jobs:
+  verify-read-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: "${{ inputs.main_sha }}", fetch-depth: 0}
+      - name: Prove exact current main
+        env: {MAIN_SHA: "${{ inputs.main_sha }}"}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$MAIN_SHA"
+          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+      - name: Prove exact ledger identity and catalog outcome
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          RECOVERY_EVIDENCE: ${{ runner.temp }}/production-ledger-recovery-1750.json
+        run: python scripts/verify_production_ledger_recovery.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-ledger-recovery-1750-${{ inputs.main_sha }}
+          path: ${{ runner.temp }}/production-ledger-recovery-1750.json
+          if-no-files-found: error
+          retention-days: 90
