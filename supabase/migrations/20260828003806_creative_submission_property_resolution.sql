@@ -94,11 +94,7 @@ DECLARE
   v_predecessor plm.creative_submission_property_resolution%ROWTYPE;
   v_member_count bigint;
 BEGIN
-  IF TG_TABLE_NAME = 'creative_submission_property_resolution_member' THEN
-    v_resolution_id := NEW.resolution_id;
-  ELSE
-    v_resolution_id := NEW.resolution_id;
-  END IF;
+  v_resolution_id := NEW.resolution_id;
 
   SELECT * INTO STRICT v_header
   FROM plm.creative_submission_property_resolution

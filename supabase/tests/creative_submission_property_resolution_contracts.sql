@@ -9,6 +9,7 @@ DECLARE
   v_mapped_v2 uuid := '00000000-0000-4000-8000-000000000004';
   v_latest uuid;
   v_rejected boolean;
+  v_trigger_count integer;
   v_digest text := 'sha256:' || repeat('0', 64);
 BEGIN
   INSERT INTO plm.creative_submission_property_resolution (
@@ -100,6 +101,32 @@ BEGIN
   SET CONSTRAINTS ALL DEFERRED;
   IF NOT v_rejected THEN RAISE EXCEPTION 'member-bearing unmapped decision was accepted'; END IF;
 
+  INSERT INTO plm.creative_submission_property_resolution_member (
+    resolution_member_id, resolution_id, submission_source_system,
+    submission_source_table, submission_source_id
+  ) VALUES (
+    '30000000-0000-4000-8000-000000000005', v_conflict,
+    'synthetic_submission', 'synthetic_property', 'submission-conflict-candidate'
+  );
+  SET CONSTRAINTS ALL IMMEDIATE;
+  SET CONSTRAINTS ALL DEFERRED;
+
+  v_rejected := false;
+  BEGIN
+    INSERT INTO plm.creative_submission_property_resolution (
+      resolution_id, creative_source_system, creative_source_table, creative_source_id,
+      decision_version, decision_state, reviewed_batch_id, reviewed_batch_digest,
+      approval_actor_id, approved_at
+    ) VALUES (
+      '00000000-0000-4000-8000-000000000009', 'synthetic_creative', 'synthetic_property',
+      'creative-c', 2, 'conflict', '10000000-0000-4000-8000-000000000009', v_digest,
+      '20000000-0000-4000-8000-000000000009', now()
+    );
+  EXCEPTION WHEN unique_violation THEN
+    v_rejected := true;
+  END;
+  IF NOT v_rejected THEN RAISE EXCEPTION 'duplicate decision version was accepted'; END IF;
+
   v_rejected := false;
   BEGIN
     INSERT INTO plm.creative_submission_property_resolution_member (
@@ -184,18 +211,24 @@ BEGIN
   END;
   IF NOT v_rejected THEN RAISE EXCEPTION 'owner-path header truncate was accepted'; END IF;
 
-  IF (
-    SELECT count(*)
+  SELECT count(*) INTO v_trigger_count
     FROM pg_trigger t
     JOIN pg_class c ON c.oid = t.tgrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_proc p ON p.oid = t.tgfoid
+    JOIN pg_namespace pn ON pn.oid = p.pronamespace
     WHERE n.nspname = 'plm'
       AND t.tgname IN (
         'creative_submission_property_resolution_no_truncate',
         'creative_submission_property_resolution_member_no_truncate'
       )
       AND NOT t.tgisinternal
-  ) <> 2 THEN
+      AND t.tgenabled = 'O'
+      AND (t.tgtype & 32) = 32
+      AND (t.tgtype & 1) = 0
+      AND pn.nspname = 'plm'
+      AND p.proname = 'reject_creative_submission_property_resolution_mutation';
+  IF v_trigger_count <> 2 THEN
     RAISE EXCEPTION 'both statement-level truncate rejection triggers are required';
   END IF;
 
@@ -212,13 +245,42 @@ BEGIN
     RAISE EXCEPTION 'service_role privileges are not exactly SELECT and INSERT';
   END IF;
 
-  IF has_table_privilege('public', 'plm.creative_submission_property_resolution', 'SELECT')
-     OR has_table_privilege('anon', 'plm.creative_submission_property_resolution', 'SELECT')
-     OR has_table_privilege('authenticated', 'plm.creative_submission_property_resolution', 'SELECT')
-     OR has_table_privilege('public', 'plm.creative_submission_property_resolution_member', 'INSERT')
-     OR has_table_privilege('anon', 'plm.creative_submission_property_resolution_member', 'INSERT')
-     OR has_table_privilege('authenticated', 'plm.creative_submission_property_resolution_member', 'INSERT') THEN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.role_table_grants
+    WHERE table_schema = 'plm'
+      AND table_name IN (
+        'creative_submission_property_resolution',
+        'creative_submission_property_resolution_member'
+      )
+      AND grantee IN ('PUBLIC', 'anon', 'authenticated')
+  ) THEN
     RAISE EXCEPTION 'an untrusted role retained table privileges';
+  END IF;
+
+  IF EXISTS (
+    SELECT table_name
+    FROM information_schema.role_table_grants
+    WHERE table_schema = 'plm'
+      AND table_name IN (
+        'creative_submission_property_resolution',
+        'creative_submission_property_resolution_member'
+      )
+      AND grantee = 'service_role'
+    GROUP BY table_name
+    HAVING array_agg(privilege_type ORDER BY privilege_type)
+      IS DISTINCT FROM ARRAY['INSERT', 'SELECT']::text[]
+  ) OR (
+    SELECT count(*)
+    FROM information_schema.role_table_grants
+    WHERE table_schema = 'plm'
+      AND table_name IN (
+        'creative_submission_property_resolution',
+        'creative_submission_property_resolution_member'
+      )
+      AND grantee = 'service_role'
+  ) <> 4 THEN
+    RAISE EXCEPTION 'service_role grant rows are not exactly SELECT and INSERT per table';
   END IF;
 
   IF EXISTS (
@@ -240,9 +302,8 @@ BEGIN
         'creative_submission_property_resolution',
         'creative_submission_property_resolution_member'
       )
-      AND roles && ARRAY['public', 'anon', 'authenticated']::name[]
   ) THEN
-    RAISE EXCEPTION 'an untrusted RLS policy exists';
+    RAISE EXCEPTION 'these forced-RLS tables must not have policies';
   END IF;
 END;
 $$;
