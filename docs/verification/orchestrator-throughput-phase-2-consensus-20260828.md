@@ -216,3 +216,7 @@ The current conversation instructed Codex to start a fresh Grok session; this is
 | Phase C docs named a Phase D command | Claude | Phase C documents read-only decisions only; Step 8 lands and synchronizes marker-bound prepare instructions |
 | Preparation CLI was not wired through the manager | Claude | Step 8 names manager flag, argument validation, marker resolution, delegation and operator sequence |
 | Crash then second tip move could leave zero current successors | Grok, Claude | preparation always creates/readbacks newest live successor first even when zero existing refs match, then terminalizes proven stale refs |
+| Step 5 event writers lost tests and STAGE_PAIRS wording conflicted | Claude | writers move to Step 8; event tests require EVENT_TYPES exports and forbid readiness lifecycle events from STAGE_PAIRS |
+| Ready identity/mode/outcome contention assertions were dropped | Claude | Step 8 gate restores new-ID/no-inherited-dry-run, single outcome ref and mode-specific dispatched assertions |
+| Unreadable readiness could wedge a live issue forever | Claude | fenced marker-bound repair requires event binding and no-dispatch proof; otherwise explicit owner decision, never silent deletion |
+| Step 8 omitted CI, invalidator and manager-test files | Claude | Step 8 names required-CI backstop, invalidator discovery and manager tests; its global invalidation forces fresh bundle reviews |
