@@ -58,7 +58,7 @@ Use authenticated `git`/`gh` for `u2giants/shared-db`, Node/Python in the repo, 
 
 # 9. Open questions and risks
 
-Module boundaries and lease cadence are implementer choices under plan §8. Step 10 cap activation waits for Albert's exact two-provider approval after qualification; this does not block earlier phases or shadow work. Eight authors may enter typed `review-wait`; they never cause duplicate reviewer assignment. Ambiguous invalidation must remain `UNVERIFIABLE` and repeat full review.
+Module boundaries and lease cadence are implementer choices under plan §8. Step 10 cap activation waits for Albert's exact two-provider approval after qualification; this does not block earlier phases or shadow work. Eight authors may enter durable typed `review-wait`; they never cause duplicate reviewer assignment. Ambiguous invalidation must remain `UNVERIFIABLE` and repeat full review. The largest risks are accidental claim release, unsafe evidence reuse, wait/reconcile races and false-green required checks; plan §13 gives controls and reversible rollout for each.
 
 ## Handoff self-audit
 

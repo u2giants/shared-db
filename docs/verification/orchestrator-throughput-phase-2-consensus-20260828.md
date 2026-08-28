@@ -42,7 +42,7 @@
 | Required `check-migration-pr-lease.mjs` consumer was omitted | Step 2 and §10 now keep relinquished/expired claims red until guarded resume plus renewal |
 | Coordination events had no explicit writers or audit CLI | Step 2 names exported writers and `coordination-audit.mjs`; no second store |
 | Six-reviewer prerequisite cannot be met by the four-provider live roster | §8/§13 and handoff require Albert to approve the exact two qualified providers before cap activation |
-| Kimi's durable caller-specific denial would recur after generic doctor handling | Step 6 adds narrow caller/execution-context eligibility without globally shrinking coverage |
+| Kimi's execution-context denial would recur after generic doctor handling | Step 6 uses only the current assigning process's doctor result for one attempt, never a persisted ban |
 | Existing workflow test set was incomplete | §10 names the exact nine-suite workflow baseline, including lease, events and coordination scenarios |
 | A neutral wait could become a skipped required context | Step 5 requires the wait context absent from Python `REQUIRED_CHECKS` and managed branch protection |
 
@@ -62,6 +62,20 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Owner gate absent from rollout/definition of done | Claude | repeated in Step 10 rollout and definition of done |
 | AGENTS/skill drift could span phases | Claude | matching skill/drift change is part of Phase A and blocks its fresh-session cut |
 | `--flow-audit --json` lacked a direct test | Claude | explicit coordination-audit CLI test added |
+
+## Fourth-round objections and disposition
+
+| Objection | Source | Disposition in current plan |
+|---|---|---|
+| Live PR contexts, Python production checks and YAML jobs are different sets | Grok | live protection is authoritative only for PR requirements; no set equality; wait is forbidden from both enforcing sets |
+| Early wait could still run `if: always()` apply-artifact upload | Claude | separate short-lived dependency job; preview job never starts while waiting |
+| Waiting dispatch could hold the global workflow concurrency group | Claude | wait job emits metadata and exits immediately; reconciliation redispatches later |
+| `review-wait` lacked durable order and independent waker | Claude | immutable wait refs; release plus Step 8 reconciliation re-enter guarded allocator |
+| Context doctor had only a post-assignment entry point | Claude | factor read-only doctor-only function; run per candidate outside mutex before reservation |
+| Process-local rule contradicted leftover durable/caller prose | Claude | root cause and Step 6 compatibility prose now consistently process-local |
+| Manager `--flow-audit --json` still untested | Claude | manager CLI delegation and output contract test added |
+| Reviewer names can alias one serialized wrapper | Claude | reservations keyed by canonical provider/wrapper execution identity, with display reviewer in payload |
+| Cap test timing could assert eight before approval | Claude | production remains five until gate; parameterized fixtures test proposed eight beforehand |
 
 ## Rejected alternatives
 
