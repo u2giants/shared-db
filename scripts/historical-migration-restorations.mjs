@@ -11,6 +11,7 @@ export const HISTORICAL_RESTORATIONS = Object.freeze({
     productionProject: 'qsllyeztdwjgirsysgai',
     sourceVersion: '20260817150944',
     verificationRun: '33169143850',
+    codeTruthOnly: true,
     statementCount: 1,
     statementBytes: 3213,
     statementSha256: '03f40fec5d4d72443b31ac5c7bdb028d4972eedf057479c596214efb1b189779',

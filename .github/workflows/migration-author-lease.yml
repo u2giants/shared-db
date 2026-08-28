@@ -34,7 +34,8 @@ jobs:
           set -euo pipefail
           result="$(node scripts/check-migration-pr-lease.mjs)"
           echo "$result"
-          if [ "$result" = 'No migration files changed; claim check is not applicable.' ]; then
+          if [ "$result" = 'No migration files changed; claim check is not applicable.' ] || \
+             [ "$result" = 'Migration code-truth restoration verified; claim check is not applicable.' ]; then
             echo 'relevant=false' >> "$GITHUB_OUTPUT"
           else
             echo 'relevant=true' >> "$GITHUB_OUTPUT"
