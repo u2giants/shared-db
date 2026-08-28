@@ -70,9 +70,9 @@ export function repairPreviewReady(readyId,issue,io){
 export function reconcileFlow(input,io){
   const marker=io.resolveMarker(),mutating=Boolean(marker?.live&&marker.calling_task===marker.task),actions=[]
   for(const issue of input.issues??[]){
-    if(issue.blocker?.durable&&issue.capacity_state==='active')actions.push({issue:issue.issue,action:'relinquish-capacity'})
-    if(issue.blocker?.resolved&&issue.capacity_state==='relinquished')actions.push({issue:issue.issue,action:'resume-capacity'})
-    if(issue.preview_edge_satisfied)actions.push({issue:issue.issue,action:mutating?'persist-preview-ready':'report-preview-ready'})
+    if(issue.blocker?.durable&&!issue.blocker.resolved&&issue.capacity_state==='active')actions.push({issue:issue.issue,action:'relinquish-capacity',result:mutating?io.relinquishCapacity(issue):null})
+    if(issue.blocker?.resolved&&issue.capacity_state==='relinquished')actions.push({issue:issue.issue,action:'resume-capacity',result:mutating?io.resumeCapacity(issue):null})
+    if(issue.preview_edge_satisfied)actions.push({issue:issue.issue,action:mutating?'persist-preview-ready':'report-preview-ready',result:mutating?io.persistReady(issue):null})
   }
   return {status:mutating?'RECONCILED':'REPORT_ONLY',mutating,actions}
 }
