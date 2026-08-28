@@ -102,7 +102,7 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Unreadable reservation truth had no shadow/activation rule | Claude | legacy derived state controls shadow; unreadable new truth never triggers paid overflow and fails closed after activation |
 | Refreshed PR could lose its queue position | Claude | new bundle/head becomes next generation under the same primary sequence |
 | Wait cycles could accumulate PR check runs | Claude | waiting is operator coordination only and creates no Actions/check run |
-| New dispatcher was outside preview-producer custody | Claude | dispatcher is pinned in `PREVIEW_PRODUCER_PATHS`/invalidators and production risk tests |
+| New dispatcher was outside preview custody | Claude | corrected later: operator scripts are untrusted proposers; the workflow-side admission validator is the pinned enforcing producer |
 
 ## Seventh-round objections and disposition
 
@@ -128,6 +128,19 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Production caller/procedure was missing | Claude | shared helper supports both targets and Phase C updates the manual production procedure |
 | New config files would fail completeness gate | Claude | each is pinned or precisely exempted and filesystem-completeness test stays required |
 | Second head drift could leave no current wait generation | Claude | recovery snapshots newest live state and exits only with exactly one current generation |
+
+## Ninth-round objections and disposition
+
+| Objection | Source | Disposition in current plan |
+|---|---|---|
+| Four target jobs had no shared admission-gate location | Claude | first workflow-dispatch-only step in existing shared `validate` job; all target jobs already depend on it |
+| New gate job would break literal production `needs` invariant | Claude | no new job/needs edge; existing literal list remains and is tested |
+| Admission check could displace deliberately-first target steps | Claude | upstream validate step; target-ref and exact-confirmation remain first in their own jobs |
+| Empty unauthorized dispatch could stall/replace sanctioned group | Claude | empty admission gets unique unauthorized group; PR branch and sanctioned global group preserved |
+| Ambiguous dispatch lost `UNVERIFIABLE` rule | Claude | unreadable/ambiguous dispatch, admission or validation is explicit exit 2 |
+| Production procedure file was unnamed | Claude | `docs/production-promotion-procedure.md` is a Phase C deliverable using the shared helper |
+| Ledger contradicted operator trust boundary | Claude | older disposition corrected; workflow validator, not operator script, is pinned authority |
+| Admission validator file/tests were unnamed | Claude | named validator and test plus existing production guard test cover all four target paths/concurrency |
 
 ## Rejected alternatives
 
