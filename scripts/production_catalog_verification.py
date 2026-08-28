@@ -3169,6 +3169,30 @@ def main() -> int:
         print(f"CATALOG VERIFICATION BLOCKED: {exc}", file=sys.stderr)
         return 1
 
+CATEGORY_ORDERLIST_BRIDGE_COVERING_INDEX = """
+  (select count(*) = 1
+    from pg_index i
+    join pg_class idx on idx.oid = i.indexrelid
+    join pg_namespace ns on ns.oid = idx.relnamespace
+    join pg_class rel on rel.oid = i.indrelid
+    join pg_am am on am.oid = idx.relam
+    where ns.nspname = 'plm'
+      and idx.relname = 'style_tracker_item_bridge_plm_item_cover_idx'
+      and rel.oid = to_regclass('plm.style_tracker_item_bridge')
+      and am.amname = 'btree'
+      and i.indisvalid
+      and i.indisready
+      and not i.indisunique
+      and i.indnkeyatts = 1
+      and i.indnatts = 4
+      and i.indpred is null
+      and i.indexprs is null
+      and pg_get_indexdef(i.indexrelid) =
+        'CREATE INDEX style_tracker_item_bridge_plm_item_cover_idx ON plm.style_tracker_item_bridge USING btree (plm_item_id) INCLUDE (id, style_tracker_row_id, tracker_type)')
+  and to_regclass('plm.style_tracker_item_bridge_plm_item_idx') is null
+"""
+CATALOG_CONTRACTS["orderlist_bridge_covering_index_v1"] = CATEGORY_ORDERLIST_BRIDGE_COVERING_INDEX
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
