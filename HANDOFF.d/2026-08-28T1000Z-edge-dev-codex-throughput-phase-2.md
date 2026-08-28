@@ -6,7 +6,7 @@ owner: codex/issue-1738-throughput-phase-2
 
 # 0. Decisions only the owner can make
 
-None — nothing in this workstream needs Albert before implementation begins. His 2026-08-27 instruction to raise active author capacity from five to eight is incorporated after claim/capacity separation and proof of at least six active rotation reviewers. The plan preserves one-at-a-time preview/merge/production, exact object protection and required reviewer coverage. Any later proposal to weaken those boundaries is outside issue #1738 and must be raised separately.
+Nothing is needed before implementation begins. One decision is required before the final five-to-eight activation: after qualification evidence exists, Albert must approve the exact two providers to add or un-retire so the active reviewer roster reaches at least six. Until then the cap stays five. The plan preserves one-at-a-time preview/merge/production, exact object protection and required reviewer coverage.
 
 Already settled — do not re-ask:
 
@@ -58,11 +58,11 @@ Use authenticated `git`/`gh` for `u2giants/shared-db`, Node/Python in the repo, 
 
 # 9. Open questions and risks
 
-Module boundaries and lease cadence are implementer choices under plan §8. Ambiguous invalidation must remain `UNVERIFIABLE` and repeat full review. The largest risks are accidental claim release, unsafe review reuse and scheduler races; plan §13 gives controls and reversible rollout for each.
+Module boundaries and lease cadence are implementer choices under plan §8. Phase C cap activation waits for Albert's exact two-provider approval after qualification; this does not block Phases A–B or shadow work. Ambiguous invalidation must remain `UNVERIFIABLE` and repeat full review. The largest risks are accidental claim release, unsafe review reuse and scheduler races; plan §13 gives controls and reversible rollout for each.
 
 ## Handoff self-audit
 
 1. **Newcomer continuity: yes.** §§1–3 explain the repo, goal, exact state and plan link; §6 gives ordered gates.
 2. **Full session knowledge: yes.** §§4–5 carry the failed mechanisms and root cause; the linked plan §3 contains the complete timestamped evidence.
 3. **Execution completeness: yes.** §§6–9 cover actions, constraints, environment, risks and proof; commit/deploy state is explicit in §3.
-4. **Owner-decision sweep: yes.** §§1–9 contain no present owner choice; §0 states none and lists settled boundaries. Any future safety reduction is explicitly outside scope and must be raised separately.
+4. **Owner-decision sweep: yes.** §0 names the one deferred choice: Albert approves the exact two qualified providers before Phase C cap activation. It does not block implementation start. Any safety reduction is outside scope and must be raised separately.

@@ -91,7 +91,7 @@ The original requested queue also contained #1662, #1676, #1669, #1722, #1692, #
 | 02:35–03:01 | #1713 refreshed and obtained a second independent review although migration SQL remained byte-identical | avoidable review replay |
 | 02:49 | #1684 supersession rejected a PR that deleted an obsolete test, not a migration | route compatibility defect discovered late |
 | 02:51 | maintenance blocker #1729 filed; #1684 claim remained occupied | valid protection, false capacity use |
-| 02:55 | #1720's assigned Kimi route was prohibited and had to rotate to Muse | reviewer qualification happened after assignment |
+| 02:55 | #1720's assigned Kimi route was structurally unusable for that caller (`execution-context-denied`) and had to rotate to Muse | caller-specific eligibility was known only after assignment |
 | 02:58 | #1720 approved at refreshed head | review completed |
 | 03:00 | #1720 preview dry-run failed because preview already contained unmerged #1713 | known dependency presented as a failed run |
 | 03:01–03:04 | #1713 merged and historical preview proof was rebound | prerequisite completion manually unblocked #1720 |
@@ -118,7 +118,7 @@ The root cause is not slow coding and not excessive safety. It is **identity and
 1. A claim has two jobs: object exclusivity and one-of-five author capacity. Those lifetimes differ. An issue blocked for hours still needs exclusivity but no active author.
 2. Review evidence is keyed to an exact Git head even when the reviewed migration, test and safety inputs are byte-identical. PR #1728 changed only `HANDOFF.md` and `plan_author_lane_capacity_five_to_eight.md`, yet #1713 had to merge that `main` movement and repeat review.
 3. Preview is one mutable ordered ledger, but its unmerged-version dependencies are discovered by failing workflows instead of represented as queue dependencies.
-4. Reviewer selection uses shared coordination and can leave stale global state after interruption. Qualification can occur after a reviewer has been durably selected.
+4. Reviewer selection uses shared coordination and can leave stale global state after interruption. General local/provider qualification correctly remains post-assignment, but a durable caller-specific incompatibility such as `execution-context-denied` needs a distinct pre-selection eligibility class so the same caller is not assigned an unusable provider forever.
 5. Route and verifier capabilities are checked at the stage that needs them, so unsupported shapes survive authoring, CI and review before failing.
 6. Recovery evidence has several identities—author head, merge tip, original preview apply, ledger rename and superseded version—but route inputs do not make invalid combinations impossible early.
 
@@ -173,6 +173,7 @@ Re-anchor line numbers before editing. Durable anchors and starting behavior on 
 - `scripts/lib/exclusive-lease.mjs` and `scripts/lib/exclusive-lease.test.mjs` deliberately reject heartbeat/renewal for preview, merge and production because moving a held ref strands release and opens races. Phase 2 must preserve that decision.
 - `recoverStaleAuthorMutex()` has a fixed recognized-lock allowlist duplicated in `scripts/lib/exclusive-lease.test.mjs`; every new coordination lock kind must update both in the same PR.
 - `scripts/check-dispatch-collision.mjs` independently parses/emits claim bodies and must remain compatible with any new capacity-state fence.
+- `scripts/check-migration-pr-lease.mjs` imports `parseAuthorLease()` and is the required `Migration author lease` check. It currently refuses expired leases. Phase 2 must keep it fail-closed: a relinquished or expired-capacity claim cannot merge; resume must reactivate capacity and renew the time lease before required CI/merge.
 - `docs/agents/section-4-anti-collision-rules.md`
   - says claims occupy a lane until released;
   - documents five author lanes and explicit queue refill;
@@ -231,7 +232,7 @@ Selecting a reviewer needs atomic roster/cursor updates, but remote review execu
 ### Locked on 2026-08-28
 
 - Preserve exact object claims for every unresolved structural issue, including externally blocked issues.
-- Only renewable `active-author` leases count toward the five-worker cap.
+- Only renewable `active-author` leases count toward the configured active-author cap.
 - Preview, merge and production remain single-holder and fail closed.
 - Albert's 2026-08-27 five-to-eight instruction is implemented as eight **active-author capacity holders**, never as a limit of eight protected claims, and only after at least six active rotation reviewers are proven.
 - Review reuse is keyed to a canonical content bundle, never issue number, PR number, branch name or migration hash alone.
@@ -244,6 +245,10 @@ Selecting a reviewer needs atomic roster/cursor updates, but remote review execu
 - Preview-ahead state produces a dependency edge and wait status, not acceptance and not a misleading generic failure.
 - Route qualification is read-only. It may refuse or report unavailable; it may not mutate refs, GitHub, preview or production.
 - Phase 1 blocker-ledger records are the measurement authority once available.
+
+### Owner decision required before Phase C cap activation
+
+Albert's 2026-08-27 instruction authorizes the five-to-eight goal and requires at least six active rotation reviewers first. The live roster has four. Before Phase C activates eight, Albert must approve the exact two providers to add/un-retire after real wrapper qualification evidence is available. This does not block Phases A–B, the safety architecture, or shadow implementation; it blocks only roster mutation and cap activation. The implementer must present the qualified recommendation once, not silently choose provider identities.
 
 ### Implementer judgment
 
@@ -290,16 +295,18 @@ Change `scripts/manage-migration-author-lanes.mjs` around `parseAuthorLease()`, 
 - `--resume-author-lease --claim <n>`;
 - `--flow-audit --json`.
 
-A protected claim remains in collision calculations and continues owning its migration version/object set. Extend the existing `db-author-lease` fence with a distinct capacity field (`capacity_state: active | relinquished | expired-unconfirmed`) and optional `blocked_on`; do not use its existing `expires_at`, parsed `lease.active`, or clock expiry as the capacity signal. Relinquishment requires a typed blocker with a durable GitHub issue or immutable artifact, clean worktree proof and no active preview/merge/production holder for that claim. Resume reacquires capacity and rechecks every collision and version reservation. Existing lease expiry releases neither claim nor capacity automatically; it yields `expired-unconfirmed` and blocks mutation until guarded recovery.
+A protected claim remains in collision calculations and continues owning its migration version/object set. Extend the existing `db-author-lease` fence with a distinct capacity field (`capacity_state: active | relinquished | expired-unconfirmed`) and optional `blocked_on`; do not use its existing `expires_at`, parsed `lease.active`, or clock expiry as the capacity signal. Relinquishment requires a typed blocker with a durable GitHub issue or immutable artifact, clean worktree proof and no active preview/merge/production holder for that claim. Resume atomically reacquires capacity, renews `expires_at`, and rechecks every collision/version reservation before CI/review/merge. Existing lease expiry releases neither claim nor capacity automatically; it yields `expired-unconfirmed` and blocks mutation until guarded recovery.
 
-`buildDynamicQueues()` must allocate/display collision components independently of the active-author slot array, so any number of protected blocked claims can remain visible without indexing an empty `free[0]`. Remove total-claim-count ambiguity/refusals from expansion and split recovery while preserving collision/version checks. The active cap becomes eight only after the active reviewer rotation is at least six, as required by `plan_author_lane_capacity_five_to_eight.md`; otherwise it remains five and reports the unmet prerequisite.
+Update `scripts/check-migration-pr-lease.mjs` and its test explicitly. The required check stays red for every `capacity_state != active` and every expired time lease. A blocked/relinquished PR is not merge-ready and need not remain green; only guarded resume plus renewal can restore the required check. Never “fix” blocked PR noise by accepting relinquished or expired claims.
 
-Every relinquish/resume/reconcile lock kind is added to the recovery allowlist and `exclusive-lease.test.mjs` in the same change. `db-coordination-events.mjs` records `author_capacity_relinquished`, `author_capacity_resumed`, `issue_blocked`, and `issue_unblocked` with legal sequence validation. Both claim parsers accept the extended fence and continue failing closed on malformed bodies.
+`buildDynamicQueues()` must allocate/display collision components independently of the active-author slot array, so any number of protected blocked claims can remain visible without indexing an empty `free[0]`. Remove total-claim-count ambiguity/refusals from expansion and split recovery while preserving collision/version checks. Plan Markdown is evidence/history, never runtime policy input: the enforced cap comes from the code constant plus synchronized `AGENTS.md`/skill authority. The active cap becomes eight only after Albert approves the exact roster change and at least six active reviewers are proven; otherwise it remains five and reports the unmet prerequisite.
+
+Every relinquish/resume/reconcile lock kind is added to the recovery allowlist and `exclusive-lease.test.mjs` in the same change. Extend `db-coordination-events.mjs` with exported constructors/writers for `author_capacity_relinquished`, `author_capacity_resumed`, `issue_blocked`, and `issue_unblocked`; wire manager transitions to those writers. Add `scripts/orchestrator-flow/coordination-audit.mjs` as the explicit CLI over `validateEvent()`/`auditTimeline()`/`renderTimeline()`. There is no second store. Both claim parsers accept the extended fence and continue failing closed on malformed bodies.
 
 Update `docs/agents/section-4-anti-collision-rules.md` and `AGENTS.md` so “five lanes” means five active authors, not five protected claims. Keep queue grouping aware of all claims.
 
 **Dependencies:** Step 1.
-**Verification gate:** tests prove at least eight blocked protected claims plus eight non-overlapping active authors are representable when reviewer capacity is proven; the next overlapping issue remains blocked; expansion/supersession/split recovery work with more protected claims than the active cap; existing clock expiry frees zero capacity; releasing only capacity never permits an object/version collision; interrupted relinquish/resume is recoverable and idempotent; both claim parsers accept the new fence; `--coordination-audit` replays relinquish→blocked→unblocked→resume without double-acquisition.
+**Verification gate:** tests prove at least eight blocked protected claims plus eight non-overlapping active authors are representable when reviewer capacity is approved/proven; the next overlapping issue remains blocked; expansion/supersession/split recovery work with more protected claims than the active cap; existing clock expiry frees zero capacity; `check-migration-pr-lease.mjs` refuses expired active-capacity and all relinquished claims; guarded resume renews/reactivates before the check can pass; releasing only capacity never permits an object/version collision; interrupted relinquish/resume is recoverable and idempotent; both claim parsers accept the new fence; `node scripts/orchestrator-flow/coordination-audit.mjs` replays emitted relinquish→blocked→unblocked→resume events without double-acquisition.
 
 **Fresh-session cut:** commit Phase A on its feature branch, update STATUS, and start Phase B from current `origin/main` plus the Phase A branch/PR as appropriate.
 
@@ -385,14 +392,17 @@ Integrate the selector with `.github/workflows/shared-supabase-migrations.yml`; 
 
 “Neutral queued state” is coordination metadata only. It must not conclude a required GitHub check as `success`, upload a `preview-migration-apply-*`/rebind artifact, or satisfy any consumer that requires a real apply/rebind. The workflow may skip/cancel a non-required dispatch job or emit a separate non-required wait check; only a real apply or validated historical/merged rebind produces success evidence.
 
+The wait check/context must be absent from `production_business_risk_gate.py::REQUIRED_CHECKS` and from every required branch-protection context managed by `scripts/update-required-checks.mjs`. A skipped required context is not a wait design; it is a merge deadlock and fails this step.
+
 **Dependencies:** Steps 3–4.
-**Verification gate:** transcript-derived fixtures reproduce #1720 waiting behind #1713, automatic resume after #1713 rebind, #1720 historical-route selection, and #1646 dependency-closure detection without a failed preview/production run; a `WAITING` conclusion/artifact cannot satisfy `REQUIRED_CHECKS`, merge, preview-proof or production consumers.
+**Verification gate:** transcript-derived fixtures reproduce #1720 waiting behind #1713, automatic resume after #1713 rebind, #1720 historical-route selection, and #1646 dependency-closure detection without a failed preview/production run; a `WAITING` conclusion/artifact cannot satisfy `REQUIRED_CHECKS`, merge, preview-proof or production consumers; static tests prove its context is absent from Python risk policy and the branch-protection context list.
 
 ### Step 6 — replace the global reviewer-assignment critical section
 
 Refactor `assignNextReviewer()`, `replaceFailedReviewer()`, `reviewerExecutionPreflight()` and liveness/recovery helpers in `scripts/manage-migration-author-lanes.mjs`:
 
 - exclude only retired/paused providers and durable issue-specific prohibitions before selection; local wrapper/doctor failure never silently shrinks the roster;
+- add a third, caller-specific eligibility class. Only durable, fresh wrapper evidence naming the exact approved check `execution-context-denied` may mark one reviewer ineligible for one caller/execution context before selection. It does not pause the provider globally, record provider failure, or reduce the roster for other callers; unknown/stale evidence does not skip anyone;
 - reserve `refs/db-reviewer-reservations/<reviewer>` with `createRef()`/`acquireRef()` create-if-absent semantics;
 - advance the round-robin cursor inside a short `MUTEX_REF` critical section, or replace the cursor with append-only assignment refs read through `listRefs()`; never call force `updateRef()` as though it were compare-and-swap;
 - persist issue/PR/bundle ID/head metadata;
@@ -401,10 +411,10 @@ Refactor `assignNextReviewer()`, `replaceFailedReviewer()`, `reviewerExecutionPr
 - recover only a specific reviewer reservation after proving no verdict/artifact and dead/interrupted owner state;
 - never replace a substantive `REVISE` or reduce coverage.
 
-Keep exact-head metadata during rollout, but make bundle ID the review-content identity. `reviewerExecutionPreflight()` remains after durable assignment. A local `doctor` failure follows the existing local-dependency path and does not rotate/skip the provider; only a durable roster pause/retirement or issue-specific policy prevents selection. Add reviewer reservation/recovery lock kinds to the central and duplicated recovery allowlists.
+Keep exact-head metadata during rollout, but make bundle ID the review-content identity. `reviewerExecutionPreflight()` remains after durable assignment for general wrapper/provider/local checks. A local `doctor` failure follows the existing local-dependency path and does not rotate/skip the provider unless it matches the narrowly versioned caller-specific class above; only durable roster pause/retirement, issue-specific policy, or exact caller-context ineligibility prevents selection. Add reviewer reservation/recovery lock kinds to the central and duplicated recovery allowlists.
 
 **Dependencies:** Step 3 bundle identity. Can be implemented in parallel with Step 5 after schema freeze.
-**Verification gate:** concurrency tests launch assignments for at least three issues and prove distinct reviewers reserve concurrently; interruption of one does not hold `MUTEX_REF` or block others; duplicate assignment to one reviewer is impossible; stale recovery touches only that reviewer; local doctor failure keeps the assigned reviewer and fails through the existing local-dependency path; retired/paused/prohibited providers are never assigned; all existing reviewer-replacement refusal tests remain green.
+**Verification gate:** concurrency tests launch assignments for at least three issues and prove distinct reviewers reserve concurrently; interruption of one does not hold `MUTEX_REF` or block others; duplicate assignment to one reviewer is impossible; stale recovery touches only that reviewer; ordinary local doctor failure keeps the assigned reviewer and fails through the existing local-dependency path; exact fresh `execution-context-denied` evidence skips that provider only for the matching caller and preserves it for another caller; stale/unknown evidence cannot skip; retired/paused/prohibited providers are never assigned; all existing reviewer-replacement refusal tests remain green.
 
 **Fresh-session cut:** update STATUS and start Phase D.
 
@@ -494,6 +504,8 @@ Run focused tests after each step and the repository-required suites on a frozen
 ## 10. Required tests
 
 - Existing `scripts/manage-migration-author-lanes.test.mjs` remains green, including collision, lease, reviewer replacement, stale recovery, supersession and exclusive-stage tests.
+- `scripts/check-migration-pr-lease.test.mjs` proves relinquished, expired and non-active-capacity leases remain merge-blocking until guarded resume renews/reactivates them.
+- `scripts/coordination-scenarios.test.mjs` remains green and gains end-to-end blocked/relinquish/resume and wait-context scenarios.
 - `scripts/orchestrator-flow/baseline-schema.test.mjs`: source provenance, state separation, timestamp order, unknown duration handling.
 - `scripts/orchestrator-flow/evidence-bundle.test.mjs`: canonicalization, every invalidator, dirty/missing file refusal, identical bundle across unrelated base movement.
 - `scripts/orchestrator-flow/classify-invalidation.test.mjs`: all five classes and the real #1713/`ddcdd5da` byte-identical fixture.
@@ -506,10 +518,11 @@ Run focused tests after each step and the repository-required suites on a frozen
 - Static tests prove no code path releases an object claim on author-lease relinquishment/expiry.
 - Static tests prove existing `expires_at`/`lease.active` never decides active capacity and no exclusive-stage heartbeat/renewal writer exists.
 - Recovery tests cover every new lock kind in both the manager allowlist and `scripts/lib/exclusive-lease.test.mjs`.
-- `scripts/db-coordination-events.mjs` tests cover every new transition and reject a parallel event store/double acquisition.
+- `scripts/db-coordination-events.test.mjs` covers every new transition and rejects a parallel event store/double acquisition.
 - Both claim parsers accept the versioned capacity fence and reject malformed state.
 - Failure injection after every ref write proves retry/recovery is idempotent.
-- Run `node --test scripts/orchestrator-flow/*.test.mjs` plus repository-required Node/Python suites and `node scripts/check-skill-drift.mjs --require-skills`.
+- Run the repository workflow's exact existing coordination baseline: `node --test scripts/check-migration-pr-lease.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/historical-migration-restorations.test.mjs scripts/lib/work-dependencies.test.mjs scripts/agent-work-contract.test.mjs scripts/db-coordination-events.test.mjs scripts/coordination-scenarios.test.mjs scripts/lib/exclusive-lease.test.mjs scripts/apply-lane-advisory-lock.test.mjs`.
+- Run `node --test scripts/orchestrator-flow/*.test.mjs` plus repository-required Python suites and `node scripts/check-skill-drift.mjs --require-skills`.
 
 ## 11. Constraints, standing rules and gotchas
 
@@ -532,6 +545,7 @@ Run focused tests after each step and the repository-required suites on a frozen
 - Do not treat overall issue age as throughput evidence.
 - A change to `AGENTS.md` must be mirrored through the repository's skill-drift mechanism.
 - Once scripts/workflows change, the PR is not documentation-only.
+- Plan and handoff Markdown are never runtime policy inputs; executable policy comes only from versioned code/config plus synchronized standing instructions.
 
 ## 12. Access and environment
 
@@ -579,7 +593,7 @@ Run focused tests after each step and the repository-required suites on a frozen
 
 ### Open questions
 
-No new owner decision is required to begin implementation. Albert already instructed the five-to-eight raise on 2026-08-27; this plan resolves the sequencing conflict by applying eight to **active capacity leases** only after claim/capacity separation and at least six active rotation reviewers. The implementer may choose module boundaries and the versioned capacity-record representation under §8. The first shadow report may reveal a class that cannot safely be proven disjoint; classify it `UNVERIFIABLE` and retain full exact-head replay rather than asking for a safety exception. Any proposal to parallelize database writes or reduce reviewer coverage is outside this plan and requires a separate owner decision.
+Implementation may begin without an owner decision, but Phase C cap activation cannot. Albert already instructed the five-to-eight raise on 2026-08-27 and required at least six active rotation reviewers; the live roster has four. After real wrapper qualification, the implementer must bring Albert one exact recommendation naming the two providers to add or un-retire. Until he approves those identities, the cap remains five. The implementer may choose module boundaries and the versioned capacity-record representation under §8. The first shadow report may reveal a class that cannot safely be proven disjoint; classify it `UNVERIFIABLE` and retain full exact-head replay rather than asking for a safety exception. Any proposal to parallelize database writes or reduce reviewer coverage is outside this plan and requires a separate owner decision.
 
 ## Self-audit
 
