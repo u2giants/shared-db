@@ -1412,7 +1412,7 @@ have already happened in this repo, more than once.
     finishes, then release it.** This is standard practice, not an improvisation.
 
 15. **The single-orchestrator rule is scoped to STRUCTURE (owner ruling §0.0-B, 2026-08-13).**
-    Rules 1 and 2 above ("one orchestrator", "up to five migration authors") govern changes to the
+    Rules 1 and 2 above ("one orchestrator", "up to five active migration authors, independently of protected blocked claims") govern changes to the
     *shape* of the database. They do **not** make an application session's ordinary row writes
     into orchestrator work, and a session must not open an issue or hand over merely because its
     feature writes data. The single exception is curated Master Data under §6.4, which stays

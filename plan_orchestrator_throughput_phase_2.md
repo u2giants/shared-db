@@ -15,8 +15,8 @@ This is Phase 2 of the throughput repair. Phase 1 is [`plan_orchestrator_through
 | Step | Deliverable | State | Evidence |
 |---|---|---|---|
 | 0 | Plan, evidence, handoff and tracking issue registered | ✅ done 2026-08-28 | this file; linked handoff; issue #1738 |
-| 1 | Freeze a machine-readable transcript baseline and throughput model | ⬜ open | — |
-| 2 | Separate protected object claims from active author capacity | ⬜ open | — |
+| 1 | Freeze a machine-readable transcript baseline and throughput model | ✅ done 2026-08-28 | scrubbed baseline JSON; hermetic schema tests; required CI guarded glob |
+| 2 | Separate protected object claims from active author capacity | ✅ done 2026-08-28 | versioned capacity fence; guarded relinquish/resume; collision and audit tests |
 | 3 | Add immutable, content-addressed evidence bundles | ⬜ open | — |
 | 4 | Revalidate by proven invalidation class instead of unrelated `main` movement | ⬜ open | — |
 | 5 | Add an explicit shared-preview dependency graph and durable ready instruction | ⬜ open | — |

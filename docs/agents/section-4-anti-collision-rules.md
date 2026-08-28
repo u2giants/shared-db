@@ -12,11 +12,13 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
 
 ## 4. The five anti-collision rules (shared database)
 
-1. **Up to five unrelated migrations may be authored at once. Preview, merges,
+1. **Up to five unrelated migrations may hold active-author capacity at once. Preview, merges,
    and production promotion remain one at a time.** Albert's owner ruling of
    2026-08-14 set this at three; he raised it to five on 2026-08-25. Concurrent
    authors must use isolated worktrees, exact object claims and centrally
-   reserved versions. A sixth author is refused.
+   reserved versions. Protected blocked claims do not consume active-author
+   capacity, but continue blocking every overlapping object and version. A
+   sixth active author is refused.
 
    The number is a throughput dial, not a safety dial. Isolation comes from the
    exact object claim, the global acquisition mutex, the permanent version
@@ -39,14 +41,18 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
 
    Allocation is serialized across computers by a GitHub-backed lock. The command
    fails closed if claims are unreadable, objects overlap an open claim or pull
-   request, GitHub is unavailable, version reservation fails, or three author
-   lanes are occupied. Older claims count until they are explicitly released.
+   request, GitHub is unavailable, version reservation fails, or five active-author
+   leases are occupied. Older claims protect objects until explicitly released;
+   only a guarded capacity relinquishment removes their author-slot use.
    The created issue body is authoritative and machine-readable. Never hand-edit
    its fenced blocks. The permanent version ref prevents reuse even after a lease
-   ends; the lease only controls who occupies an author lane.
+   ends. Clock expiry releases neither protection nor capacity. When durable
+   external evidence blocks clean work, use `--relinquish-author-lease --claim
+   <n> --owner <owner> --blocked-on issue:#<n>`; after the blocker clears, use
+   `--resume-author-lease --claim <n> --owner <owner> --lease-hours <hours>`.
 
    Audit lanes with `node scripts/manage-migration-author-lanes.mjs --audit`.
-   Audit and refill the three dynamic queues with
+   Audit and refill the dynamic queues with
    `node scripts/manage-migration-author-lanes.mjs --queue-audit`. Every open
    `db-work` issue must contain one authoritative block:
 
@@ -203,7 +209,8 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    only the status after Albert answers can never change its owner route.
 
    Exact object overlap forms a serial queue; unrelated object
-   groups fill up to five author lanes. When a claim releases, rerun the queue
+   groups fill up to five active-author slots. A relinquished claim stays visible
+   in its collision component without occupying a slot. When capacity releases, rerun the queue
    audit and dispatch every reported `REFILL REQUIRED NOW` issue in the same
    turn. Never wait for Albert to ask or approve routine dispatch. Ask him only
    for a genuine business ruling or material production risk. Recompute after

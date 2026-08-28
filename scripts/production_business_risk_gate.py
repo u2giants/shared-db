@@ -469,6 +469,10 @@ PREVIEW_PRODUCER_PATHS = (
     # Runs FIRST in the preview job, to acquire the lane, before any evidence
     # byte exists. Unpinned, it was a complete forgery path.
     "scripts/manage-migration-author-lanes.mjs",
+    # Imported by the manager for append-only capacity and issue-flow events.
+    # A different event vocabulary could forge or suppress the coordination
+    # evidence that preview-stage authorization consumes.
+    "scripts/db-coordination-events.mjs",
     # Local import of the above. Pinning an entry point without its imports
     # leaves the same door open one level down.
     "scripts/check-dispatch-collision.mjs",

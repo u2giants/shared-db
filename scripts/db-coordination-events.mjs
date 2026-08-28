@@ -33,7 +33,12 @@ export const EVENT_TYPES = Object.freeze([
   'contract_published', 'contract_superseded',
   'dispatched',
   'claim_acquired', 'claim_renewed', 'claim_expanded', 'claim_released',
+  'author_capacity_relinquished', 'author_capacity_resumed',
+  'issue_blocked', 'issue_unblocked',
+  'ci_started', 'ci_completed',
+  'review_wait',
   'review_started', 'review_completed',
+  'preview_wait', 'preview_ready',
   'preview_acquired', 'preview_released',
   'merge_acquired', 'merge_released',
   'production_acquired', 'production_released',
@@ -93,6 +98,23 @@ export function validateEvent(event) {
 export function eventId(event) {
   const material = [event.event_type, event.work_issue, event.timestamp, event.actor, event.holder_id ?? '', event.generation ?? '', event.pr ?? ''].join('|')
   return createHash('sha256').update(material).digest('hex').slice(0, 16)
+}
+
+export function coordinationEvent({ eventType, workIssue, claimIssue, actor, timestamp, detail, ...optional }) {
+  const event = {
+    schema_version: EVENT_SCHEMA_VERSION,
+    event_id: '',
+    event_type: eventType,
+    timestamp,
+    work_issue: Number(workIssue),
+    actor,
+    result: 'succeeded',
+    ...(claimIssue === undefined ? {} : { claim_issue: Number(claimIssue) }),
+    ...(detail ? { detail } : {}),
+    ...optional,
+  }
+  event.event_id = eventId(event)
+  return validateEvent(event)
 }
 
 export function parseEventComment(body) {
