@@ -17,14 +17,14 @@ This is Phase 2 of the throughput repair. Phase 1 is [`plan_orchestrator_through
 | 0 | Plan, evidence, handoff and tracking issue registered | ✅ done 2026-08-28 | this file; linked handoff; issue #1738 |
 | 1 | Freeze a machine-readable transcript baseline and throughput model | ✅ done 2026-08-28 | scrubbed baseline JSON; hermetic schema tests; required CI guarded glob |
 | 2 | Separate protected object claims from active author capacity | ✅ done 2026-08-28 | versioned capacity fence; guarded relinquish/resume; collision and audit tests |
-| 3 | Add immutable, content-addressed evidence bundles | ⬜ open | — |
-| 4 | Revalidate by proven invalidation class instead of unrelated `main` movement | ⬜ open | — |
-| 5 | Add an explicit shared-preview dependency graph and durable ready instruction | ⬜ open | — |
-| 6 | Make reviewer allocation concurrent with short per-reviewer reservations | ⬜ open | — |
-| 7 | Preflight route and verifier compatibility before expensive work | ⬜ open | — |
-| 8 | Automate blocker transitions, capacity refill and resume | ⬜ open | — |
-| 9 | Integrate Phase 1 measurement and prove throughput without weakening safety | ⬜ open | — |
-| 10 | Full verification, staged rollout, landing and post-merge proof | ⬜ open | — |
+| 3 | Add immutable, content-addressed evidence bundles | ✅ done 2026-08-28 | canonical bundle schema/CLI; invalidator discovery; dirty/missing fail-closed tests |
+| 4 | Revalidate by proven invalidation class instead of unrelated `main` movement | ✅ done 2026-08-28 | five-class conservative classifier; #1713 integration-only fixture |
+| 5 | Add an explicit shared-preview dependency graph and durable ready instruction | ✅ done 2026-08-28 | live repository-variable/ledger reader; deterministic route/ready identity; historical dry-run refusal |
+| 6 | Make reviewer allocation concurrent with short per-reviewer reservations | ✅ shadow implementation 2026-08-28 | canonical execution-key reservations; ordered durable wait/claim tests; activation held at Step 10 gate |
+| 7 | Preflight route and verifier compatibility before expensive work | ✅ done 2026-08-28 | thin Node qualification over Python risk/catalog diagnostics; #1684/#1720/#1646 fixtures |
+| 8 | Automate blocker transitions, capacity refill and resume | ✅ done 2026-08-28 | marker-bound live adapter; guarded transitions; successor-first ready refs; explicit UNVERIFIABLE exit 2 |
+| 9 | Integrate Phase 1 measurement and prove throughput without weakening safety | ✅ schema/report done 2026-08-28 | one ledger schema; separated waits; observed-only n=20 and zero-tolerance safety tests |
+| 10 | Full verification, staged rollout, landing and post-merge proof | ⏸ owner gate | independent APPROVE; Qwen unavailable; Codex and DeepSeek qualified; exact roster approval required before six-reviewer/cap-eight activation |
 
 **Fresh implementation starts at Step 1.** Use a fresh session at each phase boundary: Phase A = Steps 1–2, Phase B = Steps 3–4, Phase C = Steps 5–6, Phase D = Steps 7–9, Phase E = Step 10. Re-read the remaining plan and current `origin/main` before each phase.
 
