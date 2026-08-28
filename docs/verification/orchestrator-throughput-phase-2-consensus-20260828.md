@@ -104,6 +104,18 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Wait cycles could accumulate PR check runs | Claude | waiting is operator coordination only and creates no Actions/check run |
 | New dispatcher was outside preview-producer custody | Claude | dispatcher is pinned in `PREVIEW_PRODUCER_PATHS`/invalidators and production risk tests |
 
+## Seventh-round objections and disposition
+
+| Objection | Source | Disposition in current plan |
+|---|---|---|
+| Run-state check would include continuous pull-request validation | Claude | admission checks queued/in-progress `workflow_dispatch` runs only |
+| Production did not own the same dispatch admission path | Claude | shared dispatcher owns both sanctioned preview and production; preview front end calls it |
+| Shared admission lock lacked allowlist/recovery | Claude | both recognized-kind lists updated; exact-payload terminal/dead fenced recovery specified |
+| Operator local bytes were not proven by producer custody alone | Claude | clean worktree plus exact `origin/main` blob proof, immutable admission record and explicit executable discovery |
+| Stale workflow-wait wording contradicted operator-state redesign | Claude | all waiting language now says no run/check/artifact |
+| Crash between superseded outcome and successor wait could lose issue | Claude | successor-first rollover under mutex plus two-generation recovery/failure injection |
+| Ready preview and reconciliation dispatch tests were missing | Claude | exact one-lock ready-preview test and reconcile dispatch/busy/recovery cases added |
+
 ## Rejected alternatives
 
 - Release blocked claims, raise the cap as a substitute for decoupling, parallelize database writes, reuse SQL-only evidence, trust path names alone, time-delete mutexes, add exclusive-stage heartbeat, build a general SQL analyzer, or accept production apply without verification.
