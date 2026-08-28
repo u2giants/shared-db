@@ -166,12 +166,12 @@ begin
   exception when insufficient_privilege then null;
   end;
 
+  execute 'reset role';
   select c.* into v_row from core.customer c where c.id = v_customer_id;
   if v_row.domain is distinct from 'issue-1615.example.invalid' then
     raise exception 'rejected non-admin clear changed the domain';
   end if;
 
-  execute 'reset role';
   select r.id into v_admin_role_id
   from app.role r
   where r.slug = 'administrator';
