@@ -6,11 +6,12 @@ owner: codex/issue-1738-throughput-phase-2
 
 # 0. Decisions only the owner can make
 
-None — nothing in this workstream needs Albert before implementation begins. The plan preserves one-at-a-time preview/merge/production, exact object protection and required reviewer coverage. Any later proposal to weaken those boundaries is outside issue #1738 and must be raised separately.
+None — nothing in this workstream needs Albert before implementation begins. His 2026-08-27 instruction to raise active author capacity from five to eight is incorporated after claim/capacity separation and proof of at least six active rotation reviewers. The plan preserves one-at-a-time preview/merge/production, exact object protection and required reviewer coverage. Any later proposal to weaken those boundaries is outside issue #1738 and must be raised separately.
 
 Already settled — do not re-ask:
 
 - 2026-08-28: Phase 2 must preserve every safety gate while removing false capacity use and unnecessary evidence replay.
+- 2026-08-27: raise active author capacity from five to eight, conditional on reviewer-roster growth; Phase 2 owns the safe sequencing.
 - 2026-08-21: repository-maintenance work belongs to a separate repo session, not the structural orchestrator.
 
 # 1. What this application is
@@ -23,21 +24,21 @@ Albert asked for an implementation-plan-writer Phase 2 plan using all evidence f
 
 # 3. Current state
 
-The comprehensive plan is [`../plan_orchestrator_throughput_phase_2.md`](../plan_orchestrator_throughput_phase_2.md). It is documentation only on branch `codex/issue-1738-throughput-phase-2`, based on planning `origin/main` SHA `4433467af5e40a82f1a8def381efa1d5a9cc52c7`. No Phase 2 code, workflow, migration, database write or deployment has occurred. Issue #1738 tracks implementation.
+The comprehensive plan is [`../plan_orchestrator_throughput_phase_2.md`](../plan_orchestrator_throughput_phase_2.md), with debate evidence in [`../docs/verification/orchestrator-throughput-phase-2-consensus-20260828.md`](../docs/verification/orchestrator-throughput-phase-2-consensus-20260828.md). The initial plan merged at `1eacdacd52a5d6bbd212f718967391df1381138d`; Grok 4.6 and Claude Opus 5 rejected that revision and their material objections are being incorporated on `codex/issue-1738-phase2-consensus`. No Phase 2 code, workflow, migration, database write or deployment has occurred. Issue #1738 tracks implementation.
 
 # 4. What did not work
 
-- Counting blocked claims as active author lanes produced “five occupied” while only three workers ran.
+- Counting blocked claims as active author lanes produced “five occupied” while only three workers ran; the initial plan also failed to name the real `buildDynamicQueues()`/expansion/audit capacity surfaces.
 - Exact-head-only review identity caused byte-identical #1713 migration evidence to be reviewed again after unrelated `main` movement.
 - Shared-preview dependencies surfaced as failed workflows, notably #1720 behind unmerged #1713.
-- Reviewer selection serialized unrelated issues and an interrupted review left a stale mutex.
+- Reviewer selection serialized unrelated issues and an interrupted review left a stale mutex. The initial plan incorrectly assumed Git-level compare-and-swap and an existing heartbeat; both assumptions are now explicitly rejected.
 - Route/verifier incompatibilities were discovered late: #1684 supersession/test deletion, #1720 constraint-only verification, and #1646 dependency/history compatibility.
 
 The plan's §7 records rejected fixes, including releasing claims, raising the lane cap, parallel database writes and unsafe review reuse.
 
 # 5. Root causes and key findings
 
-The governing defect is coupling: a claim simultaneously represents object protection and worker capacity; a Git commit simultaneously represents reviewed content and integration state; preview failure simultaneously represents unsafe state and an expected queue dependency. The plan separates those identities while retaining conservative failure behavior. Full measurements and the event timeline are in plan §3.
+The governing defect is coupling: a claim simultaneously represents object protection and worker capacity; a Git commit simultaneously represents reviewed content and integration state; preview failure simultaneously represents unsafe state and an expected queue dependency. The revised plan separates those identities while retaining conservative failure behavior and now covers the existing lease/event/recovery machinery, no-heartbeat rule, WAITING semantics, cross-language qualification seam, real #1713 documentation merge, and five-to-eight owner instruction. Full measurements and the event timeline are in plan §3.
 
 # 6. Exact next steps
 
