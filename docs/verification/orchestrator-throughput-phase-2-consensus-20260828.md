@@ -67,9 +67,11 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | AGENTS/skill drift could span phases | Claude | matching skill/drift change is part of Phase A and blocks its fresh-session cut |
 | `--flow-audit --json` lacked a direct test | Claude | explicit coordination-audit CLI test added |
 
-## Fourth-round objections and disposition — HISTORICAL, DISPATCH ITEMS SUPERSEDED
+Only the preview-wait/workflow-dispatch/live-protection row in this third round is superseded by the final no-run design. Every reviewer-allocation, capacity, owner-gate, skill-drift and audit disposition remains current.
 
-> Historical: every automatic-dispatch/admission disposition in rounds 4–9 was superseded by the replacement design after commit `3f76c28`. These rows preserve debate provenance; they are not current implementation instructions.
+## Fourth-round objections and disposition — MIXED CURRENT AND SUPERSEDED ITEMS
+
+> Only rows whose objection or disposition depends on an automatic dispatcher, dispatch admission, preview wait workflow/job or wait check context were superseded by the replacement design after commit `3f76c28`. Reviewer-wait, overflow, execution-key aliasing, skill drift, cap/owner gates, dead-releaser recovery, unreadable reservation truth and wait-generation rollover remain current. The rows are retained for exact debate provenance.
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -83,7 +85,7 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Reviewer names can alias one serialized wrapper | Claude | reservations keyed by canonical provider/wrapper execution identity, with display reviewer in payload |
 | Cap test timing could assert eight before approval | Claude | production remains five until gate; parameterized fixtures test proposed eight beforehand |
 
-## Fifth-round objections and disposition — HISTORICAL, DISPATCH ITEMS SUPERSEDED
+## Fifth-round objections and disposition — MIXED CURRENT AND SUPERSEDED ITEMS
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -96,7 +98,7 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Phase C operator semantics were not synchronized to docs/skill | Claude | Phase C cut now requires same-phase AGENTS/docs/skill/drift updates |
 | Default CI cannot read admin branch protection | Claude | live read is operator activation only; CI uses mocked fixtures |
 
-## Sixth-round objections and disposition — HISTORICAL, DISPATCH ITEMS SUPERSEDED
+## Sixth-round objections and disposition — MIXED CURRENT AND SUPERSEDED ITEMS
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -110,7 +112,7 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Wait cycles could accumulate PR check runs | Claude | waiting is operator coordination only and creates no Actions/check run |
 | New dispatcher was outside preview custody | Claude | corrected later: operator scripts are untrusted proposers; the workflow-side admission validator is the pinned enforcing producer |
 
-## Seventh-round objections and disposition — HISTORICAL, DISPATCH ITEMS SUPERSEDED
+## Seventh-round objections and disposition — MIXED CURRENT AND SUPERSEDED ITEMS
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -122,7 +124,7 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Crash between superseded outcome and successor wait could lose issue | Claude | successor-first rollover under mutex plus two-generation recovery/failure injection |
 | Ready preview and reconciliation dispatch tests were missing | Claude | exact one-lock ready-preview test and reconcile dispatch/busy/recovery cases added |
 
-## Eighth-round objections and disposition — HISTORICAL, DISPATCH ITEMS SUPERSEDED
+## Eighth-round objections and disposition — MIXED CURRENT AND SUPERSEDED ITEMS
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -131,11 +133,11 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Admission record had no namespace/lifecycle | Claude | immutable `refs/db-dispatch-admissions/<id>` plus terminal outcome; lock remains separate/recoverable |
 | Operator-executable inventory had no file | Claude | `config/orchestrator-operator-executables-v1.json` created and discovery-tested |
 | Local script cannot securely attest its own bytes | Claude | scripts are untrusted proposers; enforcing workflow revalidates all target/ref/inputs; no false producer-custody claim |
-| Production caller/procedure was missing | Claude | shared helper supports both targets and Phase C updates the manual production procedure |
+| Production caller/procedure was missing | Claude | **SUPERSEDED automatic-dispatch design:** the replacement preserves the existing manual production procedure and adds Phase A behavioral guards |
 | New config files would fail completeness gate | Claude | each is pinned or precisely exempted and filesystem-completeness test stays required |
 | Second head drift could leave no current wait generation | Claude | recovery snapshots newest live state and exits only with exactly one current generation |
 
-## Ninth-round objections and disposition — HISTORICAL, DISPATCH ITEMS SUPERSEDED
+## Ninth-round objections and disposition — MIXED CURRENT AND SUPERSEDED ITEMS
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -144,7 +146,7 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Admission check could displace deliberately-first target steps | Claude | upstream validate step; target-ref and exact-confirmation remain first in their own jobs |
 | Empty unauthorized dispatch could stall/replace sanctioned group | Claude | empty admission gets unique unauthorized group; PR branch and sanctioned global group preserved |
 | Ambiguous dispatch lost `UNVERIFIABLE` rule | Claude | unreadable/ambiguous dispatch, admission or validation is explicit exit 2 |
-| Production procedure file was unnamed | Claude | `docs/production-promotion-procedure.md` is a Phase C deliverable using the shared helper |
+| Production procedure file was unnamed | Claude | **SUPERSEDED automatic-dispatch design:** `docs/production-promotion-procedure.md` remains unchanged and is protected by Phase A behavioral assertions |
 | Ledger contradicted operator trust boundary | Claude | older disposition corrected; workflow validator, not operator script, is pinned authority |
 | Admission validator file/tests were unnamed | Claude | named validator and test plus existing production guard test cover all four target paths/concurrency |
 
@@ -173,9 +175,14 @@ The current conversation instructed Codex to start a fresh Grok session; this is
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
-| New Node tests were local-only and would miss required CI | Claude | Step 10 adds `scripts/orchestrator-flow/*.test.mjs` to required `migration-author-lease.yml` command in the same PR |
-| No named static test protected unchanged workflow invariants | Claude | `scripts/test_production_migration_guard.py` explicitly covers Step 5 invariants |
+| New Node tests were local-only and would miss required CI | Claude | Phase A adds a guarded, named-backstop `scripts/orchestrator-flow/*.test.mjs` array to required CI; every test is offline/injected and later files extend the backstop when created |
+| No named static test protected unchanged workflow invariants | Claude | Phase A extends `scripts/test_production_migration_guard.py` before Step 5 with parsed workflow and promotion-procedure invariants |
 | `PREVIEW_READY` had no store/dedupe/lifecycle | Claude | immutable ready refs, existing events, terminal outcome refs and head/bundle supersession |
 | No live marker could lose an automatic wake | Claude | wait state remains durable/derivable; no-marker audit reports only; next matching marker materializes readiness once |
 | Admission-era ledger rows looked current | Claude | rounds 4–9 are explicitly marked historical/superseded |
 | Classifier and rollout retained dispatch-era wording | Claude | selector/ready artifact is the integration surface; rollout says durable wait plus manual dispatch |
+| Preview identity incorrectly used a pinned literal | Grok | live authenticated `PREVIEW_PROJECT_REF` is validated against default/production before each fresh ledger read |
+| Frozen `mode`/early `dispatched` would break dry-run then apply | Grok | mode is per-run; dry-run is nonterminal; only completing apply/recovery records dispatched; terminal ready IDs cannot run again |
+| Procedure and workflow safety assertions were deferred or absent | Claude | Phase A adds behavioral production-guard assertions before Step 5 and keeps all required tests hermetic |
+| Three policy/provenance inputs had no manifest disposition | Claude | `source_pr`, `preview_run_id` and `preview_artifact_digest` are explicitly excluded from manual preview routes |
+| Event test required an unexported implementation detail | Claude | the gate is behavioral; no `STAGE_PAIRS` export is required |
