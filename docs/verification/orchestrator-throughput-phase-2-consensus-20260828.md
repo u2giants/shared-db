@@ -156,7 +156,7 @@ Only the preview-wait/workflow-dispatch/live-protection row in this third round 
 | Admission check could displace deliberately-first target steps | Claude | upstream validate step; target-ref and exact-confirmation remain first in their own jobs |
 | Empty unauthorized dispatch could stall/replace sanctioned group | Claude | empty admission gets unique unauthorized group; PR branch and sanctioned global group preserved |
 | Ambiguous dispatch lost `UNVERIFIABLE` rule | Claude | unreadable/ambiguous dispatch, admission or validation is explicit exit 2 |
-| Production procedure file was unnamed | Claude | **SUPERSEDED automatic-dispatch design:** Phase A preserves its manual semantics, adds the historical-dry-run no-evidence warning and protects both behaviorally |
+| Production procedure file was unnamed | Claude | **SUPERSEDED automatic-dispatch design:** Phase A protects existing production semantics; Phase C puts the historical-dry-run warning in AGENTS/anti-collision/skill operator guidance |
 | Ledger contradicted operator trust boundary | Claude | older disposition corrected; workflow validator, not operator script, is pinned authority |
 | Admission validator file/tests were unnamed | Claude | named validator and test plus existing production guard test cover all four target paths/concurrency |
 
@@ -201,3 +201,7 @@ The current conversation instructed Codex to start a fresh Grok session; this is
 | Historical route omitted current-main freshness | Claude | both commit-bound routes prove current-main immediately before every required run |
 | Workflow permits green historical dry-run no-op | Claude | selector forbids it, procedure warns it is no evidence, Phase A pins both; workflow mutation remains outside Phase 2 |
 | Live variable and drift literal could diverge silently | Claude | selector queries only the live variable but fails closed and instructs same-change repair when identities disagree |
+| Selector import rule contradicted its identity cross-check | Claude | literal import is allowed only for equality comparison; using it as query/default/fallback is forbidden |
+| Ledger-helper refactor omitted affected files and invalidator inventory | Claude | Step 5 names drift module/test, shared helper/test and global invalidator/discovery updates |
+| Successor ready ID could inherit a stale dry-run | Claude | each ready ID owns its dry-run evidence; a new commit-bound ID must dry-run again before apply |
+| Main churn could create unbounded readiness history | Claude | materialization is operator-attempt-bound, one unresolved ref is allowed, and three supersessions pause the issue |
