@@ -751,6 +751,26 @@ create table plm.wwe_character_evidence (
     foreign key (capture_id, character_candidate_key)
     references plm.wwe_character_candidate (capture_id, character_candidate_key)
     on delete restrict,
+  -- MATCH SIMPLE (the default): the FK is only checked when its own column is
+  -- non-null. This row's capture_id is the SUBMISSIONS capture root (it must match
+  -- plm.wwe_character_candidate's capture_id via the FK above, and character
+  -- candidates are rooted on the submissions side per the file header), so a
+  -- submission_ip anchor can be verified against the real wwe_submission row in the
+  -- SAME capture scope, the same way plm.sega_character_evidence's anchor FKs work.
+  --
+  -- folder_source_id and asset_source_id CANNOT get the equivalent FK: those rows
+  -- live under plm.wwe_creative_capture, a different capture-id namespace than this
+  -- row's (submissions-rooted) capture_id, so a composite (capture_id, folder_source_id)
+  -- FK could never match a real plm.wwe_asset_folder row. This is the identical
+  -- dual-capture-root trade the *_property_inferred tables below already make and
+  -- document. Those two anchors are still fully covered by
+  -- wwe_character_evidence_folder_nonblank_chk / _asset_nonblank_chk and by
+  -- wwe_character_evidence_type_anchor_chk below, which is what actually closed the
+  -- blank-anchor and type/anchor-mismatch defects; they just cannot also be
+  -- foreign-keyed to a same-capture parent.
+  constraint wwe_character_evidence_submission_fkey
+    foreign key (capture_id, submission_number)
+    references plm.wwe_submission (capture_id, submission_number) on delete restrict,
   constraint wwe_character_evidence_type_chk
     check (evidence_type in ('submission_ip','asset_folder','asset_tag')),
   constraint wwe_character_evidence_truth_chk check (relationship_truth = 'inferred'),
@@ -760,16 +780,41 @@ create table plm.wwe_character_evidence (
   constraint wwe_character_evidence_method_nonblank_chk check (btrim(match_method) <> ''),
   constraint wwe_character_evidence_rule_version_nonblank_chk
     check (btrim(rule_version) <> ''),
-  constraint wwe_character_evidence_exactly_one_anchor_chk
-    check ((submission_number is not null)::integer
-           + (folder_source_id is not null)::integer
-           + (asset_source_id is not null)::integer = 1),
+  constraint wwe_character_evidence_submission_nonblank_chk
+    check (submission_number is null or btrim(submission_number) <> ''),
+  constraint wwe_character_evidence_folder_nonblank_chk
+    check (folder_source_id is null or btrim(folder_source_id) <> ''),
+  constraint wwe_character_evidence_asset_nonblank_chk
+    check (asset_source_id is null or btrim(asset_source_id) <> ''),
+  -- Replaces a bare "exactly one anchor is NOT NULL" count, which an empty or
+  -- whitespace string could satisfy without naming a real anchor. This ties the
+  -- single populated, non-blank anchor to the evidence_type label itself, so a
+  -- row cannot claim one type while its data actually anchors to another.
+  constraint wwe_character_evidence_type_anchor_chk
+    check (
+      (evidence_type = 'submission_ip'
+         and submission_number is not null and btrim(submission_number) <> ''
+         and folder_source_id is null
+         and asset_source_id is null)
+      or (evidence_type = 'asset_folder'
+         and folder_source_id is not null and btrim(folder_source_id) <> ''
+         and submission_number is null
+         and asset_source_id is null)
+      or (evidence_type = 'asset_tag'
+         and asset_source_id is not null and btrim(asset_source_id) <> ''
+         and submission_number is null
+         and folder_source_id is null)
+    ),
   constraint wwe_character_evidence_raw_obj_chk check (jsonb_typeof(raw) = 'object')
 );
 
 comment on table plm.wwe_character_evidence is
   'NON-AUTHORITATIVE INFERRED EVIDENCE. Why a plm.wwe_character_candidate row exists, '
-  'anchored to exactly one submission, folder or asset. relationship_truth is pinned to '
+  'anchored to exactly one non-blank submission, folder or asset value that must match '
+  'evidence_type by CHECK. submission_number is additionally foreign-keyed to '
+  'plm.wwe_submission (same submissions capture scope); folder_source_id and '
+  'asset_source_id cannot be, because they live under the separate creative capture '
+  'root -- see the constraint comment above. relationship_truth is pinned to '
   '''inferred'' by CHECK; no row here can claim portal-declared provenance.';
 
 create table plm.wwe_character_property_inferred (
