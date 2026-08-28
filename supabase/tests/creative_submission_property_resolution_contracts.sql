@@ -179,10 +179,25 @@ BEGIN
   v_rejected := false;
   BEGIN
     TRUNCATE TABLE plm.creative_submission_property_resolution;
-  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+  EXCEPTION WHEN object_not_in_prerequisite_state OR feature_not_supported THEN
     v_rejected := true;
   END;
   IF NOT v_rejected THEN RAISE EXCEPTION 'owner-path header truncate was accepted'; END IF;
+
+  IF (
+    SELECT count(*)
+    FROM pg_trigger t
+    JOIN pg_class c ON c.oid = t.tgrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'plm'
+      AND t.tgname IN (
+        'creative_submission_property_resolution_no_truncate',
+        'creative_submission_property_resolution_member_no_truncate'
+      )
+      AND NOT t.tgisinternal
+  ) <> 2 THEN
+    RAISE EXCEPTION 'both statement-level truncate rejection triggers are required';
+  END IF;
 
   IF NOT has_table_privilege('service_role', 'plm.creative_submission_property_resolution', 'SELECT')
      OR NOT has_table_privilege('service_role', 'plm.creative_submission_property_resolution', 'INSERT')
