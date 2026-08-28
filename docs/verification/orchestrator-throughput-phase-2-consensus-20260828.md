@@ -90,6 +90,20 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Phase C operator semantics were not synchronized to docs/skill | Claude | Phase C cut now requires same-phase AGENTS/docs/skill/drift updates |
 | Default CI cannot read admin branch protection | Claude | live read is operator activation only; CI uses mocked fixtures |
 
+## Sixth-round objections and disposition
+
+| Objection | Source | Disposition in current plan |
+|---|---|---|
+| Workflow-to-workflow dispatch mechanism/ref/permissions were undefined | Claude | removed intermediary workflow; authenticated operator CLI dispatches exact current ref with readback |
+| Preview input passthrough could drop recovery inputs | Claude | closed adapter covers every target input; discovery test fails on either-side drift |
+| Preview wait wake had no owner | Claude | Step 8 invokes guarded dispatcher after dependency satisfaction |
+| Automatic ready dispatch could replace a pending preview/production run | Claude | shared dispatch-admission ref plus zero queued/in-progress proof; preview and production use same guarded admission |
+| Verdict landed but dead releaser could strand a reservation | Claude | verdict/PR-close/head-move are normal release proof; dead terminal releaser is recoverable separately from no-verdict recovery |
+| Unreadable reservation truth had no shadow/activation rule | Claude | legacy derived state controls shadow; unreadable new truth never triggers paid overflow and fails closed after activation |
+| Refreshed PR could lose its queue position | Claude | new bundle/head becomes next generation under the same primary sequence |
+| Wait cycles could accumulate PR check runs | Claude | waiting is operator coordination only and creates no Actions/check run |
+| New dispatcher was outside preview-producer custody | Claude | dispatcher is pinned in `PREVIEW_PRODUCER_PATHS`/invalidators and production risk tests |
+
 ## Rejected alternatives
 
 - Release blocked claims, raise the cap as a substitute for decoupling, parallelize database writes, reuse SQL-only evidence, trust path names alone, time-delete mutexes, add exclusive-stage heartbeat, build a general SQL analyzer, or accept production apply without verification.
