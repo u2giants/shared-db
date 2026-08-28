@@ -6,9 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { hasVerdictForHead } from './manage-migration-author-lanes.mjs'
-import { REVIEW_ACTIVE_CUTOVER_REF } from './manage-migration-author-lanes.mjs'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, activateReviewerLeaseIndex, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, debitReviewRequestBudget, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ASSIGNMENT_API_BUDGET, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -291,7 +289,7 @@ test('legacy claims count toward the author-lane cap and always protect objects'
   // Asserted against the constant, not a literal, so the cap can move without
   // this test quietly checking the wrong number -- but the constant itself is
   // pinned, so a change to it is a deliberate edit here.
-  assert.equal(MAX_AUTHOR_LANES, 5)
+  assert.equal(MAX_AUTHOR_LANES, 8)
   const full = Array.from({length:MAX_AUTHOR_LANES},(_,i)=>legacy(i+1,`table core.t${i}`))
   assert.doesNotThrow(() => assertLaneAvailable(full.slice(0,MAX_AUTHOR_LANES-1), ['table core.d'], NOW))
   assert.throws(() => assertLaneAvailable(full, ['table core.d'], NOW), new RegExp(`all ${MAX_AUTHOR_LANES}`))
@@ -339,93 +337,123 @@ function reviewIo(){
   io.getPr=(number)=>({number:Number(number),state:'open',head:{sha:'abcdef9',ref:'codex/x'}})
   io.getIssueComments=()=>[]
   io.getPrReviews=()=>[]
-  io.checkReviewAssignmentBudget=(limit)=>{io.calls.push(['budget',limit]);return {remaining:5000,maxRequests:limit}}
-  io.reviewLeaseStates=function(assignments){
-    return new Map(assignments.map((row)=>{
-      const pr=this.getPr(row.pr)
-      return [row.reviewer,{prState:pr?.state,headSha:pr?.head?.sha,hasVerdict:hasVerdictForHead(row.issue,row.pr,row.headSha,this)}]
-    }))
-  }
   return io
 }
 
 test('reviewer cursor advances atomically through the durable round robin',()=>{
   const io=reviewIo(), names=[]
-  for(let n=1;n<=5;n++)names.push(assignNextReviewer({issue:n,pr:100+n,headSha:`abcdef${n}`},io).reviewer)
-  assert.deepEqual(names,['grok-4.6','glm-5.3','kimi-k3','muse-spark-1.2-contributor','grok-4.6'])
+  for(let n=1;n<=ACTIVE_REVIEWERS.length+1;n++)names.push(assignNextReviewer({issue:n,pr:100+n,headSha:`abcdef${n}`},io).reviewer)
+  assert.deepEqual(names,[...ACTIVE_REVIEWERS.map((row)=>row.name),ACTIVE_REVIEWERS[0].name])
   assert.ok(io.refs.has(REVIEW_CURSOR_REF))
 })
 
-test('GitHub request budgeting debits every retry attempt, not one logical command',()=>{
-  let attempts=0,debits=0
-  const result=runGitHubCommand(['api','endpoint'],{executor:()=>{attempts++;if(attempts<3)throw commandFailure('HTTP 503: retry');return 'ok'},wait:()=>{},beforeAttempt:()=>{debits++}})
-  assert.equal(result,'ok');assert.equal(attempts,3);assert.equal(debits,3)
+test('active reviewer lease parser round-trips exact identity and fails closed',()=>{
+  const reviewer=ACTIVE_REVIEWERS[0].name, message=`db-coordination reviewer-lease generation=7 reviewer=${reviewer} issue=1767 pr=1800 head=${'a'.repeat(40)} sequence=9`
+  assert.deepEqual(parseReviewLease({message}),{generation:7,reviewer,issue:1767,pr:1800,headSha:'a'.repeat(40),sequence:9})
+  assert.throws(()=>parseReviewLease({message:message.replace(reviewer,'unknown-reviewer')}),/malformed/)
+  assert.throws(()=>parseReviewLease({message:message.replace('head='+('a'.repeat(40)),'head=not-a-sha')}),/malformed/)
+  const legacy=parseReviewLease({message:message.replace('a'.repeat(40),'abcdef1')})
+  const io=reviewIo(),sha=io.makeOwnerCommit(message.replace('a'.repeat(40),'abcdef1')),ref=reviewActiveRef(reviewer)
+  assert.equal(legacy.headSha,'abcdef1');io.requiresExactReviewHeadSha=true;io.refs.set(ref,sha);assert.equal(findBusyReviewers(io),null)
 })
 
-test('review assignment checks quota and its strict request budget before creating or locking anything',()=>{
-  const io=reviewIo();let commits=0
-  io.makeOwnerCommit=()=>{commits++;return '1'.repeat(40)}
-  io.checkReviewAssignmentBudget=(limit)=>{assert.equal(limit,REVIEW_ASSIGNMENT_API_BUDGET);throw new LaneError('remaining quota too low')}
-  assert.throws(()=>assignNextReviewer({issue:9,pr:109,headSha:'abcdef9'},io),/quota too low/)
-  assert.equal(commits,0)
-  assert.equal(io.readRef(MUTEX_REF),null)
-})
-
-test('ten thousand historical assignments are never scanned for availability',()=>{
-  const io=reviewIo(),listed=[]
-  for(let n=0;n<10000;n++)io.refs.set(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${n}-${n}-deadbeef${String(n).padStart(32,'0')}`,'f'.repeat(40))
-  const originalList=io.listRefs
-  io.listRefs=(prefix)=>{listed.push(prefix);return originalList(prefix)}
-  io.writeReviewerAssignment=()=>{io.calls.push(['batched-review-assignment'])}
-  io.calls.length=0
-  const result=assignNextReviewer({issue:20001,pr:20002,headSha:'abcdef9'},io)
-  assert.equal(result.reviewer,'grok-4.6')
-  assert.ok(listed.every((prefix)=>!prefix.startsWith(REVIEW_ASSIGNMENT_REF_PREFIX)),`historical prefix was scanned: ${listed.join(', ')}`)
-  assert.ok(listed.filter((prefix)=>prefix===REVIEW_ACTIVE_REF_PREFIX).length<=1)
-  assert.ok(io.calls.length<20,`assignment used ${io.calls.length} modeled GitHub calls`)
-  assert.equal(io.readRef(MUTEX_REF),null)
-})
-
-test('cleanup reserve is entered before the final mutex read after a full-budget assignment',()=>{
-  const io=reviewIo(),baseRead=io.readRef;let exhausted=false,cleanup=false
-  io.beginReviewAssignmentBudget=()=>{}
-  io.enterReviewAssignmentCleanup=()=>{cleanup=true}
-  io.endReviewAssignmentBudget=()=>{}
-  io.readRef=(ref)=>{if(exhausted&&ref===MUTEX_REF&&!cleanup)throw new LaneError('normal budget exhausted');return baseRead(ref)}
-  io.writeReviewerAssignment=()=>{exhausted=true}
-  const result=assignNextReviewer({issue:21001,pr:21002,headSha:'abcdef9'},io)
-  assert.equal(result.reviewer,'grok-4.6');assert.equal(io.readRef(MUTEX_REF),null)
-})
-
-test('replacement can spend fourteen normal requests and still retains five cleanup requests',()=>{
-  githubIo.beginReviewAssignmentBudget(REVIEW_ASSIGNMENT_API_BUDGET)
-  try{
-    for(let n=0;n<14;n++)assert.doesNotThrow(()=>debitReviewRequestBudget())
-    assert.throws(()=>debitReviewRequestBudget(),/cleanup requests reserved/)
-    githubIo.enterReviewAssignmentCleanup()
-    for(let n=0;n<5;n++)assert.doesNotThrow(()=>debitReviewRequestBudget())
-    assert.throws(()=>debitReviewRequestBudget(),/budget exhausted/)
-  }finally{githubIo.endReviewAssignmentBudget()}
-})
-
-test('reviewer lease activation requires exact issue PR head bindings and clears its mutex',()=>{
-  const refs=new Map(),head='a'.repeat(40),owner='b'.repeat(40)
-  const io={
-    beginReviewAssignmentBudget(){},endReviewAssignmentBudget(){},enterReviewAssignmentCleanup(){},checkReviewAssignmentBudget(){},prepareReviewerOperation(){},
-    openReviewCandidates:()=>[{number:22,headRefOid:head}],cutoverIssuePrBindings:()=>[true],reviewLeaseStates:()=>new Map(),makeOwnerCommit:()=>owner,
-    readRef:(ref)=>refs.get(ref)??null,refreshRef:(ref)=>refs.get(ref)??null,createRef:(ref,sha)=>{if(refs.has(ref))return false;refs.set(ref,sha);return true},deleteRef:(ref)=>{refs.delete(ref)},wait(){},
+test('low or unreadable quota refuses before owner commit and mutex acquisition',()=>{
+  for(const quota of [{remaining:10,graphRemaining:5000,reset:1787943600,graphReset:1787943600},{remaining:5000,graphRemaining:10,reset:1787943600,graphReset:1787943600},null]){
+    const io=reviewIo();let owners=0;io.getRateLimit=()=>quota;io.makeOwnerCommit=(...args)=>{owners++;return reviewIo().makeOwnerCommit(...args)}
+    assert.throws(()=>assignNextReviewer({issue:1767,pr:1800,headSha:'a'.repeat(40)},io),/quota/i)
+    assert.equal(owners,0);assert.equal(io.refs.has(MUTEX_REF),false)
   }
-  const result=activateReviewerLeaseIndex([{issue:11,pr:22,headSha:head}],io)
-  assert.deepEqual(result,{activated:true,active:0})
-  assert.equal(refs.get(REVIEW_ACTIVE_CUTOVER_REF),owner)
-  assert.equal(refs.has(MUTEX_REF),false)
-  const bad={...io,readRef:()=>null,cutoverIssuePrBindings:()=>[false]}
-  assert.throws(()=>activateReviewerLeaseIndex([{issue:99,pr:22,headSha:head}],bad),/issue-to-PR binding/)
 })
 
-// OVERFLOW ROUTING (owner instruction, 2026-08-25). Codex is the reviewer of last
-// resort. Every one of these cases costs real money if it is wrong in the
-// permissive direction, so the busy probe is asserted from both sides.
+test('wire-level request budget counts every retry and refuses request 20',()=>{
+  let attempts=0
+  assert.throws(()=>withReviewRequestBudget(()=>{
+    for(let n=0;n<20;n++)runGitHubCommand(['api','rate_limit'],{executor:()=>{attempts++;return '{}'}})
+  }),/before request 20/)
+  assert.equal(attempts,19)
+  attempts=0
+  assert.throws(()=>withReviewRequestBudget(()=>runGitHubCommand(['api','endpoint'],{attempts:20,wait:()=>{},executor:()=>{attempts++;const e=new Error('HTTP 502');e.stderr='HTTP 502';throw e},reportStderr:()=>{}})),/before request 20/)
+  assert.equal(attempts,19)
+})
+
+test('10,000 historical assignments do not change bounded availability cost',()=>{
+  const run=(history)=>{
+    const io=reviewIo();let requests=0,activeReads=0,historyScans=0
+    for(let n=0;n<history;n++)io.refs.set(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${n}-${n+1}-${'b'.repeat(40)}`,`historical-${n}`)
+    for(const name of ['readRef','getCommit','getPr','getIssueComments','getPrReviews','makeOwnerCommit','createRef','updateRef','deleteRef']){
+      const fn=io[name];io[name]=(...args)=>{requests++;if(name==='readRef'&&String(args[0]).startsWith(REVIEW_ACTIVE_REF_PREFIX))activeReads++;return fn(...args)}
+    }
+    io.readActiveReviewLeases=()=>{requests++;return new Map()}
+    const list=io.listRefs;io.listRefs=(prefix)=>{requests++;if(String(prefix).startsWith(REVIEW_ASSIGNMENT_REF_PREFIX))historyScans++;return list(prefix)}
+    assignNextReviewer({issue:1767,pr:1800,headSha:'a'.repeat(40)},io)
+    return {requests,activeReads,historyScans}
+  }
+  const empty=run(0), large=run(10_000)
+  assert.equal(large.historyScans,0);assert.equal(empty.requests,large.requests)
+  assert.equal(large.requests,18,JSON.stringify(large));assert.equal(large.activeReads,0,JSON.stringify(large))
+})
+
+test('complete assignment stays inside the real wire-attempt budget',()=>{
+  const io=reviewIo();let attempts=0,baseLoaded=false
+  const rawGetCommit=io.getCommit
+  const active=new Map(),states=new Map()
+  ACTIVE_REVIEWERS.slice(0,-1).forEach((reviewer,index)=>{
+    const issue=2000+index,pr=2100+index,headSha=`c${index}`.padEnd(40,'0')
+    const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=${index+1} reviewer=${reviewer.name} issue=${issue} pr=${pr} head=${headSha}`)
+    io.refs.set(reviewActiveRef(reviewer.name),sha);active.set(reviewActiveRef(reviewer.name),{sha,commit:io.getCommit(sha)})
+    states.set(`${issue}:${pr}`,{pr:{state:'open',head:{sha:headSha}},evidence:[]})
+  })
+  states.set('1767:1800',{issue:{state:'open'},pr:{state:'open',head:{sha:'a'.repeat(40)}},evidence:[]})
+  const wire=(n=1)=>{for(let i=0;i<n;i++)runGitHubCommand(['api','fixture'],{executor:()=>{attempts++;return '{}'}})}
+  io.getRateLimit=()=>{wire(2);return {remaining:5000,limit:5000,reset:1787943986,graphRemaining:5000,graphLimit:5000,graphReset:1787943986}}
+  io.readActiveReviewLeases=()=>{wire();const snapshot=new Map(active);for(const [ref,sha] of io.refs)if(ref.startsWith(REVIEW_ACTIVE_REF_PREFIX))snapshot.set(ref,{sha,commit:rawGetCommit(sha)});return snapshot}
+  io.readReviewStates=()=>{wire();return states}
+  io.readReviewRefs=(refs)=>{wire();return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
+  io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  for(const name of ['readRef','listRefs','getCommit','getPr','getIssueComments','getPrReviews','createRef','updateRef','deleteRef']){
+    const fn=io[name];io[name]=(...args)=>{wire();return fn(...args)}
+  }
+  const make=io.makeOwnerCommit
+  io.makeOwnerCommit=(message)=>{wire(1);baseLoaded=true;return make(message)}
+  const result=assignNextReviewer({issue:1767,pr:1800,headSha:'a'.repeat(40)},io)
+  assert.ok(result.reviewer);assert.ok(attempts<=19,`used ${attempts} wire attempts`)
+  attempts=0
+  assert.deepEqual(assignNextReviewer({issue:1767,pr:1800,headSha:'a'.repeat(40)},io),result)
+  assert.ok(attempts<=19,`retry used ${attempts} wire attempts`)
+})
+
+test('complete replacement stays inside the real wire-attempt budget',()=>{
+  const io=failedReviewIo();let attempts=0,baseLoaded=false;const labels=[]
+  const rawGetCommit=io.getCommit
+  const assigned=parseReviewCursor(io.getCommit(io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}`)))
+  const active=new Map([[reviewActiveRef(assigned.reviewer),{sha:io.refs.get(reviewActiveRef(assigned.reviewer)),commit:io.getCommit(io.refs.get(reviewActiveRef(assigned.reviewer)))}]])
+  const states=new Map([[`${failedReview.issue}:${failedReview.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:failedReview.headSha}},evidence:[]}]])
+  const wire=(n=1,label='wire')=>{for(let i=0;i<n;i++)runGitHubCommand(['api','fixture'],{executor:()=>{attempts++;labels.push(label);return '{}'}})}
+  io.getRateLimit=()=>{wire(1,'quota');return {remaining:5000,limit:5000,reset:1787943986,graphRemaining:5000,graphLimit:5000,graphReset:1787943986}}
+  io.readActiveReviewLeases=()=>{wire(1,'active');return active};io.readReviewStates=()=>{wire(1,'states');return states}
+  io.readReviewRefs=(refs)=>{wire(1,'readReviewRefs');return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
+  io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  io.readReviewRecords=(refs,prefix)=>{wire(1,'readReviewRecords');const result=new Map(refs.map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha,commit:rawGetCommit(sha)}))});return result}
+  for(const name of ['readRef','listRefs','getCommit','getPr','getIssue','getIssueComments','getPrReviews','createRef','updateRef','deleteRef']){const fn=io[name];io[name]=(...args)=>{wire(1,`${name}:${String(args[0])}`);return fn(...args)}}
+  const make=io.makeOwnerCommit;io.makeOwnerCommit=(message)=>{wire(1,'commit');baseLoaded=true;return make(message)}
+  let result;try{result=replaceFailedReviewer(replacementRequest,io)}catch(error){throw new Error(`${error.message}; calls=${labels.join(',')}`)}
+  assert.ok(result.reviewer);assert.ok(attempts<=19,`used ${attempts} wire attempts`)
+})
+
+test('atomic replacement succeeds when the failed assignment has no active lease',()=>{
+  const io=failedReviewIo(),failedRef=reviewActiveRef('grok-4.6');io.refs.delete(failedRef)
+  io.readActiveReviewLeases=()=>new Map()
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
+  const result=replaceFailedReviewer(replacementRequest,io)
+  assert.ok(result.reviewer);assert.equal(io.refs.has(failedRef),false);assert.equal(io.refs.has(reviewActiveRef(result.reviewer)),true)
+})
+
+// ACTIVE ROTATION (owner instruction, 2026-08-28). Codex GPT-5.6 Sol and
+// DeepSeek are ordinary approved reviewers. All-busy must fail closed.
 function busyIo(){
   // Each of the four active reviewers holds one live assignment: an open PR, still
   // at the head it was given, with no verdict recorded.
@@ -433,24 +461,20 @@ function busyIo(){
   ACTIVE_REVIEWERS.forEach((row,index)=>{
     const issue=500+index, pr=600+index, headSha=`fee${index}`.padEnd(40,'0')
     heads.set(pr,headSha)
-    const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=${index+1} reviewer=${row.name} issue=${issue} pr=${pr} head=${headSha}`)
-    io.refs.set(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${headSha}`,sha)
-    io.refs.set(`${REVIEW_ACTIVE_REF_PREFIX}/${row.name}`,sha)
+    const sha=io.makeOwnerCommit(`db-coordination reviewer-lease generation=${index+1} reviewer=${row.name} issue=${issue} pr=${pr} head=${headSha} sequence=${index+1}`)
+    io.refs.set(reviewActiveRef(row.name),sha)
   })
   io.getPr=(number)=>({number:Number(number),state:'open',head:{sha:heads.get(Number(number))??'abcdef9'}})
   return {io,heads}
 }
 
-test('every active reviewer busy routes the next assignment to the overflow provider',()=>{
+test('every active reviewer busy refuses a new assignment',()=>{
   const {io}=busyIo()
   assert.deepEqual([...findBusyReviewers(io)].sort(),ACTIVE_REVIEWERS.map((r)=>r.name).sort())
-  assert.equal(pickReviewer(1,io).name,'codex-gpt-5.6-sol')
-  // The rotation position is derived from the sequence, so spending one on the
-  // overflow provider does not move anyone's turn.
-  assert.equal(assignNextReviewer({issue:9,pr:109,headSha:'abcdef9'},io).reviewer,'codex-gpt-5.6-sol')
+  assert.throws(()=>assignNextReviewer({issue:9,pr:109,headSha:'abcdef9'},io),/no reviewer is available/)
 })
 
-test('one free active reviewer keeps the ordinary rotation and never reaches codex',()=>{
+test('a busy rotation slot advances to the next free active reviewer',()=>{
   const {io,heads}=busyIo()
   // Muse's PR is merged, so muse is free again -- and free means rotation, even
   // though the sequence would otherwise land elsewhere.
@@ -473,14 +497,16 @@ test('a recorded verdict and a moved head both free the reviewer that held them'
   assert.ok(!findBusyReviewers(movedIo).has('grok-4.6'))
 })
 
-test('an unreadable busy probe refuses assignment instead of guessing availability',()=>{
+test('an unreadable busy probe keeps the rotation',()=>{
+  // FAIL OPEN. A probe that cannot read GitHub must never silently send every
+  // review to the provider that costs money per run.
   const {io}=busyIo()
-  const blind={...io,listRefs:()=>{throw new Error('HTTP 500')}}
-  assert.throws(()=>findBusyReviewers(blind),/unreadable/)
-  assert.throws(()=>pickReviewer(1,blind),/unreadable/)
-  const noListRefs={...io};delete noListRefs.listRefs
-  assert.equal(findBusyReviewers(noListRefs),null)
-  assert.throws(()=>pickReviewer(2,noListRefs),/unavailable/)
+  const blind={...io,readRef:()=>{throw new Error('HTTP 500')}}
+  assert.equal(findBusyReviewers(blind),null)
+  assert.equal(pickReviewer(1,blind).name,'grok-4.6')
+  const noReadRef={...io};delete noReadRef.readRef
+  assert.equal(findBusyReviewers(noReadRef),null)
+  assert.equal(pickReviewer(2,noReadRef).name,'glm-5.3')
 })
 
 test('retired reviewer names stay resolvable so historical review evidence never orphans',()=>{
@@ -499,15 +525,13 @@ test('retired reviewer names stay resolvable so historical review evidence never
 test('the active rotation is exactly the current models, in a stable order',()=>{
   // Order and length are the round robin. A change here silently reassigns every
   // in-flight sequence to a different reviewer, so it must be asserted, not assumed.
-  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3','muse-spark-1.2-contributor'])
-  // The overflow provider is NOT in the rotation. If it ever appears here it has
-  // silently become a fifth round-robin slot, which is not what it is for.
-  assert.deepEqual(OVERFLOW_REVIEWERS.map((r)=>r.name),['codex-gpt-5.6-sol'])
-  assert.ok(!ACTIVE_REVIEWERS.some((r)=>r.name==='codex-gpt-5.6-sol'))
+  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3','muse-spark-1.2-contributor','codex-gpt-5.6-sol','deepseek-chat'])
+  assert.deepEqual(OVERFLOW_REVIEWERS,[])
   assert.equal(REVIEWERS.find((r)=>r.name==='kimi-k3').wrapper,'ai-kimi')
   assert.equal(REVIEWERS.find((r)=>r.name==='codex-gpt-5.6-sol').wrapper,'ai-codex-review')
   assert.equal(REVIEWERS.find((r)=>r.name==='glm-5.3').wrapper,'ai-glm')
   assert.equal(REVIEWERS.find((r)=>r.name==='muse-spark-1.2-contributor').wrapper,'ai-muse')
+  assert.equal(REVIEWERS.find((r)=>r.name==='deepseek-chat').wrapper,'ai-deepseek-agent')
 })
 
 test('reviewer assignment retry returns the same assignment without advancing',()=>{
@@ -515,6 +539,63 @@ test('reviewer assignment retry returns the same assignment without advancing',(
   const first=assignNextReviewer(request,io), second=assignNextReviewer(request,io)
   assert.deepEqual(second,first)
   assert.equal(second.sequence,1)
+})
+
+test('assignment fails closed when the bounded reviewer index was never activated',()=>{
+  const io=reviewIo();io.refs.delete(REVIEW_ACTIVE_CUTOVER_REF)
+  assert.throws(()=>assignNextReviewer({issue:1767,pr:1800,headSha:'a'.repeat(40)},io),/cutover is incomplete/)
+  assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('assignment retry releases its lease after an exact-head verdict',()=>{
+  const io=reviewIo(),request={issue:9,pr:109,headSha:'abcdef9'},first=assignNextReviewer(request,io),ref=reviewActiveRef(first.reviewer)
+  io.getIssueComments=()=>[{body:`APPROVE ${request.headSha}`}]
+  assert.deepEqual(assignNextReviewer(request,io),first)
+  assert.equal(io.refs.has(ref),false)
+})
+
+test('reviewer assignment refuses an abbreviated head SHA before acquiring its mutex',()=>{
+  const io=reviewIo()
+  io.requiresExactReviewHeadSha=true
+  assert.throws(()=>assignNextReviewer({issue:1767,pr:1800,headSha:'abcdef1'},io),/exact 40-character head SHA/)
+  assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('a successor lease appearing after preflight is never deleted',()=>{
+  const io=reviewIo(),reviewer=ACTIVE_REVIEWERS[0],oldHead='d'.repeat(40),newHead='e'.repeat(40)
+  const oldSha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=1 reviewer=${reviewer.name} issue=70 pr=80 head=${oldHead}`)
+  const successorSha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=2 reviewer=${reviewer.name} issue=71 pr=81 head=${newHead}`)
+  const ref=reviewActiveRef(reviewer.name);io.refs.set(ref,oldSha)
+  io.readActiveReviewLeases=()=>new Map([[ref,{sha:oldSha,commit:io.getCommit(oldSha)}]])
+  io.readReviewStates=()=>new Map([['70:80',{issue:{state:'open'},pr:{state:'open',head:{sha:newHead}},evidence:[]}]])
+  io.readReviewRefs=(refs)=>{if(refs.includes(ref))io.refs.set(ref,successorSha);return new Map(refs.map((name)=>[name,io.refs.get(name)??null]))}
+  assert.throws(()=>assignNextReviewer({issue:72,pr:82,headSha:'f'.repeat(40)},io),/changed after preflight/)
+  assert.equal(io.refs.get(ref),successorSha)
+})
+
+test('pre-cutover permanent assignment recreates its missing active lease',()=>{
+  const io=reviewIo(),request={issue:9,pr:109,headSha:'abcdef9'},first=assignNextReviewer(request,io)
+  const ref=reviewActiveRef(first.reviewer);io.refs.delete(ref)
+  assert.deepEqual(assignNextReviewer(request,io),first)
+  assert.ok(io.refs.has(ref))
+})
+
+test('cursor-only legacy assignment recreates its missing permanent and active refs',()=>{
+  const io=reviewIo(),request={issue:100,pr:200,headSha:'b'.repeat(40)},reviewer=ACTIVE_REVIEWERS[0]
+  io.getPr=()=>({state:'open',head:{sha:request.headSha}})
+  const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=11 reviewer=${reviewer.name} issue=${request.issue} pr=${request.pr} head=${request.headSha}`)
+  io.refs.set(REVIEW_CURSOR_REF,sha)
+  assert.equal(assignNextReviewer(request,io).reviewer,reviewer.name)
+  assert.equal(io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`),sha);assert.equal(io.refs.get(reviewActiveRef(reviewer.name)),sha)
+})
+
+test('a live historical assignment never recreates an active lease for a retired reviewer',()=>{
+  const io=reviewIo(),request={issue:99,pr:199,headSha:'6'.repeat(40)},reviewer=RETIRED_REVIEWERS[0]
+  io.getPr=()=>({state:'open',head:{sha:request.headSha}})
+  const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=7 reviewer=${reviewer} issue=${request.issue} pr=${request.pr} head=${request.headSha}`)
+  io.refs.set(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`,sha)
+  assert.throws(()=>assignNextReviewer(request,io),/retired reviewer/)
+  assert.equal(io.refs.has(`${REVIEW_ACTIVE_REF_PREFIX}/${reviewer}`),false);assert.equal(io.refs.has(MUTEX_REF),false)
 })
 
 test('reviewer assignment remains stable after later assignments advance the cursor',()=>{
@@ -539,6 +620,166 @@ test('terminal provider failure advances exactly once and retry is idempotent',(
   assert.equal(first.sequence,2);assert.equal(first.reviewer,'glm-5.3');assert.deepEqual(second,first)
   assert.equal(assignNextReviewer(failedReview,io).reviewer,'glm-5.3')
   assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'kimi-k3')
+})
+
+test('replacement retry releases its lease after an exact-head verdict',()=>{
+  const io=failedReviewIo(),first=replaceFailedReviewer(replacementRequest,io),ref=reviewActiveRef(first.reviewer)
+  io.getIssueComments=()=>[{body:`APPROVE ${failedReview.headSha}`}]
+  assert.deepEqual(replaceFailedReviewer(replacementRequest,io),first)
+  assert.equal(io.refs.has(ref),false)
+  assert.equal(assignNextReviewer(failedReview,io).reviewer,first.reviewer)
+  assert.equal(io.refs.has(ref),false)
+})
+
+test('reviewer mutex acquisition tolerates delayed create visibility without caching stale reads',()=>{
+  const io=reviewIo(),read=io.readRef;let mutexReads=0,batches=0
+  io.readReviewRefs=(refs)=>{batches++;return new Map(refs.map((ref)=>[ref,ref===MUTEX_REF&&batches===1?null:io.refs.get(ref)??null]))}
+  io.readRef=(ref)=>ref===MUTEX_REF&&++mutexReads<3?null:read(ref)
+  const result=assignNextReviewer({issue:91,pr:191,headSha:'a'.repeat(40)},io)
+  assert.ok(result.reviewer);assert.equal(io.refs.has(MUTEX_REF),false);assert.ok(mutexReads>=3)
+})
+
+test('reviewer mutex acquisition proof failure releases the newly-created mutex',()=>{
+  const io=reviewIo()
+  io.readReviewRefs=()=>{throw new Error('mutex proof unavailable')}
+  assert.throws(()=>assignNextReviewer({issue:95,pr:195,headSha:'e'.repeat(40)},io),/mutex proof unavailable/)
+  assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('lost mutex-create response releases an exact owned ref before returning the error',()=>{
+  const io=reviewIo(),create=io.createRef
+  io.createRef=(ref,sha)=>{create(ref,sha);throw new Error('create response lost')}
+  assert.throws(()=>assignNextReviewer({issue:98,pr:198,headSha:'5'.repeat(40)},io),/create response lost/)
+  assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('wire budget always preserves enough requests to release an acquired mutex',()=>{
+  const io=reviewIo();let attempts=0,proofReads=0
+  const wire=()=>runGitHubCommand(['api','fixture'],{executor:()=>{attempts++;return '{}'}})
+  io.getRateLimit=()=>{wire();return {remaining:5000,graphRemaining:5000,reset:1787943986,graphReset:1787943986}}
+  io.readActiveReviewLeases=()=>{wire();return new Map()}
+  io.readReviewStates=(leases)=>{wire();return new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))}
+  for(const name of ['createRef','readRef','deleteRef']){const fn=io[name];io[name]=(...args)=>{wire();return fn(...args)}}
+  io.readReviewRefs=(refs)=>{wire();proofReads++;return new Map(refs.map((ref)=>[ref,ref===MUTEX_REF&&proofReads===1?null:io.refs.get(ref)??null]))}
+  assert.throws(()=>assignNextReviewer({issue:97,pr:197,headSha:'4'.repeat(40)},io),/budget exhausted/)
+  assert.equal(io.refs.has(MUTEX_REF),false);assert.ok(attempts<=19,`used ${attempts} wire attempts`)
+})
+
+test('a stale selected reviewer that becomes live after locking is not overwritten',()=>{
+  const io=reviewIo(),reviewer=ACTIVE_REVIEWERS[0],oldHead='1'.repeat(40),movedHead='2'.repeat(40),requestHead='3'.repeat(40)
+  const oldSha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=1 reviewer=${reviewer.name} issue=70 pr=80 head=${oldHead}`),ref=reviewActiveRef(reviewer.name)
+  io.refs.set(ref,oldSha)
+  io.readActiveReviewLeases=()=>new Map([[ref,{sha:oldSha,commit:io.getCommit(oldSha)}]])
+  let stateReads=0
+  io.readReviewStates=(leases)=>{stateReads++;return new Map(leases.map((lease)=>{
+    if(lease.issue===70)return ['70:80',{issue:{state:'open'},pr:{state:'open',head:{sha:stateReads===1?movedHead:oldHead}},evidence:[]}]
+    return [`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]
+  }))}
+  io.readReviewRefs=(refs)=>new Map(refs.map((name)=>[name,io.refs.get(name)??null]))
+  io.atomicReviewRefs=()=>{throw new Error('must not overwrite revived lease')}
+  assert.throws(()=>assignNextReviewer({issue:96,pr:196,headSha:requestHead},io),/became live/)
+  assert.equal(io.refs.get(ref),oldSha);assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('atomic assignment failure leaves no partial refs and clears the mutex',()=>{
+  const io=reviewIo();io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]));io.atomicReviewRefs=()=>{throw new Error('atomic push rejected')}
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  assert.throws(()=>assignNextReviewer({issue:92,pr:192,headSha:'b'.repeat(40)},io),/atomic push rejected/)
+  assert.equal(io.refs.has(MUTEX_REF),false);assert.equal(io.refs.has(REVIEW_CURSOR_REF),false)
+})
+
+test('lost atomic assignment readback clears mutex and retry converges',()=>{
+  const io=reviewIo();let batches=0
+  io.readReviewRefs=(refs)=>{batches++;if(batches===2)throw new Error('readback lost');return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
+  io.atomicReviewRefs=(changes)=>{for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  const request={issue:93,pr:193,headSha:'c'.repeat(40)}
+  assert.throws(()=>assignNextReviewer(request,io),/readback lost/);assert.equal(io.refs.has(MUTEX_REF),false)
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  assert.equal(assignNextReviewer(request,io).issue,93)
+})
+
+test('replacement retry repairs a crash between permanent evidence and lease updates',()=>{
+  const io=failedReviewIo(),failedRef=reviewActiveRef('grok-4.6'),failedSha=io.refs.get(failedRef)
+  const first=replaceFailedReviewer(replacementRequest,io),replacementRef=reviewActiveRef(first.reviewer)
+  io.refs.delete(replacementRef);io.refs.set(failedRef,failedSha)
+  assert.deepEqual(replaceFailedReviewer(replacementRequest,io),first)
+  assert.equal(io.refs.has(failedRef),false);assert.ok(io.refs.has(replacementRef))
+  io.refs.delete(replacementRef);io.refs.set(failedRef,failedSha)
+  assert.equal(assignNextReviewer(failedReview,io).reviewer,first.reviewer)
+  assert.equal(io.refs.has(failedRef),false);assert.ok(io.refs.has(replacementRef))
+})
+
+test('a historical replacement never recreates an active lease for a retired reviewer',()=>{
+  const io=failedReviewIo(),reviewer=RETIRED_REVIEWERS[0],sequence=2
+  const sha=io.makeOwnerCommit(`db-coordination reviewer-failure-replacement sequence=${sequence} reviewer=${reviewer} issue=${failedReview.issue} pr=${failedReview.pr} head=${failedReview.headSha} failed-sequence=1 prior-sequence=1 failure-ref=self failed-reviewer=grok-4.6 code=provider_unavailable verdict=none artifact=none`)
+  io.refs.set(`${REVIEW_REPLACEMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}-1`,sha)
+  io.refs.set(`refs/db-review-failures/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}-1`,sha)
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/retired reviewer/)
+  assert.throws(()=>assignNextReviewer(failedReview,io),/retired reviewer/)
+  assert.equal(io.refs.has(`${REVIEW_ACTIVE_REF_PREFIX}/${reviewer}`),false);assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('replacement retry swaps a conclusively stale occupied successor lease',()=>{
+  const io=failedReviewIo(),failedRef=reviewActiveRef('grok-4.6'),failedSha=io.refs.get(failedRef)
+  const first=replaceFailedReviewer(replacementRequest,io),replacementRef=reviewActiveRef(first.reviewer)
+  const staleSha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=99 reviewer=${first.reviewer} issue=99 pr=199 head=${'d'.repeat(40)}`)
+  io.refs.set(replacementRef,staleSha);io.refs.set(failedRef,failedSha)
+  assert.deepEqual(replaceFailedReviewer(replacementRequest,io),first)
+  assert.equal(io.refs.has(failedRef),false);assert.equal(io.refs.get(replacementRef),first.replacementSha)
+})
+
+test('replacement retry does not overwrite a same-SHA stale lease that becomes live after locking',()=>{
+  const io=failedReviewIo(),failedRef=reviewActiveRef('grok-4.6'),failedSha=io.refs.get(failedRef)
+  const first=replaceFailedReviewer(replacementRequest,io),replacementRef=reviewActiveRef(first.reviewer),oldHead='7'.repeat(40),movedHead='8'.repeat(40)
+  const staleSha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=99 reviewer=${first.reviewer} issue=99 pr=199 head=${oldHead}`)
+  io.refs.set(replacementRef,staleSha);io.refs.set(failedRef,failedSha)
+  io.readActiveReviewLeases=()=>new Map([...io.refs.entries()].filter(([ref])=>ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)).map(([ref,sha])=>[ref,{sha,commit:io.getCommit(sha)}]))
+  let reads=0
+  io.readReviewStates=(leases)=>{reads++;return new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.issue===99?(reads===1?movedHead:oldHead):lease.headSha}},evidence:[]}]))}
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]));io.atomicReviewRefs=()=>{throw new Error('must not overwrite revived lease')}
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/became live/)
+  assert.equal(io.refs.get(replacementRef),staleSha);assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('replacement retry never overwrites an unrelated live successor lease',()=>{
+  const io=failedReviewIo(),failedRef=reviewActiveRef('grok-4.6'),failedSha=io.refs.get(failedRef)
+  const first=replaceFailedReviewer(replacementRequest,io),replacementRef=reviewActiveRef(first.reviewer)
+  const liveSha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=88 reviewer=${first.reviewer} issue=88 pr=188 head=${failedReview.headSha}`)
+  io.refs.set(replacementRef,liveSha);io.refs.set(failedRef,failedSha)
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/unrelated live lease/)
+  assert.equal(io.refs.get(replacementRef),liveSha);assert.equal(io.refs.get(failedRef),failedSha)
+})
+
+test('replacement refuses a PR close arriving after mutex acquisition',()=>{
+  const io=failedReviewIo();let stateReads=0
+  io.readActiveReviewLeases=()=>new Map([...io.refs.entries()].filter(([ref])=>ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)).map(([ref,sha])=>[ref,{sha,commit:io.getCommit(sha)}]))
+  io.readReviewStates=(leases)=>{stateReads++;return new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:stateReads===1?'open':'closed',head:{sha:lease.headSha}},evidence:[]}]))}
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  io.atomicReviewRefs=()=>{throw new Error('must not mutate')}
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/changed after mutex acquisition/)
+  assert.equal(io.refs.has(MUTEX_REF),false);assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith('refs/db-review-failures')),false)
+})
+
+test('replacement does not overwrite a same-SHA stale target lease that becomes live after locking',()=>{
+  const io=failedReviewIo(),target=ACTIVE_REVIEWERS[1],oldHead='9'.repeat(40),movedHead='a'.repeat(40),targetRef=reviewActiveRef(target.name)
+  const staleSha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=99 reviewer=${target.name} issue=99 pr=199 head=${oldHead}`)
+  io.refs.set(targetRef,staleSha)
+  io.readActiveReviewLeases=()=>new Map([...io.refs.entries()].filter(([ref])=>ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)).map(([ref,sha])=>[ref,{sha,commit:io.getCommit(sha)}]))
+  let reads=0
+  io.readReviewStates=(leases)=>{reads++;return new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.issue===99?(reads===1?movedHead:oldHead):lease.headSha}},evidence:[]}]))}
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]));io.atomicReviewRefs=()=>{throw new Error('must not overwrite revived lease')}
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/became live/)
+  assert.equal(io.refs.get(targetRef),staleSha);assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('assignment refuses a PR close arriving after mutex acquisition',()=>{
+  const io=reviewIo();let stateReads=0
+  io.readActiveReviewLeases=()=>new Map()
+  io.readReviewStates=(leases)=>{stateReads++;return new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:stateReads===1?'open':'closed',head:{sha:lease.headSha}},evidence:[]}]))}
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]));io.atomicReviewRefs=()=>{throw new Error('must not mutate')}
+  assert.throws(()=>assignNextReviewer({issue:94,pr:194,headSha:'d'.repeat(40)},io),/changed after mutex acquisition/)
+  assert.equal(io.refs.has(MUTEX_REF),false);assert.equal(io.refs.has(REVIEW_CURSOR_REF),false)
 })
 
 const preflightIo=()=>({commandAvailable:()=>true,localHead:()=>failedReview.headSha,localClean:()=>true,reviewerDoctor:()=>({ok:true,failingChecks:[]})})
@@ -776,7 +1017,7 @@ test('reviewer replacement rejects a mismatched original assignment',()=>{
 // is a false invariant, and it is deliberately not asserted here. Both halves are
 // pinned below, with the exact successor named in each case.
 test('one intervening assignment gives a failed reviewer a named replacement',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,4,'this test describes the four-reviewer rotation')
+  assert.equal(ACTIVE_REVIEWERS.length,6,'this test describes the approved six-reviewer rotation')
   const io=failedReviewIo()
   assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
   const replacement=replaceFailedReviewer(replacementRequest,io)
@@ -784,7 +1025,7 @@ test('one intervening assignment gives a failed reviewer a named replacement',()
 })
 
 test('N-1 intervening assignments skip the failed provider instead of stranding the replacement',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,4,'this test describes the four-reviewer rotation')
+  assert.equal(ACTIVE_REVIEWERS.length,6,'this test describes the approved six-reviewer rotation')
   const io=failedReviewIo()
   for(let n=0;n<ACTIVE_REVIEWERS.length-1;n+=1){
     assignNextReviewer({issue:20+n,pr:120+n,headSha:`abcde${n}f`},io)
@@ -811,7 +1052,10 @@ test('a chained replacement skips TWO already-failed providers to reach the last
   // selection must skip BOTH failed names (offset 2) to land on the next live one.
   const first=replaceFailedReviewer(replacementRequest,io)
   assert.equal(first.reviewer,'glm-5.3')
-  for(let n=0;n<2;n+=1)assignNextReviewer({issue:40+n,pr:140+n,headSha:`abcdf${n}9`},io)
+  let n=0
+  while(parseReviewCursor(io.getCommit(io.refs.get(REVIEW_CURSOR_REF))).sequence%ACTIVE_REVIEWERS.length!==0){
+    assignNextReviewer({issue:40+n,pr:140+n,headSha:`abcdf${n}9`},io);n+=1
+  }
   const cursorBefore=parseReviewCursor(io.getCommit(io.refs.get(REVIEW_CURSOR_REF)))
   assert.equal(cursorBefore.sequence%ACTIVE_REVIEWERS.length,0,'the cursor must sit on a roster boundary for this to be a two-name skip')
   const second=replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence},io)
@@ -820,20 +1064,16 @@ test('a chained replacement skips TWO already-failed providers to reach the last
   assert.deepEqual(replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence},io),second)
 })
 
-test('replacement exhausts the rotation, then the overflow provider, then refuses',()=>{
-  // The chain must walk every active name exactly once, reach codex only after all
-  // four are spent, and refuse only when the overflow provider has failed too. A
-  // regression that reached codex early would spend real money on every retry.
+test('replacement exhausts the active rotation, then refuses',()=>{
   const io=failedReviewIo()
   const seen=['grok-4.6']
   let failedSequence=replacementRequest.failedSequence
-  for(let n=0;n<ACTIVE_REVIEWERS.length;n+=1){
+  for(let n=0;n<ACTIVE_REVIEWERS.length-1;n+=1){
     const step=replaceFailedReviewer({...replacementRequest,failedSequence},io)
     assert.ok(!seen.includes(step.reviewer),`${step.reviewer} was already spent on this head`)
     seen.push(step.reviewer);failedSequence=step.sequence
   }
-  assert.deepEqual(seen.slice(0,ACTIVE_REVIEWERS.length),ACTIVE_REVIEWERS.map((r)=>r.name))
-  assert.equal(seen[seen.length-1],'codex-gpt-5.6-sol','the overflow provider is the last resort, not part of the rotation')
+  assert.deepEqual(seen,ACTIVE_REVIEWERS.map((r)=>r.name))
   assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence},io),/no other reviewer is available/)
 })
 
