@@ -2,6 +2,7 @@
 do $test$
 declare
   v_definition text;
+  v_trigger_function text;
 begin
   select pg_get_functiondef(
     'api.db_data_admin_scraped_properties(text,text,integer)'::regprocedure
@@ -41,6 +42,32 @@ begin
      or not has_function_privilege('authenticated',
        'api.db_data_admin_scraped_properties(text,text,integer)', 'EXECUTE') then
     raise exception 'Scraped Properties EXECUTE boundary changed';
+  end if;
+
+  if not exists (
+       select 1 from pg_constraint
+       where conrelid = 'plm.dcp_opa_property_resolution'::regclass
+         and conname = 'dcp_opa_property_resolution_single_chain_ck'
+     )
+     or (select count(*) from pg_trigger
+         where tgrelid in (
+           'plm.dcp_opa_property_resolution'::regclass,
+           'plm.dcp_opa_property_resolution_member'::regclass
+         ) and tgname in (
+           'dcp_opa_property_resolution_append_only',
+           'dcp_opa_property_resolution_member_append_only'
+         ) and not tgisinternal) <> 2 then
+    raise exception 'single-chain or append-only hardening is missing';
+  end if;
+
+  select pg_get_functiondef(
+    'plm.reject_dcp_opa_resolution_mutation()'::regprocedure
+  ) into v_trigger_function;
+  if position('append-only' in v_trigger_function) = 0
+     or position('restrict_violation' in v_trigger_function) = 0
+     or has_function_privilege('public',
+          'plm.reject_dcp_opa_resolution_mutation()', 'EXECUTE') then
+    raise exception 'append-only trigger function or privilege boundary changed';
   end if;
 end;
 $test$;
