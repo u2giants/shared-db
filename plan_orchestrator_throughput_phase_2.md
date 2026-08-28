@@ -375,14 +375,7 @@ Create:
 - `scripts/orchestrator-flow/preview-graph.mjs`
 - `scripts/orchestrator-flow/preview-graph.test.mjs`
 - `scripts/orchestrator-flow/select-preview-route.mjs`
-- `scripts/orchestrator-flow/dispatch-preview.mjs`
-- `scripts/orchestrator-flow/dispatch-preview.test.mjs`
-- `scripts/orchestrator-flow/dispatch-shared-migrations.mjs`
-- `scripts/orchestrator-flow/dispatch-shared-migrations.test.mjs`
-- `scripts/check-workflow-dispatch-admission.mjs`
-- `scripts/check-workflow-dispatch-admission.test.mjs`
-- `config/orchestrator-operator-executables-v1.json`
-- `docs/production-promotion-procedure.md`
+- `scripts/orchestrator-flow/select-preview-route.test.mjs`
 
 Inputs are read-only: current `main` migration set, preview ledger, active claims, bundle IDs, original preview artifacts and typed recovery records. Output includes ordered nodes, edges, reason, next legal route and blockers.
 
@@ -396,30 +389,20 @@ Required behavior:
 - ambiguous/missing producer evidence returns `UNVERIFIABLE`, never guesses;
 - dependency closure is printed before production dry-run, so #1646-like two-version batches are known early.
 
-`dispatch-preview.mjs` is the dependency-aware preview front end. It accepts preview only, validates the route and exact current PR head/bundle, then calls `dispatch-shared-migrations.mjs`. The shared operator-side dispatcher is the sanctioned convenience route for both preview and production targets and owns authenticated `gh`, shared admission, exact ref and a closed adapter for every input of `.github/workflows/shared-supabase-migrations.yml`. Input discovery tests compare the adapter with all target inputs—including historical recovery maps—and fail when either side drifts. The operator command is never authorization: it proposes target/ref/inputs, and the workflow independently revalidates all of them before target work or an exclusive lease.
+Do **not** add an automatic GitHub dispatcher, admission token/ref, workflow-to-workflow call, new check context or concurrency-group change in Phase 2. Those designs were debated and rejected because they can attach false required-check failures to a PR head, displace the one pending shared workflow run, execute proposed validator code from the proposed ref, or require new write permissions in a required PR job.
 
-Create `config/orchestrator-operator-executables-v1.json` listing both dispatch scripts and every sanctioned operator dispatcher; discovery tests fail on unlisted/missing entries. Add it and the other new `config/` files to `PREVIEW_PRODUCER_PATHS` or document a precise `PREVIEW_RUNTIME_DATA_EXEMPTIONS` reason, satisfying the existing filesystem-completeness test. Operator scripts are global invalidators for review but are not falsely treated as run-executed producer custody. `scripts/check-workflow-dispatch-admission.mjs` is the enforcing workflow-side validator and is pinned as part of the executed preview/production producer closure.
+The selector is read-only and produces one immutable route-decision artifact:
 
-“Neutral queued state” is operator coordination metadata only. It creates no workflow/check run or apply/rebind artifact and cannot satisfy a required or production consumer. Only a real apply or validated historical/merged rebind produces success evidence.
+- `PREVIEW_WAIT`: dependency edges plus the exact event that can satisfy each edge;
+- `PREVIEW_READY`: exact current PR head, bundle ID, route, complete existing workflow input manifest and a human-readable guarded-dispatch instruction;
+- `UNVERIFIABLE`: exit 2 with missing/ambiguous evidence.
 
-When the selector returns wait, the command writes coordination state and exits without creating a workflow/check run. It therefore cannot acquire a lock, upload an artifact, consume check-run pagination, occupy the shared preview/production concurrency group, or displace a pending run. Step 8 reconciliation invokes this command again after dependency satisfaction; only a ready result may dispatch.
+A wait creates no workflow/check run, lock or apply/rebind artifact. When an edge becomes satisfied, Step 8 re-runs the selector and emits one idempotent `PREVIEW_READY` work item to the live sole-orchestrator task. The orchestrator then uses the repository's existing manual `shared-supabase-migrations.yml` dispatch procedure. Dispatch remains deliberately manual and serialized; the workflow continues to revalidate live state and acquire the existing preview lease. “Automatic resume” in this plan means automatic dependency detection, wake-up and exact ready instruction—not automatic mutation or workflow dispatch.
 
-Before preview or production dispatch, the shared command acquires `refs/db-coordination/shared-dispatch-admission` with the existing create-if-absent/fenced pattern and proves no queued or in-progress **`workflow_dispatch`** run of `shared-supabase-migrations.yml` exists; pull-request runs are irrelevant. It creates immutable `refs/db-dispatch-admissions/<admission-id>` containing target/ref/input-manifest hash and proposer identity, dispatches exactly once, records a terminal outcome ref after exact run/ref/input readback, then releases only the lock. Admission records remain for workflow/production evidence. Preview reconciliation and the documented manual production procedure both call this helper (`--target preview|production`).
-
-Preserve the existing workflow-level concurrency expression's pull-request branch verbatim and `cancel-in-progress: false`. Refine only the non-PR branch: a nonempty admission ID uses the existing shared `shared-supabase-migrations` group; the default-empty unauthorized UI dispatch uses `unauthorized-${{ github.run_id }}` and cannot replace a sanctioned pending run. It may run only the validation job concurrently—never target work.
-
-Add the admission validator as the first **conditional step inside the existing `validate` job**, running only for `workflow_dispatch`. This changes no job `needs:` graph, so `production-apply` retains literal `needs: [validate, production-apply-review]`. The completed validate job is upstream of all four dispatch jobs, so the preview project's deliberately-first target-ref step and production-apply-review's deliberately-first exact-confirmation step remain first within their jobs. Missing/mismatched/consumed admission fails in validate before any target job, credential, allowlist parsing or lease. Direct UI/API dispatch is unsupported; workflow validation independently re-derives truth.
-
-Unreadable run/admission state, ambiguous dispatch/readback or unverifiable validation is `UNVERIFIABLE` exit 2. Update `docs/production-promotion-procedure.md` and operator rules so production uses `dispatch-shared-migrations.mjs --target production`; the old direct workflow-dispatch instruction is retired.
-
-Add `shared-dispatch-admission` to `recoverStaleAuthorMutex()`'s recognized-kind allowlist and the duplicate `scripts/lib/exclusive-lease.test.mjs` assertion. Recovery requires exact admission payload/SHA, dead operator proof or terminal/absent dispatched run, and the existing fenced recovery marker; it never guesses from elapsed time alone.
-
-The change must not alter the pull-request `validate` / `SQL migration guards` job's trigger, `if:`, or real pass/fail conclusion. Existing required contexts, including `SQL migration guards`, `Migration author lease`, and `Migration guarded merge authorization`, still run. Skipped, cancelled, missing, or never-started required contexts are forbidden because this repository's non-strict branch protection can false-green them.
-
-Static fixtures/documented rulings are not branch-protection truth. An operator-run qualification/activation check with admin-capable authentication reads live protection through the same API as `scripts/update-required-checks.mjs`; unreadable protection is `UNVERIFIABLE`. Default CI uses mocked protection fixtures and never assumes its token can read admin settings. The wait context must be absent from both the live required set and `production_business_risk_gate.py::REQUIRED_CHECKS`. Do not require the live PR set, Python production set and YAML job names to be equal.
+Preserve `.github/workflows/shared-supabase-migrations.yml`, its workflow-level concurrency expression, required check names, production procedure, permissions and dispatch inputs unchanged in Step 5. A future automatic dispatcher is a separate design requiring its own security review and is outside this plan.
 
 **Dependencies:** Steps 3–4.
-**Verification gate:** transcript fixtures reproduce automatic guarded redispatch after #1713 rebind, #1720 historical-route selection and #1646 ordering. Dispatcher tests prove wait creates no run; both sanctioned targets round-trip every input/ref/admission; two contenders admit one; only workflow-dispatch runs block; PR runs do not; ambiguity is exit 2. `check-workflow-dispatch-admission.test.mjs` and `scripts/test_production_migration_guard.py` prove: PR per-ref concurrency/cancel flag survive; empty UI dispatch gets a unique group; sanctioned dispatch gets the shared group; validator is first conditional validate step; four target jobs depend on validate; literal production needs and deliberately-first target steps remain; absent/mismatched/consumed admission fails. A ready preview reaches live validation and exactly one preview lock.
+**Verification gate:** transcript fixtures reproduce #1720 waiting behind #1713, #1720 historical-route selection and #1646 dependency closure. Selector tests prove wait creates no Actions/check/artifact; the satisfying event changes the same issue to one idempotent `PREVIEW_READY`; the ready artifact binds current head/bundle/route and every existing workflow input; stale head/bundle becomes `UNVERIFIABLE`; repeated reconciliation emits no duplicate ready item. Static tests prove Step 5 changes no shared-workflow concurrency, permissions, required contexts, dispatch inputs or production procedure.
 
 ### Step 6 — replace the global reviewer-assignment critical section
 
@@ -446,7 +429,7 @@ During shadow/dual-run, legacy derived busy state remains authoritative. An unre
 **Dependencies:** Step 3 bundle identity. Can be implemented in parallel with Step 5 after schema freeze.
 **Verification gate:** concurrency tests prove distinct execution keys reserve concurrently; aliases sharing a wrapper/provider serialize; interruption holds no `MUTEX_REF`; active reviewers precede overflow and arbitrary inactive names fail. Verdict/PR-close/head-move releases normally and remains recoverable after a dead releaser; no-verdict recovery stays stricter. All-busy creates a ref-safe monotonic wait; two wakers yield one claim/assignment/outcome; terminal waits never wake again; failure injection before/after successor creation and old-generation terminalization always leaves exactly one current queue generation with original priority. Unreadable reservation truth preserves legacy shadow behavior and fails closed after activation without paid overflow.
 
-Before the Phase C fresh-session cut, update `docs/agents/section-4-anti-collision-rules.md`, `AGENTS.md`, the `shared-db-orchestrator` skill and drift fixtures for the preview front end, shared preview/production dispatcher and admission-record lifecycle, the revised manual production command, execution-key reservation, overflow and durable wait lifecycle. Do not defer these operator-visible semantics to Step 10.
+Before the Phase C fresh-session cut, update `docs/agents/section-4-anti-collision-rules.md`, `AGENTS.md`, the `shared-db-orchestrator` skill and drift fixtures for read-only preview dependency decisions, `PREVIEW_READY` wake-up, unchanged manual dispatch, execution-key reservation, overflow and durable review-wait lifecycle. Do not defer these operator-visible semantics to Step 10.
 
 **Fresh-session cut:** prove doc/skill drift green, update STATUS and start Phase D.
 
@@ -478,7 +461,7 @@ Create `scripts/orchestrator-flow/reconcile.mjs` and tests; expose `--reconcile-
 3. relinquish active-author lease for a durable external blocker while preserving claim;
 4. fill free active-author capacity with highest-priority non-overlapping ready work;
 5. detect blocker resolution or dependency-edge satisfaction;
-6. for a satisfied preview edge, call `dispatch-preview.mjs`; its shared admission/run-state/readback guard is the only automatic preview redispatch path;
+6. for a satisfied preview edge, re-run `select-preview-route.mjs` and emit one idempotent `PREVIEW_READY` work item to the live sole-orchestrator task; never dispatch a workflow automatically;
 7. reacquire an author lease when capacity exists and emit a resumable work item;
 8. release reviewer reservations from verdict/PR-close/head-move proof and scan unresolved waits; revalidate current head/bundle/eligibility, atomically claim the oldest compatible sequence and invoke the guarded allocator when an execution key is free;
 9. refuse if owned-mutex readback proves state changed before mutation.
@@ -486,7 +469,7 @@ Create `scripts/orchestrator-flow/reconcile.mjs` and tests; expose `--reconcile-
 There is no repository coordination heartbeat, and none is added to `EXCLUSIVE_REFS`. The live sole-orchestrator session invokes reconciliation explicitly after queue/stage events and from `--queue-audit`; an optional Codex task wake-up may prompt that session but is not coordination authority. Overlapping reconciliations use the existing short mutex/create-if-absent pattern, not invented compare-and-swap. Reconciliation may always report `REFILL REQUIRED NOW`; it may create/resume a structural author only through the same guarded `--claim`/resume dispatch path after resolving the live sole-orchestrator marker to the calling task.
 
 **Dependencies:** Steps 2, 5 and 7.
-**Verification gate:** a fixture with #1658/#1645/#1684/#1720/#1646 all protected but externally blocked reports zero active authors and five protected claims, fills up to the proven active cap, then resumes correctly without losing claims. A satisfied preview edge invokes guarded dispatch exactly once; a busy/unreadable shared run queue remains waiting and never displaces work. No marker or a marker resolving elsewhere mutates anything; overlapping reconciliation and reviewer claim/outcome recovery are idempotent under two wakers, terminal reservations, stale heads and dead claimants; preview/merge/production refs never gain heartbeat writers.
+**Verification gate:** a fixture with #1658/#1645/#1684/#1720/#1646 all protected but externally blocked reports zero active authors and five protected claims, fills up to the proven active cap, then resumes correctly without losing claims. A satisfied preview edge emits one exact `PREVIEW_READY` item and no workflow run; no marker or a marker resolving elsewhere emits/mutates anything; overlapping reconciliation and reviewer claim/outcome recovery are idempotent under two wakers, terminal reservations, stale heads and dead claimants; preview/merge/production refs never gain heartbeat writers.
 
 ### Step 9 — integrate Phase 1 blocker ledger and define success
 
@@ -543,16 +526,15 @@ Run focused tests after each step and the repository-required suites on a frozen
 - `scripts/orchestrator-flow/baseline-schema.test.mjs`: source provenance, state separation, timestamp order, unknown duration handling.
 - `scripts/orchestrator-flow/evidence-bundle.test.mjs`: canonicalization, every invalidator, dirty/missing file refusal, identical bundle across unrelated base movement.
 - `scripts/orchestrator-flow/classify-invalidation.test.mjs`: all five classes and the real #1713/`ddcdd5da` byte-identical fixture.
-- `scripts/orchestrator-flow/preview-graph.test.mjs`: dependency cycles, #1713/#1720 order, automatic wake, historical route, evidence-type mismatch, #1646 closure.
-- `scripts/orchestrator-flow/dispatch-preview.test.mjs` and `dispatch-shared-migrations.test.mjs`: wait creates no run; exact ref and complete target-input passthrough; workflow-dispatch-only run-state filter; shared preview/production admission record/outcome lifecycle; ambiguous response/stranded-lock reconciliation; preview-front-end refusal of production; ready preview reaches live validation and exactly one preview lock.
-- `scripts/check-workflow-dispatch-admission.test.mjs` and `scripts/test_production_migration_guard.py`: preserve PR/sanctioned/unauthorized concurrency branches, `cancel-in-progress: false`, literal production needs and deliberately-first target steps; validate absent/mismatched/consumed admissions for every dispatch target before target work.
+- `scripts/orchestrator-flow/preview-graph.test.mjs` and `select-preview-route.test.mjs`: dependency cycles, #1713/#1720 order, historical route, evidence-type mismatch, #1646 closure, no-run wait, exact ready artifact, stale-head refusal and idempotent wake.
+- Static workflow tests preserve `.github/workflows/shared-supabase-migrations.yml` concurrency, permissions, required contexts, dispatch inputs, literal production needs and deliberately-first safety steps; Step 5 introduces no workflow mutation.
 - Reviewer concurrency tests: parallel assignment by canonical execution key, aliases sharing a provider/wrapper serialize, no global stall, exact recovery, prohibited-provider preflight, and context doctor outside `MUTEX_REF`.
 - Reviewer supply tests: all active plus overflow busy creates a durable ordered `review-wait`, never a duplicate; release and independent reconciliation each wake exactly one compatible waiter through the allocator; a dead releaser strands nothing; cap 8 does not imply eight simultaneous reviewers.
 - `scripts/orchestrator-flow/qualify-change.test.mjs`: #1684/#1720/#1646 late-failure fixtures and supported controls.
-- `scripts/orchestrator-flow/reconcile.test.mjs`: idempotence, overlapping explicit reconciliation under the owned mutex, blocked-claim capacity, priority/collision refill, exact resume, satisfied-preview-edge dispatch once, busy-run deferral, terminal reservation release, and interrupted reviewer-generation rollover.
+- `scripts/orchestrator-flow/reconcile.test.mjs`: idempotence, overlapping explicit reconciliation under the owned mutex, blocked-claim capacity, priority/collision refill, exact resume, satisfied-preview-edge ready-item emission once/no dispatch, terminal reservation release, and interrupted reviewer-generation rollover.
 - Phase 1 ledger/report tests extended for new timing classes and minimum sample rules.
 - Workflow contract tests prove preview/merge/production refs remain exclusive and a `WAITING` dependency cannot reach apply.
-- `scripts/test_production_business_risk_gate.py` covers admission evidence, pins/exempts every new config file through the existing filesystem-completeness rule, and proves production evidence relies on workflow-side validation rather than trusting operator-script bytes; keep it in the existing `scripts/test_*.py` glob.
+- `scripts/test_production_business_risk_gate.py` remains green and every new `config/` file is pinned or precisely exempted through its existing filesystem-completeness rule; keep it in the existing `scripts/test_*.py` glob.
 - Static tests prove no code path releases an object claim on author-lease relinquishment/expiry.
 - Static tests prove existing `expires_at`/`lease.active` never decides active capacity and no exclusive-stage heartbeat/renewal writer exists.
 - Recovery tests cover every new lock kind in both the manager allowlist and `scripts/lib/exclusive-lease.test.mjs`.
@@ -610,7 +592,7 @@ Run focused tests after each step and the repository-required suites on a frozen
 - [ ] Active capacity reaches eight only after two distinct provider/wrapper identities are qualified, Albert approves the exact recommendation, at least six active rotation reviewers are proven, and all-busy review safely waits.
 - [ ] Reviews and downstream proof bind to canonical evidence bundle IDs.
 - [ ] Unrelated `main` movement triggers integration refresh only; changed/uncertain inputs fail closed.
-- [ ] Preview dependencies are explicit, ordered and automatically resumed without a red apply attempt.
+- [ ] Preview dependencies are explicit, ordered and automatically wake the sole orchestrator with an exact ready instruction, without a red apply attempt or automatic dispatch.
 - [ ] Reviewer assignment is concurrent across providers and interruption-isolated.
 - [ ] Qualification catches every transcript-derived late incompatibility before the expensive/irreversible stage.
 - [ ] Blocker/resume/refill reconciliation is idempotent and marker-bound.
@@ -628,7 +610,7 @@ Run focused tests after each step and the repository-required suites on a frozen
 | Preview dependency graph is wrong | ledger/main/claim cross-check, cycle refusal, shadow mode | disable scheduler; return to serialized manual dispatch |
 | Two reviewers assigned same serialized provider/wrapper | per-execution-key create-if-absent reservation | disable new allocator; retain old assignment refs |
 | Review wait is double-woken or binds stale content | monotonic wait sequence, atomic claim/outcome refs, live head/bundle revalidation | disable durable waits; return to explicit manual assignment |
-| Preview wait false-greens or displaces a real dispatch | operator-side wait creates no run; shared dispatch-admission mutex plus zero queued/in-progress proof and exact readback | disable automatic dispatcher; return to serialized manual preview dispatch |
+| Preview wait false-greens or displaces a real dispatch | read-only selector/wake creates no run/check and preserves existing manual serialized dispatch | disable automatic wake; retain manual queue audit and dispatch |
 | Automatic resume races changed state | marker proof plus owned mutex/readback and live requalification | disable reconcile mutation; keep read-only audit |
 | Qualification disagrees with enforcing workflow | enforcing workflow always wins; mismatch recorded as blocker | disable qualification gating, retain diagnostics |
 | Legacy refs/artifacts become unreadable | versioned schema and compatibility readers | revert new writers; keep compatibility reader |
