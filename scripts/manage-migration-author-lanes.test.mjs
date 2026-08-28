@@ -1433,7 +1433,12 @@ function raceWorkers(objects){
   const runs=objects.map((object,index)=>new Promise((resolve,reject)=>{
     const child=spawn(process.execPath,[worker,store,String(index+1),object],{windowsHide:true})
     let out='',err='';child.stdout.on('data',x=>out+=x);child.stderr.on('data',x=>err+=x)
-    child.on('error',reject);child.on('close',code=>resolve({code,json:JSON.parse(out),err}))
+    child.on('error',reject);child.on('close',code=>{
+      let json
+      try{json=JSON.parse(out)}catch(error){return reject(new Error(`race worker ${index+1} returned invalid JSON (${error.message}); stderr=${err.trim()||'<empty>'}; stdout=${out.trim()||'<empty>'}`))}
+      if(![0,2].includes(code))return reject(new Error(`race worker ${index+1} exited ${code}; stderr=${err.trim()||'<empty>'}; stdout=${out.trim()||'<empty>'}`))
+      resolve({code,json,err})
+    })
   }))
   return Promise.all(runs).finally(()=>rmSync(store,{recursive:true,force:true}))
 }
