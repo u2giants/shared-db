@@ -220,3 +220,7 @@ The current conversation instructed Codex to start a fresh Grok session; this is
 | Ready identity/mode/outcome contention assertions were dropped | Claude | Step 8 gate restores new-ID/no-inherited-dry-run, single outcome ref and mode-specific dispatched assertions |
 | Unreadable readiness could wedge a live issue forever | Claude | fenced marker-bound repair requires event binding and no-dispatch proof; otherwise explicit owner decision, never silent deletion |
 | Step 8 omitted CI, invalidator and manager-test files | Claude | Step 8 names required-CI backstop, invalidator discovery and manager tests; its global invalidation forces fresh bundle reviews |
+| Repair relied on retention-bound absence and could cancel a dispatched record | Claude | repair uses positive v2 event identity only; run/artifact absence is never proof |
+| Repair could cancel the only legal current digest | Grok, Claude | wrong-digest stale refs may be superseded; a corrupt live-digest ref receives no write and requires owner decision |
+| Event schema could not bind ready ID and ordering was undefined | Claude | schema v2 adds ready ID/full tuple with v1 reader; event lands before ref and crash retries idempotently |
+| Repair/event/recovery files and operator entrypoint were inconsistent | Claude | Step 8 names event files, lock recovery, manager tests and one exact manager CLI; STAGE_PAIRS remains private and is tested behaviorally |
