@@ -1,7 +1,7 @@
 ---
 issue: 1738
 status: OPEN
-owner: codex/issue-1738-throughput-phase-2
+owner: codex/issue-1738-phase2-consensus
 ---
 
 # 0. Decisions only the owner can make
@@ -24,7 +24,7 @@ Albert asked for an implementation-plan-writer Phase 2 plan using all evidence f
 
 # 3. Current state
 
-The comprehensive plan is [`../plan_orchestrator_throughput_phase_2.md`](../plan_orchestrator_throughput_phase_2.md), with debate evidence in [`../docs/verification/orchestrator-throughput-phase-2-consensus-20260828.md`](../docs/verification/orchestrator-throughput-phase-2-consensus-20260828.md). The initial plan merged at `1eacdacd52a5d6bbd212f718967391df1381138d`; Grok 4.6 and Claude Opus 5 rejected that revision and their material objections are being incorporated on `codex/issue-1738-phase2-consensus`. No Phase 2 code, workflow, migration, database write or deployment has occurred. Issue #1738 tracks implementation.
+The comprehensive plan is [`../plan_orchestrator_throughput_phase_2.md`](../plan_orchestrator_throughput_phase_2.md), with debate evidence in [`../docs/verification/orchestrator-throughput-phase-2-consensus-20260828.md`](../docs/verification/orchestrator-throughput-phase-2-consensus-20260828.md). The initial plan merged at `1eacdacd52a5d6bbd212f718967391df1381138d`; later automatic-dispatch revisions were rejected and replaced with a read-only selector, durable `PREVIEW_READY` coordination record and unchanged manual dispatch on `codex/issue-1738-phase2-consensus`. No Phase 2 code, workflow, migration, database write or deployment has occurred. Issue #1738 tracks implementation.
 
 # 4. What did not work
 

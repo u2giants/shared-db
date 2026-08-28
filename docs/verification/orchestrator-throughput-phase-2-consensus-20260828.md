@@ -63,7 +63,9 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | AGENTS/skill drift could span phases | Claude | matching skill/drift change is part of Phase A and blocks its fresh-session cut |
 | `--flow-audit --json` lacked a direct test | Claude | explicit coordination-audit CLI test added |
 
-## Fourth-round objections and disposition
+## Fourth-round objections and disposition — HISTORICAL, DISPATCH ITEMS SUPERSEDED
+
+> Historical: every automatic-dispatch/admission disposition in rounds 4–9 was superseded by the replacement design after commit `3f76c28`. These rows preserve debate provenance; they are not current implementation instructions.
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -77,7 +79,7 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Reviewer names can alias one serialized wrapper | Claude | reservations keyed by canonical provider/wrapper execution identity, with display reviewer in payload |
 | Cap test timing could assert eight before approval | Claude | production remains five until gate; parameterized fixtures test proposed eight beforehand |
 
-## Fifth-round objections and disposition
+## Fifth-round objections and disposition — HISTORICAL, DISPATCH ITEMS SUPERSEDED
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -90,7 +92,7 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Phase C operator semantics were not synchronized to docs/skill | Claude | Phase C cut now requires same-phase AGENTS/docs/skill/drift updates |
 | Default CI cannot read admin branch protection | Claude | live read is operator activation only; CI uses mocked fixtures |
 
-## Sixth-round objections and disposition
+## Sixth-round objections and disposition — HISTORICAL, DISPATCH ITEMS SUPERSEDED
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -104,7 +106,7 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Wait cycles could accumulate PR check runs | Claude | waiting is operator coordination only and creates no Actions/check run |
 | New dispatcher was outside preview custody | Claude | corrected later: operator scripts are untrusted proposers; the workflow-side admission validator is the pinned enforcing producer |
 
-## Seventh-round objections and disposition
+## Seventh-round objections and disposition — HISTORICAL, DISPATCH ITEMS SUPERSEDED
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -116,7 +118,7 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Crash between superseded outcome and successor wait could lose issue | Claude | successor-first rollover under mutex plus two-generation recovery/failure injection |
 | Ready preview and reconciliation dispatch tests were missing | Claude | exact one-lock ready-preview test and reconcile dispatch/busy/recovery cases added |
 
-## Eighth-round objections and disposition
+## Eighth-round objections and disposition — HISTORICAL, DISPATCH ITEMS SUPERSEDED
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -129,7 +131,7 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | New config files would fail completeness gate | Claude | each is pinned or precisely exempted and filesystem-completeness test stays required |
 | Second head drift could leave no current wait generation | Claude | recovery snapshots newest live state and exits only with exactly one current generation |
 
-## Ninth-round objections and disposition
+## Ninth-round objections and disposition — HISTORICAL, DISPATCH ITEMS SUPERSEDED
 
 | Objection | Source | Disposition in current plan |
 |---|---|---|
@@ -161,4 +163,15 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 
 ## Replacement design after the exhausted first Grok debate
 
-The user explicitly authorized a fresh Grok session. Codex replaced, rather than patched, the disputed automatic dispatcher. Phase 2 now ends at a read-only route selector and idempotent `PREVIEW_READY` work item. It creates no Actions run/check, changes no workflow concurrency/permissions/inputs, and leaves the incident-derived manual preview/production dispatch procedure intact. Automatic behavior is limited to dependency detection and waking the live sole-orchestrator task with exact current evidence.
+The current conversation instructed Codex to start a fresh Grok session; this is operational provenance, not durable external authorization for a database or production action. Codex replaced, rather than patched, the disputed automatic dispatcher. Phase 2 now ends at a read-only route selector and durable idempotent `PREVIEW_READY` record. It creates no Actions run/check, changes no workflow concurrency/permissions/inputs, and leaves the incident-derived manual preview/production dispatch procedure intact. Automatic behavior is limited to dependency detection, durable readiness and optionally waking the live sole-orchestrator task with exact current evidence.
+
+## Fresh-review objections on the replacement design
+
+| Objection | Source | Disposition in current plan |
+|---|---|---|
+| New Node tests were local-only and would miss required CI | Claude | Step 10 adds `scripts/orchestrator-flow/*.test.mjs` to required `migration-author-lease.yml` command in the same PR |
+| No named static test protected unchanged workflow invariants | Claude | `scripts/test_production_migration_guard.py` explicitly covers Step 5 invariants |
+| `PREVIEW_READY` had no store/dedupe/lifecycle | Claude | immutable ready refs, existing events, terminal outcome refs and head/bundle supersession |
+| No live marker could lose an automatic wake | Claude | wait state remains durable/derivable; no-marker audit reports only; next matching marker materializes readiness once |
+| Admission-era ledger rows looked current | Claude | rounds 4–9 are explicitly marked historical/superseded |
+| Classifier and rollout retained dispatch-era wording | Claude | selector/ready artifact is the integration surface; rollout says durable wait plus manual dispatch |
