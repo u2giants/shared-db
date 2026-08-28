@@ -268,7 +268,7 @@ BEGIN
       )
       AND grantee = 'service_role'
     GROUP BY table_name
-    HAVING array_agg(privilege_type ORDER BY privilege_type)
+    HAVING array_agg(privilege_type::text ORDER BY privilege_type::text)
       IS DISTINCT FROM ARRAY['INSERT', 'SELECT']::text[]
   ) OR (
     SELECT count(*)
