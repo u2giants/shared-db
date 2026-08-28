@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, activateReviewCutover } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -2484,4 +2484,80 @@ test('completeWork publishes a fully proven merged report and reads it back', ()
   const published = completeWork({ issue: 5, report: mergedRecord(5) }, io)
   assert.equal(published.outcome, 'merged')
   assert.equal(io.posted.length, 1)
+})
+
+// --activate-review-cutover (issue #1777 handover)
+
+function freshCutoverIo(){const io=reviewIo();io.refs.delete(REVIEW_ACTIVE_CUTOVER_REF);return io}
+
+function seedAssignment(io,{issue,pr,headSha,reviewer,sequence=1}){
+  const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=${sequence} reviewer=${reviewer} issue=${issue} pr=${pr} head=${headSha}`)
+  io.refs.set(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${headSha}`,sha)
+  return sha
+}
+
+test('cutover activation is idempotent and performs no writes once already active',()=>{
+  const io=reviewIo(),before=[...io.refs.entries()]
+  const result=activateReviewCutover(io)
+  assert.deepEqual(result,{activated:false,alreadyActive:true,cutoverSha:'cutover-complete',backfilled:[]})
+  assert.deepEqual([...io.refs.entries()],before)
+})
+
+test('cutover activation with no open PRs creates the cutover ref with no backfill',()=>{
+  const io=freshCutoverIo()
+  const result=activateReviewCutover(io)
+  assert.equal(result.activated,true)
+  assert.deepEqual(result.backfilled,[])
+  assert.equal(io.refs.get(REVIEW_ACTIVE_CUTOVER_REF),result.cutoverSha)
+})
+
+test('cutover activation backfills the active lease for a pre-cutover live review before creating the cutover ref',()=>{
+  const io=freshCutoverIo(),headSha='a'.repeat(40)
+  io.openPulls=()=>[{number:109,head:{sha:headSha}}]
+  seedAssignment(io,{issue:9,pr:109,headSha,reviewer:'grok-4.6'})
+  const result=activateReviewCutover(io)
+  assert.equal(result.activated,true)
+  assert.deepEqual(result.backfilled,[{reviewer:'grok-4.6',issue:9,pr:109,headSha,ref:reviewActiveRef('grok-4.6')}])
+  assert.ok(io.refs.has(reviewActiveRef('grok-4.6')))
+  assert.ok(io.refs.has(REVIEW_ACTIVE_CUTOVER_REF))
+})
+
+test('cutover activation skips a pre-cutover assignment that already has a verdict',()=>{
+  const io=freshCutoverIo(),headSha='b'.repeat(40)
+  io.openPulls=()=>[{number:110,head:{sha:headSha}}]
+  seedAssignment(io,{issue:10,pr:110,headSha,reviewer:'grok-4.6'})
+  io.getIssueComments=()=>[{body:`APPROVE ${headSha}`,commit_id:headSha}]
+  const result=activateReviewCutover(io)
+  assert.deepEqual(result.backfilled,[])
+  assert.equal(io.refs.has(reviewActiveRef('grok-4.6')),false)
+})
+
+test('cutover activation retried after success is idempotent and repeats no backfill',()=>{
+  const io=freshCutoverIo(),headSha='c'.repeat(40)
+  io.openPulls=()=>[{number:111,head:{sha:headSha}}]
+  seedAssignment(io,{issue:11,pr:111,headSha,reviewer:'glm-5.3'})
+  const first=activateReviewCutover(io)
+  const second=activateReviewCutover(io)
+  assert.equal(first.activated,true)
+  assert.deepEqual(second,{activated:false,alreadyActive:true,cutoverSha:first.cutoverSha,backfilled:[]})
+})
+
+test('cutover activation fails closed when an open PR head SHA cannot be proved exact',()=>{
+  const io=freshCutoverIo()
+  io.openPulls=()=>[{number:112,head:{sha:'not-a-sha'}}]
+  assert.throws(()=>activateReviewCutover(io),/40-character head SHA/)
+  assert.equal(io.refs.has(REVIEW_ACTIVE_CUTOVER_REF),false)
+})
+
+test('cutover activation fails closed on an assignment naming an unrecognized reviewer',()=>{
+  const io=freshCutoverIo(),headSha='d'.repeat(40)
+  io.openPulls=()=>[{number:113,head:{sha:headSha}}]
+  seedAssignment(io,{issue:12,pr:113,headSha,reviewer:'not-a-real-reviewer'})
+  assert.throws(()=>activateReviewCutover(io),/unrecognized reviewer/)
+  assert.equal(io.refs.has(REVIEW_ACTIVE_CUTOVER_REF),false)
+})
+
+test('cutover activation requires openPulls and listRefs to avoid an unproven audit',()=>{
+  const io=freshCutoverIo();delete io.openPulls
+  assert.throws(()=>activateReviewCutover(io),/requires openPulls and listRefs/)
 })

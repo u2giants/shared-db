@@ -1268,7 +1268,7 @@ export function recoverStaleAuthorMutex({ expectedSha, confirmStale, serializedR
     const message=commit?.message ?? commit?.commit?.message ?? ''
     const dateText=commit?.committer?.date ?? commit?.commit?.committer?.date
     const acquiredAt=new Date(dateText)
-    if(!/^db-coordination (?:author-acquisition|author-capacity-relinquish|author-capacity-resume|preview|merge|production|claim-release|claim-split-recovery|claim-object-expansion|claim-reversion|claim-version-supersession|claim-lease-renewal|reviewer-assignment-lock|reviewer-replacement-lock|reviewer-failure(?:-replacement)?)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
+    if(!/^db-coordination (?:author-acquisition|author-capacity-relinquish|author-capacity-resume|preview|merge|production|claim-release|claim-split-recovery|claim-object-expansion|claim-reversion|claim-version-supersession|claim-lease-renewal|reviewer-assignment-lock|reviewer-replacement-lock|reviewer-failure(?:-replacement)?|reviewer-index-cutover-activation-audit)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
     if(Number.isNaN(acquiredAt.valueOf()))throw new LaneError('refusing recovery: mutex owner time is unreadable')
     const age=now-acquiredAt
     if(age<minAgeMs)throw new LaneError(`refusing recovery: mutex is only ${Math.max(0,Math.floor(age/1000))} seconds old`)
@@ -2036,6 +2036,87 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
 
 export function replaceFailedReviewer(request,io=githubIo){return withReviewRequestBudget(()=>replaceFailedReviewerOperation(request,reviewOperationIo(io)))}
 
+// REVIEWER-INDEX CUTOVER ACTIVATION (issue #1777 handover). `findBusyReviewers`
+// REFUSES outright when `REVIEW_ACTIVE_CUTOVER_REF` is absent (see its
+// FAIL-CLOSED comment above), so that ref must never be created bare. Any
+// review already live on an open PR's CURRENT head, assigned before this
+// activation ran, needs its `REVIEW_ACTIVE_REF_PREFIX` lease backfilled FIRST
+// -- otherwise the busy probe would silently lose visibility into it the
+// instant cutover flips on, and a second reviewer could be handed a provider
+// that is already working.
+//
+// BOUNDED. The live audit walks every currently OPEN pull request exactly
+// once (`io.openPulls()`), which is bounded by this repository's open-PR
+// count -- never all history and never every closed assignment ref ever
+// written.
+//
+// FAIL-CLOSED ON AN UNPROVEN AUDIT. Any PR whose number or exact head SHA
+// cannot be read, any matching assignment ref that cannot be parsed, any
+// reviewer name the audit does not recognize, or any lease creation that
+// cannot be proved by readback refuses the ENTIRE activation with no cutover
+// ref written. A partially-audited cutover is worse than none: it would look
+// active while actually blind to some in-flight review.
+//
+// IDEMPOTENT ON RETRY. If the cutover ref already exists this returns its
+// recorded SHA immediately and performs no writes and no audit, so retrying
+// after a network flake or an interrupted run never re-runs the audit and
+// never risks a duplicate-ref race. The same race is handled mid-flight too:
+// if another activation wins the create between this run's audit and its own
+// `createRef`, the loser reads back the winner's SHA instead of erroring.
+function activateReviewCutoverOperation(io) {
+  const already = io.readRef(REVIEW_ACTIVE_CUTOVER_REF)
+  if (already) return { activated: false, alreadyActive: true, cutoverSha: already, backfilled: [] }
+  if (typeof io.openPulls !== 'function' || typeof io.listRefs !== 'function') {
+    throw new LaneError('review cutover activation requires openPulls and listRefs; refusing an unproven audit')
+  }
+  requireReviewWireCapacity(15)
+  const openPulls = io.openPulls()
+  if (!Array.isArray(openPulls)) throw new LaneError('open PR audit did not return a readable list; cutover activation refused')
+  const assignmentRows = io.listRefs(REVIEW_ASSIGNMENT_REF_PREFIX) ?? []
+  const backfilled = []
+  const ownerSha = io.makeOwnerCommit('db-coordination reviewer-index-cutover-activation-audit')
+  acquireReviewMutex(ownerSha, io)
+  try {
+    for (const pr of openPulls) {
+      const headSha = pr?.head?.sha
+      const number = pr?.number
+      if (!Number.isInteger(number) || !/^[0-9a-f]{40}$/i.test(String(headSha ?? ''))) {
+        throw new LaneError(`open PR audit could not read an exact number and 40-character head SHA for ${JSON.stringify(pr?.number ?? pr)}; cutover activation refused`)
+      }
+      const matches = assignmentRows.filter((row) => row.ref.endsWith(`-${number}-${headSha}`))
+      for (const row of matches) {
+        let lease
+        try { lease = parseReviewCursor(io.getCommit(row.sha)) }
+        catch (error) { throw new LaneError(`assignment ref ${row.ref} is unreadable: ${error.message}; cutover activation refused`) }
+        if (!lease || lease.pr !== number || lease.headSha !== headSha) continue
+        if (hasVerdictForHead(lease.issue, lease.pr, lease.headSha, io)) continue
+        if (!REVIEWERS.some((r) => r.name === lease.reviewer)) throw new LaneError(`assignment ref ${row.ref} names an unrecognized reviewer ${lease.reviewer}; cutover activation refused`)
+        const leaseRef = reviewActiveRef(lease.reviewer)
+        requireOwnedRef(MUTEX_REF, ownerSha, io)
+        const existingLease = io.readRef(leaseRef)
+        if (existingLease === row.sha) continue
+        if (existingLease) throw new LaneError(`reviewer ${lease.reviewer} already holds a different active lease; cutover activation refused pending manual audit`)
+        if (!io.createRef(leaseRef, row.sha) && readRefAfterWrite(leaseRef, row.sha, io) !== row.sha) {
+          throw new LaneError(`could not create or prove the active lease for reviewer ${lease.reviewer} on PR #${number}; cutover activation refused`)
+        }
+        backfilled.push({ reviewer: lease.reviewer, issue: lease.issue, pr: number, headSha, ref: leaseRef })
+      }
+    }
+    requireOwnedRef(MUTEX_REF, ownerSha, io)
+    if (!io.createRef(REVIEW_ACTIVE_CUTOVER_REF, ownerSha)) {
+      const raced = readRefAfterWrite(REVIEW_ACTIVE_CUTOVER_REF, ownerSha, io)
+      if (!raced) throw new LaneError('review cutover ref could not be created or proven after the audit; activation refused')
+      return { activated: false, alreadyActive: true, cutoverSha: raced, backfilled }
+    }
+    if (readRefAfterWrite(REVIEW_ACTIVE_CUTOVER_REF, ownerSha, io) !== ownerSha) {
+      throw new LaneError('review cutover ref creation could not be proved by readback; activation refused')
+    }
+    return { activated: true, alreadyActive: false, cutoverSha: ownerSha, backfilled }
+  } finally { finalizeReviewMutex(ownerSha, io) }
+}
+
+export function activateReviewCutover(io=githubIo){return withReviewRequestBudget(()=>activateReviewCutoverOperation(reviewOperationIo(io)))}
+
 export function acquireAuthorLane(options, now = new Date(), io = githubIo) {
   options = { ...options, objects: validateClaimObjects(options.objects) }
   const requestId = options.requestId ?? randomUUID()
@@ -2792,6 +2873,7 @@ function parseArgs(argv) {
     else if (a === '--report-file') out.reportFile = argv[++i]
     else if (a === '--return-issue') out.returnIssue = Number(argv[++i])
     else if (a === '--assign-reviewer') out.assignReviewer = true
+    else if (a === '--activate-review-cutover') out.activateReviewCutover = true
     else if (a === '--replace-failed-reviewer') out.replaceFailedReviewer = true
     else if (a === '--reviewer-preflight') out.reviewerPreflight = true
     else if (a === '--cleanup-stale') out.cleanup = true
@@ -2862,6 +2944,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.replaceFailedReviewer){console.log(JSON.stringify(replaceFailedReviewer(o,io),null,2));return 0}
     if(o.reviewerPreflight){console.log(JSON.stringify(reviewerExecutionPreflight(o,io),null,2));return 0}
     if(o.assignReviewer){console.log(JSON.stringify(assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha},io),null,2));return 0}
+    if(o.activateReviewCutover){console.log(JSON.stringify(activateReviewCutover(io),null,2));return 0}
     if (o.acquireExclusive) { console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha, versions:o.versions, versionPrMap:o.versionPrMap }, io), null, 2)); return 0 }
     if (o.releaseExclusive) { if (!o.ownerSha) throw new LaneError('--owner-sha is required for safe release'); releaseOwnedRef(EXCLUSIVE_REFS[o.releaseExclusive], o.ownerSha, io); return 0 }
     const claims = io.openClaims()
@@ -3001,7 +3084,7 @@ export function main(argv, now = new Date(), io = githubIo) {
       for(const problem of malformed)console.error(`MALFORMED ${problem}`)
       return malformed.length || occupied>MAX_AUTHOR_LANES ? 2 : 0
     }
-    if (!o.claim) throw new LaneError('choose --claim, --audit, --queue-audit, --return-issue, --cleanup-stale, or an exclusive-lane command')
+    if (!o.claim) throw new LaneError('choose --claim, --audit, --queue-audit, --return-issue, --cleanup-stale, --activate-review-cutover, or an exclusive-lane command')
     for (const k of ['task','owner','branch','worktree']) if (!o[k]) throw new LaneError(`--${k} is required`)
     if (!o.objects.length) throw new LaneError('--objects must name every database object exactly')
     o.leaseHours ??= DEFAULT_LEASE_HOURS
