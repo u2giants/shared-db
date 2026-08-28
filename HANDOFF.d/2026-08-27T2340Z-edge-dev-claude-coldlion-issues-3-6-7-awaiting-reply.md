@@ -1,3 +1,9 @@
+---
+issue: 1031
+status: OPEN
+owner: claude/coldlion-handoff-20260827
+---
+
 # ColdLion API — issues 3, 6 and 7 sent; awaiting JamieLynn's reply
 
 ## 1. Status
