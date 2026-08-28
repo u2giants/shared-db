@@ -6,7 +6,7 @@ owner: codex/issue-1738-throughput-phase-2
 
 # 0. Decisions only the owner can make
 
-Nothing is needed before implementation begins. One decision is required before the final five-to-eight activation: after qualification evidence exists, Albert must approve the exact two providers to add or un-retire so the active reviewer roster reaches at least six. Until then the cap stays five. The plan preserves one-at-a-time preview/merge/production, exact object protection and required reviewer coverage.
+Nothing is needed before implementation begins. One decision is required before the final five-to-eight activation: after qualification evidence exists, Albert must approve the exact two distinct provider/wrapper identities so the active reviewer roster reaches at least six. Retired `glm-5.2` cannot count separately from active `glm-5.3`; at least one genuinely new provider is required. Until then the cap stays five. The plan preserves one-at-a-time preview/merge/production, exact object protection and required reviewer coverage.
 
 Already settled — do not re-ask:
 
@@ -58,11 +58,11 @@ Use authenticated `git`/`gh` for `u2giants/shared-db`, Node/Python in the repo, 
 
 # 9. Open questions and risks
 
-Module boundaries and lease cadence are implementer choices under plan §8. Phase C cap activation waits for Albert's exact two-provider approval after qualification; this does not block Phases A–B or shadow work. Ambiguous invalidation must remain `UNVERIFIABLE` and repeat full review. The largest risks are accidental claim release, unsafe review reuse and scheduler races; plan §13 gives controls and reversible rollout for each.
+Module boundaries and lease cadence are implementer choices under plan §8. Step 10 cap activation waits for Albert's exact two-provider approval after qualification; this does not block earlier phases or shadow work. Eight authors may enter typed `review-wait`; they never cause duplicate reviewer assignment. Ambiguous invalidation must remain `UNVERIFIABLE` and repeat full review.
 
 ## Handoff self-audit
 
 1. **Newcomer continuity: yes.** §§1–3 explain the repo, goal, exact state and plan link; §6 gives ordered gates.
 2. **Full session knowledge: yes.** §§4–5 carry the failed mechanisms and root cause; the linked plan §3 contains the complete timestamped evidence.
 3. **Execution completeness: yes.** §§6–9 cover actions, constraints, environment, risks and proof; commit/deploy state is explicit in §3.
-4. **Owner-decision sweep: yes.** §0 names the one deferred choice: Albert approves the exact two qualified providers before Phase C cap activation. It does not block implementation start. Any safety reduction is outside scope and must be raised separately.
+4. **Owner-decision sweep: yes.** §0 names the one deferred choice: Albert approves two distinct qualified provider/wrapper identities before Step 10 cap activation. It does not block implementation start. Any safety reduction is outside scope and must be raised separately.

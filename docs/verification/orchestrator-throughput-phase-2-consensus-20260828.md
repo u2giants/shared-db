@@ -48,6 +48,21 @@
 
 Plan and handoff prose are explicitly non-authoritative at runtime; versioned code/config and synchronized standing instructions remain policy inputs.
 
+## Third-round objections and disposition
+
+| Objection | Source | Disposition in current plan |
+|---|---|---|
+| Execution-context denial could become a standing caller/provider ban | Grok, Claude | current-process doctor result only; no persisted ban/TTL; later clean contexts remain eligible |
+| Preview wait could false-green a missing/skipped required check | Grok, Claude | wait only on `workflow_dispatch`; required PR jobs unchanged; live protection comparison; no lock/apply artifact |
+| Undefined `idle` capacity state could bypass guarded relinquishment | Grok | removed as fence state; dashboard-only label still counts active capacity |
+| Cap 8 can exceed concurrent reviewer supply | Claude | explicit `review-wait`; all-busy never returns a reserved reviewer; cap and reviewer supply are separate |
+| Retired GLM label is not an independent provider | Claude | exact recommendation must contain distinct provider/wrapper identities and at least one genuinely new provider |
+| Existing manager tests hard-code cap/roster | Claude | §10 explicitly updates those assertions while preserving all safety coverage |
+| Static branch-protection fixture is not live truth | Claude | authenticated live read is mandatory and unreadable/inconsistent state is `UNVERIFIABLE` |
+| Owner gate absent from rollout/definition of done | Claude | repeated in Step 10 rollout and definition of done |
+| AGENTS/skill drift could span phases | Claude | matching skill/drift change is part of Phase A and blocks its fresh-session cut |
+| `--flow-audit --json` lacked a direct test | Claude | explicit coordination-audit CLI test added |
+
 ## Rejected alternatives
 
 - Release blocked claims, raise the cap as a substitute for decoupling, parallelize database writes, reuse SQL-only evidence, trust path names alone, time-delete mutexes, add exclusive-stage heartbeat, build a general SQL analyzer, or accept production apply without verification.

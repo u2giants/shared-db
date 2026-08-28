@@ -246,9 +246,9 @@ Selecting a reviewer needs atomic roster/cursor updates, but remote review execu
 - Route qualification is read-only. It may refuse or report unavailable; it may not mutate refs, GitHub, preview or production.
 - Phase 1 blocker-ledger records are the measurement authority once available.
 
-### Owner decision required before Phase C cap activation
+### Owner decision required before Step 10 cap activation
 
-Albert's 2026-08-27 instruction authorizes the five-to-eight goal and requires at least six active rotation reviewers first. The live roster has four. Before Phase C activates eight, Albert must approve the exact two providers to add/un-retire after real wrapper qualification evidence is available. This does not block Phases A–B, the safety architecture, or shadow implementation; it blocks only roster mutation and cap activation. The implementer must present the qualified recommendation once, not silently choose provider identities.
+Albert's 2026-08-27 instruction authorizes the five-to-eight goal and requires at least six active rotation reviewers first. The live roster has four. Before Step 10 activates eight, Albert must approve the exact two providers after real wrapper qualification evidence is available. They must be distinct provider/wrapper identities; retired `glm-5.2` is the same `ai-glm` provider family as active `glm-5.3` and cannot count as another independent slot. At least one genuinely new qualified provider is therefore required even if Qwen is safely un-retired. This does not block Phases A–D, the safety architecture, or shadow implementation; it blocks only roster mutation and cap activation.
 
 ### Implementer judgment
 
@@ -278,8 +278,8 @@ The JSON carries the issue table and timeline in §3 with source task ID, observ
 Define states independently:
 
 - claim: `protected | released`;
-- author lease: `active | idle | relinquished | expired-unconfirmed`;
-- issue flow: `ready | authoring | ci | review | preview-wait | preview | merge | production | external-blocked | owner-decision | complete`;
+- author lease: `active | relinquished | expired-unconfirmed`; an “idle” dashboard label is derived from an active capacity lease with no live worker, still counts toward the cap, and is never a fence value or a bypass around guarded relinquishment;
+- issue flow: `ready | authoring | ci | review-wait | review | preview-wait | preview | merge | production | external-blocked | owner-decision | complete`;
 - evidence: `missing | current | stale-by-content | integration-refresh-required | unavailable`.
 
 Extend the existing `scripts/db-coordination-events.mjs` vocabulary for these transitions; do not create a second event store. The baseline schema may define payload validation, but durable lifecycle events remain in that module.
@@ -303,7 +303,7 @@ Update `scripts/check-migration-pr-lease.mjs` and its test explicitly. The requi
 
 Every relinquish/resume/reconcile lock kind is added to the recovery allowlist and `exclusive-lease.test.mjs` in the same change. Extend `db-coordination-events.mjs` with exported constructors/writers for `author_capacity_relinquished`, `author_capacity_resumed`, `issue_blocked`, and `issue_unblocked`; wire manager transitions to those writers. Add `scripts/orchestrator-flow/coordination-audit.mjs` as the explicit CLI over `validateEvent()`/`auditTimeline()`/`renderTimeline()`. There is no second store. Both claim parsers accept the extended fence and continue failing closed on malformed bodies.
 
-Update `docs/agents/section-4-anti-collision-rules.md` and `AGENTS.md` so “five lanes” means five active authors, not five protected claims. Keep queue grouping aware of all claims.
+Update `docs/agents/section-4-anti-collision-rules.md` and `AGENTS.md` so “five lanes” means five active authors, not five protected claims. Keep queue grouping aware of all claims. Land the matching `shared-db-orchestrator` skill text and drift fixture in the same Phase A change; Phase A cannot complete while the checked-in rule and synchronized skill disagree.
 
 **Dependencies:** Step 1.
 **Verification gate:** tests prove at least eight blocked protected claims plus eight non-overlapping active authors are representable when reviewer capacity is approved/proven; the next overlapping issue remains blocked; expansion/supersession/split recovery work with more protected claims than the active cap; existing clock expiry frees zero capacity; `check-migration-pr-lease.mjs` refuses expired active-capacity and all relinquished claims; guarded resume renews/reactivates before the check can pass; releasing only capacity never permits an object/version collision; interrupted relinquish/resume is recoverable and idempotent; both claim parsers accept the new fence; `node scripts/orchestrator-flow/coordination-audit.mjs` replays emitted relinquish→blocked→unblocked→resume events without double-acquisition.
@@ -392,29 +392,32 @@ Integrate the selector with `.github/workflows/shared-supabase-migrations.yml`; 
 
 “Neutral queued state” is coordination metadata only. It must not conclude a required GitHub check as `success`, upload a `preview-migration-apply-*`/rebind artifact, or satisfy any consumer that requires a real apply/rebind. The workflow may skip/cancel a non-required dispatch job or emit a separate non-required wait check; only a real apply or validated historical/merged rebind produces success evidence.
 
-The wait check/context must be absent from `production_business_risk_gate.py::REQUIRED_CHECKS` and from every required branch-protection context managed by `scripts/update-required-checks.mjs`. A skipped required context is not a wait design; it is a merge deadlock and fails this step.
+The wait path applies only to the `workflow_dispatch` preview route, before the preview lock. It must not change the pull-request `validate` / `SQL migration guards` job's trigger, `if:`, or real pass/fail conclusion. Existing required contexts, including `SQL migration guards`, `Migration author lease`, and `Migration guarded merge authorization`, still run. The wait context must be absent from `production_business_risk_gate.py::REQUIRED_CHECKS`; skipped, cancelled, missing, or never-started required contexts are forbidden because this repository's non-strict branch protection can false-green them. A wait job takes no preview lock and cannot reach the existing `if: always()` `preview-migration-*` artifact upload.
+
+Static fixtures/documented rulings are not branch-protection truth. Qualification and rollout perform a live read of required contexts using the same authenticated protection API as `scripts/update-required-checks.mjs`, compare it with the Python policy and workflow job names, and fail `UNVERIFIABLE` on unreadable or inconsistent state.
 
 **Dependencies:** Steps 3–4.
-**Verification gate:** transcript-derived fixtures reproduce #1720 waiting behind #1713, automatic resume after #1713 rebind, #1720 historical-route selection, and #1646 dependency-closure detection without a failed preview/production run; a `WAITING` conclusion/artifact cannot satisfy `REQUIRED_CHECKS`, merge, preview-proof or production consumers; static tests prove its context is absent from Python risk policy and the branch-protection context list.
+**Verification gate:** transcript-derived fixtures reproduce #1720 waiting behind #1713, automatic resume after #1713 rebind, #1720 historical-route selection, and #1646 dependency-closure detection without a failed preview/production run; a `WAITING` conclusion/artifact cannot satisfy `REQUIRED_CHECKS`, merge, preview-proof or production consumers; workflow tests prove only `workflow_dispatch` can wait, required PR jobs still run, waits acquire no preview lock/upload no apply artifact, and live branch-protection comparison fails closed when unreadable or inconsistent.
 
 ### Step 6 — replace the global reviewer-assignment critical section
 
 Refactor `assignNextReviewer()`, `replaceFailedReviewer()`, `reviewerExecutionPreflight()` and liveness/recovery helpers in `scripts/manage-migration-author-lanes.mjs`:
 
 - exclude only retired/paused providers and durable issue-specific prohibitions before selection; local wrapper/doctor failure never silently shrinks the roster;
-- add a third, caller-specific eligibility class. Only durable, fresh wrapper evidence naming the exact approved check `execution-context-denied` may mark one reviewer ineligible for one caller/execution context before selection. It does not pause the provider globally, record provider failure, or reduce the roster for other callers; unknown/stale evidence does not skip anyone;
+- add a third, process-local eligibility result. Only a doctor run performed by the current assigning process for its exact execution context, naming the exact approved check `execution-context-denied`, may skip that reviewer for this one selection attempt. Do not persist a standing model/caller prohibition, provider failure or TTL record. A later process whose doctor does not report the check, including a Full Access main task, can select the reviewer. Unknown output cannot skip; every other doctor failure remains post-assignment on the existing local-dependency path;
 - reserve `refs/db-reviewer-reservations/<reviewer>` with `createRef()`/`acquireRef()` create-if-absent semantics;
 - advance the round-robin cursor inside a short `MUTEX_REF` critical section, or replace the cursor with append-only assignment refs read through `listRefs()`; never call force `updateRef()` as though it were compare-and-swap;
 - persist issue/PR/bundle ID/head metadata;
 - release the allocation mutex before remote execution;
 - allow other free reviewers to be assigned concurrently;
+- if every eligible active and overflow reviewer is reserved, return typed `review-wait`; never fall back to the whole rotation or hand back a busy reviewer. A freed reservation deterministically wakes the oldest compatible wait. Eight active authors may therefore feed a smaller review stage without duplicate assignment or pretending reviewer supply equals author capacity;
 - recover only a specific reviewer reservation after proving no verdict/artifact and dead/interrupted owner state;
 - never replace a substantive `REVISE` or reduce coverage.
 
 Keep exact-head metadata during rollout, but make bundle ID the review-content identity. `reviewerExecutionPreflight()` remains after durable assignment for general wrapper/provider/local checks. A local `doctor` failure follows the existing local-dependency path and does not rotate/skip the provider unless it matches the narrowly versioned caller-specific class above; only durable roster pause/retirement, issue-specific policy, or exact caller-context ineligibility prevents selection. Add reviewer reservation/recovery lock kinds to the central and duplicated recovery allowlists.
 
 **Dependencies:** Step 3 bundle identity. Can be implemented in parallel with Step 5 after schema freeze.
-**Verification gate:** concurrency tests launch assignments for at least three issues and prove distinct reviewers reserve concurrently; interruption of one does not hold `MUTEX_REF` or block others; duplicate assignment to one reviewer is impossible; stale recovery touches only that reviewer; ordinary local doctor failure keeps the assigned reviewer and fails through the existing local-dependency path; exact fresh `execution-context-denied` evidence skips that provider only for the matching caller and preserves it for another caller; stale/unknown evidence cannot skip; retired/paused/prohibited providers are never assigned; all existing reviewer-replacement refusal tests remain green.
+**Verification gate:** concurrency tests launch assignments for at least three issues and prove distinct reviewers reserve concurrently; interruption of one does not hold `MUTEX_REF` or block others; duplicate assignment to one reviewer is impossible; all-busy returns `review-wait` and wakes without cursor duplication; stale recovery touches only that reviewer; ordinary local doctor failure keeps the assigned reviewer and fails through the existing local-dependency path; an exact current-process `execution-context-denied` result skips that provider for only that selection attempt and a later clean process can select it; unknown evidence cannot skip; retired/paused/prohibited providers are never assigned; all existing reviewer-replacement refusal tests remain green after their explicit cap/roster expectations are updated.
 
 **Fresh-session cut:** update STATUS and start Phase D.
 
@@ -492,7 +495,7 @@ Roll out in reversible stages:
 
 1. **Shadow:** commands compute new state/bundles/route/invalidation but existing enforcement remains authoritative. Record mismatches; any unsafe disagreement blocks enablement.
 2. **Capacity:** enable claim/author-lease separation while collision enforcement remains dual-checked against old claims.
-3. **Reviewer/cap:** prove at least six active rotation providers, enable per-reviewer reservations, then raise active capacity from five to eight under Albert's 2026-08-27 instruction; retain recovery compatibility for old assignment refs.
+3. **Reviewer/cap:** qualify two distinct provider/wrapper identities (retired `glm-5.2` cannot count separately from active `glm-5.3`), present the exact recommendation to Albert, obtain his approval, prove at least six active rotation providers, enable per-reviewer reservations plus `review-wait`, then raise active capacity from five to eight under his 2026-08-27 instruction; retain recovery compatibility for old assignment refs. Without the approval and proof, remain at five.
 4. **Preview scheduler:** convert known dependency failures to waits and auto-resume; keep one preview lock.
 5. **Evidence reuse:** enable `INTEGRATION_REFRESH_ONLY` review preservation last, after shadow corpus proves no false reuse.
 
@@ -503,7 +506,7 @@ Run focused tests after each step and the repository-required suites on a frozen
 
 ## 10. Required tests
 
-- Existing `scripts/manage-migration-author-lanes.test.mjs` remains green, including collision, lease, reviewer replacement, stale recovery, supersession and exclusive-stage tests.
+- Existing `scripts/manage-migration-author-lanes.test.mjs` remains green after intentionally updating its hard-coded cap, exact-roster, roster-length and boundary-arithmetic assertions for the approved configuration; collision, lease, reviewer replacement, stale recovery, supersession and exclusive-stage coverage remains intact.
 - `scripts/check-migration-pr-lease.test.mjs` proves relinquished, expired and non-active-capacity leases remain merge-blocking until guarded resume renews/reactivates them.
 - `scripts/coordination-scenarios.test.mjs` remains green and gains end-to-end blocked/relinquish/resume and wait-context scenarios.
 - `scripts/orchestrator-flow/baseline-schema.test.mjs`: source provenance, state separation, timestamp order, unknown duration handling.
@@ -511,6 +514,7 @@ Run focused tests after each step and the repository-required suites on a frozen
 - `scripts/orchestrator-flow/classify-invalidation.test.mjs`: all five classes and the real #1713/`ddcdd5da` byte-identical fixture.
 - `scripts/orchestrator-flow/preview-graph.test.mjs`: dependency cycles, #1713/#1720 order, automatic wake, historical route, evidence-type mismatch, #1646 closure.
 - Reviewer concurrency tests: parallel assignment, per-reviewer exclusion, no global stall, exact recovery, prohibited-provider preflight.
+- Reviewer supply tests: all active plus overflow busy yields `review-wait`, never a duplicate; freeing one wakes exactly one compatible waiter; cap 8 does not imply eight simultaneous reviewers.
 - `scripts/orchestrator-flow/qualify-change.test.mjs`: #1684/#1720/#1646 late-failure fixtures and supported controls.
 - `scripts/orchestrator-flow/reconcile.test.mjs`: idempotence, overlapping explicit reconciliation under the owned mutex, blocked-claim capacity, priority/collision refill, exact resume.
 - Phase 1 ledger/report tests extended for new timing classes and minimum sample rules.
@@ -519,6 +523,7 @@ Run focused tests after each step and the repository-required suites on a frozen
 - Static tests prove existing `expires_at`/`lease.active` never decides active capacity and no exclusive-stage heartbeat/renewal writer exists.
 - Recovery tests cover every new lock kind in both the manager allowlist and `scripts/lib/exclusive-lease.test.mjs`.
 - `scripts/db-coordination-events.test.mjs` covers every new transition and rejects a parallel event store/double acquisition.
+- `scripts/orchestrator-flow/coordination-audit.test.mjs` exercises `--json`, malformed histories and double-acquisition refusal.
 - Both claim parsers accept the versioned capacity fence and reject malformed state.
 - Failure injection after every ref write proves retry/recovery is idempotent.
 - Run the repository workflow's exact existing coordination baseline: `node --test scripts/check-migration-pr-lease.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/historical-migration-restorations.test.mjs scripts/lib/work-dependencies.test.mjs scripts/agent-work-contract.test.mjs scripts/db-coordination-events.test.mjs scripts/coordination-scenarios.test.mjs scripts/lib/exclusive-lease.test.mjs scripts/apply-lane-advisory-lock.test.mjs`.
@@ -535,7 +540,7 @@ Run focused tests after each step and the repository-required suites on a frozen
 - Never treat force `updateRef()` as compare-and-swap.
 - Bundle reuse never covers changed content, uncertain classification or unavailable evidence.
 - Bundle reuse requires successful full CI on the current integration head and immutable evidence naming both bundle ID and integration SHA.
-- A preview dependency wait is never GitHub `success` and never an apply/rebind artifact.
+- A preview dependency wait exists only on `workflow_dispatch`, is never GitHub required-check success and never an apply/rebind artifact; required pull-request jobs always run.
 - A reviewer verdict covers one bundle ID and declared coverage. `REVISE` is never replaced.
 - Qualification is advisory/refusal-only; enforcement reruns live at each irreversible gate.
 - Existing refs and artifacts require a compatibility/migration period; never rewrite historical refs in place.
@@ -546,12 +551,14 @@ Run focused tests after each step and the repository-required suites on a frozen
 - A change to `AGENTS.md` must be mirrored through the repository's skill-drift mechanism.
 - Once scripts/workflows change, the PR is not documentation-only.
 - Plan and handoff Markdown are never runtime policy inputs; executable policy comes only from versioned code/config plus synchronized standing instructions.
+- Every AGENTS.md/skill semantic change and its drift fixture lands in the same phase; do not cross a fresh-session cut with contradictory synced instructions.
 
 ## 12. Access and environment
 
 - Repository: authenticated `git`/`gh`, `u2giants/shared-db`, base `main`.
 - Runtime: repository Node and Python on Windows; use project-supported commands.
-- Coordination truth: GitHub refs under `refs/db-*`, GitHub issues/PRs/runs, and existing workflow artifacts.
+- Coordination truth: GitHub refs under `refs/db-*`, GitHub issues/PRs/runs, live branch-protection state, and existing workflow artifacts.
+- Skill synchronization: authenticated `popcre/ai-devops` checkout resolved through `AI_DEVOPS_DIR`/the repository's drift tooling; no skill edit is attempted without that checkout, and Phase A stops before its cut if synchronization cannot be proven.
 - Database: implementation should need no database write. Read-only preview/production queries, if a test genuinely requires them, use the existing Management API and 1Password vault `vibe_coding`; never expose values.
 - Private transcript source: local Codex archive for task `01a0461f-d1bf-7e02-8c84-ee8783f965b0`; do not commit the raw JSONL.
 - Planning branch/worktree: `codex/issue-1738-throughput-phase-2` / `C:\repos\shared-db-worktrees\issue-1738-throughput-phase-2`.
@@ -566,7 +573,7 @@ Run focused tests after each step and the repository-required suites on a frozen
 
 - [ ] Protected claims and active-author leases are distinct, audited states.
 - [ ] Blocked claims never consume author capacity and never lose collision protection.
-- [ ] Active capacity reaches eight only after at least six active rotation reviewers are proven, satisfying Albert's 2026-08-27 instruction.
+- [ ] Active capacity reaches eight only after two distinct provider/wrapper identities are qualified, Albert approves the exact recommendation, at least six active rotation reviewers are proven, and all-busy review safely waits.
 - [ ] Reviews and downstream proof bind to canonical evidence bundle IDs.
 - [ ] Unrelated `main` movement triggers integration refresh only; changed/uncertain inputs fail closed.
 - [ ] Preview dependencies are explicit, ordered and automatically resumed without a red apply attempt.
@@ -593,7 +600,7 @@ Run focused tests after each step and the repository-required suites on a frozen
 
 ### Open questions
 
-Implementation may begin without an owner decision, but Phase C cap activation cannot. Albert already instructed the five-to-eight raise on 2026-08-27 and required at least six active rotation reviewers; the live roster has four. After real wrapper qualification, the implementer must bring Albert one exact recommendation naming the two providers to add or un-retire. Until he approves those identities, the cap remains five. The implementer may choose module boundaries and the versioned capacity-record representation under §8. The first shadow report may reveal a class that cannot safely be proven disjoint; classify it `UNVERIFIABLE` and retain full exact-head replay rather than asking for a safety exception. Any proposal to parallelize database writes or reduce reviewer coverage is outside this plan and requires a separate owner decision.
+Implementation may begin without an owner decision, but Step 10 cap activation cannot. Albert already instructed the five-to-eight raise on 2026-08-27 and required at least six active rotation reviewers; the live roster has four. After real wrapper qualification, the implementer must bring Albert one exact recommendation naming two distinct provider/wrapper identities; `glm-5.2` cannot count separately from active `glm-5.3`. Until he approves and the roster/safe-wait tests pass, the cap remains five. The implementer may choose module boundaries and the versioned capacity-record representation under §8. The first shadow report may reveal a class that cannot safely be proven disjoint; classify it `UNVERIFIABLE` and retain full exact-head replay rather than asking for a safety exception. Any proposal to parallelize database writes or reduce reviewer coverage is outside this plan and requires a separate owner decision.
 
 ## Self-audit
 
