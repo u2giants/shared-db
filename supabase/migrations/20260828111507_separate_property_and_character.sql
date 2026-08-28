@@ -11,6 +11,8 @@
 -- are deliberately retired and remain rebuildable only from normalized source
 -- evidence under the governed curated-Master-Data process.
 
+begin;
+
 lock table core.properties_and_characters in access exclusive mode;
 lock table core.property_character_associations in access exclusive mode;
 lock table plm.item_character_associations in access exclusive mode;
@@ -396,3 +398,5 @@ comment on function api.db_data_admin_licensor_property_tree(text, boolean, text
 drop trigger properties_and_characters_eol_write_guard on core.properties_and_characters;
 drop function core.reject_properties_and_characters_write();
 drop table core.properties_and_characters restrict;
+
+commit;

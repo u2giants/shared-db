@@ -1075,6 +1075,21 @@ class PreflightNegativeTests(unittest.TestCase):
             migrations = local_migrations(root)
             preflight_batch(migrations, ["20260102000000"], {"20260101000000"})
 
+    def test_issue_1684_lock_and_destructive_separation_are_one_transaction(self) -> None:
+        """The live runner executes LOCK TABLE only inside explicit framing."""
+        migration = (
+            REPO
+            / "supabase"
+            / "migrations"
+            / "20260828111507_separate_property_and_character.sql"
+        ).read_text(encoding="utf-8").lower()
+
+        self.assertEqual(len(re.findall(r"(?m)^begin;$", migration)), 1)
+        self.assertEqual(len(re.findall(r"(?m)^commit;$", migration)), 1)
+        self.assertLess(migration.index("begin;"), migration.index("lock table"))
+        self.assertRegex(migration, r"drop table [^;]+ restrict;\s*commit;\s*\Z")
+        self.assertNotRegex(migration, r"drop\s+[^;]+\s+cascade\s*;")
+
     def test_real_18_file_batch_passes(self) -> None:
         migrations = local_migrations(REPO)
         remote = production_ledger_versions()
