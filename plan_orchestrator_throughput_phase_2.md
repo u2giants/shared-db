@@ -375,6 +375,7 @@ Create:
 - `scripts/orchestrator-flow/preview-graph.mjs`
 - `scripts/orchestrator-flow/preview-graph.test.mjs`
 - `scripts/orchestrator-flow/select-preview-route.mjs`
+- `.github/workflows/preview-dependency-dispatch.yml`
 
 Inputs are read-only: current `main` migration set, preview ledger, active claims, bundle IDs, original preview artifacts and typed recovery records. Output includes ordered nodes, edges, reason, next legal route and blockers.
 
@@ -388,40 +389,44 @@ Required behavior:
 - ambiguous/missing producer evidence returns `UNVERIFIABLE`, never guesses;
 - dependency closure is printed before production dry-run, so #1646-like two-version batches are known early.
 
-Integrate the selector with `.github/workflows/shared-supabase-migrations.yml`; the workflow validates the declared route against live state before taking the preview lock. A wait is a neutral queued state, not a red CI failure.
+Create `.github/workflows/preview-dependency-dispatch.yml` as the only dependency-aware preview entrypoint. It has its own short-lived, issue-keyed concurrency group and never shares the workflow-level `shared-supabase-migrations` group. It accepts preview targets only; production is rejected/bypasses this entrypoint. It validates the declared route against live state. When ready, it dispatches the existing `.github/workflows/shared-supabase-migrations.yml`, whose preview job still validates live state before taking the preview lock. When waiting, it records coordination metadata and ends without dispatching the existing workflow.
 
 “Neutral queued state” is coordination metadata only. It must not conclude a required GitHub check as `success`, upload a `preview-migration-apply-*`/rebind artifact, or satisfy any consumer that requires a real apply/rebind. The workflow may skip/cancel a non-required dispatch job or emit a separate non-required wait check; only a real apply or validated historical/merged rebind produces success evidence.
 
-The wait path applies only to `workflow_dispatch`. Implement it as a separate short-lived dependency job that emits coordination metadata and exits immediately; the existing preview/apply job is conditionally not started. It neither acquires the preview lock nor enters the job containing the existing `if: always()` `preview-migration-*` artifact upload, and it cannot occupy the workflow's global dispatch concurrency group while a dependency remains unresolved. A later reconciler-triggered dispatch re-evaluates the graph and starts the real preview job only when ready.
+The wait path applies only to preview `workflow_dispatch` through the new entrypoint. Because a waiting run never dispatches `shared-supabase-migrations.yml`, it cannot acquire the preview lock, run that workflow's unconditional `validate` job, enter the job containing the existing `if: always()` artifact upload, occupy the shared preview/production concurrency group, or displace a legitimately pending preview/production run. A later reconciliation invokes the entrypoint again; only a ready result dispatches the real workflow.
 
 The change must not alter the pull-request `validate` / `SQL migration guards` job's trigger, `if:`, or real pass/fail conclusion. Existing required contexts, including `SQL migration guards`, `Migration author lease`, and `Migration guarded merge authorization`, still run. Skipped, cancelled, missing, or never-started required contexts are forbidden because this repository's non-strict branch protection can false-green them.
 
-Static fixtures/documented rulings are not branch-protection truth. Live branch protection, read through the same authenticated API as `scripts/update-required-checks.mjs`, is authoritative for required PR contexts; unreadable protection is `UNVERIFIABLE`. The wait context must be absent from both that live required set and `production_business_risk_gate.py::REQUIRED_CHECKS`. Do not require the live PR set, Python production set and YAML job names to be equal: they serve different consumers. The prohibited inconsistency is specifically that the wait/new context appears in either enforcing set.
+Static fixtures/documented rulings are not branch-protection truth. An operator-run qualification/activation check with admin-capable authentication reads live protection through the same API as `scripts/update-required-checks.mjs`; unreadable protection is `UNVERIFIABLE`. Default CI uses mocked protection fixtures and never assumes its token can read admin settings. The wait context must be absent from both the live required set and `production_business_risk_gate.py::REQUIRED_CHECKS`. Do not require the live PR set, Python production set and YAML job names to be equal.
 
 **Dependencies:** Steps 3–4.
-**Verification gate:** transcript-derived fixtures reproduce #1720 waiting behind #1713, automatic redispatch after #1713 rebind, #1720 historical-route selection, and #1646 dependency closure without a failed preview/production run; a wait cannot satisfy `REQUIRED_CHECKS`, merge, preview-proof or production consumers. Workflow tests prove only `workflow_dispatch` can wait, the wait job exits immediately, the preview job does not start, required PR jobs still run, no lock/apply artifact is reached, unreadable live protection fails closed, and any wait context present in live or Python required sets is refused.
+**Verification gate:** transcript-derived fixtures reproduce #1720 waiting behind #1713, automatic redispatch after #1713 rebind, #1720 historical-route selection, and #1646 dependency closure without a failed preview/production run. Workflow tests prove the new entrypoint accepts preview only, a wait never dispatches the shared workflow, repeated waits cannot enter/displace its concurrency group, production never waits, and ready preview still reaches live validation/one preview lock. Mocked protection tests and the operator activation check refuse any wait context in live or Python enforcing sets; unreadable live protection is exit 2.
 
 ### Step 6 — replace the global reviewer-assignment critical section
 
 Refactor `assignNextReviewer()`, `replaceFailedReviewer()`, `reviewerExecutionPreflight()` and liveness/recovery helpers in `scripts/manage-migration-author-lanes.mjs`. Factor a read-only `reviewerExecutionContextCheck(reviewer, executionContext)` from the doctor-only portion of preflight; it needs no assignment/head and runs for each candidate outside `MUTEX_REF` before reservation. Full preflight still runs after assignment.
 
-- exclude only retired/paused providers and durable issue-specific prohibitions before selection; local wrapper/doctor failure never silently shrinks the roster;
+- preserve the existing two-tier roster: active reviewers are considered first; the owner-authorized Codex overflow candidate is considered only when every active execution key is unavailable. A shared `approvedExecutionCandidates()` policy supplies both the doctor-only check and full preflight. Full preflight accepts overflow only when the immutable assignment records `overflow: true` and proves all active keys were unavailable; arbitrary non-active names remain refused;
+- exclude retired/paused providers and durable issue-specific prohibitions before selection; local wrapper/doctor failure never silently shrinks the roster;
 - add a third, process-local eligibility result. Only a doctor run performed by the current assigning process for its exact execution context, naming the exact approved check `execution-context-denied`, may skip that reviewer for this one selection attempt. Do not persist a standing model/caller prohibition, provider failure or TTL record. A later process whose doctor does not report the check, including a Full Access main task, can select the reviewer. Unknown output cannot skip; every other doctor failure remains post-assignment on the existing local-dependency path;
 - define a canonical execution key from the actual provider/wrapper serialization identity, not the display/model name. Reserve `refs/db-reviewer-reservations/<execution-key>` with `createRef()`/`acquireRef()` create-if-absent semantics and store the selected reviewer identity in its payload. Two aliases sharing one wrapper/provider can never execute concurrently;
 - advance the round-robin cursor inside a short `MUTEX_REF` critical section, or replace the cursor with append-only assignment refs read through `listRefs()`; never call force `updateRef()` as though it were compare-and-swap;
 - persist issue/PR/bundle ID/head metadata;
 - release the allocation mutex before remote execution;
 - allow other free reviewers to be assigned concurrently;
-- if every eligible execution key is reserved, create immutable `refs/db-reviewer-waits/<created-at>-<issue>-<bundle>` metadata with issue/PR/bundle/head, eligibility set and monotonic tie-breaker, then return typed `review-wait`; never fall back to the rotation or hand back a busy reviewer. Reservation release invokes the same guarded allocator for the oldest compatible wait. Step 8 reconciliation also scans waits and performs that allocation, so a dead releasing process cannot strand them. Wake always re-enters `assignNextReviewer()` and never binds the just-freed reviewer blindly;
+- if every eligible execution key is reserved, allocate a ref-safe zero-padded monotonic sequence under the short owned mutex and create immutable `refs/db-reviewer-waits/<sequence>-<issue>-<bundle>` metadata with issue/PR/bundle/head and eligibility set, then return typed `review-wait`; never use wall-clock order or fall back to a busy reviewer;
+- a waker first revalidates the live PR head, canonical bundle and eligibility. Drift creates a terminal `superseded` outcome and, if still needed, a new wait for current content; it never assigns the stored stale head. For a current wait, the waker atomically creates `refs/db-reviewer-wait-claims/<wait-id>` before allocation. Release and Step 8 reconciliation contend on that same create-if-absent claim, so exactly one wins. Success/abandon/supersession is recorded once under `refs/db-reviewer-wait-outcomes/<wait-id>/<outcome>`; completed waits are excluded from ordering. A dead claimant is recoverable only through the existing liveness/fenced-recovery proof, after which allocation re-enters `assignNextReviewer()` rather than binding the freed reviewer blindly;
 - recover only a specific reviewer reservation after proving no verdict/artifact and dead/interrupted owner state;
 - never replace a substantive `REVISE` or reduce coverage.
 
 Keep exact-head metadata during rollout, but make bundle ID the review-content identity. `reviewerExecutionPreflight()` remains after durable assignment for general wrapper/provider/local checks. A local doctor failure follows the existing local-dependency path unless the current process's doctor-only context check reports exact `execution-context-denied` for that selection attempt. Only durable roster pause/retirement and issue-specific policy persist across attempts. Add reviewer reservation/wait/recovery lock kinds to the central and duplicated recovery allowlists.
 
 **Dependencies:** Step 3 bundle identity. Can be implemented in parallel with Step 5 after schema freeze.
-**Verification gate:** concurrency tests launch assignments for at least three issues and prove distinct execution keys reserve concurrently; aliases sharing a wrapper/provider serialize; interruption holds no `MUTEX_REF`; duplicate assignment is impossible; all-busy creates a durable ordered wait, release/reconcile wakes exactly one through the allocator, and a dead releaser does not strand it. Ordinary local doctor failure stays post-assignment; exact current-process context denial skips one attempt and a later clean process can select it. Unknown evidence cannot skip; retired/paused/prohibited providers are never assigned; updated replacement tests remain green.
+**Verification gate:** concurrency tests prove distinct execution keys reserve concurrently; aliases sharing a wrapper/provider serialize; interruption holds no `MUTEX_REF`; active reviewers precede overflow and arbitrary inactive names fail. All-busy creates a ref-safe monotonic wait; two simultaneous wakers yield one claim/assignment/outcome; dead-claim recovery is fenced; terminal waits never wake again; head/bundle drift supersedes rather than assigns stale content. Ordinary local doctor failure stays post-assignment; exact current-process context denial skips one attempt and a later clean process can select it.
 
-**Fresh-session cut:** update STATUS and start Phase D.
+Before the Phase C fresh-session cut, update `docs/agents/section-4-anti-collision-rules.md`, `AGENTS.md`, the `shared-db-orchestrator` skill and drift fixtures for the new preview entrypoint, execution-key reservation, overflow and durable wait lifecycle. Do not defer these operator-visible semantics to Step 10.
+
+**Fresh-session cut:** prove doc/skill drift green, update STATUS and start Phase D.
 
 ### Phase D — early qualification, automatic resume and measurement
 
@@ -452,13 +457,13 @@ Create `scripts/orchestrator-flow/reconcile.mjs` and tests; expose `--reconcile-
 4. fill free active-author capacity with highest-priority non-overlapping ready work;
 5. detect blocker resolution or dependency-edge satisfaction;
 6. reacquire an author lease when capacity exists and emit a resumable work item;
-7. scan durable reviewer waits and invoke the guarded allocator for the oldest compatible wait whenever an execution-key reservation is free;
+7. scan unresolved durable reviewer waits; revalidate current head/bundle/eligibility, atomically claim the oldest compatible sequence and invoke the guarded allocator when an execution-key reservation is free;
 8. refuse if owned-mutex readback proves state changed before mutation.
 
 There is no repository coordination heartbeat, and none is added to `EXCLUSIVE_REFS`. The live sole-orchestrator session invokes reconciliation explicitly after queue/stage events and from `--queue-audit`; an optional Codex task wake-up may prompt that session but is not coordination authority. Overlapping reconciliations use the existing short mutex/create-if-absent pattern, not invented compare-and-swap. Reconciliation may always report `REFILL REQUIRED NOW`; it may create/resume a structural author only through the same guarded `--claim`/resume dispatch path after resolving the live sole-orchestrator marker to the calling task.
 
 **Dependencies:** Steps 2, 5 and 7.
-**Verification gate:** a fixture with #1658/#1645/#1684/#1720/#1646 all protected but externally blocked reports zero active authors and five protected claims, fills up to the proven active cap with safe non-overlapping issues, then resumes the correct original issue when its blocker closes without losing its claim; no marker or a marker resolving elsewhere creates/resumes nothing; overlapping reconciliation is idempotent; preview/merge/production refs never gain heartbeat writers.
+**Verification gate:** a fixture with #1658/#1645/#1684/#1720/#1646 all protected but externally blocked reports zero active authors and five protected claims, fills up to the proven active cap with safe non-overlapping issues, then resumes the correct original issue when its blocker closes without losing its claim; no marker or a marker resolving elsewhere creates/resumes nothing; overlapping reconciliation is idempotent; reviewer wait claim/outcome recovery is idempotent under two wakers, stale heads and a dead claimant; preview/merge/production refs never gain heartbeat writers.
 
 ### Step 9 — integrate Phase 1 blocker ledger and define success
 
@@ -595,7 +600,9 @@ Run focused tests after each step and the repository-required suites on a frozen
 | Claim lost while author lease is released | separate refs/state, static invariant tests, dual-read shadow | disable lease separation; claims remain untouched |
 | Review reused across meaningful change | canonical bundle, conservative invalidator, `UNVERIFIABLE` fail-closed | disable evidence reuse; return to exact-head replay |
 | Preview dependency graph is wrong | ledger/main/claim cross-check, cycle refusal, shadow mode | disable scheduler; return to serialized manual dispatch |
-| Two reviewers assigned same provider | per-reviewer create-if-absent reservation | disable new allocator; retain old assignment refs |
+| Two reviewers assigned same serialized provider/wrapper | per-execution-key create-if-absent reservation | disable new allocator; retain old assignment refs |
+| Review wait is double-woken or binds stale content | monotonic wait sequence, atomic claim/outcome refs, live head/bundle revalidation | disable durable waits; return to explicit manual assignment |
+| Preview wait false-greens or displaces a real dispatch | separate preview-only entry workflow, no shared dispatch while waiting, live protection activation check | disable dependency entrypoint; return to serialized manual preview dispatch |
 | Automatic resume races changed state | marker proof plus owned mutex/readback and live requalification | disable reconcile mutation; keep read-only audit |
 | Qualification disagrees with enforcing workflow | enforcing workflow always wins; mismatch recorded as blocker | disable qualification gating, retain diagnostics |
 | Legacy refs/artifacts become unreadable | versioned schema and compatibility readers | revert new writers; keep compatibility reader |

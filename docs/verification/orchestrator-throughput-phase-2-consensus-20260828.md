@@ -77,6 +77,19 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Reviewer names can alias one serialized wrapper | Claude | reservations keyed by canonical provider/wrapper execution identity, with display reviewer in payload |
 | Cap test timing could assert eight before approval | Claude | production remains five until gate; parameterized fixtures test proposed eight beforehand |
 
+## Fifth-round objections and disposition
+
+| Objection | Source | Disposition in current plan |
+|---|---|---|
+| A wait inside the existing workflow still holds its workflow-level concurrency group | Claude | new preview-only entry workflow; waiting never dispatches the shared preview/production workflow |
+| Repeated waits could displace a pending real preview/production run | Claude | waits never enter that concurrency group; only ready state dispatches it |
+| Production could accidentally use the wait route | Claude | entry workflow accepts preview targets only and rejects production |
+| Wait wake could bind a stale PR head/bundle | Claude | every waker revalidates live head/bundle/eligibility; drift terminally supersedes and requeues current content |
+| Immutable waits lacked atomic claim, terminal lifecycle and ref-safe ordering | Claude | mutex-allocated ref-safe sequence, create-if-absent claim, append-only outcome, fenced dead-claim recovery |
+| Overflow reviewer policy was absent from the new eligibility seam | Claude | active tier first; approved overflow only with immutable proof all active keys unavailable; arbitrary inactive names fail |
+| Phase C operator semantics were not synchronized to docs/skill | Claude | Phase C cut now requires same-phase AGENTS/docs/skill/drift updates |
+| Default CI cannot read admin branch protection | Claude | live read is operator activation only; CI uses mocked fixtures |
+
 ## Rejected alternatives
 
 - Release blocked claims, raise the cap as a substitute for decoupling, parallelize database writes, reuse SQL-only evidence, trust path names alone, time-delete mutexes, add exclusive-stage heartbeat, build a general SQL analyzer, or accept production apply without verification.
