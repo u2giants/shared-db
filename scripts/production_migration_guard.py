@@ -64,6 +64,16 @@ MIGRATION_LINE_RE = re.compile(r"^\s*(?:[•*\-]\s*)?(\d{14})_[^\s]+\.sql\s*$")
 # ever turns out NOT to be applied, that changes the count in AGENTS.md 6.8 and
 # this set must be revisited before anything is promoted.
 HARD_BLOCKED = {
+    # #1750 code-truth restoration. Production already holds this exact ledger
+    # version and its one statement is byte-identical to the governed historical
+    # 20260817150944 restoration. The file exists only so main agrees with the
+    # protected ledger. Never replay it in preview or production.
+    "20260828052706",
+    # #1645 / #1692 merged-stranded original. Preview applied this version, but
+    # an unrelated producer-path change made its historical evidence permanently
+    # ineligible for production. The atomic claim reissue retains its exact
+    # object lock under a fresh version; this original must never promote.
+    "20260827183011",
     # #1517 fresh-version recovery. The original 20260814170749 Warner cleanup
     # was merged without a preview rehearsal before the preview project was
     # replaced. Current producer bytes therefore cannot create qualifying
