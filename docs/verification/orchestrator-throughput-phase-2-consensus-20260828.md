@@ -116,6 +116,19 @@ Plan and handoff prose are explicitly non-authoritative at runtime; versioned co
 | Crash between superseded outcome and successor wait could lose issue | Claude | successor-first rollover under mutex plus two-generation recovery/failure injection |
 | Ready preview and reconciliation dispatch tests were missing | Claude | exact one-lock ready-preview test and reconcile dispatch/busy/recovery cases added |
 
+## Eighth-round objections and disposition
+
+| Objection | Source | Disposition in current plan |
+|---|---|---|
+| Editing concurrency could collapse PR validation groups | Claude | existing expression and `cancel-in-progress: false` preserved verbatim and statically tested |
+| Unauthorized dispatch isolation could weaken serialization | Claude | no concurrency regrouping; first dispatch guard fails before target/lease work |
+| Admission record had no namespace/lifecycle | Claude | immutable `refs/db-dispatch-admissions/<id>` plus terminal outcome; lock remains separate/recoverable |
+| Operator-executable inventory had no file | Claude | `config/orchestrator-operator-executables-v1.json` created and discovery-tested |
+| Local script cannot securely attest its own bytes | Claude | scripts are untrusted proposers; enforcing workflow revalidates all target/ref/inputs; no false producer-custody claim |
+| Production caller/procedure was missing | Claude | shared helper supports both targets and Phase C updates the manual production procedure |
+| New config files would fail completeness gate | Claude | each is pinned or precisely exempted and filesystem-completeness test stays required |
+| Second head drift could leave no current wait generation | Claude | recovery snapshots newest live state and exits only with exactly one current generation |
+
 ## Rejected alternatives
 
 - Release blocked claims, raise the cap as a substitute for decoupling, parallelize database writes, reuse SQL-only evidence, trust path names alone, time-delete mutexes, add exclusive-stage heartbeat, build a general SQL analyzer, or accept production apply without verification.
