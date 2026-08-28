@@ -199,13 +199,16 @@ The current conversation instructed Codex to start a fresh Grok session; this is
 | Historical recovery was incorrectly given a dry-run phase | Grok | ordinary/merged routes remain dry-run then apply; historical rebind is apply-only, with a fresh live recheck before its one run |
 | Main movement could terminally supersede and regenerate the same ready ID | Claude | merged/historical ready identity includes current-main `commit_sha`; either route gets a new ID after tip movement |
 | Historical route omitted current-main freshness | Claude | both commit-bound routes prove current-main immediately before every required run |
-| Workflow permits green historical dry-run no-op | Claude | selector forbids it, procedure warns it is no evidence, Phase A pins both; workflow mutation remains outside Phase 2 |
+| Workflow permits green historical dry-run no-op | Claude | selector forbids it; Step 5 adds/pins the procedure and synchronized operator warning; shared workflow mutation remains outside Phase 2 |
 | Live variable and drift literal could diverge silently | Claude | selector queries only the live variable but fails closed and instructs same-change repair when identities disagree |
 | Selector import rule contradicted its identity cross-check | Claude | literal import is allowed only for equality comparison; using it as query/default/fallback is forbidden |
 | Ledger-helper refactor omitted affected files and invalidator inventory | Claude | Step 5 names drift module/test, shared helper/test and global invalidator/discovery updates |
 | Successor ready ID could inherit a stale dry-run | Claude | each ready ID owns its dry-run evidence; a new commit-bound ID must dry-run again before apply |
-| Main churn could create unbounded readiness history | Claude | edge satisfaction creates once; audit drift is report-only; explicit pre-dispatch preparation alone refreshes and refuses multiple unresolved refs |
+| Main churn could create unbounded readiness history | Claude | edge satisfaction creates once; audit drift is report-only; marker-bound pre-dispatch preparation alone refreshes with successor-first duplicate recovery |
 | Step 5 omitted CI workflow and helper test/injection seam | Claude | modify list names required CI; required tests name the helper; adapters are `readRepoVariable` and `fetchAppliedVersions` |
 | Churn pause had no storage or recovery and contradicted Step 8 | Claude | pause/counter/index removed; Step 8 owns initial materialization and explicit preparation owns later refresh |
 | Warning was routed away from the procedure operators read | Claude | Step 5 updates the existing rehearsal-aware procedure and pins it plus synchronized operator instructions |
 | Separate dry-run doubles main-tip exposure | Claude | standing merge protocol still requires it; apply's internal dry-run is complementary, and any new ready ID must repeat external dry-run |
+| Mutating preparation was attached to the read-only selector | Claude | selector remains read-only; marker-bound Step 8 reconciler alone owns initial readiness, preparation refresh and lifecycle mutation |
+| Ordinary reconcile still implied automatic churn supersession | Claude | ordinary reconcile is report-only for drift; explicit preparation is the sole successor-first refresh path |
+| Duplicate unresolved ready refs had no recovery | Claude | preparation creates/readbacks the one live successor first, then terminalizes provably stale duplicates; ambiguity fails closed |
