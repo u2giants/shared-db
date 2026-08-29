@@ -1531,13 +1531,33 @@ export function pickReviewer(sequence,io){
 function resolveSlotOneReviewer(issue,pr,headSha,io){
   const slotOneBase=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${headSha}`
   const slotOneReplacementBase=`${REVIEW_REPLACEMENT_REF_PREFIX}/${issue}-${pr}-${headSha}`
+  const missing=()=>new LaneError(`slot 2 requires slot 1 to already be assigned for issue #${issue} PR #${pr} head ${headSha}. Run --assign-reviewer --issue ${issue} --pr ${pr} --head-sha ${headSha} (default --review-slot 1) first, then request --review-slot 2.`)
+  // BATCHED (issue #1798 fix). This used to be up to three separate wire
+  // requests (listRefs, readRef, getCommit) run BEFORE the mutex is even
+  // acquired, on every slot-2 assignment -- which is exactly the preflight
+  // cost that pushed slot-2 over its own 19-request budget on real GitHub
+  // every time. `readReviewRecords` reads the explicit slot-1 assignment ref
+  // AND every slot-1 replacement ref, commit messages included, in one
+  // GraphQL round trip. Only test doubles without readReviewRecords fall
+  // back to the old three-call path.
+  if(typeof io.readReviewRecords==='function'){
+    const records=io.readReviewRecords([slotOneBase],slotOneReplacementBase)
+    const replacementRows=records.matching??[]
+    if(replacementRows.length){
+      const replacements=replacementRows.map((row)=>parseReviewReplacement(row.commit))
+      return replacements.sort((a,b)=>b.sequence-a.sequence)[0].reviewer
+    }
+    const record=records.get(slotOneBase)
+    if(!record)throw missing()
+    return parseReviewCursor(record.commit).reviewer
+  }
   const replacementRows=io.listRefs?.(slotOneReplacementBase)??[]
   if(replacementRows.length){
     const replacements=replacementRows.map((row)=>parseReviewReplacement(row.commit??io.getCommit(row.sha)))
     return replacements.sort((a,b)=>b.sequence-a.sequence)[0].reviewer
   }
   const sha=io.readRef(slotOneBase)
-  if(!sha)throw new LaneError(`slot 2 requires slot 1 to already be assigned for issue #${issue} PR #${pr} head ${headSha}. Run --assign-reviewer --issue ${issue} --pr ${pr} --head-sha ${headSha} (default --review-slot 1) first, then request --review-slot 2.`)
+  if(!sha)throw missing()
   return parseReviewCursor(io.getCommit(sha)).reviewer
 }
 
@@ -2118,6 +2138,14 @@ export function replaceFailedReviewer(request,io=githubIo){return withReviewRequ
 // never risks a duplicate-ref race. The same race is handled mid-flight too:
 // if another activation wins the create between this run's audit and its own
 // `createRef`, the loser reads back the winner's SHA instead of erroring.
+// A slot-2 assignment ref carries a `-slot{N}` suffix after the
+// issue-pr-head tuple (see assignNextReviewerOperation's `slotSuffix`). The
+// audit must recognize both shapes, or a live slot-2 review is invisible to
+// it and its durable lease is never backfilled (issue #1798, medium finding).
+function matchesAssignmentTuple(ref, number, headSha) {
+  return new RegExp(`-${number}-${headSha}(?:-slot\\d+)?$`).test(ref)
+}
+
 function activateReviewCutoverOperation(io) {
   const already = io.readRef(REVIEW_ACTIVE_CUTOVER_REF)
   if (already) return { activated: false, alreadyActive: true, cutoverSha: already, backfilled: [] }
@@ -2127,35 +2155,99 @@ function activateReviewCutoverOperation(io) {
   requireReviewWireCapacity(15)
   const openPulls = io.openPulls()
   if (!Array.isArray(openPulls)) throw new LaneError('open PR audit did not return a readable list; cutover activation refused')
-  const assignmentRows = io.listRefs(REVIEW_ASSIGNMENT_REF_PREFIX) ?? []
+  // BATCHED (issue #1798 fix). The old audit spent one `getCommit` REST call
+  // per matching assignment ref just to read its commit message.
+  // `readReviewRecords` returns every ref under the assignment prefix WITH
+  // its commit message already attached, in a single GraphQL round trip.
+  const batchedRecords = typeof io.readReviewRecords === 'function'
+  const assignmentRows = batchedRecords
+    ? io.readReviewRecords([], REVIEW_ASSIGNMENT_REF_PREFIX).matching
+    : (io.listRefs(REVIEW_ASSIGNMENT_REF_PREFIX) ?? [])
   const backfilled = []
   const ownerSha = io.makeOwnerCommit('db-coordination reviewer-index-cutover-activation-audit')
   acquireReviewMutex(ownerSha, io)
   try {
+    const candidates = []
     for (const pr of openPulls) {
       const headSha = pr?.head?.sha
       const number = pr?.number
       if (!Number.isInteger(number) || !/^[0-9a-f]{40}$/i.test(String(headSha ?? ''))) {
         throw new LaneError(`open PR audit could not read an exact number and 40-character head SHA for ${JSON.stringify(pr?.number ?? pr)}; cutover activation refused`)
       }
-      const matches = assignmentRows.filter((row) => row.ref.endsWith(`-${number}-${headSha}`))
+      const matches = assignmentRows.filter((row) => matchesAssignmentTuple(row.ref, number, headSha))
       for (const row of matches) {
         let lease
-        try { lease = parseReviewCursor(io.getCommit(row.sha)) }
+        try { lease = parseReviewCursor(batchedRecords ? row.commit : io.getCommit(row.sha)) }
         catch (error) { throw new LaneError(`assignment ref ${row.ref} is unreadable: ${error.message}; cutover activation refused`) }
         if (!lease || lease.pr !== number || lease.headSha !== headSha) continue
-        if (hasVerdictForHead(lease.issue, lease.pr, lease.headSha, io)) continue
         if (!REVIEWERS.some((r) => r.name === lease.reviewer)) throw new LaneError(`assignment ref ${row.ref} names an unrecognized reviewer ${lease.reviewer}; cutover activation refused`)
-        const leaseRef = reviewActiveRef(lease.reviewer)
-        requireOwnedRef(MUTEX_REF, ownerSha, io)
-        const existingLease = io.readRef(leaseRef)
-        if (existingLease === row.sha) continue
-        if (existingLease) throw new LaneError(`reviewer ${lease.reviewer} already holds a different active lease; cutover activation refused pending manual audit`)
-        if (!io.createRef(leaseRef, row.sha) && readRefAfterWrite(leaseRef, row.sha, io) !== row.sha) {
-          throw new LaneError(`could not create or prove the active lease for reviewer ${lease.reviewer} on PR #${number}; cutover activation refused`)
-        }
-        backfilled.push({ reviewer: lease.reviewer, issue: lease.issue, pr: number, headSha, ref: leaseRef })
+        candidates.push({ row, lease, number, headSha })
       }
+    }
+    requireOwnedRef(MUTEX_REF, ownerSha, io)
+    // BATCHED VERDICT + EXISTING-LEASE CHECK (issue #1798 fix). The old code
+    // spent one `getCommit`, three verdict-evidence REST/GraphQL calls, and
+    // two ref reads PER MATCHING ASSIGNMENT -- so activation was
+    // uncompletable within its own 19-request budget the moment there was an
+    // actual live review to protect (the exact case this feature exists
+    // for), even though it sailed through on the no-op cases the tests
+    // exercised. `readReviewStates` and `readReviewRefs` each answer for
+    // every candidate in ONE network call, so the audit's request count no
+    // longer grows with the number of live reviews found.
+    const states = candidates.length && typeof io.readReviewStates === 'function'
+      ? io.readReviewStates(candidates.map((c) => c.lease))
+      : null
+    const leaseRefs = [...new Set(candidates.map((c) => reviewActiveRef(c.lease.reviewer)))]
+    const existingLeases = leaseRefs.length && typeof io.readReviewRefs === 'function'
+      ? io.readReviewRefs(leaseRefs)
+      : null
+    const toCreate = []
+    for (const candidate of candidates) {
+      const { row, lease, number, headSha } = candidate
+      const state = states?.get(`${lease.issue}:${lease.pr}`)
+      const verdict = state
+        ? state.evidence.some((entry) => {
+            const body = String(entry.body ?? ''), tied = entry.commit_id === lease.headSha || body.includes(lease.headSha)
+            return tied && (/\b(?:APPROVE|REVISE|REQUEST_CHANGES)\b/i.test(body) || ['APPROVED', 'CHANGES_REQUESTED'].includes(String(entry.state ?? '').toUpperCase()))
+          })
+        : hasVerdictForHead(lease.issue, lease.pr, lease.headSha, io)
+      if (verdict) continue
+      const leaseRef = reviewActiveRef(lease.reviewer)
+      const existingLease = existingLeases ? (existingLeases.get(leaseRef) ?? null) : io.readRef(leaseRef)
+      if (existingLease === row.sha) continue
+      if (existingLease) throw new LaneError(`reviewer ${lease.reviewer} already holds a different active lease; cutover activation refused pending manual audit`)
+      toCreate.push({ reviewer: lease.reviewer, issue: lease.issue, pr: number, headSha, ref: leaseRef, sha: row.sha })
+    }
+    requireOwnedRef(MUTEX_REF, ownerSha, io)
+    if (io.atomicReviewRefs && io.readReviewRefs) {
+      const changes = [
+        { ref: MUTEX_REF, expected: ownerSha, sha: ownerSha },
+        ...toCreate.map((c) => ({ ref: c.ref, expected: null, sha: c.sha })),
+        { ref: REVIEW_ACTIVE_CUTOVER_REF, expected: null, sha: ownerSha },
+      ]
+      try { io.atomicReviewRefs(changes) }
+      catch (error) {
+        // A raced activation is the ONE expected failure here: another
+        // activation won the create between our audit and this push. Read
+        // back its winning SHA instead of erroring, same as the
+        // non-batched path below.
+        const raced = io.readRef(REVIEW_ACTIVE_CUTOVER_REF)
+        if (raced && raced !== ownerSha) return { activated: false, alreadyActive: true, cutoverSha: raced, backfilled: [] }
+        throw error
+      }
+      const verify = io.readReviewRefs([MUTEX_REF, REVIEW_ACTIVE_CUTOVER_REF, ...toCreate.map((c) => c.ref)])
+      if (verify.get(MUTEX_REF) !== ownerSha || verify.get(REVIEW_ACTIVE_CUTOVER_REF) !== ownerSha || toCreate.some((c) => verify.get(c.ref) !== c.sha)) {
+        throw new LaneError('batched review cutover activation readback mismatch')
+      }
+      backfilled.push(...toCreate.map(({ sha, ...rest }) => rest))
+      return { activated: true, alreadyActive: false, cutoverSha: ownerSha, backfilled }
+    }
+    for (const c of toCreate) {
+      requireOwnedRef(MUTEX_REF, ownerSha, io)
+      if (!io.createRef(c.ref, c.sha) && readRefAfterWrite(c.ref, c.sha, io) !== c.sha) {
+        throw new LaneError(`could not create or prove the active lease for reviewer ${c.reviewer} on PR #${c.pr}; cutover activation refused`)
+      }
+      backfilled.push({ reviewer: c.reviewer, issue: c.issue, pr: c.pr, headSha: c.headSha, ref: c.ref })
     }
     requireOwnedRef(MUTEX_REF, ownerSha, io)
     if (!io.createRef(REVIEW_ACTIVE_CUTOVER_REF, ownerSha)) {

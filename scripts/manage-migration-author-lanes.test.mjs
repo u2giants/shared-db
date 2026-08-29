@@ -2562,6 +2562,41 @@ test('cutover activation requires openPulls and listRefs to avoid an unproven au
   assert.throws(()=>activateReviewCutover(io),/requires openPulls and listRefs/)
 })
 
+// REGRESSION (issue #1798, glm-5.3 review at d91857e). Every test above uses
+// an in-memory fake whose io methods never touch the real wire-budget
+// accounting, so all of them passed while activation was UNCOMPLETABLE
+// against real GitHub the moment there was an actual live review to
+// backfill -- the exact case this feature exists for. This test routes every
+// GitHub-shaped call through the real `runGitHubCommand` budget counter, the
+// same way 'complete assignment stays inside the real wire-attempt budget'
+// and 'complete replacement stays inside the real wire-attempt budget' do
+// for the other two review operations, and exercises the one scenario those
+// two counterparts never covered for cutover activation: a live review
+// actually in progress, which is what needs to be found and backfilled.
+test('cutover activation with a live in-progress review stays inside the real wire-attempt budget',()=>{
+  const io=freshCutoverIo(),headSha='1'.repeat(40)
+  io.openPulls=()=>[{number:400,head:{sha:headSha}}]
+  seedAssignment(io,{issue:40,pr:400,headSha,reviewer:'grok-4.6'})
+  const rawGetCommit=io.getCommit
+  let attempts=0;const labels=[]
+  const wire=(n=1,label='wire')=>{for(let i=0;i<n;i++)runGitHubCommand(['api','fixture'],{executor:()=>{attempts++;labels.push(label);return '{}'}})}
+  io.getRateLimit=()=>{wire(1,'quota');return {remaining:5000,limit:5000,reset:1787943986,graphRemaining:5000,graphLimit:5000,graphReset:1787943986}}
+  io.readReviewStates=(leases)=>{wire(1,'states');return new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))}
+  io.readReviewRefs=(refs)=>{wire(1,'readReviewRefs');return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
+  io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  io.readReviewRecords=(refs,prefix)=>{wire(1,'readReviewRecords');const result=new Map(refs.map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha,commit:rawGetCommit(sha)}))});return result}
+  for(const name of ['readRef','listRefs','getCommit','getPr','getIssue','getIssueComments','getPrReviews','createRef','updateRef','deleteRef','openPulls']){
+    const fn=io[name];if(typeof fn==='function')io[name]=(...args)=>{wire(1,`${name}:${String(args[0]??'')}`);return fn(...args)}
+  }
+  const make=io.makeOwnerCommit;io.makeOwnerCommit=(message)=>{wire(1,'commit');return make(message)}
+  let result
+  try{result=activateReviewCutover(io)}catch(error){throw new Error(`${error.message}; used ${attempts} wire attempts; calls=${labels.join(',')}`)}
+  assert.equal(result.activated,true)
+  assert.deepEqual(result.backfilled,[{reviewer:'grok-4.6',issue:40,pr:400,headSha,ref:reviewActiveRef('grok-4.6')}])
+  assert.ok(attempts<=19,`used ${attempts} wire attempts; calls=${labels.join(',')}`)
+})
+
 // ---------------------------------------------------------------------------
 // Second-reviewer slots (--review-slot). Default slot 1 must be byte-for-byte
 // today's behaviour; slot 2 must land a genuinely different, non-busy
@@ -2652,4 +2687,53 @@ test('retrying a slot-2 assignment must still refuse a reviewer that is no longe
   // orchestrator review its own work.
   io.resolveOrchestratorEngine=()=> 'codex'
   assert.throws(()=>assignNextReviewer({...request,slot:2},io),/orchestrator-conflicting reviewer codex-gpt-5\.6-sol/)
+})
+
+// REGRESSION (issue #1798, glm-5.3 review at d91857e). `resolveSlotOneReviewer`
+// used to spend up to three real wire requests (listRefs, readRef, getCommit)
+// BEFORE the mutex is even acquired, on every fresh slot-2 assignment -- and
+// that preflight cost is what blew slot 2's own 19-request budget on real
+// GitHub every time, independent of everything else in the operation. Same
+// counter-routing technique as 'complete assignment stays inside the real
+// wire-attempt budget' above; that test never covered slot 2 at all.
+test('complete slot-2 assignment stays inside the real wire-attempt budget',()=>{
+  const io=reviewIo(),request={issue:2200,pr:2300,headSha:'a'.repeat(40)}
+  const first=assignNextReviewer(request,io)
+  const rawGetCommit=io.getCommit
+  const active=new Map([[reviewActiveRef(first.reviewer),{sha:io.refs.get(reviewActiveRef(first.reviewer)),commit:rawGetCommit(io.refs.get(reviewActiveRef(first.reviewer)))}]])
+  const states=new Map([[`${request.issue}:${request.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:request.headSha}},evidence:[]}]])
+  let attempts=0
+  const wire=(n=1)=>{for(let i=0;i<n;i++)runGitHubCommand(['api','fixture'],{executor:()=>{attempts++;return '{}'}})}
+  io.getRateLimit=()=>{wire();return {remaining:5000,limit:5000,reset:1787943986,graphRemaining:5000,graphLimit:5000,graphReset:1787943986}}
+  io.readActiveReviewLeases=()=>{wire();return active}
+  io.readReviewStates=()=>{wire();return states}
+  io.readReviewRefs=(refs)=>{wire();return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
+  io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  io.readReviewRecords=(refs,prefix)=>{wire();const result=new Map(refs.map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha,commit:rawGetCommit(sha)}))});return result}
+  for(const name of ['readRef','listRefs','getCommit','getPr','getIssue','getIssueComments','getPrReviews','createRef','updateRef','deleteRef']){
+    const fn=io[name];io[name]=(...args)=>{wire();return fn(...args)}
+  }
+  const make=io.makeOwnerCommit;io.makeOwnerCommit=(message)=>{wire();return make(message)}
+  let result
+  try{result=assignNextReviewer({...request,slot:2},io)}catch(error){throw new Error(`${error.message}; used ${attempts} wire attempts so far`)}
+  assert.equal(result.slot,2)
+  assert.notEqual(result.reviewer,first.reviewer)
+  assert.ok(attempts<=19,`used ${attempts} wire attempts`)
+})
+
+// REGRESSION (issue #1798, glm-5.3 review at d91857e, medium finding). A
+// slot-2 durable assignment ref carries a `-slot2` suffix after the exact
+// issue-pr-head tuple. The cutover audit used to match refs with a bare
+// `endsWith('-${number}-${headSha}')`, so a slot-2 assignment's ref never
+// matched and its live lease was silently never backfilled.
+test('cutover activation backfills a slot-2 live review, not just slot 1',()=>{
+  const io=freshCutoverIo(),headSha='2'.repeat(40)
+  io.openPulls=()=>[{number:401,head:{sha:headSha}}]
+  const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=1 reviewer=glm-5.3 issue=41 pr=401 head=${headSha} slot=2`)
+  io.refs.set(`${REVIEW_ASSIGNMENT_REF_PREFIX}/41-401-${headSha}-slot2`,sha)
+  const result=activateReviewCutover(io)
+  assert.equal(result.activated,true)
+  assert.deepEqual(result.backfilled,[{reviewer:'glm-5.3',issue:41,pr:401,headSha,ref:reviewActiveRef('glm-5.3')}])
+  assert.ok(io.refs.has(reviewActiveRef('glm-5.3')))
 })
