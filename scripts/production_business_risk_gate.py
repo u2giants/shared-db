@@ -469,6 +469,13 @@ PREVIEW_PRODUCER_PATHS = (
     # Runs FIRST in the preview job, to acquire the lane, before any evidence
     # byte exists. Unpinned, it was a complete forgery path.
     "scripts/manage-migration-author-lanes.mjs",
+    # Invoked by the manager before preview preparation to prove the live sole
+    # orchestrator identity. Its result gates whether preparation may proceed.
+    "scripts/check-orchestrator-marker.mjs",
+    # Imported by the manager for append-only capacity and issue-flow events.
+    # A different event vocabulary could forge or suppress the coordination
+    # evidence that preview-stage authorization consumes.
+    "scripts/db-coordination-events.mjs",
     # Local import of the above. Pinning an entry point without its imports
     # leaves the same door open one level down.
     "scripts/check-dispatch-collision.mjs",
@@ -486,6 +493,11 @@ PREVIEW_PRODUCER_PATHS = (
     # Data, not code, but it routes which apply mechanism the rehearsal
     # exercises. Pinned for rehearsal fidelity.
     "config/atomic-migration-allowlist.json",
+    # Phase 2 review identity and invalidation policy. These are read-only
+    # policy inputs, but changing either changes whether prior evidence may be
+    # reused, so preview proof must bind their exact bytes.
+    "config/orchestrator-evidence-schema-v1.json",
+    "config/orchestrator-global-invalidators-v1.json",
     # READ, NOT EXECUTED -- and therefore invisible to the executed-closure
     # walk, which follows invocations and imports. The Supabase CLI reads this
     # file on every `link`, `migration list` and `db push` the preview job runs,
@@ -522,6 +534,15 @@ PREVIEW_PRODUCER_PATHS = (
 PREVIEW_RUNTIME_DATA_DIRS = ("supabase", "config")
 
 PREVIEW_RUNTIME_DATA_EXEMPTIONS = {
+    "supabase/.temp": (
+        "Created locally by the Supabase CLI and excluded by the repository's "
+        "gitignore rules. These machine-specific link and tool-version files "
+        "cannot be reviewed or pinned to a repository commit, and the governed "
+        "workflow establishes and proves its project link independently before "
+        "any preview write. Treating a developer's local CLI state as repository "
+        "source would make the production-risk test depend on which commands had "
+        "previously run on that machine without protecting committed evidence."
+    ),
     "config/blocker-ledger": (
         "Never read by the preview job. Read only by the offline throughput "
         "diagnosis and reporting tools. The "
@@ -1391,6 +1412,12 @@ def classify_sql(repo_root: Path, allowlist: list[str]) -> list[str]:
         if re.search(r"\b(grant|revoke|create\s+policy|alter\s+policy|drop\s+policy|row\s+level\s+security)\b", sql):
             reasons.add(RISK_TEXT["material_access_change"])
     return sorted(reasons)
+
+
+def diagnose_risk_coverage(repo_root: Path, allowlist: list[str]) -> dict[str, Any]:
+    """Read-only Phase 2 qualification entrypoint; assess() remains authoritative."""
+    findings = classify_sql(repo_root, allowlist)
+    return {"status": "covered", "finding_count": len(findings), "findings": findings}
 
 
 def migration_statements(raw: str) -> str:

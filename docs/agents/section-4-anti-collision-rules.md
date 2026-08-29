@@ -2,9 +2,13 @@
 
 > **Active hardening plan:** [`../../plan_multi_agent_database_coordination_hardening.md`](../../plan_multi_agent_database_coordination_hardening.md), issue #1366. Read its STATUS table first. It preserves the rules below while adding read/write dependencies, proven prerequisites, provider-neutral work contracts, lifecycle traces, recoverable fenced stage leases, and an opt-in Supabase branch pilot. Its implementation is repository maintenance outside the structure/schema orchestrator.
 >
-> **Active reviewer API-budget plan:** [`../../plan_reviewer_assignment_api_budget.md`](../../plan_reviewer_assignment_api_budget.md), issue #1767. Read its STATUS table before changing reviewer assignment. It replaces historical availability scans with at-most-five active reviewer leases, strict pre-lock quota/request checks, cached PR/verdict reads, and exhaustive mutex-cleanup tests. This is repository maintenance outside the structure/schema orchestrator.
+> **Active reviewer API-budget plan:** [`../../plan_reviewer_assignment_api_budget.md`](../../plan_reviewer_assignment_api_budget.md), issue #1767. Read its STATUS table before changing reviewer assignment. It replaces historical availability scans with at-most-six active reviewer leases, strict pre-lock quota/request checks, cached PR/verdict reads, and exhaustive mutex-cleanup tests. This is repository maintenance outside the structure/schema orchestrator.
 
-Reviewer assignment now reads only `refs/db-review-active/<reviewer>`, never permanent assignment history. Assignment is capped at 19 GitHub requests; the more evidence-heavy replacement command has its own 39-request ceiling. Both count retries and refuse before creating an owner commit or taking the mutex unless the account also retains a 20-request safety reserve. Stale leases are revalidated and released only while holding the shared mutex; unreadable evidence fails closed. The one-time activation command requires an explicit `issue:PR:head` entry for every open PR, so a stale or incomplete audit cannot enable the index. If mutex cleanup cannot be proved, use the guarded `recover-author-mutex.yml` workflow with the exact ref and SHA printed by the command; never delete the ref by hand.
+Reviewer availability is the bounded `refs/db-review-active/<reviewer>` index. Permanent assignment, replacement, and failure refs remain immutable audit evidence and are never scanned to decide availability. Each command reads the active prefix once, caches repeated evidence, refuses before creating an owner commit or mutex when GitHub quota is unreadable or below reserve, and stops before request 20. Quota reset errors use `America/New_York`.
+
+An exact-head verdict, terminal failure/replacement, moved head, merged PR, or closed PR makes a lease stale. Stale leases are deleted only while the global mutex is owned and the fixed ref still matches its expected SHA. If release cannot be proved, preserve the named ref/SHA and use the guarded `recover-author-mutex.yml` procedure.
+
+Phase 2 rules: protected object claims and active-author capacity are separate; relinquishment never releases a claim. Preview dependencies produce `PREVIEW_WAIT`, never a successful workflow. Immediately before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector/fresh-ledger check, and dispatch only its matching stored instruction. Historical recovery is `mode=apply` only; historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest requires an owner decision and no mutation. Reviewer reservations serialize approved provider/wrapper execution keys and create an ordered durable `review-wait` when all eligible keys are busy. The live orchestrator engine is excluded from review; Qwen and Gemini are inactive while ai-devops reliability is repaired.
 
 Relocated from `AGENTS.md` on 2026-08-20 (issue #1331, PR #1212) so the router stays under its
 80 KB ceiling. **Text unchanged, section number unchanged.** `AGENTS.md` §4 carries the operative
@@ -12,11 +16,13 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
 
 ## 4. The five anti-collision rules (shared database)
 
-1. **Up to five unrelated migrations may be authored at once. Preview, merges,
+1. **Up to five unrelated migrations may hold active-author capacity at once. Preview, merges,
    and production promotion remain one at a time.** Albert's owner ruling of
    2026-08-14 set this at three; he raised it to five on 2026-08-25. Concurrent
    authors must use isolated worktrees, exact object claims and centrally
-   reserved versions. A sixth author is refused.
+   reserved versions. Protected blocked claims do not consume active-author
+   capacity, but continue blocking every overlapping object and version. A
+   sixth active author is refused.
 
    The number is a throughput dial, not a safety dial. Isolation comes from the
    exact object claim, the global acquisition mutex, the permanent version
@@ -39,14 +45,18 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
 
    Allocation is serialized across computers by a GitHub-backed lock. The command
    fails closed if claims are unreadable, objects overlap an open claim or pull
-   request, GitHub is unavailable, version reservation fails, or three author
-   lanes are occupied. Older claims count until they are explicitly released.
+   request, GitHub is unavailable, version reservation fails, or five active-author
+   leases are occupied. Older claims protect objects until explicitly released;
+   only a guarded capacity relinquishment removes their author-slot use.
    The created issue body is authoritative and machine-readable. Never hand-edit
    its fenced blocks. The permanent version ref prevents reuse even after a lease
-   ends; the lease only controls who occupies an author lane.
+   ends. Clock expiry releases neither protection nor capacity. When durable
+   external evidence blocks clean work, use `--relinquish-author-lease --claim
+   <n> --owner <owner> --blocked-on issue:#<n>`; after the blocker clears, use
+   `--resume-author-lease --claim <n> --owner <owner> --lease-hours <hours>`.
 
    Audit lanes with `node scripts/manage-migration-author-lanes.mjs --audit`.
-   Audit and refill the three dynamic queues with
+   Audit and refill the dynamic queues with
    `node scripts/manage-migration-author-lanes.mjs --queue-audit`. Every open
    `db-work` issue must contain one authoritative block:
 
@@ -203,7 +213,8 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    only the status after Albert answers can never change its owner route.
 
    Exact object overlap forms a serial queue; unrelated object
-   groups fill up to five author lanes. When a claim releases, rerun the queue
+   groups fill up to eight active-author slots. A relinquished claim stays visible
+   in its collision component without occupying a slot. When capacity releases, rerun the queue
    audit and dispatch every reported `REFILL REQUIRED NOW` issue in the same
    turn. Never wait for Albert to ask or approve routine dispatch. Ask him only
    for a genuine business ruling or material production risk. Recompute after
@@ -226,17 +237,16 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    ```
 
    For new assignments, the machine-independent cursor rotates Grok 4.6 → GLM
-   5.3 → Kimi K3 → Muse Spark 1.2 Contributor → repeat. Kimi K3 was unpaused on
-   2026-08-25 alongside the lane raise, because five authors feeding three
-   reviewers only moves the wait. Qwen 3.8 Max and the retired `glm-5.2` label
+   5.3 → Kimi K3 → Muse Spark 1.2 Contributor → Codex GPT-5.6 Sol → DeepSeek →
+   repeat, skipping any reviewer whose engine matches the live orchestrator.
+   Codex cannot review when Codex orchestrates; Claude cannot review when Claude
+   orchestrates. Albert approved Codex and DeepSeek on 2026-08-28 after both wrappers
+   qualified. Qwen 3.8 Max, Gemini, and the retired `glm-5.2` label
    are paused until an explicit owner instruction restores them.
 
-   **Codex (`codex-gpt-5.6-sol`, wrapper `ai-codex-review`) is overflow, not
-   rotation.** It is assigned only when all four rotation providers are already
-   holding live review work in this repository, or when every one of them has
-   already failed on the exact head under review. It never takes an ordinary
-   turn, and the busy probe fails open — if it cannot read GitHub, the ordinary
-   rotation is used, because Codex costs real money per run.
+   Codex uses wrapper `ai-codex-review`; DeepSeek uses `ai-deepseek-agent`.
+   Neither is overflow. If every eligible reviewer is busy, the allocator records an ordered
+   `review-wait`; it does not duplicate an assignment or invent availability.
 
    **Grok's in-flight lock is PER REPOSITORY, not global.** `ai-grok-review`
    allows one live Grok review at a time *in shared-db*; it does not cap Grok
@@ -252,6 +262,7 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    `templates/delegation/debate-turn.md`, stopping at agreement or the initial
    review plus three rebuttals. If material disagreement remains, stop the merge
    and ask Albert one concise decision. Never send secrets or licensed rows.
+   Do not impose a fixed hard-kill timer on a reviewer that is still making progress.
 
    **A verdict with no coverage statement is not review evidence** (issue #1220,
    fixed wrapper-side in `ai-devops` PR #43). Two wrappers could finish a run
@@ -291,21 +302,6 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    production lane waiting on a reviewer process that cannot authenticate or
    write its own state. A real `REVISE` verdict is not a transport failure and
    must never be replaced.
-
-   **Guard diagnosis and reviewer liveness.** Run
-   `node scripts/triage-gate.mjs <guard>` first for a red guard. A proved root
-   cause requires a rerunnable command or verification artifact; after ten
-   minutes without proof, call it a `working hypothesis`. Never announce a
-   proved guard incident or close it while triage prints `LEDGER_MISSING`;
-   record the minimal blocker stub first. Scripts/docs/CI-only changes require
-   one independent reviewer; migrations, data movement, production applies,
-   and security/RLS changes require two. Probe process/session updates and a
-   non-empty reviewer stream before waiting. Replace only when there is no
-   verdict and no progress, or a concrete transport, coverage, or truncated
-   output failure. Never replace `REVISE` or reduce coverage: exhaust active
-   providers not failed on the exact head, use Codex overflow once, then fail
-   closed and return the exact blocker to the owner. Do not impose a fixed
-   hard-kill timer on a reviewer that is still making progress.
 
    Append objective reviewer evidence through an `ai-devops` PR to
    `models_comparison_grok_kim_glm.md`: issue/PR, requested and proven model,
