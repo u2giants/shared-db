@@ -43,7 +43,16 @@ export const REVIEW_REPLACEMENT_REF_PREFIX = 'refs/db-review-replacements'
 export const REVIEW_ASSIGNMENT_REF_PREFIX = 'refs/db-review-assignments'
 export const REVIEW_ACTIVE_REF_PREFIX = 'refs/db-review-active'
 export const REVIEW_ACTIVE_CUTOVER_REF = 'refs/db-coordination/reviewer-index-cutover'
-export const REVIEW_OPERATION_REQUEST_LIMIT = 19
+// Worst-case wire cost of one assignNextReviewerOperation call, computed and
+// verified empirically (see issue #1812): getRateLimit (2: REST + GraphQL) +
+// resolveSlotOneReviewer, slot>=2 only (3: listRefs + readRef + getCommit) +
+// findBusyReviewers (3: readRef + readActiveReviewLeases + readReviewStates)
+// + makeOwnerCommit (1) = 9 pre-mutex calls, then requireReviewWireCapacity
+// reserves 13 more for the mutex-acquisition body itself: 9 + 13 = 22. Slot 1
+// skips resolveSlotOneReviewer (6 pre-mutex calls, 6 + 13 = 19), which is why
+// this limit looked sufficient until --review-slot 2 shipped in #1793 without
+// widening it for the extra pre-check calls slot>=2 requires.
+export const REVIEW_OPERATION_REQUEST_LIMIT = 22
 export const REVIEW_QUOTA_RESERVE = 100
 export const REVIEWERS = Object.freeze([
   { name:'grok-4.6', wrapper:'ai-grok-review' }, { name:'glm-5.3', wrapper:'ai-glm' },
