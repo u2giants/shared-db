@@ -329,7 +329,7 @@ test('issue 1684 EOL guard allows only its exact transition migrations', () => {
   withFixture(['20260801120000_fixture.sql'], (dir) => {
     for (const file of [
       'supabase/migrations/20260827222039_eol_core_properties_and_characters.sql',
-      'supabase/migrations/20260828111507_separate_property_and_character.sql',
+      'supabase/migrations/20260829004145_separate_property_and_character.sql',
     ]) {
       const result = runGuards(dir, {
         mainNewest: '20260801100000',
@@ -350,7 +350,7 @@ test('issue 1684 EOL guard allows the current final separation migration by its 
       mainNewest: '20260801100000',
       env: {
         CHECK_SQL_EOL_DIFF_FILE: toBashPath(
-          makeDiff('supabase/migrations/20260828111507_separate_property_and_character.sql', 'drop table core.properties_and_characters restrict;'),
+          makeDiff('supabase/migrations/20260829004145_separate_property_and_character.sql', 'drop table core.properties_and_characters restrict;'),
         ),
       },
     })

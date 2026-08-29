@@ -1081,7 +1081,7 @@ class PreflightNegativeTests(unittest.TestCase):
             REPO
             / "supabase"
             / "migrations"
-            / "20260828111507_separate_property_and_character.sql"
+            / "20260829004145_separate_property_and_character.sql"
         ).read_text(encoding="utf-8").lower()
 
         self.assertEqual(len(re.findall(r"(?m)^begin;$", migration)), 1)
