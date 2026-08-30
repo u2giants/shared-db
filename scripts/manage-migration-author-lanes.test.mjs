@@ -3330,6 +3330,8 @@ test('immutable preview-ledger reconciliation evidence validates the renamed cur
   assert.throws(()=>validateOriginalPreviewApplyEvidence(input,immutablePreviewReconciliationIo({replacement:'20260830013943'})),/found 0/)
   assert.throws(()=>validateOriginalPreviewApplyEvidence(input,immutablePreviewReconciliationIo({artifactRunId:'33307904278'})),/found 0/)
   assert.throws(()=>validateOriginalPreviewApplyEvidence(input,immutablePreviewReconciliationIo({relation:'diverged'})),/found 0/)
+  const reset=immutablePreviewReconciliationIo({replacement:'20260828113920'})
+  assert.throws(()=>validateOriginalPreviewApplyEvidence({...input,versions:['20260828113920']},reset),/found 0/)
 })
 
 test('an already-applied merged claim receives validated evidence before route selection',()=>{

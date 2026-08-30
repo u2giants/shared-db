@@ -3788,7 +3788,10 @@ export function validateOriginalPreviewApplyEvidence({issue,pr,versions,mergeCom
     const {run,artifacts,logs}=io.previewApplyRun(runId)
     if(expected.length!==1||String(run?.id)!==String(runId)||run?.path!=='.github/workflows/preview-ledger-orphan-reconciliation.yml'||run?.event!=='workflow_dispatch'||run?.status!=='completed'||run?.conclusion!=='success'||run?.run_attempt!==1||!/^[0-9a-f]{40}$/i.test(String(run?.head_sha??'')))continue
     const applied=/PREVIEW LEDGER RECONCILIATION APPLY OK: removed=(\d{14}) replacement=(\d{14})/.exec(String(logs))
-    if(!applied||applied[2]!==expected[0])continue
+    // Only a true rename preserves already-applied status. A same-version
+    // rehearsal reset deletes the ledger row so the migration can run again;
+    // it is therefore the opposite of immutable no-replay evidence.
+    if(!applied||applied[1]===applied[2]||applied[2]!==expected[0])continue
     const exact=(name,value)=>new RegExp(`(?:^|\\s)${name}:\\s+${String(value)}(?:\\s|$)`,'m').test(String(logs))
     if(!exact('ISSUE',issue)||!exact('SOURCE_PR',pr)||!exact('ORPHAN',applied[1])||!exact('REPLACEMENT',applied[2]))continue
     if(mergeCommitSha){const relation=io.compareCommits?.(mergeCommitSha,run.head_sha);if(!relation||!['ahead','identical'].includes(relation.status))continue}
