@@ -692,6 +692,30 @@ SCRAPED_PROPERTIES_SOURCE_PURPOSE_CONTRACT += (
     " and position('Marvel - Creative (DCP Vault)' in %s)=0" % _SCRAPED_PROPERTIES_DEF +
     " and position('Source Property vocabulary' in %s)=0" % _SCRAPED_PROPERTIES_DEF
 )
+CREATIVE_SUBMISSION_CONTRACT_STATUS_CONTRACT = _shape_contract(
+    relations=('plm.creative_submission_contract_resolution',),
+    routines=(
+        'api.db_data_admin_scraped_properties(text,text,integer)',
+        'plm.enforce_creative_submission_contract_resolution()',
+    ),
+    triggers=(
+        ('plm.creative_submission_contract_resolution','creative_submission_contract_resolution_immutable'),
+        ('plm.creative_submission_contract_resolution','creative_submission_contract_resolution_no_truncate'),
+        ('plm.creative_submission_contract_resolution','creative_submission_contract_resolution_identity_check'),
+    ),
+)
+CREATIVE_SUBMISSION_CONTRACT_STATUS_CONTRACT += (
+    " and position('creative_submission_property_resolution' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('creative_submission_contract_resolution' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('submission_source.source_property_name' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('mapping_state' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('submissions' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('contract_status' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('document_sha256' in %s)=0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('page_schedule_locator' in %s)=0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('exact_property_text' in %s)=0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('evidence_identity' in %s)=0" % _SCRAPED_PROPERTIES_DEF
+)
 POPDAM_FORWARD_RECOVERY_CONTRACT = _shape_contract(
     relations=('public.style_group_tags',),
     indexes=tuple('public.'+value for value in "asset_tags_active_asset_idx dam_search_embedding_claim_idx style_group_tags_active_group_idx".split()),
@@ -719,6 +743,7 @@ CATALOG_CONTRACTS = {
     "db_data_admin_forward_v1": DB_DATA_ADMIN_FORWARD_CONTRACT,
     "dcp_opa_property_authority_v1": DCP_OPA_PROPERTY_AUTHORITY_CONTRACT,
     "scraped_properties_source_purpose_v1": SCRAPED_PROPERTIES_SOURCE_PURPOSE_CONTRACT,
+    "creative_submission_contract_status_v1": CREATIVE_SUBMISSION_CONTRACT_STATUS_CONTRACT,
     "dflow_sequence_ceilings_v1": DFLOW_SEQUENCE_CEILINGS_CONTRACT,
     "popdam_forward_recovery_v1": POPDAM_FORWARD_RECOVERY_CONTRACT,
     "coco_owner_ruling_v1": """
