@@ -26,9 +26,12 @@ describe('ScrapedPropertiesTable', () => {
   it('presents an authoritative one-to-many mapping and sanitized contract status', () => {
     const presented = presentScrapedProperty({
       ...row('mapped', 'Example'),
-      submission_resolution_state: 'mapped',
-      authoritative_submission_labels: ['Submission A', 'Submission B'],
-      contract_status: 'entitled_evidenced',
+      mapping_state: 'mapped',
+      submissions: [
+        { source_system: 'submissions', source_table: 'source.properties', source_id: 'a', display_label: 'Submission A' },
+        { source_system: 'submissions', source_table: 'source.properties', source_id: 'b', display_label: 'Submission B' },
+      ],
+      contract_status: 'evidenced',
     })
     expect(presented.submission_display).toBe('Submission A • Submission B')
     expect(presented.contract_status_display).toBe('Entitled — evidence on file')

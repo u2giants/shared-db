@@ -11,7 +11,7 @@ const unmappedCreativeCell = ({ model }: { model: Record<string, unknown> }) => 
 export const scrapedPropertiesColumns: ColumnRegular[] = [
   { prop: 'display_label', name: 'Property', size: 260, sortable: true },
   { prop: 'submission_display', name: 'Authoritative Submissions', size: 280, sortable: true },
-  { prop: 'submission_resolution_state', name: 'Mapping', size: 130, sortable: true },
+  { prop: 'mapping_state', name: 'Mapping', size: 130, sortable: true },
   { prop: 'contract_status_display', name: 'Contract status', size: 220, sortable: true },
   { prop: 'review_reason', name: 'Review reason', size: 260, sortable: true, cellTemplate: reviewTextTemplate },
   { prop: 'evidence_basis', name: 'Evidence basis', size: 240, sortable: true, cellTemplate: reviewTextTemplate },

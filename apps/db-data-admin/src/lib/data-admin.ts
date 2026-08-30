@@ -232,16 +232,16 @@ export type ScrapedPropertyRow = AdminRow & {
   review_reason: string
   evidence_basis: string
   review_guidance: string
-  submission_resolution_state?: 'mapped' | 'conflict' | 'unmapped' | null
-  authoritative_submission_labels?: string[] | null
-  contract_status?: 'entitled_evidenced' | 'not_evidenced' | 'incomplete_chain' | 'conflict' | 'unknown' | null
+  mapping_state?: 'mapped' | 'conflict' | 'unmapped' | null
+  submissions?: Array<{ source_system: string; source_table: string; source_id: string; display_label: string | null }> | null
+  contract_status?: 'evidenced' | 'not_evidenced' | 'incomplete_chain' | 'conflict' | 'unknown' | null
   submission_display?: string
   contract_status_display?: string
   is_unmapped_creative?: boolean
 }
 
 const contractStatusLabels: Record<NonNullable<ScrapedPropertyRow['contract_status']>, string> = {
-  entitled_evidenced: 'Entitled — evidence on file',
+  evidenced: 'Entitled — evidence on file',
   not_evidenced: 'Not evidenced',
   incomplete_chain: 'Evidence chain incomplete',
   conflict: 'Authority conflict',
@@ -250,11 +250,11 @@ const contractStatusLabels: Record<NonNullable<ScrapedPropertyRow['contract_stat
 
 export function presentScrapedProperty(row: ScrapedPropertyRow): ScrapedPropertyRow {
   const isCreative = /^creative(?:\s|$|\()/i.test(row.source_purpose)
-  const labels = row.authoritative_submission_labels ?? []
-  const state = row.submission_resolution_state ?? (isCreative ? 'unmapped' : null)
+  const labels = (row.submissions ?? []).map(member => member.display_label ?? member.source_id)
+  const state = row.mapping_state ?? (isCreative ? 'unmapped' : null)
   return {
     ...row,
-    submission_resolution_state: state,
+    mapping_state: state,
     submission_display: !isCreative ? '—' : labels.length > 0 ? labels.join(' • ') : state === 'conflict' ? 'Conflict — review required' : 'Unmapped',
     contract_status_display: !isCreative ? '—' : contractStatusLabels[row.contract_status ?? 'unknown'],
     is_unmapped_creative: isCreative && state === 'unmapped',
