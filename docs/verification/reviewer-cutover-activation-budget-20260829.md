@@ -39,10 +39,17 @@ this lane did.
 
 ## Slot >=2 assignment costs more than slot 1
 
-A fresh second-reviewer assignment spends 6 requests before taking the mutex and
-`REVIEW_SLOT_N_LOCKED_WINDOW_REQUESTS` (15) inside it: 21 in total. It therefore
-does not fit a 19-request ceiling and does fit the 22-request ceiling PR #1813
-introduces.
+A fresh second-reviewer assignment spends 6 requests before taking the mutex, and
+RESERVES `REVIEW_SLOT_N_LOCKED_WINDOW_REQUESTS` (15) for the locked window: 21
+reserved in total. It therefore does not fit a 19-request ceiling and does fit
+the 22-request ceiling PR #1813 introduces.
+
+Reserved is not spent. The measured spend inside the lock on the fresh atomic
+path is about 12 including cleanup, so the reserve is deliberately conservative -
+a reserve must be at least the spend, and erring the other way is what put the
+operation into the hard wall mid-window in the first place. Anyone re-deriving
+these numbers should compare a measured spend against the reserve and expect the
+reserve to be the larger of the two.
 
 Two things follow, and both are now in the code:
 
