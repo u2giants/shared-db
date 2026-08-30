@@ -103,7 +103,7 @@ begin
   select api.db_data_admin_scraped_properties('zz1872-'||v_suffix,null,100) into v_page;
   if jsonb_array_length(v_page->'rows')<>10 then raise exception '#1872 dropped a source row'; end if;
   select x into v_row from jsonb_array_elements(v_page->'rows') x where x->>'source_property_id'='zz1872-'||v_suffix||'-mapped';
-  if v_row->>'mapping_state'<>'mapped' or v_row->>'contract_status'<>'entitled_evidenced'
+  if v_row->>'mapping_state'<>'mapped' or v_row->>'contract_status'<>'evidenced'
      or v_row->'submissions'->0->>'display_label'<>'ZZ Synthetic Submissions mapped'
      or v_row->'submissions'->0->>'source_id'<>'zz1872-'||v_suffix||'-sub-mapped' then raise exception '#1872 mapped/evidenced exact-label state failed'; end if;
   select x into v_row from jsonb_array_elements(v_page->'rows') x where x->>'source_property_id'='zz1872-'||v_suffix||'-many';

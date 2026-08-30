@@ -101,7 +101,7 @@ declare
           when bool_or(contract_decision.decision_state='not_evidenced')
             or bool_or(contract_decision.decision_state='evidenced' and evidence.id is null) then 'not_evidenced'
           when bool_and(contract_decision.decision_state='evidenced'
-            and capture.controlling_chain_complete and evidence.id is not null) then 'entitled_evidenced'
+            and capture.controlling_chain_complete and evidence.id is not null) then 'evidenced'
           else 'unknown' end contract_status
       from plm.creative_submission_property_resolution_member m
       left join source_rows submission_source
