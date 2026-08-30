@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { filePaths, openProtectedCollisions } from './check-pr-source-collisions.mjs'
+import { activationDate, filePaths, openProtectedCollisions } from './check-pr-source-collisions.mjs'
 
 test('an earlier open PR editing the lane manager serializes a later PR',()=>{
   const current={number:20,files:['scripts/manage-migration-author-lanes.mjs']}
@@ -16,6 +16,15 @@ test('the earliest active contender wins regardless of PR number',()=>{
   ]),[{file:'scripts/manage-migration-author-lanes.mjs',pr:21,title:''}])
   assert.deepEqual(openProtectedCollisions({...current,activatedAt:'2026-08-30T10:00:00Z'},[
     {number:10,activatedAt:'2026-08-30T11:00:00Z',files:['scripts/manage-migration-author-lanes.mjs']},
+  ]),[])
+})
+
+test('synchronizing a winner cannot reverse priority and deadlock both PRs',()=>{
+  const winner={number:20,created_at:'2026-08-30T10:00:00Z',head:{sha:'new-head'}}
+  const loser={number:21,created_at:'2026-08-30T11:00:00Z'}
+  assert.equal(activationDate(winner,[]),'2026-08-30T10:00:00.000Z')
+  assert.deepEqual(openProtectedCollisions({number:20,activatedAt:activationDate(winner,[]),files:['scripts/manage-migration-author-lanes.mjs']},[
+    {number:21,activatedAt:activationDate(loser,[]),files:['scripts/manage-migration-author-lanes.mjs']},
   ]),[])
 })
 

@@ -28,18 +28,15 @@ function prFiles(repo,number){
   if(!Number.isInteger(pr.changed_files)||pr.changed_files>=3000||files.length!==pr.changed_files)throw new InputError(`PR #${number} file list is incomplete`)
   return filePaths(files)
 }
-function headUpdatedAt(repo,sha){
-  if(!/^[0-9a-f]{40}$/i.test(String(sha??'')))throw new InputError('pull request head SHA is unreadable')
-  const date=ghJson(['api',`repos/${repo}/commits/${sha}`])?.commit?.committer?.date
-  if(!Number.isFinite(Date.parse(date??'')))throw new InputError(`commit timestamp for ${sha} is unreadable`)
-  return date
-}
-function activatedAt(repo,pr){
-  const timeline=ghJson(['api','--paginate','--slurp',`repos/${repo}/issues/${pr.number}/timeline?per_page=100`]).flat()
-  const dates=[pr.created_at,headUpdatedAt(repo,pr.head?.sha),...timeline.filter((row)=>['ready_for_review','reopened'].includes(row.event)).map((row)=>row.created_at)]
+export function activationDate(pr,timeline){
+  const dates=[pr.created_at,...timeline.filter((row)=>['ready_for_review','reopened'].includes(row.event)).map((row)=>row.created_at)]
   const stamps=dates.map((date)=>Date.parse(date??''))
   if(stamps.some((stamp)=>!Number.isFinite(stamp)))throw new InputError(`activation history for PR #${pr.number} is unreadable`)
   return new Date(Math.max(...stamps)).toISOString()
+}
+function activatedAt(repo,pr){
+  const timeline=ghJson(['api','--paginate','--slurp',`repos/${repo}/issues/${pr.number}/timeline?per_page=100`]).flat()
+  return activationDate(pr,timeline)
 }
 export function gather(env=process.env){
   const repo=env.GITHUB_REPOSITORY;if(!repo)throw new InputError('GITHUB_REPOSITORY is not set')
