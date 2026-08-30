@@ -586,7 +586,7 @@ test('complete replacement stays inside the real wire-attempt budget',()=>{
   io.readReviewRefs=(refs)=>{wire(1,'readReviewRefs');return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
   io.atomicReviewRefs=(changes)=>{wire(1,'atomicReviewRefs');for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
   io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
-  io.readReviewRecords=(refs,prefix)=>{wire(2,'readReviewRecords');const result=new Map(refs.map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha}))});return result}
+  io.readReviewRecords=(refs,prefix)=>{wire(prefix?2:1,'readReviewRecords');const result=new Map(refs.map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:prefix?[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha})):[]});return result}
   for(const name of ['readRef','listRefs','getCommit','getPr','getIssue','getIssueComments','getPrReviews','createRef','updateRef','deleteRef']){const fn=io[name];io[name]=(...args)=>{wire(1,`${name}:${String(args[0])}`);return fn(...args)}}
   const make=io.makeOwnerCommit;io.makeOwnerCommit=(message)=>{wire(1,'commit');baseLoaded=true;return make(message)}
   // Baseline preflight is 7 requests. Six additional fixed-record reads (the
@@ -601,14 +601,14 @@ test('complete replacement stays inside the real wire-attempt budget',()=>{
   assert.ok(result.reviewer);assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`used ${attempts} wire attempts`)
   const mutexAt=labels.indexOf(`createRef:${MUTEX_REF}`)
   assert.notEqual(mutexAt,-1,`mutex acquisition was not observed: ${labels.join(',')}`)
-  assert.equal(mutexAt,9,'the first replacement path spends 9 requests before its mutex gate')
-  assert.equal(labels.length-mutexAt,11,`new replacement success path costs exactly 11 requests after mutex acquisition: ${labels.slice(mutexAt).join(',')}`)
+  assert.equal(mutexAt,8,'the first replacement path spends 8 requests before its mutex gate')
+  assert.equal(labels.length-mutexAt,10,`new replacement success path costs exactly 10 requests after mutex acquisition: ${labels.slice(mutexAt).join(',')}`)
   attempts=0;labels.length=0
   assert.deepEqual(replaceFailedReviewer(replacementRequest,io),result)
   const retryMutexAt=labels.indexOf(`createRef:${MUTEX_REF}`)
   assert.notEqual(retryMutexAt,-1,`retry mutex acquisition was not observed: ${labels.join(',')}`)
-  assert.equal(retryMutexAt,10,'the idempotent path spends 10 requests before its mutex gate')
-  assert.equal(labels.length-retryMutexAt,11,`idempotent replacement success path costs exactly 11 requests after mutex acquisition: ${labels.slice(retryMutexAt).join(',')}`)
+  assert.equal(retryMutexAt,9,'the idempotent path spends 9 requests before its mutex gate')
+  assert.equal(labels.length-retryMutexAt,10,`idempotent replacement success path costs exactly 10 requests after mutex acquisition: ${labels.slice(retryMutexAt).join(',')}`)
   const source=readFileSync(new URL('./manage-migration-author-lanes.mjs',import.meta.url),'utf8')
   assert.match(source,/requireReviewWireCapacity\(11\);acquireReviewMutex\(ownerSha,io\);mutexAcquired=true/,'the idempotent reserve changed without re-derivation')
   assert.match(source,/requireReviewWireCapacity\(12\);acquireReviewMutex\(ownerSha,io\);mutexAcquired=true/,'the new-replacement reserve changed without re-derivation')
@@ -3679,14 +3679,14 @@ test('a complete slot-2 replacement stays inside the real wire-attempt budget (i
   io.readReviewRefs=(refs)=>{wire(1,'readReviewRefs');return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
   io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
   io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
-  io.readReviewRecords=(refs,prefix)=>{wire(2,'readReviewRecords');const result=new Map(refs.map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha}))});return result}
+  io.readReviewRecords=(refs,prefix)=>{wire(prefix?2:1,'readReviewRecords');const result=new Map(refs.map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:prefix?[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha})):[]});return result}
   for(const name of ['readRef','listRefs','getCommit','getPr','getIssue','getIssueComments','getPrReviews','createRef','updateRef','deleteRef']){const fn=io[name];io[name]=(...args)=>{wire(1,`${name}:${String(args[0])}`);return fn(...args)}}
   const make=io.makeOwnerCommit;io.makeOwnerCommit=(message)=>{wire(1,'commit');return make(message)}
   let result
   try{result=replaceFailedReviewer({...request,slot:2,failedSequence:slotTwo.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)}
   catch(error){throw new Error(`${error.message}; calls=${labels.join(',')}`)}
   assert.ok(result.reviewer)
-  assert.equal(attempts,20,`slot-2 replacement used ${attempts} of ${REVIEW_OPERATION_REQUEST_LIMIT}: ${labels.join(',')}`)
+  assert.equal(attempts,18,`slot-2 replacement used ${attempts} of ${REVIEW_OPERATION_REQUEST_LIMIT}: ${labels.join(',')}`)
   // The two additional calls are the fixed-cost preflight and post-mutex exact
   // exclusion reads. Their cost does not grow with the number of exclusions.
   // Measured, not assumed: the call labels show only batched readReviewRecords
