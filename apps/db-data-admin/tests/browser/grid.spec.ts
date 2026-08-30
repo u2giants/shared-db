@@ -10,7 +10,7 @@ const customers = [
 ]
 const vendors = [{ id: '33333333-3333-3333-3333-333333333333', display_name: 'Atlas Manufacturing', status: 'active', crm_status: 'active', pm_status: 'active', dam_status: 'active', plm_status: null, erp_active: true, alias_count: 3, updated_at: '2026-07-20T12:00:00Z' }]
 const scrapedProperties = [
-  { row_key: 'disney-1', presentation_licensor_key: 'disney', presentation_licensor_name: 'Disney - Creative (DCP Vault)', source_system: 'disney_dcp', source_table: 'plm.dcp_property', source_property_id: 'd-1', source_property_name: 'Frozen', display_label: 'Frozen', source_status: 'supported_core_ownership', provenance_kind: 'dcp_property_licensor_resolution', latest_seen_at: null, capture_marker: 'run-1', source_purpose: 'Creative (DCP Vault)', review_reason: 'Current approved evidence supports this presentation.', evidence_basis: 'dcp_property_licensor_resolution', review_guidance: 'No action unless newer direct evidence supersedes this decision.' },
+  { row_key: 'disney-1', presentation_licensor_key: 'disney', presentation_licensor_name: 'Disney - Creative (DCP Vault)', source_system: 'disney_dcp', source_table: 'plm.dcp_property', source_property_id: 'd-1', source_property_name: 'Creative fixture A', display_label: 'Creative fixture A', source_status: 'supported_core_ownership', provenance_kind: 'dcp_property_licensor_resolution', latest_seen_at: null, capture_marker: 'run-1', source_purpose: 'Creative (DCP Vault)', mapping_state: 'mapped', submissions: [{ source_system: 'submissions', source_table: 'source.properties', source_id: 'submission-a', display_label: 'Submission fixture A' }], contract_status: 'evidenced', review_reason: 'Current approved evidence supports this presentation.', evidence_basis: 'dcp_property_licensor_resolution', review_guidance: 'No action unless newer direct evidence supersedes this decision.' },
   { row_key: 'marvel-asgard-1', presentation_licensor_key: 'marvel-asgard-creative', presentation_licensor_name: 'Marvel - Creative (ASGARD)', source_system: 'marvel_asgard', source_table: 'plm.marvel_asgard_style_guide', source_property_id: 'm-1', source_property_name: 'Avengers', display_label: 'Avengers', source_status: 'active', provenance_kind: 'direct_asgard_style_guide', latest_seen_at: null, capture_marker: 'run-2', source_purpose: 'Creative (ASGARD)', review_reason: 'Current approved evidence supports this presentation.', evidence_basis: 'direct_asgard_style_guide', review_guidance: 'No action unless newer direct evidence supersedes this decision.' },
   { row_key: 'star-wars-1', presentation_licensor_key: 'star-wars', presentation_licensor_name: 'Lucasfilm / Star Wars - Creative (DCP Vault)', source_system: 'lucasfilm_dcp', source_table: 'plm.lucasfilm_dcp_property', source_property_id: 'sw-1', source_property_name: 'The Mandalorian', display_label: 'The Mandalorian', source_status: 'supported_owner_source_label', provenance_kind: 'dcp_property_licensor_resolution', latest_seen_at: null, capture_marker: 'run-3', source_purpose: 'Creative (DCP Vault)', review_reason: 'Current approved evidence supports this presentation.', evidence_basis: 'dcp_property_licensor_resolution', review_guidance: 'No action unless newer direct evidence supersedes this decision.' },
   { row_key: 'conflict-1', presentation_licensor_key: 'dcp-vault-authority-conflict', presentation_licensor_name: 'DCP Creative - contract/OPA conflict', source_system: 'disney_dcp', source_table: 'plm.dcp_property', source_property_id: 'conflict-1', source_property_name: 'Sanitized conflict fixture', display_label: 'Sanitized conflict fixture', source_status: 'authority_conflict', provenance_kind: 'dcp_property_licensor_resolution', latest_seen_at: null, capture_marker: 'run-4', source_purpose: 'Creative (DCP Vault)', review_reason: 'Conflicting approved authority evidence names more than one presentation scope; Licensing must resolve the exact source identity.', evidence_basis: 'approved exact-identity DCP authority decisions', review_guidance: 'Compare the direct authority records and approve one superseding exact-identity decision. Do not infer authority from a property name or landing table.' },
@@ -307,9 +307,9 @@ test('renders every scraped Property under distinct presentation Licensor headin
     element as HTMLElement & { columns: Array<{ name: string }> }
   ).columns.slice(0, 4).map(column => column.name))).toEqual([
     'Property',
-    'Review reason',
-    'Evidence basis',
-    'Decision guidance',
+    'Authoritative Submissions',
+    'Mapping',
+    'Contract status',
   ])
   await expect.poll(() => scrapedGrid.evaluate(element => (element as HTMLElement & { rowSize: number }).rowSize)).toBe(58)
   const reviewCell = page.locator('.review-text-cell').first()
@@ -318,7 +318,14 @@ test('renders every scraped Property under distinct presentation Licensor headin
   await expect(reviewCell).toHaveCSS('-webkit-line-clamp', '2')
   expect(await page.locator('.review-text-cell[title=""]').count()).toBeGreaterThanOrEqual(3)
   await expect(page.getByRole('gridcell', { name: 'The Mandalorian' })).toBeVisible()
-  await expect(page.getByRole('gridcell', { name: 'lucasfilm_dcp', exact: true })).toBeVisible()
+  await expect(page.getByRole('gridcell', { name: 'Submission fixture A' })).toBeVisible()
+  await expect(page.getByRole('gridcell', { name: 'Entitled — evidence on file' })).toBeVisible()
+  const unmappedCell = page.getByRole('gridcell', { name: 'Avengers' })
+  await expect(unmappedCell).toHaveCSS('background-color', 'rgb(255, 240, 240)')
+  await expect(unmappedCell).toHaveCSS('color', 'rgb(138, 28, 28)')
+  await expect.poll(() => page.locator('revo-grid').evaluateAll(elements => elements.some(element => (
+    element as HTMLElement & { source: Array<{ source_system: string }> }
+  ).source.some(row => row.source_system === 'lucasfilm_dcp')))).toBe(true)
   const conflictDetail = page.getByRole('note', { name: 'DCP Creative - contract/OPA conflict review details' })
   await expect(conflictDetail).toContainText('Two approved DCP Vault decisions')
   await expect(conflictDetail).toContainText('exact source property ID')

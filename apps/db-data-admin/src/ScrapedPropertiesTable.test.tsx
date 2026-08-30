@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ScrapedPropertiesTable } from './ScrapedPropertiesTable'
-import { groupScrapedProperties, type ApiClient, type ScrapedPropertyRow } from './lib/data-admin'
+import { groupScrapedProperties, presentScrapedProperty, type ApiClient, type ScrapedPropertyRow } from './lib/data-admin'
 import { scrapedPropertiesColumns } from './scraped-properties-columns'
 
 const row = (key: string, licensor: string, source = 'disney_dcp'): ScrapedPropertyRow => ({
@@ -14,13 +14,42 @@ const row = (key: string, licensor: string, source = 'disney_dcp'): ScrapedPrope
 })
 
 describe('ScrapedPropertiesTable', () => {
-  it('puts review decision context immediately after Property', () => {
+  it('puts authoritative mapping and contract status beside Property', () => {
     expect(scrapedPropertiesColumns.slice(0, 4).map(column => column.name)).toEqual([
       'Property',
-      'Review reason',
-      'Evidence basis',
-      'Decision guidance',
+      'Authoritative Submissions',
+      'Mapping',
+      'Contract status',
     ])
+  })
+
+  it('presents an authoritative one-to-many mapping and sanitized contract status', () => {
+    const presented = presentScrapedProperty({
+      ...row('mapped', 'Example'),
+      mapping_state: 'mapped',
+      submissions: [
+        { source_system: 'submissions', source_table: 'source.properties', source_id: 'a', display_label: 'Submission A' },
+        { source_system: 'submissions', source_table: 'source.properties', source_id: 'b', display_label: 'Submission B' },
+      ],
+      contract_status: 'evidenced',
+    })
+    expect(presented.submission_display).toBe('Submission A • Submission B')
+    expect(presented.contract_status_display).toBe('Entitled — evidence on file')
+    expect(presented.is_unmapped_creative).toBe(false)
+  })
+
+  it('keeps an unmapped Creative row visible and marks every grid cell red', () => {
+    const presented = presentScrapedProperty(row('unmapped', 'Example'))
+    expect(presented.submission_display).toBe('Unmapped')
+    expect(presented.is_unmapped_creative).toBe(true)
+    expect(scrapedPropertiesColumns.every(column => column.cellProperties?.({ model: presented } as never)?.className === 'unmapped-creative-cell')).toBe(true)
+  })
+
+  it('does not mark a Submissions source row as unmapped Creative', () => {
+    const presented = presentScrapedProperty({ ...row('submission', 'Example'), source_purpose: 'Submissions' })
+    expect(presented.submission_display).toBe('—')
+    expect(presented.contract_status_display).toBe('—')
+    expect(presented.is_unmapped_creative).toBe(false)
   })
 
   it('keeps Disney, Marvel, and Star Wars in independent presentation groups', () => {

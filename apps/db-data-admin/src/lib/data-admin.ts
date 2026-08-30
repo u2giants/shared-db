@@ -232,6 +232,33 @@ export type ScrapedPropertyRow = AdminRow & {
   review_reason: string
   evidence_basis: string
   review_guidance: string
+  mapping_state?: 'mapped' | 'conflict' | 'unmapped' | null
+  submissions?: Array<{ source_system: string; source_table: string; source_id: string; display_label: string | null }> | null
+  contract_status?: 'evidenced' | 'not_evidenced' | 'incomplete_chain' | 'conflict' | 'unknown' | null
+  submission_display?: string
+  contract_status_display?: string
+  is_unmapped_creative?: boolean
+}
+
+const contractStatusLabels: Record<NonNullable<ScrapedPropertyRow['contract_status']>, string> = {
+  evidenced: 'Entitled — evidence on file',
+  not_evidenced: 'Not evidenced',
+  incomplete_chain: 'Evidence chain incomplete',
+  conflict: 'Authority conflict',
+  unknown: 'Unknown',
+}
+
+export function presentScrapedProperty(row: ScrapedPropertyRow): ScrapedPropertyRow {
+  const isCreative = /^creative(?:\s|$|\()/i.test(row.source_purpose)
+  const labels = (row.submissions ?? []).map(member => member.display_label ?? member.source_id)
+  const state = row.mapping_state ?? (isCreative ? 'unmapped' : null)
+  return {
+    ...row,
+    mapping_state: state,
+    submission_display: !isCreative ? '—' : labels.length > 0 ? labels.join(' • ') : state === 'conflict' ? 'Conflict — review required' : 'Unmapped',
+    contract_status_display: !isCreative ? '—' : contractStatusLabels[row.contract_status ?? 'unknown'],
+    is_unmapped_creative: isCreative && state === 'unmapped',
+  }
 }
 
 export async function loadScrapedProperties(client: ApiClient) {
@@ -245,7 +272,7 @@ export async function loadScrapedProperties(client: ApiClient) {
     })
     if (error) throw error
     const payload = (data ?? {}) as { rows?: ScrapedPropertyRow[]; next_cursor?: string | null }
-    rows.push(...(payload.rows ?? []).map(row => ({ ...row, id: row.row_key })))
+    rows.push(...(payload.rows ?? []).map(row => presentScrapedProperty({ ...row, id: row.row_key })))
     cursor = payload.next_cursor ?? null
   } while (cursor)
   return rows
