@@ -3284,7 +3284,7 @@ CATEGORY_ORDERLIST_BRIDGE_COVERING_INDEX = """
 CATALOG_CONTRACTS["orderlist_bridge_covering_index_v1"] = CATEGORY_ORDERLIST_BRIDGE_COVERING_INDEX
 
 # Durable catalog outcome of the single dynamic-execution marker in migration
-# 20260830130801 (`execute format('comment on column ...')`, issue #505).
+# 20260830195655 (`execute format('comment on column ...')`, issue #505).
 #
 # WHY A COMMENT CONTRACT AND NOT A ROW COUNT. That marker's only effect is this
 # column comment. The migration also updates two `public.licensors` rows, and it
