@@ -83,6 +83,13 @@ test('an inexact or missing head is refused rather than guessed', () => {
 test('slot and replacement assignment refs are recognised as assignments at that head', () => {
   assert.deepEqual(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW}`), { issue: 1769, pr: 1809, headSha: NEW })
   assert.deepEqual(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW}-slot2`), { issue: 1769, pr: 1809, headSha: NEW })
+  // The PRODUCTION shape. `manage-migration-author-lanes.mjs` writes the replacement
+  // link as `<base>-<failedSequence>` -- dash, then digits -- and its own namespace
+  // predicate requires exactly that. An earlier version of this test asserted a slash
+  // form the writer never emits, so the parser passed its tests while discarding every
+  // real replacement ref.
+  assert.deepEqual(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}-1`), { issue: 1769, pr: 1809, headSha: NEW })
+  assert.deepEqual(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}-slot2-1`), { issue: 1769, pr: 1809, headSha: NEW })
   assert.deepEqual(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}/1`), { issue: 1769, pr: 1809, headSha: NEW })
   assert.equal(parseAssignmentRef('refs/heads/main'), null)
   assert.equal(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW.slice(0, 7)}`), null)
@@ -199,5 +206,10 @@ test('APPROVE WITH CONDITIONS neither authorizes the merge nor locks the head', 
   const pinned = { pr: 1809, headSha: NEW, assignments: [{ issue: 1769, pr: 1809, headSha: NEW }] }
   const conditional = { body: `VERDICT: APPROVE WITH CONDITIONS ${NEW} -- rerun the reconciler first` }
   assert.throws(() => evaluateExactHeadApproval({ ...pinned, evidence: [conditional] }), /has no APPROVE tied to it/)
+  // Punctuated separators are the same claim. A whitespace-only lookahead read both
+  // of these as clean approvals.
+  for (const body of [`VERDICT: APPROVE, WITH CONDITIONS ${NEW}`, `VERDICT: APPROVE -- WITH CONDITIONS ${NEW}`]) {
+    assert.throws(() => evaluateExactHeadApproval({ ...pinned, evidence: [{ body }] }), /has no APPROVE tied to it/, body)
+  }
   assert.equal(evaluateExactHeadApproval({ ...pinned, evidence: [conditional, { body: `VERDICT: APPROVE ${NEW}` }] }).approved, true)
 })

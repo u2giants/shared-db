@@ -17,6 +17,28 @@
 //
 // An assignment is not an approval and an approval at an older head is not an
 // approval of these bytes. Both are required, both pinned to the same exact SHA.
+//
+// WHAT THIS GATE DOES NOT CHECK -- stated here so nobody reads more into a pass
+// than it carries. It enforces `an assignment exists at this head` AND `an approval
+// exists at this head`, not `the assigned reviewer approved`. Assignment refs record
+// {issue, pr, headSha} and no reviewer identity, and the evidence rows are read from
+// issue and PR comments with no author, association or permission field consulted at
+// all. So anyone who can comment can supply the approval half. The word
+// "independent" here describes the assignment PROCESS -- the rotation in
+// `manage-migration-author-lanes.mjs`, which picks the reviewer and refuses the
+// live orchestrator's own engine -- and is not a property this file verifies.
+// Two related limits, both deliberate:
+//   - The head tie (`tiedToHead`) matches the SHA anywhere in the body, while the
+//     verdict must open a line. A comment quoting an old approval and separately
+//     naming the new head therefore counts at the new head. Requiring the SHA on
+//     the verdict line itself was considered and rejected: every genuine wrapper
+//     review in `.ai/reviews` names the head in a header block and ends with a bare
+//     `VERDICT: APPROVE`, so that rule would refuse all real approvals -- the
+//     inverse defect described below, which is the more dangerous one.
+//   - Fenced or indented code containing a verdict line counts.
+// Against the status quo this replaces -- nothing at all, which merged unapproved
+// bytes on PR #1809 -- it is a process-integrity gate and a large improvement. It is
+// not an authenticity gate, and it should never be cited as one.
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
@@ -59,7 +81,10 @@ const verdictLine = (body, pattern) => String(body ?? '').split(/\r?\n/).some((l
 // not the same as recording a refusal: a conditional response must leave the head
 // unapproved without LOCKING it, or the reviewer's own conditions strand the head
 // those conditions were meant to be met on -- the self-lock through a new door.
-const APPROVE = /^APPROVE(?:D)?\b(?!\s+WITH\b)/i
+// The separator before WITH is any run of non-letters, not a space: `APPROVE, WITH
+// CONDITIONS` and `APPROVE -- WITH CONDITIONS` are the same claim as the plain form
+// and a whitespace-only lookahead let both through as clean approvals.
+const APPROVE = /^APPROVE(?:D)?\b(?![^A-Za-z]+WITH\b)/i
 // REJECT is a real verdict word in this repo's reviewer wrappers alongside REVISE
 // and GitHub's own CHANGES_REQUESTED. Omitting any of them would let a refusal at
 // the merged head be silently outvoted by an approval that came before it.
@@ -88,7 +113,16 @@ function json(args) { const raw = gh(args); try { return JSON.parse(raw) } catch
 function pages(endpoint) { const result = json(['api', '--paginate', '--slurp', endpoint]); if (!Array.isArray(result) || result.some((x) => !Array.isArray(x))) throw new ApprovalCheckError(`GitHub pagination for ${endpoint} is malformed`); return result.flat() }
 
 export function parseAssignmentRef(ref) {
-  const match = /^refs\/db-review-(?:assignments|replacements)\/(\d+)-(\d+)-([0-9a-f]{40})(?:-slot\d+)?(?:\/.*)?$/.exec(String(ref ?? ''))
+// The replacement writer names its link `<base>-<failedSequence>` -- a DASH and
+// digits, not a slash (`manage-migration-author-lanes.mjs`, `replacementRef`, and
+// `inReviewReplacementNamespace`, which requires the remainder to match /^-\d+$/).
+// This parser originally accepted only the slash form, so every real replacement
+// ref parsed to null and the documented "both namespaces count" behaviour was not
+// implemented -- fail-closed, but false. Its two tests asserted the slash shape
+// production never writes: the adapter-shape defect this file's own header warns
+// about, committed in the file that warns about it. The tail now mirrors
+// `matchesReplacementTuple`.
+  const match = /^refs\/db-review-(?:assignments|replacements)\/(\d+)-(\d+)-([0-9a-f]{40})(?:-slot\d+)?(?:-\d+)?(?:\/.*)?$/.exec(String(ref ?? ''))
   return match ? { issue: Number(match[1]), pr: Number(match[2]), headSha: match[3] } : null
 }
 
