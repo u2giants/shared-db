@@ -1,4 +1,5 @@
 -- Issue #1609: fresh supported successor for two permanently retired migrations.
+-- derived-from: none
 -- Never apply or revive 20260814224937 / 20260814233423. This file also converges
 -- CI replay, where those historical files exist, to the production-supported shape.
 

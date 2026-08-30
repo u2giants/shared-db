@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "migration_version": "20260830213027",
-  "migration_sha256": "1acf1e23b36598c1a6d4ce1230e34f3e06a167acf2fe238ad050dec20a8c237b",
+  "migration_sha256": "c4559a9b61b2fdc2ff8ba7a9186f9ae4d5d025f64194c382923198b356d0c318",
   "marker_schema_version": 1,
   "marker_reviews": [
     {
-      "line_start": 86,
-      "line_end": 322,
+      "line_start": 87,
+      "line_end": 323,
       "disposition": "checks",
       "check_ids": [
         "source_resolution_supported_home_contract"
