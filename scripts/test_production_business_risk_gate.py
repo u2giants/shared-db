@@ -1434,7 +1434,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         # tooth working, not a gap: a reader cannot tell a cited path from an
         # opened one without looking, so every new mention is made to argue for
         # itself. If this citation ever becomes a read, this entry must go and
-        # docs must be pinned in PREVIE\w_PRODUCER_PATHS instead.
+        # docs must be pinned in PREVIEW_PRODUCER_PATHS instead.
         ("scripts/manage-migration-author-lanes.mjs", "message-citation"): 1,
         ("scripts/production_migration_guard.py", "message-citation"): 1,
     }
