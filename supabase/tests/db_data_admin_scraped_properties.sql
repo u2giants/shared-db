@@ -36,7 +36,7 @@ declare
   v_populated_rows jsonb;
 begin
   v_search := 'Issue1533-' || v_suffix;
-  v_populated_prefix := v_search || '-Populated-';
+  v_populated_prefix := 'Issue1936Populated-' || v_suffix || '-';
 
   if to_regprocedure(v_sig) is null then
     raise exception 'missing scraped Properties function: %', v_sig;
