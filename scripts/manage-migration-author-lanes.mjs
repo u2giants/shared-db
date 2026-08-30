@@ -1485,10 +1485,16 @@ export function findPrReviewAssignments(issue,pr,io){
 
 // WHAT COUNTS AS A RECORDED VERDICT (issue #1822).
 //
-// This predicate was never a function. The same expression -- "tied to the head
-// AND contains a verdict word anywhere in the body" -- was written out longhand
-// at NINE separate sites in this file, so there was no single place where it
-// could be wrong, and no single place where it could be fixed.
+// This predicate was never a function. "Tied to the head AND contains a verdict
+// word anywhere in the body" was written out longhand at EIGHT separate sites in
+// this file, so there was no single place where it could be wrong and no single
+// place where it could be fixed.
+//
+// A NINTH site, `previewGateProof`, is a VARIANT of the same defect rather than
+// a ninth copy: it tests `\bAPPROVE\b` only, and adds a bundle/assignment
+// clause. It is called out explicitly because a mechanical find-and-replace
+// across "nine identical sites" would silently mangle it -- and it is the one
+// that fails open.
 //
 // The old reading matched a verdict word ANYWHERE in the body. Ordinary prose
 // that discusses reviewing, in a comment that also quotes the head, therefore

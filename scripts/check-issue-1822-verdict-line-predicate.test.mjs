@@ -125,6 +125,49 @@ test('prose stating an approval is ABSENT must not satisfy the preview gate', ()
   }
 })
 
+// ---------------------------------------------------------------------------
+// COMPLYING WITH THE GOVERNANCE RULE MUST NOT LOCK THE HEAD.
+//
+// A wrong-scope review must be refused PUBLICLY in a PR comment, so that an
+// empty review slot reads as a refusal rather than an omission. Writing that
+// comment necessarily names the verdict token and the head SHA in one body --
+// which is precisely what the old reading treated as a recorded verdict. So
+// obeying the rule was what locked the head, and the only escape would have
+// been editing the very evidence the gate exists to protect.
+//
+// Real refusal body from PR #1813 (comment 5466128876), verbatim. It cost
+// nothing there only because the head it named was already dead.
+// ---------------------------------------------------------------------------
+const REAL_REFUSAL_HEAD = '47f918e5487242c9f95bc829e4cab45211a91fd1'
+const REAL_REFUSAL_COMMENT = [
+  '## Why no approval is recorded on this PR: one was produced and refused',
+  '',
+  'This is a refusal, not an omission. Reading the empty review slot as "nobody got',
+  'around to it" would be the wrong lesson.',
+  '',
+  'A Codex `diff-review` was commissioned against this PR through the governed',
+  'assignment path (sequence 485, `codex-gpt-5.6-sol`) and returned **APPROVE** at',
+  'commit `47f918e5487242c9f95bc829e4cab45211a91fd1` — which was, at that moment,',
+  "exactly this PR's head. It passed head-pinning cleanly.",
+  '',
+  'It was refused anyway, because it reviewed the wrong content. Its findings cited',
+  '`scripts/orchestrator-flow/reconcile.mjs:16`. That file has **zero lines** in this',
+].join('\n')
+
+test('a public wrong-scope refusal comment does not lock the head it names', () => {
+  // Under the old reading this locked the head, so obeying the governance rule
+  // was self-defeating. This is the case that will regress.
+  const oldReading =
+    REAL_REFUSAL_COMMENT.includes(REAL_REFUSAL_HEAD) &&
+    /\b(?:APPROVE|REVISE|REQUEST_CHANGES)\b/i.test(REAL_REFUSAL_COMMENT)
+  assert.equal(oldReading, true, 'fixture must reproduce the old lock')
+
+  assert.equal(evidenceTiedToHead(comment(REAL_REFUSAL_COMMENT), REAL_REFUSAL_HEAD), true)
+  assert.equal(isVerdictFor(comment(REAL_REFUSAL_COMMENT), REAL_REFUSAL_HEAD), false)
+  // And it must not authorize anything through the fail-open preview gate.
+  assert.equal(isApprovalFor(comment(REAL_REFUSAL_COMMENT), REAL_REFUSAL_HEAD), false)
+})
+
 test('a verdict word for a DIFFERENT head never counts for this head', () => {
   const other = '0be60cfc34fec94d87b6ea145cf7c6c8657cf968a'
   const body = `APPROVE\n\nReviewed ${other}.`
