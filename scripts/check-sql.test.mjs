@@ -14,13 +14,15 @@
 
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const gitBash = 'C:\\Program Files\\Git\\bin\\bash.exe'
+const bashCommand = process.platform === 'win32' && existsSync(gitBash) ? gitBash : 'bash'
 
 /** Git Bash on Windows wants forward slashes. */
 const toBashPath = (p) => p.replace(/\\/g, '/')
@@ -48,7 +50,7 @@ function runGuards(migrationsDir, { mainNewest = null, env = {} } = {}) {
   if (migrationsDir) childEnv.CHECK_SQL_MIGRATION_DIR = toBashPath(migrationsDir)
   if (mainNewest) childEnv.CHECK_SQL_MAIN_NEWEST = mainNewest
 
-  const result = spawnSync('bash', ['scripts/check-sql.sh'], {
+  const result = spawnSync(bashCommand, ['scripts/check-sql.sh'], {
     cwd: repoRoot,
     encoding: 'utf8',
     env: childEnv,
