@@ -213,6 +213,36 @@ from plm.wb_character_canonical_property_edge e
 join plm.wb_character_normalized s on s.id=e.source_entity_id
 where e.source_active and e.within_entitlement and s.status='active';
 
+create view api.wb_durable_entity_lifecycle_verification
+with (security_invoker = true) as
+select (
+  not exists (
+    select 1
+    from unnest(array['wb_asset_normalized','wb_character_normalized','wb_franchise','wb_property','wb_style_guide_normalized']::text[]) n(name)
+    where (select count(*) from information_schema.columns c
+           where c.table_schema='plm' and c.table_name=n.name
+             and c.column_name in ('status','withdrawn_at','first_withdrawn_at','change_signal')) <> 4
+       or to_regclass(format('plm.idx_%s_lifecycle_status',n.name)) is null
+       or not exists (select 1 from pg_trigger t
+                      where t.tgrelid=format('plm.%I',n.name)::regclass
+                        and t.tgname='trg_'||n.name||'_lifecycle' and not t.tgisinternal)
+  )
+  and (length(pg_get_functiondef('plm.sync_wb_normalized_target(uuid,text,jsonb,text,numeric)'::regprocedure))
+       - length(replace(pg_get_functiondef('plm.sync_wb_normalized_target(uuid,text,jsonb,text,numeric)'::regprocedure),'status=''active'',withdrawn_at=null','')))
+      / length('status=''active'',withdrawn_at=null') = 5
+  and (length(pg_get_functiondef('plm.sync_wb_canonical_relationship_edges(text,jsonb)'::regprocedure))
+       - length(replace(pg_get_functiondef('plm.sync_wb_canonical_relationship_edges(text,jsonb)'::regprocedure),'select status = ''active'' into v_entity_active','')))
+      / length('select status = ''active'' into v_entity_active') = 3
+  and not exists (
+    select 1
+    from unnest(array['wb_inferred_franchise_property','wb_inferred_franchise_style_guide','wb_inferred_franchise_character','wb_inferred_style_guide_property','wb_inferred_property_character','wb_inferred_style_guide_character','wb_canonical_relationship_candidates']::text[]) n(name)
+    where position('status = ''active''' in pg_get_viewdef(format('api.%I',n.name)::regclass,false)) = 0
+  )
+) as contract_ok;
+
+revoke all on api.wb_durable_entity_lifecycle_verification from public, anon, authenticated;
+grant select on api.wb_durable_entity_lifecycle_verification to service_role;
+
 comment on column plm.wb_asset_normalized.change_signal is
   'Opaque deterministic equality signal generated from the retained source hash.';
 comment on column plm.wb_character_normalized.change_signal is
