@@ -2028,7 +2028,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
   // Slot-aware, in the SAME namespaces assignment writes: a replacement request
   // for slot N resolves the failed sequence against slot N's own records and
   // nothing else. Slot 1 is byte-for-byte its historical unsuffixed namespace.
-  // This is what was missing (#1832) -- the matcher below is unchanged and still
+  // This is the gap #1832 reported -- the matcher below is unchanged and still
   // fails closed; it simply now gets shown the right records.
   const slotSuffix=reviewSlotSuffix(request.slot)
   const assignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}${slotSuffix}`
