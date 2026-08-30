@@ -2,6 +2,78 @@
 
 begin;
 
+-- Exercise the real table, trigger, foreign key, RLS/grants, and the installed
+-- capture target body.  Fixed synthetic identities are rolled back below.
+do $catalog$
+declare
+  v_table text;
+begin
+  foreach v_table in array array['wb_asset_normalized','wb_character_normalized','wb_property','wb_style_guide_normalized','wb_franchise'] loop
+    if not (select relrowsecurity from pg_class where oid=format('plm.%I',v_table)::regclass) then
+      raise exception 'RLS is disabled for plm.%',v_table;
+    end if;
+    if not has_table_privilege('authenticated',format('plm.%I',v_table),'select')
+       or has_table_privilege('anon',format('plm.%I',v_table),'select') then
+      raise exception 'Warner lifecycle table grants are incorrect for plm.%',v_table;
+    end if;
+    if not exists(select 1 from pg_constraint where conrelid=format('plm.%I',v_table)::regclass and contype='f' and confrelid='plm.wb_capture'::regclass) then
+      raise exception 'Warner lifecycle table lost its capture foreign key: plm.%',v_table;
+    end if;
+    if not exists(select 1 from pg_trigger where tgrelid=format('plm.%I',v_table)::regclass and tgname='trg_'||v_table||'_lifecycle' and not tgisinternal) then
+      raise exception 'Warner lifecycle trigger is missing for plm.%',v_table;
+    end if;
+  end loop;
+end
+$catalog$;
+
+insert into plm.wb_capture(capture_id,chunk_number,target,status,captured_at,private_source_commit,snapshot_sha256,expected_row_count,captured_by,source_url)
+values
+ ('18810000-0000-4000-8000-000000000101',0,'wb_franchise','validating','2026-08-28','synthetic',repeat('1',64),2,'contract','https://example.invalid'),
+ ('18810000-0000-4000-8000-000000000102',0,'wb_franchise','validating','2026-08-29','synthetic',repeat('2',64),1,'contract','https://example.invalid'),
+ ('18810000-0000-4000-8000-000000000103',0,'wb_franchise','validating','2026-08-30','synthetic',repeat('3',64),2,'contract','https://example.invalid');
+
+set local role service_role;
+select * from plm.sync_wb_normalized_target(
+ '18810000-0000-4000-8000-000000000101','wb_franchise',
+ '{"captured_at":"2026-08-28","rows":[{"source_namespace":"synthetic","source_id":"franchise-a","label":"A","identity_method":"source_id","source_url":"https://example.invalid"},{"source_namespace":"synthetic","source_id":"franchise-b","label":"B","identity_method":"source_id","source_url":"https://example.invalid"}]}'::jsonb,
+ 'mirror_only',1);
+select * from plm.sync_wb_normalized_target(
+ '18810000-0000-4000-8000-000000000102','wb_franchise',
+ '{"captured_at":"2026-08-29","rows":[{"source_namespace":"synthetic","source_id":"franchise-a","label":"A","identity_method":"source_id","source_url":"https://example.invalid"}]}'::jsonb,
+ 'mirror_only',1);
+
+do $withdrawn$
+declare v_first_seen timestamptz; v_first_withdrawn timestamptz;
+begin
+ select first_seen_at,first_withdrawn_at into v_first_seen,v_first_withdrawn from plm.wb_franchise where source_namespace='synthetic' and source_id='franchise-b';
+ if v_first_withdrawn is null or not exists(select 1 from plm.wb_franchise where source_namespace='synthetic' and source_id='franchise-b' and status='withdrawn' and withdrawn_at is not null) then
+   raise exception 'real-table capture did not withdraw a missing identity';
+ end if;
+ perform set_config('test.wb_first_seen',v_first_seen::text,true);
+ perform set_config('test.wb_first_withdrawn',v_first_withdrawn::text,true);
+end
+$withdrawn$;
+
+select * from plm.sync_wb_normalized_target(
+ '18810000-0000-4000-8000-000000000103','wb_franchise',
+ '{"captured_at":"2026-08-30","rows":[{"source_namespace":"synthetic","source_id":"franchise-a","label":"A","identity_method":"source_id","source_url":"https://example.invalid"},{"source_namespace":"synthetic","source_id":"franchise-b","label":"B","identity_method":"source_id","source_url":"https://example.invalid"}]}'::jsonb,
+ 'mirror_only',1);
+
+do $reactivated$
+begin
+ if not exists(select 1 from plm.wb_franchise where source_namespace='synthetic' and source_id='franchise-b' and status='active' and withdrawn_at is null and first_seen_at=current_setting('test.wb_first_seen')::timestamptz and first_withdrawn_at=current_setting('test.wb_first_withdrawn')::timestamptz) then
+   raise exception 'unchanged-hash reappearance did not preserve durable lifecycle history';
+ end if;
+ begin
+   update plm.wb_franchise set first_withdrawn_at=now() where source_namespace='synthetic' and source_id='franchise-b';
+   raise exception 'immutable first_withdrawn_at update was accepted';
+ exception when raise_exception then
+   if sqlerrm='immutable first_withdrawn_at update was accepted' then raise; end if;
+ end;
+end
+$reactivated$;
+reset role;
+
 create temp table test_wb_asset_lifecycle
   (like plm.wb_asset_normalized including defaults including generated including constraints);
 create temp table test_wb_character_lifecycle

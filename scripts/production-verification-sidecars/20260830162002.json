@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "migration_version": "20260830162002",
+  "migration_sha256": "f66aff11434a62dcc53b4567ea6126505f8831238e2636a4370410f9f4ed0f35",
+  "marker_schema_version": 1,
+  "marker_reviews": [
+    {
+      "line_start": 72,
+      "line_end": 177,
+      "disposition": "checks",
+      "reason": "These dynamic statements preserve existing routine and view identities while changing their installed definitions. The cited contract verifies the lifecycle columns and indexes and reads both installed function definitions to prove withdrawal, unchanged-hash reactivation, and entity-derived edge activity were installed.",
+      "check_ids": [
+        "wb_durable_entity_lifecycle_contract"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "id": "wb_durable_entity_lifecycle_contract",
+      "kind": "catalog_contract",
+      "contract": "wb_durable_entity_lifecycle_v1",
+      "expected_count": 1
+    }
+  ]
+}
