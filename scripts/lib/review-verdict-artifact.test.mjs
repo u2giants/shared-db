@@ -17,6 +17,7 @@ test('mutation: dropping assignment parentage is detected',()=>assert.throws(()=
 test('mutation: recording outside the exact reviewer lease is detected',()=>assert.throws(()=>validateVerdictArtifact(artifact({activeLeaseSha:'e'.repeat(40)})),/conflicting active lease/))
 test('mutation: substituting reviewer identity is detected',()=>assert.throws(()=>validateVerdictArtifact(artifact({assignmentReviewer:'kimi-k3'})),/does not own/))
 test('mutation: changing durable findings after recording is detected',()=>assert.throws(()=>validateVerdictArtifact(artifact({findingsBody:'edited later'})),/digest/))
+test('mutation: findings on another PR cannot authorize this PR',()=>assert.throws(()=>validateVerdictArtifact(artifact({record:{findings_ref:'https://github.com/u2giants/shared-db/pull/2001#issuecomment-123'}})),/reviewed shared-db PR/))
 test('replacement verdict namespace is exact and cannot masquerade as an original assignment',()=>{
   const replacement=verdictRef({issue:1824,pr:2000,headSha:head,replacementSequence:7})
   assert.equal(parseVerdictRef(replacement).replacementSequence,7)

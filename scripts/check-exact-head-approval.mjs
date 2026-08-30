@@ -51,7 +51,7 @@ import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { REPO, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_REPLACEMENT_REF_PREFIX, parseReviewCursor, reviewActiveRef } from './manage-migration-author-lanes.mjs'
 import { approvalLine, evidenceTiedToHead, refusalLine, trustedVerdictEvidence, unambiguouslyTiedToHead } from './lib/review-verdict.mjs'
-import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, parseVerdictCommit, parseVerdictRef, validateVerdictArtifact } from './lib/review-verdict-artifact.mjs'
+import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, isValidatedVerdictArtifact, parseVerdictCommit, parseVerdictRef, validateVerdictArtifact } from './lib/review-verdict-artifact.mjs'
 
 export class ApprovalCheckError extends Error {}
 
@@ -141,10 +141,18 @@ export function evaluateExactHeadApproval(input) {
 
   if (Object.prototype.hasOwnProperty.call(input, 'verdicts')) {
     const exact = (verdicts ?? []).filter((row) => Number(row.pr) === Number(pr) && String(row.head_sha).toLowerCase() === String(headSha).toLowerCase())
+    if (exact.some((row) => !isValidatedVerdictArtifact(row))) throw new ApprovalCheckError('durable verdict input crossed the approval boundary without artifact validation')
+    if (new Set(exact.map((row) => row.ref)).size !== exact.length) throw new ApprovalCheckError('duplicate durable verdict refs cannot be counted')
     if (exact.some((row) => row.verdict !== 'APPROVE')) throw new ApprovalCheckError(`head ${headSha} carries a durable reviewer refusal; answer it with a new commit and a fresh exact-head review`)
     const approvals = exact.filter((row) => row.verdict === 'APPROVE')
     if (!approvals.length) throw new ApprovalCheckError(`head ${headSha} has no durable APPROVE artifact; a review that wrote no artifact never authorizes a merge`)
-    return { approved: true, head_sha: headSha, pr: Number(pr), assignments: pinned.length, approvals: approvals.length }
+    const latestBySlot = new Map()
+    for (const assignment of pinned) {
+      const prior = latestBySlot.get(assignment.slot)
+      if (!prior || Number(assignment.replacementSequence ?? 0) > Number(prior.replacementSequence ?? 0)) latestBySlot.set(assignment.slot, assignment)
+    }
+    for (const assignment of latestBySlot.values()) if (!approvals.some((row) => row.assignment_sha === assignment.sha)) throw new ApprovalCheckError(`review slot ${assignment.slot} has no durable APPROVE for its latest exact-head assignment`)
+    return { approved: true, head_sha: headSha, pr: Number(pr), assignments: latestBySlot.size, approvals: new Set(approvals.map((row) => row.ref)).size }
   }
 
   const authenticated = evidence.filter(trustedVerdictEvidence)
@@ -175,8 +183,9 @@ export function parseAssignmentRef(ref) {
 // production never writes: the adapter-shape defect this file's own header warns
 // about, committed in the file that warns about it. The tail now mirrors
 // `matchesReplacementTuple`.
-  const match = /^refs\/db-review-(?:assignments|replacements)\/(\d+)-(\d+)-([0-9a-f]{40})(?:-slot\d+)?(?:-\d+)?(?:\/.*)?$/.exec(String(ref ?? ''))
-  return match ? { issue: Number(match[1]), pr: Number(match[2]), headSha: match[3] } : null
+  const match = /^refs\/db-review-(assignments|replacements)\/(\d+)-(\d+)-([0-9a-f]{40})(?:-slot(\d+))?(?:-(\d+))?$/.exec(String(ref ?? ''))
+  if (!match || (match[1] === 'replacements') !== Boolean(match[6])) return null
+  return { issue: Number(match[2]), pr: Number(match[3]), headSha: match[4], slot: Number(match[5] ?? 1), replacementSequence: match[6] ? Number(match[6]) : null }
 }
 
 // Assignment refs are named <issue>-<pr>-<headSha>, so the pull request alone is

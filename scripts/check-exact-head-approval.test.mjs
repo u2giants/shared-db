@@ -88,16 +88,16 @@ test('an inexact or missing head is refused rather than guessed', () => {
 // the same head, so both must count -- otherwise a merge whose review genuinely
 // happened is refused for lack of an assignment that is sitting right there.
 test('slot and replacement assignment refs are recognised as assignments at that head', () => {
-  assert.deepEqual(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW}`), { issue: 1769, pr: 1809, headSha: NEW })
-  assert.deepEqual(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW}-slot2`), { issue: 1769, pr: 1809, headSha: NEW })
+  assert.deepEqual(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW}`), { issue: 1769, pr: 1809, headSha: NEW, slot: 1, replacementSequence: null })
+  assert.deepEqual(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW}-slot2`), { issue: 1769, pr: 1809, headSha: NEW, slot: 2, replacementSequence: null })
   // The PRODUCTION shape. `manage-migration-author-lanes.mjs` writes the replacement
   // link as `<base>-<failedSequence>` -- dash, then digits -- and its own namespace
   // predicate requires exactly that. An earlier version of this test asserted a slash
   // form the writer never emits, so the parser passed its tests while discarding every
   // real replacement ref.
-  assert.deepEqual(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}-1`), { issue: 1769, pr: 1809, headSha: NEW })
-  assert.deepEqual(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}-slot2-1`), { issue: 1769, pr: 1809, headSha: NEW })
-  assert.deepEqual(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}/1`), { issue: 1769, pr: 1809, headSha: NEW })
+  assert.deepEqual(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}-1`), { issue: 1769, pr: 1809, headSha: NEW, slot: 1, replacementSequence: 1 })
+  assert.deepEqual(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}-slot2-1`), { issue: 1769, pr: 1809, headSha: NEW, slot: 2, replacementSequence: 1 })
+  assert.equal(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}/1`), null)
   assert.equal(parseAssignmentRef('refs/heads/main'), null)
   assert.equal(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW.slice(0, 7)}`), null)
 })
@@ -176,7 +176,11 @@ test('the adapter carries a refusal and a stale-head assignment through unflatte
     refs: [{ ref: `refs/db-review-replacements/1769-1809-${NEW}/1`, object: {} }],
     comments: [{ body: `REVISE ${NEW} -- the reconciler still refuses this manifest` }],
   }))
-  assert.throws(() => evaluateExactHeadApproval(refused), /no durable APPROVE artifact/)
+  assert.throws(() => evaluateExactHeadApproval(refused), /no reviewer was ever assigned head/)
+})
+
+test('raw verdict-shaped objects cannot cross the approval trust boundary',()=>{
+  assert.throws(()=>evaluateRaw({pr:1809,headSha:NEW,assignments:[{pr:1809,headSha:NEW,slot:1,sha:'a'.repeat(40)}],verdicts:[{pr:1809,head_sha:NEW,verdict:'APPROVE',ref:'fake',assignment_sha:'a'.repeat(40)}]}),/without artifact validation/)
 })
 
 test('the adapter refuses rather than guesses when the PR number is absent', () => {

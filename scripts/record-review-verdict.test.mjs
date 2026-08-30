@@ -23,3 +23,13 @@ test('a review that lost its active lease writes no artifact',()=>{
   assert.throws(()=>recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io),/does not hold/)
   assert.equal([...io.refs.keys()].some((ref)=>ref.includes('db-review-verdict')),false)
 })
+test('a contradictory verdict that wins the create race permanently refuses the tuple',()=>{
+  const io=ioFixture(),originalCreate=io.createRef
+  io.createRef=(ref,sha)=>{
+    const commit=io.commits.get(sha),row=JSON.parse(commit.message.slice('db-review-verdict '.length))
+    const contradictory=io.makeReviewVerdictCommit(`db-review-verdict ${JSON.stringify({...row,verdict:'REJECT'})}`,assignmentSha)
+    originalCreate(ref,contradictory)
+    throw new Error('already exists')
+  }
+  assert.throws(()=>recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io),/contradictory create-only verdict/)
+})

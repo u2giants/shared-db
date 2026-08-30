@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 export const REVIEW_VERDICT_REF_PREFIX = 'refs/db-review-verdicts'
 export const REVIEW_VERDICT_REPLACEMENT_REF_PREFIX = 'refs/db-review-verdict-replacements'
 export const REVIEW_VERDICTS = new Set(['APPROVE', 'REVISE', 'REJECT'])
+const VALIDATED_VERDICT = Symbol('validated-review-verdict')
 
 export function reviewSlotSuffix(slot = 1) { return Number(slot) === 1 ? '' : `-slot${Number(slot)}` }
 export function verdictRef({ issue, pr, headSha, slot = 1, replacementSequence = null }) {
@@ -45,7 +46,12 @@ export function validateVerdictArtifact({ ref, sha, commit, findingsBody, active
   const parents = commit?.parents ?? commit?.commit?.parents ?? []
   const parentShas = parents.map((parent) => parent.sha ?? parent.oid)
   if (parentShas.length !== 1 || parentShas[0] !== row.assignment_sha) throw new Error('verdict commit is not a direct child of its assignment')
-  if (!/^https:\/\/github\.com\/u2giants\/shared-db\/(?:issues|pull)\/\d+#issuecomment-\d+$/.test(String(row.findings_ref ?? ''))) throw new Error('findings_ref must name a durable shared-db GitHub comment')
+  const findingsMatch = /^https:\/\/github\.com\/u2giants\/shared-db\/pull\/(\d+)#issuecomment-\d+$/.exec(String(row.findings_ref ?? ''))
+  if (!findingsMatch || Number(findingsMatch[1]) !== Number(row.pr)) throw new Error('findings_ref must name a durable comment on the reviewed shared-db PR')
   if (!/^[0-9a-f]{64}$/.test(String(row.findings_digest ?? '')) || findingsDigest(findingsBody) !== row.findings_digest) throw new Error('findings digest does not match the durable findings')
-  return { ...row, ref, sha }
+  const validated = { ...row, ref, sha }
+  Object.defineProperty(validated, VALIDATED_VERDICT, { value: true })
+  return validated
 }
+
+export function isValidatedVerdictArtifact(row) { return row?.[VALIDATED_VERDICT] === true }

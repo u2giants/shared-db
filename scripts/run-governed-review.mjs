@@ -25,13 +25,19 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
   if(!resolved)throw new Error(`review wrapper ${options.wrapper} is not executable`)
   const plan=wrapperSpawnPlan(resolved,options.wrapperArgs)
   const run=deps.spawn(plan.file,plan.args,{cwd:options.worktree,encoding:'utf8',maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe']})
-  const body=String(run.stdout??'').trim(),verdict=verdictFromOutput(body)
+  const rawBody=String(run.stdout??'').trim(),verdict=verdictFromOutput(rawBody)
   if(run.error||run.status!==0||!verdict)throw new Error(`review wrapper did not produce a recordable terminal verdict (exit ${run.status??'unknown'})`)
+  const body=`GOVERNED REVIEW FINDINGS — NON-AUTHORIZING UNLESS THE MATCHING CREATE-ONLY VERDICT ARTIFACT EXISTS\n\n${rawBody}`
   const posted=deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
   if(posted.error||posted.status!==0)throw new Error('review findings could not be posted durably; no verdict was recorded')
   let comment
   try{comment=JSON.parse(posted.stdout)}catch{throw new Error('durable findings response was unreadable; no verdict was recorded')}
-  const artifact=deps.record({...options,verdict,findingsRef:comment.html_url,replacementSequence:options.replacementSequence??null})
+  let artifact
+  try{artifact=deps.record({...options,verdict,findingsRef:comment.html_url,replacementSequence:options.replacementSequence??null})}
+  catch(error){
+    deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body:`REVIEW RECORDING FAILED — the preceding findings comment is non-authorizing and no verdict artifact was recorded. Reason: ${error.message}`}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
+    throw error
+  }
   return {artifact,body}
 }
 export function main(argv=process.argv.slice(2)){

@@ -1465,7 +1465,16 @@ export function recordReviewVerdict(options,io=githubIo){
     return validated
   }
   const sha=io.makeReviewVerdictCommit(formatVerdictMessage(record),assignmentSha)
-  if(!io.createRef(ref,sha)||io.readRef(ref)!==sha)throw new LaneError('create-only verdict ref could not be proved; do not transcribe or retry with a different verdict')
+  try{if(!io.createRef(ref,sha))throw new Error('create returned false')}catch(error){
+    const winner=io.readRef(ref)
+    if(!winner)throw new LaneError('create-only verdict ref failed and no winner exists; do not retry blindly')
+    const winnerRecord=parseVerdictCommit(io.getCommit(winner))
+    const winnerBody=io.readFindings(winnerRecord.findings_ref)
+    const validated=validateVerdictArtifact({ref,sha:winner,commit:io.getCommit(winner),findingsBody:winnerBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
+    if(validated.verdict!==verdict)throw new LaneError('a contradictory create-only verdict won the race; this tuple is permanently refused')
+    return validated
+  }
+  if(io.readRef(ref)!==sha)throw new LaneError('create-only verdict readback disagrees with the created object; this tuple is permanently refused')
   return validateVerdictArtifact({ref,sha,commit:io.getCommit(sha),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
 }
 

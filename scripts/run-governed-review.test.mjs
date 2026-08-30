@@ -9,6 +9,15 @@ test('adapter with real process payload shapes posts findings and records before
   const result=runGovernedReview(options,{spawn,resolve:(name)=>name,preflight:()=>order.push('preflight'),record:(row)=>{order.push('record');assert.equal(row.verdict,'APPROVE');return{ref:'refs/db-review-verdicts/x',sha:'b'.repeat(40)}}})
   assert.deepEqual(order,['preflight','ai-glm','gh','record'])
   assert.match(result.body,/Coverage/)
+  assert.match(result.body,/NON-AUTHORIZING UNLESS/)
+})
+
+test('recording failure leaves an explicit durable non-authorizing notice',()=>{
+  const posts=[]
+  const spawn=(command,args,options)=>{if(command!=='gh')return{status:0,stdout:`VERDICT: APPROVE ${options.headSha??''}`};posts.push(JSON.parse(options.input).body);return{status:0,stdout:JSON.stringify({html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-123'})}}
+  assert.throws(()=>runGovernedReview(options,{spawn,resolve:(name)=>name,preflight:()=>{},record:()=>{throw new Error('lease changed')}}),/lease changed/)
+  assert.match(posts[0],/NON-AUTHORIZING UNLESS/)
+  assert.match(posts[1],/REVIEW RECORDING FAILED/)
 })
 
 test('honest review output without a verdict artifact path is refused',()=>{
