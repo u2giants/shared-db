@@ -79,27 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          # These contracts require licensed artifacts that now live in the
-          # private licensor-source-data repository. They remain runnable in an
-          # authorized checkout, but a public CI runner must not receive them.
-          PRIVATE_ARTIFACT_TESTS=(
-            tools/coldlion-cycle-state-paging.test.mjs
-            tools/coldlion-licensor-property-phase3.test.mjs
-            tools/evaluate-coldlion-licensor-property-cutover-readiness.test.mjs
-            tools/generate-style-guide-property-mapping.test.mjs
-            tools/round2-licensing-answers.test.mjs
-            tools/round3-licensing-answers.test.mjs
-            tools/run-coldlion-licensor-property-phase4.test.mjs
-          )
-          ALL_FILES=(tools/*.test.mjs)
-          FILES=()
-          for file in "${ALL_FILES[@]}"; do
-            private=false
-            for excluded in "${PRIVATE_ARTIFACT_TESTS[@]}"; do
-              [ "$file" = "$excluded" ] && private=true && break
-            done
-            $private || FILES+=("$file")
-          done
+          FILES=(tools/*.test.mjs)
           if [ "${#FILES[@]}" -eq 0 ]; then
             echo "::error::No tools/*.test.mjs files found — the glob or the checkout is wrong." >&2
             exit 1
