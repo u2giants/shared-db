@@ -97,12 +97,12 @@ begin
      set external_id = 'WW', updated_at = now()
    where id = c_wwe_legacy and external_id = 'WWE';
 
-  -- Straggler denormalised codes that the 2026-07-23 cutover missed.
-  -- licensor_name = 'WWE' is the discriminator that proves these are genuinely WWE
-  -- (their SKUs contain 'WW', not 'WWE' -- see AA036WWSU01, CSW1TWWSU01).
-  update public.assets
-     set licensor_code = 'WW'
-   where licensor_code = 'WWE' and licensor_name = 'WWE';
+  -- NOTE: this migration deliberately does NOT write public.assets.
+  -- The 15 straggler rows with licensor_code = 'WWE' / licensor_name = 'WWE'
+  -- (SKUs AA036WWSU01 ... CSW1TWWSU01) are a denormalised cleanup rider, not the
+  -- owner ruling. public.assets is held by author claim #1656 (issue #1645), so
+  -- that rider is deferred to a follow-up rather than contending for the object.
+  -- The ruling -- "change DS to DY at its source" -- is fully satisfied without it.
 
   -- ---------- postconditions ----------
   select external_id into v_code from public.licensors where id = c_disney_legacy;
@@ -134,12 +134,8 @@ begin
     raise exception 'abort: dam_character_catalog row count changed from % to %', v_before, v_after;
   end if;
 
-  select count(*) into v_n from public.assets where licensor_code = 'WWE';
-  if v_n <> 0 then
-    raise exception 'abort: % assets still carry licensor_code WWE', v_n;
-  end if;
-
   -- The SKU-artifact rows must be exactly as numerous as before: not zero, unchanged.
+  -- public.assets is read here only, never written (see the note above).
   select count(*) into v_ds_after from public.assets where licensor_code = 'DS';
   if v_ds_after <> v_ds_before then
     raise exception
