@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refuse a pass-2 migration that can overwrite a later routine definition."""
+"""Find later migrations that must be replayed after a pass-2 migration."""
 
 from __future__ import annotations
 
@@ -46,18 +46,15 @@ def main() -> int:
         return 0
 
     print(
-        f"PASS-2 SUPERSESSION REFUSAL: {args.migration.name} applied after later "
-        "migrations and redeclares routines they also define:",
+        f"PASS-2 ORDER REPAIR: {args.migration.name} redeclares routines also "
+        "defined by later migrations:",
         file=sys.stderr,
     )
     for routine, files in collisions.items():
         print(f"  {routine}: {', '.join(files)}", file=sys.stderr)
-    print(
-        "The database now holds an older definition. Pass 2 must not continue to "
-        "contract tests or report green.",
-        file=sys.stderr,
-    )
-    return 2
+    for filename in sorted({name for names in collisions.values() for name in names}):
+        print(filename)
+    return 0
 
 
 if __name__ == "__main__":

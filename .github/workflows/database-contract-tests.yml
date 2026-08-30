@@ -382,13 +382,24 @@ jobs:
             if psql -v ON_ERROR_STOP=1 --no-psqlrc --single-transaction -f "$m" \
                  > "$RUNNER_TEMP/migration-logs-pass2/$base.log" 2>&1; then
               # Pass 2 runs after every pass-1 success, so an older migration can silently
-              # replace a routine installed by a later migration. Refuse that state before
-              # contract tests can judge (and potentially green-light) superseded code.
-              if ! python scripts/check_pass2_routine_supersession.py "$m" \
-                   --migrations-dir supabase/migrations; then
-                echo "::error::pass 2 changed a routine superseded by a later migration: $base" >&2
+              # replace a routine installed by a later migration. Re-run only the later
+              # migrations that declare the same routine, in filename order. They already
+              # succeeded in pass 1; a failure here is an ordering repair refusal.
+              if ! LATER=$(python scripts/check_pass2_routine_supersession.py "$m" \
+                   --migrations-dir supabase/migrations); then
+                echo "::error::could not calculate pass-2 ordering repair for $base" >&2
                 exit 2
               fi
+              while read -r later; do
+                [ -n "$later" ] || continue
+                echo "Re-applying $later after $base to preserve migration order."
+                if ! psql -v ON_ERROR_STOP=1 --no-psqlrc --single-transaction \
+                     -f "supabase/migrations/$later" \
+                     > "$RUNNER_TEMP/migration-logs-pass2/${base}__ORDER_REPAIR__${later}.log" 2>&1; then
+                  echo "::error::pass-2 ordering repair failed: $later after $base" >&2
+                  exit 2
+                fi
+              done <<< "$LATER"
               OK=$((OK+1))
               psql -q --no-psqlrc -c \
                 "insert into supabase_migrations.schema_migrations (version, name)
