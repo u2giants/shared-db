@@ -365,7 +365,24 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    `<issue>-<pr>-<headSha>`, so re-read the head *and* confirm the PR number it
    belongs to against that ref -- one `gh pr view <n> --json headRefOid` per PR,
    or all open heads in a single call, which is what caught this. Read every
-   identifier the action depends on, not only the one that moves.
+   identifier the action depends on, not only the one that moves. Note that the
+   artifacts were correctly named the whole time: every ref on that branch read
+   `1812-1813-`. The binding was unread, not undetectable, which is why the
+   remedy is mechanical rather than a caution to be careful.
+
+   This is the sharpest entry in this section, and it is worth being precise
+   about why. Every other failure recorded here is a rule not followed. This is
+   a rule followed perfectly, passing cleanly, on the wrong object, for hours.
+   The currency check did not confirm a true fact about the wrong thing by
+   accident -- it confirmed the only fact it was ever capable of confirming. It
+   has no access to identity, so it cannot fail at identity, and therefore
+   cannot warn about it. **A rule not followed leaves a gap someone may notice;
+   a rule followed perfectly on the wrong object produces a clean record that
+   actively argues against looking further.** Hours of passing checks are more
+   convincing than no checks at all. So a procedure whose outcome the author
+   does not control is necessary and not sufficient: it constrains only the
+   value it actually reads, and says nothing whatever about the values it
+   assumes.
 
    After review approval, green checks, preview proof, and guarded merge, the
    production workflow runs `scripts/production_business_risk_gate.py`. It
