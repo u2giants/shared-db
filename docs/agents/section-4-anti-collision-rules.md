@@ -4,7 +4,7 @@
 >
 > **Active reviewer API-budget plan:** [`../../plan_reviewer_assignment_api_budget.md`](../../plan_reviewer_assignment_api_budget.md), issue #1767. Read its STATUS table before changing reviewer assignment. It replaces historical availability scans with at-most-six active reviewer leases, strict pre-lock quota/request checks, cached PR/verdict reads, and exhaustive mutex-cleanup tests. This is repository maintenance outside the structure/schema orchestrator.
 
-Reviewer availability is the bounded `refs/db-review-active/<reviewer>` index. Permanent assignment, replacement, and failure refs remain immutable audit evidence and are never scanned to decide availability. Each command reads the active prefix once, caches repeated evidence, refuses before creating an owner commit or mutex when GitHub quota is unreadable or below reserve, and stops before request 20. Quota reset errors use `America/New_York`.
+Reviewer availability is the bounded `refs/db-review-active/<reviewer>` index. Permanent assignment, replacement, and failure refs remain immutable audit evidence and are never scanned to decide availability. Each command reads the active prefix once, caches repeated evidence, refuses before creating an owner commit or mutex when GitHub quota is unreadable or below reserve, and stops before the enforced ceiling (`REVIEW_OPERATION_REQUEST_LIMIT` — **22 since 2026-08-29**, so request 23 is refused; 19 before that, per issue #1812 / PR #1813, which raised it to fit `--review-slot 2`'s three extra pre-mutex calls). Read the constant, never a number copied from a document. Quota reset errors use `America/New_York`.
 
 An exact-head verdict, terminal failure/replacement, moved head, merged PR, or closed PR makes a lease stale. Stale leases are deleted only while the global mutex is owned and the fixed ref still matches its expected SHA. If release cannot be proved, preserve the named ref/SHA and use the guarded `recover-author-mutex.yml` procedure.
 
@@ -302,6 +302,21 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    production lane waiting on a reviewer process that cannot authenticate or
    write its own state. A real `REVISE` verdict is not a transport failure and
    must never be replaced.
+
+   **`--replace-failed-reviewer` is slot-aware, and the slot must be named.** It
+   defaults to `--review-slot 1`. Pass `--review-slot 2` to replace a failed
+   second reviewer; the request is then resolved only against slot 2's own
+   assignment and replacement refs, and the replacement is chosen to stay
+   independent of whoever currently holds slot 1. Naming the wrong slot is
+   refused with `durable reviewer assignment or replacement does not match the
+   replacement request` — that refusal is a correct fail-closed, not a bug, and
+   is never to be worked around by loosening the match. Before issue #1832 the
+   flag was silently ignored, so a slot-2 failure had no working replacement
+   route at all and a slot-2 request could only ever be answered from slot 1's
+   records. A slot-2 replacement still requires the issue open, the PR still at
+   the exact head, and no verdict yet recorded for that head — including slot 1's
+   own verdict. If slot 1 has already reported at that head, slot 2 cannot be
+   replaced there; assign against the current head instead.
 
    Append objective reviewer evidence through an `ai-devops` PR to
    `models_comparison_grok_kim_glm.md`: issue/PR, requested and proven model,
