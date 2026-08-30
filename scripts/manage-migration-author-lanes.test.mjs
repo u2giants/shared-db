@@ -629,6 +629,49 @@ test('concurrent orchestrator cannot advance reviewer cursor without the mutex',
   assert.equal(io.refs.get(REVIEW_CURSOR_REF),undefined)
 })
 
+// AGENTS.md section 4 rule 2 is merge-first, so a migration that has reached main and
+// only THEN owes an exact-head approval is an expected state (#1817). These four cases
+// pin the merged-PR eligibility rule and, just as importantly, its limits. They drive
+// the atomic path because that is the one production `githubIo` takes.
+const MERGED_HEAD='8d3c31accd5b21ea669e65f5ae53f5f95cc57337'
+function mergedPrIo({merged=true,mergeSha='b'.repeat(40),inMain=true,evidence=[]}={}){
+  const io=reviewIo()
+  const pr={number:1809,state:'closed',merged,merged_at:merged?'2026-08-28T00:00:00Z':null,merge_commit_sha:mergeSha,head:{sha:MERGED_HEAD,ref:'codex/x'}}
+  io.getPr=()=>pr
+  io.mergeCommitInMain=(sha)=>inMain&&sha===mergeSha
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr,evidence}]))
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  return io
+}
+const mergedRequest={issue:1769,pr:1809,headSha:MERGED_HEAD}
+
+test('a merged pull request can receive a review assignment pinned to its merged head',()=>{
+  const io=mergedPrIo()
+  const result=assignNextReviewer(mergedRequest,io)
+  assert.ok(result.reviewer)
+  // The assignment ref shape is unchanged by the merged route, so the merge-lock gate
+  // parser reads a merged-PR assignment exactly as it reads an open-PR one.
+  const written=[...io.refs.keys()].filter((ref)=>ref.startsWith(REVIEW_ASSIGNMENT_REF_PREFIX))
+  assert.deepEqual(written,[`${REVIEW_ASSIGNMENT_REF_PREFIX}/1769-1809-${MERGED_HEAD}`])
+})
+
+test('a closed but unmerged pull request is still refused a reviewer',()=>{
+  assert.throws(()=>assignNextReviewer(mergedRequest,mergedPrIo({merged:false,mergeSha:''})),/changed after mutex acquisition/)
+})
+
+test('a merged pull request whose merge commit is absent from main is refused',()=>{
+  assert.throws(()=>assignNextReviewer(mergedRequest,mergedPrIo({inMain:false})),/changed after mutex acquisition/)
+})
+
+test('an existing verdict at the merged head still refuses a new assignment',()=>{
+  // A refusal tied to a head blocks that head permanently; the merged route inherits
+  // that guard unchanged and must never become a way to void one.
+  const io=mergedPrIo({evidence:[{state:'CHANGES_REQUESTED',commit_id:MERGED_HEAD,body:'REVISE'}]})
+  assert.throws(()=>assignNextReviewer(mergedRequest,io),/changed after mutex acquisition/)
+})
+
 const failedReview={issue:9,pr:109,headSha:'abcdef9000000000000000000000000000000000'}
 function failedReviewIo(){const io=reviewIo();io.getPr=()=>({state:'open',head:{sha:failedReview.headSha}});assignNextReviewer(failedReview,io);return io}
 const replacementRequest={...failedReview,failedSequence:1,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true}
