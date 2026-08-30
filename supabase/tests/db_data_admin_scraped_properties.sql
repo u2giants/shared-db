@@ -318,6 +318,17 @@ begin
 
   if not exists (
     select 1 from jsonb_array_elements(v_rows) r
+    where r ->> 'source_table' = 'plm.dcp_property'
+      and r ->> 'source_property_id' = v_search || '/journey-to-the-moon''s-edge'
+      and (r ->> 'asset_count')::integer = 0
+      and (r ->> 'style_guide_count')::integer = 0
+      and r -> 'style_guide_names' = '[]'::jsonb
+  ) then
+    raise exception 'page-bounded DCP context did not preserve the empty graph contract';
+  end if;
+
+  if not exists (
+    select 1 from jsonb_array_elements(v_rows) r
     where r ->> 'presentation_licensor_name' = 'DCP Creative - unresolved authority'
       and r ->> 'source_table' = 'plm.dcp_property'
   ) or not exists (

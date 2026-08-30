@@ -741,6 +741,21 @@ SCRAPED_PROPERTIES_SET_BASED_AUTHORITY_CONTRACT += (
     " and position('ordered as materialized' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
     " and position('enriched as materialized' in %s)>0" % _SCRAPED_PROPERTIES_DEF
 )
+SCRAPED_PROPERTIES_BOUNDED_SOURCE_CONTEXT_CONTRACT = _shape_contract(
+    routines=('api.db_data_admin_scraped_properties(text,text,integer)',),
+)
+SCRAPED_PROPERTIES_BOUNDED_SOURCE_CONTEXT_CONTRACT += (
+    " and position('source_rows as not materialized' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('page_dcp_context_rows as materialized' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('page_dcp_context as materialized' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('context_asset_count' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('context_style_guide_count' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('context_style_guide_names' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('select count(distinct o.dcp_asset_id)' in %s)=0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('select count(distinct o.lucasfilm_dcp_asset_id)' in %s)=0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('ordered as materialized' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('enriched as materialized' in %s)>0" % _SCRAPED_PROPERTIES_DEF
+)
 POPDAM_FORWARD_RECOVERY_CONTRACT = _shape_contract(
     relations=('public.style_group_tags',),
     indexes=tuple('public.'+value for value in "asset_tags_active_asset_idx dam_search_embedding_claim_idx style_group_tags_active_group_idx".split()),
@@ -771,6 +786,7 @@ CATALOG_CONTRACTS = {
     "creative_submission_contract_status_v1": CREATIVE_SUBMISSION_CONTRACT_STATUS_CONTRACT,
     "scraped_properties_bounded_enrichment_v1": SCRAPED_PROPERTIES_BOUNDED_ENRICHMENT_CONTRACT,
     "scraped_properties_set_based_authority_v1": SCRAPED_PROPERTIES_SET_BASED_AUTHORITY_CONTRACT,
+    "scraped_properties_bounded_source_context_v1": SCRAPED_PROPERTIES_BOUNDED_SOURCE_CONTEXT_CONTRACT,
     "dflow_sequence_ceilings_v1": DFLOW_SEQUENCE_CEILINGS_CONTRACT,
     "popdam_forward_recovery_v1": POPDAM_FORWARD_RECOVERY_CONTRACT,
     "coco_owner_ruling_v1": """

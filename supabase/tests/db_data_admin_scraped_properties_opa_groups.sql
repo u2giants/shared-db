@@ -1,4 +1,4 @@
--- Rollback-safe contract for issue #1589. The 1,445 generated rows reproduce
+-- Rollback-safe contracts for issues #1589 and #1936. The 4,000 generated rows reproduce
 -- only the aggregate studio-resolution shape; no licensed OPA row is embedded.
 
 begin;
@@ -57,7 +57,7 @@ begin
 
   insert into plm.opa_property (licensed_property_id, property_name)
   select -800000000000 - g, v_search || '-OPA-' || lpad(g::text, 4, '0')
-  from generate_series(1, 1445) g;
+  from generate_series(1, 4000) g;
 
   insert into plm.opa_property_studio_resolution (
     licensed_property_id, studio_code, resolution_status, provenance_type,
@@ -85,7 +85,7 @@ begin
     case when g <= 535 then 'synthetic-contract' else null end,
     null,
     'issue-1589-contract'
-  from generate_series(1, 1445) g;
+  from generate_series(1, 4000) g;
 
   -- Populate every valid direct-route branch across a large OPA subset. This
   -- is the stage the production-sized source set previously rescanned per row.
@@ -101,7 +101,7 @@ begin
     200, 'home-standard', 462, 50, v_search || '-scope-' || g,
     clock_timestamp(), 'approved', 'synthetic-populated-scope', repeat('9',64),
     clock_timestamp(), 'contract'
-  from generate_series(1, 1445) g
+  from generate_series(1, 4000) g
   where g <= 244 or g between 450 and 451;
 
   -- Populate DCP exact resolutions, members, and their OPA scopes at the same
@@ -111,12 +111,12 @@ begin
     resolution_id uuid not null
   ) on commit drop;
   insert into issue1936_dcp_resolution_fixture
-  select g, gen_random_uuid() from generate_series(1, 1445) g;
+  select g, gen_random_uuid() from generate_series(1, 4000) g;
 
   insert into plm.dcp_property (source_system, source_id, display_name)
   select 'disney_dcpvault', v_search || '/DCP-' || lpad(g::text, 4, '0'),
     v_search || ' DCP ' || lpad(g::text, 4, '0')
-  from generate_series(1, 1445) g;
+  from generate_series(1, 4000) g;
 
   insert into plm.dcp_opa_property_resolution (
     resolution_id, source_system, source_table, source_property_id,
@@ -159,9 +159,9 @@ begin
     ('lucasfilm_dcpvault', v_search || '/star-wars-dcp', 'star-wars', 'Star Wars',
      'supported_core_ownership', 'synthetic', 'synthetic', 'synthetic', repeat('c',64), now(), 1, 'approved', now(), 'contract', 'synthetic decision');
 
-  -- The public gateway cancels at ten seconds. Keep a stricter database-side
-  -- ceiling over the complete populated pagination walk.
-  perform set_config('statement_timeout', '9000', true);
+  -- The public gateway cancels at ten seconds. Keep more than 50% headroom on
+  -- every populated first-page and cursor-page call.
+  perform set_config('statement_timeout', '4000', true);
   v_cursor := null;
   loop
     select api.db_data_admin_scraped_properties(v_search, v_cursor, 1000) into v_page;
@@ -169,7 +169,7 @@ begin
     v_cursor := v_page ->> 'next_cursor';
     v_pages := v_pages + 1;
     exit when v_cursor is null;
-    if v_pages > 3 then
+    if v_pages > 9 then
       raise exception 'OPA pagination did not terminate';
     end if;
   end loop;
@@ -178,14 +178,14 @@ begin
   select count(*) into v_count
   from jsonb_array_elements(v_rows) r
   where r ->> 'source_table' = 'plm.opa_property';
-  if v_count <> 1445 then
-    raise exception 'expected exactly 1,445 OPA rows, got %', v_count;
+  if v_count <> 4000 then
+    raise exception 'expected exactly 4,000 OPA rows, got %', v_count;
   end if;
 
   select count(distinct r ->> 'source_property_id') into v_count
   from jsonb_array_elements(v_rows) r
   where r ->> 'source_table' = 'plm.opa_property';
-  if v_count <> 1445 then
+  if v_count <> 4000 then
     raise exception 'OPA source identities were omitted or repeated: % distinct', v_count;
   end if;
 
@@ -206,7 +206,7 @@ begin
            and r ->> 'presentation_licensor_name' = 'OPA - Submissions (scope conflict)') <> 20
      or (select count(*) from jsonb_array_elements(v_rows) r
          where r ->> 'source_table' = 'plm.opa_property'
-           and r ->> 'presentation_licensor_name' = 'OPA - Submissions (unresolved)') <> 910 then
+           and r ->> 'presentation_licensor_name' = 'OPA - Submissions (unresolved)') <> 3465 then
     raise exception 'the six OPA presentation outcomes changed';
   end if;
 
