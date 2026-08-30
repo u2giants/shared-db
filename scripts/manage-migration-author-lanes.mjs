@@ -43,7 +43,7 @@ export const REVIEW_REPLACEMENT_REF_PREFIX = 'refs/db-review-replacements'
 export const REVIEW_ASSIGNMENT_REF_PREFIX = 'refs/db-review-assignments'
 export const REVIEW_ACTIVE_REF_PREFIX = 'refs/db-review-active'
 export const REVIEW_ACTIVE_CUTOVER_REF = 'refs/db-coordination/reviewer-index-cutover'
-export const REVIEW_OPERATION_REQUEST_LIMIT = 22 // slot 2 = 9 pre-mutex + 13 mutex reserve; slot 1 = 6 + 13 = 19. Full derivation and the replacement-ref caveat: docs/verification/reviewer-assignment-api-budget-2026-08-28.md (#1812)
+export const REVIEW_OPERATION_REQUEST_LIMIT = 22, REVIEW_MUTEX_RELEASE_RESERVE = 13 // slot 2 = 9 pre-mutex + the reserve; slot 1 = 6 + reserve = 19. The reserve is what guarantees an acquired mutex can still be released, so lowering it strands the mutex rather than failing closed. Derivation and the replacement-ref caveat: docs/verification/reviewer-assignment-api-budget-2026-08-28.md (#1812)
 export const REVIEW_QUOTA_RESERVE = 100
 export const REVIEWERS = Object.freeze([
   { name:'grok-4.6', wrapper:'ai-grok-review' }, { name:'glm-5.3', wrapper:'ai-glm' },
@@ -1658,7 +1658,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
   const preflightBusy=findBusyReviewers(io)
   if(!preflightBusy)throw new LaneError('active reviewer leases are unreadable; reviewer assignment refused before mutex acquisition')
   const ownerSha=io.makeOwnerCommit(`db-coordination reviewer-assignment-lock issue=${request.issue} pr=${request.pr} head=${request.headSha}${request.slot!==1?` slot=${request.slot}`:''}`)
-  requireReviewWireCapacity(13)
+  requireReviewWireCapacity(REVIEW_MUTEX_RELEASE_RESERVE)
   acquireReviewMutex(ownerSha,io)
   try{
     // Slot 1 keeps the original, unsuffixed ref namespace so every existing
