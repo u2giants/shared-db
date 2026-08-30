@@ -3283,6 +3283,43 @@ CATEGORY_ORDERLIST_BRIDGE_COVERING_INDEX = """
 )
 CATALOG_CONTRACTS["orderlist_bridge_covering_index_v1"] = CATEGORY_ORDERLIST_BRIDGE_COVERING_INDEX
 
+# Durable catalog outcome of the single dynamic-execution marker in migration
+# 20260830195655 (`execute format('comment on column ...')`, issue #505).
+#
+# WHY A COMMENT CONTRACT AND NOT A ROW COUNT. That marker's only effect is this
+# column comment. The migration also updates two `public.licensors` rows, and it
+# is tempting to cite those row counts as the marker's coverage -- but they are
+# produced by different statements. Citing them would be a rationale claiming
+# coverage it does not have: the row checks would pass with the comment never
+# written. The sidecar's row-count checks cover the UPDATEs; this contract covers
+# the marker. Each claim is answerable by the thing it names.
+#
+# The expected text is compared byte-exact against the literal the migration
+# declares once as `c_comment`. Editing the migration changes its SHA-256, which
+# invalidates the hash-bound sidecar before this contract is ever consulted, so
+# the two cannot drift into silent disagreement.
+LICENSORS_EXTERNAL_ID_COMMENT = (
+    'Canonical licensor code, aligned to core.licensor.code since 2026-08-07 '
+    '(owner ruling: change DS to DY at its source). Legacy values DS/WWE were '
+    'normalised to DY/WW by issue #505. public.dam_character_catalog still '
+    'carries a defensive DS/WWE remap; it is now a no-op and is deliberately '
+    'retained as a safety net.'
+)
+CATEGORY_LICENSORS_EXTERNAL_ID_CANONICAL_COMMENT = """
+  (select count(*) = 1
+     from pg_description d
+     join pg_class c on c.oid = d.objoid
+     join pg_namespace n on n.oid = c.relnamespace
+     join pg_attribute a on a.attrelid = c.oid and a.attnum = d.objsubid
+    where n.nspname = 'public'
+      and c.relname = 'licensors'
+      and a.attname = 'external_id'
+      and d.description = '""" + LICENSORS_EXTERNAL_ID_COMMENT.replace("'", "''") + """')
+"""
+CATALOG_CONTRACTS["licensors_external_id_canonical_comment_v1"] = (
+    CATEGORY_LICENSORS_EXTERNAL_ID_CANONICAL_COMMENT
+)
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
