@@ -753,6 +753,8 @@ SCRAPED_PROPERTIES_BOUNDED_SOURCE_CONTEXT_CONTRACT += (
     " and position('context_style_guide_names' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
     " and position('select count(distinct o.dcp_asset_id)' in %s)=0" % _SCRAPED_PROPERTIES_DEF +
     " and position('select count(distinct o.lucasfilm_dcp_asset_id)' in %s)=0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('select count(distinct a.style_guide_id)' in %s)=0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('select distinct g.folder_name' in %s)=0" % _SCRAPED_PROPERTIES_DEF +
     " and position('ordered as materialized' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
     " and position('enriched as materialized' in %s)>0" % _SCRAPED_PROPERTIES_DEF
 )
