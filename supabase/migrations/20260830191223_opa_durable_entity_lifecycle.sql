@@ -134,6 +134,18 @@ begin
     ) then
       raise exception 'verify: %.% lifecycle index is missing', 'plm', v_table;
     end if;
+
+    if not exists (
+      select 1
+      from pg_catalog.pg_trigger t
+      where t.tgrelid = format('plm.%I', v_table)::regclass
+        and t.tgname = 'trg_' || v_table || '_lifecycle'
+        and not t.tgisinternal
+        and t.tgenabled <> 'D'
+        and t.tgfoid = 'plm.enforce_opa_entity_lifecycle()'::regprocedure
+    ) then
+      raise exception 'verify: %.% lifecycle trigger is missing, disabled, or miswired', 'plm', v_table;
+    end if;
   end loop;
 
   if pg_catalog.pg_get_functiondef('plm.enforce_opa_entity_lifecycle()'::regprocedure)
