@@ -36,7 +36,18 @@ const tiedToHead = (row, headSha) => row.commit_id === headSha || String(row.bod
 // word must lead its line (markdown emphasis and quoting allowed), which is how the
 // reviewer wrappers emit it and is not how anyone writes a status update. The rule is
 // applied symmetrically: prose cannot grant an approval either.
-const verdictLine = (body, pattern) => String(body ?? '').split(/\r?\n/).some((line) => pattern.test(line.replace(/^[\s>*_#-]+/, '')))
+// The reviewer wrappers do not emit a bare verdict word: they are instructed to
+// end with `VERDICT: APPROVE` / `VERDICT: REVISE`, and the reviews in .ai/reviews
+// show it in the wild as `VERDICT: APPROVE`, `## VERDICT: APPROVE` and
+// `VERDICT: APPROVED`. Anchoring on the bare word alone would have rejected every
+// genuine approval this repo produces -- the inverse of the defect this file fixes,
+// and the more dangerous inverse: a self-locked head fails closed loudly and gets
+// investigated, while a gate that refuses all valid input looks like reviewers not
+// returning verdicts, so the wrappers get blamed and re-run instead of the gate.
+// The optional label is stripped, never the verdict itself: `VERDICT: DO NOT
+// APPROVE` still does not open with APPROVE and is still not an approval.
+const stripVerdictLabel = (line) => line.replace(/^[\s>*_#-]+/, '').replace(/^VERDICT\s*:\s*/i, '')
+const verdictLine = (body, pattern) => String(body ?? '').split(/\r?\n/).some((line) => pattern.test(stripVerdictLabel(line)))
 const APPROVE = /^APPROVE(?:D)?\b/i
 // REJECT is a real verdict word in this repo's reviewer wrappers alongside REVISE
 // and GitHub's own CHANGES_REQUESTED. Omitting any of them would let a refusal at

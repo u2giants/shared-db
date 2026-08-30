@@ -167,3 +167,27 @@ test('the adapter carries a refusal and a stale-head assignment through unflatte
 test('the adapter refuses rather than guesses when the PR number is absent', () => {
   assert.throws(() => gatherApprovalInput({}, githubLike({ refs: [] })), /PR number is unavailable/)
 })
+
+// The reviewer wrappers emit `VERDICT: APPROVE`, not a bare `APPROVE` -- the format
+// is in this repo's own review archive and in the lanes file's own comment. Anchoring
+// on the bare word alone rejected every genuine approval, which is the inverse of the
+// defect this file exists to fix and fails closed on VALID input, so it presents as
+// reviewers not returning verdicts rather than as a broken gate.
+test('the wrapper format VERDICT: APPROVE is recognised, and its refusal form still refuses', () => {
+  const pinned = { pr: 1809, headSha: NEW, assignments: [{ issue: 1769, pr: 1809, headSha: NEW }] }
+  for (const body of [`VERDICT: APPROVE ${NEW}`, `## VERDICT: APPROVE\n\nhead ${NEW}`, `Reviewed ${NEW}.\n\nverdict: approved`]) {
+    assert.equal(evaluateExactHeadApproval({ ...pinned, evidence: [{ body }] }).approved, true, body)
+  }
+  assert.throws(() => evaluateExactHeadApproval({ ...pinned, evidence: [{ body: `VERDICT: REVISE ${NEW}` }] }), /unanswered reviewer refusal/)
+})
+
+// Stripping the label must not strip the verdict. `DO NOT APPROVE` is a refusal to
+// approve, and reading it as an approval is the worst single failure this gate could
+// have: it authorizes a merge the reviewer explicitly declined to authorize.
+test('a labelled non-approval is not turned into an approval by label stripping', () => {
+  assert.throws(() => evaluateExactHeadApproval({
+    pr: 1809, headSha: NEW,
+    assignments: [{ issue: 1769, pr: 1809, headSha: NEW }],
+    evidence: [{ body: `VERDICT: DO NOT APPROVE ${NEW}` }],
+  }), /has no APPROVE tied to it/)
+})
