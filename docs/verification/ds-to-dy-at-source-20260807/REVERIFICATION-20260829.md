@@ -112,6 +112,15 @@ proving what it says.
 All 15 `WWE` assets still carry `licensor_name = 'WWE'` and SKUs containing `WW`, not
 `WWE` (`AA036WWSU01`, `AAA36WWSU01`, `CSW1TWWSU01`, …). They are genuine stragglers.
 
+**Scope change against the plan: item 3 is DEFERRED, not delivered.** The plan's §5.1
+lists three in-scope statements; the third is the `public.assets` `WWE` → `WW` rider
+covering exactly these 15 rows. This migration deliberately drops that rider (see the
+note at migration lines 133–139): `public.assets` rows are owned by author claim #1656
+under issue #1645, which this lane does not hold. So after this migration applies, the
+two `public.licensors` rows are canonical and the 15 `public.assets` rows are still
+`WWE`. That is a known, intended, temporary inconsistency — not an oversight, and not
+something a reader should infer from the plan's "3 statements" wording.
+
 ## 5. Blast radius as enumerated today — and the gaps in it
 
 **Enumerated and cleared:**
@@ -127,7 +136,7 @@ All 15 `WWE` assets still carry `licensor_name = 'WWE'` and SKUs containing `WW`
 | `popdam3` | read; no reader and no writer of `external_id` (§1) |
 | `poppim-web` | read; its `LICENSOR_DISPLAY` map is keyed by lowercase **name** (`wwe`, `disney`), never by code — unaffected |
 | `popcrm-web`, `oracle`, the six `designflow-*` repos | no licensor-code hard-code in app source (plan §2.1, unchanged) |
-| Migration `20260828232207_wwe_licensor_capture_tables.sql` (new since the plan) | contains no reference to `'WWE'`, `'WW'`, `public.licensors`, `external_id`, or `core.licensor` — no overlap with this change |
+| Migration `20260828232207_wwe_licensor_capture_tables.sql` (new since the plan) | contains no quoted code literal `'WWE'`, `'WW'`, `'DS'` or `'DY'`, and no reference to the objects this change touches (`public.licensors`, `external_id`, `core.licensor`) — no overlap with this change. It *is* named for WWE and its comments and `plm.wwe_*` object names mention WWE throughout; that is why the claim is stated as literals-and-objects rather than as the word. |
 
 **Gaps I could not close — an unenumerated consumer is the risk here:**
 
