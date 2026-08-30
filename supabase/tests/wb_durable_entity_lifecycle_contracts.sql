@@ -35,14 +35,17 @@ select * from plm.sync_wb_normalized_target(
  '18810000-0000-4000-8000-000000000101','wb_franchise',
  '{"captured_at":"2026-08-28","rows":[{"source_namespace":"synthetic","source_id":"franchise-a","label":"A","identity_method":"source_id","source_url":"https://example.invalid"},{"source_namespace":"synthetic","source_id":"franchise-b","label":"B","identity_method":"source_id","source_url":"https://example.invalid"}]}'::jsonb,
  'mirror_only',1);
+reset role;
 update plm.wb_capture set status='complete',completed_at=now(),loader_report='{}'::jsonb
 where capture_id='18810000-0000-4000-8000-000000000101' and chunk_number=0;
 insert into plm.wb_capture(capture_id,chunk_number,target,status,captured_at,private_source_commit,snapshot_sha256,expected_row_count,captured_by,source_url,started_at)
 values ('18810000-0000-4000-8000-000000000102',0,'wb_franchise','validating','2026-08-29','synthetic',repeat('2',64),1,'contract','https://example.invalid',now());
+set local role service_role;
 select * from plm.sync_wb_normalized_target(
  '18810000-0000-4000-8000-000000000102','wb_franchise',
  '{"captured_at":"2026-08-29","rows":[{"source_namespace":"synthetic","source_id":"franchise-a","label":"A","identity_method":"source_id","source_url":"https://example.invalid"}]}'::jsonb,
  'mirror_only',1);
+reset role;
 update plm.wb_capture set status='complete',completed_at=now(),loader_report='{}'::jsonb
 where capture_id='18810000-0000-4000-8000-000000000102' and chunk_number=0;
 
@@ -61,10 +64,12 @@ $withdrawn$;
 insert into plm.wb_capture(capture_id,chunk_number,target,status,captured_at,private_source_commit,snapshot_sha256,expected_row_count,captured_by,source_url,started_at)
 values ('18810000-0000-4000-8000-000000000103',0,'wb_franchise','validating','2026-08-30','synthetic',repeat('3',64),2,'contract','https://example.invalid',now());
 
+set local role service_role;
 select * from plm.sync_wb_normalized_target(
  '18810000-0000-4000-8000-000000000103','wb_franchise',
  '{"captured_at":"2026-08-30","rows":[{"source_namespace":"synthetic","source_id":"franchise-a","label":"A","identity_method":"source_id","source_url":"https://example.invalid"},{"source_namespace":"synthetic","source_id":"franchise-b","label":"B","identity_method":"source_id","source_url":"https://example.invalid"}]}'::jsonb,
  'mirror_only',1);
+reset role;
 update plm.wb_capture set status='complete',completed_at=now(),loader_report='{}'::jsonb
 where capture_id='18810000-0000-4000-8000-000000000103' and chunk_number=0;
 
@@ -79,6 +84,7 @@ $unchanged_reactivation$;
 insert into plm.wb_capture(capture_id,chunk_number,target,status,captured_at,private_source_commit,snapshot_sha256,expected_row_count,captured_by,source_url,started_at)
 values ('18810000-0000-4000-8000-000000000104',0,'wb_franchise','validating','2026-08-30','synthetic',repeat('4',64),1,'contract','https://example.invalid',now());
 
+set local role service_role;
 select * from plm.sync_wb_normalized_target(
  '18810000-0000-4000-8000-000000000104','wb_franchise',
  '{"captured_at":"2026-08-30","rows":[{"source_namespace":"synthetic","source_id":"franchise-a","label":"A","identity_method":"source_id","source_url":"https://example.invalid"}]}'::jsonb,
