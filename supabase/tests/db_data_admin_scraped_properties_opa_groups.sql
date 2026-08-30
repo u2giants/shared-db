@@ -87,6 +87,57 @@ begin
     'issue-1589-contract'
   from generate_series(1, 1445) g;
 
+  -- Populate every valid direct-route branch across a large OPA subset. This
+  -- is the stage the production-sized source set previously rescanned per row.
+  insert into plm.opa_property_scope_membership (
+    licensed_property_id, region_code, branch_code, line_of_business_id,
+    product_type_code, template_id, workflow_id, capture_id,
+    source_captured_at, approval_status, evidence_reference, evidence_sha256,
+    approved_at, approved_by
+  )
+  select
+    -800000000000 - g, 'north-america',
+    case when g <= 244 then 'disney' else 'lucasfilm' end,
+    200, 'home-standard', 462, 50, v_search || '-scope-' || g,
+    clock_timestamp(), 'approved', 'synthetic-populated-scope', repeat('9',64),
+    clock_timestamp(), 'contract'
+  from generate_series(1, 1445) g
+  where g <= 244 or g between 450 and 451;
+
+  -- Populate DCP exact resolutions, members, and their OPA scopes at the same
+  -- scale. Temporary identities contain no licensed source values and roll back.
+  create temporary table issue1936_dcp_resolution_fixture (
+    ordinal integer primary key,
+    resolution_id uuid not null
+  ) on commit drop;
+  insert into issue1936_dcp_resolution_fixture
+  select g, gen_random_uuid() from generate_series(1, 1445) g;
+
+  insert into plm.dcp_property (source_system, source_id, display_name)
+  select 'disney_dcpvault', v_search || '/DCP-' || lpad(g::text, 4, '0'),
+    v_search || ' DCP ' || lpad(g::text, 4, '0')
+  from generate_series(1, 1445) g;
+
+  insert into plm.dcp_opa_property_resolution (
+    resolution_id, source_system, source_table, source_property_id,
+    decision_version, approval_status, evidence_reference, evidence_sha256,
+    decision_reason, contract_asserted_studio_code,
+    contract_evidence_reference, contract_evidence_sha256,
+    approved_at, approved_by
+  )
+  select f.resolution_id, 'disney_dcpvault', 'plm.dcp_property',
+    v_search || '/DCP-' || lpad(f.ordinal::text, 4, '0'), 1, 'approved',
+    'synthetic-exact-link', repeat('8',64), 'synthetic populated decision',
+    case when f.ordinal % 2 = 0 then 'disney' else 'lucasfilm' end,
+    'synthetic-contract', repeat('7',64), clock_timestamp(), 'contract'
+  from issue1936_dcp_resolution_fixture f;
+
+  insert into plm.dcp_opa_property_resolution_member (
+    resolution_id, licensed_property_id, member_ordinal
+  )
+  select f.resolution_id, -800000000000 - f.ordinal, 1
+  from issue1936_dcp_resolution_fixture f;
+
   -- These source-preserving DCP groups must remain distinct from the new OPA groups.
   insert into plm.dcp_property (source_system, source_id, display_name)
   values ('disney_dcpvault', v_search || '/disney-dcp', v_search || ' Disney DCP');
@@ -108,6 +159,9 @@ begin
     ('lucasfilm_dcpvault', v_search || '/star-wars-dcp', 'star-wars', 'Star Wars',
      'supported_core_ownership', 'synthetic', 'synthetic', 'synthetic', repeat('c',64), now(), 1, 'approved', now(), 'contract', 'synthetic decision');
 
+  -- The public gateway cancels at ten seconds. Keep a stricter database-side
+  -- ceiling over the complete populated pagination walk.
+  perform set_config('statement_timeout', '9000', true);
   v_cursor := null;
   loop
     select api.db_data_admin_scraped_properties(v_search, v_cursor, 1000) into v_page;
@@ -119,6 +173,7 @@ begin
       raise exception 'OPA pagination did not terminate';
     end if;
   end loop;
+  perform set_config('statement_timeout', '0', true);
 
   select count(*) into v_count
   from jsonb_array_elements(v_rows) r
