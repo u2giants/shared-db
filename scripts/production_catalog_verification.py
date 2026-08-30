@@ -577,6 +577,18 @@ STYLE_TRACKER_CHECKS=(
     ('public.style_tracker_audit_log','style_tracker_audit_log_event_type_check',"CHECK ((event_type = ANY (ARRAY['row_added'::text, 'cell_update'::text, 'value_resolution'::text])))"),
     ('public.style_tracker_user_views','style_tracker_user_views_source_sheet_check',"CHECK ((source_sheet = ANY (ARRAY['License.Style'::text, 'Generic.Style'::text])))"),
 )
+# The one normalizer for comparing a catalog-reconstructed definition against a
+# hand-authored expected definition. `pg_get_indexdef` and `pg_get_constraintdef`
+# REBUILD their output from the catalog rather than echoing what was typed, so
+# spacing, identifier quoting, and clause rendering are the server's choices. A
+# byte-exact literal comparison is a guess at another program's formatter, and a
+# guess that is wrong produces a contract that can never pass -- which surfaces at
+# production promotion, the single-lane gated step, rather than in review.
+# Every such comparison must use THIS constant, not a fresh equivalent, so there is
+# one place to be wrong instead of several.
+INDEXDEF_NORMALIZE = "regexp_replace(lower(replace(%s,'\"','')),'[[:space:]]+','','g')"
+
+
 def _style_tracker_exact_contract() -> str:
     checks=[]
     def expected_norm(value: str | None) -> str:
@@ -594,7 +606,7 @@ def _style_tracker_exact_contract() -> str:
             return 'text'
         rows=','.join("('%s','%s','%s','%s')" % (name,kind(name),'NO' if name in STYLE_TRACKER_NOT_NULL[relation] else 'YES',STYLE_TRACKER_DEFAULTS.get(relation,{}).get(name,'').replace("'","''")) for name in columns)
         checks.append("not exists (select 1 from (values %s) expected(name,data_type,is_nullable,column_default) where not exists (select 1 from information_schema.columns c where c.table_schema='%s' and c.table_name='%s' and c.column_name=expected.name and c.data_type=expected.data_type and c.is_nullable=expected.is_nullable and coalesce(c.column_default,'')=expected.column_default))" % (rows,schema,table))
-    normalize="regexp_replace(lower(replace(%s,'\"','')),'[[:space:]]+','','g')"
+    normalize=INDEXDEF_NORMALIZE
     for index, owner, definition in STYLE_TRACKER_INDEXES:
         checks.append("(select i.indrelid=to_regclass('%s') and %s=%s from pg_index i where i.indexrelid=to_regclass('%s'))" % (owner,normalize % "pg_get_indexdef(i.indexrelid)",normalize % ("'%s'" % definition.replace("'","''")),index))
     for owner,name,definition in STYLE_TRACKER_CHECKS:
@@ -3196,10 +3208,16 @@ CATEGORY_ORDERLIST_BRIDGE_COVERING_INDEX = """
       and i.indnatts = 4
       and i.indpred is null
       and i.indexprs is null
-      and pg_get_indexdef(i.indexrelid) =
-        'CREATE INDEX style_tracker_item_bridge_plm_item_cover_idx ON plm.style_tracker_item_bridge USING btree (plm_item_id) INCLUDE (id, style_tracker_row_id, tracker_type)')
+      and %s = %s)
   and to_regclass('plm.style_tracker_item_bridge_plm_item_idx') is null
-"""
+""" % (
+    INDEXDEF_NORMALIZE % "pg_get_indexdef(i.indexrelid)",
+    INDEXDEF_NORMALIZE % (
+        "'CREATE INDEX style_tracker_item_bridge_plm_item_cover_idx"
+        " ON plm.style_tracker_item_bridge USING btree (plm_item_id)"
+        " INCLUDE (id, style_tracker_row_id, tracker_type)'"
+    ),
+)
 CATALOG_CONTRACTS["orderlist_bridge_covering_index_v1"] = CATEGORY_ORDERLIST_BRIDGE_COVERING_INDEX
 
 
