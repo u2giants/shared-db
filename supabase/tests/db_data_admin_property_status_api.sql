@@ -2,7 +2,7 @@ begin;
 
 do $$
 declare
-  v_auth uuid:=gen_random_uuid(); v_profile uuid; v_role uuid;
+  v_auth uuid; v_profile uuid; v_role uuid;
   v_lic uuid; v_property uuid; v_updated timestamptz; v_op uuid:=gen_random_uuid();
   v_result jsonb; v_authz uuid; v_suffix text:=substr(replace(gen_random_uuid()::text,'-',''),1,10);
 begin
@@ -12,10 +12,12 @@ begin
     raise exception 'null identity was admitted';
   exception when insufficient_privilege then null; end;
 
-  insert into auth.users(id,email) values(v_auth,'issue1952-'||v_suffix||'@example.invalid');
-  insert into app.profile(auth_user_id,email,display_name,status)
-    values(v_auth,'issue1952-'||v_suffix||'@example.invalid','Issue 1952','active') returning id into v_profile;
+  select id,auth_user_id into v_profile,v_auth from app.profile
+  where status='active' and auth_user_id is not null order by created_at,id limit 1;
+  if v_profile is null then raise exception 'fixture requires an active authenticated profile'; end if;
   select id into v_role from app.role where slug='licensing';
+  delete from app.user_role where profile_id=v_profile;
+  delete from app.app_access where profile_id=v_profile and app in ('plm','admin');
   insert into app.user_role(profile_id,role_id) values(v_profile,v_role);
 
   -- Role alone is insufficient; explicit PLM/admin access is mandatory.
