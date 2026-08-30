@@ -2650,11 +2650,18 @@ function activateReviewCutoverOperation(io) {
     for (const candidate of candidates) {
       const { row, lease, number, headSha } = candidate
       const state = states?.get(`${lease.issue}:${lease.pr}`)
+      // Batched path uses the SAME shared predicate as every other consumer
+      // (issue #1822, glm-5.3 seq 524 High). This used to carry its own
+      // anywhere-in-body verdict test -- the exact defect #1822 exists to
+      // delete -- on the path production actually takes, while
+      // hasVerdictForHead below (the fallback) already used the shared rule.
+      // A false verdict here `continue`s past lease creation, so the reviewer
+      // that is genuinely reviewing never gets its protective lease, the busy
+      // probe goes blind, and a second reviewer can be handed the same
+      // provider: the double-assignment hazard this activation exists to
+      // prevent, failing silently.
       const verdict = state
-        ? state.evidence.some((entry) => {
-            const body = String(entry.body ?? ''), tied = entry.commit_id === lease.headSha || body.includes(lease.headSha)
-            return tied && (/\b(?:APPROVE|REVISE|REQUEST_CHANGES)\b/i.test(body) || ['APPROVED', 'CHANGES_REQUESTED'].includes(String(entry.state ?? '').toUpperCase()))
-          })
+        ? anyVerdictFor(state.evidence, lease.headSha)
         : hasVerdictForHead(lease.issue, lease.pr, lease.headSha, io)
       if (verdict) continue
       const leaseRef = reviewActiveRef(lease.reviewer)
