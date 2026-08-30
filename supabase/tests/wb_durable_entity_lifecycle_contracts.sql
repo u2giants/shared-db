@@ -26,12 +26,12 @@ begin
 end
 $catalog$;
 
-insert into plm.wb_capture(capture_id,chunk_number,target,status,captured_at,private_source_commit,snapshot_sha256,expected_row_count,captured_by,source_url)
+insert into plm.wb_capture(capture_id,chunk_number,target,status,captured_at,private_source_commit,snapshot_sha256,expected_row_count,captured_by,source_url,started_at)
 values
- ('18810000-0000-4000-8000-000000000101',0,'wb_franchise','validating','2026-08-28','synthetic',repeat('1',64),2,'contract','https://example.invalid'),
- ('18810000-0000-4000-8000-000000000102',0,'wb_franchise','validating','2026-08-29','synthetic',repeat('2',64),1,'contract','https://example.invalid'),
- ('18810000-0000-4000-8000-000000000103',0,'wb_franchise','validating','2026-08-30','synthetic',repeat('3',64),2,'contract','https://example.invalid'),
- ('18810000-0000-4000-8000-000000000104',0,'wb_franchise','validating','2026-08-30','synthetic',repeat('4',64),1,'contract','https://example.invalid');
+ ('18810000-0000-4000-8000-000000000101',0,'wb_franchise','validating','2026-08-28','synthetic',repeat('1',64),2,'contract','https://example.invalid',now()),
+ ('18810000-0000-4000-8000-000000000102',0,'wb_franchise','validating','2026-08-29','synthetic',repeat('2',64),1,'contract','https://example.invalid',now()),
+ ('18810000-0000-4000-8000-000000000103',0,'wb_franchise','validating','2026-08-30','synthetic',repeat('3',64),2,'contract','https://example.invalid',now()),
+ ('18810000-0000-4000-8000-000000000104',0,'wb_franchise','validating','2026-08-30','synthetic',repeat('4',64),1,'contract','https://example.invalid',now());
 
 set local role service_role;
 select * from plm.sync_wb_normalized_target(
