@@ -770,7 +770,7 @@ function mergedPrIo({merged=true,mergeSha='b'.repeat(40),inMain=true,evidence=[]
   // defect where that projection carried no merge SHA at all, so every merged PR was
   // rejected after the mutex. This fixture mirrors the real projection exactly.
   const projected={state:merged?'merged':'closed',merged,merge_commit_sha:mergeSha,head:{sha:MERGED_HEAD}}
-  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:projected,evidence}]))
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'closed'},pr:projected,evidence}]))
   io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
   io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
   io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
@@ -3323,7 +3323,11 @@ test('closed-claim recovery refuses ambiguity, an open PR, and a merge outside m
   const claim=io.openClaims()[0]
   io.openClaims=()=>[]
   io.closedClaimsForWork=()=>[{...claim,state:'closed'},{...claim,number:1806,state:'closed'}]
-  assert.throws(()=>deriveLivePreviewCandidate(1769,io),/exactly one closed claim with one merged pull request/)
+  assert.throws(()=>deriveLivePreviewCandidate(1769,io),/explicit --claim-number/)
+
+  const selected=deriveLivePreviewCandidate(1769,io,{claimNumber:claim.number})
+  assert.equal(selected.route,'merged_rehearsal')
+  assert.throws(()=>deriveLivePreviewCandidate(1769,io,{claimNumber:9999}),/not a unique historical claim/)
 
   io.closedClaimsForWork=()=>[{...claim,state:'closed'}]
   io.openPulls=()=>[{number:1809,head:{ref:'issue-1769-wwe-tables',sha:'a'.repeat(40)}}]
