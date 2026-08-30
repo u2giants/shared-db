@@ -2,8 +2,8 @@
 
 import { execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import path from 'node:path'
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import path from 'node:path'; import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { gatherOpenPrObjects, normalizeObject, parseClaimBlock } from './check-dispatch-collision.mjs'
 import { classifyDependencies, findCompletionRecord, findDependencyCycles, validateCompletionRecord, validateDependencyDeclaration, COMPLETION_FENCE, DependencyError } from './lib/work-dependencies.mjs'
@@ -1026,7 +1026,7 @@ export const githubIo = {
   createClaim(title, body) { return gh(['issue', 'create', '--repo', REPO, '--label', 'db-claim', '--title', `CLAIM: ${title}`, '--body', body]).trim() },
   createIssueIn(repo, title, body) { return gh(['issue','create','--repo',repo,'--title',title,'--body',body]).trim() },
   commentIssue(number, body) { gh(['issue','comment',String(number),'--repo',REPO,'--body',body]) },
-  issueComments(number) { return ghPaginated(`repos/${REPO}/issues/${number}/comments?per_page=100`).map((c)=>({ body: c.body })) },
+  issueComments(number) { return ghPaginated(`repos/${REPO}/issues/${number}/comments?per_page=100`).map((c)=>({ body: c.body })) }, originalPreviewApplyEvidence({pr,versions,events}) { return selectOriginalPreviewApplyEvidence({pr,versions,events,runs:(head)=>{const page=ghJson(['api',`repos/${REPO}/actions/workflows/shared-supabase-migrations.yml/runs?event=workflow_dispatch&status=success&head_sha=${encodeURIComponent(head)}&per_page=100`]),rows=page?.workflow_runs;if(!Array.isArray(rows)||Number(page?.total_count??rows.length)>rows.length)throw new LaneError('successful preview workflow-run history is unreadable or truncated');return rows},loadBinding:(run,event)=>{const artifactPage=ghJson(['api',`repos/${REPO}/actions/runs/${run.id}/artifacts?per_page=100`]),name=`preview-migration-apply-${event.route_context}`,artifacts=artifactPage?.artifacts;if(!Array.isArray(artifacts)||Number(artifactPage?.total_count??artifacts.length)>artifacts.length)throw new LaneError(`preview artifacts for run ${run.id} are unreadable or truncated`);const matches=artifacts.filter((row)=>row?.name===name&&!row?.expired);if(matches.length!==1)return null;const dir=mkdtempSync(path.join(tmpdir(),'shared-db-preview-proof-'));try{execFileSync('gh',['run','download',String(run.id),'--repo',REPO,'--name',name,'--dir',dir],{stdio:'ignore'});return JSON.parse(readFileSync(path.join(dir,'preview-instance.json'),'utf8'))}catch{return null}finally{rmSync(dir,{recursive:true,force:true})}}}) },
   closeIssue(number) { gh(['issue','close',String(number),'--repo',REPO]) },
   closeClaim(number) { gh(['issue', 'close', String(number), '--repo', REPO, '--comment', 'Expired migration-author lease closed by guarded cleanup. Its migration version remains unavailable.']) },
   reversionFiles(worktree,oldVersion) {
@@ -1169,7 +1169,7 @@ export function deriveLivePreviewCandidate(issue,io){
   const work=io.getIssue(issue),scope=parseQueueScope(work?.body??''),gate=io.previewGateProof(issue,pr.number,head,bundle.bundle_id,scope.dependencies)
   const main=io.mainSha(),mainVersions=io.treeFiles(main).filter((file)=>/^supabase\/migrations\/\d{14}_/.test(file)).map((file)=>path.basename(file).slice(0,14)),preview=io.previewLedger?.()??livePreviewLedger()
   const claimRows=claims.map((row)=>{const linked=io.openPulls().find((p)=>p.head?.ref===row.lease.branch);return{issue:claimWorkIssue(row.claim),pr:linked?.number??0,versions:[row.lease.version],merged:false}}).filter((row)=>row.pr)
-  const route=selectPreviewRoute({issue,pr:pr.number,head_sha:head,bundle_id:bundle.bundle_id,versions,dependency_closure_complete:gate.dependency_closure_complete,claims:claimRows,main_versions:mainVersions,preview_versions:preview.versions,merged})
+  const originalApplyEvidence=versions.every((version)=>preview.versions.includes(version))?io.originalPreviewApplyEvidence?.({issue,pr:pr.number,versions,events:(io.issueComments?.(issue)??[]).flatMap((comment)=>parseEventComment(comment.body??comment))})??null:null,route=selectPreviewRoute({issue,pr:pr.number,head_sha:head,bundle_id:bundle.bundle_id,versions,dependency_closure_complete:gate.dependency_closure_complete,claims:claimRows,main_versions:mainVersions,preview_versions:preview.versions,merged,original_apply_evidence:originalApplyEvidence})
   if(route.status!=='READY')throw new LaneError(`preview route is ${route.status}: ${route.reason}`)
   const routeName=route.route==='NORMAL_PREVIEW'?'ordinary_preview_apply':route.route==='POST_MERGE_REHEARSAL'?'merged_rehearsal':'historical_rebind'
   const routeContext=routeName==='ordinary_preview_apply'?'':main
@@ -3694,6 +3694,23 @@ export function main(argv, now = new Date(), io = githubIo) {
     if (!Number.isFinite(o.leaseHours) || o.leaseHours <= 0 || o.leaseHours > 24) throw new LaneError('--lease-hours must be greater than 0 and no more than 24')
     console.log(JSON.stringify(acquireAuthorLane(o, now, io), null, 2)); return 0
   } catch (error) { console.error(`REFUSED: ${error.message}`); return 2 }
+}
+
+export function selectOriginalPreviewApplyEvidence({pr,versions,events,runs,loadBinding}){
+  const requested=[...new Set((versions??[]).map(String))].sort()
+  const ready=(events??[]).filter((event)=>event?.schema_version===2&&event.event_type==='preview_ready'&&event.result==='succeeded'&&Number(event.pr)===Number(pr)&&['merged_rehearsal','historical_rebind'].includes(event.route)&&/^[0-9a-f]{40}$/i.test(String(event.route_context??'')))
+  const matches=[]
+  for(const event of ready)for(const run of runs(event.route_context)??[]){
+    if(run?.conclusion!=='success'||run?.event!=='workflow_dispatch'||run?.path!=='.github/workflows/shared-supabase-migrations.yml'||run?.head_sha!==event.route_context||!Number.isInteger(Number(run?.id)))continue
+    const binding=loadBinding(run,event)
+    if(!binding)continue
+    const allowlist=Array.isArray(binding.allowlist)?[...new Set(binding.allowlist.map(String))].sort():[]
+    if(binding.schema!=='shared-db-preview-instance-binding/v1'||Number(binding.runId)!==Number(run.id)||Number(binding.sourcePr)!==Number(pr)||binding.appliedCommit!==event.route_context||JSON.stringify(allowlist)!==JSON.stringify(requested))continue
+    matches.push({type:'preview-apply',run_id:String(run.id)})
+  }
+  const unique=[...new Map(matches.map((row)=>[row.run_id,row])).values()]
+  if(unique.length>1)throw new LaneError(`multiple original preview-apply runs match PR #${pr}: ${unique.map((row)=>row.run_id).join(', ')}`)
+  return unique[0]??null
 }
 
 if (process.argv[1] && path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1])) process.exitCode = main(process.argv.slice(2))

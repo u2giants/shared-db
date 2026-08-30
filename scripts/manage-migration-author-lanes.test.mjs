@@ -3238,6 +3238,25 @@ test('a single closed claim recovers only the merged-rehearsal route (issue #185
   assert.equal('claim_head_sha' in candidate.manifest,false)
 })
 
+test('an already-applied closed claim uses immutable original apply evidence instead of replaying preview',()=>{
+  const {io,mainSha,version}=mergedRehearsalIo()
+  const claim=io.openClaims()[0]
+  io.openClaims=()=>[]
+  io.closedClaimsForWork=()=>[{...claim,state:'closed'}]
+  io.previewLedger=()=>({versions:[version]})
+  io.issueComments=()=>[{body:`\`\`\`db-coordination-event\n${JSON.stringify({schema_version:2,event_id:'preview-ready-1769',event_type:'preview_ready',timestamp:'2026-08-29T00:35:00Z',work_issue:1769,actor:'agent/test',result:'succeeded',pr:1809,route:'merged_rehearsal',route_context:mainSha})}\n\`\`\``}]
+  let request
+  io.originalPreviewApplyEvidence=(value)=>(request=value,{type:'preview-apply',run_id:'33308168016'})
+  const candidate=deriveLivePreviewCandidate(1769,io)
+  assert.equal(request.issue,1769)
+  assert.equal(request.pr,1809)
+  assert.deepEqual(request.versions,[version])
+  assert.equal(request.events.length,1)
+  assert.equal(request.events[0].event_type,'preview_ready')
+  assert.equal(candidate.route,'historical_rebind')
+  assert.equal(candidate.manifest.historical_preview_source_pr,'1809')
+})
+
 test('closed-claim recovery refuses ambiguity, an open PR, and a merge outside main',()=>{
   const {io}=mergedRehearsalIo()
   const claim=io.openClaims()[0]
