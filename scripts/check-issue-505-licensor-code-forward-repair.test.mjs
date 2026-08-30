@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const migration = readFileSync(
-  new URL('../supabase/migrations/20260830202730_licensors_external_id_canonical_codes.sql', import.meta.url),
+  new URL('../supabase/migrations/20260830204711_licensors_external_id_canonical_codes.sql', import.meta.url),
   'utf8',
 )
 const productionGuard = readFileSync(new URL('./production_migration_guard.py', import.meta.url), 'utf8')
@@ -35,5 +35,5 @@ test('forward repair preserves every asset and style-group row', () => {
 
 test('stranded original is blocked and the producer gate pins the successor sidecar', () => {
   assert.match(productionGuard, /"20260830195655"/)
-  assert.match(producerGate, /20260830202730\.json/)
+  assert.match(producerGate, /20260830204711\.json/)
 })

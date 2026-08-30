@@ -66,7 +66,7 @@ MIGRATION_LINE_RE = re.compile(r"^\s*(?:[•*\-]\s*)?(\d{14})_[^\s]+\.sql\s*$")
 HARD_BLOCKED = {
     # #505 merged-stranded original. Its first preview apply refused and rolled
     # back transactionally after live app drift invalidated an over-broad
-    # licensor_id-is-null assumption. 20260830202730 carries the preserved
+    # licensor_id-is-null assumption. 20260830204711 carries the preserved
     # capability with the evidence-backed invariant. Never apply this original.
     "20260830195655",
     # #1750 code-truth restoration. Production already holds this exact ledger
