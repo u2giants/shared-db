@@ -351,6 +351,22 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
       it is a test of a different program.* Coverage of an evaluation core says
       nothing about the adapter that feeds it.
 
+   **A freshness check proves a value is current, never that it is the right
+   value (2026-08-30).** A lane worked PR #1813 for several hours believing it
+   was on #1748. Its discipline was not the problem: it re-read the head before
+   every action, refused four stale or ineligible approvals, and held for its
+   assigned verdict. `47f918e5` was genuinely current the whole time -- it is
+   simply #1813's head, while #1748 never moved from `95739f42` and inherited
+   none of the work. Every check the lane ran asked *is this head still current*;
+   none asked *is this head still the right PR*, so the error was invisible to
+   the entire procedure. **Staleness and misidentification are different
+   failures, and the standard remedy for the first is silent on the second.**
+   The mechanical form: the assignment ref name already carries the binding as
+   `<issue>-<pr>-<headSha>`, so re-read the head *and* confirm the PR number it
+   belongs to against that ref -- one `gh pr view <n> --json headRefOid` per PR,
+   or all open heads in a single call, which is what caught this. Read every
+   identifier the action depends on, not only the one that moves.
+
    After review approval, green checks, preview proof, and guarded merge, the
    production workflow runs `scripts/production_business_risk_gate.py`. It
    derives the result from the exact merged PR and required checks, immutable
