@@ -4,6 +4,12 @@ do $$
 declare
   v_definition text;
 begin
+  if to_regprocedure(
+       'public.search_dam_documents(text,integer,text[],extensions.vector)'
+     ) is not null then
+    raise exception 'legacy unfiltered ranked-search overload must not exist';
+  end if;
+
   select pg_get_functiondef(
     'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'::regprocedure
   ) into v_definition;

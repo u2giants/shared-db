@@ -1,6 +1,13 @@
 -- Authorization-safe ranked DAM search. Filters and caller-visible assets are
 -- resolved before ranking, totals, facets, and page boundaries.
 -- derived-from: 20260714173500, 20260713221518
+-- runtime-dependency: 20260830110517 (filter_effective_assets)
+
+-- The former direct RPC has no filter/visibility arguments. Keeping it as an
+-- overload would leave an authenticated bypass around the contract below.
+drop function if exists public.search_dam_documents(
+  text, int, text[], extensions.vector(384)
+);
 
 create or replace function public.search_dam_documents(
   p_query text,
@@ -67,7 +74,9 @@ as $$
     from eligible_documents d
     where p_query_embedding is not null and d.embedding is not null
     order by d.embedding <=> p_query_embedding
-    limit 5000
+    -- Match the largest supported page so semantic-only callers are not
+    -- silently capped below the public page ceiling.
+    limit 20000
   ),
   ranked_documents as materialized (
     select c.document_type, c.entity_id, c.asset_id, c.style_group_id,
