@@ -28,6 +28,11 @@ declare
   v_code          text;
   v_bad           bigint;
   v_n             bigint;
+  v_existing_comment text;
+  -- Declared ONCE and used by both the overwrite guard and the write itself, so the two
+  -- cannot drift apart and re-silently break idempotency.
+  c_comment constant text :=
+    'Canonical licensor code, aligned to core.licensor.code since 2026-08-07 (owner ruling: change DS to DY at its source). Legacy values DS/WWE were normalised to DY/WW by issue #505. public.dam_character_catalog still carries a defensive DS/WWE remap; it is now a no-op and is deliberately retained as a safety net.';
 begin
   -- ---------- preconditions ----------
   if not exists (select 1 from public.licensors where id = c_disney_legacy) then
@@ -91,17 +96,23 @@ begin
       v_n;
   end if;
 
-  -- The `comment on column` at the end of this file is a catalog write, so it must not
-  -- silently overwrite documentation someone else wrote. Verified read-only against
-  -- production 2026-08-30: this column currently has NO comment, so the exact reversal
-  -- is `comment on column public.licensors.external_id is null`. Assert that here rather
-  -- than trusting the observation: if a comment has appeared since, this aborts instead
-  -- of destroying it. (Base-scoped review, sequence 491.)
-  if col_description('public.licensors'::regclass,
-       (select attnum from pg_attribute
-         where attrelid = 'public.licensors'::regclass and attname = 'external_id')) is not null then
+  -- The column comment is a catalog write, so it must not silently overwrite
+  -- documentation someone else wrote. Verified read-only against production
+  -- 2026-08-30: this column has NO comment today.
+  --
+  -- The guard must tolerate ITS OWN comment. An earlier version aborted on ANY existing
+  -- comment, which broke idempotency outright: the first run installed the comment and
+  -- every subsequent run then aborted on it. That was a regression introduced while
+  -- fixing a different finding, and it is exactly why this aborts only on a comment
+  -- that is not the one this migration writes. (Base-scoped review, sequence 497.)
+  select col_description('public.licensors'::regclass,
+           (select attnum from pg_attribute
+             where attrelid = 'public.licensors'::regclass and attname = 'external_id'))
+    into v_existing_comment;
+  if v_existing_comment is not null and v_existing_comment is distinct from c_comment then
     raise exception
-      'abort: public.licensors.external_id already carries a column comment; this migration would overwrite it irreversibly, capture it first';
+      'abort: public.licensors.external_id already carries a different column comment (%); this migration would overwrite it, capture it first',
+      v_existing_comment;
   end if;
 
   -- Baselines that must survive the change untouched.
@@ -174,15 +185,28 @@ begin
       'abort: public.style_groups rows with licensor_code DS changed from % to %; these are SKU artifacts and must be untouched',
       v_sg_ds_before, v_sg_ds_after;
   end if;
+
+  -- Written INSIDE the block, from the same constant the guard above compares against,
+  -- so the whole migration is one transaction and the guard can never disagree with the
+  -- write. Re-running sets the identical text: a no-op, not an abort.
+  execute format('comment on column public.licensors.external_id is %L', c_comment);
 end $$;
 
--- ROLLBACK, in full, from this file alone:
+-- ROLLBACK -- what it does and does not restore. Read the caveats; this is not "in full".
 --   update public.licensors set external_id = 'DS'  where id = '10a445bc-cdb8-4384-ad6f-a46fd029f2bc';
 --   update public.licensors set external_id = 'WWE' where id = '1e3ebfce-7d9d-4424-a68c-73c4e57b6d83';
 --   comment on column public.licensors.external_id is null;
--- The column had no comment before this migration, asserted by a precondition above, so
--- setting it back to null restores the prior catalog state exactly. The one thing NOT
--- recoverable is the original updated_at on the two rows; forward and reverse both stamp
--- now(). That is stated rather than hidden. (Base-scoped review, sequence 491.)
-comment on column public.licensors.external_id is
-  'Canonical licensor code, aligned to core.licensor.code since 2026-08-07 (owner ruling: change DS to DY at its source). Legacy values DS/WWE were normalised to DY/WW by issue #505. public.dam_character_catalog still carries a defensive DS/WWE remap; it is now a no-op and is deliberately retained as a safety net.';
+--
+-- Two things this does NOT restore, stated plainly rather than implied by the word "full":
+--
+--   1. The original updated_at on the two rows. Forward and reverse both stamp now(),
+--      so the prior timestamps are gone and cannot be recovered from this file.
+--   2. A starting state that ALREADY held DY/WW. The forward migration accepts such a
+--      database as a valid no-op, but the rollback above is unconditional and would
+--      push those rows back to DS/WWE -- a state they were never in. If the database
+--      was already canonical before this migration ran, DO NOT run the rollback.
+--      Confirm which case applies before reversing anything.
+--
+-- The column had no comment beforehand (verified read-only against production
+-- 2026-08-30, and asserted by the guard above), so setting it back to null does restore
+-- the prior catalog state exactly. (Base-scoped review, sequence 497.)
