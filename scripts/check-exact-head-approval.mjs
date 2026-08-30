@@ -30,15 +30,19 @@
 // "independent" here describes the assignment PROCESS -- the rotation in
 // `manage-migration-author-lanes.mjs`, which picks the reviewer and refuses the
 // live orchestrator's own engine -- and is not a property this file verifies.
-// Two related limits, both deliberate:
-//   - The head tie (`tiedToHead`) matches the SHA anywhere in the body, while the
-//     verdict must open a line. A comment quoting an old approval and separately
-//     naming the new head therefore counts at the new head. Requiring the SHA on
-//     the verdict line itself was considered and rejected: every genuine wrapper
-//     review in `.ai/reviews` names the head in a header block and ends with a bare
-//     `VERDICT: APPROVE`, so that rule would refuse all real approvals -- the
-//     inverse defect described below, which is the more dangerous one.
-//   - Fenced or indented code containing a verdict line counts.
+// One deliberate limit remains: fenced or indented code containing a verdict line
+// counts.
+//
+// A SECOND "deliberate limit" recorded here previously was not one. It said the
+// head tie matched the SHA anywhere in the body for approvals as well as refusals,
+// and reasoned that a comment quoting an old approval while naming the new head
+// counting at the new head was an acceptable cost. It was not acceptable: it was
+// PR #1809's failure rebuilt inside the tool written to prevent it, and a probe
+// confirmed the shape authorized a head nobody had reviewed. See
+// `unambiguouslyTiedToHead` below for what replaced it. Recorded here rather than
+// deleted, because "we considered this and accepted it" is exactly how a fail-open
+// survives review, and the next reader should see that this file has made that
+// mistake once already.
 // Against the status quo this replaces -- nothing at all, which merged unapproved
 // bytes on PR #1809 -- it is a process-integrity gate and a large improvement. It is
 // not an authenticity gate, and it should never be cited as one.
@@ -53,6 +57,32 @@ export class ApprovalCheckError extends Error {}
 // author wrote the SHA into the body. Same rule the preview gate uses, so the two
 // gates cannot drift into disagreeing about what a reviewer approved.
 const tiedToHead = (row, headSha) => row.commit_id === headSha || String(row.body ?? '').includes(headSha)
+// APPROVALS need a STRICTER tie than refusals, and the difference is the whole
+// #1809 hole reappearing inside the tool built to close it. Under the permissive
+// tie, a comment approving head A that merely MENTIONS head B ("VERDICT: APPROVE
+// <A> ... the author has since pushed <B>") is tied to B and opens a line with
+// APPROVE, so it authorizes B -- bytes nobody looked at. That is exactly #1809.
+//
+// So an approval counts for this head only when the reference is UNAMBIGUOUS:
+//   - GitHub itself bound the review to this commit (`commit_id`), which is
+//     structured data rather than prose and cannot be ambiguous; or
+//   - the body names this head and names NO OTHER commit-length SHA at all.
+//
+// Two SHAs in one body means the reader cannot tell which one the verdict is
+// about, and the safe reading of an ambiguous authorization is to refuse it.
+// Genuine wrapper approvals name exactly one head in a header, so they still pass.
+//
+// Refusals deliberately KEEP the permissive tie. The asymmetry is on purpose:
+// over-counting a refusal locks a head that maybe did not need locking, which
+// costs a re-review; over-counting an approval merges unreviewed bytes. When a
+// tie is uncertain, both errors must fall on the side of not merging.
+const OTHER_SHA = /\b[0-9a-f]{40}\b/gi
+const unambiguouslyTiedToHead = (row, headSha) => {
+  if (row.commit_id === headSha) return true
+  const body = String(row.body ?? '')
+  if (!body.includes(headSha)) return false
+  return (body.match(OTHER_SHA) ?? []).every((sha) => sha.toLowerCase() === headSha.toLowerCase())
+}
 // A VERDICT is a line that OPENS with the verdict word -- not prose that happens to
 // mention it. A lane wrote a progress note on its own PR naming the head SHA and the
 // word REVISE, and permanently locked its own head: the note read as a recorded
@@ -126,7 +156,9 @@ export function evaluateExactHeadApproval({ pr, headSha, evidence = [], assignme
   const refusals = atHead.filter((row) => verdictLine(row.body, REFUSAL) || state(row) === 'CHANGES_REQUESTED')
   if (refusals.length) throw new ApprovalCheckError(`head ${headSha} carries an unanswered reviewer refusal; answer it with a new commit and a fresh exact-head review`)
 
-  const approvals = atHead.filter((row) => approvalLine(row.body) || state(row) === 'APPROVED')
+  const approvals = evidence
+    .filter((row) => unambiguouslyTiedToHead(row, headSha))
+    .filter((row) => approvalLine(row.body) || state(row) === 'APPROVED')
   if (!approvals.length) throw new ApprovalCheckError(`head ${headSha} has no APPROVE tied to it; an approval of an earlier head never approves these bytes`)
 
   return { approved: true, head_sha: headSha, pr: Number(pr), assignments: pinned.length, approvals: approvals.length }

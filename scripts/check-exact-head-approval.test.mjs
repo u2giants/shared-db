@@ -191,6 +191,42 @@ test('the wrapper format VERDICT: APPROVE is recognised, and its refusal form st
 // Stripping the label must not strip the verdict. `DO NOT APPROVE` is a refusal to
 // approve, and reading it as an approval is the worst single failure this gate could
 // have: it authorizes a merge the reviewer explicitly declined to authorize.
+// THE #1809 HOLE, REAPPEARING INSIDE THE TOOL BUILT TO CLOSE IT. Under a
+// permissive head tie, a comment approving head A that merely mentions head B is
+// tied to B and opens a line with APPROVE, so it authorizes B -- bytes nobody
+// looked at. Found by codex-gpt-5.6-sol at head 6ad02227 and confirmed by probe:
+// the shape approved where it must refuse. An approval must name ONE head.
+test('an approval of an earlier head does not carry to a new head it merely mentions', () => {
+  const pinned = { pr: 1809, headSha: NEW, assignments: [{ issue: 1769, pr: 1809, headSha: NEW }] }
+  assert.throws(() => evaluateExactHeadApproval({
+    ...pinned,
+    evidence: [{ body: `VERDICT: APPROVE ${OLD}\n\nNote: the author has since pushed ${NEW}.` }],
+  }), /has no APPROVE tied to it/)
+  // Any second commit-length SHA makes the reference ambiguous, whichever order.
+  assert.throws(() => evaluateExactHeadApproval({
+    ...pinned,
+    evidence: [{ body: `Reviewed ${NEW}, which supersedes ${OLD}.\n\nVERDICT: APPROVE` }],
+  }), /has no APPROVE tied to it/)
+  // A single-head approval still passes -- the fix must not refuse valid input.
+  assert.equal(evaluateExactHeadApproval({ ...pinned, evidence: [{ body: `VERDICT: APPROVE ${NEW}` }] }).approved, true)
+  // GitHub's own commit binding is structured data, so it is unambiguous even
+  // when the prose mentions other heads.
+  assert.equal(evaluateExactHeadApproval({
+    ...pinned,
+    evidence: [{ commit_id: NEW, state: 'APPROVED', body: `supersedes ${OLD}` }],
+  }).approved, true)
+})
+
+// The asymmetry is deliberate. A refusal keeps the permissive tie: over-locking
+// costs a re-review, over-approving merges unreviewed bytes.
+test('a refusal still locks a head it mentions alongside another SHA', () => {
+  assert.throws(() => evaluateExactHeadApproval({
+    pr: 1809, headSha: NEW,
+    assignments: [{ issue: 1769, pr: 1809, headSha: NEW }],
+    evidence: [{ body: `VERDICT: REVISE ${OLD}\n\nand the same defect is still present at ${NEW}.` }],
+  }), /unanswered reviewer refusal/)
+})
+
 test('a labelled non-approval is not turned into an approval by label stripping', () => {
   assert.throws(() => evaluateExactHeadApproval({
     pr: 1809, headSha: NEW,
