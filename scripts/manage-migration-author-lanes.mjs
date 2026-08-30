@@ -3004,7 +3004,7 @@ export function renewExpiredClaim(options, now = new Date(), io = githubIo) {
     possiblyChanged=true;io.updateIssue(options.claim,{body:expectedBody})
     requireOwnedRef(MUTEX_REF,ownerSha,io)
     const after=io.getIssue(options.claim),afterLease=parseAuthorLease(after?.body??'',now)
-    if(after?.state!=='open'||after.body!==expectedBody||afterLease.version!==lease.version||afterLease.owner!==lease.owner||afterLease.branch!==lease.branch||afterLease.worktree!==lease.worktree||JSON.stringify(afterLease.objects)!==JSON.stringify(lease.objects))throw new LaneError('renewed claim exact readback failed')
+    if(after?.state!=='open'||after.title!==before.title||after.body!==expectedBody||afterLease.version!==lease.version||afterLease.owner!==lease.owner||afterLease.branch!==lease.branch||afterLease.worktree!==lease.worktree||JSON.stringify(afterLease.objects)!==JSON.stringify(lease.objects))throw new LaneError('renewed claim exact readback failed')
     if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError('permanent reservation disappeared during renewal')
     return {claim:Number(options.claim),version:lease.version,expiresAt:afterLease.expiresAt.toISOString(),idempotent:false}
   } catch(error) {

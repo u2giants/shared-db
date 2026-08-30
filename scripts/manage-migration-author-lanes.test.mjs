@@ -2094,6 +2094,16 @@ test('curated renewal refuses a claim title mutation immediately before write',(
   assert.match(io.issue.body,/expires_at: 2026-08-14T19:00:00.000Z/)
 })
 
+test('curated renewal rolls back when the claim title changes during the write',()=>{
+  const io=renewalIo(),before=io.issue.body,baseGet=io.getIssue
+  io.workIssue.body=scope('ready','curated-master-data','curated-master-data-governance',900,[])
+  let claimReads=0
+  io.getIssue=(number)=>{if(Number(number)===1058&&++claimReads===3)io.issue.title='CLAIM without a work issue';return baseGet(number)}
+  assert.throws(()=>renewExpiredClaim(renewalOptions,NOW,io),/exact readback failed/)
+  assert.equal(io.issue.body,before)
+  assert.equal(io.issue.title,'CLAIM without a work issue')
+})
+
 test('claim renewal is idempotent for the exact already-written expiry',()=>{
   const io=renewalIo();renewExpiredClaim(renewalOptions,NOW,io);const once=io.issue.body
   const result=renewExpiredClaim(renewalOptions,NOW,io);assert.equal(result.idempotent,true);assert.equal(io.issue.body,once)
