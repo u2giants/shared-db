@@ -264,7 +264,9 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    reviewer, and releases that exact active lease when present. It does not
    create a failure record. New heads skip the reviewer; if exclusions and live
    leases consume the roster, assignment refuses loudly and names each durable
-   reason. Never use this to shop for a preferred verdict.
+   reason. To continue the same head after excluding slot N, assign the next
+   unused `--review-slot`; the exact-head gate accepts that ordinary assignment
+   and no false failure is recorded. Never use this to shop for a preferred verdict.
 
    **Grok's in-flight lock is PER REPOSITORY, not global.** `ai-grok-review`
    allows one live Grok review at a time *in shared-db*; it does not cap Grok

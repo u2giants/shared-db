@@ -24,8 +24,9 @@ Issue: #1767. Scope: repository coordination only; no database, preview, product
 
 > **Current ceiling, 2026-08-30 (issue #1833).** The bounded PR-local reviewer
 > exclusion lookup adds one request to both slot paths. The enforced ceiling is
-> therefore **23**: slot 2 is 10 pre-mutex requests plus the unchanged 13-call
-> mutex-section reserve; slot 1 is 7 plus 13. The one request past the ceiling
+> therefore **23**: slot 2 is 9 pre-mutex requests plus a 14-call mutex-section
+> reserve; slot 1 is 6 plus 14. The exclusion read is inside the mutex so a
+> concurrent exclusion cannot be missed. The one request past the ceiling
 > is still refused before mutex acquisition, and assignment history is never
 > scanned to decide availability.
 

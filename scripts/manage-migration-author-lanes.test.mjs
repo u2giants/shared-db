@@ -394,6 +394,32 @@ test('reviewer exclusion is idempotent and rejects false evidence or changed dis
   assert.throws(()=>excludeReviewerForPr({...request,reason:'already-reviewed'},io),/different durable exclusion/)
 })
 
+test('a same-head review continues in the next slot without fabricating a failure',()=>{
+  const io=reviewIo(),head='e'.repeat(40),first=assignNextReviewer({issue:1833,pr:1904,headSha:head},io),evidenceSha=io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/1833-1904-${head}`)
+  excludeReviewerForPr({issue:1833,pr:1904,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io)
+  const next=assignNextReviewer({issue:1833,pr:1904,headSha:head,slot:2},io)
+  assert.notEqual(next.reviewer,first.reviewer)
+  assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith('refs/db-review-failures/1833-1904-')),false)
+})
+
+test('an exclusion created while assignment waits for the mutex is never missed',()=>{
+  const io=reviewIo(),reviewer=ACTIVE_REVIEWERS[0].name,ref=`${REVIEW_EXCLUSION_REF_PREFIX}/1833-1902-${reviewer}`
+  const exclusionSha=io.makeOwnerCommit(`db-coordination reviewer-exclusion reviewer=${reviewer} issue=1833 pr=1902 reason=independence-conflict evidence=${'a'.repeat(40)}`),create=io.createRef
+  io.createRef=(target,sha)=>{const made=create(target,sha);if(target===MUTEX_REF&&made)io.refs.set(ref,exclusionSha);return made}
+  const assigned=assignNextReviewer({issue:1833,pr:1902,headSha:'d'.repeat(40)},io)
+  assert.notEqual(assigned.reviewer,reviewer)
+})
+
+test('replacement selection skips reviewers durably excluded for the PR',()=>{
+  const io=reviewIo(),headA='a'.repeat(40),headB='b'.repeat(40),first=assignNextReviewer({issue:1833,pr:1903,headSha:headA},io)
+  io.getPr=()=>({state:'open',head:{sha:headB,ref:'codex/x'}})
+  const second=assignNextReviewer({issue:1833,pr:1903,headSha:headB},io),evidenceSha=io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/1833-1903-${headB}`)
+  excludeReviewerForPr({issue:1833,pr:1903,reviewer:second.reviewer,reason:'terminal-unavailable',evidenceSha},io)
+  io.getPr=()=>({state:'open',head:{sha:headA,ref:'codex/x'}})
+  const replacement=replaceFailedReviewer({issue:1833,pr:1903,headSha:headA,failedSequence:first.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)
+  assert.notEqual(replacement.reviewer,second.reviewer)
+})
+
 test('active reviewer lease parser round-trips exact identity and fails closed',()=>{
   const reviewer=ACTIVE_REVIEWERS[0].name, message=`db-coordination reviewer-lease generation=7 reviewer=${reviewer} issue=1767 pr=1800 head=${'a'.repeat(40)} sequence=9`
   assert.deepEqual(parseReviewLease({message}),{generation:7,reviewer,issue:1767,pr:1800,headSha:'a'.repeat(40),sequence:9})
@@ -517,7 +543,7 @@ test('complete slot-2 assignment stays inside the real wire-attempt budget (issu
   // the wrong name was nearly merged anyway -- so the gate is now asserted by
   // behaviour below, not only by its numeral.
   assert.equal(attempts,21,`slot 2 used ${attempts} wire attempts; this fixture costs exactly 21 of the ${REVIEW_OPERATION_REQUEST_LIMIT}-request budget. If this changed, re-derive the ceiling rather than widening it`)
-  assert.equal(REVIEW_MUTEX_SECTION_RESERVE,13,'the mutex-section entry-gate reserve changed without this budget being re-derived')
+  assert.equal(REVIEW_MUTEX_SECTION_RESERVE,14,'the mutex-section entry-gate reserve changed without this budget being re-derived')
   assert.equal(REVIEW_OPERATION_REQUEST_LIMIT,23,'the ceiling changed; re-derive it against the real cost rather than raising it again')
   // The three pins above are near-tautologies: they restate constants. None of
   // them fails if the CALL SITE stops using the constant, because the gate asks
@@ -567,17 +593,17 @@ test('complete replacement stays inside the real wire-attempt budget',()=>{
   assert.ok(result.reviewer);assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`used ${attempts} wire attempts`)
   const mutexAt=labels.indexOf(`createRef:${MUTEX_REF}`)
   assert.notEqual(mutexAt,-1,`mutex acquisition was not observed: ${labels.join(',')}`)
-  assert.equal(mutexAt,7,'the first replacement path spends 7 requests before its mutex gate')
-  assert.equal(labels.length-mutexAt,9,`new replacement success path costs exactly 9 requests after mutex acquisition: ${labels.slice(mutexAt).join(',')}`)
+  assert.equal(mutexAt,8,'the first replacement path spends 8 requests before its mutex gate')
+  assert.equal(labels.length-mutexAt,10,`new replacement success path costs exactly 10 requests after mutex acquisition: ${labels.slice(mutexAt).join(',')}`)
   attempts=0;labels.length=0
   assert.deepEqual(replaceFailedReviewer(replacementRequest,io),result)
   const retryMutexAt=labels.indexOf(`createRef:${MUTEX_REF}`)
   assert.notEqual(retryMutexAt,-1,`retry mutex acquisition was not observed: ${labels.join(',')}`)
-  assert.equal(retryMutexAt,8,'the idempotent path spends 8 requests before its mutex gate')
-  assert.equal(labels.length-retryMutexAt,9,`idempotent replacement success path costs exactly 9 requests after mutex acquisition: ${labels.slice(retryMutexAt).join(',')}`)
+  assert.equal(retryMutexAt,9,'the idempotent path spends 9 requests before its mutex gate')
+  assert.equal(labels.length-retryMutexAt,10,`idempotent replacement success path costs exactly 10 requests after mutex acquisition: ${labels.slice(retryMutexAt).join(',')}`)
   const source=readFileSync(new URL('./manage-migration-author-lanes.mjs',import.meta.url),'utf8')
-  assert.match(source,/requireReviewWireCapacity\(10\);acquireReviewMutex\(ownerSha,io\);mutexAcquired=true/,'the idempotent reserve changed without re-derivation')
-  assert.match(source,/requireReviewWireCapacity\(11\);acquireReviewMutex\(ownerSha,io\);mutexAcquired=true/,'the new-replacement reserve changed without re-derivation')
+  assert.match(source,/requireReviewWireCapacity\(11\);acquireReviewMutex\(ownerSha,io\);mutexAcquired=true/,'the idempotent reserve changed without re-derivation')
+  assert.match(source,/requireReviewWireCapacity\(12\);acquireReviewMutex\(ownerSha,io\);mutexAcquired=true/,'the new-replacement reserve changed without re-derivation')
   // Baseline preflight is 8 requests. Six additional fixed-record reads make
   // 14; reserve 10 must refuse because 14 + 10 exceeds the 23-call ceiling.
   // Reserve 9 would acquire the mutex at exactly 23 and leave no room for the
@@ -3652,7 +3678,7 @@ test('a complete slot-2 replacement stays inside the real wire-attempt budget (i
   try{result=replaceFailedReviewer({...request,slot:2,failedSequence:slotTwo.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)}
   catch(error){throw new Error(`${error.message}; calls=${labels.join(',')}`)}
   assert.ok(result.reviewer)
-  assert.equal(attempts,16,`slot-2 replacement used ${attempts} of ${REVIEW_OPERATION_REQUEST_LIMIT}: ${labels.join(',')}`)
+  assert.equal(attempts,18,`slot-2 replacement used ${attempts} of ${REVIEW_OPERATION_REQUEST_LIMIT}: ${labels.join(',')}`)
   // 9 pre-mutex (slot 1's 7 plus resolveSlotOneReviewer's BATCHED readReviewRecords,
   // which costs 2 on this branch where it cost 3 -- listRefs+readRef+getCommit --
   // when #1832 pinned 17), then the mutex-section reserve of 11: 20 of 22, two
