@@ -28,7 +28,7 @@ begin
     line_of_business, started_at, finished_at, rows_received,
     distinct_assets_received, captured_by, private_source_commit
   ) values (
-    v_unreferenced, 'complete', date '2026-08-30', 'https://example.invalid', 'ZZTEST',
+    v_unreferenced, 'running', date '2026-08-30', 'https://example.invalid', 'ZZTEST',
     'ZZTEST synthetic', 'ZZTEST', now(), now(), 0, 0, 'ZZTEST', 'ZZTEST'
   );
 
