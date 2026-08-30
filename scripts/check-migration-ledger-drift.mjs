@@ -376,12 +376,13 @@ export function formatReport({ target, projectRef, baseRef, drift, fileByVersion
  * reports, so an unresolvable base ref must be loud rather than silent.
  */
 export function resolveFreshBaseRef(baseRef = 'origin/main', run = execFileSync) {
+  const resolved = baseRef === 'origin/main' ? 'refs/remotes/origin/main' : baseRef
   try {
     if (baseRef === 'origin/main') {
       run('git', ['-C', repoRoot, 'fetch', '--quiet', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main'], { stdio: 'ignore' })
     }
-    run('git', ['-C', repoRoot, 'rev-parse', '--verify', '--quiet', baseRef], { stdio: 'ignore' })
-    return baseRef
+    run('git', ['-C', repoRoot, 'rev-parse', '--verify', '--quiet', resolved], { stdio: 'ignore' })
+    return resolved
   } catch {
     throw new Unknown(
       `could not refresh and resolve the base ref \`${baseRef}\` (no git repository, no such ref, or no ` +

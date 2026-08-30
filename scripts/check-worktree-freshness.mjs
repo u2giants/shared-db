@@ -14,7 +14,7 @@ export function requireCurrentMain({ root = repoRoot, run = execFileSync } = {})
   try {
     git(['fetch', '--quiet', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main'])
     head = git(['rev-parse', 'HEAD']).toLowerCase()
-    main = git(['rev-parse', 'origin/main']).toLowerCase()
+    main = git(['rev-parse', 'refs/remotes/origin/main']).toLowerCase()
   } catch (error) {
     throw new StaleWorktree(`could not refresh live origin/main; refusing a verification read (${error.message})`)
   }

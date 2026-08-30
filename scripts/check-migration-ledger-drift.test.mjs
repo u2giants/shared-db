@@ -29,9 +29,9 @@ import {
 test('origin/main is refreshed before any migration-tree verification read', () => {
   const calls = []
   const run = (_command, args) => { calls.push(args) }
-  assert.equal(resolveFreshBaseRef('origin/main', run), 'origin/main')
+  assert.equal(resolveFreshBaseRef('origin/main', run), 'refs/remotes/origin/main')
   assert.deepEqual(calls[0], ['-C', calls[0][1], 'fetch', '--quiet', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main'])
-  assert.deepEqual(calls[1].slice(2), ['rev-parse', '--verify', '--quiet', 'origin/main'])
+  assert.deepEqual(calls[1].slice(2), ['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'])
 })
 
 test('origin/main verification refuses when the live refresh cannot complete', () => {

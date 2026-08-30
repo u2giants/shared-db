@@ -14,7 +14,7 @@ function runner({ head = SHA, main = SHA, fetchError = null } = {}) {
       return ''
     }
     if (args.at(-1) === 'HEAD') return `${head}\n`
-    if (args.at(-1) === 'origin/main') return `${main}\n`
+    if (args.at(-1) === 'refs/remotes/origin/main') return `${main}\n`
     throw new Error(`unexpected git call: ${args.join(' ')}`)
   }
   return { calls, run }
