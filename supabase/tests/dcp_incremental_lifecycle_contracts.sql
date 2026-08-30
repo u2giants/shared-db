@@ -7,6 +7,7 @@ declare
   v_partial uuid := gen_random_uuid();
   v_failed uuid := gen_random_uuid();
   v_incremental uuid := gen_random_uuid();
+  v_unreferenced uuid := gen_random_uuid();
   v_guide uuid := gen_random_uuid();
   v_asset uuid := gen_random_uuid();
   v_first_seen uuid;
@@ -21,6 +22,83 @@ begin
     v_complete, 'complete', date '2026-08-30', 'https://example.invalid', 'ZZTEST',
     'ZZTEST synthetic', 'ZZTEST', now(), now(), 0, 0, 'ZZTEST', 'ZZTEST'
   );
+
+  insert into plm.dcp_crawl (
+    crawl_id, status, captured_on, portal_base_url, crawler_version, account_scope,
+    line_of_business, started_at, finished_at, rows_received,
+    distinct_assets_received, captured_by, private_source_commit
+  ) values (
+    v_unreferenced, 'complete', date '2026-08-30', 'https://example.invalid', 'ZZTEST',
+    'ZZTEST synthetic', 'ZZTEST', now(), now(), 0, 0, 'ZZTEST', 'ZZTEST'
+  );
+
+  v_ok := false;
+  begin
+    insert into plm.dcp_crawl (
+      status, run_kind, baseline_crawl_id, captured_on, portal_base_url,
+      crawler_version, account_scope, line_of_business, started_at, captured_by,
+      private_source_commit
+    ) values (
+      'planned', 'full', v_complete, date '2026-08-30',
+      'https://example.invalid', 'ZZTEST', 'ZZTEST synthetic', 'ZZTEST', now(),
+      'ZZTEST', 'ZZTEST'
+    );
+  exception when sqlstate 'P0001' or check_violation then v_ok := true;
+  end;
+  if not v_ok then
+    raise exception 'DCP lifecycle FAILED: a full crawl accepted a baseline.';
+  end if;
+
+  v_ok := false;
+  begin
+    insert into plm.dcp_crawl (
+      status, run_kind, baseline_crawl_id, captured_on, portal_base_url,
+      crawler_version, account_scope, line_of_business, started_at, captured_by,
+      private_source_commit
+    ) values (
+      'planned', 'incremental', null, date '2026-08-30',
+      'https://example.invalid', 'ZZTEST', 'ZZTEST synthetic', 'ZZTEST', now(),
+      'ZZTEST', 'ZZTEST'
+    );
+  exception when sqlstate 'P0001' or check_violation then v_ok := true;
+  end;
+  if not v_ok then
+    raise exception 'DCP lifecycle FAILED: an incremental crawl accepted no baseline.';
+  end if;
+
+  v_ok := false;
+  begin
+    insert into plm.dcp_crawl (
+      crawl_id, status, run_kind, baseline_crawl_id, captured_on, portal_base_url,
+      crawler_version, account_scope, line_of_business, started_at, captured_by,
+      private_source_commit
+    ) values (
+      gen_random_uuid(), 'planned', 'incremental', gen_random_uuid(), date '2026-08-30',
+      'https://example.invalid', 'ZZTEST', 'ZZTEST synthetic', 'ZZTEST', now(),
+      'ZZTEST', 'ZZTEST'
+    );
+  exception when foreign_key_violation or sqlstate 'P0001' then v_ok := true;
+  end;
+  if not v_ok then
+    raise exception 'DCP lifecycle FAILED: an incremental crawl accepted a missing baseline.';
+  end if;
+
+  v_ok := false;
+  begin
+    insert into plm.dcp_crawl (
+      crawl_id, status, run_kind, baseline_crawl_id, captured_on, portal_base_url,
+      crawler_version, account_scope, line_of_business, started_at, captured_by,
+      private_source_commit
+    ) values (
+      v_incremental, 'planned', 'incremental', v_incremental, date '2026-08-30',
+      'https://example.invalid', 'ZZTEST', 'ZZTEST synthetic', 'ZZTEST', now(),
+      'ZZTEST', 'ZZTEST'
+    );
+  exception when sqlstate 'P0001' or foreign_key_violation then v_ok := true;
+  end;
+  if not v_ok then
+    raise exception 'DCP lifecycle FAILED: a crawl accepted itself as baseline.';
+  end if;
 
   insert into plm.dcp_crawl (
     crawl_id, status, captured_on, portal_base_url, crawler_version, account_scope,
@@ -75,6 +153,24 @@ begin
     'https://example.invalid', 'ZZTEST', 'ZZTEST synthetic', 'ZZTEST', now(),
     'ZZTEST', 'ZZTEST'
   );
+
+  v_ok := false;
+  begin
+    update plm.dcp_crawl
+    set status = 'partial'
+    where crawl_id = v_complete;
+  exception when sqlstate 'P0001' then v_ok := true;
+  end;
+  if not v_ok then
+    raise exception 'DCP lifecycle FAILED: a referenced complete baseline was downgraded.';
+  end if;
+
+  update plm.dcp_crawl
+  set status = 'partial'
+  where crawl_id = v_unreferenced;
+  if (select status from plm.dcp_crawl where crawl_id = v_unreferenced) <> 'partial' then
+    raise exception 'DCP lifecycle FAILED: an unreferenced crawl could not change status.';
+  end if;
 
   insert into plm.dcp_style_guide (
     id, source_path, folder_name, region, year_segment,

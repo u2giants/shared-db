@@ -39,6 +39,9 @@ alter table plm.dcp_crawl
   add column run_kind text not null default 'full',
   add column baseline_crawl_id uuid null
     references plm.dcp_crawl(crawl_id) on delete restrict,
+  add column baseline_required_status text generated always as (
+    case when baseline_crawl_id is null then null else 'complete'::text end
+  ) stored,
   add column assets_added_count integer null,
   add column assets_withdrawn_count integer null,
   add column assets_reactivated_count integer null,
@@ -79,7 +82,13 @@ alter table plm.dcp_crawl
         style_guides_added_count, style_guides_withdrawn_count,
         style_guides_reactivated_count
       ) = 6
-    );
+    ),
+  add constraint dcp_crawl_identity_status_uk
+    unique (crawl_id, status),
+  add constraint dcp_crawl_complete_baseline_fk
+    foreign key (baseline_crawl_id, baseline_required_status)
+    references plm.dcp_crawl(crawl_id, status)
+    on update restrict on delete restrict;
 
 create index idx_dcp_crawl_baseline
   on plm.dcp_crawl (baseline_crawl_id)
@@ -109,6 +118,21 @@ begin
       tg_table_schema, tg_table_name using errcode = 'P0001';
   end if;
 
+  if tg_op = 'UPDATE'
+     and old.status = 'complete'
+     and new.status is distinct from 'complete' then
+    if exists (
+      select 1
+      from plm.dcp_crawl c
+      where c.baseline_crawl_id = old.crawl_id
+        and c.crawl_id <> old.crawl_id
+    ) then
+      raise exception 'DCP Vault refused: complete crawl % is an active incremental '
+        'baseline and cannot be changed to %.', old.crawl_id, new.status
+        using errcode = 'P0001';
+    end if;
+  end if;
+
   if new.run_kind = 'full' then
     if new.baseline_crawl_id is not null then
       raise exception 'DCP Vault refused: a full crawl cannot name a baseline crawl.'
@@ -125,7 +149,6 @@ begin
     raise exception 'DCP Vault refused: a crawl cannot use itself as its baseline.'
       using errcode = 'P0001';
   end if;
-
   select status into v_baseline_status
   from plm.dcp_crawl
   where crawl_id = new.baseline_crawl_id;
@@ -158,7 +181,9 @@ create trigger trg_dcp_style_guide_first_withdrawal
 
 comment on function plm.validate_dcp_incremental_baseline() is
 'Refuses an incremental DCP crawl unless it names a different crawl already frozen as '
-'complete. A failed or partial crawl can never become the authority for mass withdrawal. '
+'complete, and refuses to downgrade a complete crawl while an incremental crawl cites it. '
+'A composite foreign key binds every baseline reference to status complete, so concurrent '
+'changes cannot commit an invalid baseline. A failed or partial crawl can never authorize mass withdrawal. '
 'The same guarded trigger function preserves an entity''s first withdrawal timestamp once set.';
 
 comment on column plm.dcp_asset.first_withdrawn_at is
