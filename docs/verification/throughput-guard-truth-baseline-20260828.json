@@ -416,8 +416,8 @@
       "marker_count": 1
     },
     {
-      "version": "20260830213027",
-      "path": "supabase/migrations/20260830213027_source_resolution_supported_home.sql",
+      "version": "20260830230508",
+      "path": "supabase/migrations/20260830230508_source_resolution_supported_home.sql",
       "marker_count": 10
     },
     {
