@@ -646,7 +646,32 @@ DCP_OPA_PROPERTY_AUTHORITY_CONTRACT = _shape_contract(
     relations=('plm.dcp_opa_property_resolution','plm.dcp_opa_property_resolution_member'),
     routines=('api.db_data_admin_scraped_properties(text,text,integer)','plm.reject_dcp_opa_resolution_mutation()'),
     policies=(('plm.dcp_opa_property_resolution','dcp_opa_property_resolution_read'),('plm.dcp_opa_property_resolution_member','dcp_opa_property_resolution_member_read')),
-    triggers=(('plm.dcp_opa_property_resolution','dcp_opa_property_resolution_append_only'),('plm.dcp_opa_property_resolution_member','dcp_opa_property_resolution_member_append_only')),
+    triggers=(('plm.dcp_opa_property_resolution','dcp_opa_property_resolution_append_only'),('plm.dcp_opa_property_resolution_member','dcp_opa_property_resolution_member_append_only'),('plm.dcp_opa_property_resolution','dcp_opa_property_resolution_no_truncate'),('plm.dcp_opa_property_resolution_member','dcp_opa_property_resolution_member_no_truncate')),
+)
+# The dynamic `execute v_definition;` REWRITES THE BODY of a routine that already
+# exists, so an existence-only contract would still pass if that execute became a
+# no-op. These predicates witness the rewrite itself: the OPA-authority body must
+# be installed and the superseded licensor-resolution join must be gone. Ownership
+# barriers are asserted too, because a REVOKE alone does not bind the table owner.
+_DCP_OPA_DEF = "pg_get_functiondef(to_regprocedure('api.db_data_admin_scraped_properties(text,text,integer)'))"
+DCP_OPA_PROPERTY_AUTHORITY_CONTRACT += (
+    " and position('explicit_dcp_to_opa_property_id' in %s)>0" % _DCP_OPA_DEF +
+    " and position('style_guide_names' in %s)>0" % _DCP_OPA_DEF +
+    " and position('contract_opa_conflict' in %s)>0" % _DCP_OPA_DEF +
+    " and position('plm.dcp_property_licensor_resolution' in %s)=0" % _DCP_OPA_DEF +
+    "".join(
+        " and (select relforcerowsecurity from pg_class where oid=to_regclass('%s'))" % table
+        for table in ('plm.dcp_opa_property_resolution','plm.dcp_opa_property_resolution_member')
+    ) +
+    "".join(
+        " and exists (select 1 from pg_trigger where tgrelid=to_regclass('%s') and tgname='%s' and not tgisinternal and tgenabled='A')" % row
+        for row in (
+            ('plm.dcp_opa_property_resolution','dcp_opa_property_resolution_append_only'),
+            ('plm.dcp_opa_property_resolution_member','dcp_opa_property_resolution_member_append_only'),
+            ('plm.dcp_opa_property_resolution','dcp_opa_property_resolution_no_truncate'),
+            ('plm.dcp_opa_property_resolution_member','dcp_opa_property_resolution_member_no_truncate'),
+        )
+    )
 )
 POPDAM_FORWARD_RECOVERY_CONTRACT = _shape_contract(
     relations=('public.style_group_tags',),

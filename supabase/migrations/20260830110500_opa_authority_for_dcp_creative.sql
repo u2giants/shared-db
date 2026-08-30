@@ -497,6 +497,34 @@ create trigger dcp_opa_property_resolution_member_append_only
 before update or delete on plm.dcp_opa_property_resolution_member
 for each row execute function plm.reject_dcp_opa_resolution_mutation();
 
+-- PR #1660 independent review (Grok 4.6, sequence 543) hardening.
+-- Finding: the row triggers above closed UPDATE and DELETE but left two ways to
+-- erase the ledger anyway. TRUNCATE does not fire a row trigger at all, and a
+-- default origin-only trigger is skipped entirely under
+-- session_replication_role = 'replica'. Both are available to the table owner,
+-- which is exactly the actor the trigger barrier exists to bind.
+create trigger dcp_opa_property_resolution_no_truncate
+before truncate on plm.dcp_opa_property_resolution
+for each statement execute function plm.reject_dcp_opa_resolution_mutation();
+
+create trigger dcp_opa_property_resolution_member_no_truncate
+before truncate on plm.dcp_opa_property_resolution_member
+for each statement execute function plm.reject_dcp_opa_resolution_mutation();
+
+alter table plm.dcp_opa_property_resolution
+  enable always trigger dcp_opa_property_resolution_append_only;
+alter table plm.dcp_opa_property_resolution
+  enable always trigger dcp_opa_property_resolution_no_truncate;
+alter table plm.dcp_opa_property_resolution_member
+  enable always trigger dcp_opa_property_resolution_member_append_only;
+alter table plm.dcp_opa_property_resolution_member
+  enable always trigger dcp_opa_property_resolution_member_no_truncate;
+
+-- Same review: row security was enabled but not forced, so the owner still read
+-- around the SELECT policies. The read policies are the whole access rule here.
+alter table plm.dcp_opa_property_resolution force row level security;
+alter table plm.dcp_opa_property_resolution_member force row level security;
+
 -- Accepted, documented residual risk from the same review: approved_by and
 -- approved_at are free-form and are therefore forgeable by any principal that
 -- can INSERT -- today only service_role. They are not defaulted from auth.uid()
