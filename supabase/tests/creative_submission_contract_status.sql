@@ -8,7 +8,7 @@ declare
   v_role_id uuid;
   v_profile uuid;
   v_auth uuid;
-  v_licensor uuid := gen_random_uuid();
+  v_licensor uuid;
   v_capture_complete uuid := gen_random_uuid();
   v_capture_incomplete uuid := gen_random_uuid();
   v_property_complete uuid := gen_random_uuid();
@@ -69,7 +69,8 @@ begin
   from plm.creative_submission_property_resolution r
   where r.creative_source_id='zz1872-'||v_suffix||'-many';
 
-  insert into core.licensor(id,name,code) values(v_licensor,'ZZ Synthetic 1872','ZZ1872'||v_suffix);
+  select id into v_licensor from core.licensor order by id limit 1;
+  if v_licensor is null then raise exception '#1872 fixture requires one licensor'; end if;
   insert into plm.contract_property_capture(id,licensor_id,source_identity,evidence_date,decision_authority,controlling_chain_complete)
   values(v_capture_complete,v_licensor,'ZZ-COMPLETE-'||v_suffix,date '2099-01-01','ZZ-SYNTHETIC',true),
         (v_capture_incomplete,v_licensor,'ZZ-INCOMPLETE-'||v_suffix,date '2099-01-01','ZZ-SYNTHETIC',false);
