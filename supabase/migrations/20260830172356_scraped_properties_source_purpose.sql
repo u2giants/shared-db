@@ -115,7 +115,7 @@ begin
     $$when x.authority_status = 'direct_disney' then 'Disney - Creative (DCP Vault)'$$);
   v_definition := replace(v_definition,
     $$when x.authority_status = 'direct_marvel' then 'Marvel'$$,
-    $$when x.authority_status = 'direct_marvel' then 'Marvel - Creative (DCP Vault)'$$);
+    $$when x.authority_status = 'direct_marvel' then 'DCP Vault - Creative (authoritative Marvel scope)'$$);
   v_definition := replace(v_definition,
     $$when x.authority_status = 'direct_lucasfilm' then 'Lucasfilm / Star Wars'$$,
     $$when x.authority_status = 'direct_lucasfilm' then 'Lucasfilm / Star Wars - Creative (DCP Vault)'$$);
@@ -137,7 +137,8 @@ begin
   if position('Strawberry Shortcake - Creative' in v_definition) = 0
      or position('Sega - Submissions' in v_definition) = 0
      or position('Sega - Creative' in v_definition) = 0
-     or position('Marvel - Creative (DCP Vault)' in v_definition) = 0
+     or position('DCP Vault - Creative (authoritative Marvel scope)' in v_definition) = 0
+     or position('Marvel - Creative (DCP Vault)' in v_definition) <> 0
      or position('Pixar - Creative (DCP Vault)' in v_definition) = 0
      or position('plm.sega_property_licensor' in v_definition) <> 0
      or position('Source Property vocabulary' in v_definition) <> 0 then

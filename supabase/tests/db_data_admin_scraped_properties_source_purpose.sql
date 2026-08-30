@@ -25,7 +25,7 @@ begin
     'NBCUniversal - Creative (Creative Asset Factory)',
     '20th Century - Creative (DCP Vault)',
     'Disney - Creative (DCP Vault)',
-    'Marvel - Creative (DCP Vault)',
+    'DCP Vault - Creative (authoritative Marvel scope)',
     'Lucasfilm / Star Wars - Creative (DCP Vault)',
     'Pixar - Creative (DCP Vault)'
   ] loop
