@@ -23,7 +23,7 @@ test('REJECT at one head, then a new commit answering it, does not authorize mer
     pr: 1809, headSha: NEW,
     assignments: [{ issue: 1769, pr: 1809, headSha: OLD }],
     evidence: [{ body: `REJECT ${OLD} -- anchor validation is wrong` }],
-  }), (error) => error instanceof ApprovalCheckError && /no independent reviewer was ever assigned head/.test(error.message))
+  }), (error) => error instanceof ApprovalCheckError && /no reviewer was ever assigned head/.test(error.message))
 })
 
 test('an APPROVE of an earlier head never approves the bytes actually being merged', () => {
@@ -68,7 +68,7 @@ test('assignments belonging to a different head are ignored even when several ex
     pr: 1809, headSha: NEW,
     assignments: [{ issue: 1769, pr: 1809, headSha: OLD }, { issue: 1769, pr: 1809, headSha: 'c'.repeat(40) }],
     evidence: [{ body: `APPROVE ${NEW}` }],
-  }), /no independent reviewer was ever assigned head/)
+  }), /no reviewer was ever assigned head/)
 })
 
 test('an inexact or missing head is refused rather than guessed', () => {
@@ -163,7 +163,7 @@ test('the adapter carries a refusal and a stale-head assignment through unflatte
     refs: [{ ref: `refs/db-review-assignments/1769-1809-${OLD}`, object: {} }],
     comments: [{ body: `REJECT ${OLD} -- anchor validation is wrong` }],
   }))
-  assert.throws(() => evaluateExactHeadApproval(stale), /no independent reviewer was ever assigned head/)
+  assert.throws(() => evaluateExactHeadApproval(stale), /no reviewer was ever assigned head/)
   const refused = gatherApprovalInput({ PR_NUMBER: '1809' }, githubLike({
     refs: [{ ref: `refs/db-review-replacements/1769-1809-${NEW}/1`, object: {} }],
     comments: [{ body: `REVISE ${NEW} -- the reconciler still refuses this manifest` }],
@@ -212,4 +212,45 @@ test('APPROVE WITH CONDITIONS neither authorizes the merge nor locks the head', 
     assert.throws(() => evaluateExactHeadApproval({ ...pinned, evidence: [{ body }] }), /has no APPROVE tied to it/, body)
   }
   assert.equal(evaluateExactHeadApproval({ ...pinned, evidence: [conditional, { body: `VERDICT: APPROVE ${NEW}` }] }).approved, true)
+})
+
+// The claim is "with conditions", not the word WITH sitting next to APPROVE. The
+// adjacency lookahead this replaces was wrong in BOTH directions at once, and the
+// over-refusing direction is the one that fails closed on real approvals.
+test('conditional approval is detected by the claim, however it is worded or wrapped', () => {
+  const pinned = { pr: 1809, headSha: NEW, assignments: [{ issue: 1769, pr: 1809, headSha: NEW }] }
+  for (const body of [
+    `VERDICT: APPROVE ONLY WITH CONDITIONS ${NEW}`,
+    `VERDICT: APPROVE, BUT WITH CONDITIONS ${NEW}`,
+    // Wrapped across two lines by the reviewer's own formatting.
+    `Reviewed ${NEW}.\n\nVERDICT: APPROVE\nWITH CONDITIONS: rerun the reconciler first`,
+  ]) {
+    assert.throws(() => evaluateExactHeadApproval({ ...pinned, evidence: [{ body }] }), /has no APPROVE tied to it/, body)
+  }
+  // ...and these are unconditional approvals that the adjacency rule wrongly refused.
+  for (const body of [`VERDICT: APPROVE WITH no reservations ${NEW}`, `VERDICT: APPROVE WITH confidence ${NEW}`]) {
+    assert.equal(evaluateExactHeadApproval({ ...pinned, evidence: [{ body }] }).approved, true, body)
+  }
+})
+
+// `.ai/reviews/phase6-glm-review.md:7` is literally `## VERDICT: **APPROVED`. An
+// archived, genuine approval form that the gate refused is the refuse-all-valid-input
+// defect, which surfaces as reviewers apparently not returning verdicts.
+test('emphasis after the VERDICT label does not hide the verdict', () => {
+  const pinned = { pr: 1809, headSha: NEW, assignments: [{ issue: 1769, pr: 1809, headSha: NEW }] }
+  for (const body of [`## VERDICT: **APPROVED**\n\nhead ${NEW}`, `VERDICT: __APPROVE__ ${NEW}`]) {
+    assert.equal(evaluateExactHeadApproval({ ...pinned, evidence: [{ body }] }).approved, true, body)
+  }
+  assert.throws(() => evaluateExactHeadApproval({ ...pinned, evidence: [{ body: `VERDICT: **REVISE** ${NEW}` }] }), /unanswered reviewer refusal/)
+  // Stripping emphasis must still not strip letters.
+  assert.throws(() => evaluateExactHeadApproval({ ...pinned, evidence: [{ body: `VERDICT: **DO NOT APPROVE** ${NEW}` }] }), /has no APPROVE tied to it/)
+})
+
+// A reviewer writing the refusal in prose spells it with a space. Only the
+// underscore form locked a head before, so the space form was silently ignorable.
+test('REQUEST CHANGES with a space is a refusal, like its underscore form', () => {
+  const pinned = { pr: 1809, headSha: NEW, assignments: [{ issue: 1769, pr: 1809, headSha: NEW }] }
+  for (const body of [`VERDICT: REQUEST CHANGES ${NEW}`, `VERDICT: REQUEST_CHANGES ${NEW}`]) {
+    assert.throws(() => evaluateExactHeadApproval({ ...pinned, evidence: [{ body }] }), /unanswered reviewer refusal/, body)
+  }
 })
