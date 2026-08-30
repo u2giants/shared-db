@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { evaluateExactHeadApproval, parseAssignmentRef, ApprovalCheckError } from './check-exact-head-approval.mjs'
+import { evaluateExactHeadApproval, gatherApprovalInput, parseAssignmentRef, ApprovalCheckError } from './check-exact-head-approval.mjs'
 
 const OLD = 'b494401028464ef8b2e67fe0b5b1836839b2be36'
 const NEW = '8d3c31accd5b21ea669e65f5ae53f5f95cc57337'
@@ -122,4 +122,48 @@ test('a real verdict still counts through markdown emphasis, quoting and a later
     assignments: [{ issue: 1769, pr: 1809, headSha: NEW }],
     evidence: [{ body: `> APPROVE ${NEW}` }],
   }).approved, true)
+})
+
+// The adapter, driven with the shapes GitHub actually returns -- ref rows as
+// {ref, object}, review rows as {state, commit_id, body}, comment rows as {body}.
+// The evaluation core was covered and this layer was not, and a conversion layer
+// whose test shape diverges from production is where this class of defect hides.
+function githubLike({ refs, comments = [], reviews = [] }) {
+  return {
+    json: (args) => {
+      const endpoint = args[args.length - 1]
+      if (endpoint.includes('/git/matching-refs/db-review-assignments')) return refs.filter((r) => r.ref.includes('assignments'))
+      if (endpoint.includes('/git/matching-refs/db-review-replacements')) return refs.filter((r) => r.ref.includes('replacements'))
+      if (/\/pulls\/\d+$/.test(endpoint)) return { head: { sha: NEW } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    },
+    pages: (endpoint) => (endpoint.includes('/reviews') ? reviews : comments),
+  }
+}
+
+test('the adapter turns real GitHub payloads into an authorization the core accepts', () => {
+  const input = gatherApprovalInput({ PR_NUMBER: '1809' }, githubLike({
+    refs: [{ ref: `refs/db-review-assignments/1769-1809-${NEW}`, object: { sha: 'e'.repeat(40), type: 'commit' } }],
+    reviews: [{ state: 'APPROVED', commit_id: NEW, body: '' }],
+  }))
+  assert.equal(input.headSha, NEW)
+  assert.equal(input.assignments.length, 1)
+  assert.equal(evaluateExactHeadApproval(input).approved, true)
+})
+
+test('the adapter carries a refusal and a stale-head assignment through unflattened', () => {
+  const stale = gatherApprovalInput({ PR_NUMBER: '1809' }, githubLike({
+    refs: [{ ref: `refs/db-review-assignments/1769-1809-${OLD}`, object: {} }],
+    comments: [{ body: `REJECT ${OLD} -- anchor validation is wrong` }],
+  }))
+  assert.throws(() => evaluateExactHeadApproval(stale), /no independent reviewer was ever assigned head/)
+  const refused = gatherApprovalInput({ PR_NUMBER: '1809' }, githubLike({
+    refs: [{ ref: `refs/db-review-replacements/1769-1809-${NEW}/1`, object: {} }],
+    comments: [{ body: `REVISE ${NEW} -- the reconciler still refuses this manifest` }],
+  }))
+  assert.throws(() => evaluateExactHeadApproval(refused), /unanswered reviewer refusal/)
+})
+
+test('the adapter refuses rather than guesses when the PR number is absent', () => {
+  assert.throws(() => gatherApprovalInput({}, githubLike({ refs: [] })), /PR number is unavailable/)
 })

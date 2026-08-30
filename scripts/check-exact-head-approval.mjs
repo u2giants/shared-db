@@ -72,17 +72,23 @@ export function parseAssignmentRef(ref) {
 
 // Assignment refs are named <issue>-<pr>-<headSha>, so the pull request alone is
 // enough to find them; the work issue never has to be guessed here.
-export function gatherApprovalInput(env = process.env) {
+// `deps` exists so this ADAPTER can be tested against real GitHub payload shapes.
+// The evaluation core was tested and the adapter that feeds it was not -- which is
+// where the same class of defect has now hidden twice repo-wide: a conversion layer
+// whose test-time shape diverges from the one production produces. Nothing is
+// stubbed in production; the defaults are the real readers.
+export function gatherApprovalInput(env = process.env, deps = { json, pages }) {
+  const { json: readJson = json, pages: readPages = pages } = deps
   let event = {}; if (env.GITHUB_EVENT_PATH) event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8'))
   const pr = Number(env.PR_NUMBER || event.pull_request?.number); if (!pr) throw new ApprovalCheckError('PR number is unavailable')
-  const headSha = String(env.REQUESTED_SHA || json(['api', `repos/${REPO}/pulls/${pr}`])?.head?.sha || '')
+  const headSha = String(env.REQUESTED_SHA || readJson(['api', `repos/${REPO}/pulls/${pr}`])?.head?.sha || '')
   const issueNumbers = new Set([pr])
   // Slot 2 assignments are suffixed `-slot<N>`, and a reviewer replaced after a
   // failure keeps its own ref under the replacement namespace, pinned to the SAME
   // head. Both are genuine independent assignments to these exact bytes, so both
   // count; ignoring either would refuse a merge whose review really did happen.
   const refs = [REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_REPLACEMENT_REF_PREFIX].flatMap((prefix) => {
-    const rows = json(['api', `repos/${REPO}/git/matching-refs/${prefix.replace(/^refs\//, '')}/`])
+    const rows = readJson(['api', `repos/${REPO}/git/matching-refs/${prefix.replace(/^refs\//, '')}/`])
     return Array.isArray(rows) ? rows : []
   })
   const assignments = refs.flatMap((row) => {
@@ -92,8 +98,8 @@ export function gatherApprovalInput(env = process.env) {
     return [parsed]
   })
   const evidence = [
-    ...[...issueNumbers].flatMap((number) => pages(`repos/${REPO}/issues/${number}/comments?per_page=100`)),
-    ...pages(`repos/${REPO}/pulls/${pr}/reviews?per_page=100`),
+    ...[...issueNumbers].flatMap((number) => readPages(`repos/${REPO}/issues/${number}/comments?per_page=100`)),
+    ...readPages(`repos/${REPO}/pulls/${pr}/reviews?per_page=100`),
   ]
   return { pr, headSha, evidence, assignments }
 }
