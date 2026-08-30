@@ -184,7 +184,7 @@ begin
       ('wb_inferred_property_character','wb_property','property_id','wb_character_normalized','character_id'),
       ('wb_inferred_style_guide_character','wb_style_guide_normalized','style_guide_id','wb_character_normalized','character_id')
   loop
-    select pg_get_viewdef(format('api.%I',v_view)::regclass,false) into v_definition;
+    select rtrim(pg_get_viewdef(format('api.%I',v_view)::regclass,false), E' \t\r\n;') into v_definition;
     execute format(
       'create or replace view api.%1$I with (security_invoker=true) as select q.* from (%2$s) q join plm.%3$I l on l.id=q.%4$I join plm.%5$I r on r.id=q.%6$I where l.status=''active'' and r.status=''active''',
       v_view,v_definition,v_left_table,v_left_column,v_right_table,v_right_column
