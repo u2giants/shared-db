@@ -51,7 +51,7 @@ alter table plm.wb_franchise
 create function plm.enforce_wb_entity_lifecycle()
 returns trigger language plpgsql set search_path = pg_catalog as $$
 begin
-  if old.first_withdrawn_at is not null
+  if tg_op = 'UPDATE' and old.first_withdrawn_at is not null
      and new.first_withdrawn_at is distinct from old.first_withdrawn_at then
     raise exception 'Warner first withdrawal history is immutable.' using errcode = 'P0001';
   end if;
@@ -97,8 +97,8 @@ begin
   end loop;
 
   v_definition := replace(v_definition,
-    ',last_seen_at=now(),updated_at=now()\n    where source_namespace=',
-    ',status=''active'',withdrawn_at=null,last_seen_at=now(),updated_at=now()\n    where source_namespace=');
+    E',last_seen_at=now(),updated_at=now()\n    where source_namespace=',
+    E',status=''active'',withdrawn_at=null,last_seen_at=now(),updated_at=now()\n    where source_namespace=');
   v_definition := replace(v_definition,
     ') and source_hash is distinct from encode(sha256(convert_to(x::text,''UTF8'')),''hex'');',
     ');');
@@ -121,7 +121,7 @@ begin
 
   if v_definition = v_original
      or position('first_withdrawn_at=coalesce(first_withdrawn_at,now())' in v_definition) = 0
-     or position('status=''active'',withdrawn_at=null' in v_definition) = 0 then
+     or (length(v_definition)-length(replace(v_definition,'status=''active'',withdrawn_at=null',''))) / length('status=''active'',withdrawn_at=null') <> 5 then
     raise exception 'Warner lifecycle patch refused: installed normalized loader body was not recognized.';
   end if;
   execute v_definition;
@@ -137,17 +137,28 @@ declare
   );
   v_original text := v_definition;
 begin
+  v_definition := replace(v_definition,'v_source_active boolean;','v_source_active boolean; v_entity_active boolean;');
   v_definition := replace(v_definition,
     'if not exists (select 1 from plm.wb_asset_normalized where id = v_source_id) then',
-    'select status = ''active'' into v_source_active from plm.wb_asset_normalized where id = v_source_id; if v_source_active is null then');
+    'select status = ''active'' into v_entity_active from plm.wb_asset_normalized where id = v_source_id; if v_entity_active is null then');
   v_definition := replace(v_definition,
     'if not exists (select 1 from plm.wb_style_guide_normalized where id = v_source_id) then',
-    'select status = ''active'' into v_source_active from plm.wb_style_guide_normalized where id = v_source_id; if v_source_active is null then');
+    'select status = ''active'' into v_entity_active from plm.wb_style_guide_normalized where id = v_source_id; if v_entity_active is null then');
   v_definition := replace(v_definition,
     'if not exists (select 1 from plm.wb_character_normalized where id = v_source_id) then',
-    'select status = ''active'' into v_source_active from plm.wb_character_normalized where id = v_source_id; if v_source_active is null then');
+    'select status = ''active'' into v_entity_active from plm.wb_character_normalized where id = v_source_id; if v_entity_active is null then');
+  v_definition := replace(v_definition,
+    'insert into plm.wb_asset_canonical_property_edge as e',
+    'v_source_active := v_source_active and v_entity_active; insert into plm.wb_asset_canonical_property_edge as e');
+  v_definition := replace(v_definition,
+    'insert into plm.wb_style_guide_canonical_property_edge as e',
+    'v_source_active := v_source_active and v_entity_active; insert into plm.wb_style_guide_canonical_property_edge as e');
+  v_definition := replace(v_definition,
+    'insert into plm.wb_character_canonical_property_edge as e',
+    'v_source_active := v_source_active and v_entity_active; insert into plm.wb_character_canonical_property_edge as e');
   if v_definition = v_original
-     or (length(v_definition)-length(replace(v_definition,'select status = ''active'' into v_source_active',''))) / length('select status = ''active'' into v_source_active') <> 3 then
+     or (length(v_definition)-length(replace(v_definition,'select status = ''active'' into v_entity_active',''))) / length('select status = ''active'' into v_entity_active') <> 3
+     or (length(v_definition)-length(replace(v_definition,'v_source_active := v_source_active and v_entity_active',''))) / length('v_source_active := v_source_active and v_entity_active') <> 3 then
     raise exception 'Warner lifecycle patch refused: installed canonical-edge writer body was not recognized.';
   end if;
   execute v_definition;

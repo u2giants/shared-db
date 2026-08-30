@@ -695,19 +695,27 @@ SCRAPED_PROPERTIES_SOURCE_PURPOSE_CONTRACT += (
 WB_DURABLE_ENTITY_LIFECYCLE_CONTRACT = _shape_contract(
     relations=tuple('plm.' + value for value in (
         'wb_asset_normalized','wb_character_normalized','wb_franchise',
-        'wb_property','wb_style_guide_normalized')),
+        'wb_property','wb_style_guide_normalized')) + tuple('api.' + value for value in (
+        'wb_inferred_franchise_property','wb_inferred_franchise_style_guide',
+        'wb_inferred_franchise_character','wb_inferred_style_guide_property',
+        'wb_inferred_property_character','wb_inferred_style_guide_character',
+        'wb_canonical_relationship_candidates')),
     indexes=tuple('plm.idx_' + value + '_lifecycle_status' for value in (
         'wb_asset_normalized','wb_character_normalized','wb_franchise',
         'wb_property','wb_style_guide_normalized')),
     routines=('plm.sync_wb_normalized_target(uuid,text,jsonb,text,numeric)',
               'plm.sync_wb_canonical_relationship_edges(text,jsonb)'),
+    triggers=tuple(('plm.' + value,'trg_' + value + '_lifecycle') for value in (
+        'wb_asset_normalized','wb_character_normalized','wb_franchise',
+        'wb_property','wb_style_guide_normalized')),
 )
 _WB_LOADER_DEF = "pg_get_functiondef(to_regprocedure('plm.sync_wb_normalized_target(uuid,text,jsonb,text,numeric)'))"
 _WB_EDGE_DEF = "pg_get_functiondef(to_regprocedure('plm.sync_wb_canonical_relationship_edges(text,jsonb)'))"
 WB_DURABLE_ENTITY_LIFECYCLE_CONTRACT += (
     " and position('first_withdrawn_at=coalesce(first_withdrawn_at,now())' in %s)>0" % _WB_LOADER_DEF
-    + " and position('status=''active'',withdrawn_at=null' in %s)>0" % _WB_LOADER_DEF
-    + " and position('select status = ''active'' into v_source_active' in %s)>0" % _WB_EDGE_DEF
+    + " and (length(%s)-length(replace(%s,'status=''active'',withdrawn_at=null','')))/length('status=''active'',withdrawn_at=null')=5" % (_WB_LOADER_DEF,_WB_LOADER_DEF)
+    + " and (length(%s)-length(replace(%s,'select status = ''active'' into v_entity_active','')))/length('select status = ''active'' into v_entity_active')=3" % (_WB_EDGE_DEF,_WB_EDGE_DEF)
+    + " and not exists (select 1 from unnest(array['wb_inferred_franchise_property','wb_inferred_franchise_style_guide','wb_inferred_franchise_character','wb_inferred_style_guide_property','wb_inferred_property_character','wb_inferred_style_guide_character']::text[]) n(name) where position('status = ''active''' in pg_get_viewdef(format('api.%I',n.name)::regclass,false))=0)"
     + " and not exists (select 1 from unnest(array['wb_asset_normalized','wb_character_normalized','wb_franchise','wb_property','wb_style_guide_normalized']::text[]) n(name) where (select count(*) from information_schema.columns c where c.table_schema='plm' and c.table_name=n.name and c.column_name in ('status','withdrawn_at','first_withdrawn_at','change_signal'))<>4)"
 )
 POPDAM_FORWARD_RECOVERY_CONTRACT = _shape_contract(

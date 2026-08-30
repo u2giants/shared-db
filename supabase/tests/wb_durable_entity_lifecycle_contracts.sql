@@ -30,7 +30,8 @@ insert into plm.wb_capture(capture_id,chunk_number,target,status,captured_at,pri
 values
  ('18810000-0000-4000-8000-000000000101',0,'wb_franchise','validating','2026-08-28','synthetic',repeat('1',64),2,'contract','https://example.invalid'),
  ('18810000-0000-4000-8000-000000000102',0,'wb_franchise','validating','2026-08-29','synthetic',repeat('2',64),1,'contract','https://example.invalid'),
- ('18810000-0000-4000-8000-000000000103',0,'wb_franchise','validating','2026-08-30','synthetic',repeat('3',64),2,'contract','https://example.invalid');
+ ('18810000-0000-4000-8000-000000000103',0,'wb_franchise','validating','2026-08-30','synthetic',repeat('3',64),2,'contract','https://example.invalid'),
+ ('18810000-0000-4000-8000-000000000104',0,'wb_franchise','validating','2026-08-30','synthetic',repeat('4',64),1,'contract','https://example.invalid');
 
 set local role service_role;
 select * from plm.sync_wb_normalized_target(
@@ -59,11 +60,30 @@ select * from plm.sync_wb_normalized_target(
  '{"captured_at":"2026-08-30","rows":[{"source_namespace":"synthetic","source_id":"franchise-a","label":"A","identity_method":"source_id","source_url":"https://example.invalid"},{"source_namespace":"synthetic","source_id":"franchise-b","label":"B","identity_method":"source_id","source_url":"https://example.invalid"}]}'::jsonb,
  'mirror_only',1);
 
-do $reactivated$
+do $unchanged_reactivation$
 begin
  if not exists(select 1 from plm.wb_franchise where source_namespace='synthetic' and source_id='franchise-b' and status='active' and withdrawn_at is null and first_seen_at=current_setting('test.wb_first_seen')::timestamptz and first_withdrawn_at=current_setting('test.wb_first_withdrawn')::timestamptz) then
    raise exception 'unchanged-hash reappearance did not preserve durable lifecycle history';
  end if;
+end
+$unchanged_reactivation$;
+
+select * from plm.sync_wb_normalized_target(
+ '18810000-0000-4000-8000-000000000104','wb_franchise',
+ '{"captured_at":"2026-08-30","rows":[{"source_namespace":"synthetic","source_id":"franchise-a","label":"A","identity_method":"source_id","source_url":"https://example.invalid"}]}'::jsonb,
+ 'mirror_only',1);
+
+do $reactivated$
+begin
+ if not exists(select 1 from plm.wb_franchise where source_namespace='synthetic' and source_id='franchise-b' and status='withdrawn' and withdrawn_at is not null and first_seen_at=current_setting('test.wb_first_seen')::timestamptz and first_withdrawn_at=current_setting('test.wb_first_withdrawn')::timestamptz) then
+   raise exception 'repeated withdrawal did not preserve durable lifecycle history';
+ end if;
+end
+$reactivated$;
+reset role;
+
+do $immutable$
+begin
  begin
    update plm.wb_franchise set first_withdrawn_at=now() where source_namespace='synthetic' and source_id='franchise-b';
    raise exception 'immutable first_withdrawn_at update was accepted';
@@ -71,8 +91,20 @@ begin
    if sqlerrm='immutable first_withdrawn_at update was accepted' then raise; end if;
  end;
 end
-$reactivated$;
-reset role;
+$immutable$;
+
+do $write_grants$
+declare v_table text;
+begin
+ foreach v_table in array array['wb_asset_normalized','wb_character_normalized','wb_property','wb_style_guide_normalized','wb_franchise'] loop
+  if has_table_privilege('service_role',format('plm.%I',v_table),'insert')
+     or has_table_privilege('service_role',format('plm.%I',v_table),'update')
+     or has_table_privilege('service_role',format('plm.%I',v_table),'delete') then
+    raise exception 'service_role unexpectedly has direct lifecycle-table DML on plm.%',v_table;
+  end if;
+ end loop;
+end
+$write_grants$;
 
 create temp table test_wb_asset_lifecycle
   (like plm.wb_asset_normalized including defaults including generated including constraints);
