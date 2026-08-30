@@ -15,6 +15,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   verdictOpensLine,
+  approvalOpensLine,
   isApprovalFor,
   isVerdictFor,
   anyVerdictFor,
@@ -197,6 +198,18 @@ test('APPROVE WITH CONDITIONS neither approves nor locks the head', () => {
     // Half two: it does not lock. This is the half that is easy to get wrong.
     assert.equal(isVerdictFor(comment(body), HEAD), false, `locked: ${label}`)
   }
+})
+
+test('conditional approval is detected across wording and one wrapped line',()=>{
+  for(const body of [
+    `APPROVE ONLY WITH CONDITIONS\n\nHead ${HEAD}.`,
+    `APPROVE, BUT WITH CONDITIONS\n\nHead ${HEAD}.`,
+    `VERDICT: APPROVE\nWITH CONDITIONS: fix first.\nHead ${HEAD}.`,
+  ]){
+    assert.equal(approvalOpensLine(body),false)
+    assert.equal(isVerdictFor(comment(body),HEAD),false)
+  }
+  for(const body of [`APPROVE WITH confidence\nHead ${HEAD}.`,`APPROVE WITH no reservations\nHead ${HEAD}.`,`## VERDICT: **APPROVED**\nHead ${HEAD}.`])assert.equal(isApprovalFor(comment(body),HEAD),true)
 })
 
 test('an unconditional APPROVE still clears a head a conditional one touched', () => {

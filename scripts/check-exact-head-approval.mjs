@@ -49,7 +49,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { REPO, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_REPLACEMENT_REF_PREFIX } from './manage-migration-author-lanes.mjs'
+import { REPO, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_REPLACEMENT_REF_PREFIX, isApprovalFor, isVerdictFor } from './manage-migration-author-lanes.mjs'
 
 export class ApprovalCheckError extends Error {}
 
@@ -108,42 +108,6 @@ const unambiguouslyTiedToHead = (row, headSha) => {
 // because it presents as reviewers not returning verdicts rather than as a gate bug.
 // Only whitespace and emphasis marks are stripped, never letters: `VERDICT: DO NOT
 // APPROVE` still does not open with APPROVE.
-const stripVerdictLabel = (line) => line.replace(/^[\s>*_#-]+/, '').replace(/^VERDICT\s*:\s*/i, '').replace(/^[\s*_]+/, '')
-const bodyLines = (body) => String(body ?? '').split(/\r?\n/)
-const verdictLine = (body, pattern) => bodyLines(body).some((line) => pattern.test(stripVerdictLabel(line)))
-// `APPROVE WITH CONDITIONS` is a refusal-with-remedy, not an approval: the
-// conditions ARE the reviewer's finding, so merging on it merges the state the
-// reviewer declined to authorize -- while producing an audit trail saying they
-// approved. `psg4-glm52-review-brief.md` offers reviewers exactly that wording.
-// Matching it because the line opens with APPROVE is the anywhere-in-body defect
-// in miniature: matching the token instead of the claim.
-//
-// It deliberately does NOT join REFUSAL. Failing to satisfy the approval gate is
-// not the same as recording a refusal: a conditional response must leave the head
-// unapproved without LOCKING it, or the reviewer's own conditions strand the head
-// those conditions were meant to be met on -- the self-lock through a new door.
-// Detection is on the CLAIM, not on adjacency to the word APPROVE. A lookahead for
-// `WITH` immediately after APPROVE was wrong in both directions: it missed
-// `APPROVE ONLY WITH CONDITIONS` and `APPROVE, BUT WITH CONDITIONS`, and it wrongly
-// refused `APPROVE WITH no reservations` and `APPROVE WITH confidence`, which are
-// unconditional approvals. So the test is the phrase "with condition(s)" appearing
-// anywhere on the verdict line -- and on the line after it, because reviewers wrap
-// and `VERDICT: APPROVE` / `WITH CONDITIONS: ...` is the same claim split in two.
-const CONDITIONAL = /\bWITH\s+CONDITIONS?\b/i
-// The boundary is "no more letters or digits", not `\b`. Underscore is a word
-// character, so `\b` did not fire on the markdown emphasis form `__APPROVE__`.
-const APPROVE = /^APPROVE(?:D)?(?![A-Za-z0-9])/i
-// REJECT is a real verdict word in this repo's reviewer wrappers alongside REVISE
-// and GitHub's own CHANGES_REQUESTED. Omitting any of them would let a refusal at
-// the merged head be silently outvoted by an approval that came before it. The
-// space-separated `REQUEST CHANGES` counts too: it is how a reviewer writing prose
-// spells the same refusal, and only the underscore form was recognised before.
-const REFUSAL = /^(?:REJECT(?:ED)?|REVISE|REQUEST[_\s]CHANGES)(?![A-Za-z0-9])/i
-const approvalLine = (body) => bodyLines(body).some((line, index, all) => {
-  const stripped = stripVerdictLabel(line)
-  return APPROVE.test(stripped) && !CONDITIONAL.test(`${stripped} ${all[index + 1] ?? ''}`)
-})
-
 export function evaluateExactHeadApproval({ pr, headSha, evidence = [], assignments = [] }) {
   if (!/^[0-9a-f]{40}$/i.test(String(headSha ?? ''))) throw new ApprovalCheckError('an exact 40-character head SHA is required')
   if (!Number.isInteger(Number(pr)) || Number(pr) <= 0) throw new ApprovalCheckError('an exact pull request number is required')
@@ -152,13 +116,12 @@ export function evaluateExactHeadApproval({ pr, headSha, evidence = [], assignme
   if (!pinned.length) throw new ApprovalCheckError(`no reviewer was ever assigned head ${headSha}; an assignment pinned to an earlier head does not carry forward to new commits`)
 
   const atHead = evidence.filter((row) => tiedToHead(row, headSha))
-  const state = (row) => String(row.state ?? '').toUpperCase()
-  const refusals = atHead.filter((row) => verdictLine(row.body, REFUSAL) || state(row) === 'CHANGES_REQUESTED')
+  const refusals = atHead.filter((row) => isVerdictFor(row,headSha) && !isApprovalFor(row,headSha))
   if (refusals.length) throw new ApprovalCheckError(`head ${headSha} carries an unanswered reviewer refusal; answer it with a new commit and a fresh exact-head review`)
 
   const approvals = evidence
     .filter((row) => unambiguouslyTiedToHead(row, headSha))
-    .filter((row) => approvalLine(row.body) || state(row) === 'APPROVED')
+    .filter((row) => isApprovalFor(row,headSha))
   if (!approvals.length) throw new ApprovalCheckError(`head ${headSha} has no APPROVE tied to it; an approval of an earlier head never approves these bytes`)
 
   return { approved: true, head_sha: headSha, pr: Number(pr), assignments: pinned.length, approvals: approvals.length }

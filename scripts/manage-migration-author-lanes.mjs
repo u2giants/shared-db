@@ -1568,7 +1568,7 @@ export function findPrReviewAssignments(issue,pr,io){
 // widened to skip arbitrary leading words: a strip that swallowed them would
 // read `VERDICT: DO NOT APPROVE` as an approval, turning the plainest possible
 // refusal into the strongest possible authorization. Pinned by test.
-const stripLineLead=(line)=>String(line).replace(/^[\s>*_#-]+/,'').replace(/^VERDICT\s*[:-]\s*/i,'')
+const stripLineLead=(line)=>String(line).replace(/^[\s>*_#-]+/,'').replace(/^VERDICT\s*[:-]\s*/i,'').replace(/^[\s*_]+/,'')
 // REJECT is a real verdict word in this repository's reviewer wrappers alongside
 // REVISE, and REQUEST_CHANGES is GitHub's own.
 //
@@ -1584,10 +1584,15 @@ const stripLineLead=(line)=>String(line).replace(/^[\s>*_#-]+/,'').replace(/^VER
 // refusal -- it withholds the decision rather than recording one. Both halves are
 // asserted in the same test, because "does not approve" and "does not lock" are
 // two separate claims and only the first is obvious.
-const VERDICT_APPROVE=/^APPROVE(?:D)?\b(?!\s*(?:WITH|,\s*WITH)\s+CONDITIONS?\b)/i
-const VERDICT_REFUSAL=/^(?:REJECT(?:ED)?|REVISE|REQUEST_CHANGES)\b/i
+const VERDICT_APPROVE=/^APPROVE(?:D)?(?![A-Za-z0-9])/i
+const VERDICT_REFUSAL=/^(?:REJECT(?:ED)?|REVISE|REQUEST[_\s]CHANGES)(?![A-Za-z0-9])/i
+const VERDICT_CONDITIONAL=/\bWITH\s+CONDITIONS?\b/i
 export function verdictOpensLine(body,pattern){
   return String(body??'').split(/\r?\n/).some((line)=>pattern.test(stripLineLead(line)))
+}
+export function approvalOpensLine(body){
+  const lines=String(body??'').split(/\r?\n/)
+  return lines.some((line,index)=>{const stripped=stripLineLead(line);return VERDICT_APPROVE.test(stripped)&&!VERDICT_CONDITIONAL.test(`${stripped} ${lines[index+1]??''}`)})
 }
 // Structured GitHub review states are data, not prose, so they are trusted as
 // they always were -- the opening-line rule governs free text only.
@@ -1597,14 +1602,14 @@ export function evidenceTiedToHead(row,headSha){
 }
 // An APPROVE for this head. Used by the fail-OPEN preview gate.
 export function isApprovalFor(row,headSha){
-  return evidenceTiedToHead(row,headSha)&&(verdictOpensLine(row?.body,VERDICT_APPROVE)||reviewState(row)==='APPROVED')
+  return evidenceTiedToHead(row,headSha)&&(approvalOpensLine(row?.body)||reviewState(row)==='APPROVED')
 }
 // Any decision for this head -- approval or refusal. Used by the fail-CLOSED
 // assignment, replacement and lease guards.
 export function isVerdictFor(row,headSha){
   if(!evidenceTiedToHead(row,headSha))return false
   if(['APPROVED','CHANGES_REQUESTED'].includes(reviewState(row)))return true
-  return verdictOpensLine(row?.body,VERDICT_APPROVE)||verdictOpensLine(row?.body,VERDICT_REFUSAL)
+  return approvalOpensLine(row?.body)||verdictOpensLine(row?.body,VERDICT_REFUSAL)
 }
 export const anyVerdictFor=(evidence,headSha)=>(evidence??[]).some((row)=>isVerdictFor(row,headSha))
 
