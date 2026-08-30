@@ -471,7 +471,7 @@ test('complete slot-2 assignment stays inside the real wire-attempt budget (issu
   // the wrong name was nearly merged anyway -- so the gate is now asserted by
   // behaviour below, not only by its numeral.
   assert.equal(attempts,20,`slot 2 used ${attempts} wire attempts; this fixture costs exactly 20 of the ${REVIEW_OPERATION_REQUEST_LIMIT}-request budget. If this changed, re-derive the ceiling rather than widening it`)
-  assert.equal(REVIEW_MUTEX_SECTION_RESERVE,13,'the mutex-release reserve changed without this budget being re-derived')
+  assert.equal(REVIEW_MUTEX_SECTION_RESERVE,13,'the mutex-section entry-gate reserve changed without this budget being re-derived')
   assert.equal(REVIEW_OPERATION_REQUEST_LIMIT,22,'the ceiling changed; re-derive it against the real cost rather than raising it again')
   // The three pins above are near-tautologies: they restate constants. None of
   // them fails if the CALL SITE stops using the constant, because the gate asks
@@ -481,7 +481,7 @@ test('complete slot-2 assignment stays inside the real wire-attempt budget (issu
   // A reserve one smaller would clear this gate, take the mutex, and only then
   // discover it cannot finish -- which is the failure the gate exists to stop.
   const slot2Ref=`${REVIEW_ASSIGNMENT_REF_PREFIX}/1722-1748-${'a'.repeat(40)}-slot2`
-  assert.ok(io.refs.has(slot2Ref),'the slot-2 assignment ref should exist before it is cleared to re-run the path')
+  assert.ok(io.refs.has(slot2Ref),'the slot-2 assignment ref should exist before it is cleared to re-run the pre-mutex path (the post-mutex portion re-runs via the cursor branch; pre-mutex cost is identical either way, which is all this gate assertion depends on)')
   io.refs.delete(slot2Ref)
   const rate=io.getRateLimit
   io.getRateLimit=()=>{wire(1);return rate()}
