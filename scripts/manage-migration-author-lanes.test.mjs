@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_PAGE_LIMIT, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_PAGE_LIMIT, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -70,6 +70,46 @@ test('GitHub coordination delete never replays after response loss and preserves
 
 const NOW = new Date('2026-08-14T20:00:00Z')
 const body = (objects, owner, expires = '2026-08-15T08:00:00.000Z') => claimBody({ version:`2026081420${owner.padStart(4,'0')}`, objects, owner:`agent-${owner}`, branch:`codex/${owner}`, worktree:`C:/w/${owner}`, expiresAt:new Date(expires) })
+
+function durableApprovalFixture({includeLatestReplacementVerdict=true}={}){
+  const issue=1824,pr=1931,headSha='a'.repeat(40),findingsBody='review findings',findingsRef=`https://github.com/u2giants/shared-db/pull/${pr}#issuecomment-1`
+  const assignment1='1'.repeat(40),assignment2='2'.repeat(40),replacement2='3'.repeat(40)
+  const commits=new Map([
+    [assignment1,{message:`db-coordination reviewer-cursor sequence=1 reviewer=kimi-k3 issue=${issue} pr=${pr} head=${headSha} slot=1`}],
+    [assignment2,{message:`db-coordination reviewer-cursor sequence=2 reviewer=kimi-k3 issue=${issue} pr=${pr} head=${headSha} slot=2`}],
+    [replacement2,{message:`db-coordination reviewer-replacement sequence=7 reviewer=kimi-k3 issue=${issue} pr=${pr} head=${headSha} reason=wrapper_terminal_failure`}],
+  ])
+  const refs=new Map([
+    [`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${headSha}`,assignment1],
+    [`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${headSha}-slot2`,assignment2],
+    [`${REVIEW_REPLACEMENT_REF_PREFIX}/${issue}-${pr}-${headSha}-slot2-7`,replacement2],
+  ])
+  const addVerdict=(ref,sha,slot,assignmentSha)=>{
+    const record={verdict:'APPROVE',head_sha:headSha,issue,pr,slot,reviewer:'kimi-k3',assignment_sha:assignmentSha,findings_digest:createHash('sha256').update(findingsBody).digest('hex'),findings_ref:findingsRef}
+    refs.set(ref,sha);commits.set(sha,{message:`db-review-verdict ${JSON.stringify(record)}`,parents:[{sha:assignmentSha}]})
+  }
+  addVerdict(`refs/db-review-verdicts/${issue}-${pr}-${headSha}`,'4'.repeat(40),1,assignment1)
+  addVerdict(`refs/db-review-verdicts/${issue}-${pr}-${headSha}-slot2`,'5'.repeat(40),2,assignment2)
+  if(includeLatestReplacementVerdict)addVerdict(`refs/db-review-verdict-replacements/${issue}-${pr}-${headSha}-slot2-7`,'6'.repeat(40),2,replacement2)
+  const io={
+    listRefs:(prefix)=>[...refs].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha})),
+    readRef:(ref)=>refs.get(ref)??null,
+    getCommit:(sha)=>commits.get(sha),
+    readFindings:()=>findingsBody,
+  }
+  return{issue,pr,headSha,io}
+}
+
+test('durable preview approval requires APPROVE for every latest reviewer slot',()=>{
+  const fixture=durableApprovalFixture()
+  const verdicts=assertDurableReviewApproval(fixture.issue,fixture.pr,fixture.headSha,fixture.io)
+  assert.equal(verdicts.filter((row)=>row.verdict==='APPROVE').length,3)
+})
+
+test('durable preview approval rejects an older slot verdict after replacement',()=>{
+  const fixture=durableApprovalFixture({includeLatestReplacementVerdict:false})
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,fixture.headSha,fixture.io),/review slot 2 has no durable APPROVE for its latest exact-head assignment/)
+})
 
 const scope = (status, workType, route, priority, objects=[], depends='') => `\`\`\`db-work-scope\nstatus: ${status}\nwork_type: ${workType}\nroute: ${route}\npriority: ${priority}\ndepends_on: ${depends}\nobjects:\n${objects.map((x)=>`  - ${x}`).join('\n')}\n\`\`\``
 
