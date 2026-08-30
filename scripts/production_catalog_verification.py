@@ -716,6 +716,16 @@ CREATIVE_SUBMISSION_CONTRACT_STATUS_CONTRACT += (
     " and position('exact_property_text' in %s)=0" % _SCRAPED_PROPERTIES_DEF +
     " and position('evidence_identity' in %s)=0" % _SCRAPED_PROPERTIES_DEF
 )
+SCRAPED_PROPERTIES_BOUNDED_ENRICHMENT_CONTRACT = _shape_contract(
+    routines=('api.db_data_admin_scraped_properties(text,text,integer)',),
+)
+SCRAPED_PROPERTIES_BOUNDED_ENRICHMENT_CONTRACT += (
+    " and position('ordered as materialized' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('enriched as materialized' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('from ordered o' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('from enriched e' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position(E'from source_rows s\\n    left join lateral' in %s)=0" % _SCRAPED_PROPERTIES_DEF
+)
 POPDAM_FORWARD_RECOVERY_CONTRACT = _shape_contract(
     relations=('public.style_group_tags',),
     indexes=tuple('public.'+value for value in "asset_tags_active_asset_idx dam_search_embedding_claim_idx style_group_tags_active_group_idx".split()),
@@ -744,6 +754,7 @@ CATALOG_CONTRACTS = {
     "dcp_opa_property_authority_v1": DCP_OPA_PROPERTY_AUTHORITY_CONTRACT,
     "scraped_properties_source_purpose_v1": SCRAPED_PROPERTIES_SOURCE_PURPOSE_CONTRACT,
     "creative_submission_contract_status_v1": CREATIVE_SUBMISSION_CONTRACT_STATUS_CONTRACT,
+    "scraped_properties_bounded_enrichment_v1": SCRAPED_PROPERTIES_BOUNDED_ENRICHMENT_CONTRACT,
     "dflow_sequence_ceilings_v1": DFLOW_SEQUENCE_CEILINGS_CONTRACT,
     "popdam_forward_recovery_v1": POPDAM_FORWARD_RECOVERY_CONTRACT,
     "coco_owner_ruling_v1": """

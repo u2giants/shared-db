@@ -1743,6 +1743,7 @@ PREVIEW_PRODUCER_PATHS += (
     "scripts/production-verification-sidecars/20260830172356.json",
     "scripts/production-verification-sidecars/20260830191719.json",
     "scripts/production-verification-sidecars/20260830202243.json",
+    "scripts/production-verification-sidecars/20260830212955.json",
     # Invoked by check-sql.sh during preview; pin the reviewed parser so the
     # protected static check cannot be changed independently of the PR head.
     "scripts/check-expected-count-patterns.mjs",
