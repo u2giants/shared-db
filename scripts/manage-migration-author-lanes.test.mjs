@@ -638,7 +638,8 @@ function mergedPrIo({merged=true,mergeSha='b'.repeat(40),inMain=true,evidence=[]
   const io=reviewIo()
   const pr={number:1809,state:'closed',merged,merged_at:merged?'2026-08-28T00:00:00Z':null,merge_commit_sha:mergeSha,head:{sha:MERGED_HEAD,ref:'codex/x'}}
   io.getPr=()=>pr
-  io.mergeCommitInMain=(sha)=>inMain&&sha===mergeSha
+  io.ancestryCalls=[]
+  io.mergeCommitInMain=(sha)=>{io.ancestryCalls.push(sha);return inMain&&sha===mergeSha}
   io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr,evidence}]))
   io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
   io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
@@ -662,7 +663,34 @@ test('a closed but unmerged pull request is still refused a reviewer',()=>{
 })
 
 test('a merged pull request whose merge commit is absent from main is refused',()=>{
-  assert.throws(()=>assignNextReviewer(mergedRequest,mergedPrIo({inMain:false})),/changed after mutex acquisition/)
+  // Discriminating on ANCESTRY specifically, not merely on "not open": this io differs
+  // from the passing merged case above by exactly one bit, the ancestry answer. The
+  // assertion that mergeCommitInMain was actually consulted with the merge SHA is what
+  // stops the check from being silently dropped while the test still passes.
+  const io=mergedPrIo({inMain:false})
+  assert.throws(()=>assignNextReviewer(mergedRequest,io),/changed after mutex acquisition/)
+  assert.deepEqual([...new Set(io.ancestryCalls)],['b'.repeat(40)])
+})
+
+test('the merged-PR ancestry answer is memoised, so it costs two requests once',()=>{
+  // The predicate is reached from several alternative return paths in one operation.
+  // Without the memo the wire cost would scale with call sites, which is the claim the
+  // reserved budget depends on.
+  const io=mergedPrIo()
+  assignNextReviewer(mergedRequest,io)
+  assert.equal(new Set(io.ancestryCalls).size,1)
+  assert.equal(io.ancestryCalls.length,1)
+})
+
+test('a merged pull request can also receive a reviewer REPLACEMENT for its merged head',()=>{
+  // The pre-mutex gate on the replacement path is a separate site from the post-mutex
+  // recheck. An open-only test there throws before the merged-eligible gate is reached,
+  // so replacement stayed impossible for a merged head even once assignment worked.
+  const io=mergedPrIo()
+  const first=assignNextReviewer(mergedRequest,io)
+  const replaced=replaceFailedReviewer({...mergedRequest,failedSequence:first.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)
+  assert.ok(replaced.reviewer)
+  assert.notEqual(replaced.reviewer,first.reviewer)
 })
 
 test('an existing verdict at the merged head still refuses a new assignment',()=>{

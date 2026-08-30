@@ -1426,7 +1426,7 @@ function finalizeReviewMutex(ownerSha,io){
   }catch(error){throw new LaneError(`${error.message}; RECOVERY REQUIRED: ${MUTEX_REF} expected SHA ${ownerSha}. Use the guarded recover-author-mutex.yml procedure and do not retry blindly`)}
   finally{if(reviewWireBudget)reviewWireBudget.cleanup=previous}
 }
-function requireReviewWireCapacity(required){if(reviewWireBudget&&reviewWireBudget.count+required>REVIEW_OPERATION_REQUEST_LIMIT)throw new LaneError(`reviewer operation cannot fit ${required} remaining requests inside the ${REVIEW_OPERATION_REQUEST_LIMIT}-request budget; refused before mutex acquisition`)}
+function requireReviewWireCapacity(required,when='refused before mutex acquisition'){if(reviewWireBudget&&reviewWireBudget.count+required>REVIEW_OPERATION_REQUEST_LIMIT)throw new LaneError(`reviewer operation cannot fit ${required} remaining requests inside the ${REVIEW_OPERATION_REQUEST_LIMIT}-request budget; ${when}`)}
 function acquireReviewMutex(ownerSha,io){
   if(reviewWireBudget){reviewWireBudget.cleanupReserve=io.atomicReviewMutexRelease?2:8;reviewWireBudget.locked=true}
   let acquired
@@ -1621,7 +1621,16 @@ function reviewTargetEligible(pr,io){
   let cache=MERGE_ANCESTRY_MEMO.get(io)
   if(!cache){cache=new Map();MERGE_ANCESTRY_MEMO.set(io,cache)}
   const key=String(mergeSha).toLowerCase()
-  if(!cache.has(key))cache.set(key,io.mergeCommitInMain?.(mergeSha)===true)
+  // The 2 requests are checked HERE rather than folded into the operations' pre-mutex
+  // reservations, because raising those by 2 unconditionally would shrink the ordinary
+  // open-PR path -- which spends nothing extra -- and can push a legitimate assignment
+  // over the limit. Charging the merged path for its own cost keeps the open path at
+  // exactly its previous headroom, and turns an opaque mid-flight exhaustion into a
+  // refusal that names the reason.
+  if(!cache.has(key)){
+    requireReviewWireCapacity(2,'the merged-pull-request ancestry check needs two more requests than remain')
+    cache.set(key,io.mergeCommitInMain?.(mergeSha)===true)
+  }
   return cache.get(key)
 }
 
@@ -2070,7 +2079,11 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     const preflightState=preflightBusy.states?.get(`${request.issue}:${request.pr}`)
     const issueRow=preflightState?.issue??io.getIssue(request.issue), prRow=preflightState?.pr??io.getPr(request.pr)
     if(issueRow?.state!=='open')throw new LaneError('review replacement requires the exact issue to remain open')
-    if(prRow?.state!=='open')throw new LaneError('review replacement requires the exact open PR head')
+    // Same eligibility rule as assignment, and it must be applied HERE, pre-mutex, not
+    // only at the post-mutex recheck below: an open-only test at this point throws
+    // before the merged-eligible gate is ever reached, which would leave replacement
+    // impossible for a merged head even though assignment works.
+    if(!reviewTargetEligible(prRow,io))throw new LaneError('review replacement requires the exact open PR head')
     // The mirror of the lookup above: here the assignment WAS found under the
     // head that was named, but the pull request has since moved past it. Same
     // truth, said plainly, instead of a technicality.
