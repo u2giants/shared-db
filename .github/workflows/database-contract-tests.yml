@@ -536,7 +536,7 @@ jobs:
                [ "$base" != "coldlion_promotion_serialization_lock.sql" ]; then
               run_file="$RUNNER_TEMP/results/$base.wrapper.sql"
               case "$base" in
-                popsg_property_resolution_contracts.sql|popdam_effective_asset_filter_contracts.sql|opa_property_character_landing_contracts.sql|opa_property_character_importer_contracts.sql|opa_normalized_sync_contracts.sql|item_taxonomy_phase2_fixture.sql|contract_property_evidence_contracts.sql|coldlion_licensor_property_phase4_contracts.sql|coldlion_licensor_property_phase2_contracts.sql|coldlion_licensor_property_phase1_contracts.sql)
+                popsg_property_resolution_contracts.sql|popdam_effective_asset_filter_contracts.sql|opa_property_character_landing_contracts.sql|opa_property_character_importer_contracts.sql|opa_normalized_sync_contracts.sql|item_taxonomy_phase2_fixture.sql|contract_property_evidence_contracts.sql|coldlion_licensor_property_phase4_contracts.sql|coldlion_licensor_property_phase2_contracts.sql|coldlion_licensor_property_phase1_contracts.sql|source_resolution_durability_contracts.sql|source_resolution_remaining_sources_contracts.sql)
                   printf 'begin;\nselect public.ci_authorize_licensing_contract_test();\n\\ir %s\nrollback;\n' "$GITHUB_WORKSPACE/$f" > "$run_file"
                   ;;
                 *)

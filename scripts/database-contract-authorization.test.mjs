@@ -29,3 +29,28 @@ test('blanket helper is opt-in only in the known legacy contract', () => {
     ))
   assert.deepEqual(callers, ['clickup_task_import_contracts.sql'])
 })
+
+test('runner authorization is limited to the audited legacy fixture allowlist', () => {
+  const workflow = fs.readFileSync(
+    path.join(root, '.github/workflows/database-contract-tests.yml'),
+    'utf8',
+  )
+  const optInArm = workflow.match(/case "\$base" in\s+([^)]*)\)\s+printf 'begin;\\nselect public\.ci_authorize_licensing_contract_test/)?.[1] ?? ''
+  const actual = optInArm.split('|').map(name => name.trim()).filter(Boolean).sort()
+  const expected = [
+    'coldlion_licensor_property_phase1_contracts.sql',
+    'coldlion_licensor_property_phase2_contracts.sql',
+    'coldlion_licensor_property_phase4_contracts.sql',
+    'contract_property_evidence_contracts.sql',
+    'item_taxonomy_phase2_fixture.sql',
+    'opa_normalized_sync_contracts.sql',
+    'opa_property_character_importer_contracts.sql',
+    'opa_property_character_landing_contracts.sql',
+    'popdam_effective_asset_filter_contracts.sql',
+    'popsg_property_resolution_contracts.sql',
+    'source_resolution_durability_contracts.sql',
+    'source_resolution_remaining_sources_contracts.sql',
+  ].sort()
+  assert.deepEqual(actual, expected)
+  assert.ok(actual.every(name => !/(guard|refusal)/i.test(name)))
+})
