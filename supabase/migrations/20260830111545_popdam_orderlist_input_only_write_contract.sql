@@ -103,6 +103,7 @@ as $$
   -- here: create_dam_order adds it for creation only, which makes it immutable after.
   select array[
     'company_id',
+    'status',
     'metadata',
     'void_reason', 'voided'
   ]::text[];
