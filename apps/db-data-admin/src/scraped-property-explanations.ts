@@ -33,6 +33,22 @@ export function explainScrapedProperty(row: ScrapedPropertyRow): ReviewExplanati
     }
   }
 
+  if (row.source_status === 'contract_opa_conflict' || row.presentation_licensor_key === 'dcp-contract-opa-conflict') {
+    return {
+      review_reason: 'The signed contract and the captured Disney OPA scope disagree about which studio this property belongs to, so the page cannot place it under one studio.',
+      evidence_basis: 'The disagreement is between the authoritative signed-contract assertion and the latest directly captured OPA scope reached through the approved exact OPA Property ID link.',
+      review_guidance: 'Licensing must compare the contract assertion against the OPA scope and approve one studio. Do not decide from the property name or the landing table.',
+    }
+  }
+
+  if (row.source_status === 'opa_scope_conflict' || row.presentation_licensor_key === 'dcp-opa-scope-conflict') {
+    return {
+      review_reason: 'The approved OPA Property IDs mapped to this DCP property carry conflicting direct scopes, so the page cannot tell which placement is intended.',
+      evidence_basis: 'The conflict came from the directly captured OPA scopes of the exact OPA Property IDs linked by the approved DCP-to-OPA resolution.',
+      review_guidance: 'Licensing must review the concrete OPA assertions and the named style guides, then approve the exact OPA placement.',
+    }
+  }
+
   if (row.source_status === 'ambiguous_crossover') {
     return {
       review_reason: 'The approved Disney OPA classification records disagree about which studio owns this property, so the page cannot place it confidently.',
