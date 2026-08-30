@@ -43,9 +43,11 @@ export const REVIEW_REPLACEMENT_REF_PREFIX = 'refs/db-review-replacements'
 export const REVIEW_ASSIGNMENT_REF_PREFIX = 'refs/db-review-assignments'
 export const REVIEW_ACTIVE_REF_PREFIX = 'refs/db-review-active'
 export const REVIEW_ACTIVE_CUTOVER_REF = 'refs/db-coordination/reviewer-index-cutover'
-// Worst-case wire cost of one assignNextReviewerOperation call, computed and
-// verified empirically (see issue #1812): getRateLimit (2: REST + GraphQL) +
-// resolveSlotOneReviewer, slot>=2 only (3: listRefs + readRef + getCommit) +
+// Wire cost of one assignNextReviewerOperation call on the normal path,
+// computed and verified empirically (see issue #1812): getRateLimit (2: REST +
+// GraphQL) + resolveSlotOneReviewer, slot>=2 only (3: listRefs + readRef +
+// getCommit; more when slot 1 has recorded replacement refs, which costs one
+// getCommit per replacement row and fails closed with a clean REFUSED) +
 // findBusyReviewers (3: readRef + readActiveReviewLeases + readReviewStates)
 // + makeOwnerCommit (1) = 9 pre-mutex calls, then requireReviewWireCapacity
 // reserves 13 more for the mutex-acquisition body itself: 9 + 13 = 22. Slot 1

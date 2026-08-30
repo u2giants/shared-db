@@ -9,10 +9,14 @@ Issue: #1767. Scope: repository coordination only; no database, preview, product
 > (`resolveSlotOneReviewer`: `listRefs` + `readRef` + `getCommit`), needing 22
 > and so refusing 100% of slot-2 assignments. The enforced ceiling is now
 > **22** (`REVIEW_OPERATION_REQUEST_LIMIT = 22`); the counter refuses API
-> request **23**, not 20. Worst case: 2 (`getRateLimit`) + 3
+> request **23**, not 20. Normal path: 2 (`getRateLimit`) + 3
 > (`resolveSlotOneReviewer`, slot >= 2) + 3 (`findBusyReviewers`) + 1
 > (`makeOwnerCommit`) = 9 pre-mutex, plus the 13-request mutex-body reserve =
-> 22. Slot 1 remains 6 + 13 = 19. Raised as an orchestrator decision under the
+> 22. Slot 1 remains 6 + 13 = 19. `resolveSlotOneReviewer` costs more than 3
+> when slot 1 has recorded replacement refs (one `getCommit` per replacement
+> row); that path fails **closed** with a clean `REFUSED` before the mutex, so
+> 22 is the normal-path ceiling, not an absolute upper bound. Raised as an
+> orchestrator decision under the
 > 2026-08-18 owner ruling that technical risk is not routed to the owner; see
 > `plan_reviewer_assignment_api_budget.md` "Open questions". The historical
 > numbers in this document are left intact as the record of what was measured
