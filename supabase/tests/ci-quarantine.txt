@@ -74,3 +74,26 @@ db_data_admin_read_contracts.sql                              # the test inserts
 wb_grants_rls_and_dam_order_list_invoker.sql                  # "new row for relation wb_capture violates check constraint wb_capture_header_shape_chk" -- again the test's own fixture, against a constraint that is now present.
 plm_import_master_data_preserve_customer_status.sql           # ordered replay restores the newer #1090 retirement guard, which correctly refuses this test's call to the retired broad DesignFlow canonical-identity importer. The test needs a narrow customer-only replacement; restoring the older implementation would recreate the false pass.
 popdam_scoped_ai_metadata_search_contracts.sql                # ordered replay restores the newer AI-search forward definition; this test then reports that assets.tags omitted active-only asset-scope rows. That is a real contract disagreement exposed by correct ordering, not permission to reinstall an older routine.
+
+# --- Voided by the two-pass replay re-applying a SUPERSEDED definition last ------------
+# Read this before adding anything here; it is a different failure mode from every entry
+# above, and it is a property of the HARNESS, not of the change or of the test.
+#
+# Pass 1 replays every migration from empty. 20260810010000_popdam_order_list_contract.sql
+# does not replay from empty, so it lands in the pass-2 list. Pass 2 re-runs exactly that
+# list against the captured baseline -- which means 20260810010000 is applied AFTER every
+# migration that replayed cleanly in pass 1, including any LATER migration that supersedes
+# it. Both files carry `create or replace function` for the same four objects, so the
+# older file wins the race and the database this lane ends up with is running the
+# superseded bodies. Verified on run 33308654166: pass 1 reported 456 applied / 106 failed
+# with 20260810010000 among the failures, pass 2 reported 90 of 106 now apply, and the
+# whitelist observed afterwards was the pre-20260830111545 one, field for field.
+#
+# The right repair is to make 20260810010000 replay from empty, which is out of scope here
+# and cannot be done by editing it (it is applied). Until then, any test asserting the
+# CURRENT definition of these four functions is unprovable in this lane and provable
+# everywhere the migrations are applied in order -- preview and production included.
+#
+# Do NOT weaken the assertions below to clear this entry. The assertion is correct; the
+# database it is being asked about is the one that is wrong.
+dam_order_input_only_write_contract.sql                       # asserts the 20260830111545 (issue #1772) input-only whitelists, which pass 2 overwrites with the 20260810010000 ones. Observed failure is verbatim: "header whitelist admits field(s) that are not user inputs: actual_ship_date, booking_state, close_tracking, ... status, vendor_delivery_date, warehouse_date" -- i.e. exactly the old list, exactly the fields this change removes.
