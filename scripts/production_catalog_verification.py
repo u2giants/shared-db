@@ -586,6 +586,17 @@ STYLE_TRACKER_CHECKS=(
 # production promotion, the single-lane gated step, rather than in review.
 # Every such comparison must use THIS constant, not a fresh equivalent, so there is
 # one place to be wrong instead of several.
+#
+# LIMIT OF THIS NORMALIZER, and it is a real trap for the next contract added here.
+# Lowercasing and stripping ALL whitespace is safe only while the compared definition
+# carries no case-sensitive or space-sensitive string literal. A partial index
+# (`where status = 'in progress'`) or an expression index over a literal would have
+# that literal folded too, so `'in progress'`, `'InProgress'` and `'inprogress'` all
+# collapse to the same text and the contract stops being able to tell them apart --
+# a check that cannot return dirty. Every contract that exists today pins
+# `indpred is null and indexprs is null`, which excludes literals entirely and is why
+# this is currently unreachable. If you add a contract for a partial or expression
+# index, do NOT reuse this constant unexamined: narrow the normalization instead.
 INDEXDEF_NORMALIZE = "regexp_replace(lower(replace(%s,'\"','')),'[[:space:]]+','','g')"
 
 
