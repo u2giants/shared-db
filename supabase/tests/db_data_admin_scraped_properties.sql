@@ -59,7 +59,8 @@ begin
      or position('plm.nbcu_property' in v_definition) = 0
      or position('plm.nbcu_capture' in v_definition) = 0
      or position('plm.sega_property' in v_definition) = 0
-     or position('plm.sega_property_licensor' in v_definition) = 0 then
+     or position('plm.sega_submission_property' in v_definition) = 0
+     or position('plm.wildbrain_era' in v_definition) = 0 then
     raise exception 'source Property union is incomplete';
   end if;
 
@@ -211,8 +212,8 @@ begin
   v_rows := v_page -> 'rows';
 
   select count(*) into v_count from jsonb_array_elements(v_rows);
-  if v_count <> 7 then
-    raise exception 'expected seven exact fixture rows, got %', v_count;
+  if v_count <> 6 then
+    raise exception 'expected six exact fixture rows, got %', v_count;
   end if;
 
   if not exists (
@@ -296,8 +297,8 @@ begin
   select count(*) into v_count
   from jsonb_array_elements(v_rows) r
   where r ->> 'source_property_id' = v_search || '-Sega';
-  if v_count <> 2 then
-    raise exception 'Sega capture repeats or multi-Licensor rows were collapsed incorrectly: %', v_count;
+  if v_count <> 1 then
+    raise exception 'Sega Creative did not collapse Property-level Licensor labels: %', v_count;
   end if;
   if exists (
     select 1 from jsonb_array_elements(v_rows) r
@@ -344,9 +345,9 @@ begin
   end loop;
 
   select count(*) into v_count from jsonb_array_elements(v_walk_rows);
-  if v_count <> 7 or (
+  if v_count <> 6 or (
     select count(distinct r ->> 'row_key') from jsonb_array_elements(v_walk_rows) r
-  ) <> 7 then
+  ) <> 6 then
     raise exception 'pagination walk omitted or repeated fixture rows';
   end if;
 
