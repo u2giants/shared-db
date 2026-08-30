@@ -148,6 +148,7 @@ function githubLike({ refs, comments = [], reviews = [] }) {
       const endpoint = args[args.length - 1]
       if (endpoint.includes('/git/matching-refs/db-review-assignments')) return refs.filter((r) => r.ref.includes('assignments'))
       if (endpoint.includes('/git/matching-refs/db-review-replacements')) return refs.filter((r) => r.ref.includes('replacements'))
+      if (endpoint.includes('/git/matching-refs/db-review-verdict')) return []
       if (/\/pulls\/\d+$/.test(endpoint)) return { head: { sha: NEW } }
       throw new Error(`unexpected endpoint ${endpoint}`)
     },
@@ -155,14 +156,14 @@ function githubLike({ refs, comments = [], reviews = [] }) {
   }
 }
 
-test('the adapter turns real GitHub payloads into an authorization the core accepts', () => {
+test('the adapter refuses a prose approval when the governed path wrote no verdict artifact', () => {
   const input = gatherApprovalInput({ PR_NUMBER: '1809' }, githubLike({
     refs: [{ ref: `refs/db-review-assignments/1769-1809-${NEW}`, object: { sha: 'e'.repeat(40), type: 'commit' } }],
     reviews: [{ state: 'APPROVED', commit_id: NEW, body: '' }],
   }))
   assert.equal(input.headSha, NEW)
   assert.equal(input.assignments.length, 1)
-  assert.equal(evaluateExactHeadApproval(input).approved, true)
+  assert.throws(()=>evaluateExactHeadApproval(input),/no durable APPROVE artifact/)
 })
 
 test('the adapter carries a refusal and a stale-head assignment through unflattened', () => {
@@ -175,7 +176,7 @@ test('the adapter carries a refusal and a stale-head assignment through unflatte
     refs: [{ ref: `refs/db-review-replacements/1769-1809-${NEW}/1`, object: {} }],
     comments: [{ body: `REVISE ${NEW} -- the reconciler still refuses this manifest` }],
   }))
-  assert.throws(() => evaluateExactHeadApproval(refused), /unanswered reviewer refusal/)
+  assert.throws(() => evaluateExactHeadApproval(refused), /no durable APPROVE artifact/)
 })
 
 test('the adapter refuses rather than guesses when the PR number is absent', () => {

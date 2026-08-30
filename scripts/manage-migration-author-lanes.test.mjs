@@ -589,9 +589,9 @@ test('complete replacement stays inside the real wire-attempt budget',()=>{
   io.readReviewRecords=(refs,prefix)=>{wire(prefix?2:1,'readReviewRecords');const result=new Map(refs.map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:prefix?[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha})):[]});return result}
   for(const name of ['readRef','listRefs','getCommit','getPr','getIssue','getIssueComments','getPrReviews','createRef','updateRef','deleteRef']){const fn=io[name];io[name]=(...args)=>{wire(1,`${name}:${String(args[0])}`);return fn(...args)}}
   const make=io.makeOwnerCommit;io.makeOwnerCommit=(message)=>{wire(1,'commit');baseLoaded=true;return make(message)}
-  // Baseline preflight is 7 requests. Six additional fixed-record reads (the
-  // one-request-per-record worst case) make 13; reserve 11 must
-  // refuse because 13 + 11 exceeds the 23-request ceiling. Reserve 10 would
+  // Baseline preflight is 8 requests, including the exact create-only verdict
+  // ref check. Five additional fixed-record reads make 13; reserve 11 must
+  // refuse because it exceeds the request ceiling. Reserve 10 would
   // acquire the mutex with no room for the measured success path plus cleanup.
   io.getRateLimit=()=>{wire(6,'replacement-record-read');return ordinaryQuota()}
   assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/budget/i)
@@ -601,7 +601,7 @@ test('complete replacement stays inside the real wire-attempt budget',()=>{
   assert.ok(result.reviewer);assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`used ${attempts} wire attempts`)
   const mutexAt=labels.indexOf(`createRef:${MUTEX_REF}`)
   assert.notEqual(mutexAt,-1,`mutex acquisition was not observed: ${labels.join(',')}`)
-  assert.equal(mutexAt,8,'the first replacement path spends 8 requests before its mutex gate')
+  assert.equal(mutexAt,8,'the first replacement path spends 8 requests before its mutex gate, including durable-verdict refusal')
   assert.equal(labels.length-mutexAt,10,`new replacement success path costs exactly 10 requests after mutex acquisition: ${labels.slice(mutexAt).join(',')}`)
   attempts=0;labels.length=0
   assert.deepEqual(replaceFailedReviewer(replacementRequest,io),result)
@@ -3687,10 +3687,9 @@ test('a complete slot-2 replacement stays inside the real wire-attempt budget (i
   catch(error){throw new Error(`${error.message}; calls=${labels.join(',')}`)}
   assert.ok(result.reviewer)
   assert.equal(attempts,18,`slot-2 replacement used ${attempts} of ${REVIEW_OPERATION_REQUEST_LIMIT}: ${labels.join(',')}`)
-  // The two additional calls are the fixed-cost preflight and post-mutex exact
-  // exclusion reads. Their cost does not grow with the number of exclusions.
-  // Measured, not assumed: the call labels show only batched readReviewRecords
-  // and no per-exclusion getCommit calls.
+  // Durable-verdict refusal and exact exclusion reads are both fixed-cost. Their
+  // cost does not grow with the number of exclusions; the batched record reads
+  // avoid per-exclusion commit calls.
   assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`slot-2 replacement exceeded the ${REVIEW_OPERATION_REQUEST_LIMIT}-request budget`)
 })
 

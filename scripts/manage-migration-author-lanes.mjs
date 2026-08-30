@@ -13,6 +13,7 @@ import { reconcileFlow, persistInitialReady, preparePreviewDispatch, repairPrevi
 import { buildEvidenceBundle, canonicalJson, sha256 } from './orchestrator-flow/evidence-bundle.mjs'
 import { selectPreviewRoute } from './orchestrator-flow/select-preview-route.mjs'
 import { PROJECT_REFS } from './orchestrator-flow/read-preview-ledger.mjs'; import { verdictOpensLine as sharedVerdictOpensLine, evidenceTiedToHead as sharedEvidenceTiedToHead, isApprovalFor as sharedIsApprovalFor, isVerdictFor as sharedIsVerdictFor, anyVerdictFor as sharedAnyVerdictFor } from './lib/review-verdict.mjs'
+import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, REVIEW_VERDICTS, findingsDigest, formatVerdictMessage, parseVerdictCommit, parseVerdictRef, validateVerdictArtifact, verdictRef } from './lib/review-verdict-artifact.mjs'
 
 export const REPO = 'u2giants/shared-db'
 // AUTHOR LANE CAP. Raised from three to five on 2026-08-25 and from five to
@@ -931,19 +932,9 @@ export const githubIo = {
     const byName=new Map(checks.map((row)=>[row.name,String(row.state).toUpperCase()]))
     const failed=protectedContexts.filter((name)=>byName.get(name)!=='SUCCESS')
     if(failed.length)throw new LaneError(`required full CI is not successful on the current head: ${failed.join(', ')}`)
-    const evidence=[...(this.getIssueComments(issue)??[]),...(this.getIssueComments(pr)??[]),...(this.getPrReviews(pr)??[])]
-    // FAILS OPEN -- see the verdict-predicate block near `hasVerdictForHead`.
-    // `isApprovalFor` requires the APPROVE to OPEN its line, so prose that
-    // merely discusses approval (including prose stating approval is absent)
-    // can no longer authorize a migration (issue #1822).
-    // The decision itself lives in `gateAuthorizes` so it is REACHABLE BY TESTS.
-    // The two lines above shell out through module-scope `ghJson`/`gh`, so this
-    // whole method is unreachable without a network, and every existing test
-    // replaces it with a stub that returns success. That meant the one site in
-    // this file that can AUTHORIZE A MIGRATION had no coverage at all: deleting
-    // its approval check entirely left the suite green.
-    const approved=gateAuthorizes(evidence,head,bundleId,()=>findPrReviewAssignments(issue,pr,this))
-    if(!approved)throw new LaneError('an independent APPROVE tied to the exact head and bundle-compatible assignment is required')
+    const verdicts=readReviewVerdicts(issue,pr,head,this)
+    if(verdicts.some((row)=>row.verdict!=='APPROVE'))throw new LaneError('the exact head carries a durable reviewer refusal')
+    if(!verdicts.some((row)=>row.verdict==='APPROVE'))throw new LaneError('a durable assigned-reviewer APPROVE artifact tied to the exact head is required')
     const states=dependencies.length?this.dependencyStates(dependencies):{},closure=classifyDependencies(issue,dependencies,states)
     if(!closure.satisfied)throw new LaneError(`migration dependency closure is incomplete: ${closure.blocked.map((row)=>`#${row.number}`).join(', ')}`)
     return {full_ci_success:true,review_approved:true,dependency_closure_complete:true}
@@ -974,6 +965,18 @@ export const githubIo = {
     const commit = ghJson(['api', '-X', 'POST', `repos/${REPO}/git/commits`, '-f', `message=${message}`, '-f', `tree=${tree}`, '-f', `parents[]=${head}`])
     if (!commit?.sha) throw new LaneError('GitHub did not create an ownership commit')
     return commit.sha
+  },
+  makeReviewVerdictCommit(message,parentSha){
+    const parent=ghJson(['api',`repos/${REPO}/git/commits/${parentSha}`])
+    if(!parent?.tree?.sha)throw new LaneError('review assignment parent commit is unreadable')
+    const commit=ghJson(['api','-X','POST',`repos/${REPO}/git/commits`,'-f',`message=${message}`,'-f',`tree=${parent.tree.sha}`,'-f',`parents[]=${parentSha}`])
+    if(!commit?.sha)throw new LaneError('GitHub did not create the verdict commit')
+    return commit.sha
+  },
+  readFindings(url){
+    const match=/^https:\/\/github\.com\/u2giants\/shared-db\/(?:issues|pull)\/\d+#issuecomment-(\d+)$/.exec(String(url??''))
+    if(!match)throw new LaneError('findings-ref must be a durable shared-db issue or PR comment URL')
+    return ghJson(['api',`repos/${REPO}/issues/comments/${match[1]}`])?.body??null
   },
   createRef(ref, sha) {
     return createRefWithReadback(ref,sha,{readRef:(target)=>this.readRef(target)})
@@ -1432,6 +1435,58 @@ export function parseReviewCursor(commit) {
   const match=/^db-coordination reviewer-cursor sequence=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40})(?: slot=(\d+))?$/i.exec(message)??/^db-coordination reviewer-(?:failure-)?replacement sequence=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40}) /i.exec(message)
   if (!match) throw new LaneError('reviewer cursor does not point to a recognized assignment')
   return {sequence:Number(match[1]),reviewer:match[2],issue:Number(match[3]),pr:Number(match[4]),headSha:match[5],slot:match[6]?Number(match[6]):1}
+}
+
+export function recordReviewVerdict(options,io=githubIo){
+  const issue=Number(options.issue),pr=Number(options.pr),slot=Number(options.slot??1),headSha=String(options.headSha??'').toLowerCase()
+  const verdict=String(options.verdict??'').toUpperCase(),findingsRef=String(options.findingsRef??'')
+  const replacementSequence=options.replacementSequence==null?null:Number(options.replacementSequence)
+  if(!Number.isInteger(issue)||issue<1||!Number.isInteger(pr)||pr<1||!Number.isInteger(slot)||slot<1||!/^[0-9a-f]{40}$/.test(headSha)||!REVIEW_VERDICTS.has(verdict))throw new LaneError('review verdict requires exact issue, PR, slot, 40-character head SHA, and APPROVE, REVISE, or REJECT')
+  if(replacementSequence!==null&&(!Number.isInteger(replacementSequence)||replacementSequence<1))throw new LaneError('replacement verdict requires a positive replacement sequence')
+  const assignmentRef=replacementSequence===null
+    ?`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${headSha}${reviewSlotSuffix(slot)}`
+    :`${REVIEW_REPLACEMENT_REF_PREFIX}/${issue}-${pr}-${headSha}${reviewSlotSuffix(slot)}-${replacementSequence}`
+  const assignmentSha=io.readRef(assignmentRef)
+  if(!assignmentSha)throw new LaneError('the exact durable reviewer assignment does not exist')
+  const assignment=parseReviewCursor(io.getCommit(assignmentSha))
+  if(assignment.issue!==issue||assignment.pr!==pr||assignment.headSha.toLowerCase()!==headSha||(assignment.slot??1)!==slot)throw new LaneError('the assignment record disagrees with the requested verdict tuple')
+  const activeRef=reviewActiveRef(assignment.reviewer)
+  if(io.readRef(activeRef)!==assignmentSha)throw new LaneError('reviewer does not hold the exact active lease; late or conflicting verdict refused')
+  const live=io.getPr(pr)
+  if(String(live?.state??'').toLowerCase()!=='open'||String(live?.head?.sha??'').toLowerCase()!==headSha)throw new LaneError('review target is no longer the exact open PR head')
+  const findingsBody=io.readFindings(findingsRef)
+  if(!String(findingsBody??'').trim())throw new LaneError('durable reviewer findings are unreadable or empty')
+  const record={verdict,head_sha:headSha,issue,pr,slot,reviewer:assignment.reviewer,assignment_sha:assignmentSha,findings_digest:findingsDigest(findingsBody),findings_ref:findingsRef}
+  const ref=verdictRef({issue,pr,headSha,slot,replacementSequence})
+  const existing=io.readRef(ref)
+  if(existing){
+    const validated=validateVerdictArtifact({ref,sha:existing,commit:io.getCommit(existing),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
+    if(JSON.stringify(validated.verdict)!==JSON.stringify(verdict))throw new LaneError('a different create-only verdict already exists')
+    return validated
+  }
+  const sha=io.makeReviewVerdictCommit(formatVerdictMessage(record),assignmentSha)
+  if(!io.createRef(ref,sha)||io.readRef(ref)!==sha)throw new LaneError('create-only verdict ref could not be proved; do not transcribe or retry with a different verdict')
+  return validateVerdictArtifact({ref,sha,commit:io.getCommit(sha),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
+}
+
+export function readReviewVerdicts(issue,pr,headSha,io=githubIo){
+  const prefixes=[REVIEW_VERDICT_REF_PREFIX,REVIEW_VERDICT_REPLACEMENT_REF_PREFIX]
+  const rows=prefixes.flatMap((prefix)=>io.listRefs(`${prefix}/${Number(issue)}-${Number(pr)}-${String(headSha).toLowerCase()}`))
+  return rows.map(({ref,sha})=>{
+    const named=parseVerdictRef(ref)
+    if(!named||named.issue!==Number(issue)||named.pr!==Number(pr)||named.headSha!==String(headSha).toLowerCase())throw new LaneError(`verdict ref ${ref} escaped its exact tuple prefix`)
+    const commit=io.getCommit(sha),record=parseVerdictCommit(commit)
+    const assignmentRef=named.replacementSequence===null
+      ?`${REVIEW_ASSIGNMENT_REF_PREFIX}/${named.issue}-${named.pr}-${named.headSha}${reviewSlotSuffix(named.slot)}`
+      :`${REVIEW_REPLACEMENT_REF_PREFIX}/${named.issue}-${named.pr}-${named.headSha}${reviewSlotSuffix(named.slot)}-${named.replacementSequence}`
+    const assignmentSha=io.readRef(assignmentRef)
+    if(!assignmentSha)throw new LaneError(`verdict ${ref} has no live assignment record`)
+    const assignment=parseReviewCursor(io.getCommit(assignmentSha))
+    const activeLeaseSha=io.readRef(reviewActiveRef(assignment.reviewer))
+    const findingsBody=io.readFindings(record.findings_ref)
+    try{return validateVerdictArtifact({ref,sha,commit,findingsBody,activeLeaseSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})}
+    catch(error){throw new LaneError(`verdict ${ref} is invalid: ${error.message}`)}
+  })
 }
 
 export function reviewActiveRef(reviewer){
@@ -2384,7 +2439,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     }
     const initial=parseReviewCursor(fixedRecords?.get(assignmentRef)?.sha===assignmentSha?fixedRecords.get(assignmentRef).commit:io.getCommit(assignmentSha))
     const replacementRows=(fixedRecords?.matching??io.listRefs?.(replacementBase)??[]).filter((row)=>inReviewReplacementNamespace(row.ref,replacementBase))
-    const parsedReplacements=replacementRows.map((row)=>{const parsed=parseReviewReplacement(row.commit??io.getCommit(row.sha));return {...parsed,failureSha:parsed.failureSha==='self'?row.sha:parsed.failureSha}})
+    const parsedReplacements=replacementRows.map((row)=>{const parsed=parseReviewReplacement(row.commit??io.getCommit(row.sha));return {...parsed,ref:row.ref,assignmentSha:row.sha,failureSha:parsed.failureSha==='self'?row.sha:parsed.failureSha}})
     for(const replacement of parsedReplacements)requireReplacementEvidence(replacement,io)
     const predecessors=parsedReplacements.filter((row)=>row.sequence===request.failedSequence)
     const original=request.failedSequence===initial.sequence?initial:predecessors.length===1?predecessors[0]:null
@@ -2403,7 +2458,12 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     // head that was named, but the pull request has since moved past it. Same
     // truth, said plainly, instead of a technicality.
     if(prRow?.head?.sha!==request.headSha)throw new LaneError(`review replacement requires the exact open PR head: sequence=${initial.sequence} reviewer=${initial.reviewer} IS recorded for issue #${request.issue} PR #${request.pr} under head ${request.headSha}, but the pull request has since moved to head ${String(prRow?.head?.sha??'unknown')}. Nothing is missing. A push replaced the code under review, so a replacement reviewer would be bound to a commit the failed reviewer never saw. Assign a reviewer to the new code instead: --assign-reviewer --issue ${request.issue} --pr ${request.pr} --head-sha ${String(prRow?.head?.sha??'<current head>')}`)
-    const hasVerdict=preflightState?.evidence?anyVerdictFor(preflightState.evidence,request.headSha):hasVerdictForHead(request.issue,request.pr,request.headSha,io)
+    const answeredAssignmentRef=request.failedSequence===initial.sequence?assignmentRef:original.ref
+    const answeredVerdictRef=answeredAssignmentRef
+      .replace(REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_VERDICT_REF_PREFIX)
+      .replace(REVIEW_REPLACEMENT_REF_PREFIX,REVIEW_VERDICT_REPLACEMENT_REF_PREFIX)
+    const durableVerdict=io.readRef(answeredVerdictRef)
+    const hasVerdict=Boolean(durableVerdict)||(preflightState?.evidence?anyVerdictFor(preflightState.evidence,request.headSha):hasVerdictForHead(request.issue,request.pr,request.headSha,io))
     if(hasVerdict)throw new LaneError('an existing verdict for the exact head forbids reviewer replacement')
     const failedLeaseRef=reviewActiveRef(original.reviewer),cachedFailed=preflightBusy.leases?.get(original.reviewer),failedLeaseSha=cachedFailed?.sha??io.readRef(failedLeaseRef)
     const failedLease=failedLeaseSha?(cachedFailed?.sha===failedLeaseSha?cachedFailed.lease:parseReviewLease(io.getCommit(failedLeaseSha))):null
@@ -3598,6 +3658,7 @@ function parseArgs(argv) {
     else if (a === '--return-issue') out.returnIssue = Number(argv[++i])
     else if (a === '--assign-reviewer') out.assignReviewer = true
     else if (a === '--exclude-reviewer') out.excludeReviewer = true
+    else if (a === '--record-review-verdict') out.recordReviewVerdict = true
     else if (a === '--activate-review-cutover') out.activateReviewCutover = true
     else if (a === '--replace-failed-reviewer') out.replaceFailedReviewer = true
     else if (a === '--reviewer-preflight') out.reviewerPreflight = true
@@ -3621,7 +3682,7 @@ function parseArgs(argv) {
     else if (a === '--confirm-stale') out.confirmStale = true
     else if (/^--acquire-(preview|preview-recovery|preview-rehearsal|merge|production)$/.test(a)) out.acquireExclusive = a.slice(10)
     else if (/^--release-(preview|preview-recovery|preview-rehearsal|merge|production)$/.test(a)) out.releaseExclusive = a.slice(10)
-    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--claim-number','--failed-sequence','--failure-code','--failing-check','--old-version','--reviewer','--wrapper','--version-pr-map','--blocked-on','--review-slot','--reason','--evidence-sha'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
+    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--claim-number','--failed-sequence','--failure-code','--failing-check','--old-version','--reviewer','--wrapper','--version-pr-map','--blocked-on','--review-slot','--reason','--evidence-sha','--verdict','--findings-ref','--replacement-sequence'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
     else if(a==='--confirm-local-dependency-unfixable')out.confirmLocalDependencyUnfixable=true
     else if(a==='--skip-doctor')out.skipDoctor=true
     else if(a==='--confirm-no-verdict')out.confirmNoVerdict=true
@@ -3668,6 +3729,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.reversionClaim){console.log(JSON.stringify(reversionActiveClaim({...o,claim:o.claimNumber},now,io),null,2));return 0}
     if(o.replaceFailedReviewer){console.log(JSON.stringify(replaceFailedReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
     if(o.excludeReviewer){console.log(JSON.stringify(excludeReviewerForPr(o,io),null,2));return 0}
+    if(o.recordReviewVerdict){console.log(JSON.stringify(recordReviewVerdict({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
     if(o.reviewerPreflight){console.log(JSON.stringify(reviewerExecutionPreflight(o,io),null,2));return 0}
     if(o.assignReviewer){console.log(JSON.stringify(assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
     if(o.activateReviewCutover){console.log(JSON.stringify(activateReviewCutover(io),null,2));return 0}
