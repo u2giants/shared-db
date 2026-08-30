@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_PAGE_LIMIT } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_PAGE_LIMIT, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -374,6 +374,26 @@ test('reviewer cursor advances atomically through the durable round robin',()=>{
   assert.ok(io.refs.has(REVIEW_CURSOR_REF))
 })
 
+test('durable per-PR exclusion skips a truthfully disposed reviewer on a new head',()=>{
+  const io=reviewIo(), first=assignNextReviewer({issue:1833,pr:1900,headSha:'a'.repeat(40)},io)
+  const evidenceSha=io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/1833-1900-${'a'.repeat(40)}`)
+  const excluded=excludeReviewerForPr({issue:1833,pr:1900,reviewer:first.reviewer,reason:'already-reviewed',evidenceSha},io)
+  assert.deepEqual(parseReviewExclusion(io.getCommit(excluded.sha)),{reviewer:first.reviewer,issue:1833,pr:1900,reason:'already-reviewed',evidenceSha})
+  io.getPr=()=>({state:'open',head:{sha:'b'.repeat(40),ref:'codex/x'}})
+  const next=assignNextReviewer({issue:1833,pr:1900,headSha:'b'.repeat(40)},io)
+  assert.notEqual(next.reviewer,first.reviewer)
+  assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith('refs/db-review-failures/1833-1900-')),false)
+})
+
+test('reviewer exclusion is idempotent and rejects false evidence or changed disposition',()=>{
+  const io=reviewIo(), first=assignNextReviewer({issue:1833,pr:1901,headSha:'c'.repeat(40)},io)
+  const evidenceSha=io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/1833-1901-${'c'.repeat(40)}`),request={issue:1833,pr:1901,reviewer:first.reviewer,reason:'terminal-unavailable',evidenceSha}
+  const one=excludeReviewerForPr(request,io),two=excludeReviewerForPr(request,io)
+  assert.equal(two.sha,one.sha)
+  assert.throws(()=>excludeReviewerForPr({...request,issue:1834},io),/evidence does not match/)
+  assert.throws(()=>excludeReviewerForPr({...request,reason:'already-reviewed'},io),/different durable exclusion/)
+})
+
 test('active reviewer lease parser round-trips exact identity and fails closed',()=>{
   const reviewer=ACTIVE_REVIEWERS[0].name, message=`db-coordination reviewer-lease generation=7 reviewer=${reviewer} issue=1767 pr=1800 head=${'a'.repeat(40)} sequence=9`
   assert.deepEqual(parseReviewLease({message}),{generation:7,reviewer,issue:1767,pr:1800,headSha:'a'.repeat(40),sequence:9})
@@ -418,7 +438,7 @@ test('10,000 historical assignments do not change bounded availability cost',()=
   }
   const empty=run(0), large=run(10_000)
   assert.equal(large.historyScans,0);assert.equal(empty.requests,large.requests)
-  assert.equal(large.requests,18,JSON.stringify(large));assert.equal(large.activeReads,0,JSON.stringify(large))
+  assert.equal(large.requests,19,JSON.stringify(large));assert.equal(large.activeReads,0,JSON.stringify(large))
 })
 
 test('complete assignment stays inside the real wire-attempt budget',()=>{
@@ -496,9 +516,9 @@ test('complete slot-2 assignment stays inside the real wire-attempt budget (issu
   // section still fits. Both reviewers derived that mechanism correctly, and
   // the wrong name was nearly merged anyway -- so the gate is now asserted by
   // behaviour below, not only by its numeral.
-  assert.equal(attempts,20,`slot 2 used ${attempts} wire attempts; this fixture costs exactly 20 of the ${REVIEW_OPERATION_REQUEST_LIMIT}-request budget. If this changed, re-derive the ceiling rather than widening it`)
+  assert.equal(attempts,21,`slot 2 used ${attempts} wire attempts; this fixture costs exactly 21 of the ${REVIEW_OPERATION_REQUEST_LIMIT}-request budget. If this changed, re-derive the ceiling rather than widening it`)
   assert.equal(REVIEW_MUTEX_SECTION_RESERVE,13,'the mutex-section entry-gate reserve changed without this budget being re-derived')
-  assert.equal(REVIEW_OPERATION_REQUEST_LIMIT,22,'the ceiling changed; re-derive it against the real cost rather than raising it again')
+  assert.equal(REVIEW_OPERATION_REQUEST_LIMIT,23,'the ceiling changed; re-derive it against the real cost rather than raising it again')
   // The three pins above are near-tautologies: they restate constants. None of
   // them fails if the CALL SITE stops using the constant, because the gate asks
   // `count + required > LIMIT` and the remaining budget after pre-mutex is
@@ -535,11 +555,11 @@ test('complete replacement stays inside the real wire-attempt budget',()=>{
   io.readReviewRecords=(refs,prefix)=>{wire(2,'readReviewRecords');const result=new Map(refs.map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha}))});return result}
   for(const name of ['readRef','listRefs','getCommit','getPr','getIssue','getIssueComments','getPrReviews','createRef','updateRef','deleteRef']){const fn=io[name];io[name]=(...args)=>{wire(1,`${name}:${String(args[0])}`);return fn(...args)}}
   const make=io.makeOwnerCommit;io.makeOwnerCommit=(message)=>{wire(1,'commit');baseLoaded=true;return make(message)}
-  // Baseline preflight is 7 requests. Five additional fixed-record reads (the
-  // one-request-per-record worst case) make 12; reserve 11 must
-  // refuse because 12 + 11 exceeds the 22-request ceiling. Reserve 10 would
+  // Baseline preflight is 7 requests. Six additional fixed-record reads (the
+  // one-request-per-record worst case) make 13; reserve 11 must
+  // refuse because 13 + 11 exceeds the 23-request ceiling. Reserve 10 would
   // acquire the mutex with no room for the measured success path plus cleanup.
-  io.getRateLimit=()=>{wire(5,'replacement-record-read');return ordinaryQuota()}
+  io.getRateLimit=()=>{wire(6,'replacement-record-read');return ordinaryQuota()}
   assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/budget/i)
   assert.equal(labels.includes(`createRef:${MUTEX_REF}`),false,'new replacement budget refusal must precede mutex acquisition')
   io.getRateLimit=ordinaryQuota;attempts=0;labels.length=0
@@ -558,11 +578,11 @@ test('complete replacement stays inside the real wire-attempt budget',()=>{
   const source=readFileSync(new URL('./manage-migration-author-lanes.mjs',import.meta.url),'utf8')
   assert.match(source,/requireReviewWireCapacity\(10\);acquireReviewMutex\(ownerSha,io\);mutexAcquired=true/,'the idempotent reserve changed without re-derivation')
   assert.match(source,/requireReviewWireCapacity\(11\);acquireReviewMutex\(ownerSha,io\);mutexAcquired=true/,'the new-replacement reserve changed without re-derivation')
-  // Baseline preflight is 8 requests. Five additional fixed-record reads make
-  // 13; reserve 10 must
-  // refuse because 13 + 10 exceeds the ceiling. Reserve 9 would acquire the
-  // mutex at exactly 22 and leave no room for the measured success path.
-  io.getRateLimit=()=>{wire(5,'replacement-record-read');return ordinaryQuota()}
+  // Baseline preflight is 8 requests. Six additional fixed-record reads make
+  // 14; reserve 10 must refuse because 14 + 10 exceeds the 23-call ceiling.
+  // Reserve 9 would acquire the mutex at exactly 23 and leave no room for the
+  // measured success path.
+  io.getRateLimit=()=>{wire(6,'replacement-record-read');return ordinaryQuota()}
   attempts=0;labels.length=0
   assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/budget/i)
   assert.equal(labels.includes(`createRef:${MUTEX_REF}`),false,'budget refusal must happen before mutex acquisition')
