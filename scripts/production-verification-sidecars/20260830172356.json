@@ -18,6 +18,12 @@
     {
       "id": "scraped_properties_source_purpose_contract",
       "kind": "catalog_contract",
+      "contract": "scraped_properties_source_purpose_v1",
+      "expected_count": 1
+    },
+    {
+      "id": "dcp_opa_property_authority_non_regression",
+      "kind": "catalog_contract",
       "contract": "dcp_opa_property_authority_v1",
       "expected_count": 1
     }
