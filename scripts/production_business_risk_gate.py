@@ -444,6 +444,22 @@ def prove_preview_migration_contents(
 PREVIEW_PRODUCER_PATHS = (
     PREVIEW_WORKFLOW,
     "scripts/production_migration_guard.py",
+    # Hash-bound verification declarations are read by the catalog verifier in
+    # preview. Contents API directory responses are arrays, so pin each reviewed
+    # file explicitly rather than pretending a directory has a blob SHA.
+    "scripts/production-verification-sidecars/20260621151155.json",
+    "scripts/production-verification-sidecars/20260701154948.json",
+    "scripts/production-verification-sidecars/20260710135600.json",
+    "scripts/production-verification-sidecars/20260710135700.json",
+    "scripts/production-verification-sidecars/20260710135900.json",
+    "scripts/production-verification-sidecars/20260710135950.json",
+    "scripts/production-verification-sidecars/20260727154500.json",
+    "scripts/production-verification-sidecars/20260807030000.json",
+    "scripts/production-verification-sidecars/20260823233716.json",
+    "scripts/production-verification-sidecars/20260825031841.json",
+    "scripts/production-verification-sidecars/20260825050407.json",
+    "scripts/production-verification-sidecars/20260825082910.json",
+    "scripts/production-verification-sidecars/20260828021051.json",
     # Local import of the guard, and the only thing that reads a migration's
     # `-- derived-from:` declaration (issue #1608). An unpinned copy could
     # declare every base satisfied and the guard would believe it, which is the
@@ -453,6 +469,13 @@ PREVIEW_PRODUCER_PATHS = (
     # Runs FIRST in the preview job, to acquire the lane, before any evidence
     # byte exists. Unpinned, it was a complete forgery path.
     "scripts/manage-migration-author-lanes.mjs",
+    # Invoked by the manager before preview preparation to prove the live sole
+    # orchestrator identity. Its result gates whether preparation may proceed.
+    "scripts/check-orchestrator-marker.mjs",
+    # Imported by the manager for append-only capacity and issue-flow events.
+    # A different event vocabulary could forge or suppress the coordination
+    # evidence that preview-stage authorization consumes.
+    "scripts/db-coordination-events.mjs",
     # Local import of the above. Pinning an entry point without its imports
     # leaves the same door open one level down.
     "scripts/check-dispatch-collision.mjs",
@@ -470,6 +493,11 @@ PREVIEW_PRODUCER_PATHS = (
     # Data, not code, but it routes which apply mechanism the rehearsal
     # exercises. Pinned for rehearsal fidelity.
     "config/atomic-migration-allowlist.json",
+    # Phase 2 review identity and invalidation policy. These are read-only
+    # policy inputs, but changing either changes whether prior evidence may be
+    # reused, so preview proof must bind their exact bytes.
+    "config/orchestrator-evidence-schema-v1.json",
+    "config/orchestrator-global-invalidators-v1.json",
     # READ, NOT EXECUTED -- and therefore invisible to the executed-closure
     # walk, which follows invocations and imports. The Supabase CLI reads this
     # file on every `link`, `migration list` and `db push` the preview job runs,
@@ -506,6 +534,21 @@ PREVIEW_PRODUCER_PATHS = (
 PREVIEW_RUNTIME_DATA_DIRS = ("supabase", "config")
 
 PREVIEW_RUNTIME_DATA_EXEMPTIONS = {
+    "supabase/.temp": (
+        "Created locally by the Supabase CLI and excluded by the repository's "
+        "gitignore rules. These machine-specific link and tool-version files "
+        "cannot be reviewed or pinned to a repository commit, and the governed "
+        "workflow establishes and proves its project link independently before "
+        "any preview write. Treating a developer's local CLI state as repository "
+        "source would make the production-risk test depend on which commands had "
+        "previously run on that machine without protecting committed evidence."
+    ),
+    "config/blocker-ledger": (
+        "Never read by the preview job. Read only by the offline throughput "
+        "diagnosis and reporting tools. The "
+        "preview job and every migration apply helper have no import or file-read "
+        "path to this incident evidence, so it cannot shape preview execution."
+    ),
     "supabase/migrations": (
         "The PAYLOAD, not a producer. It cannot be pinned to exact main and must "
         "not be: in the pre-merge claim lane the pull-request head legitimately "
@@ -1371,6 +1414,12 @@ def classify_sql(repo_root: Path, allowlist: list[str]) -> list[str]:
     return sorted(reasons)
 
 
+def diagnose_risk_coverage(repo_root: Path, allowlist: list[str]) -> dict[str, Any]:
+    """Read-only Phase 2 qualification entrypoint; assess() remains authoritative."""
+    findings = classify_sql(repo_root, allowlist)
+    return {"status": "covered", "finding_count": len(findings), "findings": findings}
+
+
 def migration_statements(raw: str) -> str:
     """The migration's own statements, with the noise that caused false alarms gone.
 
@@ -1540,6 +1589,10 @@ def main() -> int:
         return 2
     print(json.dumps(result, sort_keys=True))
     return 0 if result.get("productionPromotionAllowed", result["automaticPromotionAllowed"]) else 3
+
+PREVIEW_PRODUCER_PATHS += (
+    "scripts/production-verification-sidecars/20260830013942.json",
+)
 
 
 if __name__ == "__main__":

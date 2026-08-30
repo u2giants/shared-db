@@ -262,7 +262,20 @@ jobs:
           node tools/dispatch-coldlion-taxonomy-alerts.mjs --apply --linked --out alert-plan.json
           CODE=$?
           if [ "$CODE" -ne 1 ]; then
-            echo "::warning::No undelivered alert row found for this failure (dispatcher exit $CODE); the job still failed and is visible in Actions."
+            TITLE="ColdLion preview lane failed before an alert row was readable (run ${{ github.run_id }})"
+            {
+              echo "The ColdLion preview lane failed, and its database-backed alert dispatcher could not read an undelivered alert row (dispatcher exit ${CODE})."
+              echo ""
+              echo "This is the pre-link/fault fallback: GitHub is delivering the alert without depending on the database connection that failed."
+              echo ""
+              echo "Job: ${{ steps.plan.outputs.job }}"
+              echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              echo "Human response owner: Albert Hazan."
+            } > alert-body.md
+            gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body-file alert-body.md \
+              --label "coldlion-taxonomy-alert" \
+              || gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body-file alert-body.md
+            echo "::error::ColdLion preview failure delivered through the database-independent fallback. Human response owner: Albert Hazan."
             exit 0
           fi
           TITLE=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('alert-plan.json','utf8')).title)")
