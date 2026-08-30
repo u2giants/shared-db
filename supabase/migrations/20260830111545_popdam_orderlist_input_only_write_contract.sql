@@ -91,6 +91,49 @@
 begin;
 
 -- -------------------------------------------------------------------------------------
+-- 0. FAIL CLOSED IF THE BASES ARE NOT HERE YET.
+--
+-- This is not decoration and it is not defensive habit. It is what makes the contract
+-- test below provable in CI, and it was added because a reviewer showed the change was
+-- otherwise unverifiable.
+--
+-- `.github/workflows/database-contract-tests.yml` replays migrations in two passes: pass
+-- one applies everything from empty and records what failed; pass two replays ONLY that
+-- failure list, in filename order, AFTER every pass-one success.
+-- 20260810010000_popdam_order_list_contract.sql cannot replay from empty -- its
+-- api.dam_order_list selects from public.style_tracker_rows, which no migration in this
+-- repository creates -- so it is always a pass-one failure and a pass-two success.
+--
+-- Everything below is `create or replace function` in sql/plpgsql, and PostgreSQL does
+-- not resolve table names inside a function body at creation time. So without this probe
+-- this file would apply happily in pass one, and pass two would then re-apply
+-- 20260810010000 on top of it and REINSTATE the very whitelists this migration exists to
+-- remove. The lane would go green while certifying the pre-#1772 contract.
+--
+-- The probe forces this file onto the pass-two list too, where filename order puts it
+-- after its base and the narrowed definitions survive. On any database that applies
+-- migrations in order -- preview, production, and a correct from-empty replay -- the
+-- objects exist and the probe is a no-op.
+--
+-- It deliberately does NOT probe public.create_dam_order: 20260810060000 also defines
+-- that one and can plant it in pass one, which would let this file slip through. Every
+-- object named here is created ONLY by 20260810010000.
+-- -------------------------------------------------------------------------------------
+do $probe$
+begin
+  perform plm.dam_order_allowed_header_keys();
+  perform plm.dam_order_allowed_line_keys();
+  perform 'public.update_dam_order(uuid, jsonb, jsonb)'::regprocedure;
+exception when undefined_function or undefined_table or invalid_schema_name then
+  raise exception using
+    errcode = '42883',
+    message = '20260830111545 requires 20260810010000_popdam_order_list_contract.sql to be applied first',
+    detail  = 'This migration narrows whitelists that 20260810010000 defines. Applying it before its base would leave the wide definitions in force.',
+    hint    = 'Apply migrations in filename order.';
+end;
+$probe$;
+
+-- -------------------------------------------------------------------------------------
 -- 1. The whitelists. One place, so the RPCs and the contract tests cannot drift apart.
 -- -------------------------------------------------------------------------------------
 create or replace function plm.dam_order_allowed_header_keys()

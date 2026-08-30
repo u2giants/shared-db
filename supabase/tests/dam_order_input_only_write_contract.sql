@@ -17,6 +17,12 @@
 --   order row — which is precisely why it can run in the from-empty lane and be
 --   trusted there, instead of joining the eleven files in ci-quarantine.txt.
 --
+--   That trust is only earned because 20260830111545 opens with a fail-closed probe of
+--   the objects its base creates. Without it the two-pass replay would re-apply the base
+--   AFTER this migration and this file would be asserting against the superseded
+--   whitelists. If you ever see this file fail with the OLD field list, that probe is
+--   what regressed -- do not quarantine this file, and do not weaken the assertions.
+--
 --   Every negative case catches errcode 42501 SPECIFICALLY. A test that caught
 --   `when others` would score a typo, a missing function or a permission error as a
 --   working guard, which is the failure mode this repository has shipped before.
