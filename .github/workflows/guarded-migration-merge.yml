@@ -50,6 +50,9 @@ jobs:
           node scripts/check-production-verification-sidecars.mjs --base origin/main
           node scripts/check-pr-object-collisions.mjs
           node scripts/check-migration-pr-lease.mjs
+          # An assignment is not an approval, and an approval of an earlier head
+          # is not an approval of these bytes (#1816).
+          PR_NUMBER="${{ inputs.pull_request }}" REQUESTED_SHA="${{ inputs.head_sha }}" node scripts/check-exact-head-approval.mjs
       - name: Acquire the exclusive merge lane
         id: merge_lock
         env:
@@ -73,6 +76,9 @@ jobs:
           test "$(git merge-base HEAD origin/main)" = "$(git rev-parse origin/main)"
           node scripts/check-pr-object-collisions.mjs
           node scripts/check-migration-pr-lease.mjs
+          # Re-proven under the lock: a reviewer can withdraw, or a refusal can
+          # land, between the first pass and the merge itself.
+          node scripts/check-exact-head-approval.mjs
           gh api "repos/u2giants/shared-db/statuses/$REQUESTED_SHA" -f state=success -f context='Migration guarded merge authorization' -f description='Exclusive merge lock held and exact head revalidated'
           # The status write above and the mergeability GitHub evaluates below are
           # EVENTUALLY CONSISTENT. Posting the status and merging back-to-back asked
