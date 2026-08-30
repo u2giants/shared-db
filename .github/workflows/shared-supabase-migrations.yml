@@ -1252,13 +1252,6 @@ jobs:
         with:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 0
-      - name: Verify exact main commit
-        env:
-          REQUESTED_SHA: ${{ inputs.commit_sha }}
-        run: |
-          git fetch origin main
-          test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
-          test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
       - name: Acquire the exclusive production lane and freeze merges
         id: production_lock
         env:
@@ -1270,6 +1263,15 @@ jobs:
             --owner "github-actions:${GITHUB_RUN_ID}" --head-sha "$REQUESTED_SHA" \
             > "$RUNNER_TEMP/production-lock.json"
           echo "owner_sha=$(jq -r .ownerSha "$RUNNER_TEMP/production-lock.json")" >> "$GITHUB_OUTPUT"
+      # Verify only AFTER the production lock exists. Otherwise main can move
+      # between this equality check and lock acquisition (issue #1689).
+      - name: Verify exact main commit while holding the production lane
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+        run: |
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
+          test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
       # Re-verify after the environment wait. GitHub artifacts are retention-
       # bound, so this both pins the original ZIP digest and copies the verified
       # canonical JSON into the final apply evidence artifact.
