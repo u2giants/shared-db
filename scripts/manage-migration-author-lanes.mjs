@@ -1611,13 +1611,30 @@ export function pickReviewer(sequence,io){
   return ordered.find((row)=>!busy.has(row.name))??OVERFLOW_REVIEWERS.find((row)=>!busy.has(row.name))??ordered[0]
 }
 
+// Slot 1 keeps the original, unsuffixed ref namespace so every already-recorded
+// assignment and replacement stays exactly where it is. Slot 2+ gets a parallel
+// namespace under the same tuple.
+export function reviewSlotSuffix(slot){return Number(slot)===1?'':`-slot${Number(slot)}`}
+
+// `listRefs` is a PREFIX scan, and slot 1's replacement base is a prefix of
+// every higher slot's base (".../9-109-abc" also matches ".../9-109-abc-slot2-516").
+// Every replacement listing must therefore be narrowed to the exact namespace it
+// asked for, or slot 2's records leak into slot 1's answers -- silently, and with
+// the highest sequence winning, which is exactly the cross-slot mutation the
+// replacement matcher fails closed to prevent. Links are named `<base>-<failedSequence>`,
+// so the remainder after the base is digits and nothing else.
+export function inReviewReplacementNamespace(ref,base){
+  const rest=String(ref).slice(base.length)
+  return String(ref).startsWith(base)&&/^-\d+$/.test(rest)
+}
+
 // Resolve the CURRENT reviewer bound to slot 1 for this exact (issue, pr,
 // headSha), read-only. Slot 1 may have been replaced after a genuine failure
-// (--replace-failed-reviewer, which is not slot-aware and only ever touches
-// slot 1's own ref namespace), so a live replacement takes priority over the
-// original assignment record -- same precedence assignNextReviewerOperation
-// itself gives replacements over a plain assignment. Throws if slot 1 was
-// never assigned: slot 2 must never silently invent a first reviewer.
+// (--replace-failed-reviewer --review-slot 1, which touches only slot 1's own
+// ref namespace), so a live replacement takes priority over the original
+// assignment record -- same precedence assignNextReviewerOperation itself gives
+// replacements over a plain assignment. Throws if slot 1 was never assigned:
+// slot 2 must never silently invent a first reviewer.
 function resolveSlotOneReviewer(issue,pr,headSha,io){
   const slotOneBase=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${headSha}`
   const slotOneReplacementBase=`${REVIEW_REPLACEMENT_REF_PREFIX}/${issue}-${pr}-${headSha}`
@@ -1637,7 +1654,11 @@ function resolveSlotOneReviewer(issue,pr,headSha,io){
   // after `--replace-failed-reviewer` throw outright (issue #1798 round 2).
   if(typeof io.readReviewRecords==='function'){
     const records=io.readReviewRecords([slotOneBase],slotOneReplacementBase)
-    const replacementRows=records.matching??[]
+    // `.matching` is a PREFIX listing, and slot 1's replacement base is a prefix
+    // of every higher slot's base, so slot 2's records would otherwise leak into
+    // slot 1's answer with the highest sequence winning (#1838). Narrow it to the
+    // exact namespace, the same way the listRefs fallback below does.
+    const replacementRows=(records.matching??[]).filter((row)=>inReviewReplacementNamespace(row.ref,slotOneReplacementBase))
     if(replacementRows.length){
       const replacements=replacementRows.map((row)=>parseReviewReplacement(row.commit??io.getCommit(row.sha)))
       return replacements.sort((a,b)=>b.sequence-a.sequence)[0].reviewer
@@ -1646,7 +1667,7 @@ function resolveSlotOneReviewer(issue,pr,headSha,io){
     if(!record)throw missing()
     return parseReviewCursor(record.commit??io.getCommit(record.sha)).reviewer
   }
-  const replacementRows=io.listRefs?.(slotOneReplacementBase)??[]
+  const replacementRows=(io.listRefs?.(slotOneReplacementBase)??[]).filter((row)=>inReviewReplacementNamespace(row.ref,slotOneReplacementBase))
   if(replacementRows.length){
     const replacements=replacementRows.map((row)=>parseReviewReplacement(row.commit??io.getCommit(row.sha)))
     return replacements.sort((a,b)=>b.sequence-a.sequence)[0].reviewer
@@ -1734,10 +1755,10 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
     // caller and every already-recorded assignment/replacement is untouched.
     // Slot 2+ gets its own parallel namespace under the same tuple so it can
     // never collide with, or be confused for, slot 1's records.
-    const slotSuffix=request.slot===1?'':`-slot${request.slot}`
+    const slotSuffix=reviewSlotSuffix(request.slot)
     const assignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}${slotSuffix}`
     const replacementBase=`${REVIEW_REPLACEMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}${slotSuffix}`
-    const replacementRows=io.listRefs?.(replacementBase)??[]
+    const replacementRows=(io.listRefs?.(replacementBase)??[]).filter((row)=>inReviewReplacementNamespace(row.ref,replacementBase))
     if(replacementRows.length){
       const replacements=replacementRows.map((row)=>{const parsed=parseReviewReplacement(row.commit??io.getCommit(row.sha));return {...parsed,failureSha:parsed.failureSha==='self'?row.sha:parsed.failureSha,replacementSha:row.sha}})
       for(const replacement of replacements){
@@ -2056,12 +2077,13 @@ export function reviewerExecutionPreflight({reviewer,wrapper,worktree,headSha,sk
   return {reviewer,wrapper,worktree,headSha,ready:true,doctorChecked:!skipDoctor,failingChecks:doctor?.failingChecks??[]}
 }
 
-function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failureCode,failingCheck,confirmLocalDependencyUnfixable,confirmNoVerdict,confirmNoArtifact},io){
+function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failureCode,failingCheck,confirmLocalDependencyUnfixable,confirmNoVerdict,confirmNoArtifact,slot=1},io){
   io=reviewOperationIo(io)
-  const request={issue:Number(issue),pr:Number(pr),headSha:String(headSha??''),failedSequence:Number(failedSequence)}
+  const request={issue:Number(issue),pr:Number(pr),headSha:String(headSha??''),failedSequence:Number(failedSequence),slot:Number(slot)}
   const eligible=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
   const eligibleNames=new Set(eligible.map((row)=>row.name))
   if(!Number.isInteger(request.issue)||!Number.isInteger(request.pr)||!/^[0-9a-f]{40}$/i.test(request.headSha)||!Number.isInteger(request.failedSequence))throw new LaneError('reviewer replacement requires exact issue, PR, 40-character head SHA, and failed sequence')
+  if(!Number.isInteger(request.slot)||request.slot<1)throw new LaneError('reviewer replacement slot must be a positive integer (1 = first reviewer, 2 = second independent reviewer)')
   if(!TERMINAL_FAILURE_CODES.includes(String(failureCode??'')))throw new LaneError(`reviewer replacement requires a recognized terminal provider/tool failure code (${TERMINAL_FAILURE_CODES.join(', ')})`)
   // A LOCAL fault is not the reviewer's fault. Replacing on one spends a
   // rotation slot and records permanent evidence against a provider that was
@@ -2076,10 +2098,21 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
   if(!confirmNoVerdict||!confirmNoArtifact)throw new LaneError('reviewer replacement requires explicit confirmation that the failed session produced no verdict and no artifact')
   const preflightBusy=findBusyReviewers(io)
   if(!preflightBusy)throw new LaneError('active reviewer leases are unreadable; reviewer replacement refused before mutex acquisition')
-  const assignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`
+  // Slot-aware, in the SAME namespaces assignment writes: a replacement request
+  // for slot N resolves the failed sequence against slot N's own records and
+  // nothing else. Slot 1 is byte-for-byte its historical unsuffixed namespace.
+  // This is the gap #1832 reported -- the matcher below is unchanged and still
+  // fails closed; it simply now gets shown the right records.
+  const slotSuffix=reviewSlotSuffix(request.slot)
+  const assignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}${slotSuffix}`
+  // Failure evidence stays keyed by the globally monotone sequence, which is
+  // unique across slots, so it needs no suffix and older refs keep their names.
   const failureRef=`${REVIEW_FAILURE_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}-${request.failedSequence}`
-  const replacementBase=`${REVIEW_REPLACEMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`
+  const replacementBase=`${REVIEW_REPLACEMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}${slotSuffix}`
   const replacementRef=`${replacementBase}-${request.failedSequence}`
+  // Slot >=2 must stay independent of slot 1 after a replacement, not only at
+  // first assignment. Resolved read-only, pre-mutex, exactly as assignment does.
+  const excludedProvider=request.slot===1?null:resolveSlotOneReviewer(request.issue,request.pr,request.headSha,io)
   const fixedRecords=io.readReviewRecords?.([replacementRef,assignmentRef,REVIEW_CURSOR_REF],replacementBase)??null
   let ownerSha=null,mutexAcquired=false
   try{
@@ -2087,7 +2120,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     // The first implementation used one unsuffixed immutable ref. Preserve it
     // as the first link while allowing later links to be appended safely.
     if(!priorReplacement){
-      const legacyRow=(fixedRecords?.matching??io.listRefs?.(replacementBase)??[]).find((row)=>row.ref===replacementBase)
+      const legacyRow=request.slot===1?(fixedRecords?.matching??io.listRefs?.(replacementBase)??[]).find((row)=>row.ref===replacementBase):null
       if(legacyRow){const parsed=parseReviewReplacement(io.getCommit(legacyRow.sha));if(parsed.failedSequence===request.failedSequence)priorReplacement=legacyRow.sha}
     }
     if(priorReplacement){
@@ -2100,7 +2133,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
       const staleReplacement=preflightBusy.stale.find((row)=>row.ref===replacementLeaseRef)
       const liveReplacement=preflightBusy.leases.get(parsed.reviewer)
       if(liveReplacement&&liveReplacement.sha!==priorReplacement&&!staleReplacement)throw new LaneError(`reviewer ${parsed.reviewer} has an unrelated live lease; idempotent replacement repair refused`)
-      ownerSha=io.makeOwnerCommit(`db-coordination reviewer-replacement-lock issue=${request.issue} pr=${request.pr} head=${request.headSha}`)
+      ownerSha=io.makeOwnerCommit(`db-coordination reviewer-replacement-lock issue=${request.issue} pr=${request.pr} head=${request.headSha}${request.slot!==1?` slot=${request.slot}`:''}`)
       requireReviewWireCapacity(10);acquireReviewMutex(ownerSha,io);mutexAcquired=true
       const freshStates=io.readReviewStates?.([parsed,...(staleReplacement?[staleReplacement.assignment]:[])])
       const replacementLive=isReviewAssignmentLive(parsed,freshStates,io),replacementTarget=replacementLive?priorReplacement:null
@@ -2135,7 +2168,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
         if(rollback.length)throw new LaneError(`${error.message}; idempotent lease rollback incomplete: ${rollback.join('; ')}`)
         throw error
       }
-      return {...parsed,wrapper:reviewer.wrapper,failureCode:String(failureCode),replacementSha:priorReplacement}
+      return {...parsed,slot:request.slot,wrapper:reviewer.wrapper,failureCode:String(failureCode),replacementSha:priorReplacement}
     }
     const assignmentSha=fixedRecords?.get(assignmentRef)?.sha??io.readRef(assignmentRef)
     if(!assignmentSha){
@@ -2146,7 +2179,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
       throw new LaneError(`no durable reviewer assignment exists for issue #${request.issue} PR #${request.pr} under ANY head; --assign-reviewer was never run for this pull request, so there is nothing to replace`)
     }
     const initial=parseReviewCursor(fixedRecords?.get(assignmentRef)?.sha===assignmentSha?fixedRecords.get(assignmentRef).commit:io.getCommit(assignmentSha))
-    const replacementRows=fixedRecords?.matching??io.listRefs?.(replacementBase)??[]
+    const replacementRows=(fixedRecords?.matching??io.listRefs?.(replacementBase)??[]).filter((row)=>inReviewReplacementNamespace(row.ref,replacementBase))
     const parsedReplacements=replacementRows.map((row)=>{const parsed=parseReviewReplacement(row.commit??io.getCommit(row.sha));return {...parsed,failureSha:parsed.failureSha==='self'?row.sha:parsed.failureSha}})
     for(const replacement of parsedReplacements)requireReplacementEvidence(replacement,io)
     const predecessors=parsedReplacements.filter((row)=>row.sequence===request.failedSequence)
@@ -2189,16 +2222,16 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     let sequence=null, reviewer=null
     for(let offset=0;offset<ACTIVE_REVIEWERS.length;offset+=1){
       const candidateSequence=cursor.sequence+1+offset, candidate=ACTIVE_REVIEWERS[(candidateSequence-1)%ACTIVE_REVIEWERS.length]
-      if(!eligibleNames.has(candidate.name)||failedNames.has(candidate.name)||preflightBusy.has(candidate.name))continue
+      if(!eligibleNames.has(candidate.name)||failedNames.has(candidate.name)||preflightBusy.has(candidate.name)||candidate.name===excludedProvider)continue
       sequence=candidateSequence;reviewer=candidate;break
     }
     // Compatibility hook for historical configurations that had an overflow
     // provider. The approved 2026-08-28 roster has none.
     if(!reviewer){
-      const overflow=OVERFLOW_REVIEWERS.find((row)=>eligibleNames.has(row.name)&&!failedNames.has(row.name)&&!preflightBusy.has(row.name))
+      const overflow=OVERFLOW_REVIEWERS.find((row)=>eligibleNames.has(row.name)&&!failedNames.has(row.name)&&!preflightBusy.has(row.name)&&row.name!==excludedProvider)
       if(overflow){sequence=cursor.sequence+1+ACTIVE_REVIEWERS.length;reviewer=overflow}
     }
-    if(!reviewer)throw new LaneError('no other reviewer is available; every active provider has already failed on this exact head')
+    if(!reviewer)throw new LaneError(request.slot===1?'no other reviewer is available; every active provider has already failed on this exact head':`no other independent reviewer is available for slot ${request.slot}: every active provider has already failed on this exact head, is busy, or is already holding an earlier slot for it`)
     const replacementSha=io.makeOwnerCommit(`db-coordination reviewer-failure-replacement sequence=${sequence} reviewer=${reviewer.name} issue=${request.issue} pr=${request.pr} head=${request.headSha} failed-sequence=${request.failedSequence} prior-sequence=${cursor.sequence} failure-ref=self failed-reviewer=${original.reviewer} code=${failureCode}${checkNote} verdict=none artifact=none`)
     failureSha=replacementSha;ownerSha=replacementSha
     const cursorReplacementSha=replacementSha
@@ -2305,6 +2338,29 @@ function matchesAssignmentTuple(ref, number, headSha) {
 // `<issue>-<pr>-<head>[-slotN]` (the original single unsuffixed link) and
 // `<issue>-<pr>-<head>[-slotN]-<failedSequence>` for every link after it, so
 // both shapes have to match here (see replaceFailedReviewerOperation).
+
+// SLOT-SCOPED, not merely tuple-scoped (issue #1798 round 6, grok-4.6 blocking
+// finding). Matching the tuple alone pools slot 1's and slot 2's replacements
+// into ONE list, and the highest sequence in that pool then overwrites BOTH
+// assignments. A slot-1 replacement would win the slot-2 assignment, leaving the
+// live slot-2 reviewer with no lease and invisible to the busy probe -- the
+// double-assignment hazard this activation exists to prevent. PR #1838 made the
+// replacement WRITER slot-aware; this is the reader, and legacy unsuffixed
+// slot-1 refs are still honoured, so the bad state was reachable on today's refs.
+// A replacement belongs to an assignment only when the text after the tuple is
+// that assignment's own slot suffix, optionally followed by the
+// `-<failedSequence>` link number and nothing else.
+function matchesReplacementForSlot(ref, number, headSha, slotSuffix) {
+  return new RegExp(`-${number}-${headSha}${slotSuffix}(?:-\\d+)?$`).test(ref)
+}
+
+// The suffix an assignment ref carries after its tuple: '' for slot 1, `-slotN`
+// above it. Read back off the ref itself, so the reader cannot disagree with
+// what the writer produced.
+function assignmentSlotSuffix(ref, number, headSha) {
+  return new RegExp(`-${number}-${headSha}(-slot\\d+)?$`).exec(ref)?.[1] ?? ''
+}
+
 function matchesReplacementTuple(ref, number, headSha) {
   return new RegExp(`-${number}-${headSha}(?:-slot\\d+)?(?:-\\d+)?$`).test(ref)
 }
@@ -2315,7 +2371,16 @@ function activateReviewCutoverOperation(io) {
   if (typeof io.openPulls !== 'function' || typeof io.listRefs !== 'function') {
     throw new LaneError('review cutover activation requires openPulls and listRefs; refusing an unproven audit')
   }
-  requireReviewWireCapacity(15)
+  // ENTRY GATE, re-derived (issue #1798 round 6, grok-4.6). This used to reserve
+  // a bare 15 -- the in-lock reserve from a slot-2 design that was DELETED when
+  // this branch deferred to #1813. It survived the merge as a number attached to
+  // nothing, and it sat here rather than at the mutex acquire, so it guaranteed
+  // release of nothing. Measured on this head: 3 requests are already spent when
+  // control reaches this line, 7 more are spent before the mutex (openPulls, 4
+  // assignment ref pages, the active-lease read, the owner commit), and the
+  // mutex-held section reserves 11 at its own acquire site below. 7 + 11 is what
+  // an operation still has to be able to afford here, so 18 is what it asks for.
+  requireReviewWireCapacity(18)
   const openPulls = io.openPulls()
   if (!Array.isArray(openPulls)) throw new LaneError('open PR audit did not return a readable list; cutover activation refused')
   // REF DISCOVERY (issue #1798, round 2). Two production I/O facts drive this
@@ -2334,7 +2399,9 @@ function activateReviewCutoverOperation(io) {
   // Hence: page the listing explicitly (cheap {ref,sha} rows, counted), narrow
   // to the open-PR tuples LOCALLY for free, then spend ONE GraphQL call to read
   // messages for just that narrowed set. Cost stays flat in the number of live
-  // reviews found, which is what the 19-request budget actually requires.
+  // reviews found. 19 is what this walk SPENDS on today's real page counts; the
+  // budget is REVIEW_OPERATION_REQUEST_LIMIT, which is 22. Spend and ceiling are
+  // different numbers and this comment used to conflate them (issue #1798 round 6).
   const pagedRefs = (prefix) => (typeof io.listReviewRefsPaged === 'function'
     ? io.listReviewRefsPaged(prefix)
     : (io.listRefs(prefix) ?? []))
@@ -2358,6 +2425,14 @@ function activateReviewCutoverOperation(io) {
   // of 3, and the existing-lease check below costs 0 instead of 1.
   const activeLeases = typeof io.readActiveReviewLeases === 'function' ? io.readActiveReviewLeases() : null
   const ownerSha = io.makeOwnerCommit('db-coordination reviewer-index-cutover-activation-audit')
+  // RESERVE THE MUTEX-HELD SECTION, at the acquire site, the way the two sibling
+  // acquire sites above do. The replacement ref listing runs INSIDE this lock, so
+  // extra replacement pages and per-ref getCommit fallbacks are in-lock spend, and
+  // hitting the hard budget wall mid-section is exactly what a reserve prevents.
+  // Measured in-lock spend on the real 4+2 page path is 9; 11 leaves two above it,
+  // because a reserve must be at least the spend and erring the other way is what
+  // strands a held mutex.
+  requireReviewWireCapacity(11)
   acquireReviewMutex(ownerSha, io)
   try {
     // Narrow to the open-PR tuples first -- pure local filtering, no requests.
@@ -2429,6 +2504,7 @@ function activateReviewCutoverOperation(io) {
         // to the busy probe -- the double-assignment hazard this whole
         // activation exists to prevent.
         const parsedReplacements = replacements
+          .filter((entry) => matchesReplacementForSlot(entry.ref, number, headSha, assignmentSlotSuffix(row.ref, number, headSha)))
           .map((entry) => {
             let parsed
             try { parsed = parseReviewReplacement(messages.get(entry.ref)) }
@@ -3356,7 +3432,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.resumeAuthorLease){console.log(JSON.stringify(resumeAuthorLease({...o,claim:o.claimNumber??o.claim},now,io),null,2));return 0}
     if(o.reissueMergedClaim){console.log(JSON.stringify(reissueMergedStrandedClaim({...o,claim:o.claimNumber},now,io),null,2));return 0}
     if(o.reversionClaim){console.log(JSON.stringify(reversionActiveClaim({...o,claim:o.claimNumber},now,io),null,2));return 0}
-    if(o.replaceFailedReviewer){console.log(JSON.stringify(replaceFailedReviewer(o,io),null,2));return 0}
+    if(o.replaceFailedReviewer){console.log(JSON.stringify(replaceFailedReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
     if(o.reviewerPreflight){console.log(JSON.stringify(reviewerExecutionPreflight(o,io),null,2));return 0}
     if(o.assignReviewer){console.log(JSON.stringify(assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
     if(o.activateReviewCutover){console.log(JSON.stringify(activateReviewCutover(io),null,2));return 0}

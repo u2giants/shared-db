@@ -43,18 +43,42 @@ This branch and PR #1813 found the same slot-2 defect and fixed it two different
 ways. #1813 merged first, so this branch defers to its design in full; what
 follows describes the merged one, not the superseded one.
 
-Under the merged design a fresh second-reviewer assignment spends 9 requests
+Under the merged design a fresh second-reviewer assignment spends 8 requests
 BEFORE taking the mutex - the slot-1 preflight plus the extra
 `resolveSlotOneReviewer` read, which stays pre-mutex - and must then still be
 able to reserve `REVIEW_MUTEX_SECTION_RESERVE` (13) for the whole mutex-held
-section. The entry gate is what that sum has to clear: 9 + 13 = 22, which is
-exactly `REVIEW_OPERATION_REQUEST_LIMIT`. There is no spare request.
+section. The entry gate is what that sum has to clear: 8 + 13 = 21, one under
+`REVIEW_OPERATION_REQUEST_LIMIT`, so there is exactly one spare request.
+
+#1813 derived that pre-mutex figure as 9, because `resolveSlotOneReviewer` cost
+three wire calls there. On this branch the same resolve is batched into one
+`readReviewRecords`, which costs 2, so the honest figure is 8. Taking #1813's
+mutex placement together with this branch's cheaper resolve while keeping
+#1813's arithmetic is half-applied accounting - mutex placement from one design,
+resolve cost from another, the total from neither - and it went green. Two test
+figures were corrected for this reason: the slot-2 assignment cost and #1832's
+slot-2 replacement cost, which measured 16 rather than the 17 it pinned. Both
+were verified from the call labels, not inferred: two `readReviewRecords` calls
+and no `listRefs`/`readRef`/`getCommit` triple.
+
+## The cutover's own reserve
+
+Activation reserved a bare `15` - the in-lock reserve of the slot-2 design this
+branch deleted when it deferred to #1813. It survived the merge as a number
+attached to nothing, and it sat before the open-PR walk rather than at the mutex
+acquire, so it guaranteed the release of nothing. Measured on this head: 10
+requests are spent before the mutex and 9 inside it. The entry gate now asks for
+18 (the 7 pre-mutex requests still to come, plus the reserve) and the mutex-held
+section reserves 11 at its own acquire site, two above its measured spend. The
+replacement ref listing runs inside that lock, so extra replacement pages and
+per-ref commit fallbacks are in-lock spend.
 
 Measured against merged `main`, on 2026-08-30:
 
 | Operation | Measured spend | Ceiling |
 | --- | --- | --- |
 | Complete slot-2 assignment | 20 requests | 22 |
+| Complete slot-2 replacement | 16 requests | 22 |
 | Cutover activation with a live review, real page counts | 19 requests | 22 |
 
 Reserved is not spent. The reserve is deliberately larger than the measured
@@ -85,3 +109,21 @@ present for that window instead of a later run inheriting it.
 Merge order: PR #1799 lands only after PR #1813 raises the request ceiling. The
 budget tests here assert against the imported constant, so they track the raise,
 but they are re-run against merged `main` before merging rather than assumed.
+
+## Slot-scoped replacements in the cutover reader
+
+PR #1838 made the replacement WRITER slot-aware. The cutover READER was not: it
+gathered replacements per pull request and applied one shared list to every
+assignment on that PR, highest failure sequence winning. A slot-1 replacement
+therefore overwrote the slot-2 assignment, the live slot-2 reviewer never got a
+lease, and the busy probe went blind to a provider that was actually reviewing -
+the double-assignment hazard this activation exists to prevent. Legacy
+unsuffixed slot-1 replacement refs are deliberately still honoured, so the bad
+state was reachable on today's refs, not only on historical ones.
+
+The reader now binds each replacement to its assignment's own slot suffix, read
+back off the assignment ref rather than assumed. A combined-state test seeds a
+replaced slot 1 and a live, never-replaced slot 2 on one open pull request and
+requires both reviewers to be leased. It was watched failing first, against this
+branch merged with `main` at `a79ba256`: it reported the same reviewer leased
+twice and the slot-2 reviewer not at all.
