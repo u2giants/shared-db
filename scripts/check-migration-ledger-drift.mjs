@@ -89,8 +89,8 @@ export const PENDING_KINDS = new Set(['genuinely-pending', 'guarded-batch', 'del
 export const INTENTIONALLY_EXCLUDED_KINDS = new Set(['deliberately-held', 'retired'])
 
 /**
- * Read the production lane's existing rules instead of maintaining a second list here.
- * Python emits the rule data; JavaScript applies it with the actual ledger. Any import,
+ * Ask the production lane's one Python classifier for final answers instead of
+ * maintaining either a second list or a second policy engine here. Any import,
  * parse, or coverage failure is UNKNOWN and makes the drift check exit 2.
  */
 export function guardClassifications(versions, appliedVersions = []) {
@@ -100,10 +100,11 @@ import json, sys
 from pathlib import Path
 root = Path(sys.argv[1])
 sys.path.insert(0, str(root / 'scripts'))
-from production_migration_guard import classify_pending_version
+from production_migration_guard import classify_pending_version, local_migrations
 versions = json.loads(sys.argv[2])
 applied = set(json.loads(sys.argv[3]))
-print(json.dumps({v: classify_pending_version(v, applied, root) for v in versions}))
+migrations = local_migrations(root)
+print(json.dumps({v: classify_pending_version(v, applied, root, migrations) for v in versions}))
 `
   let raw
   try {
@@ -118,73 +119,6 @@ print(json.dumps({v: classify_pending_version(v, applied, root) for v in version
   let result
   try { result = JSON.parse(raw) } catch { throw new Unknown('production guard classification returned invalid JSON') }
   validatePendingClassifications(versions, result)
-  return result
-}
-
-export function classifyPendingWithRules(versions, appliedVersions, rules) {
-  const applied = new Set(appliedVersions)
-  const retired = new Set(rules.retired)
-  const hardBlocked = new Set(rules.hardBlocked)
-  const bundle = new Set(rules.bundle)
-  const frHeld = new Set(rules.frHeld)
-  const frCompatibility = new Set(rules.frCompatibility ?? [])
-  const frRemoval = new Set(rules.frRemoval)
-  const previewOnlyHistorical = new Set(rules.previewOnlyHistorical ?? [])
-  const derivedFrom = rules.derivedFrom ?? {}
-  const result = {}
-  for (const version of versions) {
-    if (retired.has(version)) {
-      const reason = rules.retiredReasons?.[version] ?? 'never apply this version; its safe replacement or end state is already present'
-      result[version] = { kind: 'retired', reason: `RETIRED_VERSIONS: ${reason}.` }
-      continue
-    }
-    if (frHeld.has(version) || frCompatibility.has(version) || frRemoval.has(version)) {
-      const suffix = frRemoval.size === 0 ? 'The required FR removal migration set is not yet defined.' : `Full held bundle: ${[...frHeld, ...frRemoval].sort().join(', ')}.`
-      result[version] = { kind: 'deliberately-held', reason: `AGENTS.md 6.5 owner ruling holds the compatibility prerequisite, both FR versions, and every FR removal member for one bounded apply. ${suffix}` }
-      continue
-    }
-    if (previewOnlyHistorical.has(version)) {
-      result[version] = { kind: 'deliberately-held', reason: 'Preview-only historical restoration: retain truthful preview history and never include this version in a production allowlist.' }
-      continue
-    }
-    if (hardBlocked.has(version)) {
-      result[version] = { kind: 'retired', reason: 'production_migration_guard.HARD_BLOCKED: the general production lane refuses this version outright. Do not apply it.' }
-      continue
-    }
-    // Issue #1608. This version re-derives a whole object body from a base the
-    // target database does not hold. Applying it would SUCCEED and silently
-    // install a body written for a different world — the 2026-08-24 failure.
-    // Checked before the guarded-batch and genuinely-pending branches because it
-    // is a strictly sharper statement than either, and reported as its own kind
-    // so it stops looking like ordinary pending work.
-    const unsatisfied = (derivedFrom[version] ?? []).filter((base) => !applied.has(base))
-    if (unsatisfied.length > 0) {
-      result[version] = {
-        kind: 'base-absent',
-        reason:
-          `Declares \`-- derived-from: ${(derivedFrom[version] ?? []).join(', ')}\` and this database ` +
-          `does NOT have ${unsatisfied.join(', ')}. It re-derives a whole object body, so applying it ` +
-          'here would not fail — it would replace the object with a body written against a base this ' +
-          'database never got (issue #1608). Apply the missing base(s) in the same bounded window, or ' +
-          'promote with a recorded --derivation-override naming the resulting state.',
-      }
-      continue
-    }
-    const matches = []
-    if (bundle.has(version)) matches.push('AGENTS.md 6.8 requires the complete four-version ColdLion bundle, never a subset.')
-    for (const { name, basis, why, members } of rules.atomic) {
-      if (members.includes(version)) matches.push(`${name} ${basis} batch: ${why} Outstanding set: ${members.filter((v) => !applied.has(v)).join(', ')}.`)
-    }
-    for (const { create, fixes, why } of rules.coPresence) {
-      const outstanding = fixes.filter((v) => !applied.has(v))
-      if (version === create || (applied.has(create) && outstanding.includes(version))) {
-        matches.push(`${why} ${applied.has(create) ? `Create ${create} is already applied; fix-only recovery must carry every outstanding fix.` : ''} Outstanding required fixes: ${outstanding.join(', ')}.`)
-      }
-    }
-    result[version] = matches.length
-      ? { kind: 'guarded-batch', reason: matches.join(' ') }
-      : { kind: 'genuinely-pending', reason: 'No retirement, owner-hold, atomic-batch, bundle, or ledger-aware co-presence rule names this version. It is still unapproved until the normal bounded promotion workflow passes.' }
-  }
   return result
 }
 

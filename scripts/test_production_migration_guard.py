@@ -25,6 +25,7 @@ from production_migration_guard import (  # noqa: E402
     GuardError,
     assert_bounded,
     compute_content_manifest,
+    classify_pending_version,
     created_objects,
     local_migrations,
     manifest_path,
@@ -3324,6 +3325,22 @@ class B3TruncateFixCoPresenceTest(unittest.TestCase):
         self.assertIn("revoke truncate, references, trigger, maintain", lowered)
         # ...and asserts the outcome via has_table_privilege (the behaviour probe).
         self.assertIn("has_table_privilege", lowered)
+
+
+class PendingVersionClassifierTest(unittest.TestCase):
+    def test_every_registry_flows_through_one_classifier(self) -> None:
+        paths = local_migrations(REPO)
+        self.assertEqual(classify_pending_version("20260814170749", set(), REPO, paths)["kind"], "retired")
+        self.assertEqual(classify_pending_version("20260802171000", set(), REPO, paths)["kind"], "deliberately-held")
+        self.assertEqual(classify_pending_version("20260817150944", set(), REPO, paths)["kind"], "deliberately-held")
+        self.assertEqual(classify_pending_version("20260828052706", set(), REPO, paths)["kind"], "retired")
+        self.assertEqual(classify_pending_version("20260810190000", set(), REPO, paths)["kind"], "guarded-batch")
+
+    def test_missing_declared_base_is_sharper_than_ordinary_pending(self) -> None:
+        paths = local_migrations(REPO)
+        row = classify_pending_version("20260824135515", {"20260811030000"}, REPO, paths)
+        self.assertEqual(row["kind"], "base-absent")
+        self.assertIn("20260814223552", row["reason"])
 
 
 if __name__ == "__main__":

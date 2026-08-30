@@ -1102,6 +1102,7 @@ def classify_pending_version(
     version: str,
     applied_versions: set[str] | frozenset[str],
     repo: Path,
+    migration_paths: dict[str, Path] | None = None,
 ) -> dict[str, str]:
     """Return the one authoritative pending-status classification.
 
@@ -1141,7 +1142,7 @@ def classify_pending_version(
             "reason": "production_migration_guard.HARD_BLOCKED: the general production lane refuses this version outright. Do not apply it.",
         }
 
-    migration = local_migrations(repo).get(version)
+    migration = (migration_paths if migration_paths is not None else local_migrations(repo)).get(version)
     bases = sorted(declared_bases(version, path=migration) or ()) if migration else []
     missing = [base for base in bases if base not in applied]
     if missing:
