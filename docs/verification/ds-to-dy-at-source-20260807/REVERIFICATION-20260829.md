@@ -98,6 +98,17 @@ the plan's numbers as current. It is flagged as an open question in §6 below.
 GF152DSEN01   MCZ6XDSPT01   MWB21DSPT01 (x3)   VDE83HDSUC01   VS162DSPT01
 ```
 
+**And the guard now tests all three of those columns, not just the name.** An earlier
+draft asserted the three-column discriminator in this prose while the migration checked
+only `licensor_name IS NOT NULL`. A guard described as stronger than it is gets trusted
+at its description, so the guard was widened to match the claim rather than the claim
+softened to match the guard: it aborts if any `DS` row in `public.assets` or
+`public.style_groups` has a non-null `licensor_name`, a non-null `licensor_id`, or
+`is_licensed` anything other than `false`. Re-verified read-only against production
+`qsllyeztdwjgirsysgai` on 2026-08-30: **0** of the 7 assets rows and **0** of the 1
+style-group row trip the widened guard, so it passes on today's data while genuinely
+proving what it says.
+
 All 15 `WWE` assets still carry `licensor_name = 'WWE'` and SKUs containing `WW`, not
 `WWE` (`AA036WWSU01`, `AAA36WWSU01`, `CSW1TWWSU01`, …). They are genuine stragglers.
 

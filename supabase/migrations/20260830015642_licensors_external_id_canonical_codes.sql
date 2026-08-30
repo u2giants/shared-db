@@ -63,24 +63,45 @@ begin
   -- THE TRAP (plan section 2.4a). Rows in public.assets / public.style_groups whose
   -- licensor_code is the literal 'DS' are NOT Disney: the letters are a substring of
   -- the item SKU (MCZ6X-DS-PT01, GF152-DS-EN01, VDE83H-DS-UC01, ...). Every one of
-  -- them carries licensor_name IS NULL and is_licensed = false. This migration must
-  -- not touch them, and must fail if that discriminator ever stops holding.
+  -- them carries licensor_name IS NULL, licensor_id IS NULL and is_licensed = false.
+  -- This migration must not touch them, and must fail if that discriminator ever
+  -- stops holding.
+  --
+  -- The guard tests ALL THREE columns, not just licensor_name. Testing only the name
+  -- would let a future row that acquired a licensor_id, or had is_licensed flipped,
+  -- pass a check whose stated purpose is to prove those rows are not real licensor
+  -- rows. The guard now proves what it claims. (Base-scoped review, sequence 491.)
   select count(*) into v_n
   from public.assets
-  where licensor_code = 'DS' and licensor_name is not null;
+  where licensor_code = 'DS'
+    and (licensor_name is not null or licensor_id is not null or is_licensed is distinct from false);
   if v_n <> 0 then
     raise exception
-      'abort: % public.assets row(s) with licensor_code DS carry a licensor_name; the SKU-artifact finding no longer holds, re-verify before proceeding',
+      'abort: % public.assets row(s) with licensor_code DS carry a licensor_name, a licensor_id, or is_licensed <> false; the SKU-artifact finding no longer holds, re-verify before proceeding',
       v_n;
   end if;
 
   select count(*) into v_n
   from public.style_groups
-  where licensor_code = 'DS' and licensor_name is not null;
+  where licensor_code = 'DS'
+    and (licensor_name is not null or licensor_id is not null or is_licensed is distinct from false);
   if v_n <> 0 then
     raise exception
-      'abort: % public.style_groups row(s) with licensor_code DS carry a licensor_name; the SKU-artifact finding no longer holds, re-verify before proceeding',
+      'abort: % public.style_groups row(s) with licensor_code DS carry a licensor_name, a licensor_id, or is_licensed <> false; the SKU-artifact finding no longer holds, re-verify before proceeding',
       v_n;
+  end if;
+
+  -- The `comment on column` at the end of this file is a catalog write, so it must not
+  -- silently overwrite documentation someone else wrote. Verified read-only against
+  -- production 2026-08-30: this column currently has NO comment, so the exact reversal
+  -- is `comment on column public.licensors.external_id is null`. Assert that here rather
+  -- than trusting the observation: if a comment has appeared since, this aborts instead
+  -- of destroying it. (Base-scoped review, sequence 491.)
+  if col_description('public.licensors'::regclass,
+       (select attnum from pg_attribute
+         where attrelid = 'public.licensors'::regclass and attname = 'external_id')) is not null then
+    raise exception
+      'abort: public.licensors.external_id already carries a column comment; this migration would overwrite it irreversibly, capture it first';
   end if;
 
   -- Baselines that must survive the change untouched.
@@ -105,13 +126,17 @@ begin
   -- The ruling -- "change DS to DY at its source" -- is fully satisfied without it.
 
   -- ---------- postconditions ----------
+  -- `is distinct from`, NOT `<>`. With `<>`, a NULL external_id -- or a row that has
+  -- vanished, which leaves v_code NULL via SELECT INTO without raising -- makes the
+  -- comparison UNKNOWN, the `if` is not taken, and the postcondition passes silently.
+  -- A guard that cannot fail is not a guard. (Base-scoped review, sequence 491.)
   select external_id into v_code from public.licensors where id = c_disney_legacy;
-  if v_code <> 'DY' then
-    raise exception 'abort: Disney legacy external_id is % after update, expected DY', v_code;
+  if v_code is distinct from 'DY' then
+    raise exception 'abort: Disney legacy external_id is % after update, expected DY', coalesce(v_code, '<null or row missing>');
   end if;
   select external_id into v_code from public.licensors where id = c_wwe_legacy;
-  if v_code <> 'WW' then
-    raise exception 'abort: WWE legacy external_id is % after update, expected WW', v_code;
+  if v_code is distinct from 'WW' then
+    raise exception 'abort: WWE legacy external_id is % after update, expected WW', coalesce(v_code, '<null or row missing>');
   end if;
 
   -- Every legacy licensor still resolves to exactly one core.licensor under the
@@ -151,5 +176,13 @@ begin
   end if;
 end $$;
 
+-- ROLLBACK, in full, from this file alone:
+--   update public.licensors set external_id = 'DS'  where id = '10a445bc-cdb8-4384-ad6f-a46fd029f2bc';
+--   update public.licensors set external_id = 'WWE' where id = '1e3ebfce-7d9d-4424-a68c-73c4e57b6d83';
+--   comment on column public.licensors.external_id is null;
+-- The column had no comment before this migration, asserted by a precondition above, so
+-- setting it back to null restores the prior catalog state exactly. The one thing NOT
+-- recoverable is the original updated_at on the two rows; forward and reverse both stamp
+-- now(). That is stated rather than hidden. (Base-scoped review, sequence 491.)
 comment on column public.licensors.external_id is
   'Canonical licensor code, aligned to core.licensor.code since 2026-08-07 (owner ruling: change DS to DY at its source). Legacy values DS/WWE were normalised to DY/WW by issue #505. public.dam_character_catalog still carries a defensive DS/WWE remap; it is now a no-op and is deliberately retained as a safety net.';
