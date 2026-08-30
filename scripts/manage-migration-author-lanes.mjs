@@ -1461,7 +1461,17 @@ export function parseReviewExclusion(commit){
 function reviewerExclusions(issue,pr,io,{fresh=false}={}){
   const prefix=`${REVIEW_EXCLUSION_REF_PREFIX}/${Number(issue)}-${Number(pr)}-`
   const result=new Map()
-  for(const row of (fresh?io.__freshListRefs(prefix):io.listRefs(prefix))??[]){
+  // Read the complete, finite reviewer registry in one GraphQL request.  A
+  // prefix listing returns only ref/SHA pairs and therefore costs one extra
+  // getCommit request per exclusion while the global reviewer mutex is held.
+  // That variable cost defeated the mutex-section request reserve (#1833).
+  // Exact reads also make absence explicit and cannot be truncated.
+  const refs=REVIEWERS.map(({name})=>`${prefix}${name}`)
+  const exact=io.readReviewRecords?.(refs,null)
+  const rows=exact
+    ? refs.map((ref)=>{const row=exact.get(ref);return row?{ref,...row}:null}).filter(Boolean)
+    : (fresh?io.__freshListRefs(prefix):io.listRefs(prefix))??[]
+  for(const row of rows){
     const exclusion=parseReviewExclusion(row.commit??io.getCommit(row.sha))
     if(exclusion.issue!==Number(issue)||exclusion.pr!==Number(pr)||row.ref!==`${prefix}${exclusion.reviewer}`)throw new LaneError('durable reviewer exclusion does not match its ref identity')
     result.set(exclusion.reviewer,exclusion)

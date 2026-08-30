@@ -478,11 +478,19 @@ test('complete assignment stays inside the real wire-attempt budget',()=>{
     states.set(`${issue}:${pr}`,{pr:{state:'open',head:{sha:headSha}},evidence:[]})
   })
   states.set('1767:1800',{issue:{state:'open'},pr:{state:'open',head:{sha:'a'.repeat(40)}},evidence:[]})
+  // Multiple durable exclusions must remain one fixed-cost exact-record read.
+  // The former prefix scan paid an unreserved getCommit request for every row
+  // after the mutex was acquired and could exhaust the global wire ceiling.
+  REVIEWERS.slice(0,4).forEach((reviewer,index)=>{
+    const sha=io.makeOwnerCommit(`db-coordination reviewer-exclusion reviewer=${reviewer.name} issue=1767 pr=1800 reason=already-reviewed evidence=${String(index+1).repeat(40).slice(0,40)}`)
+    io.refs.set(`${REVIEW_EXCLUSION_REF_PREFIX}/1767-1800-${reviewer.name}`,sha)
+  })
   const wire=(n=1)=>{for(let i=0;i<n;i++)runGitHubCommand(['api','fixture'],{executor:()=>{attempts++;return '{}'}})}
   io.getRateLimit=()=>{wire(2);return {remaining:5000,limit:5000,reset:1787943986,graphRemaining:5000,graphLimit:5000,graphReset:1787943986}}
   io.readActiveReviewLeases=()=>{wire();const snapshot=new Map(active);for(const [ref,sha] of io.refs)if(ref.startsWith(REVIEW_ACTIVE_REF_PREFIX))snapshot.set(ref,{sha,commit:rawGetCommit(sha)});return snapshot}
   io.readReviewStates=()=>{wire();return states}
   io.readReviewRefs=(refs)=>{wire();return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
+  io.readReviewRecords=(refs)=>{wire();return new Map(refs.map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}))}
   io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
   io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
   for(const name of ['readRef','listRefs','getCommit','getPr','getIssueComments','getPrReviews','createRef','updateRef','deleteRef']){
@@ -593,14 +601,14 @@ test('complete replacement stays inside the real wire-attempt budget',()=>{
   assert.ok(result.reviewer);assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`used ${attempts} wire attempts`)
   const mutexAt=labels.indexOf(`createRef:${MUTEX_REF}`)
   assert.notEqual(mutexAt,-1,`mutex acquisition was not observed: ${labels.join(',')}`)
-  assert.equal(mutexAt,8,'the first replacement path spends 8 requests before its mutex gate')
-  assert.equal(labels.length-mutexAt,10,`new replacement success path costs exactly 10 requests after mutex acquisition: ${labels.slice(mutexAt).join(',')}`)
+  assert.equal(mutexAt,9,'the first replacement path spends 9 requests before its mutex gate')
+  assert.equal(labels.length-mutexAt,11,`new replacement success path costs exactly 11 requests after mutex acquisition: ${labels.slice(mutexAt).join(',')}`)
   attempts=0;labels.length=0
   assert.deepEqual(replaceFailedReviewer(replacementRequest,io),result)
   const retryMutexAt=labels.indexOf(`createRef:${MUTEX_REF}`)
   assert.notEqual(retryMutexAt,-1,`retry mutex acquisition was not observed: ${labels.join(',')}`)
-  assert.equal(retryMutexAt,9,'the idempotent path spends 9 requests before its mutex gate')
-  assert.equal(labels.length-retryMutexAt,10,`idempotent replacement success path costs exactly 10 requests after mutex acquisition: ${labels.slice(retryMutexAt).join(',')}`)
+  assert.equal(retryMutexAt,10,'the idempotent path spends 10 requests before its mutex gate')
+  assert.equal(labels.length-retryMutexAt,11,`idempotent replacement success path costs exactly 11 requests after mutex acquisition: ${labels.slice(retryMutexAt).join(',')}`)
   const source=readFileSync(new URL('./manage-migration-author-lanes.mjs',import.meta.url),'utf8')
   assert.match(source,/requireReviewWireCapacity\(11\);acquireReviewMutex\(ownerSha,io\);mutexAcquired=true/,'the idempotent reserve changed without re-derivation')
   assert.match(source,/requireReviewWireCapacity\(12\);acquireReviewMutex\(ownerSha,io\);mutexAcquired=true/,'the new-replacement reserve changed without re-derivation')
@@ -3678,13 +3686,11 @@ test('a complete slot-2 replacement stays inside the real wire-attempt budget (i
   try{result=replaceFailedReviewer({...request,slot:2,failedSequence:slotTwo.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)}
   catch(error){throw new Error(`${error.message}; calls=${labels.join(',')}`)}
   assert.ok(result.reviewer)
-  assert.equal(attempts,18,`slot-2 replacement used ${attempts} of ${REVIEW_OPERATION_REQUEST_LIMIT}: ${labels.join(',')}`)
-  // 9 pre-mutex (slot 1's 7 plus resolveSlotOneReviewer's BATCHED readReviewRecords,
-  // which costs 2 on this branch where it cost 3 -- listRefs+readRef+getCommit --
-  // when #1832 pinned 17), then the mutex-section reserve of 11: 20 of 22, two
-  // spare. Measured, not assumed: the call labels show two readReviewRecords and
-  // no listRefs/readRef/getCommit triple. If this moves, re-derive the ceiling
-  // rather than widening it.
+  assert.equal(attempts,20,`slot-2 replacement used ${attempts} of ${REVIEW_OPERATION_REQUEST_LIMIT}: ${labels.join(',')}`)
+  // The two additional calls are the fixed-cost preflight and post-mutex exact
+  // exclusion reads. Their cost does not grow with the number of exclusions.
+  // Measured, not assumed: the call labels show only batched readReviewRecords
+  // and no per-exclusion getCommit calls.
   assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`slot-2 replacement exceeded the ${REVIEW_OPERATION_REQUEST_LIMIT}-request budget`)
 })
 
