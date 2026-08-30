@@ -351,38 +351,73 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
       it is a test of a different program.* Coverage of an evaluation core says
       nothing about the adapter that feeds it.
 
-   **A freshness check proves a value is current, never that it is the right
-   value (2026-08-30).** A lane worked PR #1813 for several hours believing it
-   was on #1748. Its discipline was not the problem: it re-read the head before
-   every action, refused four stale or ineligible approvals, and held for its
-   assigned verdict. `47f918e5` was genuinely current the whole time -- it is
-   simply #1813's head, while #1748 never moved from `95739f42` and inherited
-   none of the work. Every check the lane ran asked *is this head still current*;
-   none asked *is this head still the right PR*, so the error was invisible to
-   the entire procedure. **Staleness and misidentification are different
-   failures, and the standard remedy for the first is silent on the second.**
-   The mechanical form: the assignment ref name already carries the binding as
-   `<issue>-<pr>-<headSha>`, so re-read the head *and* confirm the PR number it
-   belongs to against that ref -- one `gh pr view <n> --json headRefOid` per PR,
-   or all open heads in a single call, which is what caught this. Read every
-   identifier the action depends on, not only the one that moves. Note that the
-   artifacts were correctly named the whole time: every ref on that branch read
-   `1812-1813-`. The binding was unread, not undetectable, which is why the
-   remedy is mechanical rather than a caution to be careful.
+   **A pin proves a value is current, never that it is the right value, and
+   never what was actually examined (2026-08-30).** Codex approved PR #1813 at
+   exactly `47f918e5` -- the correct head, the pin every gate in this section
+   checks -- having reviewed `scripts/orchestrator-flow/reconcile.mjs`, a file
+   with **zero lines in that PR's delta**. That delta is seven files and does
+   not include it. The head was a merge commit (two parents) and the wrapper
+   offers no base selection, so "the change" resolved to the merge's incoming
+   side: someone else's work. Right commit, wrong content, and the third
+   wrong-scope review of the session. Nobody was confused about anything and the
+   head pin did exactly what it promises. **Currency and subject are independent
+   properties and the check reads only the first: an approval can be perfectly
+   pinned and about nothing.** Remedy: hand reviewers a linear delta or state
+   the base explicitly -- a reviewer given a merge commit and no base is
+   reviewing an unspecified diff -- and read every identifier an action depends
+   on, not only the one that moves. The assignment ref already carries the
+   binding as `<issue>-<pr>-<headSha>`, so it can be read off the artifact
+   rather than held in memory.
 
-   This is the sharpest entry in this section, and it is worth being precise
-   about why. Every other failure recorded here is a rule not followed. This is
-   a rule followed perfectly, passing cleanly, on the wrong object, for hours.
-   The currency check did not confirm a true fact about the wrong thing by
-   accident -- it confirmed the only fact it was ever capable of confirming. It
-   has no access to identity, so it cannot fail at identity, and therefore
-   cannot warn about it. **A rule not followed leaves a gap someone may notice;
-   a rule followed perfectly on the wrong object produces a clean record that
-   actively argues against looking further.** Hours of passing checks are more
-   convincing than no checks at all. So a procedure whose outcome the author
+   **The same shape a third time, on the predicate rather than the subject.**
+   A session reported four failing checks on PR #1819. The four were `preview`,
+   `production-dry-run` and both production-apply gates, all **SKIPPED** -- the
+   correct outcome for a PR shipping no migration, and the PR was MERGEABLE with
+   nothing red. The filter treated "not SUCCESS" as "failure". Right check,
+   right head, right PR, false conclusion, because *not success* and *failed*
+   are different sets. **A status is a value, not a verdict; read what the value
+   means before reporting what it implies.**
+
+   This is the sharpest group in this section, and it is worth being precise
+   about why. Every other failure recorded here is a rule not followed. These
+   are rules followed perfectly, passing cleanly, on the wrong subject or with
+   the wrong predicate. The head check did not confirm a true fact about the
+   wrong thing by accident -- it confirmed the only fact it was ever capable of
+   confirming. It has no access to subject, so it cannot fail at subject, and
+   therefore cannot warn about it. **A rule not followed leaves a gap someone
+   may notice; a rule followed perfectly on the wrong object produces a clean
+   record that actively argues against looking further.** A passing check is
+   more convincing than no check at all. So a procedure whose outcome the author
    does not control is necessary and not sufficient: it constrains only the
    value it actually reads, and says nothing whatever about the values it
-   assumes.
+   assumes or the meaning it is given.
+
+   **Two corrections belong with this entry, because the entry was wrong once
+   before it was right.** An earlier version said a lane had worked PR #1813 for
+   hours believing it was #1748. That is false and is retracted. The lane's
+   worktree, branch and HEAD were #1813 throughout; its assignment, head pin,
+   tests and revert check were all against #1813; its reports named #1813. The
+   real errors were a mislabelled dispatch name and one stale SHA in a passing
+   reference -- true, and far smaller than the account built on them. That
+   account was assembled from a real but minor fact because the larger story was
+   the more interesting one: the same overreach, from the same cause, as calling
+   an absent review record a fabricated one a day earlier (#1816). **The second
+   correction is how it reached this file.** It was recorded on a peer's report.
+   The SHAs in that report were independently verified and were correct -- but
+   what was verified were *artifacts*, and what was written down was a
+   *narrative about a session's belief*, which no artifact can evidence.
+   Verifying the checkable part of a claim and then recording the unfalsifiable
+   part is not verification. **Record what the artifacts show; attribute
+   anything past that to whoever reported it.**
+
+   **The counterpart, so this section is not only a list of things caught by
+   someone else.** A lane prepared a hazard report -- four files, roughly four
+   hundred deleted lines -- and retracted it before sending, having found on its
+   own that it had compared against main's tip instead of the branch point.
+   Unprompted, by the author, at the only moment it was free to catch. Most
+   procedures here exist to catch what someone else missed; the cheapest catch
+   remains the author re-deriving a result before reporting it, and a wrong
+   diff base is the first thing to suspect in any surprising delta.
 
    After review approval, green checks, preview proof, and guarded merge, the
    production workflow runs `scripts/production_business_risk_gate.py`. It
