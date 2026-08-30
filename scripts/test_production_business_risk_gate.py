@@ -1851,6 +1851,28 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 downloader=lambda *_: self.fail("wrong run must not download"),
             )
 
+        for label, expired, workflow_run in (
+            ("expired", True, {"id": 7}),
+            ("missing expiry", None, {"id": 7}),
+            ("missing workflow metadata", False, "missing"),
+            ("null workflow metadata", False, None),
+        ):
+            if expired is None:
+                artifact.pop("expired", None)
+            else:
+                artifact["expired"] = expired
+            if workflow_run == "missing":
+                artifact.pop("workflow_run", None)
+            else:
+                artifact["workflow_run"] = workflow_run
+            with self.subTest(label=label), self.assertRaisesRegex(
+                RiskGateError, "expired or belongs to another run"
+            ):
+                prove_preview(
+                    **self.prove_preview_args(pr_head=head, main_sha="b" * 40, api=api),
+                    downloader=lambda *_: self.fail(f"{label} artifact must not download"),
+                )
+
     def test_production_workflow_enforces_gate_twice_and_keeps_old_boundary(self):
         workflow = Path(__file__).parents[1] / ".github/workflows/shared-supabase-migrations.yml"
         text = workflow.read_text(encoding="utf-8")
@@ -2961,6 +2983,17 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         self.assertIn("merged_preview_source_pr_map:", workflow)
         self.assertIn("REFUSED: name merged_preview_source_pr OR merged_preview_source_pr_map, not both.", workflow)
         self.assertIn("--version-pr-map", workflow)
+        self.assertIn("if [ -n \"${MERGED_SOURCE_PR:-}\" ]; then LOCK_KIND=preview-rehearsal; fi", workflow)
+        self.assertIn(
+            "ref: ${{ (inputs.merged_preview_source_pr != '' || "
+            "inputs.merged_preview_source_pr_map != '' || "
+            "inputs.historical_preview_source_pr != '' || "
+            "inputs.historical_preview_source_pr_map != '') && "
+            "inputs.commit_sha || inputs.claim_head_sha }}",
+            workflow,
+        )
+        self.assertIn("if: success() && inputs.mode == 'apply'", workflow)
+        self.assertIn('--preview-project-ref "$PREVIEW_PROJECT_REF"', workflow)
         for line in workflow.splitlines():
             if "inputs.merged_preview_source_pr" not in line:
                 continue
