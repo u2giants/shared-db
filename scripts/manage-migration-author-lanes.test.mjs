@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, projectReviewPr, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_RELEASE_RESERVE } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, projectReviewPr, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -459,14 +459,36 @@ test('complete slot-2 assignment stays inside the real wire-attempt budget (issu
   assert.notEqual(second.reviewer,first.reviewer);assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`slot 2 used ${attempts} wire attempts`)
   // Round-6 review finding (issue #1812): `attempts <= LIMIT` on its own lets
   // several one-line regressions through green -- a dropped listRefs on the
-  // counted path (9 pre-mutex becomes 8), a silently raised ceiling, or a
-  // shrunken mutex reserve. The last is the dangerous one: the reserve is what
-  // guarantees the operation can still release a mutex it has taken, so
-  // shrinking it strands the mutex instead of failing closed. Pin the operands
-  // themselves, not just the inequality they satisfy.
+  // counted path (9 pre-mutex becomes 8), or a silently raised ceiling. Pin the
+  // operands themselves, not just the inequality they satisfy.
+  //
+  // Round-7 correction: an earlier version of this comment claimed the reserve
+  // is what lets the operation release a mutex it has taken. That is false.
+  // Release is guaranteed by `cleanupReserve`, which is set when the mutex is
+  // acquired and enforced in `consumeReviewWireRequest`. The reserve here is an
+  // ENTRY gate: it refuses to take the mutex unless the whole mutex-held
+  // section still fits. Both reviewers derived that mechanism correctly, and
+  // the wrong name was nearly merged anyway -- so the gate is now asserted by
+  // behaviour below, not only by its numeral.
   assert.equal(attempts,20,`slot 2 used ${attempts} wire attempts; this fixture costs exactly 20 of the ${REVIEW_OPERATION_REQUEST_LIMIT}-request budget. If this changed, re-derive the ceiling rather than widening it`)
-  assert.equal(REVIEW_MUTEX_RELEASE_RESERVE,13,'the mutex-release reserve changed without this budget being re-derived')
+  assert.equal(REVIEW_MUTEX_SECTION_RESERVE,13,'the mutex-release reserve changed without this budget being re-derived')
   assert.equal(REVIEW_OPERATION_REQUEST_LIMIT,22,'the ceiling changed; re-derive it against the real cost rather than raising it again')
+  // The three pins above are near-tautologies: they restate constants. None of
+  // them fails if the CALL SITE stops using the constant, because the gate asks
+  // `count + required > LIMIT` and the remaining budget after pre-mutex is
+  // LIMIT - count either way. So assert what the gate DOES: with one extra
+  // counted pre-mutex call, the operation must refuse BEFORE the mutex exists.
+  // A reserve one smaller would clear this gate, take the mutex, and only then
+  // discover it cannot finish -- which is the failure the gate exists to stop.
+  const slot2Ref=`${REVIEW_ASSIGNMENT_REF_PREFIX}/1722-1748-${'a'.repeat(40)}-slot2`
+  assert.ok(io.refs.has(slot2Ref),'the slot-2 assignment ref should exist before it is cleared to re-run the path')
+  io.refs.delete(slot2Ref)
+  const rate=io.getRateLimit
+  io.getRateLimit=()=>{wire(1);return rate()}
+  attempts=0
+  assert.throws(()=>assignNextReviewer({issue:1722,pr:1748,headSha:'a'.repeat(40),slot:2},io),/budget/i,'one extra pre-mutex call must be refused by the entry gate')
+  assert.equal(io.refs.get(MUTEX_REF)??null,null,'the entry gate must refuse before the mutex is acquired; acquiring it and failing inside is what strands it for every other lane')
+  io.getRateLimit=rate
   attempts=0
   assert.deepEqual(assignNextReviewer({issue:1722,pr:1748,headSha:'a'.repeat(40),slot:2},io),second)
   assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`slot 2 retry used ${attempts} wire attempts`)
