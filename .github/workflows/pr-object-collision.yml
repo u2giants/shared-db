@@ -57,6 +57,7 @@ name: Cross-PR Object Collision
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -92,7 +93,14 @@ jobs:
       # this one job precisely so they cannot drift apart. This step adds no new
       # required status context -- the job name is unchanged.
       - name: Unit-test the dispatch-time collision checker (shares the parser)
-        run: node --test scripts/check-dispatch-collision.test.mjs scripts/manage-migration-author-lanes.test.mjs
+        run: node --test scripts/check-dispatch-collision.test.mjs scripts/check-pr-source-collisions.test.mjs scripts/manage-migration-author-lanes.test.mjs
+
+      - name: No earlier open PR edits the same protected coordination source
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/check-pr-source-collisions.mjs
 
       - name: No other open PR replaces the same database object
         env:
