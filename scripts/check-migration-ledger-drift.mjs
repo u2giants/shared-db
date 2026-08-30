@@ -100,31 +100,14 @@ import json, sys
 from pathlib import Path
 root = Path(sys.argv[1])
 sys.path.insert(0, str(root / 'scripts'))
-from production_migration_guard import HARD_BLOCKED, BUNDLE_20260804, FR_HELD_20260803, FR_COMPATIBILITY_VERSIONS, FR_REMOVAL_VERSIONS, CO_PRESENCE_RULES, ATOMIC_BATCHES, PREVIEW_ONLY_HISTORICAL_RESTORATIONS, local_migrations
-from post_batch_app_verification import RETIRED_VERSION_REASONS, RETIRED_VERSIONS
-from migration_derivation import declared_bases
-# Issue #1608 ask 3: a version whose declared base is unapplied in the target is
-# not the same risk as an ordinary pending version, and the report must say so.
-derived_from = {
-  v: sorted(b)
-  for v, path in local_migrations(root).items()
-  if (b := declared_bases(v, path=path))
-}
-print(json.dumps({
-  'retired': sorted(RETIRED_VERSIONS), 'hardBlocked': sorted(HARD_BLOCKED),
-  'retiredReasons': RETIRED_VERSION_REASONS,
-  'bundle': sorted(BUNDLE_20260804), 'frHeld': sorted(FR_HELD_20260803),
-  'previewOnlyHistorical': sorted(PREVIEW_ONLY_HISTORICAL_RESTORATIONS),
-  'frCompatibility': sorted(FR_COMPATIBILITY_VERSIONS),
-  'frRemoval': sorted(FR_REMOVAL_VERSIONS),
-  'coPresence': [{'create': c, 'fixes': sorted(f), 'why': w} for c, f, w in CO_PRESENCE_RULES],
-  'atomic': [{'name': n, 'basis': b, 'why': w, 'members': sorted(m)} for n, b, w, m in ATOMIC_BATCHES],
-  'derivedFrom': derived_from,
-}))
+from production_migration_guard import classify_pending_version
+versions = json.loads(sys.argv[2])
+applied = set(json.loads(sys.argv[3]))
+print(json.dumps({v: classify_pending_version(v, applied, root) for v in versions}))
 `
   let raw
   try {
-    raw = execFileSync('python', ['-c', program, repoRoot], {
+    raw = execFileSync('python', ['-c', program, repoRoot, JSON.stringify(versions), JSON.stringify(appliedVersions)], {
       cwd: repoRoot,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -132,9 +115,8 @@ print(json.dumps({
   } catch (error) {
     throw new Unknown(`could not classify pending migrations from the production guard rules: ${error.message}`)
   }
-  let rules
-  try { rules = JSON.parse(raw) } catch { throw new Unknown('production guard classification returned invalid JSON') }
-  const result = classifyPendingWithRules(versions, appliedVersions, rules)
+  let result
+  try { result = JSON.parse(raw) } catch { throw new Unknown('production guard classification returned invalid JSON') }
   validatePendingClassifications(versions, result)
   return result
 }

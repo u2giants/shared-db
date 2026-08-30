@@ -15,6 +15,7 @@ from migration_derivation import (
     DerivationError,
     DerivationRefusal,
     assert_derivation_bases,
+    declared_bases,
     parse_overrides,
 )
 
@@ -1095,6 +1096,83 @@ def local_migrations(repo: Path) -> dict[str, Path]:
             raise GuardError(f"duplicate migration version: {version}")
         migrations[version] = path
     return migrations
+
+
+def classify_pending_version(
+    version: str,
+    applied_versions: set[str] | frozenset[str],
+    repo: Path,
+) -> dict[str, str]:
+    """Return the one authoritative pending-status classification.
+
+    Keep every registry behind this function. Callers in other languages must
+    consume its answer rather than importing the sets and rebuilding policy.
+    """
+    from post_batch_app_verification import HELD_VERSIONS, RETIRED_VERSION_REASONS, RETIRED_VERSIONS
+
+    applied = set(applied_versions)
+    if version in RETIRED_VERSIONS:
+        reason = RETIRED_VERSION_REASONS.get(
+            version,
+            "never apply this version; its safe replacement or end state is already present",
+        )
+        return {"kind": "retired", "reason": f"RETIRED_VERSIONS: {reason}."}
+    if version in HELD_VERSIONS or version in FR_SHIP_SET_HOLD or version in FR_REMOVAL_VERSIONS:
+        suffix = (
+            "The required FR removal migration set is not yet defined."
+            if not FR_REMOVAL_VERSIONS
+            else f"Full held bundle: {', '.join(sorted(FR_SHIP_SET_HOLD | FR_REMOVAL_VERSIONS))}."
+        )
+        return {
+            "kind": "deliberately-held",
+            "reason": (
+                "AGENTS.md 6.5 owner ruling holds the compatibility prerequisite, both FR versions, "
+                f"and every FR removal member for one bounded apply. {suffix}"
+            ),
+        }
+    if version in PREVIEW_ONLY_HISTORICAL_RESTORATIONS:
+        return {
+            "kind": "deliberately-held",
+            "reason": "Preview-only historical restoration: retain truthful preview history and never include this version in a production allowlist.",
+        }
+    if version in HARD_BLOCKED:
+        return {
+            "kind": "retired",
+            "reason": "production_migration_guard.HARD_BLOCKED: the general production lane refuses this version outright. Do not apply it.",
+        }
+
+    migration = local_migrations(repo).get(version)
+    bases = sorted(declared_bases(version, path=migration) or ()) if migration else []
+    missing = [base for base in bases if base not in applied]
+    if missing:
+        return {
+            "kind": "base-absent",
+            "reason": (
+                f"Declares `-- derived-from: {', '.join(bases)}` and this database does NOT have {', '.join(missing)}. "
+                "It re-derives a whole object body, so applying it here would not fail — it would replace the object "
+                "with a body written against a base this database never got (issue #1608). Apply the missing base(s) "
+                "in the same bounded window, or promote with a recorded --derivation-override naming the resulting state."
+            ),
+        }
+
+    matches: list[str] = []
+    if version in BUNDLE_20260804:
+        matches.append("AGENTS.md 6.8 requires the complete four-version ColdLion bundle, never a subset.")
+    for name, basis, why, members in ATOMIC_BATCHES:
+        if version in members:
+            outstanding = ", ".join(sorted(member for member in members if member not in applied))
+            matches.append(f"{name} {basis} batch: {why} Outstanding set: {outstanding}.")
+    for create, fixes, why in CO_PRESENCE_RULES:
+        outstanding = sorted(fix for fix in fixes if fix not in applied)
+        if version == create or (create in applied and version in outstanding):
+            create_note = f"Create {create} is already applied; fix-only recovery must carry every outstanding fix. " if create in applied else ""
+            matches.append(f"{why} {create_note}Outstanding required fixes: {', '.join(outstanding)}.")
+    if matches:
+        return {"kind": "guarded-batch", "reason": " ".join(matches)}
+    return {
+        "kind": "genuinely-pending",
+        "reason": "No retirement, owner-hold, atomic-batch, bundle, or ledger-aware co-presence rule names this version. It is still unapproved until the normal bounded promotion workflow passes.",
+    }
 
 
 # ---------------------------------------------------------------------------
