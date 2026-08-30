@@ -21,6 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {ref: "${{ inputs.main_sha }}", fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Prove exact current main
         env: {MAIN_SHA: "${{ inputs.main_sha }}"}
         run: |

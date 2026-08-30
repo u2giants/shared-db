@@ -913,6 +913,15 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
     def test_instance_binding_writer_is_a_pinned_preview_producer(self):
         self.assertIn("scripts/preview_instance_binding.py", PREVIEW_PRODUCER_PATHS)
 
+    def test_every_verification_sidecar_is_an_individually_pinned_producer(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        actual = {
+            path.relative_to(repo_root).as_posix()
+            for path in (repo_root / "scripts/production-verification-sidecars").glob("*.json")
+        }
+        pinned = {path for path in PREVIEW_PRODUCER_PATHS if path.startswith("scripts/production-verification-sidecars/")}
+        self.assertEqual(actual, pinned)
+
     PREVIEW_JOB_EXCLUSIONS = (
         # These run ONLY in the production-apply jobs, which check out exact main
         # and prove HEAD == origin/main before executing. They are not part of
@@ -920,6 +929,10 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         "scripts/production_business_risk_gate.py",
         "scripts/production_apply_review_evidence.py",
         "scripts/production_catalog_verification.py",
+        # Runtime data directory named by the verifier, not executable code.
+        # Every reviewed JSON file beneath it is pinned individually because
+        # GitHub's Contents API does not expose a directory as a blob.
+        "scripts/production-verification-sidecars",
         # Validate-only job, which produces no evidence.
         # Validate-only job. It produces no evidence, runs on a separate runner,
         # and a forged artifact under the preview name would collide with the
@@ -1096,11 +1109,22 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         # An exemption must describe something that exists, and must not also be
         # pinned -- a path that is both is a contradiction a reader cannot resolve.
         for key, reason in PREVIEW_RUNTIME_DATA_EXEMPTIONS.items():
-            self.assertTrue(
-                (repo_root / key).exists(),
-                f"stale runtime-read exemption: {key} no longer exists. Delete the "
-                f"entry rather than leaving a reason nobody can check.",
-            )
+            exempt_path = repo_root / key
+            if not exempt_path.exists():
+                # Tool-owned runtime directories are intentionally absent in a
+                # clean checkout. Their exemption stays checkable only while the
+                # repository still ignores a representative child path.
+                ignored = subprocess.run(
+                    ["git", "check-ignore", "-q", f"{key}/project-ref"],
+                    cwd=repo_root,
+                    check=False,
+                ).returncode == 0
+                self.assertTrue(
+                    ignored,
+                    f"stale runtime-read exemption: {key} neither exists nor has "
+                    "a repository ignore rule. Delete the entry rather than "
+                    "leaving a reason nobody can check.",
+                )
             self.assertNotIn(
                 key, pinned,
                 f"{key} is both pinned and exempted; one of the two is wrong",
@@ -1136,6 +1160,11 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             "preview job can read it, pin it. If it cannot, say why, in words a "
             "reader can check.",
         )
+
+    def test_supabase_cli_machine_state_is_explicitly_exempted(self):
+        reason = PREVIEW_RUNTIME_DATA_EXEMPTIONS.get("supabase/.temp", "")
+        self.assertIn("machine-specific", reason)
+        self.assertGreaterEqual(len(reason), 120)
 
     @staticmethod
     def repository_paths_named_in(text, repo_root):
@@ -1322,6 +1351,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
     # fails test_every_runtime_data_exemption_is_verified_somewhere until someone
     # either words it with the phrase or writes it a test.
     PHRASE_VERIFIED_EXEMPTIONS = frozenset({
+        "config/blocker-ledger",
         "supabase/tests",
         "supabase/ci-bootstrap",
         "config/production-risk-policy-activation.json",
@@ -1337,6 +1367,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
     NAMED_TEST_VERIFIED_EXEMPTIONS = {
         "docs": "test_the_docs_exemption_is_verified_against_every_producer_that_names_it",
         "supabase/migrations": "test_the_payload_exemption_is_byte_bound_on_every_lane",
+        "supabase/.temp": "test_supabase_cli_machine_state_is_explicitly_exempted",
     }
 
     def test_every_runtime_data_exemption_is_verified_somewhere(self):
@@ -1392,6 +1423,19 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
     #                      error or a printed line. Nothing is opened.
     DOCS_NAMING_SITES = {
         ("scripts/manage-migration-author-lanes.mjs", "git-pathspec"): 2,
+        # Added for issue #1812. The budget constants on line 46 of
+        # manage-migration-author-lanes.mjs carry a trailing comment citing
+        # docs/verification/reviewer-assignment-api-budget-2026-08-28.md, where
+        # the 9 + 13 = 22 derivation is written out. Classified deliberately, as
+        # this test asks: it is a CITATION in a comment and opens nothing. The
+        # file is never read, joined into a path, required, or passed to git.
+        # `uncommented()` strips whole-line comments but not a trailing `//`,
+        # which is why a comment reaches this inventory at all -- that is the
+        # tooth working, not a gap: a reader cannot tell a cited path from an
+        # opened one without looking, so every new mention is made to argue for
+        # itself. If this citation ever becomes a read, this entry must go and
+        # docs must be pinned in PREVIEW_PRODUCER_PATHS instead.
+        ("scripts/manage-migration-author-lanes.mjs", "message-citation"): 1,
         ("scripts/production_migration_guard.py", "message-citation"): 1,
     }
 

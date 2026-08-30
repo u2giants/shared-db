@@ -119,8 +119,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Run SQL checks
         run: bash scripts/check-sql.sh
+      - name: Validate hash-bound production verification sidecars
+        run: node scripts/check-production-verification-sidecars.mjs --base "origin/${GITHUB_BASE_REF:-main}"
       - name: Test SQL migration guards
         run: node --test scripts/check-sql.test.mjs
       - name: Test issue 1242 contract-derived rights removal
@@ -175,6 +180,7 @@ jobs:
           for f in \
             scripts/test_production_migration_guard.py \
             scripts/test_production_catalog_verification.py \
+            scripts/test_check_production_verification_sidecars.py \
             scripts/test_post_batch_app_verification.py \
             scripts/test_production_apply_review_evidence.py
           do
@@ -183,7 +189,7 @@ jobs:
               exit 1
             fi
           done
-          echo "All four Python suites present and covered by the glob above."
+          echo "All named Python suites present and covered by the glob above."
 
   # ===========================================================================
   # PREVIEW: BOUNDED, NAMED APPLY (issue #739).
