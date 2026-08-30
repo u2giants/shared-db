@@ -35,6 +35,19 @@ def later_collisions(migration: Path, migrations_dir: Path) -> dict[str, list[st
     return collisions
 
 
+def snapshot_query(collisions: dict[str, list[str]]) -> str:
+    names = sorted(name.replace('"', "") for name in collisions)
+    if not names:
+        return ""
+    literals = ", ".join("'" + name.replace("'", "''") + "'" for name in names)
+    return (
+        "select pg_get_functiondef(p.oid) || E';\\n' "
+        "from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+        f"where lower(n.nspname || '.' || p.proname) in ({literals}) "
+        "order by n.nspname, p.proname, pg_get_function_identity_arguments(p.oid);"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("migration", type=Path)
@@ -52,8 +65,7 @@ def main() -> int:
     )
     for routine, files in collisions.items():
         print(f"  {routine}: {', '.join(files)}", file=sys.stderr)
-    for filename in sorted({name for names in collisions.values() for name in names}):
-        print(filename)
+    print(snapshot_query(collisions))
     return 0
 
 

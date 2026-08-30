@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_pass2_routine_supersession import declared_routines, later_collisions
+from check_pass2_routine_supersession import declared_routines, later_collisions, snapshot_query
 
 
 class Pass2RoutineSupersessionTests(unittest.TestCase):
@@ -42,6 +42,12 @@ class Pass2RoutineSupersessionTests(unittest.TestCase):
             path = Path(temp) / "x.sql"
             path.write_text("-- create or replace function public.fake()\nselect 1;", encoding="utf-8")
             self.assertEqual(declared_routines(path), set())
+
+    def test_snapshot_query_selects_every_colliding_routine(self):
+        query = snapshot_query({"public.f": ["later.sql"], '"plm"."g"': ["later.sql"]})
+        self.assertIn("'public.f'", query)
+        self.assertIn("'plm.g'", query)
+        self.assertIn("pg_get_function_identity_arguments", query)
 
 
 if __name__ == "__main__":

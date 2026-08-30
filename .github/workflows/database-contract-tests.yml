@@ -379,27 +379,36 @@ jobs:
             if [ ! -f "$m" ]; then
               echo "::error::pass 2 cannot find $m" >&2; BAD=$((BAD+1)); continue
             fi
+            # Snapshot any newer routine definitions that this older pass-2 file would
+            # replace. Restoring the definitions is safer than re-running whole later
+            # migrations, which may contain guarded data or other non-repeatable work.
+            if ! SNAPSHOT_QUERY=$(python scripts/check_pass2_routine_supersession.py "$m" \
+                 --migrations-dir supabase/migrations); then
+              echo "::error::could not calculate pass-2 ordering repair for $base" >&2
+              exit 2
+            fi
+            ROUTINE_SNAPSHOT=""
+            if [ -n "$SNAPSHOT_QUERY" ]; then
+              if ! ROUTINE_SNAPSHOT=$(psql -At --no-psqlrc -v ON_ERROR_STOP=1 -c "$SNAPSHOT_QUERY"); then
+                echo "::error::could not snapshot later routine definitions before $base" >&2
+                exit 2
+              fi
+            fi
             if psql -v ON_ERROR_STOP=1 --no-psqlrc --single-transaction -f "$m" \
                  > "$RUNNER_TEMP/migration-logs-pass2/$base.log" 2>&1; then
               # Pass 2 runs after every pass-1 success, so an older migration can silently
               # replace a routine installed by a later migration. Re-run only the later
-              # migrations that declare the same routine, in filename order. They already
-              # succeeded in pass 1; a failure here is an ordering repair refusal.
-              if ! LATER=$(python scripts/check_pass2_routine_supersession.py "$m" \
-                   --migrations-dir supabase/migrations); then
-                echo "::error::could not calculate pass-2 ordering repair for $base" >&2
-                exit 2
-              fi
-              while read -r later; do
-                [ -n "$later" ] || continue
-                echo "Re-applying $later after $base to preserve migration order."
-                if ! psql -v ON_ERROR_STOP=1 --no-psqlrc --single-transaction \
-                     -f "supabase/migrations/$later" \
-                     > "$RUNNER_TEMP/migration-logs-pass2/${base}__ORDER_REPAIR__${later}.log" 2>&1; then
-                  echo "::error::pass-2 ordering repair failed: $later after $base" >&2
+              # Restore exactly the newer routine definitions, without re-running the
+              # later migrations' unrelated DDL or guarded data work.
+              if [ -n "$ROUTINE_SNAPSHOT" ]; then
+                echo "Restoring later routine definitions after $base to preserve order."
+                if ! printf '%s\n' "$ROUTINE_SNAPSHOT" | psql -v ON_ERROR_STOP=1 \
+                     --no-psqlrc --single-transaction \
+                     > "$RUNNER_TEMP/migration-logs-pass2/${base}__ORDER_REPAIR.log" 2>&1; then
+                  echo "::error::pass-2 routine-definition restore failed after $base" >&2
                   exit 2
                 fi
-              done <<< "$LATER"
+              fi
               OK=$((OK+1))
               psql -q --no-psqlrc -c \
                 "insert into supabase_migrations.schema_migrations (version, name)
