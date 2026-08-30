@@ -89,7 +89,7 @@ jobs:
       # These specifically prove it REFUSES to report "no drift" on an empty or
       # unreachable ledger.
       - name: Prove the guard fails loudly on an unreadable ledger
-        run: node --test scripts/check-migration-ledger-drift.test.mjs
+        run: node --test scripts/check-migration-ledger-drift.test.mjs scripts/check-worktree-freshness.test.mjs
 
       - name: Compare origin/main against the applied ledger
         id: check
