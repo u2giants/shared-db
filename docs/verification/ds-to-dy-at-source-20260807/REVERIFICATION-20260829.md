@@ -115,7 +115,7 @@ All 15 `WWE` assets still carry `licensor_name = 'WWE'` and SKUs containing `WW`
 **Scope change against the plan: item 3 is DEFERRED, not delivered.** The plan's §5.1
 lists three in-scope statements; the third is the `public.assets` `WWE` → `WW` rider
 covering exactly these 15 rows. This migration deliberately drops that rider (see the
-note at migration lines 133–139): `public.assets` rows are owned by author claim #1656
+note at migration lines 132–137): `public.assets` rows are owned by author claim #1656
 under issue #1645, which this lane does not hold. So after this migration applies, the
 two `public.licensors` rows are canonical and the 15 `public.assets` rows are still
 `WWE`. That is a known, intended, temporary inconsistency — not an oversight, and not
