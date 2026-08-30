@@ -642,6 +642,12 @@ AI_TAG_BAKEOFF_CONTRACT = _shape_contract(
     policies=tuple((table,policy) for table in ('public.ai_tag_bakeoff_results','public.ai_tag_bakeoff_reviews','public.ai_tag_bakeoff_runs') for policy in (f"Admin manage {table.split('.')[-1].replace('_',' ')}",f"Admin read {table.split('.')[-1].replace('_',' ')}")),
 )
 DB_DATA_ADMIN_FORWARD_CONTRACT = _shape_contract(relations=('app.db_data_admin_feature_gate',),routines=tuple("""api.db_data_admin_audit_list api.db_data_admin_licensor_property_tree api.db_data_admin_merge_customer api.db_data_admin_merge_vendor api.db_data_admin_preview_customer_merge api.db_data_admin_preview_vendor_merge api.db_data_admin_update_customer api.db_data_admin_update_vendor app.db_data_admin_customer_row app.db_data_admin_extension_conflicts app.db_data_admin_merge_execute app.db_data_admin_merge_fk_counts app.db_data_admin_merge_preview app.db_data_admin_reconcile_extension app.db_data_admin_single_record_writes_enabled app.db_data_admin_vendor_row""".split()),triggers=(('app.db_data_admin_feature_gate','set_updated_at'),))
+DCP_OPA_PROPERTY_AUTHORITY_CONTRACT = _shape_contract(
+    relations=('plm.dcp_opa_property_resolution','plm.dcp_opa_property_resolution_member'),
+    routines=('api.db_data_admin_scraped_properties(text,text,integer)','plm.reject_dcp_opa_resolution_mutation()'),
+    policies=(('plm.dcp_opa_property_resolution','dcp_opa_property_resolution_read'),('plm.dcp_opa_property_resolution_member','dcp_opa_property_resolution_member_read')),
+    triggers=(('plm.dcp_opa_property_resolution','dcp_opa_property_resolution_append_only'),('plm.dcp_opa_property_resolution_member','dcp_opa_property_resolution_member_append_only')),
+)
 POPDAM_FORWARD_RECOVERY_CONTRACT = _shape_contract(
     relations=('public.style_group_tags',),
     indexes=tuple('public.'+value for value in "asset_tags_active_asset_idx dam_search_embedding_claim_idx style_group_tags_active_group_idx".split()),
@@ -667,6 +673,7 @@ CATALOG_CONTRACTS = {
     "ai_tag_bakeoff_v1": AI_TAG_BAKEOFF_CONTRACT,
     "dflow_baseline_v1": DFLOW_BASELINE_CONTRACT,
     "db_data_admin_forward_v1": DB_DATA_ADMIN_FORWARD_CONTRACT,
+    "dcp_opa_property_authority_v1": DCP_OPA_PROPERTY_AUTHORITY_CONTRACT,
     "dflow_sequence_ceilings_v1": DFLOW_SEQUENCE_CEILINGS_CONTRACT,
     "popdam_forward_recovery_v1": POPDAM_FORWARD_RECOVERY_CONTRACT,
     "coco_owner_ruling_v1": """
