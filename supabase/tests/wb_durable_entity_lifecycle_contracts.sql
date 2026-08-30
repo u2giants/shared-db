@@ -85,7 +85,7 @@ reset role;
 do $immutable$
 begin
  begin
-   update plm.wb_franchise set first_withdrawn_at=now() where source_namespace='synthetic' and source_id='franchise-b';
+   update plm.wb_franchise set first_withdrawn_at='2026-12-31 00:00:00+00' where source_namespace='synthetic' and source_id='franchise-b';
    raise exception 'immutable first_withdrawn_at update was accepted';
  exception when raise_exception then
    if sqlerrm='immutable first_withdrawn_at update was accepted' then raise; end if;
