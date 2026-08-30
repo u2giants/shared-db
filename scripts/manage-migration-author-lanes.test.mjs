@@ -816,6 +816,13 @@ test('a closed issue with an open pull request is still refused a reviewer',()=>
   assert.throws(()=>assignNextReviewer(mergedRequest,io),/changed after mutex acquisition/)
 })
 
+test('an existing assignment is not returned after its closed issue target becomes an open PR',()=>{
+  const io=mergedPrIo(),assigned=assignNextReviewer(mergedRequest,io),openPr={state:'open',merged:false,merge_commit_sha:'',head:{sha:MERGED_HEAD}}
+  assert.ok(assigned.reviewer);io.getPr=()=>openPr
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'closed'},pr:openPr,evidence:[]}]))
+  assert.throws(()=>assignNextReviewer(mergedRequest,io),/merge eligibility changed/)
+})
+
 test('a merged pull request whose merge commit is absent from main is refused',()=>{
   // Discriminating on ANCESTRY specifically, not merely on "not open": this io differs
   // from the passing merged case above by exactly one bit, the ancestry answer. The
@@ -845,6 +852,14 @@ test('a merged pull request can also receive a reviewer REPLACEMENT for its merg
   const replaced=replaceFailedReviewer({...mergedRequest,failedSequence:first.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)
   assert.ok(replaced.reviewer)
   assert.notEqual(replaced.reviewer,first.reviewer)
+})
+
+test('an existing replacement is not returned after its closed issue target becomes an open PR',()=>{
+  const io=mergedPrIo(),first=assignNextReviewer(mergedRequest,io),request={...mergedRequest,failedSequence:first.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true}
+  replaceFailedReviewer(request,io)
+  const openPr={state:'open',merged:false,merge_commit_sha:'',head:{sha:MERGED_HEAD}};io.getPr=()=>openPr
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'closed'},pr:openPr,evidence:[]}]))
+  assert.throws(()=>replaceFailedReviewer(request,io),/merge eligibility changed/)
 })
 
 test('an existing verdict at the merged head still refuses a new assignment',()=>{
