@@ -308,6 +308,8 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    verdict, confirmed/disproved findings, defects, false positives, policy/tool
    adherence, continuity, latency, turns, and only metrics the wrapper reports.
    Kimi headless metrics and returned model are unavailable; never invent them.
+   **The exact-head approval rule is ENFORCED at the merge gate, not merely documented (#1816, 2026-08-29).** Until then `guarded-migration-merge` proved head identity, base currency, object collisions and the author lease, but never asked whether the bytes being merged had been approved -- and under merge-first the preview gate that does ask only runs AFTER the merge. So `REJECT` at head A, a new commit B answering it, then merging B put unapproved bytes on `main`. That happened on PR #1809 (issue #1769): grok-4.6 REJECTed `b494401`, commit `8d3c31a` answered it, and `8d3c31a` merged as `2b68e7e` with zero approvals tied to it. `scripts/check-exact-head-approval.mjs` now runs twice in that workflow -- once up front and once re-proven under the merge lock -- and refuses unless a reviewer assignment AND an `APPROVE` are both pinned to the exact head being merged, with no unanswered refusal at that head. **An assignment is not an approval, and an approval of an earlier head is not an approval of these bytes.** A new commit answering a review always needs a fresh exact-head review before it can merge.
+
    After review approval, green checks, preview proof, and guarded merge, the
    production workflow runs `scripts/production_business_risk_gate.py`. It
    derives the result from the exact merged PR and required checks, immutable
