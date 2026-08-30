@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_PAGE_LIMIT, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_PAGE_LIMIT, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -809,6 +809,43 @@ test('assignment retry releases its lease after an exact-head verdict',()=>{
   io.getIssueComments=()=>[{body:`APPROVE ${request.headSha}`,author_association:'OWNER'}]
   assert.deepEqual(assignNextReviewer(request,io),first)
   assert.equal(io.refs.has(ref),false)
+})
+
+test('batched verdict reads request repository association for every evidence source',()=>{
+  const fields=reviewStateGraphqlFields({issue:1224,pr:1957},0)
+  assert.equal((fields.match(/authorAssociation/g)??[]).length,3)
+  assert.match(fields,/pullRequest\(number:1957\).*comments\(first:100\).*authorAssociation/)
+  assert.match(fields,/reviews\(first:100\).*authorAssociation/)
+  assert.match(fields,/issue\(number:1224\).*comments\(first:100\).*authorAssociation/)
+})
+
+test('normal assignment retry releases an OWNER verdict lease without a manual ref path',()=>{
+  const io=reviewIo(),headSha='7'.repeat(40),request={issue:1224,pr:1957,headSha}
+  const first=assignNextReviewer(request,io),ref=reviewActiveRef(first.reviewer)
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{
+    issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},
+    evidence:[{body:`VERDICT: APPROVE\n\nReviewed at ${headSha}.`,authorAssociation:'OWNER'}],
+  }]))
+  let atomicLeaseRelease=false
+  io.readReviewRefs=(refs)=>new Map(refs.map((name)=>[name,io.refs.get(name)??null]))
+  io.atomicReviewRefs=(changes)=>{
+    atomicLeaseRelease ||= changes.some((change)=>change.ref===ref&&change.expected===io.refs.get(ref)&&change.sha===null)
+    for(const change of changes){assert.equal(io.refs.get(change.ref)??null,change.expected??null);if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}
+  }
+  assert.deepEqual(assignNextReviewer(request,io),first)
+  assert.equal(io.refs.has(ref),false)
+  assert.equal(atomicLeaseRelease,true)
+})
+
+test('normal assignment retry refuses a non-OWNER verdict and keeps its lease',()=>{
+  const io=reviewIo(),headSha='8'.repeat(40),request={issue:1225,pr:1958,headSha}
+  const first=assignNextReviewer(request,io),ref=reviewActiveRef(first.reviewer)
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{
+    issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},
+    evidence:[{body:`VERDICT: APPROVE\n\nReviewed at ${headSha}.`,authorAssociation:'CONTRIBUTOR'}],
+  }]))
+  assert.deepEqual(assignNextReviewer(request,io),first)
+  assert.equal(io.refs.has(ref),true)
 })
 
 test('reviewer assignment refuses an abbreviated head SHA before acquiring its mutex',()=>{

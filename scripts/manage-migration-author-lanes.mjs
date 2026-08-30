@@ -793,7 +793,7 @@ export const githubIo = {
   readReviewStates(leases){
     const unique=[...new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,lease])).values()]
     if(!unique.length)return new Map()
-    const fields=unique.map((lease,index)=>`p${index}:pullRequest(number:${lease.pr}){state merged mergeCommit{oid} headRefOid comments(first:100){pageInfo{hasNextPage} nodes{body}} reviews(first:100){pageInfo{hasNextPage} nodes{body state commit{oid}}}} i${index}:issue(number:${lease.issue}){state comments(first:100){pageInfo{hasNextPage} nodes{body}}}`).join(' ')
+    const fields=unique.map(reviewStateGraphqlFields).join(' ')
     const data=ghJson(['api','graphql','-f',`query=query{repository(owner:"u2giants",name:"shared-db"){${fields}}}`])
     if(data?.errors?.length||!data?.data?.repository)throw new LaneError('batched reviewer PR/verdict evidence returned GraphQL errors')
     const result=new Map()
@@ -1951,6 +1951,13 @@ function resolveSlotOneReviewer(issue,pr,headSha,io){
 // and a hand-written fixture in the tests could not catch that.
 export function projectReviewPr(pr){
   return {state:String(pr?.state??'').toLowerCase(),merged:pr?.merged===true,merge_commit_sha:pr?.mergeCommit?.oid??'',head:{sha:pr?.headRefOid}}
+}
+
+// GitHub does not include repository association unless it is requested. The
+// verdict predicate refuses association-less prose, so omitting this field here
+// makes a genuine OWNER verdict invisible to normal reviewer-lease cleanup.
+export function reviewStateGraphqlFields(lease,index){
+  return `p${index}:pullRequest(number:${lease.pr}){state merged mergeCommit{oid} headRefOid comments(first:100){pageInfo{hasNextPage} nodes{body authorAssociation}} reviews(first:100){pageInfo{hasNextPage} nodes{body state authorAssociation commit{oid}}}} i${index}:issue(number:${lease.issue}){state comments(first:100){pageInfo{hasNextPage} nodes{body authorAssociation}}}`
 }
 
 const MERGE_ANCESTRY_MEMO=new WeakMap()
