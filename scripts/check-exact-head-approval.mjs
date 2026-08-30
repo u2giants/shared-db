@@ -20,7 +20,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { REPO, REVIEW_ASSIGNMENT_REF_PREFIX } from './manage-migration-author-lanes.mjs'
+import { REPO, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_REPLACEMENT_REF_PREFIX } from './manage-migration-author-lanes.mjs'
 
 export class ApprovalCheckError extends Error {}
 
@@ -56,6 +56,11 @@ function gh(args) { try { return execFileSync('gh', args, { encoding: 'utf8', ma
 function json(args) { const raw = gh(args); try { return JSON.parse(raw) } catch { throw new ApprovalCheckError('GitHub returned malformed JSON') } }
 function pages(endpoint) { const result = json(['api', '--paginate', '--slurp', endpoint]); if (!Array.isArray(result) || result.some((x) => !Array.isArray(x))) throw new ApprovalCheckError(`GitHub pagination for ${endpoint} is malformed`); return result.flat() }
 
+export function parseAssignmentRef(ref) {
+  const match = /^refs\/db-review-(?:assignments|replacements)\/(\d+)-(\d+)-([0-9a-f]{40})(?:-slot\d+)?(?:\/.*)?$/.exec(String(ref ?? ''))
+  return match ? { issue: Number(match[1]), pr: Number(match[2]), headSha: match[3] } : null
+}
+
 // Assignment refs are named <issue>-<pr>-<headSha>, so the pull request alone is
 // enough to find them; the work issue never has to be guessed here.
 export function gatherApprovalInput(env = process.env) {
@@ -63,12 +68,19 @@ export function gatherApprovalInput(env = process.env) {
   const pr = Number(env.PR_NUMBER || event.pull_request?.number); if (!pr) throw new ApprovalCheckError('PR number is unavailable')
   const headSha = String(env.REQUESTED_SHA || json(['api', `repos/${REPO}/pulls/${pr}`])?.head?.sha || '')
   const issueNumbers = new Set([pr])
-  const refs = json(['api', `repos/${REPO}/git/matching-refs/${REVIEW_ASSIGNMENT_REF_PREFIX.replace(/^refs\//, '')}/`])
-  const assignments = (Array.isArray(refs) ? refs : []).flatMap((row) => {
-    const match = new RegExp(`^${REVIEW_ASSIGNMENT_REF_PREFIX}/(\\d+)-(\\d+)-([0-9a-f]{40})$`).exec(String(row.ref ?? ''))
-    if (!match || Number(match[2]) !== pr) return []
-    issueNumbers.add(Number(match[1]))
-    return [{ issue: Number(match[1]), pr, headSha: match[3] }]
+  // Slot 2 assignments are suffixed `-slot<N>`, and a reviewer replaced after a
+  // failure keeps its own ref under the replacement namespace, pinned to the SAME
+  // head. Both are genuine independent assignments to these exact bytes, so both
+  // count; ignoring either would refuse a merge whose review really did happen.
+  const refs = [REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_REPLACEMENT_REF_PREFIX].flatMap((prefix) => {
+    const rows = json(['api', `repos/${REPO}/git/matching-refs/${prefix.replace(/^refs\//, '')}/`])
+    return Array.isArray(rows) ? rows : []
+  })
+  const assignments = refs.flatMap((row) => {
+    const parsed = parseAssignmentRef(row.ref)
+    if (!parsed || parsed.pr !== pr) return []
+    issueNumbers.add(parsed.issue)
+    return [parsed]
   })
   const evidence = [
     ...[...issueNumbers].flatMap((number) => pages(`repos/${REPO}/issues/${number}/comments?per_page=100`)),

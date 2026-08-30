@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { evaluateExactHeadApproval, ApprovalCheckError } from './check-exact-head-approval.mjs'
+import { evaluateExactHeadApproval, parseAssignmentRef, ApprovalCheckError } from './check-exact-head-approval.mjs'
 
 const OLD = 'b494401028464ef8b2e67fe0b5b1836839b2be36'
 const NEW = '8d3c31accd5b21ea669e65f5ae53f5f95cc57337'
@@ -74,4 +74,16 @@ test('assignments belonging to a different head are ignored even when several ex
 test('an inexact or missing head is refused rather than guessed', () => {
   assert.throws(() => evaluateExactHeadApproval({ pr: 1809, headSha: '8d3c31a' }), /exact 40-character head SHA/)
   assert.throws(() => evaluateExactHeadApproval({ pr: 0, headSha: NEW }), /exact pull request number/)
+})
+
+// A reviewer replaced after a failure keeps its assignment under the replacement
+// namespace, and slot 2 assignments carry a `-slot<N>` suffix. Both are pinned to
+// the same head, so both must count -- otherwise a merge whose review genuinely
+// happened is refused for lack of an assignment that is sitting right there.
+test('slot and replacement assignment refs are recognised as assignments at that head', () => {
+  assert.deepEqual(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW}`), { issue: 1769, pr: 1809, headSha: NEW })
+  assert.deepEqual(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW}-slot2`), { issue: 1769, pr: 1809, headSha: NEW })
+  assert.deepEqual(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}/1`), { issue: 1769, pr: 1809, headSha: NEW })
+  assert.equal(parseAssignmentRef('refs/heads/main'), null)
+  assert.equal(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW.slice(0, 7)}`), null)
 })
