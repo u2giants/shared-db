@@ -87,3 +87,39 @@ test('slot and replacement assignment refs are recognised as assignments at that
   assert.equal(parseAssignmentRef('refs/heads/main'), null)
   assert.equal(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW.slice(0, 7)}`), null)
 })
+
+// A lane locked its own PR by writing a progress note that named the head SHA and
+// contained the word REVISE. The note read as a recorded refusal, and under this
+// enforced gate that head becomes unmergeable with no comment-shaped symptom.
+// A verdict leads its line; prose that mentions one does not.
+test('a progress note mentioning a verdict word does not lock or approve a head', () => {
+  const note = { body: `Status: pushed a fix at ${NEW}; the earlier REVISE findings are answered here.` }
+  assert.throws(() => evaluateExactHeadApproval({
+    pr: 1809, headSha: NEW,
+    assignments: [{ issue: 1769, pr: 1809, headSha: NEW }],
+    evidence: [note],
+  }), /has no APPROVE tied to it/)
+  assert.equal(evaluateExactHeadApproval({
+    pr: 1809, headSha: NEW,
+    assignments: [{ issue: 1769, pr: 1809, headSha: NEW }],
+    evidence: [note, { body: `APPROVE ${NEW}` }],
+  }).approved, true)
+  assert.throws(() => evaluateExactHeadApproval({
+    pr: 1809, headSha: NEW,
+    assignments: [{ issue: 1769, pr: 1809, headSha: NEW }],
+    evidence: [{ body: `We should APPROVE ${NEW} once CI is green.` }],
+  }), /has no APPROVE tied to it/)
+})
+
+test('a real verdict still counts through markdown emphasis, quoting and a later line', () => {
+  assert.throws(() => evaluateExactHeadApproval({
+    pr: 1809, headSha: NEW,
+    assignments: [{ issue: 1769, pr: 1809, headSha: NEW }],
+    evidence: [{ body: `Reviewed head ${NEW}.\n\n**REVISE** -- the anchor is wrong.` }],
+  }), /unanswered reviewer refusal/)
+  assert.equal(evaluateExactHeadApproval({
+    pr: 1809, headSha: NEW,
+    assignments: [{ issue: 1769, pr: 1809, headSha: NEW }],
+    evidence: [{ body: `> APPROVE ${NEW}` }],
+  }).approved, true)
+})

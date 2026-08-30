@@ -28,11 +28,20 @@ export class ApprovalCheckError extends Error {}
 // author wrote the SHA into the body. Same rule the preview gate uses, so the two
 // gates cannot drift into disagreeing about what a reviewer approved.
 const tiedToHead = (row, headSha) => row.commit_id === headSha || String(row.body ?? '').includes(headSha)
-const APPROVE = /\bAPPROVE(?:D)?\b/i
+// A VERDICT is a line that OPENS with the verdict word -- not prose that happens to
+// mention it. A lane wrote a progress note on its own PR naming the head SHA and the
+// word REVISE, and permanently locked its own head: the note read as a recorded
+// refusal. Under an ENFORCED gate a self-locked head is unmergeable, and the failure
+// looks like an unexplained refusal rather than anything comment-shaped. So the verdict
+// word must lead its line (markdown emphasis and quoting allowed), which is how the
+// reviewer wrappers emit it and is not how anyone writes a status update. The rule is
+// applied symmetrically: prose cannot grant an approval either.
+const verdictLine = (body, pattern) => String(body ?? '').split(/\r?\n/).some((line) => pattern.test(line.replace(/^[\s>*_#-]+/, '')))
+const APPROVE = /^APPROVE(?:D)?\b/i
 // REJECT is a real verdict word in this repo's reviewer wrappers alongside REVISE
 // and GitHub's own CHANGES_REQUESTED. Omitting any of them would let a refusal at
 // the merged head be silently outvoted by an approval that came before it.
-const REFUSAL = /\b(?:REJECT(?:ED)?|REVISE|REQUEST_CHANGES)\b/i
+const REFUSAL = /^(?:REJECT(?:ED)?|REVISE|REQUEST_CHANGES)\b/i
 
 export function evaluateExactHeadApproval({ pr, headSha, evidence = [], assignments = [] }) {
   if (!/^[0-9a-f]{40}$/i.test(String(headSha ?? ''))) throw new ApprovalCheckError('an exact 40-character head SHA is required')
@@ -43,10 +52,10 @@ export function evaluateExactHeadApproval({ pr, headSha, evidence = [], assignme
 
   const atHead = evidence.filter((row) => tiedToHead(row, headSha))
   const state = (row) => String(row.state ?? '').toUpperCase()
-  const refusals = atHead.filter((row) => REFUSAL.test(String(row.body ?? '')) || state(row) === 'CHANGES_REQUESTED')
+  const refusals = atHead.filter((row) => verdictLine(row.body, REFUSAL) || state(row) === 'CHANGES_REQUESTED')
   if (refusals.length) throw new ApprovalCheckError(`head ${headSha} carries an unanswered reviewer refusal; answer it with a new commit and a fresh exact-head review`)
 
-  const approvals = atHead.filter((row) => APPROVE.test(String(row.body ?? '')) || state(row) === 'APPROVED')
+  const approvals = atHead.filter((row) => verdictLine(row.body, APPROVE) || state(row) === 'APPROVED')
   if (!approvals.length) throw new ApprovalCheckError(`head ${headSha} has no APPROVE tied to it; an approval of an earlier head never approves these bytes`)
 
   return { approved: true, head_sha: headSha, pr: Number(pr), assignments: pinned.length, approvals: approvals.length }
