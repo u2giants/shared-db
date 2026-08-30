@@ -393,11 +393,11 @@
       "line_sha256": "eeb8dded1d42c210577e0f9d9bf7948a7691878c83cf7213f3c370007a4ddca8"
     },
     {
-      "site": "scripts/check-migration-ledger-drift.mjs:186",
-      "disposition": "excluded",
-      "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation.",
-      "semantic_key": "scripts/check-migration-ledger-drift.mjs:7a23e8c369dcbc2e6278da9e1b1ae0855fc20d5cb7ec41a753aab5449317a932:1",
-      "line_sha256": "7a23e8c369dcbc2e6278da9e1b1ae0855fc20d5cb7ec41a753aab5449317a932"
+      "site": "scripts/production_migration_guard.py:1169",
+      "disposition": "enriched",
+      "reason": "The classifier derives the absent base from a migration declaration and compares it with the target ledger before naming the exact gap.",
+      "semantic_key": "scripts/production_migration_guard.py:c09f129d700353ee3bdde8d550d639ce22090dfe682acffcdd4510fef639f5c3:1",
+      "line_sha256": "c09f129d700353ee3bdde8d550d639ce22090dfe682acffcdd4510fef639f5c3"
     },
     {
       "site": "scripts/check-migration-ledger-drift.mjs:26",
@@ -1605,6 +1605,6 @@
     }
   ],
   "call_site_count": 227,
-  "call_site_sha256": "de3c4dc83713aa225b387173c570a5b5ee1326207d21994029354d5541677c55",
+  "call_site_sha256": "6aea27653cf41e2bf6761dbb3cf9726dbea3fa0843228057072c5d44a33c2b5c",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
