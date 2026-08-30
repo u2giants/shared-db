@@ -431,7 +431,7 @@ test('complete slot-2 assignment stays inside the real wire-attempt budget (issu
   // own pre-mutex cost, so the budget must be sized for slot>=2's real total,
   // not just slot 1's. Before the fix this threw REFUSED at 9 pre-mutex calls
   // + the 13-call mutex-acquisition reserve = 22 > the old 19-request limit.
-  const io=reviewIo();let attempts=0,baseLoaded=false
+  const io=reviewIo();let attempts=0
   const rawGetCommit=io.getCommit
   const active=new Map(),states=new Map()
   ACTIVE_REVIEWERS.slice(0,-2).forEach((reviewer,index)=>{
@@ -452,7 +452,7 @@ test('complete slot-2 assignment stays inside the real wire-attempt budget (issu
     const fn=io[name];io[name]=(...args)=>{wire();return fn(...args)}
   }
   const make=io.makeOwnerCommit
-  io.makeOwnerCommit=(message)=>{wire(1);baseLoaded=true;return make(message)}
+  io.makeOwnerCommit=(message)=>{wire(1);return make(message)}
   const first=assignNextReviewer({issue:1722,pr:1748,headSha:'a'.repeat(40)},io)
   attempts=0
   const second=assignNextReviewer({issue:1722,pr:1748,headSha:'a'.repeat(40),slot:2},io)
