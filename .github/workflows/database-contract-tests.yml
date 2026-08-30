@@ -535,7 +535,14 @@ jobs:
                [ "$base" != "clickup_task_import_contracts.sql" ] && \
                [ "$base" != "coldlion_promotion_serialization_lock.sql" ]; then
               run_file="$RUNNER_TEMP/results/$base.wrapper.sql"
-              printf 'begin;\nselect public.ci_authorize_licensing_contract_test();\n\\ir %s\nrollback;\n' "$GITHUB_WORKSPACE/$f" > "$run_file"
+              case "$base" in
+                popsg_property_resolution_contracts.sql|popdam_effective_asset_filter_contracts.sql|opa_property_character_landing_contracts.sql|opa_property_character_importer_contracts.sql|opa_normalized_sync_contracts.sql|item_taxonomy_phase2_fixture.sql|contract_property_evidence_contracts.sql|coldlion_licensor_property_phase4_contracts.sql|coldlion_licensor_property_phase2_contracts.sql|coldlion_licensor_property_phase1_contracts.sql|source_resolution_durability_contracts.sql|source_resolution_remaining_sources_contracts.sql|db_data_admin_licensor_property_tree.sql|wb_canonical_relationship_edges_contracts.sql)
+                  printf 'begin;\nselect public.ci_authorize_licensing_contract_test();\n\\ir %s\nrollback;\n' "$GITHUB_WORKSPACE/$f" > "$run_file"
+                  ;;
+                *)
+                  printf 'begin;\n\\ir %s\nrollback;\n' "$GITHUB_WORKSPACE/$f" > "$run_file"
+                  ;;
+              esac
             fi
             echo "::group::$base"
             if psql -v ON_ERROR_STOP=1 --no-psqlrc -f "$run_file" > "$log" 2>&1; then
