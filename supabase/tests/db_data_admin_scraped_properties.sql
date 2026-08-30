@@ -30,8 +30,13 @@ declare
   v_cursor text;
   v_walk_rows jsonb := '[]'::jsonb;
   v_walk_pages integer := 0;
+  v_populated_prefix text;
+  v_populated_first jsonb;
+  v_populated_second jsonb;
+  v_populated_rows jsonb;
 begin
   v_search := 'Issue1533-' || v_suffix;
+  v_populated_prefix := v_search || '-Populated-';
 
   if to_regprocedure(v_sig) is null then
     raise exception 'missing scraped Properties function: %', v_sig;
@@ -268,6 +273,41 @@ begin
     v_sega_submission_new, '{"submission_properties":1}', '[]');
 
   perform set_config('request.jwt.claim.sub', v_auth::text, true);
+
+  -- Issue #1936 regression: exercise a genuinely populated source arm at the
+  -- maximum public page size, then walk the following cursor page. The exact
+  -- row identities are synthetic and rollback with this contract test.
+  insert into plm.opa_property (
+    licensed_property_id, property_name, first_seen_at, last_seen_at
+  )
+  select
+    -1936000000 - g,
+    v_populated_prefix || lpad(g::text, 4, '0'),
+    clock_timestamp(),
+    clock_timestamp()
+  from generate_series(1, 1505) g;
+
+  select api.db_data_admin_scraped_properties(v_populated_prefix, null, 1000)
+    into v_populated_first;
+  if jsonb_array_length(v_populated_first -> 'rows') <> 1000
+     or nullif(v_populated_first ->> 'next_cursor', '') is null then
+    raise exception 'populated first page was not bounded at 1000 rows with a cursor';
+  end if;
+
+  select api.db_data_admin_scraped_properties(
+    v_populated_prefix, v_populated_first ->> 'next_cursor', 1000
+  ) into v_populated_second;
+  if jsonb_array_length(v_populated_second -> 'rows') <> 505
+     or v_populated_second ->> 'next_cursor' is not null then
+    raise exception 'populated second page did not return the complete 505-row tail';
+  end if;
+
+  v_populated_rows := (v_populated_first -> 'rows') || (v_populated_second -> 'rows');
+  if jsonb_array_length(v_populated_rows) <> 1505
+     or (select count(distinct r ->> 'row_key')
+         from jsonb_array_elements(v_populated_rows) r) <> 1505 then
+    raise exception 'populated pagination omitted or repeated source rows';
+  end if;
   select api.db_data_admin_scraped_properties(v_search, null, 100) into v_page;
   v_rows := v_page -> 'rows';
 
