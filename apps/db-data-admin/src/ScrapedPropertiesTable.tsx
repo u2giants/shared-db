@@ -67,7 +67,7 @@ export function ScrapedPropertiesTable({ client }: Props) {
       <label className="search"><Search aria-hidden="true" /><span className="sr-only">Search scraped properties</span><input placeholder="Search scraped properties" value={search} onChange={event => setSearch(event.target.value)} /></label>
       <button className="icon-button" aria-label="Refresh scraped properties" onClick={() => void load()}><RefreshCw /></button>
     </div>
-    <p className="muted">Read-only source-declared Property vocabularies retained from authorized licensor scrapes. Presentation Licensor and source provenance remain separate.</p>
+    <p className="muted">Read-only source-declared Property vocabularies retained from authorized licensor scrapes. Creative rows show their authoritative Submissions mapping and contract evidence status; red rows are still unmapped.</p>
     {error && <div className="inline-error" role="alert">{error}</div>}
     <div aria-busy={loading}>
       {groups.map(group => <section key={group.key} className="scraped-property-group" aria-labelledby={`scraped-${group.key}`}>
