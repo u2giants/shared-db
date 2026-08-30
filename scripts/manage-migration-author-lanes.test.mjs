@@ -823,6 +823,14 @@ test('an existing assignment is not returned after its closed issue target becom
   assert.throws(()=>assignNextReviewer(mergedRequest,io),/merge eligibility changed/)
 })
 
+test('an existing assignment is not returned after an open issue target closes unmerged or moves head',()=>{
+  for(const pr of [{state:'closed',merged:false,merge_commit_sha:'',head:{sha:MERGED_HEAD}},{state:'open',merged:false,merge_commit_sha:'',head:{sha:'c'.repeat(40)}}]){
+    const io=mergedPrIo();assignNextReviewer(mergedRequest,io);io.getPr=()=>pr
+    io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr,evidence:[]}]))
+    assert.throws(()=>assignNextReviewer(mergedRequest,io),/merge eligibility changed/)
+  }
+})
+
 test('a merged pull request whose merge commit is absent from main is refused',()=>{
   // Discriminating on ANCESTRY specifically, not merely on "not open": this io differs
   // from the passing merged case above by exactly one bit, the ancestry answer. The
@@ -859,6 +867,14 @@ test('an existing replacement is not returned after its closed issue target beco
   replaceFailedReviewer(request,io)
   const openPr={state:'open',merged:false,merge_commit_sha:'',head:{sha:MERGED_HEAD}};io.getPr=()=>openPr
   io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'closed'},pr:openPr,evidence:[]}]))
+  assert.throws(()=>replaceFailedReviewer(request,io),/merge eligibility changed/)
+})
+
+test('an existing replacement is not returned after its open issue target moves head',()=>{
+  const io=mergedPrIo(),first=assignNextReviewer(mergedRequest,io),request={...mergedRequest,failedSequence:first.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true}
+  replaceFailedReviewer(request,io)
+  const moved={state:'open',merged:false,merge_commit_sha:'',head:{sha:'d'.repeat(40)}};io.getPr=()=>moved
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:moved,evidence:[]}]))
   assert.throws(()=>replaceFailedReviewer(request,io),/merge eligibility changed/)
 })
 

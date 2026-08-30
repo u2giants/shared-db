@@ -1850,8 +1850,8 @@ function reviewIssueEligible(issue,pr,io){
 }
 
 function assertReviewRequestEligible(request,states,io){
+  if(!states)return null
   const state=states?.get(`${request.issue}:${request.pr}`),issue=state?.issue??io.getIssue(request.issue),pr=state?.pr??io.getPr(request.pr)
-  if(issue?.state==='open')return state
   if(!reviewIssueEligible(issue,pr,io)||!reviewTargetEligible(pr,io)||pr?.head?.sha!==request.headSha)throw new LaneError('review assignment issue, PR head, or merge eligibility changed after mutex acquisition')
   return state
 }
