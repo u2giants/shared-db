@@ -809,6 +809,13 @@ test('a closed but unmerged pull request is still refused a reviewer',()=>{
   assert.throws(()=>assignNextReviewer(mergedRequest,mergedPrIo({merged:false,mergeSha:''})),/changed after mutex acquisition/)
 })
 
+test('a closed issue with an open pull request is still refused a reviewer',()=>{
+  const io=mergedPrIo(),openPr={state:'open',merged:false,merge_commit_sha:'',head:{sha:MERGED_HEAD}}
+  io.getPr=()=>openPr
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'closed'},pr:openPr,evidence:[]}]))
+  assert.throws(()=>assignNextReviewer(mergedRequest,io),/changed after mutex acquisition/)
+})
+
 test('a merged pull request whose merge commit is absent from main is refused',()=>{
   // Discriminating on ANCESTRY specifically, not merely on "not open": this io differs
   // from the passing merged case above by exactly one bit, the ancestry answer. The

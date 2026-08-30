@@ -1846,7 +1846,7 @@ function reviewTargetEligible(pr,io){
 }
 
 function reviewIssueEligible(issue,pr,io){
-  return issue?.state==='open'||(issue?.state==='closed'&&reviewTargetEligible(pr,io))
+  return issue?.state==='open'||(issue?.state==='closed'&&pr?.state!=='open'&&reviewTargetEligible(pr,io))
 }
 
 function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
