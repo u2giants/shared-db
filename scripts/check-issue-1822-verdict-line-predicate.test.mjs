@@ -19,6 +19,7 @@ import {
   isVerdictFor,
   anyVerdictFor,
   evidenceTiedToHead,
+  gateAuthorizes,
 } from './manage-migration-author-lanes.mjs'
 
 const HEAD = '8bb1886a31f89409d06c312d3a9005eff07a1cea'
@@ -168,6 +169,80 @@ test('a public wrong-scope refusal comment does not lock the head it names', () 
   assert.equal(isApprovalFor(comment(REAL_REFUSAL_COMMENT), REAL_REFUSAL_HEAD), false)
 })
 
+// ---------------------------------------------------------------------------
+// APPROVE WITH CONDITIONS is a refusal with a remedy.
+//
+// Accepting it merges before the conditions are met while producing a record
+// that says the reviewer approved -- the damage and the evidence of no damage in
+// a single act. But recording it as a REFUSAL is its own trap: that locks the
+// head, so the reviewer could never clear their own conditions, because a later
+// unconditional approval at the same head would be refused as "a verdict already
+// exists".
+//
+// So it must be NEITHER. Both halves are asserted here, in the same test,
+// because "does not approve" and "does not lock" are two separate claims and
+// only the first one is obvious.
+// ---------------------------------------------------------------------------
+test('APPROVE WITH CONDITIONS neither approves nor locks the head', () => {
+  for (const body of [
+    `APPROVE WITH CONDITIONS\n\nHead ${HEAD}. Fix the adapter first.`,
+    `VERDICT: APPROVE WITH CONDITIONS\n\nHead ${HEAD}.`,
+    `**APPROVE WITH CONDITIONS**\n\nHead ${HEAD}.`,
+    `APPROVE, WITH CONDITIONS\n\nHead ${HEAD}.`,
+    `APPROVED WITH CONDITION\n\nHead ${HEAD}.`,
+  ]) {
+    const label = body.split('\n')[0]
+    // Half one: it does not authorize.
+    assert.equal(isApprovalFor(comment(body), HEAD), false, `approved: ${label}`)
+    // Half two: it does not lock. This is the half that is easy to get wrong.
+    assert.equal(isVerdictFor(comment(body), HEAD), false, `locked: ${label}`)
+  }
+})
+
+test('an unconditional APPROVE still clears a head a conditional one touched', () => {
+  // The consequence of half two, stated as the behaviour that matters: the
+  // reviewer must be able to come back and clear their own conditions.
+  const conditional = comment(`APPROVE WITH CONDITIONS\n\nHead ${HEAD}.`)
+  const unconditional = comment(`APPROVE\n\nHead ${HEAD}. Conditions met.`)
+  assert.equal(anyVerdictFor([conditional], HEAD), false)
+  assert.equal(anyVerdictFor([conditional, unconditional], HEAD), true)
+  assert.equal(
+    [conditional, unconditional].some((row) => isApprovalFor(row, HEAD)),
+    true,
+  )
+})
+
+test('the label strip must not swallow leading words', () => {
+  // The inverted failure: a strip that skipped arbitrary leading words would
+  // read the plainest possible refusal as the strongest possible approval.
+  for (const body of [
+    `VERDICT: DO NOT APPROVE\n\nHead ${HEAD}.`,
+    `DO NOT APPROVE\n\nHead ${HEAD}.`,
+    `VERDICT: NOT APPROVED\n\nHead ${HEAD}.`,
+    `CANNOT APPROVE\n\nHead ${HEAD}.`,
+  ]) {
+    assert.equal(isApprovalFor(comment(body), HEAD), false, body.split('\n')[0])
+  }
+  // And the label strip still does its actual job.
+  assert.equal(isApprovalFor(comment(`VERDICT: APPROVE\n\nHead ${HEAD}.`), HEAD), true)
+})
+
+test('KNOWN BOUNDARY: a structured APPROVED state outranks conditional prose', () => {
+  // Pinned deliberately so this is a recorded decision, not an oversight.
+  //
+  // The conditional-approval rule governs PROSE. If a reviewer submits a GitHub
+  // review whose structured state is APPROVED but whose body says APPROVE WITH
+  // CONDITIONS, the structured state still wins and it counts as an approval.
+  //
+  // That is intentional for now: the structured state is a deliberate UI action
+  // taken by a human or wrapper, not incidental text, and narrowing it here
+  // would diverge from the sibling implementation on #1818. It IS a hole -- a
+  // reviewer can express a conditional approval that the gate reads as
+  // unconditional. Flagged to the coordinator rather than fixed unilaterally.
+  const row = { body: 'APPROVE WITH CONDITIONS', state: 'APPROVED', commit_id: HEAD }
+  assert.equal(isApprovalFor(row, HEAD), true)
+})
+
 test('a verdict word for a DIFFERENT head never counts for this head', () => {
   const other = '0be60cfc34fec94d87b6ea145cf7c6c8657cf968a'
   const body = `APPROVE\n\nReviewed ${other}.`
@@ -188,4 +263,71 @@ test('empty and malformed evidence is inert', () => {
   assert.equal(anyVerdictFor([], HEAD), false)
   assert.equal(isVerdictFor({}, HEAD), false)
   assert.equal(isApprovalFor(null, HEAD), false)
+})
+
+// ---------------------------------------------------------------------------
+// The FAIL-OPEN preview gate. Everything above tests the predicate; these test
+// the WIRING that uses it to authorize a migration. Before `gateAuthorizes` was
+// extracted, the entire approval check at that call site could be replaced with
+// `const approved=true` and the whole suite stayed green, because the only test
+// reference to `previewGateProof` is a stub that replaces the method.
+// ---------------------------------------------------------------------------
+const BUNDLE = 'bundle-1822-abc'
+const never = () => {
+  throw new Error('assignment lookup called when it should have short-circuited')
+}
+
+test('gate: prose merely discussing approval does not authorize a migration', () => {
+  const evidence = [comment(`${REAL_APPROVE_PROSE}
+
+Bundle ${BUNDLE}.`)]
+  assert.equal(gateAuthorizes(evidence, HEAD, BUNDLE, never), false)
+})
+
+test('gate: a real APPROVE opening its line and naming the bundle authorizes', () => {
+  const evidence = [comment(`APPROVE
+
+Head ${HEAD}, bundle ${BUNDLE}.`)]
+  assert.equal(gateAuthorizes(evidence, HEAD, BUNDLE, never), true)
+})
+
+test('gate: an APPROVE without the bundle needs a matching assignment head', () => {
+  const evidence = [comment(`APPROVE
+
+Head ${HEAD}.`)]
+  // No assignment at this head -> not authorized, even though the verdict is real.
+  assert.equal(gateAuthorizes(evidence, HEAD, BUNDLE, () => []), false)
+  assert.equal(gateAuthorizes(evidence, HEAD, BUNDLE, () => [{ headSha: 'deadbeef' }]), false)
+  // An assignment pinned to this exact head -> authorized.
+  assert.equal(gateAuthorizes(evidence, HEAD, BUNDLE, () => [{ headSha: HEAD }]), true)
+})
+
+test('gate: APPROVE WITH CONDITIONS does not authorize a migration', () => {
+  const evidence = [comment(`APPROVE WITH CONDITIONS
+
+Head ${HEAD}, bundle ${BUNDLE}.`)]
+  assert.equal(gateAuthorizes(evidence, HEAD, BUNDLE, never), false)
+})
+
+test('gate: evidence tied to another head cannot authorize this one', () => {
+  const evidence = [comment(`APPROVE
+
+Head ${REAL_REFUSAL_HEAD}, bundle ${BUNDLE}.`)]
+  assert.equal(gateAuthorizes(evidence, HEAD, BUNDLE, never), false)
+})
+
+test('gate: the assignment lookup stays lazy (wire budget)', () => {
+  // Evidence carrying the bundle id must short-circuit before the network read.
+  const evidence = [comment(`APPROVE
+
+Head ${HEAD}, bundle ${BUNDLE}.`)]
+  assert.equal(gateAuthorizes(evidence, HEAD, BUNDLE, never), true)
+  // Evidence with no approval at all must not trigger it either.
+  assert.equal(gateAuthorizes([comment('no verdict here')], HEAD, BUNDLE, never), false)
+})
+
+test('gate: empty and malformed evidence fails closed', () => {
+  assert.equal(gateAuthorizes(undefined, HEAD, BUNDLE, never), false)
+  assert.equal(gateAuthorizes([], HEAD, BUNDLE, never), false)
+  assert.equal(gateAuthorizes([{}, null], HEAD, BUNDLE, never), false)
 })

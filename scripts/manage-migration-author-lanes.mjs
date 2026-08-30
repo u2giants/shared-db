@@ -902,7 +902,13 @@ export const githubIo = {
     // `isApprovalFor` requires the APPROVE to OPEN its line, so prose that
     // merely discusses approval (including prose stating approval is absent)
     // can no longer authorize a migration (issue #1822).
-    const approved=evidence.some((row)=>isApprovalFor(row,head)&&(String(row.body??'').includes(bundleId)||findPrReviewAssignments(issue,pr,this).some((assignment)=>assignment.headSha===head)))
+    // The decision itself lives in `gateAuthorizes` so it is REACHABLE BY TESTS.
+    // The two lines above shell out through module-scope `ghJson`/`gh`, so this
+    // whole method is unreachable without a network, and every existing test
+    // replaces it with a stub that returns success. That meant the one site in
+    // this file that can AUTHORIZE A MIGRATION had no coverage at all: deleting
+    // its approval check entirely left the suite green.
+    const approved=gateAuthorizes(evidence,head,bundleId,()=>findPrReviewAssignments(issue,pr,this))
     if(!approved)throw new LaneError('an independent APPROVE tied to the exact head and bundle-compatible assignment is required')
     const states=dependencies.length?this.dependencyStates(dependencies):{},closure=classifyDependencies(issue,dependencies,states)
     if(!closure.satisfied)throw new LaneError(`migration dependency closure is incomplete: ${closure.blocked.map((row)=>`#${row.number}`).join(', ')}`)
@@ -1521,10 +1527,27 @@ export function findPrReviewAssignments(issue,pr,io){
 // refusal direction would leave the repository strict about blocking and loose
 // about authorizing, which is the worst available asymmetry and would look like
 // an improvement.
+// The label strip removes ONLY the `VERDICT:` label itself. It must never be
+// widened to skip arbitrary leading words: a strip that swallowed them would
+// read `VERDICT: DO NOT APPROVE` as an approval, turning the plainest possible
+// refusal into the strongest possible authorization. Pinned by test.
 const stripLineLead=(line)=>String(line).replace(/^[\s>*_#-]+/,'').replace(/^VERDICT\s*[:-]\s*/i,'')
 // REJECT is a real verdict word in this repository's reviewer wrappers alongside
 // REVISE, and REQUEST_CHANGES is GitHub's own.
-const VERDICT_APPROVE=/^APPROVE(?:D)?\b/i
+//
+// `APPROVE WITH CONDITIONS` is a REFUSAL WITH A REMEDY, not an approval. Accepting
+// it would merge before the conditions are met AND leave a durable record saying
+// the reviewer approved -- the damage and the evidence of no damage in one act.
+//
+// The lookahead sits on the APPROVAL pattern ONLY, deliberately. Adding it to the
+// refusal pattern too would make the conditional verdict count as a recorded
+// refusal, which LOCKS the head: the reviewer could then never clear their own
+// conditions, because a later unconditional APPROVE at that same head would be
+// refused as "a verdict already exists". So it must be neither an approval nor a
+// refusal -- it withholds the decision rather than recording one. Both halves are
+// asserted in the same test, because "does not approve" and "does not lock" are
+// two separate claims and only the first is obvious.
+const VERDICT_APPROVE=/^APPROVE(?:D)?\b(?!\s*(?:WITH|,\s*WITH)\s+CONDITIONS?\b)/i
 const VERDICT_REFUSAL=/^(?:REJECT(?:ED)?|REVISE|REQUEST_CHANGES)\b/i
 export function verdictOpensLine(body,pattern){
   return String(body??'').split(/\r?\n/).some((line)=>pattern.test(stripLineLead(line)))
@@ -1547,6 +1570,23 @@ export function isVerdictFor(row,headSha){
   return verdictOpensLine(row?.body,VERDICT_APPROVE)||verdictOpensLine(row?.body,VERDICT_REFUSAL)
 }
 export const anyVerdictFor=(evidence,headSha)=>(evidence??[]).some((row)=>isVerdictFor(row,headSha))
+
+// The fail-OPEN preview gate's authorization decision, extracted so it can be
+// executed by a test. `previewGateProof` itself shells out to `gh` on its first
+// two lines, so every test in this repo replaces the whole method with a stub
+// that returns success -- which left the one decision here that can AUTHORIZE A
+// MIGRATION completely uncovered.
+//
+// `readAssignments` is a THUNK on purpose. At the call site it performs network
+// reads, and it sits inside the `some()` short-circuit so it only runs for
+// evidence that already carries an approval and lacks the bundle id. Hoisting it
+// to a plain argument would call it on every gate evaluation and raise the wire
+// budget this repo treats as significant.
+export function gateAuthorizes(evidence,headSha,bundleId,readAssignments){
+  return (evidence??[]).some((row)=>isApprovalFor(row,headSha)&&(
+    String(row?.body??'').includes(bundleId)||
+    (readAssignments?.()??[]).some((assignment)=>assignment?.headSha===headSha)))
+}
 
 // A verdict exists for an exact head when an issue comment, a PR comment, or a
 // PR review is tied to that head AND carries a decision. Extracted so the
