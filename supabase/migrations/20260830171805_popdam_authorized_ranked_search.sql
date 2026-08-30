@@ -1,5 +1,6 @@
 -- Authorization-safe ranked DAM search. Filters and caller-visible assets are
 -- resolved before ranking, totals, facets, and page boundaries.
+-- derived-from: 20260714173500, 20260713221518
 
 create or replace function public.search_dam_documents(
   p_query text,
