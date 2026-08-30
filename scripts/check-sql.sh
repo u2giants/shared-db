@@ -8,6 +8,47 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # `bash scripts/check-sql.sh` set none of them and behave exactly as before.
 migration_dir="${CHECK_SQL_MIGRATION_DIR:-$root_dir/supabase/migrations}"
 
+# Issue #1235: a JSON key merely existing does not make its value a usable
+# expected count. Reject newly added migrations that repeat either template
+# defect from #1219/#1221/#1222: extracting a count without first proving the
+# JSON value is a number, or casting JSON number text straight to an integer.
+check_expected_count_patterns() {
+  local added_versions="$1"
+  [[ -s "$added_versions" ]] || return 0
+  node - "$migration_dir" "$added_versions" <<'NODE'
+const fs = require('node:fs')
+const path = require('node:path')
+const dir = process.argv[2]
+const added = new Set(fs.readFileSync(process.argv[3], 'utf8').split(/\r?\n/).filter(Boolean))
+const failures = []
+for (const name of fs.readdirSync(dir).filter((v) => v.endsWith('.sql') && added.has(v.slice(0, 14)))) {
+  const sql = fs.readFileSync(path.join(dir, name), 'utf8')
+  const compact = sql.replace(/--[^\n]*/g, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ')
+  const directInteger = /\(\s*[a-z_][a-z0-9_.]*expected_counts\s*->>\s*(?:'[^']+'|[a-z_][a-z0-9_]*)\s*\)\s*::\s*(?:bigint|integer|int)\b/gi
+  if (directInteger.test(compact)) {
+    failures.push(`${name}: expected_counts text is cast directly to an integer; validate as a JSON number and assign through numeric first`)
+  }
+
+  const keyUse = /([a-z_][a-z0-9_.]*expected_counts)\s*\?\s*('([^']+)'|([a-z_][a-z0-9_]*))[\s\S]{0,800}?\1\s*->>\s*\2/gi
+  for (const match of compact.matchAll(keyUse)) {
+    const object = match[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const key = match[2].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const typed = new RegExp(`jsonb_typeof\\s*\\(\\s*${object}\\s*->\\s*${key}\\s*\\)\\s*(?:=|<>)\\s*'number'`, 'i')
+    const globalTyped = new RegExp(`jsonb_each\\s*\\(\\s*${object}\\s*\\)[\\s\\S]{0,300}?jsonb_typeof\\s*\\([^)]*value[^)]*\\)\\s*(?:=|<>)\\s*'number'`, 'i')
+    if (!typed.test(compact) && !globalTyped.test(compact)) {
+      failures.push(`${name}: expected_counts key ${match[2]} is trusted after a bare ? test without a JSON-number type check`)
+    }
+  }
+}
+if (failures.length) {
+  console.error('ERROR: unsafe expected-count JSON pattern detected (issue #1235):')
+  for (const failure of [...new Set(failures)]) console.error(`  ${failure}`)
+  process.exit(1)
+}
+console.log('Issue #1235 expected-count guard passed: added migrations validate JSON count types and avoid raw integer casts.')
+NODE
+}
+
 # Issue #1684 Phase 1: reject every new runtime or migration dependency on the
 # EOL mixed table. The diff makes existing historical references the exact
 # grandfathered set. Only the two reviewed #1684 transition migrations are
@@ -415,6 +456,8 @@ if [[ -n "$base_versions_file" && -s "$base_versions_file" ]]; then
   comm -23 "$local_versions_file" "$base_versions_file" > "$added_versions_file"
   rm -f "$local_versions_file"
 fi
+
+check_expected_count_patterns "$added_versions_file"
 
 guard_b2_failed=0
 guard_b2_ran=0

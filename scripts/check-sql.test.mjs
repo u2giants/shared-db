@@ -553,3 +553,31 @@ test('Guard B2 refuses to run when the ADDED set cannot be determined', () => {
   assert.match(result.stderr, /could not be determined/)
   rmSync(dir, { recursive: true, force: true })
 })
+
+test('issue 1235 rejects every unsafe expected-count template shape', () => {
+  for (const sql of [
+    `do $$ begin if v_expected_counts ? 'assets' and (v_expected_counts ->> 'assets')::numeric <> 1 then null; end if; end $$;`,
+    `do $$ declare v_count bigint; begin v_count := (v_expected_counts ->> 'assets')::bigint; end $$;`,
+    `do $$ begin if p_expected_counts ? v_key and (p_expected_counts ->> v_key)::numeric > 0 then null; end if; end $$;`,
+  ]) {
+    withFixture(['20260899000000_bad_expected_count.sql'], (dir) => {
+      writeFileSync(path.join(dir, '20260899000000_bad_expected_count.sql'), sql)
+      const result = runGuards(dir, { env: baseEnv() })
+      assert.equal(result.status, 1, `unsafe shape passed:\n${sql}`)
+      assert.match(result.stderr, /unsafe expected-count JSON pattern detected/)
+    })
+  }
+})
+
+test('issue 1235 permits a typed JSON number assigned through numeric', () => {
+  withFixture(['20260899000000_safe_expected_count.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260899000000_safe_expected_count.sql'), `
+      do $$ declare v_count bigint; begin
+        if jsonb_typeof(v_expected_counts -> 'assets') <> 'number' then raise exception 'bad count'; end if;
+        v_count := (v_expected_counts ->> 'assets')::numeric::bigint;
+      end $$;
+    `)
+    const result = runGuards(dir, { env: baseEnv() })
+    assert.equal(result.status, 0, result.stderr)
+  })
+})
