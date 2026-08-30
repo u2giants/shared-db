@@ -40,7 +40,9 @@ begin
   where p.status = 'active' and p.auth_user_id is not null order by p.created_at, p.id limit 1;
   select id into v_role_id from app.role where slug = 'licensing'::app.app_role;
   delete from app.user_role where profile_id = v_profile and role_id = v_role_id;
+  delete from app.app_access where profile_id = v_profile and app = 'plm';
   insert into app.user_role(profile_id, role_id) values (v_profile, v_role_id);
+  insert into app.app_access(profile_id, app) values (v_profile, 'plm');
 
   insert into plm.dcp_property(source_system, source_id, display_name) values
     ('disney_dcpvault', 'zz1872-'||v_suffix||'-mapped', 'ZZ Synthetic mapped'),
