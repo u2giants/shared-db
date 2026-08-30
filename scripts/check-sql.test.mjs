@@ -14,7 +14,7 @@
 
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -187,6 +187,61 @@ test('Guard A still enforces duplicates when Guard B has to skip', () => {
 test('the real supabase/migrations directory passes both guards', () => {
   const { status, stderr } = runGuards(null)
   assert.equal(status, 0, `check-sql.sh failed on the real repo:\n${stderr}`)
+})
+
+test('verify-cost guard rejects direct and dynamic reads of plm data', () => {
+  withFixture(['20260801120000_expensive_verify.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_expensive_verify.sql'), `
+      -- Self-verification
+      do $verify$
+      begin
+        execute 'select count(*) from plm.large_table';
+        raise notice 'verify passed';
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /verification must not read source_capture_inventory or plm\.\* data/)
+    assert.match(result.stderr, /20260801120000_expensive_verify\.sql/)
+  })
+})
+
+test('verify-cost guard rejects the expensive inventory view', () => {
+  withFixture(['20260801120000_inventory_verify.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_inventory_verify.sql'), `
+      do $verification$
+      begin
+        perform count(*) from api.source_capture_inventory;
+      end
+      $verification$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads api\.source_capture_inventory/)
+  })
+})
+
+test('verify-cost guard allows catalogue-only verification and ignores comments', () => {
+  withFixture(['20260801120000_catalogue_verify.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_catalogue_verify.sql'), `
+      -- Verification must never read plm.large_table.
+      do $verify$
+      begin
+        if not exists (select 1 from pg_catalog.pg_class where relname = 'large_table') then
+          raise exception 'verify: expected relation missing';
+        end if;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.equal(result.status, 0, result.stderr)
+  })
+})
+
+test('check-sql keeps the verify-cost guard wired into the required suite', () => {
+  const script = readFileSync(path.join(repoRoot, 'scripts', 'check-sql.sh'), 'utf8')
+  assert.match(script, /check-migration-verify-cost\.mjs/)
 })
 
 // --- Guard B2: backdated against a LIVE LEDGER (#651) ----------------------
