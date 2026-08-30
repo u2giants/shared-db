@@ -49,7 +49,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { REPO, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_REPLACEMENT_REF_PREFIX, parseReviewCursor, reviewActiveRef } from './manage-migration-author-lanes.mjs'
+import { REPO, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_REPLACEMENT_REF_PREFIX, parseReviewCursor } from './manage-migration-author-lanes.mjs'
 import { approvalLine, evidenceTiedToHead, refusalLine, trustedVerdictEvidence, unambiguouslyTiedToHead } from './lib/review-verdict.mjs'
 import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, isValidatedVerdictArtifact, parseVerdictCommit, parseVerdictRef, validateVerdictArtifact } from './lib/review-verdict-artifact.mjs'
 
@@ -240,12 +240,10 @@ export function gatherApprovalInput(env = process.env, deps = { json, pages }) {
     const assignment=assignments.find((candidate)=>candidate.ref===expectedAssignment)
     if(!assignment?.sha)throw new ApprovalCheckError(`verdict ${row.ref} has no exact assignment object`)
     const assignmentCommit=readJson(['api',`repos/${REPO}/git/commits/${assignment.sha}`]),cursor=parseReviewCursor(assignmentCommit)
-    let activeLeaseSha=null
-    try{activeLeaseSha=readJson(['api',`repos/${REPO}/git/ref/${reviewActiveRef(cursor.reviewer).replace(/^refs\//,'')}`])?.object?.sha??null}catch(error){if(!/404|not found/i.test(String(error?.message??error)))throw error}
     const commentId=/#issuecomment-(\d+)$/.exec(String(record.findings_ref??''))?.[1]
     if(!commentId)throw new ApprovalCheckError(`verdict ${row.ref} has an invalid findings reference`)
     const findingsBody=readJson(['api',`repos/${REPO}/issues/comments/${commentId}`])?.body
-    try{return validateVerdictArtifact({ref:row.ref,sha,commit,findingsBody,activeLeaseSha,assignment:{sha:assignment.sha,reviewer:cursor.reviewer}})}
+    try{return validateVerdictArtifact({ref:row.ref,sha,commit,findingsBody,assignment:{sha:assignment.sha,reviewer:cursor.reviewer}})}
     catch(error){throw new ApprovalCheckError(`verdict ${row.ref} is invalid: ${error.message}`)}
   })
   const evidence = [

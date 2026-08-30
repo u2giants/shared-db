@@ -33,3 +33,10 @@ test('a contradictory verdict that wins the create race permanently refuses the 
   }
   assert.throws(()=>recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io),/contradictory create-only verdict/)
 })
+test('findings for another PR are refused before a commit or ref is created',()=>{
+  const io=ioFixture();let commits=0,creates=0
+  io.makeReviewVerdictCommit=()=>{commits++;return 'c'.repeat(40)}
+  io.createRef=()=>{creates++;return true}
+  assert.throws(()=>recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef:'https://github.com/u2giants/shared-db/pull/2001#issuecomment-123'},io),/reviewed shared-db PR/)
+  assert.equal(commits,0);assert.equal(creates,0)
+})

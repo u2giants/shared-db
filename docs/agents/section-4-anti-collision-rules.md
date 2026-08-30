@@ -289,6 +289,10 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    created the immutable verdict ref while the exact reviewer lease is still
    held. Calling a wrapper directly produces supplementary diligence, never
    merge or preview evidence; there is no manual verdict-recording fallback.
+   The manager CLI rejects `--record-review-verdict`; only the terminal adapter
+   can call the create-only recorder after posting the assigned wrapper output.
+   Prose may free reviewer capacity during cutover, but it never authorizes a
+   merge, preview, or replacement; those gates consume durable artifacts only.
 
    **A verdict with no coverage statement is not review evidence** (issue #1220,
    fixed wrapper-side in `ai-devops` PR #43). Two wrappers could finish a run

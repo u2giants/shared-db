@@ -14,7 +14,7 @@ test('adapter with real process payload shapes posts findings and records before
 
 test('recording failure leaves an explicit durable non-authorizing notice',()=>{
   const posts=[]
-  const spawn=(command,args,options)=>{if(command!=='gh')return{status:0,stdout:`VERDICT: APPROVE ${options.headSha??''}`};posts.push(JSON.parse(options.input).body);return{status:0,stdout:JSON.stringify({html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-123'})}}
+  const spawn=(command,args,spawnOptions)=>{if(command!=='gh')return{status:0,stdout:`VERDICT: APPROVE ${options.headSha}`};posts.push(JSON.parse(spawnOptions.input).body);return{status:0,stdout:JSON.stringify({html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-123'})}}
   assert.throws(()=>runGovernedReview(options,{spawn,resolve:(name)=>name,preflight:()=>{},record:()=>{throw new Error('lease changed')}}),/lease changed/)
   assert.match(posts[0],/NON-AUTHORIZING UNLESS/)
   assert.match(posts[1],/REVIEW RECORDING FAILED/)
@@ -24,6 +24,8 @@ test('honest review output without a verdict artifact path is refused',()=>{
   assert.throws(()=>runGovernedReview(options,{spawn:()=>({status:0,stdout:'I reviewed every file and found no issues.'}),resolve:(name)=>name,preflight:()=>{},record:()=>assert.fail('must not record')}),/did not produce/)
 })
 test('wrapper refusal forms remain terminal verdicts, not transport failures',()=>{
-  assert.equal(verdictFromOutput('VERDICT: REVISE -- fix it'),'REVISE')
-  assert.equal(verdictFromOutput('VERDICT: REJECT -- unsafe'),'REJECT')
+  assert.equal(verdictFromOutput(`VERDICT: REVISE ${options.headSha}`,options.headSha),'REVISE')
+  assert.equal(verdictFromOutput(`VERDICT: REJECT ${options.headSha}`,options.headSha),'REJECT')
+  assert.equal(verdictFromOutput(`VERDICT: APPROVE ${options.headSha}\nVERDICT: REJECT ${options.headSha}`,options.headSha),null)
+  assert.equal(verdictFromOutput(`VERDICT: APPROVE ${'b'.repeat(40)}`,options.headSha),null)
 })

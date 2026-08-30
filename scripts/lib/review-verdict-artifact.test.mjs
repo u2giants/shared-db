@@ -15,6 +15,7 @@ test('real GitHub commit/ref/comment shapes validate as one exact durable verdic
 test('mutation: widening the verdict enum is detected',()=>assert.throws(()=>validateVerdictArtifact(artifact({record:{verdict:'APPROVE WITH CONDITIONS'}})),/must be APPROVE/))
 test('mutation: dropping assignment parentage is detected',()=>assert.throws(()=>validateVerdictArtifact(artifact({parents:[{sha:'d'.repeat(40)}]})),/direct child/))
 test('mutation: recording outside the exact reviewer lease is detected',()=>assert.throws(()=>validateVerdictArtifact(artifact({activeLeaseSha:'e'.repeat(40)})),/conflicting active lease/))
+test('a durable verdict remains valid after the reviewer lease rotates',()=>assert.equal(validateVerdictArtifact({...artifact(),activeLeaseSha:undefined}).verdict,'APPROVE'))
 test('mutation: substituting reviewer identity is detected',()=>assert.throws(()=>validateVerdictArtifact(artifact({assignmentReviewer:'kimi-k3'})),/does not own/))
 test('mutation: changing durable findings after recording is detected',()=>assert.throws(()=>validateVerdictArtifact(artifact({findingsBody:'edited later'})),/digest/))
 test('mutation: findings on another PR cannot authorize this PR',()=>assert.throws(()=>validateVerdictArtifact(artifact({record:{findings_ref:'https://github.com/u2giants/shared-db/pull/2001#issuecomment-123'}})),/reviewed shared-db PR/))

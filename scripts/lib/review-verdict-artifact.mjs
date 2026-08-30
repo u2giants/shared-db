@@ -12,6 +12,10 @@ export function verdictRef({ issue, pr, headSha, slot = 1, replacementSequence =
   return `${prefix}/${Number(issue)}-${Number(pr)}-${String(headSha).toLowerCase()}${reviewSlotSuffix(slot)}${tail}`
 }
 export function findingsDigest(body) { return createHash('sha256').update(String(body), 'utf8').digest('hex') }
+export function assertFindingsRefForPr(findingsRef, pr) {
+  const match = /^https:\/\/github\.com\/u2giants\/shared-db\/pull\/(\d+)#issuecomment-\d+$/.exec(String(findingsRef ?? ''))
+  if (!match || Number(match[1]) !== Number(pr)) throw new Error('findings_ref must name a durable comment on the reviewed shared-db PR')
+}
 
 export function parseVerdictRef(ref) {
   const match = /^refs\/db-review-verdict(s|-replacements)\/(\d+)-(\d+)-([0-9a-f]{40})(?:-slot(\d+))?(?:-(\d+))?$/.exec(String(ref ?? ''))
@@ -46,8 +50,7 @@ export function validateVerdictArtifact({ ref, sha, commit, findingsBody, active
   const parents = commit?.parents ?? commit?.commit?.parents ?? []
   const parentShas = parents.map((parent) => parent.sha ?? parent.oid)
   if (parentShas.length !== 1 || parentShas[0] !== row.assignment_sha) throw new Error('verdict commit is not a direct child of its assignment')
-  const findingsMatch = /^https:\/\/github\.com\/u2giants\/shared-db\/pull\/(\d+)#issuecomment-\d+$/.exec(String(row.findings_ref ?? ''))
-  if (!findingsMatch || Number(findingsMatch[1]) !== Number(row.pr)) throw new Error('findings_ref must name a durable comment on the reviewed shared-db PR')
+  assertFindingsRefForPr(row.findings_ref, row.pr)
   if (!/^[0-9a-f]{64}$/.test(String(row.findings_digest ?? '')) || findingsDigest(findingsBody) !== row.findings_digest) throw new Error('findings digest does not match the durable findings')
   const validated = { ...row, ref, sha }
   Object.defineProperty(validated, VALIDATED_VERDICT, { value: true })
