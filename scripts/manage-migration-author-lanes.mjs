@@ -43,7 +43,7 @@ export const REVIEW_REPLACEMENT_REF_PREFIX = 'refs/db-review-replacements'
 export const REVIEW_ASSIGNMENT_REF_PREFIX = 'refs/db-review-assignments'
 export const REVIEW_ACTIVE_REF_PREFIX = 'refs/db-review-active'
 export const REVIEW_ACTIVE_CUTOVER_REF = 'refs/db-coordination/reviewer-index-cutover'
-export const REVIEW_OPERATION_REQUEST_LIMIT = 19
+export const REVIEW_OPERATION_REQUEST_LIMIT = 22, REVIEW_MUTEX_SECTION_RESERVE = 13 // slot 2 = 9 pre-mutex + this reserve; slot 1 = 6 + reserve. An ENTRY gate, not a release guarantee: it refuses to ACQUIRE the mutex unless the whole mutex-held section (body 11 + merged-PR ancestry add-on 2) still fits. Release is guaranteed separately by cleanupReserve (set at the acquire site, enforced in consumeReviewWireRequest). Derivation and the replacement-ref caveat: docs/verification/reviewer-assignment-api-budget-2026-08-28.md (#1812)
 export const REVIEW_QUOTA_RESERVE = 100
 // Page ceiling for listReviewRefsPaged. It is a REFUSAL, not a truncation: past
 // this the reviewer audit stops rather than reporting a partial view of the
@@ -57,16 +57,6 @@ export const REVIEW_QUOTA_RESERVE = 100
 // The headroom this constant appears to grant is illusory; the operation will
 // hit the request budget first (issue #1798 round 3, glm-5.3 Medium).
 export const REVIEW_REF_PAGE_LIMIT = 6
-// What a slot >=2 assignment RESERVES between taking the mutex and releasing it.
-// Reserved is not spent: the measured spend on the fresh atomic path is about 12
-// including cleanup, and the reserve is deliberately the larger number, because a
-// reserve that is smaller than the spend is what put this operation into the hard
-// budget wall mid-window. It is set against production request prices rather than
-// a fixture's. With the 6 requests every assignment pays before the lock, a fresh
-// second-reviewer assignment reserves 21 in total -- so it does NOT fit a
-// 19-request budget and DOES fit a 22-request one. It is refused cleanly before
-// the mutex rather than failing partway through (issue #1798 round 3).
-export const REVIEW_SLOT_N_LOCKED_WINDOW_REQUESTS = 15
 export const REVIEWERS = Object.freeze([
   { name:'grok-4.6', wrapper:'ai-grok-review' }, { name:'glm-5.3', wrapper:'ai-glm' },
   { name:'kimi-k3', wrapper:'ai-kimi' }, { name:'qwen-3.8-max', wrapper:'ai-qwen' },
@@ -1724,30 +1714,20 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
   const eligible=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
   if(!eligible.length)throw new LaneError('no reviewer is independent from the live orchestrator engine')
   const eligibleNames=new Set(eligible.map((row)=>row.name))
-  // Slot >=2 needs slot 1's reviewer as an exclusion, and resolving it costs two
-  // real requests (one GraphQL read for the assignment record, one REST listing
-  // for any replacement that superseded it). It used to be resolved HERE, before
-  // the mutex. That put the count at 7-8 when `requireReviewWireCapacity(13)`
-  // below demands 6 or less, so a fresh slot-2 assignment could never clear its
-  // own capacity precheck on the real wire, in every configuration -- invisible
-  // until the fixture below was corrected to production prices (issue #1798
-  // round 3, glm-5.3 High 2). It is resolved inside the lock instead, where the
-  // 13-request reserve already covers it, and where an idempotent retry that
-  // returns early never pays for it at all. The only thing given up is failing
-  // an ungoverned "slot 2 with no slot 1" request a few requests sooner; it is
-  // still refused, and the mutex is still released on the way out.
+  // Slot >=2 needs a name to exclude BEFORE the mutex is taken: cheap, and it
+  // lets an ungoverned "assign slot 2 with no slot 1" request fail fast.
+  //
+  // This branch reached the same slot-2 defect from the other side and moved
+  // this resolve INSIDE the lock. #1813 fixed it by raising the ceiling instead,
+  // and its REVIEW_MUTEX_SECTION_RESERVE is derived assuming the resolve is paid
+  // here, pre-mutex. Two fixes for one defect is worse than either, so this
+  // branch defers to the merged one: the resolve stays here, and the reserve is
+  // #1813's (issue #1798 round 3 / issue #1812).
+  const excludedProvider=request.slot===1?null:resolveSlotOneReviewer(request.issue,request.pr,request.headSha,io)
   const preflightBusy=findBusyReviewers(io)
   if(!preflightBusy)throw new LaneError('active reviewer leases are unreadable; reviewer assignment refused before mutex acquisition')
   const ownerSha=io.makeOwnerCommit(`db-coordination reviewer-assignment-lock issue=${request.issue} pr=${request.pr} head=${request.headSha}${request.slot!==1?` slot=${request.slot}`:''}`)
-  // Slot >=2 costs more inside the lock than slot 1 does: resolving slot 1's
-  // reviewer (moved here from before the mutex, see above) is two more requests,
-  // and the replacement listing for slot 2's own namespace is one more again.
-  // Reserving slot 1's 13 for both was wrong in a way that mattered -- the check
-  // passed and the operation then hit the hard budget wall mid-window, after the
-  // mutex was taken and partway through its reads. A precheck exists precisely so
-  // that cannot happen, so slot >=2 reserves what it actually spends and is
-  // refused cleanly before the mutex when it will not fit (issue #1798 round 3).
-  requireReviewWireCapacity(request.slot===1?13:REVIEW_SLOT_N_LOCKED_WINDOW_REQUESTS)
+  requireReviewWireCapacity(REVIEW_MUTEX_SECTION_RESERVE)
   acquireReviewMutex(ownerSha,io)
   try{
     // Slot 1 keeps the original, unsuffixed ref namespace so every existing
@@ -1835,7 +1815,6 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
     // exact head, so the second reviewer is never the same provider as the
     // first -- on top of, never instead of, the ordinary busy exclusion.
     const busy=preflightBusy
-    const excludedProvider=request.slot===1?null:resolveSlotOneReviewer(request.issue,request.pr,request.headSha,io)
     const start=(sequence-1)%ACTIVE_REVIEWERS.length
     const notTaken=(row)=>eligibleNames.has(row.name)&&!busy.has(row.name)&&row.name!==excludedProvider
     const reviewer=Array.from({length:ACTIVE_REVIEWERS.length},(_,offset)=>ACTIVE_REVIEWERS[(start+offset)%ACTIVE_REVIEWERS.length]).find(notTaken)??OVERFLOW_REVIEWERS.find(notTaken)

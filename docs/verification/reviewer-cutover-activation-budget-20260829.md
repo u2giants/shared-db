@@ -39,29 +39,35 @@ this lane did.
 
 ## Slot >=2 assignment costs more than slot 1
 
-A fresh second-reviewer assignment spends 6 requests before taking the mutex, and
-RESERVES `REVIEW_SLOT_N_LOCKED_WINDOW_REQUESTS` (15) for the locked window: 21
-reserved in total. It therefore does not fit a 19-request ceiling and does fit
-the 22-request ceiling PR #1813 introduces.
+This branch and PR #1813 found the same slot-2 defect and fixed it two different
+ways. #1813 merged first, so this branch defers to its design in full; what
+follows describes the merged one, not the superseded one.
 
-Reserved is not spent. The measured spend inside the lock on the fresh atomic
-path is about 12 including cleanup, so the reserve is deliberately conservative -
-a reserve must be at least the spend, and erring the other way is what put the
-operation into the hard wall mid-window in the first place. Anyone re-deriving
-these numbers should compare a measured spend against the reserve and expect the
-reserve to be the larger of the two.
+Under the merged design a fresh second-reviewer assignment spends 9 requests
+BEFORE taking the mutex - the slot-1 preflight plus the extra
+`resolveSlotOneReviewer` read, which stays pre-mutex - and must then still be
+able to reserve `REVIEW_MUTEX_SECTION_RESERVE` (13) for the whole mutex-held
+section. The entry gate is what that sum has to clear: 9 + 13 = 22, which is
+exactly `REVIEW_OPERATION_REQUEST_LIMIT`. There is no spare request.
 
-Two things follow, and both are now in the code:
+Measured against merged `main`, on 2026-08-30:
 
-- Resolving slot 1's reviewer (2 requests) moved from before the mutex to inside
-  it. Done before the lock it pushed the count to 7-8 where the capacity
-  precheck demands 6 or less, so a fresh slot-2 assignment could never clear its
-  own precheck on the real wire, in any configuration.
-- The capacity reserve is slot-aware. Reserving slot 1's 13 for both meant the
-  precheck passed and the operation then hit the hard budget wall mid-window,
-  with the mutex already held and its reads half done - the exact outcome a
-  precheck exists to prevent. Slot >=2 now reserves what it spends and is
-  refused cleanly before the mutex when it will not fit.
+| Operation | Measured spend | Ceiling |
+| --- | --- | --- |
+| Complete slot-2 assignment | 20 requests | 22 |
+| Cutover activation with a live review, real page counts | 19 requests | 22 |
+
+Reserved is not spent. The reserve is deliberately larger than the measured
+in-lock spend, because a reserve must be at least the spend and erring the other
+way is what put the operation into the hard wall mid-window in the first place.
+Anyone re-deriving these numbers should compare a measured spend against the
+reserve and expect the reserve to be the larger of the two.
+
+The superseded fix on this branch moved the slot-1 resolve inside the lock and
+used a slot-aware reserve of 15. It is recorded here only so the deletion of
+`REVIEW_SLOT_N_LOCKED_WINDOW_REQUESTS` is legible: two fixes for one defect is
+worse than either, so the constant is gone and the resolve stays pre-mutex where
+#1813's reserve derivation assumes it is paid.
 
 The tests assert this in both directions against the imported ceiling: below the
 honest cost they require a clean pre-mutex refusal with no mutex taken; at or
