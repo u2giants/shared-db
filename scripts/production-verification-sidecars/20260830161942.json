@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "migration_version": "20260830161942",
+  "migration_sha256": "bad936052d668c82fa3f2fc484aa6836e13a75630c347c642292854593a4f5d5",
+  "marker_schema_version": 1,
+  "marker_reviews": [
+    {
+      "line_start": 124,
+      "line_end": 124,
+      "disposition": "checks",
+      "reason": "The dynamic execute rewrites the existing api.db_data_admin_scraped_properties routine while retaining its previously verified DCP authority contract. The cited catalog contract proves the exact routine remains installed with the required authoritative DCP body; the migration's rollback-safe SQL contract separately refuses missing sanitized mapping joins, unsafe grants, and private contract fields.",
+      "check_ids": [
+        "creative_submission_privacy_contract"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "id": "creative_submission_privacy_contract",
+      "kind": "catalog_contract",
+      "contract": "dcp_opa_property_authority_v1",
+      "expected_count": 1
+    }
+  ]
+}
