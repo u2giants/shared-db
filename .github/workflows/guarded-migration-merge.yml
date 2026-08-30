@@ -1,10 +1,10 @@
-name: Guarded Migration Merge
+name: Guarded Merge
 
 on:
   workflow_dispatch:
     inputs:
       pull_request:
-        description: "Migration pull request number"
+        description: "Pull request number"
         required: true
         type: string
       head_sha:
@@ -38,7 +38,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Require current main and rerun every coordination guard
+      - name: Require current main and rerun every applicable coordination guard
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pull_request }}

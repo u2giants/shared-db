@@ -1467,6 +1467,39 @@ test('preview and merge are fixed exclusive refs and merge refuses during produc
   assert.throws(()=>acquireExclusive('production',{owner:'p',headSha:'main'},io),/guarded merge is active/)
 })
 
+test('issue 1688 routes non-migration pull requests through the guarded merge lane', () => {
+  const io=memoryIo()
+  io.getPr=()=>({number:7,head:{sha:'docs-head',ref:'codex/docs'},base:{sha:'main'}})
+  io.getPrFiles=()=>[{path:'docs/operations.md',status:'modified'}]
+  const lock=acquireExclusive('merge',{owner:'docs',pr:7,headSha:'docs-head'},io)
+  assert.equal(lock.ref,EXCLUSIVE_REFS.merge)
+  releaseOwnedRef(EXCLUSIVE_REFS.merge,lock.ownerSha,io)
+  io.getPrFiles=()=>[{path:'supabase/migrations/20990101000000_change.sql',status:'added'}]
+  assert.throws(
+    ()=>acquireExclusive('merge',{owner:'migration-without-claim',pr:7,headSha:'docs-head'},io),
+    /requires exactly one live author claim/,
+  )
+  io.getPrFiles=()=>{throw new Error('GitHub unavailable')}
+  assert.throws(
+    ()=>acquireExclusive('merge',{owner:'unknown-files',pr:7,headSha:'docs-head'},io),
+    /cannot read pull request files/,
+  )
+})
+
+test('issue 1688 never leaves a durable ordinary-merge authorization before the merge lock', () => {
+  const leaseWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/migration-author-lease.yml',import.meta.url)),'utf8')
+  const mergeWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/guarded-migration-merge.yml',import.meta.url)),'utf8')
+  const productionWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/shared-supabase-migrations.yml',import.meta.url)),'utf8')
+  assert.doesNotMatch(leaseWorkflow,/state=success[^\n]+Migration guarded merge authorization/)
+  assert.match(mergeWorkflow,/--acquire-merge[\s\S]+state=success[^\n]+Migration guarded merge authorization/)
+  const acquire=productionWorkflow.indexOf('name: Acquire the exclusive production lane and freeze merges')
+  const revoke=productionWorkflow.indexOf('name: Revoke every pre-existing merge authorization while frozen')
+  const release=productionWorkflow.indexOf('name: Release the exclusive production lane with ownership proof')
+  assert.ok(acquire >= 0 && acquire < revoke && revoke < release)
+  assert.match(productionWorkflow.slice(revoke,release),/state=failure[\s\S]+Migration guarded merge authorization/)
+  assert.match(productionWorkflow,/production-apply:[\s\S]+permissions:[\s\S]+statuses: write/)
+})
+
 test('historical preview recovery shares the preview lock and requires current main plus merged source PR',()=>{
   const io=memoryIo()
   io.getPr=()=>({merged:true,merge_commit_sha:'merged'})

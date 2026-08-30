@@ -3502,7 +3502,15 @@ export function acquireExclusive(kind, metadata, io = githubIo) {
       if (!pr?.head?.sha || pr.head.sha !== metadata.headSha) throw new LaneError('exclusive lane head SHA does not match the live pull request')
       const claims = io.openClaims()
       const matching = claims.map((claim)=>({ ...claim, lease:parseAuthorLease(claim.body) })).filter((claim)=>!claim.lease.legacy && claim.lease.branch===pr.head.ref && claim.lease.active)
-      if (matching.length !== 1) throw new LaneError('exclusive lane requires exactly one live author claim for the pull-request branch')
+      if (kind !== 'merge' && matching.length !== 1) throw new LaneError('exclusive lane requires exactly one live author claim for the pull-request branch')
+      if (kind === 'merge' && matching.length > 1) throw new LaneError('exclusive merge lane requires at most one live author claim for the pull-request branch')
+      if (kind === 'merge' && matching.length === 0) {
+        let files
+        try { files = io.getPrFiles?.(metadata.pr) } catch (error) { throw new LaneError(`exclusive merge lane cannot read pull request files (${error.message})`) }
+        if (!Array.isArray(files)) throw new LaneError('exclusive merge lane cannot establish whether the pull request changes migrations')
+        const changesMigration = files.some((file) => /^supabase\/migrations\/[^/]+\.sql$/.test(String(file?.path ?? file?.filename ?? '')))
+        if (changesMigration) throw new LaneError('exclusive merge lane requires exactly one live author claim for a pull request that changes migrations')
+      }
       if (kind === 'merge' && pr.base?.sha !== io.mainSha?.()) throw new LaneError('pull request is not based on the current main tip')
       if (kind === 'merge' && io.readRef(EXCLUSIVE_REFS.production)) throw new LaneError('production promotion is active; merges are frozen')
     }
