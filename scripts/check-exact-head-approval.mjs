@@ -48,7 +48,18 @@ const tiedToHead = (row, headSha) => row.commit_id === headSha || String(row.bod
 // APPROVE` still does not open with APPROVE and is still not an approval.
 const stripVerdictLabel = (line) => line.replace(/^[\s>*_#-]+/, '').replace(/^VERDICT\s*:\s*/i, '')
 const verdictLine = (body, pattern) => String(body ?? '').split(/\r?\n/).some((line) => pattern.test(stripVerdictLabel(line)))
-const APPROVE = /^APPROVE(?:D)?\b/i
+// `APPROVE WITH CONDITIONS` is a refusal-with-remedy, not an approval: the
+// conditions ARE the reviewer's finding, so merging on it merges the state the
+// reviewer declined to authorize -- while producing an audit trail saying they
+// approved. `psg4-glm52-review-brief.md` offers reviewers exactly that wording.
+// Matching it because the line opens with APPROVE is the anywhere-in-body defect
+// in miniature: matching the token instead of the claim.
+//
+// It deliberately does NOT join REFUSAL. Failing to satisfy the approval gate is
+// not the same as recording a refusal: a conditional response must leave the head
+// unapproved without LOCKING it, or the reviewer's own conditions strand the head
+// those conditions were meant to be met on -- the self-lock through a new door.
+const APPROVE = /^APPROVE(?:D)?\b(?!\s+WITH\b)/i
 // REJECT is a real verdict word in this repo's reviewer wrappers alongside REVISE
 // and GitHub's own CHANGES_REQUESTED. Omitting any of them would let a refusal at
 // the merged head be silently outvoted by an approval that came before it.

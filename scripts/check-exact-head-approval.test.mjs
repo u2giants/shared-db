@@ -191,3 +191,13 @@ test('a labelled non-approval is not turned into an approval by label stripping'
     evidence: [{ body: `VERDICT: DO NOT APPROVE ${NEW}` }],
   }), /has no APPROVE tied to it/)
 })
+
+// A conditional approval is a refusal-with-remedy. It must not satisfy the gate --
+// and, just as importantly, it must not lock the head either, or a reviewer's own
+// conditions strand the head those conditions were meant to be met on.
+test('APPROVE WITH CONDITIONS neither authorizes the merge nor locks the head', () => {
+  const pinned = { pr: 1809, headSha: NEW, assignments: [{ issue: 1769, pr: 1809, headSha: NEW }] }
+  const conditional = { body: `VERDICT: APPROVE WITH CONDITIONS ${NEW} -- rerun the reconciler first` }
+  assert.throws(() => evaluateExactHeadApproval({ ...pinned, evidence: [conditional] }), /has no APPROVE tied to it/)
+  assert.equal(evaluateExactHeadApproval({ ...pinned, evidence: [conditional, { body: `VERDICT: APPROVE ${NEW}` }] }).approved, true)
+})
