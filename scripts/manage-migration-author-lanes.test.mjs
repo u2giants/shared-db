@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, activateReviewCutover } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, buildDynamicQueues, claimBody, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, activateReviewCutover, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_REF_PAGE_LIMIT } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -418,10 +418,10 @@ test('complete assignment stays inside the real wire-attempt budget',()=>{
   const make=io.makeOwnerCommit
   io.makeOwnerCommit=(message)=>{wire(1);baseLoaded=true;return make(message)}
   const result=assignNextReviewer({issue:1767,pr:1800,headSha:'a'.repeat(40)},io)
-  assert.ok(result.reviewer);assert.ok(attempts<=19,`used ${attempts} wire attempts`)
+  assert.ok(result.reviewer);assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`used ${attempts} wire attempts`)
   attempts=0
   assert.deepEqual(assignNextReviewer({issue:1767,pr:1800,headSha:'a'.repeat(40)},io),result)
-  assert.ok(attempts<=19,`retry used ${attempts} wire attempts`)
+  assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`retry used ${attempts} wire attempts`)
 })
 
 test('complete replacement stays inside the real wire-attempt budget',()=>{
@@ -440,7 +440,7 @@ test('complete replacement stays inside the real wire-attempt budget',()=>{
   for(const name of ['readRef','listRefs','getCommit','getPr','getIssue','getIssueComments','getPrReviews','createRef','updateRef','deleteRef']){const fn=io[name];io[name]=(...args)=>{wire(1,`${name}:${String(args[0])}`);return fn(...args)}}
   const make=io.makeOwnerCommit;io.makeOwnerCommit=(message)=>{wire(1,'commit');baseLoaded=true;return make(message)}
   let result;try{result=replaceFailedReviewer(replacementRequest,io)}catch(error){throw new Error(`${error.message}; calls=${labels.join(',')}`)}
-  assert.ok(result.reviewer);assert.ok(attempts<=19,`used ${attempts} wire attempts`)
+  assert.ok(result.reviewer);assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`used ${attempts} wire attempts`)
 })
 
 test('atomic replacement succeeds when the failed assignment has no active lease',()=>{
@@ -680,7 +680,7 @@ test('wire budget always preserves enough requests to release an acquired mutex'
   for(const name of ['createRef','readRef','deleteRef']){const fn=io[name];io[name]=(...args)=>{wire();return fn(...args)}}
   io.readReviewRefs=(refs)=>{wire();proofReads++;return new Map(refs.map((ref)=>[ref,ref===MUTEX_REF&&proofReads===1?null:io.refs.get(ref)??null]))}
   assert.throws(()=>assignNextReviewer({issue:97,pr:197,headSha:'4'.repeat(40)},io),/budget exhausted/)
-  assert.equal(io.refs.has(MUTEX_REF),false);assert.ok(attempts<=19,`used ${attempts} wire attempts`)
+  assert.equal(io.refs.has(MUTEX_REF),false);assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`used ${attempts} wire attempts`)
 })
 
 test('a stale selected reviewer that becomes live after locking is not overwritten',()=>{
@@ -2496,6 +2496,39 @@ function seedAssignment(io,{issue,pr,headSha,reviewer,sequence=1}){
   return sha
 }
 
+// REGRESSION (issue #1798 round 2, grok-4.6 High #5). `--replace-failed-reviewer`
+// does NOT rewrite the assignment ref, so a review that was replaced while live
+// still names its FAILED reviewer there. A cutover that read only assignment refs
+// would backfill a lease for someone who is not reviewing and leave the reviewer
+// who actually is invisible to the busy probe -- the exact blindness activation
+// exists to prevent.
+test('cutover activation backfills the REPLACEMENT reviewer, not the failed reviewer named on the assignment ref',()=>{
+  const io=freshCutoverIo(),headSha='c'.repeat(40)
+  io.openPulls=()=>[{number:410,head:{sha:headSha}}]
+  seedAssignment(io,{issue:41,pr:410,headSha,reviewer:'grok-4.6'})
+  const replacementSha=io.makeOwnerCommit(`db-coordination reviewer-replacement sequence=2 reviewer=glm-5.3 issue=41 pr=410 head=${headSha} failed-sequence=1 prior-sequence=1 failure-ref=${'d'.repeat(40)}`)
+  io.refs.set(`${REVIEW_REPLACEMENT_REF_PREFIX}/41-410-${headSha}`,replacementSha)
+  const result=activateReviewCutover(io)
+  assert.equal(result.activated,true)
+  assert.deepEqual(result.backfilled,[{reviewer:'glm-5.3',issue:41,pr:410,headSha,ref:reviewActiveRef('glm-5.3')}])
+  assert.equal(io.refs.get(reviewActiveRef('glm-5.3')),replacementSha)
+  assert.equal(io.refs.has(reviewActiveRef('grok-4.6')),false)
+})
+
+// REGRESSION (issue #1798 round 2). The paged listing must REFUSE past its page
+// ceiling rather than silently return a truncated view of the review history --
+// a short read here reads as "no live review", which is the fail-open this
+// activation exists to avoid.
+test('cutover activation fails closed when the ref listing refuses as possibly truncated',()=>{
+  const io=freshCutoverIo(),headSha='f'.repeat(40)
+  io.openPulls=()=>[{number:420,head:{sha:headSha}}]
+  seedAssignment(io,{issue:42,pr:420,headSha,reviewer:'grok-4.6'})
+  io.listReviewRefsPaged=()=>{throw new LaneError(`refs/db-review-assignments exceeded ${REVIEW_REF_PAGE_LIMIT} pages of 100 refs; refusing a possibly truncated reviewer audit`)}
+  assert.throws(()=>activateReviewCutover(io),/refusing a possibly truncated reviewer audit/)
+  assert.equal(io.refs.has(REVIEW_ACTIVE_CUTOVER_REF),false)
+  assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
 test('cutover activation is idempotent and performs no writes once already active',()=>{
   const io=reviewIo(),before=[...io.refs.entries()]
   const result=activateReviewCutover(io)
@@ -2580,12 +2613,39 @@ test('cutover activation with a live in-progress review stays inside the real wi
   const rawGetCommit=io.getCommit
   let attempts=0;const labels=[]
   const wire=(n=1,label='wire')=>{for(let i=0;i<n;i++)runGitHubCommand(['api','fixture'],{executor:()=>{attempts++;labels.push(label);return '{}'}})}
-  io.getRateLimit=()=>{wire(1,'quota');return {remaining:5000,limit:5000,reset:1787943986,graphRemaining:5000,graphLimit:5000,graphReset:1787943986}}
+  // PRODUCTION-FAITHFUL COSTS (issue #1798 round 2, grok-4.6 at 53abae0). The
+  // first version of this test charged a friendlier price than githubIo really
+  // pays, which is why it passed while activation was still broken on the real
+  // wire. Each cost below is the real one:
+  //   getRateLimit        -> 2 (REST rate_limit + GraphQL rateLimit)
+  //   readReviewRecords   -> 2 (GraphQL for explicit refs + REST prefix list),
+  //                          and `.matching` rows carry NO commit message
+  //   listReviewRefsPaged -> 1 per 100-ref page
+  //   readActiveReviewLeases -> 1, and it warms reviewCommitBase, so
+  //   makeOwnerCommit     -> 1 after it (3 only when the base is still cold)
+  io.getRateLimit=()=>{wire(2,'quota');return {remaining:5000,limit:5000,reset:1787943986,graphRemaining:5000,graphLimit:5000,graphReset:1787943986}}
+  io.readActiveReviewLeases=()=>{wire(1,'activeLeases');return new Map([...io.refs.entries()].filter(([ref])=>ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)).map(([ref,sha])=>[ref,{sha,commit:rawGetCommit(sha)}]))}
   io.readReviewStates=(leases)=>{wire(1,'states');return new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))}
   io.readReviewRefs=(refs)=>{wire(1,'readReviewRefs');return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
   io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
   io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
-  io.readReviewRecords=(refs,prefix)=>{wire(1,'readReviewRecords');const result=new Map(refs.map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha,commit:rawGetCommit(sha)}))});return result}
+  // These namespaces are append-only across the repository's WHOLE review
+  // history, so a fixture holding two refs would charge one page while the real
+  // repository charges four and two (370 assignment refs / 106 replacement refs,
+  // measured 2026-08-29). Charging the fixture one page apiece is precisely the
+  // friendlier-than-production fiction that let the previous version of this
+  // test pass over a broken activation, so the real page counts are charged here.
+  const REAL_REF_PAGES={[REVIEW_ASSIGNMENT_REF_PREFIX]:4,[REVIEW_REPLACEMENT_REF_PREFIX]:2}
+  io.listReviewRefsPaged=(prefix)=>{wire(REAL_REF_PAGES[prefix]??1,`listReviewRefsPaged:${prefix}`);return [...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha}))}
+  io.readReviewRecords=(refs,prefix)=>{
+    assert.ok(refs.length,'production readReviewRecords builds an EMPTY GraphQL selection set for an empty ref list, which GitHub rejects outright')
+    wire(prefix?2:1,'readReviewRecords')
+    const result=new Map(refs.map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}))
+    // Production attaches NO commit message to prefix matches -- they come from
+    // a separate REST listing. Modelling that is the whole point of this test.
+    Object.defineProperty(result,'matching',{value:prefix?[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha})):[]})
+    return result
+  }
   for(const name of ['readRef','listRefs','getCommit','getPr','getIssue','getIssueComments','getPrReviews','createRef','updateRef','deleteRef','openPulls']){
     const fn=io[name];if(typeof fn==='function')io[name]=(...args)=>{wire(1,`${name}:${String(args[0]??'')}`);return fn(...args)}
   }
@@ -2594,7 +2654,7 @@ test('cutover activation with a live in-progress review stays inside the real wi
   try{result=activateReviewCutover(io)}catch(error){throw new Error(`${error.message}; used ${attempts} wire attempts; calls=${labels.join(',')}`)}
   assert.equal(result.activated,true)
   assert.deepEqual(result.backfilled,[{reviewer:'grok-4.6',issue:40,pr:400,headSha,ref:reviewActiveRef('grok-4.6')}])
-  assert.ok(attempts<=19,`used ${attempts} wire attempts; calls=${labels.join(',')}`)
+  assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`used ${attempts} wire attempts; calls=${labels.join(',')}`)
 })
 
 // ---------------------------------------------------------------------------
@@ -2719,7 +2779,7 @@ test('complete slot-2 assignment stays inside the real wire-attempt budget',()=>
   try{result=assignNextReviewer({...request,slot:2},io)}catch(error){throw new Error(`${error.message}; used ${attempts} wire attempts so far`)}
   assert.equal(result.slot,2)
   assert.notEqual(result.reviewer,first.reviewer)
-  assert.ok(attempts<=19,`used ${attempts} wire attempts`)
+  assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`used ${attempts} wire attempts`)
 })
 
 // REGRESSION (issue #1798, glm-5.3 review at d91857e, medium finding). A
