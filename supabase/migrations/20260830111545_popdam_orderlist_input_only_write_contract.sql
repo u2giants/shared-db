@@ -108,7 +108,19 @@ begin;
 -- not resolve table names inside a function body at creation time. So without this probe
 -- this file would apply happily in pass one, and pass two would then re-apply
 -- 20260810010000 on top of it and REINSTATE the very whitelists this migration exists to
--- remove. The lane would go green while certifying the pre-#1772 contract.
+-- remove.
+--
+-- Be precise about what that costs, because the first draft of this comment was not.
+-- The contract test beside this file is NOT quarantined, so in the no-probe world it
+-- asserts against the reinstated wide whitelists and the lane goes RED, loudly. The
+-- danger is not a silent green here and now; it is that the only two ways to get a green
+-- lane without this probe were to quarantine the test -- which the quarantine charter
+-- forbids, because that file is for tests that cannot hold from empty, not for parking a
+-- test that found a real defect -- or to weaken the assertions. A silent green IS the
+-- outcome for any future change in this position that has no test or a quarantined one,
+-- which is why the harness behaviour is filed as a defect in its own right; but for THIS
+-- file the honest statement is that the probe is what makes a green lane both achievable
+-- and truthful.
 --
 -- The probe forces this file onto the pass-two list too, where filename order puts it
 -- after its base and the narrowed definitions survive. On any database that applies
