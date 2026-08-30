@@ -1125,10 +1125,16 @@ export function deriveLivePreviewCandidate(issue,io){
   const route=selectPreviewRoute({issue,pr:pr.number,head_sha:head,bundle_id:bundle.bundle_id,versions,dependency_closure_complete:gate.dependency_closure_complete,claims:claimRows,main_versions:mainVersions,preview_versions:preview.versions,merged})
   if(route.status!=='READY')throw new LaneError(`preview route is ${route.status}: ${route.reason}`)
   const routeName=route.route==='NORMAL_PREVIEW'?'ordinary_preview_apply':route.route==='POST_MERGE_REHEARSAL'?'merged_rehearsal':'historical_rebind'
-  // A post-merge rehearsal is anchored at the AUTHORING merge commit, not the current
-  // main tip: the recovery lane pins producer files there and a later tip fails the pin.
-  const anchor=routeName==='merged_rehearsal'?mergeCommit:main,routeContext=routeName==='ordinary_preview_apply'?'':anchor
-  const manifest={target:'preview',preview_allowlist:versions.join(','),claim_pr:String(pr.number),claim_head_sha:head,...(routeName==='merged_rehearsal'?{commit_sha:anchor,merged_preview_source_pr:String(pr.number)}:{}),...(routeName==='historical_rebind'?{commit_sha:main,historical_preview_source_pr:String(pr.number)}:{})}
+  const routeContext=routeName==='ordinary_preview_apply'?'':main
+  // commit_sha is the CURRENT MAIN TIP the rehearsal runs at -- shared-supabase-migrations
+  // asserts `git rev-parse origin/main` equals it. That is a different thing from the
+  // historical-recovery lane's producer-file pin at the authoring merge commit; conflating
+  // the two emits a manifest the workflow refuses.
+  //
+  // A merged rehearsal must NOT name claim_pr: "merged_preview_source_pr replaces claim_pr.
+  // A merged pull request has no live author claim; do not name both."
+  const claimFields=routeName==='merged_rehearsal'?{}:{claim_pr:String(pr.number),claim_head_sha:head}
+  const manifest={target:'preview',preview_allowlist:versions.join(','),...claimFields,...(routeName==='merged_rehearsal'?{commit_sha:main,merged_preview_source_pr:String(pr.number)}:{}),...(routeName==='historical_rebind'?{commit_sha:main,historical_preview_source_pr:String(pr.number)}:{})}
   return {issue,pr:pr.number,head_sha:head,bundle_id:bundle.bundle_id,route:routeName,route_context:routeContext,manifest}
 }
 

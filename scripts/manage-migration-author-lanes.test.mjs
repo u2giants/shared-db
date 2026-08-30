@@ -2589,9 +2589,9 @@ function mergedRehearsalIo(){
     '```db-claim','version: '+version,'objects:','  - table plm.wwe_property','```','',
     '```db-author-lease','owner: agent/issue-1769','branch: issue-1769-wwe-tables',
     'worktree: C:/repos/x','expires_at: 2099-01-01T00:00:00Z','```'].join('\n')}
-  const head='a'.repeat(40), mergeSha='b'.repeat(40), mainSha='b'.repeat(40)
+  const head='a'.repeat(40), mergeSha='b'.repeat(40), mainSha='d'.repeat(40)
   const files={[migration]:'create table plm.wwe_property();','config/orchestrator-global-invalidators-v1.json':'{"schema_version":1,"files":[]}'}
-  return {head,mergeSha,version,io:{
+  return {head,mergeSha,mainSha,version,io:{
     openClaims:()=>[claim],
     openPulls:()=>[],
     branchPulls:(branch)=>branch==='issue-1769-wwe-tables'?[{number:1809,head:{ref:branch,sha:head},base:{sha:'c'.repeat(40)},merged_at:'2026-08-29T00:32:19Z',merge_commit_sha:mergeSha}]:[],
@@ -2607,16 +2607,22 @@ function mergedRehearsalIo(){
 }
 
 test('a merged claim still reaches the post-merge rehearsal route instead of being stranded',()=>{
-  const {io,mergeSha,head,version}=mergedRehearsalIo()
+  const {io,mainSha,head,version}=mergedRehearsalIo()
   const candidate=deriveLivePreviewCandidate(1769,io)
   assert.equal(candidate.route,'merged_rehearsal')
   assert.equal(candidate.pr,1809)
   assert.equal(candidate.head_sha,head)
-  // anchored at the AUTHORING merge commit, never a later main tip
-  assert.equal(candidate.route_context,mergeSha)
-  assert.equal(candidate.manifest.commit_sha,mergeSha)
+  // commit_sha is the CURRENT MAIN TIP -- shared-supabase-migrations asserts
+  // `git rev-parse origin/main` equals it. The fixture deliberately keeps the main
+  // tip different from the merge commit so anchoring at the wrong one fails here.
+  assert.equal(candidate.route_context,mainSha)
+  assert.equal(candidate.manifest.commit_sha,mainSha)
   assert.equal(candidate.manifest.merged_preview_source_pr,'1809')
   assert.equal(candidate.manifest.preview_allowlist,version)
+  // "merged_preview_source_pr replaces claim_pr ... do not name both" -- naming
+  // either claim field alongside it makes the workflow refuse the dispatch outright.
+  assert.equal('claim_pr' in candidate.manifest,false)
+  assert.equal('claim_head_sha' in candidate.manifest,false)
 })
 
 test('a merged claim whose merge commit is not in main history is refused',()=>{
