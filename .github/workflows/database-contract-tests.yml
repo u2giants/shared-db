@@ -381,6 +381,14 @@ jobs:
             fi
             if psql -v ON_ERROR_STOP=1 --no-psqlrc --single-transaction -f "$m" \
                  > "$RUNNER_TEMP/migration-logs-pass2/$base.log" 2>&1; then
+              # Pass 2 runs after every pass-1 success, so an older migration can silently
+              # replace a routine installed by a later migration. Refuse that state before
+              # contract tests can judge (and potentially green-light) superseded code.
+              if ! python scripts/check_pass2_routine_supersession.py "$m" \
+                   --migrations-dir supabase/migrations; then
+                echo "::error::pass 2 changed a routine superseded by a later migration: $base" >&2
+                exit 2
+              fi
               OK=$((OK+1))
               psql -q --no-psqlrc -c \
                 "insert into supabase_migrations.schema_migrations (version, name)
