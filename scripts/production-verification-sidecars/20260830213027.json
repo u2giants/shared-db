@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "migration_version": "20260830213027",
+  "migration_sha256": "1acf1e23b36598c1a6d4ce1230e34f3e06a167acf2fe238ad050dec20a8c237b",
+  "marker_schema_version": 1,
+  "marker_reviews": [
+    {
+      "line_start": 86,
+      "line_end": 322,
+      "disposition": "checks",
+      "check_ids": [
+        "source_resolution_supported_home_contract"
+      ],
+      "reason": "The verifier-owned source_resolution_supported_home_v1 contract checks the dynamic per-kind detector and target-lock function bodies, all 26 dynamically installed landing guards, the durable table and API view, the read policy, and the zero-foreign-key invariant produced by every marker in this reviewed range."
+    }
+  ],
+  "checks": [
+    {
+      "id": "source_resolution_supported_home_contract",
+      "kind": "catalog_contract",
+      "contract": "source_resolution_supported_home_v1",
+      "expected_count": 1
+    }
+  ]
+}
