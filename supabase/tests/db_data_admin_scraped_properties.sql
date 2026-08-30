@@ -222,7 +222,7 @@ begin
       and r ->> 'source_table' = 'plm.dcp_property'
   ) or not exists (
     select 1 from jsonb_array_elements(v_rows) r
-    where r ->> 'presentation_licensor_name' = 'DCP Vault - non-authoritative Marvel tag'
+    where r ->> 'presentation_licensor_name' = 'DCP Vault - Creative (non-authoritative Marvel tag)'
       and r ->> 'source_table' = 'plm.marvel_dcp_property'
   ) or not exists (
     select 1 from jsonb_array_elements(v_rows) r
