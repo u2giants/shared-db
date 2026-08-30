@@ -310,6 +310,47 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    Kimi headless metrics and returned model are unavailable; never invent them.
    **The exact-head approval rule is ENFORCED at the merge gate, not merely documented (#1816, 2026-08-29).** Until then `guarded-migration-merge` proved head identity, base currency, object collisions and the author lease, but never asked whether the bytes being merged had been approved -- and under merge-first the preview gate that does ask only runs AFTER the merge. So `REJECT` at head A, a new commit B answering it, then merging B put unapproved bytes on `main`. That happened on PR #1809 (issue #1769): grok-4.6 REJECTed `b494401`, commit `8d3c31a` answered it, and `8d3c31a` merged as `2b68e7e` with zero approvals tied to it. `scripts/check-exact-head-approval.mjs` now runs twice in that workflow -- once up front and once re-proven under the merge lock -- and refuses unless a reviewer assignment AND an `APPROVE` are both pinned to the exact head being merged, with no unanswered refusal at that head. **An assignment is not an approval, and an approval of an earlier head is not an approval of these bytes.** A new commit answering a review always needs a fresh exact-head review before it can merge. A reviewer *replacement* does not change any of this: replacement exists for a reviewer that produced **silence** (the TERMINAL_FAILURE_CODES -- quota, provider unavailable, dependency unavailable, wrapper failure, turn-limit cancellation), not for one that produced a verdict. Replacing a reviewer who timed out mid-review is legitimate, but if that reviewer had already emitted a refusal, the refusal survives the replacement -- the distinction is verdict-vs-silence, not reviewer identity. Conversely, a replacement reviewer's assignment (and a slot 2 assignment, suffixed `-slot<N>`) counts as a genuine assignment at that head, so the gate reads both the assignment and the replacement ref namespaces.
 
+   **What a verdict is worth depends on how it was obtained (#1816, #1824, 2026-08-30).**
+   Six failures in two days shared one shape: a claim that was true when made,
+   relayed onward, and acted on after it stopped being checkable. Four were
+   true-but-stale -- a real value, correctly read, since superseded. Two were
+   unrecorded-but-relayed: a review that genuinely ran, reported honestly, whose
+   outcome survived only in one session's scrollback or in local files on one
+   machine. Truthfulness is not the failure mode here; durability is, and a
+   report that a review happened is not evidence that a review happened. The
+   governed evidence channel -- PR reviews plus issue and PR comments matched to
+   the exact head, read by `previewGateProof` and by
+   `scripts/check-exact-head-approval.mjs` -- exists and works; both misses were
+   wrapper runs made outside it. **A review conducted outside the governed
+   channel did not happen, for merge purposes.** Post the verdict there or it is
+   not evidence. Two further rules follow. A reviewer holding a lease on another
+   issue is not independent even when its verdict is correctly pinned: check
+   lease state, not just head state, and count such findings as supplementary
+   diligence only. And a claim written into a governance record is a merge, not a
+   comment -- durable, citable, and owed the same standard of evidence as code.
+   #1824 tracks making the verdict an output of the review path rather than a
+   transcription by the session that ran it; until it lands, an artifact a
+   session can transcribe is prose with a schema.
+
+   **Verification doctrine: the remedy is never care, it is any procedure whose
+   outcome the author does not control.** A second reader is the most reliable
+   instance and the most available one, but it is an instance, not the principle
+   -- a session running alone at 03:00 cannot summon a peer and can still run
+   something whose answer it does not already know. Three instances, each of
+   which caught a real defect in this repository:
+   1. **Read the head at the moment of assignment or merge.** Never carry a SHA
+      across a message boundary. Every wrong value in the #1816 sequence was a
+      real value that had been true when it was read.
+   2. **Break the code on purpose. If the suite stays green, the suite is
+      furniture.** Reverting one constant and finding exactly one test fail is
+      what distinguishes a fix from a fix-shaped edit.
+   3. **Drive conversion layers with production-shaped payloads.** Twice in one
+      week a defect hid in an adapter whose test-time shape diverged from the
+      shape production emits, with the suite green throughout. *A test that
+      asserts on a value the production path never receives is not a weak test,
+      it is a test of a different program.* Coverage of an evaluation core says
+      nothing about the adapter that feeds it.
+
    After review approval, green checks, preview proof, and guarded merge, the
    production workflow runs `scripts/production_business_risk_gate.py`. It
    derives the result from the exact merged PR and required checks, immutable
