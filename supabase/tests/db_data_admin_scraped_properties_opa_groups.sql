@@ -19,6 +19,7 @@ declare
   v_count integer;
   v_dcp_crawl uuid := gen_random_uuid();
   v_dcp_run uuid := gen_random_uuid();
+  v_dcp_run_2 uuid := gen_random_uuid();
   v_dcp_guide uuid;
 begin
   v_search := 'Issue1589-' || v_suffix;
@@ -39,6 +40,8 @@ begin
      or position('page_submission_source_candidates as materialized' in v_definition) = 0
      or position('select distinct o.dcp_asset_id' in v_definition) = 0
      or position('page_dcp_context_rows as materialized' in v_definition) = 0
+     or position('page_dcp_retained_assets as materialized' in v_definition) = 0
+     or position('dcp_asset_context as materialized' in v_definition) = 0
      or position('left join source_rows s' in v_definition) <> 0
      or position('Disney OPA (unsplit)' in v_definition) <> 0 then
     raise exception 'authorization, targeted labels, OPA resolution, or retired-group contract changed';
@@ -129,17 +132,17 @@ begin
     v_search || ' DCP ' || lpad(g::text, 4, '0')
   from generate_series(1, 4000) g;
 
-  -- Populate the formerly dominant path: 4,000 page-visible DCP properties,
-  -- 200 retained assets and 800,000 historical property/asset observations.
-  -- This is deliberately denser than the current production relationship and
-  -- proves both asset counts and style-guide labels remain available.
+  -- Populate the production-shaped dominant path: 250 early page-visible DCP
+  -- properties each retain 1,600 distinct assets across two metadata runs.
+  -- The resulting 800,000 observations model the measured 2:1 history fanout
+  -- and hundreds-of-thousands-of-assets page skew without licensed values.
   insert into plm.dcp_crawl (
     crawl_id,captured_on,portal_base_url,crawler_version,account_scope,
     line_of_business,started_at,captured_by,private_source_commit,status,
     rows_received,distinct_assets_received,finished_at
   ) values (
     v_dcp_crawl,current_date,'https://invalid.example','contract','contract',
-    'contract',now(),'contract',repeat('d',40),'running',200,200,now()
+    'contract',now(),'contract',repeat('d',40),'running',1600,1600,now()
   );
   insert into plm.dcp_style_guide (
     source_path,folder_name,region,year_segment,first_seen_crawl_id
@@ -152,7 +155,7 @@ begin
     asset_id uuid not null
   ) on commit drop;
   insert into issue1936_dcp_asset_fixture
-  select g,gen_random_uuid() from generate_series(1,200) g;
+  select g,gen_random_uuid() from generate_series(1,1600) g;
   insert into plm.dcp_asset (
     id,source_path,style_guide_id,file_name,file_extension,first_seen_crawl_id
   )
@@ -167,8 +170,8 @@ begin
     metadata_run_id,source_crawl_id,status,captured_on,started_at,
     endpoint_suffix,crawler_version,captured_by,private_source_commit,assets_expected
   ) values (
-    v_dcp_run,v_dcp_crawl,'running',current_date,now(),'/contract',
-    'contract','contract',repeat('d',40),200
+    v_dcp_run,v_dcp_crawl,'planned',current_date,now(),'/contract',
+    'contract','contract',repeat('d',40),1600
   );
   insert into plm.dcp_metadata_asset (
     metadata_run_id,source_crawl_id,dcp_asset_id
@@ -178,14 +181,30 @@ begin
     fetch_status='success',http_status=200,raw_metadata='{"contract":true}',
     retrieved_at=now(),source_hash=repeat('d',64),normalized_hash=repeat('e',64)
   where metadata_run_id=v_dcp_run;
+  insert into plm.dcp_metadata_run (
+    metadata_run_id,source_crawl_id,status,captured_on,started_at,
+    endpoint_suffix,crawler_version,captured_by,private_source_commit,assets_expected
+  ) values (
+    v_dcp_run_2,v_dcp_crawl,'planned',current_date,now(),'/contract-2',
+    'contract','contract',repeat('e',40),1600
+  );
+  insert into plm.dcp_metadata_asset (
+    metadata_run_id,source_crawl_id,dcp_asset_id
+  )
+  select v_dcp_run_2,v_dcp_crawl,asset_id from issue1936_dcp_asset_fixture;
+  update plm.dcp_metadata_asset set
+    fetch_status='success',http_status=200,raw_metadata='{"contract":true}',
+    retrieved_at=now(),source_hash=repeat('e',64),normalized_hash=repeat('f',64)
+  where metadata_run_id=v_dcp_run_2;
   insert into plm.dcp_asset_property_observation (
     metadata_run_id,dcp_asset_id,dcp_property_id
   )
-  select v_dcp_run,a.asset_id,p.id
-  from issue1936_dcp_asset_fixture a
+  select r.run_id,a.asset_id,p.id
+  from (values (v_dcp_run),(v_dcp_run_2)) r(run_id)
+  cross join issue1936_dcp_asset_fixture a
   cross join plm.dcp_property p
   where p.source_system='disney_dcpvault'
-    and p.source_id like v_search||'/DCP-%';
+    and p.source_id between v_search||'/DCP-0001' and v_search||'/DCP-0250';
 
   insert into plm.dcp_opa_property_resolution (
     resolution_id, source_system, source_table, source_property_id,
@@ -337,9 +356,14 @@ begin
 
   if (select count(*) from jsonb_array_elements(v_rows) r
       where r ->> 'source_table'='plm.dcp_property'
-        and (r ->> 'asset_count')::integer=200
+        and (r ->> 'asset_count')::integer=1600
         and (r ->> 'style_guide_count')::integer=1
-        and jsonb_array_length(r -> 'style_guide_names')=1) <> 4000 then
+        and jsonb_array_length(r -> 'style_guide_names')=1) <> 250
+     or (select count(*) from jsonb_array_elements(v_rows) r
+         where r ->> 'source_table'='plm.dcp_property'
+           and (r ->> 'asset_count')::integer=0
+           and (r ->> 'style_guide_count')::integer=0
+           and jsonb_array_length(r -> 'style_guide_names')=0) <> 3751 then
     raise exception 'retained DCP asset/style context was lost or duplicated';
   end if;
 
