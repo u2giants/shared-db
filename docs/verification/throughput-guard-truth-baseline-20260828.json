@@ -1,9 +1,9 @@
 {
   "detector_schema_version": 1,
-  "detector_source_sha256": "cdf01c3efced138d7eeb57f52823c3b8ca91724721f6829f31d015b6c22303bb",
+  "detector_source_sha256": "b363f9c07ed724adf3e97543d2d1a3361b414771f442abf2fc28e0a9cd7b9dd1",
   "command": "node scripts/check-production-verification-sidecars.mjs",
-  "total_migration_files": 576,
-  "matched_count": 87,
+  "total_migration_files": 584,
+  "matched_count": 89,
   "matched_paths": [
     {
       "version": "20260621150815",
@@ -416,11 +416,6 @@
       "marker_count": 1
     },
     {
-      "version": "20260831003542",
-      "path": "supabase/migrations/20260831003542_source_resolution_supported_home.sql",
-      "marker_count": 10
-    },
-    {
       "version": "20260830220646",
       "path": "supabase/migrations/20260830220646_scraped_properties_set_based_authority.sql",
       "marker_count": 1
@@ -438,6 +433,21 @@
     {
       "version": "20260831002935",
       "path": "supabase/migrations/20260831002935_scraped_properties_targeted_submission_labels.sql",
+      "marker_count": 1
+    },
+    {
+      "version": "20260831003542",
+      "path": "supabase/migrations/20260831003542_source_resolution_supported_home.sql",
+      "marker_count": 10
+    },
+    {
+      "version": "20260831012326",
+      "path": "supabase/migrations/20260831012326_scraped_properties_covering_asset_context.sql",
+      "marker_count": 1
+    },
+    {
+      "version": "20260831021656",
+      "path": "supabase/migrations/20260831021656_scraped_properties_set_based_retained_context.sql",
       "marker_count": 1
     }
   ],
