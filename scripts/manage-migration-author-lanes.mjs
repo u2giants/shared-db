@@ -757,6 +757,14 @@ function ghPaginated(endpoint) {
 }
 export function isConfirmedRefAbsence(error) { return /HTTP 404/i.test(String(error?.message??'')) }
 
+export function reviewRecordRefs(refs,matches=[]){
+  const replacementVerdicts=matches
+    .map((row)=>String(row?.ref??''))
+    .filter((ref)=>ref.startsWith(`${REVIEW_REPLACEMENT_REF_PREFIX}/`))
+    .map((ref)=>ref.replace(REVIEW_REPLACEMENT_REF_PREFIX,REVIEW_VERDICT_REPLACEMENT_REF_PREFIX))
+  return [...new Set([...refs,...matches.map((row)=>row.ref),...replacementVerdicts])]
+}
+
 export const githubIo = {
   requiresExactReviewHeadSha: true,
   countLogicalReviewRequests:true,
@@ -841,7 +849,7 @@ export const githubIo = {
     // REVIEW_CURSOR_REF), which would have made every caller of this method
     // treat a real record as absent.
     const matches=prefix?this.listRefs(prefix):[]
-    const allRefs=[...new Set([...refs,...matches.map((row)=>row.ref)])]
+    const allRefs=reviewRecordRefs(refs,matches)
     const fields=allRefs.map((ref,index)=>`r${index}:object(expression:${JSON.stringify(ref)}){oid ... on Commit{message}}`).join(' ')
     const data=ghJson(['api','graphql','-f',`query=query{repository(owner:"u2giants",name:"shared-db"){base:defaultBranchRef{target{... on Commit{oid tree{oid}}}} ${fields}}}`])
     if(data?.errors?.length||!data?.data?.repository)throw new LaneError('review record preflight returned GraphQL errors')
@@ -2396,11 +2404,10 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
   const replacementBase=`${REVIEW_REPLACEMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}${slotSuffix}`
   const replacementRef=`${replacementBase}-${request.failedSequence}`
   const assignmentVerdictRef=assignmentRef.replace(REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_VERDICT_REF_PREFIX)
-  const replacementVerdictRef=replacementRef.replace(REVIEW_REPLACEMENT_REF_PREFIX,REVIEW_VERDICT_REPLACEMENT_REF_PREFIX)
   // Slot >=2 must stay independent of slot 1 after a replacement, not only at
   // first assignment. Resolved read-only, pre-mutex, exactly as assignment does.
   const excludedProvider=request.slot===1?null:resolveSlotOneReviewer(request.issue,request.pr,request.headSha,io)
-  const fixedRecords=io.readReviewRecords?.([replacementRef,assignmentRef,REVIEW_CURSOR_REF,assignmentVerdictRef,replacementVerdictRef],replacementBase)??null
+  const fixedRecords=io.readReviewRecords?.([replacementRef,assignmentRef,REVIEW_CURSOR_REF,assignmentVerdictRef],replacementBase)??null
   let ownerSha=null,mutexAcquired=false
   try{
     let priorReplacement=fixedRecords?(fixedRecords.get(replacementRef)?.sha??null):io.readRef(replacementRef)
