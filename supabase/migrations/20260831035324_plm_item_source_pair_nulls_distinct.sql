@@ -48,6 +48,6 @@ alter table plm.item
   unique nulls distinct (source_system, source_id);
 
 comment on constraint item_source_system_source_id_key on plm.item is
-  'NULLS DISTINCT since 20260831003618: multiple items may lack an external identity, while each non-null source_system/source_id pair remains unique.';
+  'NULLS DISTINCT since 20260831035324: multiple items may lack an external identity, while each non-null source_system/source_id pair remains unique.';
 
 commit;
