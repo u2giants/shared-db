@@ -9,7 +9,7 @@ begin
   if to_regprocedure(
        'public.search_dam_documents(text,integer,text[],extensions.vector)'
      ) is not null then
-    raise exception 'legacy unfiltered ranked-search overload must not exist';
+    raise exception 'legacy unfiltered ranked-search overload survived ordered replay';
   end if;
 
   select pg_get_functiondef(

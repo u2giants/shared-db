@@ -1794,7 +1794,7 @@ class BehavioralSidecarTests(unittest.TestCase):
         self.assertEqual(checks[0]["kind"], "catalog_contract")
         self.assertEqual(
             checks[0]["migration_sha256"],
-            "fcc3d8780d67d5a1166ab6e01ed8b9819fbb19120e25e6d7ab72e6932bcf8918",
+            "8cae66fd16b67b12371103696d9c79ed37cacf828c6a105c79a02c101ec5f8b9",
         )
         self.assertEqual(targets.functions, ["public.search_dam_documents"])
         self.assertIn("full_text_matches as materialized", sql)

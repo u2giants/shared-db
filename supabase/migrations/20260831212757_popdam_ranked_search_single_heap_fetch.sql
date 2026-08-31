@@ -2,6 +2,13 @@
 -- wide search heap once even when bounded synonym expansion emits several
 -- tsqueries. Ranking still takes the maximum score across every matching
 -- expansion; substring and semantic candidates remain unchanged.
+-- derived-from: 20260831184547
+
+-- Pass-2 replay can restore the pre-filtered overload after forward 6 removed
+-- it. Reassert the same authorization boundary in the final ordered state.
+drop function if exists public.search_dam_documents(
+  text, integer, text[], extensions.vector
+);
 
 create or replace function public.search_dam_documents(
   p_query text,
@@ -178,3 +185,13 @@ grant execute on function public.search_dam_documents(text,jsonb,int,int,text[],
 
 comment on function public.search_dam_documents(text,jsonb,int,int,text[],extensions.vector(384),real) is
   'DAM-entitled ranked search: one private keyed visibility pass and one heap fetch per full-text document drive exact totals, facets, and pagination.';
+
+do $$
+begin
+  if to_regprocedure(
+       'public.search_dam_documents(text,integer,text[],extensions.vector)'
+     ) is not null then
+    raise exception 'legacy unfiltered ranked-search overload survived ordered replay';
+  end if;
+end;
+$$;
