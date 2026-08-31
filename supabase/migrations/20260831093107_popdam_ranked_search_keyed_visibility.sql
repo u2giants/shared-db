@@ -18,6 +18,9 @@ set statement_timeout = '8s'
 as $$
 begin
   perform public.require_dam_access();
+  if coalesce(p_filters, '{}'::jsonb) = '{}'::jsonb then
+    return public.get_filter_counts_unchecked_1703(p_filters);
+  end if;
   return public.get_effective_filter_counts_unchecked_1703(p_filters);
 end;
 $$;
@@ -35,6 +38,12 @@ begin
   return public.get_effective_filter_counts_unchecked_1703(p_filters);
 end;
 $$;
+
+-- Ordered replay can retain the pre-filtered overload even though production
+-- already removed it. Keep that bypass closed in both database states.
+drop function if exists public.search_dam_documents(
+  text, integer, text[], extensions.vector
+);
 
 create or replace function public.search_dam_documents(
   p_query text,

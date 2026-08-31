@@ -105,8 +105,9 @@ begin
   select pg_get_functiondef('public.get_filter_counts(jsonb)'::regprocedure)
     into v_definition;
   if position('get_effective_filter_counts_unchecked_1703' in v_definition) = 0
+     or position('get_filter_counts_unchecked_1703' in v_definition) = 0
      or position('require_dam_access' in v_definition) = 0 then
-    raise exception 'legacy counts must delegate to the gated effective-count implementation';
+    raise exception 'legacy counts must preserve the empty fast path and delegate filtered requests';
   end if;
 end;
 $$;
