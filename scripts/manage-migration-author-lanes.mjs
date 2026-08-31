@@ -2395,10 +2395,12 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
   const failureRef=`${REVIEW_FAILURE_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}-${request.failedSequence}`
   const replacementBase=`${REVIEW_REPLACEMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}${slotSuffix}`
   const replacementRef=`${replacementBase}-${request.failedSequence}`
+  const assignmentVerdictRef=assignmentRef.replace(REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_VERDICT_REF_PREFIX)
+  const replacementVerdictRef=replacementRef.replace(REVIEW_REPLACEMENT_REF_PREFIX,REVIEW_VERDICT_REPLACEMENT_REF_PREFIX)
   // Slot >=2 must stay independent of slot 1 after a replacement, not only at
   // first assignment. Resolved read-only, pre-mutex, exactly as assignment does.
   const excludedProvider=request.slot===1?null:resolveSlotOneReviewer(request.issue,request.pr,request.headSha,io)
-  const fixedRecords=io.readReviewRecords?.([replacementRef,assignmentRef,REVIEW_CURSOR_REF],replacementBase)??null
+  const fixedRecords=io.readReviewRecords?.([replacementRef,assignmentRef,REVIEW_CURSOR_REF,assignmentVerdictRef,replacementVerdictRef],replacementBase)??null
   let ownerSha=null,mutexAcquired=false
   try{
     let priorReplacement=fixedRecords?(fixedRecords.get(replacementRef)?.sha??null):io.readRef(replacementRef)
@@ -2491,7 +2493,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     const answeredVerdictRef=answeredAssignmentRef
       .replace(REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_VERDICT_REF_PREFIX)
       .replace(REVIEW_REPLACEMENT_REF_PREFIX,REVIEW_VERDICT_REPLACEMENT_REF_PREFIX)
-    const durableVerdict=io.readRef(answeredVerdictRef)
+    const durableVerdict=fixedRecords?(fixedRecords.get(answeredVerdictRef)?.sha??null):io.readRef(answeredVerdictRef)
     const hasVerdict=Boolean(durableVerdict)||(preflightState?.evidence?anyVerdictFor(preflightState.evidence,request.headSha):hasVerdictForHead(request.issue,request.pr,request.headSha,io))
     if(hasVerdict)throw new LaneError('an existing verdict for the exact head forbids reviewer replacement')
     const failedLeaseRef=reviewActiveRef(original.reviewer),cachedFailed=preflightBusy.leases?.get(original.reviewer),failedLeaseSha=cachedFailed?.sha??io.readRef(failedLeaseRef)
