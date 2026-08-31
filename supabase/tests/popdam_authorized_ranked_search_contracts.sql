@@ -3,6 +3,8 @@ begin;
 do $$
 declare
   v_definition text;
+  v_rows real;
+  v_expansions text[];
 begin
   if to_regprocedure(
        'public.search_dam_documents(text,integer,text[],extensions.vector)'
@@ -46,6 +48,23 @@ begin
      or not has_function_privilege('authenticated',
        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE') then
     raise exception 'ranked search execute grants violate the authenticated boundary';
+  end if;
+
+  select prorows into v_rows
+  from pg_proc
+  where oid = 'public.expand_dam_search_queries(text)'::regprocedure;
+  if v_rows <> 32 then
+    raise exception 'DAM synonym expansion must retain its bounded planner estimate, got %', v_rows;
+  end if;
+  select array_agg(query_text order by query_text) into v_expansions
+  from public.expand_dam_search_queries('canvas poster');
+  if not v_expansions @> array[
+    'canvas poster',
+    'canvas wall art',
+    'wall art poster',
+    'wall art wall art'
+  ]::text[] then
+    raise exception 'planner estimate repair must not truncate chained synonym expansions';
   end if;
 
   select pg_get_functiondef('public.search_style_groups_full_text(text,integer)'::regprocedure)
