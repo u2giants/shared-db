@@ -916,6 +916,30 @@ test('terminal provider failure advances exactly once and retry is idempotent',(
   assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'kimi-k3')
 })
 
+test('three terminal providers do not grow replacement preflight past the fixed wire budget (#1962)',()=>{
+  const io=failedReviewIo();let attempts=0
+  const rawGetCommit=io.getCommit
+  const wire=(n=1)=>{for(let i=0;i<n;i++)runGitHubCommand(['api','fixture'],{executor:()=>{attempts++;return '{}'}})}
+  io.getRateLimit=()=>{wire();return {remaining:5000,limit:5000,reset:1787943986,graphRemaining:5000,graphLimit:5000,graphReset:1787943986}}
+  io.readActiveReviewLeases=()=>{wire();return new Map([...io.refs.entries()].filter(([ref])=>ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)).map(([ref,sha])=>[ref,{sha,commit:rawGetCommit(sha)}]))}
+  io.readReviewStates=(leases)=>{wire();return new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))}
+  io.readReviewRefs=(refs)=>{wire();return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
+  io.atomicReviewRefs=(changes)=>{wire();for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  io.readReviewRecords=(refs,prefix)=>{wire(2);const matching=[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha,commit:rawGetCommit(sha)}));const result=new Map([...new Set([...refs,...matching.map((row)=>row.ref)])].map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:matching});return result}
+  for(const name of ['readRef','getCommit']){const fn=io[name];io[name]=(...args)=>{wire();return fn(...args)}}
+  const make=io.makeOwnerCommit;io.makeOwnerCommit=(message)=>{wire();return make(message)}
+  const first=replaceFailedReviewer(replacementRequest,io)
+  const second=replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence},io)
+  attempts=0
+  const third=replaceFailedReviewer({...replacementRequest,failedSequence:second.sequence},io)
+  assert.ok(third.reviewer)
+  assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`third terminal-provider replacement used ${attempts} wire attempts`)
+  const source=readFileSync(new URL('./manage-migration-author-lanes.mjs',import.meta.url),'utf8')
+  assert.match(source,/const allRefs=\[\.\.\.new Set\(\[\.\.\.refs,\.\.\.matches\.map\(\(row\)=>row\.ref\)\]\)\]/,'the production batch must include every immutable matching replacement ref')
+  assert.match(source,/commit:result\.get\(row\.ref\)\?\.commit/,'matching replacement rows must reuse the batched commit instead of one getCommit per terminal provider')
+})
+
 test('replacement retry releases its lease after an exact-head verdict',()=>{
   const io=failedReviewIo(),first=replaceFailedReviewer(replacementRequest,io),ref=reviewActiveRef(first.reviewer)
   io.getIssueComments=()=>[{body:`APPROVE ${failedReview.headSha}`,author_association:'OWNER'}]
