@@ -1807,6 +1807,27 @@ class BehavioralSidecarTests(unittest.TestCase):
             migration_sql,
         )
 
+    def test_real_1703_forward_8_sidecar_is_hash_bound_and_asserts_rank_keys_through_visibility(self):
+        version = "20260831221607"
+        migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
+        checks = load_behavior_sidecars(REPO, {version: migration}, [version])
+        targets = derive_targets({version: migration}, [version])
+        sql = build_behavior_sql(checks)
+        migration_sql = migration.read_text(encoding="utf-8").lower()
+
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["kind"], "catalog_contract")
+        self.assertEqual(
+            checks[0]["migration_sha256"],
+            "b0902414ec5eac846ae0e1469d79630aa7692ef1f3dcb0ae52ca97852d600b20",
+        )
+        self.assertIn("public.search_dam_documents", targets.functions)
+        self.assertIn("c.keyword_rank, c.semantic_rank, c.rank, c.asset_id id", sql)
+        self.assertIn("select distinct a.document_type, a.entity_id, a.asset_id", sql)
+        self.assertIn("join visible_assets a on a.id = c.asset_id", sql)
+        self.assertIn("derived-from: 20260831212757", migration_sql)
+        self.assertNotIn("join visible_assets a on a.id = c.asset_id", migration_sql)
+
     def test_real_1732_sidecar_is_hash_bound_catalog_only_and_exact_shape(self):
         version = "20260828021051"
         migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
