@@ -18,6 +18,16 @@ begin
      or position('visible_assets as materialized' in v_definition) = 0 then
     raise exception 'ranked search must establish the effective visible asset set first';
   end if;
+  if position('require_dam_access' in v_definition) = 0 then
+    raise exception 'ranked search must refuse callers without DAM entitlement';
+  end if;
+  if position('keyword_candidates as materialized' in v_definition)
+       > position('visible_assets as materialized' in v_definition) then
+    raise exception 'indexed ranked candidates must precede expensive asset expansion';
+  end if;
+  if position('length(q.query_text) >= 3' in v_definition) = 0 then
+    raise exception 'short queries must not activate unindexable substring scans';
+  end if;
   if position('offset (select page_offset from params)' in lower(v_definition)) = 0
      or position('from ranked_documents' in lower(v_definition)) = 0 then
     raise exception 'ranked search must paginate only after authorization and ranking';
@@ -43,6 +53,86 @@ begin
   if position('max(d.rank)*0.8' in replace(v_definition, ' ', '')) = 0 then
     raise exception 'style-group member-asset ranking rollup changed';
   end if;
+  if (length(v_definition) - length(replace(v_definition, 'search_dam_documents', '')))
+       / length('search_dam_documents') <> 1 then
+    raise exception 'style-group rollup must use one ranked-search pass';
+  end if;
+
+  select pg_get_functiondef('public.filter_effective_assets(jsonb)'::regprocedure)
+    into v_definition;
+  if position('require_dam_access' in v_definition) = 0
+     or position('from public.assets' in v_definition) = 0 then
+    raise exception 'effective filter must keep its inlinable body behind the DAM gate';
+  end if;
+  if has_function_privilege('authenticated',
+       'public.filter_effective_assets_unchecked_1703(jsonb)', 'EXECUTE')
+     or has_function_privilege('authenticated',
+       'public.get_filter_counts_unchecked_1703(jsonb)', 'EXECUTE')
+     or has_function_privilege('authenticated',
+       'public.get_effective_filter_counts_unchecked_1703(jsonb)', 'EXECUTE') then
+    raise exception 'unchecked implementation functions must not be callable by authenticated';
+  end if;
+end;
+$$;
+
+set local session_replication_role = replica;
+insert into auth.users (id,email) values
+  ('17030000-0000-4000-8000-000000000001','zz1703-dam@example.invalid'),
+  ('17030000-0000-4000-8000-000000000002','zz1703-no-dam@example.invalid');
+set local session_replication_role = origin;
+
+insert into app.profile (auth_user_id,email,display_name,status) values
+  ('17030000-0000-4000-8000-000000000001','zz1703-dam@example.invalid','ZZ1703 DAM','active'),
+  ('17030000-0000-4000-8000-000000000002','zz1703-no-dam@example.invalid','ZZ1703 NO DAM','active');
+insert into app.app_access (profile_id,app)
+select id,'dam'::app.app_name from app.profile
+where auth_user_id = '17030000-0000-4000-8000-000000000001';
+
+do $$
+declare v_n bigint;
+begin
+  execute 'set local role authenticated';
+  perform set_config('request.jwt.claims',
+    '{"sub":"17030000-0000-4000-8000-000000000001","role":"authenticated"}',true);
+  if not app.has_app_access('dam'::app.app_name) then
+    raise exception 'authorized control user did not receive DAM access';
+  end if;
+  perform 1 from public.filter_effective_assets('{}'::jsonb) limit 1;
+  perform public.get_filter_counts('{}'::jsonb);
+  perform public.get_effective_filter_counts('{}'::jsonb);
+  select count(*) into v_n from public.search_dam_documents(
+    'zz1703-no-match','{}'::jsonb,5,0,array['absent-document-type']::text[],null,0
+  );
+
+  perform set_config('request.jwt.claims',
+    '{"sub":"17030000-0000-4000-8000-000000000002","role":"authenticated"}',true);
+  if app.has_app_access('dam'::app.app_name) then
+    raise exception 'non-DAM control user unexpectedly received DAM access';
+  end if;
+  begin
+    perform 1 from public.filter_effective_assets('{}'::jsonb) limit 1;
+    raise exception 'non-DAM user reached effective assets';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform 1 from public.search_dam_documents(
+      'zz1703-no-match','{}'::jsonb,5,0,array['absent-document-type']::text[],null,0
+    );
+    raise exception 'non-DAM user reached ranked search';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.get_filter_counts('{}'::jsonb);
+    raise exception 'non-DAM user reached filter counts';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.get_effective_filter_counts('{}'::jsonb);
+    raise exception 'non-DAM user reached effective filter counts';
+  exception when insufficient_privilege then null;
+  end;
+  execute 'reset role';
+  perform set_config('request.jwt.claims',null,true);
 end;
 $$;
 
