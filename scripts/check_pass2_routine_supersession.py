@@ -42,11 +42,11 @@ def snapshot_query(collisions: dict[str, list[str]]) -> str:
     literals = ", ".join("'" + name.replace("'", "''") + "'" for name in names)
     return (
         "select pg_get_functiondef(p.oid) || E';\\n' || "
-        "format('alter %s %I.%I(%s) security %s;\\n', "
+        "format(E'alter %s %I.%I(%s) security %s;\\n', "
         "case when p.prokind = 'p' then 'procedure' else 'function' end, "
         "n.nspname, p.proname, pg_get_function_identity_arguments(p.oid), "
         "case when p.prosecdef then 'definer' else 'invoker' end) || "
-        "format('alter %s %I.%I(%s) reset all;\\n', "
+        "format(E'alter %s %I.%I(%s) reset all;\\n', "
         "case when p.prokind = 'p' then 'procedure' else 'function' end, "
         "n.nspname, p.proname, pg_get_function_identity_arguments(p.oid)) || "
         "coalesce((select string_agg(format('alter %s %I.%I(%s) set %s to %L;', "

@@ -58,6 +58,20 @@ class Pass2RoutineSupersessionTests(unittest.TestCase):
         self.assertIn("set %s to %l", query)
         self.assertIn("p.prokind = 'p'", query)
 
+    def test_real_dam_search_restore_uses_newlines_not_psql_backslash_commands(self):
+        query = snapshot_query(
+            {
+                "public.search_assets_full_text": ["20260831074401_later.sql"],
+                "public.search_style_groups_full_text": ["20260831074401_later.sql"],
+            }
+        ).lower()
+        self.assertIn("'public.search_assets_full_text'", query)
+        self.assertIn("'public.search_style_groups_full_text'", query)
+        self.assertIn("pg_get_function_identity_arguments(p.oid)", query)
+        self.assertEqual(query.count("format(e'alter"), 2)
+        self.assertNotIn("format('alter %s %i.%i(%s) security", query)
+        self.assertNotIn("format('alter %s %i.%i(%s) reset all", query)
+
 
 if __name__ == "__main__":
     unittest.main()
