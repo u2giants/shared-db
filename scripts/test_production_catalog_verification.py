@@ -1755,14 +1755,14 @@ class BehavioralSidecarTests(unittest.TestCase):
         self.assertEqual(checks[0]["kind"], "catalog_contract")
         self.assertEqual(
             checks[0]["migration_sha256"],
-            "8bc35283bce42f19ffd5075c8292816cc43909082bea2f8ec100fb66e5a9ea61",
+            "a34c4da4f30904cca774679b1c185d09c568fb2da933ba9a094f44c0a18d9fa6",
         )
         self.assertIn("public.filter_effective_assets", targets.functions)
         self.assertIn("public.search_dam_documents", targets.functions)
         self.assertIn("join candidate_asset_ids c on c.id = a.id", sql)
         self.assertIn("authorized as materialized", sql)
-        self.assertIn("p.prosecdef", sql)
-        self.assertIn("search_path=public", sql)
+        self.assertIn("not p.prosecdef", sql)
+        self.assertIn("p.proconfig is null", sql)
         self.assertIn("has_function_privilege('authenticated'", sql)
 
     def test_real_1732_sidecar_is_hash_bound_catalog_only_and_exact_shape(self):

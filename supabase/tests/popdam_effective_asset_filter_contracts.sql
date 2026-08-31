@@ -21,15 +21,15 @@ declare
   v_counts jsonb;
 begin
   if (
-    select not ('search_path=public' = any(coalesce(p.proconfig, '{}')))
+    select p.proconfig is not null
         or l.lanname <> 'sql'
         or p.provolatile <> 's'
-        or not p.prosecdef
+        or p.prosecdef
     from pg_proc p
     join pg_language l on l.oid = p.prolang
     where p.oid = 'public.filter_effective_assets(jsonb)'::regprocedure
   ) then
-    raise exception 'effective list function is not a stable definer SQL function with a safe search path';
+    raise exception 'effective list function is not an inlinable stable invoker SQL function';
   end if;
 
   -- DAM identity foreign keys were cut over from the retired public mirrors to

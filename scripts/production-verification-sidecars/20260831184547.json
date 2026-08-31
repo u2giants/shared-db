@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "migration_version": "20260831184547",
-  "migration_sha256": "8bc35283bce42f19ffd5075c8292816cc43909082bea2f8ec100fb66e5a9ea61",
+  "migration_sha256": "a34c4da4f30904cca774679b1c185d09c568fb2da933ba9a094f44c0a18d9fa6",
   "checks": [
     {
       "id": "popdam_ranked_search_private_keyed_visibility_forward_6",
