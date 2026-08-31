@@ -1744,6 +1744,44 @@ class BehavioralSidecarTests(unittest.TestCase):
         self.assertIn("get_effective_filter_counts_unchecked_1703", sql)
         self.assertIn("has_function_privilege('authenticated'", sql)
 
+    def test_real_1703_forward_6_sidecar_is_hash_bound_and_catalog_only(self):
+        version = "20260831184547"
+        migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
+        checks = load_behavior_sidecars(REPO, {version: migration}, [version])
+        targets = derive_targets({version: migration}, [version])
+        sql = build_behavior_sql(checks)
+        migration_sql = migration.read_text(encoding="utf-8").lower()
+
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["kind"], "catalog_contract")
+        self.assertEqual(
+            checks[0]["migration_sha256"],
+            "a33c22920120dee3ed2fc7f8f54a37377eb5c801141522d5b8b965bb59b14eac",
+        )
+        self.assertIn("public.filter_effective_assets", targets.functions)
+        self.assertIn("public.search_dam_documents", targets.functions)
+        self.assertIn("from candidate_asset_ids c", sql)
+        self.assertIn("join public.assets a on a.id = c.id", sql)
+        self.assertIn("select a.file_type, a.status, a.workflow_status, a.stage, a.is_licensed", sql)
+        self.assertIn("position('select a.*'", sql)
+        self.assertIn("bounds as materialized", sql)
+        self.assertIn("authorized as materialized", sql)
+        self.assertIn("not p.prosecdef", sql)
+        self.assertIn("p.proconfig is null", sql)
+        self.assertIn(
+            "alter function public.filter_effective_assets(jsonb) security invoker;",
+            migration_sql,
+        )
+        self.assertIn(
+            "alter function public.filter_effective_assets(jsonb) reset all;",
+            migration_sql,
+        )
+        self.assertLess(
+            migration_sql.index("create or replace function public.filter_effective_assets"),
+            migration_sql.index("alter function public.filter_effective_assets(jsonb) reset all;"),
+        )
+        self.assertIn("has_function_privilege('authenticated'", sql)
+
     def test_real_1732_sidecar_is_hash_bound_catalog_only_and_exact_shape(self):
         version = "20260828021051"
         migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
