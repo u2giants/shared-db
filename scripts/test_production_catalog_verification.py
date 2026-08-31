@@ -1730,7 +1730,7 @@ class BehavioralSidecarTests(unittest.TestCase):
         self.assertEqual(checks[0]["kind"], "catalog_contract")
         self.assertEqual(
             checks[0]["migration_sha256"],
-            "3de0aefa9b977248fe3b9d1425cc635ca9b7cd5c16854356bae6e62c48ea19c4",
+            "c08f3a2207bde361e9784b6ec9ab7b2322ae7da8c138ff634a39932fce220000",
         )
         self.assertEqual(
             targets.functions,

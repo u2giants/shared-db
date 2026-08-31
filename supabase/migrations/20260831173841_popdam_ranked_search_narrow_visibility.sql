@@ -9,11 +9,26 @@ security definer
 set search_path = public
 set statement_timeout = '8s'
 as $$
+declare
+  v_filters jsonb := coalesce(p_filters, '{}'::jsonb);
+  v_result jsonb;
 begin
   perform public.require_dam_access();
-  return public.get_effective_filter_counts_unchecked_1703(coalesce(p_filters, '{}'::jsonb));
+  v_result := public.get_effective_filter_counts_unchecked_1703(v_filters);
+  -- The empty legacy response intentionally predates the effective API's
+  -- explicit total. Preserve that public shape while using the faster helper.
+  if v_filters = '{}'::jsonb then
+    return v_result - 'total';
+  end if;
+  return v_result;
 end;
 $$;
+
+-- Ordered replay may retain the pre-filtered overload when its deployment-only
+-- predecessor was skipped. Keep that authorization bypass closed in both states.
+drop function if exists public.search_dam_documents(
+  text, integer, text[], extensions.vector
+);
 
 create or replace function public.search_dam_documents(
   p_query text,
