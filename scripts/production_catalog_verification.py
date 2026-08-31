@@ -927,6 +927,26 @@ CATALOG_CONTRACTS = {
       and has_function_privilege('authenticated',
         'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
 """,
+    "popdam_ranked_search_single_heap_fetch_v3": """
+      (select
+        position('full_text_matches as materialized' in pg_get_functiondef(p.oid)) > 0
+        and position('d.search_tsv @@ any(array(select q.tsq from queries q))'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('select max(ts_rank_cd(d.search_tsv, q.tsq))'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('from full_text_matches d' in pg_get_functiondef(p.oid)) > 0
+        and position('join public.dam_search_documents d on d.search_tsv @@ q.tsq'
+          in pg_get_functiondef(p.oid)) = 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p
+        where p.oid = to_regprocedure(
+          'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and not has_function_privilege('anon',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+""",
     "coco_owner_ruling_v1": """
       case when to_regclass('core.taxonomy_owner_ruling') is null then true else
         cardinality(xpath('/table/row', query_to_xml(
