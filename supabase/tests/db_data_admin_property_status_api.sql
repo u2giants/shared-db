@@ -91,7 +91,10 @@ begin
     raise exception 'divergent-status replay was admitted';
   exception when unique_violation then null; end;
   begin
-    perform api.db_data_admin_set_property_status(v_op,'activate',v_property,'active',v_updated);
+    perform api.db_data_admin_set_property_status(v_op,'activate',v_property,'active',
+      (select (old_snapshot->>'updated_at')::timestamptz - interval '1 second'
+       from app.db_data_admin_audit_event
+       where operation_id=v_op and operation_item_key='primary'));
     raise exception 'divergent-token replay was admitted';
   exception when unique_violation then null; end;
 
