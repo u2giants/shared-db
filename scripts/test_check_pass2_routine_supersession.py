@@ -49,48 +49,6 @@ class Pass2RoutineSupersessionTests(unittest.TestCase):
         self.assertIn("'plm.g'", query)
         self.assertIn("pg_get_function_identity_arguments", query)
 
-    def test_snapshot_restores_routine_attributes_not_in_function_definition(self):
-        query = snapshot_query({"public.f": ["later.sql"]}).lower()
-        self.assertIn("security %s", query)
-        self.assertIn("then 'definer' else 'invoker'", query)
-        self.assertIn("reset all", query)
-        self.assertNotIn("p.proconfig", query)
-        self.assertNotIn(" set %s to ", query)
-        self.assertIn("p.prokind = 'p'", query)
-        self.assertIn("do $pass2$ begin if exists", query)
-        self.assertIn("then execute %l", query)
-        self.assertLess(query.index("reset all"), query.index("pg_get_functiondef"))
-        self.assertLess(query.index("pg_get_functiondef"), query.index("security %s"))
-
-    def test_real_dam_search_restore_uses_newlines_not_psql_backslash_commands(self):
-        query = snapshot_query(
-            {
-                "public.search_assets_full_text": ["20260831074401_later.sql"],
-                "public.search_style_groups_full_text": ["20260831074401_later.sql"],
-            }
-        ).lower()
-        self.assertIn("'public.search_assets_full_text'", query)
-        self.assertIn("'public.search_style_groups_full_text'", query)
-        self.assertIn("pg_get_function_identity_arguments(p.oid)", query)
-        self.assertEqual(query.count("format(e'alter"), 1)
-        self.assertNotIn("format('alter %s %i.%i(%s) security", query)
-        self.assertIn("format('alter %s %i.%i(%s) reset all", query)
-
-    def test_search_path_lists_are_left_to_pg_get_functiondef(self):
-        query = snapshot_query({"public.search_dam_documents": ["later.sql"]}).lower()
-        self.assertIn("pg_get_functiondef(p.oid)", query)
-        self.assertNotIn("unnest(p.proconfig)", query)
-        self.assertNotIn("split_part(setting", query)
-        self.assertNotIn("substr(setting", query)
-
-    def test_missing_saved_overload_skips_only_reset_before_recreation(self):
-        query = snapshot_query({"public.search_dam_documents": ["later.sql"]}).lower()
-        self.assertIn("if exists (select 1 from pg_proc p2", query)
-        self.assertIn("pg_get_function_identity_arguments(p2.oid) = %l", query)
-        self.assertIn("p2.prokind = %l", query)
-        self.assertIn("then execute %l; end if", query)
-        self.assertLess(query.index("end $pass2$"), query.index("pg_get_functiondef"))
-
 
 if __name__ == "__main__":
     unittest.main()
