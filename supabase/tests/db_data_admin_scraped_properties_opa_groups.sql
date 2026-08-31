@@ -138,6 +138,59 @@ begin
   select f.resolution_id, -800000000000 - f.ordinal, 1
   from issue1936_dcp_resolution_fixture f;
 
+  -- Forward-4 regression: every synthetic OPA row on the early pages carries
+  -- a real Creative-to-Submissions member whose display label must be resolved
+  -- from the DCP source arm. Before the repair, a cursor page could re-run the
+  -- complete source union once per mapped row through this exact lateral path.
+  create temporary table issue1936_creative_resolution_fixture (
+    ordinal integer primary key,
+    resolution_id uuid not null
+  ) on commit drop;
+  insert into issue1936_creative_resolution_fixture
+  select g, gen_random_uuid() from generate_series(1, 4000) g;
+
+  insert into plm.creative_submission_property_resolution (
+    resolution_id, creative_source_system, creative_source_table,
+    creative_source_id, decision_version, decision_state, reviewed_batch_id,
+    reviewed_batch_digest, approval_actor_id, approved_at
+  )
+  select f.resolution_id, 'disney_opa', 'plm.opa_property',
+    (-800000000000 - f.ordinal)::text, 1, 'mapped', gen_random_uuid(),
+    'sha256:' || repeat('6',64), gen_random_uuid(), clock_timestamp()
+  from issue1936_creative_resolution_fixture f;
+
+  insert into plm.creative_submission_property_resolution_member (
+    resolution_member_id, resolution_id, submission_source_system,
+    submission_source_table, submission_source_id
+  )
+  select gen_random_uuid(), f.resolution_id, 'disney_dcpvault',
+    'plm.dcp_property', v_search || '/DCP-' || lpad(f.ordinal::text, 4, '0')
+  from issue1936_creative_resolution_fixture f;
+
+  create temporary table issue1936_dcp_creative_resolution_fixture (
+    ordinal integer primary key,
+    resolution_id uuid not null
+  ) on commit drop;
+  insert into issue1936_dcp_creative_resolution_fixture
+  select g, gen_random_uuid() from generate_series(1, 4000) g;
+  insert into plm.creative_submission_property_resolution (
+    resolution_id, creative_source_system, creative_source_table,
+    creative_source_id, decision_version, decision_state, reviewed_batch_id,
+    reviewed_batch_digest, approval_actor_id, approved_at
+  )
+  select f.resolution_id, 'disney_dcpvault', 'plm.dcp_property',
+    v_search || '/DCP-' || lpad(f.ordinal::text, 4, '0'), 1, 'mapped',
+    gen_random_uuid(), 'sha256:' || repeat('5',64), gen_random_uuid(),
+    clock_timestamp()
+  from issue1936_dcp_creative_resolution_fixture f;
+  insert into plm.creative_submission_property_resolution_member (
+    resolution_member_id, resolution_id, submission_source_system,
+    submission_source_table, submission_source_id
+  )
+  select gen_random_uuid(), f.resolution_id, 'disney_opa',
+    'plm.opa_property', (-800000000000 - f.ordinal)::text
+  from issue1936_dcp_creative_resolution_fixture f;
+
   -- These source-preserving DCP groups must remain distinct from the new OPA groups.
   insert into plm.dcp_property (source_system, source_id, display_name)
   values ('disney_dcpvault', v_search || '/disney-dcp', v_search || ' Disney DCP');
@@ -162,8 +215,32 @@ begin
   -- The public gateway cancels at ten seconds. Keep more than 50% headroom on
   -- every populated first-page and cursor-page call.
   perform set_config('statement_timeout', '4000', true);
-  v_cursor := null;
+  select api.db_data_admin_scraped_properties(v_search, null, 1000) into v_page;
+  if jsonb_array_length(v_page -> 'rows') <> 1000
+     or nullif(v_page ->> 'next_cursor','') is null then
+    raise exception 'populated first page did not return 1,000 rows and a real cursor';
+  end if;
+  v_rows := v_page -> 'rows';
+  v_cursor := v_page ->> 'next_cursor';
+  v_pages := 1;
+
+  -- This is an actual cursor returned by page 1, not a fabricated boundary.
+  select api.db_data_admin_scraped_properties(v_search, v_cursor, 1000) into v_page;
+  if jsonb_array_length(v_page -> 'rows') <> 1000
+     or nullif(v_page ->> 'next_cursor','') is null then
+    raise exception 'populated real cursor page 2 did not return 1,000 rows and a cursor';
+  end if;
+  if (select count(*) from jsonb_array_elements(v_page -> 'rows') r
+      where r ->> 'mapping_state' = 'mapped'
+        and jsonb_array_length(r -> 'submissions') = 1) < 995 then
+    raise exception 'real cursor page 2 did not exercise the populated submission-label path';
+  end if;
+  v_rows := v_rows || (v_page -> 'rows');
+  v_cursor := v_page ->> 'next_cursor';
+  v_pages := 2;
+
   loop
+    exit when v_cursor is null;
     select api.db_data_admin_scraped_properties(v_search, v_cursor, 1000) into v_page;
     v_rows := v_rows || (v_page -> 'rows');
     v_cursor := v_page ->> 'next_cursor';
