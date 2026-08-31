@@ -4,7 +4,7 @@ do $$
 declare
   v_definition text;
   v_rows real;
-  v_expansion_count integer;
+  v_expansions text[];
 begin
   if to_regprocedure(
        'public.search_dam_documents(text,integer,text[],extensions.vector)'
@@ -56,9 +56,14 @@ begin
   if v_rows <> 32 then
     raise exception 'DAM synonym expansion must retain its bounded planner estimate, got %', v_rows;
   end if;
-  select count(*) into v_expansion_count
+  select array_agg(query_text order by query_text) into v_expansions
   from public.expand_dam_search_queries('canvas poster');
-  if v_expansion_count < 3 then
+  if not v_expansions @> array[
+    'canvas poster',
+    'canvas wall art',
+    'wall art poster',
+    'wall art wall art'
+  ]::text[] then
     raise exception 'planner estimate repair must not truncate chained synonym expansions';
   end if;
 
