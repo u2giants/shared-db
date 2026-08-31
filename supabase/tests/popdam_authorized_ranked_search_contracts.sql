@@ -121,6 +121,17 @@ begin
      or position('join visible_style_groups g on g.style_group_id = c.style_group_id' in v_definition) = 0 then
     raise exception 'ranked search must use keyed asset and Style Group visibility joins';
   end if;
+  if position('full_text_matches as materialized' in v_definition) = 0
+     or position('d.search_tsv @@ any(array(select q.tsq from queries q))' in v_definition) = 0
+     or position('select max(ts_rank_cd(d.search_tsv, q.tsq))' in v_definition) = 0
+     or position('from full_text_matches d' in v_definition) = 0 then
+    raise exception 'ranked search must fetch each full-text document once and preserve maximum expansion rank';
+  end if;
+  if (length(v_definition) - length(replace(v_definition,
+       'join public.dam_search_documents d on d.search_tsv @@ q.tsq', '')))
+       / length('join public.dam_search_documents d on d.search_tsv @@ q.tsq') <> 0 then
+    raise exception 'ranked search restored one wide-heap fetch per synonym expansion';
+  end if;
   if position('c.asset_id = a.id or c.style_group_id = a.style_group_id' in v_definition) > 0
      or position('r.asset_id = a.id or r.style_group_id = a.style_group_id' in v_definition) > 0 then
     raise exception 'ranked search restored the production-timeout OR join';

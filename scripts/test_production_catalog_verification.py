@@ -1782,6 +1782,31 @@ class BehavioralSidecarTests(unittest.TestCase):
         )
         self.assertIn("has_function_privilege('authenticated'", sql)
 
+    def test_real_1703_forward_7_sidecar_is_hash_bound_and_asserts_single_heap_fetch(self):
+        version = "20260831212757"
+        migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
+        checks = load_behavior_sidecars(REPO, {version: migration}, [version])
+        targets = derive_targets({version: migration}, [version])
+        sql = build_behavior_sql(checks)
+        migration_sql = migration.read_text(encoding="utf-8").lower()
+
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["kind"], "catalog_contract")
+        self.assertEqual(
+            checks[0]["migration_sha256"],
+            "fcc3d8780d67d5a1166ab6e01ed8b9819fbb19120e25e6d7ab72e6932bcf8918",
+        )
+        self.assertEqual(targets.functions, ["public.search_dam_documents"])
+        self.assertIn("full_text_matches as materialized", sql)
+        self.assertIn("d.search_tsv @@ any(array(select q.tsq from queries q))", sql)
+        self.assertIn("select max(ts_rank_cd(d.search_tsv, q.tsq))", sql)
+        self.assertIn("has_function_privilege('authenticated'", sql)
+        self.assertIn("full_text_matches as materialized", migration_sql)
+        self.assertNotIn(
+            "join public.dam_search_documents d on d.search_tsv @@ q.tsq",
+            migration_sql,
+        )
+
     def test_real_1732_sidecar_is_hash_bound_catalog_only_and_exact_shape(self):
         version = "20260828021051"
         migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
