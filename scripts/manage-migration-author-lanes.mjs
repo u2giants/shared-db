@@ -845,7 +845,7 @@ export const githubIo = {
     const base=data.data.repository.base?.target
     if(reviewWireBudget&&base?.oid&&base?.tree?.oid)reviewCommitBase={head:base.oid,tree:base.tree.oid}
     const result=new Map(allRefs.map((ref,index)=>{const target=data.data.repository[`r${index}`];return [ref,target?.oid?{sha:target.oid,commit:{message:target.message}}:null]}))
-    Object.defineProperty(result,'matching',{value:matches.map((row)=>({ref:row.ref,sha:row.sha,commit:result.get(row.ref)?.commit})),enumerable:false})
+    Object.defineProperty(result,'matching',{value:matches.map((row)=>{const record=result.get(row.ref);return{ref:row.ref,sha:row.sha,commit:record?.sha===row.sha&&record?.commit?.message?record.commit:undefined}}),enumerable:false})
     return result
   },
   atomicReviewRefs(changes){
