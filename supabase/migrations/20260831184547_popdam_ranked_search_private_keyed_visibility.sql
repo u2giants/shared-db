@@ -100,6 +100,136 @@ alter function public.filter_effective_assets(jsonb) reset all;
 revoke all on function public.filter_effective_assets(jsonb) from public, anon;
 grant execute on function public.filter_effective_assets(jsonb) to authenticated, service_role;
 
+-- Counts need only the five facet columns. Keep the shared implementation
+-- private and inline the effective predicates so neither public entry point
+-- materializes the library-wide a.* filter result.
+create or replace function public.get_effective_filter_counts_unchecked_1703(
+  p_filters jsonb default '{}'::jsonb
+)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public
+as $$
+declare
+  v_filters jsonb := coalesce(p_filters, '{}'::jsonb);
+  v_base_filters jsonb;
+  v_file_types text[];
+  v_statuses text[];
+  v_workflow_statuses text[];
+  v_stages text[];
+  v_is_licensed boolean;
+  v_result jsonb;
+begin
+  v_base_filters := v_filters
+    - array['fileType', 'status', 'workflowStatus', 'stage', 'isLicensed']::text[];
+  if v_filters ? 'fileType' and jsonb_array_length(v_filters -> 'fileType') > 0 then
+    select array_agg(x) into v_file_types from jsonb_array_elements_text(v_filters -> 'fileType') x;
+  end if;
+  if v_filters ? 'status' and jsonb_array_length(v_filters -> 'status') > 0 then
+    select array_agg(x) into v_statuses from jsonb_array_elements_text(v_filters -> 'status') x;
+  end if;
+  if v_filters ? 'workflowStatus' and jsonb_array_length(v_filters -> 'workflowStatus') > 0 then
+    select array_agg(x) into v_workflow_statuses from jsonb_array_elements_text(v_filters -> 'workflowStatus') x;
+  end if;
+  if v_filters ? 'stage' and jsonb_array_length(v_filters -> 'stage') > 0 then
+    select array_agg(x) into v_stages from jsonb_array_elements_text(v_filters -> 'stage') x;
+  end if;
+  if v_filters ? 'isLicensed' then
+    v_is_licensed := (v_filters ->> 'isLicensed')::boolean;
+  end if;
+
+  with bounds as materialized (
+    select public.assets_thumbnail_min_date() thumbnail_min_date
+  ), base as materialized (
+    select a.file_type, a.status, a.workflow_status, a.stage, a.is_licensed
+    from public.assets a
+    cross join bounds b
+    left join public.style_groups sg on sg.id = a.style_group_id
+    where a.is_deleted = false
+      and (a.modified_at >= b.thumbnail_min_date
+        or a.file_created_at >= b.thumbnail_min_date or a.thumbnail_url is not null)
+      and (nullif(v_base_filters ->> 'search', '') is null
+        or a.filename ilike '%' || (v_base_filters ->> 'search') || '%')
+      and (nullif(v_base_filters ->> 'licensorId', '') is null
+        or case when a.style_group_id is null then a.licensor_id else sg.licensor_id end
+          = (v_base_filters ->> 'licensorId')::uuid)
+      and (nullif(v_base_filters ->> 'propertyId', '') is null
+        or case when a.style_group_id is null then a.property_id else sg.property_id end
+          = (v_base_filters ->> 'propertyId')::uuid)
+      and (nullif(v_base_filters ->> 'tagFilter', '') is null or exists (
+        select 1 from public.asset_effective_tags e
+        where e.asset_id = a.id and e.tag = v_base_filters ->> 'tagFilter'))
+      and (jsonb_array_length(coalesce(v_base_filters -> 'assetType', '[]'::jsonb)) = 0
+        or a.asset_type::text in (select jsonb_array_elements_text(v_base_filters -> 'assetType')))
+      and (jsonb_array_length(coalesce(v_base_filters -> 'artSource', '[]'::jsonb)) = 0
+        or a.art_source::text in (select jsonb_array_elements_text(v_base_filters -> 'artSource')))
+      and (nullif(v_base_filters ->> 'customer', '') is null or a.customer = v_base_filters ->> 'customer')
+      and (nullif(v_base_filters ->> 'program', '') is null or a.program = v_base_filters ->> 'program')
+  )
+  select jsonb_build_object(
+    'total', (select count(*) from base where
+      (v_file_types is null or file_type::text = any(v_file_types)) and
+      (v_statuses is null or status::text = any(v_statuses)) and
+      (v_workflow_statuses is null or workflow_status::text = any(v_workflow_statuses)) and
+      (v_stages is null or stage = any(v_stages)) and
+      (v_is_licensed is null or is_licensed = v_is_licensed)),
+    'fileType', coalesce((select jsonb_object_agg(file_type::text, cnt) from (
+      select file_type, count(*) cnt from base where
+        (v_statuses is null or status::text = any(v_statuses)) and
+        (v_workflow_statuses is null or workflow_status::text = any(v_workflow_statuses)) and
+        (v_stages is null or stage = any(v_stages)) and
+        (v_is_licensed is null or is_licensed = v_is_licensed) group by file_type) s), '{}'::jsonb),
+    'status', coalesce((select jsonb_object_agg(status::text, cnt) from (
+      select status, count(*) cnt from base where
+        (v_file_types is null or file_type::text = any(v_file_types)) and
+        (v_workflow_statuses is null or workflow_status::text = any(v_workflow_statuses)) and
+        (v_stages is null or stage = any(v_stages)) and
+        (v_is_licensed is null or is_licensed = v_is_licensed) group by status) s), '{}'::jsonb),
+    'workflowStatus', coalesce((select jsonb_object_agg(workflow_status::text, cnt) from (
+      select workflow_status, count(*) cnt from base where workflow_status is not null and
+        (v_file_types is null or file_type::text = any(v_file_types)) and
+        (v_statuses is null or status::text = any(v_statuses)) and
+        (v_stages is null or stage = any(v_stages)) and
+        (v_is_licensed is null or is_licensed = v_is_licensed) group by workflow_status) s), '{}'::jsonb),
+    'stage', coalesce((select jsonb_object_agg(stage, cnt) from (
+      select stage, count(*) cnt from base where stage is not null and
+        (v_file_types is null or file_type::text = any(v_file_types)) and
+        (v_statuses is null or status::text = any(v_statuses)) and
+        (v_workflow_statuses is null or workflow_status::text = any(v_workflow_statuses)) and
+        (v_is_licensed is null or is_licensed = v_is_licensed) group by stage) s), '{}'::jsonb),
+    'isLicensed', (select jsonb_build_object(
+      'true', coalesce(sum(case when is_licensed is true then 1 else 0 end), 0),
+      'false', coalesce(sum(case when is_licensed is not true then 1 else 0 end), 0))
+      from base where (v_file_types is null or file_type::text = any(v_file_types)) and
+        (v_statuses is null or status::text = any(v_statuses)) and
+        (v_workflow_statuses is null or workflow_status::text = any(v_workflow_statuses)) and
+        (v_stages is null or stage = any(v_stages)))
+  ) into v_result;
+  return v_result;
+end;
+$$;
+
+revoke all on function public.get_effective_filter_counts_unchecked_1703(jsonb)
+  from public, anon, authenticated, service_role;
+
+create or replace function public.get_effective_filter_counts(p_filters jsonb default '{}'::jsonb)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+set statement_timeout = '8s'
+as $$
+declare
+  v_filters jsonb := coalesce(p_filters, '{}'::jsonb);
+begin
+  perform public.require_dam_access();
+  return public.get_effective_filter_counts_unchecked_1703(v_filters);
+end;
+$$;
+
 create or replace function public.get_filter_counts(p_filters jsonb default '{}'::jsonb)
 returns jsonb
 language plpgsql
@@ -212,13 +342,44 @@ as $$
     join public.assets a on a.style_group_id = c.style_group_id
       and a.is_deleted = false
     where c.document_type = 'style_group' and c.style_group_id is not null
+  ), visibility_params as materialized (
+    select coalesce(p_filters, '{}'::jsonb) - 'search' filters,
+      public.assets_thumbnail_min_date() thumbnail_min_date
   ), visible_assets as materialized (
     select a.id, a.style_group_id, a.file_type, a.status,
       a.workflow_status, a.stage, a.is_licensed
-    from public.filter_effective_assets_unchecked_1703(
-      coalesce(p_filters, '{}'::jsonb) - 'search'
-    ) a
-    join candidate_asset_ids c on c.id = a.id
+    from candidate_asset_ids c
+    join public.assets a on a.id = c.id
+    cross join visibility_params f
+    left join public.style_groups sg on sg.id = a.style_group_id
+    where a.is_deleted = false
+      and (a.modified_at >= f.thumbnail_min_date
+        or a.file_created_at >= f.thumbnail_min_date or a.thumbnail_url is not null)
+      and (nullif(f.filters ->> 'licensorId', '') is null
+        or case when a.style_group_id is null then a.licensor_id else sg.licensor_id end
+          = (f.filters ->> 'licensorId')::uuid)
+      and (nullif(f.filters ->> 'propertyId', '') is null
+        or case when a.style_group_id is null then a.property_id else sg.property_id end
+          = (f.filters ->> 'propertyId')::uuid)
+      and (nullif(f.filters ->> 'tagFilter', '') is null or exists (
+        select 1 from public.asset_effective_tags e
+        where e.asset_id = a.id and e.tag = f.filters ->> 'tagFilter'))
+      and (jsonb_array_length(coalesce(f.filters -> 'fileType', '[]'::jsonb)) = 0
+        or a.file_type::text in (select jsonb_array_elements_text(f.filters -> 'fileType')))
+      and (jsonb_array_length(coalesce(f.filters -> 'status', '[]'::jsonb)) = 0
+        or a.status::text in (select jsonb_array_elements_text(f.filters -> 'status')))
+      and (jsonb_array_length(coalesce(f.filters -> 'workflowStatus', '[]'::jsonb)) = 0
+        or a.workflow_status::text in (select jsonb_array_elements_text(f.filters -> 'workflowStatus')))
+      and (jsonb_array_length(coalesce(f.filters -> 'stage', '[]'::jsonb)) = 0
+        or a.stage in (select jsonb_array_elements_text(f.filters -> 'stage')))
+      and ((f.filters ->> 'isLicensed') is null
+        or a.is_licensed = (f.filters ->> 'isLicensed')::boolean)
+      and (jsonb_array_length(coalesce(f.filters -> 'assetType', '[]'::jsonb)) = 0
+        or a.asset_type::text in (select jsonb_array_elements_text(f.filters -> 'assetType')))
+      and (jsonb_array_length(coalesce(f.filters -> 'artSource', '[]'::jsonb)) = 0
+        or a.art_source::text in (select jsonb_array_elements_text(f.filters -> 'artSource')))
+      and (nullif(f.filters ->> 'customer', '') is null or a.customer = f.filters ->> 'customer')
+      and (nullif(f.filters ->> 'program', '') is null or a.program = f.filters ->> 'program')
   ), visible_style_groups as materialized (
     select distinct a.style_group_id
     from visible_assets a
@@ -263,8 +424,10 @@ as $$
 $$;
 
 revoke all on function public.get_filter_counts(jsonb) from public, anon;
+revoke all on function public.get_effective_filter_counts(jsonb) from public, anon;
 revoke all on function public.search_dam_documents(text,jsonb,int,int,text[],extensions.vector(384),real) from public, anon;
 grant execute on function public.get_filter_counts(jsonb) to authenticated, service_role;
+grant execute on function public.get_effective_filter_counts(jsonb) to authenticated, service_role;
 grant execute on function public.search_dam_documents(text,jsonb,int,int,text[],extensions.vector(384),real) to authenticated, service_role;
 
 comment on function public.search_dam_documents(text,jsonb,int,int,text[],extensions.vector(384),real) is

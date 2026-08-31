@@ -16,7 +16,7 @@ begin
     'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'::regprocedure
   ) into v_definition;
 
-  if position('filter_effective_assets' in v_definition) = 0
+  if position('candidate_asset_ids as materialized' in v_definition) = 0
      or position('visible_assets as materialized' in v_definition) = 0 then
     raise exception 'ranked search must establish the effective visible asset set first';
   end if;
@@ -83,7 +83,8 @@ begin
      or (length(v_definition) - length(replace(v_definition, 'require_dam_access', '')))
           / length('require_dam_access') <> 1
      or position('authorized as materialized' in v_definition) = 0
-     or position('from public.assets' in v_definition) = 0
+     or position('from authorized' in v_definition) = 0
+     or position('cross join public.assets a' in v_definition) = 0
      or position('filter_effective_assets_unchecked_1703' in v_definition) > 0
      or not exists (
        select 1 from pg_proc
@@ -131,8 +132,10 @@ begin
   if position('select f.*' in v_definition) > 0
      or position('select distinct a.*' in v_definition) > 0
      or position('cross join lateral' in substring(v_definition from position('visible_assets as materialized' in v_definition))) > 0
-     or position('join candidate_asset_ids c on c.id = a.id' in v_definition) = 0
-     or position('filter_effective_assets_unchecked_1703' in v_definition) = 0 then
+     or position('from candidate_asset_ids c' in v_definition) = 0
+     or position('join public.assets a on a.id = c.id' in v_definition) = 0
+     or position('filter_effective_assets' in substring(v_definition from position('visible_assets as materialized' in v_definition))) > 0
+     or position('cross join lateral' in v_definition) > 0 then
     raise exception 'ranked search restored wide visibility or redundant wide deduplication';
   end if;
   if not exists (
@@ -150,6 +153,24 @@ begin
      or position('get_filter_counts_unchecked_1703' in v_definition) > 0
      or position('require_dam_access' in v_definition) = 0 then
     raise exception 'legacy counts must delegate exactly once to effective counts behind the DAM gate';
+  end if;
+  select pg_get_functiondef('public.get_effective_filter_counts_unchecked_1703(jsonb)'::regprocedure)
+    into v_definition;
+  if position('select a.file_type, a.status, a.workflow_status, a.stage, a.is_licensed' in v_definition) = 0
+     or position('from public.assets a' in v_definition) = 0
+     or position('select a.*' in v_definition) > 0
+     or position('filter_effective_assets' in v_definition) > 0
+     or position('bounds as materialized' in v_definition) = 0 then
+    raise exception 'effective counts must use one narrow five-column direct asset scan';
+  end if;
+  select pg_get_functiondef('public.get_effective_filter_counts(jsonb)'::regprocedure)
+    into v_definition;
+  if (length(v_definition) - length(replace(v_definition,
+       'get_effective_filter_counts_unchecked_1703', '')))
+       / length('get_effective_filter_counts_unchecked_1703') <> 1
+     or (length(v_definition) - length(replace(v_definition, 'require_dam_access', '')))
+       / length('require_dam_access') <> 1 then
+    raise exception 'effective counts must share the narrow implementation behind one DAM gate';
   end if;
 end;
 $$;

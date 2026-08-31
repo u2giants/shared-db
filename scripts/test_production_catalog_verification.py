@@ -1756,11 +1756,15 @@ class BehavioralSidecarTests(unittest.TestCase):
         self.assertEqual(checks[0]["kind"], "catalog_contract")
         self.assertEqual(
             checks[0]["migration_sha256"],
-            "75bbdbe465f7b38ffb1764a89fa57a1289c5edec6f49a75e7f0defa2bb2bec9e",
+            "a33c22920120dee3ed2fc7f8f54a37377eb5c801141522d5b8b965bb59b14eac",
         )
         self.assertIn("public.filter_effective_assets", targets.functions)
         self.assertIn("public.search_dam_documents", targets.functions)
-        self.assertIn("join candidate_asset_ids c on c.id = a.id", sql)
+        self.assertIn("from candidate_asset_ids c", sql)
+        self.assertIn("join public.assets a on a.id = c.id", sql)
+        self.assertIn("select a.file_type, a.status, a.workflow_status, a.stage, a.is_licensed", sql)
+        self.assertIn("position('select a.*'", sql)
+        self.assertIn("bounds as materialized", sql)
         self.assertIn("authorized as materialized", sql)
         self.assertIn("not p.prosecdef", sql)
         self.assertIn("p.proconfig is null", sql)

@@ -882,8 +882,11 @@ CATALOG_CONTRACTS = {
       (select
         position('select a.id, a.style_group_id, a.file_type, a.status,' in pg_get_functiondef(p.oid)) > 0
         and position('a.workflow_status, a.stage, a.is_licensed' in pg_get_functiondef(p.oid)) > 0
-        and position('filter_effective_assets_unchecked_1703' in pg_get_functiondef(p.oid)) > 0
-        and position('join candidate_asset_ids c on c.id = a.id' in pg_get_functiondef(p.oid)) > 0
+        and position('from candidate_asset_ids c' in pg_get_functiondef(p.oid)) > 0
+        and position('join public.assets a on a.id = c.id' in pg_get_functiondef(p.oid)) > 0
+        and position('filter_effective_assets' in substring(pg_get_functiondef(p.oid)
+          from position('visible_assets as materialized' in pg_get_functiondef(p.oid)))) = 0
+        and position('cross join lateral' in pg_get_functiondef(p.oid)) = 0
         and position('select distinct a.*' in pg_get_functiondef(p.oid)) = 0
         and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
         from pg_proc p
@@ -893,7 +896,8 @@ CATALOG_CONTRACTS = {
         and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
         and (length(pg_get_functiondef(p.oid)) - length(replace(pg_get_functiondef(p.oid),
           'require_dam_access', ''))) / length('require_dam_access') = 1
-        and position('from public.assets' in pg_get_functiondef(p.oid)) > 0
+        and position('from authorized' in pg_get_functiondef(p.oid)) > 0
+        and position('cross join public.assets a' in pg_get_functiondef(p.oid)) > 0
         and position('filter_effective_assets_unchecked_1703' in pg_get_functiondef(p.oid)) = 0
         and p.provolatile = 's' and not p.prosecdef
         and p.proconfig is null
@@ -901,8 +905,27 @@ CATALOG_CONTRACTS = {
         where p.oid = to_regprocedure('public.filter_effective_assets(jsonb)'))
       and not has_function_privilege('authenticated',
         'public.filter_effective_assets_unchecked_1703(jsonb)', 'EXECUTE')
+      and (select
+        position('select a.file_type, a.status, a.workflow_status, a.stage, a.is_licensed'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('from public.assets a' in pg_get_functiondef(p.oid)) > 0
+        and position('select a.*' in pg_get_functiondef(p.oid)) = 0
+        and position('filter_effective_assets' in pg_get_functiondef(p.oid)) = 0
+        and position('bounds as materialized' in pg_get_functiondef(p.oid)) > 0
+        from pg_proc p where p.oid = to_regprocedure(
+          'public.get_effective_filter_counts_unchecked_1703(jsonb)'))
+      and (select position('get_effective_filter_counts_unchecked_1703'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p where p.oid = to_regprocedure(
+          'public.get_effective_filter_counts(jsonb)'))
       and not has_function_privilege('anon', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
       and has_function_privilege('authenticated', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+      and not has_function_privilege('anon',
+        'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
 """,
     "coco_owner_ruling_v1": """
       case when to_regclass('core.taxonomy_owner_ruling') is null then true else
