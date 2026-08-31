@@ -41,9 +41,15 @@ def snapshot_query(collisions: dict[str, list[str]]) -> str:
         return ""
     literals = ", ".join("'" + name.replace("'", "''") + "'" for name in names)
     return (
-        "select format(E'alter %s %I.%I(%s) reset all;\\n', "
+        "select format(E'do $pass2$ begin if exists (select 1 from pg_proc p2 "
+        "join pg_namespace n2 on n2.oid = p2.pronamespace "
+        "where n2.nspname = %L and p2.proname = %L "
+        "and pg_get_function_identity_arguments(p2.oid) = %L and p2.prokind = %L) "
+        "then execute %L; end if; end $pass2$;\\n', "
+        "n.nspname, p.proname, pg_get_function_identity_arguments(p.oid), p.prokind, "
+        "format('alter %s %I.%I(%s) reset all', "
         "case when p.prokind = 'p' then 'procedure' else 'function' end, "
-        "n.nspname, p.proname, pg_get_function_identity_arguments(p.oid)) || "
+        "n.nspname, p.proname, pg_get_function_identity_arguments(p.oid))) || "
         "pg_get_functiondef(p.oid) || E';\\n' || "
         "format(E'alter %s %I.%I(%s) security %s;\\n', "
         "case when p.prokind = 'p' then 'procedure' else 'function' end, "
