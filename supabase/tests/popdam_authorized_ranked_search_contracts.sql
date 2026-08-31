@@ -61,8 +61,8 @@ begin
   select pg_get_functiondef('public.filter_effective_assets(jsonb)'::regprocedure)
     into v_definition;
   if position('require_dam_access' in v_definition) = 0
-     or position('filter_effective_assets_unchecked_1703' in v_definition) = 0 then
-    raise exception 'effective filter must preserve its body behind the DAM gate';
+     or position('from public.assets' in v_definition) = 0 then
+    raise exception 'effective filter must keep its inlinable body behind the DAM gate';
   end if;
   if has_function_privilege('authenticated',
        'public.filter_effective_assets_unchecked_1703(jsonb)', 'EXECUTE')
@@ -97,6 +97,9 @@ begin
   if not app.has_app_access('dam'::app.app_name) then
     raise exception 'authorized control user did not receive DAM access';
   end if;
+  perform 1 from public.filter_effective_assets('{}'::jsonb) limit 1;
+  perform public.get_filter_counts('{}'::jsonb);
+  perform public.get_effective_filter_counts('{}'::jsonb);
   select count(*) into v_n from public.search_dam_documents(
     'zz1703-no-match','{}'::jsonb,5,0,array['absent-document-type']::text[],null,0
   );
@@ -116,6 +119,16 @@ begin
       'zz1703-no-match','{}'::jsonb,5,0,array['absent-document-type']::text[],null,0
     );
     raise exception 'non-DAM user reached ranked search';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.get_filter_counts('{}'::jsonb);
+    raise exception 'non-DAM user reached filter counts';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.get_effective_filter_counts('{}'::jsonb);
+    raise exception 'non-DAM user reached effective filter counts';
   exception when insufficient_privilege then null;
   end;
   execute 'reset role';

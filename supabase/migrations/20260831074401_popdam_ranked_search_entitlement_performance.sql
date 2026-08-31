@@ -114,8 +114,77 @@ stable
 security invoker
 as $$
   select a.*
-  from public.filter_effective_assets_unchecked_1703(p_filters) a
-  where public.require_dam_access();
+  from public.assets a
+  left join public.style_groups sg on sg.id = a.style_group_id
+  where public.require_dam_access()
+    and a.is_deleted = false
+    and (
+      a.modified_at >= public.assets_thumbnail_min_date()
+      or a.file_created_at >= public.assets_thumbnail_min_date()
+      or a.thumbnail_url is not null
+    )
+    and (
+      not (p_filters ? 'search')
+      or nullif(p_filters ->> 'search', '') is null
+      or a.filename ilike '%' || (p_filters ->> 'search') || '%'
+    )
+    and (
+      not (p_filters ? 'licensorId')
+      or nullif(p_filters ->> 'licensorId', '') is null
+      or case when a.style_group_id is null then a.licensor_id else sg.licensor_id end
+           = (p_filters ->> 'licensorId')::uuid
+    )
+    and (
+      not (p_filters ? 'propertyId')
+      or nullif(p_filters ->> 'propertyId', '') is null
+      or case when a.style_group_id is null then a.property_id else sg.property_id end
+           = (p_filters ->> 'propertyId')::uuid
+    )
+    and (
+      not (p_filters ? 'tagFilter')
+      or nullif(p_filters ->> 'tagFilter', '') is null
+      or exists (
+        select 1 from public.asset_effective_tags e
+        where e.asset_id = a.id and e.tag = p_filters ->> 'tagFilter'
+      )
+    )
+    and (
+      not (p_filters ? 'fileType')
+      or jsonb_array_length(p_filters -> 'fileType') = 0
+      or a.file_type::text in (select jsonb_array_elements_text(p_filters -> 'fileType'))
+    )
+    and (
+      not (p_filters ? 'status')
+      or jsonb_array_length(p_filters -> 'status') = 0
+      or a.status::text in (select jsonb_array_elements_text(p_filters -> 'status'))
+    )
+    and (
+      not (p_filters ? 'workflowStatus')
+      or jsonb_array_length(p_filters -> 'workflowStatus') = 0
+      or a.workflow_status::text in (select jsonb_array_elements_text(p_filters -> 'workflowStatus'))
+    )
+    and (
+      not (p_filters ? 'stage')
+      or jsonb_array_length(p_filters -> 'stage') = 0
+      or a.stage in (select jsonb_array_elements_text(p_filters -> 'stage'))
+    )
+    and (
+      not (p_filters ? 'isLicensed')
+      or (p_filters ->> 'isLicensed') is null
+      or a.is_licensed = (p_filters ->> 'isLicensed')::boolean
+    )
+    and (
+      not (p_filters ? 'assetType')
+      or jsonb_array_length(p_filters -> 'assetType') = 0
+      or a.asset_type::text in (select jsonb_array_elements_text(p_filters -> 'assetType'))
+    )
+    and (
+      not (p_filters ? 'artSource')
+      or jsonb_array_length(p_filters -> 'artSource') = 0
+      or a.art_source::text in (select jsonb_array_elements_text(p_filters -> 'artSource'))
+    )
+    and (nullif(p_filters ->> 'customer', '') is null or a.customer = p_filters ->> 'customer')
+    and (nullif(p_filters ->> 'program', '') is null or a.program = p_filters ->> 'program');
 $$;
 
 revoke all on function public.filter_effective_assets(jsonb) from public, anon;
@@ -308,16 +377,42 @@ create or replace function public.search_style_groups_full_text(p_query text, p_
 returns table(style_group_id uuid, rank real)
 language sql stable security definer set search_path=public set statement_timeout='8s'
 as $$
-  with candidates as materialized (
-    select d.* from public.search_dam_documents(
-      p_query,'{}'::jsonb,20000,0,array['asset','style_group']::text[],null,0
-    ) d
-  ), direct_groups as (
-    select d.style_group_id,d.rank from candidates d
+  with queries as materialized (
+    select websearch_to_tsquery('simple', q.query_text) tsq,
+      '%' || q.query_text || '%' like_pattern,
+      length(q.query_text) >= 3 allow_substring
+    from public.expand_dam_search_queries(nullif(trim(p_query), '')) q
+    where public.require_dam_access()
+  ), direct_candidates as materialized (
+    select d.style_group_id,
+      greatest(ts_rank_cd(d.search_tsv, q.tsq), 0.01)::real rank
+    from queries q
+    join public.dam_search_documents d on d.search_tsv @@ q.tsq
     where d.document_type = 'style_group'
+    union all
+    select d.style_group_id,
+      case when d.title ilike q.like_pattern then 0.04
+           when d.path ilike q.like_pattern then 0.03
+           when d.customer ilike q.like_pattern or d.program ilike q.like_pattern then 0.02
+           else 0.01 end::real rank
+    from queries q
+    join public.dam_search_documents d on q.allow_substring and (
+      d.title ilike q.like_pattern or d.path ilike q.like_pattern
+      or d.customer ilike q.like_pattern or d.program ilike q.like_pattern
+    )
+    where d.document_type = 'style_group'
+  ), direct_groups as (
+    select d.style_group_id,max(d.rank)::real rank
+    from direct_candidates d
+    where d.style_group_id is not null
+    group by d.style_group_id
+  ), member_assets as materialized (
+    select d.* from public.search_dam_documents(
+      p_query,'{}'::jsonb,20000,0,array['asset']::text[],null,0
+    ) d
   ), asset_groups as (
-    select d.style_group_id,max(d.rank)*0.8 rank from candidates d
-    where d.document_type = 'asset' and d.style_group_id is not null
+    select d.style_group_id,max(d.rank)*0.8 rank from member_assets d
+    where d.style_group_id is not null
     group by d.style_group_id
   )
   select x.style_group_id,max(x.rank)::real rank
