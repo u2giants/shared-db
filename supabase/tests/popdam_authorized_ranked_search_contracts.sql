@@ -75,6 +75,42 @@ begin
 end;
 $$;
 
+do $$
+declare
+  v_definition text;
+begin
+  if to_regclass('public.assets_style_group_id_active_idx') is null then
+    raise exception 'ranked Style Group expansion requires its active asset key index';
+  end if;
+  select pg_get_functiondef(
+    'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'::regprocedure
+  ) into v_definition;
+  if position('candidate_asset_ids' in v_definition) = 0
+     or position('visible_style_groups' in v_definition) = 0
+     or position('join visible_assets a on a.id = c.asset_id' in v_definition) = 0
+     or position('join visible_style_groups g on g.style_group_id = c.style_group_id' in v_definition) = 0 then
+    raise exception 'ranked search must use keyed asset and Style Group visibility joins';
+  end if;
+  if position('c.asset_id = a.id or c.style_group_id = a.style_group_id' in v_definition) > 0
+     or position('r.asset_id = a.id or r.style_group_id = a.style_group_id' in v_definition) > 0 then
+    raise exception 'ranked search restored the production-timeout OR join';
+  end if;
+  if not exists (
+    select 1 from pg_proc
+    where oid = 'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'::regprocedure
+      and 'statement_timeout=8s' = any(coalesce(proconfig,'{}'))
+  ) then
+    raise exception 'ranked search lost its explicit edge timeout';
+  end if;
+  select pg_get_functiondef('public.get_filter_counts(jsonb)'::regprocedure)
+    into v_definition;
+  if position('get_effective_filter_counts_unchecked_1703' in v_definition) = 0
+     or position('require_dam_access' in v_definition) = 0 then
+    raise exception 'legacy counts must delegate to the gated effective-count implementation';
+  end if;
+end;
+$$;
+
 set local session_replication_role = replica;
 insert into auth.users (id,email) values
   ('17030000-0000-4000-8000-000000000001','zz1703-dam@example.invalid'),
@@ -103,6 +139,8 @@ begin
   select count(*) into v_n from public.search_dam_documents(
     'zz1703-no-match','{}'::jsonb,5,0,array['absent-document-type']::text[],null,0
   );
+  perform 1 from public.search_assets_full_text('zz1703-no-match',5);
+  perform 1 from public.search_style_groups_full_text('zz1703-no-match',5);
 
   perform set_config('request.jwt.claims',
     '{"sub":"17030000-0000-4000-8000-000000000002","role":"authenticated"}',true);
@@ -129,6 +167,16 @@ begin
   begin
     perform public.get_effective_filter_counts('{}'::jsonb);
     raise exception 'non-DAM user reached effective filter counts';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform 1 from public.search_assets_full_text('zz1703-no-match',1);
+    raise exception 'non-DAM user reached asset search wrapper';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform 1 from public.search_style_groups_full_text('zz1703-no-match',1);
+    raise exception 'non-DAM user reached Style Group search wrapper';
   exception when insufficient_privilege then null;
   end;
   execute 'reset role';
