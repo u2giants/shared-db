@@ -49,6 +49,15 @@ class Pass2RoutineSupersessionTests(unittest.TestCase):
         self.assertIn("'plm.g'", query)
         self.assertIn("pg_get_function_identity_arguments", query)
 
+    def test_snapshot_restores_routine_attributes_not_in_function_definition(self):
+        query = snapshot_query({"public.f": ["later.sql"]}).lower()
+        self.assertIn("security %s", query)
+        self.assertIn("then 'definer' else 'invoker'", query)
+        self.assertIn("reset all", query)
+        self.assertIn("from unnest(p.proconfig) setting", query)
+        self.assertIn("set %s to %l", query)
+        self.assertIn("p.prokind = 'p'", query)
+
 
 if __name__ == "__main__":
     unittest.main()
