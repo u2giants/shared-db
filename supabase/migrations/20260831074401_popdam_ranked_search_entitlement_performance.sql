@@ -9,7 +9,9 @@ security definer
 set search_path = app, auth, public
 as $$
 begin
-  if auth.role() = 'service_role' or app.has_app_access('dam'::app.app_name) then
+  if auth.role() = 'service_role'
+     or (auth.role() is null and session_user = 'postgres')
+     or app.has_app_access('dam'::app.app_name) then
     return true;
   end if;
   raise insufficient_privilege using message = 'DAM access is required';
@@ -160,6 +162,12 @@ revoke all on function public.get_effective_filter_counts(jsonb) from public, an
 revoke all on function public.get_filter_counts(jsonb) from public, anon;
 grant execute on function public.get_effective_filter_counts(jsonb) to authenticated, service_role;
 grant execute on function public.get_filter_counts(jsonb) to authenticated, service_role;
+
+-- Ordered replay can retain the pre-filtered overload even though deployed
+-- databases already removed it. Close that bypass explicitly in both states.
+drop function if exists public.search_dam_documents(
+  text, integer, text[], extensions.vector
+);
 
 create or replace function public.search_dam_documents(
   p_query text,
