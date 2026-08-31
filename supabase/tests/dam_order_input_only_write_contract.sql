@@ -1,7 +1,7 @@
 -- =====================================================================================
 -- PopDAM OrderList — "input fields only" write contract (issue #1772).
 --
--- Covers migration 20260830141421_popdam_orderlist_input_only_write_contract.sql.
+-- Covers migration 20260831004326_popdam_orderlist_input_only_write_contract.sql.
 --
 -- HOW TO RUN
 --   Against any database that carries the migrations, including the ephemeral
@@ -17,7 +17,7 @@
 --   order row — which is precisely why it can run in the from-empty lane and be
 --   trusted there, instead of joining the eleven files in ci-quarantine.txt.
 --
---   That trust is only earned because 20260830141421 opens with a fail-closed probe of
+--   That trust is only earned because 20260831004326 opens with a fail-closed probe of
 --   the objects its base creates. Without it the two-pass replay would re-apply the base
 --   AFTER this migration and this file would be asserting against the superseded
 --   whitelists. If you ever see this file fail with the OLD field list, that probe is
