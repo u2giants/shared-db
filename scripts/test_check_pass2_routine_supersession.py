@@ -54,9 +54,11 @@ class Pass2RoutineSupersessionTests(unittest.TestCase):
         self.assertIn("security %s", query)
         self.assertIn("then 'definer' else 'invoker'", query)
         self.assertIn("reset all", query)
-        self.assertIn("from unnest(p.proconfig) setting", query)
-        self.assertIn("set %s to %l", query)
+        self.assertNotIn("p.proconfig", query)
+        self.assertNotIn(" set %s to ", query)
         self.assertIn("p.prokind = 'p'", query)
+        self.assertLess(query.index("reset all"), query.index("pg_get_functiondef"))
+        self.assertLess(query.index("pg_get_functiondef"), query.index("security %s"))
 
     def test_real_dam_search_restore_uses_newlines_not_psql_backslash_commands(self):
         query = snapshot_query(
@@ -71,6 +73,13 @@ class Pass2RoutineSupersessionTests(unittest.TestCase):
         self.assertEqual(query.count("format(e'alter"), 2)
         self.assertNotIn("format('alter %s %i.%i(%s) security", query)
         self.assertNotIn("format('alter %s %i.%i(%s) reset all", query)
+
+    def test_search_path_lists_are_left_to_pg_get_functiondef(self):
+        query = snapshot_query({"public.search_dam_documents": ["later.sql"]}).lower()
+        self.assertIn("pg_get_functiondef(p.oid)", query)
+        self.assertNotIn("unnest(p.proconfig)", query)
+        self.assertNotIn("split_part(setting", query)
+        self.assertNotIn("substr(setting", query)
 
 
 if __name__ == "__main__":
