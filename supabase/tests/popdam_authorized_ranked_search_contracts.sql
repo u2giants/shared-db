@@ -188,6 +188,18 @@ insert into app.app_access (profile_id,app)
 select id,'dam'::app.app_name from app.profile
 where auth_user_id = '17030000-0000-4000-8000-000000000001';
 
+-- An inlinable SQL SRF may defer its materialized authorization CTE when the
+-- underlying scan is empty. Keep one rollback-only eligible row so the runtime
+-- refusal probe necessarily evaluates the gate instead of proving only that an
+-- empty query returns no rows.
+insert into public.assets (
+  id, filename, relative_path, file_type, quick_hash, modified_at, is_deleted
+) values (
+  '17030000-0000-4000-8000-000000000003',
+  'zz1703-auth-gate.ai', 'zz1703-auth-gate.ai', 'ai',
+  'zz1703-auth-gate', now(), false
+);
+
 do $$
 declare v_n bigint;
 begin
