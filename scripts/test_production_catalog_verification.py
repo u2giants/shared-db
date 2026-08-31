@@ -1744,6 +1744,25 @@ class BehavioralSidecarTests(unittest.TestCase):
         self.assertIn("get_effective_filter_counts_unchecked_1703", sql)
         self.assertIn("has_function_privilege('authenticated'", sql)
 
+    def test_real_1703_forward_6_sidecar_is_hash_bound_and_catalog_only(self):
+        version = "20260831184547"
+        migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
+        checks = load_behavior_sidecars(REPO, {version: migration}, [version])
+        targets = derive_targets({version: migration}, [version])
+        sql = build_behavior_sql(checks)
+
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["kind"], "catalog_contract")
+        self.assertEqual(
+            checks[0]["migration_sha256"],
+            "37ef27427f23d780706596325695fced9226a1d5dfa3c19075f3ea7beb57410c",
+        )
+        self.assertIn("public.filter_effective_assets", targets.functions)
+        self.assertIn("public.search_dam_documents", targets.functions)
+        self.assertIn("join candidate_asset_ids c on c.id = a.id", sql)
+        self.assertIn("authorized as materialized", sql)
+        self.assertIn("has_function_privilege('authenticated'", sql)
+
     def test_real_1732_sidecar_is_hash_bound_catalog_only_and_exact_shape(self):
         version = "20260828021051"
         migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))

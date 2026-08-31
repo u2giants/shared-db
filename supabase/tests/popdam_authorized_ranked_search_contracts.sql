@@ -80,8 +80,9 @@ begin
   select pg_get_functiondef('public.filter_effective_assets(jsonb)'::regprocedure)
     into v_definition;
   if position('require_dam_access' in v_definition) = 0
-     or position('from public.assets' in v_definition) = 0 then
-    raise exception 'effective filter must keep its inlinable body behind the DAM gate';
+     or position('authorized as materialized' in v_definition) = 0
+     or position('filter_effective_assets_unchecked_1703' in v_definition) = 0 then
+    raise exception 'effective filter must evaluate DAM access once before its private filter body';
   end if;
   if has_function_privilege('authenticated',
        'public.filter_effective_assets_unchecked_1703(jsonb)', 'EXECUTE')
@@ -114,12 +115,15 @@ begin
      or position('r.asset_id = a.id or r.style_group_id = a.style_group_id' in v_definition) > 0 then
     raise exception 'ranked search restored the production-timeout OR join';
   end if;
-  if position('select f.id, f.style_group_id, f.file_type, f.status,' in v_definition) = 0
-     or position('f.workflow_status, f.stage, f.is_licensed' in v_definition) = 0 then
+  if position('select a.id, a.style_group_id, a.file_type, a.status,' in v_definition) = 0
+     or position('a.workflow_status, a.stage, a.is_licensed' in v_definition) = 0 then
     raise exception 'visible assets must retain the explicit seven-column projection';
   end if;
   if position('select f.*' in v_definition) > 0
-     or position('select distinct a.*' in v_definition) > 0 then
+     or position('select distinct a.*' in v_definition) > 0
+     or position('cross join lateral' in substring(v_definition from position('visible_assets as materialized' in v_definition))) > 0
+     or position('join candidate_asset_ids c on c.id = a.id' in v_definition) = 0
+     or position('filter_effective_assets_unchecked_1703' in v_definition) = 0 then
     raise exception 'ranked search restored wide visibility or redundant wide deduplication';
   end if;
   if not exists (

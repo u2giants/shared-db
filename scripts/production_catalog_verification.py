@@ -878,6 +878,28 @@ CATALOG_CONTRACTS = {
       and not has_function_privilege('anon', 'public.get_filter_counts(jsonb)', 'EXECUTE')
       and has_function_privilege('authenticated', 'public.get_filter_counts(jsonb)', 'EXECUTE')
 """,
+    "popdam_ranked_search_private_keyed_visibility_v2": """
+      (select
+        position('select a.id, a.style_group_id, a.file_type, a.status,' in pg_get_functiondef(p.oid)) > 0
+        and position('a.workflow_status, a.stage, a.is_licensed' in pg_get_functiondef(p.oid)) > 0
+        and position('filter_effective_assets_unchecked_1703' in pg_get_functiondef(p.oid)) > 0
+        and position('join candidate_asset_ids c on c.id = a.id' in pg_get_functiondef(p.oid)) > 0
+        and position('select distinct a.*' in pg_get_functiondef(p.oid)) = 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p
+        where p.oid = to_regprocedure('public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and (select
+        position('authorized as materialized' in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and position('filter_effective_assets_unchecked_1703' in pg_get_functiondef(p.oid)) > 0
+        and p.provolatile = 's' and not p.prosecdef
+        from pg_proc p
+        where p.oid = to_regprocedure('public.filter_effective_assets(jsonb)'))
+      and not has_function_privilege('authenticated',
+        'public.filter_effective_assets_unchecked_1703(jsonb)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+""",
     "coco_owner_ruling_v1": """
       case when to_regclass('core.taxonomy_owner_ruling') is null then true else
         cardinality(xpath('/table/row', query_to_xml(
