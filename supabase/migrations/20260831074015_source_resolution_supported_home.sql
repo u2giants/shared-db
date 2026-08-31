@@ -42,6 +42,50 @@ create table if not exists plm.source_resolution (
   constraint source_resolution_actor_nonblank_chk check (resolved_by is null or btrim(resolved_by) <> '')
 );
 
+-- CREATE TABLE IF NOT EXISTS alone does not repair a partially-created historical table.
+-- Reinstall every check under its canonical name so this successor converges both a clean
+-- production database and CI replay of the retired predecessors to the same constraints.
+alter table plm.source_resolution
+  drop constraint if exists source_resolution_source_system_nonblank_chk,
+  drop constraint if exists source_resolution_source_system_supported_chk,
+  drop constraint if exists source_resolution_source_id_nonblank_chk,
+  drop constraint if exists source_resolution_entity_kind_chk,
+  drop constraint if exists source_resolution_status_chk,
+  drop constraint if exists source_resolution_target_kind_chk,
+  drop constraint if exists source_resolution_matched_target_chk,
+  drop constraint if exists source_resolution_audit_pair_chk,
+  drop constraint if exists source_resolution_reason_nonblank_chk,
+  drop constraint if exists source_resolution_actor_nonblank_chk;
+alter table plm.source_resolution
+  add constraint source_resolution_source_system_nonblank_chk check (btrim(source_system) <> ''),
+  add constraint source_resolution_source_system_supported_chk check (
+    source_system in (
+      'paramount','nbcu','disney_opa','disney_dcpvault','lucasfilm_dcpvault',
+      'marvel_dcpvault','twentieth_century_dcpvault'
+    ) or source_system like 'warner:%'
+  ),
+  add constraint source_resolution_source_id_nonblank_chk check (btrim(source_id) <> ''),
+  add constraint source_resolution_entity_kind_chk
+    check (entity_kind in ('property','character','style_guide','asset')),
+  add constraint source_resolution_status_chk
+    check (resolution_status in ('unresolved','matched','ambiguous','no_match','rejected','deferred')),
+  add constraint source_resolution_target_kind_chk check (
+    case entity_kind
+      when 'property' then core_character_id is null and core_style_guide_id is null and dam_asset_id is null
+      when 'character' then core_property_id is null and core_style_guide_id is null and dam_asset_id is null
+      when 'style_guide' then core_property_id is null and core_character_id is null and dam_asset_id is null
+      when 'asset' then core_property_id is null and core_character_id is null and core_style_guide_id is null
+      else false
+    end
+  ),
+  add constraint source_resolution_matched_target_chk check (
+    (resolution_status = 'matched') =
+    (num_nonnulls(core_property_id, core_character_id, core_style_guide_id, dam_asset_id) = 1)
+  ),
+  add constraint source_resolution_audit_pair_chk check ((resolved_at is null) = (resolved_by is null)),
+  add constraint source_resolution_reason_nonblank_chk check (resolution_reason is null or btrim(resolution_reason) <> ''),
+  add constraint source_resolution_actor_nonblank_chk check (resolved_by is null or btrim(resolved_by) <> '');
+
 -- The owner ruling requires plain UUID decisions. Every FK action either blocks target
 -- lifecycle or destroys/invalidates the durable human decision. Historical CI replay may
 -- have created these four constraints; production will not have them.
@@ -122,6 +166,105 @@ comment on view api.source_resolution is
   'Authenticated durable decision read path. target_missing keeps dangling decisions visible; consumers must LEFT JOIN and must not treat a missing target as an absent decision.';
 revoke all on table api.source_resolution from public, anon;
 grant select on table api.source_resolution to authenticated, service_role;
+
+-- Existing API consumers must observe durable decisions before their landing columns become
+-- immutable. A durable row wins even when its nullable reason/target is NULL; only a wholly
+-- absent durable identity falls back to the pre-existing landing value during transition.
+create or replace view api.pmt_properties
+with (security_invoker = true) as
+select
+  p.capture_id, p.property_source_id, p.property_name, p.is_licensed_selection,
+  coalesce((select array_agg(distinct t.authorized_title_name)
+              from plm.pmt_authorized_title_property atp
+              join plm.pmt_authorized_title t
+                on t.capture_id = atp.capture_id and t.authorized_title_key = atp.authorized_title_key
+             where atp.capture_id = p.capture_id and atp.property_source_id = p.property_source_id),
+           array[]::text[]) as business_title_names,
+  (select count(*) from plm.pmt_asset_property ap
+    where ap.capture_id = p.capture_id and ap.property_source_id = p.property_source_id) as asset_count,
+  (select count(*) from plm.pmt_property_character pch
+    where pch.capture_id = p.capture_id and pch.property_source_id = p.property_source_id) as character_count,
+  (select count(*) from plm.pmt_property_collection pc
+    where pc.capture_id = p.capture_id and pc.property_source_id = p.property_source_id) as style_guide_count,
+  coalesce((select array_agg(f.franchise_name order by f.franchise_name)
+              from plm.pmt_property_franchise_evidence pfe
+              join plm.pmt_franchise f
+                on f.capture_id = pfe.capture_id and f.franchise_source_id = pfe.franchise_source_id
+             where pfe.capture_id = p.capture_id and pfe.property_source_id = p.property_source_id),
+           array[]::text[]) as franchise_names_cooccurrence_evidence_only,
+  false as franchise_link_is_a_direct_source_relationship,
+  case when r.source_id is null then p.core_property_id else r.core_property_id end as core_property_id,
+  case when r.source_id is null then coalesce(p.resolution_status,'unresolved') else r.resolution_status end as resolution_status,
+  case when r.source_id is null then p.resolution_reason else r.resolution_reason end as resolution_reason,
+  case when r.source_id is null then p.resolved_at else r.resolved_at end as resolved_at
+from plm.pmt_property p
+join api.pmt_latest_capture lc on lc.capture_id = p.capture_id
+left join plm.source_resolution r
+  on r.source_system = 'paramount' and r.entity_kind = 'property'
+ and r.source_id = p.property_source_id::text;
+
+create or replace view api.pmt_characters
+with (security_invoker = true) as
+select
+  ch.capture_id, ch.character_source_id, ch.character_name,
+  coalesce((select array_agg(p.property_name order by p.property_name)
+              from plm.pmt_property_character pch
+              join plm.pmt_property p
+                on p.capture_id = pch.capture_id and p.property_source_id = pch.property_source_id
+             where pch.capture_id = ch.capture_id and pch.character_source_id = ch.character_source_id),
+           array[]::text[]) as explicit_property_names,
+  (select count(*) from plm.pmt_asset_character ac
+    where ac.capture_id = ch.capture_id and ac.character_source_id = ch.character_source_id) as asset_count,
+  coalesce((select array_agg(distinct cl.collection_name)
+              from plm.pmt_asset_character ac
+              join plm.pmt_asset_collection acl
+                on acl.capture_id = ac.capture_id and acl.asset_id = ac.asset_id
+              join plm.pmt_collection cl
+                on cl.capture_id = acl.capture_id and cl.collection_source_id = acl.collection_source_id
+             where ac.capture_id = ch.capture_id and ac.character_source_id = ch.character_source_id),
+           array[]::text[]) as style_guide_names,
+  case when r.source_id is null then ch.core_character_id else r.core_character_id end as core_character_id,
+  case when r.source_id is null then coalesce(ch.resolution_status,'unresolved') else r.resolution_status end as resolution_status,
+  case when r.source_id is null then ch.resolution_reason else r.resolution_reason end as resolution_reason,
+  case when r.source_id is null then ch.resolved_at else r.resolved_at end as resolved_at
+from plm.pmt_character ch
+join api.pmt_latest_capture lc on lc.capture_id = ch.capture_id
+left join plm.source_resolution r
+  on r.source_system = 'paramount' and r.entity_kind = 'character'
+ and r.source_id = ch.character_source_id::text;
+
+create or replace view api.opa_property_reconciliation
+with (security_invoker = true) as
+select
+  o.licensed_property_id,
+  min(o.property_name) as opa_property_name,
+  count(*) as opa_character_count,
+  count(*) filter (where case when r.source_id is null then coalesce(o.resolution_status,'unresolved') else r.resolution_status end = 'unresolved') as unresolved_character_count,
+  count(distinct case when r.source_id is null then o.property_id else r.core_property_id end) as matched_core_property_count,
+  coalesce(array_agg(distinct case when r.source_id is null then o.property_id else r.core_property_id end
+    order by case when r.source_id is null then o.property_id else r.core_property_id end)
+    filter (where case when r.source_id is null then o.property_id else r.core_property_id end is not null), '{}'::uuid[]) as matched_core_property_ids,
+  coalesce(array_agg(distinct p.name order by p.name) filter (where p.name is not null), '{}'::text[]) as core_property_names,
+  coalesce(array_agg(distinct l.code order by l.code) filter (where l.code is not null), '{}'::text[]) as core_licensor_codes,
+  case
+    when count(r.source_id) > 0 then min(r.resolution_status)
+    when count(distinct o.resolution_status) = 1 then min(o.resolution_status)
+    else 'mixed'
+  end as resolution_status,
+  case when count(r.source_id) > 0 then max(r.resolved_at) else max(o.resolved_at) end as last_resolved_at,
+  min(o.captured_at) as captured_at,
+  min(o.line_of_business) as line_of_business,
+  min(o.entitlement_scope) as entitlement_scope
+from plm.opa_property_character o
+left join plm.source_resolution r
+  on r.source_system = 'disney_opa' and r.entity_kind = 'property'
+ and r.source_id = o.licensed_property_id::text
+left join core.property p on p.id = case when r.source_id is null then o.property_id else r.core_property_id end
+left join core.licensor l on l.id = p.licensor_id
+group by o.licensed_property_id;
+
+comment on view api.opa_property_reconciliation is
+  'Exactly one row per Disney OPA licensed_property_id. A durable disney_opa/property source_resolution decision wins for the whole node; only a wholly absent durable identity falls back to the legacy per-character landing fields, where disagreement reports mixed. Match arrays are deterministic and non-null. captured_at is the oldest retained row for the node. Core names and licensor codes remain subject to their underlying RLS, so empty names beside non-empty matched IDs can mean RLS suppression rather than no match.';
 
 create or replace function plm.set_source_resolution(
   p_source_system text,
@@ -270,6 +413,11 @@ begin
           '%I.%I.%I is legacy; use plm.set_source_resolution()',tg_table_schema,tg_table_name,v_column);
       end if;
     end loop;
+    if tg_table_name = 'opa_property_character'
+       and v_new ? 'property_id' and v_new -> 'property_id' <> 'null'::jsonb then
+      raise exception using errcode='23514', message=
+        'plm.opa_property_character.property_id is legacy; use plm.set_source_resolution()';
+    end if;
     return new;
   end if;
   v_old := to_jsonb(old);
@@ -281,6 +429,11 @@ begin
         tg_table_schema,tg_table_name,v_column);
     end if;
   end loop;
+  if tg_table_name = 'opa_property_character'
+     and (v_new -> 'property_id') is distinct from (v_old -> 'property_id') then
+    raise exception using errcode='23514', message=
+      'plm.opa_property_character.property_id is legacy and immutable; use plm.set_source_resolution()';
+  end if;
   return new;
 end;
 $$;
@@ -343,6 +496,11 @@ begin
   if position('for key share' in lower(pg_get_functiondef(
       'plm.set_source_resolution(text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz)'::regprocedure)))=0 then
     raise exception 'set_source_resolution lacks target lock';
+  end if;
+  if position('plm.source_resolution' in pg_get_viewdef('api.pmt_properties'::regclass,true))=0
+     or position('plm.source_resolution' in pg_get_viewdef('api.pmt_characters'::regclass,true))=0
+     or position('plm.source_resolution' in pg_get_viewdef('api.opa_property_reconciliation'::regclass,true))=0 then
+    raise exception 'consumer views do not read durable source resolution';
   end if;
 end;
 $$;
