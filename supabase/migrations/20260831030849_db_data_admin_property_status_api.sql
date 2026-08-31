@@ -25,6 +25,7 @@ declare
   v_actor text;
 begin
   perform app.require_licensing_manager_access();
+  v_actor := coalesce(app.current_profile_id()::text, auth.uid()::text);
 
   if p_operation_id is null or p_property_id is null then
     raise exception 'db_data_admin property status: operation and Property are required'
@@ -41,7 +42,13 @@ begin
   if found then
     if v_existing.entity_type <> 'property'
        or v_existing.entity_id <> p_property_id
-       or v_existing.action <> 'property_set_status' then
+       or v_existing.action <> 'property_set_status'
+       or v_existing.new_snapshot ->> 'status' is distinct from v_status
+       or v_existing.reason is distinct from v_reason
+       or (v_existing.old_snapshot ->> 'updated_at')::timestamptz
+          is distinct from p_expected_updated_at
+       or v_existing.actor_profile_id is distinct from app.current_profile_id()
+       or v_existing.actor_user_id is distinct from auth.uid() then
       raise exception 'db_data_admin property status: operation id already belongs to another action'
         using errcode = '23505';
     end if;
@@ -72,14 +79,14 @@ begin
       'message', 'nothing to change', 'current', v_old);
   end if;
 
-  v_actor := coalesce(app.current_profile_id()::text, auth.uid()::text);
   insert into plm.licensing_write_authorization(
     backend_pid,transaction_id,target_table,write_kind,plan_id,plan_hash,
     actor,protected_columns,expires_at)
   values(
     pg_backend_pid(),txid_current(),'core.property','coldlion_status',p_operation_id,
     encode(extensions.digest(concat_ws('/', '1952',p_operation_id::text,
-      p_property_id::text,v_status,v_reason),'sha256'),'hex'),
+      p_property_id::text,v_status,v_reason,p_expected_updated_at::text,v_actor),
+      'sha256'),'hex'),
     v_actor,array['status'],clock_timestamp()+interval '1 minute')
   returning id into v_authorization_id;
 
