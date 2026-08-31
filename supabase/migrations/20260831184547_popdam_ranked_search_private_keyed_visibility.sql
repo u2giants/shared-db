@@ -11,7 +11,8 @@ create or replace function public.filter_effective_assets(
 returns setof public.assets
 language sql
 stable
-security invoker
+security definer
+set search_path = public
 as $$
   with authorized as materialized (
     select public.require_dam_access() ok

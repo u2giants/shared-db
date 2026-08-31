@@ -892,7 +892,8 @@ CATALOG_CONTRACTS = {
         position('authorized as materialized' in pg_get_functiondef(p.oid)) > 0
         and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
         and position('filter_effective_assets_unchecked_1703' in pg_get_functiondef(p.oid)) > 0
-        and p.provolatile = 's' and not p.prosecdef
+        and p.provolatile = 's' and p.prosecdef
+        and 'search_path=public' = any(coalesce(p.proconfig, '{}'))
         from pg_proc p
         where p.oid = to_regprocedure('public.filter_effective_assets(jsonb)'))
       and not has_function_privilege('authenticated',

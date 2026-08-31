@@ -81,7 +81,13 @@ begin
     into v_definition;
   if position('require_dam_access' in v_definition) = 0
      or position('authorized as materialized' in v_definition) = 0
-     or position('filter_effective_assets_unchecked_1703' in v_definition) = 0 then
+     or position('filter_effective_assets_unchecked_1703' in v_definition) = 0
+     or not exists (
+       select 1 from pg_proc
+       where oid = 'public.filter_effective_assets(jsonb)'::regprocedure
+         and prosecdef
+         and 'search_path=public' = any(coalesce(proconfig, '{}'))
+     ) then
     raise exception 'effective filter must evaluate DAM access once before its private filter body';
   end if;
   if has_function_privilege('authenticated',
