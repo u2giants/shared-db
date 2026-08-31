@@ -44,10 +44,6 @@ alter table dflow.user_notification
   add column workflow_action_id bigint references dflow.item_workflow_action(id) on delete restrict,
   add column idempotency_key text;
 
-alter table dflow.user_notification
-  add constraint user_notification_user_id_fk_fkey
-  foreign key (user_id_fk) references dflow.users(id) not valid;
-
 create unique index user_notification_action_recipient
   on dflow.user_notification (workflow_action_id, user_id_fk)
   where workflow_action_id is not null;
