@@ -116,28 +116,28 @@ begin
     'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'::regprocedure
   ) into v_definition;
   if position('candidate_asset_ids' in v_definition) = 0
-     or position('visible_style_groups' in v_definition) = 0
-     or position('join visible_assets a on a.id = c.asset_id' in v_definition) = 0
-     or position('join visible_style_groups g on g.style_group_id = c.style_group_id' in v_definition) = 0 then
+     or position('select distinct a.document_type, a.entity_id, a.asset_id' in v_definition) = 0 then
     raise exception 'ranked search must use keyed asset and Style Group visibility joins';
   end if;
-  if position('full_text_matches as materialized' in v_definition) = 0
-     or position('d.search_tsv @@ any(array(select q.tsq from queries q))' in v_definition) = 0
-     or position('select max(ts_rank_cd(d.search_tsv, q.tsq))' in v_definition) = 0
-     or position('from full_text_matches d' in v_definition) = 0 then
-    raise exception 'ranked search must fetch each full-text document once and preserve maximum expansion rank';
+  if position('d.search_tsv @@ any(array(select q.tsq from queries q))' in v_definition) = 0
+     or position('full_text_matches as materialized' in v_definition) = 0
+     or position('select max(ts_rank_cd(d.search_tsv, q.tsq))' in v_definition) = 0 then
+    raise exception 'ranked search must retain the measured indexable scan and maximum synonym rank';
   end if;
-  if (length(v_definition) - length(replace(v_definition,
-       'join public.dam_search_documents d on d.search_tsv @@ q.tsq', '')))
-       / length('join public.dam_search_documents d on d.search_tsv @@ q.tsq') <> 0 then
-    raise exception 'ranked search restored one wide-heap fetch per synonym expansion';
+  if position('c.keyword_rank, c.semantic_rank, c.rank, c.asset_id id' in v_definition) = 0
+     or position('c.keyword_rank, c.semantic_rank, c.rank, a.id' in v_definition) = 0
+     or position('select distinct a.document_type, a.entity_id, a.asset_id' in v_definition) = 0
+     or position('from candidate_ranks c' in substring(v_definition from position('ranked_documents as materialized' in v_definition))) > 0 then
+    raise exception 'candidate rank keys must flow through visibility without a quadratic CTE join';
   end if;
   if position('c.asset_id = a.id or c.style_group_id = a.style_group_id' in v_definition) > 0
      or position('r.asset_id = a.id or r.style_group_id = a.style_group_id' in v_definition) > 0 then
     raise exception 'ranked search restored the production-timeout OR join';
   end if;
-  if position('select a.id, a.style_group_id, a.file_type, a.status,' in v_definition) = 0
-     or position('a.workflow_status, a.stage, a.is_licensed' in v_definition) = 0 then
+  if position('a.id, a.style_group_id asset_style_group_id, a.file_type, a.status,' in v_definition) = 0
+     or position('a.workflow_status, a.stage, a.is_licensed' in v_definition) = 0
+     or position('select a.*' in v_definition) > 0
+     or position('select distinct a.*' in v_definition) > 0 then
     raise exception 'visible assets must retain the explicit seven-column projection';
   end if;
   if position('select f.*' in v_definition) > 0

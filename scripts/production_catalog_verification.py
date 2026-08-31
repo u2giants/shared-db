@@ -947,6 +947,29 @@ CATALOG_CONTRACTS = {
       and has_function_privilege('authenticated',
         'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
 """,
+    "popdam_ranked_search_rank_keys_through_visibility_v4": """
+      (select
+        position('c.keyword_rank, c.semantic_rank, c.rank, c.asset_id id'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('c.keyword_rank, c.semantic_rank, c.rank, a.id'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('select distinct a.document_type, a.entity_id, a.asset_id'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('join visible_assets a on a.id = c.asset_id'
+          in pg_get_functiondef(p.oid)) = 0
+        and position('join visible_style_groups g on g.style_group_id = c.style_group_id'
+          in pg_get_functiondef(p.oid)) = 0
+        and position('d.search_tsv @@ any(array(select q.tsq from queries q))'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p where p.oid = to_regprocedure(
+          'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and not has_function_privilege('anon',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+""",
     "coco_owner_ruling_v1": """
       case when to_regclass('core.taxonomy_owner_ruling') is null then true else
         cardinality(xpath('/table/row', query_to_xml(
