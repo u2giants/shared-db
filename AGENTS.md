@@ -394,6 +394,13 @@ code — but an orchestrator that leaves items standing in it is carrying other 
 The block prints **before** the refill line, not after it, so a queue that has dispatchable work
 cannot hide it — that ordering is deliberate.
 
+### Queue priority
+
+Among eligible structural issues, work that releases the largest number of other open issues is
+first. The count includes direct and chained `depends_on` relationships. If two issues release the
+same number, the older issue is first. The numeric `priority:` field remains required for scope
+compatibility but does not override blocker impact or age.
+
 An issue with **no** `db-work-scope` block at all is `unclassified`: it is not admitted, it is not
 worked, and it already blocks an empty-lane claim. Classify it or send it back.
 

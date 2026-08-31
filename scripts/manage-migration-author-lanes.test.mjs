@@ -96,6 +96,26 @@ test('dynamic queues serialize overlapping work and refill every empty lane',()=
   assert.ok(result.queues.some((q)=>q.queued.join(',')==='1,2'))
 })
 
+test('queue priority favors the issue that unblocks the most downstream work, then the oldest issue',()=>{
+  const issues=[
+    {number:100,createdAt:'2026-08-04T00:00:00Z',title:'old but no dependents',body:scope('ready','structural','shared-db-orchestrator',999,['table core.a'])},
+    {number:200,createdAt:'2026-08-03T00:00:00Z',title:'older equal blocker',body:scope('ready','structural','shared-db-orchestrator',1,['table core.a'])},
+    {number:300,createdAt:'2026-08-02T00:00:00Z',title:'depends on 200',body:scope('ready','structural','shared-db-orchestrator',1,['table core.b'],'#200')},
+    {number:400,createdAt:'2026-08-05T00:00:00Z',title:'larger blocker',body:scope('ready','structural','shared-db-orchestrator',1,['table core.a'])},
+    {number:500,createdAt:'2026-08-06T00:00:00Z',title:'depends on 400',body:scope('ready','structural','shared-db-orchestrator',1,['table core.c'],'#400')},
+    {number:600,createdAt:'2026-08-07T00:00:00Z',title:'transitively depends on 400',body:scope('ready','structural','shared-db-orchestrator',1,['table core.d'],'#500')},
+  ]
+  const result=buildDynamicQueues(issues,[],NOW)
+  assert.deepEqual(result.blockerCounts,{100:0,200:1,300:0,400:2,500:1,600:0})
+  assert.equal(result.queues.find((queue)=>queue.queued.includes(400)).queued[0],400,'two downstream issues outrank every older or manually higher-priority issue')
+
+  const ageTie=buildDynamicQueues([
+    {number:700,createdAt:'2026-08-10T00:00:00Z',title:'newer',body:scope('ready','structural','shared-db-orchestrator',999,['table core.z'])},
+    {number:800,createdAt:'2026-08-01T00:00:00Z',title:'older',body:scope('ready','structural','shared-db-orchestrator',1,['table core.z'])},
+  ],[],NOW)
+  assert.deepEqual(ageTie.queues.find((queue)=>queue.queued.includes(800)).queued,[800,700])
+})
+
 test('an open issue whose closed claim version is on main is never dispatched as fresh authoring',()=>{
   const issue={number:1769,title:'WWE tables awaiting promotion',body:scope('ready','structural','shared-db-orchestrator',700,['schema plm'])}
   const positiveControl=buildDynamicQueues([issue],[],NOW)

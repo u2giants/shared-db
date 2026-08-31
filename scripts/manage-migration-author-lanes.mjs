@@ -410,6 +410,33 @@ export function conflicts(a, b) {
 // lost the read/write distinction must not be handed a weaker answer.
 function overlaps(a, b) { return conflicts({ writes: a, reads: [] }, { writes: b, reads: [] }) }
 
+function downstreamBlockerCounts(dependencyEdges) {
+  const dependents = new Map()
+  for (const [issue, dependencies] of Object.entries(dependencyEdges)) {
+    for (const dependency of dependencies) {
+      if (!dependents.has(dependency)) dependents.set(dependency, new Set())
+      dependents.get(dependency).add(Number(issue))
+    }
+  }
+  const count = (issue) => {
+    const seen = new Set(), pending = [...(dependents.get(issue) ?? [])]
+    while (pending.length) {
+      const dependent = pending.pop()
+      if (seen.has(dependent)) continue
+      seen.add(dependent)
+      pending.push(...(dependents.get(dependent) ?? []))
+    }
+    return seen.size
+  }
+  return new Map(Object.keys(dependencyEdges).map(Number).map((issue)=>[issue,count(issue)]))
+}
+
+function queueOrder(a,b) {
+  return b.blockedIssueCount-a.blockedIssueCount
+    || a.createdAt-b.createdAt
+    || a.issue-b.issue
+}
+
 export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssueNumbers = issues.map((issue)=>issue.number), dependencyStates = null, claimPullStates = new Map(), authoredOnMain = new Set()) {
   const openNumbers = new Set(allOpenIssueNumbers.map(Number))
   const skipped = [], unclassified = [], malformed = [], unlabelled = [], candidates = [], notOrchestratorWork = []
@@ -476,8 +503,11 @@ export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssu
       const waiting = scope.dependencies.filter((number)=>openNumbers.has(number))
       if (waiting.length) { skipped.push({ issue:issue.number, reason:`depends-on-open:${waiting.join(',')}` }); continue }
     }
-    candidates.push({ issue:issue.number, title:issue.title, ...scope })
+    const createdAt = Date.parse(issue.createdAt ?? issue.created_at ?? '')
+    candidates.push({ issue:issue.number, title:issue.title, createdAt:Number.isFinite(createdAt)?createdAt:Number(issue.number), ...scope })
   }
+  const blockerCounts = downstreamBlockerCounts(dependencyEdges)
+  for (const candidate of candidates) candidate.blockedIssueCount = blockerCounts.get(candidate.issue) ?? 0
   const protectedClaims = claims.map((claim)=>{
     const lease = parseAuthorLease(claim.body,now)
     return { claim:claim.number, issue:null, priority:Number.MAX_SAFE_INTEGER, writes:lease.writes, reads:lease.reads ?? [], objects:lease.writes, capacityActive:lease.capacityActive, leaseState:lease.capacityState, expiresAt:lease.expiresAt?.toISOString?.() ?? null, prState:claimPullStates.get(claim.number) ?? 'unknown' }
@@ -487,7 +517,8 @@ export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssu
     if (components[i].some((a)=>components[j].some((b)=>conflicts(a,b)))) components[i].push(...components.splice(j,1)[0]); else j++
   }
   const queues = Array.from({length:MAX_AUTHOR_LANES},(_,index)=>({ lane:index+1, active:null, activeLeaseState:null, activeExpiresAt:null, activePrState:null, protected:[], queued:[], objects:[], reads:[] }))
-  const ordered = components.sort((a,b)=>Number(Boolean(b.some(x=>x.claim)))-Number(Boolean(a.some(x=>x.claim))) || Math.max(...b.map(x=>x.priority))-Math.max(...a.map(x=>x.priority)))
+  const componentRank = (component) => component.filter((item)=>item.issue).sort(queueOrder)[0]
+  const ordered = components.sort((a,b)=>Number(Boolean(b.some(x=>x.claim)))-Number(Boolean(a.some(x=>x.claim))) || (componentRank(a)&&componentRank(b)?queueOrder(componentRank(a),componentRank(b)):0))
   for (const component of ordered) {
     const protectedItems = component.filter((x)=>x.claim)
     const activeItem = protectedItems.find((x)=>x.capacityActive)
@@ -504,7 +535,7 @@ export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssu
       lane.activePrState = activeItem.prState
     }
     lane.protected.push(...protectedItems.map((item)=>item.claim))
-    lane.queued.push(...component.filter((x)=>x.issue).sort((a,b)=>b.priority-a.priority || a.issue-b.issue).map((x)=>x.issue))
+    lane.queued.push(...component.filter((x)=>x.issue).sort(queueOrder).map((x)=>x.issue))
     lane.objects.push(...new Set(component.flatMap((x)=>x.writes ?? x.objects ?? [])))
     lane.reads.push(...new Set(component.flatMap((x)=>x.reads ?? [])))
   }
@@ -515,7 +546,7 @@ export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssu
   // A CYCLE IS NEVER STARTABLE and is invisible to an open/closed test, so it is
   // reported as its own finding rather than as N tasks that merely look blocked.
   const dependencyCycles = findDependencyCycles(dependencyEdges)
-  return { queues, expiredClaims, skipped, unclassified, malformed, unlabelled, notOrchestratorWork, dependencyCycles, grandfatheredDependencies, dispatchable, emptyLanes, fullyAudited:!unclassified.length&&!malformed.length&&!unlabelled.length&&!dependencyCycles.length }
+  return { queues, expiredClaims, skipped, unclassified, malformed, unlabelled, notOrchestratorWork, dependencyCycles, grandfatheredDependencies, blockerCounts:Object.fromEntries(blockerCounts), dispatchable, emptyLanes, fullyAudited:!unclassified.length&&!malformed.length&&!unlabelled.length&&!dependencyCycles.length }
 }
 
 // RETURN PATH (AGENTS.md 0.0-C). A rejected task is forwarded to the repository
@@ -876,7 +907,7 @@ export const githubIo = {
   openWorkIssues(pager = ghPaginated) {
     const rows = pager(`repos/${REPO}/issues?state=open&per_page=100`)
     return rows.filter((x)=>!x.pull_request)
-      .map((x)=>({ number:x.number, title:x.title, body:x.body, labels:(x.labels??[]).map((l)=>l.name) }))
+      .map((x)=>({ number:x.number, title:x.title, body:x.body, createdAt:x.created_at, labels:(x.labels??[]).map((l)=>l.name) }))
       .filter((x)=>!x.labels.some((name)=>COORDINATION_LABELS.has(name)))
   },
   openIssueNumbers() { return ghPaginated(`repos/${REPO}/issues?state=open&per_page=100`).filter((x)=>!x.pull_request).map((x)=>x.number) },
