@@ -91,6 +91,12 @@ as $$
     and (nullif(p_filters ->> 'program', '') is null or a.program = p_filters ->> 'program');
 $$;
 
+-- CREATE OR REPLACE retains an older function's SET configuration. Normalize
+-- both properties explicitly so an ordered replay from a configured predecessor
+-- still produces the inlinable public contract.
+alter function public.filter_effective_assets(jsonb) security invoker;
+alter function public.filter_effective_assets(jsonb) reset all;
+
 revoke all on function public.filter_effective_assets(jsonb) from public, anon;
 grant execute on function public.filter_effective_assets(jsonb) to authenticated, service_role;
 

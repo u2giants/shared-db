@@ -1750,12 +1750,13 @@ class BehavioralSidecarTests(unittest.TestCase):
         checks = load_behavior_sidecars(REPO, {version: migration}, [version])
         targets = derive_targets({version: migration}, [version])
         sql = build_behavior_sql(checks)
+        migration_sql = migration.read_text(encoding="utf-8").lower()
 
         self.assertEqual(len(checks), 1)
         self.assertEqual(checks[0]["kind"], "catalog_contract")
         self.assertEqual(
             checks[0]["migration_sha256"],
-            "a34c4da4f30904cca774679b1c185d09c568fb2da933ba9a094f44c0a18d9fa6",
+            "75bbdbe465f7b38ffb1764a89fa57a1289c5edec6f49a75e7f0defa2bb2bec9e",
         )
         self.assertIn("public.filter_effective_assets", targets.functions)
         self.assertIn("public.search_dam_documents", targets.functions)
@@ -1763,6 +1764,18 @@ class BehavioralSidecarTests(unittest.TestCase):
         self.assertIn("authorized as materialized", sql)
         self.assertIn("not p.prosecdef", sql)
         self.assertIn("p.proconfig is null", sql)
+        self.assertIn(
+            "alter function public.filter_effective_assets(jsonb) security invoker;",
+            migration_sql,
+        )
+        self.assertIn(
+            "alter function public.filter_effective_assets(jsonb) reset all;",
+            migration_sql,
+        )
+        self.assertLess(
+            migration_sql.index("create or replace function public.filter_effective_assets"),
+            migration_sql.index("alter function public.filter_effective_assets(jsonb) reset all;"),
+        )
         self.assertIn("has_function_privilege('authenticated'", sql)
 
     def test_real_1732_sidecar_is_hash_bound_catalog_only_and_exact_shape(self):
