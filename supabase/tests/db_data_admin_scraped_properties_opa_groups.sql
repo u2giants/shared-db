@@ -33,8 +33,10 @@ begin
   select pg_get_functiondef(v_sig::regprocedure) into v_definition;
   if position('app.require_licensing_manager_access()' in v_definition) = 0
      or position('plm.opa_property_studio_resolution' in v_definition) = 0
+     or position('page_submission_source_candidates as materialized' in v_definition) = 0
+     or position('left join source_rows s' in v_definition) <> 0
      or position('Disney OPA (unsplit)' in v_definition) <> 0 then
-    raise exception 'authorization, OPA resolution, or retired-group contract changed';
+    raise exception 'authorization, targeted labels, OPA resolution, or retired-group contract changed';
   end if;
 
   select p.id, p.auth_user_id into v_profile, v_auth
