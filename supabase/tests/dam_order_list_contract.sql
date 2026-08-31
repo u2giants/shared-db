@@ -5,7 +5,7 @@
 --   20260810060000_popdam_order_list_source_pair_nulls_distinct.sql and
 --   20260810100000_link_dam_order_line_cross_item_ambiguity.sql and
 --   20260818141220_popdam_bulk_order_line_relink.sql and
---   20260831004326_popdam_orderlist_input_only_write_contract.sql (issue #1772), which
+--   20260831045020_popdam_orderlist_input_only_write_contract.sql (issue #1772), which
 --   narrowed the write whitelists and is why the payloads below use input fields only.
 --
 -- HOW TO RUN
@@ -470,14 +470,14 @@ begin
   select public.create_dam_order(
     jsonb_build_object(
       -- status / sent_po_date / close_tracking are AUTOMATIC columns and stopped being
-      -- writable through this RPC in 20260831004326 (issue #1772). Passing one here now
+      -- writable through this RPC in 20260831045020 (issue #1772). Passing one here now
       -- raises 42501, which is the contract, not a regression.
       'production_order_number', 'TEST-PO-0001',
       'company_id', v_cust,
       'metadata', jsonb_build_object('ordering_company', 'POP')
     ),
     jsonb_build_array(
-      -- line_number is DERIVED from position since 20260831004326; these four lines
+      -- line_number is DERIVED from position since 20260831045020; these four lines
       -- still land as '1'..'4' because they are given in that order.
       jsonb_build_object('sku',' NCV3SP1 ','quantity_ordered',10,
                          'source_style_type','licensed','customer_po_number','CPO-1',
@@ -799,7 +799,7 @@ begin
   else v_fail := v_fail + 1; raise notice 'FAIL voiding destroyed lines (% of 12 remain)', v_n; end if;
 
   -- A partial patch must not blank fields it did not mention. `mbl` was used here until
-  -- 20260831004326 made it non-writable; void_reason is the writable field now, and the
+  -- 20260831045020 made it non-writable; void_reason is the writable field now, and the
   -- unmentioned fields it must not disturb are company_id and voided_at.
   perform public.update_dam_order(v_order, jsonb_build_object('void_reason','contract test 2'), '[]'::jsonb);
   if exists (select 1 from plm.production_order

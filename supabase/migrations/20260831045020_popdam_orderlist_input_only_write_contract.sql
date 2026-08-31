@@ -139,7 +139,7 @@ begin
 exception when undefined_function or undefined_table or invalid_schema_name then
   raise exception using
     errcode = '42883',
-    message = '20260831004326 requires 20260810010000_popdam_order_list_contract.sql to be applied first',
+    message = '20260831045020 requires 20260810010000_popdam_order_list_contract.sql to be applied first',
     detail  = 'This migration narrows whitelists that 20260810010000 defines. Applying it before its base would leave the wide definitions in force.',
     hint    = 'Apply migrations in filename order.';
 end;
