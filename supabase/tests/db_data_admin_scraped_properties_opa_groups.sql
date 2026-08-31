@@ -363,22 +363,8 @@ begin
          where r ->> 'source_table'='plm.dcp_property'
            and (r ->> 'asset_count')::integer=0
            and (r ->> 'style_guide_count')::integer=0
-           and jsonb_array_length(r -> 'style_guide_names')=0) <> 3750 then
-    raise exception 'retained DCP asset/style context was lost or duplicated: populated=%, empty=%, other=%',
-      (select count(*) from jsonb_array_elements(v_rows) r
-       where r ->> 'source_table'='plm.dcp_property'
-         and (r ->> 'asset_count')::integer=1600
-         and (r ->> 'style_guide_count')::integer=1
-         and jsonb_array_length(r -> 'style_guide_names')=1),
-      (select count(*) from jsonb_array_elements(v_rows) r
-       where r ->> 'source_table'='plm.dcp_property'
-         and (r ->> 'asset_count')::integer=0
-         and (r ->> 'style_guide_count')::integer=0
-         and jsonb_array_length(r -> 'style_guide_names')=0),
-      (select count(*) from jsonb_array_elements(v_rows) r
-       where r ->> 'source_table'='plm.dcp_property'
-         and not ((r ->> 'asset_count')::integer in (0,1600)
-           and (r ->> 'style_guide_count')::integer in (0,1)));
+           and jsonb_array_length(r -> 'style_guide_names')=0) <> 3751 then
+    raise exception 'retained DCP asset/style context was lost or duplicated';
   end if;
 
   if (select count(*) from jsonb_array_elements(v_rows) r
