@@ -17,6 +17,35 @@ export function verdictFromOutput(body,headSha){
   if(!match||!match[2]||match[2].toLowerCase()!==String(headSha??'').toLowerCase())return null
   return match[1].toUpperCase()
 }
+export const VOID_MARKER='VERDICT LINE VOIDED BY THE GOVERNED REVIEW RUNNER'
+// Rewrites ONLY the terminal machine-parseable verdict line of an already-posted
+// findings comment into a clearly-marked voided form. The reviewer's analysis is
+// evidence: every other line is preserved verbatim. The replacement must be
+// unreadable both to `verdictFromOutput` (which requires the terminal line to
+// match its VERDICT regex) and to `anyVerdictFor`/`isVerdictFor` (which strip a
+// leading `VERDICT:` label plus leading `[\s>*_#-]` punctuation and then test
+// whether the line OPENS with a decision word). So no produced line opens with
+// VERDICT:, APPROVE, REVISE or REJECT; the decision word survives only
+// mid-sentence, quoted, for the human reader.
+export function neutraliseVerdictLine(body,reason){
+  const lines=String(body??'').split(/\r?\n/)
+  let index=-1
+  for(let i=lines.length-1;i>=0;i-=1){
+    if(!lines[i].trim())continue
+    if(/^\s*VERDICT\s*:\s*(?:APPROVE|REVISE|REJECT)\b/i.test(lines[i]))index=i
+    break
+  }
+  if(index<0)return null
+  const decision=/(APPROVE|REVISE|REJECT)/i.exec(lines[index])?.[1]?.toUpperCase()??'UNKNOWN'
+  lines[index]=[
+    `> ${VOID_MARKER}.`,
+    '>',
+    `> The reviewer's terminal verdict line (its decision word was "${decision}") was rewritten so that no tool can read it as a verdict at this head. It was voided because the durable verdict artifact could not be recorded, so this comment authorizes nothing. Reason: ${reason}`,
+    '>',
+    "> The reviewer's findings above are unchanged and remain readable as evidence. A real decision requires a fresh governed review that records a create-only verdict artifact."
+  ].join('\n')
+  return lines.join('\n')
+}
 export function wrapperSpawnPlan(resolved,args,platform=process.platform){
   if(platform==='win32'&&/\.(cmd|bat)$/i.test(resolved))return{file:process.env.ComSpec||'cmd.exe',args:['/d','/s','/c',resolved,...args]}
   return{file:resolved,args}
@@ -37,7 +66,23 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
   let artifact
   try{artifact=deps.record({...options,verdict,findingsRef:comment.html_url,replacementSequence:options.replacementSequence??null})}
   catch(error){
-    deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body:`REVIEW RECORDING FAILED — the preceding findings comment is non-authorizing and no verdict artifact was recorded. Reason: ${error.message}`}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
+    // The findings comment posted above still ends in a machine-parseable
+    // terminal verdict line. Left in place, the lane tooling reads it as a real
+    // verdict at this head and the pull request deadlocks in both directions
+    // (issue #2075). Void that one line before announcing the failure.
+    let voidStatus='voided'
+    try{
+      const edited=neutraliseVerdictLine(body,error.message)
+      if(edited===null)throw new Error('the posted findings comment carried no terminal verdict line to void')
+      const patch=deps.spawn('gh',['api','-X','PATCH',`repos/u2giants/shared-db/issues/comments/${comment.id}`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body:edited}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
+      if(patch.error||patch.status!==0)throw new Error(`gh exited ${patch.status??'unknown'}${patch.error?` (${patch.error.message})`:''}`)
+    }catch(voidError){voidStatus=`FAILED: ${voidError.message}`}
+    const stillLive=voidStatus!=='voided'
+    const note=stillLive
+      ? `\n\nTHE VOIDING EDIT ITSELF ${voidStatus}. A PARSEABLE TERMINAL VERDICT LINE IS STILL LIVE ON COMMENT ${comment.id} (${comment.html_url}). Lane tooling will read it as a real verdict at ${options.headSha} and deadlock this pull request. That line must be neutralised BY HAND on comment ${comment.id} before this pull request can proceed.`
+      : `\n\nThe terminal verdict line on comment ${comment.id} was voided so no tool can read it as a verdict at ${options.headSha}. The reviewer's findings were left intact.`
+    deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body:`REVIEW RECORDING FAILED — the preceding findings comment is non-authorizing and no verdict artifact was recorded. Reason: ${error.message}${note}`}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
+    if(stillLive)throw new Error(`${error.message} — and the voiding edit ${voidStatus}; a parseable terminal verdict line is still live on comment ${comment.id} and must be neutralised by hand`)
     throw error
   }
   return {artifact,body}
