@@ -110,7 +110,7 @@ jobs:
           set -euo pipefail
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$MAIN_SHA"
-          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          MAIN_SHA="$MAIN_SHA" node scripts/check-main-tip-freshness.mjs
           if [ -z "${PREVIEW_PROJECT_REF// /}" ]; then
             echo "REFUSED: repository variable PREVIEW_PROJECT_REF is not set. Set it to the CURRENT preview branch project ref. An unset ref is never treated as a default." >&2
             exit 1
@@ -216,7 +216,7 @@ jobs:
         run: |
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$MAIN_SHA"
-          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          MAIN_SHA="$MAIN_SHA" node scripts/check-main-tip-freshness.mjs
           python scripts/preview_ledger_orphan_reconcile.py --mode apply \
             --repo "$GITHUB_WORKSPACE" --linked-dir "$GITHUB_WORKSPACE" --source-pr-dir "$RUNNER_TEMP/source-pr" --orphan-source-dir "$RUNNER_TEMP/orphan-source" --expected-project-ref "$PREVIEW_PROJECT_REF" \
             --main-sha "$MAIN_SHA" --orphan-version "$ORPHAN" --replacement-version "$REPLACEMENT" \
