@@ -74,6 +74,11 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    ````
    ```
 
+   Queue order is derived, not manually nominated: the issue that unblocks the
+   most other open issues through direct or chained `depends_on` relationships
+   goes first; equal blocker counts are ordered oldest first. `priority:` remains
+   required for scope compatibility but cannot override blocker impact or age.
+
    **READS AND WRITES ARE DECLARED SEPARATELY (Step 2, issue #1366).** Use
    `writes:` for every object the work CHANGES and `reads:` for every object it
    DEPENDS ON without changing. The queue serialises on this matrix:
@@ -283,6 +288,16 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    review plus three rebuttals. If material disagreement remains, stop the merge
    and ask Albert one concise decision. Never send secrets or licensed rows.
    Do not impose a fixed hard-kill timer on a reviewer that is still making progress.
+
+   Run the returned wrapper only through `scripts/run-governed-review.mjs`. The
+   adapter withholds the result until it has posted the complete findings and
+   created the immutable verdict ref while the exact reviewer lease is still
+   held. Calling a wrapper directly produces supplementary diligence, never
+   merge or preview evidence; there is no manual verdict-recording fallback.
+   The manager CLI rejects `--record-review-verdict`; only the terminal adapter
+   can call the create-only recorder after posting the assigned wrapper output.
+   Prose may free reviewer capacity during cutover, but it never authorizes a
+   merge, preview, or replacement; those gates consume durable artifacts only.
 
    **A verdict with no coverage statement is not review evidence** (issue #1220,
    fixed wrapper-side in `ai-devops` PR #43). Two wrappers could finish a run
@@ -549,6 +564,16 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    ordinary preview lane, unchanged here — an earlier draft of this section
    claimed the exclusion existed, and it never did. Promotions are serialised
    among themselves by the workflow `concurrency` group, not by this lock.
+
+   **Every pull request enters through that guarded merge lane, including
+   documentation-only and other non-migration changes.** A pull request that
+   changes no migration needs no migration-author claim, but the lease workflow
+   does not auto-authorize it: the guarded merge still proves the exact head,
+   current-main relationship, collision result, and governed review while it
+   holds the merge lock. When production acquires its lock, the production
+   workflow revokes every open pull request's earlier merge authorization before
+   releasing the lock. This prevents a stale green authorization from surviving
+   the production freeze.
 
    The lock fails closed if the PR is not merged, if its
    merge commit is not carried by the main tip, if the named versions were not
