@@ -189,9 +189,39 @@ test('POSITIVE CONTROL: an advanced tip reporting no changed file refuses', () =
   assert.match(verdict.reason, /no changed file/)
 })
 
+test('POSITIVE CONTROL: a rename from code to Markdown is refused, not hidden', () => {
+  // `diff.renames` defaults to true, and rename detection makes --name-only
+  // report ONLY the destination. Without --no-renames this commit reports one
+  // Markdown path and PASSES while deleting a script. Found by external review.
+  const { repo, sha } = makeRepo()
+  try {
+    commitFiles(repo, { 'scripts/thing.mjs': '// x\n' }, 'feat: script')
+
+    const base = git(repo, ['rev-parse', 'HEAD']).trim()
+    git(repo, ['config', 'diff.renames', 'true'])
+    mkdirSync(join(repo, 'docs'), { recursive: true })
+    git(repo, ['mv', 'scripts/thing.mjs', 'docs/thing.md'])
+    git(repo, ['commit', '-q', '-m', 'chore: rename'])
+    const tip = git(repo, ['rev-parse', 'HEAD']).trim()
+    const verdict = classify(repo, base, tip)
+    assert.equal(verdict.ok, false, 'a code file renamed to .md must not pass as documentation')
+    assert.match(verdict.reason, /scripts\/thing\.mjs/)
+    assert.equal(sha.length, 40)
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test('POSITIVE CONTROL: a .txt control file is NOT documentation', () => {
+  // supabase/tests/ci-quarantine.txt decides which contract tests may fail the
+  // job. `.txt` is therefore not an inert extension in this repository, and was
+  // removed from the allowlist after external review.
+  assert.equal(isDocumentationPath('supabase/tests/ci-quarantine.txt'), false)
+  assert.equal(isDocumentationPath('notes.txt'), false)
+})
+
 test('extension matching is case-insensitive but not substring-based', () => {
   assert.equal(isDocumentationPath('HANDOFF.d/x.MD'), true)
-  assert.equal(isDocumentationPath('notes.txt'), true)
   // A file merely CONTAINING ".md" is not Markdown.
   assert.equal(isDocumentationPath('scripts/parse.md.py'), false)
   assert.equal(isDocumentationPath('supabase/migrations/1.sql'), false)

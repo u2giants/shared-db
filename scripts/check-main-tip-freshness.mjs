@@ -53,7 +53,14 @@
 import { execFileSync } from 'node:child_process'
 
 // Prose only. Deliberately short, deliberately not directory-based -- see above.
-const DOCUMENTATION_SUFFIXES = ['.md', '.markdown', '.txt']
+// `.txt` was here and was REMOVED after external review (GLM, 2026-09-01):
+// `supabase/tests/ci-quarantine.txt` is a plain-text file that CONTROLS WHICH
+// CONTRACT TESTS MAY FAIL THE JOB (`database-contract-tests.yml`, QUARANTINE_FILE).
+// Treating it as prose would have let a quarantine edit land on main during a
+// merge window without forcing the branch update and contract-test re-run the
+// old exact gate forced. The extension rule does not save you if the extension
+// itself is not inert -- so the list is Markdown only.
+const DOCUMENTATION_SUFFIXES = ['.md', '.markdown']
 
 // `.github/` is never documentation even when it is Markdown: an issue or pull
 // request TEMPLATE is inert, but this directory also carries workflows, actions
@@ -137,7 +144,14 @@ export function classifyMainTip({ mainSha, tipSha, cwd, gitRunner = git }) {
     // --name-only over the range, NUL-separated so a path containing a space or
     // a quote cannot be mis-split. -m flattens merge commits so a merge that
     // carried code cannot hide behind an empty diff.
-    raw = gitRunner(['log', '--format=', '--name-only', '-z', '-m', `${mainSha}..${tipSha}`], {
+    //
+    // --no-renames is LOAD-BEARING (added after external review, GLM 2026-09-01).
+    // `diff.renames` defaults to true, and with rename detection on, --name-only
+    // reports ONLY THE DESTINATION of a rename. `git mv scripts/foo.mjs
+    // docs/foo.md` would therefore have reported one Markdown path and PASSED,
+    // while deleting a code file. With --no-renames both sides are reported and
+    // the `.mjs` side blocks. Do not remove this flag.
+    raw = gitRunner(['log', '--format=', '--name-only', '--no-renames', '-z', '-m', `${mainSha}..${tipSha}`], {
       cwd,
     })
   } catch {
