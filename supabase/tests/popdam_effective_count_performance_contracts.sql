@@ -50,6 +50,17 @@ declare
   v_legacy jsonb;
   v_effective jsonb;
 begin
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
+     actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.licensor', 'scrape_consolidation',
+     gen_random_uuid(), repeat('2',64), 'issue-2054-contract-test',
+     array['name','code','status'], clock_timestamp() + interval '1 minute'),
+    (pg_backend_pid(), txid_current(), 'core.property', 'scrape_consolidation',
+     gen_random_uuid(), repeat('3',64), 'issue-2054-contract-test',
+     array['licensor_id','name','code','status'], clock_timestamp() + interval '1 minute');
+
   insert into core.licensor (id,name,code,status)
   values (v_licensor,'ZZ2054 Licensor','ZZ2054L-'||txid_current(),'active');
   insert into core.property (id,licensor_id,name,code,status)
