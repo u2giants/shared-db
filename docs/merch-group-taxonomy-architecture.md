@@ -61,7 +61,9 @@ above. ColdLion also owns official Licensor names and ColdLion-only Property tru
 > component value is blank; explode assortments to components before grouping any report, royalty
 > calculation, or licence-expiry check by licensor or property. A Master's licensor set is derived,
 > and it is a set, not a value. Full rule:
-> [`business-rules-erp-data.md` §9](business-rules-erp-data.md).
+> [`business-rules-erp-data.md` §9](business-rules-erp-data.md). Read it from the ordinary
+> `merchGroup05`/`merchGroup06` fields on the exploded component row of either history feed —
+> the separate `ppkMerchGroup*` family this repo once documented no longer exists in the API.
 
 ---
 
