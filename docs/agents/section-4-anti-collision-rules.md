@@ -289,12 +289,35 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    newest record returned for it, and that assignment must have its own APPROVE.
    Another slot's APPROVE can never answer for it.
 
-   To continue the same head after excluding slot N, re-run `--assign-reviewer`
-   for that head and slot: the returned slot draws a fresh, independent
-   reviewer, and the excluded one is still barred from this pull request
-   forever. A pull request excluded before returns existed is repaired by
-   re-running the IDENTICAL `--exclude-reviewer` command, which completes the
-   return without recording a second exclusion.
+   "At least as new" is the GLOBAL reviewer cursor sequence, not the
+   replacement namespace tail. Every assignment and every replacement spends one
+   strictly increasing sequence from the same durable counter, so a re-drawn
+   reviewer is always newer than the record that was returned, whichever
+   namespace each of them lives in.
+
+   To continue the same head after excluding slot N, draw a fresh reviewer for
+   that exact head and slot. WHICH COMMAND depends on what was returned, and
+   only one of the two will work:
+
+   - the returned record was the ORIGINAL assignment -> re-run
+     `--assign-reviewer` for that head and slot;
+   - the returned record was a REPLACEMENT -> re-run
+     `--replace-failed-reviewer` with the SAME `--failed-sequence`.
+     `--assign-reviewer` recreates the original ref, which the merge gate will
+     not accept as an answer for a returned replacement.
+
+   Either way the excluded reviewer stays barred from this pull request forever,
+   and the newly drawn reviewer must record its OWN durable APPROVE. A pull
+   request excluded before returns existed is repaired by re-running the
+   IDENTICAL `--exclude-reviewer` command, which completes the return without
+   recording a second exclusion.
+
+   A verdict that lands in the instant between the exclusion's in-mutex check and
+   its push answers an assignment that no longer exists. It is not deleted and it
+   does not pin the head: the exclusion re-files it under
+   `refs/db-review-retired-verdicts/` in the same atomic step that frees the
+   create-only verdict ref, so the next reviewer can record a verdict for that
+   head normally and the raced object remains readable for audit.
 
    **Grok's in-flight lock is PER REPOSITORY, not global.** `ai-grok-review`
    allows one live Grok review at a time *in shared-db*; it does not cap Grok
