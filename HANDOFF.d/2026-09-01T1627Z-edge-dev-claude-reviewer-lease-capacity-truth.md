@@ -1,5 +1,5 @@
 ---
-issue: 1851
+issue: 2058
 status: OPEN
 owner: claude/find-edge-dev-reviewer-coordination-9ec999
 ---
@@ -10,9 +10,13 @@ owner: claude/find-edge-dev-reviewer-coordination-9ec999
 - **Machine / agent:** `edge-dev` / Claude (Opus 5)
 - **Repo:** `u2giants/shared-db`, worktree branch
   `claude/find-edge-dev-reviewer-coordination-9ec999`, off `main` at `bcd2ec1a`
-- **Governed issue:** [#1851](https://github.com/u2giants/shared-db/issues/1851)
-  (`db-work`, `work_type: repo-maintenance`) — **no new issue was opened**; #1851
-  already documents this condition and its first three defects.
+- **Governed issue:** [#2058](https://github.com/u2giants/shared-db/issues/2058)
+  (`db-work`, `route: repo-maintenance`) — opened by the orchestrator session that
+  hit this same deadlock, four minutes after this session started. Same incident,
+  same root cause; see its briefing
+  [`2026-09-01T1630Z-edge-dev-codex-reviewer-capacity-deadlock.md`](2026-09-01T1630Z-edge-dev-codex-reviewer-capacity-deadlock.md).
+  [#1851](https://github.com/u2giants/shared-db/issues/1851) is the earlier, wider
+  record of the same pool and stays open for its two out-of-scope defects.
 
 ## What this session did
 

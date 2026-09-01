@@ -3,7 +3,15 @@
 **Making reviewer capacity tell the truth: release dead leases, age them, report them,
 and stop misnaming the refusal — plus repair the reviewer-issue evidence capture.**
 
-Governed by **issue [#1851](https://github.com/u2giants/shared-db/issues/1851)**
+Governed by **issue [#2058](https://github.com/u2giants/shared-db/issues/2058)** —
+the purpose-built repository-maintenance handover opened at 2026-09-01 16:31 UTC by
+the orchestrator session that hit this deadlock. Its briefing is
+[`HANDOFF.d/2026-09-01T1630Z-edge-dev-codex-reviewer-capacity-deadlock.md`](HANDOFF.d/2026-09-01T1630Z-edge-dev-codex-reviewer-capacity-deadlock.md).
+Issue [#1851](https://github.com/u2giants/shared-db/issues/1851) is the earlier,
+broader record of the same pool and holds two defects deliberately left out of scope
+here; keep it open and cross-referenced. This plan is the design #2058 asks for.
+
+Also governed by
 ("reviewer pool exhausted: all six reviewers leased across three PRs, no lane can
 commission"), label `db-work`, `work_type: repo-maintenance`.
 Session handoff: [`HANDOFF.d/2026-09-01T1627Z-edge-dev-claude-reviewer-lease-capacity-truth.md`](HANDOFF.d/2026-09-01T1627Z-edge-dev-claude-reviewer-lease-capacity-truth.md)
@@ -20,7 +28,7 @@ Session handoff: [`HANDOFF.d/2026-09-01T1627Z-edge-dev-claude-reviewer-lease-cap
 | 3 | `--reviewer-capacity` report: who holds what, since when, alive or dead | ⬜ open | — |
 | 4 | Refusal message names the true cause and the blocking holders | ⬜ open | — |
 | 5 | `ai-reviewer-issue`: never advertise evidence that was not captured | ⬜ open | — |
-| 6 | Tests green, PR merged, `#1851` updated | ⬜ open | — |
+| 6 | Tests green, PR merged, `#2058` closed and `#1851` updated | ⬜ open | — |
 
 **A fresh session starts at Step 1.** Steps 1–4 are one repository
 (`u2giants/shared-db`), one file, one pull request. Step 5 is a *different*
@@ -220,7 +228,8 @@ part of this plan has been started. There is no half-done work anywhere.
 | Its tests | `scripts/manage-migration-author-lanes.test.mjs` (2,579 lines) | on `main`, untouched |
 | Reviewer-issue logger | `ai-devops` `bin/ai-reviewer-issue` (392 lines) | on `main`, untouched |
 | Its tests | `ai-devops` `tests/test-ai-reviewer-issue.sh` | on `main`, untouched |
-| Governed issue | `u2giants/shared-db` #1851 | **open**, labelled `db-work` |
+| Governed issue | `u2giants/shared-db` #2058 | **open**, `db-work`, `work_type: repo-maintenance`, `route: repo-maintenance` |
+| Earlier related issue | `u2giants/shared-db` #1851 | **open** — same pool, wider scope |
 
 Key landmarks in `scripts/manage-migration-author-lanes.mjs`:
 
@@ -773,14 +782,14 @@ this is a **code** change, so none of them may be skipped.
 - [ ] Every test in §10 written, each observed **red first**, then green.
 - [ ] `node --test scripts/manage-migration-author-lanes.test.mjs` passes locally.
 - [ ] Branch pushed; PR opened against `u2giants/shared-db` `main`, body citing
-      issue #1851 and quoting the 2026-09-01 census.
+      issues #2058 and #1851 and quoting the 2026-09-01 census.
 - [ ] All required checks green on the PR (nine merge-gate checks; none skipped —
       this is code).
 - [ ] PR **merged by this session**, merge commit SHA recorded.
 - [ ] `--reviewer-capacity` run once against live state after merge; its six-row
-      output pasted into issue #1851 as proof.
+      output pasted into issue #2058 as proof.
 - [ ] Step 5 implemented in `ai-devops`, its test suite green, its own PR merged.
-- [ ] Issue #1851 updated with a comment stating which of its defects are now
+- [ ] Issue #2058 closed with the evidence below, and issue #1851 updated with a comment stating which of its defects are now
       closed (the third — no reclaim command) and which remain open (defect 1, the
       per-PR ceiling; defect 2, the missing queue).
 - [ ] This file's STATUS table updated: every row marked with a citable artifact
