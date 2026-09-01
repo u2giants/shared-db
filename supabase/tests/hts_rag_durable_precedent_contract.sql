@@ -6,6 +6,22 @@
 -- which were real defects found by external review of earlier drafts of this contract.
 begin;
 
+-- The PUBLIC/anon exposure detector, defined once so the assertion below and the probe
+-- that proves it can fail are literally the same query. It reads the ACL out of
+-- pg_class: information_schema.role_table_grants OMITS every grant whose grantee is
+-- PUBLIC, so the earlier information_schema form of this check could not see a
+-- `grant select ... to public` at all -- exactly the exposure it exists to catch.
+create function pg_temp.hts_rag_public_exposure() returns boolean language sql stable as $fn$
+  select exists (
+    select 1
+      from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+      cross join lateral aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a
+     where n.nspname = 'public' and c.relkind = 'r' and c.relname like 'hts_rag\_%'
+       and (a.grantee = 0 or a.grantee = (select oid from pg_roles where rolname = 'anon'))
+  );
+$fn$;
+
 do $$
 declare v_count integer; v_def text;
 begin
@@ -42,7 +58,7 @@ begin
   if v_count <> 7 then raise exception 'row level security is not enabled on all seven HTS RAG tables, got %', v_count; end if;
 
   -- No path at all for the unauthenticated browser role or PUBLIC, on any privilege.
-  if exists (select 1 from information_schema.role_table_grants where table_schema='public' and table_name like 'hts_rag_%' and grantee in ('anon','PUBLIC')) then
+  if pg_temp.hts_rag_public_exposure() then
     raise exception 'anon or PUBLIC holds a grant on an HTS RAG table';
   end if;
   if exists (select 1 from information_schema.role_table_grants where table_schema='public' and table_name like 'hts_rag_%' and grantee in ('anon','authenticated') and privilege_type in ('INSERT','UPDATE','DELETE')) then
@@ -101,6 +117,26 @@ begin
   end if;
 end $$;
 
+-- A check never seen to go red is not evidence. Inject a real `grant select to public`
+-- inside a subtransaction, require the detector to fire on it, and roll the grant back.
+do $$
+declare v_detected boolean;
+begin
+  begin
+    execute 'grant select on public.hts_rag_precedents to public';
+    v_detected := pg_temp.hts_rag_public_exposure();
+    raise exception using errcode = '22000', message = 'hts_rag_public_probe_rollback';
+  exception when others then
+    if sqlerrm <> 'hts_rag_public_probe_rollback' then raise; end if;
+  end;
+  if not coalesce(v_detected, false) then
+    raise exception 'the PUBLIC exposure detector did not fire on an injected grant, so it proves nothing';
+  end if;
+  if pg_temp.hts_rag_public_exposure() then
+    raise exception 'the injected PUBLIC grant did not roll back';
+  end if;
+end $$;
+
 -- Behavioural rows. Every one of the seven tables is exercised, so a table that is
 -- unusable in practice cannot pass on catalog presence alone.
 insert into public.hts_rag_product_examples(id,product_family,fixture_version,fixture_hash,input_hash)
@@ -113,8 +149,19 @@ insert into public.hts_rag_determinations(id,product_example_id,precedent_id,met
 values ('33333333-3333-4333-8333-333333333333','11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','rag_shadow','6913.10.50','provisional_complete',repeat('1',64),'44444444-4444-4444-8444-444444444444');
 
 -- The review queue must actually be workable; the index on comparison_review_state is
--- meaningless if nothing can transition the column.
-update public.hts_rag_determinations set comparison_review_state='accepted' where id='33333333-3333-4333-8333-333333333333';
+-- meaningless if nothing can transition the column. Run it AS service_role: the owner
+-- bypasses every grant, so an owner update proves nothing about the column-scoped
+-- UPDATE grant and the backend review policy actually working together.
+do $$
+begin
+  set local role service_role;
+  update public.hts_rag_determinations set comparison_review_state='accepted' where id='33333333-3333-4333-8333-333333333333';
+  if not found then raise exception 'service_role could not transition comparison_review_state'; end if;
+  reset role;
+exception when others then
+  reset role;
+  raise;
+end $$;
 
 insert into public.hts_rag_extraction_jobs(product_example_id,prompt_version,model_version,extraction_version,input_hash)
 values ('11111111-1111-4111-8111-111111111111','prompt-v1','model-v1','extract-v1',repeat('b',64));
@@ -137,20 +184,21 @@ begin
   end if;
 end $$;
 
--- The precedent/ruling join is exercised only when a ruling exists. The rulings table is
--- owned by an earlier migration, so this block adapts rather than assuming a fixture.
+-- The precedent/ruling link, exercised on a fixture this test creates itself. An earlier
+-- form adapted to whatever rulings happened to exist and silently skipped the table when
+-- none did, so the claim that all seven tables are exercised could be false and green.
+insert into public.hts_rag_rulings(id,ruling_number,full_text,full_text_hash)
+values ('55555555-5555-4555-8555-555555555555','ZZ-FIXTURE-0001','ZZ fixture ruling text',repeat('d',64));
+
+insert into public.hts_rag_precedent_rulings(precedent_id,ruling_id,verifier_relevance,final_relationship)
+values ('22222222-2222-4222-8222-222222222222','55555555-5555-4555-8555-555555555555','relevant','supporting');
+
 do $$
-declare v_ruling uuid;
 begin
-  select id into v_ruling from public.hts_rag_rulings limit 1;
-  if v_ruling is null then
-    raise notice 'no hts_rag_rulings row available; precedent-ruling link exercised by catalog only';
-  else
-    insert into public.hts_rag_precedent_rulings(precedent_id,ruling_id,verifier_relevance,final_relationship)
-    values ('22222222-2222-4222-8222-222222222222', v_ruling, 'relevant', 'supporting');
-    if not exists (select 1 from public.hts_rag_precedent_rulings where precedent_id='22222222-2222-4222-8222-222222222222') then
-      raise exception 'the precedent-ruling link did not accept a row';
-    end if;
+  if not exists (select 1 from public.hts_rag_precedent_rulings
+                  where precedent_id='22222222-2222-4222-8222-222222222222'
+                    and ruling_id='55555555-5555-4555-8555-555555555555') then
+    raise exception 'the precedent-ruling link did not accept a row';
   end if;
 end $$;
 
