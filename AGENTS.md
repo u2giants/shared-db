@@ -1496,9 +1496,13 @@ have already happened in this repo, more than once.
 
     What actually re-checks a migration pull request against current `main` is
     `.github/workflows/guarded-migration-merge.yml`, whose required context
-    `Migration guarded merge authorization` re-runs collision and lease validation on a head that
-    contains current `main`, while holding the merge lock. A pull request with no migrations is
-    auto-authorized by `.github/workflows/migration-author-lease.yml`.
+    `Migration guarded merge authorization` re-runs collision, exact-head review, and—when the
+    pull request changes a migration—lease validation on a head that contains current `main`,
+    while holding the merge lock. **Every pull request, including documentation-only and other
+    non-migration changes, uses that guarded merge lane.** A non-migration pull request needs no
+    migration-author claim, but it is never auto-authorized by the lease workflow. When production
+    acquires its lock, it revokes every open pull request's earlier merge authorization before
+    releasing that lock, so a stale green result cannot bypass the production freeze.
 
     Older documents — including `docs/owner-rulings.md`'s 2026-08-06/14 entries and
     `plan_orchestrator-workflow-gaps.md` — describe the earlier `strict: true` state. That history

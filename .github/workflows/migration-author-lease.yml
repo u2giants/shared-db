@@ -54,11 +54,8 @@ jobs:
           else
             echo 'relevant=true' >> "$GITHUB_OUTPUT"
           fi
-      - name: Authorize ordinary merge only when this pull request has no migration
-        if: github.event_name == 'pull_request' && steps.lease_check.outputs.relevant == 'false'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          gh api "repos/u2giants/shared-db/statuses/$HEAD_SHA" -f state=success -f context='Migration guarded merge authorization' -f description='No migration files; exclusive migration merge lane is not required'
+      # Every pull request receives merge authorization only inside
+      # guarded-migration-merge.yml. That workflow acquires the merge lane at
+      # the actual merge point, where an active production lock can refuse it.
+      # Auto-authorizing a non-migration head here left a green status that
+      # survived a production lock acquired later (#1688).

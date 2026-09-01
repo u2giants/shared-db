@@ -560,6 +560,16 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    claimed the exclusion existed, and it never did. Promotions are serialised
    among themselves by the workflow `concurrency` group, not by this lock.
 
+   **Every pull request enters through that guarded merge lane, including
+   documentation-only and other non-migration changes.** A pull request that
+   changes no migration needs no migration-author claim, but the lease workflow
+   does not auto-authorize it: the guarded merge still proves the exact head,
+   current-main relationship, collision result, and governed review while it
+   holds the merge lock. When production acquires its lock, the production
+   workflow revokes every open pull request's earlier merge authorization before
+   releasing the lock. This prevents a stale green authorization from surviving
+   the production freeze.
+
    The lock fails closed if the PR is not merged, if its
    merge commit is not carried by the main tip, if the named versions were not
    *added* by that PR, or if GitHub state cannot be read.
