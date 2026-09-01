@@ -939,6 +939,48 @@ CATALOG_CONTRACTS = {
       and has_function_privilege('authenticated',
         'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
 """,
+    "popdam_effective_count_indexed_union_v1": """
+      (select
+        position('identity_asset_ids as' in pg_get_functiondef(p.oid)) > 0
+        and position('union all' in pg_get_functiondef(p.oid)) > 0
+        and position('left join public.style_groups' in pg_get_functiondef(p.oid)) = 0
+        and position('a.licensor_id = ' in pg_get_functiondef(p.oid)) > 0
+        and position('sg.licensor_id = ' in pg_get_functiondef(p.oid)) > 0
+        and position('a.property_id = ' in pg_get_functiondef(p.oid)) > 0
+        and position('sg.property_id = ' in pg_get_functiondef(p.oid)) > 0
+        and position('a.customer_id = ' in pg_get_functiondef(p.oid)) > 0
+        and position('sg.customer_id = ' in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and p.provolatile = 's' and not p.prosecdef and p.proconfig is null
+        from pg_proc p where p.oid = to_regprocedure('public.filter_effective_assets(jsonb)'))
+      and (select
+        position('identity_asset_ids as' in pg_get_functiondef(p.oid)) > 0
+        and position('select a.file_type, a.status, a.workflow_status, a.stage, a.is_licensed'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('__includeOwnFacets2054' in pg_get_functiondef(p.oid)) > 0
+        and position('contentType' in pg_get_functiondef(p.oid)) > 0
+        and position('productMaterial' in pg_get_functiondef(p.oid)) > 0
+        and position('fileStatus' in pg_get_functiondef(p.oid)) > 0
+        and position('productCategory' in pg_get_functiondef(p.oid)) > 0
+        and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+        and not has_function_privilege('service_role', p.oid, 'EXECUTE')
+        from pg_proc p where p.oid = to_regprocedure(
+          'public.get_effective_filter_counts_unchecked_1703(jsonb)'))
+      and (select position('__includeOwnFacets2054' in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p where p.oid = to_regprocedure('public.get_effective_filter_counts(jsonb)'))
+      and (select position('__includeOwnFacets2054' in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p where p.oid = to_regprocedure('public.get_filter_counts(jsonb)'))
+      and not has_function_privilege('anon', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.get_filter_counts(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.get_filter_counts(jsonb)', 'EXECUTE')
+""",
     "popdam_ranked_search_single_heap_fetch_v3": """
       (select
         position('full_text_matches as materialized' in pg_get_functiondef(p.oid)) > 0
