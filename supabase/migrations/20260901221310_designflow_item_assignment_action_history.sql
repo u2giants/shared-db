@@ -324,8 +324,24 @@ exception
 end
 $function$;
 
+-- Access model for the two new tables (issue #1987): the `dflow` schema is not
+-- exposed through PostgREST and is not in any API search path, so there is no
+-- browser-reachable route to these tables. Access is closed explicitly rather
+-- than relying on that: every privilege is revoked from `anon` and
+-- `authenticated` first, then only SELECT is granted back to `authenticated`
+-- and `service_role`. `anon` is granted nothing and can reach nothing. All
+-- writes go exclusively through the two SECURITY DEFINER RPCs below, which
+-- derive the actor from the JWT, so row-level security is deliberately not
+-- enabled here: there is no direct-write path for RLS to police, and no other
+-- table in `dflow` enables it. Enabling RLS with no policy would additionally
+-- revoke the intended `authenticated` SELECT.
 revoke all on dflow.item_user_assignment, dflow.item_workflow_action from anon, authenticated;
 revoke all on function dflow.current_designflow_user_id() from public;
+-- The two append-only guard functions are trigger functions: they are only ever
+-- invoked by the triggers below, never called directly. Revoke the default
+-- PUBLIC EXECUTE so they cannot be invoked outside their trigger context.
+revoke all on function dflow.reject_item_assignment_history_rewrite() from public;
+revoke all on function dflow.reject_item_workflow_action_rewrite() from public;
 revoke all on function dflow.set_item_user_assignment(integer,text,integer,boolean,jsonb) from public;
 revoke all on function dflow.record_item_workflow_action(integer,integer,text,uuid,text,text,boolean,text,text,text,jsonb) from public;
 grant select on dflow.item_user_assignment, dflow.item_workflow_action to authenticated, service_role;
