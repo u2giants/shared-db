@@ -78,11 +78,11 @@ begin
      thumbnail_url,thumbnail_error,product_category,is_deleted)
   values
     (v_a1,'zz2054-a.ai','ZZ2054/a.ai','ai','zz2054-a-'||txid_current(),now(),v_group,
-      null,null,null,'pending','illustration',array['cotton'],'https://example.invalid/a.png',null,'Wall',false),
+      null,null,null,'pending','source_art',array['cotton'],'https://example.invalid/a.png',null,'Wall',false),
     (v_a2,'zz2054-b.pdf','ZZ2054/b.pdf','pdf','zz2054-b-'||txid_current(),now(),v_group,
-      null,null,null,'pending','illustration',array['cotton'],'https://example.invalid/b.png',null,'Wall',false),
+      null,null,null,'pending','source_art',array['cotton'],'https://example.invalid/b.png',null,'Wall',false),
     (v_a3,'zz2054-c.ai','ZZ2054/c.ai','ai','zz2054-c-'||txid_current(),now(),null,
-      v_licensor,v_property,v_customer,'tagged','photo',array['metal'],null,null,'Other',false);
+      v_licensor,v_property,v_customer,'tagged','product_photo',array['metal'],null,null,'Other',false);
 
   -- Grouped rows take group identity; the ungrouped row takes its own identity.
   foreach v_filters in array array[
@@ -119,7 +119,7 @@ begin
   end if;
 
   v_filters := jsonb_build_object('customerId',v_customer,
-    'contentType',jsonb_build_array('illustration'),
+    'contentType',jsonb_build_array('source_art'),
     'productMaterial',jsonb_build_array('cotton'),
     'fileStatus',jsonb_build_array('has_preview'),
     'productCategory',jsonb_build_array('Wall'));
