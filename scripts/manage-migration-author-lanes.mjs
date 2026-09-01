@@ -3128,7 +3128,11 @@ export function resumeAuthorLease(options, now = new Date(), io = githubIo) {
     const lease=parseAuthorLease(before.body,now)
     if(lease.legacy||lease.owner!==options.owner)throw new LaneError('claim lease is legacy or belongs to a different owner')
     if(lease.capacityState!=='relinquished')throw new LaneError('claim capacity is not relinquished')
-    assertLaneAvailable(claims.filter((claim)=>String(claim.number)!==String(options.claim)),lease.objects,now,{prSources:io.prSources?.()??[]})
+    const sources=io.prSources?.()??[],selfPrs=sources.filter((source)=>source.branch===lease.branch)
+    if(selfPrs.length>1)throw new LaneError('claim branch has multiple open pull-request sources')
+    if(selfPrs.length&&(selfPrs[0].versions?.length!==1||String(selfPrs[0].versions[0])!==lease.version))throw new LaneError('claim branch pull request does not carry the permanent claim version')
+    const otherPrs=selfPrs.length?sources.filter((source)=>source!==selfPrs[0]):sources
+    assertLaneAvailable(claims.filter((claim)=>String(claim.number)!==String(options.claim)),lease.objects,now,{prSources:otherPrs})
     if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError('permanent version reservation is unreadable')
     const expiresAt=new Date(now.valueOf()+options.leaseHours*3600000)
     const expected=replaceLeaseExpiry(replaceCapacityState(before.body,'active'),expiresAt)
