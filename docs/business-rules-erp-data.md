@@ -191,6 +191,22 @@ earlier still the field was not really used.
 
 ## 6. Merch groups on `prodHistory`: assortment level vs component level
 
+> ### ⚠️ SUPERSEDED 2026-09-01 — `ppkMerchGroup*` no longer exists
+> Checked against the live spec (`GET /EhpApi/v2/api-docs`) on 2026-09-01: `ProdHistory` has **105**
+> properties and `OrderHistory` **63**, and a name search for `ppkMerchGroup` or `subMerchGroup`
+> returns **nothing on either feed**. `ProdHistory` carries a single `merchGroup01`–`14` family (plus
+> `Desc` twins) and a `prepack*` family that is identity and cost only — `prePackCode`,
+> `prepackItemNo`, `prepackColorCode`, `prepackDimCode`, `prepackSizeCode`, `prepackLabelCode`,
+> `prepackQty`, `prepackDivisionCode`, `prepackItemPKey`, `ppkDetailCost` — **no merch groups**.
+>
+> **What this means.** The two-family split described below was real when measured on 2026-08-18 but
+> the payload changed on or before 2026-08-31 (the same change that introduced paging). **Both feeds
+> now carry ONE merch-group family on the exploded component row, and on prepack rows it holds the
+> COMPONENT's values** — see §9. The measured populations below are kept as history; the instruction
+> "read component taxonomy from `ppkMerchGroup*`" is **void, and no code may be written against it**.
+> The rest of the section stands as a record of what the old payload looked like.
+
+
 ColdLion's read (JamieLynn, 2026-08-18) is **confirmed structurally**: `merchGroup01`–`14` describe
 the **assortment (master) SKU** and `ppkMerchGroup01`–`14` describe the **component (sub) SKU**.
 Verified on 139 multi-component lines: `merchGroup01`–`04` were **identical across every component
@@ -294,3 +310,41 @@ slice is still not a documented rule; this one is now a rule because ColdLion sa
 out of 803 (0.7%)** remain unexplained — orders 23034 (HLL770, qty 3,024 and 4,032), 23039/23040
 (ATH160, qty 1 each), 23044 (BOX030, qty 1) and 23852 (MOD010, `FOILCORNER`, qty 7,600). The qty-1
 lines look like charges rather than production. Not worth chasing unless a report trips over them.
+
+## 9. Licensor and property are meaningless at the assortment (Master) level
+
+> **Albert (owner), 2026-09-01:** "In one Master assortment we have 4 different designs with 4
+> different licensors/properties. A licensor and property at the Master level is meaningless. It's
+> only useful for the sub-items."
+
+**Vocabulary.** What ColdLion calls a **prepack** is what we call a **Master assortment**: one
+sellable master SKU that contains several different component styles. `itemNo` is the Master;
+`subItemNo` (with `subColorCode` and `subLabelCode`) is the component actually manufactured and
+licensed.
+
+**The rule.** Licensor (`merchGroup05`) and property (`merchGroup06`) are **attributes of the
+component style, never of the Master**. A Master assortment routinely spans several licensors and
+several properties at once, so any single licensor or property value stamped on the Master is at
+best one of four and at worst wrong. This is a business fact about how assortments are built, not a
+data-quality problem to be cleaned up.
+
+**What it implies:**
+
+1. **Never read licensor or property from a Master assortment record**, and never fall back to the
+   Master when the component value is blank. Blank at assortment level is the normal state, not
+   missing data — §6 measured that on the pre-2026-08-31 payload, and it is quoted here as the
+   original evidence, not as a current field map.
+2. **Any report grouped by licensor or property must explode assortments to components first.**
+   Grouping at Master grain attributes the whole assortment to whichever single licensor happens to
+   sit on the Master and silently drops the rest — on a four-design Master, three of the four.
+3. **A Master's licensor set is derived, not stored** — it is the distinct set of its components'
+   licensors, and it is a set, not a value.
+4. **Royalty and licence-expiry logic runs at component level only.** A lapsed licence retires the
+   component styles that use it; the Master survives with fewer components.
+5. **Both history feeds now carry ONE merch-group family, and on an exploded prepack row it holds
+   the COMPONENT's values.** Measured on `orderHistory`, 2026-09-01: inside a single prepack line
+   `merchGroup05` varies across component rows in 135 of 176 groups and `merchGroup06` in 162 of
+   176. This is why owner ruling **D14** keeps `merchGroup01`-`06` on prepack component rows.
+   The separate `ppkMerchGroup*` family that §6 documented on `prodHistory` **no longer exists** —
+   see the superseded box at the top of §6. Do not write code against it, and do not treat the two
+   feeds as using different conventions any more.
