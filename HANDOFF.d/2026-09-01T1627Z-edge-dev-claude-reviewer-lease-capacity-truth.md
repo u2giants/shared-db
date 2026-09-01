@@ -1,3 +1,9 @@
+---
+issue: 1851
+status: OPEN
+owner: claude/find-edge-dev-reviewer-coordination-9ec999
+---
+
 # Reviewer lease capacity truth — plan written, implementation not started
 
 - **When:** 2026-09-01 ~16:27 UTC
