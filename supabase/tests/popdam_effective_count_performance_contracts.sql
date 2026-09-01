@@ -64,7 +64,7 @@ begin
   insert into core.licensor (id,name,code,status)
   values (v_licensor,'ZZ2054 Licensor','ZZ2054L-'||txid_current(),'active');
   insert into core.property (id,licensor_id,name,code,status)
-  values (v_property,v_licensor,'ZZ2054 Property','ZZ2054P-'||txid_current(),'active');
+  values (v_property,v_licensor,'ZZ2054 Property','ZZ2054P-'||txid_current(),'potential');
   insert into core.customer (id,name,status)
   values (v_customer,'ZZ2054 Customer '||txid_current(),'active');
   insert into public.style_groups
