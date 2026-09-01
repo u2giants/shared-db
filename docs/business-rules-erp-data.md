@@ -191,6 +191,22 @@ earlier still the field was not really used.
 
 ## 6. Merch groups on `prodHistory`: assortment level vs component level
 
+> ### ⚠️ SUPERSEDED 2026-09-01 — `ppkMerchGroup*` no longer exists
+> Checked against the live spec (`GET /EhpApi/v2/api-docs`) on 2026-09-01: `ProdHistory` has **105**
+> properties and `OrderHistory` **63**, and a name search for `ppkMerchGroup` or `subMerchGroup`
+> returns **nothing on either feed**. `ProdHistory` carries a single `merchGroup01`–`14` family (plus
+> `Desc` twins) and a `prepack*` family that is identity and cost only — `prePackCode`,
+> `prepackItemNo`, `prepackColorCode`, `prepackDimCode`, `prepackSizeCode`, `prepackLabelCode`,
+> `prepackQty`, `prepackDivisionCode`, `prepackItemPKey`, `ppkDetailCost` — **no merch groups**.
+>
+> **What this means.** The two-family split described below was real when measured on 2026-08-18 but
+> the payload changed on or before 2026-08-31 (the same change that introduced paging). **Both feeds
+> now carry ONE merch-group family on the exploded component row, and on prepack rows it holds the
+> COMPONENT's values** — see §9. The measured populations below are kept as history; the instruction
+> "read component taxonomy from `ppkMerchGroup*`" is **void, and no code may be written against it**.
+> The rest of the section stands as a record of what the old payload looked like.
+
+
 ColdLion's read (JamieLynn, 2026-08-18) is **confirmed structurally**: `merchGroup01`–`14` describe
 the **assortment (master) SKU** and `ppkMerchGroup01`–`14` describe the **component (sub) SKU**.
 Verified on 139 multi-component lines: `merchGroup01`–`04` were **identical across every component
@@ -323,9 +339,10 @@ data-quality problem to be cleaned up.
    licensors, and it is a set, not a value.
 4. **Royalty and licence-expiry logic runs at component level only.** A lapsed licence retires the
    component styles that use it; the Master survives with fewer components.
-5. On `orderHistory` the ordinary `merchGroup01`-`06` fields **on an exploded component row carry
-   the component's own values** (measured 2026-09-01: `merchGroup05` varies inside 135 of 176
-   prepack groups, `merchGroup06` in 162 of 176). This is why owner ruling **D14** keeps them on
-   prepack component rows. Note the contrast with `prodHistory` in §6, where `merchGroup*` is
-   assortment-level and `ppkMerchGroup*` is component-level — **the two feeds do not use the same
-   convention, and code must not assume they do.**
+5. **Both history feeds now carry ONE merch-group family, and on an exploded prepack row it holds
+   the COMPONENT's values.** Measured on `orderHistory`, 2026-09-01: inside a single prepack line
+   `merchGroup05` varies across component rows in 135 of 176 groups and `merchGroup06` in 162 of
+   176. This is why owner ruling **D14** keeps `merchGroup01`-`06` on prepack component rows.
+   The separate `ppkMerchGroup*` family that §6 documented on `prodHistory` **no longer exists** —
+   see the superseded box at the top of §6. Do not write code against it, and do not treat the two
+   feeds as using different conventions any more.
