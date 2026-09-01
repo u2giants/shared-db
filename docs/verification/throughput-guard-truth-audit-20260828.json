@@ -617,6 +617,13 @@
       "line_sha256": "40e08fbb26123da8f7cb72c4a6870299c6aa90338c2e3af2ad5b9494876e63c2"
     },
     {
+      "site": "scripts/manage-migration-author-lanes.mjs:226",
+      "disposition": "excluded",
+      "reason": "Prose comment explaining the #2078 reviewer-repository-access gate; the word matches the discovery pattern but the line is not a throughput call site and carries no derivation behavior.",
+      "semantic_key": "scripts/manage-migration-author-lanes.mjs:435a6abb51443c34755210b1f1927ce87702403e85b83c894a9d0ee9a1b367f8:1",
+      "line_sha256": "435a6abb51443c34755210b1f1927ce87702403e85b83c894a9d0ee9a1b367f8"
+    },
+    {
       "site": "scripts/manage-migration-author-lanes.mjs:2006",
       "disposition": "excluded",
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation.",
@@ -1611,7 +1618,7 @@
       "line_sha256": "c306e35745386b717b583be41a182e378d17ce899e352842a4d0cfbae51ccc3c"
     }
   ],
-  "call_site_count": 228,
-  "call_site_sha256": "c6503e7624a40740ea6f8826feb1a241ae1c9ab954219078f0f99eb6e745e688",
+  "call_site_count": 229,
+  "call_site_sha256": "4579afd39ff8dcd925976a89fccfae44bc95ed7176374b5f3b01e474d99a073f",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
