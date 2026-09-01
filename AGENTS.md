@@ -395,6 +395,13 @@ code — but an orchestrator that leaves items standing in it is carrying other 
 The block prints **before** the refill line, not after it, so a queue that has dispatchable work
 cannot hide it — that ordering is deliberate.
 
+### Queue priority
+
+Among eligible structural issues, work that releases the largest number of other open issues is
+first. The count includes direct and chained `depends_on` relationships. If two issues release the
+same number, the older issue is first. The numeric `priority:` field remains required for scope
+compatibility but does not override blocker impact or age.
+
 An issue with **no** `db-work-scope` block at all is `unclassified`: it is not admitted, it is not
 worked, and it already blocks an empty-lane claim. Classify it or send it back.
 
@@ -568,6 +575,13 @@ all share one working copy. Observed, dated damage:
 another live agent may be mid-task on it. Leave it, work in your own worktree, and say so in your
 handoff. Remove your own worktree when your branch has merged; never remove one that is dirty,
 locked, or held by a live agent.
+
+**Before treating working-tree files as current `main` evidence**, run
+`node scripts/check-worktree-freshness.mjs`. It fetches live `origin/main` and refuses unless the
+checked-out commit is that exact tip. A refusal means read the required files from a fresh isolated
+worktree or from `git show origin/main:<path>`; never update or switch the shared checkout to make
+the guard pass. Verification tools that read the migration tree must refresh `origin/main`
+themselves and fail closed if that refresh is unavailable.
 
 ### 2.1-W.1 Retiring a worktree — and the squash-merge trap that has defeated every attempt
 
@@ -1489,9 +1503,13 @@ have already happened in this repo, more than once.
 
     What actually re-checks a migration pull request against current `main` is
     `.github/workflows/guarded-migration-merge.yml`, whose required context
-    `Migration guarded merge authorization` re-runs collision and lease validation on a head that
-    contains current `main`, while holding the merge lock. A pull request with no migrations is
-    auto-authorized by `.github/workflows/migration-author-lease.yml`.
+    `Migration guarded merge authorization` re-runs collision, exact-head review, and—when the
+    pull request changes a migration—lease validation on a head that contains current `main`,
+    while holding the merge lock. **Every pull request, including documentation-only and other
+    non-migration changes, uses that guarded merge lane.** A non-migration pull request needs no
+    migration-author claim, but it is never auto-authorized by the lease workflow. When production
+    acquires its lock, it revokes every open pull request's earlier merge authorization before
+    releasing that lock, so a stale green result cannot bypass the production freeze.
 
     Older documents — including `docs/owner-rulings.md`'s 2026-08-06/14 entries and
     `plan_orchestrator-workflow-gaps.md` — describe the earlier `strict: true` state. That history
