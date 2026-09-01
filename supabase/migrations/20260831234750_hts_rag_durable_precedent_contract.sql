@@ -19,7 +19,7 @@ create table public.hts_rag_precedents (
   missing_critical_facts jsonb not null default '[]'::jsonb check (jsonb_typeof(missing_critical_facts) = 'array'),
   conflicts jsonb not null default '[]'::jsonb check (jsonb_typeof(conflicts) = 'array'),
   plausible_headings jsonb not null default '[]'::jsonb check (jsonb_typeof(plausible_headings) = 'array'),
-  proposed_hts text check (proposed_hts is null or proposed_hts ~ '^[0-9]{4}([.][0-9]{2}){0,3}$'),
+  proposed_hts text check (proposed_hts is null or proposed_hts ~ '^[0-9]{4}([.][0-9]{1,6})?$'),
   classification_state text not null check (classification_state in ('needs_more_facts','provisional_complete')),
   reasoning_summary text,
   confidence_components jsonb not null default '{}'::jsonb check (jsonb_typeof(confidence_components) = 'object'),
@@ -67,7 +67,7 @@ create table public.hts_rag_determinations (
   product_example_id uuid not null references public.hts_rag_product_examples(id) on delete restrict,
   precedent_id uuid references public.hts_rag_precedents(id) on delete restrict,
   method text not null check (method in ('legacy_ai_cross','rag_shadow')),
-  proposed_hts text check (proposed_hts is null or proposed_hts ~ '^[0-9]{4}([.][0-9]{2}){0,3}$'),
+  proposed_hts text check (proposed_hts is null or proposed_hts ~ '^[0-9]{4}([.][0-9]{1,6})?$'),
   classification_state text not null check (classification_state in ('needs_more_facts','provisional_complete')),
   operative_eligible boolean not null default false,
   result_hash text not null check (result_hash ~ '^[0-9a-f]{64}$'),
@@ -75,7 +75,6 @@ create table public.hts_rag_determinations (
   comparison_review_state text not null default 'unreviewed' check (comparison_review_state in ('unreviewed','accepted','rejected','needs_revision')),
   created_at timestamptz not null default now(),
   constraint hts_rag_determinations_operability_chk check (not operative_eligible or classification_state = 'provisional_complete'),
-  constraint hts_rag_determinations_shadow_precedent_chk check (method <> 'rag_shadow' or precedent_id is not null),
   unique (method, product_example_id, result_hash)
 );
 create index hts_rag_determinations_family_created_idx on public.hts_rag_determinations (product_example_id, created_at desc);
@@ -98,10 +97,7 @@ create table public.hts_rag_extraction_jobs (
   created_at timestamptz not null default now(),
   completed_at timestamptz,
   constraint hts_rag_extraction_jobs_claim_chk check ((claimed_at is null) = (claimed_by is null)),
-  constraint hts_rag_extraction_jobs_completion_chk check ((status in ('succeeded','failed','cancelled')) = (completed_at is not null)),
-  constraint hts_rag_extraction_jobs_pending_unclaimed_chk check (status <> 'pending' or claimed_at is null),
-  constraint hts_rag_extraction_jobs_active_claim_chk check (status not in ('running','succeeded') or claimed_at is not null),
-  constraint hts_rag_extraction_jobs_success_result_chk check (status <> 'succeeded' or result_hash is not null)
+  constraint hts_rag_extraction_jobs_completion_chk check ((status in ('succeeded','failed','cancelled')) = (completed_at is not null))
 );
 create index hts_rag_extraction_jobs_pending_claim_idx on public.hts_rag_extraction_jobs (available_at, created_at) where status = 'pending';
 create unique index hts_rag_extraction_jobs_idempotency_idx on public.hts_rag_extraction_jobs (product_example_id, prompt_version, model_version, extraction_version, input_hash);
@@ -129,6 +125,7 @@ create table public.hts_rag_product_family_allowlist (
   updated_at timestamptz not null default now(),
   constraint hts_rag_product_family_allowlist_enabled_chk check ((not enabled and enabled_at is null and enabled_by is null) or (enabled and enabled_at is not null and enabled_by is not null and btrim(coalesce(reason,'')) <> ''))
 );
+create index hts_rag_product_family_allowlist_enabled_idx on public.hts_rag_product_family_allowlist (product_family) where enabled;
 
 alter table public.hts_rag_precedents enable row level security;
 alter table public.hts_rag_precedent_rulings enable row level security;
@@ -142,15 +139,10 @@ revoke all on public.hts_rag_precedents, public.hts_rag_precedent_rulings, publi
   public.hts_rag_determinations, public.hts_rag_extraction_jobs, public.hts_rag_review_events,
   public.hts_rag_product_family_allowlist from anon, authenticated, service_role;
 grant select on public.hts_rag_precedents, public.hts_rag_precedent_rulings, public.hts_rag_product_examples,
-  public.hts_rag_determinations, public.hts_rag_review_events, public.hts_rag_extraction_jobs,
-  public.hts_rag_product_family_allowlist to authenticated;
+  public.hts_rag_determinations, public.hts_rag_review_events to authenticated;
 grant all on public.hts_rag_precedents, public.hts_rag_precedent_rulings, public.hts_rag_product_examples,
   public.hts_rag_extraction_jobs, public.hts_rag_product_family_allowlist to service_role;
 grant select, insert on public.hts_rag_determinations, public.hts_rag_review_events to service_role;
--- The comparison outcome itself is immutable history, but comparison_review_state is a
--- review workflow column. Without this column-scoped grant the review queue index above
--- indexes a value nothing can ever transition. No other column becomes updatable.
-grant update (comparison_review_state) on public.hts_rag_determinations to service_role;
 
 create policy hts_rag_precedents_backend_all on public.hts_rag_precedents for all to service_role using (true) with check (true);
 create policy hts_rag_precedents_admin_read on public.hts_rag_precedents for select to authenticated using ((select app.has_role('administrator')));
@@ -158,9 +150,7 @@ create policy hts_rag_precedent_rulings_backend_all on public.hts_rag_precedent_
 create policy hts_rag_precedent_rulings_admin_read on public.hts_rag_precedent_rulings for select to authenticated using ((select app.has_role('administrator')));
 create policy hts_rag_product_examples_backend_all on public.hts_rag_product_examples for all to service_role using (true) with check (true);
 create policy hts_rag_product_examples_admin_read on public.hts_rag_product_examples for select to authenticated using ((select app.has_role('administrator')));
-create policy hts_rag_determinations_backend_read on public.hts_rag_determinations for select to service_role using (true);
-create policy hts_rag_determinations_backend_insert on public.hts_rag_determinations for insert to service_role with check (true);
-create policy hts_rag_determinations_backend_review on public.hts_rag_determinations for update to service_role using (true) with check (true);
+create policy hts_rag_determinations_backend_all on public.hts_rag_determinations for all to service_role using (true) with check (true);
 create policy hts_rag_determinations_admin_read on public.hts_rag_determinations for select to authenticated using ((select app.has_role('administrator')));
 create policy hts_rag_extraction_jobs_backend_all on public.hts_rag_extraction_jobs for all to service_role using (true) with check (true);
 create policy hts_rag_extraction_jobs_admin_read on public.hts_rag_extraction_jobs for select to authenticated using ((select app.has_role('administrator')));
@@ -169,6 +159,6 @@ create policy hts_rag_review_events_admin_read on public.hts_rag_review_events f
 create policy hts_rag_product_family_allowlist_backend_all on public.hts_rag_product_family_allowlist for all to service_role using (true) with check (true);
 create policy hts_rag_product_family_allowlist_admin_read on public.hts_rag_product_family_allowlist for select to authenticated using ((select app.has_role('administrator')));
 
-comment on table public.hts_rag_determinations is 'RAG-shadow and legacy AI/CROSS comparison outcomes. The outcome columns are immutable history: the backend may append and may transition comparison_review_state, but cannot rewrite a result or delete history.';
+comment on table public.hts_rag_determinations is 'Immutable RAG-shadow and legacy AI/CROSS comparison outcomes. Backend may append but cannot update or delete history.';
 comment on table public.hts_rag_review_events is 'Append-only human review history. Corrections are new events; UPDATE and DELETE are not granted.';
 comment on table public.hts_rag_product_family_allowlist is 'Product families eligible for later RAG activation. Every row is disabled unless explicitly enabled with actor, time, and reason.';
