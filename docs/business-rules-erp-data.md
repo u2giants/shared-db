@@ -331,10 +331,12 @@ data-quality problem to be cleaned up.
 **What it implies:**
 
 1. **Never read licensor or property from a Master assortment record**, and never fall back to the
-   Master when the component value is blank — see §6, where blank at assortment level is the normal
-   state, not missing data.
+   Master when the component value is blank. Blank at assortment level is the normal state, not
+   missing data — §6 measured that on the pre-2026-08-31 payload, and it is quoted here as the
+   original evidence, not as a current field map.
 2. **Any report grouped by licensor or property must explode assortments to components first.**
-   Counting assortments by licensor double-counts three licensors and drops the other three.
+   Grouping at Master grain attributes the whole assortment to whichever single licensor happens to
+   sit on the Master and silently drops the rest — on a four-design Master, three of the four.
 3. **A Master's licensor set is derived, not stored** — it is the distinct set of its components'
    licensors, and it is a set, not a value.
 4. **Royalty and licence-expiry logic runs at component level only.** A lapsed licence retires the
