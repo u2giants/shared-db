@@ -74,6 +74,11 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    ````
    ```
 
+   Queue order is derived, not manually nominated: the issue that unblocks the
+   most other open issues through direct or chained `depends_on` relationships
+   goes first; equal blocker counts are ordered oldest first. `priority:` remains
+   required for scope compatibility but cannot override blocker impact or age.
+
    **READS AND WRITES ARE DECLARED SEPARATELY (Step 2, issue #1366).** Use
    `writes:` for every object the work CHANGES and `reads:` for every object it
    DEPENDS ON without changing. The queue serialises on this matrix:
@@ -283,6 +288,16 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    review plus three rebuttals. If material disagreement remains, stop the merge
    and ask Albert one concise decision. Never send secrets or licensed rows.
    Do not impose a fixed hard-kill timer on a reviewer that is still making progress.
+
+   Run the returned wrapper only through `scripts/run-governed-review.mjs`. The
+   adapter withholds the result until it has posted the complete findings and
+   created the immutable verdict ref while the exact reviewer lease is still
+   held. Calling a wrapper directly produces supplementary diligence, never
+   merge or preview evidence; there is no manual verdict-recording fallback.
+   The manager CLI rejects `--record-review-verdict`; only the terminal adapter
+   can call the create-only recorder after posting the assigned wrapper output.
+   Prose may free reviewer capacity during cutover, but it never authorizes a
+   merge, preview, or replacement; those gates consume durable artifacts only.
 
    **A verdict with no coverage statement is not review evidence** (issue #1220,
    fixed wrapper-side in `ai-devops` PR #43). Two wrappers could finish a run
@@ -550,6 +565,16 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    claimed the exclusion existed, and it never did. Promotions are serialised
    among themselves by the workflow `concurrency` group, not by this lock.
 
+   **Every pull request enters through that guarded merge lane, including
+   documentation-only and other non-migration changes.** A pull request that
+   changes no migration needs no migration-author claim, but the lease workflow
+   does not auto-authorize it: the guarded merge still proves the exact head,
+   current-main relationship, collision result, and governed review while it
+   holds the merge lock. When production acquires its lock, the production
+   workflow revokes every open pull request's earlier merge authorization before
+   releasing the lock. This prevents a stale green authorization from surviving
+   the production freeze.
+
    The lock fails closed if the PR is not merged, if its
    merge commit is not carried by the main tip, if the named versions were not
    *added* by that PR, or if GitHub state cannot be read.
@@ -743,3 +768,28 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    version** — the CLI still finds a local file for every `schema_migrations`
    row, so it does not abort with `Remote migration versions not found in local
    migrations directory`.
+
+   **Working doctrine learned while building the exact-head approval gate.**
+
+   - **Check supersethood before taking a side in a merge conflict.** A side that
+     looks newer may still omit unique work from the other side. Compare the
+     complete competing content before choosing or rebuilding the result.
+   - **Regenerate on drift; verify otherwise.** Regenerate derived evidence when
+     its source moved. When the source did not move, verify the existing artifact
+     rather than replacing it merely to make it look current.
+   - **Two ways to absorb a repeated cost is the signal to find its cause.** If
+     the same workaround, retry, or manual correction is needed twice, stop
+     paying the symptom cost and investigate the shared cause.
+   - **The instrument rule.** A check that can only ever return "clean" must be
+     proven capable of returning "dirty" before its clean result means anything.
+     Every check asserts that its own precondition held, and verdict matching is
+     tested in the same regex engine production uses. Do not use `jq` for verdict
+     matching: a collapsed `\b` can become an Oniguruma backspace and silently
+     test for a control character instead of a word boundary.
+   - **The stacked-mutation rule.** A mutation check that cannot say which change
+     caused the failure is coincidence, not evidence. Restore, mutate one thing,
+     observe the expected failure, then restore before testing the next mutation.
+   - **The venue rule.** Before publishing an artifact, decide whether its content
+     may exist in this repository, separately from whether the change is correct.
+     Evidence capture does not authorize public storage of licensed, private, or
+     sensitive source material.

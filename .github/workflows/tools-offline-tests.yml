@@ -67,6 +67,18 @@ jobs:
             test -f "$f" || { echo "::error::Missing planned throughput test: $f"; exit 1; }
           done
 
+      - name: Run the main-tip freshness gate tests (#2047)
+        # Named explicitly, not globbed: scripts/ holds a mix of test and
+        # non-test files, and this gate decides whether a governed run may
+        # proceed against a moved origin/main. Six of its cases are positive
+        # controls proving it still REFUSES a code-bearing move; a suite that
+        # silently stopped running would leave that unguarded.
+        run: |
+          set -euo pipefail
+          test -f scripts/check-main-tip-freshness.test.mjs || {
+            echo "::error::Missing scripts/check-main-tip-freshness.test.mjs"; exit 1; }
+          node --test scripts/check-main-tip-freshness.test.mjs
+
       - name: Refuse to run with any production authorization present
         run: |
           set -euo pipefail
