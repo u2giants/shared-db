@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, replaceFailedReviewer, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_PAGE_LIMIT, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reviewRecordRefs } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_PAGE_LIMIT, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reviewRecordRefs } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -830,6 +830,22 @@ test('reviewer assignment retry returns the same assignment without advancing',(
   assert.equal(second.sequence,1)
 })
 
+test('assignment retry refuses a terminal release completed after preflight but before mutex acquisition',()=>{
+  const io=reviewIo(),request={issue:9,pr:109,headSha:'9'.repeat(40)},first=assignNextReviewer(request,io),leaseRef=reviewActiveRef(first.reviewer)
+  const createRef=io.createRef;let interleave=true
+  io.createRef=(ref,sha)=>{
+    if(interleave&&ref===MUTEX_REF){
+      interleave=false
+      io.refs.delete(leaseRef)
+      const releaseSha=io.makeOwnerCommit(`db-coordination reviewer-failure-release reviewer=${first.reviewer} issue=${request.issue} pr=${request.pr} head=${request.headSha} failed-sequence=${first.sequence} code=turn_limit_cancelled verdict=none artifact=none replacement=none`)
+      io.refs.set(`${REVIEW_FAILURE_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}-${first.sequence}`,releaseSha)
+    }
+    return createRef(ref,sha)
+  }
+  assert.throws(()=>assignNextReviewer(request,io),/terminal failure was released/)
+  assert.equal(io.refs.get(leaseRef)??null,null)
+})
+
 test('assignment fails closed when the bounded reviewer index was never activated',()=>{
   const io=reviewIo();io.refs.delete(REVIEW_ACTIVE_CUTOVER_REF)
   assert.throws(()=>assignNextReviewer({issue:1767,pr:1800,headSha:'a'.repeat(40)},io),/cutover is incomplete/)
@@ -1595,6 +1611,126 @@ test('replacement exhausts the active rotation, then refuses',()=>{
   }
   assert.deepEqual(seen,ACTIVE_REVIEWERS.map((r)=>r.name))
   assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence},io),/no other reviewer is available/)
+})
+
+test('release frees a terminally failed lease when all six reviewer slots are full',()=>{
+  const io=failedReviewIo()
+  for(let n=0;n<ACTIVE_REVIEWERS.length-1;n+=1)assignNextReviewer({issue:2100+n,pr:2200+n,headSha:`${n+1}`.repeat(40)},io)
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha===null)io.refs.delete(change.ref);else io.refs.set(change.ref,change.sha)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  assert.equal(findBusyReviewers(io).size,ACTIVE_REVIEWERS.length)
+  let refusal=null
+  try{replaceFailedReviewer(replacementRequest,io)}catch(error){refusal=error}
+  assert.match(refusal?.message??'',/no replacement reviewer is available|no other reviewer is available/)
+  assert.match(refusal.message,/1 of 6 already failed on this exact head/)
+  assert.match(refusal.message,/5 of 6 hold other live leases/)
+  assert.match(refusal.message,/glm-5\.3 #2100\/PR #2200/)
+  const cursorBefore=io.refs.get(REVIEW_CURSOR_REF)
+  const released=releaseFailedReviewer(replacementRequest,io)
+  assert.equal(released.reviewer,'grok-4.6')
+  assert.equal(io.refs.get(reviewActiveRef(released.reviewer))??null,null)
+  assert.equal(findBusyReviewers(io).size,ACTIVE_REVIEWERS.length-1)
+  assert.equal(io.refs.get(REVIEW_CURSOR_REF),cursorBefore,'release must not move the rotation cursor')
+  assert.throws(()=>assignNextReviewer(failedReview,io),/terminal failure was released/,'an assignment retry must not recreate a terminally released lease')
+  assert.throws(()=>releaseFailedReviewer(replacementRequest,io),/already released/,'release evidence is create-only and retry-safe')
+})
+
+test('terminal release resolves the historical unsuffixed first replacement record',()=>{
+  const io=failedReviewIo(),reviewer='glm-5.3',sequence=2,base=`${REVIEW_REPLACEMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}`
+  const sha=io.makeOwnerCommit(`db-coordination reviewer-failure-replacement sequence=${sequence} reviewer=${reviewer} issue=${failedReview.issue} pr=${failedReview.pr} head=${failedReview.headSha} failed-sequence=1 prior-sequence=1 failure-ref=self failed-reviewer=grok-4.6 code=provider_unavailable verdict=none artifact=none`)
+  io.refs.set(base,sha);io.refs.set(`${REVIEW_FAILURE_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}-1`,sha);io.refs.delete(reviewActiveRef('grok-4.6'));io.refs.set(reviewActiveRef(reviewer),sha)
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha===null)io.refs.delete(change.ref);else io.refs.set(change.ref,change.sha)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  const released=releaseFailedReviewer({...replacementRequest,failedSequence:sequence},io)
+  assert.equal(released.reviewer,reviewer)
+  assert.equal(io.refs.get(reviewActiveRef(reviewer))??null,null)
+})
+
+test('saturation release instructions preserve slot and local dependency evidence',()=>{
+  const command=failedReviewerReleaseCommand({...replacementRequest,slot:2},{failureCode:'local_dependency_unavailable',failingCheck:'reviewer doctor service'})
+  assert.match(command,/--review-slot 2/)
+  assert.match(command,/--failing-check "reviewer doctor service"/)
+  assert.match(command,/--confirm-local-dependency-unfixable/)
+  assert.match(command,/--confirm-no-verdict --confirm-no-artifact$/)
+})
+
+test('review lease age is truthful for known and unknown commit dates',()=>{
+  assert.equal(reviewLeaseAgeHours('2026-09-01T00:00:00Z',new Date('2026-09-01T12:00:00Z')),12)
+  assert.equal(reviewLeaseAgeHours(null,new Date('2026-09-01T12:00:00Z')),null)
+  assert.equal(reviewLeaseAgeHours('not-a-date',new Date('2026-09-01T12:00:00Z')),null)
+})
+
+test('capacity report classifies free, live, stale, verdict, aged, and unknown leases without mutation',()=>{
+  const io=reviewIo(),snapshot=new Map(),states=new Map(),now=new Date('2026-09-02T12:00:00Z')
+  const cases=[
+    {kind:'live',date:'2026-09-02T11:00:00Z'},
+    {kind:'moved',date:'2026-09-02T10:00:00Z'},
+    {kind:'verdict',date:'2026-09-02T09:00:00Z'},
+    {kind:'aged',date:'2026-08-31T00:00:00Z'},
+    {kind:'unknown',date:null},
+  ]
+  cases.forEach((entry,index)=>{
+    const reviewer=ACTIVE_REVIEWERS[index],issue=2300+index,pr=2400+index,headSha=`${index+1}`.repeat(40),sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=${index+1} reviewer=${reviewer.name} issue=${issue} pr=${pr} head=${headSha}`),commit={...io.getCommit(sha),committedDate:entry.date}
+    io.refs.set(reviewActiveRef(reviewer.name),sha);snapshot.set(reviewActiveRef(reviewer.name),{sha,commit})
+    states.set(`${issue}:${pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:entry.kind==='moved'?'f'.repeat(40):headSha}},evidence:entry.kind==='verdict'?[{body:'',commit_id:headSha,state:'APPROVED',author_association:'OWNER'}]:[]})
+  })
+  io.readActiveReviewLeases=()=>snapshot
+  io.readReviewStates=()=>states
+  const before=new Map(io.refs),report=reviewerCapacityReport(io,now)
+  assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','stale-reclaimable','suspect-aged','unknown','free'])
+  assert.deepEqual(report.summary,{total:6,free:1,live:2,reclaimable:2,unknown:1})
+  assert.deepEqual(io.refs,before,'capacity report must be read-only')
+})
+
+test('release refuses a verdict or a changed lease under the mutex',()=>{
+  const verdictIo=failedReviewIo()
+  verdictIo.getPrReviews=()=>[{body:'',commit_id:failedReview.headSha,state:'APPROVED',author_association:'OWNER'}]
+  assert.throws(()=>releaseFailedReviewer(replacementRequest,verdictIo),/verdict/)
+  const changed=failedReviewIo(),leaseRef=reviewActiveRef('grok-4.6'),real=changed.refs.get(leaseRef),commit=changed.getCommit(real)
+  changed.getCommit=(sha)=>sha===real?{message:commit.message.replace('sequence=1','sequence=99')}:reviewIo().getCommit(sha)
+  assert.throws(()=>releaseFailedReviewer(replacementRequest,changed),/does not match/)
+})
+
+test('release refuses when a verdict appears after preflight and changes no ref',()=>{
+  const io=failedReviewIo(),before=new Map(io.refs);let reads=0
+  io.readReviewStates=(leases)=>{reads+=1;return new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:reads===1?[]:[{body:'',commit_id:lease.headSha,state:'APPROVED',author_association:'OWNER'}]}]))}
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha===null)io.refs.delete(change.ref);else io.refs.set(change.ref,change.sha)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  assert.throws(()=>releaseFailedReviewer(replacementRequest,io),/changed after mutex acquisition/)
+  assert.equal(reads,2,'the verdict must appear only on the mutex-protected recheck')
+  assert.deepEqual(io.refs,before,'a post-preflight verdict must preserve every coordination ref')
+})
+
+test('a governed replacement adopts immutable release evidence after capacity becomes available',()=>{
+  const io=failedReviewIo()
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha===null)io.refs.delete(change.ref);else io.refs.set(change.ref,change.sha)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  const released=releaseFailedReviewer(replacementRequest,io),failureRef=[...io.refs.keys()].find((ref)=>ref.startsWith('refs/db-review-failures/'))
+  assert.equal(io.refs.get(failureRef),released.failureSha)
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(replacement.reviewer,'glm-5.3')
+  assert.equal(replacement.failureSha,released.failureSha,'replacement must adopt, not overwrite, the release evidence')
+  assert.equal(io.refs.get(failureRef),released.failureSha)
+  assert.equal(io.refs.get(reviewActiveRef(replacement.reviewer)),replacement.replacementSha)
+})
+
+test('assignment retry cannot recreate a terminally released replacement reviewer lease',()=>{
+  const io=failedReviewIo(),replacement=replaceFailedReviewer(replacementRequest,io)
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha===null)io.refs.delete(change.ref);else io.refs.set(change.ref,change.sha)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  releaseFailedReviewer({...replacementRequest,failedSequence:replacement.sequence,failureCode:'turn_limit_cancelled'},io)
+  assert.equal(io.refs.get(reviewActiveRef(replacement.reviewer))??null,null)
+  assert.throws(()=>assignNextReviewer(failedReview,io),/terminal failure was released/)
+  assert.equal(io.refs.get(reviewActiveRef(replacement.reviewer))??null,null)
 })
 
 test('reviewer replacement rejects a substantive exact-head verdict',()=>{
