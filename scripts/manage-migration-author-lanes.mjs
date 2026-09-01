@@ -80,13 +80,34 @@ export const REVIEW_REF_PAGE_LIMIT = 6
 //   ai-deepseek-agent -- HTTP conversation only. No filesystem, no diff, no tools.
 //                        The `--worktree` argument sets a spawn cwd it never uses.
 // A `false` entry can never record a code-review verdict; see recordReviewVerdict.
+//
+// THIS IS A HAND-MAINTAINED CROSS-REPOSITORY CLAIM, AND IT CAN ROT (#2079).
+// The wrappers live in `u2giants/ai-devops`, not here. No check in THIS
+// repository can open them, so nothing mechanical re-verifies these values: if
+// `ai-muse`'s sandbox copy or `ai-kimi`'s read-only profile changes upstream,
+// the roster keeps saying `true` and the gate keeps recording confabulations
+// with full ceremony. Rather than pretend that is solved, every entry records
+// WHEN the claim was checked and AGAINST WHAT, so staleness is visible instead
+// of implied. `date` is the day a human read the wrapper; `evidence` is the
+// exact wrapper behaviour that was read. Treat an old date as UNVERIFIED and
+// re-read the wrapper before trusting its `true`.
 export const REVIEWERS = Object.freeze([
-  { name:'grok-4.6', wrapper:'ai-grok-review', readsRepository:true }, { name:'glm-5.3', wrapper:'ai-glm', readsRepository:true },
-  { name:'kimi-k3', wrapper:'ai-kimi', readsRepository:true }, { name:'qwen-3.8-max', wrapper:'ai-qwen', readsRepository:true },
-  { name:'glm-5.2', wrapper:'ai-glm', readsRepository:true },
-  { name:'muse-spark-1.2-contributor', wrapper:'ai-muse', readsRepository:true },
-  { name:'codex-gpt-5.6-sol', wrapper:'ai-codex-review', orchestratorEngine:'codex', readsRepository:true },
-  { name:'deepseek-chat', wrapper:'ai-deepseek-agent', readsRepository:false },
+  { name:'grok-4.6', wrapper:'ai-grok-review', readsRepository:true,
+    readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-grok-review: grok --cwd <checkout> with a read-only permission set' } },
+  { name:'glm-5.3', wrapper:'ai-glm', readsRepository:true,
+    readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-glm: OpenCode session pinned to the review directory, read-only agent' } },
+  { name:'kimi-k3', wrapper:'ai-kimi', readsRepository:true,
+    readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-kimi: read-only agent profile over the checkout/worktree' } },
+  { name:'qwen-3.8-max', wrapper:'ai-qwen', readsRepository:true,
+    readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-qwen: retired from the rotation; wrapper hands the model a real checkout' } },
+  { name:'glm-5.2', wrapper:'ai-glm', readsRepository:true,
+    readsRepositoryVerified:{ date:'2026-09-01', evidence:'historical label for the ai-glm wrapper above; same checkout' } },
+  { name:'muse-spark-1.2-contributor', wrapper:'ai-muse', readsRepository:true,
+    readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-muse: ai-review-sandbox ensure-copy clone plus evidence packet; the doctor probe reads a file inside it' } },
+  { name:'codex-gpt-5.6-sol', wrapper:'ai-codex-review', orchestratorEngine:'codex', readsRepository:true,
+    readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-codex-review: codex exec --sandbox read-only over the sandbox copy' } },
+  { name:'deepseek-chat', wrapper:'ai-deepseek-agent', readsRepository:false,
+    readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-deepseek-agent: HTTP chat completions only; --worktree sets a spawn cwd it never uses' } },
 ])
 // Keep REVIEWERS as the historical evidence registry. Paused providers remain
 // readable forever, but only ACTIVE_REVIEWERS can receive new work.
@@ -275,7 +296,13 @@ export const EXCLUSIVE_REFS = Object.freeze({
 // and is usually a thirty-second fix, the second is the provider being down and
 // means waiting. Collapsing them is what produced a two-day pause of a working
 // reviewer (#1287). Keep them distinct.
-export const TERMINAL_FAILURE_CODES = Object.freeze(['insufficient_quota','provider_unavailable','local_dependency_unavailable','wrapper_terminal_failure','turn_limit_cancelled'])
+// `reviewer_cannot_read_repository` (#2079) is the code for a reviewer that is
+// structurally incapable of reading the code under review. It is terminal in the
+// strongest sense -- no retry, no wrapper version and no better prompt gives an
+// HTTP client a checkout -- and it exists so the recovery route this tool NAMES
+// is one an operator can actually run, instead of forcing a misdescription as
+// `wrapper_terminal_failure`.
+export const TERMINAL_FAILURE_CODES = Object.freeze(['insufficient_quota','provider_unavailable','local_dependency_unavailable','wrapper_terminal_failure','turn_limit_cancelled','reviewer_cannot_read_repository'])
 
 export const QUEUE_STATUSES = new Set(['ready','blocked','owner-decision'])
 export const QUEUE_WORK_TYPES = new Set(['structural','curated-master-data','application-data','source-data','repo-maintenance','documentation','security-settings'])
@@ -1532,7 +1559,7 @@ export function recordReviewVerdict(options,io=githubIo){
   // PR reads, so a reviewer that cannot open the code leaves no artifact at all.
   // This is a property of the wrapper, so no retry, no re-run and no better
   // formatted output can satisfy it.
-  if(!reviewerReadsRepository(assignment.reviewer))throw new LaneError(`reviewer ${assignment.reviewer} runs through a wrapper that has no access to the repository under review -- it never reads the diff, only the text of the brief, so its verdict describes the change as DESCRIBED rather than as WRITTEN. Refusing to record a code-review verdict from it. Use --replace-failed-reviewer to draw a reviewer that reads the code.`)
+  if(!reviewerReadsRepository(assignment.reviewer))throw new LaneError(`reviewer ${assignment.reviewer} runs through a wrapper that has no access to the repository under review -- it never reads the diff, only the text of the brief, so its verdict describes the change as DESCRIBED rather than as WRITTEN. Refusing to record a code-review verdict from it. This is a property of the wrapper: no retry and no re-run can satisfy it. Draw a reviewer that reads the code with the exact command: ${nonReadingReviewerReplacementCommand({issue,pr,headSha,slot},assignment.sequence)}`)
   const activeRef=reviewActiveRef(assignment.reviewer)
   if(io.readRef(activeRef)!==assignmentSha)throw new LaneError('reviewer does not hold the exact active lease; late or conflicting verdict refused')
   const live=io.getPr(pr)
@@ -1562,7 +1589,36 @@ export function recordReviewVerdict(options,io=githubIo){
   return validateVerdictArtifact({ref,sha,commit:io.getCommit(sha),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
 }
 
-export function readReviewVerdicts(issue,pr,headSha,io=githubIo){
+// THE EXACT RECOVERY ROUTE FOR A NON-READING REVIEWER (#2079).
+// The refusal above used to end with a bare "use --replace-failed-reviewer",
+// which an operator could follow straight into a second refusal: replacement
+// requires a recognized terminal failure code and both no-verdict confirmations,
+// and (before this change) any durable verdict at the head blocked it outright.
+// This builds the command that actually runs, so the message names a route
+// rather than a direction.
+export function nonReadingReviewerReplacementCommand({issue,pr,headSha,slot=1},failedSequence){
+  return `node scripts/manage-migration-author-lanes.mjs --replace-failed-reviewer --issue ${issue} --pr ${pr} --head-sha ${headSha} --review-slot ${slot} --failed-sequence ${failedSequence} --failure-code reviewer_cannot_read_repository --confirm-no-verdict --confirm-no-artifact`
+}
+
+// THE READ SIDE OF THE SAME FACT (#2079).
+// The write-side guard in recordReviewVerdict only binds FUTURE verdicts. It
+// cannot retract `refs/db-review-verdicts/1987-1989-fe810d47...`, the artifact
+// deepseek-chat already produced for a migration it could not open, and that
+// artifact was still merge-gate-valid.
+//
+// A verdict from a reviewer that cannot read the repository is treated as
+// ABSENT, not as a refusal. That choice is deliberate. A refusal would be
+// permanent -- the artifact is immutable and create-only, so the slot could
+// never be satisfied and the pull request would be stuck forever, trading one
+// deadlock for another. Treated as absent, the slot simply has no verdict: the
+// merge gate refuses for the ordinary "no durable APPROVE" reason, and
+// --replace-failed-reviewer can draw a reviewer that reads the code and finish
+// the review. Absence is recoverable; a permanent refusal is not.
+//
+// It is not silently dropped: `includeDisregarded` returns the rows with
+// `disregarded:true` so callers can SAY that an artifact exists and why it does
+// not count.
+export function readReviewVerdicts(issue,pr,headSha,io=githubIo,{includeDisregarded=false}={}){
   const prefixes=[REVIEW_VERDICT_REF_PREFIX,REVIEW_VERDICT_REPLACEMENT_REF_PREFIX]
   const rows=prefixes.flatMap((prefix)=>io.listRefs(`${prefix}/${Number(issue)}-${Number(pr)}-${String(headSha).toLowerCase()}`))
   return rows.map(({ref,sha})=>{
@@ -1576,9 +1632,11 @@ export function readReviewVerdicts(issue,pr,headSha,io=githubIo){
     if(!assignmentSha)throw new LaneError(`verdict ${ref} has no live assignment record`)
     const assignment=parseReviewCursor(io.getCommit(assignmentSha))
     const findingsBody=io.readFindings(record.findings_ref)
-    try{return validateVerdictArtifact({ref,sha,commit,findingsBody,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})}
+    let validated
+    try{validated=validateVerdictArtifact({ref,sha,commit,findingsBody,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})}
     catch(error){throw new LaneError(`verdict ${ref} is invalid: ${error.message}`)}
-  })
+    return {...validated,ref,reviewer:assignment.reviewer,disregarded:!reviewerReadsRepository(assignment.reviewer)}
+  }).filter((row)=>includeDisregarded||!row.disregarded)
 }
 
 export function reviewActiveRef(reviewer){
@@ -1857,7 +1915,12 @@ export function hasVerdictForHead(issue,pr,headSha,io){
 }
 
 export function assertDurableReviewApproval(issue,pr,headSha,io=githubIo){
-  const head=String(headSha).toLowerCase(),verdicts=readReviewVerdicts(issue,pr,head,io)
+  const head=String(headSha).toLowerCase(),allVerdicts=readReviewVerdicts(issue,pr,head,io,{includeDisregarded:true})
+  const disregarded=allVerdicts.filter((row)=>row.disregarded),verdicts=allVerdicts.filter((row)=>!row.disregarded)
+  // #2079. A verdict recorded before the write-side guard existed, by a reviewer
+  // that cannot open the code, is not evidence in either direction: it neither
+  // approves nor refuses this head. It is reported, then ignored.
+  const disregardedNote=disregarded.length?` (${disregarded.length} durable verdict artifact(s) at this head are DISREGARDED because their reviewer cannot read the repository: ${disregarded.map((row)=>`${row.ref} by ${row.reviewer}`).join(', ')}. Re-review the slot with --replace-failed-reviewer --failure-code reviewer_cannot_read_repository)`:''
   if(verdicts.some((row)=>row.verdict!=='APPROVE'))throw new LaneError('the exact head carries a durable reviewer refusal')
   const assignments=[REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_REPLACEMENT_REF_PREFIX].flatMap((prefix)=>io.listRefs(`${prefix}/${Number(issue)}-${Number(pr)}-${head}`)).map(({ref,sha})=>{
     const match=/^refs\/db-review-(assignments|replacements)\/(\d+)-(\d+)-([0-9a-f]{40})(?:-slot(\d+))?(?:-(\d+))?$/.exec(ref)
@@ -1867,7 +1930,7 @@ export function assertDurableReviewApproval(issue,pr,headSha,io=githubIo){
   const latest=new Map()
   for(const assignment of assignments){const prior=latest.get(assignment.slot);if(!prior||Number(assignment.replacementSequence??0)>Number(prior.replacementSequence??0))latest.set(assignment.slot,assignment)}
   if(!latest.size)throw new LaneError('the exact head has no durable reviewer assignment')
-  for(const assignment of latest.values())if(!verdicts.some((row)=>row.verdict==='APPROVE'&&row.assignment_sha===assignment.sha))throw new LaneError(`review slot ${assignment.slot} has no durable APPROVE for its latest exact-head assignment`)
+  for(const assignment of latest.values())if(!verdicts.some((row)=>row.verdict==='APPROVE'&&row.assignment_sha===assignment.sha))throw new LaneError(`review slot ${assignment.slot} has no durable APPROVE for its latest exact-head assignment${disregardedNote}`)
   return verdicts
 }
 
@@ -2221,7 +2284,16 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
     if(current&&current.issue===request.issue&&current.pr===request.pr&&current.headSha===request.headSha&&(current.slot??1)===request.slot){
       if(exclusions.has(current.reviewer))throw new LaneError(`current reviewer ${current.reviewer} is excluded for this PR (${exclusions.get(current.reviewer).reason}); it was not returned or re-leased`)
       assertReviewRequestEligible(request,io.readReviewStates?.([current]),io)
-      if(ACTIVE_REVIEWERS.some((row)=>row.name===current.reviewer)&&!eligibleNames.has(current.reviewer))throw new LaneError(`current reviewer ${current.reviewer} conflicts with the live orchestrator engine; assign an independent reviewer`)
+      // #2079. Mirror the prior-assignment path at the top of this function.
+      // This branch used to create the durable assignment ref and RETURN a
+      // retired reviewer whenever the global cursor happened to name it for the
+      // same issue/PR/head/slot -- no lease was taken, because the eligibility
+      // guard below wraps only lease creation, so no verdict could ever result.
+      // That is wasted work and an inconsistent refusal, and it named no repair.
+      // Refuse here, before any ref is created, with the same repair route.
+      if(!eligibleNames.has(current.reviewer))throw new LaneError(ACTIVE_REVIEWERS.some((row)=>row.name===current.reviewer)
+        ?`current reviewer ${current.reviewer} conflicts with the live orchestrator engine; assign an independent reviewer`
+        :`current reviewer cursor sequence ${current.sequence} belongs to a retired reviewer or orchestrator-conflicting reviewer ${current.reviewer}; no assignment was recorded and no lease was taken. Record a governed replacement for this exact head`)
       assertAssignmentWasNotTerminallyReleased(request,current,io)
       if(!io.createRef(assignmentRef,cursorSha)&&readRefAfterWrite(assignmentRef,cursorSha,io)!==cursorSha)throw new LaneError('review assignment record could not be proved; retry the same assignment')
       const live=io.getPr(current.pr)
@@ -2705,7 +2777,12 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
       .replace(REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_VERDICT_REF_PREFIX)
       .replace(REVIEW_REPLACEMENT_REF_PREFIX,REVIEW_VERDICT_REPLACEMENT_REF_PREFIX)
     const durableVerdict=fixedRecords?(fixedRecords.get(answeredVerdictRef)?.sha??null):io.readRef(answeredVerdictRef)
-    const hasVerdict=Boolean(durableVerdict)||(preflightState?.evidence?anyVerdictFor(preflightState.evidence,request.headSha):hasVerdictForHead(request.issue,request.pr,request.headSha,io))
+    // #2079. The durable verdict answering THIS assignment counts only if its
+    // reviewer could read the repository. Otherwise the artifact deepseek-chat
+    // left behind would forbid the very replacement the refusal message tells
+    // the operator to run -- the head would be permanently unreviewable.
+    const durableVerdictCounts=Boolean(durableVerdict)&&reviewerReadsRepository(original.reviewer)
+    const hasVerdict=durableVerdictCounts||(preflightState?.evidence?anyVerdictFor(preflightState.evidence,request.headSha):hasVerdictForHead(request.issue,request.pr,request.headSha,io))
     if(hasVerdict)throw new LaneError('an existing verdict for the exact head forbids reviewer replacement')
     const failedLeaseRef=reviewActiveRef(original.reviewer),cachedFailed=preflightBusy.leases?.get(original.reviewer),failedLeaseSha=cachedFailed?.sha??io.readRef(failedLeaseRef)
     const failedLease=failedLeaseSha?(cachedFailed?.sha===failedLeaseSha?cachedFailed.lease:parseReviewLease(io.getCommit(failedLeaseSha))):null

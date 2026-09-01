@@ -57,6 +57,14 @@ test('a verdict from a reviewer whose wrapper cannot read the repository is REFU
   // No commit, no ref: a reviewer that could not read the code leaves NO artifact.
   assert.equal(commits,0);assert.equal(creates,0)
   assert.equal([...io.refs.keys()].some((ref)=>ref.includes('db-review-verdict')),false)
+  // #2079. The refusal must name a route that actually RUNS. "Use
+  // --replace-failed-reviewer" was not one: replacement needs a recognized
+  // terminal failure code and both no-verdict confirmations, so an operator
+  // following the old message walked into a second refusal.
+  let message='';try{recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},ioFixture('deepseek-chat'))}catch(error){message=error.message}
+  assert.match(message,/no retry and no re-run can satisfy it/)
+  assert.ok(message.includes(`node scripts/manage-migration-author-lanes.mjs --replace-failed-reviewer --issue ${issue} --pr ${pr} --head-sha ${headSha}`))
+  assert.ok(message.includes('--failure-code reviewer_cannot_read_repository --confirm-no-verdict --confirm-no-artifact'))
 })
 test('a verdict from a reviewer that does read the repository still records (#2078)',()=>{
   const io=ioFixture()
