@@ -5,8 +5,8 @@
   "marker_schema_version": 1,
   "marker_reviews": [
     {
-      "line_start": 86,
-      "line_end": 86,
+      "line_start": 83,
+      "line_end": 83,
       "disposition": "checks",
       "reason": "This execute rewrites the existing Licensing Manager RPC. The authority catalog contract proves the exact Marvel-contract over Disney-OPA exception and all original DCP-to-OPA authority protections; predecessor contracts preserve set-based execution, bounded enrichment, privacy-safe presentation, and source-purpose behavior.",
       "check_ids": [
