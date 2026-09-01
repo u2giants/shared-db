@@ -74,6 +74,11 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    ````
    ```
 
+   Queue order is derived, not manually nominated: the issue that unblocks the
+   most other open issues through direct or chained `depends_on` relationships
+   goes first; equal blocker counts are ordered oldest first. `priority:` remains
+   required for scope compatibility but cannot override blocker impact or age.
+
    **READS AND WRITES ARE DECLARED SEPARATELY (Step 2, issue #1366).** Use
    `writes:` for every object the work CHANGES and `reads:` for every object it
    DEPENDS ON without changing. The queue serialises on this matrix:
