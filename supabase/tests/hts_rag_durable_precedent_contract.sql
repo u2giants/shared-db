@@ -21,6 +21,30 @@ begin
   if exists (select 1 from information_schema.role_table_grants where table_schema='public' and table_name in ('hts_rag_determinations','hts_rag_review_events') and grantee='service_role' and privilege_type in ('UPDATE','DELETE','TRUNCATE')) then
     raise exception 'immutable comparison/review history received a mutation grant';
   end if;
+
+  -- Row level security must be ENABLED, not merely policied. Policies on a table
+  -- with RLS off are inert, so a dropped ENABLE line would expose every row the
+  -- SELECT grants below reach while all the other assertions here stayed green.
+  select count(*) into v_count from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname='public' and c.relrowsecurity
+     and c.relname in ('hts_rag_precedents','hts_rag_precedent_rulings','hts_rag_product_examples','hts_rag_determinations','hts_rag_extraction_jobs','hts_rag_review_events','hts_rag_product_family_allowlist');
+  if v_count <> 7 then raise exception 'row level security is not enabled on all seven HTS RAG tables, got %', v_count; end if;
+
+  -- No read path for the unauthenticated browser role or PUBLIC, on any privilege.
+  if exists (select 1 from information_schema.role_table_grants where table_schema='public' and table_name like 'hts_rag_%' and grantee in ('anon','PUBLIC')) then
+    raise exception 'anon or PUBLIC holds a grant on an HTS RAG table';
+  end if;
+
+  -- Every authenticated read must sit behind an administrator policy, never a bare grant.
+  if exists (
+    select 1 from information_schema.role_table_grants g
+     where g.table_schema='public' and g.table_name like 'hts_rag_%'
+       and g.grantee='authenticated'
+       and not exists (select 1 from pg_policies p where p.schemaname='public' and p.tablename=g.table_name and p.cmd in ('SELECT','ALL'))
+  ) then
+    raise exception 'authenticated holds a grant on an HTS RAG table with no read policy';
+  end if;
 end $$;
 
 insert into public.hts_rag_product_examples(product_family,fixture_version,fixture_hash,input_hash)
