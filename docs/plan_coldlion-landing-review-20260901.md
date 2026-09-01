@@ -128,12 +128,12 @@ one-request-at-a-time pacing are all unchanged and still correct.
 
 ### B6. Field-level gaps that will bite the loader (severity: medium)
 
-- **`invoiceNoString` and `pickTicketNoString` can hold comma-separated lists** (order 7126086:
+- **`invoiceNoString` and `pickTicketNoString` can hold comma-separated lists** (order <order redacted>:
   `6015220,6015221,6015222`; 31 of 1,823 rows). Any typed integer column truncates or fails.
   Assume `invoiceDateString` behaves the same.
-- **An invoice number does not mean the row was invoiced** — order 7121891 carries invoice numbers
+- **An invoice number does not mean the row was invoiced** — order <order redacted> carries invoice numbers
   on lines with `invoiceQty` = 0. Fulfilment state comes from quantities only.
-- **`orderQty` = 0 on a prepack row is a rounding artefact, not an empty line** (order 7121892,
+- **`orderQty` = 0 on a prepack row is a rounding artefact, not an empty line** (order <order redacted>,
   17 rows: `lineQty` 1 ÷ `prepackQty` 4). Do not filter these out as junk.
 - **Eight fields are new since the decisions CSV was written** — `orderQty`, `invoiceQty`,
   `pickTicketNoString`, `prepackQty`, `quantity`, `labelDesc`, `warehouseDesc`, and
@@ -164,7 +164,7 @@ Mostly yes, with two changes to sequencing.
 
 - The `core.*` promotion layer, deliberately out of scope in the plan.
 - Where the loaders run (step 7 names it an open decision; it still is).
-- The price question on order 7109618, where collapsing the old duplicate rows left a single
+- The price question on order <order redacted>, where collapsing the old duplicate rows left a single
   `linePrice` matching neither of the two prices previously returned. **We cannot re-verify this
   against the pre-change payload and it is not being reported to ColdLion as a defect.** It is
   recorded here only so a later session does not rediscover it as new.

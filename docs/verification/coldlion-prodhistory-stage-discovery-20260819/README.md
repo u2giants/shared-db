@@ -53,7 +53,7 @@ Production order **22717**, 2024-07-01, item `VSZ20ATRN01`, customer `HLL770`:
 
 | Stage | `prodLineSeq` | `prodOrderQty` | `salesOrderNo` | `custPONumber` | `receiveDate` |
 |---|---|---|---|---|---|
-| `ISS` | 1 | **4,800** | 7123801 | populated | 2024-08-23 |
+| `ISS` | 1 | **4,800** | <order redacted> | populated | 2024-08-23 |
 | `REC` | 2 | **4,548** | **0** | empty | 2024-08-23 |
 
 Ordered 4,800, received 4,548 — a **252-piece shortfall that is invisible in the default response**.

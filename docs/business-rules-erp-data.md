@@ -135,7 +135,7 @@ customer PO or the sales-order link**. That is by design in ColdLion, not data l
 
 | Stage | Line | Qty | `salesOrderNo` | `custPONumber` | Meaning |
 |---|---|---|---|---|---|
-| `ISS` | 1 | 4,800 | 7123801 | populated | what we ordered |
+| `ISS` | 1 | 4,800 | <order redacted> | populated | what we ordered |
 | `REC` | 2 | 4,548 | **0** | empty | what we received |
 
 Ordered 4,800, received 4,548. **That difference is a real business fact** — short shipment — and it

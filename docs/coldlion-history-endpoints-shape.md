@@ -194,7 +194,7 @@ how many pieces are in one pack. The endpoint then returns **one row per compone
 each carrying a `sub*` block (`subItemNo`, `subColorCode`, `subSizeCode`,
 `subMerchGroup01`–`06`), with `quantity` = how many of that style are in one pack.
 
-Real example (sales order 7127367):
+Real example (sales order <order redacted>):
 
 ```
 master AAH6601  prePackCode=PPK2536  prepackQty=6  lineQty=1680  linePrice=2.07
@@ -308,7 +308,7 @@ shows the quantity and pricing of each component."*
 So on a prepack line, every component row repeats the same `lineQty` and carries **its own**
 `linePrice`. Two rows on one order with the same item and different prices are **not two lines**.
 
-Worked example — sales order `7121866`, item `VSZ4812`, customer `ROS010`, prepack `PPK1557`:
+Worked example — sales order `<order redacted>`, item `VSZ4812`, customer `ROS010`, prepack `PPK1557`:
 
 | Row | `lineQty` | `linePrice` | `subItemNo` |
 |---|---|---|---|
