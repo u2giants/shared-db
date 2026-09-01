@@ -21,8 +21,8 @@ begin
   if position('customerId' in v_search)=0 or position('contentType' in v_search)=0
      or position('productMaterial' in v_search)=0 or position('fileStatus' in v_search)=0
      or position('productCategory' in v_search)=0
-     or position('page AS MATERIALIZED' in v_search)=0
-     or position('customerId' in v_search) > position('page AS MATERIALIZED' in v_search) then
+     or position('page as materialized' in lower(v_search))=0
+     or position('customerid' in lower(v_search)) > position('page as materialized' in lower(v_search)) then
     raise exception 'ranked filters are missing or occur after pagination';
   end if;
   if position('filter_effective_assets' in v_counts)=0 or position('require_dam_access' in v_counts)=0 then

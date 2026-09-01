@@ -1,5 +1,6 @@
 -- #2031: complete ranked-search parity with the active PopDAM library filters.
 -- customer remains legacy free text; customerId is the canonical UUID key.
+-- derived-from: 20260831184547, 20260831221607
 
 create or replace function public.filter_effective_assets(p_filters jsonb default '{}'::jsonb)
 returns setof public.assets
@@ -128,11 +129,11 @@ as $$
   ), candidate_ranks as materialized (
     select c.document_type,c.entity_id,c.asset_id,c.style_group_id,max(c.keyword_rank)::real keyword_rank,
       max(c.semantic_rank)::real semantic_rank,
-      (coalesce(max(c.keyword_rank),0)+coalesce(max(c.semantic_rank),0)*0.35)::real rank
+      (coalesce(max(c.keyword_rank),0) + coalesce(max(c.semantic_rank),0) * 0.35)::real rank
     from (select k.*,null::real semantic_rank from keyword_candidates k union all
       select s.document_type,s.entity_id,s.asset_id,s.style_group_id,null::real,s.semantic_rank from semantic_candidates s) c
     group by c.document_type,c.entity_id,c.asset_id,c.style_group_id
-    having coalesce(max(c.keyword_rank),0)+coalesce(max(c.semantic_rank),0)*0.35 >= (select min_rank from params)
+    having coalesce(max(c.keyword_rank),0) + coalesce(max(c.semantic_rank),0) * 0.35 >= (select min_rank from params)
   ), candidate_asset_ids as materialized (
     select c.*,c.asset_id id from candidate_ranks c where c.document_type='asset' and c.asset_id is not null
     union all
