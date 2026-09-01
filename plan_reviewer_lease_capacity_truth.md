@@ -225,7 +225,8 @@ part of this plan has been started. There is no half-done work anywhere.
 Key landmarks in `scripts/manage-migration-author-lanes.mjs`:
 
 **Verified against `main` at `bcd2ec1a`, 3,917 lines.** The shared checkout at
-`C:epos\shared-db` was ~800 lines stale when this plan was first drafted and its
+`C:
+epos\shared-db` was ~800 lines stale when this plan was first drafted and its
 line numbers were wrong throughout. Re-derive any number below with `grep -n`
 before relying on it; treat the symbol name as the truth and the line as a hint.
 
@@ -367,6 +368,16 @@ reason given.
    to prevent. Step 1 instead adds a **separate, complete, atomic operation** whose
    whole job is the release — and then lets the existing replacement path reuse it.
 
+**Rejected (2026-09-01, after independent review) — putting the lease timestamp in
+the commit message.** This plan originally proposed appending an optional
+` held-since=<ISO8601>` field to the lease line. Rejected: the same message family
+is parsed by `parseReviewLease` (line 1445) *and* `parseReviewCursor` (line 1429);
+both anchor the cursor form with `$`, so any appended field breaks both, and
+capture group 6 already means `sequence` in one and `slot` in the other while
+`parseReviewLease` derives `cursorForm` from `!match[6]`. A cosmetic field is not
+worth a silent lease/cursor misclassification. The commit's `committedDate` already
+carries the answer and costs nothing to read.
+
 ## 8. Design decisions already made
 
 Dated 2026-09-01 unless stated. **LOCKED** decisions must not be relitigated;
@@ -390,17 +401,18 @@ Dated 2026-09-01 unless stated. **LOCKED** decisions must not be relitigated;
 - **LOCKED — age never auto-deletes.** Step 2 makes age *visible* and Step 3
   *reports* it. Eviction stays a human/agent-invoked, evidenced act.
 - **LOCKED — backward compatibility of the lease grammar.** `parseReviewLease`
-  must keep accepting today's three message forms unchanged; new fields are
-  additive and optional. Old leases written before this ships must still parse, and
-  must report their age as "unknown (pre-dates timestamped leases)" rather than
-  erroring or defaulting to zero.
+  and `parseReviewCursor` must keep accepting today's three message forms
+  **byte-identically**. Neither regex may be edited. Any lease whose age cannot be
+  determined must report "unknown" rather than erroring or defaulting to zero.
 - **LOCKED — Step 3's report is read-only.** It takes no mutex and writes no ref.
 - **LOCKED — `ai-devops` fix is honesty, not new capture.** Step 5 stops the tool
   lying about what it has. Making coordination-class reports capture *richer*
   evidence is a good idea and is out of scope.
-- **OPEN — the exact new lease message grammar.** Suggested:
-  append ` held-since=<ISO-8601-Z>` to the lease line. Any additive, regex-safe
-  form is acceptable provided old messages still parse and the field is optional.
+- **LOCKED (revised 2026-09-01) — the lease message grammar does not change at
+  all.** Lease age comes from the commit's own `committedDate`, read via the
+  existing GraphQL query. See Step 2 for why appending a field is unsafe: two
+  parsers read the same messages, both `$`-anchored, and capture group 6 already
+  carries different meanings in each.
 - **OPEN — the age threshold at which the report flags a slot as suspicious.**
   Pick something defensible (12h or 24h) and put the number in one named constant
   with a comment saying it is advisory only. It gates no behaviour.
@@ -494,26 +506,42 @@ before you make it green. (See §11: prove a check can fail before trusting it.)
 
 **Dependencies:** Step 1 can land first or together; Step 3 depends on this.
 
-**What to change**
+**LOCKED decision, revised 2026-09-01 after review: do NOT put the timestamp in the
+commit message.** Use the lease commit's own `committedDate`. Reasoning below — the
+original grammar approach is now a rejected approach, not the plan.
 
-1. `parseReviewLease` (line 1445): extend the lease grammar to accept an optional
-   trailing ` held-since=<ISO-8601 Z>` and return `heldSince` (a `Date`, or `null`
-   when absent). **All three existing message forms must still parse unchanged** —
-   add the field as optional in the regex, do not rewrite the alternation.
-2. Every site that *writes* a lease commit message — the assignment path around
-   line 2043, and the replacement message at line 2439 — must emit `held-since`
-   with the current UTC time.
-3. Add a small exported helper `reviewLeaseAgeHours(lease, now)` returning a number
-   or `null`. `null` means "pre-dates timestamped leases", and every consumer must
+Why the grammar approach was dropped: the lease message family is parsed by **two**
+functions, not one — `parseReviewLease` (line 1445) and `parseReviewCursor`
+(line 1429). Both anchor the `reviewer-cursor` form with `$`, so *any* appended
+field breaks both immediately. Worse, capture group 6 means `sequence` in one
+parser and `slot` in the other, and `parseReviewLease` derives `cursorForm` from
+`!match[6]` — so adding an optional group anywhere near it risks silently
+reclassifying a lease as a cursor. That is a correctness hazard for a cosmetic
+gain.
+
+**What to change instead**
+
+1. In `readActiveReviewLeases` (line 770), extend the GraphQL selection from
+   `... on Commit{message}` to `... on Commit{message committedDate}` and carry
+   `committedDate` into the returned entry alongside `sha` and `commit`. This is
+   one field on an existing query: **no extra request, no budget change.**
+2. In `findBusyReviewers` (line 1741), attach that date to each record and expose
+   it on the existing non-enumerable `busy.leases` side-channel (lines 1775–1777)
+   as `heldSince`.
+3. Add a small exported helper `reviewLeaseAgeHours(heldSince, now)` returning a
+   number or `null`. `null` means the date was unavailable, and every consumer must
    render that as unknown, never as `0`.
+4. Leave `parseReviewLease` and `parseReviewCursor` **untouched.**
 
-**Behaviour when done:** new leases carry their own age; old ones report unknown
-and nothing breaks.
+**Behaviour when done:** every lease reports its age, including leases taken before
+this change — because the date was always on the commit; nobody was reading it.
 
 **Verification gate:** `node --test scripts/manage-migration-author-lanes.test.mjs`
-with new cases covering (a) each of the three legacy message forms still parsing,
-(b) a timestamped lease round-tripping, (c) `reviewLeaseAgeHours` returning `null`
-for a legacy lease.
+with new cases covering (a) `parseReviewLease` and `parseReviewCursor` byte-identical
+behaviour on all three message forms (regression guard — these must not change),
+(b) a lease record carrying `heldSince` through `findBusyReviewers`, (c)
+`reviewLeaseAgeHours` returning `null` when the fake IO omits the date. The fake IO
+in the test file must be extended to supply `committedDate`.
 
 ---
 
