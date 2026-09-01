@@ -207,6 +207,18 @@ CREATE_INDEX_RE = re.compile(
     rf"^\s*create\s+(unique\s+)?index\s+(concurrently\s+)?"
     rf"(?:if\s+not\s+exists\s+)?({IDENT})\s+on\s+(?:only\s+)?{QUALIFIED}\b"
 )
+# A later migration in the SAME ordered batch may drop an index an earlier one
+# created (issue #2035: the review fix removed
+# `hts_rag_product_family_allowlist_enabled_idx`). Without this, the batch's
+# expected-object set still demands the index and enforcing verification fails on
+# a database that is exactly right. Only a SCHEMA-QUALIFIED drop is acted on; a
+# bare name is recorded as unassertable rather than guessed at, which is the same
+# refusal `CREATE_INDEX_HEAD_RE` makes.
+DROP_INDEX_HEAD_RE = re.compile(r"^\s*drop\s+index\b")
+DROP_INDEX_RE = re.compile(
+    rf"^\s*drop\s+index\s+(?:concurrently\s+)?"
+    rf"(?:if\s+exists\s+)?{QUALIFIED}\b"
+)
 GRANT_RE = re.compile(r"^\s*(grant|revoke)\b")
 # The object of a GRANT/REVOKE. `all tables in schema` is DELIBERATELY NOT
 # matched: it names a schema, not a relation, and guessing its membership is
@@ -854,6 +866,123 @@ CATALOG_CONTRACTS = {
       (select p.proretset and p.prorows = 4
         from pg_proc p
         where p.oid = to_regprocedure('public.expand_dam_search_queries(text)'))
+""",
+    "popdam_ranked_search_narrow_visibility_v1": """
+      (select
+        position('select f.id, f.style_group_id, f.file_type, f.status,' in pg_get_functiondef(p.oid)) > 0
+        and position('f.workflow_status, f.stage, f.is_licensed' in pg_get_functiondef(p.oid)) > 0
+        and position('select f.*' in pg_get_functiondef(p.oid)) = 0
+        and position('select distinct a.*' in pg_get_functiondef(p.oid)) = 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p
+        where p.oid = to_regprocedure('public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and (select
+        position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and (length(pg_get_functiondef(p.oid)) - length(replace(pg_get_functiondef(p.oid),
+          'get_effective_filter_counts_unchecked_1703', '')))
+          / length('get_effective_filter_counts_unchecked_1703') = 1
+        and position('get_filter_counts_unchecked_1703' in pg_get_functiondef(p.oid)) = 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p
+        where p.oid = to_regprocedure('public.get_filter_counts(jsonb)'))
+      and not has_function_privilege('anon',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.get_filter_counts(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.get_filter_counts(jsonb)', 'EXECUTE')
+""",
+    "popdam_ranked_search_private_keyed_visibility_v2": """
+      (select
+        position('select a.id, a.style_group_id, a.file_type, a.status,' in pg_get_functiondef(p.oid)) > 0
+        and position('a.workflow_status, a.stage, a.is_licensed' in pg_get_functiondef(p.oid)) > 0
+        and position('from candidate_asset_ids c' in pg_get_functiondef(p.oid)) > 0
+        and position('join public.assets a on a.id = c.id' in pg_get_functiondef(p.oid)) > 0
+        and position('filter_effective_assets' in substring(pg_get_functiondef(p.oid)
+          from position('visible_assets as materialized' in pg_get_functiondef(p.oid)))) = 0
+        and position('cross join lateral' in pg_get_functiondef(p.oid)) = 0
+        and position('select distinct a.*' in pg_get_functiondef(p.oid)) = 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p
+        where p.oid = to_regprocedure('public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and (select
+        position('authorized as materialized' in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and (length(pg_get_functiondef(p.oid)) - length(replace(pg_get_functiondef(p.oid),
+          'require_dam_access', ''))) / length('require_dam_access') = 1
+        and position('from authorized' in pg_get_functiondef(p.oid)) > 0
+        and position('cross join public.assets a' in pg_get_functiondef(p.oid)) > 0
+        and position('filter_effective_assets_unchecked_1703' in pg_get_functiondef(p.oid)) = 0
+        and p.provolatile = 's' and not p.prosecdef
+        and p.proconfig is null
+        from pg_proc p
+        where p.oid = to_regprocedure('public.filter_effective_assets(jsonb)'))
+      and not has_function_privilege('authenticated',
+        'public.filter_effective_assets_unchecked_1703(jsonb)', 'EXECUTE')
+      and (select
+        position('select a.file_type, a.status, a.workflow_status, a.stage, a.is_licensed'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('from public.assets a' in pg_get_functiondef(p.oid)) > 0
+        and position('select a.*' in pg_get_functiondef(p.oid)) = 0
+        and position('filter_effective_assets' in pg_get_functiondef(p.oid)) = 0
+        and position('bounds as materialized' in pg_get_functiondef(p.oid)) > 0
+        from pg_proc p where p.oid = to_regprocedure(
+          'public.get_effective_filter_counts_unchecked_1703(jsonb)'))
+      and (select position('get_effective_filter_counts_unchecked_1703'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p where p.oid = to_regprocedure(
+          'public.get_effective_filter_counts(jsonb)'))
+      and not has_function_privilege('anon', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+      and not has_function_privilege('anon',
+        'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
+""",
+    "popdam_ranked_search_single_heap_fetch_v3": """
+      (select
+        position('full_text_matches as materialized' in pg_get_functiondef(p.oid)) > 0
+        and position('d.search_tsv @@ any(array(select q.tsq from queries q))'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('select max(ts_rank_cd(d.search_tsv, q.tsq))'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('from full_text_matches d' in pg_get_functiondef(p.oid)) > 0
+        and position('join public.dam_search_documents d on d.search_tsv @@ q.tsq'
+          in pg_get_functiondef(p.oid)) = 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p
+        where p.oid = to_regprocedure(
+          'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and not has_function_privilege('anon',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+""",
+    "popdam_ranked_search_rank_keys_through_visibility_v4": """
+      (select
+        position('c.keyword_rank, c.semantic_rank, c.rank, c.asset_id id'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('c.keyword_rank, c.semantic_rank, c.rank, a.id'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('select distinct a.document_type, a.entity_id, a.asset_id'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('join visible_assets a on a.id = c.asset_id'
+          in pg_get_functiondef(p.oid)) = 0
+        and position('join visible_style_groups g on g.style_group_id = c.style_group_id'
+          in pg_get_functiondef(p.oid)) = 0
+        and position('d.search_tsv @@ any(array(select q.tsq from queries q))'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p where p.oid = to_regprocedure(
+          'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and not has_function_privilege('anon',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
 """,
     "coco_owner_ruling_v1": """
       case when to_regclass('core.taxonomy_owner_ruling') is null then true else
@@ -2055,6 +2184,22 @@ def derive_targets(migrations: dict[str, Path], allowlist: list[str]) -> Targets
                 relation_name = f"{match.group(4)}.{match.group(5)}"
                 indexes.add((index_name, relation_name))
                 tables.add(relation_name)
+                continue
+            if match := DROP_INDEX_RE.match(statement):
+                dropped = f"{match.group(1)}.{match.group(2)}"
+                before = len(indexes)
+                indexes = {pair for pair in indexes if pair[0] != dropped}
+                if len(indexes) != before:
+                    notes.append(
+                        f"{version}: dropped index `{dropped}` created earlier in this "
+                        f"batch; it is no longer an expected object"
+                    )
+                continue
+            if DROP_INDEX_HEAD_RE.match(statement):
+                notes.append(
+                    f"{version}: DROP INDEX was not safely parseable and was not "
+                    f"silently accepted: `{statement.strip()[:240]}`"
+                )
                 continue
             if CREATE_INDEX_HEAD_RE.match(statement):
                 notes.append(
