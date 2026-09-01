@@ -30,9 +30,9 @@
 // -------------------------------------------------------------------------------
 // The obvious implementation is "anything under `docs/` is documentation". It is
 // WRONG here and would have punched a hole straight through the promotion
-// evidence chain: `docs/verification/throughput-guard-truth-baseline-20260828.json`
-// is the REVIEWED DETECTOR BASELINE that `check-production-verification-sidecars.mjs`
-// pins the catalog detector against. A directory rule would have let that file --
+// evidence chain: the REVIEWED DETECTOR BASELINE that
+// `check-production-verification-sidecars.mjs` pins the catalog detector
+// against is a JSON file that lives under the documentation directory. A directory rule would have let that file --
 // the very thing designed to make the detector un-editable without a deliberate
 // re-review -- change silently underneath a promotion that had already been
 // approved. It is a data file that lives in a documentation folder, and that is
@@ -54,8 +54,9 @@ import { execFileSync } from 'node:child_process'
 
 // Prose only. Deliberately short, deliberately not directory-based -- see above.
 // `.txt` was here and was REMOVED after external review (GLM, 2026-09-01):
-// `supabase/tests/ci-quarantine.txt` is a plain-text file that CONTROLS WHICH
-// CONTRACT TESTS MAY FAIL THE JOB (`database-contract-tests.yml`, QUARANTINE_FILE).
+// the contract-test QUARANTINE FILE is a plain-text file that CONTROLS WHICH
+// CONTRACT TESTS MAY FAIL THE JOB (see QUARANTINE_FILE in the contract-test
+// workflow).
 // Treating it as prose would have let a quarantine edit land on main during a
 // merge window without forcing the branch update and contract-test re-run the
 // old exact gate forced. The extension rule does not save you if the extension
