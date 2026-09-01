@@ -25,6 +25,15 @@ This is the whole reason order 7127866 looked wrong to us. Seven rows all readin
 copies of a quantity — it is seven different products, each carrying the same **parent** total in the
 parent-level fields.
 
+## 1a. A Master assortment has no single licensor or property
+
+**Owner ruling, Albert, 2026-09-01:** a Master assortment (what ColdLion calls a prepack) routinely
+holds four different designs with four different licensors and properties. **Licensor and property
+are meaningless at the Master level and belong only to the sub-items.** Never read either from the
+parent, never fall back to the parent when the component value is blank, and explode assortments to
+components before grouping any report by licensor or property. Full rule and its consequences:
+[`business-rules-erp-data.md` §9](business-rules-erp-data.md).
+
 ## 2. The real SKU is not `itemNo`
 
 On an exploded row, `itemNo` is the **parent prepack's** item number and is identical on every row of
@@ -143,4 +152,5 @@ never from the presence of a document number.
 
 - [`coldlion-open-questions.md`](coldlion-open-questions.md) — the single question register; read §4 before asking ColdLion anything
 - [`coldlion-erp-api-reference.md`](coldlion-erp-api-reference.md) — endpoint and field map
+- [`business-rules-erp-data.md`](business-rules-erp-data.md) — §9: licensor and property are component-level, never Master-level
 - [`business-rules/erp-orders-and-source-meaning.md`](business-rules/erp-orders-and-source-meaning.md) — what an order-history row means in business terms

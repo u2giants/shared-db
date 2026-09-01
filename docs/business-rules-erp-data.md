@@ -294,3 +294,38 @@ slice is still not a documented rule; this one is now a rule because ColdLion sa
 out of 803 (0.7%)** remain unexplained — orders 23034 (HLL770, qty 3,024 and 4,032), 23039/23040
 (ATH160, qty 1 each), 23044 (BOX030, qty 1) and 23852 (MOD010, `FOILCORNER`, qty 7,600). The qty-1
 lines look like charges rather than production. Not worth chasing unless a report trips over them.
+
+## 9. Licensor and property are meaningless at the assortment (Master) level
+
+> **Albert (owner), 2026-09-01:** "In one Master assortment we have 4 different designs with 4
+> different licensors/properties. A licensor and property at the Master level is meaningless. It's
+> only useful for the sub-items."
+
+**Vocabulary.** What ColdLion calls a **prepack** is what we call a **Master assortment**: one
+sellable master SKU that contains several different component styles. `itemNo` is the Master;
+`subItemNo` (with `subColorCode` and `subLabelCode`) is the component actually manufactured and
+licensed.
+
+**The rule.** Licensor (`merchGroup05`) and property (`merchGroup06`) are **attributes of the
+component style, never of the Master**. A Master assortment routinely spans several licensors and
+several properties at once, so any single licensor or property value stamped on the Master is at
+best one of four and at worst wrong. This is a business fact about how assortments are built, not a
+data-quality problem to be cleaned up.
+
+**What it implies:**
+
+1. **Never read licensor or property from a Master assortment record**, and never fall back to the
+   Master when the component value is blank — see §6, where blank at assortment level is the normal
+   state, not missing data.
+2. **Any report grouped by licensor or property must explode assortments to components first.**
+   Counting assortments by licensor double-counts three licensors and drops the other three.
+3. **A Master's licensor set is derived, not stored** — it is the distinct set of its components'
+   licensors, and it is a set, not a value.
+4. **Royalty and licence-expiry logic runs at component level only.** A lapsed licence retires the
+   component styles that use it; the Master survives with fewer components.
+5. On `orderHistory` the ordinary `merchGroup01`-`06` fields **on an exploded component row carry
+   the component's own values** (measured 2026-09-01: `merchGroup05` varies inside 135 of 176
+   prepack groups, `merchGroup06` in 162 of 176). This is why owner ruling **D14** keeps them on
+   prepack component rows. Note the contrast with `prodHistory` in §6, where `merchGroup*` is
+   assortment-level and `ppkMerchGroup*` is component-level — **the two feeds do not use the same
+   convention, and code must not assume they do.**
