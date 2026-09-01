@@ -16,7 +16,7 @@
 |---|---|---|---|
 | 0 | Field decisions captured from the owner | ✅ done 2026-08-19 | [`coldlion-field-decisions-20260819.csv`](coldlion-field-decisions-20260819.csv) |
 | 1 | Supersede the design doc for the 2026-08-19 rulings | ⬜ open | |
-| 4a | ~~Resolve the `orderHistory` line key~~ | ✅ **done 2026-08-20** | ColdLion answer + verification on 1,671 rows; `docs/coldlion-open-questions.md` §4 |
+| 4a | Resolve the `orderHistory` line key | ✅ **REDONE 2026-09-01** | The 2026-08-20 key was superseded — it collides on 181 of 1,243 groups. Current key: `(salesOrderNo, salesOrderLineNo, itemNo, subItemNo)`, zero duplicates on 1,823 rows. See the superseded box in step 4 |
 | 2 | `coldlion.merch_group_header` + `merch_group_detail` | ⬜ open | |
 | 3 | `coldlion.item_header` + `item_merch_group` + `item_detail` | ⬜ open | |
 | 4 | `coldlion.order_history_line` + `order_history_component` | ⬜ open | |
@@ -159,9 +159,12 @@ Re-derive any of them with the method in §12.
    Proof it matters: `CW001` genuinely contains items numbered `01`, `02`, `03`, `04`, `05`
    (verified live). A March 2026 sync run failed with *"ON CONFLICT DO UPDATE command cannot affect
    row a second time"*, the exact signature of two same-numbered rows in one batch.
-4. **Merch groups on the history feeds are duplicated item attributes.** 519 order lines joined
-   against the full item master: `merchGroup01`-`06` **identical on 519 of 519, zero differences.**
-   Hence owner ruling D2.
+4. **Merch groups on the history feeds are duplicated item attributes — ON NON-PREPACK ROWS ONLY.**
+   519 order lines joined against the full item master: `merchGroup01`-`06` **identical on 519 of
+   519, zero differences.** Hence owner ruling D2. **Corrected 2026-09-01: that sample was
+   non-prepack.** Inside a single prepack line the same codes vary across component rows
+   (`merchGroup05` in 135 of 176 groups, `merchGroup06` in 162 of 176), so there they describe the
+   component, not the parent. Owner ruling **D14** keeps them on prepack component rows.
 5. **`brandAssuranceNo` on an order is NOT duplication.** Same join: identical where both present
    (287), **never conflicting (0)**, and present on the order while blank on the item on **181**
    lines. The order is the only source for those. Keep it.
@@ -206,7 +209,7 @@ Re-derive any of them with the method in §12.
 | # | Decision | Authority |
 |---|---|---|
 | D1 | Land **all 14** merch-group slots on items, even though 11-14 measure 0% | Albert, 2026-08-19 |
-| D2 | **Drop LINE-LEVEL merch-group codes and their `Desc` twins from both history feeds** — item attributes, not order attributes. **Scope is `merchGroupNN` / `merchGroupNNDesc` ONLY.** `subMerchGroup*` and `ppkMerchGroup*` are a DIFFERENT GRAIN and are KEPT — see the warning below | Albert, 2026-08-19, on the 519/519 evidence |
+| D2 | **Drop LINE-LEVEL merch-group codes and their `Desc` twins from both history feeds** — item attributes, not order attributes. **Scope is `merchGroupNN` / `merchGroupNNDesc` ONLY.** ~~`subMerchGroup*` and `ppkMerchGroup*` are a DIFFERENT GRAIN and are KEPT~~ — those two field families **do not exist**; see the corrected box below. **NARROWED BY D14 (2026-09-01): D2 now applies to NON-PREPACK rows only.** On prepack component rows of `orderHistory` the codes describe the component and are KEPT | Albert, 2026-08-19, on the 519/519 evidence; narrowed by Albert, 2026-09-01 |
 | D3 | **Division identity is the letter code** (`CW001`, `SP001`, `EH001`), never a number. No numeric division id in any new table | Albert, 2026-08-19; recorded in `business-rules/merchandise-and-product-taxonomy.md` |
 | D4 | **Only fields marked `ingest`** in the decisions CSV get a typed column | Albert, 2026-08-19 |
 | D5 | **No raw JSON archive column.** Accepted consequence: an `ignore` decision on the two history feeds is effectively permanent, and reversing one means re-pulling 7 years | Albert, 2026-08-19 |
@@ -367,8 +370,8 @@ is the old bug reappearing.
 
 | Table | Grain | Key |
 |---|---|---|
-| `order_history_line` | one sales order line | ⚠️ **UNRESOLVED — see below** |
-| `order_history_component` | one component style in that line | `+ sub_item_no` |
+| `order_history_line` | one sales order line | `(salesOrderNo, salesOrderLineNo)` — resolved 2026-09-01. **The API never returns a line row**; it must be synthesised by de-duplicating fields that are constant within the group, and the load must assert that constancy |
+| `order_history_component` | one component style in that line | `(salesOrderNo, salesOrderLineNo, itemNo, subItemNo)` — zero duplicates on 1,823 rows |
 
 > ### ❌ SUPERSEDED 2026-09-01 — the 2026-08-20 line key is WRONG. Use the key below.
 >
@@ -396,9 +399,9 @@ is the old bug reappearing.
 > component quantities and prices each component. See
 > [`coldlion-prepack-sku-mapping.md`](coldlion-prepack-sku-mapping.md).
 >
-> ColdLion does have a `Line #` on Sales Order internally, but it is **not exposed in the API**
-> (register 2.10 asks for it). Until it is, the derived key above is what we use — and it is
-> evidence-backed, not a guess.
+> ~~ColdLion does have a `Line #` on Sales Order internally, but it is not exposed in the API.~~
+> **It is exposed now** — `salesOrderLineNo` arrived on 2026-08-31 and is part of the key above.
+> Register question 2.10 is answered.
 
 - **Append-only.** Never updated. Identity key plus `source_hash` makes a re-pull a no-op.
 - **Versioning:** the unique constraint must be `(identity, source_hash)`, not `(identity)` alone.
@@ -409,8 +412,11 @@ is the old bug reappearing.
   on too small a window; wider samples give 11.5% and 24%. Under D5 that drop would have been
   permanent. Treat this as the worked example of why a low fill percentage is not, by itself, a
   reason to discard a field.
-- **31 fields** after D2 removed the 12 line-level merch-group fields. Component `subMerchGroup*`
-  fields are KEPT — see the D2 warning in §8. Keep `brandAssuranceNo` (finding 5).
+- **Field count: RE-DERIVE FROM THE LIVE SPEC.** The old "31 fields" figure is void — it was built
+  on `subMerchGroup*`, a family that does not exist (see the corrected box in §8). `OrderHistory`
+  carries **63** properties as of 2026-09-01. Keep `brandAssuranceNo` (finding 5), keep
+  `merchGroup01`-`06` on prepack component rows (D14), and give the eight fields listed in D15
+  typed columns.
 - Non-prepack lines: one line row plus a single component row keyed on `item_no`.
 - **No foreign key to `item_header`** (finding 6) — 26% of lines have no item master row. Put that
   in a table comment, or a future session will "fix" it into a broken constraint.
@@ -442,8 +448,11 @@ array length, and the sum assertion passes with zero violations.
 3. `salesOrderNo = 0` means "no linked sales order", not a foreign key. Reading it as one creates
    ~1,500 broken links per sample.
 
-**83 fields** after D2 removed the 28 line-level merch-group fields. Component `ppkMerchGroup*`
-fields are KEPT — see the D2 warning in §8. (An earlier draft said 55 by wrongly dropping them.)
+**Field count: RE-DERIVE FROM THE LIVE SPEC.** Both the old "83" and the earlier "55" are void —
+"83" was built on `ppkMerchGroup*`, a family that does not exist (see the corrected box in §8).
+`ProdHistory` carries **105** properties as of 2026-09-01. It does have a `prepack*` family
+(`prepackItemNo`, `prepackColorCode`, `prepackQty`, `ppkDetailCost` and siblings) — identity and
+cost fields, not merchandise groups.
 
 **You'll know it worked when:** one window loads and a self-join on `prod_order_no` with differing
 `prod_line_seq` returns rows — i.e. multi-line orders survive as separate rows rather than being
