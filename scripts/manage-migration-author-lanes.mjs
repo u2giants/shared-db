@@ -31,7 +31,8 @@ export const REPO = 'u2giants/shared-db'
 // WHAT THE RAISE ACTUALLY COSTS. Downstream capacity, not correctness. Eight
 // authors finishing together queue in front of the single preview stage. The
 // owner approved six active reviewers, including Codex GPT-5.6 Sol and DeepSeek,
-// before this cap was activated. Ref writes are ~6/hour per lane, so eight lanes
+// before this cap was activated. DeepSeek was retired on 2026-09-01 (#2078),
+// leaving five; the cap is unaffected -- it bounds authors, not reviewers. Ref writes are ~6/hour per lane, so eight lanes
 // stay far inside GitHub's limits and the rate-limit caveat recorded in
 // plan_multi_agent_database_coordination_hardening.md is satisfied at this cap.
 export const MAX_AUTHOR_LANES = 8
@@ -63,13 +64,29 @@ export const REVIEW_LEASE_SUSPECT_HOURS = 24 // Advisory visibility only. Age ne
 // The headroom this constant appears to grant is illusory; the operation will
 // hit the request budget first (issue #1798 round 3, glm-5.3 Medium).
 export const REVIEW_REF_PAGE_LIMIT = 6
+//
+// `readsRepository` RECORDS A FACT ABOUT THE WRAPPER, NOT A PREFERENCE (#2078).
+// `true` means the wrapper hands its model a real, self-contained checkout of the
+// code under review and the model can open files in it. `false` means the wrapper
+// is a conversational API client: it sees only the text of the brief it is given,
+// so it can only review the change as DESCRIBED, never as WRITTEN. Verified per
+// wrapper in ai-devops/bin before this field was written, not assumed:
+//   ai-grok-review    -- `--cwd` on a real checkout, read-only permission set.
+//   ai-glm            -- OpenCode session pinned to the review directory, read-only agent.
+//   ai-kimi           -- read-only agent profile over the checkout/worktree.
+//   ai-muse           -- `ai-review-sandbox ensure-copy` clone plus an evidence packet;
+//                        its live doctor probe reads a file inside that directory.
+//   ai-codex-review   -- `codex exec --sandbox read-only` over the sandbox copy.
+//   ai-deepseek-agent -- HTTP conversation only. No filesystem, no diff, no tools.
+//                        The `--worktree` argument sets a spawn cwd it never uses.
+// A `false` entry can never record a code-review verdict; see recordReviewVerdict.
 export const REVIEWERS = Object.freeze([
-  { name:'grok-4.6', wrapper:'ai-grok-review' }, { name:'glm-5.3', wrapper:'ai-glm' },
-  { name:'kimi-k3', wrapper:'ai-kimi' }, { name:'qwen-3.8-max', wrapper:'ai-qwen' },
-  { name:'glm-5.2', wrapper:'ai-glm' },
-  { name:'muse-spark-1.2-contributor', wrapper:'ai-muse' },
-  { name:'codex-gpt-5.6-sol', wrapper:'ai-codex-review', orchestratorEngine:'codex' },
-  { name:'deepseek-chat', wrapper:'ai-deepseek-agent' },
+  { name:'grok-4.6', wrapper:'ai-grok-review', readsRepository:true }, { name:'glm-5.3', wrapper:'ai-glm', readsRepository:true },
+  { name:'kimi-k3', wrapper:'ai-kimi', readsRepository:true }, { name:'qwen-3.8-max', wrapper:'ai-qwen', readsRepository:true },
+  { name:'glm-5.2', wrapper:'ai-glm', readsRepository:true },
+  { name:'muse-spark-1.2-contributor', wrapper:'ai-muse', readsRepository:true },
+  { name:'codex-gpt-5.6-sol', wrapper:'ai-codex-review', orchestratorEngine:'codex', readsRepository:true },
+  { name:'deepseek-chat', wrapper:'ai-deepseek-agent', readsRepository:false },
 ])
 // Keep REVIEWERS as the historical evidence registry. Paused providers remain
 // readable forever, but only ACTIVE_REVIEWERS can receive new work.
@@ -192,7 +209,25 @@ export const REVIEWERS = Object.freeze([
 // Qwen remains historical-only, and Gemini remains outside the registry, while
 // ai-devops reviewer reliability is being repaired (owner instruction,
 // 2026-08-28). Historical names are never deleted because durable refs use them.
-export const RETIRED_REVIEWERS = Object.freeze(['qwen-3.8-max', 'glm-5.2'])
+//
+// RETIRED 2026-09-01 (issue #2078): 'deepseek-chat'. NOT a provider-quality pause
+// and not a health-check failure -- `ai-deepseek-agent` is structurally incapable
+// of reading the code it is asked to review. On issue #1987 / PR #1989 it produced
+// a complete, confidently formatted, well-ranked review of a file name, five
+// functions, two tables and two columns that DO NOT EXIST anywhere in the branch,
+// and the pipeline recorded it as a durable verdict artifact bound to the exact
+// head. The same run could have said APPROVE and produced a green merge gate over
+// SQL no reviewer ever saw. Retirement is the correct disposition, not a pause:
+// no future wrapper version fixes a conversational API client having no checkout.
+// Its historical name stays readable in REVIEWERS forever because durable refs
+// (`refs/db-review-assignments/1987-1989-2108fcd1...`) still name it.
+export const RETIRED_REVIEWERS = Object.freeze(['qwen-3.8-max', 'glm-5.2', 'deepseek-chat'])
+
+// The single fact the gate was missing (#2078). A verdict is evidence only if the
+// reviewer could open the file. Unknown names fail closed.
+export function reviewerReadsRepository(name, reviewers=REVIEWERS){
+  return reviewers.find((row)=>row.name===name)?.readsRepository===true
+}
 
 // ACTIVE ROTATION EXPANSION (owner approval, 2026-08-28). Codex GPT-5.6 Sol and
 // DeepSeek are active rotation providers. No overflow provider remains; when all
@@ -1493,6 +1528,11 @@ export function recordReviewVerdict(options,io=githubIo){
   if(!assignmentSha)throw new LaneError('the exact durable reviewer assignment does not exist')
   const assignment=parseReviewCursor(io.getCommit(assignmentSha))
   if(assignment.issue!==issue||assignment.pr!==pr||assignment.headSha.toLowerCase()!==headSha||(assignment.slot??1)!==slot)throw new LaneError('the assignment record disagrees with the requested verdict tuple')
+  // #2078. Refuse BEFORE any commit or ref is created, and before the lease and
+  // PR reads, so a reviewer that cannot open the code leaves no artifact at all.
+  // This is a property of the wrapper, so no retry, no re-run and no better
+  // formatted output can satisfy it.
+  if(!reviewerReadsRepository(assignment.reviewer))throw new LaneError(`reviewer ${assignment.reviewer} runs through a wrapper that has no access to the repository under review -- it never reads the diff, only the text of the brief, so its verdict describes the change as DESCRIBED rather than as WRITTEN. Refusing to record a code-review verdict from it. Use --replace-failed-reviewer to draw a reviewer that reads the code.`)
   const activeRef=reviewActiveRef(assignment.reviewer)
   if(io.readRef(activeRef)!==assignmentSha)throw new LaneError('reviewer does not hold the exact active lease; late or conflicting verdict refused')
   const live=io.getPr(pr)

@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_PAGE_LIMIT, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reviewRecordRefs } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, reviewerReadsRepository, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_PAGE_LIMIT, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reviewRecordRefs } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -797,7 +797,7 @@ test('retired reviewer names stay resolvable so historical review evidence never
 test('the active rotation is exactly the current models, in a stable order',()=>{
   // Order and length are the round robin. A change here silently reassigns every
   // in-flight sequence to a different reviewer, so it must be asserted, not assumed.
-  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3','muse-spark-1.2-contributor','codex-gpt-5.6-sol','deepseek-chat'])
+  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3','muse-spark-1.2-contributor','codex-gpt-5.6-sol'])
   assert.deepEqual(OVERFLOW_REVIEWERS,[])
   assert.equal(REVIEWERS.find((r)=>r.name==='kimi-k3').wrapper,'ai-kimi')
   assert.equal(REVIEWERS.find((r)=>r.name==='codex-gpt-5.6-sol').wrapper,'ai-codex-review')
@@ -805,6 +805,26 @@ test('the active rotation is exactly the current models, in a stable order',()=>
   assert.equal(REVIEWERS.find((r)=>r.name==='muse-spark-1.2-contributor').wrapper,'ai-muse')
   assert.equal(REVIEWERS.find((r)=>r.name==='deepseek-chat').wrapper,'ai-deepseek-agent')
   assert.ok(!ACTIVE_REVIEWERS.some((r)=>/qwen|gemini/i.test(r.name)),'Qwen and Gemini must remain outside the active rotation')
+})
+
+test('deepseek-chat can never be drawn for a code review (#2078)',()=>{
+  // The draw is the round robin over ACTIVE_REVIEWERS at every offset, so walking
+  // a full cycle of every eligible orchestrator engine covers every reachable pick.
+  assert.ok(!ACTIVE_REVIEWERS.some((r)=>r.name==='deepseek-chat'),'deepseek-chat must not be drawable')
+  assert.ok(!OVERFLOW_REVIEWERS.some((r)=>r.name==='deepseek-chat'),'deepseek-chat must not be reachable through overflow')
+  assert.ok(RETIRED_REVIEWERS.includes('deepseek-chat'))
+  for(const engine of ['claude','codex'])assert.ok(!reviewersForOrchestrator(engine).some((r)=>r.name==='deepseek-chat'))
+  // ...and it is still readable, because durable refs on PR #1989 name it.
+  assert.equal(REVIEWERS.find((r)=>r.name==='deepseek-chat').wrapper,'ai-deepseek-agent')
+})
+
+test('the roster records, per reviewer, whether its wrapper reads the repository (#2078)',()=>{
+  // Verified against each wrapper in ai-devops/bin, not assumed. Every reviewer
+  // that stays drawable hands its model a real checkout it can open files in.
+  for(const row of ACTIVE_REVIEWERS)assert.equal(reviewerReadsRepository(row.name),true,`${row.name} (${row.wrapper}) must read the repository under review to stay drawable`)
+  assert.equal(reviewerReadsRepository('deepseek-chat'),false)
+  assert.equal(reviewerReadsRepository('nobody-at-all'),false,'an unknown reviewer must fail closed')
+  assert.equal(reviewerReadsRepository(undefined),false)
 })
 
 test('the orchestrator engine is never eligible to review its own work',()=>{
@@ -1093,6 +1113,27 @@ test('terminal provider failure advances exactly once and retry is idempotent',(
   assert.equal(first.sequence,2);assert.equal(first.reviewer,'glm-5.3');assert.deepEqual(second,first)
   assert.equal(assignNextReviewer(failedReview,io).reviewer,'glm-5.3')
   assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'kimi-k3')
+})
+
+test('a retired reviewer is replaced cleanly, without an exclusion deadlock (#2078)',()=>{
+  // The live consequence of retiring deepseek-chat: PR #1989 holds a durable
+  // assignment naming it. --assign-reviewer now refuses that head ("belongs to a
+  // retired reviewer ... Record a governed replacement"), so --replace-failed-reviewer
+  // is the route. This proves the route works for a name that is in REVIEWERS but
+  // NOT in ACTIVE_REVIEWERS: the failed name only has to RESOLVE, never to be eligible.
+  const io=reviewIo();io.getPr=()=>({state:'open',head:{sha:failedReview.headSha}})
+  const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=1 reviewer=deepseek-chat issue=${failedReview.issue} pr=${failedReview.pr} head=${failedReview.headSha}`)
+  io.refs.set(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}`,sha)
+  io.refs.set(reviewActiveRef('deepseek-chat'),sha)
+  io.refs.set(REVIEW_CURSOR_REF,sha)
+  assert.throws(()=>assignNextReviewer(failedReview,io),/belongs to a retired reviewer[\s\S]*Record a governed replacement for this exact head/)
+  const replacement=replaceFailedReviewer({...replacementRequest,failureCode:'wrapper_terminal_failure'},io)
+  assert.equal(replacement.reviewer,'glm-5.3')
+  assert.equal(reviewerReadsRepository(replacement.reviewer),true,'the replacement must be a reviewer that reads the code')
+  assert.equal(io.refs.get(reviewActiveRef('deepseek-chat'))??null,null,'the retired reviewer lease is released')
+  assert.equal(io.refs.get(reviewActiveRef('glm-5.3')),replacement.replacementSha)
+  // Idempotent, exactly as for any other replacement.
+  assert.deepEqual(replaceFailedReviewer({...replacementRequest,failureCode:'wrapper_terminal_failure'},io),replacement)
 })
 
 test('three terminal providers do not grow replacement preflight past the fixed wire budget (#1962)',()=>{
@@ -1553,7 +1594,7 @@ test('reviewer replacement rejects a mismatched original assignment',()=>{
 // is a false invariant, and it is deliberately not asserted here. Both halves are
 // pinned below, with the exact successor named in each case.
 test('one intervening assignment gives a failed reviewer a named replacement',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,6,'this test describes the approved six-reviewer rotation')
+  assert.equal(ACTIVE_REVIEWERS.length,5,'this test describes the approved five-reviewer rotation (deepseek-chat retired, #2078)')
   const io=failedReviewIo()
   assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
   const replacement=replaceFailedReviewer(replacementRequest,io)
@@ -1561,7 +1602,7 @@ test('one intervening assignment gives a failed reviewer a named replacement',()
 })
 
 test('N-1 intervening assignments skip the failed provider instead of stranding the replacement',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,6,'this test describes the approved six-reviewer rotation')
+  assert.equal(ACTIVE_REVIEWERS.length,5,'this test describes the approved five-reviewer rotation (deepseek-chat retired, #2078)')
   const io=failedReviewIo()
   for(let n=0;n<ACTIVE_REVIEWERS.length-1;n+=1){
     assignNextReviewer({issue:20+n,pr:120+n,headSha:`abcde${n}f`},io)
@@ -1613,7 +1654,7 @@ test('replacement exhausts the active rotation, then refuses',()=>{
   assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence},io),/no other reviewer is available/)
 })
 
-test('release frees a terminally failed lease when all six reviewer slots are full',()=>{
+test('release frees a terminally failed lease when every reviewer slot is full',()=>{
   const io=failedReviewIo()
   for(let n=0;n<ACTIVE_REVIEWERS.length-1;n+=1)assignNextReviewer({issue:2100+n,pr:2200+n,headSha:`${n+1}`.repeat(40)},io)
   io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
@@ -1624,8 +1665,8 @@ test('release frees a terminally failed lease when all six reviewer slots are fu
   let refusal=null
   try{replaceFailedReviewer(replacementRequest,io)}catch(error){refusal=error}
   assert.match(refusal?.message??'',/no replacement reviewer is available|no other reviewer is available/)
-  assert.match(refusal.message,/1 of 6 already failed on this exact head/)
-  assert.match(refusal.message,/5 of 6 hold other live leases/)
+  assert.match(refusal.message,new RegExp(`1 of ${ACTIVE_REVIEWERS.length} already failed on this exact head`))
+  assert.match(refusal.message,new RegExp(`${ACTIVE_REVIEWERS.length-1} of ${ACTIVE_REVIEWERS.length} hold other live leases`))
   assert.match(refusal.message,/glm-5\.3 #2100\/PR #2200/)
   const cursorBefore=io.refs.get(REVIEW_CURSOR_REF)
   const released=releaseFailedReviewer(replacementRequest,io)
@@ -1678,12 +1719,20 @@ test('capacity report classifies free, live, stale, verdict, aged, and unknown l
     io.refs.set(reviewActiveRef(reviewer.name),sha);snapshot.set(reviewActiveRef(reviewer.name),{sha,commit})
     states.set(`${issue}:${pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:entry.kind==='moved'?'f'.repeat(40):headSha}},evidence:entry.kind==='verdict'?[{body:'',commit_id:headSha,state:'APPROVED',author_association:'OWNER'}]:[]})
   })
+  assert.equal(cases.length,ACTIVE_REVIEWERS.length,'every reviewer must carry a lease for the occupied pass')
   io.readActiveReviewLeases=()=>snapshot
   io.readReviewStates=()=>states
   const before=new Map(io.refs),report=reviewerCapacityReport(io,now)
-  assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','stale-reclaimable','suspect-aged','unknown','free'])
-  assert.deepEqual(report.summary,{total:6,free:1,live:2,reclaimable:2,unknown:1})
+  assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','stale-reclaimable','suspect-aged','unknown'])
+  assert.deepEqual(report.summary,{total:5,free:0,live:2,reclaimable:2,unknown:1})
   assert.deepEqual(io.refs,before,'capacity report must be read-only')
+  // 'free' is the sixth classification and it is a property of an ABSENT lease, so
+  // it is proved by removing one rather than by needing a spare roster name.
+  const freed=ACTIVE_REVIEWERS.at(-1).name
+  snapshot.delete(reviewActiveRef(freed));io.refs.delete(reviewActiveRef(freed))
+  const withFree=reviewerCapacityReport(io,now)
+  assert.deepEqual(withFree.reviewers.map((row)=>row.classification),['live','stale-reclaimable','stale-reclaimable','suspect-aged','free'])
+  assert.deepEqual(withFree.summary,{total:5,free:1,live:2,reclaimable:2,unknown:0})
 })
 
 test('release refuses a verdict or a changed lease under the mutex',()=>{

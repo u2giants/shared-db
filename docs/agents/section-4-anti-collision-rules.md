@@ -250,15 +250,28 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    ```
 
    For new assignments, the machine-independent cursor rotates Grok 4.6 → GLM
-   5.3 → Kimi K3 → Muse Spark 1.2 Contributor → Codex GPT-5.6 Sol → DeepSeek →
+   5.3 → Kimi K3 → Muse Spark 1.2 Contributor → Codex GPT-5.6 Sol →
    repeat, skipping any reviewer whose engine matches the live orchestrator.
    Codex cannot review when Codex orchestrates; Claude cannot review when Claude
-   orchestrates. Albert approved Codex and DeepSeek on 2026-08-28 after both wrappers
+   orchestrates. Albert approved Codex on 2026-08-28 after its wrapper
    qualified. Qwen 3.8 Max, Gemini, and the retired `glm-5.2` label
    are paused until an explicit owner instruction restores them.
 
-   Codex uses wrapper `ai-codex-review`; DeepSeek uses `ai-deepseek-agent`.
-   Neither is overflow. If every eligible reviewer is busy, the allocator records an ordered
+   **DeepSeek was RETIRED on 2026-09-01 (issue #2078) and is not drawable.**
+   `ai-deepseek-agent` is a conversational API client with no filesystem, no
+   diff and no tools, so it can only review a change as *described* in the
+   brief, never as *written*. On PR #1989 it produced a complete, confidently
+   ranked review of a file, five functions, two tables and two columns that do
+   not exist, and the pipeline recorded it as a durable verdict artifact. The
+   roster now records `readsRepository` per reviewer, and `recordReviewVerdict`
+   refuses outright — before any commit or ref is created — to record a
+   code-review verdict from a reviewer whose wrapper cannot read the repository.
+   Every drawable reviewer is given a real checkout: Grok via `--cwd`, GLM and
+   Muse via an `ai-review-sandbox` clone, Kimi via a read-only agent profile,
+   Codex via `codex exec --sandbox read-only`.
+
+   Codex uses wrapper `ai-codex-review`. It is not overflow. If every eligible
+   reviewer is busy, the allocator records an ordered
    `review-wait`; it does not duplicate an assignment or invent availability.
 
    A reviewer that is truthfully unusable for one pull request is excluded with
