@@ -271,13 +271,23 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    leases consume the roster, assignment refuses loudly and names each durable
    reason. Never use this to shop for a preferred verdict.
 
-   The exclusion also RETURNS every assignment of that pull request the excluded
-   reviewer still holds, so the slot can be filled again. Each return is a
-   create-only record under `refs/db-review-returns/`, named for the exact
-   assignment it retires and committed on top of it, and only then is the
-   assignment ref compare-and-cleared. Nothing is deleted silently: the record
-   keeps who was assigned, to which head and slot, and why it came back.
-   An assignment that already carries a durable verdict is never returned.
+   The exclusion also RETURNS every assignment AND every replacement of that
+   pull request the excluded reviewer still holds, so the slot can be filled
+   again. Each return is a create-only record under `refs/db-review-returns/`,
+   named for the exact record it retires and committed on top of it, and only
+   then is that ref compare-and-cleared. Nothing is deleted silently: the record
+   keeps who was assigned, to which head, slot and replacement sequence, and why
+   it came back. An assignment that already carries a durable verdict is never
+   returned, and that check is re-read inside the reviewer mutex immediately
+   before the write, so a verdict recorded concurrently still refuses. Returning
+   a slot requires the atomic compare-and-swap ref writer; it never falls back
+   to a compare-then-delete.
+
+   A returned slot is an UNAPPROVED slot, never a vanished one. The merge gate
+   still demands a durable APPROVE for every slot that was ever returned for
+   that head: the slot must carry a live assignment at least as new as the
+   newest record returned for it, and that assignment must have its own APPROVE.
+   Another slot's APPROVE can never answer for it.
 
    To continue the same head after excluding slot N, re-run `--assign-reviewer`
    for that head and slot: the returned slot draws a fresh, independent
