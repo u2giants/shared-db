@@ -188,8 +188,11 @@ Re-derive any of them with the method in §12.
 - **A single loader with different date ranges for backfill and ongoing sync.** Rejected by #1202:
   they are different jobs. The history endpoints return current state per window, not a change feed,
   so deriving "versions" from successive pulls fabricates history.
-- **Paging the two history endpoints.** They return a plain array and silently ignore `page`/`size`
-  — a paging loop re-fetches the same rows forever. Chunk by date window only.
+- ~~**Paging the two history endpoints.**~~ **NO LONGER TRUE — corrected 2026-09-01.** ColdLion
+  added the standard paged envelope to both history endpoints on 2026-08-31. They now honour
+  `page`/`size` and MUST be paged: the page size caps silently at **200 rows**, so a single
+  request returns 200 rows and no error however large `size` is. Loop until `last` is true, and
+  still chunk by date window on top of that.
 - **Trusting the response body's status code.** A too-wide window arrives as **HTTP 400 on the wire**
   with `"status": 500` in the body. A loader reading the body treats a permanent input error as
   transient and retries forever.
@@ -215,6 +218,8 @@ Re-derive any of them with the method in §12.
 | D11 | **Exclude retired division `EP001`.** Filter it at the loader on every feed | Albert, 2026-08-19 |
 | D12 | **Colour and size stay out of `item_detail`** — reaffirmed after the consequence was spelled out. *"We don't make clothing."* Key on `item_pkey` | Albert, 2026-08-19 |
 | D13 | **`orderHistory.lineCancelledQty` is `ingest`**, reversing the CSV's original `ignore`. The 0.8% fill it was dropped on came from too small a window; wider samples give 11.5% and 24% | Albert, 2026-08-19 |
+| D14 | **Keep `merchGroup01`-`06` (and their `Desc` twins) on PREPACK COMPONENT rows of `orderHistory`.** Measured 2026-09-01: inside a single prepack line, `merchGroup05` (licensor) varies across component rows in 135 of 176 groups and `merchGroup06` (property) in 162 of 176 — so on those rows the codes describe the COMPONENT, not the parent item. D2's 519/519 evidence was measured on non-prepack rows and does not generalise. D2 continues to apply unchanged to non-prepack rows | Albert, 2026-09-01 |
+| D15 | **All eight fields new since the decisions CSV get typed columns** — `orderQty`, `invoiceQty`, `pickTicketNoString`, `prepackQty`, `quantity`, `labelDesc`, `warehouseDesc`, and the `merchGroup01Desc`-`14Desc` family. This is an explicit `ingest` marking under D4; the CSV predates these fields and its silence is absence, not a decision. `orderQty` and `invoiceQty` are now the ONLY correct per-SKU quantities | Albert, 2026-09-01 |
 
 **OPEN — your judgment; record the reasoning in the migration comment.**
 
@@ -224,20 +229,22 @@ Re-derive any of them with the method in §12.
 - Index choice beyond the natural key.
 - Whether `item_detail` and `item_header` share a loader module.
 
-> ### ⚠️ D2 does NOT extend to component merch groups — corrected 2026-08-19 after external review
+> ### ⚠️ CORRECTED 2026-09-01 — the fields this box used to name do not exist
 >
-> The 519/519 evidence compared **line-level** `merchGroup01`-`06` against the item master. It says
-> nothing about `subMerchGroup*` (sales side) or `ppkMerchGroup*` (production side), which describe
-> the **component styles inside an assortment**, not the master item.
+> An earlier version of this box kept `subMerchGroup*` (sales side) and `ppkMerchGroup*`
+> (production side) out of D2's drop, and raised the field counts to 31 and 83 on that basis.
+> **Neither field family exists.** Live spec, 2026-09-01: `OrderHistory` has 63 properties and
+> `ProdHistory` has 105; a name search for `subMerchGroup` or `ppkMerchGroup` returns nothing in
+> either. `ProdHistory` does carry a `prepack*` family (`prepackItemNo`, `prepackColorCode`,
+> `prepackQty`, `ppkDetailCost` and siblings), which is probably what was meant — but those are
+> identity and cost fields, not merchandise groups.
 >
-> `coldlion-history-endpoints-shape.md` §4.1 states component merch groups deliberately DIFFER from
-> the master — that is what an assortment is — and §5.7 states the order-side `subMerchGroup*` is
-> the **better** record of what a component style is. Under D5 (no raw archive) dropping them would
-> be a one-way discard of seven years of assortment taxonomy, with no fallback for the 26% of lines
-> that have no item master row (finding 6).
+> **Consequence: the 31 and 83 field counts are void. Re-derive both from the live spec before
+> writing the step-4 or step-5 tables.** Do not carry the old numbers forward.
 >
-> The first draft of this plan and the first generation of the decisions CSV wrongly swept them in.
-> **Both are corrected.** Field counts changed: `orderHistory` 25 → **31**, `prodHistory` 55 → **83**.
+> The concern behind the original box was real, and D14 now answers it correctly: the component
+> taxonomy lives in the ordinary `merchGroup01`-`06` fields ON the exploded component row, and D14
+> keeps those on prepack rows. See [`coldlion-prepack-sku-mapping.md`](coldlion-prepack-sku-mapping.md).
 
 **D6 has a live conflict you must not silently resolve.** Albert marked write-back on
 `orderHistory.brandAssuranceNo`, `prodHistory.depositPerc`, and `vendors.femaExpDate` /
@@ -363,20 +370,31 @@ is the old bug reappearing.
 | `order_history_line` | one sales order line | ⚠️ **UNRESOLVED — see below** |
 | `order_history_component` | one component style in that line | `+ sub_item_no` |
 
-> ### ✅ RESOLVED 2026-08-20 — the line key is known. Do not re-derive it.
+> ### ❌ SUPERSEDED 2026-09-01 — the 2026-08-20 line key is WRONG. Use the key below.
 >
-> **Line:** `(salesOrderNo, itemNo, labelCode)` · **Component:** `+ subItemNo`
+> **Correct key:** `(salesOrderNo, salesOrderLineNo, itemNo, subItemNo)` — zero duplicates across
+> 1,823 rows / 409 orders, 2019-2026, measured 2026-09-01. Adding `subColorCode` and `subLabelCode`
+> does not change that, so they are not needed in the key.
 >
-> Earlier drafts keyed this on `sales_order_no, line_no`. **`lineNo` does not exist** in the
-> 59-field payload; that key was inherited from the design doc and never checked.
+> **What the old box said and why it failed.** It gave the key as `(salesOrderNo, itemNo,
+> labelCode)`, verified on 1,671 rows with the claim that *no field other than `linePrice` varies
+> inside any group*, and instructed the next session not to re-derive it. On 1,823 rows that key
+> **collides on 181 of 1,243 groups**, and the claim is false by a wide margin: inside those groups
+> `itemDesc` varies in 176, `subItemNo` in 176, `merchGroup06` in 162, `brandAssuranceNo` in 158,
+> `merchGroup05` in 135 — and `linePrice` in only 7.
 >
-> The thing that unlocked it: **`linePrice` is per COMPONENT, not per line.** ColdLion's
-> JamieLynn, 2026-08-20 — for a prepack the system divides the line quantity into component
-> quantities and prices each component. So rows that look like conflicting duplicate lines are
-> one line's components priced individually.
+> The 2026-08-20 verification was not wrong when it was made. It was made **before ColdLion exposed
+> `salesOrderLineNo`, `subItemNo`, `orderQty` and `invoiceQty` on 2026-08-31**, against a payload
+> that could not distinguish a parent line from its components. The measurement expired; the ✅
+> marker did not, and that is what made it dangerous.
 >
-> Verified on 1,671 rows across 8 windows, 2019-2026: 196 multi-row groups on the line key, and
-> **no field other than `linePrice` varies inside any of them.**
+> **Rule for every ✅ box in this plan:** record the payload version or field list it was measured
+> against, so a later session can tell whether the ground has moved.
+>
+> Still true from the old box: `lineNo` does not exist; and `linePrice` is per COMPONENT, not per
+> line (ColdLion's JamieLynn, 2026-08-20) — for a prepack the system divides the line quantity into
+> component quantities and prices each component. See
+> [`coldlion-prepack-sku-mapping.md`](coldlion-prepack-sku-mapping.md).
 >
 > ColdLion does have a `Line #` on Sales Order internally, but it is **not exposed in the API**
 > (register 2.10 asks for it). Until it is, the derived key above is what we use — and it is
@@ -460,7 +478,7 @@ this path. Confirm that is still current before building.
 | Rule | Why |
 |---|---|
 | History windows are **7 days inclusive, max**. Wider is refused outright | ColdLion's own limit, set at our request |
-| **No paging** on the two history endpoints; `page`/`size` silently ignored | A paging loop re-fetches forever |
+| **Page both history endpoints and loop until `last` is true.** The page size caps silently at **200** — `size=5000` returns 200 rows with no error | Corrected 2026-09-01: paging works since 2026-08-31. Believing the old rule cost us a wrong row count (1,375 reported against a true 1,823) |
 | Branch on the **wire** HTTP status, never the body's `status` | A refusal is HTTP 400 with `"status": 500` in the body |
 | One request at a time, 2-3 second pause, 60s+ timeout | Rate limiting |
 | `companyCode=EDGEHOME` returns **four** divisions incl. retired `EP001`. **Filter `EP001` out (D11)** | A short window showing one division is misleading; and retired-division rows must never land |
