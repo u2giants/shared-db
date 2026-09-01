@@ -28,10 +28,10 @@ evidence files it never captured.
 ## The finding worth not re-deriving
 
 In `scripts/manage-migration-author-lanes.mjs`, freeing a dead reviewer slot is
-welded to *successfully drawing a replacement*: the refusal at line 2052 fires
-before the release at line 2076. So the one operation that would free capacity
+welded to *successfully drawing a replacement*: the refusal at line 2438 fires
+before the release at line 2461. So the one operation that would free capacity
 refuses for lack of capacity — a deadlock by construction, worst exactly when
-capacity matters most. Separately, `findBusyReviewers` (line 1496) only calls a
+capacity matters most. Separately, `findBusyReviewers` (line 1741) only calls a
 lease stale when the PR closed, the head moved, or a verdict exists; a reviewer
 that crashed or ran out of turns produces none of those and holds its slot forever.
 

@@ -82,7 +82,7 @@ ghosts.
 
 The file you will edit,
 [`scripts/manage-migration-author-lanes.mjs`](scripts/manage-migration-author-lanes.mjs)
-(3,094 lines), coordinates multiple concurrent AI sessions working on the same
+(3,917 lines), coordinates multiple concurrent AI sessions working on the same
 database. Two separate lease systems live in it, and **confusing them is the
 single most likely way to get this wrong**:
 
@@ -101,7 +101,7 @@ Other terms used throughout:
 
 - **Lease / active lease** — the ref `refs/db-review-active/<reviewer>` pointing at
   a commit whose *message* is the record. Format parsed at
-  `parseReviewLease()`, line 1345:
+  `parseReviewLease()`, line 1445:
   `db-coordination reviewer-lease generation=<n> reviewer=<name> issue=<n> pr=<n> head=<40-hex> sequence=<n>`.
   **The message carries no timestamp and no state** — that is the gap Step 2 fills.
 - **Head / exact head** — the 40-character commit SHA of the pull request's tip at
@@ -109,8 +109,8 @@ Other terms used throughout:
   head it was assigned for.
 - **Verdict** — a comment or GitHub review containing `APPROVE`, `REVISE`, or
   `REQUEST_CHANGES` that is *tied* to the exact head (either `commit_id` equals it
-  or the body contains the SHA). Detected at line 1526.
-- **Stale (existing meaning)** — `findBusyReviewers()` (line 1496) calls a lease
+  or the body contains the SHA). Detected at line 1772.
+- **Stale (existing meaning)** — `findBusyReviewers()` (line 1741) calls a lease
   stale when **the PR is closed, or the PR head moved, or a verdict exists for the
   exact head** (lines 1524, 1527). Anything else counts as *busy*.
 - **Terminal failure** — a permanent, non-retryable reviewer death. The recognised
@@ -143,7 +143,7 @@ What it recorded, verbatim in substance:
 - The command that failed:
   `node scripts/manage-migration-author-lanes.mjs --replace-failed-reviewer --issue 1999 --pr 2002 --head-sha 0903384fb8db610c823c4c2bd9a3f9e0c45dfb53 --failed-sequence 809 --failure-code turn_limit_cancelled --confirm-no-verdict --confirm-no-artifact`
 - The refusal:
-  `no other reviewer is available; every active provider has already failed on this exact head` (thrown at **line 2052**).
+  `no other reviewer is available; every active provider has already failed on this exact head` (thrown at **line 2438**).
 - The actual state of the six slots at that moment:
 
 | reviewer | issue / PR | sequence | real state |
@@ -173,7 +173,7 @@ deterministically against the in-memory fake IO the existing test file already u
 2. Making a lease say **when it was taken** and **whether its holder reported a
    terminal end**, so age and death are readable facts rather than inferences.
 3. A **read-only capacity report** covering all six slots.
-4. Making the refusal at line 2052 (and its sibling at line 1676) state the
+4. Making the refusal at line 2438 (and its sibling at line 2042) state the
    **true** cause and name the blocking holders.
 5. Repairing `ai-devops`'s `bin/ai-reviewer-issue` so an issue report never
    advertises evidence files it did not actually capture.
@@ -216,7 +216,7 @@ part of this plan has been started. There is no half-done work anywhere.
 
 | Thing | Where | State |
 |---|---|---|
-| Reviewer coordination logic | `scripts/manage-migration-author-lanes.mjs` (3,094 lines) | on `main`, untouched |
+| Reviewer coordination logic | `scripts/manage-migration-author-lanes.mjs` (3,917 lines) | on `main`, untouched |
 | Its tests | `scripts/manage-migration-author-lanes.test.mjs` (2,579 lines) | on `main`, untouched |
 | Reviewer-issue logger | `ai-devops` `bin/ai-reviewer-issue` (392 lines) | on `main`, untouched |
 | Its tests | `ai-devops` `tests/test-ai-reviewer-issue.sh` | on `main`, untouched |
@@ -224,27 +224,36 @@ part of this plan has been started. There is no half-done work anywhere.
 
 Key landmarks in `scripts/manage-migration-author-lanes.mjs`:
 
+**Verified against `main` at `bcd2ec1a`, 3,917 lines.** The shared checkout at
+`C:epos\shared-db` was ~800 lines stale when this plan was first drafted and its
+line numbers were wrong throughout. Re-derive any number below with `grep -n`
+before relying on it; treat the symbol name as the truth and the line as a hint.
+
+
 | Line | Symbol | What it is |
 |---|---|---|
-| 44 | `REVIEW_ACTIVE_REF_PREFIX` | `refs/db-review-active` |
-| 45 | `REVIEW_ACTIVE_CUTOVER_REF` | must exist or lease reads refuse entirely (line 1500) |
-| 48 | `REVIEWERS` | the full roster |
-| 195 | `ACTIVE_REVIEWERS` | roster minus retired — the six |
-| 225 | `TERMINAL_FAILURE_CODES` | the five recognised terminal codes |
-| 744–787 | `readActiveReviewLeases`, `readReviewStates`, `readReviewRefs`, `readReviewRecords` | GraphQL batch readers, with hard-won comments about `object(expression:)` vs `ref(qualifiedName:)` — **read those comments before writing any new query** |
-| 819 | `atomicReviewRefs` | the atomic multi-ref push |
-| 1340 | `reviewActiveRef(reviewer)` | ref path for a reviewer |
-| 1345 | `parseReviewLease(commit)` | the lease message grammar |
-| 1496 | `findBusyReviewers(io)` | **the heart of the defect** |
-| 1524, 1527 | staleness tests | PR closed / head moved / verdict exists |
-| 1530–1532 | `busy.stale`, `busy.states`, `busy.leases` | non-enumerable side-channels on the returned Set |
-| 1676 | assignment refusal | `no reviewer is available` |
-| 1893 | `reviewerExecutionPreflight` | `--reviewer-preflight`, runs a wrapper's own `doctor` |
-| 1914 | `replaceFailedReviewerOperation` | the whole replacement path |
-| 2036–2052 | replacement selection loop and its refusal | **the false message** |
-| 2060–2105 | the atomic replacement transaction | where the failed lease *is* released |
-| 2875–2898 | CLI flag parsing | where new flags go |
-| 2944 | command dispatch | where new commands go |
+| 46 | `REVIEW_ACTIVE_REF_PREFIX` | `refs/db-review-active` |
+| 49 | `REVIEW_ACTIVE_CUTOVER_REF` | must exist or lease reads refuse entirely (line 1745) |
+| 64 | `REVIEWERS` | the full roster |
+| 211 | `ACTIVE_REVIEWERS` | roster minus retired — the six |
+| 241 | `TERMINAL_FAILURE_CODES` | the five recognised terminal codes |
+| 770–850 | `readActiveReviewLeases`, `readReviewStates`, `readReviewRefs`, `readReviewRecords` | GraphQL batch readers, with hard-won comments about `object(expression:)` vs `ref(qualifiedName:)` — **read those comments before writing any new query** |
+| 853 | `atomicReviewRefs(changes)` | the atomic multi-ref push |
+| 1437 | `reviewActiveRef(reviewer)` | ref path for a reviewer |
+| 1445 | `parseReviewLease(commit)` | the lease message grammar (three alternated regexes on ONE line) |
+| 1741 | `findBusyReviewers(io, requested=[])` | **the heart of the defect** |
+| 1769, 1772 | staleness tests | PR closed / head moved / verdict exists |
+| 1775–1777 | `busy.stale`, `busy.states`, `busy.leases` | non-enumerable side-channels on the returned Set |
+| 2042 | assignment refusal | already reworded upstream — names busy / already-assigned / excluded, and lists durable exclusions |
+| 2043 | assignment lease commit message | `reviewer-cursor` form, with optional ` slot=N` |
+| 2072 | `io.deleteRef(leaseRef)` | the assignment path already releases a *stale* lease it selects |
+| 2259 | `reviewerExecutionPreflight` | `--reviewer-preflight`, runs a wrapper's own `doctor` |
+| 2280 | `replaceFailedReviewerOperation({...,slot=1}, io)` | the whole replacement path |
+| 2427–2437 | replacement selection loop | skips retired / already-failed / busy / excluded |
+| 2438 | replacement refusal | **the false message** |
+| 2446–2470 | the atomic replacement transaction | where the failed lease *is* released (2461) |
+| 3582 | `parseArgs` | where new flags go |
+| 3672 | command dispatch (`o.assignReviewer` …) | where new commands go |
 
 ## 6. Key findings and root cause
 
@@ -253,12 +262,12 @@ draw. This is the primary defect.**
 
 Read `replaceFailedReviewerOperation` in order:
 
-- Line **2036–2051**: it loops the roster looking for a replacement, skipping any
+- Line **2427–2437**: it loops the roster looking for a replacement, skipping any
   candidate that is retired, already failed on this head, or `preflightBusy`.
-- Line **2052**: if none is found it **throws immediately**.
-- Line **2060–2077**: only *after* a replacement exists does it build the atomic
+- Line **2438**: if none is found it **throws immediately**.
+- Line **2446–2462**: only *after* a replacement exists does it build the atomic
   change set — and only there does `{ref: failedLeaseRef, expected: failedLeaseSha, sha: null}`
-  (line 2076) release the dead reviewer's slot.
+  (line 2461) release the dead reviewer's slot.
 
 So the code can only free a slot as a *side effect* of filling another one. When
 the pool is full, the one operation that would free capacity refuses for lack of
@@ -268,7 +277,7 @@ from the opposite direction: "There is currently no command that reclaims one.")
 
 **Finding 2 — `findBusyReviewers` has no concept of a dead review.**
 
-At line 1524/1527 a lease is only stale if the PR closed, the head moved, or a
+At line 1769/1772 a lease is only stale if the PR closed, the head moved, or a
 verdict exists. A reviewer that ran out of turns, crashed, or refused to attach
 evidence produces **none of those three**: the PR is still open, the head has not
 moved, and there is no verdict precisely *because* it died. Its lease therefore
@@ -277,7 +286,7 @@ exactly this state, plus two more that were simply old.
 
 **Finding 3 — a lease cannot be aged, because it records no time and no state.**
 
-`parseReviewLease` (line 1345) accepts three message grammars and extracts
+`parseReviewLease` (line 1445) accepts three message grammars and extracts
 `generation, reviewer, issue, pr, headSha, sequence`. There is **no timestamp** and
 **no lifecycle field**. A slot taken four days ago for an unrelated issue is
 byte-indistinguishable from one taken four minutes ago. (The underlying Git commit
@@ -286,7 +295,7 @@ record.)
 
 **Finding 4 — the refusal misnames its own cause.**
 
-Line 2052 says *"every active provider has already failed on this exact head."*
+Line 2438 says *"every active provider has already failed on this exact head."*
 On 2026-09-01 that was false: exactly one provider had failed on that head. The
 truth was "five of six are held by other work, and the sixth already failed here."
 The loop at 2044 skips for three distinct reasons — ineligible, already-failed,
@@ -428,15 +437,15 @@ in-memory fake IO the suite uses.
 1. `scripts/manage-migration-author-lanes.mjs`: add
    `releaseFailedReviewerOperation({issue, pr, headSha, failedSequence, failureCode, failingCheck, confirmNoVerdict, confirmNoArtifact}, io)`,
    placed immediately **before** `replaceFailedReviewerOperation` (currently line
-   1914) so the two read together.
+   2280) so the two read together.
 2. Reuse, do not re-implement: the argument and evidence validation at lines
    1920–1935 (terminal-code check, confirmations, `local_dependency_unavailable`
-   special case), the mutex acquisition at line 2060, the freshness re-check at
+   special case), the mutex acquisition at line 2446, the freshness re-check at
    2063–2068, and `io.atomicReviewRefs` at 819.
 3. The atomic change set is a strict subset of the replacement one:
    - `{ref: MUTEX_REF, expected: ownerSha, sha: ownerSha}`
    - `{ref: failureRef, expected: null, sha: failureSha}` — create-only immutable
-     evidence, message identical in shape to line 2053's but with
+     evidence, message identical in shape to line 2439's but with
      `replacement=none` in place of the replacement fields, so a reader can tell a
      release from a replacement at a glance.
    - `{ref: failedLeaseRef, expected: failedLeaseSha, sha: null}` — the release.
@@ -448,13 +457,13 @@ in-memory fake IO the suite uses.
    match the failure evidence. A freshness check is not an identity check — check
    both.
 5. Read back after the push (`io.readReviewRefs`) and refuse on mismatch, mirroring
-   line 2078–2079. Roll back on error in the same shape as lines 2105–2110.
+   line 2463–2464. Roll back on error in the same shape as lines 2466–2470.
 6. Wire the CLI: add `--release-failed-reviewer` to the flag parser (near line
    2876) and dispatch it (near line 2944). It takes the same `--issue --pr
    --head-sha --failed-sequence --failure-code --confirm-no-verdict
    --confirm-no-artifact` arguments as `--replace-failed-reviewer`.
 7. **Then make the replacement path reuse it.** In
-   `replaceFailedReviewerOperation`, when the selection loop at 2036–2051 finds no
+   `replaceFailedReviewerOperation`, when the selection loop at 2427–2437 finds no
    reviewer, do **not** simply throw: throw an error whose message (see Step 4)
    names the true cause **and** tells the caller the exact
    `--release-failed-reviewer` command to run instead. Do not silently auto-release
@@ -487,12 +496,12 @@ before you make it green. (See §11: prove a check can fail before trusting it.)
 
 **What to change**
 
-1. `parseReviewLease` (line 1345): extend the lease grammar to accept an optional
+1. `parseReviewLease` (line 1445): extend the lease grammar to accept an optional
    trailing ` held-since=<ISO-8601 Z>` and return `heldSince` (a `Date`, or `null`
    when absent). **All three existing message forms must still parse unchanged** —
    add the field as optional in the regex, do not rewrite the alternation.
 2. Every site that *writes* a lease commit message — the assignment path around
-   line 1690, and the replacement message at line 2053 — must emit `held-since`
+   line 2043, and the replacement message at line 2439 — must emit `held-since`
    with the current UTC time.
 3. Add a small exported helper `reviewLeaseAgeHours(lease, now)` returning a number
    or `null`. `null` means "pre-dates timestamped leases", and every consumer must
@@ -514,7 +523,7 @@ for a legacy lease.
 
 **What to change**
 
-Add `reviewerCapacityReport(io)` near `findBusyReviewers` (line 1496) and a
+Add `reviewerCapacityReport(io)` near `findBusyReviewers` (line 1741) and a
 `--reviewer-capacity` CLI command (parser ~2876, dispatch ~2944) printing JSON
 (`JSON.stringify(..., null, 2)`, matching how `--reviewer-preflight` prints at line
 2944). One row per reviewer in `ACTIVE_REVIEWERS`, each with:
@@ -549,15 +558,27 @@ rows and exit 0 — paste that output into the PR.
 
 **What to change**
 
-1. In the selection loop at lines 2036–2051, **record why** each candidate was
+1. In the selection loop at lines 2427–2437, **record why** each candidate was
    skipped — `ineligible`, `already-failed-on-this-head`, or `busy` (with the
    issue/PR it is busy on).
-2. Replace the message at line 2052 so it states the counts and names the holders,
+2. Replace the message at line 2438 so it states the counts and names the holders,
    e.g.:
    `no replacement reviewer is available: 1 of 6 already failed on this exact head (grok-4.6), 5 of 6 are holding other leases (glm-5.3 #2054, deepseek-chat #1609, ...). If a holder has terminally failed, free it with --release-failed-reviewer.`
-3. Do the same for the assignment refusal at line 1676 (`no reviewer is available`
-   / `no independent reviewer is available for slot N`).
+3. The assignment refusal at line 2042 has **already been improved upstream** (it
+   now distinguishes busy / already-assigned / excluded and lists durable
+   exclusions). Do not rewrite it. Add only the missing half: the live counts
+   (`N of 6`), the issue/PR each busy holder is on, and the pointer to
+   `--release-failed-reviewer`. Re-read that line before editing — if it has moved
+   on again, keep whatever it already says and add only what is absent.
 4. Do **not** change any refusal *condition*. Message only.
+
+**Safety note carried from review (verify before implementing):** the assignment
+path at line 2072 already deletes a lease it judged stale, and the retry/repair
+branches near lines 1976–2010 can **re-create** a lease for a sequence whose lease
+was released. Before landing Step 1, prove with a test that a slot released by
+`--release-failed-reviewer` is not silently re-created by a later
+`--assign-reviewer` retry for the same issue/PR/head. If it can be, Step 1 must
+also write a durable release record that those branches consult.
 
 **Behaviour when done:** a session that hits the wall is told which of the two very
 different problems it has, and what to do next.
@@ -679,7 +700,7 @@ this is a **code** change, so none of them may be skipped.
   `git/matching-refs` fallback. Comments at lines 779–806 record the evidence — read
   them before writing a query.
 - **Request budget:** reviewer operations run under `withReviewRequestBudget` and
-  `requireReviewWireCapacity(n)` (see line 2060's `requireReviewWireCapacity(11)`).
+  `requireReviewWireCapacity(n)` (see line 2446's `requireReviewWireCapacity(12)`).
   Any new reads must be batched and budgeted; do not add per-reviewer round trips.
   Never test scale by scanning live historical assignment refs.
 - **Prove a check can fail before trusting it.** Every new test must be observed
@@ -765,7 +786,7 @@ this is a **code** change, so none of them may be skipped.
    batching saves three mutex round-trips; if it is rare, one-at-a-time is safer
    and simpler. Default to one-at-a-time unless the implementer finds evidence of
    recurrence.
-3. **Whether the assignment path (line 1676) should also point at the release
+3. **Whether the assignment path (line 2042) should also point at the release
    command.** It probably should, but its failure mode is subtly different
    (no failure evidence exists yet for a lease that was never commissioned by this
    caller). Judgment call; err toward a hint, not an instruction.
@@ -779,7 +800,7 @@ this conversation execute this plan to perfection, without asking anything?**
 Yes. §2 defines the repository, the stack, where state actually lives (Git refs,
 not a database), and — critically — the author-lane vs reviewer-slot distinction
 that is the likeliest source of a wrong edit. §5 gives a line-number landmark table
-for a 3,094-line file. §9 names the exact functions to add, the exact lines to reuse,
+for a 3,917-line file. §9 names the exact functions to add, the exact lines to reuse,
 and the change-set contents. §12 confirms no credential or environment setup is
 needed. Gap found and fixed during audit: the first draft assumed the reader knew
 what a "lease", a "verdict", an "exact head" and the mutex were — §2 now defines
@@ -789,7 +810,7 @@ every term before use, and §5 states plainly that nothing has been started.
 held — including what was ruled out and why?**
 Yes. §3 reproduces the incident census and the three things the incident session
 tried that failed. §6 gives the root cause at line-number precision, including the
-subtle one (release welded to a successful draw at 2052 vs 2076) that reading the
+subtle one (release welded to a successful draw at 2438 vs 2461) that reading the
 function top-to-bottom does not reveal. §7 lists six rejected approaches, two of
 which (hand-deleting refs, posting a synthetic verdict) are dangerous enough that
 omitting them would invite real harm. §11 carries the GraphQL trap, the
