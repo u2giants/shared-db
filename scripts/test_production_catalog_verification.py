@@ -52,6 +52,11 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class ThroughputSequenceContractTests(unittest.TestCase):
+    def test_popdam_query_expansion_rows_contract_is_exact(self):
+        sql = CATALOG_CONTRACTS["popdam_query_expansion_rows_v1"]
+        self.assertIn("to_regprocedure('public.expand_dam_search_queries(text)')", sql)
+        self.assertIn("p.prorows = 32", sql)
+
     def test_sequence_contract_compares_next_value_with_live_table_maximum(self):
         sql = CATALOG_CONTRACTS["dflow_sequence_ceilings_v1"]
         self.assertIn("is_called then last_value + 1", sql)
@@ -172,6 +177,47 @@ PUBLIC_GRANTEE_BLOCKS = 3
 
 
 class DeriveTargetsTests(unittest.TestCase):
+    def test_alter_schema_rename_and_comment_are_derived(self):
+        t = targets_for(
+            "alter schema designflow rename to designflow_frozen_20260710;\n"
+            "comment on schema designflow_frozen_20260710 is 'Frozen owner''s history';"
+        )
+        self.assertEqual(
+            t.schema_renames,
+            [("designflow", "designflow_frozen_20260710", "Frozen owner's history")],
+        )
+        self.assertFalse(t.is_empty())
+
+    def test_real_778_schema_rename_is_derived_with_exact_comment(self):
+        path = REPO / "supabase" / "migrations" / "20260831041658_freeze_orphan_designflow_schema.sql"
+        t = derive_targets({"20260831041658": path}, ["20260831041658"])
+        self.assertEqual(len(t.schema_renames), 1)
+        source, destination, comment = t.schema_renames[0]
+        self.assertEqual((source, destination), ("designflow", "designflow_frozen_20260710"))
+        self.assertIn("FROZEN 2026-08-27", comment)
+
+    def test_index_dropped_later_in_the_batch_is_not_expected(self):
+        # Issue #2035: the review-fix migration removes an index the contract
+        # migration created. The batch's expected-object set must follow the
+        # drop, or enforcing verification fails on a database that is exactly
+        # right. The positive control is the first assertion: without the drop
+        # the index MUST still be demanded.
+        created = "create index widget_name_idx on plm.widget (name);"
+        self.assertIn(
+            ("plm.widget_name_idx", "plm.widget"), targets_for(created).indexes
+        )
+        t = targets_for(created + "\ndrop index if exists plm.widget_name_idx;")
+        self.assertEqual(t.indexes, [])
+        self.assertTrue(any("dropped index" in note for note in t.notes))
+
+    def test_unqualified_drop_index_is_recorded_not_guessed_at(self):
+        created = "create index widget_name_idx on plm.widget (name);"
+        t = targets_for(created + "\ndrop index widget_name_idx;")
+        self.assertIn(("plm.widget_name_idx", "plm.widget"), t.indexes)
+        self.assertTrue(
+            any("DROP INDEX was not safely parseable" in note for note in t.notes)
+        )
+
     def test_create_table_is_found(self):
         t = targets_for("create table if not exists plm.widget (id bigint);")
         self.assertIn("plm.widget", t.tables)
@@ -402,6 +448,15 @@ class CanaryDerivationTests(unittest.TestCase):
 
 
 class SqlBuildTests(unittest.TestCase):
+    def test_schema_rename_catalog_query_reads_both_names_and_comments(self):
+        sql = build_catalog_sql(
+            targets_for("alter schema designflow rename to designflow_frozen_20260710;")
+        )
+        self.assertIn("designflow", sql)
+        self.assertIn("designflow_frozen_20260710", sql)
+        self.assertIn("pg_namespace", sql)
+        self.assertIn("obj_description(n.oid, 'pg_namespace')", sql)
+
     def test_maintain_is_probed_conditionally(self):
         sql = build_catalog_sql(targets_for("create table plm.widget (id int);"))
         self.assertIn(MAINTAIN_PRIVILEGE, sql)
@@ -553,7 +608,17 @@ class RecoveryWorkflowTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('MAIN_SHA: "${{ inputs.main_sha }}"', workflow)
         self.assertIn('APPLY_MAIN_SHA: ${{ inputs.apply_main_sha }}', workflow)
-        self.assertIn('git rev-parse origin/main)" = "$MAIN_SHA"', workflow)
+        # Narrowed 2026-09-01 (#2047): the tip is proven by
+        # check-main-tip-freshness.mjs, which accepts an origin/main that has
+        # advanced by DOCUMENTATION ONLY and refuses every other move. The bare
+        # equality this replaced voided a promotion for any commit at all,
+        # including a handover note. The binding itself is unchanged: this job
+        # still names the exact main SHA and still refuses a code-bearing move.
+        self.assertIn(
+            'MAIN_SHA="$MAIN_SHA" node scripts/check-main-tip-freshness.mjs',
+            workflow,
+        )
+        self.assertNotIn('git rev-parse origin/main)" = "$MAIN_SHA"', workflow)
         self.assertIn('jq -r .head_sha <<<"$run")" = "$APPLY_MAIN_SHA"', workflow)
         self.assertIn('production-migration-apply-$APPLY_MAIN_SHA', workflow)
         self.assertNotIn('production-migration-apply-$MAIN_SHA', workflow)
@@ -600,6 +665,44 @@ class RenderReportTests(unittest.TestCase):
             {"relations": [{"name": "plm.widget", "to_regclass": "plm.widget"}]}
         )
         self.assertEqual(failures, [])
+
+    def test_schema_rename_requires_old_absent_new_present_and_exact_comment(self):
+        targets = targets_for(
+            "alter schema designflow rename to designflow_frozen_20260710;\n"
+            "comment on schema designflow_frozen_20260710 is 'frozen';"
+        )
+        catalog = {"schemas": [
+            {"name": "designflow", "exists": False, "comment": None},
+            {"name": "designflow_frozen_20260710", "exists": True, "comment": "frozen"},
+        ]}
+        report, failures = self.render(catalog, targets=targets)
+        self.assertEqual(failures, [])
+        self.assertIn("designflow_frozen_20260710", report)
+
+    def test_schema_rename_fails_closed_for_each_wrong_end_state(self):
+        targets = targets_for(
+            "alter schema designflow rename to designflow_frozen_20260710;\n"
+            "comment on schema designflow_frozen_20260710 is 'frozen';"
+        )
+        bad_catalogs = (
+            {"schemas": []},
+            {"schemas": [
+                {"name": "designflow", "exists": True, "comment": None},
+                {"name": "designflow_frozen_20260710", "exists": True, "comment": "frozen"},
+            ]},
+            {"schemas": [
+                {"name": "designflow", "exists": False, "comment": None},
+                {"name": "designflow_frozen_20260710", "exists": False, "comment": None},
+            ]},
+            {"schemas": [
+                {"name": "designflow", "exists": False, "comment": None},
+                {"name": "designflow_frozen_20260710", "exists": True, "comment": "wrong"},
+            ]},
+        )
+        for catalog in bad_catalogs:
+            with self.subTest(catalog=catalog):
+                _, failures = self.render(catalog, targets=targets)
+                self.assertTrue(failures)
 
     def test_index_definition_is_reported_and_enforced(self):
         targets = targets_for(
@@ -1613,6 +1716,149 @@ class BehavioralSidecarTests(unittest.TestCase):
         self.assertFalse(any(name.startswith("pg_temp.") for name in targets.functions))
         self.assertTrue(targets.is_empty())
         self.assertIn("final #1427 contract active", sql)
+
+    def test_real_1703_rows_sidecar_is_hash_bound_and_catalog_only(self):
+        version = "20260831104325"
+        migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
+        checks = load_behavior_sidecars(REPO, {version: migration}, [version])
+        targets = derive_targets({version: migration}, [version])
+        sql = build_behavior_sql(checks)
+
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["kind"], "catalog_contract")
+        self.assertEqual(
+            checks[0]["migration_sha256"],
+            "4da12c32355833d33d80902483d3ec75197fd803b030dcb06a1be1db6aa21aa4",
+        )
+        self.assertTrue(targets.is_empty())
+        self.assertIn("expand_dam_search_queries(text)", sql)
+        self.assertIn("p.prorows = 32", sql)
+
+    def test_real_1703_forward_4_rows_sidecar_is_hash_bound_and_catalog_only(self):
+        version = "20260831145707"
+        migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
+        checks = load_behavior_sidecars(REPO, {version: migration}, [version])
+        targets = derive_targets({version: migration}, [version])
+        sql = build_behavior_sql(checks)
+
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["kind"], "catalog_contract")
+        self.assertEqual(
+            checks[0]["migration_sha256"],
+            "b8396e694cd162805ffe994d04964ed9154937ff071704542710d78d7f1a2111",
+        )
+        self.assertTrue(targets.is_empty())
+        self.assertIn("expand_dam_search_queries(text)", sql)
+        self.assertIn("p.prorows = 4", sql)
+
+    def test_real_1703_forward_5_sidecar_is_hash_bound_and_catalog_only(self):
+        version = "20260831173841"
+        migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
+        checks = load_behavior_sidecars(REPO, {version: migration}, [version])
+        targets = derive_targets({version: migration}, [version])
+        sql = build_behavior_sql(checks)
+
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["kind"], "catalog_contract")
+        self.assertEqual(
+            checks[0]["migration_sha256"],
+            "c08f3a2207bde361e9784b6ec9ab7b2322ae7da8c138ff634a39932fce220000",
+        )
+        self.assertEqual(
+            targets.functions,
+            ["public.get_filter_counts", "public.search_dam_documents"],
+        )
+        self.assertEqual(
+            targets.roles,
+            ["anon", "authenticated", "public", "service_role"],
+        )
+        self.assertIn("select f.id, f.style_group_id, f.file_type, f.status,", sql)
+        self.assertIn("get_effective_filter_counts_unchecked_1703", sql)
+        self.assertIn("has_function_privilege('authenticated'", sql)
+
+    def test_real_1703_forward_6_sidecar_is_hash_bound_and_catalog_only(self):
+        version = "20260831184547"
+        migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
+        checks = load_behavior_sidecars(REPO, {version: migration}, [version])
+        targets = derive_targets({version: migration}, [version])
+        sql = build_behavior_sql(checks)
+        migration_sql = migration.read_text(encoding="utf-8").lower()
+
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["kind"], "catalog_contract")
+        self.assertEqual(
+            checks[0]["migration_sha256"],
+            "a33c22920120dee3ed2fc7f8f54a37377eb5c801141522d5b8b965bb59b14eac",
+        )
+        self.assertIn("public.filter_effective_assets", targets.functions)
+        self.assertIn("public.search_dam_documents", targets.functions)
+        self.assertIn("from candidate_asset_ids c", sql)
+        self.assertIn("join public.assets a on a.id = c.id", sql)
+        self.assertIn("select a.file_type, a.status, a.workflow_status, a.stage, a.is_licensed", sql)
+        self.assertIn("position('select a.*'", sql)
+        self.assertIn("bounds as materialized", sql)
+        self.assertIn("authorized as materialized", sql)
+        self.assertIn("not p.prosecdef", sql)
+        self.assertIn("p.proconfig is null", sql)
+        self.assertIn(
+            "alter function public.filter_effective_assets(jsonb) security invoker;",
+            migration_sql,
+        )
+        self.assertIn(
+            "alter function public.filter_effective_assets(jsonb) reset all;",
+            migration_sql,
+        )
+        self.assertLess(
+            migration_sql.index("create or replace function public.filter_effective_assets"),
+            migration_sql.index("alter function public.filter_effective_assets(jsonb) reset all;"),
+        )
+        self.assertIn("has_function_privilege('authenticated'", sql)
+
+    def test_real_1703_forward_7_sidecar_is_hash_bound_and_asserts_single_heap_fetch(self):
+        version = "20260831212757"
+        migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
+        checks = load_behavior_sidecars(REPO, {version: migration}, [version])
+        targets = derive_targets({version: migration}, [version])
+        sql = build_behavior_sql(checks)
+        migration_sql = migration.read_text(encoding="utf-8").lower()
+
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["kind"], "catalog_contract")
+        self.assertEqual(
+            checks[0]["migration_sha256"],
+            "8cae66fd16b67b12371103696d9c79ed37cacf828c6a105c79a02c101ec5f8b9",
+        )
+        self.assertEqual(targets.functions, ["public.search_dam_documents"])
+        self.assertIn("full_text_matches as materialized", sql)
+        self.assertIn("d.search_tsv @@ any(array(select q.tsq from queries q))", sql)
+        self.assertIn("select max(ts_rank_cd(d.search_tsv, q.tsq))", sql)
+        self.assertIn("has_function_privilege('authenticated'", sql)
+        self.assertIn("full_text_matches as materialized", migration_sql)
+        self.assertNotIn(
+            "join public.dam_search_documents d on d.search_tsv @@ q.tsq",
+            migration_sql,
+        )
+
+    def test_real_1703_forward_8_sidecar_is_hash_bound_and_asserts_rank_keys_through_visibility(self):
+        version = "20260831221607"
+        migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
+        checks = load_behavior_sidecars(REPO, {version: migration}, [version])
+        targets = derive_targets({version: migration}, [version])
+        sql = build_behavior_sql(checks)
+        migration_sql = migration.read_text(encoding="utf-8").lower()
+
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["kind"], "catalog_contract")
+        self.assertEqual(
+            checks[0]["migration_sha256"],
+            "b0902414ec5eac846ae0e1469d79630aa7692ef1f3dcb0ae52ca97852d600b20",
+        )
+        self.assertIn("public.search_dam_documents", targets.functions)
+        self.assertIn("c.keyword_rank, c.semantic_rank, c.rank, c.asset_id id", sql)
+        self.assertIn("select distinct a.document_type, a.entity_id, a.asset_id", sql)
+        self.assertIn("join visible_assets a on a.id = c.asset_id", sql)
+        self.assertIn("derived-from: 20260831212757", migration_sql)
+        self.assertNotIn("join visible_assets a on a.id = c.asset_id", migration_sql)
 
     def test_real_1732_sidecar_is_hash_bound_catalog_only_and_exact_shape(self):
         version = "20260828021051"

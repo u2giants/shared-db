@@ -26,7 +26,7 @@ jobs:
         run: |
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$MAIN_SHA"
-          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          MAIN_SHA="$MAIN_SHA" node scripts/check-main-tip-freshness.mjs
       - name: Record authenticated exact owner decision
         env:
           GH_TOKEN: ${{ github.token }}

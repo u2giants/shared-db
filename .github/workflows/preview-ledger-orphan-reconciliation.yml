@@ -110,7 +110,7 @@ jobs:
           set -euo pipefail
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$MAIN_SHA"
-          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          MAIN_SHA="$MAIN_SHA" node scripts/check-main-tip-freshness.mjs
           if [ -z "${PREVIEW_PROJECT_REF// /}" ]; then
             echo "REFUSED: repository variable PREVIEW_PROJECT_REF is not set. Set it to the CURRENT preview branch project ref. An unset ref is never treated as a default." >&2
             exit 1
@@ -119,21 +119,23 @@ jobs:
           test "$PREVIEW_PROJECT_REF" != "$PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE"
           test "$EXPECTED_PROJECT_REF" = "$PREVIEW_PROJECT_REF"
           test "$CONFIRMATION" = "RECONCILE $ORPHAN AS $REPLACEMENT"
-          case "$ISSUE:$CLAIM:$SOURCE_PR:$ORPHAN:$REPLACEMENT" in
-            1090:1100:1108:*) ;;
-            1211:1371:1372:20260824002102:20260824004025) ;;
-            1211:1371:1372:20260824004025:20260824004025) ;;
-            1422:1423:1424:20260824150630:20260824172136) ;;
-            1439:1488:1495:20260825102716:20260825110813) ;;
-            1615:1636:1637:20260827031236:20260827095753) ;;
-            1467:1580:1585:20260827183106:20260827183106) ;;
-            1658:1659:1660:20260827134155:20260827214517) ;;
-            1722:1747:1748:20260828113920:20260830013942) ;;
-            *) echo "REFUSED: reconciliation tuple is not explicitly allowlisted" >&2; exit 1 ;;
-          esac
+          python - "$ISSUE" "$CLAIM" "$SOURCE_PR" "$ORPHAN" "$REPLACEMENT" <<'PY'
+          import json,sys
+          data=json.load(open('config/preview-ledger-orphan-reconciliations.json',encoding='utf-8'))
+          issue,claim,source_pr=map(int,sys.argv[1:4]); orphan,replacement=sys.argv[4:6]
+          matches=[row for row in data.get('cases',[]) if row.get('issue')==issue and row.get('claim')==claim and row.get('source_pr')==source_pr and row.get('orphan_version',orphan)==orphan and row.get('replacement_version',replacement)==replacement]
+          if data.get('schema')!='shared-db-preview-ledger-orphan-reconciliations/v1' or len(matches)!=1:
+              raise SystemExit('REFUSED: reconciliation tuple is not uniquely allowlisted by the reviewed manifest')
+          PY
           [[ "$ORPHAN" =~ ^[0-9]{14}$ && "$REPLACEMENT" =~ ^[0-9]{14}$ ]]
           if [ "$ORPHAN" = "$REPLACEMENT" ]; then
-            case "$ORPHAN" in 20260824004025|20260827183106) ;; *) echo "REFUSED: same-version rehearsal reset is not allowlisted for this version" >&2; exit 1 ;; esac
+            python - "$ISSUE" "$CLAIM" "$SOURCE_PR" "$ORPHAN" <<'PY'
+          import json,sys
+          data=json.load(open('config/preview-ledger-orphan-reconciliations.json',encoding='utf-8'))
+          issue,claim,source_pr=int(sys.argv[1]),int(sys.argv[2]),int(sys.argv[3]); version=sys.argv[4]
+          if not any(row.get('issue')==issue and row.get('claim')==claim and row.get('source_pr')==source_pr and row.get('mode')=='rehearsal_reset' and row.get('orphan_version')==version and row.get('replacement_version')==version for row in data.get('cases',[])):
+              raise SystemExit('REFUSED: same-version rehearsal reset is not allowlisted by the reviewed manifest')
+          PY
             test -n "$(find supabase/migrations -maxdepth 1 -name "${ORPHAN}_*.sql" -print -quit)"
           else
             test -z "$(find supabase/migrations -maxdepth 1 -name "${ORPHAN}_*.sql" -print -quit)"
@@ -214,7 +216,7 @@ jobs:
         run: |
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$MAIN_SHA"
-          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          MAIN_SHA="$MAIN_SHA" node scripts/check-main-tip-freshness.mjs
           python scripts/preview_ledger_orphan_reconcile.py --mode apply \
             --repo "$GITHUB_WORKSPACE" --linked-dir "$GITHUB_WORKSPACE" --source-pr-dir "$RUNNER_TEMP/source-pr" --orphan-source-dir "$RUNNER_TEMP/orphan-source" --expected-project-ref "$PREVIEW_PROJECT_REF" \
             --main-sha "$MAIN_SHA" --orphan-version "$ORPHAN" --replacement-version "$REPLACEMENT" \

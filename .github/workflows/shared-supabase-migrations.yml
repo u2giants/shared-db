@@ -335,7 +335,7 @@ jobs:
           fi
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$MAIN_SHA"
-          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          MAIN_SHA="$MAIN_SHA" node scripts/check-main-tip-freshness.mjs
           # A batch that AGENTS.md 6.5 requires to move as ONE bounded event can
           # span several authoring pull requests, so it names a source PR per
           # version. BOTH SET IS REFUSED HERE for the same reason the historical
@@ -428,7 +428,7 @@ jobs:
           test -n "$MAIN_SHA"
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$MAIN_SHA"
-          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          MAIN_SHA="$MAIN_SHA" node scripts/check-main-tip-freshness.mjs
           # A batch authored across several pull requests names a source PR per
           # version; a single-PR batch keeps the original form.
           #
@@ -899,7 +899,7 @@ jobs:
         run: |
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
-          test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
+          MAIN_SHA="$REQUESTED_SHA" node scripts/check-main-tip-freshness.mjs
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
@@ -1083,7 +1083,7 @@ jobs:
         run: |
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
-          test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
+          MAIN_SHA="$REQUESTED_SHA" node scripts/check-main-tip-freshness.mjs
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
@@ -1259,7 +1259,7 @@ jobs:
         run: |
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
-          test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
+          MAIN_SHA="$REQUESTED_SHA" node scripts/check-main-tip-freshness.mjs
       - name: Acquire the exclusive production lane and freeze merges
         id: production_lock
         env:

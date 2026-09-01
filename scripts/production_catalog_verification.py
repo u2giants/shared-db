@@ -192,6 +192,13 @@ ALTER_RELATION_RE = re.compile(
     r"^\s*alter\s+(table|view|materialized\s+view|foreign\s+table)\s+"
     rf"(if\s+exists\s+)?(?:only\s+)?{QUALIFIED}"
 )
+ALTER_SCHEMA_RENAME_RE = re.compile(
+    rf"^\s*alter\s+schema\s+({IDENT})\s+rename\s+to\s+({IDENT})\s*$"
+)
+COMMENT_SCHEMA_RE = re.compile(
+    rf"^\s*comment\s+on\s+schema\s+({IDENT})\s+is\s+'((?:''|[^'])*)'\s*;",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
+)
 ROW_SECURITY_RE = re.compile(r"\brow\s+level\s+security\b")
 CREATE_POLICY_RE = re.compile(rf"^\s*create\s+policy\b[\s\S]*?\bon\s+{QUALIFIED}")
 INSERT_INTO_RE = re.compile(rf"^\s*insert\s+into\s+{QUALIFIED}")
@@ -199,6 +206,18 @@ CREATE_INDEX_HEAD_RE = re.compile(r"^\s*create\s+(?:unique\s+)?index\b")
 CREATE_INDEX_RE = re.compile(
     rf"^\s*create\s+(unique\s+)?index\s+(concurrently\s+)?"
     rf"(?:if\s+not\s+exists\s+)?({IDENT})\s+on\s+(?:only\s+)?{QUALIFIED}\b"
+)
+# A later migration in the SAME ordered batch may drop an index an earlier one
+# created (issue #2035: the review fix removed
+# `hts_rag_product_family_allowlist_enabled_idx`). Without this, the batch's
+# expected-object set still demands the index and enforcing verification fails on
+# a database that is exactly right. Only a SCHEMA-QUALIFIED drop is acted on; a
+# bare name is recorded as unassertable rather than guessed at, which is the same
+# refusal `CREATE_INDEX_HEAD_RE` makes.
+DROP_INDEX_HEAD_RE = re.compile(r"^\s*drop\s+index\b")
+DROP_INDEX_RE = re.compile(
+    rf"^\s*drop\s+index\s+(?:concurrently\s+)?"
+    rf"(?:if\s+exists\s+)?{QUALIFIED}\b"
 )
 GRANT_RE = re.compile(r"^\s*(grant|revoke)\b")
 # The object of a GRANT/REVOKE. `all tables in schema` is DELIBERATELY NOT
@@ -836,6 +855,133 @@ CATALOG_CONTRACTS = {
     "scraped_properties_targeted_submission_label_v1": SCRAPED_PROPERTIES_TARGETED_SUBMISSION_LABEL_CONTRACT,
     "dflow_sequence_ceilings_v1": DFLOW_SEQUENCE_CEILINGS_CONTRACT,
     "popdam_forward_recovery_v1": POPDAM_FORWARD_RECOVERY_CONTRACT,
+    "popdam_query_expansion_rows_v1": """
+      (select p.prorows = 32
+        from pg_proc p
+        where p.oid = to_regprocedure('public.expand_dam_search_queries(text)'))
+""",
+    "popdam_query_expansion_rows_v2": """
+      (select p.proretset and p.prorows = 4
+        from pg_proc p
+        where p.oid = to_regprocedure('public.expand_dam_search_queries(text)'))
+""",
+    "popdam_ranked_search_narrow_visibility_v1": """
+      (select
+        position('select f.id, f.style_group_id, f.file_type, f.status,' in pg_get_functiondef(p.oid)) > 0
+        and position('f.workflow_status, f.stage, f.is_licensed' in pg_get_functiondef(p.oid)) > 0
+        and position('select f.*' in pg_get_functiondef(p.oid)) = 0
+        and position('select distinct a.*' in pg_get_functiondef(p.oid)) = 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p
+        where p.oid = to_regprocedure('public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and (select
+        position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and (length(pg_get_functiondef(p.oid)) - length(replace(pg_get_functiondef(p.oid),
+          'get_effective_filter_counts_unchecked_1703', '')))
+          / length('get_effective_filter_counts_unchecked_1703') = 1
+        and position('get_filter_counts_unchecked_1703' in pg_get_functiondef(p.oid)) = 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p
+        where p.oid = to_regprocedure('public.get_filter_counts(jsonb)'))
+      and not has_function_privilege('anon',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.get_filter_counts(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.get_filter_counts(jsonb)', 'EXECUTE')
+""",
+    "popdam_ranked_search_private_keyed_visibility_v2": """
+      (select
+        position('select a.id, a.style_group_id, a.file_type, a.status,' in pg_get_functiondef(p.oid)) > 0
+        and position('a.workflow_status, a.stage, a.is_licensed' in pg_get_functiondef(p.oid)) > 0
+        and position('from candidate_asset_ids c' in pg_get_functiondef(p.oid)) > 0
+        and position('join public.assets a on a.id = c.id' in pg_get_functiondef(p.oid)) > 0
+        and position('filter_effective_assets' in substring(pg_get_functiondef(p.oid)
+          from position('visible_assets as materialized' in pg_get_functiondef(p.oid)))) = 0
+        and position('cross join lateral' in pg_get_functiondef(p.oid)) = 0
+        and position('select distinct a.*' in pg_get_functiondef(p.oid)) = 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p
+        where p.oid = to_regprocedure('public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and (select
+        position('authorized as materialized' in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and (length(pg_get_functiondef(p.oid)) - length(replace(pg_get_functiondef(p.oid),
+          'require_dam_access', ''))) / length('require_dam_access') = 1
+        and position('from authorized' in pg_get_functiondef(p.oid)) > 0
+        and position('cross join public.assets a' in pg_get_functiondef(p.oid)) > 0
+        and position('filter_effective_assets_unchecked_1703' in pg_get_functiondef(p.oid)) = 0
+        and p.provolatile = 's' and not p.prosecdef
+        and p.proconfig is null
+        from pg_proc p
+        where p.oid = to_regprocedure('public.filter_effective_assets(jsonb)'))
+      and not has_function_privilege('authenticated',
+        'public.filter_effective_assets_unchecked_1703(jsonb)', 'EXECUTE')
+      and (select
+        position('select a.file_type, a.status, a.workflow_status, a.stage, a.is_licensed'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('from public.assets a' in pg_get_functiondef(p.oid)) > 0
+        and position('select a.*' in pg_get_functiondef(p.oid)) = 0
+        and position('filter_effective_assets' in pg_get_functiondef(p.oid)) = 0
+        and position('bounds as materialized' in pg_get_functiondef(p.oid)) > 0
+        from pg_proc p where p.oid = to_regprocedure(
+          'public.get_effective_filter_counts_unchecked_1703(jsonb)'))
+      and (select position('get_effective_filter_counts_unchecked_1703'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p where p.oid = to_regprocedure(
+          'public.get_effective_filter_counts(jsonb)'))
+      and not has_function_privilege('anon', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+      and not has_function_privilege('anon',
+        'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
+""",
+    "popdam_ranked_search_single_heap_fetch_v3": """
+      (select
+        position('full_text_matches as materialized' in pg_get_functiondef(p.oid)) > 0
+        and position('d.search_tsv @@ any(array(select q.tsq from queries q))'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('select max(ts_rank_cd(d.search_tsv, q.tsq))'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('from full_text_matches d' in pg_get_functiondef(p.oid)) > 0
+        and position('join public.dam_search_documents d on d.search_tsv @@ q.tsq'
+          in pg_get_functiondef(p.oid)) = 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p
+        where p.oid = to_regprocedure(
+          'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and not has_function_privilege('anon',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+""",
+    "popdam_ranked_search_rank_keys_through_visibility_v4": """
+      (select
+        position('c.keyword_rank, c.semantic_rank, c.rank, c.asset_id id'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('c.keyword_rank, c.semantic_rank, c.rank, a.id'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('select distinct a.document_type, a.entity_id, a.asset_id'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('join visible_assets a on a.id = c.asset_id'
+          in pg_get_functiondef(p.oid)) = 0
+        and position('join visible_style_groups g on g.style_group_id = c.style_group_id'
+          in pg_get_functiondef(p.oid)) = 0
+        and position('d.search_tsv @@ any(array(select q.tsq from queries q))'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p where p.oid = to_regprocedure(
+          'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and not has_function_privilege('anon',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+""",
     "coco_owner_ruling_v1": """
       case when to_regclass('core.taxonomy_owner_ruling') is null then true else
         cardinality(xpath('/table/row', query_to_xml(
@@ -1095,6 +1241,7 @@ class Targets:
         notes: list[str] | None = None,
         noop_declaration: dict | None = None,
         indexes: set[tuple[str, str]] | None = None,
+        schema_renames: set[tuple[str, str, str | None]] | None = None,
     ) -> None:
         # ORDER IS LOAD-BEARING and must be the order the statements appear in,
         # not sorted: a batch may `grant` a privilege and then `revoke` it, and
@@ -1116,6 +1263,7 @@ class Targets:
         self.roles = sorted(roles)
         self.seeded = sorted(seeded)
         self.indexes = sorted(indexes or set())
+        self.schema_renames = sorted(schema_renames or set())
         # Relations an `... if exists` statement named. Read if present, NEVER
         # required: the migration said in its own SQL that it tolerates absence.
         self.optional = sorted(set(optional or set()) - set(tables) - set(views))
@@ -1148,6 +1296,7 @@ class Targets:
             or self.rls_relations
             or self.privileges
             or self.indexes
+            or self.schema_renames
         )
 
     def as_dict(self) -> dict[str, list[str]]:
@@ -1160,6 +1309,10 @@ class Targets:
             "roles": self.roles,
             "seeded": self.seeded,
             "indexes": [f"{index}|{relation}" for index, relation in self.indexes],
+            "schema_renames": [
+                f"{source}|{destination}|{comment if comment is not None else ''}"
+                for source, destination, comment in self.schema_renames
+            ],
             "privilege_assertions": [e.describe() for e in self.privileges],
             "unassertable_statements": self.notes,
         }
@@ -1971,17 +2124,27 @@ def derive_targets(migrations: dict[str, Path], allowlist: list[str]) -> Targets
     notes: list[str] = []
     noop: dict | None = None
     indexes: set[tuple[str, str]] = set()
+    schema_rename_pairs: set[tuple[str, str]] = set()
+    schema_comments: dict[str, str] = {}
 
     for version in allowlist:
         path = migrations.get(version)
         if path is None:
             raise GuardError(f"unknown migration version: {version}")
         raw = path.read_text(encoding="utf-8")
+        # strip_sql deliberately blanks string literals, so schema comments
+        # must be read from the comment-stripped raw text. This still avoids
+        # matching prose in SQL comments while preserving the exact literal.
+        for match in COMMENT_SCHEMA_RE.finditer(_strip_sql_comments(raw)):
+            schema_comments[match.group(1)] = match.group(2).replace("''", "'")
         declaration = read_noop_declaration(raw, version)
         if declaration is not None and (noop is None or not declaration["accepted"]):
             noop = declaration
         text = strip_sql(raw)
         for statement in split_statements(text):
+            if match := ALTER_SCHEMA_RENAME_RE.match(statement):
+                schema_rename_pairs.add((match.group(1), match.group(2)))
+                continue
             if ALTER_DEFAULT_PRIVILEGES_RE.match(statement):
                 found, adp_notes = parse_default_privileges(statement, version)
                 privileges.extend(found)
@@ -2019,6 +2182,22 @@ def derive_targets(migrations: dict[str, Path], allowlist: list[str]) -> Targets
                 relation_name = f"{match.group(4)}.{match.group(5)}"
                 indexes.add((index_name, relation_name))
                 tables.add(relation_name)
+                continue
+            if match := DROP_INDEX_RE.match(statement):
+                dropped = f"{match.group(1)}.{match.group(2)}"
+                before = len(indexes)
+                indexes = {pair for pair in indexes if pair[0] != dropped}
+                if len(indexes) != before:
+                    notes.append(
+                        f"{version}: dropped index `{dropped}` created earlier in this "
+                        f"batch; it is no longer an expected object"
+                    )
+                continue
+            if DROP_INDEX_HEAD_RE.match(statement):
+                notes.append(
+                    f"{version}: DROP INDEX was not safely parseable and was not "
+                    f"silently accepted: `{statement.strip()[:240]}`"
+                )
                 continue
             if CREATE_INDEX_HEAD_RE.match(statement):
                 notes.append(
@@ -2084,6 +2263,10 @@ def derive_targets(migrations: dict[str, Path], allowlist: list[str]) -> Targets
     # Every relation is worth an RLS reading -- RLS-on-with-zero-policies was the
     # single check the canary run could not confirm at all.
     rls |= tables
+    schema_renames = {
+        (source, destination, schema_comments.get(destination))
+        for source, destination in schema_rename_pairs
+    }
     return Targets(
         tables,
         views,
@@ -2096,6 +2279,7 @@ def derive_targets(migrations: dict[str, Path], allowlist: list[str]) -> Targets
         notes=notes,
         noop_declaration=noop,
         indexes=indexes,
+        schema_renames=schema_renames,
     )
 
 
@@ -2152,6 +2336,9 @@ def build_catalog_sql(targets: Targets) -> str:
     functions = _sql_array(targets.functions)
     index_names = _sql_array([row[0] for row in targets.indexes])
     index_relations = _sql_array([row[1] for row in targets.indexes])
+    schema_names = _sql_array(
+        sorted({name for source, destination, _ in targets.schema_renames for name in (source, destination)})
+    )
     defacl = targets.default_acls
     defacl_schemas = _sql_array([row[0] for row in defacl])
     defacl_roles = _sql_array([row[1] for row in defacl])
@@ -2192,6 +2379,15 @@ select jsonb_build_object(
   -- the two need different verdicts.
   'probe_roles', coalesce((
     select jsonb_agg(probe_roles.role order by probe_roles.role) from probe_roles
+  ), '[]'::jsonb),
+  'schemas', coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'name', s.name,
+      'exists', n.oid is not null,
+      'comment', obj_description(n.oid, 'pg_namespace')
+    ) order by s.name)
+    from unnest({schema_names}) as s(name)
+    left join pg_namespace n on n.nspname = s.name
   ), '[]'::jsonb),
   'indexes', coalesce((
     select jsonb_agg(jsonb_build_object(
@@ -3015,6 +3211,48 @@ def render_report(
             f"`{row.get('objtype')}` | {row.get('row_exists')} | "
             f"`{row.get('acl_text') or 'NULL'}` |"
         )
+    add("")
+
+    add("## Schema rename assertions (`pg_namespace`)")
+    add("")
+    add("| source | destination | source absent | destination present | comment matches |")
+    add("| --- | --- | --- | --- | --- |")
+    schema_rows = {
+        str(row.get("name")): row for row in (data.get("schemas") or [])
+        if isinstance(row, dict)
+    }
+    for source, destination, expected_comment in targets.schema_renames:
+        source_row = schema_rows.get(source)
+        destination_row = schema_rows.get(destination)
+        source_absent = source_row is not None and source_row.get("exists") is False
+        destination_present = (
+            destination_row is not None and destination_row.get("exists") is True
+        )
+        comment_matches = (
+            expected_comment is None
+            or (
+                destination_row is not None
+                and destination_row.get("comment") == expected_comment
+            )
+        )
+        add(
+            f"| `{source}` | `{destination}` | {source_absent} | "
+            f"{destination_present} | {comment_matches} |"
+        )
+        if not source_absent:
+            failures.append(
+                f"schema rename {source} -> {destination}: source schema must be absent"
+            )
+        if not destination_present:
+            failures.append(
+                f"schema rename {source} -> {destination}: destination schema must be present"
+            )
+        if not comment_matches:
+            failures.append(
+                f"schema rename {source} -> {destination}: destination comment does not match the migration"
+            )
+    if not targets.schema_renames:
+        add("| _no ALTER SCHEMA RENAME target was derived_ | | | | |")
     add("")
 
     add("## Indexes (`pg_index` / `pg_get_indexdef`)")
