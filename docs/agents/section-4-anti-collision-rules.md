@@ -269,9 +269,22 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    reviewer, and releases that exact active lease when present. It does not
    create a failure record. New heads skip the reviewer; if exclusions and live
    leases consume the roster, assignment refuses loudly and names each durable
-   reason. To continue the same head after excluding slot N, assign the next
-   unused `--review-slot`; the exact-head gate accepts that ordinary assignment
-   and no false failure is recorded. Never use this to shop for a preferred verdict.
+   reason. Never use this to shop for a preferred verdict.
+
+   The exclusion also RETURNS every assignment of that pull request the excluded
+   reviewer still holds, so the slot can be filled again. Each return is a
+   create-only record under `refs/db-review-returns/`, named for the exact
+   assignment it retires and committed on top of it, and only then is the
+   assignment ref compare-and-cleared. Nothing is deleted silently: the record
+   keeps who was assigned, to which head and slot, and why it came back.
+   An assignment that already carries a durable verdict is never returned.
+
+   To continue the same head after excluding slot N, re-run `--assign-reviewer`
+   for that head and slot: the returned slot draws a fresh, independent
+   reviewer, and the excluded one is still barred from this pull request
+   forever. A pull request excluded before returns existed is repaired by
+   re-running the IDENTICAL `--exclude-reviewer` command, which completes the
+   return without recording a second exclusion.
 
    **Grok's in-flight lock is PER REPOSITORY, not global.** `ai-grok-review`
    allows one live Grok review at a time *in shared-db*; it does not cap Grok
