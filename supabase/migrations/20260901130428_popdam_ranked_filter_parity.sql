@@ -111,7 +111,7 @@ as $$
       and d.search_tsv @@ any(array(select q.tsq from queries q))
   ), keyword_candidates as materialized (
     select d.document_type,d.entity_id,d.asset_id,d.style_group_id,
-      greatest((select max(ts_rank_cd(d.search_tsv,q.tsq)) from queries q where d.search_tsv @@ q.tsq),0.01)::real keyword_rank
+      greatest((select max(ts_rank_cd(d.search_tsv, q.tsq)) from queries q where d.search_tsv @@ q.tsq),0.01)::real keyword_rank
     from full_text_matches d
     union all
     select d.document_type,d.entity_id,d.asset_id,d.style_group_id,
@@ -135,18 +135,23 @@ as $$
     group by c.document_type,c.entity_id,c.asset_id,c.style_group_id
     having coalesce(max(c.keyword_rank),0) + coalesce(max(c.semantic_rank),0) * 0.35 >= (select min_rank from params)
   ), candidate_asset_ids as materialized (
-    select c.*,c.asset_id id from candidate_ranks c where c.document_type='asset' and c.asset_id is not null
+    select c.document_type, c.entity_id, c.asset_id, c.style_group_id,
+      c.keyword_rank, c.semantic_rank, c.rank, c.asset_id id
+    from candidate_ranks c where c.document_type='asset' and c.asset_id is not null
     union all
-    select c.*,a.id from candidate_ranks c join public.assets a on a.style_group_id=c.style_group_id and not a.is_deleted
+    select c.document_type, c.entity_id, c.asset_id, c.style_group_id,
+      c.keyword_rank, c.semantic_rank, c.rank, a.id
+    from candidate_ranks c join public.assets a on a.style_group_id=c.style_group_id and not a.is_deleted
     where c.document_type='style_group' and c.style_group_id is not null
   ), visibility_params as materialized (
     select coalesce(p_filters,'{}'::jsonb)-'search' f,
       public.assets_thumbnail_min_date() thumbnail_min_date
   ), visible_assets as materialized (
     select c.document_type,c.entity_id,c.asset_id,c.style_group_id,c.keyword_rank,c.semantic_rank,c.rank,
-      a.id,a.style_group_id asset_style_group_id,a.file_type,a.status,a.workflow_status,a.stage,a.is_licensed
+      a.id, a.style_group_id asset_style_group_id, a.file_type, a.status,
+      a.workflow_status, a.stage, a.is_licensed
     from candidate_asset_ids c
-    join public.assets a on a.id=c.id
+    join public.assets a on a.id = c.id
     left join public.style_groups sg on sg.id=a.style_group_id
     cross join visibility_params v
     where not a.is_deleted
@@ -174,7 +179,9 @@ as $$
       and (nullif(v.f->>'customer','') is null or a.customer=v.f->>'customer')
       and (nullif(v.f->>'program','') is null or a.program=v.f->>'program')
   ), ranked_documents as materialized (
-    select distinct a.document_type,a.entity_id,a.asset_id,a.style_group_id,a.keyword_rank,a.semantic_rank,a.rank from visible_assets a
+    select distinct a.document_type, a.entity_id, a.asset_id, a.style_group_id,
+      a.keyword_rank, a.semantic_rank, a.rank
+    from visible_assets a
   ), matched_assets as materialized (
     select distinct a.id,a.asset_style_group_id style_group_id,a.file_type,a.status,a.workflow_status,a.stage,a.is_licensed from visible_assets a
   ), summary as materialized (
