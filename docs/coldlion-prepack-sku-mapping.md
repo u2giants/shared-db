@@ -31,7 +31,9 @@ parent-level fields.
 holds four different designs with four different licensors and properties. **Licensor and property
 are meaningless at the Master level and belong only to the sub-items.** Never read either from the
 parent, never fall back to the parent when the component value is blank, and explode assortments to
-components before grouping any report by licensor or property. Full rule and its consequences:
+components before grouping any report by licensor or property. Read both from the ordinary
+`merchGroup05`/`merchGroup06` fields on the component row — the `ppkMerchGroup*` family this
+repo once documented is gone from the live spec as of 2026-09-01. Full rule and its consequences:
 [`business-rules-erp-data.md` §9](business-rules-erp-data.md).
 
 ## 2. The real SKU is not `itemNo`
