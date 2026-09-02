@@ -4,8 +4,8 @@
 
 | Step | Status | Date | Evidence / starting point |
 |---|---|---|---|
-| 0. Re-verify source, code, GitHub, and live targets | ⬜ open | — | Start with the commands in §9 Phase 0; never reuse this plan's dated measurements. |
-| 1. Build the private, live-qualified candidate manifest | ⬜ open | — | The manifest and its SHA-256 digest are the approval object. |
+| 0. Re-verify source, code, GitHub, and live targets | ✅ complete | 2026-09-02 | Re-run recorded in §9.1. Its counts are that day's live measurements, not a licence to skip Phase 0 again. |
+| 1. Build the private, live-qualified candidate manifest | ⬜ open | — | The manifest and its SHA-256 digest are the approval object. Start here; the 2026-09-02 re-run sized the writable set at 1,190 rows and repaired the reproducibility defect that would have made the digest gate meaningless. |
 | 2. Implement and test the guarded data-only executor | ⬜ open | — | Synthetic tests in §10 must pass before any database write. |
 | 3. Rehearse the exact manifest on preview | ⬜ open | — | Requires Albert's new preview-write authorization and §4.2 target proof. |
 | 4. Obtain exact production authorization | ⬜ open | — | Authorization must name the manifest digest and live reconciliation output. |
@@ -13,7 +13,7 @@
 | 6. Finish all residual historical items | ⬜ open | — | Current partial and unresolved results remain withheld. |
 | 7. Decide whether the temporary cutoff may retire | ⬜ open | — | The exhaustive gate in §13 must pass; otherwise the cutoff remains. |
 
-**Fresh-session start:** Step 0. Re-read all downstream phases before beginning each phase because the source snapshot, production rows, preview project, active taxonomy, and orchestrator route can change.
+**Fresh-session start:** Step 1, after re-reading §9.1. Re-run Phase 0 before Phase 3 and again before Phase 4 as §9 requires. Original fresh-session start was Step 0. Re-read all downstream phases before beginning each phase because the source snapshot, production rows, preview project, active taxonomy, and orchestrator route can change.
 
 **Tracking issue:** [#1984](https://github.com/u2giants/shared-db/issues/1984). **Session handoff:** [HANDOFF.d/2026-08-31T1457Z-edge-dev-codex-historical-mg-apply-plan.md](HANDOFF.d/2026-08-31T1457Z-edge-dev-codex-historical-mg-apply-plan.md).
 
@@ -80,6 +80,7 @@ These are findings, not frozen counts. Re-run §9 and use its artifacts for curr
 - `docs/verification/item-mg-reclassification-20260814/test_hierarchical_item_taxonomy.py` carries the contamination, date-boundary, code-validity, fallback, and old-code exclusion tests.
 - `docs/item-description-mg-classification-process.md` is the permanent interpretation contract.
 - `supabase/migrations/20260827213024_resolve_item_mg_category_cutoff.sql` defines the temporary production cutoff and MG01-only category derivation.
+- Name matching in the classifier is deterministic across processes. Equal-length licensor and property names are broken by display name, not by set iteration order. Test 24 spawns interpreters under eight different `PYTHONHASHSEED` values and fails on the pre-repair code.
 
 ### Private artifacts
 
@@ -148,6 +149,24 @@ No guarded production manifest builder, data executor, backup format, verifier, 
 4. Query production read-only through the Management API with `read_only: true`, quoting the observed project ref in the report. Re-read the cutoff migration ledger/object, live item population, division resolution, active MG hierarchy, and source-to-production identifier reconciliation. **Gate:** target is the protected production ref, the cutoff contract is present, and no write-capable call is made.
 
 **Natural context cut:** start a fresh session before Phase 1 and re-read Phases 1–7.
+
+### 9.1 Phase 0 re-run, 2026-09-02 (read-only, complete)
+
+Every number below is a live measurement taken that day. Re-run Phase 0 rather than reusing them.
+
+**Code, source, and GitHub.** PR #1651 is merged, issue #1662 is closed and applied, issue #1984 is open. Exactly one orchestrator marker is open and the queue audit is clean. All four private artifacts are present in `u2giants/licensor-source-data` under `shared-db-relocated/2026-08-30/` and were verified by SHA-256. The classifier suite passes. Regenerating the row outputs reproduces the published distribution exactly: 19,302 source rows split 3,658 post-change and 15,644 historical, matching 1,781 at level 3, 8,102 at level 2, 2,502 at level 1, and 3,259 unmatched, which reconciles to the historical total.
+
+**Reproducibility defect found and repaired.** Two runs of the classifier over byte-identical input produced different `Licensor`, `Property`, and `Artwork Description` values on 181 rows. The cause was a name-matching sort that left equal-length names to set iteration order, which varies with `PYTHONHASHSEED` between processes. This never touched an MG proposal, but it would have silently broken the Phase 1 gate in step 7, which requires the same inputs to produce the same manifest digest. The tie-break is now the display name, and the run is byte-identical across hash seeds. Do not weaken that ordering.
+
+**Historical-code negative control.** Replacing all 46,932 pre-cutoff MG01-MG03 cells with a sentinel and re-running leaves every proposal and evidence column byte-identical; only the deliberately mutated comparison columns differ. Historical codes remain worth nothing as classification evidence.
+
+**Live production (`qsllyeztdwjgirsysgai`, read-only, no write-capable call).** The migration ledger reports no actionable drift. `api.resolve_item_mg_category(integer)` exists, carries the cutoff date, and references neither MG02 nor MG03, so the MG01-only contract still holds. `dflow."itemHeader"` holds 19,463 rows against the August snapshot's 19,302: 16,820 historical, 2,516 post-cutoff, and **127 with a null creation date**. Those 127 alone keep the §13 retirement gate closed. Item numbers remain unsafe as a write key: 2,850 historical rows carry an item number that is not unique among historical rows. `core."merchGroup"` holds 58 active MG01, 317 active MG02 and 803 active MG03 rows forming **726 active MG01→MG02→MG03 chains**. `EP001` has 49 rows and **none active**, so its proposals still abstain and must not be remapped.
+
+**Division resolution is the live trap.** 15,185 historical items carry a null `div_code` and resolve only through `div_code_fk`. Worse, the numeric id `2` resolves to external division `CW001` in `dflow."divisionCode"` while `core."merchGroup"` pairs that same id with `EH001` on 217 rows, all inactive. Phase 1 must resolve division through the authoritative ColdLion-backed link and must not trust either encoding on its own.
+
+**Writable set as of 2026-09-02.** Of the 1,781 level-3 proposals: 1,200 reach exactly one live historical row whose division agrees; 345 fail on division (321 source `EH001` and 24 source `SP001` against live `CW001`); 163 hit a non-unique historical item number; 73 have no live historical row. Of the 1,200, **1,190 form an active three-level chain in that division and 10 do not**. So the first write batch is on the order of 1,190 rows out of 16,820 live historical items — about 7 percent. Everything else abstains, exactly as §1 requires.
+
+**Still unauthorized.** No preview or production row was written, and none is authorized. Phase 3 needs Albert's explicit preview-write authorization; Phase 5 needs a separate production authorization naming one manifest digest.
 
 ### Phase 1 — build the private candidate manifest (read-only)
 
