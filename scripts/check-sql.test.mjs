@@ -244,6 +244,112 @@ test('check-sql keeps the verify-cost guard wired into the required suite', () =
   assert.match(script, /check-migration-verify-cost\.mjs/)
 })
 
+// --- Verify-cost guard: the cases external review (grok-4.6, PR #1954) found -
+//
+// The first version of the guard matched the NAMES anywhere inside a
+// verification block. Each test below is one of the concrete slip-pasts or
+// false refusals the review demonstrated. They are behavioural: every one of
+// them goes through `check-sql.sh` exactly as CI does.
+
+test('verify-cost guard sees a block declared with an explicit LANGUAGE clause', () => {
+  withFixture(['20260801120000_language_verify.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_language_verify.sql'), `
+      do language plpgsql $verify$
+      begin
+        perform count(*) from plm.large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
+
+test('verify-cost guard sees a block whose DO keyword is separated by a comment', () => {
+  withFixture(['20260801120000_commented_verify.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_commented_verify.sql'), `
+      do /* nothing to see here */ $verify$
+      begin
+        perform count(*) from api.source_capture_inventory;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads api\.source_capture_inventory/)
+  })
+})
+
+test('verify-cost guard refuses a file it cannot parse instead of passing it', () => {
+  withFixture(['20260801120000_decoy_tag.sql'], (dir) => {
+    // A decoy dollar tag that never closes. PostgreSQL ignores it inside the
+    // comment; the first version of the guard stopped scanning at it and
+    // reported the file clean.
+    writeFileSync(path.join(dir, '20260801120000_decoy_tag.sql'), `
+      select 'do $x$ never closed';
+      do $verify$
+      begin
+        perform count(*) from plm.large_table;
+      end
+      $verify$;
+    `.replace("'do $x$ never closed'", "'do $x$ never closed"))
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /unterminated/)
+  })
+})
+
+test('verify-cost guard refuses a verification block that reaches plm through search_path', () => {
+  withFixture(['20260801120000_search_path_verify.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_search_path_verify.sql'), `
+      do $verify$
+      begin
+        set local search_path to plm, public;
+        perform count(*) from large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /plm through search_path/)
+  })
+})
+
+test('verify-cost guard allows catalogue lookups that merely NAME the expensive objects', () => {
+  withFixture(['20260801120000_catalogue_lookups.sql'], (dir) => {
+    // Every line here is the shape the guard's own documentation tells authors
+    // to use. None of them reads a row. The first version refused all of them,
+    // which would have blocked migration 20260820004338.
+    writeFileSync(path.join(dir, '20260801120000_catalogue_lookups.sql'), `
+      do $verify$
+      begin
+        if to_regclass('api.source_capture_inventory') is null then
+          raise exception 'verify: api.source_capture_inventory is missing';
+        end if;
+        if pg_get_viewdef('api.source_capture_inventory'::regclass, true) not like '%capture%' then
+          raise exception 'verify: the inventory view body changed';
+        end if;
+        if not has_table_privilege('authenticated', 'api.source_capture_inventory', 'select') then
+          raise exception 'verify: the read grant is missing';
+        end if;
+        if to_regprocedure('plm.finalize_capture(uuid)') is null then
+          raise exception 'verify: no plm.finalize_capture(uuid) routine exists';
+        end if;
+        if not exists (
+          select 1 from information_schema.columns
+          where table_schema = 'plm' and table_name = 'large_table'
+        ) then
+          raise exception 'verify: expected column metadata missing';
+        end if;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.equal(result.status, 0, result.stderr)
+  })
+})
+
 // --- Guard B2: backdated against a LIVE LEDGER (#651) ----------------------
 //
 // Guard B compares a branch only against the BASE BRANCH, and `main` is not
