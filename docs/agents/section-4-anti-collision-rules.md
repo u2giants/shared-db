@@ -638,7 +638,21 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    changes no migration needs no migration-author claim, but the lease workflow
    does not auto-authorize it: the guarded merge still proves the exact head,
    current-main relationship, collision result, and governed review while it
-   holds the merge lock. When production acquires its lock, the production
+   holds the merge lock.
+
+   **One exemption, 2026-09-02 (#2102): a documents-only pull request draws no
+   database reviewer, and the merge gate requires no verdict for it.** It still
+   enters this same lane and still runs every other check; only the external
+   reviewer draw is skipped, because PR #2034 and PR #2070 spent migration
+   reviewer capacity on prose. Rulebook files — `AGENTS.md`, anything under
+   `.claude/skills/` or `skills/`, and `plan_*.md` — are **not** documents for
+   this purpose, and one non-document file of any kind removes the exemption from
+   the whole pull request. The classifier is
+   `scripts/lib/documents-only-change.mjs`; it fails closed on an empty,
+   unreadable or absent file list, and a refusal already recorded at the exact
+   head still blocks the merge.
+
+   When production acquires its lock, the production
    workflow revokes every open pull request's earlier merge authorization before
    releasing the lock. This prevents a stale green authorization from surviving
    the production freeze.
