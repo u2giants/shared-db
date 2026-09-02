@@ -1,10 +1,10 @@
-name: Guarded Migration Merge
+name: Guarded Merge
 
 on:
   workflow_dispatch:
     inputs:
       pull_request:
-        description: "Migration pull request number"
+        description: "Pull request number"
         required: true
         type: string
       head_sha:
@@ -38,14 +38,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Require current main and rerun every coordination guard
+      - name: Require current main and rerun every applicable coordination guard
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pull_request }}
         run: |
           set -euo pipefail
           git fetch origin main
-          test "$(git merge-base HEAD origin/main)" = "$(git rev-parse origin/main)"
+          node scripts/check-main-tip-freshness.mjs --contains
           bash scripts/check-sql.sh
           node scripts/check-production-verification-sidecars.mjs --base origin/main
           node scripts/check-pr-object-collisions.mjs
@@ -73,7 +73,7 @@ jobs:
           set -euo pipefail
           test "$(gh pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
           git fetch origin main
-          test "$(git merge-base HEAD origin/main)" = "$(git rev-parse origin/main)"
+          node scripts/check-main-tip-freshness.mjs --contains
           node scripts/check-pr-object-collisions.mjs
           node scripts/check-migration-pr-lease.mjs
           # Re-proven under the lock: a reviewer can withdraw, or a refusal can
@@ -109,7 +109,7 @@ jobs:
             echo "guarded merge attempt $attempt was refused; re-proving the head and retrying"
             test "$(gh pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
             git fetch origin main
-            test "$(git merge-base HEAD origin/main)" = "$(git rev-parse origin/main)"
+            node scripts/check-main-tip-freshness.mjs --contains
             sleep 10
           done
           test "$merged" = '1'
