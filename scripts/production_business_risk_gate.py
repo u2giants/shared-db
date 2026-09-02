@@ -261,7 +261,12 @@ def preview_applied_commit(
             f"expected exactly one {expected_name} artifact on run {run_id}, found {len(matches)}"
         )
     artifact, match = matches[0]
-    if artifact.get("expired") is not False or artifact.get("workflow_run", {}).get("id") != run_id:
+    workflow_run = artifact.get("workflow_run")
+    if (
+        artifact.get("expired") is not False
+        or not isinstance(workflow_run, dict)
+        or workflow_run.get("id") != run_id
+    ):
         raise RiskGateError("preview artifact is expired or belongs to another run")
     return artifact, match.group(1)
 
@@ -1771,6 +1776,7 @@ PREVIEW_PRODUCER_PATHS += (
     # Invoked by check-sql.sh during preview; pin the reviewed parser so the
     # protected static check cannot be changed independently of the PR head.
     "scripts/check-expected-count-patterns.mjs",
+    "scripts/check-migration-verify-cost.mjs",
 )
 
 
