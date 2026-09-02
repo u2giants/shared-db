@@ -162,11 +162,11 @@ export function matchState(row: PropertyMatchRow): MatchState {
 export function describeMatchState(row: PropertyMatchRow) {
   switch (matchState(row)) {
     case 'multiple':
-      return `${row.candidates.length} OPA Properties are proposed for this contract clause. Remove any the clause does not cover.`
+      return `${row.candidates.length} submissions-system (OPA) names are proposed for this contract clause. Remove any the clause does not cover.`
     case 'none':
-      return 'No OPA Property was proposed. Reject it, or check the contract evidence before deciding.'
+      return 'No submissions-system (OPA) name was proposed. Reject it, or check the contract evidence before deciding.'
     default:
-      return 'One OPA Property is proposed. Confirm to record the decision, or reject it.'
+      return 'One submissions-system (OPA) name is proposed. Confirm to record the decision, or reject it.'
   }
 }
 
