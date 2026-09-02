@@ -1,5 +1,5 @@
 -- Contract tests for the #2067 HTS RAG comparison and raw-response audit contract
--- (migration 20260902054313). Run after the migrations in an ephemeral database.
+-- (migration 20260902062827). Run after the migrations in an ephemeral database.
 --
 -- Every value below is SYNTHETIC and labelled as such: 'ZZ Fixture' names, invented
 -- hashes, and a raw_response object that contains no product description of any kind.
