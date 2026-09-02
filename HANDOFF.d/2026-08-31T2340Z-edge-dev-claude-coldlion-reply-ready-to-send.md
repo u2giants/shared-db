@@ -57,9 +57,10 @@ feed before building a loader. Open questions to the vendor live in `docs/coldli
   NOT the same as internal register entries (`2.x`). The draft carries a mapping block at the top.
   Read it before editing either file.
 - **The quantity-multiplication finding:** on all five affected orders the invoiced quantity per
-  populated row equals orderQty × (number of populated rows). Order 7127866 ordered 239 and the feed
-  shows 1,673 on each of seven rows, summing to ~49× the true figure. All five invoiced 2026-07-30,
-  so it is current. **`lineInvoiceQty` cannot be trusted from this feed** until ColdLion answers.
+  populated row equals orderQty × (number of populated rows). One order (synthetic illustration of
+  the real shape: ordered 200, seven populated rows, 1,400 shown on each, summing to ~49× the true
+  figure) demonstrates it. All five are recent invoiced orders, so it is current. The real order
+  numbers are in the ColdLion question register, not in this public repository. **`lineInvoiceQty` cannot be trusted from this feed** until ColdLion answers.
 - **There is no April 2025 signal anywhere in the API.** Merch-group headers carry 2019 or 2025-09
   timestamps and `merchGroupDetails` returns no modification timestamps at all. The real slot-07
   break is 2025-05-20/21 for CW001, ~05-27 for SP001, October 2025 for EH001. The slots we consume
