@@ -603,6 +603,13 @@
       "line_sha256": "24907eac099978efffb5d13c1ff206d6f398c787d5aa259678ad6cf594af2299"
     },
     {
+      "site": "scripts/manage-migration-author-lanes.mjs:2318",
+      "disposition": "excluded",
+      "reason": "Prose comment above durableVerdictBlocksReplacement, not executable logic. The word \"missing\" here names the unreadable-assignment-record case that the function immediately below treats as blocking, so this call site documents a fail-closed path rather than a silently missing one.",
+      "semantic_key": "scripts/manage-migration-author-lanes.mjs:2ddf8009d73172c32ef99c59ae68148190ba7a7791968f42cf31637301bea671:1",
+      "line_sha256": "2ddf8009d73172c32ef99c59ae68148190ba7a7791968f42cf31637301bea671"
+    },
+    {
       "site": "scripts/manage-migration-author-lanes.mjs:3430",
       "disposition": "excluded",
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation.",
@@ -615,6 +622,13 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation.",
       "semantic_key": "scripts/manage-migration-author-lanes.mjs:40e08fbb26123da8f7cb72c4a6870299c6aa90338c2e3af2ad5b9494876e63c2:1",
       "line_sha256": "40e08fbb26123da8f7cb72c4a6870299c6aa90338c2e3af2ad5b9494876e63c2"
+    },
+    {
+      "site": "scripts/manage-migration-author-lanes.mjs:226",
+      "disposition": "excluded",
+      "reason": "Prose comment explaining the #2078 reviewer-repository-access gate; the word matches the discovery pattern but the line is not a throughput call site and carries no derivation behavior.",
+      "semantic_key": "scripts/manage-migration-author-lanes.mjs:435a6abb51443c34755210b1f1927ce87702403e85b83c894a9d0ee9a1b367f8:1",
+      "line_sha256": "435a6abb51443c34755210b1f1927ce87702403e85b83c894a9d0ee9a1b367f8"
     },
     {
       "site": "scripts/manage-migration-author-lanes.mjs:2006",
@@ -692,6 +706,13 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation.",
       "semantic_key": "scripts/manage-migration-author-lanes.mjs:b03846824daaafeb0f0c7f536b249b0207a114a30eb80de2001ea5b575c7d5c6:1",
       "line_sha256": "b03846824daaafeb0f0c7f536b249b0207a114a30eb80de2001ea5b575c7d5c6"
+    },
+    {
+      "site": "scripts/manage-migration-author-lanes.mjs:1619",
+      "disposition": "excluded",
+      "reason": "Prose comment added by the #2076 reviewer-exclusion return path; the wording matches the discovery pattern but the line is not a throughput call site and carries no derivation behavior.",
+      "semantic_key": "scripts/manage-migration-author-lanes.mjs:b3b03b389e25b1e34d3bf7a7e4aa2337b618cb6f9852fea602b4b370aeae090f:1",
+      "line_sha256": "b3b03b389e25b1e34d3bf7a7e4aa2337b618cb6f9852fea602b4b370aeae090f"
     },
     {
       "site": "scripts/manage-migration-author-lanes.mjs:2989",
@@ -1611,7 +1632,7 @@
       "line_sha256": "c306e35745386b717b583be41a182e378d17ce899e352842a4d0cfbae51ccc3c"
     }
   ],
-  "call_site_count": 228,
-  "call_site_sha256": "c6503e7624a40740ea6f8826feb1a241ae1c9ab954219078f0f99eb6e745e688",
+  "call_site_count": 231,
+  "call_site_sha256": "87ae78fdb22df88f14288a28b8d6441082cfeeaa725bedef8b96a107da99797f",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
