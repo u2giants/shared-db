@@ -1408,8 +1408,9 @@ have already happened in this repo, more than once.
    code can exist as separate property rows under many different licensors at
    once. The schema enforces exactly this:
    `core.property … unique nulls not distinct (licensor_id, code)`
-   (`supabase/migrations/20260621150815_app_core.sql:200`). **`core.licensor` is
-   different** — it *is* `unique nulls not distinct (code)` (`:188`), so
+   (the `core.property` constraint in
+   `supabase/migrations/20260621150815_app_core.sql`). **`core.licensor` is
+   different** — its constraint is `unique nulls not distinct (code)`, so
    **licensor** codes are global. The two are routinely confused, and confusing
    them produces instructions like *"re-parent code `CC` under Disney"* that are
    not meaningful. Owner-confirmed by Albert Hazan, **2026-08-06**. See also
