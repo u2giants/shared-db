@@ -1762,6 +1762,7 @@ PREVIEW_PRODUCER_PATHS += (
     "scripts/production-verification-sidecars/20260831021656.json",
     "scripts/production-verification-sidecars/20260831104325.json",
     "scripts/production-verification-sidecars/20260831145707.json",
+    "scripts/production-verification-sidecars/20260902035909.json",
     "scripts/production-verification-sidecars/20260831173841.json",
     "scripts/production-verification-sidecars/20260831184547.json",
     "scripts/production-verification-sidecars/20260831212757.json",

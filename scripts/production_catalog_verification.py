@@ -792,6 +792,8 @@ DCP_OPA_PROPERTY_AUTHORITY_CONTRACT += (
     " and position('explicit_dcp_to_opa_property_id' in %s)>0" % _DCP_OPA_DEF +
     " and position('style_guide_names' in %s)>0" % _DCP_OPA_DEF +
     " and position('contract_opa_conflict' in %s)>0" % _DCP_OPA_DEF +
+    " and position(\"r.contract_asserted_studio_code = 'marvel'\" in %s)>0" % _DCP_OPA_DEF +
+    " and position(\"o.opa_studio_code = 'disney'\" in %s)>0" % _DCP_OPA_DEF +
     " and position('plm.dcp_property_licensor_resolution' in %s)=0" % _DCP_OPA_DEF +
     "".join(
         " and (select relforcerowsecurity from pg_class where oid=to_regclass('%s'))" % table
