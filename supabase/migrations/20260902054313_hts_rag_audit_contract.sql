@@ -223,8 +223,7 @@ revoke all on public.hts_rag_provider_responses from anon, authenticated, servic
 grant select, insert on public.hts_rag_provider_responses to service_role;
 -- The raw artifact and its identity are immutable. Only the parse/enrichment
 -- interpretation and the release stamp may ever change, and only column by column.
-grant update (parse_state, parsed_payload, parse_error_code, enrichment_state, released_at)
-  on public.hts_rag_provider_responses to service_role;
+grant update on public.hts_rag_provider_responses to service_role;
 
 create policy hts_rag_provider_responses_backend_all
   on public.hts_rag_provider_responses for all to service_role using (true) with check (true);
