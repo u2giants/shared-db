@@ -129,7 +129,7 @@ one-request-at-a-time pacing are all unchanged and still correct.
 ### B6. Field-level gaps that will bite the loader (severity: medium)
 
 - **`invoiceNoString` and `pickTicketNoString` can hold comma-separated lists** (order <order redacted>:
-  `6015220,6015221,6015222`; 31 of 1,823 rows). Any typed integer column truncates or fails.
+  `<invoice A>,<invoice B>,<invoice C>` — three comma-separated numbers; 31 of 1,823 rows). Any typed integer column truncates or fails.
   Assume `invoiceDateString` behaves the same.
 - **An invoice number does not mean the row was invoiced** — order <order redacted> carries invoice numbers
   on lines with `invoiceQty` = 0. Fulfilment state comes from quantities only.
@@ -174,5 +174,5 @@ Mostly yes, with two changes to sequencing.
 ## Related
 
 - [`plan_coldlion-landing-phases-2-6.md`](plan_coldlion-landing-phases-2-6.md) — the plan under review
-- [`coldlion-prepack-sku-mapping.md`](coldlion-prepack-sku-mapping.md) — the prepack model this review rests on
+- [`business-rules-erp-data.md` §10](business-rules-erp-data.md) — the prepack model this review rests on
 - [`coldlion-open-questions.md`](coldlion-open-questions.md) — the question register
