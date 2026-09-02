@@ -39,7 +39,7 @@ PR #1651 merged the three-axis matcher and its reproducible final distribution. 
 
 The 2026-08-31 audit established:
 
-- the committed matcher and all 37 tests reproduce the final workbook distribution;
+- the committed matcher and all 39 tests reproduce the final workbook distribution;
 - replacing every historical stored MG01-MG03 value with a sentinel produces byte-identical proposals and evidence, proving old codes are not teaching data;
 - the workbook is a historical source snapshot, while production has since changed;
 - item numbers are not globally safe write keys, and the workbook does not carry production `item_id_pk` values;
@@ -144,7 +144,7 @@ No guarded production manifest builder, data executor, backup format, verifier, 
 ### Phase 0 — re-derive current truth (read-only)
 
 1. From a clean worktree at current `origin/main`, read `AGENTS.md`, this plan, `docs/item-description-mg-classification-process.md`, and `plan_mg_taxonomy_three_axis_repair.md`. Verify PR #1651 and issues #1662/#1984 live on GitHub. Resolve the current orchestrator and run the queue audit. **Gate:** record current SHAs, issue states, clean status, and a declared/none/unsafe orchestrator result; do not use a remembered route.
-2. Resolve the private `licensor-source-data` checkout and verify the source, workbook, dictionary, and preserved final workbook by SHA-256. Run the 37 classifier tests, regenerate the row outputs and eight-sheet workbook with the commands in the permanent process document, and visually inspect every sheet. **Gate:** tests pass, the summary reconciles to the row CSV, no workbook formula errors exist, and all outputs stay private.
+2. Resolve the private `licensor-source-data` checkout and verify the source, workbook, dictionary, and preserved final workbook by SHA-256. Run the 39 classifier tests, regenerate the row outputs and eight-sheet workbook with the commands in the permanent process document, and visually inspect every sheet. **Gate:** tests pass, the summary reconciles to the row CSV, no workbook formula errors exist, and all outputs stay private.
 3. Run the historical-code negative control: replace pre-cutoff MG01-MG03 comparison values with sentinels, rerun, and compare proposal/evidence columns. **Gate:** byte-identical digests; otherwise stop because historical codes influence the result.
 4. Query production read-only through the Management API with `read_only: true`, quoting the observed project ref in the report. Re-read the cutoff migration ledger/object, live item population, division resolution, active MG hierarchy, and source-to-production identifier reconciliation. **Gate:** target is the protected production ref, the cutoff contract is present, and no write-capable call is made.
 
