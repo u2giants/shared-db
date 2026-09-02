@@ -74,7 +74,7 @@ ColdLion acted on the note's first two questions before it was even sent. Albert
 1. **`prodLineSeq` added to `prodHistory`, and the fan-out fixed at source** (they now select the
    maximum `lastProdDate`). Row identity is `(prodOrderNo, prodLineSeq, prepackItemNo)`. The old
    ambiguity described in §4 below **can no longer occur**. Verified: `prodLineSeq` on 1,475/1,475
-   rows across nine 7-day windows; order 23825 dropped from 8 rows to 4.
+   rows across nine 7-day windows; order 90001 (synthetic) dropped from 8 rows to 4.
 2. **A hard 7-day window cap on both endpoints** (`fromDate`–`toDate` within 7 days inclusive),
    ~2s per window from their office, ~0.1–1.4s from here. **Month-wide calls now fail**, which
    invalidates the fetch pattern used for the original census.
@@ -184,9 +184,9 @@ app repo. This session deliberately produced **zero** schema.
 different reasons that are indistinguishable in shape**:
 
 - **Cause A (collapse):** same purchase, differs only in `last*` lookup fields. Verified on
-  prod order **23825** / AAW2A02 — 8 rows for 4 components, differing only in `lastProdDate`.
-- **Cause B (keep):** two real buy lines on one order. Verified on prod order **20907** /
-  VSZ4803 / PPK1020 — 8 rows for 4 components, one set 1,600 packs, the other 3,000.
+  prod order **90001** / AAA1A01 (synthetic values, real shape) — 8 rows for 4 components, differing only in `lastProdDate`.
+- **Cause B (keep):** two real buy lines on one order. Verified on prod order **90002** /
+  AAA4801 / PPK1001 (synthetic values, real shape) — 8 rows for 4 components, one set 1,600 packs, the other 3,000.
 
 Measured: **261 repeated groups — 131 cause A, 130 cause B.** Almost exactly 50/50, so no blanket
 rule is safe. **There is no line-number field** — confirmed against the live OpenAPI spec, not
