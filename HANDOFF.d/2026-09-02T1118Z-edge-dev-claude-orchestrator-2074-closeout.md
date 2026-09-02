@@ -302,7 +302,7 @@ This is the expensive part. Do not repeat any of it.
 
 - **`.ai/reviews/*` is git-ignored** with a small allowlist (`.gitignore:72`), so the
   governed-review artifacts — which DO contain the leaked order number — never
-  entered the repository. `git grep -l "7127866" origin/main` returns nothing.
+  entered the repository. A workspace-wide search for that literal on `origin/main` returns nothing.
 
 ---
 
