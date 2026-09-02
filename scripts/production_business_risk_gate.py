@@ -1776,6 +1776,7 @@ PREVIEW_PRODUCER_PATHS += (
     # Invoked by check-sql.sh during preview; pin the reviewed parser so the
     # protected static check cannot be changed independently of the PR head.
     "scripts/check-expected-count-patterns.mjs",
+    "scripts/check-migration-verify-cost.mjs",
 )
 
 
