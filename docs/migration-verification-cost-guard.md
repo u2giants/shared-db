@@ -12,12 +12,19 @@ database and production.
 The rule is a read context, not a name. A migration is refused when, inside a
 verification block, one of the prohibited objects appears:
 
-- after `from`, `join`, `into`, `update`, `delete from`, `truncate`, `analyze`
-  or `copy` (optionally through `only`), or
+- after `from`, `join`, `into`, `update`, `delete from`, `truncate` (with or
+  without the optional `table` keyword), `analyze` or `copy` (optionally through
+  `only`), or
 - as a called routine — `plm.something(...)`, or
-- indirectly, because the block does `set search_path to ... plm ...`, which
-  makes every unqualified name a possible `plm` read that no `plm.` pattern can
-  see. That construct is refused outright rather than guessed at.
+- indirectly, because `search_path` names `plm` and every unqualified name
+  becomes a possible `plm` read that no `plm.` pattern can see. That construct is
+  refused outright rather than guessed at, both inside the verification block and
+  as a statement standing before it in the same file.
+
+The file-scope rule reads a `SET` **statement** — one that begins the statement,
+after a `;` or at the start of the file. The `SET search_path` **attribute** of a
+`CREATE FUNCTION` is scoped to that function, cannot change what a later block
+resolves, and is used by 223 migrations here; it is allowed.
 
 Naming a prohibited object inside a catalogue lookup or an error message is
 **allowed**, because nothing scans it: `to_regclass('api.source_capture_inventory')`,
@@ -29,13 +36,17 @@ shape is what the guard exists to steer verification towards, so it must not
 refuse it. Migration `20260820004338` is the worked example in the repository.
 
 The one place a string literal is still read as SQL is when it is handed to
-`execute` or `format`, because there it is about to run.
+`execute` or `format`, because there it is about to run. That includes an escape
+string, `execute E'...'`, whose backslash escapes are read correctly so an
+escaped quote inside it does not end the literal early.
 
 ## Which blocks are inspected
 
 Dollar-quoted `DO` bodies, including `do language plpgsql $verify$` and a `DO`
-separated from its tag by a comment. A body counts as verification when its tag
-names verify/verification, when it raises a verification message, or when a
+separated from its tag by a comment of any length — comments are blanked and the
+remaining whitespace collapsed, so the distance between the keyword and the tag
+does not matter. A body counts as verification when its tag names
+verify/verification, when it raises a verification message, or when a
 verification heading sits immediately above it.
 
 ## Fail closed
@@ -52,7 +63,10 @@ This is a static text scanner, not a SQL executor. It still cannot see an
 expensive read when:
 
 - the object name is assembled from fragments or built by `format('%I.%I', ...)`
-  from identifier variables, or comes from a variable or another table;
+  from identifier variables, or comes from a variable or another table. This one
+  is **accepted, not pending**: a name that exists only at run time cannot be
+  resolved by reading the text, so no amount of work on this scanner closes it.
+  It is review's to catch;
 - the read goes through an unlisted view, function or foreign table that itself
   touches the prohibited objects;
 - a verification block carries no verification tag, message or heading, so it is

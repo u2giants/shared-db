@@ -744,3 +744,109 @@ test('issue 1235 permits a typed JSON number assigned through numeric', () => {
     assert.equal(result.status, 0, result.stderr)
   })
 })
+
+// ---------------------------------------------------------------------------
+// ISSUE #2130. Four shapes the verify-cost guard could not see. Each of these
+// migrations reads exactly what the guard exists to refuse; each one passed.
+// ---------------------------------------------------------------------------
+
+test('verify-cost guard sees a read inside an ESCAPE string handed to execute', () => {
+  withFixture(['20260801120000_escape_string_verify.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_escape_string_verify.sql'), `
+      do $verify$
+      begin
+        execute E'select count(*) from plm.large_table';
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
+
+test('verify-cost guard reads an escape string as ONE literal, not two', () => {
+  // The backslash escape must not close the literal early. If it did, the text
+  // after it would be scanned as if it were SQL and the file would be refused
+  // for a read that is really inside a message.
+  withFixture(['20260801120000_escape_message.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_escape_message.sql'), `
+      do $verify$
+      begin
+        raise exception E'verify: the operator\\'s count from plm.large_table was wrong';
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.equal(result.status, 0, result.stderr)
+  })
+})
+
+test('verify-cost guard sees TRUNCATE spelled with the optional TABLE keyword', () => {
+  withFixture(['20260801120000_truncate_table_verify.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_truncate_table_verify.sql'), `
+      do $verify$
+      begin
+        truncate table plm.large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
+
+test('verify-cost guard finds the DO keyword past a long comment', () => {
+  withFixture(['20260801120000_long_lead_verify.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_long_lead_verify.sql'), `
+      do /* ${'why this verification exists. '.repeat(40)} */ $verify$
+      begin
+        perform count(*) from plm.large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
+
+test('verify-cost guard refuses a statement-level search_path set before the block', () => {
+  withFixture(['20260801120000_file_scope_search_path.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_file_scope_search_path.sql'), `
+      set search_path to plm, public;
+      do $verify$
+      begin
+        perform count(*) from large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /statement-level search_path/)
+  })
+})
+
+test('verify-cost guard allows the SET search_path ATTRIBUTE of a function', () => {
+  // 223 migrations in this repository carry this clause. It is scoped to the
+  // function it defines and cannot change what a later block resolves, so
+  // refusing it would refuse the repository's ordinary way of writing SQL.
+  withFixture(['20260801120000_function_search_path.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_function_search_path.sql'), `
+      create or replace function api.f() returns void
+        language sql
+        set search_path = plm, core, public
+      as $body$ select 1 $body$;
+      do $verify$
+      begin
+        if to_regprocedure('api.f()') is null then
+          raise exception 'verify: api.f() is missing';
+        end if;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.equal(result.status, 0, result.stderr)
+  })
+})
