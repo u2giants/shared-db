@@ -101,13 +101,25 @@ A rejection must carry no members; the database rejects one that does.
 
 ## Enablement status
 
-The RPCs are live. What remains is loading the pending candidate rows into
-`plm.dcp_opa_property_resolution` and `_member`. That is source-data work, not a
-structural change, and stays in the private `u2giants/licensor-source-data`
-repository per the migration's own note.
+**Live and populated as of 2026-09-02.** The RPCs are live, and 113 version-1
+`pending` rows were loaded into production `plm.dcp_opa_property_resolution` (80
+`disney`, 31 `lucasfilm`, 2 `marvel`) with 173 candidate members. Every row is a
+proposal carrying its K2557 clause, page and title; nothing was placed. A DCP
+Vault Property keeps reading "DCP Creative - unresolved authority" until its row
+is APPROVED here.
 
-Until those rows exist the tab loads and reports that nothing is waiting for a
-decision. If the RPCs are ever absent — an older database, a rollback — the screen
+The rows are source data, not structure, so they were built and loaded from the
+private `u2giants/licensor-source-data` repository
+(`reconciliation/opa-contract-match-20260831/`) per the migration's own note.
+
+Note for whoever ships the next change to this screen: **merging to `main` does
+not deploy it.** The guarded merge runs as `GITHUB_TOKEN`, and GitHub suppresses
+workflow triggers for token-driven pushes, so the `DB Data Admin` push workflow
+never fires. Production release is always a manual `workflow_dispatch` of
+`db-data-admin.yml` with the confirmation input — see
+[`db-data-admin-deployment.md`](db-data-admin-deployment.md).
+
+If the RPCs are ever absent — an older database, a rollback — the screen
 says "not enabled on this database yet" rather than showing a PostgREST error.
 
 ## Out of scope for this screen
