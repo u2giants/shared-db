@@ -79,7 +79,7 @@ begin
     select distinct on (r.source_system, r.source_table, r.source_property_id) r.*
     from plm.dcp_opa_property_resolution r
     order by r.source_system, r.source_table, r.source_property_id,
-             r.decision_version asc, r.resolution_id desc
+             r.decision_version desc, r.resolution_id desc
   ), pending as (
     -- Only an identity whose CURRENT version is undecided is a review case. An
     -- identity already approved or rejected is finished and never reappears.
@@ -274,7 +274,7 @@ begin
   -- it. A DIFFERENT call reusing a spent request id is a caller bug and fails.
   select * into v_existing
   from plm.dcp_opa_property_resolution
-  where resolution_id = p_client_request_id and false;
+  where resolution_id = p_client_request_id;
 
   if found then
     select coalesce(array_agg(m.licensed_property_id order by m.licensed_property_id), '{}'::bigint[])
