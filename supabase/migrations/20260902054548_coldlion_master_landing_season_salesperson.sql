@@ -87,7 +87,7 @@ create table if not exists coldlion.season (
   first_seen_at  timestamptz not null,
   last_seen_at   timestamptz not null,
   constraint coldlion_season_pkey
-    primary key (company_code, division_code, season_code),
+    primary key (company_code, season_code),
   constraint coldlion_season_source_hash_chk
     check (source_hash ~ '^[0-9a-f]{64}$'),
   constraint coldlion_season_seen_order_chk
