@@ -359,22 +359,6 @@ begin
           using errcode = 'serialization_failure';
       end if;
 
-      -- The winner used THIS client request id. It is only a safe repeat when it
-      -- recorded the same decision on the same pending row with the same member
-      -- set. A different decision reusing a spent request id must fail loudly
-      -- rather than silently returning somebody else's verdict.
-      select coalesce(array_agg(m.licensed_property_id order by m.licensed_property_id), '{}'::bigint[])
-        into v_existing_ids
-      from plm.dcp_opa_property_resolution_member m
-      where m.resolution_id = p_client_request_id;
-
-      if v_existing.supersedes_resolution_id is distinct from p_resolution_id
-         or v_existing.approval_status <> v_status
-         or v_existing_ids is distinct from v_ids then
-        raise exception 'db_data_admin: this client request id already recorded a different decision'
-          using errcode = 'unique_violation';
-      end if;
-
       v_written := v_existing;
       v_repeat := true;
     end;
