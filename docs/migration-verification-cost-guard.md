@@ -23,8 +23,9 @@ verification block, one of the prohibited objects appears:
 
 The `search_path` rule is one rule applied in both places, so the two cannot
 drift apart. It covers `set`, `set local` and `set session`, the `to` and `=`
-spellings, a value written bare or in quotes — `set search_path to 'plm'` — and
-the function form, `set_config('search_path', 'plm', ...)`.
+spellings, a value written bare or in quotes — `set search_path to 'plm'` — a
+value wrapped onto the next line, and the function form,
+`select set_config('search_path', 'plm', false)`.
 
 In the file scope it reads a `SET` **statement** — one that begins the statement,
 after a `;` or at the start of the file. The `SET search_path` **attribute** of a
@@ -53,6 +54,14 @@ remaining whitespace collapsed, so the distance between the keyword and the tag
 does not matter. A body counts as verification when its tag names
 verify/verification, when it raises a verification message, or when a
 verification heading sits immediately above it.
+
+## Known false positive
+
+A string handed to `execute` or `format` is deliberately still read as SQL, so a
+message assembled by `format` that itself contains the words `set search_path`
+and the token `plm` is refused even though it only prints them. Reword the
+message. This is the accepted cost of reading dynamic SQL at all, and the guard
+errs towards refusing.
 
 ## Fail closed
 

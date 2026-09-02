@@ -162,12 +162,16 @@ const DO_LEAD = /\bdo(?:\s+language\s+[A-Za-z_][A-Za-z0-9_]*)?$/i
 // the keyword and the tag irrelevant.
 //
 // There is no window. A 20 000-character one was still a window and a longer comment
-// walked straight past it (external review, muse-spark-1.2, PR #2139). Trimming
-// FIRST and only then looking at the last few characters is what removes the limit:
-// slicing first would put the window back.
+// walked straight past it (external review, muse-spark-1.2, PR #2139).
+//
+// COLLAPSE FIRST, then trim, and only then look at the tail. Slicing first left a
+// 200-character window on UNCOLLAPSED text, so a long comment in the `do`..`language`
+// gap pushed `do` out of view exactly as the old window did, while the surviving
+// `language plpgsql` kept the lead looking legitimate (external review, glm-5.3,
+// PR #2139). After the collapse the lead is `... do language plpgsql`, so the tail is
+// a cheap read of a decided answer rather than a limit on what can be seen.
 export function doLead(masked, tagStart) {
-  const lead = masked.slice(0, tagStart).trimEnd()
-  return lead.slice(-200).replace(/\s+/g, ' ')
+  return masked.slice(0, tagStart).replace(/\s+/g, ' ').trimEnd().slice(-200)
 }
 
 export function verifyBlocks(sql) {
@@ -232,8 +236,17 @@ export function searchPathReachesPlm(scannable, literal, { fileScopeOnly = false
     regex.lastIndex = 0
     let found
     while ((found = regex.exec(scannable)) !== null) {
-      if (fileScopeOnly && !STATEMENT_START.test(scannable.slice(0, found.index))) continue
-      const rest = literal.slice(found.index + found[0].length)
+      // The statement-start test exists only to tell a SET STATEMENT from the SET
+      // ATTRIBUTE of a CREATE FUNCTION. `set_config` is a function call with no such
+      // twin, and its only valid file-scope spelling is `select set_config(...)`,
+      // which never begins a statement -- so applying the test to it made the
+      // file-scope half of that rule unreachable (external review, glm-5.3, PR #2139).
+      const attributeRisk = fileScopeOnly && regex === SEARCH_PATH_SET
+      if (attributeRisk && !STATEMENT_START.test(scannable.slice(0, found.index))) continue
+      // Leading whitespace is skipped before the value is delimited. Searching for the
+      // terminator first cut a LINE-WRAPPED value off at its own opening newline and
+      // read it as empty (external review, glm-5.3, PR #2139).
+      const rest = literal.slice(found.index + found[0].length).replace(/^\s+/, '')
       const stop = rest.search(/[;\n]/)
       const value = stop < 0 ? rest : rest.slice(0, stop)
       if (!NAMES_PLM.test(value)) continue
@@ -248,7 +261,11 @@ export function searchPathReachesPlm(scannable, literal, { fileScopeOnly = false
 // are the contexts in which it does.
 // `truncate table x` is the spelled-out form of `truncate x`; without the optional
 // keyword the guard read only the short form (issue #2130).
-const READ_CONTEXT = String.raw`\b(?:from|join|into|update|delete\s+from|truncate(?:\s+table)?|analyze|copy|vacuum(?:\s+full)?(?:\s+analyze)?|refresh\s+materialized\s+view(?:\s+concurrently)?|cluster)\s+(?:only\s+)?`
+// A maintenance command puts an option list or VERBOSE between its keyword and the
+// object, so `vacuum (analyze) plm.t` and `cluster verbose plm.t` need the gap
+// spelled out (external review, glm-5.3, PR #2139).
+const MAINTENANCE = String.raw`(?:vacuum(?:\s*\([^)]*\))?(?:\s+full)?(?:\s+freeze)?(?:\s+verbose)?(?:\s+analyze)?|analyze(?:\s*\([^)]*\))?(?:\s+verbose)?|cluster(?:\s+verbose)?|refresh\s+materialized\s+view(?:\s+concurrently)?)`
+const READ_CONTEXT = String.raw`\b(?:from|join|into|update|delete\s+from|truncate(?:\s+table)?|copy|${MAINTENANCE})\s+(?:only\s+)?`
 const INVENTORY = String.raw`(?:"?api"?\s*\.\s*)?"?source_capture_inventory"?(?![A-Za-z0-9_])`
 const PLM_OBJECT = String.raw`"?plm"?\s*\.\s*"?[A-Za-z_][A-Za-z0-9_]*"?`
 

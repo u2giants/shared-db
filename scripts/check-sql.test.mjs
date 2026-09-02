@@ -935,3 +935,75 @@ test('verify-cost guard finds the DO keyword past a comment longer than any wind
     assert.match(result.stderr, /reads a plm object/)
   })
 })
+
+test('verify-cost guard finds DO past a long comment in the LANGUAGE gap', () => {
+  // The comment sits BETWEEN `do` and `language`, so `language plpgsql` survives at
+  // the end of the lead and the blanked comment pushes `do` out of any tail window.
+  // Collapsing the whitespace before reading the tail is what sees it.
+  withFixture(['20260801120000_language_gap_lead.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_language_gap_lead.sql'), `
+      do /* ${'why this verification exists. '.repeat(40)} */ language plpgsql $verify$
+      begin
+        perform count(*) from plm.large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
+
+test('verify-cost guard reads a LINE-WRAPPED search_path value', () => {
+  // The value begins on the line after `to`. Delimiting it without skipping the
+  // leading whitespace first cut it off at its own opening newline and read it as
+  // empty, so the set passed.
+  withFixture(['20260801120000_wrapped_search_path.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_wrapped_search_path.sql'), `
+      do $verify$
+      begin
+        set local search_path to
+          plm, public;
+        perform count(*) from large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /plm through search_path/)
+  })
+})
+
+test('verify-cost guard refuses SELECT set_config standing before the block', () => {
+  // `select set_config(...)` is the ONLY valid file-scope spelling, and it never
+  // begins a statement -- so the statement-start test, which exists to spare the SET
+  // ATTRIBUTE of a CREATE FUNCTION, must not be applied to it.
+  withFixture(['20260801120000_file_scope_set_config.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_file_scope_set_config.sql'), `
+      select set_config('search_path', 'plm', false);
+      do $verify$
+      begin
+        perform count(*) from large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /statement-level search_path/)
+  })
+})
+
+test('verify-cost guard sees VACUUM and CLUSTER written with their options', () => {
+  withFixture(['20260801120000_vacuum_options.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_vacuum_options.sql'), `
+      do $verify$
+      begin
+        vacuum (analyze) plm.large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
