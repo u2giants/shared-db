@@ -48,7 +48,7 @@ export const REVIEW_ACTIVE_REF_PREFIX = 'refs/db-review-active'
 export const REVIEW_EXCLUSION_REF_PREFIX = 'refs/db-review-exclusions'
 export const REVIEW_EXCLUSION_REASONS = new Set(['already-reviewed','independence-conflict','terminal-unavailable'])
 export const REVIEW_ACTIVE_CUTOVER_REF = 'refs/db-coordination/reviewer-index-cutover'
-export const REVIEW_OPERATION_REQUEST_LIMIT = 23, REVIEW_MUTEX_SECTION_RESERVE = 14 // slot 2 = 9 pre-mutex + this reserve; slot 1 = 6 + reserve. The bounded per-PR exclusion read is now inside the mutex so it cannot race assignment. This entry gate refuses to acquire the mutex unless the whole mutex-held section still fits. Release is guaranteed separately by cleanupReserve. Derivation: docs/verification/reviewer-assignment-api-budget-2026-08-28.md (#1812, #1833)
+export const REVIEW_OPERATION_REQUEST_LIMIT = 25, REVIEW_MUTEX_SECTION_RESERVE = 15 // slot 2 = 10 pre-mutex + this reserve; slot 1 = 7 + reserve. RE-DERIVED, NOT WIDENED (issue #2075): every reviewer operation now proves 'a verdict exists for this head' from the create-only durable verdict refs instead of from comment prose. That costs exactly ONE listing of refs/db-review-verdict pre-mutex (cached for the rest of the operation by reviewOperationIo) and ONE uncached re-listing inside the mutex section, so each half grew by exactly one request. Measured totals moved 21->23 (slot-2 assignment), 18->20 (slot-2 replacement), and 8->9 pre-mutex for the first replacement, with the post-mutex replacement section going 10->11. The bounded per-PR exclusion read is now inside the mutex so it cannot race assignment. This entry gate refuses to acquire the mutex unless the whole mutex-held section still fits. Release is guaranteed separately by cleanupReserve. Derivation: docs/verification/reviewer-assignment-api-budget-2026-08-28.md (#1812, #1833)
 export const REVIEW_QUOTA_RESERVE = 100
 export const REVIEW_LEASE_SUSPECT_HOURS = 24 // Advisory visibility only. Age never releases a lease.
 // Page ceiling for listReviewRefsPaged. It is a REFUSAL, not a truncation: past
@@ -712,7 +712,7 @@ export function isTransientGitHubTransport(error) {
 // noisy.
 export const EXPECTED_REF_ABSENCE=/HTTP 404/i
 export const EXPECTED_REF_PRESENCE=/reference already exists/i
-let reviewWireBudget=null,reviewCommitBase=null
+let reviewWireBudget=null,reviewCommitBase=null,freshDurableVerdictRefs=null
 function consumeReviewWireRequest(){
   if(!reviewWireBudget)return
   const usable=reviewWireBudget.locked&&!reviewWireBudget.cleanup?REVIEW_OPERATION_REQUEST_LIMIT-(reviewWireBudget.cleanupReserve??0):REVIEW_OPERATION_REQUEST_LIMIT
@@ -722,7 +722,7 @@ function consumeReviewWireRequest(){
 export function withReviewRequestBudget(fn){
   if(reviewWireBudget)return fn(reviewWireBudget)
   reviewWireBudget={count:0}
-  try{return fn(reviewWireBudget)}finally{reviewWireBudget=null;reviewCommitBase=null}
+  try{return fn(reviewWireBudget)}finally{reviewWireBudget=null;reviewCommitBase=null;freshDurableVerdictRefs=null}
 }
 export function runGitHubCommand(args,{executor=execFileSync,wait=(ms)=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms),attempts=4,expectedFailure=null,reportStderr=(text)=>process.stderr.write(text)}={}) {
   let last
@@ -1627,10 +1627,14 @@ function reviewOperationIo(io){
     if(key==='__reviewOperation')return true
     if(key==='__cacheRef')return (ref,sha)=>cache.set(`readRef:${JSON.stringify([ref])}`,sha)
     if(key==='__freshListRefs')return (...args)=>target.listRefs(...args)
+    // Uncached durable-verdict listing for the post-mutex re-check. It must not
+    // answer from the pre-mutex snapshot: the point of the recheck is that a
+    // verdict may have landed while the mutex was being acquired.
+    if(key==='__freshDurableVerdictRefs')return ()=>readDurableVerdictRefs(target)
     const value=target[key]
     if(typeof value!=='function')return value
     return (...args)=>{
-      const cacheable=['listRefs','getCommit','getPr','getIssue','getIssueComments','getPrReviews'].includes(key)
+      const cacheable=['listRefs','listReviewRefsPaged','getCommit','getPr','getIssue','getIssueComments','getPrReviews'].includes(key)
       const cacheKey=cacheable?`${String(key)}:${JSON.stringify(args)}`:null
       if(cacheable&&cache.has(cacheKey))return cache.get(cacheKey)
       const result=value.apply(target,args)
@@ -1807,13 +1811,55 @@ export function gateAuthorizes(evidence,headSha,bundleId,readAssignments){
     (readAssignments?.()??[]).some((assignment)=>assignment?.headSha===headSha)))
 }
 
-// A verdict exists for an exact head when an issue comment, a PR comment, or a
-// PR review is tied to that head AND carries a decision. Extracted so the
-// replacement guard and the busy-reviewer probe cannot drift apart: "this review
-// is finished" has to mean the same thing in both places.
-export function hasVerdictForHead(issue,pr,headSha,io){
-  const evidence=[...(io.getIssueComments?.(Number(issue))??[]),...(io.getIssueComments?.(Number(pr))??[]),...(io.getPrReviews?.(Number(pr))??[])]
-  return anyVerdictFor(evidence,headSha)
+// A VERDICT IS AN ARTIFACT, NEVER A SENTENCE (issue #2075).
+//
+// This predicate used to be "an issue comment, a PR comment, or a PR review tied
+// to this head contains a decision word". That made every lane decision -- lease
+// liveness, the busy probe, the capacity report, assignment, replacement and
+// release -- answerable by PROSE, and in particular by the governed-review
+// runner's own findings comment in the window before its create-only artifact
+// was recorded. Issue #2075 is exactly that: a findings comment whose verdict
+// line was posted, whose artifact was never written, and whose pull request then
+// deadlocked in BOTH directions -- the lease looked finished, so replacement and
+// release were refused, while no artifact existed to authorize anything.
+//
+// The only thing that records a verdict is `recordReviewVerdict`, and the only
+// thing it produces is a create-only ref under refs/db-review-verdicts/ or
+// refs/db-review-verdict-replacements/. So that is what is read here. Comment
+// text remains evidence for a human; it is no longer an input to any decision.
+//
+// ONE REQUEST, NOT ONE PER LEASE. `git/matching-refs` is a plain string-prefix
+// match (measured 2026-08-30, see check-exact-head-approval.mjs), and both
+// namespaces share the prefix `refs/db-review-verdict`, so a single listing
+// answers for every (issue, pr, head) tuple an operation asks about and
+// `reviewOperationIo` caches it for the rest of that operation.
+export const DURABLE_VERDICT_REF_NAMESPACE = 'refs/db-review-verdict'
+function readDurableVerdictRefs(io){
+  // `listReviewRefsPaged` walks explicit pages and REFUSES past
+  // REVIEW_REF_PAGE_LIMIT rather than returning a partial list; plain `listRefs`
+  // refuses at 100 rows inside a wire budget. Either refusal is loud, and loud is
+  // the only safe failure here: a silently short list reads as "no verdict",
+  // which is the fail-OPEN direction for release and replacement.
+  const reader=typeof io?.listReviewRefsPaged==='function'?io.listReviewRefsPaged.bind(io):(typeof io?.listRefs==='function'?io.listRefs.bind(io):null)
+  if(!reader)throw new LaneError('durable reviewer verdict refs are unreadable; a verdict can only be proved by its create-only artifact, never by comment text')
+  const rows=reader(DURABLE_VERDICT_REF_NAMESPACE)
+  if(!Array.isArray(rows))throw new LaneError('durable reviewer verdict refs are unreadable; a verdict can only be proved by its create-only artifact, never by comment text')
+  return rows
+}
+export function listDurableVerdictRefs(io,{fresh=false}={}){
+  if(!fresh)return readDurableVerdictRefs(io)
+  if(freshDurableVerdictRefs)return freshDurableVerdictRefs
+  const rows=typeof io?.__freshDurableVerdictRefs==='function'?io.__freshDurableVerdictRefs():readDurableVerdictRefs(io)
+  if(!Array.isArray(rows))throw new LaneError('durable reviewer verdict refs are unreadable; a verdict can only be proved by its create-only artifact, never by comment text')
+  if(reviewWireBudget)freshDurableVerdictRefs=rows
+  return rows
+}
+export function hasVerdictForHead(issue,pr,headSha,io,options={}){
+  const head=String(headSha??'').toLowerCase()
+  return listDurableVerdictRefs(io,options).some((row)=>{
+    const named=parseVerdictRef(row.ref)
+    return Boolean(named)&&named.issue===Number(issue)&&named.pr===Number(pr)&&named.headSha===head
+  })
 }
 
 export function assertDurableReviewApproval(issue,pr,headSha,io=githubIo){
@@ -1831,16 +1877,16 @@ export function assertDurableReviewApproval(issue,pr,headSha,io=githubIo){
   return verdicts
 }
 
-function assertReviewLeaseStillStale(row,states){
+function assertReviewLeaseStillStale(row,states,io){
   if(!row)return
-  const state=states?.get(`${row.assignment.issue}:${row.assignment.pr}`),evidence=state?.evidence??[]
-  const verdict=anyVerdictFor(evidence,row.assignment.headSha)
+  const state=states?.get(`${row.assignment.issue}:${row.assignment.pr}`)
+  const verdict=hasVerdictForHead(row.assignment.issue,row.assignment.pr,row.assignment.headSha,io,{fresh:true})
   if(state?.pr?.state==='open'&&state?.pr?.head?.sha===row.assignment.headSha&&!verdict)throw new LaneError(`reviewer ${row.assignment.reviewer} lease became live after mutex acquisition`)
 }
 
 function isReviewAssignmentLive(assignment,states,io){
-  const state=states?.get(`${assignment.issue}:${assignment.pr}`),pr=state?.pr??io.getPr(assignment.pr),evidence=state?.evidence
-  const verdict=evidence?anyVerdictFor(evidence,assignment.headSha):hasVerdictForHead(assignment.issue,assignment.pr,assignment.headSha,io)
+  const state=states?.get(`${assignment.issue}:${assignment.pr}`),pr=state?.pr??io.getPr(assignment.pr)
+  const verdict=hasVerdictForHead(assignment.issue,assignment.pr,assignment.headSha,io)
   return pr?.state==='open'&&pr?.head?.sha===assignment.headSha&&!verdict
 }
 
@@ -1884,14 +1930,14 @@ export function findBusyReviewers(io,requested=[]){
   let states=null
     try{states=typeof io.readReviewStates==='function'?io.readReviewStates([...records.map((row)=>row.assignment),...requested]):null}catch{return null}
   for(const {reviewer,ref,sha,assignment} of records){
-    let prRow,evidence
+    let prRow
     try{
       const state=states?.get(`${assignment.issue}:${assignment.pr}`)
-      prRow=state?.pr??io.getPr(assignment.pr);evidence=state?.evidence
+      prRow=state?.pr??io.getPr(assignment.pr)
     }catch{return null}
     if(prRow?.state!=='open'||prRow?.head?.sha!==assignment.headSha){stale.push({ref,sha,assignment});continue}
     let verdict
-    try{verdict=evidence?anyVerdictFor(evidence,assignment.headSha):hasVerdictForHead(assignment.issue,assignment.pr,assignment.headSha,io)}catch{return null}
+    try{verdict=hasVerdictForHead(assignment.issue,assignment.pr,assignment.headSha,io)}catch{return null}
     if(verdict){stale.push({ref,sha,assignment});continue}
     busy.add(assignment.reviewer)
   }
@@ -1915,7 +1961,8 @@ export function reviewerCapacityReport(io=githubIo,now=new Date()){
     const record=busy.leases.get(reviewer.name)
     if(!record)return {reviewer:reviewer.name,held:false,issue:null,pr:null,headSha:null,sequence:null,heldSinceIso:null,ageHours:null,prState:null,headMatches:null,verdictPresent:false,classification:'free'}
     const state=busy.states?.get(`${record.lease.issue}:${record.lease.pr}`),pr=state?.pr
-    const verdictPresent=state?.evidence?anyVerdictFor(state.evidence,record.lease.headSha):false
+    let verdictPresent=false
+    try{verdictPresent=hasVerdictForHead(record.lease.issue,record.lease.pr,record.lease.headSha,io)}catch{verdictPresent=false}
     const ageHours=reviewLeaseAgeHours(record.heldSince,now)
     let classification
     if(!state||!pr)classification='unknown'
@@ -2127,7 +2174,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
       const replacementLive=isReviewAssignmentLive(replacement,freshStates,io),replacementTarget=replacementLive?replacement.replacementSha:null
       if(replacementLive&&!liveReplacement)assertAssignmentWasNotTerminallyReleased(request,replacement,io)
       if(io.atomicReviewRefs){
-        if(staleReplacement)assertReviewLeaseStillStale(staleReplacement,freshStates)
+        if(staleReplacement)assertReviewLeaseStillStale(staleReplacement,freshStates,io)
         const changes=[{ref:MUTEX_REF,expected:ownerSha,sha:ownerSha}]
         if(failed)changes.push({ref:reviewActiveRef(failed.lease.reviewer),expected:failed.sha,sha:null})
         changes.push({ref:replacementLeaseRef,expected:staleReplacement?.sha??(liveReplacement?.sha??null),sha:replacementTarget})
@@ -2166,7 +2213,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
         return {...prior,slot:request.slot,wrapper:REVIEWERS.find((r)=>r.name===prior.reviewer)?.wrapper}
       }
       if(stalePrior){
-        if(io.atomicReviewRefs){assertReviewLeaseStillStale(stalePrior,io.readReviewStates([stalePrior.assignment]));io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:ownerSha},{ref:leaseRef,expected:priorSha,sha:null}]);const after=io.readReviewRefs([MUTEX_REF,leaseRef]);if(after.get(MUTEX_REF)!==ownerSha||after.get(leaseRef)!==null)throw new LaneError('stale assignment lease release readback mismatch')}
+        if(io.atomicReviewRefs){assertReviewLeaseStillStale(stalePrior,io.readReviewStates([stalePrior.assignment]),io);io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:ownerSha},{ref:leaseRef,expected:priorSha,sha:null}]);const after=io.readReviewRefs([MUTEX_REF,leaseRef]);if(after.get(MUTEX_REF)!==ownerSha||after.get(leaseRef)!==null)throw new LaneError('stale assignment lease release readback mismatch')}
         else if(io.readRef(leaseRef)===priorSha)releaseOwnedRef(leaseRef,priorSha,io)
       }
       assertAssignmentWasNotTerminallyReleased(request,prior,io)
@@ -2221,11 +2268,11 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
         requireOwnedRef(MUTEX_REF,ownerSha,io)
         const freshStates=io.readReviewStates([{issue:request.issue,pr:request.pr,headSha:request.headSha},...(selectedStale?[selectedStale.assignment]:[])])
         const fresh=freshStates?.get(`${request.issue}:${request.pr}`)
-        const freshVerdict=anyVerdictFor(fresh?.evidence,request.headSha)
+        const freshVerdict=hasVerdictForHead(request.issue,request.pr,request.headSha,io,{fresh:true})
         if(!reviewIssueEligible(fresh?.issue,fresh?.pr,io)||!reviewTargetEligible(fresh?.pr,io)||fresh?.pr?.head?.sha!==request.headSha||freshVerdict)throw new LaneError('review assignment issue, PR head, or verdict changed after mutex acquisition')
         if(selectedStale){
-          const revived=freshStates?.get(`${selectedStale.assignment.issue}:${selectedStale.assignment.pr}`), evidence=revived?.evidence??[]
-          const verdict=anyVerdictFor(evidence,selectedStale.assignment.headSha)
+          const revived=freshStates?.get(`${selectedStale.assignment.issue}:${selectedStale.assignment.pr}`)
+          const verdict=hasVerdictForHead(selectedStale.assignment.issue,selectedStale.assignment.pr,selectedStale.assignment.headSha,io,{fresh:true})
           if(revived?.pr?.state==='open'&&revived?.pr?.head?.sha===selectedStale.assignment.headSha&&!verdict)throw new LaneError('selected reviewer lease became live after mutex acquisition')
         }
         io.atomicReviewRefs([
@@ -2513,7 +2560,7 @@ export function releaseFailedReviewer(options,io=githubIo){
     if(!preflightBusy)throw new LaneError('active reviewer leases are unreadable; reviewer release refused before mutex acquisition')
     const state=preflightBusy.states?.get(`${request.issue}:${request.pr}`),issueRow=state?.issue??io.getIssue(request.issue),prRow=state?.pr??io.getPr(request.pr)
     if(!reviewIssueEligible(issueRow,prRow,io)||!reviewTargetEligible(prRow,io)||prRow?.head?.sha!==request.headSha)throw new LaneError('reviewer release requires the exact eligible PR head')
-    if(state?.evidence?anyVerdictFor(state.evidence,request.headSha):hasVerdictForHead(request.issue,request.pr,request.headSha,io))throw new LaneError('an existing verdict for the exact head forbids reviewer release')
+    if(hasVerdictForHead(request.issue,request.pr,request.headSha,io))throw new LaneError('an existing verdict for the exact head forbids reviewer release')
     const cached=preflightBusy.leases?.get(original.reviewer),failedLeaseSha=cached?.sha??io.readRef(failedLeaseRef),failedLease=failedLeaseSha?(cached?.sha===failedLeaseSha?cached.lease:parseReviewLease(io.getCommit(failedLeaseSha))):null
     if(!failedLease||![failedLease.issue,failedLease.pr,failedLease.headSha,failedLease.sequence,failedLease.reviewer].every((value,index)=>value===[request.issue,request.pr,request.headSha,request.failedSequence,original.reviewer][index]))throw new LaneError('failed reviewer active lease does not match the terminal failure evidence')
     if(typeof io.atomicReviewRefs!=='function'||typeof io.readReviewRefs!=='function')throw new LaneError('reviewer release requires atomic compare-and-swap ref support')
@@ -2524,7 +2571,7 @@ export function releaseFailedReviewer(options,io=githubIo){
     try{
       requireReviewWireCapacity(8);acquireReviewMutex(ownerSha,io);acquired=true;requireOwnedRef(MUTEX_REF,ownerSha,io)
       const freshStates=io.readReviewStates([original]),fresh=freshStates?.get(`${request.issue}:${request.pr}`)
-      if(!reviewIssueEligible(fresh?.issue,fresh?.pr,io)||!reviewTargetEligible(fresh?.pr,io)||fresh?.pr?.head?.sha!==request.headSha||anyVerdictFor(fresh?.evidence,request.headSha))throw new LaneError('reviewer release issue, PR head, or verdict changed after mutex acquisition')
+      if(!reviewIssueEligible(fresh?.issue,fresh?.pr,io)||!reviewTargetEligible(fresh?.pr,io)||fresh?.pr?.head?.sha!==request.headSha||hasVerdictForHead(request.issue,request.pr,request.headSha,io,{fresh:true}))throw new LaneError('reviewer release issue, PR head, or verdict changed after mutex acquisition')
       const locked=io.readReviewRefs([MUTEX_REF,failureRef,failedLeaseRef])
       if(locked.get(MUTEX_REF)!==ownerSha||locked.get(failureRef)!==null||locked.get(failedLeaseRef)!==failedLeaseSha)throw new LaneError('reviewer release ownership changed after preflight')
       io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:ownerSha},{ref:failureRef,expected:null,sha:failureSha},{ref:failedLeaseRef,expected:failedLeaseSha,sha:null}])
@@ -2595,7 +2642,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
       let failedDeleted=false,staleDeleted=false
       try{if(io.atomicReviewRefs){
           requireOwnedRef(MUTEX_REF,ownerSha,io)
-          if(staleReplacement)assertReviewLeaseStillStale(staleReplacement,freshStates)
+          if(staleReplacement)assertReviewLeaseStillStale(staleReplacement,freshStates,io)
           const changes=[]
           changes.push({ref:MUTEX_REF,expected:ownerSha,sha:ownerSha})
           if(failed)changes.push({ref:reviewActiveRef(failed.lease.reviewer),expected:failed.sha,sha:null})
@@ -2665,7 +2712,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
       .replace(REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_VERDICT_REF_PREFIX)
       .replace(REVIEW_REPLACEMENT_REF_PREFIX,REVIEW_VERDICT_REPLACEMENT_REF_PREFIX)
     const durableVerdict=fixedRecords?(fixedRecords.get(answeredVerdictRef)?.sha??null):io.readRef(answeredVerdictRef)
-    const hasVerdict=Boolean(durableVerdict)||(preflightState?.evidence?anyVerdictFor(preflightState.evidence,request.headSha):hasVerdictForHead(request.issue,request.pr,request.headSha,io))
+    const hasVerdict=Boolean(durableVerdict)||hasVerdictForHead(request.issue,request.pr,request.headSha,io)
     if(hasVerdict)throw new LaneError('an existing verdict for the exact head forbids reviewer replacement')
     const failedLeaseRef=reviewActiveRef(original.reviewer),cachedFailed=preflightBusy.leases?.get(original.reviewer),failedLeaseSha=cachedFailed?.sha??io.readRef(failedLeaseRef)
     const failedLease=failedLeaseSha?(cachedFailed?.sha===failedLeaseSha?cachedFailed.lease:parseReviewLease(io.getCommit(failedLeaseSha))):null
@@ -2722,9 +2769,9 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
         requireOwnedRef(MUTEX_REF,ownerSha,io)
         const freshStates=io.readReviewStates([original,...(replacementStale?[replacementStale.assignment]:[])])
         const fresh=freshStates?.get(`${request.issue}:${request.pr}`)
-        const freshVerdict=anyVerdictFor(fresh?.evidence,request.headSha)
+        const freshVerdict=hasVerdictForHead(request.issue,request.pr,request.headSha,io,{fresh:true})
         if(!reviewIssueEligible(fresh?.issue,fresh?.pr,io)||!reviewTargetEligible(fresh?.pr,io)||fresh?.pr?.head?.sha!==request.headSha||freshVerdict)throw new LaneError('review replacement issue, PR head, or verdict changed after mutex acquisition')
-        assertReviewLeaseStillStale(replacementStale,freshStates)
+        assertReviewLeaseStillStale(replacementStale,freshStates,io)
         const changes=[
           {ref:MUTEX_REF,expected:ownerSha,sha:ownerSha},
           {ref:failureRef,expected:releasedFailureSha??null,sha:failureSha},
@@ -3033,9 +3080,7 @@ function activateReviewCutoverOperation(io) {
       // probe goes blind, and a second reviewer can be handed the same
       // provider: the double-assignment hazard this activation exists to
       // prevent, failing silently.
-      const verdict = state
-        ? anyVerdictFor(state.evidence, lease.headSha)
-        : hasVerdictForHead(lease.issue, lease.pr, lease.headSha, io)
+      const verdict = hasVerdictForHead(lease.issue, lease.pr, lease.headSha, io)
       if (verdict) continue
       const leaseRef = reviewActiveRef(lease.reviewer)
       const existingLease = existingLeases ? (existingLeases.get(leaseRef) ?? null) : io.readRef(leaseRef)

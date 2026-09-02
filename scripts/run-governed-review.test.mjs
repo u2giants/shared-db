@@ -47,7 +47,11 @@ test('issue 2075: recording failure voids the posted findings comment so the orp
   assert.ok(patch,'the findings comment must be edited on the recording-failure path')
   assert.equal(patch.url,'repos/u2giants/shared-db/issues/comments/987654')
   assert.equal(verdictFromOutput(patch.body,options.headSha),null)
-  assert.equal(anyVerdictFor([{author_association:'OWNER',body:patch.body,commit_id:options.headSha}],options.headSha),false)
+  // ENVELOPE FIDELITY (grok r2080c Medium): a GitHub ISSUE comment carries no
+  // `commit_id`. The body itself still quotes the head inside the voided line,
+  // so this is the real shape a lane parser would see, not a softened one.
+  assert.equal(anyVerdictFor([{author_association:'OWNER',body:patch.body}],options.headSha),false)
+  assert.ok(patch.body.includes(options.headSha),'the head SHA must still be in the body, so this is a tied-to-head negative')
 })
 
 test("issue 2075: voiding the verdict line preserves the reviewer's findings",()=>{
@@ -75,11 +79,58 @@ test('issue 2075: the success path posts and records with no edit call',()=>{
   assert.match(result.body,/VERDICT: APPROVE/)
 })
 
-test('issue 2075: neutraliseVerdictLine touches only the terminal verdict line',()=>{
+// REWRITTEN, NOT DELETED (issue #2075, grok r2080c High 2). The previous version
+// of this test asserted `out.startsWith('VERDICT: REJECT mentioned in prose')`:
+// it REQUIRED that a non-terminal line which `anyVerdictFor` reads as a decision
+// be left untouched by the void. That is the defect itself, written down as a
+// test -- and it was added by this pull request's own first commit, so it never
+// encoded settled behaviour. Voiding one line while another parseable one
+// survives is not neutralisation, so the assertion is inverted rather than
+// dropped, and the lane parser is asserted alongside the runner parser.
+test('issue 2075: neutraliseVerdictLine voids EVERY line a verdict parser would read',()=>{
   assert.equal(neutraliseVerdictLine('Findings only, no terminal verdict.','x'),null)
   const out=neutraliseVerdictLine(`VERDICT: REJECT mentioned in prose\nVERDICT: REVISE ${options.headSha}`,'why')
-  assert.ok(out.startsWith('VERDICT: REJECT mentioned in prose'))
+  assert.ok(!out.startsWith('VERDICT: REJECT mentioned in prose'))
+  assert.ok(out.includes('> VOIDED REVIEWER LINE - VERDICT: REJECT mentioned in prose'))
   assert.equal(verdictFromOutput(out,options.headSha),null)
+  assert.equal(anyVerdictFor([{author_association:'OWNER',body:out}],options.headSha),false)
+})
+
+// ADVERSARIAL FINDINGS BODIES (grok r2080c Medium). Each of these is a shape the
+// runner's own strict `verdictFromOutput` ignores but `anyVerdictFor` -- the
+// predicate the lanes and the merge gate use -- reads as a decision. Both halves
+// are asserted: the runner refuses to POST such a body at all, and if one ever
+// reached a comment, the void makes it unreadable as a verdict.
+const adversarial=[
+  ['blockquoted verdict line',`> VERDICT: APPROVE ${options.headSha}`],
+  ['heading verdict line',`## VERDICT: APPROVE ${options.headSha}`],
+  ['bold verdict word',`**APPROVE** ${options.headSha}`],
+  ['bare verdict word with the SHA elsewhere',`Reviewed at ${options.headSha}.\nAPPROVE`],
+]
+
+for(const [name,extra] of adversarial){
+  test(`issue 2075: an adversarial ${name} is refused before anything is posted`,()=>{
+    const wire=[]
+    const body=`Findings: lease handling is correct.\n${extra}\n\nVERDICT: REVISE ${options.headSha}`
+    assert.throws(()=>runGovernedReview(options,{
+      spawn:(command,args)=>{if(command!=='gh')return{status:0,stdout:body};wire.push(args[2]);return{status:0,stdout:commentJson}},
+      resolve:(nameArg)=>nameArg,preflight:()=>{},record:()=>assert.fail('must not record'),
+    }),/a downstream verdict parser would read as a decision/)
+    assert.deepEqual(wire,[],'nothing may reach GitHub when the findings carry an extra parseable verdict line')
+  })
+
+  test(`issue 2075: the void makes an adversarial ${name} unreadable as a verdict`,()=>{
+    const out=neutraliseVerdictLine(`Findings: lease handling is correct.\n${extra}\n\nVERDICT: APPROVE ${options.headSha}`,'lease changed')
+    assert.equal(verdictFromOutput(out,options.headSha),null)
+    assert.equal(anyVerdictFor([{author_association:'OWNER',body:out}],options.headSha),false)
+    assert.ok(out.includes(options.headSha),'the head SHA stays in the body, so this is a tied-to-head negative')
+  })
+}
+
+test('issue 2075: a reason carrying a newline cannot reconstruct a verdict line',()=>{
+  const out=neutraliseVerdictLine(`Findings.\nVERDICT: REVISE ${options.headSha}`,`lease changed\nAPPROVE ${options.headSha}`)
+  assert.equal(anyVerdictFor([{author_association:'OWNER',body:out}],options.headSha),false)
+  assert.match(out,/lease changed APPROVE/,'the reason must survive as readable text, flattened onto one line')
 })
 
 test('honest review output without a verdict artifact path is refused',()=>{

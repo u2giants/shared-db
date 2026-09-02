@@ -155,6 +155,12 @@ export function evaluateExactHeadApproval(input) {
     return { approved: true, head_sha: headSha, pr: Number(pr), assignments: latestBySlot.size, approvals: new Set(approvals.map((row) => row.ref)).size }
   }
 
+  // COMMENT TEXT IS NOT A VERDICT IN PRODUCTION (issue #2075).
+  // Reaching this point means the caller supplied no `verdicts` key at all.
+  // `gatherApprovalInput` ALWAYS supplies one, and `main` refuses below if it
+  // ever stops doing so, so in the merge gate this branch is unreachable. It
+  // survives only as a predicate library for tests and for callers that have no
+  // access to the durable refs, and it can never authorize a merge on its own.
   const authenticated = evidence.filter(trustedVerdictEvidence)
   const atHead = authenticated.filter((row) => tiedToHead(row, headSha))
   const state = (row) => String(row.state ?? '').toUpperCase()
@@ -253,9 +259,19 @@ export function gatherApprovalInput(env = process.env, deps = { json, pages }) {
   return { pr, headSha, evidence, assignments, verdicts }
 }
 
+// A merge is authorized by create-only verdict artifacts, never by comment prose.
+// `gatherApprovalInput` always supplies a `verdicts` array; if it ever stopped,
+// `evaluateExactHeadApproval` would silently fall back to reading decision words
+// out of comments -- the exact trust that produced issue #2075. This boundary
+// refuses instead of falling back, and it is exported so that refusal is testable.
+export function requireDurableVerdictInput(input) {
+  if (!Array.isArray(input?.verdicts)) throw new ApprovalCheckError('durable reviewer verdict artifacts could not be read; a merge is never authorized by comment text')
+  return input
+}
+
 export function main(env = process.env) {
   try {
-    const result = evaluateExactHeadApproval(gatherApprovalInput(env))
+    const result = evaluateExactHeadApproval(requireDurableVerdictInput(gatherApprovalInput(env)))
     console.log(`Exact-head approval verified: PR #${result.pr} head ${result.head_sha} (${result.approvals} approval(s), ${result.assignments} pinned assignment(s)).`)
     return 0
   } catch (e) { console.error(`REFUSED: ${e.message}`); return 2 }
