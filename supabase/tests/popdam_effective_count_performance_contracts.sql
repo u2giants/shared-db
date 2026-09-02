@@ -133,4 +133,41 @@ begin
 end;
 $$;
 
+-- #2054: the no-identity-filter facet count must keep its own direct scan of
+-- public.assets. Routing it through the identity candidates costs the covering
+-- index-only plan, and running both arms at once would double every count.
+do $$
+declare
+  v_helper text := lower(pg_get_functiondef(
+    'public.get_effective_filter_counts_unchecked_1703(jsonb)'::regprocedure));
+  v_arm1 int := position('-- arm 1: no identity filter' in v_helper);
+  v_arm2 int := position('-- arm 2: an identity filter is present' in v_helper);
+  v_unfiltered jsonb;
+  v_listed bigint;
+begin
+  if v_arm1 = 0 or v_arm2 = 0 or v_arm2 < v_arm1 then
+    raise exception 'effective count helper lost its two mutually exclusive matched arms';
+  end if;
+  if position('identity_asset_ids' in substr(v_helper, v_arm1, v_arm2 - v_arm1)) > 0 then
+    raise exception 'unfiltered facet counts were routed back through identity candidates';
+  end if;
+  if position('from identity_asset_ids i' in substr(v_helper, v_arm2)) = 0 then
+    raise exception 'identity-filtered facet counts no longer join the UNION candidates';
+  end if;
+
+  select count(*) into v_listed from public.filter_effective_assets('{}'::jsonb);
+  v_unfiltered := public.get_effective_filter_counts('{}'::jsonb);
+  if (v_unfiltered ->> 'total')::bigint <> v_listed then
+    raise exception 'unfiltered count % disagrees with the listed rows %',
+      v_unfiltered ->> 'total', v_listed;
+  end if;
+  if (select coalesce(sum(value::bigint), 0)
+      from jsonb_each_text(v_unfiltered -> 'fileType')) <> v_listed then
+    raise exception 'unfiltered fileType facet totals % disagree with the listed rows %',
+      (select coalesce(sum(value::bigint), 0) from jsonb_each_text(v_unfiltered -> 'fileType')),
+      v_listed;
+  end if;
+end;
+$$;
+
 rollback;
