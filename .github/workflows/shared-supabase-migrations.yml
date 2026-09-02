@@ -335,7 +335,7 @@ jobs:
           fi
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$MAIN_SHA"
-          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          MAIN_SHA="$MAIN_SHA" node scripts/check-main-tip-freshness.mjs
           # A batch that AGENTS.md 6.5 requires to move as ONE bounded event can
           # span several authoring pull requests, so it names a source PR per
           # version. BOTH SET IS REFUSED HERE for the same reason the historical
@@ -428,7 +428,7 @@ jobs:
           test -n "$MAIN_SHA"
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$MAIN_SHA"
-          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          MAIN_SHA="$MAIN_SHA" node scripts/check-main-tip-freshness.mjs
           # A batch authored across several pull requests names a source PR per
           # version; a single-PR batch keeps the original form.
           #
@@ -899,7 +899,7 @@ jobs:
         run: |
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
-          test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
+          MAIN_SHA="$REQUESTED_SHA" node scripts/check-main-tip-freshness.mjs
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
@@ -1083,7 +1083,7 @@ jobs:
         run: |
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
-          test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
+          MAIN_SHA="$REQUESTED_SHA" node scripts/check-main-tip-freshness.mjs
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
@@ -1235,6 +1235,7 @@ jobs:
       checks: read
       issues: read
       pull-requests: read
+      statuses: write
     # Keep the production environment binding. Environment policy is managed in
     # a separate phase and is not changed by this repository patch.
     environment: production
@@ -1272,6 +1273,21 @@ jobs:
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
           test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
+          MAIN_SHA="$REQUESTED_SHA" node scripts/check-main-tip-freshness.mjs
+      - name: Revoke every pre-existing merge authorization while frozen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate 'repos/u2giants/shared-db/pulls?state=open&per_page=100' \
+            --jq '.[].head.sha' | sort -u > "$RUNNER_TEMP/open-pr-heads"
+          while IFS= read -r head_sha; do
+            [ -n "$head_sha" ] || continue
+            gh api "repos/u2giants/shared-db/statuses/$head_sha" \
+              -f state=failure \
+              -f context='Migration guarded merge authorization' \
+              -f description='Production promotion is active; guarded merge authorization revoked'
+          done < "$RUNNER_TEMP/open-pr-heads"
       # Re-verify after the environment wait. GitHub artifacts are retention-
       # bound, so this both pins the original ZIP digest and copies the verified
       # canonical JSON into the final apply evidence artifact.

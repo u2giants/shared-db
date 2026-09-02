@@ -23,6 +23,8 @@ and dissemination process is
 
 Before interpreting `full_item_master.csv`, changing item-description parsing, or reporting historical MG match counts, read [`docs/item-description-mg-classification-process.md`](docs/item-description-mg-classification-process.md) and the completed [`plan_mg_taxonomy_three_axis_repair.md`](plan_mg_taxonomy_three_axis_repair.md). The implemented method separates MG01 physical form, MG02's family-specific subtype or material, and MG03 explicit embellishment. It validates newer codes independently at each depth, builds three independent post-May-13 maps, and matches historical items from three axes to two to one. Missing embellishment is unreadable, not plain; invalid child evidence never erases a valid parent; and a failed full-key match is never an MG01 failure. The older `plan_item_description_mg_taxonomy_repair.md` is retained as superseded history.
 
+The guarded row-application work is planned in [`plan_historical_mg_reclassification_apply.md`](plan_historical_mg_reclassification_apply.md). Read its STATUS table first. It permits no preview or production write without a new explicit authorization, applies only complete live-qualified triplets in its first batch, keeps private artifacts out of this public repo, and leaves the May 14 cutoff in place until its exhaustive live-population gate passes.
+
 ## Active contracts and implementation plans
 
 - PopDAM OrderList linked to Master Data: [`plan_popdam_order_list.md`](plan_popdam_order_list.md). Read its STATUS table first. Do not re-derive or re-plan completed steps.
@@ -32,6 +34,7 @@ Before interpreting `full_item_master.csv`, changing item-description parsing, o
 - **ColdLion raw landing layer (issue #1184), phases 2-6:** [`docs/plan_coldlion-landing-phases-2-6.md`](docs/plan_coldlion-landing-phases-2-6.md). Read its STATUS table first — do not re-derive its measurements or re-plan its steps. Phase 1 (the spine) is merged; phases 2-6 build the feed tables and loaders. The owner's per-field ingest/ignore decisions are [`docs/coldlion-field-decisions-20260819.csv`](docs/coldlion-field-decisions-20260819.csv) and are authority, not a suggestion. Step 4 is blocked until the `orderHistory` line key is resolved from a live pull; there is no `lineNo` in the payload and every obvious substitute silently merges sales lines.
 - **Multi-agent database coordination hardening (issue #1366):** [`plan_multi_agent_database_coordination_hardening.md`](plan_multi_agent_database_coordination_hardening.md). Read its STATUS table first. This is repository-maintenance work outside the structure/schema orchestrator; do not route its implementation to that orchestrator or re-derive the completed research.
 - **Reviewer-assignment GitHub API budget (issue #1767, complete):** [`plan_reviewer_assignment_api_budget.md`](plan_reviewer_assignment_api_budget.md). Read its STATUS table and verification link before investigating regressions; do not reimplement it or test scale by scanning live historical assignment refs. Slot 1 is capped at 19 requests, while mandatory slot 2 has a documented 22-request normal-path ceiling after PR #1813.
+- **Reviewer lease capacity truth (issues #2058 and #1851):** [`plan_reviewer_lease_capacity_truth.md`](plan_reviewer_lease_capacity_truth.md). Read its STATUS table first — do not re-derive its root cause or re-plan its steps. Repository-maintenance work that authorizes **no** database change; implement it in a fresh isolated session outside the structure/schema orchestrator. It releases terminally failed reviewer slots without requiring a replacement draw, timestamps leases, adds a read-only capacity report, and makes the exhaustion refusal name its true cause. Never hand-delete a `refs/db-review-active/*` ref and never post a synthetic verdict to free capacity — both were considered and rejected, and both silently un-review a database change.
 - **Orchestrator throughput Phase 2 (issue #1738):** [`plan_orchestrator_throughput_phase_2.md`](plan_orchestrator_throughput_phase_2.md). Read its STATUS table first. It uses the completed `shared-db.orch` transcript to separate protected claims from worker capacity, preserve content-addressed evidence across unrelated `main` movement, schedule shared-preview dependencies, and qualify routes before expensive gates. This is repository-maintenance work outside the structure/schema orchestrator.
   Phase 2 is active: protected claims never disappear when author capacity is relinquished; preview dependencies are waits, not successful checks. Before manual preview dispatch resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector/fresh-ledger check, and use only the matching instruction. Historical recovery is apply-only; historical dry-run proves nothing. `--repair-preview-ready <ready-id> --issue <n>` may repair only a v2-bound stale wrong digest; a corrupt live digest stops for owner decision without mutation. Reviewer reservations serialize approved provider/wrapper execution keys and create durable ordered waits when all eligible reviewers are busy. The live orchestrator engine is always excluded: Codex cannot review a Codex-orchestrated change, and Claude cannot review a Claude-orchestrated change. Qwen and Gemini remain outside the active rotation while ai-devops reliability is repaired.
 - **Making throughput guards tell the truth (hash-bound verification sidecars, typed catalog truth, regression corpus and causal blocker measures):** [`plan_orchestrator_throughput_guard_truth.md`](plan_orchestrator_throughput_guard_truth.md). Read its STATUS table first — do not re-derive its analysis or re-plan its steps. Repository-maintenance work that authorizes **no** database change; do not route it to the structure/schema orchestrator. It preserves every refusal while separating migration-file, ledger and live-catalog evidence so “not derivable” is never reported as “absent.”
@@ -392,6 +395,13 @@ code — but an orchestrator that leaves items standing in it is carrying other 
 The block prints **before** the refill line, not after it, so a queue that has dispatchable work
 cannot hide it — that ordering is deliberate.
 
+### Queue priority
+
+Among eligible structural issues, work that releases the largest number of other open issues is
+first. The count includes direct and chained `depends_on` relationships. If two issues release the
+same number, the older issue is first. The numeric `priority:` field remains required for scope
+compatibility but does not override blocker impact or age.
+
 An issue with **no** `db-work-scope` block at all is `unclassified`: it is not admitted, it is not
 worked, and it already blocks an empty-lane claim. Classify it or send it back.
 
@@ -566,6 +576,13 @@ another live agent may be mid-task on it. Leave it, work in your own worktree, a
 handoff. Remove your own worktree when your branch has merged; never remove one that is dirty,
 locked, or held by a live agent.
 
+**Before treating working-tree files as current `main` evidence**, run
+`node scripts/check-worktree-freshness.mjs`. It fetches live `origin/main` and refuses unless the
+checked-out commit is that exact tip. A refusal means read the required files from a fresh isolated
+worktree or from `git show origin/main:<path>`; never update or switch the shared checkout to make
+the guard pass. Verification tools that read the migration tree must refresh `origin/main`
+themselves and fail closed if that refresh is unavailable.
+
 ### 2.1-W.1 Retiring a worktree — and the squash-merge trap that has defeated every attempt
 
 `scripts/reap-merged-worktrees.mjs` does this. Dry run by default; `--apply` to act.
@@ -709,8 +726,9 @@ rules below are the operative summary.
      only when there is no verdict and no progress, or a concrete transport, coverage, or
      truncated-output failure. Never replace `REVISE` or reduce coverage: exhaust active providers
     not failed on the exact head, then fail closed with the exact blocker. The configured rotation is
-    Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.2 Contributor, Codex GPT-5.6 Sol, and DeepSeek,
-    minus the live orchestrator's own engine. Qwen and Gemini are inactive.
+    Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.2 Contributor, and Codex GPT-5.6 Sol,
+    minus the live orchestrator's own engine. Qwen, Gemini and DeepSeek are inactive; DeepSeek
+    was RETIRED on 2026-09-01 (issue #2078) and is not drawable.
 
    The `Cross-PR object collision` CI check is only the backstop. By the time it fires, somebody's
    session is already wasted — on 2026-07-31, three of four were.
@@ -725,7 +743,7 @@ rules below are the operative summary.
    `scripts/check-workflow-preview-ref.test.mjs` fails the guard job if any workflow pins a literal
    again.
 
-   ⚠️ **Merging requires an APPROVE pinned to the EXACT head being merged, and the merge gate now enforces it (#1816, 2026-08-29).** A reviewer assignment is not an approval, and an approval of an earlier head is not an approval of these bytes: answering a `REJECT` with a new commit requires a fresh exact-head review before that commit can merge. Enforced by `scripts/check-exact-head-approval.mjs`, run twice in `guarded-migration-merge` (up front, then re-proven under the merge lock). Before this it was convention only, and PR #1809 merged unapproved bytes onto `main`. Free-text verdicts are unauthorized by default and count only from GitHub's OWNER, MEMBER or COLLABORATOR associations. The gate still does **not** prove the assigned provider is the commenter, because assignment refs do not carry an identity that can be bound to GitHub authorship. Do not cite a pass as proof of who reviewed. Full limits in `docs/agents/section-4-anti-collision-rules.md`.
+   ⚠️ **Merging requires an APPROVE pinned to the EXACT head being merged, and the merge gate now enforces it (#1816, 2026-08-29).** A reviewer assignment is not an approval, and an approval of an earlier head is not an approval of these bytes: answering a `REJECT` with a new commit requires a fresh exact-head review before that commit can merge. Enforced by `scripts/check-exact-head-approval.mjs`, run twice in `guarded-migration-merge` (up front, then re-proven under the merge lock). Before this it was convention only, and PR #1809 merged unapproved bytes onto `main`. Free-text verdicts are unauthorized by default and count only from GitHub's OWNER, MEMBER or COLLABORATOR associations. The gate still does **not** prove the assigned provider is the commenter, because assignment refs do not carry an identity that can be bound to GitHub authorship. Do not cite a pass as proof of who reviewed. Full limits in `docs/agents/section-4-anti-collision-rules.md`. ⚠️ **One exemption, added 2026-09-02 (#2102): a documents-only pull request draws no reviewer and the gate requires no verdict for it — see rule 18. Rulebook files are not documents.**
 
    **Merge first, then rehearse on preview from merged `main`, then promote.** A rehearsal runs
    **once** — an applied version can never be applied again, so a re-dispatch and a GitHub
@@ -1486,13 +1504,45 @@ have already happened in this repo, more than once.
 
     What actually re-checks a migration pull request against current `main` is
     `.github/workflows/guarded-migration-merge.yml`, whose required context
-    `Migration guarded merge authorization` re-runs collision and lease validation on a head that
-    contains current `main`, while holding the merge lock. A pull request with no migrations is
-    auto-authorized by `.github/workflows/migration-author-lease.yml`.
+    `Migration guarded merge authorization` re-runs collision, exact-head review, and—when the
+    pull request changes a migration—lease validation on a head that contains current `main`,
+    while holding the merge lock. **Every pull request, including documentation-only and other
+    non-migration changes, uses that guarded merge lane.** A non-migration pull request needs no
+    migration-author claim, but it is never auto-authorized by the lease workflow. When production
+    acquires its lock, it revokes every open pull request's earlier merge authorization before
+    releasing that lock, so a stale green result cannot bypass the production freeze.
 
     Older documents — including `docs/owner-rulings.md`'s 2026-08-06/14 entries and
     `plan_orchestrator-workflow-gaps.md` — describe the earlier `strict: true` state. That history
     is real and is preserved; it is **superseded** as a current instruction. Only issue #1286
     governs whether strict mode is ever reconsidered.
+
+18. **A DOCUMENTS-ONLY PULL REQUEST DRAWS NO DATABASE REVIEWER (owner decision, 2026-09-02, issue
+    #2102).** A pull request whose changed files are **all** prose documents still runs **every**
+    automated check and still merges through the **guarded merge lane**. What it no longer does is
+    consume a slot from the small external **database reviewer pool** that exists for migrations.
+    PR #2034 — a two-file documentation change — spent two reviewer draws, two dead-reviewer
+    replacements and three full review runs, and PR #2070 repeated the shape. That capacity belongs
+    to migrations.
+
+    **Rulebook files are NOT documents for this purpose and keep the full treatment:** `AGENTS.md`
+    (and `CLAUDE.md`), anything under `.claude/skills/` or `skills/`, and plan files
+    (`plan_*.md`). They instruct every later session, so a bad edit to one of them is as dangerous
+    as a bad migration. One non-document file of any kind — a `.sql`, a script, a workflow, a test,
+    a config file — removes the exemption from the whole pull request.
+
+    **Review is not removed, and this is not a merge exemption.** The review of PR #2034 caught a
+    real customer order number heading into this **public** repository, so the content risk is
+    real; what changed is only which pool answers for it. The automated checks and the guarded
+    merge lane still answer, and a refusal already recorded at the exact head still blocks it — the
+    exemption is from *drawing* a reviewer, never from *answering* one.
+
+    Enforced, not documented: `scripts/lib/documents-only-change.mjs` is the single deterministic
+    classifier, listing the rulebook exclusions explicitly and failing closed whenever the
+    changed-file list is empty, unreadable or absent. `scripts/check-exact-head-approval.mjs` — the
+    gate the guarded merge waits on — uses it to skip the reviewer requirement, and
+    `--assign-reviewer` in `scripts/manage-migration-author-lanes.mjs` refuses to draw for such a
+    pull request. `scripts/lib/documents-only-change.test.mjs` fails if the classifier exempts a
+    rulebook file or a mixed change.
 
 ---
