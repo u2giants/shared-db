@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
-import { evaluateExactHeadApproval as evaluateRaw, gatherApprovalInput, parseAssignmentRef, ApprovalCheckError } from './check-exact-head-approval.mjs'
+import { evaluateExactHeadApproval as evaluateRaw, gatherApprovalInput, parseAssignmentRef, requireDurableVerdictInput, ApprovalCheckError } from './check-exact-head-approval.mjs'
 
 const OLD = 'b494401028464ef8b2e67fe0b5b1836839b2be36'
 const NEW = '8d3c31accd5b21ea669e65f5ae53f5f95cc57337'
@@ -303,6 +303,19 @@ test('REQUEST CHANGES with a space is a refusal, like its underscore form', () =
   for (const body of [`VERDICT: REQUEST CHANGES ${NEW}`, `VERDICT: REQUEST_CHANGES ${NEW}`]) {
     assert.throws(() => evaluateExactHeadApproval({ ...pinned, evidence: [{ body }] }), /unanswered reviewer refusal/, body)
   }
+})
+
+// ISSUE #2075. `evaluateExactHeadApproval` still contains a comment-text branch,
+// used as a predicate library by the tests above and by callers with no access to
+// the durable refs. In the MERGE GATE that branch must be unreachable: production
+// input always carries the durable verdict artifacts, and if it ever stopped, the
+// gate would silently start authorizing merges from comment prose. So the
+// boundary refuses rather than falling through.
+test('issue 2075: the merge gate refuses input that carries no durable verdict list', () => {
+  const input = { pr: 2080, headSha: 'a'.repeat(40), evidence: [], assignments: [] }
+  assert.throws(() => requireDurableVerdictInput(input), /never authorized by comment text/)
+  assert.throws(() => requireDurableVerdictInput({ ...input, verdicts: null }), /never authorized by comment text/)
+  assert.deepEqual(requireDurableVerdictInput({ ...input, verdicts: [] }).verdicts, [])
 })
 
 // THE MERGE GATE MUST SEE A RETURNED SLOT.
