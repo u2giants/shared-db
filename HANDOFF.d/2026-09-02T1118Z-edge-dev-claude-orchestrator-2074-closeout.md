@@ -1,7 +1,7 @@
 ---
 issue: 2098
 status: OPEN
-owner: claude/orchestrator-2074-closeout
+owner: claude/shared-db-orchestrator-edf2f2
 ---
 
 # Orchestrator #2074 closeout — three merges landed, three owner decisions open
@@ -159,7 +159,7 @@ that had been stopping the queue audit from ever reporting clean.
 - **The documentation reviewer-exemption change (section 0 item 2) is NOT written.**
   It is a recommendation only. Nothing has been drafted, no branch exists.
 - **The retailer-code scrub (section 0 item 3) is NOT done.**
-- **This handoff itself** is on branch `claude/orchestrator-2074-closeout` and must
+- **This handoff itself** is on branch `claude/shared-db-orchestrator-edf2f2` and must
   be merged; it is documentation-only.
 
 ### Deliberately not done, with reasons
@@ -320,7 +320,7 @@ This is the expensive part. Do not repeat any of it.
    one at a time as you trip over them.
    *You'll know it worked when he answers all three.*
 
-3. **Merge this handoff.** It is on branch `claude/orchestrator-2074-closeout` and
+3. **Merge this handoff.** It is on branch `claude/shared-db-orchestrator-edf2f2` and
    is documentation-only. Open the pull request, wait for checks, dispatch the
    guarded merge, and close issue #2098 once the section-0 items are resolved.
    *You'll know it worked when `gh pr view <n> --json state` says `MERGED`.*
