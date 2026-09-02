@@ -11,46 +11,65 @@ import type { ApiClient } from './data-admin'
 //
 // This screen is how a Licensing reviewer records the decision the ruling
 // requires, one DCP Vault Property at a time, instead of trading spreadsheets.
-// It never invents a placement: the queue only ever offers candidates, and an
-// approval is written as a new version of an append-only decision row.
+// It never invents a placement: the queue only ever offers the candidate
+// members already recorded against the pending row, and an approval is written
+// as a new superseding version of an append-only decision row.
+//
+// The shapes below follow api.db_data_admin_property_match_queue and
+// api.db_data_admin_decide_property_match exactly
+// (supabase/migrations/20260902053756_property_match_review_rpcs.sql).
 
-export type MatchCandidate = {
+/** A candidate member as the queue returns it: an id and its ordinal, nothing more. */
+export type QueueCandidate = {
   licensed_property_id: number
-  property_name: string
-  opa_studio_code: string | null
-  /** Pre-selected because the contract title and the OPA name matched exactly. */
-  is_selected: boolean
-  /** 0-1 name similarity. Null for an exact match. */
-  similarity: number | null
+  member_ordinal: number
 }
 
-export type MatchState = 'exact' | 'multiple' | 'suggested' | 'none'
+/** A candidate after the OPA name has been looked up for display. */
+export type MatchCandidate = QueueCandidate & {
+  /** Null when the name lookup found nothing — shown as unknown rather than hidden. */
+  property_name: string | null
+}
+
+export type MatchState = 'exact' | 'multiple' | 'none'
 
 export type PropertyMatchRow = {
+  row_key: string
   resolution_id: string
   source_system: string
   source_table: string
   source_property_id: string
+  source_property_name: string | null
   display_label: string
   decision_version: number
   approval_status: 'pending' | 'approved' | 'rejected'
-  match_state: MatchState
-  contract_section: string | null
-  contract_clause: number | null
-  contract_page: string | null
-  contract_title: string | null
+  evidence_reference: string
+  evidence_sha256: string
+  decision_reason: string
   contract_asserted_studio_code: string | null
+  contract_evidence_reference: string | null
+  contract_evidence_sha256: string | null
+  supersedes_resolution_id: string | null
+  prior_resolution_id: string | null
+  prior_approval_status: string | null
+  prior_decision_version: number | null
+  prior_contract_asserted_studio_code: string | null
+  candidate_count: number
   candidates: MatchCandidate[]
 }
 
-export type MatchQueuePage = { rows: PropertyMatchRow[]; next_cursor: string | null }
+export type MatchQueuePage = {
+  rows: PropertyMatchRow[]
+  next_cursor: string | null
+  page_size: number
+}
 
 export type DecisionResult = {
-  success: boolean
-  code?: string
-  message?: string
-  resolution_id?: string
-  decision_version?: number
+  resolution_id: string
+  decision_version: number
+  approval_status: string
+  idempotent_repeat: boolean
+  members: QueueCandidate[]
 }
 
 /**
@@ -73,31 +92,64 @@ function isMissingFunction(error: unknown) {
   return code === 'PGRST202' || code === '42883' || /could not find the function/i.test(message)
 }
 
-export function normaliseCandidates(row: PropertyMatchRow): PropertyMatchRow {
-  const candidates = [...(row.candidates ?? [])].sort((a, b) => {
-    if (a.is_selected !== b.is_selected) return a.is_selected ? -1 : 1
-    if ((b.similarity ?? 1) !== (a.similarity ?? 1)) return (b.similarity ?? 1) - (a.similarity ?? 1)
-    return a.property_name.localeCompare(b.property_name)
-  })
-  return { ...row, candidates }
+export function normaliseRow(row: PropertyMatchRow): PropertyMatchRow {
+  const candidates = [...(row.candidates ?? [])]
+    .map(candidate => ({ ...candidate, property_name: candidate.property_name ?? null }))
+    .sort((a, b) => a.member_ordinal - b.member_ordinal)
+  return { ...row, candidates, candidate_count: row.candidate_count ?? candidates.length }
 }
 
-/** Human sentence explaining why this row is in the queue. */
+/**
+ * The queue returns candidate ids only. Names come from
+ * api.opa_property_reconciliation, the authenticated view that carries
+ * licensed_property_id alongside the OPA property name.
+ */
+export async function attachCandidateNames(client: ApiClient, rows: PropertyMatchRow[]) {
+  const ids = [...new Set(rows.flatMap(row => row.candidates.map(c => c.licensed_property_id)))]
+  if (ids.length === 0) return rows
+  const { data, error } = await client
+    .from('opa_property_reconciliation')
+    .select('licensed_property_id, opa_property_name')
+    .in('licensed_property_id', ids)
+  // A naming lookup must never cost the reviewer the queue itself; the ids
+  // still identify each candidate unambiguously without it.
+  if (error) return rows
+  const names = new Map<number, string>()
+  for (const entry of (data ?? []) as { licensed_property_id: number; opa_property_name: string | null }[]) {
+    if (entry.opa_property_name) names.set(Number(entry.licensed_property_id), entry.opa_property_name)
+  }
+  return rows.map(row => ({
+    ...row,
+    candidates: row.candidates.map(candidate => ({
+      ...candidate,
+      property_name: names.get(candidate.licensed_property_id) ?? null,
+    })),
+  }))
+}
+
+/** Why this row needs a human: no candidate, exactly one, or a choice between several. */
+export function matchState(row: PropertyMatchRow): MatchState {
+  if (row.candidates.length === 0) return 'none'
+  return row.candidates.length === 1 ? 'exact' : 'multiple'
+}
+
 export function describeMatchState(row: PropertyMatchRow) {
-  switch (row.match_state) {
+  switch (matchState(row)) {
     case 'multiple':
-      return `The contract clause matches ${row.candidates.length} OPA Properties. Choose every one the clause covers.`
-    case 'suggested':
-      return 'No exact name match. The closest OPA Properties are offered as suggestions only — confirm or reject.'
+      return `${row.candidates.length} OPA Properties are proposed for this contract clause. Tick every one the clause covers.`
     case 'none':
-      return 'No OPA Property carries this name. Reject it, or select one after checking the contract clause.'
+      return 'No OPA Property was proposed. Reject it, or check the contract evidence before deciding.'
     default:
-      return 'The contract clause and the OPA Property name match exactly. Confirm to record the decision.'
+      return 'One OPA Property is proposed. Confirm to record the decision, or reject it.'
   }
 }
 
-export function selectedIds(row: PropertyMatchRow) {
-  return row.candidates.filter(candidate => candidate.is_selected).map(candidate => candidate.licensed_property_id)
+/**
+ * A single candidate is pre-ticked because there is nothing to choose between.
+ * A choice between several is never pre-made for the reviewer.
+ */
+export function defaultSelection(row: PropertyMatchRow) {
+  return row.candidates.length === 1 ? [row.candidates[0].licensed_property_id] : []
 }
 
 export async function loadPropertyMatchQueue(client: ApiClient, search: string | null = null) {
@@ -114,15 +166,26 @@ export async function loadPropertyMatchQueue(client: ApiClient, search: string |
       throw error
     }
     const payload = (data ?? {}) as Partial<MatchQueuePage>
-    rows.push(...(payload.rows ?? []).map(normaliseCandidates))
+    rows.push(...(payload.rows ?? []).map(normaliseRow))
     cursor = payload.next_cursor ?? null
   } while (cursor)
-  return rows
+  return attachCandidateNames(client, rows)
 }
 
 export async function decidePropertyMatch(
   client: ApiClient,
-  input: { resolutionId: string; decision: 'approve' | 'reject'; licensedPropertyIds: number[]; reason: string },
+  input: {
+    resolutionId: string
+    decision: 'approve' | 'reject'
+    licensedPropertyIds: number[]
+    reason: string
+    /**
+     * Stable per attempt. It BECOMES the new decision row's id, so retrying a
+     * failed call with the same value returns the recorded decision instead of
+     * appending a second version.
+     */
+    clientRequestId: string
+  },
 ) {
   if (input.decision === 'approve' && input.licensedPropertyIds.length === 0) {
     throw new Error('Select at least one OPA Property before confirming, or reject the row instead.')
@@ -131,15 +194,14 @@ export async function decidePropertyMatch(
   const { data, error } = await client.rpc('db_data_admin_decide_property_match', {
     p_resolution_id: input.resolutionId,
     p_decision: input.decision,
+    // The database refuses a rejection that carries members, so never send any.
     p_licensed_property_ids: input.decision === 'approve' ? input.licensedPropertyIds : [],
-    p_reason: input.reason.trim(),
-    p_operation_id: crypto.randomUUID(),
+    p_decision_reason: input.reason.trim(),
+    p_client_request_id: input.clientRequestId,
   })
   if (error) {
     if (isMissingFunction(error)) throw new ReviewQueueUnavailableError()
     throw error
   }
-  const result = (data ?? {}) as DecisionResult
-  if (result.success === false) throw new Error(result.message || 'The decision was not saved.')
-  return result
+  return (data ?? {}) as DecisionResult
 }

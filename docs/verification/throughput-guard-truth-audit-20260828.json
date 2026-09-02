@@ -449,6 +449,13 @@
       "line_sha256": "f3fb62b3fc4b23ff0b6e6ab6d6692b9d6e04118df8f780c4b41503c79d7d41ac"
     },
     {
+      "site": "scripts/check-migration-verify-cost.mjs:66",
+      "disposition": "excluded",
+      "reason": "Illustrative prose inside a source comment explaining what the verify-cost scanner masks; it emits no diagnostic and reports nothing about an object being absent, so there is no throughput claim to enrich.",
+      "semantic_key": "scripts/check-migration-verify-cost.mjs:316698f328ab07fad23616809dd9f7b261b728c219764da79dea6debb3c97f42:1",
+      "line_sha256": "316698f328ab07fad23616809dd9f7b261b728c219764da79dea6debb3c97f42"
+    },
+    {
       "site": "scripts/check-orchestrator-marker.mjs:70",
       "disposition": "excluded",
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation.",
@@ -1646,7 +1653,7 @@
       "line_sha256": "c09f129d700353ee3bdde8d550d639ce22090dfe682acffcdd4510fef639f5c3"
     }
   ],
-  "call_site_count": 233,
-  "call_site_sha256": "c56292296246f5ecd1d76bdf99d98d6e92ba7cdc94ce2e2cf3cf2cb17ee9c456",
+  "call_site_count": 234,
+  "call_site_sha256": "431a83734736190bf837e2048344009bdf8246f049c1d015ba56cad16c575431",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
