@@ -726,8 +726,9 @@ rules below are the operative summary.
      only when there is no verdict and no progress, or a concrete transport, coverage, or
      truncated-output failure. Never replace `REVISE` or reduce coverage: exhaust active providers
     not failed on the exact head, then fail closed with the exact blocker. The configured rotation is
-    Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.2 Contributor, Codex GPT-5.6 Sol, and DeepSeek,
-    minus the live orchestrator's own engine. Qwen and Gemini are inactive.
+    Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.2 Contributor, and Codex GPT-5.6 Sol,
+    minus the live orchestrator's own engine. Qwen, Gemini and DeepSeek are inactive; DeepSeek
+    was RETIRED on 2026-09-01 (issue #2078) and is not drawable.
 
    The `Cross-PR object collision` CI check is only the backstop. By the time it fires, somebody's
    session is already wasted — on 2026-07-31, three of four were.
