@@ -282,9 +282,64 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    reviewer, and releases that exact active lease when present. It does not
    create a failure record. New heads skip the reviewer; if exclusions and live
    leases consume the roster, assignment refuses loudly and names each durable
-   reason. To continue the same head after excluding slot N, assign the next
-   unused `--review-slot`; the exact-head gate accepts that ordinary assignment
-   and no false failure is recorded. Never use this to shop for a preferred verdict.
+   reason. Never use this to shop for a preferred verdict.
+
+   The exclusion also RETURNS every assignment AND every replacement of that
+   pull request the excluded reviewer still holds, so the slot can be filled
+   again. Each return is a create-only record under `refs/db-review-returns/`,
+   named for the exact record it retires and committed on top of it, and only
+   then is that ref compare-and-cleared. Nothing is deleted silently: the record
+   keeps who was assigned, to which head, slot and replacement sequence, and why
+   it came back. An assignment that already carries a durable verdict is never
+   returned, and that check is re-read inside the reviewer mutex immediately
+   before the write, so a verdict recorded concurrently still refuses. Returning
+   a slot requires the atomic compare-and-swap ref writer; it never falls back
+   to a compare-then-delete.
+
+   A returned slot is an UNAPPROVED slot, never a vanished one. The merge gate
+   still demands a durable APPROVE for every slot that was ever returned for
+   that head: the slot must carry a live assignment at least as new as the
+   newest record returned for it, and that assignment must have its own APPROVE.
+   Another slot's APPROVE can never answer for it.
+
+   "At least as new" is the GLOBAL reviewer cursor sequence, not the
+   replacement namespace tail. Every assignment and every replacement spends one
+   strictly increasing sequence from the same durable counter, so a re-drawn
+   reviewer is always newer than the record that was returned, whichever
+   namespace each of them lives in.
+
+   To continue the same head after excluding slot N, draw a fresh reviewer for
+   that exact head and slot. WHICH COMMAND depends on what was returned, and
+   only one of the two will work:
+
+   - the returned record was the ORIGINAL assignment -> re-run
+     `--assign-reviewer` for that head and slot;
+   - the returned record was a REPLACEMENT -> re-run
+     `--replace-failed-reviewer` with the SAME `--failed-sequence`.
+     `--assign-reviewer` recreates the original ref, which the merge gate will
+     not accept as an answer for a returned replacement.
+
+   Either way the excluded reviewer stays barred from this pull request forever,
+   and the newly drawn reviewer must record its OWN durable APPROVE. A pull
+   request excluded before returns existed is repaired by re-running the
+   IDENTICAL `--exclude-reviewer` command, which completes the return without
+   recording a second exclusion.
+
+   The merge gate that reads these records is `check-exact-head-approval.mjs`,
+   the script the guarded merge workflow runs BEFORE the merge -- not only the
+   preview gate, which under merge-first runs after it. Both read the return
+   namespace and order it the same way.
+
+   A verdict that lands in the instant between the exclusion's in-mutex check and
+   its push answers an assignment that no longer exists. It is not deleted and it
+   does not pin the head: the exclusion re-files it under
+   `refs/db-review-retired-verdicts/`, freeing the create-only verdict ref, so
+   the next reviewer can record a verdict for that head normally and the raced
+   object remains readable for audit. That re-filing is its own atomic
+   compare-and-swap push, made after the push that records the exclusion and its
+   returns -- so if it fails, re-run the IDENTICAL `--exclude-reviewer` command.
+   The re-run rebuilds the returned records from the return namespace and
+   completes the re-filing, recording no second exclusion and no second return.
 
    **Grok's in-flight lock is PER REPOSITORY, not global.** `ai-grok-review`
    allows one live Grok review at a time *in shared-db*; it does not cap Grok
