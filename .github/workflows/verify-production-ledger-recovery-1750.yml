@@ -21,7 +21,7 @@ jobs:
           set -euo pipefail
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$MAIN_SHA"
-          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          MAIN_SHA="$MAIN_SHA" node scripts/check-main-tip-freshness.mjs
       - name: Prove exact ledger identity and catalog outcome
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
