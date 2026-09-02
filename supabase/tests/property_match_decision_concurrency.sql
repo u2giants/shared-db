@@ -22,24 +22,17 @@
 -- review queue), and the only cleanup possible -- the temporary role grants --
 -- is performed.
 -- The racing connections are opened by dblink, which refuses a passwordless
--- connection for a non-superuser. The connection parameters are read from the
--- environment psql is already using -- nothing is hardcoded and no credential
--- is written into this repository.
+-- connection for a non-superuser. dblink runs INSIDE the server, so it must use
+-- the server's own local socket -- the host and port psql was given are mapped
+-- from outside and are not reachable from in there. Only the password is taken
+-- from the environment psql is already using: nothing is hardcoded and no
+-- credential is written into this repository.
 \set pm_race_pw ''
-\set pm_race_host ''
-\set pm_race_port ''
-\set pm_race_user ''
 \getenv pm_race_pw PGPASSWORD
-\getenv pm_race_host PGHOST
-\getenv pm_race_port PGPORT
-\getenv pm_race_user PGUSER
 
 select set_config(
   'pm_race.dsn',
   'dbname=' || current_database()
-    || case when :'pm_race_host' <> '' then ' host=' || :'pm_race_host' else '' end
-    || case when :'pm_race_port' <> '' then ' port=' || :'pm_race_port' else '' end
-    || case when :'pm_race_user' <> '' then ' user=' || :'pm_race_user' else '' end
     || case when :'pm_race_pw' <> '' then ' password=' || :'pm_race_pw' else '' end,
   false);
 
