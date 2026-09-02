@@ -496,6 +496,11 @@ PREVIEW_PRODUCER_PATHS = (
     # Runs FIRST in the preview job, to acquire the lane, before any evidence
     # byte exists. Unpinned, it was a complete forgery path.
     "scripts/manage-migration-author-lanes.mjs",
+    # Decides whether the dispatched main tip is still current (#2047). It runs
+    # before any evidence byte is written, and its answer is what permits the
+    # rehearsal to proceed at all. Unpinned, a doctored copy could accept ANY
+    # tip -- which is the whole gate.
+    "scripts/check-main-tip-freshness.mjs",
     # Invoked by the manager before preview preparation to prove the live sole
     # orchestrator identity. Its result gates whether preparation may proceed.
     "scripts/check-orchestrator-marker.mjs",
@@ -525,6 +530,10 @@ PREVIEW_PRODUCER_PATHS = (
     # reused, so preview proof must bind their exact bytes.
     "config/orchestrator-evidence-schema-v1.json",
     "config/orchestrator-global-invalidators-v1.json",
+    # Governed preview-ledger reconciliation reads this reviewed manifest to
+    # select the exact issue/claim/source/orphan/replacement tuple. Bind those
+    # bytes to the same exact-main producer proof as the workflow and tool.
+    "config/preview-ledger-orphan-reconciliations.json",
     # READ, NOT EXECUTED -- and therefore invisible to the executed-closure
     # walk, which follows invocations and imports. The Supabase CLI reads this
     # file on every `link`, `migration list` and `db push` the preview job runs,
@@ -1749,12 +1758,21 @@ PREVIEW_PRODUCER_PATHS += (
     "scripts/production-verification-sidecars/20260830191719.json",
     "scripts/production-verification-sidecars/20260830202243.json",
     "scripts/production-verification-sidecars/20260830212955.json",
+    "scripts/production-verification-sidecars/20260902024541.json",
     "scripts/production-verification-sidecars/20260830220646.json",
     "scripts/production-verification-sidecars/20260830230246.json",
     "scripts/production-verification-sidecars/20260830235651.json",
     "scripts/production-verification-sidecars/20260831002935.json",
     "scripts/production-verification-sidecars/20260831012326.json",
     "scripts/production-verification-sidecars/20260831021656.json",
+    "scripts/production-verification-sidecars/20260831104325.json",
+    "scripts/production-verification-sidecars/20260831145707.json",
+    "scripts/production-verification-sidecars/20260902035909.json",
+    "scripts/production-verification-sidecars/20260831173841.json",
+    "scripts/production-verification-sidecars/20260831184547.json",
+    "scripts/production-verification-sidecars/20260831212757.json",
+    "scripts/production-verification-sidecars/20260831221607.json",
+    "scripts/production-verification-sidecars/20260901142825.json",
     # Invoked by check-sql.sh during preview; pin the reviewed parser so the
     # protected static check cannot be changed independently of the PR head.
     "scripts/check-expected-count-patterns.mjs",

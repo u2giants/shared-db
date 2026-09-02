@@ -10,6 +10,7 @@ import {
 import { RecordEditor } from './RecordEditor'
 import { MergeDialog } from './MergeDialog'
 import { ProductDepthTable } from './ProductDepthTable'
+import { PropertyMatchReview } from './PropertyMatchReview'
 import { ScrapedPropertiesTable } from './ScrapedPropertiesTable'
 import { INLINE_EDITABLE_PROPS, INLINE_EDIT_REASON, INLINE_UNDO_REASON, saveInlineRow } from './lib/inline-edit'
 import { FilterHeader, type HeaderProps } from './FilterHeader'
@@ -66,7 +67,7 @@ const baseColumns: ColumnRegular[] = [
 
 export function DataAdmin({ client, email, environmentLabel, onSignOut }: Props) {
   const [kind, setKind] = useState<EntityKind>('customer')
-  const [section, setSection] = useState<'entity' | 'scraped-property' | 'product-depth'>('entity')
+  const [section, setSection] = useState<'entity' | 'scraped-property' | 'property-match' | 'product-depth'>('entity')
   const [query, setQuery] = useState<QueryState>(initialQuery)
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
@@ -319,10 +320,13 @@ export function DataAdmin({ client, email, environmentLabel, onSignOut }: Props)
       <button className={section === 'entity' && kind === 'customer' ? 'active' : ''} onClick={() => { setSection('entity'); setKind('customer') }}>Customers</button>
       <button className={section === 'entity' && kind === 'vendor' ? 'active' : ''} onClick={() => { setSection('entity'); setKind('vendor') }}>Vendors</button>
       <button className={section === 'scraped-property' ? 'active' : ''} onClick={() => setSection('scraped-property')}>Scraped Properties</button>
+      <button className={section === 'property-match' ? 'active' : ''} onClick={() => setSection('property-match')}>Property Matches</button>
       <button className={section === 'product-depth' ? 'active' : ''} onClick={() => setSection('product-depth')}>Product Depth</button>
     </nav>
     {section === 'product-depth'
       ? <ProductDepthTable client={client} />
+      : section === 'property-match'
+      ? <PropertyMatchReview client={client} />
       : section === 'scraped-property'
       ? <ScrapedPropertiesTable client={client} />
       : denied
