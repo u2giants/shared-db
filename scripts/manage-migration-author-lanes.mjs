@@ -252,6 +252,20 @@ export function reviewerReadsRepository(name, reviewers=REVIEWERS){
   return reviewers.find((row)=>row.name===name)?.readsRepository===true
 }
 
+// #2079 ROUND 3. The two directions need OPPOSITE defaults for an unknown name.
+// The merge gate asks "may this verdict authorize?" and an unknown name must
+// answer no -- that is `reviewerReadsRepository` above. Replacement asks "may this
+// verdict be stripped off the head?" and an unknown name must answer NO THERE TOO,
+// which is the opposite boolean. Only a roster row that positively says
+// `readsRepository:false` (today: deepseek-chat) may be discarded. A name that is
+// absent, misspelled, case-shifted (`parseReviewCursor` matches case-insensitively
+// while the roster lookup does not) or dropped from REVIEWERS is UNCLASSIFIABLE,
+// and un-reviewing a head on an unclassifiable artifact is the hole #2078 was.
+export function reviewerKnownNonReading(name, reviewers=REVIEWERS){
+  const row=reviewers.find((entry)=>entry.name===name)
+  return Boolean(row)&&row.readsRepository===false
+}
+
 // ACTIVE ROTATION EXPANSION (owner approval, 2026-08-28). Codex GPT-5.6 Sol and
 // DeepSeek are active rotation providers. No overflow provider remains; when all
 // six execution keys are occupied, assignment fails closed and the Phase 2
@@ -2317,7 +2331,10 @@ function durableVerdictBlocksReplacement(ref,io){
     if(sha)reviewer=parseReviewCursor(io.getCommit(sha))?.reviewer??null
   }catch{return true}
   if(!reviewer)return true
-  return reviewerReadsRepository(reviewer)
+  // NOT `reviewerReadsRepository(reviewer)`: that returns false for an unknown
+  // name, which would PERMIT replacement on an artifact nobody can attribute.
+  // Only a roster row explicitly marked non-reading may be discarded.
+  return !reviewerKnownNonReading(reviewer)
 }
 export function headVerdictBlocksReplacement(issue,pr,headSha,io,options={}){
   const head=String(headSha??'').toLowerCase()
