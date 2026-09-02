@@ -2015,6 +2015,28 @@ class ApplyLaneTests(unittest.TestCase):
             "needs: [validate, production-apply-review]", _job("production-apply")
         )
 
+    def test_issue_1689_locks_production_before_verifying_live_main(self) -> None:
+        steps = _steps(_job("production-apply"))
+        acquire = next(
+            i
+            for i, step in enumerate(steps)
+            if "Acquire the exclusive production lane" in step
+        )
+        verify = next(
+            i
+            for i, step in enumerate(steps)
+            if "Verify exact main commit while holding the production lane" in step
+        )
+        release = next(
+            i
+            for i, step in enumerate(steps)
+            if "Release the exclusive production lane with ownership proof" in step
+        )
+        self.assertLess(acquire, verify)
+        self.assertLess(verify, release)
+        self.assertIn("if: always()", steps[release])
+        self.assertIn("steps.production_lock.outputs.owner_sha", steps[release])
+
     def test_the_typed_confirmation_is_APPLY_plus_sha(self) -> None:
         for name in ("production-apply-review", "production-apply"):
             with self.subTest(job=name):
