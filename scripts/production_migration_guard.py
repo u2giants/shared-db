@@ -1138,6 +1138,19 @@ def classify_pending_version(
             "never apply this version; its safe replacement or end state is already present",
         )
         return {"kind": "retired", "reason": f"RETIRED_VERSIONS: {reason}."}
+    # HARD_BLOCKED is tested BEFORE the owner-hold branch on purpose. A version can
+    # sit in both registries -- 20260802171000 is held AND hard-blocked, because the
+    # held historical FR ruling was superseded by the guarded forward 20260818174350
+    # and the original must never be applied at all. Reporting it as "held for one
+    # bounded apply" would tell a reader it is merely waiting its turn, which is the
+    # opposite of what the production lane does with it. The strictest true statement
+    # wins; both kinds are intentionally-excluded, so the actionable drift count is
+    # unchanged either way and only the sentence a human reads differs.
+    if version in HARD_BLOCKED:
+        return {
+            "kind": "retired",
+            "reason": "production_migration_guard.HARD_BLOCKED: the general production lane refuses this version outright. Do not apply it.",
+        }
     if version in HELD_VERSIONS or version in FR_SHIP_SET_HOLD or version in FR_REMOVAL_VERSIONS:
         suffix = (
             "The required FR removal migration set is not yet defined."
@@ -1155,11 +1168,6 @@ def classify_pending_version(
         return {
             "kind": "deliberately-held",
             "reason": "Preview-only historical restoration: retain truthful preview history and never include this version in a production allowlist.",
-        }
-    if version in HARD_BLOCKED:
-        return {
-            "kind": "retired",
-            "reason": "production_migration_guard.HARD_BLOCKED: the general production lane refuses this version outright. Do not apply it.",
         }
 
     migration = (migration_paths if migration_paths is not None else local_migrations(repo)).get(version)

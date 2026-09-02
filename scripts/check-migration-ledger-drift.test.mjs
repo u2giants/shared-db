@@ -166,7 +166,11 @@ test('classifies retired and deliberately-held versions from every existing Pyth
   assert.match(result['20260729120000'].reason, /RETIRED_VERSIONS/)
   assert.equal(result['20260802170000'].kind, 'deliberately-held')
   assert.match(result['20260802170000'].reason, /owner ruling/i)
-  assert.equal(result['20260802171000'].kind, 'deliberately-held')
+  // Held AND hard-blocked. The held historical FR ruling was superseded by the
+  // guarded forward 20260818174350, so this original must never be applied at
+  // all; the drift report must print the hard block, not 'waiting its turn'.
+  assert.equal(result['20260802171000'].kind, 'retired')
+  assert.match(result['20260802171000'].reason, /refuses this version outright/)
   assert.equal(result['20260816045130'].kind, 'retired')
   assert.match(result['20260816045130'].reason, /explicit COMMIT separates DDL from the Supabase migration ledger/)
   assert.match(result['20260816045130'].reason, /never apply production/)
