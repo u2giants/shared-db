@@ -486,3 +486,52 @@ test('a reviewer that does read the repository still authorizes and still blocks
   assert.equal(evaluateExactHeadApproval(gatherApprovalInput({ PR_NUMBER: '1989' }, nonReadingVerdictGithub({ reviewer: 'kimi-k3', verdict: 'APPROVE' }))).approved, true)
   assert.throws(() => evaluateExactHeadApproval(gatherApprovalInput({ PR_NUMBER: '1989' }, nonReadingVerdictGithub({ reviewer: 'kimi-k3', verdict: 'REVISE' }))), /carries a durable reviewer refusal/)
 })
+
+// THE DOCUMENTS-ONLY LANE AT THE GATE THAT AUTHORIZES MERGES (#2102).
+//
+// A documents-only pull request draws no database reviewer, so this gate must not
+// demand an assignment and an APPROVE that nothing is allowed to produce. Every
+// other automated check still runs and the guarded merge lane is unchanged.
+test('a documents-only pull request authorizes with no reviewer assignment at all', () => {
+  const result = evaluateExactHeadApproval({
+    pr: 2102, headSha: NEW, assignments: [], verdicts: [],
+    changedFiles: ['HANDOFF.d/2026-09-02T0000Z-note.md', 'docs/verification/run.md'],
+  })
+  assert.equal(result.approved, true)
+  assert.equal(result.documents_only, true)
+  assert.equal(result.assignments, 0)
+})
+
+// The exclusions are the safety of the whole rule. Each of these keeps the full
+// treatment, so with no assignment the gate must still refuse.
+for (const path of ['AGENTS.md', '.claude/skills/shared-db-change/SKILL.md', 'skills/claude/shared-db-orchestrator/SKILL.md', 'plan_reviewer_lease_capacity_truth.md']) {
+  test(`a rulebook file is not a document and still needs a reviewer: ${path}`, () => {
+    assert.throws(() => evaluateExactHeadApproval({
+      pr: 2102, headSha: NEW, assignments: [], verdicts: [], changedFiles: ['docs/notes.md', path],
+    }), /no reviewer was ever assigned head/)
+  })
+}
+
+for (const path of ['supabase/migrations/20260902120000_add_thing.sql', 'scripts/manage-migration-author-lanes.mjs', '.github/workflows/guarded-migration-merge.yml', 'scripts/check-exact-head-approval.test.mjs']) {
+  test(`one non-document file removes the exemption: ${path}`, () => {
+    assert.throws(() => evaluateExactHeadApproval({
+      pr: 2102, headSha: NEW, assignments: [], verdicts: [], changedFiles: ['docs/notes.md', path],
+    }), /no reviewer was ever assigned head/)
+  })
+}
+
+test('an absent or unreadable changed-file list never grants the exemption', () => {
+  assert.throws(() => evaluateExactHeadApproval({ pr: 2102, headSha: NEW, assignments: [], verdicts: [] }), /no reviewer was ever assigned head/)
+  assert.throws(() => evaluateExactHeadApproval({ pr: 2102, headSha: NEW, assignments: [], verdicts: [], changedFiles: [] }), /no reviewer was ever assigned head/)
+  assert.throws(() => evaluateExactHeadApproval({ pr: 2102, headSha: NEW, assignments: [], verdicts: [], changedFiles: null }), /no reviewer was ever assigned head/)
+})
+
+// Exempt from DRAWING a reviewer is not exempt from ANSWERING one. If a review
+// really happened at these bytes and refused them, the refusal still stands.
+test('a recorded refusal still blocks a documents-only head', () => {
+  const assignmentSha = 'a'.repeat(40)
+  const artifact = { pr: 2102, head_sha: NEW, verdict: 'REVISE', ref: `${'refs/db-review-verdicts'}/2102-2102-${NEW}`, assignment_sha: assignmentSha, reviewer: 'grok-4.6', validated: true }
+  assert.throws(() => evaluateExactHeadApproval({
+    pr: 2102, headSha: NEW, assignments: [], verdicts: [artifact], changedFiles: ['docs/notes.md'],
+  }), /durable reviewer refusal|without artifact validation/)
+})

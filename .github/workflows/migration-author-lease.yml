@@ -38,7 +38,7 @@ jobs:
             [[ -f "$test_file" ]] || { echo "Missing required orchestrator-flow test: $test_file" >&2; exit 1; }
           done
           printf 'Required orchestrator-flow test: %s\n' "${required[@]}"
-          node --test scripts/check-migration-pr-lease.test.mjs scripts/check-exact-head-approval.test.mjs scripts/check-migration-ledger-drift.test.mjs scripts/check-worktree-freshness.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/historical-migration-restorations.test.mjs scripts/lib/work-dependencies.test.mjs scripts/lib/review-verdict-artifact.test.mjs scripts/agent-work-contract.test.mjs scripts/db-coordination-events.test.mjs scripts/coordination-scenarios.test.mjs scripts/lib/exclusive-lease.test.mjs scripts/apply-lane-advisory-lock.test.mjs scripts/record-review-verdict.test.mjs scripts/run-governed-review.test.mjs "${flow_tests[@]}"
+          node --test scripts/check-migration-pr-lease.test.mjs scripts/check-exact-head-approval.test.mjs scripts/check-migration-ledger-drift.test.mjs scripts/check-worktree-freshness.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/historical-migration-restorations.test.mjs scripts/lib/work-dependencies.test.mjs scripts/lib/review-verdict-artifact.test.mjs scripts/lib/documents-only-change.test.mjs scripts/agent-work-contract.test.mjs scripts/db-coordination-events.test.mjs scripts/coordination-scenarios.test.mjs scripts/lib/exclusive-lease.test.mjs scripts/apply-lane-advisory-lock.test.mjs scripts/record-review-verdict.test.mjs scripts/run-governed-review.test.mjs "${flow_tests[@]}"
       - name: Require a valid branch-bound claim and permanent version reservation
         id: lease_check
         env:

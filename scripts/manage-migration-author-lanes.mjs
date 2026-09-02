@@ -14,6 +14,7 @@ import { buildEvidenceBundle, canonicalJson, sha256 } from './orchestrator-flow/
 import { selectPreviewRoute } from './orchestrator-flow/select-preview-route.mjs'
 import { PROJECT_REFS } from './orchestrator-flow/read-preview-ledger.mjs'; import { verdictOpensLine as sharedVerdictOpensLine, evidenceTiedToHead as sharedEvidenceTiedToHead, isApprovalFor as sharedIsApprovalFor, isVerdictFor as sharedIsVerdictFor, anyVerdictFor as sharedAnyVerdictFor } from './lib/review-verdict.mjs'
 import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, REVIEW_VERDICTS, assertFindingsRefForPr, findingsDigest, formatVerdictMessage, parseVerdictCommit, parseVerdictRef, validateVerdictArtifact, verdictRef } from './lib/review-verdict-artifact.mjs'
+import { changedPathsFromPullRequestFiles, classifyChangedPaths } from './lib/documents-only-change.mjs'
 
 export const REPO = 'u2giants/shared-db'
 // AUTHOR LANE CAP. Raised from three to five on 2026-08-25 and from five to
@@ -880,8 +881,29 @@ export function reviewRecordRefs(refs,matches=[]){
   return [...new Set([...refs,...matches.map((row)=>row.ref),...replacementVerdicts])]
 }
 
+// THE REVIEWER POOL IS NOT DRAWN FOR A DOCUMENTS-ONLY PULL REQUEST (#2102).
+//
+// The merge gate stops REQUIRING a reviewer for a documents-only change; this
+// stops one being DRAWN, which is what actually protects pool capacity. PR #2034
+// -- two documentation files -- spent two draws, two dead-reviewer replacements
+// and three review runs, and PR #2070 repeated it.
+//
+// Rulebook files are excluded from the exemption, and the classifier fails closed:
+// if the changed-file list cannot be read, the draw proceeds exactly as before.
+// A refusal here is never silent -- it names the rule and the classification.
+export function assertReviewerDrawIsWarranted(pr,io=githubIo){
+  if(typeof io?.pullRequestFiles!=='function')return null
+  let rows
+  try{rows=io.pullRequestFiles(pr)}catch{return null}
+  const verdict=classifyChangedPaths(changedPathsFromPullRequestFiles(rows))
+  if(!verdict.documentsOnly)return verdict
+  throw new LaneError(`PR #${pr} is a documents-only change (${verdict.reason}), so it does not draw from the database reviewer pool (#2102). Every automated check still runs and it still merges through the guarded merge lane; the merge gate does not require a reviewer verdict for it. Rulebook files -- AGENTS.md, skills, plan_*.md -- are never documents for this purpose and would have been drawn for.`)
+}
+
 export const githubIo = {
   requiresExactReviewHeadSha: true,
+  // The changed-file list a documents-only classification is made from (#2102).
+  pullRequestFiles(pr){return ghJson(['api','--paginate',`repos/${REPO}/pulls/${Number(pr)}/files?per_page=100`])},
   countLogicalReviewRequests:true,
   getRateLimit(){
     const rest=ghJson(['api','rate_limit'])?.resources?.core
@@ -4585,7 +4607,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.reviewerCapacity){console.log(JSON.stringify(reviewerCapacityReport(io,now),null,2));return 0}
     if(o.excludeReviewer){console.log(JSON.stringify(excludeReviewerForPr(o,io),null,2));return 0}
     if(o.reviewerPreflight){console.log(JSON.stringify(reviewerExecutionPreflight(o,io),null,2));return 0}
-    if(o.assignReviewer){console.log(JSON.stringify(assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
+    if(o.assignReviewer){assertReviewerDrawIsWarranted(o.pr,io);console.log(JSON.stringify(assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
     if(o.activateReviewCutover){console.log(JSON.stringify(activateReviewCutover(io),null,2));return 0}
     if (o.acquireExclusive) { console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha, versions:o.versions, versionPrMap:o.versionPrMap }, io), null, 2)); return 0 }
     if (o.releaseExclusive) { if (!o.ownerSha) throw new LaneError('--owner-sha is required for safe release'); releaseOwnedRef(EXCLUSIVE_REFS[o.releaseExclusive], o.ownerSha, io); return 0 }
