@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
-import { evaluateExactHeadApproval as evaluateRaw, gatherApprovalInput, parseAssignmentRef, ApprovalCheckError } from './check-exact-head-approval.mjs'
+import { evaluateExactHeadApproval as evaluateRaw, gatherApprovalInput, parseAssignmentRef, requireDurableVerdictInput, ApprovalCheckError } from './check-exact-head-approval.mjs'
+import { isValidatedVerdictArtifact } from './lib/review-verdict-artifact.mjs'
 
 const OLD = 'b494401028464ef8b2e67fe0b5b1836839b2be36'
 const NEW = '8d3c31accd5b21ea669e65f5ae53f5f95cc57337'
@@ -88,16 +90,16 @@ test('an inexact or missing head is refused rather than guessed', () => {
 // the same head, so both must count -- otherwise a merge whose review genuinely
 // happened is refused for lack of an assignment that is sitting right there.
 test('slot and replacement assignment refs are recognised as assignments at that head', () => {
-  assert.deepEqual(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW}`), { issue: 1769, pr: 1809, headSha: NEW })
-  assert.deepEqual(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW}-slot2`), { issue: 1769, pr: 1809, headSha: NEW })
+  assert.deepEqual(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW}`), { replacement: false, issue: 1769, pr: 1809, headSha: NEW, slot: 1, replacementSequence: null })
+  assert.deepEqual(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW}-slot2`), { replacement: false, issue: 1769, pr: 1809, headSha: NEW, slot: 2, replacementSequence: null })
   // The PRODUCTION shape. `manage-migration-author-lanes.mjs` writes the replacement
   // link as `<base>-<failedSequence>` -- dash, then digits -- and its own namespace
   // predicate requires exactly that. An earlier version of this test asserted a slash
   // form the writer never emits, so the parser passed its tests while discarding every
   // real replacement ref.
-  assert.deepEqual(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}-1`), { issue: 1769, pr: 1809, headSha: NEW })
-  assert.deepEqual(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}-slot2-1`), { issue: 1769, pr: 1809, headSha: NEW })
-  assert.deepEqual(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}/1`), { issue: 1769, pr: 1809, headSha: NEW })
+  assert.deepEqual(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}-1`), { replacement: true, issue: 1769, pr: 1809, headSha: NEW, slot: 1, replacementSequence: 1 })
+  assert.deepEqual(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}-slot2-1`), { replacement: true, issue: 1769, pr: 1809, headSha: NEW, slot: 2, replacementSequence: 1 })
+  assert.equal(parseAssignmentRef(`refs/db-review-replacements/1769-1809-${NEW}/1`), null)
   assert.equal(parseAssignmentRef('refs/heads/main'), null)
   assert.equal(parseAssignmentRef(`refs/db-review-assignments/1769-1809-${NEW.slice(0, 7)}`), null)
 })
@@ -148,6 +150,8 @@ function githubLike({ refs, comments = [], reviews = [] }) {
       const endpoint = args[args.length - 1]
       if (endpoint.includes('/git/matching-refs/db-review-assignments')) return refs.filter((r) => r.ref.includes('assignments'))
       if (endpoint.includes('/git/matching-refs/db-review-replacements')) return refs.filter((r) => r.ref.includes('replacements'))
+      if (endpoint.includes('/git/matching-refs/db-review-verdict')) return []
+      if (endpoint.includes('/git/matching-refs/db-review-returns')) return []
       if (/\/pulls\/\d+$/.test(endpoint)) return { head: { sha: NEW } }
       throw new Error(`unexpected endpoint ${endpoint}`)
     },
@@ -155,14 +159,14 @@ function githubLike({ refs, comments = [], reviews = [] }) {
   }
 }
 
-test('the adapter turns real GitHub payloads into an authorization the core accepts', () => {
+test('the adapter refuses a prose approval when the governed path wrote no verdict artifact', () => {
   const input = gatherApprovalInput({ PR_NUMBER: '1809' }, githubLike({
     refs: [{ ref: `refs/db-review-assignments/1769-1809-${NEW}`, object: { sha: 'e'.repeat(40), type: 'commit' } }],
     reviews: [{ state: 'APPROVED', commit_id: NEW, body: '' }],
   }))
   assert.equal(input.headSha, NEW)
   assert.equal(input.assignments.length, 1)
-  assert.equal(evaluateExactHeadApproval(input).approved, true)
+  assert.throws(()=>evaluateExactHeadApproval(input),/no durable APPROVE artifact/)
 })
 
 test('the adapter carries a refusal and a stale-head assignment through unflattened', () => {
@@ -175,7 +179,11 @@ test('the adapter carries a refusal and a stale-head assignment through unflatte
     refs: [{ ref: `refs/db-review-replacements/1769-1809-${NEW}/1`, object: {} }],
     comments: [{ body: `REVISE ${NEW} -- the reconciler still refuses this manifest` }],
   }))
-  assert.throws(() => evaluateExactHeadApproval(refused), /unanswered reviewer refusal/)
+  assert.throws(() => evaluateExactHeadApproval(refused), /no reviewer was ever assigned head/)
+})
+
+test('raw verdict-shaped objects cannot cross the approval trust boundary',()=>{
+  assert.throws(()=>evaluateRaw({pr:1809,headSha:NEW,assignments:[{pr:1809,headSha:NEW,slot:1,sha:'a'.repeat(40)}],verdicts:[{pr:1809,head_sha:NEW,verdict:'APPROVE',ref:'fake',assignment_sha:'a'.repeat(40)}]}),/without artifact validation/)
 })
 
 test('the adapter refuses rather than guesses when the PR number is absent', () => {
@@ -296,4 +304,334 @@ test('REQUEST CHANGES with a space is a refusal, like its underscore form', () =
   for (const body of [`VERDICT: REQUEST CHANGES ${NEW}`, `VERDICT: REQUEST_CHANGES ${NEW}`]) {
     assert.throws(() => evaluateExactHeadApproval({ ...pinned, evidence: [{ body }] }), /unanswered reviewer refusal/, body)
   }
+})
+
+// ISSUE #2075. `evaluateExactHeadApproval` still contains a comment-text branch,
+// used as a predicate library by the tests above and by callers with no access to
+// the durable refs. In the MERGE GATE that branch must be unreachable: production
+// input always carries the durable verdict artifacts, and if it ever stopped, the
+// gate would silently start authorizing merges from comment prose. So the
+// boundary refuses rather than falling through.
+test('issue 2075: the merge gate refuses input that carries no durable verdict list', () => {
+  const input = { pr: 2080, headSha: 'a'.repeat(40), evidence: [], assignments: [] }
+  assert.throws(() => requireDurableVerdictInput(input), /never authorized by comment text/)
+  assert.throws(() => requireDurableVerdictInput({ ...input, verdicts: null }), /never authorized by comment text/)
+  assert.deepEqual(requireDurableVerdictInput({ ...input, verdicts: [] }).verdicts, [])
+})
+
+// THE MERGE GATE MUST SEE A RETURNED SLOT.
+//
+// `--exclude-reviewer` hands a slot back by compare-and-clearing its assignment
+// ref and writing a durable return record in its place. This gate listed only the
+// live assignment namespaces, so a returned slot did not read as unapproved -- it
+// read as a slot that had never existed. Slot 1 approved, slot 2 returned and
+// never re-drawn, and the gate authorized the merge: bytes merged over a slot no
+// reviewer ever answered. Before returns existed the ref stayed live and the gate
+// failed closed, so clearing the ref is what turned this fail-open on, and the
+// rule was enforced only by the PREVIEW gate, which runs after the merge.
+//
+// Driven through the ADAPTER with the ref, commit and comment shapes GitHub
+// actually returns, because the gap was in what the adapter never read.
+const RETURN_HEAD = 'a'.repeat(40)
+function returnedSlotGithub({ redrawSequence = null } = {}) {
+  const issue = 1824, pr = 1931
+  const assignment1 = '1'.repeat(40), assignment2 = '2'.repeat(40), redraw = '7'.repeat(40)
+  const findingsBody = 'review findings', findingsRef = `https://github.com/u2giants/shared-db/pull/${pr}#issuecomment-1`
+  const digest = createHash('sha256').update(findingsBody).digest('hex')
+  const commits = new Map(), assignmentRefs = [], verdictRefs = []
+  const cursor = (sha, sequence, slot, reviewer) => commits.set(sha, { message: `db-coordination reviewer-cursor sequence=${sequence} reviewer=${reviewer} issue=${issue} pr=${pr} head=${RETURN_HEAD} slot=${slot}` })
+  const approve = (sha, slot, assignmentSha, reviewer) => {
+    const record = { verdict: 'APPROVE', head_sha: RETURN_HEAD, issue, pr, slot, reviewer, assignment_sha: assignmentSha, findings_digest: digest, findings_ref: findingsRef }
+    commits.set(sha, { message: `db-review-verdict ${JSON.stringify(record)}`, parents: [{ sha: assignmentSha }] })
+    verdictRefs.push({ ref: `refs/db-review-verdicts/${issue}-${pr}-${RETURN_HEAD}${slot === 1 ? '' : `-slot${slot}`}`, object: { sha } })
+  }
+  cursor(assignment1, 1, 1, 'kimi-k3')
+  assignmentRefs.push({ ref: `refs/db-review-assignments/${issue}-${pr}-${RETURN_HEAD}`, object: { sha: assignment1 } })
+  approve('4'.repeat(40), 1, assignment1, 'kimi-k3')
+  // Slot 2 was assigned, then its reviewer was excluded: the ref is gone and only
+  // the return record remains. That record is the whole difference between "this
+  // slot is unapproved" and "this slot was never there".
+  cursor(assignment2, 2, 2, 'grok-4.6')
+  commits.set('8'.repeat(40), { message: `db-coordination reviewer-return reviewer=grok-4.6 issue=${issue} pr=${pr} head=${RETURN_HEAD} slot=2 assignment=${assignment2} sequence=2 reason=independence-conflict`, parents: [{ sha: assignment2 }] })
+  const returnRefs = [{ ref: `refs/db-review-returns/${issue}-${pr}-${RETURN_HEAD}-slot2-${assignment2}`, object: { sha: '8'.repeat(40) } }]
+  // A re-drawn slot 2, with its own APPROVE. `redrawSequence` is what decides
+  // whether it answers the return or is a record the return already superseded.
+  if (redrawSequence !== null) {
+    cursor(redraw, redrawSequence, 2, 'kimi-k3')
+    assignmentRefs.push({ ref: `refs/db-review-assignments/${issue}-${pr}-${RETURN_HEAD}-slot2`, object: { sha: redraw } })
+    approve('5'.repeat(40), 2, redraw, 'kimi-k3')
+  }
+  return {
+    json: (args) => {
+      const endpoint = args[args.length - 1]
+      if (endpoint.includes('/git/matching-refs/db-review-assignments')) return assignmentRefs
+      if (endpoint.includes('/git/matching-refs/db-review-replacements')) return []
+      if (endpoint.includes('/git/matching-refs/db-review-returns')) return returnRefs
+      if (endpoint.includes('/git/matching-refs/db-review-verdicts')) return verdictRefs
+      if (endpoint.includes('/git/matching-refs/db-review-verdict-replacements')) return []
+      if (/\/git\/commits\/[0-9a-f]{40}$/.test(endpoint)) return commits.get(endpoint.split('/').pop())
+      if (endpoint.includes('/issues/comments/')) return { body: findingsBody }
+      if (/\/pulls\/\d+$/.test(endpoint)) return { head: { sha: RETURN_HEAD } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    },
+    pages: () => [],
+  }
+}
+
+test('the merge gate refuses a head whose slot was durably returned and never re-drawn', () => {
+  const input = gatherApprovalInput({ PR_NUMBER: '1931' }, returnedSlotGithub())
+  assert.equal(input.returns.length, 1)
+  assert.equal(input.returns[0].slot, 2)
+  assert.equal(input.returns[0].sequence, 2)
+  assert.throws(() => evaluateExactHeadApproval(input), (error) => error instanceof ApprovalCheckError && /review slot 2 was durably returned/.test(error.message))
+})
+
+// "Newer" is the GLOBAL reviewer cursor sequence, spent once by every assignment
+// and every replacement out of the same counter -- not the replacement namespace
+// tail, which is not a clock. A re-draw that spent a later sequence answers the
+// return; a record the return had already superseded does not, even with its own
+// APPROVE sitting right there.
+test('a returned slot is answered only by an assignment drawn after the returned one', () => {
+  assert.equal(evaluateExactHeadApproval(gatherApprovalInput({ PR_NUMBER: '1931' }, returnedSlotGithub({ redrawSequence: 9 }))).approved, true)
+  assert.throws(() => evaluateExactHeadApproval(gatherApprovalInput({ PR_NUMBER: '1931' }, returnedSlotGithub({ redrawSequence: 1 }))), /review slot 2 was durably returned/)
+})
+
+// The ref name only SELECTS the record; the commit is what is trusted, and it is
+// checked back against the name it is stored under. A return record filed under a
+// name that does not describe it decides which slot is charged, so a disagreement
+// stops the gate rather than being resolved in either direction.
+test('a return record whose commit disagrees with its ref name stops the gate', () => {
+  const base = returnedSlotGithub()
+  const io = { ...base, json: (args) => {
+    const endpoint = args[args.length - 1]
+    if (endpoint.includes('/git/matching-refs/db-review-returns')) return [{ ref: `refs/db-review-returns/1824-1931-${RETURN_HEAD}-${'2'.repeat(40)}`, object: { sha: '8'.repeat(40) } }]
+    return base.json(args)
+  } }
+  assert.throws(() => gatherApprovalInput({ PR_NUMBER: '1931' }, io), /does not match its ref identity/)
+})
+
+// THE NON-READING-REVIEWER RULE AT THE GATE THAT AUTHORIZES MERGES (#2079).
+//
+// The write-side guard (`recordReviewVerdict`) binds only FUTURE verdicts, and the
+// read-side rule (`readReviewVerdicts`) is called only by the PREVIEW gate, which
+// under merge-first runs AFTER the merge. This gate is the required context the
+// guarded merge workflow waits on, so until it applied the rule, a legacy APPROVE
+// from a reviewer that never opened the diff still authorized a merge, and a legacy
+// REVISE from that same reviewer blocked the head permanently -- even after the
+// sanctioned --replace-failed-reviewer route recorded a fresh reading APPROVE.
+// Both directions are asserted, plus a scope control proving a healthy reviewer's
+// verdict still counts, so the rule cannot be satisfied by refusing everything.
+const NONREAD_HEAD = 'c'.repeat(40)
+function nonReadingVerdictGithub({ reviewer = 'deepseek-chat', verdict = 'APPROVE', replacement = null } = {}) {
+  const issue = 1987, pr = 1989
+  const assignment = '1'.repeat(40), replacementAssignment = '3'.repeat(40)
+  const findingsBody = 'review findings', findingsRef = `https://github.com/u2giants/shared-db/pull/${pr}#issuecomment-1`
+  const digest = createHash('sha256').update(findingsBody).digest('hex')
+  const commits = new Map(), assignmentRefs = [], verdictRefs = [], replacementRefs = [], verdictReplacementRefs = []
+  const cursor = (sha, sequence, who) => commits.set(sha, { message: `db-coordination reviewer-cursor sequence=${sequence} reviewer=${who} issue=${issue} pr=${pr} head=${NONREAD_HEAD} slot=1` })
+  const record = (sha, who, what, assignmentSha, refs, ref) => {
+    const row = { verdict: what, head_sha: NONREAD_HEAD, issue, pr, slot: 1, reviewer: who, assignment_sha: assignmentSha, findings_digest: digest, findings_ref: findingsRef }
+    commits.set(sha, { message: `db-review-verdict ${JSON.stringify(row)}`, parents: [{ sha: assignmentSha }] })
+    refs.push({ ref, object: { sha } })
+  }
+  cursor(assignment, 1, reviewer)
+  assignmentRefs.push({ ref: `refs/db-review-assignments/${issue}-${pr}-${NONREAD_HEAD}`, object: { sha: assignment } })
+  record('4'.repeat(40), reviewer, verdict, assignment, verdictRefs, `refs/db-review-verdicts/${issue}-${pr}-${NONREAD_HEAD}`)
+  // The recovery route: a reviewer that reads the code, drawn at the SAME head
+  // under the replacement namespace, recording its own APPROVE.
+  if (replacement) {
+    cursor(replacementAssignment, 2, replacement)
+    replacementRefs.push({ ref: `refs/db-review-replacements/${issue}-${pr}-${NONREAD_HEAD}-1`, object: { sha: replacementAssignment } })
+    record('5'.repeat(40), replacement, 'APPROVE', replacementAssignment, verdictReplacementRefs, `refs/db-review-verdict-replacements/${issue}-${pr}-${NONREAD_HEAD}-1`)
+  }
+  return {
+    json: (args) => {
+      const endpoint = args[args.length - 1]
+      if (endpoint.includes('/git/matching-refs/db-review-assignments')) return assignmentRefs
+      if (endpoint.includes('/git/matching-refs/db-review-replacements')) return replacementRefs
+      if (endpoint.includes('/git/matching-refs/db-review-returns')) return []
+      if (endpoint.includes('/git/matching-refs/db-review-verdict-replacements')) return verdictReplacementRefs
+      if (endpoint.includes('/git/matching-refs/db-review-verdicts')) return verdictRefs
+      if (/\/git\/commits\/[0-9a-f]{40}$/.test(endpoint)) return commits.get(endpoint.split('/').pop())
+      if (endpoint.includes('/issues/comments/')) return { body: findingsBody }
+      if (/\/pulls\/\d+$/.test(endpoint)) return { head: { sha: NONREAD_HEAD } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    },
+    pages: () => [],
+  }
+}
+
+test('the merge gate does not let an APPROVE from a reviewer that cannot read the repository authorize a merge (#2079)', () => {
+  const input = gatherApprovalInput({ PR_NUMBER: '1989' }, nonReadingVerdictGithub({ verdict: 'APPROVE' }))
+  assert.equal(input.verdicts.length, 1)
+  assert.throws(() => evaluateExactHeadApproval(input), (error) => error instanceof ApprovalCheckError
+    && /no durable APPROVE artifact/.test(error.message)
+    && /DISREGARDED because their reviewer cannot read the repository/.test(error.message)
+    && /deepseek-chat/.test(error.message))
+})
+
+test('the merge gate does not let a REVISE from a reviewer that cannot read the repository block a head forever (#2079)', () => {
+  // Alone it is absent, not a refusal: the gate must refuse for the ordinary
+  // "no durable APPROVE" reason, which --replace-failed-reviewer can answer.
+  const alone = gatherApprovalInput({ PR_NUMBER: '1989' }, nonReadingVerdictGithub({ verdict: 'REVISE' }))
+  assert.throws(() => evaluateExactHeadApproval(alone), (error) => error instanceof ApprovalCheckError
+    && /no durable APPROVE artifact/.test(error.message)
+    && !/carries a durable reviewer refusal/.test(error.message))
+  // And once the sanctioned recovery route records a reading reviewer's APPROVE at
+  // the same head, the disregarded REVISE must not still block the merge.
+  const recovered = gatherApprovalInput({ PR_NUMBER: '1989' }, nonReadingVerdictGithub({ verdict: 'REVISE', replacement: 'kimi-k3' }))
+  assert.equal(evaluateExactHeadApproval(recovered).approved, true)
+})
+
+test('a reviewer that does read the repository still authorizes and still blocks (#2079)', () => {
+  assert.equal(evaluateExactHeadApproval(gatherApprovalInput({ PR_NUMBER: '1989' }, nonReadingVerdictGithub({ reviewer: 'kimi-k3', verdict: 'APPROVE' }))).approved, true)
+  assert.throws(() => evaluateExactHeadApproval(gatherApprovalInput({ PR_NUMBER: '1989' }, nonReadingVerdictGithub({ reviewer: 'kimi-k3', verdict: 'REVISE' }))), /carries a durable reviewer refusal/)
+})
+
+// THE DOCUMENTS-ONLY LANE AT THE GATE THAT AUTHORIZES MERGES (#2102).
+//
+// A documents-only pull request draws no database reviewer, so this gate must not
+// demand an assignment and an APPROVE that nothing is allowed to produce. Every
+// other automated check still runs and the guarded merge lane is unchanged.
+test('a documents-only pull request authorizes with no reviewer assignment at all', () => {
+  const result = evaluateExactHeadApproval({
+    pr: 2102, headSha: NEW, assignments: [], verdicts: [],
+    changedFiles: ['HANDOFF.d/2026-09-02T0000Z-note.md', 'docs/verification/run.md'],
+  })
+  assert.equal(result.approved, true)
+  assert.equal(result.documents_only, true)
+  assert.equal(result.assignments, 0)
+})
+
+// The exclusions are the safety of the whole rule. Each of these keeps the full
+// treatment, so with no assignment the gate must still refuse.
+for (const path of ['AGENTS.md', '.claude/skills/shared-db-change/SKILL.md', 'skills/claude/shared-db-orchestrator/SKILL.md', 'plan_reviewer_lease_capacity_truth.md']) {
+  test(`a rulebook file is not a document and still needs a reviewer: ${path}`, () => {
+    assert.throws(() => evaluateExactHeadApproval({
+      pr: 2102, headSha: NEW, assignments: [], verdicts: [], changedFiles: ['docs/notes.md', path],
+    }), /no reviewer was ever assigned head/)
+  })
+}
+
+for (const path of ['supabase/migrations/20260902120000_add_thing.sql', 'scripts/manage-migration-author-lanes.mjs', '.github/workflows/guarded-migration-merge.yml', 'scripts/check-exact-head-approval.test.mjs']) {
+  test(`one non-document file removes the exemption: ${path}`, () => {
+    assert.throws(() => evaluateExactHeadApproval({
+      pr: 2102, headSha: NEW, assignments: [], verdicts: [], changedFiles: ['docs/notes.md', path],
+    }), /no reviewer was ever assigned head/)
+  })
+}
+
+test('an absent or unreadable changed-file list never grants the exemption', () => {
+  assert.throws(() => evaluateExactHeadApproval({ pr: 2102, headSha: NEW, assignments: [], verdicts: [] }), /no reviewer was ever assigned head/)
+  assert.throws(() => evaluateExactHeadApproval({ pr: 2102, headSha: NEW, assignments: [], verdicts: [], changedFiles: [] }), /no reviewer was ever assigned head/)
+  assert.throws(() => evaluateExactHeadApproval({ pr: 2102, headSha: NEW, assignments: [], verdicts: [], changedFiles: null }), /no reviewer was ever assigned head/)
+})
+
+// THE DOCUMENTS-ONLY LANE THROUGH THE ADAPTER, NOT ONLY THROUGH THE CORE (#2102).
+//
+// The exemption is only real if `gatherApprovalInput` actually reads
+// `pulls/{n}/files` and hands the classifier the COMPLETE list. A review of this
+// change found that nothing asserted the `changedFiles` field, nothing mocked the
+// files endpoint, and no rename row ever reached the classifier -- so deleting the
+// adapter's changed-file read would have left a documents-only pull request
+// refused by this gate while the draw side refused to draw a reviewer for it:
+// permanently stuck, with CI green. These tests drive the real adapter.
+const DOC_HEAD = 'd'.repeat(40)
+const DOC_ISSUE = 2102, DOC_PR = 2112
+function documentsOnlyGithub({ files = [], recorded = null } = {}) {
+  const assignmentSha = '7'.repeat(40), verdictSha = '9'.repeat(40)
+  const findingsBody = 'documents-only review findings'
+  const findingsRef = `https://github.com/u2giants/shared-db/pull/${DOC_PR}#issuecomment-9`
+  const digest = createHash('sha256').update(findingsBody).digest('hex')
+  const commits = new Map(), assignmentRefs = [], verdictRefs = []
+  // A reviewer really was drawn at these exact bytes and really did answer. The
+  // artifact is built the way production builds one -- an assignment cursor
+  // commit, a verdict commit parented on it, and durable findings whose digest
+  // matches -- so `gatherApprovalInput` validates it and stamps it. Handing the
+  // core a hand-written `{validated: true}` object instead proves nothing: that
+  // field is not what `isValidatedVerdictArtifact` reads, so such an object is
+  // always unvalidated and never reaches the refusal branch at all.
+  if (recorded) {
+    commits.set(assignmentSha, { message: `db-coordination reviewer-cursor sequence=1 reviewer=${recorded.reviewer} issue=${DOC_ISSUE} pr=${DOC_PR} head=${DOC_HEAD} slot=1` })
+    assignmentRefs.push({ ref: `refs/db-review-assignments/${DOC_ISSUE}-${DOC_PR}-${DOC_HEAD}`, object: { sha: assignmentSha } })
+    const row = { verdict: recorded.verdict, head_sha: DOC_HEAD, issue: DOC_ISSUE, pr: DOC_PR, slot: 1, reviewer: recorded.reviewer, assignment_sha: assignmentSha, findings_digest: digest, findings_ref: findingsRef }
+    commits.set(verdictSha, { message: `db-review-verdict ${JSON.stringify(row)}`, parents: [{ sha: assignmentSha }] })
+    verdictRefs.push({ ref: `refs/db-review-verdicts/${DOC_ISSUE}-${DOC_PR}-${DOC_HEAD}`, object: { sha: verdictSha } })
+  }
+  return {
+    json: (args) => {
+      const endpoint = args[args.length - 1]
+      if (endpoint.includes('/git/matching-refs/db-review-assignments')) return assignmentRefs
+      if (endpoint.includes('/git/matching-refs/db-review-replacements')) return []
+      if (endpoint.includes('/git/matching-refs/db-review-returns')) return []
+      if (endpoint.includes('/git/matching-refs/db-review-verdict-replacements')) return []
+      if (endpoint.includes('/git/matching-refs/db-review-verdicts')) return verdictRefs
+      if (/\/git\/commits\/[0-9a-f]{40}$/.test(endpoint)) return commits.get(endpoint.split('/').pop())
+      if (endpoint.includes('/issues/comments/')) return { body: findingsBody }
+      if (/\/pulls\/\d+$/.test(endpoint)) return { head: { sha: DOC_HEAD } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    },
+    // The files endpoint is a DISTINCT page read from the comment and review
+    // reads. The older helper in this file returned issue comments for any
+    // non-review pages URL, files included, which is why an adapter that never
+    // read files could still look correct here.
+    pages: (endpoint) => (/\/pulls\/\d+\/files/.test(endpoint) ? files : []),
+  }
+}
+
+test('the adapter reads the pull request changed-file list and classifies it (#2102)', () => {
+  const input = gatherApprovalInput({ PR_NUMBER: String(DOC_PR) }, documentsOnlyGithub({
+    files: [{ filename: 'docs/notes.md' }, { filename: 'HANDOFF.d/2026-09-02T0000Z-note.md' }],
+  }))
+  assert.deepEqual(input.changedFiles, ['docs/notes.md', 'HANDOFF.d/2026-09-02T0000Z-note.md'])
+  const result = evaluateExactHeadApproval(input)
+  assert.equal(result.approved, true)
+  assert.equal(result.documents_only, true)
+  assert.equal(result.assignments, 0)
+})
+
+// A migration renamed to a `.md` is a migration change wearing a document's name.
+// GitHub's rename row carries `previous_filename`, and the adapter must pass it
+// through or the exemption is handed to a SQL change.
+test('the adapter carries a rename previous_filename into the classification (#2102)', () => {
+  const renamed = gatherApprovalInput({ PR_NUMBER: String(DOC_PR) }, documentsOnlyGithub({
+    files: [{ filename: 'docs/moved.md', previous_filename: 'supabase/migrations/20260902120000_add_thing.sql' }],
+  }))
+  assert.deepEqual(renamed.changedFiles, ['docs/moved.md', 'supabase/migrations/20260902120000_add_thing.sql'])
+  assert.throws(() => evaluateExactHeadApproval(renamed), /no reviewer was ever assigned head/)
+})
+
+// Exempt from DRAWING a reviewer is not exempt from ANSWERING one. If a review
+// really happened at these bytes and refused them, the refusal still stands --
+// and the assertion names ONLY the refusal, so the unvalidated-input throw cannot
+// stand in for it.
+test('a recorded refusal still blocks a documents-only head (#2102)', () => {
+  const input = gatherApprovalInput({ PR_NUMBER: String(DOC_PR) }, documentsOnlyGithub({
+    files: [{ filename: 'docs/notes.md' }], recorded: { reviewer: 'grok-4.6', verdict: 'REVISE' },
+  }))
+  assert.equal(input.verdicts.length, 1)
+  assert.equal(isValidatedVerdictArtifact(input.verdicts[0]), true)
+  assert.throws(() => evaluateExactHeadApproval(input), (error) => error instanceof ApprovalCheckError
+    && /carries a durable reviewer refusal/.test(error.message)
+    && /exempt from DRAWING a reviewer/.test(error.message)
+    && !/without artifact validation/.test(error.message))
+})
+
+// The scope control: the same lane with that reviewer's APPROVE is still exempt
+// and still authorizes, so the refusal rule cannot be satisfied by refusing
+// everything that carries a verdict.
+test('a recorded APPROVE does not disturb the documents-only lane (#2102)', () => {
+  const input = gatherApprovalInput({ PR_NUMBER: String(DOC_PR) }, documentsOnlyGithub({
+    files: [{ filename: 'docs/notes.md' }], recorded: { reviewer: 'grok-4.6', verdict: 'APPROVE' },
+  }))
+  assert.equal(evaluateExactHeadApproval(input).documents_only, true)
+})
+
+// And a raw verdict-shaped object still cannot cross the boundary on this lane
+// either: unvalidated input costs a review rather than granting an exemption.
+test('an unvalidated verdict object cannot cross the documents-only boundary (#2102)', () => {
+  assert.throws(() => evaluateRaw({
+    pr: DOC_PR, headSha: DOC_HEAD, assignments: [], changedFiles: ['docs/notes.md'],
+    verdicts: [{ pr: DOC_PR, head_sha: DOC_HEAD, verdict: 'REVISE', ref: 'fake', reviewer: 'grok-4.6', validated: true }],
+  }), /without artifact validation/)
 })

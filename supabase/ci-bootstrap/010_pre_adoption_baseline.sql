@@ -84,6 +84,56 @@ create schema if not exists api;
 -- The DAM search migrations need pgvector; the CLI's local stack does not enable it.
 create extension if not exists vector with schema extensions;
 
+-- Issue #1258 replay exception. This table IS authored by historical migrations,
+-- but both of those migrations correctly refuse when the real FR/FK taxonomy
+-- rows are absent. Because each file is atomic, that refusal rolls its earlier
+-- CREATE TABLE back too, leaving the from-empty catalogue unable to test the
+-- durable ruling contract. Preserve only the deployed SCHEMA here; never seed
+-- the real ruling rows or weaken the historical refusal.
+create table if not exists core.taxonomy_owner_ruling (
+  id uuid primary key default gen_random_uuid(),
+  entity_schema text not null default 'core',
+  entity_table text not null,
+  entity_id uuid,
+  entity_code text,
+  entity_name text,
+  ruling text not null,
+  ruled_by text not null,
+  ruled_at timestamptz not null,
+  ruling_evidence text not null,
+  action_taken text not null,
+  open_questions text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint taxonomy_owner_ruling_entity_table_not_blank check (length(btrim(entity_table)) > 0),
+  constraint taxonomy_owner_ruling_ruling_not_blank check (length(btrim(ruling)) > 0),
+  constraint taxonomy_owner_ruling_ruled_by_not_blank check (length(btrim(ruled_by)) > 0),
+  constraint taxonomy_owner_ruling_evidence_not_blank check (length(btrim(ruling_evidence)) > 0),
+  constraint taxonomy_owner_ruling_action_not_blank check (length(btrim(action_taken)) > 0),
+  constraint taxonomy_owner_ruling_has_a_subject check (
+    entity_id is not null
+    or (entity_code is not null and length(btrim(entity_code)) > 0)
+    or (entity_name is not null and length(btrim(entity_name)) > 0)
+  )
+);
+
+create index if not exists taxonomy_owner_ruling_entity_idx
+  on core.taxonomy_owner_ruling (entity_schema, entity_table, entity_id);
+create index if not exists taxonomy_owner_ruling_ruled_at_idx
+  on core.taxonomy_owner_ruling (ruled_at desc);
+drop trigger if exists set_updated_at on core.taxonomy_owner_ruling;
+create trigger set_updated_at before update on core.taxonomy_owner_ruling
+for each row execute function app.set_updated_at();
+
+alter table core.taxonomy_owner_ruling enable row level security;
+drop policy if exists shared_read on core.taxonomy_owner_ruling;
+create policy shared_read on core.taxonomy_owner_ruling
+for select to authenticated
+using (app.has_any_role(array['administrator','sales','licensing','designer','viewer','vendor']::app.app_role[]));
+revoke all on core.taxonomy_owner_ruling from public, anon, authenticated;
+grant select on core.taxonomy_owner_ruling to authenticated;
+grant all on core.taxonomy_owner_ruling to service_role;
+
 do $bootstrap$ begin
   CREATE TYPE public.app_name AS ENUM ('popdam', 'styleguides');
 exception when duplicate_object then null; end $bootstrap$;
