@@ -1620,9 +1620,20 @@ export function nonReadingReviewerReplacementCommand({issue,pr,headSha,slot=1},f
 // permanent -- the artifact is immutable and create-only, so the slot could
 // never be satisfied and the pull request would be stuck forever, trading one
 // deadlock for another. Treated as absent, the slot simply has no verdict: the
-// merge gate refuses for the ordinary "no durable APPROVE" reason, and
+// gate refuses for the ordinary "no durable APPROVE" reason, and
 // --replace-failed-reviewer can draw a reviewer that reads the code and finish
 // the review. Absence is recoverable; a permanent refusal is not.
+//
+// THAT IS ONLY TRUE BECAUSE THE MERGE GATE APPLIES THE SAME RULE. This function
+// is read by the PREVIEW gate, which under merge-first runs AFTER the merge. An
+// earlier version of this comment claimed the merge gate refuses for the ordinary
+// "no durable APPROVE" reason; it did not, because it applied no such filter at
+// all -- a disregarded APPROVE still authorized there, and a disregarded REVISE
+// still blocked the head permanently, which is exactly the deadlock this
+// treat-as-absent choice exists to avoid. `evaluateExactHeadApproval` in
+// `check-exact-head-approval.mjs` now disregards both directions the same way,
+// so the two gates agree. Do not remove it there on the assumption that this
+// function covers it.
 //
 // It is not silently dropped: `includeDisregarded` returns the rows with
 // `disregarded:true` so callers can SAY that an artifact exists and why it does

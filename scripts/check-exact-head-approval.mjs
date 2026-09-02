@@ -49,7 +49,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { REPO, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseAssignmentRef, parseReviewCursor, parseReviewReturn, reviewReturnRef } from './manage-migration-author-lanes.mjs'
+import { REPO, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseAssignmentRef, parseReviewCursor, parseReviewReturn, reviewReturnRef, reviewerReadsRepository } from './manage-migration-author-lanes.mjs'
 import { approvalLine, evidenceTiedToHead, refusalLine, trustedVerdictEvidence, unambiguouslyTiedToHead } from './lib/review-verdict.mjs'
 import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, isValidatedVerdictArtifact, parseVerdictCommit, parseVerdictRef, validateVerdictArtifact } from './lib/review-verdict-artifact.mjs'
 
@@ -179,14 +179,29 @@ export function evaluateExactHeadApproval(input) {
   if (!pinned.length) throw new ApprovalCheckError(`every reviewer assignment pinned to head ${headSha} was durably returned; a returned slot is an unapproved slot`)
 
   if (Object.prototype.hasOwnProperty.call(input, 'verdicts')) {
-    const exact = (verdicts ?? []).filter((row) => Number(row.pr) === Number(pr) && String(row.head_sha).toLowerCase() === String(headSha).toLowerCase())
-    if (exact.some((row) => !isValidatedVerdictArtifact(row))) throw new ApprovalCheckError('durable verdict input crossed the approval boundary without artifact validation')
-    if (new Set(exact.map((row) => row.ref)).size !== exact.length) throw new ApprovalCheckError('duplicate durable verdict refs cannot be counted')
-    if (exact.some((row) => row.verdict !== 'APPROVE')) throw new ApprovalCheckError(`head ${headSha} carries a durable reviewer refusal; answer it with a new commit and a fresh exact-head review`)
+    const all = (verdicts ?? []).filter((row) => Number(row.pr) === Number(pr) && String(row.head_sha).toLowerCase() === String(headSha).toLowerCase())
+    if (all.some((row) => !isValidatedVerdictArtifact(row))) throw new ApprovalCheckError('durable verdict input crossed the approval boundary without artifact validation')
+    if (new Set(all.map((row) => row.ref)).size !== all.length) throw new ApprovalCheckError('duplicate durable verdict refs cannot be counted')
+    // THE NON-READING-REVIEWER RULE, ENFORCED AT THE GATE THAT AUTHORIZES MERGES (#2079).
+    //
+    // The same rule `readReviewVerdicts` applies on the write/preview side, applied
+    // here because THIS is the required context the guarded merge workflow waits on
+    // (`.github/workflows/guarded-migration-merge.yml`), and under merge-first the
+    // preview gate runs after the merge. A rule enforced only there is not enforced
+    // at merge time: a legacy APPROVE from a reviewer that never opened the diff
+    // would still authorize, and a legacy REVISE from that same reviewer would block
+    // the head forever even after the sanctioned replacement route records a fresh
+    // APPROVE. Both directions are disregarded, identically. Every row here is a
+    // validated artifact, so `reviewer` is present and was checked against the
+    // assignment; an unknown name fails closed to "cannot read".
+    const disregarded = all.filter((row) => !reviewerReadsRepository(row.reviewer))
+    const exact = all.filter((row) => reviewerReadsRepository(row.reviewer))
+    const disregardedNote = disregarded.length ? ` (${disregarded.length} durable verdict artifact(s) at this head are DISREGARDED because their reviewer cannot read the repository: ${disregarded.map((row) => `${row.ref} by ${row.reviewer}`).join(', ')}. Re-review the slot with --replace-failed-reviewer --failure-code reviewer_cannot_read_repository)` : ''
+    if (exact.some((row) => row.verdict !== 'APPROVE')) throw new ApprovalCheckError(`head ${headSha} carries a durable reviewer refusal; answer it with a new commit and a fresh exact-head review${disregardedNote}`)
     const approvals = exact.filter((row) => row.verdict === 'APPROVE')
-    if (!approvals.length) throw new ApprovalCheckError(`head ${headSha} has no durable APPROVE artifact; a review that wrote no artifact never authorizes a merge`)
+    if (!approvals.length) throw new ApprovalCheckError(`head ${headSha} has no durable APPROVE artifact; a review that wrote no artifact never authorizes a merge${disregardedNote}`)
     const latestBySlot = liveBySlot
-    for (const assignment of latestBySlot.values()) if (!approvals.some((row) => row.assignment_sha === assignment.sha)) throw new ApprovalCheckError(`review slot ${assignment.slot} has no durable APPROVE for its latest exact-head assignment`)
+    for (const assignment of latestBySlot.values()) if (!approvals.some((row) => row.assignment_sha === assignment.sha)) throw new ApprovalCheckError(`review slot ${assignment.slot} has no durable APPROVE for its latest exact-head assignment${disregardedNote}`)
     return { approved: true, head_sha: headSha, pr: Number(pr), assignments: latestBySlot.size, approvals: new Set(approvals.map((row) => row.ref)).size }
   }
 

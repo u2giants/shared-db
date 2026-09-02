@@ -4285,7 +4285,7 @@ function nonReadingVerdictFixture(verdict='APPROVE',reviewer='deepseek-chat'){
   return {issue,pr,headSha,io,verdictSha}
 }
 
-test('an already-recorded APPROVE from a reviewer that cannot read the repository does not satisfy the merge gate (#2079)',()=>{
+test('an already-recorded APPROVE from a reviewer that cannot read the repository does not satisfy the preview gate (#2079)',()=>{
   const fixture=nonReadingVerdictFixture('APPROVE')
   // Read as absent, not as evidence.
   assert.deepEqual(readReviewVerdicts(fixture.issue,fixture.pr,fixture.headSha,fixture.io),[])
