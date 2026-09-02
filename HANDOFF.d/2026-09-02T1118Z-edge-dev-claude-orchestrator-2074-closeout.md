@@ -45,7 +45,7 @@ recommendation; most can be answered with a single word.
 3. **Retailer master codes sitting in a public repository.** This repository is
    public and Albert ruled on 2026-09-01 that it stays public. Three documents
    contain real ERP customer master codes — retailer names paired with their codes
-   and cities, including the documented `AMA030 = Amazon` ruling:
+   and cities, including the documented Amazon 1P code ruling:
    - `docs/coldlion-customer-dedupe-review.md`
    - `docs/app-migration-notes/coldlion-customers-vendors-20260715.md`
    - `docs/dam-customer-reconciliation.md`
@@ -330,7 +330,7 @@ This is the expensive part. Do not repeat any of it.
    synthetic one, adding the same pointer sentence used in PR #2034 — that the real
    values live in the ColdLion question register, not in this public repository.
    Leave `BRT10DYWP01` in `docs/owner-rulings.md` alone.
-   *You'll know it worked when `git grep -i "AMA030" origin/main` returns nothing
+   *You'll know it worked when no real customer master code remains on `origin/main`
    and the decision text still reads correctly.*
 
 5. **If Albert answers "change it" to decision 2:** write the documentation-review
