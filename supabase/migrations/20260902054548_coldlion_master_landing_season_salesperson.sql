@@ -87,7 +87,7 @@ create table if not exists coldlion.season (
   first_seen_at  timestamptz not null,
   last_seen_at   timestamptz not null,
   constraint coldlion_season_pkey
-    primary key (company_code, season_code),
+    primary key (company_code, division_code, season_code),
   constraint coldlion_season_source_hash_chk
     check (source_hash ~ '^[0-9a-f]{64}$'),
   constraint coldlion_season_seen_order_chk
@@ -106,9 +106,6 @@ comment on column coldlion.season.last_seen_at is
   'When this natural key was last returned by ColdLion. This is a sighting, not a lifecycle flag: ColdLion has no active marker on this endpoint and none is invented here.';
 comment on column coldlion.season.division_code is
   'Division identity is the letter code as ColdLion returns it. EP001 is excluded from the landing layer.';
-
-create index if not exists coldlion_season_last_seen_idx
-  on coldlion.season (last_seen_at);
 
 -- =====================================================================================
 -- coldlion.salesperson — grain: one sales rep, within one company.
@@ -144,9 +141,6 @@ comment on column coldlion.salesperson.first_seen_at is
   'When this natural key was first landed. Never moves forward.';
 comment on column coldlion.salesperson.last_seen_at is
   'When this natural key was last returned by ColdLion. A sighting, not a lifecycle flag.';
-
-create index if not exists coldlion_salesperson_last_seen_idx
-  on coldlion.salesperson (last_seen_at);
 
 -- =====================================================================================
 -- Security posture, applied to exactly the two tables this migration creates.
