@@ -743,7 +743,7 @@ rules below are the operative summary.
    `scripts/check-workflow-preview-ref.test.mjs` fails the guard job if any workflow pins a literal
    again.
 
-   ⚠️ **Merging requires an APPROVE pinned to the EXACT head being merged, and the merge gate now enforces it (#1816, 2026-08-29).** A reviewer assignment is not an approval, and an approval of an earlier head is not an approval of these bytes: answering a `REJECT` with a new commit requires a fresh exact-head review before that commit can merge. Enforced by `scripts/check-exact-head-approval.mjs`, run twice in `guarded-migration-merge` (up front, then re-proven under the merge lock). Before this it was convention only, and PR #1809 merged unapproved bytes onto `main`. Free-text verdicts are unauthorized by default and count only from GitHub's OWNER, MEMBER or COLLABORATOR associations. The gate still does **not** prove the assigned provider is the commenter, because assignment refs do not carry an identity that can be bound to GitHub authorship. Do not cite a pass as proof of who reviewed. Full limits in `docs/agents/section-4-anti-collision-rules.md`.
+   ⚠️ **Merging requires an APPROVE pinned to the EXACT head being merged, and the merge gate now enforces it (#1816, 2026-08-29).** A reviewer assignment is not an approval, and an approval of an earlier head is not an approval of these bytes: answering a `REJECT` with a new commit requires a fresh exact-head review before that commit can merge. Enforced by `scripts/check-exact-head-approval.mjs`, run twice in `guarded-migration-merge` (up front, then re-proven under the merge lock). Before this it was convention only, and PR #1809 merged unapproved bytes onto `main`. Free-text verdicts are unauthorized by default and count only from GitHub's OWNER, MEMBER or COLLABORATOR associations. The gate still does **not** prove the assigned provider is the commenter, because assignment refs do not carry an identity that can be bound to GitHub authorship. Do not cite a pass as proof of who reviewed. Full limits in `docs/agents/section-4-anti-collision-rules.md`. ⚠️ **One exemption, added 2026-09-02 (#2102): a documents-only pull request draws no reviewer and the gate requires no verdict for it — see rule 18. Rulebook files are not documents.**
 
    **Merge first, then rehearse on preview from merged `main`, then promote.** A rehearsal runs
    **once** — an applied version can never be applied again, so a re-dispatch and a GitHub
@@ -1516,5 +1516,33 @@ have already happened in this repo, more than once.
     `plan_orchestrator-workflow-gaps.md` — describe the earlier `strict: true` state. That history
     is real and is preserved; it is **superseded** as a current instruction. Only issue #1286
     governs whether strict mode is ever reconsidered.
+
+18. **A DOCUMENTS-ONLY PULL REQUEST DRAWS NO DATABASE REVIEWER (owner decision, 2026-09-02, issue
+    #2102).** A pull request whose changed files are **all** prose documents still runs **every**
+    automated check and still merges through the **guarded merge lane**. What it no longer does is
+    consume a slot from the small external **database reviewer pool** that exists for migrations.
+    PR #2034 — a two-file documentation change — spent two reviewer draws, two dead-reviewer
+    replacements and three full review runs, and PR #2070 repeated the shape. That capacity belongs
+    to migrations.
+
+    **Rulebook files are NOT documents for this purpose and keep the full treatment:** `AGENTS.md`
+    (and `CLAUDE.md`), anything under `.claude/skills/` or `skills/`, and plan files
+    (`plan_*.md`). They instruct every later session, so a bad edit to one of them is as dangerous
+    as a bad migration. One non-document file of any kind — a `.sql`, a script, a workflow, a test,
+    a config file — removes the exemption from the whole pull request.
+
+    **Review is not removed, and this is not a merge exemption.** The review of PR #2034 caught a
+    real customer order number heading into this **public** repository, so the content risk is
+    real; what changed is only which pool answers for it. The automated checks and the guarded
+    merge lane still answer, and a refusal already recorded at the exact head still blocks it — the
+    exemption is from *drawing* a reviewer, never from *answering* one.
+
+    Enforced, not documented: `scripts/lib/documents-only-change.mjs` is the single deterministic
+    classifier, listing the rulebook exclusions explicitly and failing closed whenever the
+    changed-file list is empty, unreadable or absent. `scripts/check-exact-head-approval.mjs` — the
+    gate the guarded merge waits on — uses it to skip the reviewer requirement, and
+    `--assign-reviewer` in `scripts/manage-migration-author-lanes.mjs` refuses to draw for such a
+    pull request. `scripts/lib/documents-only-change.test.mjs` fails if the classifier exempts a
+    rulebook file or a mixed change.
 
 ---
