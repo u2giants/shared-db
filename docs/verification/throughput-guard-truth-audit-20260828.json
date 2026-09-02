@@ -1184,6 +1184,13 @@
       "line_sha256": "6c692515220a0f59388ac7e4df694866256f2a8fa8b0328759e368e7f97e1b50"
     },
     {
+      "site": "scripts/production_catalog_verification.py:3180",
+      "disposition": "enriched",
+      "reason": "This comment states the defect the change repairs: a behavioural query that errored was rendered as MISSING, which reads as a proven absence of the contract. It is documentation of the enrichment, not a detection site.",
+      "semantic_key": "scripts/production_catalog_verification.py:6f51b444f73e93f144387f80677b2284b8ed83b1e31d6d9a2b94656e2df1b758:1",
+      "line_sha256": "6f51b444f73e93f144387f80677b2284b8ed83b1e31d6d9a2b94656e2df1b758"
+    },
+    {
       "site": "scripts/production_catalog_verification.py:1175",
       "disposition": "excluded",
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation.",
@@ -1196,13 +1203,6 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation.",
       "semantic_key": "scripts/production_catalog_verification.py:8325a3f7cf5f41c7da778e49ea84ba8a0171b9c13f8920ed28a1e9cc626db48e:1",
       "line_sha256": "8325a3f7cf5f41c7da778e49ea84ba8a0171b9c13f8920ed28a1e9cc626db48e"
-    },
-    {
-      "site": "scripts/production_catalog_verification.py:2690",
-      "disposition": "excluded",
-      "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation.",
-      "semantic_key": "scripts/production_catalog_verification.py:840f5776f2158170692844f2f4cd494a63252be8f517609ec5e92588476ef05f:1",
-      "line_sha256": "840f5776f2158170692844f2f4cd494a63252be8f517609ec5e92588476ef05f"
     },
     {
       "site": "scripts/production_catalog_verification.py:2988",
@@ -1238,6 +1238,13 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation.",
       "semantic_key": "scripts/production_catalog_verification.py:b5525d61a12e30af96d49030c2f843643fdd4cd51d176c39a9d64cddee170525:1",
       "line_sha256": "b5525d61a12e30af96d49030c2f843643fdd4cd51d176c39a9d64cddee170525"
+    },
+    {
+      "site": "scripts/production_catalog_verification.py:3188",
+      "disposition": "enriched",
+      "reason": "Enriched: this render line now distinguishes a failed behavioural query (ERROR) from a genuinely absent row (MISSING), so the word MISSING is only emitted when the query ran and returned nothing.",
+      "semantic_key": "scripts/production_catalog_verification.py:c00f2f086cbbabff9a20231f4b5cd5a1e52e73eca0224a7437c7e87da2929b8a:1",
+      "line_sha256": "c00f2f086cbbabff9a20231f4b5cd5a1e52e73eca0224a7437c7e87da2929b8a"
     },
     {
       "site": "scripts/production_catalog_verification.py:2178",
@@ -1639,7 +1646,7 @@
       "line_sha256": "c306e35745386b717b583be41a182e378d17ce899e352842a4d0cfbae51ccc3c"
     }
   ],
-  "call_site_count": 232,
-  "call_site_sha256": "4652270fe77316dc580c9f20306fc008a00b1252444a24a145ea615c33acaad8",
+  "call_site_count": 233,
+  "call_site_sha256": "e7fc0c176401dd7b2140b0fd5d3406bae0c666acef7c69a1630d5536ab9d5ae2",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
