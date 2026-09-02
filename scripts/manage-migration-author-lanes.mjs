@@ -1731,6 +1731,31 @@ function retireVerdictsOrphanedByReturn({issue,pr,returns,ownerSha},io){
   return orphans.map((orphan)=>({ref:orphan.ref,retiredRef:orphan.retiredRef,sha:orphan.sha}))
 }
 
+// The rows a reviewer's own durable return records say were handed back, shaped
+// exactly like the live rows `excludeReviewerForPr` builds from assignment refs,
+// so the retirement below cannot tell -- and does not need to tell -- a first run
+// from a repair run. Identity is proved from the commit and then checked against
+// the ref name, the same way `readReviewReturns` does it; a ref name is a label,
+// never the authority on what was returned.
+export function reviewReturnsHeldBy({issue,pr,reviewer,rows},io){
+  return (rows??io.listRefs(`${REVIEW_RETURN_REF_PREFIX}/${Number(issue)}-${Number(pr)}-`)??[]).flatMap((row)=>{
+    const record=parseReviewReturn(row.commit??io.getCommit(row.sha))
+    if(record.issue!==Number(issue)||record.pr!==Number(pr)||row.ref!==reviewReturnRef(record))throw new LaneError('durable reviewer return does not match its ref identity')
+    if(record.reviewer!==reviewer)return []
+    return [{ref:row.ref,sha:record.assignmentSha,headSha:record.headSha,slot:record.slot,replacementSequence:record.replacementSequence}]
+  })
+}
+
+// Which of those returned rows still has a verdict sitting on its per-tuple ref.
+// This is a READ, taken before the mutex, so a repair run that has nothing to
+// retire costs one batched request and never takes the global lock.
+function outstandingRetirements(rows,{issue,pr},io){
+  if(!rows.length||typeof io.readReviewRefs!=='function')return []
+  const refs=rows.map((row)=>verdictRef({issue,pr,headSha:row.headSha,slot:row.slot,replacementSequence:row.replacementSequence}))
+  const raced=io.readReviewRefs(refs)
+  return rows.filter((row,index)=>Boolean(raced.get(refs[index])))
+}
+
 export function excludeReviewerForPr({issue,pr,reviewer,reason,evidenceSha},io=githubIo){
   return withReviewRequestBudget(()=>{
     io=reviewOperationIo(io);issue=Number(issue);pr=Number(pr);reviewer=String(reviewer??'');reason=String(reason??'');evidenceSha=String(evidenceSha??'')
@@ -1746,7 +1771,9 @@ export function excludeReviewerForPr({issue,pr,reviewer,reason,evidenceSha},io=g
     // -- an idempotent command that fails the second time is not idempotent. The
     // return record, matched by ref name and then PROVED by its commit, is what
     // keeps the evidence readable after the assignment ref is gone.
-    const returnedEvidence=durable?null:(io.listRefs(`${REVIEW_RETURN_REF_PREFIX}/${issue}-${pr}-`)??[]).find((row)=>row.ref.endsWith(`-${evidenceSha.toLowerCase()}`))
+    let returnRowCache=null
+    const listReturnRows=()=>returnRowCache??(returnRowCache=io.listRefs(`${REVIEW_RETURN_REF_PREFIX}/${issue}-${pr}-`)??[])
+    const returnedEvidence=durable?null:listReturnRows().find((row)=>row.ref.endsWith(`-${evidenceSha.toLowerCase()}`))
     if(returnedEvidence){
       const record=parseReviewReturn(returnedEvidence.commit??io.getCommit(returnedEvidence.sha))
       if(record.issue!==issue||record.pr!==pr||record.reviewer!==reviewer||record.assignmentSha!==evidenceSha.toLowerCase()||returnedEvidence.ref!==reviewReturnRef(record))throw new LaneError('durable reviewer return does not match its ref identity')
@@ -1775,7 +1802,13 @@ export function excludeReviewerForPr({issue,pr,reviewer,reason,evidenceSha},io=g
     // replacement message has no slot token, so the parse silently answered 1,
     // which then named the return ref, chose which verdict ref was consulted,
     // and told the merge gate which slot had been handed back.
-    const scanRows=[...assignmentRows,...replacementRows].map((row)=>({row,named:parseAssignmentRef(row.ref)})).filter(({named})=>named!==null&&named.issue===issue&&named.pr===pr)
+    // A ref this parser cannot name is KEPT here, not filtered away. Dropping it
+    // silently was the wrong direction: a reviewer whose only outstanding record
+    // was a legacy link with no namespace tail was excluded with no return
+    // written for it, which re-creates the stranded slot this whole path exists
+    // to repair. The row is carried into the loop instead, and stops the command
+    // as soon as its commit turns out to name the reviewer being excluded.
+    const scanRows=[...assignmentRows,...replacementRows].map((row)=>({row,named:parseAssignmentRef(row.ref)})).filter(({named})=>named===null||(named.issue===issue&&named.pr===pr))
     const scanRefs=scanRows.map(({row})=>row.ref)
     const scanRecords=scanRefs.length?io.readReviewRecords?.(scanRefs,null):null
     const held=[]
@@ -1783,6 +1816,7 @@ export function excludeReviewerForPr({issue,pr,reviewer,reason,evidenceSha},io=g
       const record=scanRecords?.get(row.ref)
       const parsed=parseReviewCursor(record?.sha===row.sha?record.commit:(row.commit??io.getCommit(row.sha)))
       if(parsed.reviewer!==reviewer||parsed.issue!==issue||parsed.pr!==pr)continue
+      if(!named)throw new LaneError(`assignment ${row.ref} cannot be named by the shared ref parser and still holds reviewer ${reviewer}; reviewer exclusion refused rather than excluding a reviewer without returning the slot`)
       // The commit must AGREE with its ref wherever it says anything at all. A
       // disagreement is corruption, not a preference between two answers.
       if(!named.headSha.startsWith(parsed.headSha.toLowerCase()))throw new LaneError(`assignment ${row.ref} names a head its commit does not`)
@@ -1830,8 +1864,26 @@ export function excludeReviewerForPr({issue,pr,reviewer,reason,evidenceSha},io=g
       // still outstanding this is the repair route for a pull request excluded
       // before returns existed: re-running the IDENTICAL exclusion completes it,
       // with no new exclusion record and no second reason.
-      if(!held.length)return {...parsed,ref,sha:existing,returned:[]}
-      repeat={...parsed,ref,sha:existing}
+      // A RE-RUN MUST BE ABLE TO REACH THE RETIREMENT.
+      //
+      // The raced-verdict retirement is a SECOND atomic push, made after the one
+      // that records the exclusion and its returns. If that second push fails,
+      // or the process dies between the two, the exclusion and every return are
+      // already durable and every returned assignment ref is already cleared --
+      // so a re-run finds nothing held and used to stop on this line, before the
+      // retirement could run a second time. The orphaned verdict then held the
+      // per-tuple ref for that head with no repair short of a new push, which is
+      // the very escape this feature was written to close.
+      //
+      // So the re-run reconstructs the returned rows from the DURABLE return
+      // records this reviewer's own exclusion wrote -- the assignment refs are
+      // gone, the records that retired them are not -- and hands them to the same
+      // retirement. Nothing new is recorded: if no verdict is still sitting on a
+      // returned tuple, the command stays the plain idempotent no-op it was.
+      const retryReturns=held.length?[]:outstandingRetirements(reviewReturnsHeldBy({issue,pr,reviewer,rows:listReturnRows()},io),{issue,pr},io)
+      if(!held.length&&!retryReturns.length)return {...parsed,ref,sha:existing,returned:[]}
+      if(retryReturns.length&&typeof io.atomicReviewRefs!=='function')throw new LaneError('retiring a raced verdict requires atomic compare-and-swap ref support; reviewer exclusion refused before mutex acquisition')
+      repeat={...parsed,ref,sha:existing,retryReturns}
     }
     const ownerSha=io.makeOwnerCommit(`db-coordination reviewer-exclusion-lock issue=${issue} pr=${pr} reviewer=${reviewer}`)
     requireReviewWireCapacity(REVIEW_MUTEX_SECTION_RESERVE);acquireReviewMutex(ownerSha,io)
@@ -1862,7 +1914,7 @@ export function excludeReviewerForPr({issue,pr,reviewer,reason,evidenceSha},io=g
         const after=io.readReviewRefs([MUTEX_REF,ref,...returns.flatMap((row)=>[row.returnRef,row.ref]),...(releaseLease?[leaseRef]:[])])
         if(after.get(MUTEX_REF)!==ownerSha||after.get(ref)!==sha||(releaseLease&&after.get(leaseRef)!==null))throw new LaneError('atomic reviewer exclusion readback mismatch')
         for(const row of returns)if(after.get(row.returnRef)!==row.returnSha||after.get(row.ref)!==null)throw new LaneError('atomic reviewer return readback mismatch')
-        retireVerdictsOrphanedByReturn({issue,pr,returns,ownerSha},io)
+        retireVerdictsOrphanedByReturn({issue,pr,returns:[...returns,...(repeat?.retryReturns??[])],ownerSha},io)
       }
       else{
         // Unreachable for a return: the pre-mutex guard above already refused

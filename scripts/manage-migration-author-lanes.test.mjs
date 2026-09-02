@@ -89,7 +89,7 @@ function durableApprovalFixture({includeLatestReplacementVerdict=true,returnSlot
   const commits=new Map([
     [assignment1,{message:`db-coordination reviewer-cursor sequence=1 reviewer=kimi-k3 issue=${issue} pr=${pr} head=${headSha} slot=1`}],
     [assignment2,{message:`db-coordination reviewer-cursor sequence=2 reviewer=kimi-k3 issue=${issue} pr=${pr} head=${headSha} slot=2`}],
-    [replacement2,{message:`db-coordination reviewer-replacement sequence=7 reviewer=kimi-k3 issue=${issue} pr=${pr} head=${headSha} reason=wrapper_terminal_failure`}],
+    [replacement2,{message:`db-coordination reviewer-replacement sequence=7 reviewer=kimi-k3 issue=${issue} pr=${pr} head=${headSha} slot=2 failed-sequence=2 prior-sequence=6 failure-ref=${'9'.repeat(40)}`}],
   ])
   const refs=new Map([
     [`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${headSha}`,assignment1],
@@ -4553,4 +4553,60 @@ test('a reviewer return whose ref name disagrees with its commit is refused',()=
   const sha=io.makeOwnerCommit(`db-coordination reviewer-return reviewer=${reviewer} issue=1999 pr=2002 head=${head} slot=1 assignment=${assignmentSha} reason=already-reviewed`)
   io.refs.set(`${REVIEW_RETURN_REF_PREFIX}/1999-2002-${head}-slot2-${assignmentSha}`,sha)
   assert.throws(()=>readReviewReturns(1999,2002,head,io),/does not match its ref identity/)
+})
+
+// THE RE-RUN MUST REACH THE RETIREMENT (grok-4.6 third REVISE of PR #2077).
+//
+// The retirement is a SECOND atomic push, made after the one that records the
+// exclusion and its returns. If that second push fails -- or the process dies
+// between the two -- the exclusion is already durable and the returned
+// assignment ref is already cleared, so a re-run found nothing held and stopped
+// on the idempotent early return, before the retirement could run again. The
+// raced verdict then held the per-tuple ref for that head with no repair short of
+// a new push, which is the escape this whole feature exists to close. The re-run
+// now rebuilds the returned rows from the durable return records themselves.
+test('re-running the exclusion retires a verdict left orphaned by a failed retirement push',()=>{
+  const head='5'.repeat(40),{io,first,assignmentRef,evidenceSha}=returnScenario(2077,2104,head)
+  const tupleRef=`refs/db-review-verdicts/2077-2104-${head}`,verdictSha='c'.repeat(40)
+  racedVerdictIo(io,tupleRef,verdictSha,{verdict:'APPROVE',head_sha:head,issue:2077,pr:2104,slot:1,reviewer:first.reviewer,assignment_sha:evidenceSha,findings_digest:'0'.repeat(64)})
+  // The exclusion+return push lands; the retirement push is the one that fails.
+  const atomic=io.atomicReviewRefs
+  io.atomicReviewRefs=(changes)=>{
+    if(changes.some((change)=>change.ref.startsWith(REVIEW_RETIRED_VERDICT_REF_PREFIX)))throw new LaneError('HTTP 503 during retirement push')
+    return atomic(changes)
+  }
+  assert.throws(()=>excludeReviewerForPr({issue:2077,pr:2104,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io),/503/)
+  // Durably half-done: the slot is returned, and the orphan still pins the tuple.
+  assert.equal(io.refs.get(assignmentRef),undefined)
+  assert.deepEqual(readReviewReturns(2077,2104,head,io).map((row)=>row.assignmentSha),[evidenceSha])
+  assert.equal(io.refs.get(tupleRef),verdictSha)
+  // The documented repair -- re-run the IDENTICAL exclusion -- now completes it.
+  io.atomicReviewRefs=atomic
+  const repaired=excludeReviewerForPr({issue:2077,pr:2104,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io)
+  assert.equal(repaired.ref,`${REVIEW_EXCLUSION_REF_PREFIX}/2077-2104-${first.reviewer}`)
+  assert.equal(io.refs.get(tupleRef),undefined)
+  assert.equal(io.refs.get(retiredVerdictRef({issue:2077,pr:2104,headSha:head,slot:1,replacementSequence:null,verdictSha})),verdictSha)
+  // Nothing new was recorded: no second exclusion, no second return.
+  assert.equal(readReviewReturns(2077,2104,head,io).length,1)
+  // And with nothing left orphaned, a third run is the plain no-op it always was.
+  const again=excludeReviewerForPr({issue:2077,pr:2104,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io)
+  assert.deepEqual(again.returned,[])
+})
+
+// FAIL CLOSED ON A REF THIS PARSER CANNOT NAME.
+//
+// The legacy first-implementation replacement link had no namespace tail, so the
+// shared ref parser answers null for it. The exclusion scan used to drop such a
+// row silently -- which excluded the reviewer while writing NO return for the
+// record it still held, re-creating the stranded slot the return exists to
+// repair. It now stops instead, and only for a record that really does name the
+// reviewer being excluded: another reviewer's legacy link is not this command's
+// problem and must not brick every exclusion on the pull request.
+test('a malformed assignment ref still held by the excluded reviewer stops the exclusion',()=>{
+  const head='6'.repeat(40),{io,first,evidenceSha}=returnScenario(2077,2105,head)
+  const legacy=`${REVIEW_REPLACEMENT_REF_PREFIX}/2077-2105-${head}`
+  io.refs.set(legacy,evidenceSha)
+  assert.throws(()=>excludeReviewerForPr({issue:2077,pr:2105,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io),/cannot be named by the shared ref parser/)
+  assert.equal(io.refs.get(legacy),evidenceSha)
+  assert.equal(io.readRef(`${REVIEW_EXCLUSION_REF_PREFIX}/2077-2105-${first.reviewer}`),null)
 })

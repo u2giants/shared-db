@@ -312,12 +312,21 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    IDENTICAL `--exclude-reviewer` command, which completes the return without
    recording a second exclusion.
 
+   The merge gate that reads these records is `check-exact-head-approval.mjs`,
+   the script the guarded merge workflow runs BEFORE the merge -- not only the
+   preview gate, which under merge-first runs after it. Both read the return
+   namespace and order it the same way.
+
    A verdict that lands in the instant between the exclusion's in-mutex check and
    its push answers an assignment that no longer exists. It is not deleted and it
    does not pin the head: the exclusion re-files it under
-   `refs/db-review-retired-verdicts/` in the same atomic step that frees the
-   create-only verdict ref, so the next reviewer can record a verdict for that
-   head normally and the raced object remains readable for audit.
+   `refs/db-review-retired-verdicts/`, freeing the create-only verdict ref, so
+   the next reviewer can record a verdict for that head normally and the raced
+   object remains readable for audit. That re-filing is its own atomic
+   compare-and-swap push, made after the push that records the exclusion and its
+   returns -- so if it fails, re-run the IDENTICAL `--exclude-reviewer` command.
+   The re-run rebuilds the returned records from the return namespace and
+   completes the re-filing, recording no second exclusion and no second return.
 
    **Grok's in-flight lock is PER REPOSITORY, not global.** `ai-grok-review`
    allows one live Grok review at a time *in shared-db*; it does not cap Grok
