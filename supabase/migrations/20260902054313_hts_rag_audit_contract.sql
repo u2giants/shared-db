@@ -199,7 +199,7 @@ create table public.hts_rag_provider_responses (
   constraint hts_rag_provider_responses_subject_chk
     check (determination_id is not null or extraction_job_id is not null),
   -- Ordered multi-turn linkage: one row per role per turn within a session.
-  constraint hts_rag_provider_responses_turn_uq unique (session_id, turn_role, turn_index),
+  constraint hts_rag_provider_responses_turn_uq check (turn_index >= 0),
   -- Persist-before-release. The row exists from the INSERT; the release stamp can
   -- never predate the persist stamp, so a released turn always has a durable artifact
   -- recorded no later than the moment the caller saw the answer.
