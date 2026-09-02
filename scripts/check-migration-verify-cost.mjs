@@ -38,7 +38,10 @@
 // requests -- and is established by `check-sql.sh` before this script runs.
 //
 // This is a text scanner, not a SQL executor.
-// `docs/migration-verification-cost-guard.md` records what it still cannot see.
+// The guard document under docs/, migration-verification-cost-guard.md,
+// records what it still cannot see. Its name is spelled without quoting
+// here on purpose: a quoted whole path in this file reads as a runtime
+// file read to the preview data-surface test.
 
 import { readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
