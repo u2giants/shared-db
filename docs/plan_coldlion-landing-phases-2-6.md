@@ -249,7 +249,7 @@ Re-derive any of them with the method in §12.
 >
 > The concern behind the original box was real, and D14 now answers it correctly: the component
 > taxonomy lives in the ordinary `merchGroup01`-`06` fields ON the exploded component row, and D14
-> keeps those on prepack rows. See [`coldlion-prepack-sku-mapping.md`](coldlion-prepack-sku-mapping.md).
+> keeps those on prepack rows. See [`business-rules-erp-data.md` §10](business-rules-erp-data.md).
 
 **D6 has a live conflict you must not silently resolve.** Albert marked write-back on
 `orderHistory.brandAssuranceNo`, `prodHistory.depositPerc`, and `vendors.femaExpDate` /
@@ -399,7 +399,7 @@ is the old bug reappearing.
 > Still true from the old box: `lineNo` does not exist; and `linePrice` is per COMPONENT, not per
 > line (ColdLion's JamieLynn, 2026-08-20) — for a prepack the system divides the line quantity into
 > component quantities and prices each component. See
-> [`coldlion-prepack-sku-mapping.md`](coldlion-prepack-sku-mapping.md).
+> [`business-rules-erp-data.md` §10](business-rules-erp-data.md).
 >
 > ~~ColdLion does have a `Line #` on Sales Order internally, but it is not exposed in the API.~~
 > **It is exposed now** — `salesOrderLineNo` arrived on 2026-08-31 and is part of the key above.
