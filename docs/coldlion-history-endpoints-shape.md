@@ -414,7 +414,7 @@ most of it, and there are **three distinct causes**:
    not carry down from `ISS`. Every `REC` row tested was unlinked with an empty `custPONumber`.
    Attribute a receipt via `prodOrderNo` back to its `ISS` line — rules §4.
 3. **`COS` sample production**, which legitimately has no customer order — rules §1.
-4. **Stock production for Amazon** (`AMA030`). Amazon goods are made to stock for their warehouse,
+4. **Stock production for Amazon** (`CUST003`). Amazon goods are made to stock for their warehouse,
    not presold, so there is no customer PO. Verified 10 of 10 unlinked. **This is what the 10
    "unexplained" 2026-08 rows were** — rules §8. Do **not** generalise it from `prodTypeCode`:
    `Stock*` types are 92% linked (one non-Amazon customer alone has 120 linked `Stock*` rows).
@@ -501,7 +501,7 @@ Drafted in [`_drafts/coldlion-history-endpoints-questions.md`](_drafts/coldlion-
 2. **The ~12–16% of component rows where `ppkMerchGroup*` is blank**, after the assortment-vs-
    component structure is accounted for (§5.7).
 3. **Recent non-`COS` unlinked lines.** ColdLion's historical explanation covers the old ones, but
-   10 rows in 2026-08 are `ISS`-stage, not `COS`, recent, and unlinked — all customer AMA030,
+   10 rows in 2026-08 are `ISS`-stage, not `COS`, recent, and unlinked — all customer CUST003,
    references D3568/D3569, ordered 2026-08-05 (§5.5).
 4. **How far back the history goes**, to size the one-time load (§7).
 
