@@ -792,8 +792,8 @@ DCP_OPA_PROPERTY_AUTHORITY_CONTRACT += (
     " and position('explicit_dcp_to_opa_property_id' in %s)>0" % _DCP_OPA_DEF +
     " and position('style_guide_names' in %s)>0" % _DCP_OPA_DEF +
     " and position('contract_opa_conflict' in %s)>0" % _DCP_OPA_DEF +
-    " and position(\"r.contract_asserted_studio_code = 'marvel'\" in %s)>0" % _DCP_OPA_DEF +
-    " and position(\"o.opa_studio_code = 'disney'\" in %s)>0" % _DCP_OPA_DEF +
+    " and position('r.contract_asserted_studio_code = ''marvel''' in %s)>0" % _DCP_OPA_DEF +
+    " and position('o.opa_studio_code = ''disney''' in %s)>0" % _DCP_OPA_DEF +
     " and position('plm.dcp_property_licensor_resolution' in %s)=0" % _DCP_OPA_DEF +
     "".join(
         " and (select relforcerowsecurity from pg_class where oid=to_regclass('%s'))" % table
@@ -3130,6 +3130,7 @@ def render_report(
     enforcing: bool,
     behavior_checks: list[dict] | None = None,
     behavior_results: object = None,
+    behavior_error: str | None = None,
 ) -> tuple[str, list[str]]:
     """Render the Markdown artifact and return the HARD FAILURES it found.
 
@@ -3175,13 +3176,25 @@ def render_report(
             and returned_expected == expected
             and actual == expected
         )
+        # A check whose query never reached the database has NOT been shown to
+        # be absent. Reporting it as MISSING/FAIL is a false negative that reads
+        # as a real absence -- and because every check is one branch of a single
+        # UNION ALL, one malformed branch silently condemns all of them. When the
+        # behavioral query itself errored, say ERROR and say why.
+        did_not_run = actual is None and behavior_error is not None
         add(
             f"| `{check['id']}` | `{check['migration_version']}` | "
             f"`{check['relation']}` | {expected} | "
-            f"{actual if actual is not None else 'MISSING'} | "
-            f"**{'PASS' if passed else 'FAIL'}** |"
+            f"{'ERROR' if did_not_run else (actual if actual is not None else 'MISSING')} | "
+            f"**{'ERROR' if did_not_run else ('PASS' if passed else 'FAIL')}** |"
         )
-        if not passed:
+        if did_not_run:
+            failures.append(
+                f"behavioral check {check['id']} DID NOT RUN: the behavioral "
+                f"query failed ({behavior_error}). This is not evidence that "
+                f"the contract is absent."
+            )
+        elif not passed:
             failures.append(
                 f"behavioral check {check['id']} expected {expected} row(s) "
                 f"but received {actual!r}"
@@ -3604,6 +3617,7 @@ def verify(
     catalog: object = None
     row_counts: object = None
     behavior_results: object = None
+    behavior_error: str | None = None
 
     declaration = targets.noop_declaration
     if behavior_checks:
@@ -3614,6 +3628,7 @@ def verify(
                 )
             )
         except (urllib.error.URLError, GuardError, ValueError, OSError) as exc:
+            behavior_error = str(exc)
             errors.append(f"behavioral query failed: {exc}")
 
     has_catalog_contract = any(
@@ -3696,6 +3711,7 @@ def verify(
         enforcing,
         behavior_checks=behavior_checks,
         behavior_results=behavior_results,
+        behavior_error=behavior_error,
     )
     (output_dir / "production-catalog-verification.md").write_text(
         markdown, encoding="utf-8"
