@@ -661,6 +661,121 @@ AI_TAG_BAKEOFF_CONTRACT = _shape_contract(
     policies=tuple((table,policy) for table in ('public.ai_tag_bakeoff_results','public.ai_tag_bakeoff_reviews','public.ai_tag_bakeoff_runs') for policy in (f"Admin manage {table.split('.')[-1].replace('_',' ')}",f"Admin read {table.split('.')[-1].replace('_',' ')}")),
 )
 DB_DATA_ADMIN_FORWARD_CONTRACT = _shape_contract(relations=('app.db_data_admin_feature_gate',),routines=tuple("""api.db_data_admin_audit_list api.db_data_admin_licensor_property_tree api.db_data_admin_merge_customer api.db_data_admin_merge_vendor api.db_data_admin_preview_customer_merge api.db_data_admin_preview_vendor_merge api.db_data_admin_update_customer api.db_data_admin_update_vendor app.db_data_admin_customer_row app.db_data_admin_extension_conflicts app.db_data_admin_merge_execute app.db_data_admin_merge_fk_counts app.db_data_admin_merge_preview app.db_data_admin_reconcile_extension app.db_data_admin_single_record_writes_enabled app.db_data_admin_vendor_row""".split()),triggers=(('app.db_data_admin_feature_gate','set_updated_at'),))
+SOURCE_RESOLUTION_SUPPORTED_HOME_CONTRACT = _shape_contract(
+    relations=(
+        'plm.source_resolution', 'api.source_resolution', 'api.pmt_properties',
+        'api.pmt_characters', 'api.opa_property_reconciliation',
+    ),
+    constraints=tuple(('plm.source_resolution', name) for name in """
+        source_resolution_source_system_nonblank_chk
+        source_resolution_source_system_supported_chk
+        source_resolution_source_id_nonblank_chk
+        source_resolution_entity_kind_chk
+        source_resolution_status_chk
+        source_resolution_target_kind_chk
+        source_resolution_matched_target_chk
+        source_resolution_audit_pair_chk
+        source_resolution_reason_nonblank_chk
+        source_resolution_actor_nonblank_chk
+    """.split()),
+    routines=(
+        'plm.set_source_resolution(text,text,text,text,uuid,uuid,uuid,uuid,text,timestamp with time zone)',
+        'plm.source_resolution_target_missing(text,uuid,uuid,uuid,uuid)',
+        'plm.reject_legacy_landing_resolution_write()',
+    ),
+    policies=(('plm.source_resolution', 'source_resolution_authenticated_read'),),
+    triggers=tuple((f'plm.{table}', trigger) for table, trigger in (
+        ('pmt_property','pmt_property_resolution_immutable'),
+        ('pmt_character','pmt_character_resolution_immutable'),
+        ('nbcu_property','nbcu_property_resolution_immutable'),
+        ('nbcu_character','nbcu_character_resolution_immutable'),
+        ('nbcu_style_guide','nbcu_style_guide_resolution_immutable'),
+        ('nbcu_asset','nbcu_asset_resolution_immutable'),
+        ('opa_property_character','opa_property_character_resolution_immutable'),
+        ('opa_property','opa_property_resolution_immutable'),
+        ('opa_character','opa_character_resolution_immutable'),
+        ('dcp_portal_tile','dcp_portal_tile_resolution_immutable'),
+        ('dcp_style_guide','dcp_style_guide_resolution_immutable'),
+        ('dcp_property','dcp_property_resolution_immutable'),
+        ('dcp_character','dcp_character_resolution_immutable'),
+        ('lucasfilm_dcp_portal_tile','lucasfilm_dcp_portal_tile_resolution_immutable'),
+        ('lucasfilm_dcp_style_guide','lucasfilm_dcp_style_guide_resolution_immutable'),
+        ('lucasfilm_dcp_property','lucasfilm_dcp_property_resolution_immutable'),
+        ('lucasfilm_dcp_character','lucasfilm_dcp_character_resolution_immutable'),
+        ('marvel_dcp_portal_tile','marvel_dcp_portal_tile_resolution_immutable'),
+        ('marvel_dcp_style_guide','marvel_dcp_style_guide_resolution_immutable'),
+        ('marvel_dcp_property','marvel_dcp_property_resolution_immutable'),
+        ('marvel_dcp_character','marvel_dcp_character_resolution_immutable'),
+        ('twentieth_century_dcp_portal_tile','twentieth_century_dcp_portal_tile_resolution_immutable'),
+        ('twentieth_century_dcp_style_guide','twentieth_century_dcp_style_guide_resolution_immutable'),
+        ('twentieth_century_dcp_property','twentieth_century_dcp_property_resolution_immutable'),
+        ('twentieth_century_dcp_character','twentieth_century_dcp_character_resolution_immutable'),
+        ('wb_property_character_normalized','wb_property_character_normalized_resolution_immutable'),
+    )),
+)
+SOURCE_RESOLUTION_SUPPORTED_HOME_CONTRACT += """
+  and not exists (select 1 from pg_constraint
+    where conrelid=to_regclass('plm.source_resolution') and contype='f')
+  and (select count(*) from pg_constraint
+    where conrelid=to_regclass('plm.source_resolution') and contype='c' and convalidated)=10
+  and position('paramount' in lower(pg_get_constraintdef((select oid from pg_constraint
+    where conrelid=to_regclass('plm.source_resolution')
+      and conname='source_resolution_source_system_supported_chk'))))>0
+  and position('warner:' in lower(pg_get_constraintdef((select oid from pg_constraint
+    where conrelid=to_regclass('plm.source_resolution')
+      and conname='source_resolution_source_system_supported_chk'))))>0
+  and exists (select 1 from pg_policies
+    where schemaname='plm' and tablename='source_resolution'
+      and policyname='source_resolution_authenticated_read'
+      and cmd='SELECT' and roles=array['authenticated']::name[]
+      and regexp_replace(lower(coalesce(qual,'')),'[[:space:]()]','','g')='true'
+      and with_check is null)
+  and has_table_privilege('authenticated',to_regclass('plm.source_resolution'),'SELECT')
+  and has_table_privilege('service_role',to_regclass('plm.source_resolution'),'SELECT')
+  and not exists (select 1 from information_schema.role_table_grants
+    where table_schema='plm' and table_name='source_resolution'
+      and grantee in ('public','anon','authenticated','service_role')
+      and privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN'))
+  and not exists (select 1 from pg_trigger
+    where tgfoid<>to_regprocedure('plm.reject_legacy_landing_resolution_write()')
+      and not tgisinternal and tgname in (
+        'pmt_property_resolution_immutable','pmt_character_resolution_immutable',
+        'nbcu_property_resolution_immutable','nbcu_character_resolution_immutable',
+        'nbcu_style_guide_resolution_immutable','nbcu_asset_resolution_immutable',
+        'opa_property_character_resolution_immutable','opa_property_resolution_immutable',
+        'opa_character_resolution_immutable','dcp_portal_tile_resolution_immutable',
+        'dcp_style_guide_resolution_immutable','dcp_property_resolution_immutable',
+        'dcp_character_resolution_immutable','lucasfilm_dcp_portal_tile_resolution_immutable',
+        'lucasfilm_dcp_style_guide_resolution_immutable','lucasfilm_dcp_property_resolution_immutable',
+        'lucasfilm_dcp_character_resolution_immutable','marvel_dcp_portal_tile_resolution_immutable',
+        'marvel_dcp_style_guide_resolution_immutable','marvel_dcp_property_resolution_immutable',
+        'marvel_dcp_character_resolution_immutable','twentieth_century_dcp_portal_tile_resolution_immutable',
+        'twentieth_century_dcp_style_guide_resolution_immutable','twentieth_century_dcp_property_resolution_immutable',
+        'twentieth_century_dcp_character_resolution_immutable','wb_property_character_normalized_resolution_immutable'))
+  and (select count(*) from pg_trigger
+    where tgfoid=to_regprocedure('plm.reject_legacy_landing_resolution_write()')
+      and not tgisinternal and tgenabled<>'D')=26
+  and position('opa_property_character' in pg_get_functiondef(to_regprocedure(
+    'plm.reject_legacy_landing_resolution_write()')))>0
+  and position('property_id' in pg_get_functiondef(to_regprocedure(
+    'plm.reject_legacy_landing_resolution_write()')))>0
+  and position('target_missing' in pg_get_viewdef(to_regclass('api.source_resolution'),true))>0
+  and position('plm.source_resolution' in pg_get_viewdef(to_regclass('api.pmt_properties'),true))>0
+  and position('plm.source_resolution' in pg_get_viewdef(to_regclass('api.pmt_characters'),true))>0
+  and position('plm.source_resolution' in pg_get_viewdef(to_regclass('api.opa_property_reconciliation'),true))>0
+  and (select reloptions @> array['security_invoker=true'] from pg_class
+    where oid=to_regclass('api.source_resolution'))
+  and (select reloptions @> array['security_invoker=true'] from pg_class
+    where oid=to_regclass('api.pmt_properties'))
+  and (select reloptions @> array['security_invoker=true'] from pg_class
+    where oid=to_regclass('api.pmt_characters'))
+  and (select reloptions @> array['security_invoker=true'] from pg_class
+    where oid=to_regclass('api.opa_property_reconciliation'))
+  and position('for key share' in lower(pg_get_functiondef(to_regprocedure(
+    'plm.set_source_resolution(text,text,text,text,uuid,uuid,uuid,uuid,text,timestamp with time zone)'))))>0
+  and position('to_regclass' in lower(pg_get_functiondef(to_regprocedure(
+    'plm.source_resolution_target_missing(text,uuid,uuid,uuid,uuid)'))))>0
+"""
 DCP_OPA_PROPERTY_AUTHORITY_CONTRACT = _shape_contract(
     relations=('plm.dcp_opa_property_resolution','plm.dcp_opa_property_resolution_member'),
     routines=('api.db_data_admin_scraped_properties(text,text,integer)','plm.reject_dcp_opa_resolution_mutation()'),
@@ -844,6 +959,7 @@ CATALOG_CONTRACTS = {
     "ai_tag_bakeoff_v1": AI_TAG_BAKEOFF_CONTRACT,
     "dflow_baseline_v1": DFLOW_BASELINE_CONTRACT,
     "db_data_admin_forward_v1": DB_DATA_ADMIN_FORWARD_CONTRACT,
+    "source_resolution_supported_home_v1": SOURCE_RESOLUTION_SUPPORTED_HOME_CONTRACT,
     "dcp_opa_property_authority_v1": DCP_OPA_PROPERTY_AUTHORITY_CONTRACT,
     "scraped_properties_source_purpose_v1": SCRAPED_PROPERTIES_SOURCE_PURPOSE_CONTRACT,
     "creative_submission_contract_status_v1": CREATIVE_SUBMISSION_CONTRACT_STATUS_CONTRACT,
