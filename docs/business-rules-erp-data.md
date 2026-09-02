@@ -59,8 +59,8 @@ for a customer*, produced for someone other than that customer:
   a factory-direct shipment.
 
 **A second, older sample marker exists — do not assume `COS` is the only one.** Two rows carried the
-marker in the **item code** instead: `VSZ851MABPCONTR` and `VSZ851WAJGCONTR` (`CONTR` suffix,
-"DC COMICS CANVAS SAMPLES"), both quantity 15, both unlinked, and **neither had a `COS` reference**.
+marker in the **item code** instead: `AAA111BBBBCONTR` and `AAA111CCCCCONTR` (synthetic values, real shape) (`CONTR` suffix,
+"<LICENSED> CANVAS SAMPLES"), both quantity 15, both unlinked, and **neither had a `COS` reference**.
 A third case put it in the item itself: `SAMPLECHRG` / "SAMPLE CHARGE". So sample-related production
 is identifiable by **at least three** different conventions. Any "is this a sample?" rule must
 account for that, and a `COS`-only rule will miss cases.
