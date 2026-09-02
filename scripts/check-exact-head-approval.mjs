@@ -149,7 +149,7 @@ export function evaluateExactHeadApproval(input) {
   // Rulebook files (`AGENTS.md`, skills, `plan_*.md`) are NOT documents here:
   // they instruct every later session, so they keep the full treatment. The
   // classifier lists them explicitly and fails closed on anything it cannot read,
-  // so a missing or malformed file list costs a review rather than granting an
+  // so an absent or malformed file list costs a review rather than granting an
   // exemption. `changedFiles` absent entirely -- every caller that predates this
   // rule, and every test below -- behaves exactly as before.
   const documents = Object.prototype.hasOwnProperty.call(input, 'changedFiles')
