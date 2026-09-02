@@ -39,7 +39,7 @@ PR #1651 merged the three-axis matcher and its reproducible final distribution. 
 
 The 2026-08-31 audit established:
 
-- the committed matcher and all 39 tests reproduce the final workbook distribution;
+- the committed matcher and all 37 tests as they stood that day reproduce the final workbook distribution (the suite is 39 tests since the 2026-09-02 re-run added two);
 - replacing every historical stored MG01-MG03 value with a sentinel produces byte-identical proposals and evidence, proving old codes are not teaching data;
 - the workbook is a historical source snapshot, while production has since changed;
 - item numbers are not globally safe write keys, and the workbook does not carry production `item_id_pk` values;
