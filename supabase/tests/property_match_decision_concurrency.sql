@@ -58,14 +58,34 @@ limit 1
 
 -- Committed setup, in its own session: the racing session cannot see anything
 -- this test transaction writes.
-\! psql -v ON_ERROR_STOP=1 -q --no-psqlrc -c "insert into app.user_role (profile_id, role_id) values (:'pm_profile', :'pm_role') on conflict do nothing; insert into app.app_access (profile_id, app) values (:'pm_profile', 'plm') on conflict do nothing; insert into plm.opa_property (licensed_property_id, property_name) values (:pm_opa_a, :'pm_opa_a_nm'), (:pm_opa_b, :'pm_opa_b_nm'); insert into plm.dcp_property (source_system, source_id, display_name) values ('disney_dcpvault', :'pm_src1', :'pm_nm1'), ('disney_dcpvault', :'pm_src2', :'pm_nm2'); insert into plm.dcp_opa_property_resolution (resolution_id, source_system, source_table, source_property_id, decision_version, approval_status, evidence_reference, evidence_sha256, decision_reason) values (:'pm_pending_1', 'disney_dcpvault', 'plm.dcp_property', :'pm_src1', 1, 'pending', 'synthetic-race-1', repeat('d', 64), 'synthetic pending one'), (:'pm_pending_2', 'disney_dcpvault', 'plm.dcp_property', :'pm_src2', 1, 'pending', 'synthetic-race-2', repeat('e', 64), 'synthetic pending two');"
+
+-- \! hands its line to the shell verbatim -- psql does NOT interpolate
+-- variables there -- so the values cross into the second session through the
+-- environment instead.
+\setenv PM_PROFILE :pm_profile
+\setenv PM_ROLE :pm_role
+\setenv PM_AUTH :pm_auth
+\setenv PM_P1 :pm_pending_1
+\setenv PM_P2 :pm_pending_2
+\setenv PM_R1 :pm_request_1
+\setenv PM_R2 :pm_request_2
+\setenv PM_A :pm_opa_a
+\setenv PM_B :pm_opa_b
+\setenv PM_SRC1 :pm_src1
+\setenv PM_SRC2 :pm_src2
+\setenv PM_NM1 :pm_nm1
+\setenv PM_NM2 :pm_nm2
+\setenv PM_ANM :pm_opa_a_nm
+\setenv PM_BNM :pm_opa_b_nm
+
+\! psql -v ON_ERROR_STOP=1 -q --no-psqlrc -c "insert into app.user_role (profile_id, role_id) values ('$PM_PROFILE', '$PM_ROLE') on conflict do nothing; insert into app.app_access (profile_id, app) values ('$PM_PROFILE', 'plm') on conflict do nothing; insert into plm.opa_property (licensed_property_id, property_name) values ($PM_A, '$PM_ANM'), ($PM_B, '$PM_BNM'); insert into plm.dcp_property (source_system, source_id, display_name) values ('disney_dcpvault', '$PM_SRC1', '$PM_NM1'), ('disney_dcpvault', '$PM_SRC2', '$PM_NM2'); insert into plm.dcp_opa_property_resolution (resolution_id, source_system, source_table, source_property_id, decision_version, approval_status, evidence_reference, evidence_sha256, decision_reason) values ('$PM_P1', 'disney_dcpvault', 'plm.dcp_property', '$PM_SRC1', 1, 'pending', 'synthetic-race-1', repeat('d', 64), 'synthetic pending one'), ('$PM_P2', 'disney_dcpvault', 'plm.dcp_property', '$PM_SRC2', 1, 'pending', 'synthetic-race-2', repeat('e', 64), 'synthetic pending two');"
 
 -- ----------------------------------------------------------------------
 -- RACE 1 -- DIVERGENT. The background session approves and holds its
 -- transaction open; this session reuses the same client request id for a
 -- REJECT and must be refused rather than handed the approval.
 -- ----------------------------------------------------------------------
-\! (psql -v ON_ERROR_STOP=1 -q --no-psqlrc -c "select set_config('request.jwt.claim.sub', :'pm_auth', false); select api.db_data_admin_decide_property_match(:'pm_pending_1', 'approve', array[:pm_opa_a, :pm_opa_b]::bigint[], 'race winner approval', :'pm_request_1'); select pg_sleep(4);" > /dev/null 2>&1) &
+\! (psql -v ON_ERROR_STOP=1 -q --no-psqlrc -c "select set_config('request.jwt.claim.sub', '$PM_AUTH', false); select api.db_data_admin_decide_property_match('$PM_P1', 'approve', array[$PM_A, $PM_B]::bigint[], 'race winner approval', '$PM_R1'); select pg_sleep(4);" > /dev/null 2>&1) &
 
 begin;
 
@@ -128,7 +148,7 @@ rollback;
 -- RACE 2 -- IDENTICAL. The same guard must NOT turn a genuine retry into a
 -- failure: an identical losing call is still an idempotent repeat.
 -- ----------------------------------------------------------------------
-\! (psql -v ON_ERROR_STOP=1 -q --no-psqlrc -c "select set_config('request.jwt.claim.sub', :'pm_auth', false); select api.db_data_admin_decide_property_match(:'pm_pending_2', 'approve', array[:pm_opa_a]::bigint[], 'race winner approval two', :'pm_request_2'); select pg_sleep(4);" > /dev/null 2>&1) &
+\! (psql -v ON_ERROR_STOP=1 -q --no-psqlrc -c "select set_config('request.jwt.claim.sub', '$PM_AUTH', false); select api.db_data_admin_decide_property_match('$PM_P2', 'approve', array[$PM_A]::bigint[], 'race winner approval two', '$PM_R2'); select pg_sleep(4);" > /dev/null 2>&1) &
 
 begin;
 
@@ -175,7 +195,7 @@ rollback;
 
 -- Cleanup of everything that CAN be cleaned. The ledger is append-only, so the
 -- raced identities remain -- approved, never pending.
-\! psql -v ON_ERROR_STOP=1 -q --no-psqlrc -c "delete from app.app_access where profile_id = :'pm_profile' and app = 'plm'; delete from app.user_role where profile_id = :'pm_profile' and role_id = :'pm_role';"
+\! psql -v ON_ERROR_STOP=1 -q --no-psqlrc -c "delete from app.app_access where profile_id = '$PM_PROFILE' and app = 'plm'; delete from app.user_role where profile_id = '$PM_PROFILE' and role_id = '$PM_ROLE';"
 
 begin;
 rollback;
