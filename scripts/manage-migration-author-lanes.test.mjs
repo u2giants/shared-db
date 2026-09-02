@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_PAGE_LIMIT, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reviewRecordRefs } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_PAGE_LIMIT, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -83,26 +83,54 @@ test('GitHub coordination delete never replays after response loss and preserves
 const NOW = new Date('2026-08-14T20:00:00Z')
 const body = (objects, owner, expires = '2026-08-15T08:00:00.000Z') => claimBody({ version:`2026081420${owner.padStart(4,'0')}`, objects, owner:`agent-${owner}`, branch:`codex/${owner}`, worktree:`C:/w/${owner}`, expiresAt:new Date(expires) })
 
-function durableApprovalFixture({includeLatestReplacementVerdict=true}={}){
+function durableApprovalFixture({includeLatestReplacementVerdict=true,returnSlot=null,keepReturnedSlotVerdict=false,redraw=false,redrawVerdict=true}={}){
   const issue=1824,pr=1931,headSha='a'.repeat(40),findingsBody='review findings',findingsRef=`https://github.com/u2giants/shared-db/pull/${pr}#issuecomment-1`
   const assignment1='1'.repeat(40),assignment2='2'.repeat(40),replacement2='3'.repeat(40)
   const commits=new Map([
     [assignment1,{message:`db-coordination reviewer-cursor sequence=1 reviewer=kimi-k3 issue=${issue} pr=${pr} head=${headSha} slot=1`}],
     [assignment2,{message:`db-coordination reviewer-cursor sequence=2 reviewer=kimi-k3 issue=${issue} pr=${pr} head=${headSha} slot=2`}],
-    [replacement2,{message:`db-coordination reviewer-replacement sequence=7 reviewer=kimi-k3 issue=${issue} pr=${pr} head=${headSha} reason=wrapper_terminal_failure`}],
+    [replacement2,{message:`db-coordination reviewer-replacement sequence=7 reviewer=kimi-k3 issue=${issue} pr=${pr} head=${headSha} slot=2 failed-sequence=2 prior-sequence=6 failure-ref=${'9'.repeat(40)}`}],
   ])
   const refs=new Map([
     [`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${headSha}`,assignment1],
     [`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${headSha}-slot2`,assignment2],
     [`${REVIEW_REPLACEMENT_REF_PREFIX}/${issue}-${pr}-${headSha}-slot2-7`,replacement2],
   ])
-  const addVerdict=(ref,sha,slot,assignmentSha)=>{
-    const record={verdict:'APPROVE',head_sha:headSha,issue,pr,slot,reviewer:'kimi-k3',assignment_sha:assignmentSha,findings_digest:createHash('sha256').update(findingsBody).digest('hex'),findings_ref:findingsRef}
+  const addVerdict=(ref,sha,slot,assignmentSha,reviewer='kimi-k3')=>{
+    const record={verdict:'APPROVE',head_sha:headSha,issue,pr,slot,reviewer,assignment_sha:assignmentSha,findings_digest:createHash('sha256').update(findingsBody).digest('hex'),findings_ref:findingsRef}
     refs.set(ref,sha);commits.set(sha,{message:`db-review-verdict ${JSON.stringify(record)}`,parents:[{sha:assignmentSha}]})
   }
   addVerdict(`refs/db-review-verdicts/${issue}-${pr}-${headSha}`,'4'.repeat(40),1,assignment1)
   addVerdict(`refs/db-review-verdicts/${issue}-${pr}-${headSha}-slot2`,'5'.repeat(40),2,assignment2)
   if(includeLatestReplacementVerdict)addVerdict(`refs/db-review-verdict-replacements/${issue}-${pr}-${headSha}-slot2-7`,'6'.repeat(40),2,replacement2)
+  // `returnSlot` retires one slot's latest assignment exactly the way
+  // --exclude-reviewer does: the ref is cleared and a durable return record is
+  // written in its place. Slot 1 retires its original assignment; slot 2 retires
+  // its LATEST record, the replacement, leaving the superseded original behind.
+  if(returnSlot){
+    const retired=returnSlot===1?{ref:`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${headSha}`,sha:assignment1,sequence:null}
+      :{ref:`${REVIEW_REPLACEMENT_REF_PREFIX}/${issue}-${pr}-${headSha}-slot2-7`,sha:replacement2,sequence:7}
+    refs.delete(retired.ref)
+    if(!keepReturnedSlotVerdict)refs.delete(returnSlot===1?`refs/db-review-verdicts/${issue}-${pr}-${headSha}`:`refs/db-review-verdict-replacements/${issue}-${pr}-${headSha}-slot2-7`)
+    const returnSha='7'.repeat(40)
+    refs.set(`${REVIEW_RETURN_REF_PREFIX}/${issue}-${pr}-${headSha}${returnSlot===1?'':'-slot2'}-${retired.sha}`,returnSha)
+    commits.set(returnSha,{message:`db-coordination reviewer-return reviewer=kimi-k3 issue=${issue} pr=${pr} head=${headSha} slot=${returnSlot} assignment=${retired.sha} sequence=${returnSlot===1?1:7}${retired.sequence===null?'':` replacement=${retired.sequence}`} reason=independence-conflict`})
+    // THE RE-DRAW. A returned slot is answerable again by a genuinely NEWER
+    // assignment for the same slot -- and only by that. `--assign-reviewer`
+    // recreates the ORIGINAL ref (namespace sequence 0) and
+    // `--replace-failed-reviewer` recreates the replacement ref under the SAME
+    // failed-sequence tail, so in both real routes the namespace tail cannot
+    // tell new from superseded. The global cursor sequence can, and that is what
+    // this exercises: sequence 11, drawn after the returned record.
+    if(redraw){
+      const redrawn='8'.repeat(40)
+      commits.set(redrawn,returnSlot===1
+        ?{message:`db-coordination reviewer-cursor sequence=11 reviewer=grok-4.6 issue=${issue} pr=${pr} head=${headSha} slot=1`}
+        :{message:`db-coordination reviewer-replacement sequence=11 reviewer=grok-4.6 issue=${issue} pr=${pr} head=${headSha} slot=2 failed-sequence=2 prior-sequence=7 failure-ref=${'9'.repeat(40)}`})
+      refs.set(retired.ref,redrawn)
+      if(redrawVerdict)addVerdict(returnSlot===1?`refs/db-review-verdicts/${issue}-${pr}-${headSha}`:`refs/db-review-verdict-replacements/${issue}-${pr}-${headSha}-slot2-7`,'b'.repeat(40),returnSlot,redrawn,'grok-4.6')
+    }
+  }
   const io={
     listRefs:(prefix)=>[...refs].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha})),
     readRef:(ref)=>refs.get(ref)??null,
@@ -120,6 +148,68 @@ test('durable preview approval requires APPROVE for every latest reviewer slot',
 
 test('durable preview approval rejects an older slot verdict after replacement',()=>{
   const fixture=durableApprovalFixture({includeLatestReplacementVerdict:false})
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,fixture.headSha,fixture.io),/review slot 2 has no durable APPROVE for its latest exact-head assignment/)
+})
+
+// THE MULTI-SLOT RETURN HOLE (grok-4.6 review of PR #2077, high finding 2).
+//
+// Dropping a returned assignment from the gate is fail-CLOSED with one slot --
+// nothing is left, and the emptiness refusal fires. With two slots it was
+// fail-OPEN: slot 2's own APPROVE was enough to make the gate green while slot
+// 1's assignment for this exact head had been returned and nobody had approved
+// anything for it. That is a merge authorized over an unreviewed slot, the exact
+// failure the return record exists to prevent. Both tests below fail against the
+// version of the gate that only filtered returned SHAs.
+test('a returned slot is never satisfied by another slot APPROVE',()=>{
+  const fixture=durableApprovalFixture({returnSlot:1})
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,fixture.headSha,fixture.io),/review slot 1 was durably returned and has no live exact-head assignment/)
+})
+
+// A returned slot is not satisfied by a raced verdict on the assignment it
+// retired either. The verdict still READS -- it resolves through the return
+// record instead of breaking the audit chain with "no live assignment record" --
+// but it authorizes nothing.
+test('a verdict raced onto a returned assignment reads but never approves the slot',()=>{
+  const fixture=durableApprovalFixture({returnSlot:1,keepReturnedSlotVerdict:true})
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,fixture.headSha,fixture.io),/review slot 1 was durably returned and has no live exact-head assignment/)
+})
+
+// Returning a slot's LATEST record does not hand the slot back to the older
+// record that latest one had already superseded: slot 2's returned replacement
+// cannot be answered for by the original assignment it replaced.
+test('a returned replacement is not satisfied by the assignment it superseded',()=>{
+  const fixture=durableApprovalFixture({returnSlot:2})
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,fixture.headSha,fixture.io),/review slot 2 was durably returned and has no live exact-head assignment/)
+})
+
+// THE OVER-CORRECTION (grok-4.6 second REVISE of PR #2077, high finding 2).
+//
+// A returned slot must not be answerable by another slot, nor by the record the
+// returned one had already superseded -- but it MUST be answerable by a
+// genuinely newer assignment that carries its own APPROVE. Comparing the
+// replacement-namespace tail made that impossible: `--assign-reviewer`
+// recreates the original ref, whose tail is 0, and `--replace-failed-reviewer`
+// recreates the replacement ref under the same failed-sequence tail, so neither
+// real recovery route could ever compare as newer and the slot stayed red
+// forever. Both tests below fail against the tail comparison and pass against
+// the cursor-sequence comparison.
+test('a re-drawn original assignment with its own APPROVE answers a returned slot',()=>{
+  const fixture=durableApprovalFixture({returnSlot:1,redraw:true})
+  const verdicts=assertDurableReviewApproval(fixture.issue,fixture.pr,fixture.headSha,fixture.io)
+  assert.equal(verdicts.filter((row)=>row.verdict==='APPROVE').length,3)
+})
+
+test('a re-drawn replacement with its own APPROVE answers a returned replacement slot',()=>{
+  const fixture=durableApprovalFixture({returnSlot:2,redraw:true})
+  const verdicts=assertDurableReviewApproval(fixture.issue,fixture.pr,fixture.headSha,fixture.io)
+  assert.equal(verdicts.filter((row)=>row.verdict==='APPROVE').length,3)
+})
+
+// The re-draw is not a free pass: the NEW assignment still has to record its
+// own APPROVE. Without one the slot stays red, so "newer" relaxed the ordering
+// rule and nothing else.
+test('a re-drawn assignment without its own APPROVE still leaves the slot red',()=>{
+  const fixture=durableApprovalFixture({returnSlot:2,redraw:true,redrawVerdict:false})
   assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,fixture.headSha,fixture.io),/review slot 2 has no durable APPROVE for its latest exact-head assignment/)
 })
 
@@ -439,6 +529,21 @@ function reviewIo(){
   return io
 }
 
+// Production `githubIo` always defines the atomic compare-and-swap ref writer,
+// and the exclusion RETURN path now refuses to run without it: retiring a
+// durable assignment ref through a compare-then-delete fallback is not a
+// compare-and-swap and can tear. Every test that excludes a reviewer who still
+// holds a slot therefore has to offer the same primitive production offers.
+function withAtomicRefs(io){
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  io.atomicReviewRefs=(changes)=>{
+    for(const change of changes)if((io.refs.get(change.ref)??null)!==(change.expected??null))throw new LaneError(`atomic reviewer ref transition failed: ${change.ref}`)
+    for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}
+  }
+  io.readReviewStates=(rows)=>new Map(rows.map((row)=>[`${row.issue}:${row.pr}`,{issue:io.getIssue(),pr:io.getPr(row.pr),evidence:io.getIssueComments(row.pr)}]))
+  return io
+}
+
 test('reviewer cursor advances atomically through the durable round robin',()=>{
   const io=reviewIo(), names=[]
   for(let n=1;n<=ACTIVE_REVIEWERS.length+1;n++)names.push(assignNextReviewer({issue:n,pr:100+n,headSha:`abcdef${n}`},io).reviewer)
@@ -447,7 +552,9 @@ test('reviewer cursor advances atomically through the durable round robin',()=>{
 })
 
 test('durable per-PR exclusion skips a truthfully disposed reviewer on a new head',()=>{
-  const io=reviewIo(), first=assignNextReviewer({issue:1833,pr:1900,headSha:'a'.repeat(40)},io)
+  const io=withAtomicRefs(reviewIo())
+  io.getPr=()=>({number:1900,state:'open',head:{sha:'a'.repeat(40),ref:'codex/x'}})
+  const first=assignNextReviewer({issue:1833,pr:1900,headSha:'a'.repeat(40)},io)
   const evidenceSha=io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/1833-1900-${'a'.repeat(40)}`)
   const excluded=excludeReviewerForPr({issue:1833,pr:1900,reviewer:first.reviewer,reason:'already-reviewed',evidenceSha},io)
   assert.deepEqual(parseReviewExclusion(io.getCommit(excluded.sha)),{reviewer:first.reviewer,issue:1833,pr:1900,reason:'already-reviewed',evidenceSha})
@@ -458,7 +565,9 @@ test('durable per-PR exclusion skips a truthfully disposed reviewer on a new hea
 })
 
 test('reviewer exclusion is idempotent and rejects false evidence or changed disposition',()=>{
-  const io=reviewIo(), first=assignNextReviewer({issue:1833,pr:1901,headSha:'c'.repeat(40)},io)
+  const io=withAtomicRefs(reviewIo())
+  io.getPr=()=>({number:1901,state:'open',head:{sha:'c'.repeat(40),ref:'codex/x'}})
+  const first=assignNextReviewer({issue:1833,pr:1901,headSha:'c'.repeat(40)},io)
   const evidenceSha=io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/1833-1901-${'c'.repeat(40)}`),request={issue:1833,pr:1901,reviewer:first.reviewer,reason:'terminal-unavailable',evidenceSha}
   const one=excludeReviewerForPr(request,io),two=excludeReviewerForPr(request,io)
   assert.equal(two.sha,one.sha)
@@ -466,11 +575,21 @@ test('reviewer exclusion is idempotent and rejects false evidence or changed dis
   assert.throws(()=>excludeReviewerForPr({...request,reason:'already-reviewed'},io),/different durable exclusion/)
 })
 
+// Excluding slot 1's reviewer now RETURNS slot 1's assignment, so slot 1 is
+// re-assigned to a fresh reviewer before slot 2 is requested. The previous
+// version of this test skipped straight to slot 2 while slot 1's ref still named
+// the excluded reviewer -- which is exactly the state assertDurableReviewApproval
+// can never be satisfied from, so that shortcut was never a usable route.
 test('a same-head review continues in the next slot without fabricating a failure',()=>{
-  const io=reviewIo(),head='e'.repeat(40),first=assignNextReviewer({issue:1833,pr:1904,headSha:head},io),evidenceSha=io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/1833-1904-${head}`)
+  const io=withAtomicRefs(reviewIo()),head='e'.repeat(40)
+  io.getPr=()=>({number:1904,state:'open',head:{sha:head,ref:'codex/x'}})
+  const first=assignNextReviewer({issue:1833,pr:1904,headSha:head},io),evidenceSha=io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/1833-1904-${head}`)
   excludeReviewerForPr({issue:1833,pr:1904,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io)
+  const replaced=assignNextReviewer({issue:1833,pr:1904,headSha:head},io)
+  assert.notEqual(replaced.reviewer,first.reviewer)
   const next=assignNextReviewer({issue:1833,pr:1904,headSha:head,slot:2},io)
   assert.notEqual(next.reviewer,first.reviewer)
+  assert.notEqual(next.reviewer,replaced.reviewer)
   assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith('refs/db-review-failures/1833-1904-')),false)
 })
 
@@ -483,7 +602,9 @@ test('an exclusion created while assignment waits for the mutex is never missed'
 })
 
 test('replacement selection skips reviewers durably excluded for the PR',()=>{
-  const io=reviewIo(),headA='a'.repeat(40),headB='b'.repeat(40),first=assignNextReviewer({issue:1833,pr:1903,headSha:headA},io)
+  const io=withAtomicRefs(reviewIo()),headA='a'.repeat(40),headB='b'.repeat(40)
+  io.getPr=()=>({number:1903,state:'open',head:{sha:headA,ref:'codex/x'}})
+  const first=assignNextReviewer({issue:1833,pr:1903,headSha:headA},io)
   io.getPr=()=>({state:'open',head:{sha:headB,ref:'codex/x'}})
   const second=assignNextReviewer({issue:1833,pr:1903,headSha:headB},io),evidenceSha=io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/1833-1903-${headB}`)
   excludeReviewerForPr({issue:1833,pr:1903,reviewer:second.reviewer,reason:'terminal-unavailable',evidenceSha},io)
@@ -4071,4 +4192,421 @@ test('--replace-failed-reviewer honours --review-slot on the command line (issue
   assert.notEqual(result.reviewer,slotTwo.reviewer)
   assert.notEqual(result.reviewer,slotOne.reviewer)
   assert.deepEqual(assignNextReviewer(request,io),slotOne,'slot 1 must be untouched by a slot-2 command-line replacement')
+})
+
+
+// ISSUE: EXCLUDING THE HOLDER OF THE CURRENT HEAD'S ASSIGNMENT DEADLOCKED THE PR.
+//
+// Live instance: issue #1999 / PR #2002, reviewer muse-spark-1.2-contributor
+// excluded for `already-reviewed` while it held the assignment ref for head
+// 0f139c0d. The exclusion released the lease and left the assignment ref naming
+// the excluded reviewer, so every later --assign-reviewer for that head refused
+// ("it was not returned or re-leased"), --replace-failed-reviewer could not be
+// used honestly (it demands a terminal failure code and nothing failed), and
+// assertDurableReviewApproval kept demanding an APPROVE for a slot no eligible
+// reviewer could ever be drawn into. The four tests below are the proof set: the
+// first two fail against the pre-fix script, the last two must keep passing.
+function returnScenario(issue,pr,head){
+  const io=withAtomicRefs(reviewIo())
+  io.getPr=()=>({number:pr,state:'open',head:{sha:head,ref:'codex/x'}})
+  const first=assignNextReviewer({issue,pr,headSha:head},io)
+  const assignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${head}`
+  return {io,first,assignmentRef,evidenceSha:io.refs.get(assignmentRef)}
+}
+
+// PROOF 1 + 2. Fails against the current script with "durable assignment
+// reviewer <name> is excluded for this PR (already-reviewed); it was not
+// returned or re-leased"; passes once the exclusion returns the assignment.
+test('excluding the holder of this head assignment returns the slot and a different reviewer is drawn (issue #1999)',()=>{
+  const head='f'.repeat(40),{io,first,assignmentRef,evidenceSha}=returnScenario(1999,2002,head)
+  const excluded=excludeReviewerForPr({issue:1999,pr:2002,reviewer:first.reviewer,reason:'already-reviewed',evidenceSha},io)
+  assert.equal(excluded.returned.length,1)
+  const record=parseReviewReturn(io.getCommit(excluded.returned[0].sha))
+  // `sequence` is the retired assignment's global cursor sequence. It is what
+  // lets the merge gate tell a NEWER assignment for this slot from the one that
+  // was handed back, so it is asserted here rather than left to the gate tests.
+  assert.deepEqual(record,{reviewer:first.reviewer,issue:1999,pr:2002,headSha:head,slot:1,assignmentSha:evidenceSha,sequence:first.sequence,replacementSequence:null,reason:'already-reviewed'})
+  assert.equal(excluded.returned[0].ref,reviewReturnRef(record))
+  // The retired assignment ref is cleared, and the return record -- not a bare
+  // deletion -- is what carries the fact that it ever existed.
+  assert.equal(io.refs.get(assignmentRef),undefined)
+  assert.deepEqual(readReviewReturns(1999,2002,head,io).map((row)=>row.assignmentSha),[evidenceSha])
+  assert.equal(io.refs.get(`${REVIEW_ACTIVE_REF_PREFIX}/${first.reviewer}`),undefined)
+  const next=assignNextReviewer({issue:1999,pr:2002,headSha:head},io)
+  assert.notEqual(next.reviewer,first.reviewer)
+  assert.equal(io.refs.get(assignmentRef),io.refs.get(`${REVIEW_ACTIVE_REF_PREFIX}/${next.reviewer}`))
+  assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith(`${REVIEW_FAILURE_REF_PREFIX}/1999-2002-`)),false)
+})
+
+// The same proof through the atomic compare-and-swap io, because the exclusion
+// takes a different write path there and a readback mismatch must be provable.
+test('the exclusion return lands atomically with the exclusion record (issue #1999)',()=>{
+  const head='f'.repeat(40),{io,first,assignmentRef,evidenceSha}=returnScenario(1999,2012,head)
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  io.atomicReviewRefs=(changes)=>{
+    for(const change of changes)if((io.refs.get(change.ref)??null)!==(change.expected??null))throw new LaneError(`atomic reviewer ref transition failed: ${change.ref}`)
+    for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}
+  }
+  io.readReviewStates=(rows)=>new Map(rows.map((row)=>[`${row.issue}:${row.pr}`,{issue:io.getIssue(),pr:io.getPr(row.pr),evidence:[]}]))
+  const excluded=excludeReviewerForPr({issue:1999,pr:2012,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io)
+  assert.equal(excluded.returned.length,1)
+  assert.equal(io.refs.get(assignmentRef),undefined)
+  assert.equal(io.refs.get(excluded.returned[0].ref),excluded.returned[0].sha)
+  const next=assignNextReviewer({issue:1999,pr:2012,headSha:head},io)
+  assert.notEqual(next.reviewer,first.reviewer)
+})
+
+// PROOF 3. The exclusion is never weakened: the returned reviewer stays barred
+// from this pull request on this head and on every later head.
+test('a returned reviewer is still never drawn again for that pull request (issue #1999)',()=>{
+  const head='f'.repeat(40),{io,first,evidenceSha}=returnScenario(1999,2003,head)
+  excludeReviewerForPr({issue:1999,pr:2003,reviewer:first.reviewer,reason:'already-reviewed',evidenceSha},io)
+  assert.ok(io.refs.get(`${REVIEW_EXCLUSION_REF_PREFIX}/1999-2003-${first.reviewer}`))
+  const drawn=[]
+  for(let n=0;n<ACTIVE_REVIEWERS.length+1;n++){
+    const next=`${'0'.repeat(39)}${n.toString(16)}`.slice(-40).padStart(40,'0')
+    io.getPr=()=>({number:2003,state:'open',head:{sha:next,ref:'codex/x'}})
+    // Each head's reviewer finishes before the next head is assigned, so the
+    // rotation is free to come back around to every provider except the
+    // excluded one -- which is the point of the assertion below.
+    io.getIssueComments=(number)=>Number(number)===2003?drawn.map((row)=>({body:`head ${row.headSha} APPROVE`})):[]
+    io.getPrReviews=()=>[]
+    drawn.push(assignNextReviewer({issue:1999,pr:2003,headSha:next},io))
+  }
+  assert.equal(drawn.some((row)=>row.reviewer===first.reviewer),false)
+  // Re-running the identical exclusion stays idempotent after the return, and
+  // records no second return for an assignment it already retired.
+  assert.deepEqual(excludeReviewerForPr({issue:1999,pr:2003,reviewer:first.reviewer,reason:'already-reviewed',evidenceSha},io).returned,[])
+})
+
+// PROOF 4. The approval gate is not softened. A live slot with no APPROVE is
+// still refused, and a RETURNED assignment is superseded rather than silently
+// satisfied -- even if its ref were somehow re-created after the return.
+test('durable approval still refuses a live slot with no APPROVE and never passes a returned one (issue #1999)',()=>{
+  const head='f'.repeat(40),{io,first,assignmentRef,evidenceSha}=returnScenario(1999,2004,head)
+  assert.throws(()=>assertDurableReviewApproval(1999,2004,head,io),/review slot 1 has no durable APPROVE/)
+  excludeReviewerForPr({issue:1999,pr:2004,reviewer:first.reviewer,reason:'already-reviewed',evidenceSha},io)
+  assert.throws(()=>assertDurableReviewApproval(1999,2004,head,io),/no durable reviewer assignment/)
+  // A returned assignment whose ref was re-created by a racing writer is still
+  // superseded history: it can neither satisfy the slot nor resurrect it.
+  io.refs.set(assignmentRef,evidenceSha)
+  assert.throws(()=>assertDurableReviewApproval(1999,2004,head,io),/no durable reviewer assignment/)
+  io.refs.delete(assignmentRef)
+  const next=assignNextReviewer({issue:1999,pr:2004,headSha:head},io)
+  assert.notEqual(next.reviewer,first.reviewer)
+  assert.throws(()=>assertDurableReviewApproval(1999,2004,head,io),/review slot 1 has no durable APPROVE/)
+})
+
+// A reviewer that already delivered a durable verdict is finished, not
+// returnable: returning it would strip the assignment record its verdict
+// artifact is validated against.
+test('an assignment that already carries a durable verdict is never returned (issue #1999)',()=>{
+  const head='f'.repeat(40),{io,first,evidenceSha}=returnScenario(1999,2005,head)
+  io.refs.set(`refs/db-review-verdicts/1999-2005-${head}`,'verdict-sha')
+  assert.throws(()=>excludeReviewerForPr({issue:1999,pr:2005,reviewer:first.reviewer,reason:'already-reviewed',evidenceSha},io),/already recorded a durable verdict/)
+  assert.ok(io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/1999-2005-${head}`))
+})
+
+// A REPLACEMENT HOLDER STRANDS THE SLOT THE SAME WAY AN ORIGINAL DOES.
+// --assign-reviewer reads the replacement namespace FIRST, so a replacement ref
+// left naming an excluded reviewer is the identical #1999 deadlock. The
+// exclusion returns both namespaces, and the return record carries the retired
+// record's replacement sequence so the merge gate can order the slot's history.
+function replacementScenario(issue,pr,head){
+  const io=withAtomicRefs(reviewIo())
+  io.getPr=()=>({number:pr,state:'open',head:{sha:head,ref:'codex/x'}})
+  const first=assignNextReviewer({issue,pr,headSha:head},io)
+  const replacement=replaceFailedReviewer({issue,pr,headSha:head,failedSequence:first.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)
+  const replacementRef=[...io.refs.keys()].find((ref)=>ref.startsWith(`${REVIEW_REPLACEMENT_REF_PREFIX}/${issue}-${pr}-${head}`))
+  return {io,first,replacement,replacementRef,evidenceSha:io.refs.get(replacementRef)}
+}
+
+test('excluding a replacement holder returns the replacement slot too (issue #1999)',()=>{
+  const head='c'.repeat(40),{io,replacement,replacementRef,evidenceSha}=replacementScenario(1999,2006,head)
+  const excluded=excludeReviewerForPr({issue:1999,pr:2006,reviewer:replacement.reviewer,reason:'independence-conflict',evidenceSha},io)
+  assert.equal(excluded.returned.length,1)
+  assert.equal(excluded.returned[0].assignmentRef,replacementRef)
+  assert.equal(io.refs.get(replacementRef),undefined)
+  const record=parseReviewReturn(io.getCommit(excluded.returned[0].sha))
+  assert.equal(record.reviewer,replacement.reviewer)
+  assert.equal(record.assignmentSha,evidenceSha)
+  assert.ok(record.replacementSequence>=1)
+  assert.deepEqual(readReviewReturns(1999,2006,head,io).map((row)=>row.assignmentSha),[evidenceSha])
+  // The slot no longer refuses every future assignment with the #1999 message.
+  // (This scenario's release fixture stops the retry for an unrelated reason;
+  // what is asserted is that the exclusion deadlock is not the reason.)
+  try{assignNextReviewer({issue:1999,pr:2006,headSha:head},io)}
+  catch(error){assert.doesNotMatch(error.message,/is excluded for this PR/)}
+})
+
+// SLOT 2 IS NOT SLOT 1 (grok-4.6 second REVISE of PR #2077, high finding 1).
+//
+// The exclusion used to take the slot from the ASSIGNMENT COMMIT. A replacement
+// message carried no `slot=` token, so a slot-2 replacement parsed as slot 1 and
+// the return was written against slot 1: it named the slot-1 return ref, asked
+// slot 1's verdict ref whether the work had already been reviewed, and told the
+// merge gate slot 1 had been handed back -- bricking an innocent, already
+// approved slot 1 while letting a REVIEWED slot-2 replacement be returned. The
+// gate tests cannot catch this: they hand-build their slot-2 return with slot=2
+// already in both the ref and the commit. Only the writer can be caught here.
+function slotTwoReplacementScenario(issue,pr,head){
+  const io=withAtomicRefs(reviewIo())
+  io.getPr=()=>({number:pr,state:'open',head:{sha:head,ref:'codex/x'}})
+  const first=assignNextReviewer({issue,pr,headSha:head},io)
+  const slotTwo=assignNextReviewer({issue,pr,headSha:head,slot:2},io)
+  const replacement=replaceFailedReviewer({issue,pr,headSha:head,slot:2,failedSequence:slotTwo.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)
+  const replacementRef=[...io.refs.keys()].find((ref)=>ref.startsWith(`${REVIEW_REPLACEMENT_REF_PREFIX}/${issue}-${pr}-${head}-slot2-`))
+  return {io,first,slotTwo,replacement,replacementRef,evidenceSha:io.refs.get(replacementRef)}
+}
+
+test('excluding a slot-2 replacement holder charges the return to slot 2, never slot 1',()=>{
+  const head='1'.repeat(40),{io,replacement,replacementRef,evidenceSha}=slotTwoReplacementScenario(2077,2100,head)
+  assert.ok(replacementRef&&evidenceSha)
+  const excluded=excludeReviewerForPr({issue:2077,pr:2100,reviewer:replacement.reviewer,reason:'independence-conflict',evidenceSha},io)
+  assert.equal(excluded.returned.length,1)
+  assert.equal(excluded.returned[0].assignmentRef,replacementRef)
+  assert.equal(excluded.returned[0].slot,2)
+  const record=parseReviewReturn(io.getCommit(excluded.returned[0].sha))
+  assert.equal(record.slot,2)
+  assert.equal(record.sequence,replacement.sequence)
+  assert.equal(excluded.returned[0].ref,reviewReturnRef(record))
+  assert.ok(excluded.returned[0].ref.includes('-slot2-'))
+  // The replacement COMMIT states its slot too, in the same form the original
+  // assignment writer uses. It is not what the writer trusts -- the ref is --
+  // but a record whose message is silent about its slot cannot be cross-checked
+  // against its ref at all, and silence is how this defect stayed invisible.
+  assert.equal(parseReviewCursor(io.getCommit(evidenceSha)).slot,2)
+  assert.equal(parseReviewCursor(io.getCommit(io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/2077-2100-${head}`))).slot,null)
+  // Slot 1 is untouched and no slot-1 return was invented for it -- the exact
+  // way an innocent, already-approved slot 1 used to be bricked.
+  assert.ok(io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/2077-2100-${head}`))
+  assert.deepEqual(readReviewReturns(2077,2100,head,io).map((row)=>row.slot),[2])
+})
+
+// A record whose commit contradicts its own ref is CORRUPTION, not a choice
+// between two answers. The ref is the authority on slot, so the writer stops
+// rather than returning a slot nobody can prove was held.
+test('an assignment whose commit contradicts its ref about the slot stops the exclusion',()=>{
+  const head='6'.repeat(40),{io,replacement,replacementRef,evidenceSha}=slotTwoReplacementScenario(2077,2105,head)
+  const commit=io.getCommit(evidenceSha)
+  const forged={...commit,message:commit.message.replace(' slot=2',' slot=1')}
+  const getCommit=io.getCommit
+  io.getCommit=(sha)=>sha===evidenceSha?forged:getCommit(sha)
+  assert.throws(()=>excludeReviewerForPr({issue:2077,pr:2105,reviewer:replacement.reviewer,reason:'independence-conflict',evidenceSha},io),/names slot 2 but its commit says slot 1/)
+  assert.equal(io.refs.get(replacementRef),evidenceSha)
+})
+
+// END TO END, WRITER INTO GATE. The reviewer's counter-spot-check found that
+// `excluding a replacement holder returns the replacement slot too` passes even
+// with the merge gate's returned-slot rule deleted. This one does not: it takes
+// the return records the WRITER actually produced and asks the gate about them.
+// Delete the `newestReturned` loop and the refusal changes to slot 1's missing
+// APPROVE, so the slot-2 assertion goes red; charge the return to slot 1 again
+// and it names slot 1 instead. It is pinned to both defects at once.
+test('the return the writer produced makes the merge gate refuse slot 2, not slot 1',()=>{
+  const head='5'.repeat(40),{io,replacement,evidenceSha}=slotTwoReplacementScenario(2077,2104,head)
+  excludeReviewerForPr({issue:2077,pr:2104,reviewer:replacement.reviewer,reason:'independence-conflict',evidenceSha},io)
+  assert.throws(()=>assertDurableReviewApproval(2077,2104,head,io),/review slot 2 was durably returned and has no live exact-head assignment/)
+  // And the refusal names the command that actually refills a returned
+  // REPLACEMENT, which is not --assign-reviewer.
+  assert.throws(()=>assertDurableReviewApproval(2077,2104,head,io),/--replace-failed-reviewer with the same --failed-sequence/)
+})
+
+// The verdict question is asked of the slot the record actually belongs to.
+// With the slot read from the commit, a REVIEWED slot-2 replacement was asked
+// about slot 1's verdict ref, found nothing there, and was returned anyway.
+test('a reviewed slot-2 replacement is never returned as an unreviewed slot 1',()=>{
+  const head='2'.repeat(40),{io,slotTwo,replacement,replacementRef,evidenceSha}=slotTwoReplacementScenario(2077,2101,head)
+  const sequence=Number(/-(\d+)$/.exec(replacementRef)[1])
+  assert.equal(sequence,slotTwo.sequence)
+  io.refs.set(`refs/db-review-verdict-replacements/2077-2101-${head}-slot2-${sequence}`,'verdict-sha')
+  assert.throws(()=>excludeReviewerForPr({issue:2077,pr:2101,reviewer:replacement.reviewer,reason:'already-reviewed',evidenceSha},io),/already recorded a durable verdict .* slot 2/)
+  assert.equal(io.refs.get(replacementRef),evidenceSha)
+  assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith(REVIEW_RETURN_REF_PREFIX)),false)
+})
+
+// THE RESIDUAL VERDICT WINDOW (grok-4.6 second REVISE of PR #2077, medium).
+//
+// `recordReviewVerdict` does not take the review mutex, so a verdict can still
+// land after the in-mutex scan and before the return's push lands. It authorizes
+// nothing -- its assignment_sha names the object the return just retired -- but
+// the verdict ref is keyed per TUPLE, not per assignment, and it is create-only.
+// Left in place it PINNED the head: no re-drawn reviewer could ever record a
+// verdict for it again, and the only escape was a spurious new head. The orphan
+// is now retired into its own durable namespace in a second atomic push, so the
+// object survives for audit and the tuple is free.
+function racedVerdictIo(io,tupleRef,verdictSha,record){
+  const atomic=io.atomicReviewRefs,getCommit=io.getCommit
+  let armed=false
+  io.atomicReviewRefs=(changes)=>{
+    const result=atomic(changes)
+    if(!armed&&changes.some((change)=>change.ref.startsWith(REVIEW_RETURN_REF_PREFIX))){armed=true;io.refs.set(tupleRef,verdictSha)}
+    return result
+  }
+  io.getCommit=(sha)=>sha===verdictSha?{message:`db-review-verdict ${JSON.stringify(record)}`,parents:[{sha:record.assignment_sha}]}:getCommit(sha)
+}
+
+test('a verdict that lands after the in-mutex scan is retired, not left pinning the head',()=>{
+  const head='3'.repeat(40),{io,first,assignmentRef,evidenceSha}=returnScenario(2077,2102,head)
+  const tupleRef=`refs/db-review-verdicts/2077-2102-${head}`,verdictSha='c'.repeat(40)
+  racedVerdictIo(io,tupleRef,verdictSha,{verdict:'APPROVE',head_sha:head,issue:2077,pr:2102,slot:1,reviewer:first.reviewer,assignment_sha:evidenceSha,findings_digest:'0'.repeat(64)})
+  const excluded=excludeReviewerForPr({issue:2077,pr:2102,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io)
+  assert.equal(excluded.returned.length,1)
+  assert.equal(io.refs.get(assignmentRef),undefined)
+  // The tuple is free again, so the head is reviewable by the next reviewer.
+  assert.equal(io.refs.get(tupleRef),undefined)
+  // And the raced object is still named by a durable ref that records which
+  // retired assignment it answered. Nothing is deleted, only re-filed.
+  const retired=retiredVerdictRef({issue:2077,pr:2102,headSha:head,slot:1,replacementSequence:null,verdictSha})
+  assert.ok(retired.startsWith(REVIEW_RETIRED_VERDICT_REF_PREFIX))
+  assert.equal(io.refs.get(retired),verdictSha)
+})
+
+// A raced verdict that answers some OTHER assignment is not this orphan, and is
+// never swept aside: the command stops and leaves both refs for a human.
+test('a verdict naming another assignment stops the exclusion for audit',()=>{
+  const head='4'.repeat(40),{io,first,evidenceSha}=returnScenario(2077,2103,head)
+  const tupleRef=`refs/db-review-verdicts/2077-2103-${head}`,verdictSha='d'.repeat(40)
+  racedVerdictIo(io,tupleRef,verdictSha,{verdict:'APPROVE',head_sha:head,issue:2077,pr:2103,slot:1,reviewer:first.reviewer,assignment_sha:'e'.repeat(40),findings_digest:'0'.repeat(64)})
+  assert.throws(()=>excludeReviewerForPr({issue:2077,pr:2103,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io),/stopped for audit/)
+  assert.equal(io.refs.get(tupleRef),verdictSha)
+})
+
+// The verdict refusal is not a slot-1-original presence stub: a verdict recorded
+// against a REPLACEMENT sequence lives in its own ref namespace, and the refusal
+// has to ask each held record about its own sequence.
+test('a replacement assignment that already carries a durable verdict is never returned (issue #1999)',()=>{
+  const head='d'.repeat(40),{io,replacement,replacementRef,evidenceSha}=replacementScenario(1999,2007,head)
+  const sequence=Number(/-(\d+)$/.exec(replacementRef)[1])
+  io.refs.set(`refs/db-review-verdict-replacements/1999-2007-${head}-${sequence}`,'verdict-sha')
+  assert.throws(()=>excludeReviewerForPr({issue:1999,pr:2007,reviewer:replacement.reviewer,reason:'already-reviewed',evidenceSha},io),/already recorded a durable verdict/)
+  assert.equal(io.refs.get(replacementRef),evidenceSha)
+})
+
+// A verdict-shaped COMMENT is not a durable verdict artifact. Only the
+// create-only verdict ref bars a return; prose never does, in either direction.
+test('a comment-only verdict never bars returning the slot (issue #1999)',()=>{
+  const head='f'.repeat(40),{io,first,assignmentRef,evidenceSha}=returnScenario(1999,2008,head)
+  io.getIssueComments=(number)=>Number(number)===2008?[{body:`head ${head} APPROVE`,author_association:'OWNER'}]:[]
+  const excluded=excludeReviewerForPr({issue:1999,pr:2008,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io)
+  assert.equal(excluded.returned.length,1)
+  assert.equal(io.refs.get(assignmentRef),undefined)
+})
+
+// THE VERDICT RACE (grok-4.6 review of PR #2077, high finding 3).
+// `recordReviewVerdict` does not take the review mutex, so a verdict can land
+// after a pre-mutex scan and before the return's push. The scan that decides is
+// therefore run again INSIDE the mutex, immediately before the write. Here the
+// verdict appears exactly at mutex acquisition: the pre-mutex answer says
+// "returnable", the in-mutex answer must say "reviewed, refuse", and the
+// assignment ref must survive untouched.
+test('a verdict recorded while the exclusion waits for the mutex still refuses the return (issue #1999)',()=>{
+  const head='f'.repeat(40),{io,first,assignmentRef,evidenceSha}=returnScenario(1999,2009,head)
+  const create=io.createRef
+  io.createRef=(ref,sha)=>{const made=create(ref,sha);if(ref===MUTEX_REF&&made)io.refs.set(`refs/db-review-verdicts/1999-2009-${head}`,'verdict-sha');return made}
+  assert.throws(()=>excludeReviewerForPr({issue:1999,pr:2009,reviewer:first.reviewer,reason:'already-reviewed',evidenceSha},io),/already recorded a durable verdict/)
+  assert.equal(io.refs.get(assignmentRef),evidenceSha)
+  assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith(REVIEW_RETURN_REF_PREFIX)),false)
+  assert.equal(io.refs.get(MUTEX_REF),undefined)
+})
+
+// Retiring a durable assignment ref is a compare-and-swap or it does not happen.
+// The compare-then-delete fallback can tear -- return record created, assignment
+// ref still naming the excluded reviewer -- and the documented re-run cannot
+// repair that state. So the return refuses the io instead of falling back.
+test('returning a slot refuses an io without atomic compare-and-swap refs (issue #1999)',()=>{
+  const head='f'.repeat(40),io=reviewIo()
+  io.getPr=()=>({number:2010,state:'open',head:{sha:head,ref:'codex/x'}})
+  const first=assignNextReviewer({issue:1999,pr:2010,headSha:head},io)
+  const assignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/1999-2010-${head}`
+  assert.throws(()=>excludeReviewerForPr({issue:1999,pr:2010,reviewer:first.reviewer,reason:'already-reviewed',evidenceSha:io.refs.get(assignmentRef)},io),/requires atomic compare-and-swap ref support/)
+  assert.equal(io.refs.get(assignmentRef),io.refs.get(assignmentRef))
+  assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith(REVIEW_EXCLUSION_REF_PREFIX)),false)
+})
+
+test('a reviewer return record is parsed strictly and fails closed',()=>{
+  const reviewer=ACTIVE_REVIEWERS[0].name,head='a'.repeat(40),assignmentSha='b'.repeat(40)
+  const message=`db-coordination reviewer-return reviewer=${reviewer} issue=1999 pr=2002 head=${head} slot=1 assignment=${assignmentSha} reason=already-reviewed`
+  // A record written before the cursor sequence was carried still parses, and
+  // says so honestly with sequence null, rather than inventing an order.
+  assert.deepEqual(parseReviewReturn({message}),{reviewer,issue:1999,pr:2002,headSha:head,slot:1,assignmentSha,sequence:null,replacementSequence:null,reason:'already-reviewed'})
+  const sequenced=message.replace(' reason=',' sequence=9 reason=')
+  assert.deepEqual(parseReviewReturn({message:sequenced}),{reviewer,issue:1999,pr:2002,headSha:head,slot:1,assignmentSha,sequence:9,replacementSequence:null,reason:'already-reviewed'})
+  // The replacement form carries the sequence of the record it retires, because
+  // a slot's history is ordered and the merge gate has to compare against it.
+  const replacementMessage=message.replace(' reason=',' sequence=9 replacement=2 reason=')
+  assert.deepEqual(parseReviewReturn({message:replacementMessage}),{reviewer,issue:1999,pr:2002,headSha:head,slot:1,assignmentSha,sequence:9,replacementSequence:2,reason:'already-reviewed'})
+  assert.throws(()=>parseReviewReturn({message:message.replace(' reason=',' sequence=0 reason=')}),/malformed/)
+  assert.throws(()=>parseReviewReturn({message:message.replace(' reason=',' sequence=x reason=')}),/malformed/)
+  // Order matters: `replacement=` before `sequence=` is not the recorded form.
+  assert.throws(()=>parseReviewReturn({message:message.replace(' reason=',' replacement=2 sequence=9 reason=')}),/malformed/)
+  assert.throws(()=>parseReviewReturn({message:message.replace(' reason=',' replacement=0 reason=')}),/malformed/)
+  assert.throws(()=>parseReviewReturn({message:message.replace(' reason=',' replacement=x reason=')}),/malformed/)
+  assert.throws(()=>parseReviewReturn({message:message.replace(reviewer,'unknown-reviewer')}),/malformed/)
+  assert.throws(()=>parseReviewReturn({message:message.replace('reason=already-reviewed','reason=because-i-said-so')}),/malformed/)
+  assert.throws(()=>parseReviewReturn({message:message.replace(`head=${head}`,'head=not-a-sha')}),/malformed/)
+  assert.equal(reviewReturnRef({issue:1999,pr:2002,headSha:head,slot:2,assignmentSha}),`${REVIEW_RETURN_REF_PREFIX}/1999-2002-${head}-slot2-${assignmentSha}`)
+})
+
+test('a reviewer return whose ref name disagrees with its commit is refused',()=>{
+  const io=reviewIo(),reviewer=ACTIVE_REVIEWERS[0].name,head='a'.repeat(40),assignmentSha='b'.repeat(40)
+  const sha=io.makeOwnerCommit(`db-coordination reviewer-return reviewer=${reviewer} issue=1999 pr=2002 head=${head} slot=1 assignment=${assignmentSha} reason=already-reviewed`)
+  io.refs.set(`${REVIEW_RETURN_REF_PREFIX}/1999-2002-${head}-slot2-${assignmentSha}`,sha)
+  assert.throws(()=>readReviewReturns(1999,2002,head,io),/does not match its ref identity/)
+})
+
+// THE RE-RUN MUST REACH THE RETIREMENT (grok-4.6 third REVISE of PR #2077).
+//
+// The retirement is a SECOND atomic push, made after the one that records the
+// exclusion and its returns. If that second push fails -- or the process dies
+// between the two -- the exclusion is already durable and the returned
+// assignment ref is already cleared, so a re-run found nothing held and stopped
+// on the idempotent early return, before the retirement could run again. The
+// raced verdict then held the per-tuple ref for that head with no repair short of
+// a new push, which is the escape this whole feature exists to close. The re-run
+// now rebuilds the returned rows from the durable return records themselves.
+test('re-running the exclusion retires a verdict left orphaned by a failed retirement push',()=>{
+  const head='5'.repeat(40),{io,first,assignmentRef,evidenceSha}=returnScenario(2077,2104,head)
+  const tupleRef=`refs/db-review-verdicts/2077-2104-${head}`,verdictSha='c'.repeat(40)
+  racedVerdictIo(io,tupleRef,verdictSha,{verdict:'APPROVE',head_sha:head,issue:2077,pr:2104,slot:1,reviewer:first.reviewer,assignment_sha:evidenceSha,findings_digest:'0'.repeat(64)})
+  // The exclusion+return push lands; the retirement push is the one that fails.
+  const atomic=io.atomicReviewRefs
+  io.atomicReviewRefs=(changes)=>{
+    if(changes.some((change)=>change.ref.startsWith(REVIEW_RETIRED_VERDICT_REF_PREFIX)))throw new LaneError('HTTP 503 during retirement push')
+    return atomic(changes)
+  }
+  assert.throws(()=>excludeReviewerForPr({issue:2077,pr:2104,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io),/503/)
+  // Durably half-done: the slot is returned, and the orphan still pins the tuple.
+  assert.equal(io.refs.get(assignmentRef),undefined)
+  assert.deepEqual(readReviewReturns(2077,2104,head,io).map((row)=>row.assignmentSha),[evidenceSha])
+  assert.equal(io.refs.get(tupleRef),verdictSha)
+  // The documented repair -- re-run the IDENTICAL exclusion -- now completes it.
+  io.atomicReviewRefs=atomic
+  const repaired=excludeReviewerForPr({issue:2077,pr:2104,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io)
+  assert.equal(repaired.ref,`${REVIEW_EXCLUSION_REF_PREFIX}/2077-2104-${first.reviewer}`)
+  assert.equal(io.refs.get(tupleRef),undefined)
+  assert.equal(io.refs.get(retiredVerdictRef({issue:2077,pr:2104,headSha:head,slot:1,replacementSequence:null,verdictSha})),verdictSha)
+  // Nothing new was recorded: no second exclusion, no second return.
+  assert.equal(readReviewReturns(2077,2104,head,io).length,1)
+  // And with nothing left orphaned, a third run is the plain no-op it always was.
+  const again=excludeReviewerForPr({issue:2077,pr:2104,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io)
+  assert.deepEqual(again.returned,[])
+})
+
+// FAIL CLOSED ON A REF THIS PARSER CANNOT NAME.
+//
+// The legacy first-implementation replacement link had no namespace tail, so the
+// shared ref parser answers null for it. The exclusion scan used to drop such a
+// row silently -- which excluded the reviewer while writing NO return for the
+// record it still held, re-creating the stranded slot the return exists to
+// repair. It now stops instead, and only for a record that really does name the
+// reviewer being excluded: another reviewer's legacy link is not this command's
+// problem and must not brick every exclusion on the pull request.
+test('a malformed assignment ref still held by the excluded reviewer stops the exclusion',()=>{
+  const head='6'.repeat(40),{io,first,evidenceSha}=returnScenario(2077,2105,head)
+  const legacy=`${REVIEW_REPLACEMENT_REF_PREFIX}/2077-2105-${head}`
+  io.refs.set(legacy,evidenceSha)
+  assert.throws(()=>excludeReviewerForPr({issue:2077,pr:2105,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io),/cannot be named by the shared ref parser/)
+  assert.equal(io.refs.get(legacy),evidenceSha)
+  assert.equal(io.readRef(`${REVIEW_EXCLUSION_REF_PREFIX}/2077-2105-${first.reviewer}`),null)
 })
