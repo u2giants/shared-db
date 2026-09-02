@@ -21,6 +21,28 @@
 -- residual identities end APPROVED (never pending, so they cannot appear in the
 -- review queue), and the only cleanup possible -- the temporary role grants --
 -- is performed.
+-- The racing connections are opened by dblink, which refuses a passwordless
+-- connection for a non-superuser. The connection parameters are read from the
+-- environment psql is already using -- nothing is hardcoded and no credential
+-- is written into this repository.
+\set pm_race_pw ''
+\set pm_race_host ''
+\set pm_race_port ''
+\set pm_race_user ''
+\getenv pm_race_pw PGPASSWORD
+\getenv pm_race_host PGHOST
+\getenv pm_race_port PGPORT
+\getenv pm_race_user PGUSER
+
+select set_config(
+  'pm_race.dsn',
+  'dbname=' || current_database()
+    || case when :'pm_race_host' <> '' then ' host=' || :'pm_race_host' else '' end
+    || case when :'pm_race_port' <> '' then ' port=' || :'pm_race_port' else '' end
+    || case when :'pm_race_user' <> '' then ' user=' || :'pm_race_user' else '' end
+    || case when :'pm_race_pw' <> '' then ' password=' || :'pm_race_pw' else '' end,
+  false);
+
 begin;
 
 do $t$
@@ -59,7 +81,8 @@ begin
     end;
   end if;
 
-  v_dsn := 'dbname=' || current_database();
+  v_dsn := coalesce(nullif(current_setting('pm_race.dsn', true), ''),
+                    'dbname=' || current_database());
 
   select p.id, p.auth_user_id into v_profile, v_auth
   from app.profile p
