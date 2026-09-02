@@ -41,7 +41,7 @@ Three ColdLion answers (JamieLynn, via Albert) and the follow-up probing changed
 
 **The one that matters: `GET /prodHistory` without `stageCode` returns ONLY the `ISS` (issued)
 lines.** `stageCode=REC` returns **receipt** lines that appear nowhere in the default response —
-zero key overlap across four windows. Order 22717 ordered 4,800 (`ISS`) and received 4,548 (`REC`),
+zero key overlap across four windows. Order 90003 ordered 5,000 (`ISS`) and received 4,748 (`REC`) (synthetic values, real shape),
 and only the first half was visible. **A load built on the default response has no receipts in it
 and looks complete.** The stage is not in the payload; the loader must stamp it from the request.
 Full evidence, method and reproduction:
