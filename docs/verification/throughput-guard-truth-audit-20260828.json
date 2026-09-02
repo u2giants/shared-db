@@ -428,13 +428,6 @@
       "line_sha256": "10cdacb1f5aa4bb7115edf89810b0ff86865a4ef1850efa37a4b3160aaac3c04"
     },
     {
-      "site": "scripts/check-migration-ledger-drift.mjs:186",
-      "disposition": "excluded",
-      "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation.",
-      "semantic_key": "scripts/check-migration-ledger-drift.mjs:7a23e8c369dcbc2e6278da9e1b1ae0855fc20d5cb7ec41a753aab5449317a932:1",
-      "line_sha256": "7a23e8c369dcbc2e6278da9e1b1ae0855fc20d5cb7ec41a753aab5449317a932"
-    },
-    {
       "site": "scripts/check-migration-ledger-drift.mjs:26",
       "disposition": "excluded",
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation.",
@@ -1651,9 +1644,16 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation.",
       "semantic_key": "scripts/verify/migration_body_md5.py:c306e35745386b717b583be41a182e378d17ce899e352842a4d0cfbae51ccc3c:1",
       "line_sha256": "c306e35745386b717b583be41a182e378d17ce899e352842a4d0cfbae51ccc3c"
+    },
+    {
+      "site": "scripts/production_migration_guard.py:1169",
+      "disposition": "enriched",
+      "reason": "The classifier derives the absent base from a migration declaration and compares it with the target ledger before naming the exact gap.",
+      "semantic_key": "scripts/production_migration_guard.py:c09f129d700353ee3bdde8d550d639ce22090dfe682acffcdd4510fef639f5c3:1",
+      "line_sha256": "c09f129d700353ee3bdde8d550d639ce22090dfe682acffcdd4510fef639f5c3"
     }
   ],
   "call_site_count": 234,
-  "call_site_sha256": "7e3b0fb3aee70ce3da1b124baa5ae47bdd085febf98b6ae8cfdbd8a67e77f03b",
+  "call_site_sha256": "431a83734736190bf837e2048344009bdf8246f049c1d015ba56cad16c575431",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }

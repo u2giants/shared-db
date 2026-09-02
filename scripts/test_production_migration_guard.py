@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import production_migration_guard  # noqa: E402
 from production_migration_guard import (  # noqa: E402
     HARD_BLOCKED,
+    HELD_VERSIONS,
     PREVIEW_ONLY_HISTORICAL_RESTORATIONS,
     BUNDLE_20260804,
     FR_HELD_20260803,
@@ -25,6 +26,7 @@ from production_migration_guard import (  # noqa: E402
     GuardError,
     assert_bounded,
     compute_content_manifest,
+    classify_pending_version,
     created_objects,
     local_migrations,
     manifest_path,
@@ -3346,6 +3348,42 @@ class B3TruncateFixCoPresenceTest(unittest.TestCase):
         self.assertIn("revoke truncate, references, trigger, maintain", lowered)
         # ...and asserts the outcome via has_table_privilege (the behaviour probe).
         self.assertIn("has_table_privilege", lowered)
+
+
+class PendingVersionClassifierTest(unittest.TestCase):
+    def test_every_registry_flows_through_one_classifier(self) -> None:
+        paths = local_migrations(REPO)
+        self.assertEqual(classify_pending_version("20260814170749", set(), REPO, paths)["kind"], "retired")
+        self.assertEqual(classify_pending_version("20260802170000", set(), REPO, paths)["kind"], "deliberately-held")
+        self.assertEqual(classify_pending_version("20260817150944", set(), REPO, paths)["kind"], "deliberately-held")
+        self.assertEqual(classify_pending_version("20260828052706", set(), REPO, paths)["kind"], "retired")
+        self.assertEqual(classify_pending_version("20260810190000", set(), REPO, paths)["kind"], "guarded-batch")
+
+    def test_a_version_that_is_both_held_and_hard_blocked_reports_the_hard_block(self) -> None:
+        """20260802171000 sits in HELD_VERSIONS and in HARD_BLOCKED.
+
+        The held historical FR ruling was superseded by the guarded forward
+        20260818174350, so this original must never be applied at all. Calling it
+        "held for one bounded apply" would read as "waiting its turn" in the
+        migration-ledger drift report, which is the opposite of the truth. Both
+        kinds are intentionally excluded, so the actionable drift COUNT is the
+        same either way -- only the sentence a human reads changes, and it must
+        be the strict one.
+        """
+        paths = local_migrations(REPO)
+        self.assertIn("20260802171000", HELD_VERSIONS)
+        self.assertIn("20260802171000", HARD_BLOCKED)
+        row = classify_pending_version("20260802171000", set(), REPO, paths)
+        self.assertEqual(row["kind"], "retired")
+        self.assertIn("refuses this version outright", row["reason"])
+        for version in sorted((set(HELD_VERSIONS) | set(FR_SHIP_SET_HOLD) | set(FR_REMOVAL_VERSIONS)) - set(HARD_BLOCKED)):
+            self.assertEqual(classify_pending_version(version, set(), REPO, paths)["kind"], "deliberately-held")
+
+    def test_missing_declared_base_is_sharper_than_ordinary_pending(self) -> None:
+        paths = local_migrations(REPO)
+        row = classify_pending_version("20260824135515", {"20260811030000"}, REPO, paths)
+        self.assertEqual(row["kind"], "base-absent")
+        self.assertIn("20260814223552", row["reason"])
 
 
 if __name__ == "__main__":
