@@ -2309,6 +2309,51 @@ test('merge-commit ancestry helper refuses every unreadable comparison shape', (
     'm', 'main', { compareCommits: () => ({ status: 'identical', behind_by: 0 }) }))
 })
 
+// THE DOCUMENTS-ONLY DRAW GUARD IS WIRED INTO --assign-reviewer (#2102).
+//
+// `assertReviewerDrawIsWarranted` is what actually protects reviewer-pool
+// capacity, and its only caller is the CLI branch below. A review of this change
+// found that no test imported it and no test drove `main(['--assign-reviewer', …])`
+// at all, so deleting the call from the CLI would not have failed CI while a
+// documents-only pull request went on spending a reviewer slot. This drives the
+// real CLI: the refusal, the rename that must NOT be exempt, and a control
+// proving a migration change still reaches the draw.
+function assignReviewerRun(files){
+  const io={pullRequestFiles(){return files}}
+  const errors=[],original=console.error
+  console.error=(message)=>errors.push(String(message))
+  let code
+  try{code=main(['--assign-reviewer','--issue','2102','--pr','2112','--head-sha','d'.repeat(40)],NOW,io)}
+  finally{console.error=original}
+  return {code,stderr:errors.join('\n')}
+}
+
+test('--assign-reviewer refuses to draw a database reviewer for a documents-only pull request (#2102)',()=>{
+  const refused=assignReviewerRun([{filename:'docs/notes.md'},{filename:'HANDOFF.d/2026-09-02T0000Z-note.md'}])
+  assert.equal(refused.code,2)
+  assert.match(refused.stderr,/documents-only change/)
+  assert.match(refused.stderr,/does not draw from the database reviewer pool/)
+  // The refusal must name the rule, not just fail: an unexplained refusal at the
+  // draw is indistinguishable from the reviewer pool being broken.
+  assert.match(refused.stderr,/Rulebook files/)
+})
+
+test('--assign-reviewer still draws for a rulebook file, a migration, and a migration renamed to a document (#2102)',()=>{
+  // Each of these must get PAST the guard. The draw then fails on the stub io,
+  // which is the point: the failure is anything EXCEPT the documents-only refusal.
+  for(const files of [
+    [{filename:'docs/notes.md'},{filename:'AGENTS.md'}],
+    [{filename:'docs/notes.md'},{filename:'supabase/migrations/20260902120000_add_thing.sql'}],
+    [{filename:'docs/moved.md',previous_filename:'supabase/migrations/20260902120000_add_thing.sql'}],
+  ]){
+    const drawn=assignReviewerRun(files)
+    assert.doesNotMatch(drawn.stderr,/documents-only change/,JSON.stringify(files))
+  }
+  // And an unreadable file list fails OPEN at the draw: "we could not tell" costs
+  // a review, it never grants an exemption.
+  assert.doesNotMatch(assignReviewerRun('nonsense').stderr,/documents-only change/)
+})
+
 test('unreadable claims fail closed',()=>assert.throws(()=>assertLaneAvailable([{number:9,body:'bad'}],[],NOW),/unreadable/))
 
 test('claim objects require known kinds and exact qualified identifiers',()=>{

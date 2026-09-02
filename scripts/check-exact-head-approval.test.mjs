@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
 import { evaluateExactHeadApproval as evaluateRaw, gatherApprovalInput, parseAssignmentRef, requireDurableVerdictInput, ApprovalCheckError } from './check-exact-head-approval.mjs'
+import { isValidatedVerdictArtifact } from './lib/review-verdict-artifact.mjs'
 
 const OLD = 'b494401028464ef8b2e67fe0b5b1836839b2be36'
 const NEW = '8d3c31accd5b21ea669e65f5ae53f5f95cc57337'
@@ -526,12 +527,111 @@ test('an absent or unreadable changed-file list never grants the exemption', () 
   assert.throws(() => evaluateExactHeadApproval({ pr: 2102, headSha: NEW, assignments: [], verdicts: [], changedFiles: null }), /no reviewer was ever assigned head/)
 })
 
+// THE DOCUMENTS-ONLY LANE THROUGH THE ADAPTER, NOT ONLY THROUGH THE CORE (#2102).
+//
+// The exemption is only real if `gatherApprovalInput` actually reads
+// `pulls/{n}/files` and hands the classifier the COMPLETE list. A review of this
+// change found that nothing asserted the `changedFiles` field, nothing mocked the
+// files endpoint, and no rename row ever reached the classifier -- so deleting the
+// adapter's changed-file read would have left a documents-only pull request
+// refused by this gate while the draw side refused to draw a reviewer for it:
+// permanently stuck, with CI green. These tests drive the real adapter.
+const DOC_HEAD = 'd'.repeat(40)
+const DOC_ISSUE = 2102, DOC_PR = 2112
+function documentsOnlyGithub({ files = [], recorded = null } = {}) {
+  const assignmentSha = '7'.repeat(40), verdictSha = '9'.repeat(40)
+  const findingsBody = 'documents-only review findings'
+  const findingsRef = `https://github.com/u2giants/shared-db/pull/${DOC_PR}#issuecomment-9`
+  const digest = createHash('sha256').update(findingsBody).digest('hex')
+  const commits = new Map(), assignmentRefs = [], verdictRefs = []
+  // A reviewer really was drawn at these exact bytes and really did answer. The
+  // artifact is built the way production builds one -- an assignment cursor
+  // commit, a verdict commit parented on it, and durable findings whose digest
+  // matches -- so `gatherApprovalInput` validates it and stamps it. Handing the
+  // core a hand-written `{validated: true}` object instead proves nothing: that
+  // field is not what `isValidatedVerdictArtifact` reads, so such an object is
+  // always unvalidated and never reaches the refusal branch at all.
+  if (recorded) {
+    commits.set(assignmentSha, { message: `db-coordination reviewer-cursor sequence=1 reviewer=${recorded.reviewer} issue=${DOC_ISSUE} pr=${DOC_PR} head=${DOC_HEAD} slot=1` })
+    assignmentRefs.push({ ref: `refs/db-review-assignments/${DOC_ISSUE}-${DOC_PR}-${DOC_HEAD}`, object: { sha: assignmentSha } })
+    const row = { verdict: recorded.verdict, head_sha: DOC_HEAD, issue: DOC_ISSUE, pr: DOC_PR, slot: 1, reviewer: recorded.reviewer, assignment_sha: assignmentSha, findings_digest: digest, findings_ref: findingsRef }
+    commits.set(verdictSha, { message: `db-review-verdict ${JSON.stringify(row)}`, parents: [{ sha: assignmentSha }] })
+    verdictRefs.push({ ref: `refs/db-review-verdicts/${DOC_ISSUE}-${DOC_PR}-${DOC_HEAD}`, object: { sha: verdictSha } })
+  }
+  return {
+    json: (args) => {
+      const endpoint = args[args.length - 1]
+      if (endpoint.includes('/git/matching-refs/db-review-assignments')) return assignmentRefs
+      if (endpoint.includes('/git/matching-refs/db-review-replacements')) return []
+      if (endpoint.includes('/git/matching-refs/db-review-returns')) return []
+      if (endpoint.includes('/git/matching-refs/db-review-verdict-replacements')) return []
+      if (endpoint.includes('/git/matching-refs/db-review-verdicts')) return verdictRefs
+      if (/\/git\/commits\/[0-9a-f]{40}$/.test(endpoint)) return commits.get(endpoint.split('/').pop())
+      if (endpoint.includes('/issues/comments/')) return { body: findingsBody }
+      if (/\/pulls\/\d+$/.test(endpoint)) return { head: { sha: DOC_HEAD } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    },
+    // The files endpoint is a DISTINCT page read from the comment and review
+    // reads. The older helper in this file returned issue comments for any
+    // non-review pages URL, files included, which is why an adapter that never
+    // read files could still look correct here.
+    pages: (endpoint) => (/\/pulls\/\d+\/files/.test(endpoint) ? files : []),
+  }
+}
+
+test('the adapter reads the pull request changed-file list and classifies it (#2102)', () => {
+  const input = gatherApprovalInput({ PR_NUMBER: String(DOC_PR) }, documentsOnlyGithub({
+    files: [{ filename: 'docs/notes.md' }, { filename: 'HANDOFF.d/2026-09-02T0000Z-note.md' }],
+  }))
+  assert.deepEqual(input.changedFiles, ['docs/notes.md', 'HANDOFF.d/2026-09-02T0000Z-note.md'])
+  const result = evaluateExactHeadApproval(input)
+  assert.equal(result.approved, true)
+  assert.equal(result.documents_only, true)
+  assert.equal(result.assignments, 0)
+})
+
+// A migration renamed to a `.md` is a migration change wearing a document's name.
+// GitHub's rename row carries `previous_filename`, and the adapter must pass it
+// through or the exemption is handed to a SQL change.
+test('the adapter carries a rename previous_filename into the classification (#2102)', () => {
+  const renamed = gatherApprovalInput({ PR_NUMBER: String(DOC_PR) }, documentsOnlyGithub({
+    files: [{ filename: 'docs/moved.md', previous_filename: 'supabase/migrations/20260902120000_add_thing.sql' }],
+  }))
+  assert.deepEqual(renamed.changedFiles, ['docs/moved.md', 'supabase/migrations/20260902120000_add_thing.sql'])
+  assert.throws(() => evaluateExactHeadApproval(renamed), /no reviewer was ever assigned head/)
+})
+
 // Exempt from DRAWING a reviewer is not exempt from ANSWERING one. If a review
-// really happened at these bytes and refused them, the refusal still stands.
-test('a recorded refusal still blocks a documents-only head', () => {
-  const assignmentSha = 'a'.repeat(40)
-  const artifact = { pr: 2102, head_sha: NEW, verdict: 'REVISE', ref: `${'refs/db-review-verdicts'}/2102-2102-${NEW}`, assignment_sha: assignmentSha, reviewer: 'grok-4.6', validated: true }
-  assert.throws(() => evaluateExactHeadApproval({
-    pr: 2102, headSha: NEW, assignments: [], verdicts: [artifact], changedFiles: ['docs/notes.md'],
-  }), /durable reviewer refusal|without artifact validation/)
+// really happened at these bytes and refused them, the refusal still stands --
+// and the assertion names ONLY the refusal, so the unvalidated-input throw cannot
+// stand in for it.
+test('a recorded refusal still blocks a documents-only head (#2102)', () => {
+  const input = gatherApprovalInput({ PR_NUMBER: String(DOC_PR) }, documentsOnlyGithub({
+    files: [{ filename: 'docs/notes.md' }], recorded: { reviewer: 'grok-4.6', verdict: 'REVISE' },
+  }))
+  assert.equal(input.verdicts.length, 1)
+  assert.equal(isValidatedVerdictArtifact(input.verdicts[0]), true)
+  assert.throws(() => evaluateExactHeadApproval(input), (error) => error instanceof ApprovalCheckError
+    && /carries a durable reviewer refusal/.test(error.message)
+    && /exempt from DRAWING a reviewer/.test(error.message)
+    && !/without artifact validation/.test(error.message))
+})
+
+// The scope control: the same lane with that reviewer's APPROVE is still exempt
+// and still authorizes, so the refusal rule cannot be satisfied by refusing
+// everything that carries a verdict.
+test('a recorded APPROVE does not disturb the documents-only lane (#2102)', () => {
+  const input = gatherApprovalInput({ PR_NUMBER: String(DOC_PR) }, documentsOnlyGithub({
+    files: [{ filename: 'docs/notes.md' }], recorded: { reviewer: 'grok-4.6', verdict: 'APPROVE' },
+  }))
+  assert.equal(evaluateExactHeadApproval(input).documents_only, true)
+})
+
+// And a raw verdict-shaped object still cannot cross the boundary on this lane
+// either: unvalidated input costs a review rather than granting an exemption.
+test('an unvalidated verdict object cannot cross the documents-only boundary (#2102)', () => {
+  assert.throws(() => evaluateRaw({
+    pr: DOC_PR, headSha: DOC_HEAD, assignments: [], changedFiles: ['docs/notes.md'],
+    verdicts: [{ pr: DOC_PR, head_sha: DOC_HEAD, verdict: 'REVISE', ref: 'fake', reviewer: 'grok-4.6', validated: true }],
+  }), /without artifact validation/)
 })

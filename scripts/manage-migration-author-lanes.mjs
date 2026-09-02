@@ -903,7 +903,15 @@ export function assertReviewerDrawIsWarranted(pr,io=githubIo){
 export const githubIo = {
   requiresExactReviewHeadSha: true,
   // The changed-file list a documents-only classification is made from (#2102).
-  pullRequestFiles(pr){return ghJson(['api','--paginate',`repos/${REPO}/pulls/${Number(pr)}/files?per_page=100`])},
+  // Fetched through `ghPaginated` so this side and the merge gate
+  // (`check-exact-head-approval.mjs`) build the list the SAME way: paginate,
+  // slurp, verify every page is an array, flatten. One classifier with two
+  // fetchers is how the two enforcement points come to disagree, and a
+  // disagreement here is a permanently stuck pull request -- the draw refusing
+  // while the gate still demands a verdict. A malformed or unreadable response
+  // raises, and `assertReviewerDrawIsWarranted` catches it and draws as before:
+  // "we could not tell" costs a review, it never grants an exemption.
+  pullRequestFiles(pr){return ghPaginated(`repos/${REPO}/pulls/${Number(pr)}/files?per_page=100`)},
   countLogicalReviewRequests:true,
   getRateLimit(){
     const rest=ghJson(['api','rate_limit'])?.resources?.core
