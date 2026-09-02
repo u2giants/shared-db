@@ -744,3 +744,266 @@ test('issue 1235 permits a typed JSON number assigned through numeric', () => {
     assert.equal(result.status, 0, result.stderr)
   })
 })
+
+// ---------------------------------------------------------------------------
+// ISSUE #2130. Four shapes the verify-cost guard could not see. Each of these
+// migrations reads exactly what the guard exists to refuse; each one passed.
+// ---------------------------------------------------------------------------
+
+test('verify-cost guard sees a read inside an ESCAPE string handed to execute', () => {
+  withFixture(['20260801120000_escape_string_verify.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_escape_string_verify.sql'), `
+      do $verify$
+      begin
+        execute E'select count(*) from plm.large_table';
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
+
+test('verify-cost guard reads an escape string as ONE literal, not two', () => {
+  // The backslash escape must not close the literal early. If it did, the text
+  // after it would be scanned as if it were SQL and the file would be refused
+  // for a read that is really inside a message.
+  withFixture(['20260801120000_escape_message.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_escape_message.sql'), `
+      do $verify$
+      begin
+        raise exception E'verify: the operator\\'s count from plm.large_table was wrong';
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.equal(result.status, 0, result.stderr)
+  })
+})
+
+test('verify-cost guard sees TRUNCATE spelled with the optional TABLE keyword', () => {
+  withFixture(['20260801120000_truncate_table_verify.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_truncate_table_verify.sql'), `
+      do $verify$
+      begin
+        truncate table plm.large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
+
+test('verify-cost guard finds the DO keyword past a long comment', () => {
+  withFixture(['20260801120000_long_lead_verify.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_long_lead_verify.sql'), `
+      do /* ${'why this verification exists. '.repeat(40)} */ $verify$
+      begin
+        perform count(*) from plm.large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
+
+test('verify-cost guard refuses a statement-level search_path set before the block', () => {
+  withFixture(['20260801120000_file_scope_search_path.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_file_scope_search_path.sql'), `
+      set search_path to plm, public;
+      do $verify$
+      begin
+        perform count(*) from large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /statement-level search_path/)
+  })
+})
+
+test('verify-cost guard allows the SET search_path ATTRIBUTE of a function', () => {
+  // 223 migrations in this repository carry this clause. It is scoped to the
+  // function it defines and cannot change what a later block resolves, so
+  // refusing it would refuse the repository's ordinary way of writing SQL.
+  withFixture(['20260801120000_function_search_path.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_function_search_path.sql'), `
+      create or replace function api.f() returns void
+        language sql
+        set search_path = plm, core, public
+      as $body$ select 1 $body$;
+      do $verify$
+      begin
+        if to_regprocedure('api.f()') is null then
+          raise exception 'verify: api.f() is missing';
+        end if;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.equal(result.status, 0, result.stderr)
+  })
+})
+
+test('verify-cost guard refuses SET SESSION search_path inside the block', () => {
+  // The in-block rule and the file-scope rule must agree on the spellings they
+  // recognise; `session` was only in the second one (external review, PR #2139).
+  withFixture(['20260801120000_session_search_path.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_session_search_path.sql'), `
+      do $verify$
+      begin
+        set session search_path to plm;
+        perform count(*) from large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /plm through search_path/)
+  })
+})
+
+test('verify-cost guard reads a QUOTED search_path value', () => {
+  // The schema name sits inside a string literal, whose contents the scannable
+  // view blanks. Matching the keywords there but reading the VALUE from the
+  // comment-only mask is what sees it (external review, PR #2139).
+  withFixture(['20260801120000_quoted_search_path.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_quoted_search_path.sql'), `
+      set search_path to 'plm';
+      do $verify$
+      begin
+        perform count(*) from large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /statement-level search_path/)
+  })
+})
+
+test('verify-cost guard refuses set_config of search_path to plm', () => {
+  withFixture(['20260801120000_set_config_search_path.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_set_config_search_path.sql'), `
+      do $verify$
+      begin
+        perform set_config('search_path', 'plm', false);
+        perform count(*) from large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /plm through search_path/)
+  })
+})
+
+test('verify-cost guard sees REFRESH MATERIALIZED VIEW as a read', () => {
+  withFixture(['20260801120000_refresh_matview.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_refresh_matview.sql'), `
+      do $verify$
+      begin
+        refresh materialized view concurrently plm.big_rollup;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
+
+test('verify-cost guard finds the DO keyword past a comment longer than any window', () => {
+  // 20 000 characters was the previous window. The lead is now trimmed before it
+  // is read, so the distance no longer decides anything (external review, PR #2139).
+  withFixture(['20260801120000_very_long_lead.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_very_long_lead.sql'), `
+      do /* ${'why this verification exists. '.repeat(1200)} */ $verify$
+      begin
+        perform count(*) from plm.large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
+
+test('verify-cost guard finds DO past a long comment in the LANGUAGE gap', () => {
+  // The comment sits BETWEEN `do` and `language`, so `language plpgsql` survives at
+  // the end of the lead and the blanked comment pushes `do` out of any tail window.
+  // Collapsing the whitespace before reading the tail is what sees it.
+  withFixture(['20260801120000_language_gap_lead.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_language_gap_lead.sql'), `
+      do /* ${'why this verification exists. '.repeat(40)} */ language plpgsql $verify$
+      begin
+        perform count(*) from plm.large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
+
+test('verify-cost guard reads a LINE-WRAPPED search_path value', () => {
+  // The value begins on the line after `to`. Delimiting it without skipping the
+  // leading whitespace first cut it off at its own opening newline and read it as
+  // empty, so the set passed.
+  withFixture(['20260801120000_wrapped_search_path.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_wrapped_search_path.sql'), `
+      do $verify$
+      begin
+        set local search_path to
+          plm, public;
+        perform count(*) from large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /plm through search_path/)
+  })
+})
+
+test('verify-cost guard refuses SELECT set_config standing before the block', () => {
+  // `select set_config(...)` is the ONLY valid file-scope spelling, and it never
+  // begins a statement -- so the statement-start test, which exists to spare the SET
+  // ATTRIBUTE of a CREATE FUNCTION, must not be applied to it.
+  withFixture(['20260801120000_file_scope_set_config.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_file_scope_set_config.sql'), `
+      select set_config('search_path', 'plm', false);
+      do $verify$
+      begin
+        perform count(*) from large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /statement-level search_path/)
+  })
+})
+
+test('verify-cost guard sees VACUUM and CLUSTER written with their options', () => {
+  withFixture(['20260801120000_vacuum_options.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_vacuum_options.sql'), `
+      do $verify$
+      begin
+        vacuum (analyze) plm.large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
