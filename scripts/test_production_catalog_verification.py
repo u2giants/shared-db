@@ -2264,5 +2264,137 @@ class DynamicAclExtractionTests(unittest.TestCase):
         )
 
 
+class ContractSqlQuotingTests(unittest.TestCase):
+    """A search needle must be a SQL STRING LITERAL, never a quoted identifier.
+
+    Production apply run 33647723083 applied nine migrations and then failed its
+    post-apply catalog verification with a `column "..." does not exist` error
+    naming a whole SQL comparison expression as if it were a column,
+    because two `position(...)` needles were written as Python double-quoted
+    strings, so they reached Postgres as double-quoted IDENTIFIERS. Every
+    behavioural check is one branch of a single `union all`, so that one bad
+    branch made all seven contracts report MISSING -- which reads as "the
+    contract is absent from the database" when it means "the check never ran".
+    """
+
+    IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_$]*\Z")
+
+    @staticmethod
+    def _double_quoted_tokens_outside_literals(sql: str):
+        """Yield every `"..."` token that is NOT inside a single-quoted literal."""
+        tokens = []
+        i = 0
+        n = len(sql)
+        while i < n:
+            ch = sql[i]
+            if ch == "'":
+                i += 1
+                while i < n:
+                    if sql[i] == "'":
+                        if i + 1 < n and sql[i + 1] == "'":
+                            i += 2
+                            continue
+                        i += 1
+                        break
+                    i += 1
+                continue
+            if ch == '"':
+                end = sql.find('"', i + 1)
+                if end == -1:
+                    tokens.append(sql[i + 1 :])
+                    break
+                tokens.append(sql[i + 1 : end])
+                i = end + 1
+                continue
+            i += 1
+        return tokens
+
+    def test_no_contract_uses_a_double_quoted_string_as_a_search_needle(self):
+        for name, sql in CATALOG_CONTRACTS.items():
+            with self.subTest(contract=name):
+                self.assertNotIn(
+                    'position("',
+                    sql,
+                    f"{name} passes a double-quoted IDENTIFIER to position(); "
+                    "Postgres rejects the whole union and every contract in it "
+                    "is then reported MISSING",
+                )
+
+    def test_every_double_quoted_token_in_a_contract_is_a_plain_identifier(self):
+        for name, sql in CATALOG_CONTRACTS.items():
+            for token in self._double_quoted_tokens_outside_literals(sql):
+                with self.subTest(contract=name, token=token):
+                    self.assertRegex(
+                        token,
+                        self.IDENTIFIER,
+                        f"{name} contains the double-quoted token {token!r} "
+                        "outside any string literal. Postgres reads that as a "
+                        "column name, not as text to search for.",
+                    )
+
+    def test_dcp_opa_authority_needles_are_literals_with_doubled_inner_quotes(self):
+        sql = CATALOG_CONTRACTS["dcp_opa_property_authority_v1"]
+        self.assertIn("position('r.contract_asserted_studio_code = ''", sql)
+        self.assertIn("position('o.opa_studio_code = ''", sql)
+
+    def test_built_behaviour_union_carries_no_quoted_identifier_needle(self):
+        checks = [
+            {
+                "id": "dcp-opa-authority",
+                "kind": "catalog_contract",
+                "contract": "dcp_opa_property_authority_v1",
+                "expected_count": 1,
+                "migration_version": "20260902120000",
+                "relation": "n/a",
+            }
+        ]
+        sql = build_behavior_sql(checks)
+        self.assertNotIn('position("', sql)
+        for token in self._double_quoted_tokens_outside_literals(sql):
+            self.assertRegex(token, self.IDENTIFIER)
+
+
+class BehaviourQueryErrorHonestyTests(unittest.TestCase):
+    """A check that never ran is an ERROR, not a MISSING row."""
+
+    CHECKS = [
+        {
+            "id": "dcp-opa-authority",
+            "kind": "catalog_contract",
+            "contract": "dcp_opa_property_authority_v1",
+            "expected_count": 1,
+            "migration_version": "20260902120000",
+            "relation": "n/a",
+        }
+    ]
+
+    def _render(self, behavior_error):
+        return render_report(
+            ["20260902120000"],
+            Targets(set(), set(), set(), set(), set(), set()),
+            None,
+            None,
+            [f"behavioral query failed: {behavior_error}"] if behavior_error else [],
+            True,
+            behavior_checks=self.CHECKS,
+            behavior_results=None,
+            behavior_error=behavior_error,
+        )
+
+    def test_failed_query_reports_error_not_missing(self):
+        report, failures = self._render('column "x" does not exist')
+        self.assertIn("ERROR", report)
+        self.assertNotIn("| MISSING |", report)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("DID NOT RUN", failures[0])
+        self.assertIn("not evidence that the contract is absent", failures[0])
+
+    def test_absent_row_without_a_query_error_is_still_missing(self):
+        report, failures = self._render(None)
+        self.assertIn("MISSING", report)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("expected 1 row(s)", failures[0])
+
+
 if __name__ == "__main__":
     unittest.main()
