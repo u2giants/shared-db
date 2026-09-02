@@ -48,36 +48,45 @@ which already exist and already enforce the shape this screen needs:
 
 ## Application contract
 
-The screen calls two RPCs in the `api` schema. Both are **still to be created** by
-a governed shared-db migration — see the "Not yet enabled" note below.
+Both RPCs exist as of `supabase/migrations/20260902053756_property_match_review_rpcs.sql`
+(issue #2008, the structural half of #2007). The signatures below are the shipped
+ones — the screen follows them exactly.
 
 ### `api.db_data_admin_property_match_queue(p_search text, p_cursor text, p_page_size int)`
 
-Returns `{ rows: [...], next_cursor }`. Each row:
+Licensing-manager gated, read-only. Returns `{ rows, next_cursor, page_size }`,
+keyset-paged over `source_table|source_system|source_property_id`. A row is in the
+queue only while its **latest** version is `pending`; once decided it never
+reappears.
 
-| Field | Meaning |
-| --- | --- |
-| `resolution_id` | the pending decision row being reviewed |
-| `source_system`, `source_table`, `source_property_id` | the DCP Vault Property identity |
-| `display_label` | what the reviewer sees |
-| `decision_version`, `approval_status` | position in the supersession chain |
-| `match_state` | `exact` / `multiple` / `suggested` / `none` |
-| `contract_section`, `contract_clause`, `contract_page`, `contract_title` | the K2557 evidence shown beside the row |
-| `contract_asserted_studio_code` | `disney`, `marvel`, `lucasfilm`, or `pixar` |
-| `candidates[]` | `licensed_property_id`, `property_name`, `opa_studio_code`, `is_selected`, `similarity` |
+Each row carries its own identity (`source_system`, `source_table`,
+`source_property_id`, `display_label`), its version and status, its evidence
+(`evidence_reference`, `evidence_sha256`, `decision_reason`), its contract
+assertion (`contract_asserted_studio_code`, `contract_evidence_reference`,
+`contract_evidence_sha256`), the previously approved version for context
+(`prior_*`), and `candidates` — an array of `{ licensed_property_id,
+member_ordinal }`.
 
-`is_selected` pre-ticks a candidate whose name matched the contract title exactly.
-`similarity` is `null` for an exact match and a 0-1 score for a suggestion.
+The queue deliberately returns **no** authority verdict and **no** OPA property
+names. Conflict presentation has exactly one home,
+`api.db_data_admin_scraped_properties`, which #1999 corrected so a Marvel contract
+assertion over a Disney OPA scope is not a permanent conflict. The screen resolves
+candidate names separately through `api.opa_property_reconciliation`, and falls
+back to showing the OPA id if that lookup returns nothing.
 
-### `api.db_data_admin_decide_property_match(p_resolution_id uuid, p_decision text, p_licensed_property_ids bigint[], p_reason text, p_operation_id uuid)`
+### `api.db_data_admin_decide_property_match(p_resolution_id uuid, p_decision text, p_licensed_property_ids bigint[], p_decision_reason text, p_client_request_id uuid)`
 
-`p_decision` is `approve` or `reject`. Returns
-`{ success, code, message, resolution_id, decision_version }`.
+`p_decision` is `approve` or `reject`. The reviewer's identity comes from the JWT
+and from nowhere else — there is deliberately no actor parameter.
 
-It must write a **new version** superseding the row under review, stamp
-`approved_by` from the signed-in reviewer, and treat `p_operation_id` as an
-idempotency key — the same pattern the customer/vendor update and merge RPCs
-already use.
+`p_client_request_id` **becomes the new decision row's id**, which is what makes a
+retry idempotent: the same call twice collides with its own primary key and
+returns the recorded decision instead of appending a second version. It may not
+equal `p_resolution_id`, and reusing a spent one for a *different* decision fails
+loudly. The screen therefore mints one id per queued row and holds it until that
+row's decision succeeds, rather than minting a fresh one per click.
+
+A rejection must carry no members; the database rejects one that does.
 
 ## Guarantees the screen enforces in the UI
 
@@ -90,11 +99,16 @@ already use.
   its own once the migration lands.
 - An access denial is scoped to this tab; the rest of the app stays usable.
 
-## Not yet enabled
+## Enablement status
 
-The tab is live but shows the "not enabled" note until the two RPCs above exist
-and the pending rows are loaded. Both are structural / governed work and are
-requested through the shared-db issue queue, not done from an application session.
+The RPCs are live. What remains is loading the pending candidate rows into
+`plm.dcp_opa_property_resolution` and `_member`. That is source-data work, not a
+structural change, and stays in the private `u2giants/licensor-source-data`
+repository per the migration's own note.
+
+Until those rows exist the tab loads and reports that nothing is waiting for a
+decision. If the RPCs are ever absent — an older database, a rollback — the screen
+says "not enabled on this database yet" rather than showing a PostgREST error.
 
 ## Out of scope for this screen
 

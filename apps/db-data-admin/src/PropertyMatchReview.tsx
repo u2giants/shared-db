@@ -4,18 +4,19 @@ import type { ApiClient } from './lib/data-admin'
 import {
   ReviewQueueUnavailableError,
   decidePropertyMatch,
+  defaultSelection,
   describeMatchState,
   loadPropertyMatchQueue,
-  selectedIds,
+  matchState,
+  type MatchState,
   type PropertyMatchRow,
 } from './lib/property-match'
 
 type Props = { client: ApiClient }
 
-const stateLabel: Record<PropertyMatchRow['match_state'], string> = {
-  exact: 'Exact name match',
+const stateLabel: Record<MatchState, string> = {
+  exact: 'One candidate',
   multiple: 'More than one candidate',
-  suggested: 'Suggestion only',
   none: 'No candidate',
 }
 
@@ -23,6 +24,10 @@ export function PropertyMatchReview({ client }: Props) {
   const [rows, setRows] = useState<PropertyMatchRow[]>([])
   const [chosen, setChosen] = useState<Record<string, number[]>>({})
   const [reasons, setReasons] = useState<Record<string, string>>({})
+  // One request id per row, held until that row's decision succeeds. Retrying a
+  // failed call therefore returns the recorded decision instead of appending a
+  // second version of it.
+  const [requestIds, setRequestIds] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -36,7 +41,8 @@ export function PropertyMatchReview({ client }: Props) {
     try {
       const loaded = await loadPropertyMatchQueue(client)
       setRows(loaded)
-      setChosen(Object.fromEntries(loaded.map(row => [row.resolution_id, selectedIds(row)])))
+      setChosen(Object.fromEntries(loaded.map(row => [row.resolution_id, defaultSelection(row)])))
+      setRequestIds(Object.fromEntries(loaded.map(row => [row.resolution_id, crypto.randomUUID()])))
     } catch (cause) {
       if (cause instanceof ReviewQueueUnavailableError) setUnavailable(true)
       else {
@@ -55,7 +61,12 @@ export function PropertyMatchReview({ client }: Props) {
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase()
     if (!term) return rows
-    return rows.filter(row => `${row.display_label} ${row.contract_title ?? ''} ${row.candidates.map(c => c.property_name).join(' ')}`.toLowerCase().includes(term))
+    return rows.filter(row => [
+      row.display_label,
+      row.source_property_id,
+      row.contract_evidence_reference ?? '',
+      ...row.candidates.map(c => c.property_name ?? ''),
+    ].join(' ').toLowerCase().includes(term))
   }, [rows, search])
 
   const toggle = (resolutionId: string, licensedPropertyId: number) => setChosen(current => {
@@ -76,6 +87,7 @@ export function PropertyMatchReview({ client }: Props) {
         decision,
         licensedPropertyIds: chosen[row.resolution_id] ?? [],
         reason: reasons[row.resolution_id] ?? '',
+        clientRequestId: requestIds[row.resolution_id] ?? crypto.randomUUID(),
       })
       setRows(current => current.filter(candidate => candidate.resolution_id !== row.resolution_id))
       setSaved(`${row.display_label} — ${decision === 'approve' ? 'decision recorded' : 'rejected'}.`)
@@ -108,28 +120,33 @@ export function PropertyMatchReview({ client }: Props) {
     </div>
     <p className="muted">
       Each row is one DCP Vault Property waiting on a decision about which OPA Property it is.
-      OPA cannot tell Marvel from Disney on its own, so the signed contract clause shown beside
-      each row is the controlling evidence. Nothing here is placed automatically.
+      OPA cannot tell Marvel from Disney on its own, so the signed contract evidence shown beside
+      each row is the controlling authority. Nothing here is placed automatically.
     </p>
     {error && <div className="inline-error" role="alert">{error}</div>}
     {saved && <p className="muted" role="status">{saved}</p>}
     <div aria-busy={loading}>
       {visible.map(row => {
         const picked = chosen[row.resolution_id] ?? []
+        const reason = (reasons[row.resolution_id] ?? '').trim()
+        const state = matchState(row)
         return <article key={row.resolution_id} className="match-row" aria-labelledby={`match-${row.resolution_id}`}>
           <header>
             <h2 id={`match-${row.resolution_id}`}>{row.display_label}</h2>
-            <span className={`match-state match-state-${row.match_state}`}>{stateLabel[row.match_state]}</span>
+            <span className={`match-state match-state-${state}`}>{stateLabel[state]}</span>
           </header>
           <p className="muted">{describeMatchState(row)}</p>
-          {row.contract_title && <p className="muted contract-evidence">
-            Contract: <strong>{row.contract_title}</strong>
-            {row.contract_section && <> — {row.contract_section} section</>}
-            {row.contract_clause !== null && <>, clause {row.contract_clause}</>}
-            {row.contract_page && <>, page {row.contract_page}</>}
+          <p className="muted contract-evidence">
+            {row.contract_asserted_studio_code && <>Contract says <strong>{row.contract_asserted_studio_code}</strong>. </>}
+            {row.contract_evidence_reference && <>Evidence: {row.contract_evidence_reference}. </>}
+            <span className="source-id">{row.source_property_id}</span>
+          </p>
+          {row.prior_approval_status && <p className="muted">
+            Previously {row.prior_approval_status} at version {row.prior_decision_version}
+            {row.prior_contract_asserted_studio_code && <> as {row.prior_contract_asserted_studio_code}</>}.
           </p>}
           {row.candidates.length === 0
-            ? <p className="muted">No OPA Property carries this name.</p>
+            ? <p className="muted">No OPA Property was proposed for this one.</p>
             : <ul className="match-candidates">
               {row.candidates.map(candidate => <li key={candidate.licensed_property_id}>
                 <label>
@@ -138,10 +155,8 @@ export function PropertyMatchReview({ client }: Props) {
                     checked={picked.includes(candidate.licensed_property_id)}
                     onChange={() => toggle(row.resolution_id, candidate.licensed_property_id)}
                   />
-                  <span>{candidate.property_name}</span>
+                  <span>{candidate.property_name ?? `OPA Property ${candidate.licensed_property_id}`}</span>
                   <span className="muted"> · OPA {candidate.licensed_property_id}</span>
-                  {candidate.opa_studio_code && <span className="muted"> · {candidate.opa_studio_code} branch</span>}
-                  {candidate.similarity !== null && <span className="muted"> · {Math.round(candidate.similarity * 100)}% name match</span>}
                 </label>
               </li>)}
             </ul>}
@@ -155,12 +170,12 @@ export function PropertyMatchReview({ client }: Props) {
           </label>
           <div className="match-actions">
             <button
-              disabled={busy === row.resolution_id || picked.length === 0 || !(reasons[row.resolution_id] ?? '').trim()}
+              disabled={busy === row.resolution_id || picked.length === 0 || !reason}
               onClick={() => void decide(row, 'approve')}
             ><Check aria-hidden="true" /> Confirm {picked.length > 1 ? `${picked.length} matches` : 'match'}</button>
             <button
               className="secondary"
-              disabled={busy === row.resolution_id || !(reasons[row.resolution_id] ?? '').trim()}
+              disabled={busy === row.resolution_id || !reason}
               onClick={() => void decide(row, 'reject')}
             ><X aria-hidden="true" /> Not on this contract</button>
           </div>
