@@ -207,6 +207,18 @@ CREATE_INDEX_RE = re.compile(
     rf"^\s*create\s+(unique\s+)?index\s+(concurrently\s+)?"
     rf"(?:if\s+not\s+exists\s+)?({IDENT})\s+on\s+(?:only\s+)?{QUALIFIED}\b"
 )
+# A later migration in the SAME ordered batch may drop an index an earlier one
+# created (issue #2035: the review fix removed
+# `hts_rag_product_family_allowlist_enabled_idx`). Without this, the batch's
+# expected-object set still demands the index and enforcing verification fails on
+# a database that is exactly right. Only a SCHEMA-QUALIFIED drop is acted on; a
+# bare name is recorded as unassertable rather than guessed at, which is the same
+# refusal `CREATE_INDEX_HEAD_RE` makes.
+DROP_INDEX_HEAD_RE = re.compile(r"^\s*drop\s+index\b")
+DROP_INDEX_RE = re.compile(
+    rf"^\s*drop\s+index\s+(?:concurrently\s+)?"
+    rf"(?:if\s+exists\s+)?{QUALIFIED}\b"
+)
 GRANT_RE = re.compile(r"^\s*(grant|revoke)\b")
 # The object of a GRANT/REVOKE. `all tables in schema` is DELIBERATELY NOT
 # matched: it names a schema, not a relation, and guessing its membership is
@@ -649,6 +661,121 @@ AI_TAG_BAKEOFF_CONTRACT = _shape_contract(
     policies=tuple((table,policy) for table in ('public.ai_tag_bakeoff_results','public.ai_tag_bakeoff_reviews','public.ai_tag_bakeoff_runs') for policy in (f"Admin manage {table.split('.')[-1].replace('_',' ')}",f"Admin read {table.split('.')[-1].replace('_',' ')}")),
 )
 DB_DATA_ADMIN_FORWARD_CONTRACT = _shape_contract(relations=('app.db_data_admin_feature_gate',),routines=tuple("""api.db_data_admin_audit_list api.db_data_admin_licensor_property_tree api.db_data_admin_merge_customer api.db_data_admin_merge_vendor api.db_data_admin_preview_customer_merge api.db_data_admin_preview_vendor_merge api.db_data_admin_update_customer api.db_data_admin_update_vendor app.db_data_admin_customer_row app.db_data_admin_extension_conflicts app.db_data_admin_merge_execute app.db_data_admin_merge_fk_counts app.db_data_admin_merge_preview app.db_data_admin_reconcile_extension app.db_data_admin_single_record_writes_enabled app.db_data_admin_vendor_row""".split()),triggers=(('app.db_data_admin_feature_gate','set_updated_at'),))
+SOURCE_RESOLUTION_SUPPORTED_HOME_CONTRACT = _shape_contract(
+    relations=(
+        'plm.source_resolution', 'api.source_resolution', 'api.pmt_properties',
+        'api.pmt_characters', 'api.opa_property_reconciliation',
+    ),
+    constraints=tuple(('plm.source_resolution', name) for name in """
+        source_resolution_source_system_nonblank_chk
+        source_resolution_source_system_supported_chk
+        source_resolution_source_id_nonblank_chk
+        source_resolution_entity_kind_chk
+        source_resolution_status_chk
+        source_resolution_target_kind_chk
+        source_resolution_matched_target_chk
+        source_resolution_audit_pair_chk
+        source_resolution_reason_nonblank_chk
+        source_resolution_actor_nonblank_chk
+    """.split()),
+    routines=(
+        'plm.set_source_resolution(text,text,text,text,uuid,uuid,uuid,uuid,text,timestamp with time zone)',
+        'plm.source_resolution_target_missing(text,uuid,uuid,uuid,uuid)',
+        'plm.reject_legacy_landing_resolution_write()',
+    ),
+    policies=(('plm.source_resolution', 'source_resolution_authenticated_read'),),
+    triggers=tuple((f'plm.{table}', trigger) for table, trigger in (
+        ('pmt_property','pmt_property_resolution_immutable'),
+        ('pmt_character','pmt_character_resolution_immutable'),
+        ('nbcu_property','nbcu_property_resolution_immutable'),
+        ('nbcu_character','nbcu_character_resolution_immutable'),
+        ('nbcu_style_guide','nbcu_style_guide_resolution_immutable'),
+        ('nbcu_asset','nbcu_asset_resolution_immutable'),
+        ('opa_property_character','opa_property_character_resolution_immutable'),
+        ('opa_property','opa_property_resolution_immutable'),
+        ('opa_character','opa_character_resolution_immutable'),
+        ('dcp_portal_tile','dcp_portal_tile_resolution_immutable'),
+        ('dcp_style_guide','dcp_style_guide_resolution_immutable'),
+        ('dcp_property','dcp_property_resolution_immutable'),
+        ('dcp_character','dcp_character_resolution_immutable'),
+        ('lucasfilm_dcp_portal_tile','lucasfilm_dcp_portal_tile_resolution_immutable'),
+        ('lucasfilm_dcp_style_guide','lucasfilm_dcp_style_guide_resolution_immutable'),
+        ('lucasfilm_dcp_property','lucasfilm_dcp_property_resolution_immutable'),
+        ('lucasfilm_dcp_character','lucasfilm_dcp_character_resolution_immutable'),
+        ('marvel_dcp_portal_tile','marvel_dcp_portal_tile_resolution_immutable'),
+        ('marvel_dcp_style_guide','marvel_dcp_style_guide_resolution_immutable'),
+        ('marvel_dcp_property','marvel_dcp_property_resolution_immutable'),
+        ('marvel_dcp_character','marvel_dcp_character_resolution_immutable'),
+        ('twentieth_century_dcp_portal_tile','twentieth_century_dcp_portal_tile_resolution_immutable'),
+        ('twentieth_century_dcp_style_guide','twentieth_century_dcp_style_guide_resolution_immutable'),
+        ('twentieth_century_dcp_property','twentieth_century_dcp_property_resolution_immutable'),
+        ('twentieth_century_dcp_character','twentieth_century_dcp_character_resolution_immutable'),
+        ('wb_property_character_normalized','wb_property_character_normalized_resolution_immutable'),
+    )),
+)
+SOURCE_RESOLUTION_SUPPORTED_HOME_CONTRACT += """
+  and not exists (select 1 from pg_constraint
+    where conrelid=to_regclass('plm.source_resolution') and contype='f')
+  and (select count(*) from pg_constraint
+    where conrelid=to_regclass('plm.source_resolution') and contype='c' and convalidated)=10
+  and position('paramount' in lower(pg_get_constraintdef((select oid from pg_constraint
+    where conrelid=to_regclass('plm.source_resolution')
+      and conname='source_resolution_source_system_supported_chk'))))>0
+  and position('warner:' in lower(pg_get_constraintdef((select oid from pg_constraint
+    where conrelid=to_regclass('plm.source_resolution')
+      and conname='source_resolution_source_system_supported_chk'))))>0
+  and exists (select 1 from pg_policies
+    where schemaname='plm' and tablename='source_resolution'
+      and policyname='source_resolution_authenticated_read'
+      and cmd='SELECT' and roles=array['authenticated']::name[]
+      and regexp_replace(lower(coalesce(qual,'')),'[[:space:]()]','','g')='true'
+      and with_check is null)
+  and has_table_privilege('authenticated',to_regclass('plm.source_resolution'),'SELECT')
+  and has_table_privilege('service_role',to_regclass('plm.source_resolution'),'SELECT')
+  and not exists (select 1 from information_schema.role_table_grants
+    where table_schema='plm' and table_name='source_resolution'
+      and grantee in ('public','anon','authenticated','service_role')
+      and privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN'))
+  and not exists (select 1 from pg_trigger
+    where tgfoid<>to_regprocedure('plm.reject_legacy_landing_resolution_write()')
+      and not tgisinternal and tgname in (
+        'pmt_property_resolution_immutable','pmt_character_resolution_immutable',
+        'nbcu_property_resolution_immutable','nbcu_character_resolution_immutable',
+        'nbcu_style_guide_resolution_immutable','nbcu_asset_resolution_immutable',
+        'opa_property_character_resolution_immutable','opa_property_resolution_immutable',
+        'opa_character_resolution_immutable','dcp_portal_tile_resolution_immutable',
+        'dcp_style_guide_resolution_immutable','dcp_property_resolution_immutable',
+        'dcp_character_resolution_immutable','lucasfilm_dcp_portal_tile_resolution_immutable',
+        'lucasfilm_dcp_style_guide_resolution_immutable','lucasfilm_dcp_property_resolution_immutable',
+        'lucasfilm_dcp_character_resolution_immutable','marvel_dcp_portal_tile_resolution_immutable',
+        'marvel_dcp_style_guide_resolution_immutable','marvel_dcp_property_resolution_immutable',
+        'marvel_dcp_character_resolution_immutable','twentieth_century_dcp_portal_tile_resolution_immutable',
+        'twentieth_century_dcp_style_guide_resolution_immutable','twentieth_century_dcp_property_resolution_immutable',
+        'twentieth_century_dcp_character_resolution_immutable','wb_property_character_normalized_resolution_immutable'))
+  and (select count(*) from pg_trigger
+    where tgfoid=to_regprocedure('plm.reject_legacy_landing_resolution_write()')
+      and not tgisinternal and tgenabled<>'D')=26
+  and position('opa_property_character' in pg_get_functiondef(to_regprocedure(
+    'plm.reject_legacy_landing_resolution_write()')))>0
+  and position('property_id' in pg_get_functiondef(to_regprocedure(
+    'plm.reject_legacy_landing_resolution_write()')))>0
+  and position('target_missing' in pg_get_viewdef(to_regclass('api.source_resolution'),true))>0
+  and position('plm.source_resolution' in pg_get_viewdef(to_regclass('api.pmt_properties'),true))>0
+  and position('plm.source_resolution' in pg_get_viewdef(to_regclass('api.pmt_characters'),true))>0
+  and position('plm.source_resolution' in pg_get_viewdef(to_regclass('api.opa_property_reconciliation'),true))>0
+  and (select reloptions @> array['security_invoker=true'] from pg_class
+    where oid=to_regclass('api.source_resolution'))
+  and (select reloptions @> array['security_invoker=true'] from pg_class
+    where oid=to_regclass('api.pmt_properties'))
+  and (select reloptions @> array['security_invoker=true'] from pg_class
+    where oid=to_regclass('api.pmt_characters'))
+  and (select reloptions @> array['security_invoker=true'] from pg_class
+    where oid=to_regclass('api.opa_property_reconciliation'))
+  and position('for key share' in lower(pg_get_functiondef(to_regprocedure(
+    'plm.set_source_resolution(text,text,text,text,uuid,uuid,uuid,uuid,text,timestamp with time zone)'))))>0
+  and position('to_regclass' in lower(pg_get_functiondef(to_regprocedure(
+    'plm.source_resolution_target_missing(text,uuid,uuid,uuid,uuid)'))))>0
+"""
 DCP_OPA_PROPERTY_AUTHORITY_CONTRACT = _shape_contract(
     relations=('plm.dcp_opa_property_resolution','plm.dcp_opa_property_resolution_member'),
     routines=('api.db_data_admin_scraped_properties(text,text,integer)','plm.reject_dcp_opa_resolution_mutation()'),
@@ -665,6 +792,8 @@ DCP_OPA_PROPERTY_AUTHORITY_CONTRACT += (
     " and position('explicit_dcp_to_opa_property_id' in %s)>0" % _DCP_OPA_DEF +
     " and position('style_guide_names' in %s)>0" % _DCP_OPA_DEF +
     " and position('contract_opa_conflict' in %s)>0" % _DCP_OPA_DEF +
+    " and position('r.contract_asserted_studio_code = ''marvel''' in %s)>0" % _DCP_OPA_DEF +
+    " and position('o.opa_studio_code = ''disney''' in %s)>0" % _DCP_OPA_DEF +
     " and position('plm.dcp_property_licensor_resolution' in %s)=0" % _DCP_OPA_DEF +
     "".join(
         " and (select relforcerowsecurity from pg_class where oid=to_regclass('%s'))" % table
@@ -832,6 +961,7 @@ CATALOG_CONTRACTS = {
     "ai_tag_bakeoff_v1": AI_TAG_BAKEOFF_CONTRACT,
     "dflow_baseline_v1": DFLOW_BASELINE_CONTRACT,
     "db_data_admin_forward_v1": DB_DATA_ADMIN_FORWARD_CONTRACT,
+    "source_resolution_supported_home_v1": SOURCE_RESOLUTION_SUPPORTED_HOME_CONTRACT,
     "dcp_opa_property_authority_v1": DCP_OPA_PROPERTY_AUTHORITY_CONTRACT,
     "scraped_properties_source_purpose_v1": SCRAPED_PROPERTIES_SOURCE_PURPOSE_CONTRACT,
     "creative_submission_contract_status_v1": CREATIVE_SUBMISSION_CONTRACT_STATUS_CONTRACT,
@@ -843,6 +973,175 @@ CATALOG_CONTRACTS = {
     "scraped_properties_targeted_submission_label_v1": SCRAPED_PROPERTIES_TARGETED_SUBMISSION_LABEL_CONTRACT,
     "dflow_sequence_ceilings_v1": DFLOW_SEQUENCE_CEILINGS_CONTRACT,
     "popdam_forward_recovery_v1": POPDAM_FORWARD_RECOVERY_CONTRACT,
+    "popdam_query_expansion_rows_v1": """
+      (select p.prorows = 32
+        from pg_proc p
+        where p.oid = to_regprocedure('public.expand_dam_search_queries(text)'))
+""",
+    "popdam_query_expansion_rows_v2": """
+      (select p.proretset and p.prorows = 4
+        from pg_proc p
+        where p.oid = to_regprocedure('public.expand_dam_search_queries(text)'))
+""",
+    "popdam_ranked_search_narrow_visibility_v1": """
+      (select
+        position('select f.id, f.style_group_id, f.file_type, f.status,' in pg_get_functiondef(p.oid)) > 0
+        and position('f.workflow_status, f.stage, f.is_licensed' in pg_get_functiondef(p.oid)) > 0
+        and position('select f.*' in pg_get_functiondef(p.oid)) = 0
+        and position('select distinct a.*' in pg_get_functiondef(p.oid)) = 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p
+        where p.oid = to_regprocedure('public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and (select
+        position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and (length(pg_get_functiondef(p.oid)) - length(replace(pg_get_functiondef(p.oid),
+          'get_effective_filter_counts_unchecked_1703', '')))
+          / length('get_effective_filter_counts_unchecked_1703') = 1
+        and position('get_filter_counts_unchecked_1703' in pg_get_functiondef(p.oid)) = 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p
+        where p.oid = to_regprocedure('public.get_filter_counts(jsonb)'))
+      and not has_function_privilege('anon',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.get_filter_counts(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.get_filter_counts(jsonb)', 'EXECUTE')
+""",
+    "popdam_ranked_search_private_keyed_visibility_v2": """
+      (select
+        position('select a.id, a.style_group_id, a.file_type, a.status,' in pg_get_functiondef(p.oid)) > 0
+        and position('a.workflow_status, a.stage, a.is_licensed' in pg_get_functiondef(p.oid)) > 0
+        and position('from candidate_asset_ids c' in pg_get_functiondef(p.oid)) > 0
+        and position('join public.assets a on a.id = c.id' in pg_get_functiondef(p.oid)) > 0
+        and position('filter_effective_assets' in substring(pg_get_functiondef(p.oid)
+          from position('visible_assets as materialized' in pg_get_functiondef(p.oid)))) = 0
+        and position('cross join lateral' in pg_get_functiondef(p.oid)) = 0
+        and position('select distinct a.*' in pg_get_functiondef(p.oid)) = 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p
+        where p.oid = to_regprocedure('public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and (select
+        position('authorized as materialized' in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and (length(pg_get_functiondef(p.oid)) - length(replace(pg_get_functiondef(p.oid),
+          'require_dam_access', ''))) / length('require_dam_access') = 1
+        and position('from authorized' in pg_get_functiondef(p.oid)) > 0
+        and position('cross join public.assets a' in pg_get_functiondef(p.oid)) > 0
+        and position('filter_effective_assets_unchecked_1703' in pg_get_functiondef(p.oid)) = 0
+        and p.provolatile = 's' and not p.prosecdef
+        and p.proconfig is null
+        from pg_proc p
+        where p.oid = to_regprocedure('public.filter_effective_assets(jsonb)'))
+      and not has_function_privilege('authenticated',
+        'public.filter_effective_assets_unchecked_1703(jsonb)', 'EXECUTE')
+      and (select
+        position('select a.file_type, a.status, a.workflow_status, a.stage, a.is_licensed'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('from public.assets a' in pg_get_functiondef(p.oid)) > 0
+        and position('select a.*' in pg_get_functiondef(p.oid)) = 0
+        and position('filter_effective_assets' in pg_get_functiondef(p.oid)) = 0
+        and position('bounds as materialized' in pg_get_functiondef(p.oid)) > 0
+        from pg_proc p where p.oid = to_regprocedure(
+          'public.get_effective_filter_counts_unchecked_1703(jsonb)'))
+      and (select position('get_effective_filter_counts_unchecked_1703'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p where p.oid = to_regprocedure(
+          'public.get_effective_filter_counts(jsonb)'))
+      and not has_function_privilege('anon', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+      and not has_function_privilege('anon',
+        'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
+""",
+    "popdam_effective_count_indexed_union_v1": """
+      (select
+        position('identity_asset_ids as' in pg_get_functiondef(p.oid)) > 0
+        and position('union all' in pg_get_functiondef(p.oid)) > 0
+        and position('left join public.style_groups' in pg_get_functiondef(p.oid)) = 0
+        and position('a.licensor_id = ' in pg_get_functiondef(p.oid)) > 0
+        and position('sg.licensor_id = ' in pg_get_functiondef(p.oid)) > 0
+        and position('a.property_id = ' in pg_get_functiondef(p.oid)) > 0
+        and position('sg.property_id = ' in pg_get_functiondef(p.oid)) > 0
+        and position('a.customer_id = ' in pg_get_functiondef(p.oid)) > 0
+        and position('sg.customer_id = ' in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and p.provolatile = 's' and not p.prosecdef and p.proconfig is null
+        from pg_proc p where p.oid = to_regprocedure('public.filter_effective_assets(jsonb)'))
+      and (select
+        position('identity_asset_ids as' in pg_get_functiondef(p.oid)) > 0
+        and position('select a.file_type, a.status, a.workflow_status, a.stage, a.is_licensed'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('__includeOwnFacets2054' in pg_get_functiondef(p.oid)) > 0
+        and position('contentType' in pg_get_functiondef(p.oid)) > 0
+        and position('productMaterial' in pg_get_functiondef(p.oid)) > 0
+        and position('fileStatus' in pg_get_functiondef(p.oid)) > 0
+        and position('productCategory' in pg_get_functiondef(p.oid)) > 0
+        and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+        and not has_function_privilege('service_role', p.oid, 'EXECUTE')
+        from pg_proc p where p.oid = to_regprocedure(
+          'public.get_effective_filter_counts_unchecked_1703(jsonb)'))
+      and (select position('__includeOwnFacets2054' in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p where p.oid = to_regprocedure('public.get_effective_filter_counts(jsonb)'))
+      and (select position('__includeOwnFacets2054' in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p where p.oid = to_regprocedure('public.get_filter_counts(jsonb)'))
+      and not has_function_privilege('anon', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.get_filter_counts(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.get_filter_counts(jsonb)', 'EXECUTE')
+""",
+    "popdam_ranked_search_single_heap_fetch_v3": """
+      (select
+        position('full_text_matches as materialized' in pg_get_functiondef(p.oid)) > 0
+        and position('d.search_tsv @@ any(array(select q.tsq from queries q))'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('select max(ts_rank_cd(d.search_tsv, q.tsq))'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('from full_text_matches d' in pg_get_functiondef(p.oid)) > 0
+        and position('join public.dam_search_documents d on d.search_tsv @@ q.tsq'
+          in pg_get_functiondef(p.oid)) = 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p
+        where p.oid = to_regprocedure(
+          'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and not has_function_privilege('anon',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+""",
+    "popdam_ranked_search_rank_keys_through_visibility_v4": """
+      (select
+        position('c.keyword_rank, c.semantic_rank, c.rank, c.asset_id id'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('c.keyword_rank, c.semantic_rank, c.rank, a.id'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('select distinct a.document_type, a.entity_id, a.asset_id'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('join visible_assets a on a.id = c.asset_id'
+          in pg_get_functiondef(p.oid)) = 0
+        and position('join visible_style_groups g on g.style_group_id = c.style_group_id'
+          in pg_get_functiondef(p.oid)) = 0
+        and position('d.search_tsv @@ any(array(select q.tsq from queries q))'
+          in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        and 'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        from pg_proc p where p.oid = to_regprocedure(
+          'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)'))
+      and not has_function_privilege('anon',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+      and has_function_privilege('authenticated',
+        'public.search_dam_documents(text,jsonb,integer,integer,text[],extensions.vector,real)', 'EXECUTE')
+""",
     "coco_owner_ruling_v1": """
       case when to_regclass('core.taxonomy_owner_ruling') is null then true else
         cardinality(xpath('/table/row', query_to_xml(
@@ -2044,6 +2343,22 @@ def derive_targets(migrations: dict[str, Path], allowlist: list[str]) -> Targets
                 indexes.add((index_name, relation_name))
                 tables.add(relation_name)
                 continue
+            if match := DROP_INDEX_RE.match(statement):
+                dropped = f"{match.group(1)}.{match.group(2)}"
+                before = len(indexes)
+                indexes = {pair for pair in indexes if pair[0] != dropped}
+                if len(indexes) != before:
+                    notes.append(
+                        f"{version}: dropped index `{dropped}` created earlier in this "
+                        f"batch; it is no longer an expected object"
+                    )
+                continue
+            if DROP_INDEX_HEAD_RE.match(statement):
+                notes.append(
+                    f"{version}: DROP INDEX was not safely parseable and was not "
+                    f"silently accepted: `{statement.strip()[:240]}`"
+                )
+                continue
             if CREATE_INDEX_HEAD_RE.match(statement):
                 notes.append(
                     f"{version}: CREATE INDEX was not safely parseable and was not "
@@ -2815,6 +3130,7 @@ def render_report(
     enforcing: bool,
     behavior_checks: list[dict] | None = None,
     behavior_results: object = None,
+    behavior_error: str | None = None,
 ) -> tuple[str, list[str]]:
     """Render the Markdown artifact and return the HARD FAILURES it found.
 
@@ -2860,13 +3176,25 @@ def render_report(
             and returned_expected == expected
             and actual == expected
         )
+        # A check whose query never reached the database has NOT been shown to
+        # be absent. Reporting it as MISSING/FAIL is a false negative that reads
+        # as a real absence -- and because every check is one branch of a single
+        # UNION ALL, one malformed branch silently condemns all of them. When the
+        # behavioral query itself errored, say ERROR and say why.
+        did_not_run = actual is None and behavior_error is not None
         add(
             f"| `{check['id']}` | `{check['migration_version']}` | "
             f"`{check['relation']}` | {expected} | "
-            f"{actual if actual is not None else 'MISSING'} | "
-            f"**{'PASS' if passed else 'FAIL'}** |"
+            f"{'ERROR' if did_not_run else (actual if actual is not None else 'MISSING')} | "
+            f"**{'ERROR' if did_not_run else ('PASS' if passed else 'FAIL')}** |"
         )
-        if not passed:
+        if did_not_run:
+            failures.append(
+                f"behavioral check {check['id']} DID NOT RUN: the behavioral "
+                f"query failed ({behavior_error}). This is not evidence that "
+                f"the contract is absent."
+            )
+        elif not passed:
             failures.append(
                 f"behavioral check {check['id']} expected {expected} row(s) "
                 f"but received {actual!r}"
@@ -3289,6 +3617,7 @@ def verify(
     catalog: object = None
     row_counts: object = None
     behavior_results: object = None
+    behavior_error: str | None = None
 
     declaration = targets.noop_declaration
     if behavior_checks:
@@ -3299,6 +3628,7 @@ def verify(
                 )
             )
         except (urllib.error.URLError, GuardError, ValueError, OSError) as exc:
+            behavior_error = str(exc)
             errors.append(f"behavioral query failed: {exc}")
 
     has_catalog_contract = any(
@@ -3381,6 +3711,7 @@ def verify(
         enforcing,
         behavior_checks=behavior_checks,
         behavior_results=behavior_results,
+        behavior_error=behavior_error,
     )
     (output_dir / "production-catalog-verification.md").write_text(
         markdown, encoding="utf-8"

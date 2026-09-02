@@ -74,6 +74,11 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    ````
    ```
 
+   Queue order is derived, not manually nominated: the issue that unblocks the
+   most other open issues through direct or chained `depends_on` relationships
+   goes first; equal blocker counts are ordered oldest first. `priority:` remains
+   required for scope compatibility but cannot override blocker impact or age.
+
    **READS AND WRITES ARE DECLARED SEPARATELY (Step 2, issue #1366).** Use
    `writes:` for every object the work CHANGES and `reads:` for every object it
    DEPENDS ON without changing. The queue serialises on this matrix:
@@ -245,15 +250,28 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    ```
 
    For new assignments, the machine-independent cursor rotates Grok 4.6 → GLM
-   5.3 → Kimi K3 → Muse Spark 1.2 Contributor → Codex GPT-5.6 Sol → DeepSeek →
+   5.3 → Kimi K3 → Muse Spark 1.2 Contributor → Codex GPT-5.6 Sol →
    repeat, skipping any reviewer whose engine matches the live orchestrator.
    Codex cannot review when Codex orchestrates; Claude cannot review when Claude
-   orchestrates. Albert approved Codex and DeepSeek on 2026-08-28 after both wrappers
+   orchestrates. Albert approved Codex on 2026-08-28 after its wrapper
    qualified. Qwen 3.8 Max, Gemini, and the retired `glm-5.2` label
    are paused until an explicit owner instruction restores them.
 
-   Codex uses wrapper `ai-codex-review`; DeepSeek uses `ai-deepseek-agent`.
-   Neither is overflow. If every eligible reviewer is busy, the allocator records an ordered
+   **DeepSeek was RETIRED on 2026-09-01 (issue #2078) and is not drawable.**
+   `ai-deepseek-agent` is a conversational API client with no filesystem, no
+   diff and no tools, so it can only review a change as *described* in the
+   brief, never as *written*. On PR #1989 it produced a complete, confidently
+   ranked review of a file, five functions, two tables and two columns that do
+   not exist, and the pipeline recorded it as a durable verdict artifact. The
+   roster now records `readsRepository` per reviewer, and `recordReviewVerdict`
+   refuses outright — before any commit or ref is created — to record a
+   code-review verdict from a reviewer whose wrapper cannot read the repository.
+   Every drawable reviewer is given a real checkout: Grok via `--cwd`, GLM and
+   Muse via an `ai-review-sandbox` clone, Kimi via a read-only agent profile,
+   Codex via `codex exec --sandbox read-only`.
+
+   Codex uses wrapper `ai-codex-review`. It is not overflow. If every eligible
+   reviewer is busy, the allocator records an ordered
    `review-wait`; it does not duplicate an assignment or invent availability.
 
    A reviewer that is truthfully unusable for one pull request is excluded with
@@ -264,9 +282,64 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    reviewer, and releases that exact active lease when present. It does not
    create a failure record. New heads skip the reviewer; if exclusions and live
    leases consume the roster, assignment refuses loudly and names each durable
-   reason. To continue the same head after excluding slot N, assign the next
-   unused `--review-slot`; the exact-head gate accepts that ordinary assignment
-   and no false failure is recorded. Never use this to shop for a preferred verdict.
+   reason. Never use this to shop for a preferred verdict.
+
+   The exclusion also RETURNS every assignment AND every replacement of that
+   pull request the excluded reviewer still holds, so the slot can be filled
+   again. Each return is a create-only record under `refs/db-review-returns/`,
+   named for the exact record it retires and committed on top of it, and only
+   then is that ref compare-and-cleared. Nothing is deleted silently: the record
+   keeps who was assigned, to which head, slot and replacement sequence, and why
+   it came back. An assignment that already carries a durable verdict is never
+   returned, and that check is re-read inside the reviewer mutex immediately
+   before the write, so a verdict recorded concurrently still refuses. Returning
+   a slot requires the atomic compare-and-swap ref writer; it never falls back
+   to a compare-then-delete.
+
+   A returned slot is an UNAPPROVED slot, never a vanished one. The merge gate
+   still demands a durable APPROVE for every slot that was ever returned for
+   that head: the slot must carry a live assignment at least as new as the
+   newest record returned for it, and that assignment must have its own APPROVE.
+   Another slot's APPROVE can never answer for it.
+
+   "At least as new" is the GLOBAL reviewer cursor sequence, not the
+   replacement namespace tail. Every assignment and every replacement spends one
+   strictly increasing sequence from the same durable counter, so a re-drawn
+   reviewer is always newer than the record that was returned, whichever
+   namespace each of them lives in.
+
+   To continue the same head after excluding slot N, draw a fresh reviewer for
+   that exact head and slot. WHICH COMMAND depends on what was returned, and
+   only one of the two will work:
+
+   - the returned record was the ORIGINAL assignment -> re-run
+     `--assign-reviewer` for that head and slot;
+   - the returned record was a REPLACEMENT -> re-run
+     `--replace-failed-reviewer` with the SAME `--failed-sequence`.
+     `--assign-reviewer` recreates the original ref, which the merge gate will
+     not accept as an answer for a returned replacement.
+
+   Either way the excluded reviewer stays barred from this pull request forever,
+   and the newly drawn reviewer must record its OWN durable APPROVE. A pull
+   request excluded before returns existed is repaired by re-running the
+   IDENTICAL `--exclude-reviewer` command, which completes the return without
+   recording a second exclusion.
+
+   The merge gate that reads these records is `check-exact-head-approval.mjs`,
+   the script the guarded merge workflow runs BEFORE the merge -- not only the
+   preview gate, which under merge-first runs after it. Both read the return
+   namespace and order it the same way.
+
+   A verdict that lands in the instant between the exclusion's in-mutex check and
+   its push answers an assignment that no longer exists. It is not deleted and it
+   does not pin the head: the exclusion re-files it under
+   `refs/db-review-retired-verdicts/`, freeing the create-only verdict ref, so
+   the next reviewer can record a verdict for that head normally and the raced
+   object remains readable for audit. That re-filing is its own atomic
+   compare-and-swap push, made after the push that records the exclusion and its
+   returns -- so if it fails, re-run the IDENTICAL `--exclude-reviewer` command.
+   The re-run rebuilds the returned records from the return namespace and
+   completes the re-filing, recording no second exclusion and no second return.
 
    **Grok's in-flight lock is PER REPOSITORY, not global.** `ai-grok-review`
    allows one live Grok review at a time *in shared-db*; it does not cap Grok
@@ -283,6 +356,16 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    review plus three rebuttals. If material disagreement remains, stop the merge
    and ask Albert one concise decision. Never send secrets or licensed rows.
    Do not impose a fixed hard-kill timer on a reviewer that is still making progress.
+
+   Run the returned wrapper only through `scripts/run-governed-review.mjs`. The
+   adapter withholds the result until it has posted the complete findings and
+   created the immutable verdict ref while the exact reviewer lease is still
+   held. Calling a wrapper directly produces supplementary diligence, never
+   merge or preview evidence; there is no manual verdict-recording fallback.
+   The manager CLI rejects `--record-review-verdict`; only the terminal adapter
+   can call the create-only recorder after posting the assigned wrapper output.
+   Prose may free reviewer capacity during cutover, but it never authorizes a
+   merge, preview, or replacement; those gates consume durable artifacts only.
 
    **A verdict with no coverage statement is not review evidence** (issue #1220,
    fixed wrapper-side in `ai-devops` PR #43). Two wrappers could finish a run
@@ -550,6 +633,30 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    claimed the exclusion existed, and it never did. Promotions are serialised
    among themselves by the workflow `concurrency` group, not by this lock.
 
+   **Every pull request enters through that guarded merge lane, including
+   documentation-only and other non-migration changes.** A pull request that
+   changes no migration needs no migration-author claim, but the lease workflow
+   does not auto-authorize it: the guarded merge still proves the exact head,
+   current-main relationship, collision result, and governed review while it
+   holds the merge lock.
+
+   **One exemption, 2026-09-02 (#2102): a documents-only pull request draws no
+   database reviewer, and the merge gate requires no verdict for it.** It still
+   enters this same lane and still runs every other check; only the external
+   reviewer draw is skipped, because PR #2034 and PR #2070 spent migration
+   reviewer capacity on prose. Rulebook files — `AGENTS.md`, anything under
+   `.claude/skills/` or `skills/`, and `plan_*.md` — are **not** documents for
+   this purpose, and one non-document file of any kind removes the exemption from
+   the whole pull request. The classifier is
+   `scripts/lib/documents-only-change.mjs`; it fails closed on an empty,
+   unreadable or absent file list, and a refusal already recorded at the exact
+   head still blocks the merge.
+
+   When production acquires its lock, the production
+   workflow revokes every open pull request's earlier merge authorization before
+   releasing the lock. This prevents a stale green authorization from surviving
+   the production freeze.
+
    The lock fails closed if the PR is not merged, if its
    merge commit is not carried by the main tip, if the named versions were not
    *added* by that PR, or if GitHub state cannot be read.
@@ -743,3 +850,28 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    version** — the CLI still finds a local file for every `schema_migrations`
    row, so it does not abort with `Remote migration versions not found in local
    migrations directory`.
+
+   **Working doctrine learned while building the exact-head approval gate.**
+
+   - **Check supersethood before taking a side in a merge conflict.** A side that
+     looks newer may still omit unique work from the other side. Compare the
+     complete competing content before choosing or rebuilding the result.
+   - **Regenerate on drift; verify otherwise.** Regenerate derived evidence when
+     its source moved. When the source did not move, verify the existing artifact
+     rather than replacing it merely to make it look current.
+   - **Two ways to absorb a repeated cost is the signal to find its cause.** If
+     the same workaround, retry, or manual correction is needed twice, stop
+     paying the symptom cost and investigate the shared cause.
+   - **The instrument rule.** A check that can only ever return "clean" must be
+     proven capable of returning "dirty" before its clean result means anything.
+     Every check asserts that its own precondition held, and verdict matching is
+     tested in the same regex engine production uses. Do not use `jq` for verdict
+     matching: a collapsed `\b` can become an Oniguruma backspace and silently
+     test for a control character instead of a word boundary.
+   - **The stacked-mutation rule.** A mutation check that cannot say which change
+     caused the failure is coincidence, not evidence. Restore, mutate one thing,
+     observe the expected failure, then restore before testing the next mutation.
+   - **The venue rule.** Before publishing an artifact, decide whether its content
+     may exist in this repository, separately from whether the change is correct.
+     Evidence capture does not authorize public storage of licensed, private, or
+     sensitive source material.
