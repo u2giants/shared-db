@@ -379,9 +379,19 @@ jobs:
             if [ ! -f "$m" ]; then
               echo "::error::pass 2 cannot find $m" >&2; BAD=$((BAD+1)); continue
             fi
-            # Snapshot any newer routine definitions that this older pass-2 file would
-            # replace. Restoring the definitions is safer than re-running whole later
-            # migrations, which may contain guarded data or other non-repeatable work.
+            # Snapshot the LATER truth this older pass-2 file would overwrite, in both
+            # of the ways it can: newer routine DEFINITIONS it would replace, and the
+            # EXECUTE GRANTS of functions a schema-wide revoke inside it would strip
+            # from objects created after it. Restoring a snapshot is safer than
+            # re-running whole later migrations, which may contain guarded data or
+            # other non-repeatable work.
+            #
+            # The grant half was added after api.set_source_resolution (#2085) failed
+            # its own grant contract on this lane: 20260710135985_reconcile_permission_
+            # parity.sql does not replay from empty, so it lands in pass 2 and its
+            # `revoke execute on all functions in schema api from service_role` reached
+            # roughly sixty api functions created months later. The migrations applied
+            # cleanly and said nothing; only a contract test asserting a grant caught it.
             if ! SNAPSHOT_QUERY=$(python scripts/check_pass2_routine_supersession.py "$m" \
                  --migrations-dir supabase/migrations); then
               echo "::error::could not calculate pass-2 ordering repair for $base" >&2
@@ -396,12 +406,13 @@ jobs:
             fi
             if psql -v ON_ERROR_STOP=1 --no-psqlrc --single-transaction -f "$m" \
                  > "$RUNNER_TEMP/migration-logs-pass2/$base.log" 2>&1; then
-              # Pass 2 runs after every pass-1 success, so an older migration can silently
-              # replace a routine installed by a later migration. Re-run only the later
-              # Restore exactly the newer routine definitions, without re-running the
-              # later migrations' unrelated DDL or guarded data work.
+              # Pass 2 runs after every pass-1 success, so an older migration can
+              # silently replace a routine installed by a later migration, or revoke
+              # privileges from one. Restore exactly the newer routine definitions and
+              # grants, without re-running the later migrations' unrelated DDL or
+              # guarded data work.
               if [ -n "$ROUTINE_SNAPSHOT" ]; then
-                echo "Restoring later routine definitions after $base to preserve order."
+                echo "Restoring later routine definitions and grants after $base to preserve order."
                 if ! printf '%s\n' "$ROUTINE_SNAPSHOT" | psql -v ON_ERROR_STOP=1 \
                      --no-psqlrc --single-transaction \
                      > "$RUNNER_TEMP/migration-logs-pass2/${base}__ORDER_REPAIR.log" 2>&1; then

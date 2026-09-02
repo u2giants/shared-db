@@ -196,6 +196,28 @@ class DeriveTargetsTests(unittest.TestCase):
         self.assertEqual((source, destination), ("designflow", "designflow_frozen_20260710"))
         self.assertIn("FROZEN 2026-08-27", comment)
 
+    def test_index_dropped_later_in_the_batch_is_not_expected(self):
+        # Issue #2035: the review-fix migration removes an index the contract
+        # migration created. The batch's expected-object set must follow the
+        # drop, or enforcing verification fails on a database that is exactly
+        # right. The positive control is the first assertion: without the drop
+        # the index MUST still be demanded.
+        created = "create index widget_name_idx on plm.widget (name);"
+        self.assertIn(
+            ("plm.widget_name_idx", "plm.widget"), targets_for(created).indexes
+        )
+        t = targets_for(created + "\ndrop index if exists plm.widget_name_idx;")
+        self.assertEqual(t.indexes, [])
+        self.assertTrue(any("dropped index" in note for note in t.notes))
+
+    def test_unqualified_drop_index_is_recorded_not_guessed_at(self):
+        created = "create index widget_name_idx on plm.widget (name);"
+        t = targets_for(created + "\ndrop index widget_name_idx;")
+        self.assertIn(("plm.widget_name_idx", "plm.widget"), t.indexes)
+        self.assertTrue(
+            any("DROP INDEX was not safely parseable" in note for note in t.notes)
+        )
+
     def test_create_table_is_found(self):
         t = targets_for("create table if not exists plm.widget (id bigint);")
         self.assertIn("plm.widget", t.tables)
@@ -586,7 +608,17 @@ class RecoveryWorkflowTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('MAIN_SHA: "${{ inputs.main_sha }}"', workflow)
         self.assertIn('APPLY_MAIN_SHA: ${{ inputs.apply_main_sha }}', workflow)
-        self.assertIn('git rev-parse origin/main)" = "$MAIN_SHA"', workflow)
+        # Narrowed 2026-09-01 (#2047): the tip is proven by
+        # check-main-tip-freshness.mjs, which accepts an origin/main that has
+        # advanced by DOCUMENTATION ONLY and refuses every other move. The bare
+        # equality this replaced voided a promotion for any commit at all,
+        # including a handover note. The binding itself is unchanged: this job
+        # still names the exact main SHA and still refuses a code-bearing move.
+        self.assertIn(
+            'MAIN_SHA="$MAIN_SHA" node scripts/check-main-tip-freshness.mjs',
+            workflow,
+        )
+        self.assertNotIn('git rev-parse origin/main)" = "$MAIN_SHA"', workflow)
         self.assertIn('jq -r .head_sha <<<"$run")" = "$APPLY_MAIN_SHA"', workflow)
         self.assertIn('production-migration-apply-$APPLY_MAIN_SHA', workflow)
         self.assertNotIn('production-migration-apply-$MAIN_SHA', workflow)
@@ -1780,6 +1812,31 @@ class BehavioralSidecarTests(unittest.TestCase):
             migration_sql.index("create or replace function public.filter_effective_assets"),
             migration_sql.index("alter function public.filter_effective_assets(jsonb) reset all;"),
         )
+        self.assertIn("has_function_privilege('authenticated'", sql)
+
+    def test_real_2054_sidecar_is_hash_bound_and_asserts_indexed_union_counts(self):
+        version = "20260901142825"
+        migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
+        checks = load_behavior_sidecars(REPO, {version: migration}, [version])
+        targets = derive_targets({version: migration}, [version])
+        sql = build_behavior_sql(checks)
+
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["kind"], "catalog_contract")
+        self.assertEqual(
+            checks[0]["migration_sha256"],
+            "bc8ef9e10f5ef6fd91f61d7b03516464cfc1a799d9dbae27944c1551742a15ba",
+        )
+        self.assertIn("public.filter_effective_assets", targets.functions)
+        self.assertIn("public.get_effective_filter_counts", targets.functions)
+        self.assertIn("public.get_filter_counts", targets.functions)
+        self.assertIn("identity_asset_ids as", sql)
+        self.assertIn("union all", sql)
+        self.assertIn("a.licensor_id = ", sql)
+        self.assertIn("sg.licensor_id = ", sql)
+        self.assertIn("a.customer_id = ", sql)
+        self.assertIn("sg.customer_id = ", sql)
+        self.assertIn("__includeOwnFacets2054", sql)
         self.assertIn("has_function_privilege('authenticated'", sql)
 
     def test_real_1703_forward_7_sidecar_is_hash_bound_and_asserts_single_heap_fetch(self):

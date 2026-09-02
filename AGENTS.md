@@ -34,6 +34,7 @@ The guarded row-application work is planned in [`plan_historical_mg_reclassifica
 - **ColdLion raw landing layer (issue #1184), phases 2-6:** [`docs/plan_coldlion-landing-phases-2-6.md`](docs/plan_coldlion-landing-phases-2-6.md). Read its STATUS table first — do not re-derive its measurements or re-plan its steps. Phase 1 (the spine) is merged; phases 2-6 build the feed tables and loaders. The owner's per-field ingest/ignore decisions are [`docs/coldlion-field-decisions-20260819.csv`](docs/coldlion-field-decisions-20260819.csv) and are authority, not a suggestion. Step 4 is blocked until the `orderHistory` line key is resolved from a live pull; there is no `lineNo` in the payload and every obvious substitute silently merges sales lines.
 - **Multi-agent database coordination hardening (issue #1366):** [`plan_multi_agent_database_coordination_hardening.md`](plan_multi_agent_database_coordination_hardening.md). Read its STATUS table first. This is repository-maintenance work outside the structure/schema orchestrator; do not route its implementation to that orchestrator or re-derive the completed research.
 - **Reviewer-assignment GitHub API budget (issue #1767, complete):** [`plan_reviewer_assignment_api_budget.md`](plan_reviewer_assignment_api_budget.md). Read its STATUS table and verification link before investigating regressions; do not reimplement it or test scale by scanning live historical assignment refs. Slot 1 is capped at 19 requests, while mandatory slot 2 has a documented 22-request normal-path ceiling after PR #1813.
+- **Reviewer lease capacity truth (issues #2058 and #1851):** [`plan_reviewer_lease_capacity_truth.md`](plan_reviewer_lease_capacity_truth.md). Read its STATUS table first — do not re-derive its root cause or re-plan its steps. Repository-maintenance work that authorizes **no** database change; implement it in a fresh isolated session outside the structure/schema orchestrator. It releases terminally failed reviewer slots without requiring a replacement draw, timestamps leases, adds a read-only capacity report, and makes the exhaustion refusal name its true cause. Never hand-delete a `refs/db-review-active/*` ref and never post a synthetic verdict to free capacity — both were considered and rejected, and both silently un-review a database change.
 - **Orchestrator throughput Phase 2 (issue #1738):** [`plan_orchestrator_throughput_phase_2.md`](plan_orchestrator_throughput_phase_2.md). Read its STATUS table first. It uses the completed `shared-db.orch` transcript to separate protected claims from worker capacity, preserve content-addressed evidence across unrelated `main` movement, schedule shared-preview dependencies, and qualify routes before expensive gates. This is repository-maintenance work outside the structure/schema orchestrator.
   Phase 2 is active: protected claims never disappear when author capacity is relinquished; preview dependencies are waits, not successful checks. Before manual preview dispatch resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector/fresh-ledger check, and use only the matching instruction. Historical recovery is apply-only; historical dry-run proves nothing. `--repair-preview-ready <ready-id> --issue <n>` may repair only a v2-bound stale wrong digest; a corrupt live digest stops for owner decision without mutation. Reviewer reservations serialize approved provider/wrapper execution keys and create durable ordered waits when all eligible reviewers are busy. The live orchestrator engine is always excluded: Codex cannot review a Codex-orchestrated change, and Claude cannot review a Claude-orchestrated change. Qwen and Gemini remain outside the active rotation while ai-devops reliability is repaired.
 - **Making throughput guards tell the truth (hash-bound verification sidecars, typed catalog truth, regression corpus and causal blocker measures):** [`plan_orchestrator_throughput_guard_truth.md`](plan_orchestrator_throughput_guard_truth.md). Read its STATUS table first — do not re-derive its analysis or re-plan its steps. Repository-maintenance work that authorizes **no** database change; do not route it to the structure/schema orchestrator. It preserves every refusal while separating migration-file, ledger and live-catalog evidence so “not derivable” is never reported as “absent.”
@@ -394,6 +395,13 @@ code — but an orchestrator that leaves items standing in it is carrying other 
 The block prints **before** the refill line, not after it, so a queue that has dispatchable work
 cannot hide it — that ordering is deliberate.
 
+### Queue priority
+
+Among eligible structural issues, work that releases the largest number of other open issues is
+first. The count includes direct and chained `depends_on` relationships. If two issues release the
+same number, the older issue is first. The numeric `priority:` field remains required for scope
+compatibility but does not override blocker impact or age.
+
 An issue with **no** `db-work-scope` block at all is `unclassified`: it is not admitted, it is not
 worked, and it already blocks an empty-lane claim. Classify it or send it back.
 
@@ -568,6 +576,13 @@ another live agent may be mid-task on it. Leave it, work in your own worktree, a
 handoff. Remove your own worktree when your branch has merged; never remove one that is dirty,
 locked, or held by a live agent.
 
+**Before treating working-tree files as current `main` evidence**, run
+`node scripts/check-worktree-freshness.mjs`. It fetches live `origin/main` and refuses unless the
+checked-out commit is that exact tip. A refusal means read the required files from a fresh isolated
+worktree or from `git show origin/main:<path>`; never update or switch the shared checkout to make
+the guard pass. Verification tools that read the migration tree must refresh `origin/main`
+themselves and fail closed if that refresh is unavailable.
+
 ### 2.1-W.1 Retiring a worktree — and the squash-merge trap that has defeated every attempt
 
 `scripts/reap-merged-worktrees.mjs` does this. Dry run by default; `--apply` to act.
@@ -711,8 +726,9 @@ rules below are the operative summary.
      only when there is no verdict and no progress, or a concrete transport, coverage, or
      truncated-output failure. Never replace `REVISE` or reduce coverage: exhaust active providers
     not failed on the exact head, then fail closed with the exact blocker. The configured rotation is
-    Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.2 Contributor, Codex GPT-5.6 Sol, and DeepSeek,
-    minus the live orchestrator's own engine. Qwen and Gemini are inactive.
+    Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.2 Contributor, and Codex GPT-5.6 Sol,
+    minus the live orchestrator's own engine. Qwen, Gemini and DeepSeek are inactive; DeepSeek
+    was RETIRED on 2026-09-01 (issue #2078) and is not drawable.
 
    The `Cross-PR object collision` CI check is only the backstop. By the time it fires, somebody's
    session is already wasted — on 2026-07-31, three of four were.
@@ -1488,9 +1504,13 @@ have already happened in this repo, more than once.
 
     What actually re-checks a migration pull request against current `main` is
     `.github/workflows/guarded-migration-merge.yml`, whose required context
-    `Migration guarded merge authorization` re-runs collision and lease validation on a head that
-    contains current `main`, while holding the merge lock. A pull request with no migrations is
-    auto-authorized by `.github/workflows/migration-author-lease.yml`.
+    `Migration guarded merge authorization` re-runs collision, exact-head review, and—when the
+    pull request changes a migration—lease validation on a head that contains current `main`,
+    while holding the merge lock. **Every pull request, including documentation-only and other
+    non-migration changes, uses that guarded merge lane.** A non-migration pull request needs no
+    migration-author claim, but it is never auto-authorized by the lease workflow. When production
+    acquires its lock, it revokes every open pull request's earlier merge authorization before
+    releasing that lock, so a stale green result cannot bypass the production freeze.
 
     Older documents — including `docs/owner-rulings.md`'s 2026-08-06/14 entries and
     `plan_orchestrator-workflow-gaps.md` — describe the earlier `strict: true` state. That history
