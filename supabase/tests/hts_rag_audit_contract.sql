@@ -48,8 +48,11 @@ begin
   end if;
 
   -- Bounded writes. No table-wide UPDATE, no DELETE, no TRUNCATE for anybody.
+  -- GRANTEE-SCOPED: information_schema reports the OWNER's implicit privileges as
+  -- grants too, so an unscoped form is red on every correctly built table.
   if exists (select 1 from information_schema.role_table_grants
               where table_schema='public' and table_name='hts_rag_provider_responses'
+                and grantee in ('service_role','authenticated','anon','PUBLIC')
                 and privilege_type in ('UPDATE','DELETE','TRUNCATE')) then
     raise exception 'hts_rag_provider_responses received a table-wide mutation grant';
   end if;

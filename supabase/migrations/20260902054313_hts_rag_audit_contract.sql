@@ -268,9 +268,12 @@ begin
   end if;
 
   -- Service-only WRITES, bounded. No DELETE, no TRUNCATE, no table-wide UPDATE.
+  -- GRANTEE-SCOPED on purpose: information_schema reports the owner's own implicit
+  -- privileges as grants, so an unscoped form fails on every correctly built table.
   if exists (
     select 1 from information_schema.role_table_grants
      where table_schema = 'public' and table_name = 'hts_rag_provider_responses'
+       and grantee in ('service_role','authenticated','anon','PUBLIC')
        and privilege_type in ('UPDATE','DELETE','TRUNCATE')) then
     raise exception 'public.hts_rag_provider_responses received a table-wide mutation grant';
   end if;
@@ -295,6 +298,7 @@ begin
   if exists (
     select 1 from information_schema.role_table_grants
      where table_schema = 'public' and table_name = 'hts_rag_determinations'
+       and grantee in ('service_role','authenticated','anon','PUBLIC')
        and privilege_type in ('UPDATE','DELETE','TRUNCATE')) then
     raise exception 'hts_rag_determinations received a table-wide mutation grant, so the new comparison columns are not immutable';
   end if;
