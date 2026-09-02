@@ -850,3 +850,88 @@ test('verify-cost guard allows the SET search_path ATTRIBUTE of a function', () 
     assert.equal(result.status, 0, result.stderr)
   })
 })
+
+test('verify-cost guard refuses SET SESSION search_path inside the block', () => {
+  // The in-block rule and the file-scope rule must agree on the spellings they
+  // recognise; `session` was only in the second one (external review, PR #2139).
+  withFixture(['20260801120000_session_search_path.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_session_search_path.sql'), `
+      do $verify$
+      begin
+        set session search_path to plm;
+        perform count(*) from large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /plm through search_path/)
+  })
+})
+
+test('verify-cost guard reads a QUOTED search_path value', () => {
+  // The schema name sits inside a string literal, whose contents the scannable
+  // view blanks. Matching the keywords there but reading the VALUE from the
+  // comment-only mask is what sees it (external review, PR #2139).
+  withFixture(['20260801120000_quoted_search_path.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_quoted_search_path.sql'), `
+      set search_path to 'plm';
+      do $verify$
+      begin
+        perform count(*) from large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /statement-level search_path/)
+  })
+})
+
+test('verify-cost guard refuses set_config of search_path to plm', () => {
+  withFixture(['20260801120000_set_config_search_path.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_set_config_search_path.sql'), `
+      do $verify$
+      begin
+        perform set_config('search_path', 'plm', false);
+        perform count(*) from large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /plm through search_path/)
+  })
+})
+
+test('verify-cost guard sees REFRESH MATERIALIZED VIEW as a read', () => {
+  withFixture(['20260801120000_refresh_matview.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_refresh_matview.sql'), `
+      do $verify$
+      begin
+        refresh materialized view concurrently plm.big_rollup;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
+
+test('verify-cost guard finds the DO keyword past a comment longer than any window', () => {
+  // 20 000 characters was the previous window. The lead is now trimmed before it
+  // is read, so the distance no longer decides anything (external review, PR #2139).
+  withFixture(['20260801120000_very_long_lead.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_very_long_lead.sql'), `
+      do /* ${'why this verification exists. '.repeat(1200)} */ $verify$
+      begin
+        perform count(*) from plm.large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})

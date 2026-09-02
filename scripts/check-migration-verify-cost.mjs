@@ -158,10 +158,16 @@ const DO_LEAD = /\bdo(?:\s+language\s+[A-Za-z_][A-Za-z0-9_]*)?$/i
 // The lead used to be read through a fixed 200-character window, so a long comment
 // or a long LANGUAGE clause between `do` and its tag pushed the keyword out of view
 // and the block was never inspected (issue #2130). Comments are already blanked to
-// spaces by the scan, so collapsing whitespace and trimming the end makes the
-// distance between the keyword and the tag irrelevant instead of merely larger.
+// spaces by the scan, so trimming the blanks off the end makes the distance between
+// the keyword and the tag irrelevant.
+//
+// There is no window. A 20 000-character one was still a window and a longer comment
+// walked straight past it (external review, muse-spark-1.2, PR #2139). Trimming
+// FIRST and only then looking at the last few characters is what removes the limit:
+// slicing first would put the window back.
 export function doLead(masked, tagStart) {
-  return masked.slice(Math.max(0, tagStart - 20000), tagStart).replace(/\s+/g, ' ').trimEnd()
+  const lead = masked.slice(0, tagStart).trimEnd()
+  return lead.slice(-200).replace(/\s+/g, ' ')
 }
 
 export function verifyBlocks(sql) {
@@ -173,9 +179,20 @@ export function verifyBlocks(sql) {
     const signalled = /verify|verification/i.test(region.tag)
       || /raise\s+(?:exception|notice|warning)[\s\S]{0,160}\bverif(?:y|ication)\b/i.test(masked.slice(region.bodyStart, region.bodyEnd))
       || /(?:self[- ]verification|verification(?:\s+block)?|verify(?:\s+block)?)[^\n]*$/im.test(lead)
-    if (signalled) blocks.push({ body: scannable.slice(region.bodyStart, region.bodyEnd), offset: region.bodyStart })
+    if (signalled) {
+      blocks.push({
+        body: scannable.slice(region.bodyStart, region.bodyEnd),
+        literal: masked.slice(region.bodyStart, region.bodyEnd),
+        offset: region.bodyStart,
+      })
+    }
   }
-  return { blocks, unterminated, fileScope: fileScopeText(scannable, dollars) }
+  return {
+    blocks,
+    unterminated,
+    fileScope: fileScopeText(scannable, dollars),
+    fileScopeLiteral: fileScopeText(masked, dollars),
+  }
 }
 
 // The text OUTSIDE every top-level dollar-quoted body: the statements the session
@@ -189,19 +206,49 @@ export function fileScopeText(scannable, dollars) {
   return out.join('')
 }
 
-// A statement-level `set search_path ... plm` changes what every UNQUALIFIED name in
-// the rest of the session resolves to, including inside a verification block that
-// follows it. The in-block form was already refused; this is the same hole one level
-// out (issue #2130). The `(?:^|;)` lead is what separates a real SET STATEMENT from
-// the `SET search_path` ATTRIBUTE of a CREATE FUNCTION, which is scoped to that
-// function and is used by 223 migrations in this repository.
-const FILE_SCOPE_SEARCH_PATH = /(?:^|;)\s*set\s+(?:local\s+|session\s+)?search_path\s*(?:to|=)\s*[^;\n]*\bplm\b/i
+// Anything that points `search_path` at `plm` makes every UNQUALIFIED name a possible
+// plm read that no `plm.` pattern can see. The construct is refused rather than
+// guessed at, in a verification block and in the statements before one alike: a set
+// one level out reaches into the block that follows it (issue #2130).
+//
+// The KEYWORDS are matched in the scannable view, so the same words sitting inside a
+// message string are not mistaken for a statement. The VALUE is then read from the
+// masked view, where string CONTENTS are still visible, because `set search_path to
+// 'plm'` puts the schema name inside a literal -- reading the value from the
+// scannable view saw blanks and passed (external review, muse-spark-1.2, PR #2139).
+// `set_config('search_path', 'plm', false)` is the function spelling of the same
+// statement and is found the same way.
+const SEARCH_PATH_SET = /\bset\s+(?:local\s+|session\s+)?search_path\s*(?:to|=)/gi
+const SET_CONFIG_CALL = /\bset_config\s*\(/gi
+const STATEMENT_START = /(?:^|;)\s*$/
+const NAMES_PLM = /(?:^|[^A-Za-z0-9_])plm(?![A-Za-z0-9_])/i
+
+// `fileScopeOnly` is the discriminator that keeps the `SET search_path` ATTRIBUTE of a
+// CREATE FUNCTION allowed: an attribute sits inside the CREATE statement, while a real
+// SET STATEMENT begins at the start of the file or after a `;`. 223 migrations here
+// carry the attribute form, and it cannot change what a later block resolves.
+export function searchPathReachesPlm(scannable, literal, { fileScopeOnly = false } = {}) {
+  for (const regex of [SEARCH_PATH_SET, SET_CONFIG_CALL]) {
+    regex.lastIndex = 0
+    let found
+    while ((found = regex.exec(scannable)) !== null) {
+      if (fileScopeOnly && !STATEMENT_START.test(scannable.slice(0, found.index))) continue
+      const rest = literal.slice(found.index + found[0].length)
+      const stop = rest.search(/[;\n]/)
+      const value = stop < 0 ? rest : rest.slice(0, stop)
+      if (!NAMES_PLM.test(value)) continue
+      if (regex === SET_CONFIG_CALL && !/search_path/i.test(value)) continue
+      return found.index
+    }
+  }
+  return -1
+}
 
 // A relation name only costs anything when something READS or WRITES it. These
 // are the contexts in which it does.
 // `truncate table x` is the spelled-out form of `truncate x`; without the optional
 // keyword the guard read only the short form (issue #2130).
-const READ_CONTEXT = String.raw`\b(?:from|join|into|update|delete\s+from|truncate(?:\s+table)?|analyze|copy)\s+(?:only\s+)?`
+const READ_CONTEXT = String.raw`\b(?:from|join|into|update|delete\s+from|truncate(?:\s+table)?|analyze|copy|vacuum(?:\s+full)?(?:\s+analyze)?|refresh\s+materialized\s+view(?:\s+concurrently)?|cluster)\s+(?:only\s+)?`
 const INVENTORY = String.raw`(?:"?api"?\s*\.\s*)?"?source_capture_inventory"?(?![A-Za-z0-9_])`
 const PLM_OBJECT = String.raw`"?plm"?\s*\.\s*"?[A-Za-z_][A-Za-z0-9_]*"?`
 
@@ -221,17 +268,11 @@ export const PATTERNS = [
     label: 'a plm routine',
     regex: /(?<!['"\w.])"?plm"?\s*\.\s*"?[A-Za-z_][A-Za-z0-9_]*"?\s*\(/i,
   },
-  {
-    // `set search_path to plm` makes every unqualified name a plm read that no
-    // `plm.` pattern can see. Refuse the construct instead of guessing.
-    label: 'plm through search_path',
-    regex: /\bset\s+(?:local\s+)?search_path\s*(?:to|=)\s*[^;\n]*\bplm\b/i,
-  },
 ]
 
 export function inspectSql(name, sql) {
   const failures = []
-  const { blocks, unterminated, fileScope } = verifyBlocks(sql)
+  const { blocks, unterminated, fileScope, fileScopeLiteral } = verifyBlocks(sql)
   for (const open of unterminated) {
     const line = sql.slice(0, open.offset).split(/\r?\n/).length
     failures.push(`${name}:${line}: unterminated ${open.kind}; this guard cannot read the file and refuses it`)
@@ -243,14 +284,23 @@ export function inspectSql(name, sql) {
       const line = sql.slice(0, block.offset + found.index).split(/\r?\n/).length
       failures.push(`${name}:${line}: verification reads ${pattern.label}`)
     }
+    const inBlock = searchPathReachesPlm(block.body, block.literal)
+    if (inBlock >= 0) {
+      const line = sql.slice(0, block.offset + inBlock).split(/\r?\n/).length
+      failures.push(`${name}:${line}: verification reads plm through search_path`)
+    }
   }
   // Only a search_path set BEFORE a verification block can change what that block
   // reads, so one set after the last block is left alone.
   if (blocks.length) {
-    const reach = fileScope.slice(0, Math.max(...blocks.map((block) => block.offset)))
-    const found = FILE_SCOPE_SEARCH_PATH.exec(reach)
-    if (found) {
-      const line = sql.slice(0, found.index).split(/\r?\n/).length
+    const end = Math.max(...blocks.map((block) => block.offset))
+    const reached = searchPathReachesPlm(
+      fileScope.slice(0, end),
+      fileScopeLiteral.slice(0, end),
+      { fileScopeOnly: true },
+    )
+    if (reached >= 0) {
+      const line = sql.slice(0, reached).split(/\r?\n/).length
       failures.push(`${name}:${line}: verification reads a plm object through a statement-level search_path set before it`)
     }
   }

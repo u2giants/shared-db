@@ -13,15 +13,20 @@ The rule is a read context, not a name. A migration is refused when, inside a
 verification block, one of the prohibited objects appears:
 
 - after `from`, `join`, `into`, `update`, `delete from`, `truncate` (with or
-  without the optional `table` keyword), `analyze` or `copy` (optionally through
-  `only`), or
+  without the optional `table` keyword), `analyze`, `copy`, `vacuum`, `cluster`
+  or `refresh materialized view` (optionally through `only`), or
 - as a called routine — `plm.something(...)`, or
 - indirectly, because `search_path` names `plm` and every unqualified name
   becomes a possible `plm` read that no `plm.` pattern can see. That construct is
   refused outright rather than guessed at, both inside the verification block and
   as a statement standing before it in the same file.
 
-The file-scope rule reads a `SET` **statement** — one that begins the statement,
+The `search_path` rule is one rule applied in both places, so the two cannot
+drift apart. It covers `set`, `set local` and `set session`, the `to` and `=`
+spellings, a value written bare or in quotes — `set search_path to 'plm'` — and
+the function form, `set_config('search_path', 'plm', ...)`.
+
+In the file scope it reads a `SET` **statement** — one that begins the statement,
 after a `;` or at the start of the file. The `SET search_path` **attribute** of a
 `CREATE FUNCTION` is scoped to that function, cannot change what a later block
 resolves, and is used by 223 migrations here; it is allowed.
@@ -73,7 +78,9 @@ expensive read when:
   not recognised as verification in the first place;
 - the read uses a construct outside the listed read contexts — for example a
   scalar subquery reached some other way, or a `with` clause naming the object
-  through an alias defined elsewhere.
+  through an alias defined elsewhere;
+- `search_path` is changed by something other than the spellings above — a value
+  built at run time, or a setting inherited from the role or the database.
 
 It also does not estimate the cost of allowed catalogue queries, and it inspects
 only migrations added by the branch, never historical SQL.
