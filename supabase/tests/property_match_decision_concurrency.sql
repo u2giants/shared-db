@@ -74,8 +74,28 @@ begin
     end;
   end if;
 
-  v_dsn := coalesce(nullif(current_setting('pm_race.dsn', true), ''),
-                    'dbname=' || current_database());
+  v_dsn := coalesce(nullif(current_setting('pm_race.dsn', true), ''), '');
+  if position('password=' in v_dsn) = 0 then
+    raise exception
+      'the racing password never reached the test (psql could not read PGPASSWORD)';
+  end if;
+
+  -- dblink refuses a connection that did not authenticate with a password when
+  -- the caller is not a superuser, and the local socket here is trust-auth. So
+  -- try the socket first and fall back to the server's own TCP listener, which
+  -- is 5432 from INSIDE the server whatever port is mapped outside it.
+  begin
+    perform dblink_connect(v_conn_a, v_dsn);
+  exception when others then
+    v_message := sqlerrm;
+    begin
+      v_dsn := v_dsn || ' host=127.0.0.1 port=5432';
+      perform dblink_connect(v_conn_a, v_dsn);
+    exception when others then
+      raise exception 'the race could not open a connection (socket: %) (tcp: %)',
+        v_message, sqlerrm;
+    end;
+  end;
 
   select p.id, p.auth_user_id into v_profile, v_auth
   from app.profile p
@@ -87,7 +107,6 @@ begin
   end if;
   select r.id into v_role_id from app.role r where r.slug = 'licensing'::app.app_role;
 
-  perform dblink_connect(v_conn_a, v_dsn);
   perform dblink_connect(v_conn_b, v_dsn);
 
   -- Committed setup. The racing sessions cannot see anything this test
