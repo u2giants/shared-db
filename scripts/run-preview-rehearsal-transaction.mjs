@@ -5,6 +5,15 @@ import { pathToFileURL } from 'node:url'
 
 export const PRODUCTION_PROJECT_REF = 'qsllyeztdwjgirsysgai'
 
+// libpq reads the WHOLE URI, not just its authority. `?host=`, `?hostaddr=`,
+// `?user=` and `?port=` in the query silently OVERRIDE the host and user this
+// script would otherwise check, so a URL whose authority names preview can still
+// connect to production. The overrides are refused outright rather than parsed,
+// and the identity that must prove the preview ref is built from every part of
+// the URI, casefolded, with an empty host refused so libpq cannot fall back to
+// an inherited PGHOST. (External review, grok-4.6, PR #1951.)
+const CONNECTION_OVERRIDE_PARAMS = ['host', 'hostaddr', 'user', 'port', 'dbname', 'service', 'passfile']
+
 export function validateRehearsal({ projectRef, fixtureId, databaseUrl, sql }) {
   if (!/^[a-z]{20}$/.test(projectRef ?? '')) throw new Error('project ref must be exactly 20 lowercase letters')
   if (projectRef === PRODUCTION_PROJECT_REF) throw new Error(`refusing production project ${PRODUCTION_PROJECT_REF}`)
@@ -12,15 +21,29 @@ export function validateRehearsal({ projectRef, fixtureId, databaseUrl, sql }) {
   let parsed
   try { parsed=new URL(databaseUrl) } catch { throw new Error('SUPABASE_DB_URL is not a valid PostgreSQL URL') }
   if (!['postgres:','postgresql:'].includes(parsed.protocol)) throw new Error('SUPABASE_DB_URL is not a PostgreSQL URL')
-  const identity=`${decodeURIComponent(parsed.username)} ${parsed.hostname}`
+  if (!parsed.hostname) throw new Error('SUPABASE_DB_URL names no host, so libpq would choose the target from the environment')
+  for (const [key] of parsed.searchParams) {
+    if (CONNECTION_OVERRIDE_PARAMS.includes(key.toLowerCase())) throw new Error(`SUPABASE_DB_URL parameter ${key} can redirect the connection and is refused`)
+  }
+  if (parsed.hash) throw new Error('SUPABASE_DB_URL carries a fragment, which this guard cannot account for')
+  let identity
+  try { identity=decodeURIComponent(`${parsed.username} ${parsed.hostname} ${parsed.pathname} ${parsed.search}`).toLowerCase() }
+  catch { throw new Error('SUPABASE_DB_URL is not decodable and cannot be proved') }
   if (identity.includes(PRODUCTION_PROJECT_REF)) throw new Error(`refusing a connection identity that names production ${PRODUCTION_PROJECT_REF}`)
   const exactRef=new RegExp(`(^|[^a-z])${projectRef}([^a-z]|$)`)
   if (!exactRef.test(identity)) throw new Error('SUPABASE_DB_URL does not prove the requested preview project ref in its host or user identity')
   if (typeof sql !== 'string' || !sql.trim()) throw new Error('rehearsal SQL is empty')
   const stripped = sql.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, ' ')
-  if (/^\s*\\/m.test(stripped)) throw new Error('psql meta-commands are not allowed in rehearsal SQL')
+  // psql honours a meta-command after a semicolon as readily as at the start of
+  // a line, and `\connect` after the transaction has ended opens a NEW
+  // autocommit session that this guard never inspected. A rehearsal fixture has
+  // no legitimate use for a backslash, so every backslash is refused.
+  if (stripped.includes('\\')) throw new Error('psql meta-commands are not allowed in rehearsal SQL')
   if (/\b(begin|start\s+transaction|commit|rollback|savepoint|release\s+savepoint|prepare\s+transaction)\b/i.test(stripped)) throw new Error('rehearsal SQL cannot control its transaction')
-  if (/\b(vacuum|alter\s+system|create\s+database|drop\s+database|reindex\s+[^;]*\bconcurrently)\b/i.test(stripped)) throw new Error('rehearsal SQL contains a statement that cannot be safely rolled back')
+  // END and ABORT are PostgreSQL's own synonyms for COMMIT and ROLLBACK. Matched
+  // only in statement position so `case ... end` stays legal.
+  if (/(?:^|;)\s*(?:end|abort)\b/i.test(stripped)) throw new Error('rehearsal SQL cannot end its transaction with END or ABORT')
+  if (/\b(vacuum|alter\s+system|create\s+database|drop\s+database|reindex\s+[^;]*\bconcurrently\b)\b/i.test(stripped)) throw new Error('rehearsal SQL contains a statement that cannot be safely rolled back')
 }
 
 export function buildRehearsalSql({ projectRef, fixtureId, sql }) {
@@ -31,7 +54,15 @@ BEGIN;
 SET LOCAL statement_timeout = '30min';
 SET LOCAL lock_timeout = '10s';
 SELECT set_config('app.fixture_id', '${safeFixture}', true);
+SELECT set_config('app.rehearsal_open', '1', true);
 ${sql.trim()}
+-- PROOF THE TRANSACTION IS STILL OPEN. app.rehearsal_open was set with
+-- is_local = true, so it exists only for the lifetime of the transaction opened
+-- above. If the fixture ended that transaction by any means, this statement runs
+-- in a new one, current_setting raises an unrecognized configuration parameter,
+-- ON_ERROR_STOP aborts, and the run fails instead of printing a rollback that
+-- did not happen. (External review, grok-4.6, PR #1951.)
+SELECT current_setting('app.rehearsal_open');
 ROLLBACK;
 \\echo REHEARSAL_ROLLED_BACK fixture=${fixtureId}
 `
@@ -59,9 +90,15 @@ export function main(argv=process.argv.slice(2), env=process.env) {
   console.log(`TARGET PROOF: preview ${options.projectRef}; production ${PRODUCTION_PROJECT_REF} refused; fixture ${options.fixtureId}`)
   const childEnv={...env,PGDATABASE:databaseUrl}
   delete childEnv.SUPABASE_DB_URL
+  // The URI in PGDATABASE is the only destination this run has proved. Any other
+  // libpq variable inherited from the caller could name a different one, so they
+  // are removed rather than trusted. (External review, grok-4.6, PR #1951.)
+  for (const key of Object.keys(childEnv)) {
+    if (/^PG/.test(key) && key !== 'PGDATABASE') delete childEnv[key]
+  }
   const result=spawnSync('psql',['--no-psqlrc','--file','-'],{input:wrapped,stdio:['pipe','inherit','inherit'],env:childEnv})
   if (result.error) throw result.error
-  if (result.status!==0) throw new Error(`rehearsal failed with exit ${result.status}; PostgreSQL rolled back the open transaction`)
+  if (result.status!==0) throw new Error(`rehearsal failed with exit ${result.status}; no rehearsal statement was committed`)
   return 0
 }
 
