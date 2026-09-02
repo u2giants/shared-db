@@ -408,3 +408,81 @@ test('a return record whose commit disagrees with its ref name stops the gate', 
   } }
   assert.throws(() => gatherApprovalInput({ PR_NUMBER: '1931' }, io), /does not match its ref identity/)
 })
+
+// THE NON-READING-REVIEWER RULE AT THE GATE THAT AUTHORIZES MERGES (#2079).
+//
+// The write-side guard (`recordReviewVerdict`) binds only FUTURE verdicts, and the
+// read-side rule (`readReviewVerdicts`) is called only by the PREVIEW gate, which
+// under merge-first runs AFTER the merge. This gate is the required context the
+// guarded merge workflow waits on, so until it applied the rule, a legacy APPROVE
+// from a reviewer that never opened the diff still authorized a merge, and a legacy
+// REVISE from that same reviewer blocked the head permanently -- even after the
+// sanctioned --replace-failed-reviewer route recorded a fresh reading APPROVE.
+// Both directions are asserted, plus a scope control proving a healthy reviewer's
+// verdict still counts, so the rule cannot be satisfied by refusing everything.
+const NONREAD_HEAD = 'c'.repeat(40)
+function nonReadingVerdictGithub({ reviewer = 'deepseek-chat', verdict = 'APPROVE', replacement = null } = {}) {
+  const issue = 1987, pr = 1989
+  const assignment = '1'.repeat(40), replacementAssignment = '3'.repeat(40)
+  const findingsBody = 'review findings', findingsRef = `https://github.com/u2giants/shared-db/pull/${pr}#issuecomment-1`
+  const digest = createHash('sha256').update(findingsBody).digest('hex')
+  const commits = new Map(), assignmentRefs = [], verdictRefs = [], replacementRefs = [], verdictReplacementRefs = []
+  const cursor = (sha, sequence, who) => commits.set(sha, { message: `db-coordination reviewer-cursor sequence=${sequence} reviewer=${who} issue=${issue} pr=${pr} head=${NONREAD_HEAD} slot=1` })
+  const record = (sha, who, what, assignmentSha, refs, ref) => {
+    const row = { verdict: what, head_sha: NONREAD_HEAD, issue, pr, slot: 1, reviewer: who, assignment_sha: assignmentSha, findings_digest: digest, findings_ref: findingsRef }
+    commits.set(sha, { message: `db-review-verdict ${JSON.stringify(row)}`, parents: [{ sha: assignmentSha }] })
+    refs.push({ ref, object: { sha } })
+  }
+  cursor(assignment, 1, reviewer)
+  assignmentRefs.push({ ref: `refs/db-review-assignments/${issue}-${pr}-${NONREAD_HEAD}`, object: { sha: assignment } })
+  record('4'.repeat(40), reviewer, verdict, assignment, verdictRefs, `refs/db-review-verdicts/${issue}-${pr}-${NONREAD_HEAD}`)
+  // The recovery route: a reviewer that reads the code, drawn at the SAME head
+  // under the replacement namespace, recording its own APPROVE.
+  if (replacement) {
+    cursor(replacementAssignment, 2, replacement)
+    replacementRefs.push({ ref: `refs/db-review-replacements/${issue}-${pr}-${NONREAD_HEAD}-1`, object: { sha: replacementAssignment } })
+    record('5'.repeat(40), replacement, 'APPROVE', replacementAssignment, verdictReplacementRefs, `refs/db-review-verdict-replacements/${issue}-${pr}-${NONREAD_HEAD}-1`)
+  }
+  return {
+    json: (args) => {
+      const endpoint = args[args.length - 1]
+      if (endpoint.includes('/git/matching-refs/db-review-assignments')) return assignmentRefs
+      if (endpoint.includes('/git/matching-refs/db-review-replacements')) return replacementRefs
+      if (endpoint.includes('/git/matching-refs/db-review-returns')) return []
+      if (endpoint.includes('/git/matching-refs/db-review-verdict-replacements')) return verdictReplacementRefs
+      if (endpoint.includes('/git/matching-refs/db-review-verdicts')) return verdictRefs
+      if (/\/git\/commits\/[0-9a-f]{40}$/.test(endpoint)) return commits.get(endpoint.split('/').pop())
+      if (endpoint.includes('/issues/comments/')) return { body: findingsBody }
+      if (/\/pulls\/\d+$/.test(endpoint)) return { head: { sha: NONREAD_HEAD } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    },
+    pages: () => [],
+  }
+}
+
+test('the merge gate does not let an APPROVE from a reviewer that cannot read the repository authorize a merge (#2079)', () => {
+  const input = gatherApprovalInput({ PR_NUMBER: '1989' }, nonReadingVerdictGithub({ verdict: 'APPROVE' }))
+  assert.equal(input.verdicts.length, 1)
+  assert.throws(() => evaluateExactHeadApproval(input), (error) => error instanceof ApprovalCheckError
+    && /no durable APPROVE artifact/.test(error.message)
+    && /DISREGARDED because their reviewer cannot read the repository/.test(error.message)
+    && /deepseek-chat/.test(error.message))
+})
+
+test('the merge gate does not let a REVISE from a reviewer that cannot read the repository block a head forever (#2079)', () => {
+  // Alone it is absent, not a refusal: the gate must refuse for the ordinary
+  // "no durable APPROVE" reason, which --replace-failed-reviewer can answer.
+  const alone = gatherApprovalInput({ PR_NUMBER: '1989' }, nonReadingVerdictGithub({ verdict: 'REVISE' }))
+  assert.throws(() => evaluateExactHeadApproval(alone), (error) => error instanceof ApprovalCheckError
+    && /no durable APPROVE artifact/.test(error.message)
+    && !/carries a durable reviewer refusal/.test(error.message))
+  // And once the sanctioned recovery route records a reading reviewer's APPROVE at
+  // the same head, the disregarded REVISE must not still block the merge.
+  const recovered = gatherApprovalInput({ PR_NUMBER: '1989' }, nonReadingVerdictGithub({ verdict: 'REVISE', replacement: 'kimi-k3' }))
+  assert.equal(evaluateExactHeadApproval(recovered).approved, true)
+})
+
+test('a reviewer that does read the repository still authorizes and still blocks (#2079)', () => {
+  assert.equal(evaluateExactHeadApproval(gatherApprovalInput({ PR_NUMBER: '1989' }, nonReadingVerdictGithub({ reviewer: 'kimi-k3', verdict: 'APPROVE' }))).approved, true)
+  assert.throws(() => evaluateExactHeadApproval(gatherApprovalInput({ PR_NUMBER: '1989' }, nonReadingVerdictGithub({ reviewer: 'kimi-k3', verdict: 'REVISE' }))), /carries a durable reviewer refusal/)
+})
