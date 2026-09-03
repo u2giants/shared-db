@@ -171,8 +171,8 @@ separately in `plm.opa_property_studio_resolution`, and most rows have no studio
 
 Checked directly on production:
 
-- `206 Blaze` — `studio_code` **null**, `resolution_status` **`unresolved`**.
-- `1159097950 Peanuts` — `studio_code` **null**, `resolution_status` **`unresolved`**.
+- `Blaze` — `studio_code` **null**, `resolution_status` **`unresolved`**.
+- `Peanuts` — `studio_code` **null**, `resolution_status` **`unresolved`**.
 
 So neither row carries a Disney studio attribution. Calling the whole portal "Disney OPA"
 in §1 was a *derived label for the source system*; §4.1 then read that label back as though
@@ -181,7 +181,7 @@ conflict between Disney and `core.property` for either title, and therefore **no
 decision to make**. Both are withdrawn.
 
 The 6 Marvel rows in the §4.1 table are unaffected — they do carry `studio_code = marvel`,
-`canonical`. `1159089281 The Mandalorian` has **no studio resolution row at all**, so it is
+`canonical`. `The Mandalorian` has **no studio resolution row at all**, so it is
 also not a Disney claim; it belongs with the unresolved population, not the sub-brand split.
 
 **Rule this establishes:** a source-system label derived from the modal licensor describes the
