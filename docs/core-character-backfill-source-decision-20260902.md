@@ -104,10 +104,12 @@ Each of these carries the licensor's own character identity, a name, and a
 
 **The backfill is these tables' resolution columns being filled in, not a copy job.**
 The contract is already in the schema: a source row is promoted by resolving it to
-a canonical id, and `plm.opa_character`, `plm.nbcu_character` and
-`plm.pmt_character` additionally refuse to record a resolution unless the resolver
-and the timestamp are recorded with it. That check constraint is the audit trail;
-do not route around it with a direct insert into `core.character`.
+a canonical id. `plm.opa_character` additionally refuses to record a resolution
+unless the resolver and timestamp are recorded with it. `plm.nbcu_character` and
+`plm.pmt_character` currently enforce target coherence only; they do not yet
+require resolver or timestamp evidence. The stronger OPA audit shape is the model
+being propagated to newer promotion contracts. Do not route around these source
+resolution records with a direct insert into `core.character`.
 
 `plm.marvel_asgard_character` is a Tier-1 *input* but resolves through
 `plm.marvel_asgard_character_opa_resolution` into the OPA identity space rather
