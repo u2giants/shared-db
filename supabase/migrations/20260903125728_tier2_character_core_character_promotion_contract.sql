@@ -29,7 +29,7 @@
 -- target, a null resolver and a null timestamp, which the new check accepts.
 --
 -- VOCABULARY CHOICE, CONFIRMED. docs/core-character-backfill-source-decision-
--- 20260902.md sec.4 groups plm.opa_character, plm.pmt_character and
+-- 20260902.md sec.3 groups plm.opa_character, plm.pmt_character and
 -- plm.nbcu_character together, but only opa_character's vocabulary and audit
 -- check require a named resolver and timestamp; pmt/nbcu use a looser
 -- matched/no_match pair with no resolver requirement. This migration follows
