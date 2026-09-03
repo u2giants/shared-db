@@ -66,6 +66,51 @@ Issue #2208 itself remains open, correctly routed, and untouched by any
 *legitimate* orchestrator action this session — only the stray sub-dispatch is
 in question, not the issue's routing or validity.
 
+### ✅ UPDATE 2026-09-03T18:30Z — the stray dispatch above is now fully accounted for, plus a marker-collision incident and its fix
+
+**Two things happened after the section above was written and merged (PR #2220).**
+
+**1. The "unknown final state" stray work is now fully identified — it is PR
+#2221.** Branch `claude/verify-slot-verdict-scope`, head commit
+`5a0be4118322638982099c031e4577cf217ac190`, opened against
+`scripts/manage-migration-author-lanes.mjs` (plus its test file). Root cause it
+found and fixed: `hasVerdictForHead` ignores which review **slot** a verdict
+belongs to, so a first-time draw of slot 2 was wrongly refused whenever slot 1
+already had *any* verdict at the same head — this is issue #2208 itself. 3 new
+regression tests added, confirmed failing against pre-fix code, full suite
+414/414 passing post-fix. **This PR is correctly out of scope for this
+orchestrator to merge** (REPO-SESSION routing per the admission test — it is a
+tooling-script fix, not a database-shape change) — leave it for a REPO-SESSION
+to pick up and merge through the normal repo-maintenance path, not the guarded
+migration-merge workflow. One side effect from before it was found: its
+kimi-k3 slot-1 reviewer lease (sequence 1161, held since 2026-09-03T18:06:04Z)
+had gotten stuck (`insufficient_quota`, no verdict) and was blocking a shared
+reviewer-pool slot — **released** this session via
+`--release-failed-reviewer --issue 2208 --pr 2221 --head-sha
+5a0be4118322638982099c031e4577cf217ac190 --failed-sequence 1161 --review-slot 1
+--failure-code insufficient_quota --confirm-no-verdict --confirm-no-artifact`.
+
+**2. A marker-collision incident occurred and was fixed — new standing rule.**
+This session briefly closed marker #2193 to hand off, while 4 dispatched
+sub-agents (the checkpointed drivers for PRs #2199/#2200/#2201/#2205/#2216,
+listed in part (b) below) were still actively running. **That was a mistake,
+caught by the owner asking directly how those still-running tasks would
+continue if the marker signaled the session was done.** One of those sub-agents
+(`adb0a4ef9a0065439`), observing the marker closed, self-appointed as a
+successor orchestrator and opened its own marker issue **#2222**. With two
+markers open, `check-orchestrator-marker.mjs --resolve` returned `state:
+"unsafe"` and refused to resolve any address — blocking marker-dependent
+operations for every other agent. **Fix applied:** #2193 was reopened
+immediately; #2222 was closed with a comment establishing that **sub-agents
+must never open their own orchestrator marker issue — only the top-level
+orchestrator session does that.** All 4 running sub-agents were then sent an
+explicit checkpoint-and-stop instruction and their final states captured (see
+part (b)). `check-orchestrator-marker.mjs --resolve` was re-verified clean,
+resolving to #2193 only, before any further action. **Lesson for every future
+orchestrator wrap-up: do not close the marker while any dispatched sub-agent
+may still be running. Checkpoint and confirm every dispatched agent has
+stopped FIRST, then close the marker — never the reverse order.**
+
 One FYI, not a decision: `git worktree list` shows a large number of worktrees
 under `.claude/worktrees/` and `.agents/worktrees/` accumulated across many past
 sessions. This is routine housekeeping territory (`cleanup-worktree` skill,
@@ -117,6 +162,16 @@ older than this timestamp without re-checking):
 **Five structural PRs, all `state: OPEN`, all `mergeStateStatus: BLOCKED`, NONE
 merged this session:**
 
+> ⚠️ **The table below is SUPERSEDED — do not use it.** It was the 17:50Z
+> snapshot. A full re-verification against live `git`/`gh` at **18:24Z** (30+
+> minutes later, after all 4 sub-agents were checkpointed) found it already
+> wrong in several places (notably PR #2201's slot 1, and PR #2200's slot 2
+> reviewer identity). **Use the corrected table in the 18:30Z update block
+> immediately above instead — cross-checked directly against the actual
+> `refs/db-review-*` ref payloads on `origin`, not against any agent's
+> self-report.** This table is kept only so the "changed since 17:50Z" contrast
+> is visible; treat every cell in it as stale.
+
 | PR | Issue | Title | Head SHA | Slot 1 | Slot 2 |
 |---|---|---|---|---|---|
 | #2199 | #2171 | ColdLion `coldlion.division` reference table | `755c928a67afb050d330ce1144162cd4886b08dc` | drawn, no verdict at this head yet | not drawn |
@@ -124,6 +179,27 @@ merged this session:**
 | #2201 | #2196 | fillfactor 75 on `public.dam_search_documents` | `d0f76d1bcb47f398161d47634ae0b291989aee3b` | glm-5.3 (seq 1147), no verdict yet | not drawn |
 | #2205 | #1984 | MG01–MG03 reclassification manifest/executor | `1be8a83d805dc1198816e07e20ed311e496911b8` | had an APPROVE (Muse Spark) at an **earlier** head `01c8d1d8...`; a new commit landed since, so that approval no longer covers the current head | not drawn |
 | #2216 | #2217 | Pause kimi-k3 in reviewer rotation 24h | `70c54cb1c08443afa637e1c0a7434d26ced7ad0b` | grok-4.6 drawn ~17:25Z, no verdict yet | n/a (single-reviewer pause PR) |
+
+### ✅ CORRECTED table — verified 2026-09-03T18:24–18:30Z directly against `origin`'s `refs/db-review-*` payloads (read with `git ls-remote` + `git cat-file -p`, not from any agent's report)
+
+`main` tip at this check: `55c62ff012f83ce38a65e4c9c8a198c5a8e1ea4f` (this is
+**newer** than the §3 snapshot above — it includes PR #2220, the handoff-flag
+merge from earlier in this same session).
+
+| PR | Issue | Head SHA | Slot 1 | Slot 2 | Notes |
+|---|---|---|---|---|---|
+| #2199 | #2171/#2196 | `86b9b46e473d81c5a7102088d70a82308bf48048` | **no assignment ref exists at all** — never drawn at this head | **no assignment ref exists at all** — never drawn at this head | Head changed since the §3 snapshot (was `755c928a...`, now `86b9b46e...`); both slots need a fresh draw from scratch, together, per the #2208 workaround. |
+| #2200 | #2172 | `fc630d57a4d5b65fc3e1d626d3c03c31bf784559` | **FREE.** codex-gpt-5.6-sol (seq 1109) failed `wrapper_terminal_failure`, cleanly released (failure ref confirmed) | muse-spark-1.2-contributor (seq 1151), held since 17:47:30Z (~40 min old at check time), **no verdict yet — genuinely in progress**, not yet stale (24h reclaim threshold) | Draw a fresh slot-1 reviewer with `--replace-failed-reviewer --failed-sequence 1109 --failure-code wrapper_terminal_failure`. Avoid codex-gpt-5.6-sol — see PR #2216 row, same tooling incompatibility. |
+| #2201 | #2196 | `d0f76d1bcb47f398161d47634ae0b291989aee3b` | **Durable APPROVE, confirmed**: glm-5.3, verdict ref `refs/db-review-verdicts/2196-2201-d0f76d1b...` (`slot:1`) | muse-spark-1.2-contributor (seq 1148) assignment ref exists, held since ~17:39Z, **no verdict** — `--reviewer-capacity` shows muse-spark's only currently-tracked lease is seq **1151 on PR #2200 instead**, meaning muse-spark likely moved on to that PR and this seq-1148 assignment is **abandoned, not actively being worked**. Needs investigation/a fresh slot-2 draw, not a wait. | This PR is closer to done than any other — only slot 2 is missing and slot 1 is real and durable. |
+| #2205 | #1984 | `1be8a83d805dc1198816e07e20ed311e496911b8` | **Durable APPROVE, confirmed** (read the full artifact, not just the ref): grok-4.6, replacing kimi-k3's failed seq 1149, ref `refs/db-review-verdict-replacements/1984-2205-1be8a83d...-1149` | glm-5.3 (seq 1150) assignment still live/unused — one dispatch attempt auto-refused before posting because its analysis text contained an unauthorized second decision-like sentence (see part (b), `ab131d2290dd8846f`'s report) — **retry the same assignment with a stricter prompt that explicitly bans any approve/reject-shaped language outside the final `VERDICT:` line**; no re-draw needed. | `--reviewer-capacity` misreports glm-5.3 here as `verdictPresent: true` — **that is the #2208 slot-blind bug itself** (fixed, unmerged, in PR #2221): the capacity tool is seeing slot 1's verdict and misattributing it to slot 2. Do not trust `verdictPresent` for slot 2 on this repo until PR #2221 merges — always confirm against the raw ref name (must include the reviewer's own sequence, not another slot's). |
+| #2216 | #2217 | `9ff0797f69f7223caae76fe886292b7b6dcc1041` | No valid verdict at this head — the only recorded verdict (grok-4.6 APPROVE) is bound to a **superseded** head `70c54cb1...` | n/a (single-reviewer pause PR) | **PR base is stale again** relative to the current `main` tip (`55c62ff0...`) — the merge gate will refuse until refreshed. Also: codex-gpt-5.6-sol was tried here and failed `wrapper_terminal_failure` — confirmed **real tooling bug, not noise**: `ai-codex-review` never prints a `VERDICT: APPROVE\|REVISE\|REJECT <sha>` line on stdout (only a report file path), so `run-governed-review.mjs`'s parser can never record a codex verdict as currently written. Worth its own tracked issue; avoid this reviewer everywhere until fixed. |
+
+**Exact next action, in order, for whichever session picks this up:**
+1. PR #2201 first — it only needs slot 2. Confirm muse-spark's seq-1148 lease is truly abandoned (not just slow) before drawing a replacement.
+2. PR #2205 next — retry glm-5.3's existing slot-2 assignment (seq 1150) with a stricter no-decision-language prompt; no new draw needed.
+3. PR #2200 — release/replace the failed codex slot-1 lease (seq 1109); let muse-spark's slot-2 (seq 1151) keep running, it is not yet stale.
+4. PR #2216 — refresh its branch onto the current `main` tip first, *then* draw a fresh reviewer at the new head (the old verdict does not carry over).
+5. PR #2199 — needs both slots drawn together from a clean state (nothing assigned yet at its current head).
 
 **Why they're blocked — two distinct, correctly-diagnosed causes, neither of
 which is the debunked "budget bug" (see §4):**
@@ -447,3 +523,26 @@ running are gone. Everything known about them is captured here.**
   handoff file was finished. Not independently identified.
 - **Deliberately did NOT do:** did not force a slot-2 draw once slot 1 already
   had a verdict, per the #2208 workaround.
+
+---
+
+### ✅ ALL SUB-AGENTS CHECKPOINTED — 2026-09-03T18:30Z — nothing is running unaccounted for
+
+Verified via `ListAgents` at the time of this update: every sub-agent this
+orchestrator ever dispatched this session —
+`a4f190fdd54b29d4d`, `adb0a4ef9a0065439`, `afd506edcdccbc84d`,
+`a958ce6c3a98ad75a` (→`a50e473db73a0a7da`), `ae0e58e6fec224e0a`,
+`a4cfb2a1b35f26413` (→`a70ebf86201240f0c`), `ab131d2290dd8846f` (→`a2ce3428a8b4aa031`) —
+shows status **`completed`**, zero live children. **A successor picking this up
+does not need to resume, message, or wait on any of them** — every fact any of
+them could still report has already been folded into the corrected PR table
+above, which was independently re-derived from live `git`/`gh` state rather
+than trusted from any agent's self-report (two of the seven agents' final
+messages were thin non-answers like "waiting on the poll" rather than a
+substantive checkpoint — see part (b) above for which — so this table
+supersedes those where they'd otherwise be the only source).
+
+This is also the trigger condition for re-closing orchestrator marker #2193,
+per the standing rule this same handoff establishes above: **close the marker
+only after every dispatched agent is confirmed stopped, never before.** That
+condition is now met.
