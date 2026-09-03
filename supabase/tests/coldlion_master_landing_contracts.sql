@@ -409,4 +409,223 @@ begin
 end;
 $$;
 
+
+-- =====================================================================================
+-- J. Issue #2177 — `/customers` is projected in full.
+--    Migration: 20260903025816_coldlion_customer_full_projection_and_salesperson_active.sql
+--    Every property of the 2026-09-03 live sample of GET /EhpApi/customers is a
+--    column, exactly once. The list is the SAMPLED SHAPE; /api-docs types this
+--    feed as a bare object and cannot be used for it.
+-- =====================================================================================
+do $$
+declare
+  v_missing text;
+  v_expected constant text[] := array[
+    'company_code','customer_code','created_time','mod_time','active',
+    'customer_desc','vendor_number',
+    'address1','address2','address3','ar_customer_code','city',
+    'commission_perc1','commission_perc2','country_code','created_user',
+    'currency_code','customer_dba','customer_type_code','ds_cat','factor_code',
+    'fax_no','gl_code','mod_user','old_customer_code','parent_customer_code',
+    'phone_no','region_code','sales_person_code1','sales_person_code2','state',
+    'udf01','udf02','udf03','udf04','udf_date01','udf_date02',
+    'use_consolidated_invoice','zip_code'
+  ];
+begin
+  select string_agg(needed, ', ' order by needed) into v_missing
+  from unnest(v_expected) needed
+  where not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'coldlion' and table_name = 'customer' and column_name = needed
+  );
+  if v_missing is not null then
+    raise exception 'J FAILED: coldlion.customer is missing sampled /customers field(s): %', v_missing;
+  end if;
+
+  if array_length(v_expected, 1) <> 39 then
+    raise exception 'J FAILED: the sampled /customers field list is % long, expected the 39 of the 2026-09-03 sample',
+      array_length(v_expected, 1);
+  end if;
+
+  raise notice 'J PASSED: all 39 sampled /customers properties are columns.';
+end;
+$$;
+
+-- =====================================================================================
+-- K. Issue #2177 — THE DECLINED-FIELD GATE for coldlion.salesperson.
+--
+--    Owner ruling #2081 comment 5519623574 (Albert Hazan, 2026-09-03):
+--    `/salespersons` stores NAME, CODE, COMPANY and ACTIVE STATUS ONLY. E-mail,
+--    telephone, home address, commission and quota are DECLINED — personal data
+--    about named people with no established business use. Declined, not pending.
+--    Widening requires a NEW owner ruling recorded the same way.
+--
+--    K1 is a POSITIVE CONTROL: it builds a deliberately DIRTY table shaped like
+--    coldlion.salesperson plus declined columns, and fails if the gate predicate
+--    does NOT flag it. A gate nobody has seen fail is not evidence, so the proof
+--    that this one can fail runs on every CI execution rather than once, by hand,
+--    in a session nobody can re-read.
+-- =====================================================================================
+do $$
+declare
+  v_flagged text;
+begin
+  create table coldlion.zz_declined_gate_probe (
+    company_code     text not null,
+    salesperson_code text not null,
+    last_name        text,
+    active           text,
+    email            text,    -- declined
+    phone_no         text,    -- declined
+    address1         text,    -- declined
+    commission_perc  numeric, -- declined
+    quota            text     -- declined
+  );
+
+  select string_agg(column_name, ', ' order by column_name) into v_flagged
+  from information_schema.columns
+  where table_schema = 'coldlion'
+    and table_name = 'zz_declined_gate_probe'
+    and (
+         column_name like '%email%'
+      or column_name like '%e_mail%'
+      or column_name like '%mail%'
+      or column_name like '%phone%'
+      or column_name like '%fax%'
+      or column_name like '%mobile%'
+      or column_name like '%address%'
+      or column_name like '%addr%'
+      or column_name like '%city%'
+      or column_name like '%state%'
+      or column_name like '%zip%'
+      or column_name like '%postal%'
+      or column_name like '%commission%'
+      or column_name like '%quota%'
+    );
+
+  if v_flagged is null then
+    raise exception
+      'K1 FAILED: the declined-field gate did not flag a deliberately dirty table. The gate cannot fail, so its silence on the real table proves nothing.';
+  end if;
+
+  if v_flagged <> 'address1, commission_perc, email, phone_no, quota' then
+    raise exception 'K1 FAILED: the gate flagged %, expected all five planted declined columns', v_flagged;
+  end if;
+
+  drop table coldlion.zz_declined_gate_probe;
+
+  raise notice 'K1 PASSED (positive control): the declined-field gate flags a dirty table — %', v_flagged;
+end;
+$$;
+
+do $$
+declare
+  v_offending  text;
+  v_unexpected text;
+  v_missing    text;
+  v_allowed constant text[] := array[
+    'company_code','salesperson_code','last_name','active',
+    'created_time','mod_time',
+    'run_id','fetched_at','source_hash','first_seen_at','last_seen_at'
+  ];
+begin
+  -- K2. The same predicate, now against the real table. It must find nothing.
+  select string_agg(column_name, ', ' order by column_name) into v_offending
+  from information_schema.columns
+  where table_schema = 'coldlion'
+    and table_name = 'salesperson'
+    and (
+         column_name like '%email%'
+      or column_name like '%e_mail%'
+      or column_name like '%mail%'
+      or column_name like '%phone%'
+      or column_name like '%fax%'
+      or column_name like '%mobile%'
+      or column_name like '%address%'
+      or column_name like '%addr%'
+      or column_name like '%city%'
+      or column_name like '%state%'
+      or column_name like '%zip%'
+      or column_name like '%postal%'
+      or column_name like '%commission%'
+      or column_name like '%quota%'
+    );
+  if v_offending is not null then
+    raise exception
+      'K2 FAILED: coldlion.salesperson carries DECLINED personal-data column(s): %. Owner ruling #2081 comment 5519623574 permits name, code, company and active status only.',
+      v_offending;
+  end if;
+
+  -- K3. The exact permitted set, so a declined field under a name the patterns
+  --     do not anticipate is caught too.
+  select string_agg(column_name, ', ' order by column_name) into v_unexpected
+  from information_schema.columns
+  where table_schema = 'coldlion'
+    and table_name = 'salesperson'
+    and not (column_name = any (v_allowed));
+  if v_unexpected is not null then
+    raise exception
+      'K3 FAILED: coldlion.salesperson carries column(s) outside the owner-approved projection: %',
+      v_unexpected;
+  end if;
+
+  -- K4. The four approved fields are present, so K2/K3 cannot pass vacuously.
+  select string_agg(needed, ', ' order by needed) into v_missing
+  from unnest(array['company_code','salesperson_code','last_name','active']) needed
+  where not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'coldlion' and table_name = 'salesperson' and column_name = needed
+  );
+  if v_missing is not null then
+    raise exception 'K4 FAILED: coldlion.salesperson is missing owner-approved field(s): %', v_missing;
+  end if;
+
+  raise notice 'K PASSED: /salespersons projection is exactly name, code, company, active status.';
+end;
+$$;
+
+-- =====================================================================================
+-- L. Issue #2177 — the ruling is recorded IN THE CATALOG, not only in a file.
+--    A future session reading coldlion.salesperson from a database, with no
+--    repository to hand, must be told that the narrowness is a decision.
+--    Replay is idempotent: re-running the migration adds nothing, because every
+--    column is added with `add column if not exists`.
+-- =====================================================================================
+do $$
+declare
+  v_comment text;
+  v_before  int;
+  v_after   int;
+begin
+  select obj_description('coldlion.salesperson'::regclass, 'pg_class') into v_comment;
+  if v_comment is null or v_comment not ilike '%declined%' or v_comment not ilike '%5519623574%' then
+    raise exception 'L FAILED: coldlion.salesperson does not record the owner ruling in its comment: %',
+      coalesce(v_comment, '<none>');
+  end if;
+
+  select obj_description('coldlion.customer'::regclass, 'pg_class') into v_comment;
+  if v_comment is null or v_comment not ilike '%5519623574%' then
+    raise exception 'L FAILED: coldlion.customer does not record the owner ruling in its comment: %',
+      coalesce(v_comment, '<none>');
+  end if;
+
+  -- Idempotent replay of the shape this migration adds.
+  select count(*) into v_before from information_schema.columns
+  where table_schema = 'coldlion' and table_name in ('customer','salesperson');
+
+  alter table coldlion.customer add column if not exists zip_code text;
+  alter table coldlion.salesperson add column if not exists active text;
+
+  select count(*) into v_after from information_schema.columns
+  where table_schema = 'coldlion' and table_name in ('customer','salesperson');
+
+  if v_after <> v_before then
+    raise exception 'L FAILED: replaying the migration column adds changed the column count from % to %',
+      v_before, v_after;
+  end if;
+
+  raise notice 'L PASSED: the ruling is in the catalog and the column adds replay idempotently.';
+end;
+$$;
+
 rollback;
