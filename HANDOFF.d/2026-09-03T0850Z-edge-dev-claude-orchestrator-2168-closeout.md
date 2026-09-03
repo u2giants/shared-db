@@ -21,9 +21,18 @@ in this repo goes stale within the hour; re-derive before you act on it.
 Put this whole list to Albert in **one message, before starting work**. Do not
 trickle it out one item at a time.
 
-### Nothing is blocking right now
+### Read this first
 
-No item below stops the next session from working. Start on §6 immediately.
+**You named four priority issues at the start of the previous session — #2127,
+#1966, #1984, #1987 — and three are still open.** That session merged seven other
+changes instead and never reached them. Nothing blocked them; it was a sequencing
+failure on our side, not a decision. #1987 was already closed on 2026-09-02. The
+other three are now the first three steps in §6, ahead of every queued PR. Only
+#1984 needs anything from you — item 1 below; #2127 and #1966 are ours to do.
+
+### Nothing else is blocking right now
+
+No other item below stops the next session from working.
 
 ### A wrong guess is recoverable, but rework is wasteful
 
@@ -275,7 +284,20 @@ This is the section that saves the next session hours. Read it.
    one active marker. Dispatch nothing until it does.
 2. **Put §0 to Albert in one message.** *You'll know it worked when* he has
    answered, or explicitly deferred, every numbered item.
-3. **Take PR #2183 first** (smallest of the four ColdLion PRs), then #2185, then
+3. **FIRST, before any queued PR: the owner named four priority issues at the start
+   of the previous session — #2127, #1966, #1984, #1987 — and three are still open.
+   The previous session did not get to them; it spent itself on the merge queue.
+   Do NOT repeat that.** #1987 is closed (2026-09-02). Take the other three in this
+   order, ahead of every PR below:
+   - **#2127** — reviewer assignment is frozen repository-wide whenever no orchestrator
+     marker is open, and the refusal blames GitHub rather than naming the real cause.
+     Structural-adjacent tooling; it blocks every future session that starts cold.
+   - **#1966** — high-churn tables cannot do HOT updates, plus ~1.4 GB of indexes whose
+     usage counters cannot be trusted. Read its own correction section first: the
+     repack ask from #1722 was withdrawn, and the real finding is different and larger.
+   - **#1984** — the merch-group reclassification tracker, which needs the owner's three
+     answers before implementation can move. Raise those in the §0 message.
+4. **Then take PR #2183** (smallest of the four ColdLion PRs), then #2185, then
    #2186, then #2145. For each, in order: rebase onto the current main tip →
    re-run version, object-collision, SQL and contract checks from the moved base →
    acquire the preview lock **through the workflow only** → apply → read the
@@ -283,13 +305,13 @@ This is the section that saves the next session hours. Read it.
    review → release preview → dispatch `guarded-migration-merge.yml` with the
    pull request number and head SHA. *You'll know each one worked when*
    `gh pr view <n> --json state` reports `MERGED` and the run concluded `success`.
-4. **After each merge, release the author claim** and record that the reserved
+5. **After each merge, release the author claim** and record that the reserved
    version stays permanently spent — including any superseded version that was
    never applied.
-5. **Expect a version-ordering refusal on at least one of the four**, for the
+6. **Expect a version-ordering refusal on at least one of the four**, for the
    reason in §5. Supersede through the tool, never by hand-editing a claim fence.
    *You'll know it worked when* `check-sql.sh` exits 0 from the moved base.
-6. **Retire the finished worktrees** with `scripts/reap-merged-worktrees.mjs`
+7. **Retire the finished worktrees** with `scripts/reap-merged-worktrees.mjs`
    (dry run first). Note it refuses while any orchestrator marker is open, which is
    correct — do it during your own closeout. *You'll know it worked when* the dry
    run lists only worktrees whose PRs GitHub reports as merged.
