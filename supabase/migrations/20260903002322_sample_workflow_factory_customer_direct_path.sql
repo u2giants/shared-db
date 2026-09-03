@@ -28,29 +28,50 @@
 BEGIN;
 
 -- Preconditions -------------------------------------------------------------
+-- Everything is pinned to EXACTLY ONE object of exactly the right kind. A name
+-- alone is not an identity: to_regclass matches a view or a matview, a pg_proc
+-- match by name alone is satisfied by an overload while the real zero-argument
+-- trigger function is missing, and a constraint name alone is satisfied by a
+-- UNIQUE constraint. Each check below therefore counts, and refuses anything
+-- other than one.
 DO $$
+DECLARE
+  v_n integer;
 BEGIN
-  IF to_regclass('dflow.sample_workflow') IS NULL THEN
-    RAISE EXCEPTION 'Issue #2136 requires dflow.sample_workflow to exist';
+  SELECT count(*) INTO v_n
+  FROM pg_class t JOIN pg_namespace n ON n.oid = t.relnamespace
+  WHERE n.nspname = 'dflow' AND t.relname = 'sample_workflow' AND t.relkind = 'r';
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'Issue #2136 requires exactly one ordinary table dflow.sample_workflow, found %', v_n;
   END IF;
-  IF to_regclass('dflow.sample_path_revision') IS NULL THEN
-    RAISE EXCEPTION 'Issue #2136 requires dflow.sample_path_revision to exist';
+
+  SELECT count(*) INTO v_n
+  FROM pg_class t JOIN pg_namespace n ON n.oid = t.relnamespace
+  WHERE n.nspname = 'dflow' AND t.relname = 'sample_path_revision' AND t.relkind = 'r';
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'Issue #2136 requires exactly one ordinary table dflow.sample_path_revision, found %', v_n;
   END IF;
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_proc p
-    JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = 'dflow' AND p.proname = 'validate_sample_path_revision'
-  ) THEN
-    RAISE EXCEPTION 'Issue #2136 requires dflow.validate_sample_path_revision() to exist';
+
+  -- Pinned by SIGNATURE: zero arguments, returns trigger. An overload such as
+  -- dflow.validate_sample_path_revision(integer) does not satisfy this.
+  SELECT count(*) INTO v_n
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'dflow' AND p.proname = 'validate_sample_path_revision'
+    AND p.pronargs = 0 AND p.prorettype = 'pg_catalog.trigger'::regtype;
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION
+      'Issue #2136 requires exactly one zero-argument trigger function dflow.validate_sample_path_revision(), found %', v_n;
   END IF;
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint c
-    JOIN pg_class t ON t.oid = c.conrelid
-    JOIN pg_namespace n ON n.oid = t.relnamespace
-    WHERE n.nspname = 'dflow' AND t.relname = 'sample_workflow'
-      AND c.conname = 'sample_workflow_valid_flow_path'
-  ) THEN
-    RAISE EXCEPTION 'Issue #2136 requires constraint sample_workflow_valid_flow_path to exist';
+
+  SELECT count(*) INTO v_n
+  FROM pg_constraint c
+  JOIN pg_class t ON t.oid = c.conrelid
+  JOIN pg_namespace n ON n.oid = t.relnamespace
+  WHERE n.nspname = 'dflow' AND t.relname = 'sample_workflow'
+    AND c.conname = 'sample_workflow_valid_flow_path' AND c.contype = 'c';
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION
+      'Issue #2136 requires exactly one CHECK constraint sample_workflow_valid_flow_path on dflow.sample_workflow, found %', v_n;
   END IF;
 END $$;
 
@@ -171,33 +192,86 @@ END $fn$;
 REVOKE ALL ON FUNCTION dflow.validate_sample_path_revision() FROM PUBLIC, anon, authenticated;
 
 -- 4. Verification -----------------------------------------------------------
--- The value-list and flow/path CHECKs are proven by copying the LIVE catalog
--- definition onto a throwaway temp table and driving probe rows through it, so
--- the assertions exercise the deployed expression rather than the text above.
--- Positive and negative probes are both required.
+-- Three mechanisms have to agree after this migration, and they are verified
+-- against each other rather than against the text above:
+--
+--   * the business_path VALUE LIST CHECK on each table,
+--   * the sample_workflow_valid_flow_path MATRIX CHECK on the workflow table,
+--   * the LIVE BEFORE INSERT TRIGGER on dflow.sample_path_revision.
+--
+-- The two CHECKs are exercised by copying their LIVE catalog definition onto a
+-- throwaway temp table and driving probe rows through it. The trigger is
+-- exercised by INSERTING REAL ROWS into dflow.sample_path_revision inside
+-- subtransactions that are ALWAYS rolled back, because nothing short of running
+-- the trigger can prove what the trigger does: reading its source cannot tell a
+-- live RAISE apart from a notice, from dead code after an early RETURN, or from
+-- an IF with no RAISE in it at all.
+--
+-- The probe set is the FULL CROSS PRODUCT -- 4 workflow types x 10 path values,
+-- 12 accepted and 28 rejected -- plus the empty string and NULL. Probing only
+-- the accepted pairs would let the matrix CHECK be widened on one arm while the
+-- trigger stays narrow, which is exactly the lockstep failure this file exists
+-- to prevent, so every pair asserts THREE things: the CHECK's answer, the
+-- trigger's answer, and that the two answers are equal.
+--
+-- WRITE SAFETY. Every row this block inserts into dflow.sample_workflow and
+-- dflow.sample_path_revision is inserted inside a plpgsql BEGIN ... EXCEPTION
+-- subtransaction that is unconditionally rolled back before the block returns.
+-- No probe row survives on any code path, including the passing one.
 DO $$
 DECLARE
   v_def       text;
-  v_pred      text;
   v_ok        boolean;
+  v_chk       boolean;
+  v_trig      boolean;
   v_table     text;
   v_tmp       text;
+  v_conname   text;
+  v_n         integer;
   v_tgenabled "char";
   v_tgtype    smallint;
+  v_wf_id     bigint;
+  v_sample    integer;
+  v_rev       integer;
+  v_seed      text;
+  v_type      text;
+  v_failure   text;
   r           record;
 BEGIN
-  -- 4a. business_path value list on both tables.
+  -- 4a. the business_path value list on both tables ---------------------------
   FOREACH v_table IN ARRAY ARRAY['sample_workflow','sample_path_revision'] LOOP
-    SELECT pg_get_constraintdef(c.oid) INTO v_def
+    -- Exactly one CHECK over exactly the business_path column, carrying the
+    -- expected name, VALIDATED and NOT DEFERRABLE. A second permissive CHECK on
+    -- the same column, or a NOT VALID or DEFERRABLE one, would leave the probes
+    -- below measuring something the database does not actually enforce.
+    SELECT count(*) INTO v_n
     FROM pg_constraint c
     JOIN pg_class t ON t.oid = c.conrelid
     JOIN pg_namespace n ON n.oid = t.relnamespace
     JOIN pg_attribute a ON a.attrelid = t.oid AND a.attname = 'business_path' AND a.attnum > 0
     WHERE n.nspname = 'dflow' AND t.relname = v_table
       AND c.contype = 'c' AND c.conkey = ARRAY[a.attnum];
+    IF v_n <> 1 THEN
+      RAISE EXCEPTION
+        'Issue #2136 verification: dflow.% must carry exactly one business_path column CHECK, found %', v_table, v_n;
+    END IF;
 
-    IF v_def IS NULL THEN
-      RAISE EXCEPTION 'Issue #2136 verification: no business_path value CHECK found on dflow.%', v_table;
+    SELECT pg_get_constraintdef(c.oid), c.conname INTO v_def, v_conname
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attname = 'business_path' AND a.attnum > 0
+    WHERE n.nspname = 'dflow' AND t.relname = v_table
+      AND c.contype = 'c' AND c.conkey = ARRAY[a.attnum]
+      AND c.convalidated AND NOT c.condeferrable;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION
+        'Issue #2136 verification: the business_path CHECK on dflow.% is NOT VALID or DEFERRABLE and does not enforce the value list', v_table;
+    END IF;
+    IF v_conname <> v_table || '_business_path_check' THEN
+      RAISE EXCEPTION
+        'Issue #2136 verification: the business_path CHECK on dflow.% is named %, expected %',
+        v_table, v_conname, v_table || '_business_path_check';
     END IF;
 
     v_tmp := '_v2136_values_' || v_table;
@@ -217,6 +291,7 @@ BEGIN
         ('ningbo_customer', true),
         ('factory_ningbo', false),
         ('customer', false),
+        ('', false),
         ('factory_to_customer', false)
       ) AS probe(bp, expected)
     LOOP
@@ -228,132 +303,221 @@ BEGIN
       END;
       IF v_ok <> r.expected THEN
         RAISE EXCEPTION
-          'Issue #2136 verification: dflow.% business_path value CHECK accepted=% for %, expected accepted=%',
+          'Issue #2136 verification: dflow.% business_path value CHECK accepted=% for "%", expected accepted=%',
           v_table, v_ok, r.bp, r.expected;
       END IF;
     END LOOP;
   END LOOP;
 
-  -- 4b. flow/path matrix on the workflow table.
+  -- 4b/4c. the flow/path matrix: the CHECK and the LIVE TRIGGER, full grid -----
+  SELECT count(*) INTO v_n
+  FROM pg_constraint c
+  JOIN pg_class t ON t.oid = c.conrelid
+  JOIN pg_namespace n ON n.oid = t.relnamespace
+  WHERE n.nspname = 'dflow' AND t.relname = 'sample_workflow'
+    AND c.conname = 'sample_workflow_valid_flow_path' AND c.contype = 'c'
+    AND c.convalidated AND NOT c.condeferrable;
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION
+      'Issue #2136 verification: sample_workflow_valid_flow_path must be exactly one VALIDATED, NOT DEFERRABLE CHECK, found %', v_n;
+  END IF;
+
   SELECT pg_get_constraintdef(c.oid) INTO v_def
   FROM pg_constraint c
   JOIN pg_class t ON t.oid = c.conrelid
   JOIN pg_namespace n ON n.oid = t.relnamespace
   WHERE n.nspname = 'dflow' AND t.relname = 'sample_workflow'
-    AND c.conname = 'sample_workflow_valid_flow_path';
+    AND c.conname = 'sample_workflow_valid_flow_path' AND c.contype = 'c';
 
-  IF v_def IS NULL THEN
-    RAISE EXCEPTION 'Issue #2136 verification: sample_workflow_valid_flow_path is missing';
+  -- NOT NULL on both columns so a NULL probe fails the way the real table fails
+  -- it, instead of silently satisfying a CHECK that merely evaluates to NULL.
+  EXECUTE format(
+    'CREATE TEMP TABLE _v2136_flow (workflow_type text NOT NULL, business_path text NOT NULL, CONSTRAINT _v2136_flow_chk %s) ON COMMIT DROP',
+    v_def);
+
+  -- The trigger under test must be probed ALONE. dflow.sample_path_revision
+  -- also carries an AFTER INSERT trigger, sample_path_revision_apply, which
+  -- copies the accepted path onto the workflow row -- where the matrix CHECK
+  -- sample_workflow_valid_flow_path rejects an invalid pair on the validate
+  -- trigger's behalf. With it enabled, a validate function that has been
+  -- gutted entirely still looks like it is rejecting. So it is switched off
+  -- for the duration of each probe subtransaction, below.
+  SELECT count(*) INTO v_n
+  FROM pg_trigger g
+  JOIN pg_class t ON t.oid = g.tgrelid
+  JOIN pg_namespace n ON n.oid = t.relnamespace
+  WHERE n.nspname = 'dflow' AND t.relname = 'sample_path_revision'
+    AND g.tgname = 'sample_path_revision_apply' AND NOT g.tgisinternal;
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION
+      'Issue #2136 verification: dflow.sample_path_revision must carry exactly one trigger named sample_path_revision_apply, found %', v_n;
   END IF;
 
-  EXECUTE format('CREATE TEMP TABLE _v2136_flow (workflow_type text, business_path text, CONSTRAINT _v2136_flow_chk %s) ON COMMIT DROP', v_def);
+  -- Every workflow type, with a path it is allowed to be created with so that a
+  -- probe parent row can exist at all, then the whole 10-value grid against it.
+  FOR v_type, v_seed IN SELECT * FROM (VALUES
+      ('nyo_purchased_factory_reference','nyo_ningbo'),
+      ('vendor_unsolicited_offer','factory_ningbo_nyo'),
+      ('nyo_factory_make_request','factory_ningbo_nyo'),
+      ('nyo_remote_china_inventory_request','china_warehouse_ningbo_nyo')
+    ) AS t(wt, seed)
+  LOOP
+    v_failure := NULL;
 
+    -- One subtransaction per workflow type. It ALWAYS rolls back: the sentinel
+    -- raise at the end of the block is unconditional, so the probe parent row
+    -- and every probe revision disappear whether the probes passed or failed.
+    -- The failure text survives because plpgsql variables are memory, not table
+    -- state, and are not rolled back with the subtransaction.
+    BEGIN
+      -- DDL inside this always-rolled-back subtransaction: the apply trigger is
+      -- restored with the probe rows. The table is already held at ACCESS
+      -- EXCLUSIVE by section 1 of this migration, so this takes no new lock.
+      ALTER TABLE dflow.sample_path_revision DISABLE TRIGGER sample_path_revision_apply;
+
+      SELECT w.sample_workflow_id INTO v_wf_id
+      FROM dflow.sample_workflow w WHERE w.workflow_type = v_type LIMIT 1;
+
+      IF NOT FOUND THEN
+        SELECT s.sample_id_pk INTO v_sample
+        FROM dflow.sample s
+        WHERE NOT EXISTS (SELECT 1 FROM dflow.sample_workflow w2 WHERE w2.sample_id_fk = s.sample_id_pk)
+        LIMIT 1;
+        IF NOT FOUND THEN
+          RAISE EXCEPTION
+            'Issue #2136 verification: cannot probe the live trigger for workflow type % -- no existing workflow of that type, and no unused dflow.sample row to build a throwaway one from',
+            v_type;
+        END IF;
+        INSERT INTO dflow.sample_workflow (sample_id_fk, workflow_type, business_path, created_by_user)
+        VALUES (v_sample, v_type, v_seed, 'issue-2136-verification')
+        RETURNING sample_workflow_id INTO v_wf_id;
+      END IF;
+
+      SELECT COALESCE(max(pr.revision), 0) + 1 INTO v_rev
+      FROM dflow.sample_path_revision pr WHERE pr.sample_workflow_id = v_wf_id;
+
+      FOR r IN SELECT * FROM (VALUES
+          ('factory_ningbo_nyo'),('factory_ningbo_customer'),('factory_nyo'),('factory_customer'),
+          ('china_warehouse_ningbo_nyo'),('china_warehouse_ningbo_customer'),
+          ('nyo_factory'),('nyo_ningbo'),('ningbo_nyo'),('ningbo_customer'),
+          ('')
+        ) AS probe(bp)
+      LOOP
+        -- The intended matrix, stated once, as data.
+        v_ok := (v_type = 'nyo_purchased_factory_reference' AND r.bp IN ('nyo_ningbo','nyo_factory'))
+             OR (v_type = 'vendor_unsolicited_offer' AND r.bp IN ('factory_ningbo_nyo','factory_nyo'))
+             OR (v_type = 'nyo_factory_make_request' AND r.bp IN (
+                   'factory_ningbo_nyo','factory_ningbo_customer','factory_nyo','factory_customer'))
+             OR (v_type = 'nyo_remote_china_inventory_request' AND r.bp IN (
+                   'china_warehouse_ningbo_nyo','china_warehouse_ningbo_customer','ningbo_nyo','ningbo_customer'));
+
+        -- the matrix CHECK, as the catalog currently holds it
+        BEGIN
+          INSERT INTO _v2136_flow (workflow_type, business_path) VALUES (v_type, r.bp);
+          v_chk := true;
+        EXCEPTION WHEN check_violation OR not_null_violation THEN
+          v_chk := false;
+        END;
+
+        -- the LIVE trigger, by actually inserting a path revision and rolling it
+        -- back. A rejected pair must raise SQLSTATE 23514; anything else -- no
+        -- error at all, or a different error -- is a failure, not a rejection.
+        BEGIN
+          INSERT INTO dflow.sample_path_revision
+            (sample_workflow_id, revision, business_path, reason, changed_by_user)
+          VALUES (v_wf_id, v_rev, r.bp, 'issue 2136 verification probe', 'issue-2136-verification');
+          v_trig := true;
+          RAISE EXCEPTION 'issue 2136 probe rollback' USING ERRCODE = 'ZZ001';
+        EXCEPTION
+          WHEN sqlstate 'ZZ001' THEN
+            v_trig := true;
+          WHEN check_violation OR not_null_violation THEN
+            v_trig := false;
+        END;
+
+        IF v_chk <> v_ok OR v_trig <> v_ok OR v_chk <> v_trig THEN
+          v_failure := format(
+            'Issue #2136 verification: (%s, "%s") -- matrix CHECK accepted=%s, live trigger accepted=%s, expected accepted=%s',
+            v_type, r.bp, v_chk, v_trig, v_ok);
+          EXIT;
+        END IF;
+      END LOOP;
+
+      -- NULL must be refused by both.
+      IF v_failure IS NULL THEN
+        BEGIN
+          INSERT INTO _v2136_flow (workflow_type, business_path) VALUES (v_type, NULL);
+          v_chk := true;
+        EXCEPTION WHEN check_violation OR not_null_violation THEN
+          v_chk := false;
+        END;
+        BEGIN
+          INSERT INTO dflow.sample_path_revision
+            (sample_workflow_id, revision, business_path, reason, changed_by_user)
+          VALUES (v_wf_id, v_rev, NULL, 'issue 2136 verification probe', 'issue-2136-verification');
+          v_trig := true;
+          RAISE EXCEPTION 'issue 2136 probe rollback' USING ERRCODE = 'ZZ001';
+        EXCEPTION
+          WHEN sqlstate 'ZZ001' THEN
+            v_trig := true;
+          WHEN check_violation OR not_null_violation THEN
+            v_trig := false;
+        END;
+        IF v_chk OR v_trig THEN
+          v_failure := format(
+            'Issue #2136 verification: (%s, NULL) -- matrix CHECK accepted=%s, live trigger accepted=%s, expected both rejected',
+            v_type, v_chk, v_trig);
+        END IF;
+      END IF;
+
+      -- Unconditional: undo the probe parent and every probe revision.
+      RAISE EXCEPTION 'issue 2136 probe teardown' USING ERRCODE = 'ZZ002';
+    EXCEPTION
+      WHEN sqlstate 'ZZ002' THEN
+        NULL;
+    END;
+
+    IF v_failure IS NOT NULL THEN
+      RAISE EXCEPTION '%', v_failure;
+    END IF;
+  END LOOP;
+
+  -- An unrepresentable workflow type is accepted by no arm of the matrix. It
+  -- cannot be probed through the trigger, because dflow.sample_workflow's own
+  -- workflow_type CHECK refuses to store a parent row carrying it, which is
+  -- itself the stronger guarantee.
   FOR r IN SELECT * FROM (VALUES
-      -- newly allowed by issue #2136
-      ('nyo_factory_make_request','factory_nyo', true),
-      ('nyo_factory_make_request','factory_customer', true),
-      -- previously allowed, still allowed
-      ('nyo_factory_make_request','factory_ningbo_nyo', true),
-      ('nyo_factory_make_request','factory_ningbo_customer', true),
-      ('nyo_purchased_factory_reference','nyo_ningbo', true),
-      ('nyo_purchased_factory_reference','nyo_factory', true),
-      ('vendor_unsolicited_offer','factory_ningbo_nyo', true),
-      ('vendor_unsolicited_offer','factory_nyo', true),
-      ('nyo_remote_china_inventory_request','china_warehouse_ningbo_nyo', true),
-      ('nyo_remote_china_inventory_request','china_warehouse_ningbo_customer', true),
-      ('nyo_remote_china_inventory_request','ningbo_nyo', true),
-      ('nyo_remote_china_inventory_request','ningbo_customer', true),
-      -- factory_customer belongs to the make request only
-      ('nyo_purchased_factory_reference','factory_customer', false),
-      ('vendor_unsolicited_offer','factory_customer', false),
-      ('nyo_remote_china_inventory_request','factory_customer', false),
-      -- the other arms are unchanged
-      ('nyo_purchased_factory_reference','factory_ningbo_nyo', false),
-      ('vendor_unsolicited_offer','nyo_ningbo', false),
-      ('nyo_factory_make_request','ningbo_customer', false),
-      ('nyo_factory_make_request','nyo_factory', false)
-    ) AS probe(wt, bp, expected)
+      ('not_a_workflow_type','factory_customer'),
+      ('not_a_workflow_type','factory_ningbo_nyo'),
+      ('','nyo_ningbo')
+    ) AS probe(wt, bp)
   LOOP
     BEGIN
       INSERT INTO _v2136_flow (workflow_type, business_path) VALUES (r.wt, r.bp);
-      v_ok := true;
-    EXCEPTION WHEN check_violation THEN
-      v_ok := false;
+      v_chk := true;
+    EXCEPTION WHEN check_violation OR not_null_violation THEN
+      v_chk := false;
     END;
-    IF v_ok <> r.expected THEN
+    IF v_chk THEN
       RAISE EXCEPTION
-        'Issue #2136 verification: sample_workflow_valid_flow_path accepted=% for (%, %), expected accepted=%',
-        v_ok, r.wt, r.bp, r.expected;
+        'Issue #2136 verification: sample_workflow_valid_flow_path accepted unknown workflow type "%" with path %', r.wt, r.bp;
     END IF;
   END LOOP;
 
-  -- 4c. the SAME matrix inside the trigger function, proved BEHAVIOURALLY.
-  -- Substring tests cannot do this: two unbound substrings both stay present if
-  -- the make-request arm is left narrow and the four-token list is pasted onto a
-  -- different arm, which is exactly the drift this file exists to prevent. So the
-  -- acceptance predicate is lifted out of the LIVE function body and evaluated
-  -- over the full probe matrix, every arm at once.
-  SELECT p.prosrc INTO v_def
-  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-  WHERE n.nspname = 'dflow' AND p.proname = 'validate_sample_path_revision';
-
-  IF v_def IS NULL THEN
-    RAISE EXCEPTION 'Issue #2136 verification: dflow.validate_sample_path_revision() is missing';
-  END IF;
-
-  v_pred := substring(v_def from 'IF NOT \(\s*(.*?)\s*\) THEN');
-  IF v_pred IS NULL OR position('v_workflow_type' IN v_pred) = 0
-                    OR position('NEW.business_path' IN v_pred) = 0 THEN
-    RAISE EXCEPTION
-      'Issue #2136 verification: could not lift the flow/path predicate out of dflow.validate_sample_path_revision()';
-  END IF;
-
-  v_pred := replace(replace(v_pred, 'v_workflow_type', '$1'), 'NEW.business_path', '$2');
-  IF position('NEW.' IN v_pred) > 0 OR position('v_' IN v_pred) > 0 THEN
-    RAISE EXCEPTION
-      'Issue #2136 verification: the lifted predicate still references function state and cannot be probed';
-  END IF;
-
-  FOR r IN SELECT * FROM (VALUES
-      -- newly allowed by issue #2136
-      ('nyo_factory_make_request','factory_nyo', true),
-      ('nyo_factory_make_request','factory_customer', true),
-      -- previously allowed, still allowed
-      ('nyo_factory_make_request','factory_ningbo_nyo', true),
-      ('nyo_factory_make_request','factory_ningbo_customer', true),
-      ('nyo_purchased_factory_reference','nyo_ningbo', true),
-      ('nyo_purchased_factory_reference','nyo_factory', true),
-      ('vendor_unsolicited_offer','factory_ningbo_nyo', true),
-      ('vendor_unsolicited_offer','factory_nyo', true),
-      ('nyo_remote_china_inventory_request','china_warehouse_ningbo_nyo', true),
-      ('nyo_remote_china_inventory_request','china_warehouse_ningbo_customer', true),
-      ('nyo_remote_china_inventory_request','ningbo_nyo', true),
-      ('nyo_remote_china_inventory_request','ningbo_customer', true),
-      -- factory_customer belongs to the make request only
-      ('nyo_purchased_factory_reference','factory_customer', false),
-      ('vendor_unsolicited_offer','factory_customer', false),
-      ('nyo_remote_china_inventory_request','factory_customer', false),
-      -- the other arms are unchanged
-      ('nyo_purchased_factory_reference','factory_ningbo_nyo', false),
-      ('vendor_unsolicited_offer','nyo_ningbo', false),
-      ('nyo_factory_make_request','ningbo_customer', false),
-      ('nyo_factory_make_request','nyo_factory', false),
-      -- and an unknown workflow type is accepted by no arm
-      ('not_a_workflow_type','factory_customer', false),
-      ('not_a_workflow_type','factory_ningbo_nyo', false)
-    ) AS probe(wt, bp, expected)
-  LOOP
-    EXECUTE 'SELECT COALESCE((' || v_pred || '), false)' INTO v_ok USING r.wt, r.bp;
-    IF v_ok <> r.expected THEN
-      RAISE EXCEPTION
-        'Issue #2136 verification: dflow.validate_sample_path_revision() accepted=% for (%, %), expected accepted=%',
-        v_ok, r.wt, r.bp, r.expected;
-    END IF;
-  END LOOP;
-
-  -- 4d. the trigger is attached, ENABLED, and still BEFORE INSERT FOR EACH ROW.
+  -- 4d. exactly one trigger, attached, ENABLED, BEFORE INSERT FOR EACH ROW -----
   -- tgtype 7 = ROW (1) | BEFORE (2) | INSERT (4), the shape 20260818024441
   -- created. tgenabled 'O' = fires normally; a disabled trigger enforces nothing.
+  SELECT count(*) INTO v_n
+  FROM pg_trigger g
+  JOIN pg_class t ON t.oid = g.tgrelid
+  JOIN pg_namespace n ON n.oid = t.relnamespace
+  WHERE n.nspname = 'dflow' AND t.relname = 'sample_path_revision'
+    AND g.tgname = 'sample_path_revision_validate' AND NOT g.tgisinternal;
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION
+      'Issue #2136 verification: dflow.sample_path_revision must carry exactly one trigger named sample_path_revision_validate, found %', v_n;
+  END IF;
+
   SELECT g.tgenabled, g.tgtype INTO v_tgenabled, v_tgtype
   FROM pg_trigger g
   JOIN pg_class t ON t.oid = g.tgrelid
@@ -363,11 +527,11 @@ BEGIN
   WHERE n.nspname = 'dflow' AND t.relname = 'sample_path_revision'
     AND g.tgname = 'sample_path_revision_validate'
     AND fn.nspname = 'dflow' AND p.proname = 'validate_sample_path_revision'
+    AND p.pronargs = 0 AND p.prorettype = 'pg_catalog.trigger'::regtype
     AND NOT g.tgisinternal;
-
   IF NOT FOUND THEN
     RAISE EXCEPTION
-      'Issue #2136 verification: trigger sample_path_revision_validate is not attached to dflow.sample_path_revision';
+      'Issue #2136 verification: trigger sample_path_revision_validate does not run dflow.validate_sample_path_revision()';
   END IF;
   IF v_tgenabled <> 'O' THEN
     RAISE EXCEPTION
