@@ -302,7 +302,7 @@ export function reviewerKnownNonReading(name, reviewers=REVIEWERS){
 export const OVERFLOW_REVIEWERS = Object.freeze([])
 export const ACTIVE_REVIEWERS = Object.freeze(REVIEWERS.filter((row)=>!RETIRED_REVIEWERS.includes(row.name)))
 
-// `engine === null` is a POSITIVE answer, not a missing one: the marker resolver
+// `engine === null` is a POSITIVE answer, not an absent one: the marker resolver
 // said `state: none`, so no orchestrator is running and there is no same-engine
 // conflict to guard against. The exclusion list is empty and the whole rotation
 // stays eligible (issue #2127 decision (a)).
