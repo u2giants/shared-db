@@ -262,7 +262,16 @@ export const REVIEWERS = Object.freeze([
 // no future wrapper version fixes a conversational API client having no checkout.
 // Its historical name stays readable in REVIEWERS forever because durable refs
 // (`refs/db-review-assignments/1987-1989-2108fcd1...`) still name it.
-export const RETIRED_REVIEWERS = Object.freeze(['qwen-3.8-max', 'glm-5.2', 'deepseek-chat'])
+//
+// PAUSED 2026-09-03T16:55Z (owner instruction, chat directive, no issue): 'kimi-k3'.
+// Account-wide weekly usage cap, confirmed genuine (403, not retryable this week) via
+// raw evidence across multiple PRs (#2145, #2200, #2199). This is a PAUSE, not a
+// retirement -- same pattern as the 2026-08-20 pause in issue #1290 above. Owner
+// stated the cap clears in 24 hours from the timestamp above, i.e. on or after
+// 2026-09-04T16:55Z. Whoever is orchestrating then should verify the cap has
+// actually lifted (do not assume the clock alone; confirm with a real doctor/attempt)
+// before removing 'kimi-k3' from this list and restoring its original rotation slot.
+export const RETIRED_REVIEWERS = Object.freeze(['qwen-3.8-max', 'glm-5.2', 'deepseek-chat', 'kimi-k3'])
 
 // The single fact the gate was missing (#2078). A verdict is evidence only if the
 // reviewer could open the file. Unknown names fail closed.
