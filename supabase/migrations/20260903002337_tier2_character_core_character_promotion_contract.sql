@@ -107,13 +107,31 @@ comment on column plm.wildbrain_character.core_character_id is
   'Resolved core.character. Null until a resolution is recorded. Identity is licensor plus source id, never source id alone.';
 
 -- ----------------------------------------------------------------- Verification
--- Refuse the apply unless every part of the contract is present on both tables.
+-- Refuse the apply unless every part of the contract is present on both tables AND
+-- matches the intended end state exactly. Names alone are not asserted: the status
+-- vocabulary, the audit check's boolean structure, the index predicate and the
+-- column default are each compared against the catalogue's own deparsed text.
 
 do $verify$
 declare
   t        text;
   v_tables text[] := array['wb_character_normalized','wildbrain_character'];
   v_n      integer;
+  v_got    text;
+  v_want   text;
+
+  -- The exact end state, not a family of end states. Each of these is compared
+  -- against the catalogue's own deparsed text with whitespace collapsed, so a
+  -- constraint that merely mentions the right column names, or an index with a
+  -- divergent predicate, cannot satisfy the assertion.
+  c_status_ck constant text :=
+    'CHECK ((resolution_status = ANY (ARRAY[''unresolved''::text, ''resolved''::text,'
+    || ' ''ambiguous''::text, ''not_a_character''::text])))';
+  c_audit_ck constant text :=
+    'CHECK ((((resolution_status = ''resolved''::text) AND (core_character_id IS NOT NULL)'
+    || ' AND (resolved_at IS NOT NULL) AND (resolved_by IS NOT NULL)'
+    || ' AND (btrim(resolved_by) <> ''''::text)) OR ((resolution_status <> ''resolved''::text)'
+    || ' AND (core_character_id IS NULL) AND (resolved_at IS NULL) AND (resolved_by IS NULL))))';
 begin
   foreach t in array v_tables loop
 
@@ -132,19 +150,18 @@ begin
         using errcode = 'P0001';
     end if;
 
-    -- resolution_status defaults to unresolved, so an existing row is never
-    -- silently promoted by this migration.
-    select count(*) into v_n
+    -- The default is EXACTLY 'unresolved', not merely a default mentioning it.
+    -- An existing row is therefore never silently promoted by this migration.
+    select column_default into v_got
       from information_schema.columns
-     where table_schema = 'plm' and table_name = t
-       and column_name = 'resolution_status'
-       and column_default like '%unresolved%';
-    if v_n <> 1 then
-      raise exception 'plm.%.resolution_status does not default to unresolved', t
-        using errcode = 'P0001';
+     where table_schema = 'plm' and table_name = t and column_name = 'resolution_status';
+    if v_got is distinct from '''unresolved''::text' then
+      raise exception 'plm.%.resolution_status default is %, expected ''unresolved''::text',
+        t, coalesce(v_got, '<none>') using errcode = 'P0001';
     end if;
 
-    -- Foreign key to core.character, on delete restrict, validated.
+    -- Foreign key to core.character, on delete restrict, validated, and keyed on
+    -- exactly the core_character_id column.
     select count(*) into v_n
       from pg_constraint c
       join pg_class rel on rel.oid = c.conrelid
@@ -161,41 +178,47 @@ begin
         using errcode = 'P0001';
     end if;
 
-    -- Both named check constraints present and validated.
-    select count(*) into v_n
+    -- The status vocabulary, EXACTLY. A wrong IN list is a different contract.
+    select regexp_replace(pg_get_constraintdef(c.oid), '\s+', ' ', 'g') into v_got
       from pg_constraint c
       join pg_class rel on rel.oid = c.conrelid
       join pg_namespace ns on ns.oid = rel.relnamespace
      where ns.nspname = 'plm' and rel.relname = t
        and c.contype = 'c' and c.convalidated
-       and c.conname in ('plm_' || t || '_resolution_ck', 'plm_' || t || '_resolution_status_ck');
-    if v_n <> 2 then
-      raise exception 'plm.% is missing a validated resolution check constraint: % of 2 present', t, v_n
-        using errcode = 'P0001';
+       and c.conname = 'plm_' || t || '_resolution_status_ck';
+    v_want := regexp_replace(c_status_ck, '\s+', ' ', 'g');
+    if v_got is distinct from v_want then
+      raise exception 'plm.% status vocabulary is %, expected %',
+        t, coalesce(v_got, '<absent or not validated>'), v_want using errcode = 'P0001';
     end if;
 
-    -- The audit clause itself, not merely a constraint by that name.
-    select count(*) into v_n
+    -- The audit check, EXACTLY. Matching column names is not enough: the boolean
+    -- structure IS the contract, and an OR where an AND is required would let an
+    -- unaudited resolution through.
+    select regexp_replace(pg_get_constraintdef(c.oid), '\s+', ' ', 'g') into v_got
       from pg_constraint c
       join pg_class rel on rel.oid = c.conrelid
       join pg_namespace ns on ns.oid = rel.relnamespace
      where ns.nspname = 'plm' and rel.relname = t
-       and c.conname = 'plm_' || t || '_resolution_ck'
-       and pg_get_constraintdef(c.oid) like '%resolved_by%'
-       and pg_get_constraintdef(c.oid) like '%resolved_at%'
-       and pg_get_constraintdef(c.oid) like '%core_character_id%';
-    if v_n <> 1 then
-      raise exception 'plm.% resolution check does not require target, resolver and timestamp together', t
-        using errcode = 'P0001';
+       and c.contype = 'c' and c.convalidated
+       and c.conname = 'plm_' || t || '_resolution_ck';
+    v_want := regexp_replace(c_audit_ck, '\s+', ' ', 'g');
+    if v_got is distinct from v_want then
+      raise exception 'plm.% audit check is %, expected %',
+        t, coalesce(v_got, '<absent or not validated>'), v_want using errcode = 'P0001';
     end if;
 
-    -- The unresolved-work index.
-    select count(*) into v_n
+    -- The unresolved-work index, INCLUDING its predicate.
+    select regexp_replace(indexdef, '\s+', ' ', 'g') into v_got
       from pg_indexes
      where schemaname = 'plm' and tablename = t
        and indexname = 'plm_' || t || '_unresolved_idx';
-    if v_n <> 1 then
-      raise exception 'plm.% is missing its unresolved-work index', t using errcode = 'P0001';
+    v_want := format(
+      'CREATE INDEX plm_%1$s_unresolved_idx ON plm.%1$s USING btree (resolution_status)'
+      || ' WHERE (resolution_status <> ''resolved''::text)', t);
+    if v_got is distinct from v_want then
+      raise exception 'plm.% unresolved-work index is %, expected %',
+        t, coalesce(v_got, '<absent>'), v_want using errcode = 'P0001';
     end if;
 
   end loop;
