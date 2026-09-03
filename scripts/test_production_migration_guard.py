@@ -3186,6 +3186,22 @@ class AtomicBatchTests(unittest.TestCase):
     def test_a_fully_applied_batch_does_not_block_anything(self) -> None:
         assert_atomic_batches(sorted(BATCHES["B5"]), set(BATCHES["B9"]))
 
+    def test_unrelated_promotion_is_refused_while_production_rests_mid_batch(self) -> None:
+        """Issue #870: an unrelated allowlist must not hide an illegal rest."""
+        applied = {min(BATCHES["B9"])}
+        with self.assertRaises(GuardError) as ctx:
+            assert_atomic_batches(["20260811030000"], applied)
+        message = str(ctx.exception)
+        self.assertIn("already resting inside batch B9", message)
+        self.assertIn("No unrelated promotion may proceed", message)
+        for version in sorted(BATCHES["B9"] - applied):
+            self.assertIn(version, message)
+
+    def test_mid_batch_recovery_remains_allowed(self) -> None:
+        """Fail closed without wedging the only safe forward recovery."""
+        applied = {min(BATCHES["B9"])}
+        assert_atomic_batches(sorted(BATCHES["B9"] - applied), applied)
+
     # -- the choke points --------------------------------------------------
 
     def test_validate_candidates_enforces_atomicity(self) -> None:
