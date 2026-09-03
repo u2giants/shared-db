@@ -16,7 +16,7 @@ This plan was requested after the Supabase dashboard AI proposed performance, re
 
 | Step | Deliverable | State | Evidence |
 |---|---|---|---|
-| 0 | Register the evidence-gated plan, handoff, router entry, and tracking issue | ⬜ open | This branch; issue #2209 is tracking only until the plan PR merges |
+| 0 | Register the evidence-gated plan, handoff, router entry, and tracking issue | ✅ done 2026-09-03 | PR #2210 merged as `5c3bf67e767b6fcd85062f9cb98805535498d17f`; guarded merge run `33778748037`; exact-head Muse verdict ref recorded for `9cb7ad230f13697cb9e22e60dcd0c7c7434d8ce7` |
 | 1 | Capture a reproducible production baseline and reconcile every advisor claim | ⬜ open | Required artifact: `docs/verification/database-efficiency/<timestamp>/baseline.md` plus machine-readable extracts |
 | 2 | Prove or disprove Data API exposure with role and HTTP behavior tests | ⬜ open | Required artifact: `docs/verification/database-efficiency/<timestamp>/api-access-matrix.md` with no row contents |
 | 3 | Trace expensive rebuilds and projection churn to callers and changed-row sets | ⬜ open | Required artifacts: call graph, timestamped deltas, and safe preview timings |
@@ -26,7 +26,7 @@ This plan was requested after the Supabase dashboard AI proposed performance, re
 | 7 | Complete the dated index observation and maintenance/replication investigations | ⬜ open | #1966 delta on or after 2026-09-17 plus maintenance and WAL attribution reports |
 | 8 | Prove end-to-end improvement and close or retain every finding explicitly | ⬜ open | Before/after workload report, CI, deployed SHA, live smoke tests, and advisor reconciliation |
 
-**Fresh implementation starts at Step 1.** Step 0 is complete only after the plan PR is merged. Use a fresh session at the boundaries after Steps 2, 4, 6, and 7; before starting a new phase, re-read this STATUS table and all remaining phases for drift.
+**Fresh implementation starts at Step 1.** Use a fresh session at the boundaries after Steps 2, 4, 6, and 7; before starting a new phase, re-read this STATUS table and all remaining phases for drift.
 
 ---
 

@@ -36,10 +36,10 @@ Albert asked for a comprehensive implementation plan covering the Supabase dashb
 
 ## 3. Current state
 
-- Plan, router entry, tracking issue #2209, and this handoff were created in isolated worktree `C:\repos\shared-db-plan-db-efficiency-20260903` on branch `codex/database-efficiency-plan-20260903`, based on `origin/main` commit `260c8ab29f60e6487c520f914c3423e4d4ce71b0`.
+- Plan, router entry, tracking issue #2209, and this handoff were created in isolated worktree `C:\repos\shared-db-plan-db-efficiency-20260903`. PR #2210 passed every check, received an exact-head Muse approval, and merged through guarded run `33778748037` as `5c3bf67e767b6fcd85062f9cb98805535498d17f`.
 - Production target was re-verified read-only as `https://qsllyeztdwjgirsysgai.supabase.co`.
 - Relation sizes, tuple/maintenance counters, expensive function statistics, advisor census, RLS state, and direct browser-role table privileges were read. No rows, schema, grants, settings, counters, infrastructure, or application code were changed.
-- The plan PR is not yet committed, pushed, reviewed, merged, or deployed. Step 0 remains open until merge evidence is written into the plan.
+- The planning deliverable is committed, pushed, reviewed, and merged. No deployment applies to documentation. The open implementation begins at plan Step 1; issue #2209 stays open until the program is completed or every obligation is transferred to a separately owned issue.
 
 ## 4. What did not work
 
@@ -58,10 +58,9 @@ Albert asked for a comprehensive implementation plan covering the Supabase dashb
 
 ## 6. Exact next steps
 
-1. Finish this documentation branch: self-review changed files, run relevant guards, commit only the plan/router/handoff, push, open the PR, satisfy required review, merge, and update issue #2209. **Worked when:** plan Step 0 cites the merge commit and current `main` contains all three files.
-2. Start a fresh isolated repo-maintenance session at plan Step 1. Capture the privacy-safe reproducible baseline and reconcile every claim. **Worked when:** every claim is confirmed, not reproduced, unknown, or superseded with rerunnable evidence.
-3. Execute plan Step 2 before performance mutations. Prove API reachability by catalog plus bounded HTTP behavior. **Worked when:** every alleged exposure has positive/negative evidence without returned row contents.
-4. Follow the plan's phase boundaries and owner routing. **Worked when:** the STATUS table stays current and every change has one owner, evidence gate, rollback, and live acceptance.
+1. Start a fresh isolated repo-maintenance session at plan Step 1. Capture the privacy-safe reproducible baseline and reconcile every claim. **Worked when:** every claim is confirmed, not reproduced, unknown, or superseded with rerunnable evidence.
+2. Execute plan Step 2 before performance mutations. Prove API reachability by catalog plus bounded HTTP behavior. **Worked when:** every alleged exposure has positive/negative evidence without returned row contents.
+3. Follow the plan's phase boundaries and owner routing. **Worked when:** the STATUS table stays current and every change has one owner, evidence gate, rollback, and live acceptance.
 
 ## 7. Constraints and gotchas
 
