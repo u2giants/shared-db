@@ -319,11 +319,36 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
      `--assign-reviewer` recreates the original ref, which the merge gate will
      not accept as an answer for a returned replacement.
 
-   Either way the excluded reviewer stays barred from this pull request forever,
-   and the newly drawn reviewer must record its OWN durable APPROVE. A pull
+   Either way the excluded reviewer stays barred from this pull request, and the
+   newly drawn reviewer must record its OWN durable APPROVE. A pull
    request excluded before returns existed is repaired by re-running the
    IDENTICAL `--exclude-reviewer` command, which completes the return without
    recording a second exclusion.
+
+   ONE exclusion reason, and only one, can be lifted:
+   `--reinstate-reviewer-exclusion --issue <issue> --pr <pr> --reviewer <name>`.
+   `already-reviewed` and `independence-conflict` are INDEPENDENCE guarantees --
+   a provider that already judged these bytes, or that is the orchestrating
+   engine, is never re-drawn, and no later evidence changes that. Those two are
+   refused before any provider is probed. `terminal-unavailable` is different:
+   it is a claim about the WORLD, and a misdiagnosis of it used to be permanent.
+   Issue #2224 is the incident -- three of five reviewers carried
+   `terminal-unavailable` for one pull request while the other two held leases on
+   pull requests that could not merge until that one did, and at least one of the
+   three demonstrably ran fine the same day. There was no route back and the
+   queue deadlocked.
+
+   Reinstatement is a REPAIR, not a bypass. It runs the reviewer's own wrapper
+   `doctor` AT RUN TIME and refuses unless that probe passes with a readable PASS
+   check -- a failing probe, unreadable output, silence, or no probe at all are
+   all refusals, and the exclusion stands. The probe output is stored verbatim in
+   the record with a SHA-256 digest, so edited evidence stops parsing. The record
+   is APPEND-ONLY under `refs/db-review-reinstatements/<issue>-<pr>-<reviewer>`,
+   committed on top of the exclusion it names: the original exclusion ref is
+   never deleted or rewritten, and a reinstatement naming a different exclusion
+   than the one on file stops the reviewer read for audit. Re-running is
+   idempotent and writes no second record. The reason is proved from the
+   EXCLUSION commit, never from the reinstatement's copy of it.
 
    The merge gate that reads these records is `check-exact-head-approval.mjs`,
    the script the guarded merge workflow runs BEFORE the merge -- not only the
