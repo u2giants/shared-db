@@ -295,3 +295,7 @@ begin
 
   raise notice 'Issue #2172: item landing structures corrected and verified.';
 end $$;
+
+-- Re-review bump (#2172): trivial comment-only change to produce a fresh head
+-- for governed round-2 review after a verdict-recording infrastructure fault
+-- (issue #2208) made the prior head unrecoverable. No behavior change.
