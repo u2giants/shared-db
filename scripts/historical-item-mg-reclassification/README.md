@@ -106,3 +106,11 @@ fresh through the shared-db orchestrator after this gate passes.
 Both independent review slots for this pull request are re-drawn fresh at each
 head; this line exists only to produce a clean head with zero recorded verdicts
 after a reviewer-lease repair proved structurally blocked at a prior head.
+
+## Review status (second refresh)
+
+Slot 1's lease-repair path hit the same head-wide `hasVerdictForHead` block once
+slot 2 recorded a verdict at the prior head (confirmed: the repair call reported
+success but the reviewer's active lease ref did not move). This commit produces
+another fresh head with zero recorded verdicts so both slots can be drawn before
+either posts.
