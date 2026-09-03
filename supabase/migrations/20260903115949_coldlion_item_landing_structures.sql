@@ -299,3 +299,10 @@ end $$;
 -- Re-review bump (#2172): trivial comment-only change to produce a fresh head
 -- for governed round-2 review after a verdict-recording infrastructure fault
 -- (issue #2208) made the prior head unrecoverable. No behavior change.
+
+-- Re-review bump 2 (#2172): trivial comment-only change to produce a fresh
+-- head after a valid slot-1 APPROVE at the prior head (5438de6a) blocked
+-- slot-2 reviewer replacement (same head-wide verdict-guard defect class as
+-- issue #2208), following slot 2's original reviewer (kimi-k3) hitting a
+-- weekly provider quota limit unrelated to this migration's content. No
+-- behavior change.
