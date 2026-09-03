@@ -40,3 +40,5 @@
 -- Reversible: alter table public.dam_search_documents reset (fillfactor);
 
 alter table public.dam_search_documents set (fillfactor = 75);
+
+-- no-op nudge: fresh head SHA to redraw a stuck reviewer slot (#2196 lockout)
