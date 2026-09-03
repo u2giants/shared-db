@@ -40,25 +40,37 @@ lock table plm.pmt_character in share row exclusive mode;
 
 do $precheck$
 declare
-  v_table text;
   v_orphans bigint;
 begin
-  foreach v_table in array array[
-    'plm.nbcu_character', 'plm.opa_character', 'plm.pmt_character'
-  ] loop
-    execute format(
-      'select count(*) from %s s '
-      'where s.core_character_id is not null '
-      '  and not exists (select 1 from core.character c where c.id = s.core_character_id)',
-      v_table
-    ) into v_orphans;
+  select count(*) into v_orphans
+  from plm.nbcu_character s
+  where s.core_character_id is not null
+    and not exists (select 1 from core.character c where c.id = s.core_character_id);
+  if v_orphans <> 0 then
+    raise exception
+      'issue #2146 refused: plm.nbcu_character has % core_character_id value(s) with no core.character row',
+      v_orphans;
+  end if;
 
-    if v_orphans <> 0 then
-      raise exception
-        'issue #2146 refused: % has % core_character_id value(s) with no core.character row',
-        v_table, v_orphans;
-    end if;
-  end loop;
+  select count(*) into v_orphans
+  from plm.opa_character s
+  where s.core_character_id is not null
+    and not exists (select 1 from core.character c where c.id = s.core_character_id);
+  if v_orphans <> 0 then
+    raise exception
+      'issue #2146 refused: plm.opa_character has % core_character_id value(s) with no core.character row',
+      v_orphans;
+  end if;
+
+  select count(*) into v_orphans
+  from plm.pmt_character s
+  where s.core_character_id is not null
+    and not exists (select 1 from core.character c where c.id = s.core_character_id);
+  if v_orphans <> 0 then
+    raise exception
+      'issue #2146 refused: plm.pmt_character has % core_character_id value(s) with no core.character row',
+      v_orphans;
+  end if;
 end
 $precheck$;
 
