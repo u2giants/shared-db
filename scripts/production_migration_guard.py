@@ -880,7 +880,8 @@ def assert_atomic_batches(allowlist: list[str], remote: set[str]) -> None:
             raise GuardError(
                 f"production is already resting inside batch {name}; "
                 f"batch {name} is {basis}. "
-                f"No unrelated promotion may proceed until the batch is complete.\n"
+                f"The allowlist must include every remaining batch member before "
+                f"anything else may be promoted.\n"
                 f"  Excluded because production already has them "
                 f"({len(already)}): {', '.join(sorted(already))}\n"
                 f"  recovery still required ({len(missing_recovery)}): "

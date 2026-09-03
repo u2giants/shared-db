@@ -3193,7 +3193,7 @@ class AtomicBatchTests(unittest.TestCase):
             assert_atomic_batches(["20260811030000"], applied)
         message = str(ctx.exception)
         self.assertIn("already resting inside batch B9", message)
-        self.assertIn("No unrelated promotion may proceed", message)
+        self.assertIn("must include every remaining batch member", message)
         for version in sorted(BATCHES["B9"] - applied):
             self.assertIn(version, message)
 
@@ -3201,6 +3201,15 @@ class AtomicBatchTests(unittest.TestCase):
         """Fail closed without wedging the only safe forward recovery."""
         applied = {min(BATCHES["B9"])}
         assert_atomic_batches(sorted(BATCHES["B9"] - applied), applied)
+
+    def test_unrelated_promotion_is_refused_for_a_never_rest_batch_too(self) -> None:
+        """The fail-closed scan covers contract-derived NEVER-REST batches."""
+        applied = {min(BATCHES["B2"])}
+        with self.assertRaises(GuardError) as ctx:
+            assert_atomic_batches(["20260811030000"], applied)
+        self.assertIn("already resting inside batch B2", str(ctx.exception))
+        self.assertIn("batch B2 is NEVER-REST", str(ctx.exception))
+        assert_atomic_batches(sorted(BATCHES["B2"] - applied), applied)
 
     # -- the choke points --------------------------------------------------
 
