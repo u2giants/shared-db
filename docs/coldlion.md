@@ -50,9 +50,38 @@ administer. Questions go **from Albert**, never sent by an AI session:
 > Vendor **addresses, zip, state, email and phone are DECLINED**. Never describe any of
 > these as pending, undisposed, or an open owner decision, and never re-ask Albert for them.
 >
-> **`/seasons` is the opposite case:** it has **no ruling on any of its 13 fields**. That
-> is the genuinely open one. Issues #2180 and #2081 were written as though no `/vendors`
-> ruling existed; they are wrong on that point.
+> **`/seasons` is now ALSO ruled** — see the next block. Issues #2180 and #2081 were written
+> as though no `/vendors` ruling existed; they are wrong on that point, and #2180's
+> owner-decision blocker is fully resolved.
+
+> ### ⛔ SETTLED — `/seasons` field dispositions are RULED (2026-09-03). Do not re-open them.
+>
+> **All eight currently-unstored `/seasons` fields are DECLINED** by owner ruling on
+> **2026-09-03**: `seasonDesc`, `startDate`, `endDate`, `shipStartDate`, `shipEndDate`,
+> `active`, `createdUser`, `modUser`. **Nothing new is to be added to `coldlion.season`.**
+> The five stored columns — `company_code`, `division_code`, `season_code`, `created_time`,
+> `mod_time` — stand as the **complete approved projection**.
+>
+> Evidence, from a full live read of all 21 of 21 rows on 2026-09-03: `seasonDesc` merely
+> repeats `seasonCode` on every row except `NONE`, whose description is empty; all four date
+> fields are the `1900-01-01` empty-date sentinel on every row; `active` carries the same
+> single value on every row; and `createdUser` / `modUser` are ColdLion record-audit stamps
+> naming one internal staff login, identical to each other on every row — personal data about
+> a named individual, which we do not land.
+>
+> Never describe any of these eight as pending, undisposed, or an open owner decision, and
+> never re-ask Albert for them. **Revisit only if ColdLion begins populating them.**
+
+> ### ⚠️ VENDOR DEFECT — the unfiltered `/seasons` call returns WRONG division codes. Never use it.
+>
+> A company-wide (unfiltered) `/seasons` query returns **all 21 rows stamped
+> `divisionCode: CW001`**, silently mis-attributing every other division's seasons to CW001.
+> Per-division queries return the correct codes: **CW001 = 8, SP001 = 4, EP001 = 1,
+> EH001 = 8** (21 total). Confirmed against the live feed on 2026-09-03.
+>
+> **Any `/seasons` loader MUST query per division and MUST NEVER use the unfiltered call.**
+> The failure is silent — the unfiltered response looks complete and well-formed, and the
+> only symptom is that three divisions' seasons are attributed to the wrong division.
 
 ---
 

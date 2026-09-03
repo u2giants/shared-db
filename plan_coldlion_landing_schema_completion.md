@@ -90,8 +90,23 @@ Production was verified read-only on 2026-09-02 against the resolved shared prod
 > `docs/coldlion-field-decisions-20260819.csv`, and the ruling was **re-verified against
 > the live feed on 2026-09-03 with an identical field-name set**. Vendor addresses,
 > `zipCode`, `state`, `email` and `phoneNo` are **DECLINED** — not pending, not undisposed,
-> and not an open owner decision. **`/seasons` has no ruling on any of its 13 fields**;
-> that is the open one.
+> and not an open owner decision.
+>
+> **SETTLED — `/seasons` too (owner ruling 2026-09-03).** All eight currently-unstored
+> `/seasons` fields are **DECLINED**: `seasonDesc`, `startDate`, `endDate`,
+> `shipStartDate`, `shipEndDate`, `active`, `createdUser`, `modUser`. **Nothing new is to
+> be added to `coldlion.season`** — the five stored columns (`company_code`,
+> `division_code`, `season_code`, `created_time`, `mod_time`) are the complete approved
+> projection. Ruled from a full live read of 21 of 21 rows: the description duplicates the
+> code, all four dates are the `1900-01-01` empty-date sentinel on every row, `active` is
+> constant, and the two user stamps are record-audit personal data. Not pending, not
+> undisposed. Revisit only if ColdLion begins populating them.
+>
+> **⚠️ VENDOR DEFECT — never use the unfiltered `/seasons` call.** A company-wide
+> `/seasons` query returns all 21 rows stamped `divisionCode: CW001`, silently
+> mis-attributing every other division's seasons. Per-division queries return the correct
+> codes (CW001 = 8, SP001 = 4, EP001 = 1, EH001 = 8). **Any `/seasons` loader MUST query
+> per division.** Confirmed against the live feed 2026-09-03.
 
 Feed readiness at plan creation:
 
@@ -188,8 +203,23 @@ Create one exact-object structural issue per migration unit: division/masters co
 > `docs/coldlion-field-decisions-20260819.csv`, and the ruling was **re-verified against
 > the live feed on 2026-09-03 with an identical field-name set**. Vendor addresses,
 > `zipCode`, `state`, `email` and `phoneNo` are **DECLINED** — not pending, not undisposed,
-> and not an open owner decision. **`/seasons` has no ruling on any of its 13 fields**;
-> that is the open one.
+> and not an open owner decision.
+>
+> **SETTLED — `/seasons` too (owner ruling 2026-09-03).** All eight currently-unstored
+> `/seasons` fields are **DECLINED**: `seasonDesc`, `startDate`, `endDate`,
+> `shipStartDate`, `shipEndDate`, `active`, `createdUser`, `modUser`. **Nothing new is to
+> be added to `coldlion.season`** — the five stored columns (`company_code`,
+> `division_code`, `season_code`, `created_time`, `mod_time`) are the complete approved
+> projection. Ruled from a full live read of 21 of 21 rows: the description duplicates the
+> code, all four dates are the `1900-01-01` empty-date sentinel on every row, `active` is
+> constant, and the two user stamps are record-audit personal data. Not pending, not
+> undisposed. Revisit only if ColdLion begins populating them.
+>
+> **⚠️ VENDOR DEFECT — never use the unfiltered `/seasons` call.** A company-wide
+> `/seasons` query returns all 21 rows stamped `divisionCode: CW001`, silently
+> mis-attributing every other division's seasons. Per-division queries return the correct
+> codes (CW001 = 8, SP001 = 4, EP001 = 1, EH001 = 8). **Any `/seasons` loader MUST query
+> per division.** Confirmed against the live feed 2026-09-03.
 
 Compare live `/customers`, `/vendors`, `/merchGroupHeaders`, `/merchGroupDetails`, `/seasons`, `/salespersons`, and `/divisions` definitions with production columns and the owner decision register. Add `coldlion.division` with the vendor's stable company/division identity. Add only approved missing typed fields to season/salesperson. Do not recreate the four already-complete master tables.
 
