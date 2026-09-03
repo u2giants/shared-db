@@ -131,9 +131,9 @@ alter table coldlion.item_merch_group
   references coldlion.item_detail (company_code, division_code, item_no, item_pkey)
   on delete cascade;
 
-create index if not exists item_merch_group_detail_idx
-  on coldlion.item_merch_group (company_code, division_code, item_no, item_pkey)
-  where item_pkey is not null;
+-- No extra index: the slot-identity unique constraint above already indexes
+-- (company_code, division_code, item_no, item_pkey, slot_no), whose four-column
+-- prefix serves every SKU-scoped lookup.
 
 comment on table coldlion.item_merch_group is
   'ColdLion merchandise-group slots as ROWS, for both grains. item_pkey IS NULL is the '
@@ -210,17 +210,21 @@ comment on table coldlion.item_header is
 -- -------------------------------------------------------------------------------------
 -- 4. Closed landing posture, re-asserted for the three tables this file touched.
 -- -------------------------------------------------------------------------------------
-do $$
-declare v_rel text;
-begin
-  foreach v_rel in array array[
-    'coldlion.item_header','coldlion.item_detail','coldlion.item_merch_group'
-  ] loop
-    execute format('alter table %s enable row level security', v_rel);
-    execute format('revoke all on table %s from public, anon, authenticated', v_rel);
-    execute format('grant all on table %s to service_role', v_rel);
-  end loop;
-end $$;
+-- Written out literally rather than as a loop of `execute format(...)`: a
+-- dynamically executed grant statement cannot be read off the migration file, and
+-- the security posture of a landing table is exactly the thing a reviewer must be
+-- able to read without running anything.
+alter table coldlion.item_header       enable row level security;
+alter table coldlion.item_detail       enable row level security;
+alter table coldlion.item_merch_group  enable row level security;
+
+revoke all on table coldlion.item_header      from public, anon, authenticated;
+revoke all on table coldlion.item_detail      from public, anon, authenticated;
+revoke all on table coldlion.item_merch_group from public, anon, authenticated;
+
+grant all on table coldlion.item_header      to service_role;
+grant all on table coldlion.item_detail      to service_role;
+grant all on table coldlion.item_merch_group to service_role;
 
 -- -------------------------------------------------------------------------------------
 -- 5. Verify the apply produced the intended shape, so a partial apply cannot pass.
