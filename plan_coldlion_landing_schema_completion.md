@@ -85,6 +85,14 @@ Production was verified read-only on 2026-09-02 against the resolved shared prod
 - Migrations `20260818232639`, `20260825023430`, `20260825225510`, and `20260902054548` are applied. Never edit their bytes.
 - The old plan status table is not delivery evidence. Issue #1184 was closed after structural creation, while #2081 correctly tracks redesign and loading.
 
+> **SETTLED — do not re-open.** All 29 `/vendors` fields were ruled by the owner on
+> 2026-08-19 (10 ingest, 19 **DECLINED**) in
+> `docs/coldlion-field-decisions-20260819.csv`, and the ruling was **re-verified against
+> the live feed on 2026-09-03 with an identical field-name set**. Vendor addresses,
+> `zipCode`, `state`, `email` and `phoneNo` are **DECLINED** — not pending, not undisposed,
+> and not an open owner decision. **`/seasons` has no ruling on any of its 13 fields**;
+> that is the open one.
+
 Feed readiness at plan creation:
 
 | API feed | Table state | Has everything needed? |
@@ -174,6 +182,14 @@ Create one exact-object structural issue per migration unit: division/masters co
 **Gate:** every U1-U20 item has a disposition owner and each structural issue has an exact `writes:` list with no overlap.
 
 ### Step 2 — complete master/reference structures
+
+> **SETTLED — do not re-open.** All 29 `/vendors` fields were ruled by the owner on
+> 2026-08-19 (10 ingest, 19 **DECLINED**) in
+> `docs/coldlion-field-decisions-20260819.csv`, and the ruling was **re-verified against
+> the live feed on 2026-09-03 with an identical field-name set**. Vendor addresses,
+> `zipCode`, `state`, `email` and `phoneNo` are **DECLINED** — not pending, not undisposed,
+> and not an open owner decision. **`/seasons` has no ruling on any of its 13 fields**;
+> that is the open one.
 
 Compare live `/customers`, `/vendors`, `/merchGroupHeaders`, `/merchGroupDetails`, `/seasons`, `/salespersons`, and `/divisions` definitions with production columns and the owner decision register. Add `coldlion.division` with the vendor's stable company/division identity. Add only approved missing typed fields to season/salesperson. Do not recreate the four already-complete master tables.
 

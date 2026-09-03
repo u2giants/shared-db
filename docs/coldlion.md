@@ -34,6 +34,28 @@ administer. Questions go **from Albert**, never sent by an AI session:
 
 ---
 
+## Field dispositions — what is settled and what is not
+
+> ### ⛔ SETTLED — `/vendors` field dispositions are RULED. Do not re-open them.
+>
+> **All 29 `/vendors` fields were ruled by the owner on 2026-08-19** in
+> [`coldlion-field-decisions-20260819.csv`](coldlion-field-decisions-20260819.csv):
+> **10 ingest, 19 DECLINED.** The ruling was **re-verified against the live feed on
+> 2026-09-03** — the live field-name set is **identical** to the CSV's 29 rows, so the
+> August ruling applies in full and nothing about it is stale.
+>
+> **DECLINED (ruled out — not pending, not undisposed):** `address1`, `address2`,
+> `address3`, `zipCode`, `state`, `email`, `phoneNo`, `faxNo`, `createdUser`, `modUser`,
+> `udf01`–`udf04`, `udfDate01`, `udfDate02`, `payTermCode`, `glCode`, `separateCheck`.
+> Vendor **addresses, zip, state, email and phone are DECLINED**. Never describe any of
+> these as pending, undisposed, or an open owner decision, and never re-ask Albert for them.
+>
+> **`/seasons` is the opposite case:** it has **no ruling on any of its 13 fields**. That
+> is the genuinely open one. Issues #2180 and #2081 were written as though no `/vendors`
+> ruling existed; they are wrong on that point.
+
+---
+
 ## What ColdLion is
 
 The ERP that runs the business day to day: what we sell, what we bought, what it cost, who
