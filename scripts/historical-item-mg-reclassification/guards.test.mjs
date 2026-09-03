@@ -6,6 +6,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { existsSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 import { ABSTAIN, HISTORICAL_CUTOFF_ISO, assertCutoff } from './lib/constants.mjs';
 import {
@@ -572,4 +575,37 @@ test('25: licensed row data may not be written into a git working tree', async (
   assert.ok(assertPrivateOutputDir('out', { topLevel: () => 'C:/repo', ignores: () => true }));
   assert.ok(assertPrivateOutputDir('out', { topLevel: () => null }));
   assert.throws(() => assertPrivateOutputDir('', deps), /output directory is required/);
+});
+
+test('25b: a not-yet-existing --out path is still checked against real git, never treated as outside it', async () => {
+  // Regression for the real defect behind test 25's mocks: `git -C <dir>`
+  // fails when <dir> does not exist, and every caller creates the directory
+  // AFTER this guard runs, so a brand-new path is the normal case, not the
+  // exception. If a missing directory were still read as "outside any git
+  // working tree", `--out ./out` or `--out docs/verification/1984-run` would
+  // silently bypass the guard and let licensed row data land unignored in
+  // this public repo. No mocks here -- this drives the real gitTopLevel and
+  // gitIgnores implementations against this actual checkout.
+  const { assertPrivateOutputDir } = await import('./lib/private-path.mjs');
+  const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const stamp = `guard-test-${process.pid}-${Date.now()}`;
+  const unignoredMissing = join(repoRoot, `${stamp}-unignored`, 'nested');
+  const ignoredMissing = join(repoRoot, '.private', `${stamp}-ignored`, 'nested');
+  assert.ok(!existsSync(unignoredMissing) && !existsSync(ignoredMissing), 'both probe paths must not pre-exist');
+  try {
+    // Untracked, un-ignored, and missing: must still be refused.
+    assert.throws(
+      () => assertPrivateOutputDir(unignoredMissing),
+      /unless git ignores the destination/,
+    );
+    // Missing but under the gitignored .private/ directory: allowed even
+    // though nothing has created it yet -- check-ignore matches patterns, not
+    // the filesystem.
+    assert.equal(assertPrivateOutputDir(ignoredMissing), resolve(ignoredMissing));
+  } finally {
+    // Neither path was created by the guard (it only resolves and checks),
+    // but clean up defensively in case a future change starts creating them.
+    rmSync(join(repoRoot, `${stamp}-unignored`), { recursive: true, force: true });
+    rmSync(join(repoRoot, '.private', `${stamp}-ignored`), { recursive: true, force: true });
+  }
 });
