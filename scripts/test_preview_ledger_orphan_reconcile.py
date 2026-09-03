@@ -26,6 +26,18 @@ class Tests(unittest.TestCase):
             'claim_state':'closed',
         })
 
+    def test_issue_2171_evidence_pins_refuse_substitution(self):
+        case=M.SUPPORTED_CASES[(2171,2194,2199)]
+        args=type('A',(),{
+            'preview_run_id':33754529571,
+            'preview_artifact_id':9892966452,
+            'preview_artifact_digest':'sha256:285a9b78a370bb015a9a818a42cbe81f273d3600c9bd400c1b2449f05e09961c',
+        })()
+        M.validate_pinned_evidence(case,args)
+        args.preview_artifact_id=1
+        with self.assertRaises(M.Refusal):
+            M.validate_pinned_evidence(case,args)
+
     def test_version_is_exact(self):
         self.assertEqual(M.version('20260817150944'),'20260817150944')
         for bad in ('', '123', '2026081715094x', '202608171509440'):
