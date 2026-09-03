@@ -2,7 +2,7 @@
 
 **Why this exists:** ColdLion questions were scattered across seven documents, a handoff, a
 take-over note and two GitHub issues. Sessions were re-asking answered questions and missing live
-ones. This is the single register. **Last reviewed: 2026-09-01 (fifth pass — ColdLion explained the prepack SKU explosion; issue 7 closed as NOT a fault; issue 9 answered with a documented limitation).**
+ones. This is the single register. **Last reviewed: 2026-09-03 (sixth pass — the settled `/vendors` and `/seasons` field rulings and the unfiltered `/seasons` vendor defect were written into §5; fifth pass, 2026-09-01: ColdLion explained the prepack SKU explosion, issue 7 closed as NOT a fault, issue 9 answered with a documented limitation).**
 
 **Who answers these:** ColdLion is a third-party ERP Albert does **not** administer. Questions go to
 **JamieLynn** (API/data) or **Uma** (division/company codes), **from Albert** — never sent by an AI

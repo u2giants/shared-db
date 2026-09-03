@@ -4,7 +4,7 @@
 except by a broken link. Everything ColdLion lives in the documents below. Read this page
 first, then go to the one you need.
 
-**Last reviewed: 2026-09-01.**
+**Last reviewed: 2026-09-03.**
 
 ---
 
@@ -34,70 +34,14 @@ administer. Questions go **from Albert**, never sent by an AI session:
 
 ---
 
-## Field dispositions — what is settled and what is not
+## Field dispositions and the `/seasons` defect — where the rulings live
 
-> ### ⛔ SETTLED — `/vendors` field dispositions are RULED. Do not re-open them.
->
-> **All 29 `/vendors` fields were ruled by the owner on 2026-08-19** in
-> [`coldlion-field-decisions-20260819.csv`](coldlion-field-decisions-20260819.csv):
-> **10 ingest, 19 DECLINED.** The ruling was **re-verified against the live feed on
-> 2026-09-03** — the live field-name set is **identical** to the CSV's 29 rows, so the
-> August ruling applies in full and nothing about it is stale.
->
-> **DECLINED (ruled out — not pending, not undisposed):** `address1`, `address2`,
-> `address3`, `zipCode`, `state`, `email`, `phoneNo`, `faxNo`, `createdUser`, `modUser`,
-> `udf01`–`udf04`, `udfDate01`, `udfDate02`, `payTermCode`, `glCode`, `separateCheck`.
-> Vendor **addresses, zip, state, email and phone are DECLINED**. Never describe any of
-> these as pending, undisposed, or an open owner decision, and never re-ask Albert for them.
->
-> **`/seasons` is now ALSO ruled** — see the next block. Issues #2180 and #2081 were written
-> as though no `/vendors` ruling existed; they are wrong on that point, and #2180's
-> owner-decision blocker is fully resolved.
-
-> ### ⛔ SETTLED — `/seasons` field dispositions are RULED (2026-09-03). Do not re-open them.
->
-> **All eight currently-unstored `/seasons` fields are DECLINED** by owner ruling on
-> **2026-09-03**: `seasonDesc`, `startDate`, `endDate`, `shipStartDate`, `shipEndDate`,
-> `active`, `createdUser`, `modUser`. **Nothing new is to be added to `coldlion.season`.**
-> The five stored columns — `company_code`, `division_code`, `season_code`, `created_time`,
-> `mod_time` — stand as the **complete approved projection**.
->
-> Evidence, from a full live read of all 21 of 21 rows on 2026-09-03: `seasonDesc` merely
-> repeats `seasonCode` on every row except `NONE`, whose description is empty; all four date
-> fields are the `1900-01-01` empty-date sentinel on every row; `active` carries the same
-> single value on every row; and `createdUser` / `modUser` are ColdLion record-audit stamps
-> naming one internal staff login, identical to each other on every row — personal data about
-> a named individual, which we do not land.
->
-> Never describe any of these eight as pending, undisposed, or an open owner decision, and
-> never re-ask Albert for them. **Revisit only if ColdLion begins populating them.**
-
-> ### ⛔ VENDOR DEFECT — the unfiltered `/seasons` call DROPS 13 of the 21 records. Never use it.
->
-> **The other divisions' records are MISSING, not mislabelled.** A company-wide (unfiltered)
-> `/seasons` query returns the **CW001 record in place of every other division's record
-> entirely** — division code, description, `createdUser`, `createdTime`, `modUser` and
-> `modTime` all come from the CW001 row. **All 13 non-CW001 records (4 SP001, 1 EP001,
-> 8 EH001) are ABSENT from the response.**
->
-> The row *count* is correct — 8 + 4 + 1 + 8 = 21 — but the row *content* is duplicated from
-> CW001: each affected season code is repeated three or four times, and each repetition is
-> byte-identical. It reads as a lookup keyed on `seasonCode` alone, ignoring division.
->
-> **There is no workaround.** A loader author who reads "mislabelled" might think the division
-> code can be re-derived from elsewhere and the response otherwise trusted. It cannot: the
-> other divisions' data is simply not in the response. **Any `/seasons` loader MUST query per
-> division and MUST NEVER use the unfiltered call.**
->
-> The failure is silent: nothing in the response envelope signals it, the response looks
-> complete and well-formed, and paging is not involved (single page, 21 of 21, page size 50).
->
-> Confirmed against the live feed on **2026-09-03**, from a full 21-of-21 read re-verified
-> three times, with a positive control that fires — so the check can fail and is trustworthy.
->
-> **This is a `/seasons` fault, not how their API is designed to behave.** For contrast,
-> unfiltered `/merchGroupHeaders?companyCode=EDGEHOME` returns 37 rows correctly spanning all
-> four division codes.
+**`/vendors` and `/seasons` field dispositions are both SETTLED owner rulings (2026-08-19
+and 2026-09-03) and must never be re-opened, and the unfiltered `/seasons` call must never
+be used.** This page is a map, so it does not restate them: read
+[`coldlion-open-questions.md`](coldlion-open-questions.md) §5, which carries both rulings in
+full and the `/seasons` vendor defect that silently drops 13 of 21 records. Do not ask about,
+re-derive, or re-open any of it before reading that section.
 
 ---
 

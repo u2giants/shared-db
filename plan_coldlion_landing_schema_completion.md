@@ -125,7 +125,7 @@ Feed readiness at plan creation:
 | `/vendors` | correct table and owner-reviewed projection | **Yes, structurally**; loader/load still missing |
 | `/merchGroupHeaders` | correct division-scoped key | **Yes, structurally**; loader/load still missing |
 | `/merchGroupDetails` | correct four-part key and `active` | **Yes, structurally**; loader/load still missing |
-| `/seasons` | minimal table based on documented fields | **Not proven**; live field census/owner projection review missing |
+| `/seasons` | five-column table, and that projection is **SETTLED** | **Yes, structurally — the projection is CLOSED.** Owner ruling 2026-09-03 DECLINED all eight unstored fields (`seasonDesc`, `startDate`, `endDate`, `shipStartDate`, `shipEndDate`, `active`, `createdUser`, `modUser`). **No seasons field is to be added.** Loader/load still missing, and it **MUST query per division** — see Step 2 and Step 7 |
 | `/salespersons` | minimal table based on documented fields | **Not proven**; live field census/owner projection review missing |
 | `/divisions` | no table | **No** |
 | `/items` and `/itemDetails` | tables exist from old projection | **No**; current live fields and D14-D17 are not fully represented |
@@ -188,7 +188,7 @@ Plan decisions (recorded here so implementation does not need a new owner choice
 Open only where evidence is genuinely absent:
 
 - exact natural keys for pick-ticket, receiving, production-detail, and tracking rows must come from a fresh live census;
-- the complete projection for seasons/salespeople and remaining feeds requires owner field disposition because D5 makes omissions permanent;
+- the complete projection for **salespeople** and remaining feeds requires owner field disposition because D5 makes omissions permanent. **`/seasons` is NOT on this list: its projection is SETTLED by owner ruling on 2026-09-03** — the five stored columns are complete and all eight unstored fields are DECLINED. Do not treat a seasons field disposition as work to be done, and do not re-ask the owner for one;
 - the loader runtime is this repository's Node tooling executed by GitHub Actions; any move to an Edge or Google Cloud runtime requires an owner-approved plan amendment.
 
 ---
@@ -239,7 +239,7 @@ Create one exact-object structural issue per migration unit: division/masters co
 > positive control that fires. It is a `/seasons` fault, not the API's general behaviour —
 > unfiltered `/merchGroupHeaders` returns 37 rows correctly spanning all four divisions.
 
-Compare live `/customers`, `/vendors`, `/merchGroupHeaders`, `/merchGroupDetails`, `/seasons`, `/salespersons`, and `/divisions` definitions with production columns and the owner decision register. Add `coldlion.division` with the vendor's stable company/division identity. Add only approved missing typed fields to season/salesperson. Do not recreate the four already-complete master tables.
+Compare live `/customers`, `/vendors`, `/merchGroupHeaders`, `/merchGroupDetails`, `/seasons`, `/salespersons`, and `/divisions` definitions with production columns and the owner decision register. Add `coldlion.division` with the vendor's stable company/division identity. Add only approved missing typed fields to **salesperson**. **Add NOTHING to `coldlion.season`:** its projection is SETTLED by owner ruling on 2026-09-03 — the five stored columns (`company_code`, `division_code`, `season_code`, `created_time`, `mod_time`) are complete and all eight remaining fields are DECLINED. A seasons field disposition is not open work, and the owner is not to be re-asked for one. Do not recreate the four already-complete master tables.
 
 Use a new forward migration under `supabase/migrations/`; extend the SQL contract test created for #2094.
 
@@ -305,7 +305,14 @@ Implement separate current-state, history-backfill, and ongoing-history paths. A
 - hash the complete fetched record before projection for change detection;
 - alert on every terminal failure;
 - use bounded retry only for transient failures;
-- never log source rows or secrets.
+- never log source rows or secrets;
+- **query `/seasons` PER DIVISION, never unfiltered.** The unfiltered call is a confirmed
+  vendor defect: it returns the CW001 record in place of every other division's record, so
+  all 13 non-CW001 records (4 SP001, 1 EP001, 8 EH001) are ABSENT while the row count still
+  reads 21 of 21. The failure is silent, nothing in the envelope signals it, and there is no
+  workaround — the missing divisions' data is simply not in the response and cannot be
+  re-derived. Per-division queries return the correct records (CW001 = 8, SP001 = 4,
+  EP001 = 1, EH001 = 8). Confirmed live 2026-09-03; see `docs/coldlion-open-questions.md` §5.
 
 Backfill history from 2019-01-01 using the fixed grid. A window completes only through the stage/page-aware ledger contract from Step 4. Do not manufacture change history during backfill. Run data loads from the application/loader session after proving the target immediately before each write; structural issues own only migrations.
 
