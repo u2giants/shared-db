@@ -217,6 +217,12 @@ begin
     raise exception 'issue #2147: the probe holds % row(s) after the refusal pass, expected %', v_count, array_length(v_accepted, 1);
   end if;
 
-  drop table source_resolution_vocabulary_probe;
+  -- NO EXPLICIT DROP. `on commit drop` above already destroys the probe when the apply
+  -- transaction commits, so a `drop table` here would be redundant -- and the object
+  -- collision extractor (scripts/check-pr-object-collisions.mjs) deliberately exempts
+  -- `create temporary table` from its keys but not `drop table`, so spelling the drop
+  -- out emits a scratch name as a claimed object. Leaving it to `on commit drop` is
+  -- both the smaller statement and the honest one: a per-transaction scratch relation
+  -- is not an object this claim owns.
 end;
 $verify$;
