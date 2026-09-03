@@ -897,18 +897,112 @@ export function parseGhIncludeResponse(raw) {
   const boundary=/\r?\n\r?\n/.exec(text)
   if(!boundary)throw new LaneError('GitHub response had no header/body boundary; refusing to read it as a ref listing')
   const headerBlock=text.slice(0,boundary.index),body=text.slice(boundary.index+boundary[0].length)
-  const headers=Object.fromEntries(headerBlock.split(/\r?\n/).slice(1).map((line)=>{
+  // A REPEATED HEADER IS JOINED, NEVER OVERWRITTEN (#2152 review, glm-5.3).
+  // HTTP allows one field to be sent on several lines, and RFC 9110 says the
+  // combined value is those lines joined by ", ". Building this map with
+  // `Object.fromEntries` kept only the LAST line, so a `Link` line carrying
+  // rel="next" sent ahead of a second `Link` line would have vanished -- a
+  // silently missed truncation signal, which is the fail-OPEN direction this
+  // whole listing exists to prevent.
+  const headers={}
+  for(const line of headerBlock.split(/\r?\n/).slice(1)){
     const colon=line.indexOf(':')
-    return colon<0?null:[line.slice(0,colon).trim().toLowerCase(),line.slice(colon+1).trim()]
-  }).filter(Boolean))
+    if(colon<0)continue
+    const name=line.slice(0,colon).trim().toLowerCase(),value=line.slice(colon+1).trim()
+    headers[name]=name in headers?`${headers[name]}, ${value}`:value
+  }
   let rows
   try{rows=JSON.parse(body)}catch{throw new LaneError('GitHub returned unreadable JSON for a ref listing')}
   return {rows,headers}
 }
-// True when the response advertises a further page. A `Link` header with
+// Parse an RFC 8288 `Link` field value into `{uri,params}` entries.
+//
+// PARSED STRUCTURALLY, NOT BY REGULAR EXPRESSION, AND IT FAILS CLOSED (#2152
+// review, glm-5.3). The one-line regex this replaces could be fooled from both
+// directions: `[^,]*rel="?next"?` matched the text `rel=next` wherever it
+// appeared, INCLUDING inside a quoted parameter value such as
+// `; title="rel=next"`, and it silently answered "no next page" for any value
+// it simply did not recognise. Both are wrong for a truncation guard whose only
+// two honest answers are "this is the complete set" and "refuse".
+//
+// This walks the value once. A quoted string is consumed as a single unit --
+// only its closing quote ends it, and a backslash escapes the next character --
+// so text inside `title="rel=next"` is a VALUE and can never be mistaken for a
+// parameter name. Anything that does not fit the grammar THROWS: a missing `<`,
+// an unterminated `<...>` or quoted string, a parameter not introduced by `;`,
+// or an empty parameter name. Callers let that refusal propagate, because an
+// unparseable Link header must never read as "no further pages".
+export function parseLinkHeader(value) {
+  const text=String(value??'')
+  const refuse=(why)=>{throw new LaneError(`unparseable Link header (${why}); refusing to read it as "no further pages" (#2152)`)}
+  const space=/[ \t]/
+  const tokenChar=/[A-Za-z0-9!#$%&'*+.^_`|~-]/
+  const links=[]
+  let i=0
+  const skipSpace=()=>{while(i<text.length&&space.test(text[i]))i++}
+  skipSpace()
+  while(i<text.length){
+    if(text[i]!=='<')refuse('a link value must begin with <URI>')
+    const close=text.indexOf('>',i+1)
+    if(close<0)refuse('unterminated <URI>')
+    const uri=text.slice(i+1,close)
+    i=close+1
+    const params={}
+    for(;;){
+      skipSpace()
+      if(i>=text.length)break
+      if(text[i]===','){i++;skipSpace();break}
+      if(text[i]!==';')refuse('a link parameter must be introduced by ;')
+      i++
+      skipSpace()
+      const nameStart=i
+      while(i<text.length&&tokenChar.test(text[i]))i++
+      const name=text.slice(nameStart,i).toLowerCase()
+      if(!name)refuse('empty link parameter name')
+      skipSpace()
+      let parameterValue=''
+      if(text[i]==='='){
+        i++
+        skipSpace()
+        if(text[i]==='"'){
+          i++
+          let closed=false
+          while(i<text.length){
+            if(text.charCodeAt(i)===92){if(i+1>=text.length)refuse('trailing escape inside a quoted parameter value');parameterValue+=text[i+1];i+=2;continue} // 92 is a backslash: it escapes the next character, including a quote
+            if(text[i]==='"'){i++;closed=true;break}
+            parameterValue+=text[i];i++
+          }
+          if(!closed)refuse('unterminated quoted parameter value')
+        }else{
+          const valueStart=i
+          while(i<text.length&&!/[;,\s]/.test(text[i]))i++
+          parameterValue=text.slice(valueStart,i)
+        }
+      }
+      // RFC 8288: the FIRST occurrence of a parameter wins. A later repeat of
+      // the same name is ignored rather than overwriting it.
+      if(!(name in params))params[name]=parameterValue
+    }
+    links.push({uri,params})
+  }
+  return links
+}
+// True when the response advertises a further page. A `Link` field with
 // rel="next" is the ONLY signal GitHub gives that a listing is partial, so this
 // is the truncation detector -- not a pagination driver. See listReviewRefsPaged.
-export function hasNextPageLink(headers) { return /<[^>]+>\s*;[^,]*rel="?next"?/i.test(String(headers?.link??'')) }
+//
+// The field can arrive as several header lines. `parseGhIncludeResponse` joins
+// repeats with ", " per RFC 9110, and an array is accepted here too, so a
+// rel="next" on ANY of them is seen rather than only the last. `rel` is itself
+// a space-separated list of relation types, so it is compared token by token
+// and never by substring: `rel="nextish"` is not a next page. An unparseable
+// value throws rather than answering false.
+export function hasNextPageLink(headers) {
+  const raw=headers?.link
+  const value=(Array.isArray(raw)?raw:[raw]).filter((line)=>line!=null&&String(line).trim()!=='').map((line)=>String(line).trim()).join(', ')
+  if(!value)return false
+  return parseLinkHeader(value).some((link)=>String(link.params.rel??'').trim().toLowerCase().split(/\s+/).includes('next'))
+}
 export function isConfirmedRefAbsence(error) { return /HTTP 404/i.test(String(error?.message??'')) }
 
 export function currentMainMaxVersion(worktree, run = execFileSync) {

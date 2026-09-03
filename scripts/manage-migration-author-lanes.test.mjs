@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -5083,4 +5083,77 @@ test('parseGhIncludeResponse splits real gh -i output and lowercases header name
 
 test('parseGhIncludeResponse refuses output with no header/body boundary',()=>{
   assert.throws(()=>parseGhIncludeResponse('HTTP/2.0 200 OK'),/no header\/body boundary/)
+})
+
+
+// ---------------------------------------------------------------------------
+// The Link-header truncation detector (issue #2152, glm-5.3 review of #2155).
+//
+// hasNextPageLink is the load-bearing guard for a function whose failure
+// direction is fail-OPEN: a missed rel="next" is a silently truncated reviewer
+// audit, which reads as "no verdict". Three ways the first implementation could
+// have been fooled, none of them producible against GitHub today -- which is
+// not a property this repository controls.
+// ---------------------------------------------------------------------------
+
+const rawGhResponse=(headerLines,body)=>[...headerLines,'',JSON.stringify(body)].join('\r\n')
+const linkPagerFetch=(headers,rows=[])=>()=>({rows,headers})
+
+test('a repeated Link header line is JOINED, so rel="next" on the FIRST line still refuses',()=>{
+  // gh prints one line per header field. Building the map with
+  // Object.fromEntries kept only the LAST Link line, so this rel="next" was
+  // invisible and the listing returned as if it were the complete set.
+  const {headers,rows}=parseGhIncludeResponse(rawGhResponse([
+    'HTTP/2.0 200 OK',
+    'Content-Type: application/json',
+    'Link: <https://api.github.com/repositories/1/git/matching-refs/x?page=2>; rel="next"',
+    'Link: <https://api.github.com/repositories/1/git/matching-refs/x?page=9>; rel="last"',
+  ],[{ref:'refs/db-review-assignments/1-2-abc',object:{sha:'abc'}}]))
+  assert.equal(rows.length,1)
+  assert.match(headers.link,/rel="next".*rel="last"/,'both lines must survive, joined per RFC 9110')
+  assert.equal(hasNextPageLink(headers),true)
+  assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,linkPagerFetch(headers)),/paginated Link header/)
+})
+
+test('an array of Link values is also searched in full, not just its last entry',()=>{
+  assert.equal(hasNextPageLink({link:['<https://a/x?page=2>; rel="next"','<https://a/x?page=1>; rel="prev"']}),true)
+})
+
+test('rel=next inside a QUOTED parameter value is not a next page and must not refuse',()=>{
+  // `title="rel=next"` is a value, not a parameter. The old regex matched the
+  // text wherever it sat and refused a complete listing -- a false alarm on a
+  // guard that must only fire on a real further page.
+  const headers={link:'<https://a/x?page=1>; rel="prev"; title="rel=next"'}
+  assert.equal(hasNextPageLink(headers),false)
+  const rows=githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,linkPagerFetch(headers,[{ref:'refs/db-review-assignments/1-2-abc',object:{sha:'abc'}}]))
+  assert.equal(rows.length,1)
+})
+
+test('rel is matched as a whitespace-separated token list, never as a substring',()=>{
+  assert.equal(hasNextPageLink({link:'<https://a/x>; rel="nextish"'}),false)
+  assert.equal(hasNextPageLink({link:'<https://a/x>; rel="noopener next"'}),true)
+  assert.equal(hasNextPageLink({link:'<https://a/x>; rel=next'}),true)
+})
+
+test('an unparseable Link value REFUSES rather than reading as "no further pages"',()=>{
+  for(const broken of ['garbage','<https://a/x; rel="next"','<https://a/x>; rel="next','<https://a/x>; = "next"','<https://a/x> rel="next"']){
+    assert.throws(()=>hasNextPageLink({link:broken}),/unparseable Link header/,`must refuse: ${broken}`)
+    assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,linkPagerFetch({link:broken})),/unparseable Link header/)
+  }
+})
+
+test('an absent or empty Link header is simply no further pages',()=>{
+  assert.equal(hasNextPageLink({}),false)
+  assert.equal(hasNextPageLink({link:''}),false)
+  assert.equal(hasNextPageLink({link:'   '}),false)
+  assert.equal(hasNextPageLink(undefined),false)
+})
+
+test('parseLinkHeader reads uri and parameters structurally',()=>{
+  const links=parseLinkHeader('<https://a/x?page=2>; rel="next"; title="a, b; c", <https://a/x?page=9>; rel="last"')
+  assert.equal(links.length,2)
+  assert.equal(links[0].uri,'https://a/x?page=2')
+  assert.equal(links[0].params.rel,'next')
+  assert.equal(links[0].params.title,'a, b; c','a comma or semicolon inside quotes must not split the value')
+  assert.equal(links[1].params.rel,'last')
 })
