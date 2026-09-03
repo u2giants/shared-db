@@ -131,12 +131,10 @@ comment on column coldlion.inventory.warehouse_sku is
 comment on column coldlion.inventory.inventory_qty is
   'Signed. Negative quantities are live in the source (8 rows in the 8,754-row population) and are recorded as sent, not clamped.';
 
-create index coldlion_inventory_item_no_idx
-  on coldlion.inventory (company_code, item_no);
-create index coldlion_inventory_warehouse_idx
-  on coldlion.inventory (company_code, warehouse_code);
-create index coldlion_inventory_run_idx
-  on coldlion.inventory (run_id);
+-- No secondary indexes are created here. The declared write scope for issue #2175 is
+-- these two tables and nothing else, both tables are empty until a loader exists, and
+-- the phases 2-6 landing tables carry none either. Index them when a loader or a
+-- consumer contract shows a real access path, under its own claim.
 
 -- -------------------------------------------------------------------------------------
 -- coldlion.prod_tracking - GET /prodtracking (BARE ARRAY, no envelope, inert filters)
@@ -231,30 +229,17 @@ comment on column coldlion.prod_tracking.ship_date is
 comment on column coldlion.prod_tracking.customer_desc is
   'Customer NAME as sent by ColdLion. Landing-layer evidence only: this schema has no application grants, and no promotion may expose it without an owner ruling.';
 
-create index coldlion_prod_tracking_vendor_idx
-  on coldlion.prod_tracking (company_code, vendor_code);
-create index coldlion_prod_tracking_sales_order_idx
-  on coldlion.prod_tracking (company_code, sales_order_no);
-create index coldlion_prod_tracking_due_date_idx
-  on coldlion.prod_tracking (due_date);
-create index coldlion_prod_tracking_run_idx
-  on coldlion.prod_tracking (run_id);
-
 -- -------------------------------------------------------------------------------------
 -- No application role may read or mutate the landing layer (spine rule, unchanged).
+--
+-- Written out statically, one statement per table, rather than as the `execute format`
+-- loop the phases 2-6 migration used. Two named tables need no dynamic SQL, and every
+-- statement below is readable in the diff and verifiable in the catalog by name.
 -- -------------------------------------------------------------------------------------
-do $access$
-declare r record;
-begin
-  for r in
-    select c.oid::regclass as relation_name
-    from pg_class c join pg_namespace n on n.oid = c.relnamespace
-    where n.nspname = 'coldlion' and c.relkind = 'r'
-      and c.relname in ('inventory','prod_tracking')
-  loop
-    execute format('alter table %s enable row level security', r.relation_name);
-    execute format('revoke all on table %s from public, anon, authenticated', r.relation_name);
-    execute format('grant all on table %s to service_role', r.relation_name);
-  end loop;
-end
-$access$;
+alter table coldlion.inventory enable row level security;
+revoke all on table coldlion.inventory from public, anon, authenticated;
+grant all on table coldlion.inventory to service_role;
+
+alter table coldlion.prod_tracking enable row level security;
+revoke all on table coldlion.prod_tracking from public, anon, authenticated;
+grant all on table coldlion.prod_tracking to service_role;
