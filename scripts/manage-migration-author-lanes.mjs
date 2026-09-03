@@ -2019,7 +2019,12 @@ export function parseReviewLease(commit){
   //     no `slot=` token at all, so absent is genuinely UNKNOWN, not slot 1.
   //     Same reasoning as parseReviewCursor: reading that silence as slot 1 is
   //     how a slot-2 replacement was once returned as slot 1.
-  //   * legacy `generation=` leases never carried a slot at all -- UNKNOWN.
+  //   * legacy `generation=` leases are SLOT 1 (round 3). Nothing writes that
+  //     form any anymore -- it is read-only history from before review slots
+  //     existed at all, so slot 1 is the only slot such a lease could ever have
+  //     belonged to. Saying so keeps those leases freed by their own verdict, as
+  //     they always have been; leaving them UNKNOWN under the round-3 fail-closed
+  //     liveness sentinel would have pinned them busy forever.
   // `slot === null` means "not stated", and every caller falls back to the
   // pre-#2208 any-slot question for those, so no legacy lease changes behavior.
   const leaseMatch=/^db-coordination reviewer-lease generation=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40}) sequence=(\d+)$/i.exec(message)
@@ -2028,7 +2033,7 @@ export function parseReviewLease(commit){
   const match=leaseMatch??cursorMatch??replacementMatch
   if(!match)throw new LaneError('active reviewer lease is malformed')
   const cursorForm=!leaseMatch
-  const slot=leaseMatch?null:(match[6]?Number(match[6]):(cursorMatch?1:null))
+  const slot=leaseMatch?1:(match[6]?Number(match[6]):(cursorMatch?1:null))
   const lease={generation:Number(match[1]),reviewer:match[2],issue:Number(match[3]),pr:Number(match[4]),headSha:match[5],sequence:Number(cursorForm?match[1]:match[6]),slot}
   if(!Number.isSafeInteger(lease.generation)||lease.generation<1||!Number.isSafeInteger(lease.sequence)||lease.sequence<1||!REVIEWERS.some((row)=>row.name===lease.reviewer))throw new LaneError('active reviewer lease is malformed')
   if(lease.slot!==null&&(!Number.isSafeInteger(lease.slot)||lease.slot<1))throw new LaneError('active reviewer lease is malformed')
