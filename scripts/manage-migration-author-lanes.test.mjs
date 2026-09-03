@@ -1952,6 +1952,30 @@ test('capacity report classifies free, live, stale, aged, and unknown leases wit
   assert.deepEqual(withFree.summary,{total:4,free:1,live:2,reclaimable:1,unknown:0})
 })
 
+test('capacity report distinguishes an unreadable verdict from no verdict and keeps the other rows visible (issue #2157)',()=>{
+  const io=reviewIo(),reviewer=ACTIVE_REVIEWERS[0],issue=2157,pr=2239,headSha='a7'.repeat(20)
+  const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=1 reviewer=${reviewer.name} issue=${issue} pr=${pr} head=${headSha}`)
+  const snapshot=new Map([[reviewActiveRef(reviewer.name),{sha,commit:{...io.getCommit(sha),committedDate:'2026-09-03T12:00:00Z'}}]])
+  const states=new Map([[`${issue}:${pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:headSha}},evidence:[]}]])
+  io.readActiveReviewLeases=()=>snapshot
+  io.readReviewStates=()=>states
+  const listRefs=io.listRefs;let verdictReads=0
+  io.listRefs=(prefix)=>{
+    if(prefix.startsWith(DURABLE_VERDICT_REF_NAMESPACE)&&++verdictReads===2)throw new Error('GitHub verdict namespace unreadable')
+    return listRefs(prefix)
+  }
+  const report=reviewerCapacityReport(io,new Date('2026-09-03T13:00:00Z'))
+  const row=report.reviewers.find((entry)=>entry.reviewer===reviewer.name)
+  assert.equal(row.verdictPresent,null)
+  assert.equal(row.verdictReadError,'GitHub verdict namespace unreadable')
+  assert.equal(row.classification,'unknown')
+  assert.equal(report.summary.unknown,1)
+  assert.equal(report.reviewers.length,ACTIVE_REVIEWERS.length,'one unreadable lease must not hide the other reviewers')
+  const free=report.reviewers.find((entry)=>entry.held===false)
+  assert.equal(free.verdictPresent,false)
+  assert.equal(free.verdictReadError,null)
+})
+
 test('release refuses a verdict or a changed lease under the mutex',()=>{
   const verdictIo=failedReviewIo()
   giveVerdict(verdictIo,{issue:failedReview.issue,pr:failedReview.pr,headSha:failedReview.headSha})

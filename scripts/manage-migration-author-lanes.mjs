@@ -2845,18 +2845,18 @@ export function reviewerCapacityReport(io=githubIo,now=new Date()){
   const staleByReviewer=new Map(busy.stale.map((row)=>[row.assignment.reviewer,row]))
   const rows=ACTIVE_REVIEWERS.map((reviewer)=>{
     const record=busy.leases.get(reviewer.name)
-    if(!record)return {reviewer:reviewer.name,held:false,issue:null,pr:null,headSha:null,sequence:null,heldSinceIso:null,ageHours:null,prState:null,headMatches:null,verdictPresent:false,classification:'free'}
+    if(!record)return {reviewer:reviewer.name,held:false,issue:null,pr:null,headSha:null,sequence:null,heldSinceIso:null,ageHours:null,prState:null,headMatches:null,verdictPresent:false,verdictReadError:null,classification:'free'}
     const state=busy.states?.get(`${record.lease.issue}:${record.lease.pr}`),pr=state?.pr
-    let verdictPresent=false
-    try{verdictPresent=hasVerdictForHead(record.lease.issue,record.lease.pr,record.lease.headSha,io,leaseVerdictOptions(record.lease))}catch{verdictPresent=false}
+    let verdictPresent=false,verdictReadError=null
+    try{verdictPresent=hasVerdictForHead(record.lease.issue,record.lease.pr,record.lease.headSha,io,leaseVerdictOptions(record.lease))}catch(error){verdictPresent=null;verdictReadError=String(error?.message??error)}
     const ageHours=reviewLeaseAgeHours(record.heldSince,now)
     let classification
-    if(!state||!pr)classification='unknown'
+    if(verdictReadError!==null||!state||!pr)classification='unknown'
     else if(staleByReviewer.has(reviewer.name))classification='stale-reclaimable'
     else if(ageHours===null)classification='unknown'
     else if(ageHours>=REVIEW_LEASE_SUSPECT_HOURS)classification='suspect-aged'
     else classification='live'
-    return {reviewer:reviewer.name,held:true,issue:record.lease.issue,pr:record.lease.pr,headSha:record.lease.headSha,sequence:record.lease.sequence,heldSinceIso:record.heldSince??null,ageHours:ageHours===null?null:Number(ageHours.toFixed(2)),prState:pr?.state??null,headMatches:pr?pr.head?.sha===record.lease.headSha:null,verdictPresent,classification}
+    return {reviewer:reviewer.name,held:true,issue:record.lease.issue,pr:record.lease.pr,headSha:record.lease.headSha,sequence:record.lease.sequence,heldSinceIso:record.heldSince??null,ageHours:ageHours===null?null:Number(ageHours.toFixed(2)),prState:pr?.state??null,headMatches:pr?pr.head?.sha===record.lease.headSha:null,verdictPresent,verdictReadError,classification}
   })
   return {generatedAt:new Date(now).toISOString(),advisorySuspectHours:REVIEW_LEASE_SUSPECT_HOURS,summary:{total:rows.length,free:rows.filter((row)=>row.classification==='free').length,live:rows.filter((row)=>['live','suspect-aged'].includes(row.classification)).length,reclaimable:rows.filter((row)=>row.classification==='stale-reclaimable').length,unknown:rows.filter((row)=>row.classification==='unknown').length},reviewers:rows}
 }
