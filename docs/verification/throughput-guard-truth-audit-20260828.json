@@ -554,6 +554,13 @@
       "line_sha256": "cc5fe0d1f54bb8415b7b1592e5806f9f343c1ee0adb24fb5da8ce0a61579b227"
     },
     {
+      "site": "scripts/historical-item-mg-reclassification/lib/private-path.mjs:20",
+      "disposition": "excluded",
+      "reason": "Comment describing this guard file own missing-directory probing behavior; not a throughput/lease guard call site.",
+      "semantic_key": "scripts/historical-item-mg-reclassification/lib/private-path.mjs:d4cc6726bf4b21dabbffbe9a211c359b032e506f237b089c390cc1e9396c5806:1",
+      "line_sha256": "d4cc6726bf4b21dabbffbe9a211c359b032e506f237b089c390cc1e9396c5806"
+    },
+    {
       "site": "scripts/historical-item-mg-reclassification/lib/verify.mjs:44",
       "disposition": "excluded",
       "reason": "This line reports a read-only post-apply verification failure for the reclassification executor; it describes a live database row or function that is absent and makes no throughput derivability claim.",
@@ -1681,7 +1688,7 @@
       "line_sha256": "c306e35745386b717b583be41a182e378d17ce899e352842a4d0cfbae51ccc3c"
     }
   ],
-  "call_site_count": 238,
-  "call_site_sha256": "ee164962881e1a35aaf88654099ddfe8d8c14ac2303cc24c1c62c869c1432a91",
+  "call_site_count": 239,
+  "call_site_sha256": "346a87083ccfb19918b90da7ec87177e6063cdd71596e9979e8c300a9b6e6186",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
