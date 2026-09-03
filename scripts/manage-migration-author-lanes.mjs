@@ -55,18 +55,35 @@ export const REVIEW_ACTIVE_CUTOVER_REF = 'refs/db-coordination/reviewer-index-cu
 export const REVIEW_OPERATION_REQUEST_LIMIT = 25, REVIEW_MUTEX_SECTION_RESERVE = 15 // slot 2 = 10 pre-mutex + this reserve; slot 1 = 7 + reserve. RE-DERIVED, NOT WIDENED (issue #2075): every reviewer operation now proves 'a verdict exists for this head' from the create-only durable verdict refs instead of from comment prose. That costs exactly ONE listing of refs/db-review-verdict pre-mutex (cached for the rest of the operation by reviewOperationIo) and ONE uncached re-listing inside the mutex section, so each half grew by exactly one request. Measured totals moved 21->23 (slot-2 assignment), 18->20 (slot-2 replacement), and 8->9 pre-mutex for the first replacement, with the post-mutex replacement section going 10->11. The bounded per-PR exclusion read is now inside the mutex so it cannot race assignment. This entry gate refuses to acquire the mutex unless the whole mutex-held section still fits. Release is guaranteed separately by cleanupReserve. Derivation: docs/verification/reviewer-assignment-api-budget-2026-08-28.md (#1812, #1833)
 export const REVIEW_QUOTA_RESERVE = 100
 export const REVIEW_LEASE_SUSPECT_HOURS = 24 // Advisory visibility only. Age never releases a lease.
-// Page ceiling for listReviewRefsPaged. It is a REFUSAL, not a truncation: past
+// Row ceiling for listReviewRefsPaged. It is a REFUSAL, not a truncation: past
 // this the reviewer audit stops rather than reporting a partial view of the
-// durable review history (issue #1798).
+// durable review history (issue #1798), and it REPLACES the old page ceiling
+// REVIEW_REF_PAGE_LIMIT, which counted a unit `git/matching-refs` does not
+// have (issue #2152).
 //
-// DO NOT read 6 pages as 600 refs of headroom per namespace. The page limit is
-// not the real ceiling -- the wire-request budget is, and the two namespaces
-// SHARE it, one counted request per page each. Against today's budget the
-// cutover has room for roughly 500 assignment refs and 200 replacement refs
-// combined, not 600 apiece, and today's repository already holds 370 and 106.
-// The headroom this constant appears to grant is illusory; the operation will
-// hit the request budget first (issue #1798 round 3, glm-5.3 Medium).
-export const REVIEW_REF_PAGE_LIMIT = 6
+// SIZED AGAINST TWO NUMBERS, AND NEITHER OF THEM IS THE WIRE BUDGET. The old
+// page ceiling was accompanied by a warning that the request budget, not the
+// page count, was the real ceiling, because each page cost one counted request.
+// That is no longer true: `git/matching-refs` returns the complete matching set
+// in ONE response, so this listing costs exactly one counted request whatever
+// the namespace holds, and the budget cannot be the binding constraint on its
+// size. What replaces it:
+//   - FLOOR -- today's largest namespace. refs/db-review-assignments held 726
+//     refs on 2026-09-02 (refs/db-review-failures 235, refs/db-review-replacements
+//     229, refs/db-review-verdict 100). A ceiling at or under 726 would refuse
+//     on day one.
+//   - CEILING -- 1000, the smallest hard result cap GitHub imposes anywhere in
+//     its REST API. `git/matching-refs` documents no cap and demonstrably
+//     returned all 726 rows in a single response, but an undocumented
+//     server-side cap is the ONE form of truncation the Link-header guard below
+//     cannot see. Stopping at 1000 means this listing refuses BEFORE any
+//     plausible silent cap could shorten it.
+// That leaves 274 refs of headroom on today's largest namespace. When this does
+// refuse, the answer is to RETIRE refs -- refs/db-review-retired-verdicts exists
+// for exactly that -- and NOT to raise the number: raising it past 1000 trades a
+// loud refusal for a possibly silent truncation, which is the fail-OPEN
+// direction for reviewer release and replacement.
+export const REVIEW_REF_ROW_LIMIT = 1000
 //
 // `readsRepository` RECORDS A FACT ABOUT THE WRAPPER, NOT A PREFERENCE (#2078).
 // `true` means the wrapper hands its model a real, self-contained checkout of the
@@ -866,6 +883,175 @@ function ghPaginated(endpoint) {
   if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) throw new LaneError(`GitHub pagination for ${endpoint} was incomplete or malformed`)
   return pages.flat()
 }
+// Split `gh api -i` output into its response headers and its parsed JSON body.
+// The header block is separated from the body by the first blank line; GitHub's
+// JSON body never contains one, so the FIRST boundary is always the right one.
+// Header names are lowercased because HTTP header names are case-insensitive and
+// gh prints them in GitHub's own casing.
+// ONE counted request, headers included, for listReviewRefsPaged. Deliberately
+// not `--paginate`: that is one gh invocation making an unknown number of HTTP
+// requests, which the reviewer wire budget could neither see nor charge.
+function ghRefListing(endpoint) { return parseGhIncludeResponse(gh(['api','-i',endpoint])) }
+export function parseGhIncludeResponse(raw) {
+  const text=String(raw??'')
+  const boundary=/\r?\n\r?\n/.exec(text)
+  if(!boundary)throw new LaneError('GitHub response had no header/body boundary; refusing to read it as a ref listing')
+  const headerBlock=text.slice(0,boundary.index),body=text.slice(boundary.index+boundary[0].length)
+  // A REPEATED HEADER IS JOINED, NEVER OVERWRITTEN (#2152 review, glm-5.3).
+  // HTTP allows one field to be sent on several lines, and RFC 9110 says the
+  // combined value is those lines joined by ", ". Building this map with
+  // `Object.fromEntries` kept only the LAST line, so a `Link` line carrying
+  // rel="next" sent ahead of a second `Link` line would have vanished -- a
+  // silently missed truncation signal, which is the fail-OPEN direction this
+  // whole listing exists to prevent.
+  const headers={}
+  for(const line of headerBlock.split(/\r?\n/).slice(1)){
+    const colon=line.indexOf(':')
+    if(colon<0)continue
+    const name=line.slice(0,colon).trim().toLowerCase(),value=line.slice(colon+1).trim()
+    headers[name]=name in headers?`${headers[name]}, ${value}`:value
+  }
+  let rows
+  try{rows=JSON.parse(body)}catch{throw new LaneError('GitHub returned unreadable JSON for a ref listing')}
+  return {rows,headers}
+}
+// Parse an RFC 8288 `Link` field value into `{uri,params}` entries.
+//
+// PARSED STRUCTURALLY, NOT BY REGULAR EXPRESSION, AND IT FAILS CLOSED (#2152
+// review, glm-5.3). The one-line regex this replaces could be fooled from both
+// directions: `[^,]*rel="?next"?` matched the text `rel=next` wherever it
+// appeared, INCLUDING inside a quoted parameter value such as
+// `; title="rel=next"`, and it silently answered "no next page" for any value
+// it simply did not recognise. Both are wrong for a truncation guard whose only
+// two honest answers are "this is the complete set" and "refuse".
+//
+// This walks the value once. A quoted string is consumed as a single unit --
+// only its closing quote ends it, and a backslash escapes the next character --
+// so text inside `title="rel=next"` is a VALUE and can never be mistaken for a
+// parameter name. Anything that does not fit the grammar THROWS: a missing `<`,
+// an unterminated `<...>` or quoted string, a parameter not introduced by `;`,
+// an empty parameter name, a link value carrying no `rel` relation at all, a
+// parameter carrying NO `=` at all, or an unquoted
+// value that is empty or holds a character outside the token grammar (a stray
+// quote above all). Callers let that refusal propagate, because an
+// unparseable Link header must never read as "no further pages".
+export function parseLinkHeader(value) {
+  const text=String(value??'')
+  const refuse=(why)=>{throw new LaneError(`unparseable Link header (${why}); refusing to read it as "no further pages" (#2152)`)}
+  const space=/[ \t]/
+  const tokenChar=/[A-Za-z0-9!#$%&'*+.^_`|~-]/
+  // AN ABSENT OR EMPTY FIELD IS THE ONLY "NO FURTHER PAGES" ANSWER. Everything
+  // else must be PROVEN well formed before this returns anything at all.
+  if(!text.trim())return []
+  // PHASE 1 -- PROVE THE OVERALL SHAPE, THEN SPLIT.
+  // Four review rounds found four different fail-OPEN holes in a single-pass
+  // scanner that accepted whatever it had not specifically objected to (#2152
+  // reviews 1-4: a valueless parameter, an unquoted value swallowing a quote, a
+  // value with no relation, and an unterminated `<` whose `>` search ran past
+  // the end of its own link value and ate the next one). The shape is now
+  // inverted: split ONLY on commas that sit outside <URI> and outside a quoted
+  // string, and refuse anything this walk cannot fully account for. A `,` or a
+  // `;` inside a URI or inside a quoted parameter value is ordinary text and
+  // must survive; a second `<` before a `>` proves an earlier <URI> was never
+  // closed, which is exactly the hole that let one value swallow another.
+  const values=[]
+  let current=''
+  let state='outside'
+  for(let i=0;i<text.length;i++){
+    const ch=text[i]
+    if(state==='uri'){
+      if(ch==='<')refuse('a second < inside <URI>, so an earlier <URI> was never closed')
+      if(ch==='>')state='outside'
+      current+=ch
+      continue
+    }
+    if(state==='quoted'){
+      if(text.charCodeAt(i)===92){if(i+1>=text.length)refuse('trailing escape inside a quoted parameter value');current+=ch+text[i+1];i++;continue} // 92 is a backslash: it escapes the next character, including a quote
+      if(ch==='"')state='outside'
+      current+=ch
+      continue
+    }
+    if(ch==='<'){state='uri';current+=ch;continue}
+    if(ch==='"'){state='quoted';current+=ch;continue}
+    if(ch===','){values.push(current);current='';continue}
+    current+=ch
+  }
+  if(state==='uri')refuse('unterminated <URI>')
+  if(state==='quoted')refuse('unterminated quoted parameter value')
+  values.push(current)
+  // PHASE 2 -- EVERY VALUE MUST BE EXACTLY `<URI>` FOLLOWED BY `; name=value`.
+  const links=[]
+  for(const rawValue of values){
+    const v=rawValue.trim()
+    if(!v)refuse('an empty link value (a leading, doubled or trailing comma)')
+    if(v[0]!=='<')refuse('a link value must begin with <URI>')
+    const close=v.indexOf('>')
+    if(close<0)refuse('unterminated <URI>')
+    const uri=v.slice(1,close)
+    const params={}
+    let i=close+1
+    const skipSpace=()=>{while(i<v.length&&space.test(v[i]))i++}
+    skipSpace()
+    while(i<v.length){
+      // Anything between the closing `>` (or the end of a parameter) and the
+      // next `;` is leftover text this parser cannot account for: refuse.
+      if(v[i]!==';')refuse(`leftover text in a link value at ${JSON.stringify(v.slice(i))}`)
+      i++
+      skipSpace()
+      const nameStart=i
+      while(i<v.length&&tokenChar.test(v[i]))i++
+      const name=v.slice(nameStart,i).toLowerCase()
+      if(!name)refuse('empty link parameter name')
+      skipSpace()
+      // RFC 8288 defines link-param as `token BWS "=" BWS ( token / quoted-string )`;
+      // there is no valueless form (#2152 review 2).
+      if(v[i]!=='=')refuse(`link parameter "${name}" has no value`)
+      i++
+      skipSpace()
+      let parameterValue=''
+      if(v[i]==='"'){
+        i++
+        let closed=false
+        while(i<v.length){
+          if(v.charCodeAt(i)===92){if(i+1>=v.length)refuse('trailing escape inside a quoted parameter value');parameterValue+=v[i+1];i+=2;continue} // 92 is a backslash
+          if(v[i]==='"'){i++;closed=true;break}
+          parameterValue+=v[i];i++
+        }
+        if(!closed)refuse('unterminated quoted parameter value')
+      }else{
+        // An unquoted value is a token, and a token holds no quote (#2152 review 2).
+        const valueStart=i
+        while(i<v.length&&tokenChar.test(v[i]))i++
+        parameterValue=v.slice(valueStart,i)
+        if(!parameterValue)refuse(`empty unquoted value for link parameter "${name}"`)
+      }
+      // RFC 8288: the FIRST occurrence of a parameter wins. A later repeat of
+      // the same name is ignored rather than overwriting it.
+      if(!(name in params))params[name]=parameterValue
+      skipSpace()
+    }
+    // RFC 8288 requires every link value to carry a `rel` (#2152 review 3).
+    if(!String(params.rel??'').trim())refuse('a link value carries no rel relation')
+    links.push({uri,params})
+  }
+  return links
+}
+// True when the response advertises a further page. A `Link` field with
+// rel="next" is the ONLY signal GitHub gives that a listing is partial, so this
+// is the truncation detector -- not a pagination driver. See listReviewRefsPaged.
+//
+// The field can arrive as several header lines. `parseGhIncludeResponse` joins
+// repeats with ", " per RFC 9110, and an array is accepted here too, so a
+// rel="next" on ANY of them is seen rather than only the last. `rel` is itself
+// a space-separated list of relation types, so it is compared token by token
+// and never by substring: `rel="nextish"` is not a next page. An unparseable
+// value throws rather than answering false.
+export function hasNextPageLink(headers) {
+  const raw=headers?.link
+  const value=(Array.isArray(raw)?raw:[raw]).filter((line)=>line!=null&&String(line).trim()!=='').map((line)=>String(line).trim()).join(', ')
+  if(!value)return false
+  return parseLinkHeader(value).some((link)=>String(link.params.rel??'').trim().toLowerCase().split(/\s+/).includes('next'))
+}
 export function isConfirmedRefAbsence(error) { return /HTTP 404/i.test(String(error?.message??'')) }
 
 export function currentMainMaxVersion(worktree, run = execFileSync) {
@@ -1155,21 +1341,52 @@ export const githubIo = {
   // assignment refs as of 2026-08-29), so the cutover audit could never list
   // them at all: it died on the 100-row refusal before reading anything.
   //
-  // This walks explicit pages instead, so every page is a counted request the
-  // wire budget can see, and stops at REVIEW_REF_PAGE_LIMIT with a LOUD
-  // refusal rather than returning a partial list. A truncated audit is the
-  // one outcome that must never happen quietly here: it would look like
-  // "no live review to protect" and flip the cutover on blind.
-  listReviewRefsPaged(prefix) {
+  // `git/matching-refs` IS NOT A PAGINATED ENDPOINT (measured 2026-09-02,
+  // issue #2152). It ignores BOTH `per_page` and `page` and sends no Link
+  // header: one request returns the complete matching set. Against this
+  // repository, `?per_page=5`, `?per_page=100` and no query at all each
+  // returned the same 726 refs for refs/db-review-assignments, and
+  // `?per_page=100&page=3` on refs/db-review-verdict returned the same 100 rows
+  // as page 1 for a namespace holding exactly 100 refs in total.
+  //
+  // The previous implementation walked `&page=N`, so EVERY request was page 1.
+  // The `chunk.length<100` early return could therefore only fire for a
+  // namespace holding fewer than 100 refs; at 100 or more the loop ran to the
+  // page ceiling and refused, and had it not refused it would have returned the
+  // first 100 rows repeated once per page. refs/db-review-verdict crossed 100
+  // refs and took the whole governed reviewer system down with it: no reviewer
+  // could be assigned or replaced for any pull request.
+  //
+  // WIRE COST: exactly ONE counted request per call, for any namespace size --
+  // down from up to six. That is precisely what the REVIEW_OPERATION_REQUEST_LIMIT
+  // derivation already assumed each verdict listing costs ("ONE listing of
+  // refs/db-review-verdict pre-mutex ... and ONE uncached re-listing inside the
+  // mutex section"), so the measured 23-of-25 slot-2 totals stand, and unlike
+  // the page walk this cost can no longer drift upward as refs accumulate.
+  // `gh api -i` is used rather than `--paginate` deliberately: `--paginate` is a
+  // single gh invocation that may make many HTTP requests the wire budget cannot
+  // see or charge for, whereas `-i` is one request, charged once, whose headers
+  // are readable.
+  //
+  // TRUNCATION IS DETECTED, NOT ASSUMED. A silently short list reads as "no
+  // verdict", which is the fail-OPEN direction for reviewer release and
+  // replacement, so both guards below are LOUD refusals and neither ever
+  // returns a partial list:
+  //   1. A `Link` header advertising rel="next" means GitHub has begun
+  //      paginating this endpoint. We do not guess at how; we refuse, and the
+  //      fix is to teach this function to follow the Link chain (charging one
+  //      counted request per hop) rather than to ignore the header.
+  //   2. REVIEW_REF_ROW_LIMIT rows or more, which is where an undocumented
+  //      server-side cap -- the one truncation a Link header cannot reveal --
+  //      would start being plausible. See that constant for the derivation.
+  // Duplicates are impossible by construction now that there is one response.
+  listReviewRefsPaged(prefix, fetch = ghRefListing) {
     const short=prefix.replace(/^refs\//,'')
-    const rows=[]
-    for(let page=1;page<=REVIEW_REF_PAGE_LIMIT;page++){
-      const chunk=ghJson(['api',`repos/${REPO}/git/matching-refs/${short}?per_page=100&page=${page}`])
-      if(!Array.isArray(chunk))throw new LaneError(`GitHub page ${page} for ${prefix} was incomplete or malformed`)
-      rows.push(...chunk.map((row)=>({ref:row.ref,sha:row.object?.sha})).filter((row)=>row.sha))
-      if(chunk.length<100)return rows
-    }
-    throw new LaneError(`${prefix} exceeded ${REVIEW_REF_PAGE_LIMIT} pages of 100 refs; refusing a possibly truncated reviewer audit`)
+    const {rows,headers}=fetch(`repos/${REPO}/git/matching-refs/${short}`)
+    if(!Array.isArray(rows))throw new LaneError(`GitHub listing for ${prefix} was incomplete or malformed`)
+    if(hasNextPageLink(headers))throw new LaneError(`${prefix} now returns a paginated Link header, so this single listing is no longer the complete set; refusing a possibly truncated reviewer audit (#2152)`)
+    if(rows.length>=REVIEW_REF_ROW_LIMIT)throw new LaneError(`${prefix} returned ${rows.length} refs, at or past the ${REVIEW_REF_ROW_LIMIT}-ref ceiling; refusing a possibly truncated reviewer audit. Retire refs rather than raising the ceiling (#2152)`)
+    return rows.map((row)=>({ref:row.ref,sha:row.object?.sha})).filter((row)=>row.sha)
   },
   // A DELETE is never replayed after a transport failure. The first request may
   // have succeeded and a new owner may acquire the fixed coordination ref
@@ -2310,8 +2527,8 @@ export function gateAuthorizes(evidence,headSha,bundleId,readAssignments){
 // `reviewOperationIo` caches it for the rest of that operation.
 export const DURABLE_VERDICT_REF_NAMESPACE = 'refs/db-review-verdict'
 function readDurableVerdictRefs(io){
-  // `listReviewRefsPaged` walks explicit pages and REFUSES past
-  // REVIEW_REF_PAGE_LIMIT rather than returning a partial list; plain `listRefs`
+  // `listReviewRefsPaged` reads the whole namespace in one request and REFUSES
+  // past REVIEW_REF_ROW_LIMIT rather than returning a partial list; plain `listRefs`
   // refuses at 100 rows inside a wire budget. Either refusal is loud, and loud is
   // the only safe failure here: a silently short list reads as "no verdict",
   // which is the fail-OPEN direction for release and replacement.
