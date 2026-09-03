@@ -1,0 +1,78 @@
+# Offline guard tests for the historical MG01-MG03 reclassification tooling (#1984).
+#
+# Design rules, matched to tools-offline-tests.yml:
+#   1. NO `paths:` filter. A narrow filter reports a stale green — a change
+#      outside it skips the job while the PR still shows all checks passed.
+#   2. It GLOBS scripts/historical-item-mg-reclassification/*.test.mjs rather
+#      than listing filenames, so a new test file is wired into CI the moment it
+#      is committed.
+#   3. Every test must pass OFFLINE with NO secrets and NO database contact. Do
+#      not add a step that needs SUPABASE_*, a connection string, or a project
+#      ref. This suite guards a tool that can rewrite production rows; it must
+#      never be able to reach one.
+#
+# This is a separate workflow rather than a step inside tools-offline-tests.yml
+# so that the reclassification lane cannot be turned green or red by unrelated
+# tooling changes, and so the empty-glob failure below refers to exactly one
+# directory.
+
+name: Historical MG Reclassification Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: historical-mg-reclassification-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Historical MG reclassification offline tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Refuse to run with any database connection present
+        run: |
+          set -euo pipefail
+          if [ -n "${MGRC_DATABASE_URL:-}" ] || [ -n "${MGRC_PG_MODULE:-}" ]; then
+            echo "::error::These are offline contract tests. No database connection may be present." >&2
+            exit 1
+          fi
+
+      - name: Run every reclassification guard test
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          FILES=(scripts/historical-item-mg-reclassification/*.test.mjs)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "::error::No reclassification test files found — the glob or the checkout is wrong." >&2
+            exit 1
+          fi
+          echo "Running ${#FILES[@]} test files:"
+          printf '  %s\n' "${FILES[@]}"
+          node --test "${FILES[@]}"
+
+      - name: Prove the locked cutoff is still a constant
+        # The May 14, 2025 cutoff is locked by section 8 of the plan and is not
+        # the implementer's to relax. If someone turns it into a parameter, the
+        # guard test above would be edited alongside it — so this step greps the
+        # constant directly and fails independently of the suite.
+        run: |
+          set -euo pipefail
+          F=scripts/historical-item-mg-reclassification/lib/constants.mjs
+          grep -q "HISTORICAL_CUTOFF_ISO = '2025-05-14T00:00:00'" "$F" || {
+            echo "::error::The locked May 14, 2025 cutoff is missing or changed in $F" >&2
+            exit 1
+          }
