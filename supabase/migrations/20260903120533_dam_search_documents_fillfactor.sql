@@ -1,0 +1,42 @@
+-- #2196: reserve one row-width of free space per heap page on
+-- public.dam_search_documents so its lease/retry/error updates can go HOT.
+--
+-- Metadata-only. `set (fillfactor = ...)` takes no rewrite and affects only
+-- pages written after it lands. It does not shrink the existing heap bloat and
+-- it touches no index and no statistics counter (the #1966 observation window
+-- runs until 2026-09-17).
+--
+-- Measured live on production 2026-09-03, read-only:
+--   heap        34,651 pages / 271 MB, 145,636 rows, reloptions null (default 100)
+--   occupancy   4.20 rows per page overall; sampled bands 4.87 / 4.08 / 3.31
+--   stored row  ~1,943 bytes on page (8,168 usable bytes per page / 4.20 rows)
+--
+-- Why 75 and not the usual 85-90. Fillfactor reserves BYTES, and a reserve is
+-- only useful if it is at least one whole row wide: a HOT update needs room for
+-- a complete new tuple version on the same page. The reserve at fillfactor N is
+-- 81.92 * (100 - N) bytes, so a row of ~1,943 bytes (plus its 4-byte line
+-- pointer) needs N <= 76.2.
+--   fillfactor 90 -> 819 bytes reserved  -> less than half a row. On every page
+--                    whose leftover space already exceeds 819 bytes the packing
+--                    does not change at all and no slot is created.
+--   fillfactor 85 -> 1,229 bytes         -> still under one row width.
+--   fillfactor 75 -> 2,048 bytes         -> >= one full row on every page.
+-- 75 is therefore the highest value that guarantees a free slot, i.e. the
+-- cheapest one that actually works.
+--
+-- What it buys and what it costs. Pages written after this change hold ~3.16
+-- rows instead of ~4.20 and carry one row-width of free space, which is one HOT
+-- slot per page, recycled by HOT pruning on each page access. Implied heap
+-- growth is ~33% as pages are rewritten (271 MB -> ~360 MB), incurred
+-- gradually, never as a one-off rewrite.
+--
+-- Limits of the claim, stated honestly: the guarantee holds for rows at or
+-- below the 2,048-byte reserve. The widest band (~3 rows per page, rows above
+-- ~2,040 bytes, where the 384-dimension vector stayed inline rather than being
+-- pushed to TOAST) drops to 2 rows per page and gets ~2,960 free bytes, which
+-- does hold a slot, but that follows from the packing arithmetic rather than
+-- from the reserve alone.
+--
+-- Reversible: alter table public.dam_search_documents reset (fillfactor);
+
+alter table public.dam_search_documents set (fillfactor = 75);
