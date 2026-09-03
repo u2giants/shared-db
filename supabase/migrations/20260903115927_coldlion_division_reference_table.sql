@@ -97,10 +97,19 @@
 --
 -- Structure only. This migration loads no rows.
 
-create schema if not exists coldlion;
+-- The `coldlion` schema itself is NOT created here. It already exists on `main`
+-- (20260818232639) and `schema coldlion` is the declared write surface of a
+-- different unit (#2176), so even an idempotent `create schema if not exists`
+-- would be an undeclared write from this lane. The guard below proves the
+-- schema and its spine are present instead of asserting them into existence.
 
 do $$
 begin
+  if to_regnamespace('coldlion') is null then
+    raise exception
+      'schema coldlion is required before coldlion.division and is not created by this migration';
+  end if;
+
   if to_regclass('coldlion.sync_run') is null then
     raise exception
       'ColdLion landing spine (coldlion.sync_run) is required before coldlion.division';
