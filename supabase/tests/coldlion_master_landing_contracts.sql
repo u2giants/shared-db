@@ -3,7 +3,7 @@
 -- Issue #2171 — coldlion.division, the durable division dictionary (sections J-M).
 --
 -- Migrations: 20260902054548_coldlion_master_landing_season_salesperson.sql (A-I)
---             20260903162138_coldlion_division_reference_table.sql       (J-M, issue #2171)
+--             20260903115927_coldlion_division_reference_table.sql       (J-M, issue #2171)
 --
 -- Everything below is invented and rolled back. No fixture depends on a
 -- pre-existing row, because CI replays every migration into an EMPTY database
@@ -415,7 +415,7 @@ $$;
 -- =====================================================================================
 -- J. Issue #2171 — coldlion.division, the durable division dictionary.
 --
---    Migration: 20260903162138_coldlion_division_reference_table.sql
+--    Migration: 20260903115927_coldlion_division_reference_table.sql
 --
 --    Field disposition came from a LIVE sample on 2026-09-03 (both active=Y and
 --    active=N passes; 10 rows, 26 properties), never from `/api-docs`, which
