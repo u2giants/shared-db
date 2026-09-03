@@ -302,10 +302,63 @@ export function reviewerKnownNonReading(name, reviewers=REVIEWERS){
 export const OVERFLOW_REVIEWERS = Object.freeze([])
 export const ACTIVE_REVIEWERS = Object.freeze(REVIEWERS.filter((row)=>!RETIRED_REVIEWERS.includes(row.name)))
 
+// `engine === null` is a POSITIVE answer, not a missing one: the marker resolver
+// said `state: none`, so no orchestrator is running and there is no same-engine
+// conflict to guard against. The exclusion list is empty and the whole rotation
+// stays eligible (issue #2127 decision (a)).
+//
+// `undefined` and `''` remain unreadable and still refuse. That distinction is
+// load-bearing: every call site reaches this through `io.resolveOrchestratorEngine?.()`,
+// which yields `undefined` when the io object has no resolver at all, and that
+// must never be mistaken for "no orchestrator is running".
 export function reviewersForOrchestrator(engine, reviewers=ACTIVE_REVIEWERS){
+  if(engine===null)return reviewers.filter(()=>true)
   const normalized=String(engine??'').trim().toLowerCase()
   if(!normalized)throw new LaneError('live orchestrator engine is unreadable; reviewer assignment refused')
   return reviewers.filter((row)=>String(row.orchestratorEngine??'').toLowerCase()!==normalized)
+}
+
+// ---------------------------------------------------------------------------
+// Reading the orchestrator marker resolver (issue #2127)
+//
+// `check-orchestrator-marker.mjs --resolve --json` EXITS NON-ZERO FOR ANSWERS IT
+// IS CERTAIN OF: 3 for `state: none`, 1 for `ambiguous` / `invalid` / `unsafe`.
+// Only exit 2 (Unknown) and a crash mean "the question could not be answered",
+// and those print nothing parseable on stdout.
+//
+// This used to be one `execFileSync` inside a `try`, so ANY non-zero exit was
+// reported as `live orchestrator engine could not be resolved (Command failed:
+// ...)`. With zero open markers that froze reviewer assignment repository-wide
+// AND blamed a broken resolver for a resolver that had answered correctly.
+// Read stdout on the failure path FIRST; decide from `state`, never from status.
+export function readOrchestratorResolution(run){
+  let raw
+  try{raw=run()}
+  catch(error){
+    raw=error?.stdout??''
+    if(!String(raw).trim())throw new LaneError(`live orchestrator marker resolver could not be run (${error?.message??'no output'})`)
+  }
+  let parsed
+  try{parsed=JSON.parse(raw)}
+  catch(error){throw new LaneError(`live orchestrator marker resolver produced unreadable output (${error.message}); reviewer assignment refused`)}
+  if(!parsed||typeof parsed.state!=='string')throw new LaneError('live orchestrator marker resolver returned no state; reviewer assignment refused')
+  return parsed
+}
+
+// declared -> the engine to exclude. none -> null, exclude nothing.
+// ambiguous / invalid / unsafe -> refuse, and say which one it is.
+export function orchestratorEngineFromResolution(resolved){
+  if(resolved.state==='declared'){
+    const engine=resolved.routing?.engine
+    if(!engine)throw new LaneError('live orchestrator marker declares no engine; reviewer assignment refused')
+    return String(engine).toLowerCase()
+  }
+  if(resolved.state==='none')return null
+  throw new LaneError(`live orchestrator marker is ${resolved.state}; reviewer assignment refused until the marker state is resolved`)
+}
+
+function runOrchestratorResolver(){
+  return execFileSync(process.execPath,['scripts/check-orchestrator-marker.mjs','--resolve','--json'],{encoding:'utf8',stdio:['ignore','pipe','pipe']})
 }
 export const EXCLUSIVE_REFS = Object.freeze({
   preview: 'refs/db-coordination/preview',
@@ -1496,12 +1549,7 @@ export const githubIo = {
     return summarizeDoctorOutput(output)
   },
   resolveOrchestratorEngine(){
-    let resolved
-    try{resolved=JSON.parse(execFileSync(process.execPath,['scripts/check-orchestrator-marker.mjs','--resolve','--json'],{encoding:'utf8'}))}
-    catch(error){throw new LaneError(`live orchestrator engine could not be resolved (${error.message})`)}
-    const engine=resolved?.state==='declared'?resolved.routing?.engine:null
-    if(!engine)throw new LaneError('live orchestrator engine is unreadable; reviewer assignment refused')
-    return String(engine).toLowerCase()
+    return orchestratorEngineFromResolution(readOrchestratorResolution(()=>runOrchestratorResolver()))
   },
   orchestratorFlowAdapter(claimNumber){ return githubFlowAdapter(this,claimNumber) },
   flowSnapshot(){
@@ -1512,10 +1560,16 @@ export const githubIo = {
 function githubFlowAdapter(io,claimNumber=null){
   const payload=(sha)=>{const message=io.getCommit(sha)?.message??'';const match=/^db-preview-(?:ready|outcome) ([\s\S]+)$/.exec(message);if(!match)throw new LaneError('preview coordination ref does not point to a recognized immutable payload');return JSON.parse(match[1])}
   return {
+    // Same defect as `resolveOrchestratorEngine` (issue #2127): every non-zero
+    // exit was reported as "could not be resolved", so a correct `state: none`
+    // answer was misreported as a broken resolver. A parseable answer of ANY
+    // state is an answer -- `live` is false for all of them except `declared`,
+    // which is what the mutation guards already require -- and only a resolver
+    // that produced nothing readable still throws.
     resolveMarker(){
-      let resolved;try{resolved=JSON.parse(execFileSync(process.execPath,['scripts/check-orchestrator-marker.mjs','--resolve','--json'],{encoding:'utf8'}))}catch(error){throw new LaneError(`live orchestrator marker could not be resolved (${error.message})`)}
+      const resolved=readOrchestratorResolution(()=>runOrchestratorResolver())
       const calling=process.env.ORCHESTRATOR_ROUTE_ID??''
-      return {live:resolved.state==='declared',task:resolved.routing?.routeId??null,calling_task:calling}
+      return {live:resolved.state==='declared',task:resolved.routing?.routeId??null,calling_task:calling,state:resolved.state}
     },
     actor:()=>process.env.ORCHESTRATOR_ROUTE_ID??'unknown-orchestrator',now:()=>new Date().toISOString(),
     appendEvent(event){io.commentIssue(event.work_issue,formatEventComment(event))},
