@@ -1,7 +1,8 @@
 -- Issue #2172 — ColdLion landing unit 2: correct the item header/detail/merch-group
 -- structures. Plan: plan_coldlion_landing_schema_completion.md §9 Step 3.
--- derived-from: 20260825023430_coldlion_raw_landing_phases_2_6.sql (NOT edited; this
--- is a forward migration, per §11 "never edit applied migrations").
+-- derived-from: 20260825023430
+-- 20260825023430_coldlion_raw_landing_phases_2_6.sql is NOT edited; this is a
+-- forward migration, per §11 "never edit applied migrations".
 --
 -- OBJECT CLAIM. This file writes exactly three objects and nothing else:
 --   coldlion.item_header, coldlion.item_detail, coldlion.item_merch_group.
