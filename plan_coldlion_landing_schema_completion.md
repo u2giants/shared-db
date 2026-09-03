@@ -102,11 +102,20 @@ Production was verified read-only on 2026-09-02 against the resolved shared prod
 > constant, and the two user stamps are record-audit personal data. Not pending, not
 > undisposed. Revisit only if ColdLion begins populating them.
 >
-> **⚠️ VENDOR DEFECT — never use the unfiltered `/seasons` call.** A company-wide
-> `/seasons` query returns all 21 rows stamped `divisionCode: CW001`, silently
-> mis-attributing every other division's seasons. Per-division queries return the correct
-> codes (CW001 = 8, SP001 = 4, EP001 = 1, EH001 = 8). **Any `/seasons` loader MUST query
-> per division.** Confirmed against the live feed 2026-09-03.
+> **⛔ VENDOR DEFECT — never use the unfiltered `/seasons` call. The other divisions'
+> records are MISSING, not mislabelled.** A company-wide `/seasons` query returns the
+> **CW001 record in place of every other division's record entirely** — division code,
+> description and all four audit stamps come from the CW001 row. **All 13 non-CW001 records
+> (4 SP001, 1 EP001, 8 EH001) are ABSENT.** The row *count* is right (8 + 4 + 1 + 8 = 21)
+> but the row *content* is duplicated from CW001, byte-identical, as though the lookup were
+> keyed on `seasonCode` alone and ignored division. **There is no workaround — the division
+> code cannot be re-derived from elsewhere, because the data is not in the response at all.**
+> Per-division queries return the correct records (CW001 = 8, SP001 = 4, EP001 = 1,
+> EH001 = 8). **Any `/seasons` loader MUST query per division.** The failure is silent:
+> nothing in the envelope signals it and paging is not involved (single page, 21 of 21,
+> size 50). Confirmed against the live feed 2026-09-03, re-verified three times, with a
+> positive control that fires. It is a `/seasons` fault, not the API's general behaviour —
+> unfiltered `/merchGroupHeaders` returns 37 rows correctly spanning all four divisions.
 
 Feed readiness at plan creation:
 
@@ -215,11 +224,20 @@ Create one exact-object structural issue per migration unit: division/masters co
 > constant, and the two user stamps are record-audit personal data. Not pending, not
 > undisposed. Revisit only if ColdLion begins populating them.
 >
-> **⚠️ VENDOR DEFECT — never use the unfiltered `/seasons` call.** A company-wide
-> `/seasons` query returns all 21 rows stamped `divisionCode: CW001`, silently
-> mis-attributing every other division's seasons. Per-division queries return the correct
-> codes (CW001 = 8, SP001 = 4, EP001 = 1, EH001 = 8). **Any `/seasons` loader MUST query
-> per division.** Confirmed against the live feed 2026-09-03.
+> **⛔ VENDOR DEFECT — never use the unfiltered `/seasons` call. The other divisions'
+> records are MISSING, not mislabelled.** A company-wide `/seasons` query returns the
+> **CW001 record in place of every other division's record entirely** — division code,
+> description and all four audit stamps come from the CW001 row. **All 13 non-CW001 records
+> (4 SP001, 1 EP001, 8 EH001) are ABSENT.** The row *count* is right (8 + 4 + 1 + 8 = 21)
+> but the row *content* is duplicated from CW001, byte-identical, as though the lookup were
+> keyed on `seasonCode` alone and ignored division. **There is no workaround — the division
+> code cannot be re-derived from elsewhere, because the data is not in the response at all.**
+> Per-division queries return the correct records (CW001 = 8, SP001 = 4, EP001 = 1,
+> EH001 = 8). **Any `/seasons` loader MUST query per division.** The failure is silent:
+> nothing in the envelope signals it and paging is not involved (single page, 21 of 21,
+> size 50). Confirmed against the live feed 2026-09-03, re-verified three times, with a
+> positive control that fires. It is a `/seasons` fault, not the API's general behaviour —
+> unfiltered `/merchGroupHeaders` returns 37 rows correctly spanning all four divisions.
 
 Compare live `/customers`, `/vendors`, `/merchGroupHeaders`, `/merchGroupDetails`, `/seasons`, `/salespersons`, and `/divisions` definitions with production columns and the owner decision register. Add `coldlion.division` with the vendor's stable company/division identity. Add only approved missing typed fields to season/salesperson. Do not recreate the four already-complete master tables.
 

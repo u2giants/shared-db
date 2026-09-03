@@ -230,16 +230,32 @@ the requested one — that check is now free and catches a mis-stamped loader im
 > Never describe any of these eight as pending, undisposed, or an open owner decision, and
 > never re-ask Albert for them. **Revisit only if ColdLion begins populating them.**
 
-> ### ⚠️ VENDOR DEFECT — the unfiltered `/seasons` call returns WRONG division codes. Never use it.
+> ### ⛔ VENDOR DEFECT — the unfiltered `/seasons` call DROPS 13 of the 21 records. Never use it.
 >
-> A company-wide (unfiltered) `/seasons` query returns **all 21 rows stamped
-> `divisionCode: CW001`**, silently mis-attributing every other division's seasons to CW001.
-> Per-division queries return the correct codes: **CW001 = 8, SP001 = 4, EP001 = 1,
-> EH001 = 8** (21 total). Confirmed against the live feed on 2026-09-03.
+> **The other divisions' records are MISSING, not mislabelled.** A company-wide (unfiltered)
+> `/seasons` query returns the **CW001 record in place of every other division's record
+> entirely** — division code, description, `createdUser`, `createdTime`, `modUser` and
+> `modTime` all come from the CW001 row. **All 13 non-CW001 records (4 SP001, 1 EP001,
+> 8 EH001) are ABSENT from the response.**
 >
-> **Any `/seasons` loader MUST query per division and MUST NEVER use the unfiltered call.**
-> The failure is silent — the unfiltered response looks complete and well-formed, and the
-> only symptom is that three divisions' seasons are attributed to the wrong division.
+> The row *count* is correct — 8 + 4 + 1 + 8 = 21 — but the row *content* is duplicated from
+> CW001: each affected season code is repeated three or four times, and each repetition is
+> byte-identical. It reads as a lookup keyed on `seasonCode` alone, ignoring division.
+>
+> **There is no workaround.** A loader author who reads "mislabelled" might think the division
+> code can be re-derived from elsewhere and the response otherwise trusted. It cannot: the
+> other divisions' data is simply not in the response. **Any `/seasons` loader MUST query per
+> division and MUST NEVER use the unfiltered call.**
+>
+> The failure is silent: nothing in the response envelope signals it, the response looks
+> complete and well-formed, and paging is not involved (single page, 21 of 21, page size 50).
+>
+> Confirmed against the live feed on **2026-09-03**, from a full 21-of-21 read re-verified
+> three times, with a positive control that fires — so the check can fail and is trustworthy.
+>
+> **This is a `/seasons` fault, not how their API is designed to behave.** For contrast,
+> unfiltered `/merchGroupHeaders?companyCode=EDGEHOME` returns 37 rows correctly spanning all
+> four division codes.
 
 - **Two of our own merchandise-group beliefs were wrong, corrected 2026-08-28.** (a) Slots 07–14
   were recorded here and in Business Rules as "legacy positions left by the renumbering". They are
