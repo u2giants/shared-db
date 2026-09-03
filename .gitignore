@@ -98,6 +98,7 @@ __pycache__/
 .ai/runs/
 .ai/tmp/
 .ai/governed-review-evidence/
+.ai/deepseek-sessions/
 
 # Local confidential business-data audits. Never commit licensed item descriptions.
 .private/
