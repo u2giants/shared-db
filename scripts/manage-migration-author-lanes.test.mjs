@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_PAGE_LIMIT, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -3582,7 +3582,7 @@ test('cutover activation fails closed when the ref listing refuses as possibly t
   const io=freshCutoverIo(),headSha='f'.repeat(40)
   io.openPulls=()=>[{number:420,head:{sha:headSha}}]
   seedAssignment(io,{issue:42,pr:420,headSha,reviewer:'grok-4.6'})
-  io.listReviewRefsPaged=()=>{throw new LaneError(`refs/db-review-assignments exceeded ${REVIEW_REF_PAGE_LIMIT} pages of 100 refs; refusing a possibly truncated reviewer audit`)}
+  io.listReviewRefsPaged=()=>{throw new LaneError(`refs/db-review-assignments returned 1200 refs, at or past the ${REVIEW_REF_ROW_LIMIT}-ref ceiling; refusing a possibly truncated reviewer audit. Retire refs rather than raising the ceiling (#2152)`)}
   assert.throws(()=>activateReviewCutover(io),/refusing a possibly truncated reviewer audit/)
   assert.equal(io.refs.has(REVIEW_ACTIVE_CUTOVER_REF),false)
   assert.equal(io.refs.has(MUTEX_REF),false)
@@ -3735,7 +3735,9 @@ test('cutover activation with a live in-progress review stays inside the real wi
   //   getRateLimit        -> 2 (REST rate_limit + GraphQL rateLimit)
   //   readReviewRecords   -> 2 (GraphQL for explicit refs + REST prefix list),
   //                          and `.matching` rows carry NO commit message
-  //   listReviewRefsPaged -> 1 per 100-ref page
+  //   listReviewRefsPaged -> 1, flat, for any namespace size (issue #2152:
+  //                          git/matching-refs is not paginated and returns
+  //                          the whole namespace in a single request)
   //   readActiveReviewLeases -> 1, and it warms reviewCommitBase, so
   //   makeOwnerCommit     -> 1 after it (3 only when the base is still cold)
   io.getRateLimit=()=>{wire(2,'quota');return {remaining:5000,limit:5000,reset:1787943986,graphRemaining:5000,graphLimit:5000,graphReset:1787943986}}
@@ -3745,13 +3747,14 @@ test('cutover activation with a live in-progress review stays inside the real wi
   io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
   io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
   // These namespaces are append-only across the repository's WHOLE review
-  // history, so a fixture holding two refs would charge one page while the real
-  // repository charges four and two (370 assignment refs / 106 replacement refs,
-  // measured 2026-08-29). Charging the fixture one page apiece is precisely the
-  // friendlier-than-production fiction that let the previous version of this
-  // test pass over a broken activation, so the real page counts are charged here.
-  const REAL_REF_PAGES={[REVIEW_ASSIGNMENT_REF_PREFIX]:4,[REVIEW_REPLACEMENT_REF_PREFIX]:2}
-  io.listReviewRefsPaged=(prefix)=>{wire(REAL_REF_PAGES[prefix]??1,`listReviewRefsPaged:${prefix}`);return [...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha}))}
+  // history (726 assignment refs / 229 replacement refs, measured 2026-09-02),
+  // and this used to charge four and two requests for them because the listing
+  // walked pages. It no longer does: `git/matching-refs` is not a paginated
+  // endpoint, so one request returns the whole namespace whatever its size
+  // (issue #2152). Charging ONE here is now the production-faithful price, and
+  // it is the size-independent one -- the cost can no longer drift up as refs
+  // accumulate, which is what made the old charge a moving target.
+  io.listReviewRefsPaged=(prefix)=>{wire(1,`listReviewRefsPaged:${prefix}`);return [...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha}))}
   io.readReviewRecords=(refs,prefix)=>{
     assert.ok(refs.length,'production readReviewRecords builds an EMPTY GraphQL selection set for an empty ref list, which GitHub rejects outright')
     wire(prefix?2:1,'readReviewRecords')
@@ -4952,4 +4955,132 @@ test('a malformed assignment ref still held by the excluded reviewer stops the e
   assert.throws(()=>excludeReviewerForPr({issue:2077,pr:2105,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io),/cannot be named by the shared ref parser/)
   assert.equal(io.refs.get(legacy),evidenceSha)
   assert.equal(io.readRef(`${REVIEW_EXCLUSION_REF_PREFIX}/2077-2105-${first.reviewer}`),null)
+})
+
+// ---------------------------------------------------------------------------
+// listReviewRefsPaged against a namespace that GENUINELY exceeds one page
+// (issue #2152).
+//
+// The broken pager shipped because every test for it used a fixture holding
+// fewer than 100 refs, where `chunk.length<100` fires on the first request and
+// a page-1-repeating endpoint is indistinguishable from a correct one. These
+// tests use a fake transport that models the REAL endpoint measured on
+// 2026-09-02: `git/matching-refs` ignores BOTH `per_page` and `page`, sends no
+// Link header, and returns the complete matching set in one response.
+// ---------------------------------------------------------------------------
+
+// The fake endpoint. Deliberately ignores every pagination parameter, exactly
+// as the real one does -- that is the whole point of the fixture.
+const matchingRefsServer=(count,{link=null}={})=>{
+  const calls=[]
+  const rows=Array.from({length:count},(_,i)=>({ref:`refs/db-review-assignments/${i}-${i+1}-${String(i).padStart(40,'0')}`,object:{sha:String(i).padStart(40,'0')}}))
+  return {calls,rows,serve(endpoint){calls.push(endpoint);return rows},headers:link?{link}:{}}
+}
+
+// The pager as it stood on main at bd00aaa7, copied verbatim except that its
+// request goes to the fake server instead of `gh`. Kept here as the CONTROL: a
+// test that only the new implementation can pass is worth nothing unless the
+// old one demonstrably fails it.
+const brokenPagerAtBd00aaa7=(prefix,server,pageLimit=6)=>{
+  const short=prefix.replace(/^refs\//,'')
+  const rows=[]
+  for(let page=1;page<=pageLimit;page++){
+    const chunk=server.serve(`repos/u2giants/shared-db/git/matching-refs/${short}?per_page=100&page=${page}`)
+    if(!Array.isArray(chunk))throw new LaneError(`GitHub page ${page} for ${prefix} was incomplete or malformed`)
+    rows.push(...chunk.map((row)=>({ref:row.ref,sha:row.object?.sha})).filter((row)=>row.sha))
+    if(chunk.length<100)return rows
+  }
+  throw new LaneError(`${prefix} exceeded ${pageLimit} pages of 100 refs; refusing a possibly truncated reviewer audit`)
+}
+
+test('CONTROL: the pre-#2152 pager refuses on a 726-ref namespace served by a page-ignoring endpoint',()=>{
+  const server=matchingRefsServer(726)
+  assert.throws(()=>brokenPagerAtBd00aaa7(REVIEW_ASSIGNMENT_REF_PREFIX,server),/exceeded 6 pages of 100 refs/)
+  assert.equal(server.calls.length,6,'it spent six counted requests to learn nothing')
+})
+
+// EVIDENCE FOR THE #2152 POST-MORTEM QUESTION -- did any decision ever run on a
+// DUPLICATED ref list? No, and it could not have. The old loop returns early
+// only on `chunk.length<100`, and a page-1-repeating endpoint returns a short
+// page only when the namespace itself holds under 100 refs -- in which case one
+// request already held the whole namespace and the list was correct and
+// duplicate-free. At 100 refs or more every request is full, so the loop always
+// runs to the ceiling and always THROWS. The duplicated list is unreachable:
+// the two outcomes are "correct list" and "loud refusal", with nothing between
+// them. Raising the ceiling, as issue #2152 warns, is what would have made the
+// duplicated list reachable.
+test('CONTROL: the pre-#2152 pager has no path that returns a duplicated list',()=>{
+  for(const count of [0,1,99]){
+    const server=matchingRefsServer(count)
+    const rows=brokenPagerAtBd00aaa7(REVIEW_ASSIGNMENT_REF_PREFIX,server)
+    assert.equal(server.calls.length,1,'a sub-100 namespace answered in one request, so nothing repeated')
+    assert.equal(rows.length,count)
+    assert.equal(new Set(rows.map((row)=>row.ref)).size,count)
+  }
+  for(const count of [100,120,726]){
+    const server=matchingRefsServer(count)
+    assert.throws(()=>brokenPagerAtBd00aaa7(REVIEW_ASSIGNMENT_REF_PREFIX,server),/refusing a possibly truncated reviewer audit/,`a ${count}-ref namespace must refuse, never return`)
+  }
+})
+
+test('CONTROL: only a RAISED page ceiling would have made the duplicated list reachable',()=>{
+  const server=matchingRefsServer(120)
+  // Same loop, ceiling raised, early return suppressed by full pages: three
+  // requests, the same 120 rows three times over. This is the outcome the
+  // ceiling was accidentally protecting against, and why #2152 must not be
+  // fixed by raising it.
+  let rows=[]
+  try{rows=brokenPagerAtBd00aaa7(REVIEW_ASSIGNMENT_REF_PREFIX,server,3)}catch{
+    rows=server.calls.flatMap(()=>server.rows.map((row)=>({ref:row.ref,sha:row.object.sha})))
+  }
+  assert.equal(rows.length,360,'three requests, the same 120 rows each time')
+  assert.equal(new Set(rows.map((row)=>row.ref)).size,120,'only 120 of them are distinct')
+})
+
+test('listReviewRefsPaged returns every ref of a 726-ref namespace, once each, in ONE request',()=>{
+  const server=matchingRefsServer(726)
+  const rows=githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,(endpoint)=>({rows:server.serve(endpoint),headers:server.headers}))
+  assert.equal(rows.length,726)
+  assert.equal(new Set(rows.map((row)=>row.ref)).size,726,'no duplicates')
+  assert.equal(server.calls.length,1,'one counted wire request, whatever the namespace holds')
+  assert.equal(/[?&]page=/.test(server.calls[0]),false,'the endpoint ignores page=N, so asking for one is a lie about what came back')
+})
+
+test('listReviewRefsPaged refuses LOUDLY when GitHub advertises a further page',()=>{
+  const server=matchingRefsServer(100,{link:'<https://api.github.com/repositories/1/git/matching-refs/x?page=2>; rel="next", <https://api.github.com/repositories/1/git/matching-refs/x?page=9>; rel="last"'})
+  assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,(endpoint)=>({rows:server.serve(endpoint),headers:server.headers})),/paginated Link header.*refusing a possibly truncated reviewer audit/s)
+})
+
+test('listReviewRefsPaged accepts a Link header that offers only prev/last',()=>{
+  const server=matchingRefsServer(3,{link:'<https://api.github.com/repositories/1/git/matching-refs/x?page=1>; rel="prev"'})
+  assert.equal(githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,(endpoint)=>({rows:server.serve(endpoint),headers:server.headers})).length,3)
+})
+
+test('listReviewRefsPaged refuses at the row ceiling rather than trusting a possibly capped list',()=>{
+  const server=matchingRefsServer(REVIEW_REF_ROW_LIMIT)
+  assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,(endpoint)=>({rows:server.serve(endpoint),headers:server.headers})),new RegExp(`returned ${REVIEW_REF_ROW_LIMIT} refs, at or past the ${REVIEW_REF_ROW_LIMIT}-ref ceiling`))
+})
+
+test('the row ceiling sits above every namespace this repository actually holds',()=>{
+  // 726 assignment refs measured 2026-09-02; the ceiling must clear it or the
+  // audit paths refuse on day one. See REVIEW_REF_ROW_LIMIT for the derivation.
+  assert.ok(REVIEW_REF_ROW_LIMIT>726,`ceiling ${REVIEW_REF_ROW_LIMIT} must exceed the largest live namespace`)
+})
+
+test('listReviewRefsPaged refuses a malformed body instead of reading it as an empty namespace',()=>{
+  assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,()=>({rows:{message:'Not Found'},headers:{}})),/incomplete or malformed/)
+})
+
+test('parseGhIncludeResponse splits real gh -i output and lowercases header names',()=>{
+  const body=JSON.stringify([{ref:'refs/db-review-assignments/1-2-abc',object:{sha:'abc'}}])
+  const {rows,headers}=parseGhIncludeResponse(`HTTP/2.0 200 OK\r\nContent-Type: application/json\r\nLink: <https://api.github.com/x?page=2>; rel="next"\r\n\r\n${body}`)
+  assert.equal(rows.length,1)
+  assert.equal(headers['content-type'],'application/json')
+  assert.equal(hasNextPageLink(headers),true)
+  assert.equal(hasNextPageLink({}),false)
+  assert.equal(hasNextPageLink({link:'<https://api.github.com/x?page=1>; rel="last"'}),false)
+})
+
+test('parseGhIncludeResponse refuses output with no header/body boundary',()=>{
+  assert.throws(()=>parseGhIncludeResponse('HTTP/2.0 200 OK'),/no header\/body boundary/)
 })

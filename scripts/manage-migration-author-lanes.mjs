@@ -55,18 +55,35 @@ export const REVIEW_ACTIVE_CUTOVER_REF = 'refs/db-coordination/reviewer-index-cu
 export const REVIEW_OPERATION_REQUEST_LIMIT = 25, REVIEW_MUTEX_SECTION_RESERVE = 15 // slot 2 = 10 pre-mutex + this reserve; slot 1 = 7 + reserve. RE-DERIVED, NOT WIDENED (issue #2075): every reviewer operation now proves 'a verdict exists for this head' from the create-only durable verdict refs instead of from comment prose. That costs exactly ONE listing of refs/db-review-verdict pre-mutex (cached for the rest of the operation by reviewOperationIo) and ONE uncached re-listing inside the mutex section, so each half grew by exactly one request. Measured totals moved 21->23 (slot-2 assignment), 18->20 (slot-2 replacement), and 8->9 pre-mutex for the first replacement, with the post-mutex replacement section going 10->11. The bounded per-PR exclusion read is now inside the mutex so it cannot race assignment. This entry gate refuses to acquire the mutex unless the whole mutex-held section still fits. Release is guaranteed separately by cleanupReserve. Derivation: docs/verification/reviewer-assignment-api-budget-2026-08-28.md (#1812, #1833)
 export const REVIEW_QUOTA_RESERVE = 100
 export const REVIEW_LEASE_SUSPECT_HOURS = 24 // Advisory visibility only. Age never releases a lease.
-// Page ceiling for listReviewRefsPaged. It is a REFUSAL, not a truncation: past
+// Row ceiling for listReviewRefsPaged. It is a REFUSAL, not a truncation: past
 // this the reviewer audit stops rather than reporting a partial view of the
-// durable review history (issue #1798).
+// durable review history (issue #1798), and it REPLACES the old page ceiling
+// REVIEW_REF_PAGE_LIMIT, which counted a unit `git/matching-refs` does not
+// have (issue #2152).
 //
-// DO NOT read 6 pages as 600 refs of headroom per namespace. The page limit is
-// not the real ceiling -- the wire-request budget is, and the two namespaces
-// SHARE it, one counted request per page each. Against today's budget the
-// cutover has room for roughly 500 assignment refs and 200 replacement refs
-// combined, not 600 apiece, and today's repository already holds 370 and 106.
-// The headroom this constant appears to grant is illusory; the operation will
-// hit the request budget first (issue #1798 round 3, glm-5.3 Medium).
-export const REVIEW_REF_PAGE_LIMIT = 6
+// SIZED AGAINST TWO NUMBERS, AND NEITHER OF THEM IS THE WIRE BUDGET. The old
+// page ceiling was accompanied by a warning that the request budget, not the
+// page count, was the real ceiling, because each page cost one counted request.
+// That is no longer true: `git/matching-refs` returns the complete matching set
+// in ONE response, so this listing costs exactly one counted request whatever
+// the namespace holds, and the budget cannot be the binding constraint on its
+// size. What replaces it:
+//   - FLOOR -- today's largest namespace. refs/db-review-assignments held 726
+//     refs on 2026-09-02 (refs/db-review-failures 235, refs/db-review-replacements
+//     229, refs/db-review-verdict 100). A ceiling at or under 726 would refuse
+//     on day one.
+//   - CEILING -- 1000, the smallest hard result cap GitHub imposes anywhere in
+//     its REST API. `git/matching-refs` documents no cap and demonstrably
+//     returned all 726 rows in a single response, but an undocumented
+//     server-side cap is the ONE form of truncation the Link-header guard below
+//     cannot see. Stopping at 1000 means this listing refuses BEFORE any
+//     plausible silent cap could shorten it.
+// That leaves 274 refs of headroom on today's largest namespace. When this does
+// refuse, the answer is to RETIRE refs -- refs/db-review-retired-verdicts exists
+// for exactly that -- and NOT to raise the number: raising it past 1000 trades a
+// loud refusal for a possibly silent truncation, which is the fail-OPEN
+// direction for reviewer release and replacement.
+export const REVIEW_REF_ROW_LIMIT = 1000
 //
 // `readsRepository` RECORDS A FACT ABOUT THE WRAPPER, NOT A PREFERENCE (#2078).
 // `true` means the wrapper hands its model a real, self-contained checkout of the
@@ -866,6 +883,32 @@ function ghPaginated(endpoint) {
   if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) throw new LaneError(`GitHub pagination for ${endpoint} was incomplete or malformed`)
   return pages.flat()
 }
+// Split `gh api -i` output into its response headers and its parsed JSON body.
+// The header block is separated from the body by the first blank line; GitHub's
+// JSON body never contains one, so the FIRST boundary is always the right one.
+// Header names are lowercased because HTTP header names are case-insensitive and
+// gh prints them in GitHub's own casing.
+// ONE counted request, headers included, for listReviewRefsPaged. Deliberately
+// not `--paginate`: that is one gh invocation making an unknown number of HTTP
+// requests, which the reviewer wire budget could neither see nor charge.
+function ghRefListing(endpoint) { return parseGhIncludeResponse(gh(['api','-i',endpoint])) }
+export function parseGhIncludeResponse(raw) {
+  const text=String(raw??'')
+  const boundary=/\r?\n\r?\n/.exec(text)
+  if(!boundary)throw new LaneError('GitHub response had no header/body boundary; refusing to read it as a ref listing')
+  const headerBlock=text.slice(0,boundary.index),body=text.slice(boundary.index+boundary[0].length)
+  const headers=Object.fromEntries(headerBlock.split(/\r?\n/).slice(1).map((line)=>{
+    const colon=line.indexOf(':')
+    return colon<0?null:[line.slice(0,colon).trim().toLowerCase(),line.slice(colon+1).trim()]
+  }).filter(Boolean))
+  let rows
+  try{rows=JSON.parse(body)}catch{throw new LaneError('GitHub returned unreadable JSON for a ref listing')}
+  return {rows,headers}
+}
+// True when the response advertises a further page. A `Link` header with
+// rel="next" is the ONLY signal GitHub gives that a listing is partial, so this
+// is the truncation detector -- not a pagination driver. See listReviewRefsPaged.
+export function hasNextPageLink(headers) { return /<[^>]+>\s*;[^,]*rel="?next"?/i.test(String(headers?.link??'')) }
 export function isConfirmedRefAbsence(error) { return /HTTP 404/i.test(String(error?.message??'')) }
 
 export function currentMainMaxVersion(worktree, run = execFileSync) {
@@ -1155,21 +1198,52 @@ export const githubIo = {
   // assignment refs as of 2026-08-29), so the cutover audit could never list
   // them at all: it died on the 100-row refusal before reading anything.
   //
-  // This walks explicit pages instead, so every page is a counted request the
-  // wire budget can see, and stops at REVIEW_REF_PAGE_LIMIT with a LOUD
-  // refusal rather than returning a partial list. A truncated audit is the
-  // one outcome that must never happen quietly here: it would look like
-  // "no live review to protect" and flip the cutover on blind.
-  listReviewRefsPaged(prefix) {
+  // `git/matching-refs` IS NOT A PAGINATED ENDPOINT (measured 2026-09-02,
+  // issue #2152). It ignores BOTH `per_page` and `page` and sends no Link
+  // header: one request returns the complete matching set. Against this
+  // repository, `?per_page=5`, `?per_page=100` and no query at all each
+  // returned the same 726 refs for refs/db-review-assignments, and
+  // `?per_page=100&page=3` on refs/db-review-verdict returned the same 100 rows
+  // as page 1 for a namespace holding exactly 100 refs in total.
+  //
+  // The previous implementation walked `&page=N`, so EVERY request was page 1.
+  // The `chunk.length<100` early return could therefore only fire for a
+  // namespace holding fewer than 100 refs; at 100 or more the loop ran to the
+  // page ceiling and refused, and had it not refused it would have returned the
+  // first 100 rows repeated once per page. refs/db-review-verdict crossed 100
+  // refs and took the whole governed reviewer system down with it: no reviewer
+  // could be assigned or replaced for any pull request.
+  //
+  // WIRE COST: exactly ONE counted request per call, for any namespace size --
+  // down from up to six. That is precisely what the REVIEW_OPERATION_REQUEST_LIMIT
+  // derivation already assumed each verdict listing costs ("ONE listing of
+  // refs/db-review-verdict pre-mutex ... and ONE uncached re-listing inside the
+  // mutex section"), so the measured 23-of-25 slot-2 totals stand, and unlike
+  // the page walk this cost can no longer drift upward as refs accumulate.
+  // `gh api -i` is used rather than `--paginate` deliberately: `--paginate` is a
+  // single gh invocation that may make many HTTP requests the wire budget cannot
+  // see or charge for, whereas `-i` is one request, charged once, whose headers
+  // are readable.
+  //
+  // TRUNCATION IS DETECTED, NOT ASSUMED. A silently short list reads as "no
+  // verdict", which is the fail-OPEN direction for reviewer release and
+  // replacement, so both guards below are LOUD refusals and neither ever
+  // returns a partial list:
+  //   1. A `Link` header advertising rel="next" means GitHub has begun
+  //      paginating this endpoint. We do not guess at how; we refuse, and the
+  //      fix is to teach this function to follow the Link chain (charging one
+  //      counted request per hop) rather than to ignore the header.
+  //   2. REVIEW_REF_ROW_LIMIT rows or more, which is where an undocumented
+  //      server-side cap -- the one truncation a Link header cannot reveal --
+  //      would start being plausible. See that constant for the derivation.
+  // Duplicates are impossible by construction now that there is one response.
+  listReviewRefsPaged(prefix, fetch = ghRefListing) {
     const short=prefix.replace(/^refs\//,'')
-    const rows=[]
-    for(let page=1;page<=REVIEW_REF_PAGE_LIMIT;page++){
-      const chunk=ghJson(['api',`repos/${REPO}/git/matching-refs/${short}?per_page=100&page=${page}`])
-      if(!Array.isArray(chunk))throw new LaneError(`GitHub page ${page} for ${prefix} was incomplete or malformed`)
-      rows.push(...chunk.map((row)=>({ref:row.ref,sha:row.object?.sha})).filter((row)=>row.sha))
-      if(chunk.length<100)return rows
-    }
-    throw new LaneError(`${prefix} exceeded ${REVIEW_REF_PAGE_LIMIT} pages of 100 refs; refusing a possibly truncated reviewer audit`)
+    const {rows,headers}=fetch(`repos/${REPO}/git/matching-refs/${short}`)
+    if(!Array.isArray(rows))throw new LaneError(`GitHub listing for ${prefix} was incomplete or malformed`)
+    if(hasNextPageLink(headers))throw new LaneError(`${prefix} now returns a paginated Link header, so this single listing is no longer the complete set; refusing a possibly truncated reviewer audit (#2152)`)
+    if(rows.length>=REVIEW_REF_ROW_LIMIT)throw new LaneError(`${prefix} returned ${rows.length} refs, at or past the ${REVIEW_REF_ROW_LIMIT}-ref ceiling; refusing a possibly truncated reviewer audit. Retire refs rather than raising the ceiling (#2152)`)
+    return rows.map((row)=>({ref:row.ref,sha:row.object?.sha})).filter((row)=>row.sha)
   },
   // A DELETE is never replayed after a transport failure. The first request may
   // have succeeded and a new owner may acquire the fixed coordination ref
@@ -2310,8 +2384,8 @@ export function gateAuthorizes(evidence,headSha,bundleId,readAssignments){
 // `reviewOperationIo` caches it for the rest of that operation.
 export const DURABLE_VERDICT_REF_NAMESPACE = 'refs/db-review-verdict'
 function readDurableVerdictRefs(io){
-  // `listReviewRefsPaged` walks explicit pages and REFUSES past
-  // REVIEW_REF_PAGE_LIMIT rather than returning a partial list; plain `listRefs`
+  // `listReviewRefsPaged` reads the whole namespace in one request and REFUSES
+  // past REVIEW_REF_ROW_LIMIT rather than returning a partial list; plain `listRefs`
   // refuses at 100 rows inside a wire budget. Either refusal is loud, and loud is
   // the only safe failure here: a silently short list reads as "no verdict",
   // which is the fail-OPEN direction for release and replacement.
