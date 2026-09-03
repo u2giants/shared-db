@@ -108,62 +108,100 @@ grant execute on function public.filter_effective_assets(jsonb) to authenticated
 
 do $$
 declare
-  v_filter text := pg_get_functiondef('public.filter_effective_assets(jsonb)'::regprocedure);
+  v_def text := pg_get_functiondef('public.filter_effective_assets(jsonb)'::regprocedure);
+  -- Line comments are stripped and whitespace folded before anything is
+  -- inspected. A predicate that survives only inside a comment is not a
+  -- predicate, and folding lets every pin below be a contiguous piece of
+  -- syntax in its real position rather than a substring found anywhere.
+  v_body text := regexp_replace(regexp_replace(v_def, E'--[^\n]*', '', 'g'), '\s+', ' ', 'g');
+  v_lower text := lower(v_body);
+  v_pin text;
+  v_arms int;
+  v_gate int;
   v_secdef boolean;
   v_config text[];
+  v_language name;
+  v_volatility "char";
 begin
-  select p.prosecdef, p.proconfig into v_secdef, v_config
-  from pg_proc p where p.oid = 'public.filter_effective_assets(jsonb)'::regprocedure;
+  select p.prosecdef, p.proconfig, l.lanname, p.provolatile
+    into v_secdef, v_config, v_language, v_volatility
+  from pg_proc p
+  join pg_language l on l.oid = p.prolang
+  where p.oid = 'public.filter_effective_assets(jsonb)'::regprocedure;
 
   -- The CTE barrier and the id self-join are the regression; both must be gone.
-  if position('identity_asset_ids' in lower(v_filter)) > 0
-     or position('as materialized' in lower(v_filter)) > 0
-     or position('a.id = i.id' in lower(v_filter)) > 0 then
+  -- The self-join is matched by shape, not by the alias pair it happened to
+  -- use: `join public.assets a on a.id = ids.id` is the same generic-plan
+  -- nested loop under a different name.
+  if position('identity_asset_ids' in v_lower) > 0
+     or position('as materialized' in v_lower) > 0
+     or v_lower ~ '\m[a-z_][a-z0-9_]*\.id = [a-z_][a-z0-9_]*\.id\M' then
     raise exception 'effective filter still materialises identity ids before the join';
   end if;
 
-  -- Entitlement stays enforced, as an outer conjunct rather than a CTE.
-  if position('public.require_dam_access()' in lower(v_filter)) = 0
-     or position('a.is_deleted = false' in lower(v_filter)) = 0 then
-    raise exception 'effective filter lost its entitlement or visibility predicate';
+  -- Entitlement stays enforced as the Var-free outer conjunct, exactly once.
+  -- Presence of the text proves nothing: public.require_dam_access() raises
+  -- insufficient_privilege only when it is invoked, and an authenticated caller
+  -- without DAM access holds EXECUTE on this function. Pin the call in the
+  -- outer WHERE, immediately followed by the visibility guard.
+  v_gate := (length(v_lower) - length(replace(v_lower, 'public.require_dam_access()', '')))
+              / length('public.require_dam_access()');
+  if v_gate <> 1 then
+    raise exception 'effective filter must invoke public.require_dam_access() exactly once, found %', v_gate;
+  end if;
+  if position(') a where public.require_dam_access() and a.is_deleted = false and (' in v_lower) = 0 then
+    raise exception 'effective filter lost its entitlement or visibility predicate as an outer WHERE conjunct';
   end if;
 
-  -- The seven mutually exclusive identity arms must survive intact.
-  if position('union all' in lower(v_filter)) = 0
-     or position('left join public.style_groups' in lower(v_filter)) > 0
-     or position('a.licensor_id = ' in lower(v_filter)) = 0
-     or position('sg.licensor_id = ' in lower(v_filter)) = 0
-     or position('a.property_id = ' in lower(v_filter)) = 0
-     or position('sg.property_id = ' in lower(v_filter)) = 0
-     or position('a.customer_id = ' in lower(v_filter)) = 0
-     or position('sg.customer_id = ' in lower(v_filter)) = 0
-     or position('a.style_group_id is null' in lower(v_filter)) = 0 then
-    raise exception 'effective identity predicates lost index-leading UNION arms';
+  -- The seven mutually exclusive identity arms must survive intact. Counting the
+  -- six UNION ALLs and pinning each arm's leading guard is what makes this a
+  -- check: the bare equality tokens also occur as optional conjuncts on the
+  -- licensor pair, so deleting the property- or customer-leading arms would
+  -- otherwise leave every substring present while the DAM property and customer
+  -- libraries silently returned nothing.
+  v_arms := (length(v_lower) - length(replace(v_lower, 'union all', ''))) / length('union all');
+  if v_arms <> 6 then
+    raise exception 'effective filter must keep seven identity arms joined by six UNION ALLs, found % UNION ALLs', v_arms;
   end if;
-
-  -- Every filter key the DAM sends must still be honoured.
-  if position('search' in v_filter) = 0
-     or position('tagFilter' in v_filter) = 0
-     or position('fileType' in v_filter) = 0
-     or position('contentType' in v_filter) = 0
-     or position('productMaterial' in v_filter) = 0
-     or position('workflowStatus' in v_filter) = 0
-     or position('isLicensed' in v_filter) = 0
-     or position('assetType' in v_filter) = 0
-     or position('artSource' in v_filter) = 0
-     or position('fileStatus' in v_filter) = 0
-     or position('productCategory' in v_filter) = 0
-     or position('''program''' in v_filter) = 0
-     or position('''customer''' in v_filter) = 0
-     or position('''stage''' in v_filter) = 0
-     or position('''status''' in v_filter) = 0 then
-    raise exception 'effective filter lost one of its filter keys';
+  if position('left join public.style_groups' in v_lower) > 0 then
+    raise exception 'effective identity predicates restored the unindexable LEFT JOIN shape';
   end if;
+  foreach v_pin in array array[
+    'from public.assets a where nullif(p_filters ->> ''licensorid'', '''') is null and nullif(p_filters ->> ''propertyid'', '''') is null and nullif(p_filters ->> ''customerid'', '''') is null union all',
+    'where nullif(p_filters ->> ''licensorid'', '''') is not null and a.style_group_id is null and a.licensor_id = (p_filters ->> ''licensorid'')::uuid',
+    'from public.style_groups sg join public.assets a on a.style_group_id = sg.id where nullif(p_filters ->> ''licensorid'', '''') is not null and sg.licensor_id = (p_filters ->> ''licensorid'')::uuid',
+    'and nullif(p_filters ->> ''propertyid'', '''') is not null and a.style_group_id is null and a.property_id = (p_filters ->> ''propertyid'')::uuid',
+    'and nullif(p_filters ->> ''propertyid'', '''') is not null and sg.property_id = (p_filters ->> ''propertyid'')::uuid',
+    'and nullif(p_filters ->> ''customerid'', '''') is not null and a.style_group_id is null and a.customer_id = (p_filters ->> ''customerid'')::uuid',
+    'and nullif(p_filters ->> ''customerid'', '''') is not null and sg.customer_id = (p_filters ->> ''customerid'')::uuid'
+  ] loop
+    if position(v_pin in v_lower) = 0 then
+      raise exception 'effective identity predicates lost an index-leading UNION arm: %', v_pin;
+    end if;
+  end loop;
 
-  -- #1945: a SECURITY DEFINER flag or any per-function SET blocks SRF inlining,
-  -- which is what makes the outer LIMIT reach the scan at all.
-  if v_secdef or v_config is not null then
-    raise exception 'effective filter is no longer inlinable (security definer or per-function SET)';
+  -- Every filter key the DAM sends must still be honoured, including the three
+  -- identity keys: renaming one to a key the client never sends would silently
+  -- ignore that facet. These are compared case-sensitively and quoted.
+  foreach v_pin in array array[
+    '''licensorId''', '''propertyId''', '''customerId''',
+    '''search''', '''tagFilter''', '''fileType''', '''contentType''',
+    '''productMaterial''', '''workflowStatus''', '''isLicensed''',
+    '''assetType''', '''artSource''', '''fileStatus''', '''productCategory''',
+    '''program''', '''customer''', '''stage''', '''status'''
+  ] loop
+    if position(v_pin in v_body) = 0 then
+      raise exception 'effective filter lost one of its filter keys: %', v_pin;
+    end if;
+  end loop;
+
+  -- #1945: only a STABLE SQL function with no SECURITY DEFINER flag and no
+  -- per-function SET can be inlined, and inlining is what lets PostgREST's
+  -- outer LIMIT reach the append scan. A PL/pgSQL set-returning rewrite of the
+  -- same SELECT is never inlined and reproduces the #1945 timeout exactly.
+  if v_language <> 'sql' or v_volatility <> 's' or v_secdef or v_config is not null then
+    raise exception 'effective filter is no longer inlinable: language %, volatility %, security definer %, config %',
+      v_language, v_volatility, v_secdef, v_config;
   end if;
 
   if has_function_privilege('anon','public.filter_effective_assets(jsonb)','EXECUTE')
