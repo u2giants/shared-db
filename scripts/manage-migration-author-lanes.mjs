@@ -2678,6 +2678,7 @@ export function headVerdictBlocksReplacement(issue,pr,headSha,io,options={}){
   return listDurableVerdictRefs(io,options).some((row)=>{
     const named=parseVerdictRef(row.ref)
     if(!named||named.issue!==Number(issue)||named.pr!==Number(pr)||named.headSha!==head)return false
+    if(options.slot!==undefined&&named.slot!==Number(options.slot))return false
     return durableVerdictBlocksReplacement(row.ref,io)
   })
 }
@@ -2764,7 +2765,7 @@ function assertReviewLeaseStillStale(row,states,io){
 
 function isReviewAssignmentLive(assignment,states,io){
   const state=states?.get(`${assignment.issue}:${assignment.pr}`),pr=state?.pr??io.getPr(assignment.pr)
-  const verdict=hasVerdictForHead(assignment.issue,assignment.pr,assignment.headSha,io)
+  const verdict=hasVerdictForHead(assignment.issue,assignment.pr,assignment.headSha,io,leaseVerdictOptions(assignment))
   return pr?.state==='open'&&pr?.head?.sha===assignment.headSha&&!verdict
 }
 
@@ -3638,7 +3639,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     // The artifact answering THIS assignment is a subset of the head-wide
     // listing, so the attributed head-wide check answers for it too and the
     // separate single-ref read it used to do is gone.
-    const hasVerdict=headVerdictBlocksReplacement(request.issue,request.pr,request.headSha,io)
+    const hasVerdict=headVerdictBlocksReplacement(request.issue,request.pr,request.headSha,io,{slot:request.slot})
     if(hasVerdict)throw new LaneError('an existing verdict for the exact head forbids reviewer replacement')
     const failedLeaseRef=reviewActiveRef(original.reviewer),cachedFailed=preflightBusy.leases?.get(original.reviewer),failedLeaseSha=cachedFailed?.sha??io.readRef(failedLeaseRef)
     const failedLease=failedLeaseSha?(cachedFailed?.sha===failedLeaseSha?cachedFailed.lease:parseReviewLease(io.getCommit(failedLeaseSha))):null
@@ -3698,7 +3699,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
         // Same attributed, durable-only rule as the pre-mutex check above (#2079 x
         // #2075). A plain `hasVerdictForHead` here would re-open the exact hole the
         // pre-mutex check closes, one mutex acquisition later.
-        const freshVerdict=headVerdictBlocksReplacement(request.issue,request.pr,request.headSha,io,{fresh:true})
+        const freshVerdict=headVerdictBlocksReplacement(request.issue,request.pr,request.headSha,io,{fresh:true,slot:request.slot})
         if(!reviewIssueEligible(fresh?.issue,fresh?.pr,io)||!reviewTargetEligible(fresh?.pr,io)||fresh?.pr?.head?.sha!==request.headSha||freshVerdict)throw new LaneError('review replacement issue, PR head, or verdict changed after mutex acquisition')
         assertReviewLeaseStillStale(replacementStale,freshStates,io)
         const changes=[
@@ -4009,7 +4010,7 @@ function activateReviewCutoverOperation(io) {
       // probe goes blind, and a second reviewer can be handed the same
       // provider: the double-assignment hazard this activation exists to
       // prevent, failing silently.
-      const verdict = hasVerdictForHead(lease.issue, lease.pr, lease.headSha, io)
+      const verdict = hasVerdictForHead(lease.issue, lease.pr, lease.headSha, io, leaseVerdictOptions(lease))
       if (verdict) continue
       const leaseRef = reviewActiveRef(lease.reviewer)
       const existingLease = existingLeases ? (existingLeases.get(leaseRef) ?? null) : io.readRef(leaseRef)

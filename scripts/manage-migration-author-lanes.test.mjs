@@ -4377,6 +4377,30 @@ test('a failed slot-2 reviewer can be replaced without touching slot 1 (issue #1
   assert.deepEqual(replaceFailedReviewer({...request,slot:2,failedSequence:slotTwo.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io),replaced)
 })
 
+test('a slot-1 verdict neither frees nor blocks a live slot-2 replacement (issue #2208)',()=>{
+  const io=reviewIo(),request={issue:2208,pr:2221,headSha:'d8'.repeat(20)}
+  io.getPr=()=>({state:'open',head:{sha:request.headSha}})
+  const slotOne=assignNextReviewer(request,io)
+  const slotTwo=assignNextReviewer({...request,slot:2},io)
+  const replacementRequest={...request,slot:2,failedSequence:slotTwo.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true}
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:1})
+  const assigned=assignNextReviewer({...request,slot:2},io)
+  assert.equal(assigned.reviewer,replacement.reviewer,'slot-1 completion must not clear the live slot-2 replacement lease')
+  assert.equal(assigned.replacementSha,replacement.replacementSha)
+  assert.deepEqual(replaceFailedReviewer(replacementRequest,io),replacement,'slot-1 completion must not block an idempotent slot-2 replacement retry')
+  assert.equal(io.refs.get(reviewActiveRef(replacement.reviewer)),replacement.replacementSha)
+  assert.notEqual(replacement.reviewer,slotOne.reviewer)
+})
+
+test('replacement refusal is scoped to the requested review slot (issue #2208)',()=>{
+  const io=reviewIo(),issue=2208,pr=2221,headSha='e8'.repeat(20)
+  giveVerdict(io,{issue,pr,headSha,slot:1})
+  assert.equal(headVerdictBlocksReplacement(issue,pr,headSha,io,{slot:2}),false)
+  assert.equal(headVerdictBlocksReplacement(issue,pr,headSha,io,{slot:1}),true)
+  assert.equal(headVerdictBlocksReplacement(issue,pr,headSha,io),true,'legacy omitted-slot callers remain fail-closed')
+})
+
 test('a slot-2 replacement request must never be answered from slot 1 records (issue #1832)',()=>{
   // The dirty case that could plausibly slip past a loose fix: slot 1 exists
   // and is perfectly replaceable at its own sequence, so a slot-unaware or
