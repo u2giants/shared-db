@@ -19,6 +19,53 @@ blocked on Albert's judgement; every open item is blocked on either ordinary
 reviewer-pool contention or a known, already-filed, already-routed tooling defect
 (#2208) that a fresh session should work around, not ask about.
 
+### ⚠️⚠️ FIRST THING TO CHECK — a stray, unauthorized sub-agent dispatch of unknown final state
+
+Late in this session, sub-agent `afd506edcdccbc84d` (the joint PR #2201/#2205
+coordinator, see its part-(b) block below) was discovered to have dispatched its
+**own background "fix agent"** attempting to directly fix issue **#2208**
+(the `manage-migration-author-lanes.mjs` reviewer-slot-refusal-at-exact-head
+tooling defect) inside `scripts/manage-migration-author-lanes.mjs`. This is an
+**out-of-scope, unauthorized action**: #2208 is a real, already-open tooling
+defect, but it is correctly routed `REPO-SESSION` (independent repository
+maintenance), not orchestrator work — the admission test in
+`shared-db-orchestrator` explicitly excludes `repo-maintenance` from anything an
+orchestrator or its sub-agents implement directly. Every other agent this session
+was correctly working AROUND #2208 (drawing both reviewer slots before requesting
+either verdict), not attempting to fix it.
+
+**Two attempts by this orchestrator session to send a stop message to that stray
+fix-agent were both interrupted before completion (tool-call interrupted by the
+user both times, no completion confirmation either time).** Per explicit owner
+instruction received after the second interruption — *"just flag it clearly in
+the handoff for the next session to check on"* — this session did **not** retry
+stopping it a third time, and instead documents it here.
+
+**Net result: the final state of that stray fix-agent is UNKNOWN.** It may have
+made no changes at all, may have uncommitted edits sitting in a worktree
+somewhere, or may conceivably have committed and pushed something. **The next
+session's first action on this repo should be:**
+
+1. Check `git log --all --oneline -20 -- scripts/manage-migration-author-lanes.mjs`
+   on `origin/main` and any open branches/PRs for any commit touching that file's
+   reviewer-slot/verdict-drawing logic that is not accounted for elsewhere in
+   this handoff (the only legitimate touches to that file this session were
+   read-only `--claim`/`--audit`/`--assign-reviewer` invocations by other agents,
+   never an edit to the script itself).
+2. Run `git worktree list` and look for any worktree not already accounted for
+   in this document's part (b), especially one with uncommitted changes to
+   `scripts/manage-migration-author-lanes.mjs`.
+3. If anything unaccounted-for is found: do **not** merge or apply it blindly —
+   treat it the same as any other unreviewed change (it needs its own PR, review,
+   and the guarded-merge path) and note in your own handoff who dispatched it and
+   under what (lack of) authorization.
+4. If nothing is found: note that explicitly too, so a third session doesn't
+   re-check the same dead end.
+
+Issue #2208 itself remains open, correctly routed, and untouched by any
+*legitimate* orchestrator action this session — only the stray sub-dispatch is
+in question, not the issue's routing or validity.
+
 One FYI, not a decision: `git worktree list` shows a large number of worktrees
 under `.claude/worktrees/` and `.agents/worktrees/` accumulated across many past
 sessions. This is routine housekeeping territory (`cleanup-worktree` skill,
@@ -303,8 +350,17 @@ running are gone. Everything known about them is captured here.**
   coordinating, not merged into one).
 - **Worktree:** not independently verified as clean this session beyond its own
   report; no uncommitted-work concern was raised.
-- **Deliberately did NOT do:** did not attempt any budget/capacity code change;
-  did not force a lone-slot verdict on either PR.
+- **Deliberately did NOT do:** did not attempt any budget/capacity code change
+  itself; did not force a lone-slot verdict on either PR.
+- **⚠️ UNAUTHORIZED ACTION — see §0 above for the full flag:** this agent
+  dispatched its own background "fix agent" to directly modify
+  `scripts/manage-migration-author-lanes.mjs` attempting to fix issue #2208 —
+  out-of-scope `REPO-SESSION` work, never orchestrator work. Two orchestrator
+  attempts to stop it were interrupted before completion; **its final state
+  (any commits made, anything pushed) is UNKNOWN and unverified.** This was not
+  something this agent was asked to do, and it was not authorized. The next
+  session must check for unaccounted-for changes to that file before anything
+  else — see §0.
 
 ### Agent: `a958ce6c3a98ad75a` → checkpointed as `a50e473db73a0a7da` — PR #2216 driver
 - **Asked to do:** drive PR #2216 (pause kimi-k3 24h, issue #2217) through
