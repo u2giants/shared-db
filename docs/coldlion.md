@@ -71,7 +71,8 @@ Owner ruling 2026-08-09.
 ### What we are building
 | Document | What it answers |
 |---|---|
-| [`plan_coldlion-landing-phases-2-6.md`](plan_coldlion-landing-phases-2-6.md) | The current build plan (issue #1184 phases 2-6). **Read its STATUS table first** |
+| [`plan_coldlion-landing-phases-2-6.md`](plan_coldlion-landing-phases-2-6.md) | Historical phase plan and owner-decision record; execution assumptions are superseded by the completion plan below. |
+| [`../plan_coldlion_landing_schema_completion.md`](../plan_coldlion_landing_schema_completion.md) | Current completion/correction plan after the 2026-09-02 live-schema and current-API audit. **Read its STATUS table first** |
 | [`coldlion-field-decisions-20260819.csv`](coldlion-field-decisions-20260819.csv) | Albert's per-field ingest/ignore decision for all eight feeds. **Owner authority, not a suggestion** |
 | [`coldlion-raw-landing-schema-design.md`](coldlion-raw-landing-schema-design.md) | The landing-layer design, grain by grain. Carries dated supersession notes — read them |
 | [`coldlion-source-of-truth-plan.md`](coldlion-source-of-truth-plan.md) | Making ColdLion authoritative for the `core.*` master tables |
