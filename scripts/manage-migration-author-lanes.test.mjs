@@ -4378,7 +4378,7 @@ test('a failed slot-2 reviewer can be replaced without touching slot 1 (issue #1
 })
 
 test('a slot-1 verdict neither frees nor blocks a live slot-2 replacement (issue #2208)',()=>{
-  const io=reviewIo(),request={issue:2208,pr:2221,headSha:'d8'.repeat(20)}
+  const io=withAtomicRefs(reviewIo()),request={issue:2208,pr:2221,headSha:'d8'.repeat(20)}
   io.getPr=()=>({state:'open',head:{sha:request.headSha}})
   const slotOne=assignNextReviewer(request,io)
   const slotTwo=assignNextReviewer({...request,slot:2},io)
@@ -4398,6 +4398,7 @@ test('replacement refusal is scoped to the requested review slot (issue #2208)',
   giveVerdict(io,{issue,pr,headSha,slot:1})
   assert.equal(headVerdictBlocksReplacement(issue,pr,headSha,io,{slot:2}),false)
   assert.equal(headVerdictBlocksReplacement(issue,pr,headSha,io,{slot:1}),true)
+  assert.equal(headVerdictBlocksReplacement(issue,pr,headSha,io,{slot:null}),true,'an unknown slot remains fail-closed')
   assert.equal(headVerdictBlocksReplacement(issue,pr,headSha,io),true,'legacy omitted-slot callers remain fail-closed')
 })
 

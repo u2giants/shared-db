@@ -2678,7 +2678,7 @@ export function headVerdictBlocksReplacement(issue,pr,headSha,io,options={}){
   return listDurableVerdictRefs(io,options).some((row)=>{
     const named=parseVerdictRef(row.ref)
     if(!named||named.issue!==Number(issue)||named.pr!==Number(pr)||named.headSha!==head)return false
-    if(options.slot!==undefined&&named.slot!==Number(options.slot))return false
+    if(options.slot!=null&&named.slot!==Number(options.slot))return false
     return durableVerdictBlocksReplacement(row.ref,io)
   })
 }
@@ -3063,7 +3063,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
       requireOwnedRef(MUTEX_REF,ownerSha,io)
       const freshStates=io.readReviewStates?.([replacement,...(staleReplacement?[staleReplacement.assignment]:[])])
       assertReviewRequestEligible(request,freshStates,io)
-      const replacementLive=isReviewAssignmentLive(replacement,freshStates,io),replacementTarget=replacementLive?replacement.replacementSha:null
+      const replacementLive=isReviewAssignmentLive({...replacement,slot:request.slot},freshStates,io),replacementTarget=replacementLive?replacement.replacementSha:null
       if(replacementLive&&!liveReplacement)assertAssignmentWasNotTerminallyReleased(request,replacement,io)
       if(io.atomicReviewRefs){
         if(staleReplacement)assertReviewLeaseStillStale(staleReplacement,freshStates,io)
@@ -3184,7 +3184,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
         if(!reviewIssueEligible(fresh?.issue,fresh?.pr,io)||!reviewTargetEligible(fresh?.pr,io)||fresh?.pr?.head?.sha!==request.headSha||freshVerdict)throw new LaneError('review assignment issue, PR head, or verdict changed after mutex acquisition')
         if(selectedStale){
           const revived=freshStates?.get(`${selectedStale.assignment.issue}:${selectedStale.assignment.pr}`)
-          const verdict=hasVerdictForHead(selectedStale.assignment.issue,selectedStale.assignment.pr,selectedStale.assignment.headSha,io,{fresh:true})
+          const verdict=hasVerdictForHead(selectedStale.assignment.issue,selectedStale.assignment.pr,selectedStale.assignment.headSha,io,leaseVerdictOptions(selectedStale.assignment,{fresh:true}))
           if(revived?.pr?.state==='open'&&revived?.pr?.head?.sha===selectedStale.assignment.headSha&&!verdict)throw new LaneError('selected reviewer lease became live after mutex acquisition')
         }
         io.atomicReviewRefs([
@@ -3552,7 +3552,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
       // retires a durable record, and it now does so for both namespaces.
       if(freshExclusions.has(parsed.reviewer))throw new LaneError(`durable replacement reviewer ${parsed.reviewer} is excluded for this PR (${freshExclusions.get(parsed.reviewer).reason}); re-run the identical --exclude-reviewer to return this slot. The returned record is a REPLACEMENT, so --assign-reviewer will not refill it: draw the new reviewer with --replace-failed-reviewer for the same --failed-sequence.`)
       assertReviewRequestEligible(request,freshStates,io)
-      const replacementLive=isReviewAssignmentLive(parsed,freshStates,io),replacementTarget=replacementLive?priorReplacement:null
+      const replacementLive=isReviewAssignmentLive({...parsed,slot:request.slot},freshStates,io),replacementTarget=replacementLive?priorReplacement:null
       let failedDeleted=false,staleDeleted=false
       try{if(io.atomicReviewRefs){
           requireOwnedRef(MUTEX_REF,ownerSha,io)
