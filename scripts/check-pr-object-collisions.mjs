@@ -690,15 +690,24 @@ export function extractOperations(sql) {
       dollarQuoteStartsDo(source, offset) ? body : ' ')
     .replace(/'(?:[^']|'')*'/g, " '' ")
   const seen = new Map()
-  const temporaryTables = new Map()
+  const temporaryEvents = []
   const temporaryCreate = new RegExp(
     String.raw`\bcreate\s+(?:global\s+|local\s+)?(?:temp|temporary)\s+table\s+(?:if\s+not\s+exists\s+)?(${QUALIFIED})`,
     'gi',
   )
   let temporaryMatch
   while ((temporaryMatch = temporaryCreate.exec(text)) !== null) {
-    const target = canonical(temporaryMatch[1])
-    if (!temporaryTables.has(target)) temporaryTables.set(target, temporaryMatch.index)
+    temporaryEvents.push({ offset: temporaryMatch.index, action: 'create', target: canonical(temporaryMatch[1]) })
+  }
+  const tableDrop = new RegExp(String.raw`\bdrop\s+table\s+(?:if\s+exists\s+)?(${QUALIFIED})`, 'gi')
+  while ((temporaryMatch = tableDrop.exec(text)) !== null) {
+    temporaryEvents.push({ offset: temporaryMatch.index, action: 'drop', target: canonical(temporaryMatch[1]) })
+  }
+  temporaryEvents.sort((a,b)=>a.offset-b.offset)
+  const liveTemporaryTables=new Set(),temporaryCleanupOffsets=new Set()
+  for(const event of temporaryEvents){
+    if(event.action==='create'){liveTemporaryTables.add(event.target);continue}
+    if(liveTemporaryTables.has(event.target)){temporaryCleanupOffsets.add(event.offset);liveTemporaryTables.delete(event.target)}
   }
   // Bare SQL keywords are never object names. They appear when an upstream
   // regex over-reaches across statement boundaries, and emitting `table table`
@@ -712,8 +721,7 @@ export function extractOperations(sql) {
     // form. When the same migration created that name as a temporary table
     // earlier, the drop removes session-local scratch rather than a shared
     // object and must be ignored symmetrically with the create.
-    if (op.action === 'drop' && op.kind === 'table' &&
-        temporaryTables.has(op.target) && temporaryTables.get(op.target) < sourceOffset) return
+    if (op.action === 'drop' && op.kind === 'table' && temporaryCleanupOffsets.has(sourceOffset)) return
     seen.set(`${op.action}|${op.kind}|${op.target}`, op)
   }
 
