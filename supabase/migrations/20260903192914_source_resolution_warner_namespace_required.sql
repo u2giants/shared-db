@@ -26,7 +26,10 @@
 -- The deployed expression admits Warner values through `source_system like 'warner:%'`.
 -- In SQL, `%` matches ZERO characters, so the bare string `'warner:'` -- a Warner row whose
 -- namespace is empty -- is accepted. `source_resolution_source_system_nonblank_chk` does not
--- catch it either: `btrim('warner:')` is `'warner:'`, which is not blank.
+-- catch it either: `btrim('warner:')` is `'warner:'`, which is not blank. The same holds for
+-- every namespace made only of whitespace -- E'warner:\t', E'warner:\n', E'warner:\r',
+-- E'warner:\f' and E'warner:\v' (vertical tab). Each names no source namespace, each is
+-- exactly as unresolvable as the empty one, and each is refused here too.
 --
 -- That matters because the namespace is not decoration. plm.wb_property keys identity on
 -- (source_namespace, source_id), so a Warner source ID is unique only WITHIN its namespace,
@@ -53,7 +56,35 @@
 -- So the invariant the source side actually enforces is a NON-BLANK namespace, and that is
 -- what is required here:
 --
---     source_system like 'warner:%' and btrim(substring(source_system from length('warner:')+1)) <> ''
+--     source_system like 'warner:%'
+--       and substring(source_system from length('warner:')+1) !~ '^[[:space:]]*$'
+--
+-- WHY A REGEX AND NOT btrim(). An earlier draft of this file wrote
+-- `btrim(substring(...)) <> ''`, and THAT DRAFT WAS WRONG. One-argument `btrim(x)` trims
+-- SPACES ONLY: its defaulted second argument is the single-character set ' '. It therefore
+-- still ACCEPTED E'warner:\t', E'warner:\n', E'warner:\r', E'warner:\f' and
+-- E'warner:\v' -- namespaces made entirely of whitespace, every one of them as unresolvable
+-- as the empty string. The guarantee this file STATES (present and non-blank) and the
+-- guarantee it DELIVERED disagreed, and its own verification block could not see the gap
+-- because it only ever offered ordinary spaces.
+--
+-- The two candidate repairs are `btrim(x, E' \t\n\r\f\v') <> ''` and the regex
+-- above. BOTH are correct: PostgreSQL's E'' strings do recognise \v as the vertical tab --
+-- checked, not assumed, `ascii(E'\v')` is 11, identical to `ascii(E'\x0B')` -- so the
+-- explicit trim set really does cover all five characters. The regex is used because it states
+-- the condition being tested ("the namespace is not entirely whitespace") in a single reading,
+-- and because it names the whitespace set by its POSIX class rather than re-listing five
+-- escapes that a later edit could shorten by one without anything noticing. Silently covering
+-- fewer characters than intended is precisely the defect being repaired here, so the form that
+-- cannot be quietly under-specified is preferred.
+--
+-- The two forms are provably equivalent over the values at issue. PostgreSQL's POSIX class
+-- [[:space:]] is exactly {space, \t, \n, \v, \f, \r}, so
+-- `x !~ '^[[:space:]]*$'` is false precisely when every character of x belongs to that set --
+-- the empty string included -- which is the same condition as `btrim(x, <that same set>) = ''`.
+-- Both are IMMUTABLE, so both are legal in a CHECK. Any value with at least one non-whitespace
+-- character passes either form, and the verification block below exercises all five whitespace
+-- characters individually, doubled and mixed, on BOTH sides of the accept/refuse line.
 --
 -- This is deliberately NOT a pin to the two literal namespaces plm.wb_property currently
 -- allows. The vocabulary comment has always described this side as `warner:<source_namespace>`
@@ -98,7 +129,7 @@ alter table plm.source_resolution
     )
     or (
       source_system like 'warner:%'
-      and btrim(substring(source_system from length('warner:') + 1)) <> ''
+      and substring(source_system from length('warner:') + 1) !~ '^[[:space:]]*$'
     )
   );
 
@@ -149,11 +180,29 @@ declare
     'paramount','nbcu','disney_opa','disney_dcpvault','lucasfilm_dcpvault',
     'marvel_dcpvault','twentieth_century_dcpvault','wildbrain',
     'warner:warner_product_catalogue','warner:warner_art_assets','warner:x',
-    'warner:a b','warner: leading-space-is-still-a-namespace'
+    'warner:a b','warner: leading-space-is-still-a-namespace',
+    -- Namespaces that CONTAIN whitespace but are not made ONLY of it -- one per whitespace
+    -- character, leading, trailing and mixed. These prove the widened test did not over-narrow:
+    -- it refuses a namespace made only of whitespace, never one that merely has whitespace in
+    -- or around it.
+    E'warner:\tx', E'warner:x\t', E'warner:\nx', E'warner:\r\nx',
+    E'warner:\fx', E'warner:\vx', E'warner:v',
+    E'warner: \t\n\r\f\v x'
   ];
   -- The three forms this file newly refuses. Each was accepted before it.
+  --
+  -- ALL FIVE whitespace characters -- space, tab, newline, carriage return, form feed and
+  -- vertical tab -- alone, doubled and mixed, NOT just ordinary spaces. The space-only cases
+  -- were the only ones the first draft of this file exercised, which is exactly why its
+  -- one-argument btrim() defect survived its own verification block.
   v_newly_refused text[] := array[
-    'warner:','warner: ','warner:   '
+    'warner:', 'warner: ', 'warner:   ',
+    E'warner:\t', E'warner:\t\t',
+    E'warner:\n', E'warner:\n\n',
+    E'warner:\r', E'warner:\r\n',
+    E'warner:\f', E'warner:\f\f',
+    E'warner:\v', E'warner:\v\v',
+    E'warner: \t\n\r\f\v'
   ];
   -- Off-vocabulary values that were already refused and must stay refused.
   v_still_refused text[] := array[
