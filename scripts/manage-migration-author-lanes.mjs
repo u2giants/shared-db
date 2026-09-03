@@ -2611,9 +2611,18 @@ export function listDurableVerdictRefs(io,{fresh=false}={}){
 }
 export function hasVerdictForHead(issue,pr,headSha,io,options={}){
   const head=String(headSha??'').toLowerCase()
+  // #2208. `options.slot` is OPTIONAL and narrows the match to one slot's own
+  // verdict ref. Omitted (every pre-#2208 caller), this answers "does ANY slot
+  // have a durable verdict for this head" -- unchanged from before #2208, and
+  // still what a caller that only knows the head (not a specific slot) needs.
+  // A caller that IS asking on behalf of one specific slot -- "did MY slot's
+  // verdict change", not "did some sibling slot finish" -- must pass its own
+  // slot so a sibling slot's unrelated, already-existing verdict cannot be
+  // mistaken for this slot's own state changing.
+  const slot=options.slot==null?null:Number(options.slot)
   return listDurableVerdictRefs(io,options).some((row)=>{
     const named=parseVerdictRef(row.ref)
-    return Boolean(named)&&named.issue===Number(issue)&&named.pr===Number(pr)&&named.headSha===head
+    return Boolean(named)&&named.issue===Number(issue)&&named.pr===Number(pr)&&named.headSha===head&&(slot===null||named.slot===slot)
   })
 }
 
@@ -3076,7 +3085,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
       }
       assertAssignmentWasNotTerminallyReleased(request,prior,io)
       const live=io.getPr(prior.pr)
-      if(reviewTargetEligible(live,io)&&live?.head?.sha===prior.headSha&&!hasVerdictForHead(prior.issue,prior.pr,prior.headSha,io)){
+      if(reviewTargetEligible(live,io)&&live?.head?.sha===prior.headSha&&!hasVerdictForHead(prior.issue,prior.pr,prior.headSha,io,{slot:request.slot})){
         requireOwnedRef(MUTEX_REF,ownerSha,io)
         if(!io.createRef(leaseRef,priorSha)&&readRefAfterWrite(leaseRef,priorSha,io)!==priorSha)throw new LaneError(`reviewer ${prior.reviewer} has a conflicting active lease`)
       }
@@ -3108,7 +3117,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
       assertAssignmentWasNotTerminallyReleased(request,current,io)
       if(!io.createRef(assignmentRef,cursorSha)&&readRefAfterWrite(assignmentRef,cursorSha,io)!==cursorSha)throw new LaneError('review assignment record could not be proved; retry the same assignment')
       const live=io.getPr(current.pr)
-      if(reviewTargetEligible(live,io)&&live?.head?.sha===current.headSha&&!hasVerdictForHead(current.issue,current.pr,current.headSha,io)){
+      if(reviewTargetEligible(live,io)&&live?.head?.sha===current.headSha&&!hasVerdictForHead(current.issue,current.pr,current.headSha,io,{slot:request.slot})){
         if(eligibleNames.has(current.reviewer)){
           const leaseRef=reviewActiveRef(current.reviewer),existing=io.readRef(leaseRef)
           if(existing!==cursorSha&&(!io.createRef(leaseRef,cursorSha)||readRefAfterWrite(leaseRef,cursorSha,io)!==cursorSha))throw new LaneError(`reviewer ${current.reviewer} has a conflicting active lease`)
@@ -3144,7 +3153,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
         requireOwnedRef(MUTEX_REF,ownerSha,io)
         const freshStates=io.readReviewStates([{issue:request.issue,pr:request.pr,headSha:request.headSha},...(selectedStale?[selectedStale.assignment]:[])])
         const fresh=freshStates?.get(`${request.issue}:${request.pr}`)
-        const freshVerdict=hasVerdictForHead(request.issue,request.pr,request.headSha,io,{fresh:true})
+        const freshVerdict=hasVerdictForHead(request.issue,request.pr,request.headSha,io,{fresh:true,slot:request.slot})
         if(!reviewIssueEligible(fresh?.issue,fresh?.pr,io)||!reviewTargetEligible(fresh?.pr,io)||fresh?.pr?.head?.sha!==request.headSha||freshVerdict)throw new LaneError('review assignment issue, PR head, or verdict changed after mutex acquisition')
         if(selectedStale){
           const revived=freshStates?.get(`${selectedStale.assignment.issue}:${selectedStale.assignment.pr}`)
@@ -3436,7 +3445,7 @@ export function releaseFailedReviewer(options,io=githubIo){
     if(!preflightBusy)throw new LaneError('active reviewer leases are unreadable; reviewer release refused before mutex acquisition')
     const state=preflightBusy.states?.get(`${request.issue}:${request.pr}`),issueRow=state?.issue??io.getIssue(request.issue),prRow=state?.pr??io.getPr(request.pr)
     if(!reviewIssueEligible(issueRow,prRow,io)||!reviewTargetEligible(prRow,io)||prRow?.head?.sha!==request.headSha)throw new LaneError('reviewer release requires the exact eligible PR head')
-    if(hasVerdictForHead(request.issue,request.pr,request.headSha,io))throw new LaneError('an existing verdict for the exact head forbids reviewer release')
+    if(hasVerdictForHead(request.issue,request.pr,request.headSha,io,{slot:request.slot}))throw new LaneError('an existing verdict for the exact head forbids reviewer release')
     const cached=preflightBusy.leases?.get(original.reviewer),failedLeaseSha=cached?.sha??io.readRef(failedLeaseRef),failedLease=failedLeaseSha?(cached?.sha===failedLeaseSha?cached.lease:parseReviewLease(io.getCommit(failedLeaseSha))):null
     if(!failedLease||![failedLease.issue,failedLease.pr,failedLease.headSha,failedLease.sequence,failedLease.reviewer].every((value,index)=>value===[request.issue,request.pr,request.headSha,request.failedSequence,original.reviewer][index]))throw new LaneError('failed reviewer active lease does not match the terminal failure evidence')
     if(typeof io.atomicReviewRefs!=='function'||typeof io.readReviewRefs!=='function')throw new LaneError('reviewer release requires atomic compare-and-swap ref support')
@@ -3447,7 +3456,7 @@ export function releaseFailedReviewer(options,io=githubIo){
     try{
       requireReviewWireCapacity(8);acquireReviewMutex(ownerSha,io);acquired=true;requireOwnedRef(MUTEX_REF,ownerSha,io)
       const freshStates=io.readReviewStates([original]),fresh=freshStates?.get(`${request.issue}:${request.pr}`)
-      if(!reviewIssueEligible(fresh?.issue,fresh?.pr,io)||!reviewTargetEligible(fresh?.pr,io)||fresh?.pr?.head?.sha!==request.headSha||hasVerdictForHead(request.issue,request.pr,request.headSha,io,{fresh:true}))throw new LaneError('reviewer release issue, PR head, or verdict changed after mutex acquisition')
+      if(!reviewIssueEligible(fresh?.issue,fresh?.pr,io)||!reviewTargetEligible(fresh?.pr,io)||fresh?.pr?.head?.sha!==request.headSha||hasVerdictForHead(request.issue,request.pr,request.headSha,io,{fresh:true,slot:request.slot}))throw new LaneError('reviewer release issue, PR head, or verdict changed after mutex acquisition')
       const locked=io.readReviewRefs([MUTEX_REF,failureRef,failedLeaseRef])
       if(locked.get(MUTEX_REF)!==ownerSha||locked.get(failureRef)!==null||locked.get(failedLeaseRef)!==failedLeaseSha)throw new LaneError('reviewer release ownership changed after preflight')
       io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:ownerSha},{ref:failureRef,expected:null,sha:failureSha},{ref:failedLeaseRef,expected:failedLeaseSha,sha:null}])

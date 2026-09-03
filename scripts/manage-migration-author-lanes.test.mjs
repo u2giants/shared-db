@@ -3902,6 +3902,52 @@ test('slot 2 keeps its own ref namespace: it never disturbs or is confused with 
   assert.deepEqual(assignNextReviewer({...request,slot:2},io),second)
 })
 
+test('slot 2 is drawable as a genuine first-time assignment even though slot 1 already has a durable verdict for this exact head (issue #2208)',()=>{
+  // Reviewers are asynchronous: slot 1 finishing (and recording its durable
+  // verdict) before slot 2 is even drawn is the ORDINARY case, not an edge
+  // case. `hasVerdictForHead` used to answer "does ANY slot have a verdict for
+  // this head" with no slot filter, so the post-mutex freshness recheck inside
+  // the ordinary assignment path mistook slot 1's pre-existing, unrelated
+  // verdict for "the verdict state changed after I took the mutex" and refused
+  // to draw slot 2 at all -- forever, for that head. The only workaround was
+  // discarding slot 1's already-valid verdict by pushing a new head and
+  // redrawing both slots together.
+  const io=withAtomicRefs(reviewIo()),request={issue:2208,pr:2299,headSha:'e'.repeat(40)}
+  io.getPr=()=>({number:request.pr,state:'open',head:{sha:request.headSha,ref:'codex/x'}})
+  const first=assignNextReviewer(request,io)
+  giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:1})
+  const second=assignNextReviewer({...request,slot:2},io)
+  assert.equal(second.slot,2)
+  assert.notEqual(second.reviewer,first.reviewer)
+  // Idempotent retry of the same slot-2 draw must still work once it exists.
+  assert.deepEqual(assignNextReviewer({...request,slot:2},io),second)
+})
+
+test('hasVerdictForHead: an optional slot narrows the match; omitted, it still answers for ANY slot (issue #2208)',()=>{
+  const io=reviewIo(),issue=2210,pr=2301,headSha='f2'.repeat(20)
+  assert.equal(hasVerdictForHead(issue,pr,headSha,io),false)
+  giveVerdict(io,{issue,pr,headSha,slot:1})
+  // No slot given: unchanged pre-#2208 behavior, any slot's verdict counts.
+  assert.equal(hasVerdictForHead(issue,pr,headSha,io),true)
+  // Asked on behalf of slot 1 specifically: still true, it's slot 1's own verdict.
+  assert.equal(hasVerdictForHead(issue,pr,headSha,io,{slot:1}),true)
+  // Asked on behalf of slot 2 specifically: false. Slot 1's verdict is a
+  // SIBLING slot's state, not slot 2's own -- this is the exact distinction
+  // #2208's lockout collapsed.
+  assert.equal(hasVerdictForHead(issue,pr,headSha,io,{slot:2}),false)
+  giveVerdict(io,{issue,pr,headSha,slot:2})
+  assert.equal(hasVerdictForHead(issue,pr,headSha,io,{slot:2}),true)
+})
+
+test('releasing a failed slot 2 reviewer is still refused once slot 2 ITSELF already has a durable verdict (issue #2208 does not weaken same-slot protection)',()=>{
+  const io=withAtomicRefs(reviewIo()),request={issue:2209,pr:2300,headSha:'f1'.repeat(20)}
+  io.getPr=()=>({number:request.pr,state:'open',head:{sha:request.headSha,ref:'codex/x'}})
+  assignNextReviewer(request,io)
+  const second=assignNextReviewer({...request,slot:2},io)
+  giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:2})
+  assert.throws(()=>releaseFailedReviewer({issue:request.issue,pr:request.pr,headSha:request.headSha,failedSequence:second.sequence,slot:2,failureCode:'provider_unavailable',confirmNoVerdict:true,confirmNoArtifact:true},io),/verdict/)
+})
+
 test('an invalid review slot is refused',()=>{
   const io=reviewIo()
   assert.throws(()=>assignNextReviewer({issue:205,pr:305,headSha:'a'.repeat(40),slot:0},io),/positive integer/)
