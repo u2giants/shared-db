@@ -690,14 +690,30 @@ export function extractOperations(sql) {
       dollarQuoteStartsDo(source, offset) ? body : ' ')
     .replace(/'(?:[^']|'')*'/g, " '' ")
   const seen = new Map()
+  const temporaryTables = new Map()
+  const temporaryCreate = new RegExp(
+    String.raw`\bcreate\s+(?:global\s+|local\s+)?(?:temp|temporary)\s+table\s+(?:if\s+not\s+exists\s+)?(${QUALIFIED})`,
+    'gi',
+  )
+  let temporaryMatch
+  while ((temporaryMatch = temporaryCreate.exec(text)) !== null) {
+    const target = canonical(temporaryMatch[1])
+    if (!temporaryTables.has(target)) temporaryTables.set(target, temporaryMatch.index)
+  }
   // Bare SQL keywords are never object names. They appear when an upstream
   // regex over-reaches across statement boundaries, and emitting `table table`
   // would let two unrelated pull requests "collide" on a keyword.
   const KEYWORDS = new Set(['table', 'tables', 'function', 'functions', 'routine', 'routines',
     'sequence', 'sequences', 'view', 'schema', 'index', 'if', 'as', 'only', 'exists', 'all'])
-  const add = (op) => {
+  const add = (op, sourceOffset = -1) => {
     if (!op.target) return
     if (KEYWORDS.has(op.target)) return
+    // PostgreSQL spells cleanup as plain `DROP TABLE`; there is no DROP TEMP
+    // form. When the same migration created that name as a temporary table
+    // earlier, the drop removes session-local scratch rather than a shared
+    // object and must be ignored symmetrically with the create.
+    if (op.action === 'drop' && op.kind === 'table' &&
+        temporaryTables.has(op.target) && temporaryTables.get(op.target) < sourceOffset) return
     seen.set(`${op.action}|${op.kind}|${op.target}`, op)
   }
 
@@ -721,7 +737,7 @@ export function extractOperations(sql) {
   for (const { re, map } of DISPATCH_PATTERNS) {
     re.lastIndex = 0
     let m
-    while ((m = re.exec(text)) !== null) for (const op of map(m)) add(op)
+    while ((m = re.exec(text)) !== null) for (const op of map(m)) add(op, m.index)
   }
 
   return [...seen.values()].sort((a, b) =>
