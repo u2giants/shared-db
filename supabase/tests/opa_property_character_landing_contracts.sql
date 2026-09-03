@@ -314,7 +314,7 @@ begin
     raise exception 'plm.opa_character.core_character_id compatibility column is missing or not nullable';
   end if;
   -- Issue #2146: the retirement in #1374 dropped this foreign key so core.character
-  -- could be dropped. #1684 recreated core.character and 20260903014958 restored the
+  -- could be dropped. #1684 recreated core.character and 20260903072252 restored the
   -- contract, so the assertion is now that the foreign key IS present in exactly the
   -- shape the surviving Character tables carry.
   if not exists (
