@@ -5186,6 +5186,20 @@ test('an unparseable Link value REFUSES rather than reading as "no further pages
   }
 })
 
+test('a link value carrying NO relation refuses rather than reading as "no further pages"',()=>{
+  // The third hole of the same class (#2155 review 3). A link value with no
+  // `rel` at all parsed cleanly with an empty relation, so hasNextPageLink
+  // answered false when the truth was UNKNOWN. A header truncated at the
+  // semicolon -- `<uri>; rel="next"` cut to `<uri>` -- lands exactly here, which
+  // is the silent truncation this whole change exists to prevent. RFC 8288
+  // requires a rel on every link value, so both shapes below are malformed.
+  for(const broken of ['<https://a/x?page=2>','<https://a/x?page=2>; title="next"','<https://a/x?page=2>; rel="next", <https://a/x?page=9>']){
+    assert.throws(()=>hasNextPageLink({link:broken}),/unparseable Link header \(a link value carries no rel relation\)/,`must refuse: ${broken}`)
+    assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,linkPagerFetch({link:broken})),/unparseable Link header/)
+  }
+  assert.throws(()=>parseLinkHeader('<https://a/x?page=2>'),/unparseable Link header/)
+})
+
 test('an absent or empty Link header is simply no further pages',()=>{
   assert.equal(hasNextPageLink({}),false)
   assert.equal(hasNextPageLink({link:''}),false)

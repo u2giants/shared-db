@@ -930,7 +930,8 @@ export function parseGhIncludeResponse(raw) {
 // so text inside `title="rel=next"` is a VALUE and can never be mistaken for a
 // parameter name. Anything that does not fit the grammar THROWS: a missing `<`,
 // an unterminated `<...>` or quoted string, a parameter not introduced by `;`,
-// an empty parameter name, a parameter carrying NO `=` at all, or an unquoted
+// an empty parameter name, a link value carrying no `rel` relation at all, a
+// parameter carrying NO `=` at all, or an unquoted
 // value that is empty or holds a character outside the token grammar (a stray
 // quote above all). Callers let that refusal propagate, because an
 // unparseable Link header must never read as "no further pages".
@@ -996,6 +997,14 @@ export function parseLinkHeader(value) {
       // the same name is ignored rather than overwriting it.
       if(!(name in params))params[name]=parameterValue
     }
+    // A LINK VALUE WITH NO RELATION AT ALL IS A REFUSAL (#2152 review 3).
+    // RFC 8288 requires every link value to carry a `rel`. A bare `<uri>`, or
+    // one whose only parameter is something other than `rel`, parsed cleanly
+    // with no relation -- so it answered "no further pages" when the truth was
+    // unknown. A header truncated at the semicolon (`<uri>; rel="next"` cut to
+    // `<uri>`) lands exactly here: the same fail-OPEN direction as the two
+    // holes closed above.
+    if(!String(params.rel??'').trim())refuse('a link value carries no rel relation')
     links.push({uri,params})
   }
   return links
