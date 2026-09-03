@@ -20,21 +20,19 @@ import { manifestDigest } from './lib/manifest.mjs';
 import { runBatch } from './lib/execute.mjs';
 import { connect, parseArgs } from './lib/pg.mjs';
 import { assertLiveIdentity, readLiveIdentity } from './lib/target.mjs';
+import { assertPrivateOutputDir } from './lib/private-path.mjs';
 
 const FLAGS = [
   'manifest', 'target', 'expect_project_ref', 'expect_manifest_sha256',
   'expect_cluster_id', 'backup_out', 'authorization', 'apply', 'help',
 ];
 
-/** Capture the exact before-state of every candidate row, for rollback. */
-export async function captureBackup(client, manifest, { target, digest, projectRef, cluster }) {
-  const ids = manifest.candidates.map((c) => c.item_id_pk);
-  const { rows } = await client.query(
-    `select item_id_pk, ${WRITABLE_FIELDS.join(', ')} from dflow."itemHeader" `
-    + 'where item_id_pk = any($1::int[]) order by item_id_pk',
-    [ids],
-  );
-  const after = new Map(manifest.candidates.map((c) => [c.item_id_pk, c.after]));
+/**
+ * The before-state backup, built from the rows a locked, revalidated plan is
+ * about to write. It is deliberately NOT a pre-lock SELECT: see the comment in
+ * lib/execute.mjs where `onPlanned` is called.
+ */
+export function buildBackup(toChange, { target, digest, projectRef, cluster }) {
   return {
     schema: 'historical-item-mg-reclassification/backup@1',
     target,
@@ -42,12 +40,34 @@ export async function captureBackup(client, manifest, { target, digest, projectR
     cluster_system_identifier: cluster,
     manifest_sha256: digest,
     captured_at: new Date().toISOString(),
-    rows: rows.map((r) => ({
-      item_id_pk: Number(r.item_id_pk),
-      before: Object.fromEntries(WRITABLE_FIELDS.map((f) => [f, r[f] ?? null])),
-      after: after.get(Number(r.item_id_pk)),
+    rows: toChange.map((c) => ({
+      item_id_pk: Number(c.item_id_pk),
+      before: Object.fromEntries(WRITABLE_FIELDS.map((f) => [f, c.before[f] ?? null])),
+      after: Object.fromEntries(WRITABLE_FIELDS.map((f) => [f, c.after[f] ?? null])),
     })),
   };
+}
+
+/**
+ * A manifest names the exact database it was built against. Refuse to execute it
+ * anywhere else. Without this, a preview-built manifest whose digest was placed
+ * in a production authorization artifact would have been executed against
+ * production, because nothing compared the manifest to the live destination.
+ */
+export function assertManifestMatchesTarget(manifest, { target, projectRef, cluster }) {
+  if (manifest.target && manifest.target !== target) {
+    throw new Error(
+      `REFUSED: the manifest was built against "${manifest.target}", not "${target}"`,
+    );
+  }
+  if (manifest.project_ref && manifest.project_ref !== projectRef) {
+    throw new Error('REFUSED: the manifest was built against a different Supabase project');
+  }
+  if (manifest.cluster_system_identifier
+    && String(manifest.cluster_system_identifier) !== String(cluster)) {
+    throw new Error('REFUSED: the manifest was built against a different Postgres cluster');
+  }
+  return true;
 }
 
 async function main() {
@@ -75,20 +95,28 @@ async function main() {
     console.error(`target proof: project ${projectRef}, database ${identity.database}, `
       + `cluster ${identity.system_identifier}`);
 
-    const backup = await captureBackup(client, manifest, {
-      target: args.target, digest, projectRef, cluster: identity.system_identifier,
+    assertManifestMatchesTarget(manifest, {
+      target: args.target, projectRef, cluster: identity.system_identifier,
     });
-    const dir = resolve(args.backup_out);
+
+    const dir = assertPrivateOutputDir(args.backup_out);
     mkdirSync(dir, { recursive: true });
-    const backupPath = join(dir, `backup-${digest.slice(0, 12)}.json`);
-    writeFileSync(backupPath, `${JSON.stringify(backup, null, 2)}\n`);
-    console.error(`before-state backup written (${backup.rows.length} rows)`);
 
     const result = await runBatch(client, manifest, {
       target: args.target,
       mode: args.apply ? 'apply' : 'plan',
       expectedDigest: args.expect_manifest_sha256,
       authorization,
+      // Written under the lock, before the UPDATE, and only over the rows this
+      // batch will actually write.
+      onPlanned: async (toChange) => {
+        const backup = buildBackup(toChange, {
+          target: args.target, digest, projectRef, cluster: identity.system_identifier,
+        });
+        const backupPath = join(dir, `backup-${digest.slice(0, 12)}.json`);
+        writeFileSync(backupPath, JSON.stringify(backup, null, 2) + "\n");
+        console.error(`before-state backup written (${backup.rows.length} rows)`);
+      },
     });
     console.log(JSON.stringify({
       mode: result.mode,

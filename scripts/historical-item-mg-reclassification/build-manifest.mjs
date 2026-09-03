@@ -26,6 +26,7 @@ import {
 import { manifestDigest, serializeManifest, sha256 } from './lib/manifest.mjs';
 import { connect, parseArgs } from './lib/pg.mjs';
 import { readLiveIdentity } from './lib/target.mjs';
+import { assertPrivateOutputDir } from './lib/private-path.mjs';
 
 const FLAGS = ['source', 'target', 'expect_project_ref', 'out', 'help'];
 
@@ -161,7 +162,7 @@ async function main() {
   const { generated_at: generatedAt, ...digestable } = out.manifest;
   const digest = manifestDigest(digestable);
 
-  const dir = resolve(args.out);
+  const dir = assertPrivateOutputDir(args.out);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'manifest.json'), serializeManifest(digestable));
   writeFileSync(join(dir, 'manifest.meta.json'),

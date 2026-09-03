@@ -88,7 +88,7 @@ Adding `--apply` to `apply.mjs` or `rollback.mjs` writes rows. Do not.
 node --test scripts/historical-item-mg-reclassification/*.test.mjs
 ```
 
-35 tests, all offline, all synthetic, no secrets and no database. They cover the
+38 tests, all offline, all synthetic, no secrets and no database. They cover the
 19 cases required by section 10 of the plan. Each one feeds a guard a known-bad
 input and asserts the specific refusal, so every guard in this directory has been
 observed going red for the right reason rather than merely passing.

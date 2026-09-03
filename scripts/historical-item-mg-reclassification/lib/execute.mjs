@@ -156,6 +156,7 @@ where t.item_id_pk = v.item_id_pk
  */
 export async function runBatch(client, manifest, {
   target, mode = 'plan', expectedDigest, authorization, cutoff = HISTORICAL_CUTOFF_ISO,
+  onPlanned,
 } = {}) {
   if (mode !== 'plan' && mode !== 'apply') {
     throw new Error(`REFUSED: unknown mode "${mode}"; expected plan or apply`);
@@ -176,6 +177,15 @@ export async function runBatch(client, manifest, {
         + 'the entire batch is rolled back',
       );
     }
+    // The before-state backup MUST be taken here: inside this transaction, after
+    // the rows are locked and revalidated, and over the rows this batch will
+    // actually write. Capturing it before the lock was a real defect: a
+    // concurrent edit that happened to land on the desired values is classified
+    // `already_equal` and never touched by this batch, yet a pre-lock backup
+    // still listed it, so a later rollback would have overwritten someone else's
+    // edit with a stale value. `to_change` cannot contain such a row, because
+    // every one of its six before-fields was just proved equal under the lock.
+    if (onPlanned) await onPlanned(plan.to_change);
     let changed = 0;
     if (plan.to_change.length > 0) {
       const { text, params } = buildUpdate(plan.to_change);

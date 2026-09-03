@@ -519,3 +519,57 @@ test('22: a blank source identity abstains instead of matching anything', () => 
     ABSTAIN.SOURCE_IDENTITY_BLANK,
   );
 });
+
+// ---------------------------------------------- review findings at head 689047e
+
+test('23: a manifest built elsewhere cannot be executed against this database', async () => {
+  const { assertManifestMatchesTarget } = await import('./apply.mjs');
+  const live = { target: 'production', projectRef: 'aaaabbbbccccddddeeee', cluster: '77' };
+  assert.equal(assertManifestMatchesTarget(
+    { target: 'production', project_ref: 'aaaabbbbccccddddeeee', cluster_system_identifier: '77' },
+    live,
+  ), true);
+  assert.throws(
+    () => assertManifestMatchesTarget({ target: 'preview' }, live),
+    /built against "preview", not "production"/,
+  );
+  assert.throws(
+    () => assertManifestMatchesTarget({ project_ref: 'zzzzbbbbccccddddeeee' }, live),
+    /a different Supabase project/,
+  );
+  assert.throws(
+    () => assertManifestMatchesTarget({ cluster_system_identifier: '99' }, live),
+    /a different Postgres cluster/,
+  );
+});
+
+test('24: the backup is taken under the lock and covers only the rows written', async () => {
+  const a = qualify(sourceRow(), [item()]).record;
+  const b = qualify(sourceRow({ item_num: 'SYN-0002' }),
+    [item({ item_id_pk: 2, item_num_id: 'SYN-0002' })]).record;
+  // Row 2 already carries the proposal, so this batch will not write it. A
+  // pre-lock backup would still have listed it, and a later rollback would then
+  // have overwritten whoever set it.
+  const client = fakeClient([item({ item_id_pk: 1 }), item({ item_id_pk: 2, item_num_id: 'SYN-0002', ...b.after })]);
+  const seen = [];
+  await runBatch(client, manifestOf([a, b]), {
+    target: 'preview',
+    mode: 'apply',
+    onPlanned: (toChange) => { seen.push(toChange.map((c) => c.item_id_pk)); },
+  });
+  assert.deepEqual(seen, [[1]]);
+  // and the hook ran while the rows were locked, before the UPDATE
+  assert.ok(client.log.indexOf('LOCK') < client.log.indexOf('UPDATE'));
+});
+
+test('25: licensed row data may not be written into a git working tree', async () => {
+  const { assertPrivateOutputDir } = await import('./lib/private-path.mjs');
+  const deps = { topLevel: () => 'C:/repo', ignores: () => false };
+  assert.throws(
+    () => assertPrivateOutputDir('out', deps),
+    /unless git ignores the destination/,
+  );
+  assert.ok(assertPrivateOutputDir('out', { topLevel: () => 'C:/repo', ignores: () => true }));
+  assert.ok(assertPrivateOutputDir('out', { topLevel: () => null }));
+  assert.throws(() => assertPrivateOutputDir('', deps), /output directory is required/);
+});
