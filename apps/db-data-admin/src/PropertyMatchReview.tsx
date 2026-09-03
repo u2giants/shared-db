@@ -7,9 +7,11 @@ import {
   defaultSelection,
   describeMatchState,
   loadPropertyMatchQueue,
+  loadOpaPropertyOptions,
   matchState,
   type MatchState,
   type PropertyMatchRow,
+  type OpaPropertyOption,
 } from './lib/property-match'
 
 type Props = { client: ApiClient }
@@ -23,6 +25,8 @@ const stateLabel: Record<MatchState, string> = {
 export function PropertyMatchReview({ client }: Props) {
   const [rows, setRows] = useState<PropertyMatchRow[]>([])
   const [chosen, setChosen] = useState<Record<string, number[]>>({})
+  const [propertyOptions, setPropertyOptions] = useState<OpaPropertyOption[]>([])
+  const [propertySearch, setPropertySearch] = useState<Record<string, string>>({})
   const [reasons, setReasons] = useState<Record<string, string>>({})
   // One request id per row, held until that row's decision succeeds. Retrying a
   // failed call therefore returns the recorded decision instead of appending a
@@ -39,8 +43,9 @@ export function PropertyMatchReview({ client }: Props) {
   const load = useCallback(async () => {
     setLoading(true); setError(null); setDenied(false); setUnavailable(false)
     try {
-      const loaded = await loadPropertyMatchQueue(client)
+      const [loaded, options] = await Promise.all([loadPropertyMatchQueue(client), loadOpaPropertyOptions(client)])
       setRows(loaded)
+      setPropertyOptions(options)
       setChosen(Object.fromEntries(loaded.map(row => [row.resolution_id, defaultSelection(row)])))
       setRequestIds(Object.fromEntries(loaded.map(row => [row.resolution_id, crypto.randomUUID()])))
     } catch (cause) {
@@ -78,6 +83,17 @@ export function PropertyMatchReview({ client }: Props) {
         : [...picked, licensedPropertyId],
     }
   })
+
+  const optionValue = (option: OpaPropertyOption) => `${option.property_name} · OPA ${option.licensed_property_id}`
+  const addProperty = (resolutionId: string, value: string) => {
+    const option = propertyOptions.find(candidate => optionValue(candidate) === value)
+    if (!option) return
+    setChosen(current => ({
+      ...current,
+      [resolutionId]: [...new Set([...(current[resolutionId] ?? []), option.licensed_property_id])],
+    }))
+    setPropertySearch(current => ({ ...current, [resolutionId]: '' }))
+  }
 
   const decide = async (row: PropertyMatchRow, decision: 'approve' | 'reject') => {
     setBusy(row.resolution_id); setError(null); setSaved(null)
@@ -125,6 +141,9 @@ export function PropertyMatchReview({ client }: Props) {
     </p>
     {error && <div className="inline-error" role="alert">{error}</div>}
     {saved && <p className="muted" role="status">{saved}</p>}
+    <datalist id="opa-property-options">
+      {propertyOptions.map(option => <option key={option.licensed_property_id} value={optionValue(option)} />)}
+    </datalist>
     <div aria-busy={loading}>
       {visible.map(row => {
         const picked = chosen[row.resolution_id] ?? []
@@ -145,20 +164,30 @@ export function PropertyMatchReview({ client }: Props) {
             Previously {row.prior_approval_status} at version {row.prior_decision_version}
             {row.prior_contract_asserted_studio_code && <> as {row.prior_contract_asserted_studio_code}</>}.
           </p>}
-          {row.candidates.length === 0
-            ? <p className="muted">No OPA Property was proposed for this one.</p>
+          <label className="property-autocomplete">
+            <span>Disney Property</span>
+            <input
+              list="opa-property-options"
+              placeholder="Type to search every Disney Property"
+              value={propertySearch[row.resolution_id] ?? ''}
+              onChange={event => {
+                const value = event.target.value
+                setPropertySearch(current => ({ ...current, [row.resolution_id]: value }))
+                addProperty(row.resolution_id, value)
+              }}
+            />
+          </label>
+          {picked.length === 0
+            ? <p className="muted">No Disney Property selected.</p>
             : <ul className="match-candidates">
-              {row.candidates.map(candidate => <li key={candidate.licensed_property_id}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={picked.includes(candidate.licensed_property_id)}
-                    onChange={() => toggle(row.resolution_id, candidate.licensed_property_id)}
-                  />
-                  <span>{candidate.property_name ?? `OPA Property ${candidate.licensed_property_id}`}</span>
-                  <span className="muted"> · OPA {candidate.licensed_property_id}</span>
-                </label>
-              </li>)}
+              {picked.map(id => {
+                const option = propertyOptions.find(candidate => candidate.licensed_property_id === id)
+                const suggested = row.candidates.find(candidate => candidate.licensed_property_id === id)
+                return <li key={id}>
+                  <span>{option?.property_name ?? suggested?.property_name ?? `OPA Property ${id}`} · OPA {id}</span>
+                  <button type="button" className="remove-property" onClick={() => toggle(row.resolution_id, id)} aria-label={`Remove OPA Property ${id}`}><X aria-hidden="true" /></button>
+                </li>
+              })}
             </ul>}
           <label className="match-reason">
             <span>Reason</span>

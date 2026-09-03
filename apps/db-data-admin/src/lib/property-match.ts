@@ -31,6 +31,11 @@ export type MatchCandidate = QueueCandidate & {
   property_name: string | null
 }
 
+export type OpaPropertyOption = {
+  licensed_property_id: number
+  property_name: string
+}
+
 export type MatchState = 'exact' | 'multiple' | 'none'
 
 export type PropertyMatchRow = {
@@ -125,6 +130,27 @@ export async function attachCandidateNames(client: ApiClient, rows: PropertyMatc
       property_name: names.get(candidate.licensed_property_id) ?? null,
     })),
   }))
+}
+
+/** Load the complete OPA Property vocabulary; Supabase caps one select at 1,000 rows. */
+export async function loadOpaPropertyOptions(client: ApiClient) {
+  const options: OpaPropertyOption[] = []
+  const pageSize = 1000
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await client
+      .from('opa_property_reconciliation')
+      .select('licensed_property_id, opa_property_name')
+      .order('opa_property_name')
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    const page = (data ?? []) as { licensed_property_id: number; opa_property_name: string | null }[]
+    options.push(...page.filter(row => row.opa_property_name).map(row => ({
+      licensed_property_id: Number(row.licensed_property_id),
+      property_name: row.opa_property_name as string,
+    })))
+    if (page.length < pageSize) break
+  }
+  return options
 }
 
 /** Why this row needs a human: no candidate, exactly one, or a choice between several. */
