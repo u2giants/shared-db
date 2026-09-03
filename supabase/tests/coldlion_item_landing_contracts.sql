@@ -276,7 +276,7 @@ begin
     where table_schema = 'coldlion' and table_name = 'item_detail'
       and column_name = 'label_desc'
   ) then
-    raise exception 'E FAILED: item_detail.label_desc (D15, ingest) is missing';
+    raise exception 'E FAILED: item_detail.label_desc (owner ruling 2026-09-03, #2081 comment 5526450180) is missing';
   end if;
 
   if not exists (
@@ -284,7 +284,7 @@ begin
     where table_schema = 'coldlion' and table_name = 'item_merch_group'
       and column_name = 'mg_desc'
   ) then
-    raise exception 'E FAILED: item_merch_group.mg_desc (D15, ingest) is missing';
+    raise exception 'E FAILED: item_merch_group.mg_desc (owner ruling 2026-09-03, #2081 comment 5526450180) is missing';
   end if;
 
   -- Owner-DECLINED fields from docs/coldlion-field-decisions-20260819.csv. If one of

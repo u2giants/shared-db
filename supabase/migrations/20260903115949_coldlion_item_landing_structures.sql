@@ -63,8 +63,14 @@
 --
 -- 3. The merchGroupNNDesc family (14 fields on BOTH feeds) and itemDetails.labelDesc
 --    are live but carry no row in docs/coldlion-field-decisions-20260819.csv, whose
---    silence is absence and not a decision. Owner ruling D15 marks exactly this
---    family `ingest`. They are DESCRIPTIONS: evidence, never keys. The slot
+--    silence is absence and not a decision. The OWNER RULING of 2026-09-03
+--    (https://github.com/u2giants/shared-db/issues/2081#issuecomment-5526450180)
+--    marks the merchGroupNNDesc family and labelDesc `ingest` on /items and
+--    /itemDetails, satisfying D4 for these two feeds IN THEIR OWN RIGHT. It is
+--    NOT an extension of D15, whose text answers the history-feed gap list; per
+--    the D17 precedent a ruling naming one feed does not travel to another, so
+--    this ruling authorises no other field and no other feed.
+--    They are DESCRIPTIONS: evidence, never keys. The slot
 --    description is therefore stored ON THE SLOT ROW (mg_desc) beside the code it
 --    describes, and label_desc inline beside label_code. No key, constraint or
 --    index anywhere in this file uses a description.
@@ -144,7 +150,13 @@ comment on table coldlion.item_merch_group is
   'and mg_code may not be blank, so a cleared slot cannot be faked as an empty string. '
   'Owner ruling D16: licensor (slot 05) and property (slot 06) describe the COMPONENT '
   'style, never the Master assortment. A detail slot is NEVER defaulted, copied or fallen '
-  'back from the item-header slot, in either direction.';
+  'back from the item-header slot, in either direction. THIS IS A LOADER RULE, NOT A '
+  'SCHEMA GUARANTEE: this table only makes a compliant loader possible by giving each '
+  'grain its own row. No constraint here can detect a loader that copies the parent '
+  'value onto a SKU, because a SKU may legitimately share its parent licensor (D14 '
+  'measured that in a substantial minority of prepack groups), so value-equality '
+  'enforcement would reject real data. D16 is enforced by the Step 7 loader and the '
+  'Step 8 promotion contract.';
 
 comment on column coldlion.item_merch_group.item_pkey is
   'NULL = item-header grain. NOT NULL = the itemDetails SKU this slot belongs to. The '
@@ -152,7 +164,8 @@ comment on column coldlion.item_merch_group.item_pkey is
   'duplicate it.';
 
 comment on column coldlion.item_merch_group.mg_desc is
-  'merchGroupNNDesc for this slot (owner ruling D15, ingest). Evidence, never a key: no '
+  'merchGroupNNDesc for this slot (owner ruling 2026-09-03, issue #2081 comment '
+  '5526450180: ingest on /items and /itemDetails). Evidence, never a key: no '
   'constraint or index in this schema uses a description.';
 
 -- -------------------------------------------------------------------------------------
@@ -195,7 +208,8 @@ comment on table coldlion.item_detail is
   'parameter, so it has no page envelope to page through.';
 
 comment on column coldlion.item_detail.label_desc is
-  'labelDesc (owner ruling D15, ingest). Description of label_code; evidence, never a key.';
+  'labelDesc (owner ruling 2026-09-03, issue #2081 comment 5526450180: ingest on '
+  '/items and /itemDetails). Description of label_code; evidence, never a key.';
 
 -- -------------------------------------------------------------------------------------
 -- 3. item_header: identity restated, no scalar column added.
