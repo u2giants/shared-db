@@ -31,6 +31,12 @@ as "missing from the licensor" when the licensor does carry them — one level d
 
 ---
 
+> **Venue note (2026-09-03).** `u2giants/shared-db` is a **public** repository. This report
+> therefore carries method, aggregate counts and structural findings only. Every named
+> licensor source row, source id and source UUID has been moved to `u2giants/licensor-source-data` (private).
+> Precedent: `docs/db-data-admin-property-match-review.md`; rule:
+> `docs/private-data-artifacts.md` and `AGENTS.md` §0.0-A.
+
 ## 1. The derived licensor ↔ portal mapping, and how it was derived
 
 The mapping was **not assumed**. It is an output of the data.
@@ -79,18 +85,17 @@ The four extracts do not share an ID space, and integer IDs collide hard across 
 Measured on production:
 
 > `plm.opa_property.licensed_property_id` and `plm.sega_property.property_source_id`
-> **collide on 105 values** (range 101–210).
-> `101` = Disney **"Aristocats"** and Sega **"Company of Heroes 2"**.
-> `102` = Disney **"Aristocats - Individual Characters"** and Sega
-> **"Company of Heroes 2: The Western Front Armies"**.
+> **collide on 105 values** (range 101–210). At the lowest colliding ids, one licensor's
+> animated-feature row and an unrelated licensor's video-game row share the same integer.
+> The colliding id/name pairs are listed in `u2giants/licensor-source-data` (private); they are not reproduced here.
 
-A join on `source_id` alone attributes Company of Heroes to Disney. That is a royalty error,
+A join on `source_id` alone attributes one licensor's title to another. That is a royalty error,
 and it is not hypothetical — it is 105 rows waiting to happen. **Any future loader must key on
 `(source_system, source_namespace, source_id)`.**
 
 The namespace half matters too, not only the system half: `plm.wb_property` carries the same
-UUID under **two** namespaces, `warner_art_assets` and `warner_product_catalogue` (e.g.
-`79c6d511-…` appears as both for "Conjuring, The (2013)"). `(system, id)` without namespace
+UUID under **two** namespaces, `warner_art_assets` and `warner_product_catalogue` (a single
+title appears under both; the example row is in `u2giants/licensor-source-data` (private)). `(system, id)` without namespace
 double-counts Warner; `(system, namespace, id)` does not.
 
 `core.property` has **no** source-id column at all, so name is the only bridge available
@@ -136,39 +141,60 @@ Warner's *character* catalogue, is the level mismatch in one line.
 Disney OPA asserts these properties; `core.property` files them under a different licensor.
 All 9 come from Disney OPA; Paramount, NBCU and Warner produced **none**.
 
-| Source id | Source (Disney OPA) says | `core.property` row | core code | core licensor |
-|---|---|---|---|---|
-| 206 | Blaze | BLAZE | `BZ` | **`VM` VIACOM MULTI** |
-| 1159097950 | Peanuts | PEANUTS | `UT` | **`PN` PEANUTS WORLDWIDE** |
-| 1000 | Guardians of the Galaxy | GUARDIANS OF THE GALAXY | `GG` | `MV` MARVEL |
-| 628 | Iron Man | IRON MAN | `RM` | `MV` MARVEL |
-| 635 | Spider-Man | SPIDER MAN | `SP` | `MV` MARVEL |
-| 637 | Venom | VENOM | `VN` | `MV` MARVEL |
-| 639 | Wolverine | WOLVERINE | `WR` | `MV` MARVEL |
-| 640 | X-Men | X-MEN | `XM` | `MV` MARVEL |
-| 1159089281 | The Mandalorian | THE MANDALORIAN | `MD` | `SW` STAR WARS |
+The 9 rows — source id, source name, matched `core.property` code and licensor — are
+listed in `u2giants/licensor-source-data` (private). They are not reproduced here. In aggregate: **6** are Marvel,
+**1** Star Wars, and **2** (`Blaze`, `Peanuts`) carry no studio attribution at all.
 
-**Two distinct things are in that table and they must not be reported as one number.**
+**Two distinct things are in that set and they must not be reported as one number.**
 
-- **7 rows (Marvel, Star Wars) are the sub-brand split of §1**, not errors. Disney's portal
+- **6 Marvel rows are the sub-brand split of §1**, not errors. Disney's portal
   legitimately carries Marvel and Star Wars; our data files them under sibling licensors.
-- **2 rows are genuine, and both are name collisions across unrelated rights holders.**
-  `Blaze` — Disney OPA id 206 versus core `BZ` under Viacom; "Blaze and the Monster Machines"
-  is a Nickelodeon/Viacom title, so this looks like two different Blazes sharing a name.
-  `Peanuts` — Disney OPA id 1159097950 versus core `UT` under Peanuts Worldwide.
-  **These two are the owner decisions.** Neither can be settled from the extracts alone;
-  both need the contract.
+- **2 rows (`Blaze`, `Peanuts`) are NOT a Disney attribution claim at all — see the
+  correction in §4.1a.** They were reported here as owner decisions in error.
+
+### 4.1a CORRECTION (2026-09-03, owner challenge) — `Blaze` and `Peanuts` are not Disney claims
+
+The owner questioned whether Disney's OPA portal really lists `Peanuts` and
+"Blaze and the Monster Machines". It does not, and §4.1 above overstated the evidence.
+
+`plm.opa_property` is a **multi-studio** landing table. Each row's studio is resolved
+separately in `plm.opa_property_studio_resolution`, and most rows have no studio at all:
+
+| studio_code | resolution_status | rows |
+|---|---|---|
+| (none) | `unresolved` | 910 |
+| `disney` | `canonical` | 244 |
+| `marvel` | `canonical` | 205 |
+| `pixar` | `canonical` | 64 |
+| (none) | `ambiguous_crossover` | 20 |
+| `lucasfilm` | `canonical` | 2 |
+
+Checked directly on production:
+
+- `Blaze` — `studio_code` **null**, `resolution_status` **`unresolved`**.
+- `Peanuts` — `studio_code` **null**, `resolution_status` **`unresolved`**.
+
+So neither row carries a Disney studio attribution. Calling the whole portal "Disney OPA"
+in §1 was a *derived label for the source system*; §4.1 then read that label back as though
+it were an assertion made by Disney about each individual row. It is not. There is no
+conflict between Disney and `core.property` for either title, and therefore **no owner
+decision to make**. Both are withdrawn.
+
+The 6 Marvel rows in the §4.1 table are unaffected — they do carry `studio_code = marvel`,
+`canonical`. `The Mandalorian` has **no studio resolution row at all**, so it is
+also not a Disney claim; it belongs with the unresolved population, not the sub-brand split.
+
+**Rule this establishes:** a source-system label derived from the modal licensor describes the
+*portal*, never an individual row. Per-row attribution must come from that row's own resolution
+record. Do not report a portal-level label as a licensor's claim about a title.
 
 ### 4.2 Present in a source extract, absent from `core.property` — 1,992 names
 
 Largest category by far, and mostly *expected*: the extracts are the licensors' catalogues,
 `core.property` is our licensed subset. Named examples, Warner STARLABS:
 
-- `Conjuring 2, The (2016)` — `warner_art_assets` / `warner_product_catalogue`,
-  id `5920496d-31d2-4487-a584-7ecb941aee91`
-- `Looney Tunes Show, The: Animated Series (2011)` — id `91cc56b1-954b-4281-ae9e-c2cdfcd311e4`
-- `WB 100: Looney Tunes Mashups` — id `cfdc27f0-a15f-4254-87c4-9bf96b14ebe2`
-- `Gokko x Wizard of Oz, The (1939)` — id `f85a1d83-46ea-4859-86c1-01ff1ee24b2e`
+Four representative Warner STARLABS rows (title plus source UUID, one of them carried under
+both namespaces) are listed in `u2giants/licensor-source-data` (private). They are not reproduced here.
 
 **Do not read 1,992 as a gap to be filled.** It is the size of the licensors' catalogues
 relative to ours, plus the naming noise in §5. It is not a work item.
@@ -216,24 +242,26 @@ change under the ordinary orchestrator route, not this workstream.
 
 ## 5. Naming conventions that inflate the "missing" counts
 
-**Warner writes labels in sort order.** `Conjuring, The (2013)`, `Looney Tunes Show, The:
-Animated Series (2011)`, `Wizard of Oz, The (1939)` — trailing article, not leading. A
-normaliser that strips only a leading article scores every one of these as missing.
+**Warner writes labels in sort order** — `<Title>, The (<year>)`, trailing article rather
+than leading. A normaliser that strips only a leading article scores every such row as
+missing. (Named examples are in `u2giants/licensor-source-data` (private).)
 Correcting for it moved Warner's matches from **5 to 9** on a 234-name denominator, i.e. it
 was overstating Warner's gap by nearly half of its true matches. Any future matcher must
 handle the trailing-article form.
 
-Other conventions observed: Paramount and NBCU mix case freely (`DORA` vs `Minions`); NBCU
-uses both `MINIONS` (id 2576) and `Minions` (id NULL) for the same title; punctuation differs
-routinely (`KUNG FU PANDA` vs `KUNG-FU PANDA`, `E.T.: THE EXTRA-TERRESTRIAL` vs
-`E.T. THE EXTRATERRESTRIAL`). All of these matched only because punctuation was stripped.
+Other conventions observed: Paramount and NBCU mix case freely within one extract; NBCU
+carries the same title twice, once upper-cased with a source id and once title-cased with a
+null id; and punctuation differs routinely between extracts (hyphenation and internal colons
+in the same franchise name). All of these matched only because punctuation was stripped.
+Named examples are in `u2giants/licensor-source-data` (private).
 
 ---
 
 ## 6. What I could NOT determine
 
-1. **Whether the 2 genuine disagreements are wrong.** `Blaze` and `Peanuts` need the contract,
-   not the extracts. Owner decision.
+1. ~~**Whether the 2 genuine disagreements are wrong.**~~ **WITHDRAWN — see §4.1a.** Neither
+   `Blaze` nor `Peanuts` carries a Disney studio attribution; there was no disagreement and no
+   owner decision.
 2. **Whether the Marvel / Star Wars / DC / Harry Potter licensor split is intended.** It is
    consistent across all 260 core rows, which reads as deliberate, but nothing in the database
    records the intent. Owner decision, and it changes what "correct attribution" even means.
