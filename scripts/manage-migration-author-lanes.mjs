@@ -2749,11 +2749,13 @@ export function assertDurableReviewApproval(issue,pr,headSha,io=githubIo){
 }
 
 // #2208 FOLLOW-UP. A lease belongs to ONE review slot. Ask the verdict question
-// on behalf of that slot when the lease states which one it is; fall back to the
-// pre-#2208 any-slot question only when the record genuinely does not say.
+// on behalf of that slot when the lease states which one it is. An old record
+// that genuinely does not state a slot stays BUSY: a sibling verdict must never
+// reclaim an ambiguous live lease. Slot 0 cannot be written and matches no
+// verdict, so it is the fail-closed liveness sentinel.
 function leaseVerdictOptions(record,extra={}){
   const slot=record?.slot
-  return slot==null?{...extra}:{...extra,slot:Number(slot)}
+  return {...extra,slot:slot==null?0:Number(slot)}
 }
 
 function assertReviewLeaseStillStale(row,states,io){
@@ -3680,8 +3682,8 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
       throw new LaneError(`${compatiblePrefix}; no replacement reviewer is available: ${failedList.length} of ${ACTIVE_REVIEWERS.length} already failed on this exact head (${failedList.join(', ')||'none'}); ${busyList.length} of ${ACTIVE_REVIEWERS.length} hold other live leases (${busyList.join(', ')||'none'}); ${unavailable.length} are otherwise ineligible or excluded (${unavailable.join(', ')||'none'}). If this failed holder must be freed before another terminal holder can be reclaimed, run ${releaseCommand}.`)
     }
     const replacementSha=io.makeOwnerCommit(releasedFailureSha
-      ?`db-coordination reviewer-replacement sequence=${sequence} reviewer=${reviewer.name} issue=${request.issue} pr=${request.pr} head=${request.headSha}${request.slot!==1?` slot=${request.slot}`:''} failed-sequence=${request.failedSequence} prior-sequence=${cursor.sequence} failure-ref=${releasedFailureSha}`
-      :`db-coordination reviewer-failure-replacement sequence=${sequence} reviewer=${reviewer.name} issue=${request.issue} pr=${request.pr} head=${request.headSha}${request.slot!==1?` slot=${request.slot}`:''} failed-sequence=${request.failedSequence} prior-sequence=${cursor.sequence} failure-ref=self failed-reviewer=${original.reviewer} code=${failureCode}${checkNote} verdict=none artifact=none`)
+      ?`db-coordination reviewer-replacement sequence=${sequence} reviewer=${reviewer.name} issue=${request.issue} pr=${request.pr} head=${request.headSha} slot=${request.slot} failed-sequence=${request.failedSequence} prior-sequence=${cursor.sequence} failure-ref=${releasedFailureSha}`
+      :`db-coordination reviewer-failure-replacement sequence=${sequence} reviewer=${reviewer.name} issue=${request.issue} pr=${request.pr} head=${request.headSha} slot=${request.slot} failed-sequence=${request.failedSequence} prior-sequence=${cursor.sequence} failure-ref=self failed-reviewer=${original.reviewer} code=${failureCode}${checkNote} verdict=none artifact=none`)
     failureSha=releasedFailureSha??replacementSha;ownerSha=replacementSha
     const cursorReplacementSha=replacementSha
     const replacementLeaseRef=reviewActiveRef(reviewer.name)
@@ -3975,7 +3977,9 @@ function activateReviewCutoverOperation(io) {
           leaseSha = winner.sha
         }
         if (!REVIEWERS.some((r) => r.name === reviewer)) throw new LaneError(`review ref ${row.ref} names an unrecognized reviewer ${reviewer}; cutover activation refused`)
-        candidates.push({ row: { ref: row.ref, sha: leaseSha }, lease: { ...lease, reviewer }, number, headSha })
+        const assignment=parseAssignmentRef(row.ref)
+        if(!assignment)throw new LaneError(`assignment ref ${row.ref} is malformed; cutover activation refused`)
+        candidates.push({ row: { ref: row.ref, sha: leaseSha }, lease: { ...lease, reviewer, slot:assignment.slot }, number, headSha })
       }
     }
     // BATCHED VERDICT + EXISTING-LEASE CHECK (issue #1798 fix). The old code

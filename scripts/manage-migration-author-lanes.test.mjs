@@ -3701,6 +3701,16 @@ test('cutover activation still backfills a live SLOT 2 lease when only slot 1 ha
   assert.ok(io.refs.has(reviewActiveRef('glm-5.3')))
 })
 
+test('cutover activation still backfills a live SLOT 1 lease when only slot 2 has a verdict (issue #2208)',()=>{
+  const io=freshCutoverIo(),headSha='e'.repeat(40)
+  io.openPulls=()=>[{number:112,head:{sha:headSha}}]
+  const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=3 reviewer=grok-4.6 issue=12 pr=112 head=${headSha}`)
+  io.refs.set(`${REVIEW_ASSIGNMENT_REF_PREFIX}/12-112-${headSha}`,sha)
+  giveVerdict(io,{issue:12,pr:112,headSha,slot:2})
+  const result=activateReviewCutover(io)
+  assert.deepEqual(result.backfilled,[{reviewer:'grok-4.6',issue:12,pr:112,headSha,ref:reviewActiveRef('grok-4.6')}])
+})
+
 // REGRESSION (issue #1822, glm-5.3 sequence 524 High). The BATCHED verdict
 // check -- the path production takes whenever readReviewStates is available --
 // carried its own anywhere-in-body verdict test long after every other consumer
@@ -4406,6 +4416,20 @@ test('a slot-1 verdict neither frees nor blocks a live slot-2 replacement (issue
   assert.deepEqual(replaceFailedReviewer(replacementRequest,io),replacement,'slot-1 completion must not block an idempotent slot-2 replacement retry')
   assert.equal(io.refs.get(reviewActiveRef(replacement.reviewer)),replacement.replacementSha)
   assert.notEqual(replacement.reviewer,slotOne.reviewer)
+})
+
+test('a slot-2 verdict never frees a live slot-1 replacement (issue #2208)',()=>{
+  const io=withAtomicRefs(reviewIo()),request={issue:2208,pr:2221,headSha:'f8'.repeat(20)}
+  io.getPr=()=>({state:'open',head:{sha:request.headSha}})
+  const slotOne=assignNextReviewer(request,io)
+  assignNextReviewer({...request,slot:2},io)
+  const replacementRequest={...request,failedSequence:slotOne.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true}
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:2})
+  const busy=findBusyReviewers(io)
+  assert.ok(busy.has(replacement.reviewer))
+  assert.equal(io.refs.get(reviewActiveRef(replacement.reviewer)),replacement.replacementSha)
+  assert.deepEqual(replaceFailedReviewer(replacementRequest,io),replacement)
 })
 
 test("end to end: slot 1's verdict must not refuse --replace-failed-reviewer --review-slot 2 at the same head (issue #2208 follow-up F2)",()=>{
