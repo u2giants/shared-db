@@ -4,7 +4,7 @@
 
 | Step | Status | Date | Evidence / starting point |
 |---|---|---|---|
-| 0. Re-verify source, code, GitHub, and live targets | ✅ complete | 2026-09-02 | Re-run recorded in §9.1. Its counts are that day's live measurements, not a licence to skip Phase 0 again. |
+| 0. Re-verify source, code, GitHub, and live targets | ✅ complete | 2026-09-02 | Re-run recorded in §9.1, independently re-verified live on 2026-09-03 in §9.2. Those counts are those days' live measurements, not a licence to skip Phase 0 again. Read §9.2 for two §9.1 figures that did not reproduce. |
 | 1. Build the private, live-qualified candidate manifest | ⬜ open | — | The manifest and its SHA-256 digest are the approval object. Start here; the 2026-09-02 re-run sized the writable set at 1,190 rows and repaired the reproducibility defect that would have made the digest gate meaningless. |
 | 2. Implement and test the guarded data-only executor | ⬜ open | — | Synthetic tests in §10 must pass before any database write. |
 | 3. Rehearse the exact manifest on preview | ⬜ open | — | Requires Albert's new preview-write authorization and §4.2 target proof. |
@@ -13,7 +13,7 @@
 | 6. Finish all residual historical items | ⬜ open | — | Current partial and unresolved results remain withheld. |
 | 7. Decide whether the temporary cutoff may retire | ⬜ open | — | The exhaustive gate in §13 must pass; otherwise the cutoff remains. |
 
-**Fresh-session start:** Step 1, after re-reading §9.1. Re-run Phase 0 before Phase 3 and again before Phase 4 as §9 requires. Original fresh-session start was Step 0. Re-read all downstream phases before beginning each phase because the source snapshot, production rows, preview project, active taxonomy, and orchestrator route can change.
+**Fresh-session start:** Step 1, after re-reading §9.1 and §9.2. Re-run Phase 0 before Phase 3 and again before Phase 4 as §9 requires. Original fresh-session start was Step 0. Re-read all downstream phases before beginning each phase because the source snapshot, production rows, preview project, active taxonomy, and orchestrator route can change.
 
 **Tracking issue:** [#1984](https://github.com/u2giants/shared-db/issues/1984). **Session handoff:** [HANDOFF.d/2026-08-31T1457Z-edge-dev-codex-historical-mg-apply-plan.md](HANDOFF.d/2026-08-31T1457Z-edge-dev-codex-historical-mg-apply-plan.md).
 
@@ -167,6 +167,64 @@ Every number below is a live measurement taken that day. Re-run Phase 0 rather t
 **Writable set as of 2026-09-02.** Of the 1,781 level-3 proposals: 1,200 reach exactly one live historical row whose division agrees; 345 fail on division (321 source `EH001` and 24 source `SP001` against live `CW001`); 163 hit a non-unique historical item number; 73 have no live historical row. Of the 1,200, **1,190 form an active three-level chain in that division and 10 do not**. So the first write batch is on the order of 1,190 rows out of 16,820 live historical items — about 7 percent. Everything else abstains, exactly as §1 requires.
 
 **Still unauthorized.** No preview or production row was written, and none is authorized. Phase 3 needs Albert's explicit preview-write authorization; Phase 5 needs a separate production authorization naming one manifest digest.
+
+### 9.2 Live re-verification of §9.1, 2026-09-03 (read-only, complete)
+
+An independent session re-ran the live half of Phase 0 one day later, purely to
+test whether §9.1's production claims still hold. **No preview or production row
+was written and none is authorized.** Target proof: the Supabase MCP project URL
+resolved to `https://qsllyeztdwjgirsysgai.supabase.co` immediately before every
+query, and every statement issued was a `SELECT`. This section does **not**
+replace Phase 0; the private-artifact, classifier-suite and negative-control
+steps (§9 steps 2-3) were not re-run here because they need the private
+`licensor-source-data` checkout.
+
+**Confirmed unchanged from §9.1.**
+
+| Measure | §9.1 (2026-09-02) | 2026-09-03 |
+|---|---|---|
+| `dflow."itemHeader"` total rows | 19,463 | 19,463 |
+| Historical (created before 2025-05-14) | 16,820 | 16,820 |
+| Post-cutoff | 2,516 | 2,516 |
+| Null creation date | 127 | 127 |
+| Active MG01 / MG02 / MG03 rows | 58 / 317 / 803 | 58 / 317 / 803 |
+| Active MG01→MG02→MG03 chains | 726 | 726 |
+| `EP001` rows in `core."merchGroup"` / active | 49 / 0 | 49 / 0 |
+
+`api.resolve_item_mg_category(integer)` still exists, still carries the
+2025-05-14 cutoff date in its body, and still references neither `merchgroup02`
+nor `merchgroup03`, so the MG01-only contract is intact.
+
+The division-encoding trap reproduces exactly: `dflow."divisionCode"` row
+`divCode_id = 2` is `Gen` with `external_divisoncode = 'CW001'`, while the same
+numeric id appears as `divisionCode_id_fk = 2` on 217 `core."merchGroup"` rows
+whose `divisionCode_fk` is `EH001`, none of them active. Neither encoding may be
+trusted alone.
+
+**Two numbers in §9.1 did not reproduce. Neither loosens a gate; both must be
+re-derived in Phase 1 rather than assumed.**
+
+1. **Historical rows with a null `div_code`: §9.1 says 15,185; today's live
+   count is 15,437.** The count is stable across variations (all 15,437 have a
+   non-null `div_code_fk`, none has both null, and there are no blank-string
+   `div_code` values beyond the nulls), so no obvious alternative filter yields
+   15,185. Phase 1 must state its exact division-resolution predicate rather than
+   inheriting either figure.
+2. **Historical rows carrying a non-unique item number: §9.1 says 2,850;
+   today's count is 2,849** across 1,419 distinct duplicated item numbers.
+   Thirteen historical rows carry a blank (not null) `item_num_id`, which is a
+   plausible source of a one-row difference in how the two runs treated empties.
+   Item number remains categorically unusable as a write key either way.
+
+**Gates unchanged.** The 127 null creation dates keep the §13 retirement gate
+closed. `EP001` still has no active taxonomy, so its proposals still abstain and
+it must not be remapped. The temporary May 14, 2025 cutoff stays in place.
+
+**Not re-verified here (still Phase 0 work for the implementing session):**
+private artifact SHA-256 verification, the 39-test classifier suite, workbook
+regeneration, the historical-code sentinel negative control, and the writable-set
+sizing of ~1,190 rows — that last figure derives from the private level-3 output
+and could not be recomputed from live production alone.
 
 ### Phase 1 — build the private candidate manifest (read-only)
 
