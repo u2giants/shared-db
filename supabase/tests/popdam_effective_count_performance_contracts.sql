@@ -1,22 +1,91 @@
 begin;
 
+-- #2138: the effective list function returns whole rows from an append relation
+-- so PostgREST's outer LIMIT can stop it early. Comments are stripped and
+-- whitespace folded first, so each pin is contiguous syntax in its real
+-- position: a predicate that survives only inside a comment is not a predicate.
 do $$
 declare
-  v_filter text := lower(pg_get_functiondef('public.filter_effective_assets(jsonb)'::regprocedure));
+  v_def text := pg_get_functiondef('public.filter_effective_assets(jsonb)'::regprocedure);
+  v_body text := regexp_replace(regexp_replace(v_def, E'--[^\n]*', '', 'g'), '\s+', ' ', 'g');
+  v_lower text := lower(v_body);
+  v_pin text;
+  v_arms int;
+  v_gate int;
+  v_language name;
+  v_volatility "char";
+  v_secdef boolean;
+  v_config text[];
+begin
+  select l.lanname, p.provolatile, p.prosecdef, p.proconfig
+    into v_language, v_volatility, v_secdef, v_config
+  from pg_proc p
+  join pg_language l on l.oid = p.prolang
+  where p.oid = 'public.filter_effective_assets(jsonb)'::regprocedure;
+
+  -- Only a STABLE SQL invoker function with no per-function SET is inlined; a
+  -- PL/pgSQL RETURN QUERY of the same SELECT is not, and reproduces #1945.
+  if v_language <> 'sql' or v_volatility <> 's' or v_secdef or v_config is not null then
+    raise exception 'effective list function is not an inlinable stable invoker SQL function: language %, volatility %, security definer %, config %',
+      v_language, v_volatility, v_secdef, v_config;
+  end if;
+
+  -- No CTE barrier, and no id self-join under any alias pair.
+  if position('identity_asset_ids' in v_lower) > 0
+     or position('as materialized' in v_lower) > 0
+     or position('left join public.style_groups' in v_lower) > 0
+     or position('filter_effective_assets_unchecked_1703' in v_lower) > 0
+     or v_lower ~ '\m[a-z_][a-z0-9_]*\.id = [a-z_][a-z0-9_]*\.id\M' then
+    raise exception 'effective list function reintroduced the materialised id set or its self-join';
+  end if;
+
+  -- Entitlement is invoked once, as the Var-free outer WHERE conjunct.
+  v_gate := (length(v_lower) - length(replace(v_lower, 'public.require_dam_access()', '')))
+              / length('public.require_dam_access()');
+  if v_gate <> 1 then
+    raise exception 'effective list function must invoke public.require_dam_access() exactly once, found %', v_gate;
+  end if;
+  if position(') a where public.require_dam_access() and a.is_deleted = false and (' in v_lower) = 0 then
+    raise exception 'effective list function must gate on DAM entitlement in its outer WHERE clause';
+  end if;
+
+  -- Seven mutually exclusive identity arms, each pinned by its leading guard.
+  -- The bare equality tokens also occur as optional conjuncts on the licensor
+  -- pair, so counting arms and pinning guards is what stops a deleted
+  -- property- or customer-leading arm from passing while the DAM property and
+  -- customer libraries silently return nothing.
+  v_arms := (length(v_lower) - length(replace(v_lower, 'union all', ''))) / length('union all');
+  if v_arms <> 6 then
+    raise exception 'effective identity predicates must keep seven UNION arms, found % UNION ALLs', v_arms;
+  end if;
+  foreach v_pin in array array[
+    'from public.assets a where nullif(p_filters ->> ''licensorid'', '''') is null and nullif(p_filters ->> ''propertyid'', '''') is null and nullif(p_filters ->> ''customerid'', '''') is null union all',
+    'where nullif(p_filters ->> ''licensorid'', '''') is not null and a.style_group_id is null and a.licensor_id = (p_filters ->> ''licensorid'')::uuid',
+    'from public.style_groups sg join public.assets a on a.style_group_id = sg.id where nullif(p_filters ->> ''licensorid'', '''') is not null and sg.licensor_id = (p_filters ->> ''licensorid'')::uuid',
+    'and nullif(p_filters ->> ''propertyid'', '''') is not null and a.style_group_id is null and a.property_id = (p_filters ->> ''propertyid'')::uuid',
+    'and nullif(p_filters ->> ''propertyid'', '''') is not null and sg.property_id = (p_filters ->> ''propertyid'')::uuid',
+    'and nullif(p_filters ->> ''customerid'', '''') is not null and a.style_group_id is null and a.customer_id = (p_filters ->> ''customerid'')::uuid',
+    'and nullif(p_filters ->> ''customerid'', '''') is not null and sg.customer_id = (p_filters ->> ''customerid'')::uuid'
+  ] loop
+    if position(v_pin in v_lower) = 0 then
+      raise exception 'effective identity predicates lost an index-leading UNION arm: %', v_pin;
+    end if;
+  end loop;
+
+  -- The three identity keys the DAM client sends, case-sensitively.
+  foreach v_pin in array array['''licensorId''', '''propertyId''', '''customerId'''] loop
+    if position(v_pin in v_body) = 0 then
+      raise exception 'effective list function no longer reads the DAM identity key %', v_pin;
+    end if;
+  end loop;
+end;
+$$;
+
+do $$
+declare
   v_helper text := lower(pg_get_functiondef('public.get_effective_filter_counts_unchecked_1703(jsonb)'::regprocedure));
   v_legacy text := pg_get_functiondef('public.get_filter_counts(jsonb)'::regprocedure);
 begin
-  if position('left join public.style_groups' in v_filter) > 0
-     or position('identity_asset_ids as' in v_filter) = 0
-     or position('union all' in v_filter) = 0
-     or position('a.licensor_id = ' in v_filter) = 0
-     or position('sg.licensor_id = ' in v_filter) = 0
-     or position('a.property_id = ' in v_filter) = 0
-     or position('sg.property_id = ' in v_filter) = 0
-     or position('a.customer_id = ' in v_filter) = 0
-     or position('sg.customer_id = ' in v_filter) = 0 then
-    raise exception 'effective identity filters lost index-leading UNION arms';
-  end if;
   if position('left join public.style_groups' in v_helper) > 0
      or position('identity_asset_ids as' in v_helper) = 0
      or position('union all' in v_helper) = 0

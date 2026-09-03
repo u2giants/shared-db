@@ -178,7 +178,7 @@ Live row counts (2026-07-15): customers **836**, vendors **539**, inventory **8,
 | `/merchGroupDetails` | Merch group values (returns a **plain array**, not a paged envelope). **This is where licensors and properties live** — `mgTypeCode=05`/`06` in CW001/SP001; 22 licensors and 258 properties verified live 2026-07-23. See [`master-data-cutover-scoreboard.md`](master-data-cutover-scoreboard.md) §4. | companyCode, divisionCode, mgTypeCode, mgCode |
 | `/prepackDetail` | Prepack breakdowns | prepackCode *(req)*, companyCode |
 | `/salespersons` | Sales reps | companyCode, salesPersonCode, lastName |
-| `/seasons` | Season codes | companyCode, divisionCode, seasonCode |
+| `/seasons` | Season codes. **⛔ NEVER call this unfiltered — send `divisionCode` every time.** A company-wide call is a confirmed vendor defect: it returns the CW001 record in place of every other division's, so all 13 non-CW001 records (4 SP001, 1 EP001, 8 EH001) are ABSENT while the count still reads 21 of 21. Silent, nothing signals it, and there is no workaround — the data is not in the response at all. Per division: CW001 = 8, SP001 = 4, EP001 = 1, EH001 = 8. Confirmed live 2026-09-03; see [`coldlion-open-questions.md`](coldlion-open-questions.md) §5. | companyCode, **divisionCode (always send it)**, seasonCode |
 | `/pickticket` | Outbound pick transactions | createdFrom/To, transactionDate, minTransactionNo |
 | `/receiving` | Inbound receipts | createdFrom/To, transactionDate, minTransactionNo |
 | `/proddetails` | Production order detail | companyCode *(req)*, prodOrderNo *(req)* |
