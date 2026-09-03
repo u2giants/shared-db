@@ -1,3 +1,7 @@
+-- derived-from: 20260818024441
+-- (dflow.validate_sample_path_revision() is re-derived in full from the body
+--  last replaced by 20260818024441; that base must be present in the target.)
+--
 -- Issue #2136 -- dflow Sample Tracking: a sample a factory is asked to MAKE may
 -- ship straight from the factory, to New York or to the customer, without
 -- passing through Ningbo (owner-confirmed 2026-09-02).
@@ -173,11 +177,14 @@ REVOKE ALL ON FUNCTION dflow.validate_sample_path_revision() FROM PUBLIC, anon, 
 -- Positive and negative probes are both required.
 DO $$
 DECLARE
-  v_def   text;
-  v_ok    boolean;
-  v_table text;
-  v_tmp   text;
-  r       record;
+  v_def       text;
+  v_pred      text;
+  v_ok        boolean;
+  v_table     text;
+  v_tmp       text;
+  v_tgenabled "char";
+  v_tgtype    smallint;
+  r           record;
 BEGIN
   -- 4a. business_path value list on both tables.
   FOREACH v_table IN ARRAY ARRAY['sample_workflow','sample_path_revision'] LOOP
@@ -280,7 +287,12 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- 4c. the trigger function must carry the identical widened matrix.
+  -- 4c. the SAME matrix inside the trigger function, proved BEHAVIOURALLY.
+  -- Substring tests cannot do this: two unbound substrings both stay present if
+  -- the make-request arm is left narrow and the four-token list is pasted onto a
+  -- different arm, which is exactly the drift this file exists to prevent. So the
+  -- acceptance predicate is lifted out of the LIVE function body and evaluated
+  -- over the full probe matrix, every arm at once.
   SELECT p.prosrc INTO v_def
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
   WHERE n.nspname = 'dflow' AND p.proname = 'validate_sample_path_revision';
@@ -288,28 +300,82 @@ BEGIN
   IF v_def IS NULL THEN
     RAISE EXCEPTION 'Issue #2136 verification: dflow.validate_sample_path_revision() is missing';
   END IF;
-  IF position($probe$'factory_ningbo_nyo','factory_ningbo_customer','factory_nyo','factory_customer'$probe$ IN v_def) = 0 THEN
+
+  v_pred := substring(v_def from 'IF NOT \(\s*(.*?)\s*\) THEN');
+  IF v_pred IS NULL OR position('v_workflow_type' IN v_pred) = 0
+                    OR position('NEW.business_path' IN v_pred) = 0 THEN
     RAISE EXCEPTION
-      'Issue #2136 verification: dflow.validate_sample_path_revision() does not carry the widened nyo_factory_make_request arm';
-  END IF;
-  IF position('nyo_factory_make_request' IN v_def) = 0 THEN
-    RAISE EXCEPTION
-      'Issue #2136 verification: dflow.validate_sample_path_revision() no longer references nyo_factory_make_request';
+      'Issue #2136 verification: could not lift the flow/path predicate out of dflow.validate_sample_path_revision()';
   END IF;
 
-  -- 4d. the trigger is still attached to the path-revision table.
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_trigger g
-    JOIN pg_class t ON t.oid = g.tgrelid
-    JOIN pg_namespace n ON n.oid = t.relnamespace
-    JOIN pg_proc p ON p.oid = g.tgfoid
-    WHERE n.nspname = 'dflow' AND t.relname = 'sample_path_revision'
-      AND g.tgname = 'sample_path_revision_validate'
-      AND p.proname = 'validate_sample_path_revision'
-      AND NOT g.tgisinternal
-  ) THEN
+  v_pred := replace(replace(v_pred, 'v_workflow_type', '$1'), 'NEW.business_path', '$2');
+  IF position('NEW.' IN v_pred) > 0 OR position('v_' IN v_pred) > 0 THEN
+    RAISE EXCEPTION
+      'Issue #2136 verification: the lifted predicate still references function state and cannot be probed';
+  END IF;
+
+  FOR r IN SELECT * FROM (VALUES
+      -- newly allowed by issue #2136
+      ('nyo_factory_make_request','factory_nyo', true),
+      ('nyo_factory_make_request','factory_customer', true),
+      -- previously allowed, still allowed
+      ('nyo_factory_make_request','factory_ningbo_nyo', true),
+      ('nyo_factory_make_request','factory_ningbo_customer', true),
+      ('nyo_purchased_factory_reference','nyo_ningbo', true),
+      ('nyo_purchased_factory_reference','nyo_factory', true),
+      ('vendor_unsolicited_offer','factory_ningbo_nyo', true),
+      ('vendor_unsolicited_offer','factory_nyo', true),
+      ('nyo_remote_china_inventory_request','china_warehouse_ningbo_nyo', true),
+      ('nyo_remote_china_inventory_request','china_warehouse_ningbo_customer', true),
+      ('nyo_remote_china_inventory_request','ningbo_nyo', true),
+      ('nyo_remote_china_inventory_request','ningbo_customer', true),
+      -- factory_customer belongs to the make request only
+      ('nyo_purchased_factory_reference','factory_customer', false),
+      ('vendor_unsolicited_offer','factory_customer', false),
+      ('nyo_remote_china_inventory_request','factory_customer', false),
+      -- the other arms are unchanged
+      ('nyo_purchased_factory_reference','factory_ningbo_nyo', false),
+      ('vendor_unsolicited_offer','nyo_ningbo', false),
+      ('nyo_factory_make_request','ningbo_customer', false),
+      ('nyo_factory_make_request','nyo_factory', false),
+      -- and an unknown workflow type is accepted by no arm
+      ('not_a_workflow_type','factory_customer', false),
+      ('not_a_workflow_type','factory_ningbo_nyo', false)
+    ) AS probe(wt, bp, expected)
+  LOOP
+    EXECUTE 'SELECT COALESCE((' || v_pred || '), false)' INTO v_ok USING r.wt, r.bp;
+    IF v_ok <> r.expected THEN
+      RAISE EXCEPTION
+        'Issue #2136 verification: dflow.validate_sample_path_revision() accepted=% for (%, %), expected accepted=%',
+        v_ok, r.wt, r.bp, r.expected;
+    END IF;
+  END LOOP;
+
+  -- 4d. the trigger is attached, ENABLED, and still BEFORE INSERT FOR EACH ROW.
+  -- tgtype 7 = ROW (1) | BEFORE (2) | INSERT (4), the shape 20260818024441
+  -- created. tgenabled 'O' = fires normally; a disabled trigger enforces nothing.
+  SELECT g.tgenabled, g.tgtype INTO v_tgenabled, v_tgtype
+  FROM pg_trigger g
+  JOIN pg_class t ON t.oid = g.tgrelid
+  JOIN pg_namespace n ON n.oid = t.relnamespace
+  JOIN pg_proc p ON p.oid = g.tgfoid
+  JOIN pg_namespace fn ON fn.oid = p.pronamespace
+  WHERE n.nspname = 'dflow' AND t.relname = 'sample_path_revision'
+    AND g.tgname = 'sample_path_revision_validate'
+    AND fn.nspname = 'dflow' AND p.proname = 'validate_sample_path_revision'
+    AND NOT g.tgisinternal;
+
+  IF NOT FOUND THEN
     RAISE EXCEPTION
       'Issue #2136 verification: trigger sample_path_revision_validate is not attached to dflow.sample_path_revision';
+  END IF;
+  IF v_tgenabled <> 'O' THEN
+    RAISE EXCEPTION
+      'Issue #2136 verification: trigger sample_path_revision_validate is not enabled (tgenabled=%)', v_tgenabled;
+  END IF;
+  IF v_tgtype <> 7 THEN
+    RAISE EXCEPTION
+      'Issue #2136 verification: trigger sample_path_revision_validate is no longer BEFORE INSERT FOR EACH ROW (tgtype=%)', v_tgtype;
   END IF;
 END $$;
 
