@@ -5000,16 +5000,15 @@ test('CONTROL: the pre-#2152 pager refuses on a 726-ref namespace served by a pa
 })
 
 // EVIDENCE FOR THE #2152 POST-MORTEM QUESTION -- did any decision ever run on a
-// DUPLICATED ref list? No, and it could not have. The old loop returns early
-// only on `chunk.length<100`, and a page-1-repeating endpoint returns a short
-// page only when the namespace itself holds under 100 refs -- in which case one
-// request already held the whole namespace and the list was correct and
-// duplicate-free. At 100 refs or more every request is full, so the loop always
-// runs to the ceiling and always THROWS. The duplicated list is unreachable:
-// the two outcomes are "correct list" and "loud refusal", with nothing between
-// them. Raising the ceiling, as issue #2152 warns, is what would have made the
-// duplicated list reachable.
-test('CONTROL: the pre-#2152 pager has no path that returns a duplicated list',()=>{
+// DUPLICATED ref list? Not from a namespace that held still. The old loop
+// returns early only on `chunk.length<100`, and a page-1-repeating endpoint
+// returns a short page only when the namespace itself holds under 100 refs --
+// in which case one request already held the whole namespace and the list was
+// correct and duplicate-free. At 100 refs or more every request is full, so the
+// loop runs to the ceiling and THROWS. Against a STABLE namespace the two
+// outcomes are "correct list" and "loud refusal", with nothing between them.
+// The next test shows the one case that does fall between them.
+test('CONTROL: the pre-#2152 pager has no path that returns a duplicated list from a STABLE namespace',()=>{
   for(const count of [0,1,99]){
     const server=matchingRefsServer(count)
     const rows=brokenPagerAtBd00aaa7(REVIEW_ASSIGNMENT_REF_PREFIX,server)
@@ -5023,18 +5022,58 @@ test('CONTROL: the pre-#2152 pager has no path that returns a duplicated list',(
   }
 })
 
-test('CONTROL: only a RAISED page ceiling would have made the duplicated list reachable',()=>{
-  const server=matchingRefsServer(120)
-  // Same loop, ceiling raised, early return suppressed by full pages: three
-  // requests, the same 120 rows three times over. This is the outcome the
-  // ceiling was accidentally protecting against, and why #2152 must not be
-  // fixed by raising it.
-  let rows=[]
-  try{rows=brokenPagerAtBd00aaa7(REVIEW_ASSIGNMENT_REF_PREFIX,server,3)}catch{
-    rows=server.calls.flatMap(()=>server.rows.map((row)=>({ref:row.ref,sha:row.object.sha})))
+// The same page-ignoring endpoint, but the namespace SHRINKS between requests.
+// That is what a concurrent ref retirement looks like from the pager's side,
+// and refs/db-review-retired-verdicts means retirement is a routine operation
+// here, not a thought experiment.
+const shrinkingMatchingRefsServer=(counts)=>{
+  const calls=[]
+  const rowsFor=(count)=>Array.from({length:count},(_,i)=>({ref:`refs/db-review-assignments/${i}-${i+1}-${String(i).padStart(40,'0')}`,object:{sha:String(i).padStart(40,'0')}}))
+  return {calls,serve(endpoint){const count=counts[Math.min(calls.length,counts.length-1)];calls.push(endpoint);return rowsFor(count)},headers:{}}
+}
+
+// This test previously claimed the duplicated list needed a RAISED ceiling, and
+// proved it by CONSTRUCTING the duplicate rows inside its own catch block --
+// an assertion that passed whatever the pager did. Replaced with the real path
+// (#2155 review 2). No fabrication: every row here came out of the old loop.
+test('CONTROL: the pre-#2152 pager DOES return a duplicated list when the namespace shrinks mid-walk',()=>{
+  const server=shrinkingMatchingRefsServer([120,120,99])
+  const rows=brokenPagerAtBd00aaa7(REVIEW_ASSIGNMENT_REF_PREFIX,server)
+  assert.equal(server.calls.length,3,'the third request came back short, so the loop RETURNED instead of refusing')
+  assert.equal(rows.length,339,'120 + 120 + 99 rows accumulated from three requests that were all page 1')
+  assert.equal(new Set(rows.map((row)=>row.ref)).size,120,'only 120 distinct refs exist; the rest are repeats a caller would have counted twice')
+})
+
+test('CONTROL: raising the pre-#2152 page ceiling buys more requests and the SAME refusal',()=>{
+  // Raising the ceiling was never the fix: against a stable 726-ref namespace
+  // every ceiling spends its full budget of requests and then refuses anyway.
+  for(const ceiling of [3,6,12]){
+    const server=matchingRefsServer(726)
+    assert.throws(()=>brokenPagerAtBd00aaa7(REVIEW_ASSIGNMENT_REF_PREFIX,server,ceiling),new RegExp(`exceeded ${ceiling} pages of 100 refs`))
+    assert.equal(server.calls.length,ceiling,'and each of those requests was charged to the wire budget')
   }
-  assert.equal(rows.length,360,'three requests, the same 120 rows each time')
-  assert.equal(new Set(rows.map((row)=>row.ref)).size,120,'only 120 of them are distinct')
+})
+
+// THE CONTROL THAT MUST GO RED IF THE FIX IS REVERTED (#2155 review 2). It
+// drives the PRODUCTION listing against the endpoint as measured on 2026-09-02
+// -- page-ignoring, no Link header, 726 refs in one response -- which is the
+// exact shape that took the governed reviewer system down.
+//
+// The request count is asserted FIRST, and deliberately so. The pre-#2152 pager
+// accepted no transport argument at all, so on a reverted tree the injected
+// server is never called and THIS line is the failure: it names the defect (the
+// listing did not read the namespace in a single injected request) instead of
+// reporting whatever the reverted page walk did on the live wire.
+test('CONTROL: the fixed listing reads a 726-ref namespace in ONE injected request and returns it whole',()=>{
+  const server=matchingRefsServer(726)
+  let rows=null,refusal=null
+  try{rows=githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,(endpoint)=>({rows:server.serve(endpoint),headers:server.headers}))}
+  catch(error){refusal=error}
+  assert.equal(server.calls.length,1,'the production listing must read the whole namespace in exactly ONE request through the injected transport')
+  assert.equal(refusal,null,`a 726-ref namespace must not refuse: ${refusal?.message??''}`)
+  assert.equal(rows.length,726,'every ref came back')
+  assert.equal(new Set(rows.map((row)=>row.ref)).size,726,'once each')
+  assert.equal(/[?&]page=/.test(server.calls[0]),false,'and it did not ask for a page the endpoint ignores')
 })
 
 test('listReviewRefsPaged returns every ref of a 726-ref namespace, once each, in ONE request',()=>{
@@ -5136,7 +5175,12 @@ test('rel is matched as a whitespace-separated token list, never as a substring'
 })
 
 test('an unparseable Link value REFUSES rather than reading as "no further pages"',()=>{
-  for(const broken of ['garbage','<https://a/x; rel="next"','<https://a/x>; rel="next','<https://a/x>; = "next"','<https://a/x> rel="next"']){
+  // The last four are the holes the first version of this parser left OPEN
+  // (#2155 review 2): a parameter with no `=` at all, an empty unquoted value,
+  // and an unquoted value swallowing a stray quote. Each parsed cleanly into a
+  // rel that was not `next`, so a malformed truncation marker answered "no
+  // further pages" -- the fail-open direction this guard exists to close.
+  for(const broken of ['garbage','<https://a/x; rel="next"','<https://a/x>; rel="next','<https://a/x>; = "next"','<https://a/x> rel="next"','<https://a/x>; rel','<https://a/x>; rel="prev"; next','<https://a/x>; rel=','<https://a/x>; rel=next"']){
     assert.throws(()=>hasNextPageLink({link:broken}),/unparseable Link header/,`must refuse: ${broken}`)
     assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,linkPagerFetch({link:broken})),/unparseable Link header/)
   }

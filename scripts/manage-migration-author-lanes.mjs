@@ -930,7 +930,9 @@ export function parseGhIncludeResponse(raw) {
 // so text inside `title="rel=next"` is a VALUE and can never be mistaken for a
 // parameter name. Anything that does not fit the grammar THROWS: a missing `<`,
 // an unterminated `<...>` or quoted string, a parameter not introduced by `;`,
-// or an empty parameter name. Callers let that refusal propagate, because an
+// an empty parameter name, a parameter carrying NO `=` at all, or an unquoted
+// value that is empty or holds a character outside the token grammar (a stray
+// quote above all). Callers let that refusal propagate, because an
 // unparseable Link header must never read as "no further pages".
 export function parseLinkHeader(value) {
   const text=String(value??'')
@@ -961,23 +963,34 @@ export function parseLinkHeader(value) {
       if(!name)refuse('empty link parameter name')
       skipSpace()
       let parameterValue=''
-      if(text[i]==='='){
+      // A PARAMETER WITHOUT `=` IS A REFUSAL, NOT AN EMPTY VALUE (#2152 review 2).
+      // RFC 8288 defines link-param as `token BWS "=" BWS ( token / quoted-string )`;
+      // there is no valueless form. Accepting one made `<u>; rel` parse cleanly
+      // with rel='', so a MALFORMED header answered "no further pages" -- exactly
+      // the fail-OPEN direction this guard exists to close.
+      if(text[i]!=='=')refuse(`link parameter "${name}" has no value`)
+      i++
+      skipSpace()
+      if(text[i]==='"'){
         i++
-        skipSpace()
-        if(text[i]==='"'){
-          i++
-          let closed=false
-          while(i<text.length){
-            if(text.charCodeAt(i)===92){if(i+1>=text.length)refuse('trailing escape inside a quoted parameter value');parameterValue+=text[i+1];i+=2;continue} // 92 is a backslash: it escapes the next character, including a quote
-            if(text[i]==='"'){i++;closed=true;break}
-            parameterValue+=text[i];i++
-          }
-          if(!closed)refuse('unterminated quoted parameter value')
-        }else{
-          const valueStart=i
-          while(i<text.length&&!/[;,\s]/.test(text[i]))i++
-          parameterValue=text.slice(valueStart,i)
+        let closed=false
+        while(i<text.length){
+          if(text.charCodeAt(i)===92){if(i+1>=text.length)refuse('trailing escape inside a quoted parameter value');parameterValue+=text[i+1];i+=2;continue} // 92 is a backslash: it escapes the next character, including a quote
+          if(text[i]==='"'){i++;closed=true;break}
+          parameterValue+=text[i];i++
         }
+        if(!closed)refuse('unterminated quoted parameter value')
+      }else{
+        // AN UNQUOTED VALUE IS A TOKEN, AND A TOKEN HOLDS NO QUOTE (#2152
+        // review 2). Stopping only at `;`, `,` or whitespace swallowed a stray
+        // quote, so `rel=next"` parsed as the relation `next"` rather than
+        // `next` and a real further page read as none. Anything outside the
+        // token grammar, and an empty value, now refuse.
+        const valueStart=i
+        while(i<text.length&&tokenChar.test(text[i]))i++
+        parameterValue=text.slice(valueStart,i)
+        if(!parameterValue)refuse(`empty unquoted value for link parameter "${name}"`)
+        if(i<text.length&&!/[;,\s]/.test(text[i]))refuse(`unquoted value for link parameter "${name}" contains ${JSON.stringify(text[i])}, which a token may not hold`)
       }
       // RFC 8288: the FIRST occurrence of a parameter wins. A later repeat of
       // the same name is ignored rather than overwriting it.
