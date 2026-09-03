@@ -940,70 +940,97 @@ export function parseLinkHeader(value) {
   const refuse=(why)=>{throw new LaneError(`unparseable Link header (${why}); refusing to read it as "no further pages" (#2152)`)}
   const space=/[ \t]/
   const tokenChar=/[A-Za-z0-9!#$%&'*+.^_`|~-]/
+  // AN ABSENT OR EMPTY FIELD IS THE ONLY "NO FURTHER PAGES" ANSWER. Everything
+  // else must be PROVEN well formed before this returns anything at all.
+  if(!text.trim())return []
+  // PHASE 1 -- PROVE THE OVERALL SHAPE, THEN SPLIT.
+  // Four review rounds found four different fail-OPEN holes in a single-pass
+  // scanner that accepted whatever it had not specifically objected to (#2152
+  // reviews 1-4: a valueless parameter, an unquoted value swallowing a quote, a
+  // value with no relation, and an unterminated `<` whose `>` search ran past
+  // the end of its own link value and ate the next one). The shape is now
+  // inverted: split ONLY on commas that sit outside <URI> and outside a quoted
+  // string, and refuse anything this walk cannot fully account for. A `,` or a
+  // `;` inside a URI or inside a quoted parameter value is ordinary text and
+  // must survive; a second `<` before a `>` proves an earlier <URI> was never
+  // closed, which is exactly the hole that let one value swallow another.
+  const values=[]
+  let current=''
+  let state='outside'
+  for(let i=0;i<text.length;i++){
+    const ch=text[i]
+    if(state==='uri'){
+      if(ch==='<')refuse('a second < inside <URI>, so an earlier <URI> was never closed')
+      if(ch==='>')state='outside'
+      current+=ch
+      continue
+    }
+    if(state==='quoted'){
+      if(text.charCodeAt(i)===92){if(i+1>=text.length)refuse('trailing escape inside a quoted parameter value');current+=ch+text[i+1];i++;continue} // 92 is a backslash: it escapes the next character, including a quote
+      if(ch==='"')state='outside'
+      current+=ch
+      continue
+    }
+    if(ch==='<'){state='uri';current+=ch;continue}
+    if(ch==='"'){state='quoted';current+=ch;continue}
+    if(ch===','){values.push(current);current='';continue}
+    current+=ch
+  }
+  if(state==='uri')refuse('unterminated <URI>')
+  if(state==='quoted')refuse('unterminated quoted parameter value')
+  values.push(current)
+  // PHASE 2 -- EVERY VALUE MUST BE EXACTLY `<URI>` FOLLOWED BY `; name=value`.
   const links=[]
-  let i=0
-  const skipSpace=()=>{while(i<text.length&&space.test(text[i]))i++}
-  skipSpace()
-  while(i<text.length){
-    if(text[i]!=='<')refuse('a link value must begin with <URI>')
-    const close=text.indexOf('>',i+1)
+  for(const rawValue of values){
+    const v=rawValue.trim()
+    if(!v)refuse('an empty link value (a leading, doubled or trailing comma)')
+    if(v[0]!=='<')refuse('a link value must begin with <URI>')
+    const close=v.indexOf('>')
     if(close<0)refuse('unterminated <URI>')
-    const uri=text.slice(i+1,close)
-    i=close+1
+    const uri=v.slice(1,close)
     const params={}
-    for(;;){
-      skipSpace()
-      if(i>=text.length)break
-      if(text[i]===','){i++;skipSpace();break}
-      if(text[i]!==';')refuse('a link parameter must be introduced by ;')
+    let i=close+1
+    const skipSpace=()=>{while(i<v.length&&space.test(v[i]))i++}
+    skipSpace()
+    while(i<v.length){
+      // Anything between the closing `>` (or the end of a parameter) and the
+      // next `;` is leftover text this parser cannot account for: refuse.
+      if(v[i]!==';')refuse(`leftover text in a link value at ${JSON.stringify(v.slice(i))}`)
       i++
       skipSpace()
       const nameStart=i
-      while(i<text.length&&tokenChar.test(text[i]))i++
-      const name=text.slice(nameStart,i).toLowerCase()
+      while(i<v.length&&tokenChar.test(v[i]))i++
+      const name=v.slice(nameStart,i).toLowerCase()
       if(!name)refuse('empty link parameter name')
       skipSpace()
-      let parameterValue=''
-      // A PARAMETER WITHOUT `=` IS A REFUSAL, NOT AN EMPTY VALUE (#2152 review 2).
       // RFC 8288 defines link-param as `token BWS "=" BWS ( token / quoted-string )`;
-      // there is no valueless form. Accepting one made `<u>; rel` parse cleanly
-      // with rel='', so a MALFORMED header answered "no further pages" -- exactly
-      // the fail-OPEN direction this guard exists to close.
-      if(text[i]!=='=')refuse(`link parameter "${name}" has no value`)
+      // there is no valueless form (#2152 review 2).
+      if(v[i]!=='=')refuse(`link parameter "${name}" has no value`)
       i++
       skipSpace()
-      if(text[i]==='"'){
+      let parameterValue=''
+      if(v[i]==='"'){
         i++
         let closed=false
-        while(i<text.length){
-          if(text.charCodeAt(i)===92){if(i+1>=text.length)refuse('trailing escape inside a quoted parameter value');parameterValue+=text[i+1];i+=2;continue} // 92 is a backslash: it escapes the next character, including a quote
-          if(text[i]==='"'){i++;closed=true;break}
-          parameterValue+=text[i];i++
+        while(i<v.length){
+          if(v.charCodeAt(i)===92){if(i+1>=v.length)refuse('trailing escape inside a quoted parameter value');parameterValue+=v[i+1];i+=2;continue} // 92 is a backslash
+          if(v[i]==='"'){i++;closed=true;break}
+          parameterValue+=v[i];i++
         }
         if(!closed)refuse('unterminated quoted parameter value')
       }else{
-        // AN UNQUOTED VALUE IS A TOKEN, AND A TOKEN HOLDS NO QUOTE (#2152
-        // review 2). Stopping only at `;`, `,` or whitespace swallowed a stray
-        // quote, so `rel=next"` parsed as the relation `next"` rather than
-        // `next` and a real further page read as none. Anything outside the
-        // token grammar, and an empty value, now refuse.
+        // An unquoted value is a token, and a token holds no quote (#2152 review 2).
         const valueStart=i
-        while(i<text.length&&tokenChar.test(text[i]))i++
-        parameterValue=text.slice(valueStart,i)
+        while(i<v.length&&tokenChar.test(v[i]))i++
+        parameterValue=v.slice(valueStart,i)
         if(!parameterValue)refuse(`empty unquoted value for link parameter "${name}"`)
-        if(i<text.length&&!/[;,\s]/.test(text[i]))refuse(`unquoted value for link parameter "${name}" contains ${JSON.stringify(text[i])}, which a token may not hold`)
       }
       // RFC 8288: the FIRST occurrence of a parameter wins. A later repeat of
       // the same name is ignored rather than overwriting it.
       if(!(name in params))params[name]=parameterValue
+      skipSpace()
     }
-    // A LINK VALUE WITH NO RELATION AT ALL IS A REFUSAL (#2152 review 3).
-    // RFC 8288 requires every link value to carry a `rel`. A bare `<uri>`, or
-    // one whose only parameter is something other than `rel`, parsed cleanly
-    // with no relation -- so it answered "no further pages" when the truth was
-    // unknown. A header truncated at the semicolon (`<uri>; rel="next"` cut to
-    // `<uri>`) lands exactly here: the same fail-OPEN direction as the two
-    // holes closed above.
+    // RFC 8288 requires every link value to carry a `rel` (#2152 review 3).
     if(!String(params.rel??'').trim())refuse('a link value carries no rel relation')
     links.push({uri,params})
   }

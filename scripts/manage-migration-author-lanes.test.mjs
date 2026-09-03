@@ -5207,6 +5207,55 @@ test('an absent or empty Link header is simply no further pages',()=>{
   assert.equal(hasNextPageLink(undefined),false)
 })
 
+// ---------------------------------------------------------------------------
+// THE STRICT REWRITE (#2152 review 4). Four review rounds found four fail-OPEN
+// holes of the SAME family in a scanner that accepted whatever it had not
+// specifically objected to. The parser now PROVES a header is well formed
+// before returning anything, and refuses everything it cannot account for.
+// These cases pin each known variant plus the two shapes that must still parse.
+// ---------------------------------------------------------------------------
+test('an UNTERMINATED <URI> cannot swallow the next link value',()=>{
+  // The fourth hole. The closing `>` was searched for across the WHOLE
+  // remaining header, so a first value missing its bracket ran past the comma
+  // and ate the second value's `>`. The literal rel="next" ended up inside the
+  // URI text and the surviving parameters gave a different relation, so a
+  // TRUNCATED listing read as complete -- fail OPEN, again.
+  const broken='<https://a/x?page=2; rel="next", <https://b/y>; rel="prev"'
+  assert.throws(()=>hasNextPageLink({link:broken}),/unparseable Link header \(a second < inside <URI>, so an earlier <URI> was never closed\)/,`must refuse: ${broken}`)
+  assert.throws(()=>parseLinkHeader('<https://a/x?page=2; rel="next"'),/unparseable Link header \(unterminated <URI>\)/,'a lone unterminated <URI> refuses too')
+  assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,linkPagerFetch({link:broken})),/unparseable Link header/)
+})
+
+test('a header ending in a TRAILING comma refuses rather than parsing as one good value',()=>{
+  // The fifth hole, found by the external reviewer. A trailing comma leaves an
+  // empty final link value: a header cut mid-transmission looks like a clean
+  // single value, so a truncated listing answers "no further pages".
+  for(const broken of ['<https://a/x?page=2>; rel="next",','<https://a/x?page=2>; rel="next", ',', <https://a/x?page=2>; rel="next"','<https://a/x?page=2>; rel="next",, <https://b/y>; rel="last"']){
+    assert.throws(()=>hasNextPageLink({link:broken}),/unparseable Link header \(an empty link value \(a leading, doubled or trailing comma\)\)/,`must refuse: ${broken}`)
+  }
+})
+
+test('a link value with NO rel, a parameter with no =, and an unquoted value holding a quote all refuse',()=>{
+  assert.throws(()=>hasNextPageLink({link:'<https://a/x?page=2>'}),/a link value carries no rel relation/,'no rel')
+  assert.throws(()=>hasNextPageLink({link:'<https://a/x?page=2>; rel'}),/link parameter "rel" has no value/,'parameter with no =')
+  assert.throws(()=>hasNextPageLink({link:'<https://a/x?page=2>; rel=next"'}),/unparseable Link header/,'an unquoted value may not hold a quote')
+  assert.throws(()=>hasNextPageLink({link:'<https://a/x?page=2> rel="next"'}),/leftover text in a link value/,'leftover text between > and the next parameter')
+})
+
+test('a , and a ; INSIDE the URI and inside a quoted parameter still read as a real next page',()=>{
+  // The strict shape must not become strict in the wrong direction: commas and
+  // semicolons are ordinary text inside <URI> and inside a quoted value, and a
+  // real further page must still be SEEN, not refused.
+  const header='<https://api.github.com/x?q=a,b;c&page=2>; rel="next"; title="page 2, of 3; final", <https://api.github.com/x?q=a,b;c&page=3>; rel="last"'
+  assert.equal(hasNextPageLink({link:header}),true)
+  const links=parseLinkHeader(header)
+  assert.equal(links.length,2,'the commas inside the URI and inside the quoted title must not split the header')
+  assert.equal(links[0].uri,'https://api.github.com/x?q=a,b;c&page=2')
+  assert.equal(links[0].params.title,'page 2, of 3; final')
+  assert.equal(links[1].params.rel,'last')
+})
+
+
 test('parseLinkHeader reads uri and parameters structurally',()=>{
   const links=parseLinkHeader('<https://a/x?page=2>; rel="next"; title="a, b; c", <https://a/x?page=9>; rel="last"')
   assert.equal(links.length,2)
