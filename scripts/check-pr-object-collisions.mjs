@@ -690,14 +690,38 @@ export function extractOperations(sql) {
       dollarQuoteStartsDo(source, offset) ? body : ' ')
     .replace(/'(?:[^']|'')*'/g, " '' ")
   const seen = new Map()
+  const temporaryEvents = []
+  const temporaryCreate = new RegExp(
+    String.raw`\bcreate\s+(?:global\s+|local\s+)?(?:temp|temporary)\s+table\s+(?:if\s+not\s+exists\s+)?(${QUALIFIED})`,
+    'gi',
+  )
+  let temporaryMatch
+  while ((temporaryMatch = temporaryCreate.exec(text)) !== null) {
+    temporaryEvents.push({ offset: temporaryMatch.index, action: 'create', target: canonical(temporaryMatch[1]) })
+  }
+  const tableDrop = new RegExp(String.raw`\bdrop\s+table\s+(?:if\s+exists\s+)?(${QUALIFIED})`, 'gi')
+  while ((temporaryMatch = tableDrop.exec(text)) !== null) {
+    temporaryEvents.push({ offset: temporaryMatch.index, action: 'drop', target: canonical(temporaryMatch[1]) })
+  }
+  temporaryEvents.sort((a,b)=>a.offset-b.offset)
+  const liveTemporaryTables=new Set(),temporaryCleanupOffsets=new Set()
+  for(const event of temporaryEvents){
+    if(event.action==='create'){liveTemporaryTables.add(event.target);continue}
+    if(liveTemporaryTables.has(event.target)){temporaryCleanupOffsets.add(event.offset);liveTemporaryTables.delete(event.target)}
+  }
   // Bare SQL keywords are never object names. They appear when an upstream
   // regex over-reaches across statement boundaries, and emitting `table table`
   // would let two unrelated pull requests "collide" on a keyword.
   const KEYWORDS = new Set(['table', 'tables', 'function', 'functions', 'routine', 'routines',
     'sequence', 'sequences', 'view', 'schema', 'index', 'if', 'as', 'only', 'exists', 'all'])
-  const add = (op) => {
+  const add = (op, sourceOffset = -1) => {
     if (!op.target) return
     if (KEYWORDS.has(op.target)) return
+    // PostgreSQL spells cleanup as plain `DROP TABLE`; there is no DROP TEMP
+    // form. When the same migration created that name as a temporary table
+    // earlier, the drop removes session-local scratch rather than a shared
+    // object and must be ignored symmetrically with the create.
+    if (op.action === 'drop' && op.kind === 'table' && temporaryCleanupOffsets.has(sourceOffset)) return
     seen.set(`${op.action}|${op.kind}|${op.target}`, op)
   }
 
@@ -721,7 +745,7 @@ export function extractOperations(sql) {
   for (const { re, map } of DISPATCH_PATTERNS) {
     re.lastIndex = 0
     let m
-    while ((m = re.exec(text)) !== null) for (const op of map(m)) add(op)
+    while ((m = re.exec(text)) !== null) for (const op of map(m)) add(op, m.index)
   }
 
   return [...seen.values()].sort((a, b) =>
