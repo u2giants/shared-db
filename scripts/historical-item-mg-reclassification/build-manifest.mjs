@@ -18,7 +18,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { HISTORICAL_CUTOFF_ISO } from './lib/constants.mjs';
+import { HISTORICAL_CUTOFF_ISO, assertCutoff } from './lib/constants.mjs';
 import { parseCsv } from './lib/csv.mjs';
 import {
   buildDivisionIndex, buildTaxonomyIndex, qualifyCandidate, reconcile,
@@ -46,6 +46,10 @@ function mapSourceRow(r) {
 }
 
 export async function buildManifest({ client, sourceRows, sourceDigest, cutoff = HISTORICAL_CUTOFF_ISO }) {
+  // The CLI cannot pass a cutoff, but this function is exported: a direct caller
+  // could otherwise widen the SELECT bound and only be refused later, per row, by
+  // qualifyCandidate. Refuse here, before any statement is issued.
+  assertCutoff(cutoff);
   const items = await client.query(
     'select item_id_pk, item_num_id, created_time_date, div_code, div_code_fk, '
     + 'udf_merchgroup01, udf_merchgroup02, udf_merchgroup03, '

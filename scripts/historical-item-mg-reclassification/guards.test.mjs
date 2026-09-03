@@ -482,3 +482,40 @@ test('5c: a RETIRED conflicted row does not poison a clean active sibling code',
   });
   assert.equal(cw.reason, ABSTAIN.TAXONOMY_DIVISION_CONFLICT);
 });
+
+test('11d: a compare-and-swap that affects the wrong number of rows rolls the batch back', async () => {
+  const rec = qualify(sourceRow(), [item()]).record;
+  const inner = fakeClient([item()]);
+  // The plan and the drift partition are both clean, so the only thing left that
+  // can disagree is the database's own affected-row count. Nothing in the fake
+  // client can produce that honestly, so it is forced: an UPDATE that reports one
+  // row fewer than was planned must still abort the whole transaction.
+  const client = {
+    log: inner.log,
+    table: inner.table,
+    end: () => inner.end(),
+    async query(text, params) {
+      const res = await inner.query(text, params);
+      if (String(text).trim().startsWith('update dflow."itemHeader"')) {
+        return { ...res, rowCount: (res.rowCount ?? 0) - 1 };
+      }
+      return res;
+    },
+  };
+  await assert.rejects(
+    runBatch(client, manifestOf([rec]), { target: 'preview', mode: 'apply' }),
+    /affected 0 rows but 1 were planned/,
+  );
+  assert.equal(client.log.at(-1), 'ROLLBACK');
+});
+
+test('22: a blank source identity abstains instead of matching anything', () => {
+  assert.equal(
+    qualify(sourceRow({ item_num: '   ' }), [item()]).reason,
+    ABSTAIN.SOURCE_IDENTITY_BLANK,
+  );
+  assert.equal(
+    qualify(sourceRow({ division: '' }), [item()]).reason,
+    ABSTAIN.SOURCE_IDENTITY_BLANK,
+  );
+});

@@ -20,7 +20,9 @@ const FLAGS = ['backup', 'target', 'expect_project_ref', 'expect_manifest_sha256
 
 async function main() {
   const args = parseArgs(process.argv.slice(2), FLAGS);
-  if (args.help || !args.backup || !args.target) {
+  // A rollback writes rows. It must be bound to the manifest it is undoing for
+  // exactly the reason apply.mjs is: a file name is not an approval.
+  if (args.help || !args.backup || !args.target || !args.expect_manifest_sha256) {
     console.error('usage: rollback.mjs --backup <file> --target preview|production '
       + '--expect-project-ref <ref> --expect-manifest-sha256 <digest> [--apply]');
     process.exit(2);
