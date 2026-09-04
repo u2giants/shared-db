@@ -17,9 +17,17 @@ const THE_TWO = ['Orchestrator marker guard', 'Cancelled work guard']
 
 function io(sequence) {
   const calls = []
+  // NEVER let a test reach the real filesystem. `main --apply` rewrites the committed
+  // mirror, and an unstubbed write here overwrote the repository's own
+  // `docs/verification/main-required-status-checks.json` with this file's fixture --
+  // which made the committed mirror evidence of a test run, not of a live readback.
+  const written = []
   let index = 0
   return {
     calls,
+    written,
+    root: '/nowhere',
+    write: (path, body) => written.push([String(path), body]),
     run(args, options) {
       calls.push({ args, input: options?.input })
       const next = sequence[Math.min(index, sequence.length - 1)]
@@ -181,6 +189,18 @@ test('main with --apply writes once, reads back, and exits 0', async () => {
   assert.equal(code, 0)
   assert.equal(transport.calls.length, 3, 'read, write, readback')
   assert.match(transport.calls[1].args.join(' '), /-X PATCH/)
+  // The mirror must be rewritten, and rewritten from the READBACK. Removing the
+  // writeMirror call, or feeding it the requested plan instead, fails here.
+  assert.equal(transport.written.length, 1, 'a successful --apply must rewrite the committed mirror')
+  const doc = JSON.parse(transport.written[0][1])
+  assert.deepEqual([...doc.contexts].sort(), [...after.contexts].sort())
+  assert.equal(doc.strict, after.strict)
+})
+
+test('a failed readback does not rewrite the mirror', async () => {
+  const transport = io([LIVE, '{}', LIVE])
+  assert.equal(await main(['--add', THE_TWO[0], '--apply'], transport), 1)
+  assert.equal(transport.written.length, 0, 'a mirror written on a failed write is a lie about main')
 })
 
 test('main exits 1 when the readback proves the write did not take effect', async () => {

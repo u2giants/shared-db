@@ -10,8 +10,6 @@
 // check runs BEFORE the lock is taken and names the exact contexts that are not
 // satisfied on the reviewed head.
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { REPO } from './manage-migration-author-lanes.mjs'
 
@@ -21,7 +19,9 @@ export class PreflightError extends Error {}
 // it here would make the pre-flight unsatisfiable on every first run.
 export const SELF_CONTEXT = 'Migration guarded merge authorization'
 
-const SUCCESS = new Set(['success', 'neutral', 'skipped'])
+// A skipped or neutral required check can still be refused by the merge API.
+// Accept only explicit success so that refusal happens before the merge lock.
+const SUCCESS = new Set(['success'])
 
 // A required context can be answered by either a commit status or a check run.
 // Latest wins for each name; a check run that has not completed has no conclusion
@@ -67,12 +67,30 @@ export function observedStates({ statuses = [], checkRuns = [] }) {
 // mirror is a refusal, never an empty required list.
 export const REQUIRED_CHECKS_MIRROR = 'docs/verification/main-required-status-checks.json'
 
-export function readRequiredChecksMirror(root = process.cwd(), read = readFileSync) {
+export function parseMirror(raw, where) {
   let parsed
-  try { parsed = JSON.parse(read(join(root, REQUIRED_CHECKS_MIRROR), 'utf8')) }
-  catch (e) { throw new PreflightError(`the committed required-checks mirror ${REQUIRED_CHECKS_MIRROR} is missing or unreadable (${sanitize(e.message)}), so the required list is unknown from both sources`) }
+  try { parsed = JSON.parse(raw) }
+  catch (e) { throw new PreflightError(`${REQUIRED_CHECKS_MIRROR} on ${where} is not readable JSON (${sanitize(e.message)}), so the required list is unknown from both sources`) }
   const contexts = parsed?.contexts
-  if (!Array.isArray(contexts) || contexts.length === 0) throw new PreflightError(`${REQUIRED_CHECKS_MIRROR} carries no contexts, which is not the same as "nothing is required"`)
+  if (!Array.isArray(contexts) || contexts.length === 0 || contexts.some((c) => typeof c !== 'string')) {
+    throw new PreflightError(`${REQUIRED_CHECKS_MIRROR} on ${where} carries no usable contexts, which is not the same as "nothing is required"`)
+  }
+  return contexts
+}
+
+// The guarded merge checks out the proposed head, so that checkout must never supply
+// the list used to judge itself. The workflow fetches origin/main immediately before
+// this script; only the protected branch's mirror is trusted.
+export function readRequiredChecksMirror(root = process.cwd(), run = execFileSync) {
+  let raw
+  try { raw = run('git', ['show', `origin/main:${REQUIRED_CHECKS_MIRROR}`], { encoding: 'utf8', cwd: root, maxBuffer: 8 * 1024 * 1024 }) }
+  catch (e) { throw new PreflightError(`the trusted origin/main mirror ${REQUIRED_CHECKS_MIRROR} is missing or unreadable (${sanitize(e.message)}), so the required list is unknown from both sources`) }
+  const contexts = parseMirror(raw, 'origin/main')
+  // The pre-flight strips its own context before testing, so a mirror naming ONLY
+  // that context leaves nothing to test and would pass with zero coverage.
+  if (contexts.filter((c) => c !== SELF_CONTEXT).length === 0) {
+    throw new PreflightError(`${REQUIRED_CHECKS_MIRROR} names no context other than ${SELF_CONTEXT}, so the mirror would test nothing`)
+  }
   return contexts
 }
 
@@ -85,7 +103,7 @@ export function evaluateWithoutRequiredList({ statuses, checkRuns, reason, mirro
   // live but not yet mirrored cannot slip through once it starts reporting.
   const bad = [...states].filter(([, state]) => !SUCCESS.has(state))
   if (bad.length) throw new PreflightError(`${describe(bad)} on the reviewed head. The required list came from the committed mirror, so EVERY reported check must pass. No retry can clear this, so the merge lane was not taken.`)
-  return { required: mirrorContexts.length, mode: 'committed-mirror' }
+  return { required: mirrorContexts.filter((c) => c !== SELF_CONTEXT).length, mode: 'committed-mirror' }
 }
 
 function describe(bad) {
@@ -154,7 +172,16 @@ export function sanitize(text) {
 // transient, and quietly switching tests on a blip would hide a real outage behind a
 // different check. Those refuse, and the merge is retried later.
 export function isPermissionRefusal(message) {
-  return /(403|401)|resource not accessible|must have admin|not accessible by integration/i.test(String(message ?? ''))
+  // Word-bounded, so a duration like `1403ms` or an id containing 403 is not a
+  // permission refusal and does not silently switch the pre-flight to the fallback.
+  return /\b(403|401)\b|resource not accessible|must have admin|not accessible by integration/i.test(String(message ?? ''))
+}
+
+export function requireWholePage(what, totalCount, page) {
+  if (!Number.isInteger(totalCount) || !Array.isArray(page)) return
+  if (totalCount > page.length) {
+    throw new PreflightError(`GitHub reported ${totalCount} ${what} on the reviewed head but only ${page.length} fit on one page, so some checks were never seen. The merge lane was not taken.`)
+  }
 }
 
 export function gatherPreflightInput(env = process.env, deps = { json }) {
@@ -169,11 +196,16 @@ export function gatherPreflightInput(env = process.env, deps = { json }) {
   }
   const combined = read(['api', `repos/${REPO}/commits/${sha}/status?per_page=100`])
   const runs = read(['api', `repos/${REPO}/commits/${sha}/check-runs?per_page=100`])
+  // One page only. A required context beyond page 1 would look like "never reported"
+  // and fail closed, but a FAILING extra check beyond page 1 would be invisible to
+  // the second half of the fallback. Refuse rather than judge a partial page.
+  requireWholePage('commit statuses', combined?.total_count, combined?.statuses)
+  requireWholePage('check runs', runs?.total_count, runs?.check_runs)
   // NO `?? []` on the contexts. An empty list must never be read as "nothing is
   // required" -- that is the fail-open this whole script exists to prevent.
   return {
     protectionUnreadable,
-    mirrorContexts: protectionUnreadable ? readRequiredChecksMirror(deps.root ?? process.cwd(), deps.read ?? readFileSync) : null,
+    mirrorContexts: protectionUnreadable ? readRequiredChecksMirror(deps.root ?? process.cwd(), deps.run ?? execFileSync) : null,
     requiredContexts: protectionUnreadable ? null : protection?.contexts,
     statuses: combined?.statuses ?? [],
     checkRuns: runs?.check_runs ?? [],

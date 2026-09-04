@@ -65,6 +65,11 @@ jobs:
           # An assignment is not an approval, and an approval of an earlier head
           # is not an approval of these bytes (#1816).
           PR_NUMBER="${{ inputs.pull_request }}" REQUESTED_SHA="${{ inputs.head_sha }}" node scripts/check-exact-head-approval.mjs
+      # `github.token` cannot read branch protection (there is no `administration`
+      # permission scope), so this falls back to the committed mirror. It reads that
+      # mirror from BOTH `origin/main` and the checked-out head and unions them, so a
+      # pull request can add a required context but can never drop one. The step above
+      # already ran `git fetch origin main`, which is what makes that ref readable.
       - name: Pre-flight the required status checks before taking the merge lane
         env:
           GH_TOKEN: ${{ github.token }}
