@@ -252,3 +252,45 @@ The underlying guard defect — a schema-qualification strip that cannot see acr
 columns, so any tabular evidence file trips a rule that does not apply to it —
 is real and will outlive this PR. It is reported separately rather than patched
 here, because changing a merge-gate guard is not evidence work.
+
+
+## Corrections applied after the governed review at head 93f9b2ad
+
+The slot-1 governed review (glm-5.3) returned REVISE with four defects. Each was
+independently re-verified against the committed extracts before being fixed; all
+four were real, and all four were mine.
+
+1. **`safe_wal_size` was untraceable.** The published 2,164,240,320 matched
+   neither run. The real values are 2,164,233,680 (run 1) and 2,164,254,128
+   (run 2). Section 8 now prints both and says the figure moves between runs.
+2. **Six ON DELETE cells were misdecoded.** `pg_constraint.confdeltype` `n` is
+   SET NULL; NO ACTION is `a`. Every one of the six rows' own `constraintdef`
+   string said `ON DELETE SET NULL`. Corrected, and section 8 now states the
+   decode table so the next reader cannot repeat it.
+3. **Section 11's index claims were false.** "16 index entries, all `idx_scan` 0"
+   was the fan-out row count, not distinct indexes: there are 10 distinct
+   indexes, 9 with `idx_scan` 0 and one (`dflow.idx_properties_licensor_id`)
+   with a recorded scan on 2026-09-02. "All 16 appear in `unused_index`" was
+   also wrong: exactly 3 do. The advisor omits the scanned one and the six that
+   back primary-key or unique constraints. Section 11 additionally printed
+   `dflow_prod`'s `reltuples` of **-1** as "0"; -1 is the never-analyzed marker,
+   and reading it as an estimate of zero is the exact error this artifact warns
+   against elsewhere.
+4. **The plan's fresh-session pointer was stale.** It still sent a new session to
+   Step 1 after the STATUS row marked Step 1 done. It now points at Step 2.
+
+Two further review notes were accepted rather than argued:
+
+- The claim that "twenty-four indexes recorded their first scan" was an inference
+  from the advisor's count delta. The 2026-09-03 per-index membership was never
+  committed, so which twenty-four cannot be recovered. Section 3 now says the
+  count moved, states that the membership is unrecoverable, and rests the
+  mechanism on the `cron.job.job_pkey` transition observed live inside our own
+  window instead.
+- Two capture-list items are open — function provenance and foreign-key caller
+  sites. The STATUS row now names both as carried unknowns rather than implying
+  the capture list is fully closed.
+
+Nothing in these corrections came from a new production read. Every corrected
+figure was recomputed from the extracts already committed in `run1/` and `run2/`,
+so the two recorded runs remain the only production access in this artifact.

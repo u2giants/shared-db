@@ -17,7 +17,7 @@ This plan was requested after the Supabase dashboard AI proposed performance, re
 | Step | Deliverable | State | Evidence |
 |---|---|---|---|
 | 0 | Register the evidence-gated plan, handoff, router entry, and tracking issue | ✅ done 2026-09-03 | PR #2210 merged as `5c3bf67e767b6fcd85062f9cb98805535498d17f`; guarded merge run `33778748037`; exact-head Muse verdict ref recorded for `9cb7ad230f13697cb9e22e60dcd0c7c7434d8ce7` |
-| 1 | Capture a reproducible production baseline and reconcile every advisor claim | ✅ done 2026-09-04 | Artifact: `docs/verification/database-efficiency/20260904T212459Z/baseline.md`; verbatim query log `queries.md`; two read-only runs (21:25:25Z and 21:31:01Z) with `run1/`, `run2/` extracts and `delta-run1-run2.txt`; 340 security findings confirmed rule-by-rule, `unused_index` moved 763 → 739 |
+| 1 | Capture a reproducible production baseline and reconcile every advisor claim | ✅ done 2026-09-04 | Artifact: `docs/verification/database-efficiency/20260904T212459Z/baseline.md`; verbatim query log `queries.md`; two read-only runs (21:25:25Z and 21:31:01Z) with `run1/`, `run2/` extracts and `delta-run1-run2.txt`; 340 security findings confirmed rule-by-rule, `unused_index` moved 763 → 739. Two capture-list items remain open and are carried as named unknowns, not as done: the repository provenance of the five named functions (md5s are recorded so a later byte-comparison can settle it) and the application query sites behind the foreign keys (Step 3 caller work) |
 | 2 | Prove or disprove Data API exposure with role and HTTP behavior tests | ⬜ open | Required artifact: `docs/verification/database-efficiency/<timestamp>/api-access-matrix.md` with no row contents |
 | 3 | Trace expensive rebuilds and projection churn to callers and changed-row sets | ⬜ open | Required artifacts: call graph, timestamped deltas, and safe preview timings |
 | 4 | Implement and verify application-owned write-amplification reductions | ⬜ open | Separate app issues/PRs, deployed SHAs, and post-deploy deltas |
@@ -26,7 +26,7 @@ This plan was requested after the Supabase dashboard AI proposed performance, re
 | 7 | Complete the dated index observation and maintenance/replication investigations | ⬜ open | #1966 delta on or after 2026-09-17 plus maintenance and WAL attribution reports |
 | 8 | Prove end-to-end improvement and close or retain every finding explicitly | ⬜ open | Before/after workload report, CI, deployed SHA, live smoke tests, and advisor reconciliation |
 
-**Fresh implementation starts at Step 1.** Use a fresh session at the boundaries after Steps 2, 4, 6, and 7; before starting a new phase, re-read this STATUS table and all remaining phases for drift.
+**Fresh implementation starts at Step 2** (Step 1 landed 2026-09-04; see the STATUS table). Use a fresh session at the boundaries after Steps 2, 4, 6, and 7; before starting a new phase, re-read this STATUS table and all remaining phases for drift.
 
 ---
 

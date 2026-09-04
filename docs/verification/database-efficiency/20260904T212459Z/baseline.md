@@ -104,9 +104,12 @@ Performance advisors moved, in one rule only.
 
 **The 24 indexes that stopped being "unused" are the finding.** No index was created or
 dropped — the index inventory is identical in count, size and validity across both runs, and
-none is invalid. Twenty-four indexes simply recorded their first scan since the counters
-began. Within our own 5m36s window a further index (`cron.job.job_pkey`) left the zero-scan
-set, so this is a live, ongoing drift, not a one-off.
+none is invalid. What moved is the advisor's own count, 763 to 739, between the 2026-09-03
+census and this run; the per-index membership of the 2026-09-03 set was never committed, so
+"which twenty-four" cannot be recovered and this artifact does not claim to know. The
+mechanism, however, was observed directly: within our own 5m36s window `cron.job.job_pkey`
+left the zero-scan set, with no DDL. That is a live, ongoing drift, not a one-off, and it is
+the simplest explanation of a 24-index decrease with an unchanged index inventory.
 
 That directly supports the plan's existing prohibition on dropping an index because its
 lifetime `idx_scan` is zero: a zero here has been demonstrated, on this database, this week,
@@ -309,14 +312,21 @@ tables, with the parent-change counters that decide whether the missing index co
 | --- | --- | --- | --- | --- |
 | `plm.dcp_metadata_asset` (`dcp_metadata_asset_membership_fk`) | 1,333,559,296 | 0 | 0 | restrict |
 | `plm.dcp_metadata_asset` (`dcp_metadata_asset_run_fk`) | 1,333,559,296 | 0 | 0 | cascade |
-| `public.style_guide_file_tags` (`style_guide_file_tags_source_file_id_fkey`) | 681,771,008 | **1,565,455** | 0 | no action |
-| `public.style_guide_file_tags` (`style_guide_file_tags_created_by_fkey`) | 681,771,008 | 412 | 0 | no action |
-| `public.style_guide_file_tags` (`style_guide_file_tags_confirmed_by_fkey`) | 681,771,008 | 412 | 0 | no action |
+| `public.style_guide_file_tags` (`style_guide_file_tags_source_file_id_fkey`) | 681,771,008 | **1,565,455** | 0 | set null |
+| `public.style_guide_file_tags` (`style_guide_file_tags_created_by_fkey`) | 681,771,008 | 412 | 0 | set null |
+| `public.style_guide_file_tags` (`style_guide_file_tags_confirmed_by_fkey`) | 681,771,008 | 412 | 0 | set null |
 | `plm.dcp_asset_term_observation` (`dcp_asset_term_obs_asset_fk`) | 458,457,088 | 0 | 0 | cascade |
-| `ingest.raw_record` (`raw_record_sync_run_id_fkey`) | 310,001,664 | 0 | 0 | no action |
+| `ingest.raw_record` (`raw_record_sync_run_id_fkey`) | 310,001,664 | 0 | 0 | set null |
 | `plm.dcp_asset_property_observation` (`dcp_asset_property_obs_asset_fk`) | 200,310,784 | 0 | 0 | cascade |
-| `pim.product` (`product_factory_id_fkey`) | 173,596,672 | 0 | 0 | no action |
-| `pim.product` (`product_product_type_id_fkey`) | 173,596,672 | 0 | 0 | no action |
+| `pim.product` (`product_factory_id_fkey`) | 173,596,672 | 0 | 0 | set null |
+| `pim.product` (`product_product_type_id_fkey`) | 173,596,672 | 0 | 0 | set null |
+
+The ON DELETE column decodes `pg_constraint.confdeltype`: `a` NO ACTION, `r` RESTRICT,
+`c` CASCADE, `n` SET NULL. Six of the rows above are `n` — **SET NULL**, not NO ACTION.
+That distinction matters downstream: SET NULL writes the child row on a parent delete
+where NO ACTION only checks it, so a Step 5 shortlist built from this table must price
+the child write. It does not change the argument below, because every one of those six
+parents has zero recorded deletes.
 
 This is exactly the discrimination the plan asked for and it separates the list cleanly.
 **One row on this list has a parent that actually changes:**
@@ -340,7 +350,9 @@ considering later is small.
   `realtime.messages_2026_09_0N` partitions.
 
 **Replication slots.** Two, both logical, both temporary, both active, both
-`wal_status = reserved` with `safe_wal_size` 2,164,240,320 —
+`wal_status = reserved`. `safe_wal_size` is per run and moves between them: 2,164,233,680
+in run 1 and 2,164,254,128 in run 2 for both slots (a 20,448-byte difference over 5m36s,
+which is WAL headroom drifting normally, not a slot falling behind) —
 `supabase_realtime_replication_slot_2_134_2_3e6fc57` (plugin `wal2json`) and
 `supabase_realtime_messages_replication_slot_2_134_2_3e6fc57` (plugin `pgoutput`). No
 subscriptions. No slot is lagging or in a `lost`/`unreserved` state, so replication is not
@@ -422,14 +434,31 @@ re-measure.
 | Relation | Total bytes | Live tuples | Planner rows | Inserts | Updates | Deletes | Seq scans | Index scans | Ever vacuumed/analyzed |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `dflow.properties_and_characters` | 3,006,464 | 0 | 10,122 | 0 | 0 | 0 | 1 | 1 | never |
-| `dflow_prod.properties_and_characters` | 49,152 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | never |
+| `dflow_prod.properties_and_characters` | 49,152 | 0 | unknown (`reltuples` -1) | 0 | 0 | 0 | 0 | 0 | never |
 
 These are `dflow` / `dflow_prod`, **not** `core.properties_and_characters`. Both
-carry zero live tuples and zero recorded write activity over the window; the
+carry zero live tuples and zero recorded write activity over the window. The
 `dflow` copy's 10,122 planner rows against 0 live tuples means the planner
-estimate is stale, not that rows exist — nothing has ever analyzed it. Between
-them they hold 16 index entries (all `idx_scan` 0) and are named by 8 foreign-key
-rows. All 16 indexes appear in the `unused_index` performance rule.
+estimate is stale, not that rows exist — nothing has ever analyzed it. The
+`dflow_prod` copy's `reltuples` is **-1**, which is PostgreSQL's "never analyzed,
+unknown" marker and must not be read as an estimate of zero; the earlier draft of
+this section printed it as 0, which was wrong in exactly the way this artifact
+warns against elsewhere.
+
+Between them the two relations have **10 distinct indexes**, named by 8
+foreign-key rows. (`indexes.csv` shows 16 rows for them because of the
+`pg_constraint` fan-out disclosed in section 7 — count distinct index identity,
+not rows.) **Nine** of the ten have `idx_scan` 0. The tenth,
+`dflow.idx_properties_licensor_id`, has `idx_scan` 1 with 10,122 tuples read and
+`last_idx_scan` 2026-09-02 15:56:11-04 — it is the same single index scan the
+table above reports for that relation.
+
+Only **three** of them appear in the `unused_index` advisor rule:
+`idx_properties_name` on `dflow`, and `idx_properties_licensor_id` and
+`idx_properties_name` on `dflow_prod`. The advisor correctly omits
+`dflow.idx_properties_licensor_id` because it has a recorded scan, and omits the
+remaining six because they back primary-key or unique constraints, which that
+rule excludes — the same reason 968 zero-scan indexes are undroppable in section 7.
 
 Read this as "not reproduced as active", not "empty": `n_live_tup` is a counter,
 and `pg_stat_database.stats_reset` is NULL (section 2), so these zeros cannot be
