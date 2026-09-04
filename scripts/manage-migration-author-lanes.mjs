@@ -10,11 +10,11 @@ import { classifyDependencies, findCompletionRecord, findDependencyCycles, valid
 import { assertLease, evaluateRecovery, formatLeaseMessage, parseLeaseMessage, recoveredLeaseMetadata, LeaseError } from './lib/exclusive-lease.mjs'
 import { coordinationEvent, formatEventComment, parseEventComment, auditTimeline, renderTimeline } from './db-coordination-events.mjs'
 import { reconcileFlow, persistInitialReady, preparePreviewDispatch, repairPreviewReady } from './orchestrator-flow/reconcile.mjs'
-import { SELF_CONTEXT as MERGE_SELF_CONTEXT } from './check-required-checks-preflight.mjs'
+import { MERGE_SELF_CONTEXT } from './lib/merge-self-context.mjs'
 
 // `Migration guarded merge authorization` is posted by the guarded merge ITSELF,
 // after this gate has already passed -- see SELF_CONTEXT in
-// check-required-checks-preflight.mjs. Every other consumer of the required list
+// lib/merge-self-context.mjs (and the merge pre-flight). Every other consumer of the required list
 // strips it; the preview gate did not, which made the gate self-referential:
 // preview could never be prepared, because the only thing that sets that context
 // is the merge that preview is a precondition of. Exported so the exclusion is
