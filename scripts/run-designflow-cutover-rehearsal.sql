@@ -4,10 +4,28 @@
   \echo 'scratch_schema is required'
   \quit 2
 \endif
+\if :{?expected_project_ref}
+\else
+  \echo 'expected_project_ref is required'
+  \quit 2
+\endif
 
 SET statement_timeout = '20min';
 SET lock_timeout = '5s';
 SET idle_in_transaction_session_timeout = '2min';
+SELECT set_config('issue771.expected_project_ref', :'expected_project_ref', false);
+
+DO $guard$
+BEGIN
+  IF current_database() <> 'postgres'
+     OR current_user <> 'postgres'
+     OR NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres.' || current_setting('issue771.expected_project_ref')) THEN
+    RAISE EXCEPTION 'target is not the expected Supabase preview project';
+  END IF;
+END
+$guard$;
+SELECT jsonb_build_object('database', current_database(), 'user', current_user,
+  'server_address', inet_server_addr(), 'expected_project_ref', :'expected_project_ref') AS target_proof;
 
 CREATE SCHEMA :"scratch_schema";
 SET search_path = :"scratch_schema", dflow, public;
@@ -46,6 +64,19 @@ INSERT INTO selected_tables VALUES
   ('AuditLog'), ('email_logs'), ('quote_auth_token'), ('user_notification'),
   ('itemHeader'), ('RFQItem'), ('itemDetail'), ('itemAttachment'),
   ('productUserAssignment'), ('users');
+
+WITH RECURSIVE dependency_tables(table_name) AS (
+  SELECT table_name FROM selected_tables
+  UNION
+  SELECT parent.relname
+  FROM dependency_tables d
+  JOIN pg_class child ON child.relname = d.table_name
+  JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace AND child_ns.nspname = 'dflow'
+  JOIN pg_constraint fk ON fk.conrelid = child.oid AND fk.contype = 'f'
+  JOIN pg_class parent ON parent.oid = fk.confrelid
+  JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace AND parent_ns.nspname = 'dflow'
+)
+INSERT INTO selected_tables SELECT table_name FROM dependency_tables ON CONFLICT DO NOTHING;
 
 DO $block$
 DECLARE r record;
@@ -114,7 +145,8 @@ BEGIN
     WHERE n.nspname = 'dflow' AND con.contype = 'f'
     ORDER BY c.relname, con.conname
   LOOP
-    add_ddl := format('ALTER TABLE %I.%I ADD CONSTRAINT %I %s NOT VALID', current_schema(), r.table_name, r.conname, r.definition);
+    add_ddl := format('ALTER TABLE %I.%I ADD CONSTRAINT %I %s NOT VALID', current_schema(), r.table_name, r.conname,
+                      replace(r.definition, format('REFERENCES %I.', 'dflow'), format('REFERENCES %I.', current_schema())));
     validate_ddl := format('ALTER TABLE %I.%I VALIDATE CONSTRAINT %I', current_schema(), r.table_name, r.conname);
     PERFORM record_timing('foreign_key_add', r.table_name || '.' || r.conname, add_ddl);
     PERFORM record_timing('foreign_key_validate', r.table_name || '.' || r.conname, validate_ddl);
@@ -160,6 +192,13 @@ SELECT record_timing(
       'source_tail_hash', (SELECT md5(string_agg(h, '' ORDER BY h)) FROM src_tail),
       'copy_tail_hash', (SELECT md5(string_agg(h, '' ORDER BY h)) FROM dst_tail))
   $sql$, :'scratch_schema', :'scratch_schema', :'scratch_schema', :'scratch_schema'));
+
+UPDATE timings
+SET ok = detail->>'source_count' = detail->>'copy_count'
+     AND detail->>'source_min_id' = detail->>'copy_min_id'
+     AND detail->>'source_max_id' = detail->>'copy_max_id'
+     AND detail->>'source_tail_hash' = detail->>'copy_tail_hash'
+WHERE phase = 'auditlog_gate';
 
 DO $block$
 DECLARE r record;

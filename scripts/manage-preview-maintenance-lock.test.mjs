@@ -23,13 +23,23 @@ function io() {
 
 test('ready repository maintenance acquires and safely releases the shared preview ref', () => {
   const fake = io()
-  const lock = acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'a'.repeat(40) }, fake)
-  assert.equal(fake.refs.get(lock.ref), lock.ownerSha)
-  releasePreviewMaintenanceLock(lock.ownerSha, fake)
-  assert.equal(fake.refs.has(lock.ref), false)
+  process.env.GITHUB_RUN_ID = '123'
+  process.env.GITHUB_RUN_ATTEMPT = '1'
+  try {
+    const lock = acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'a'.repeat(40) }, fake)
+    assert.equal(fake.refs.get(lock.ref), lock.ownerSha)
+    assert.equal(fake.refs.has('refs/db-coordination/author-acquisition'), false)
+    releasePreviewMaintenanceLock(lock.ownerSha, fake)
+    assert.equal(fake.refs.has(lock.ref), false)
+  } finally {
+    delete process.env.GITHUB_RUN_ID
+    delete process.env.GITHUB_RUN_ATTEMPT
+  }
 })
 
 test('wrong main, issue routing, or occupied preview fails closed', () => {
+  process.env.GITHUB_RUN_ID = '123'
+  process.env.GITHUB_RUN_ATTEMPT = '1'
   const stale = io()
   assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'b'.repeat(40) }, stale), /exact current main/)
   const wrong = io()
@@ -38,4 +48,12 @@ test('wrong main, issue routing, or occupied preview fails closed', () => {
   const busy = io()
   busy.refs.set('refs/db-coordination/preview', 'c'.repeat(40))
   assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'a'.repeat(40) }, busy), /occupied/)
+  delete process.env.GITHUB_RUN_ID
+  delete process.env.GITHUB_RUN_ATTEMPT
+})
+
+test('local acquisition is refused because it would be unrecoverable after a crash', () => {
+  delete process.env.GITHUB_RUN_ID
+  delete process.env.GITHUB_RUN_ATTEMPT
+  assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'a'.repeat(40) }, io()), /must run in GitHub Actions/)
 })

@@ -6,6 +6,7 @@ import { acquireMutex, acquireRef, EXCLUSIVE_REFS, githubIo, parseQueueScope, re
 import { formatLeaseMessage } from './lib/exclusive-lease.mjs'
 
 export class PreviewMaintenanceLockError extends Error {}
+const MUTEX_REF = 'refs/db-coordination/author-acquisition'
 
 export function acquirePreviewMaintenanceLock({ issue, owner, headSha, now = new Date() }, io = githubIo) {
   const number = Number(issue)
@@ -20,18 +21,21 @@ export function acquirePreviewMaintenanceLock({ issue, owner, headSha, now = new
   if (scope?.status !== 'ready' || scope?.workType !== 'repo-maintenance' || scope?.route !== 'repo-maintenance') {
     throw new PreviewMaintenanceLockError(`issue #${number} is not ready repo-maintenance work`)
   }
+  const githubRunId = process.env.GITHUB_RUN_ID
+  const githubRunAttempt = process.env.GITHUB_RUN_ATTEMPT
+  if (!githubRunId || !githubRunAttempt) throw new PreviewMaintenanceLockError('acquisition must run in GitHub Actions so a crashed holder remains recoverable')
 
   const holderId = `repo-maintenance:${number}`
-  const ownerSha = io.makeOwnerCommit(formatLeaseMessage('preview-maintenance', {
+  const ownerSha = io.makeOwnerCommit(formatLeaseMessage('preview', {
     requestId: randomUUID(), holderId, owner, headSha, generation: 1,
-    acquiredAt: now.toISOString(), pr: null, migrationVersions: [],
+    acquiredAt: now.toISOString(), pr: null, migrationVersions: [], githubRunId, githubRunAttempt,
   }))
   acquireMutex(ownerSha, io)
   try {
     acquireRef(EXCLUSIVE_REFS.preview, ownerSha, io)
     return { kind: 'preview-maintenance', ref: EXCLUSIVE_REFS.preview, ownerSha, holderId, issue: number, headSha }
   } finally {
-    if (io.readRef('refs/db-coordination/author-mutex') === ownerSha) releaseOwnedRef('refs/db-coordination/author-mutex', ownerSha, io)
+    if (io.readRef(MUTEX_REF) === ownerSha) releaseOwnedRef(MUTEX_REF, ownerSha, io)
   }
 }
 
