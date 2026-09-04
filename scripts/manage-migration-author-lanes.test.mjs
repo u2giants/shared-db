@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -1336,6 +1336,55 @@ test('a retired reviewer is replaced cleanly, without an exclusion deadlock (#20
   assert.deepEqual(replaceFailedReviewer({...replacementRequest,failureCode:'wrapper_terminal_failure'},io),replacement)
 })
 
+test('a failed reviewer holding an UNRELATED live lease no longer blocks its own replacement (#2106)',()=>{
+  // ISSUE #2106 -- the second reviewer-pool deadlock mode. The reviewer that
+  // failed on THIS head has since been drawn onto a different review. A reviewer
+  // holds at most one lease, so that proves the lease this failure is about was
+  // already released. Replacement used to refuse outright, and freeing every
+  // OTHER reviewer in the pool could not clear it: only this one reviewer going
+  // idle would. During marker #2074 two assignments each needed four draws.
+  const io=failedReviewIo()
+  const failedName='grok-4.6'
+  assert.equal(io.refs.has(reviewActiveRef(failedName)),true,'the fixture must start with the failed reviewer holding its own lease')
+  // Same head so the unrelated lease is LIVE, not stale -- the point of the test
+  // is an active unrelated review, not a leftover to be swept.
+  const unrelated=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=99 reviewer=${failedName} issue=777 pr=778 head=${failedReview.headSha}`)
+  io.refs.set(reviewActiveRef(failedName),unrelated)
+  let protectedByCas=false
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  const applyAtomic=(changes)=>{
+    for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null)
+    for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}
+  }
+  io.atomicReviewRefs=(changes)=>{
+    if(changes.some((change)=>change.ref===`${REVIEW_REPLACEMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}-1`)){
+      const preservation=changes.find((change)=>change.ref===reviewActiveRef(failedName))
+      assert.deepEqual(preservation,{ref:reviewActiveRef(failedName),expected:unrelated,sha:unrelated},'the unrelated lease must be protected by the same atomic compare-and-swap')
+      protectedByCas=true
+    }
+    applyAtomic(changes)
+  }
+  io.atomicReviewMutexRelease=(ownerSha)=>applyAtomic([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(protectedByCas,true)
+  assert.equal(replacement.reviewer,'glm-5.3')
+  assert.equal(io.refs.get(reviewActiveRef(failedName)),unrelated,'the unrelated review must be left exactly as it was found')
+  assert.equal(io.refs.get(reviewActiveRef('glm-5.3')),replacement.replacementSha)
+  // Still idempotent, and still does not touch the unrelated lease on retry.
+  assert.deepEqual(replaceFailedReviewer(replacementRequest,io),replacement)
+  assert.equal(io.refs.get(reviewActiveRef(failedName)),unrelated)
+})
+
+test('a MATCHING failed lease is still released, and the relaxation is not a blanket one (#2106)',()=>{
+  // The control for the test above. Nothing about a lease that genuinely belongs
+  // to this failure changes: it is still released, and the outcome does not claim
+  // it was already gone.
+  const io=failedReviewIo()
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(io.refs.get(reviewActiveRef('grok-4.6'))??null,null,'the matching failed lease is released exactly as before')
+})
+
 test('three terminal providers do not grow replacement preflight past the fixed wire budget (#1962)',()=>{
   const io=failedReviewIo();let attempts=0;const labels=[]
   const rawGetCommit=io.getCommit
@@ -2660,6 +2709,11 @@ test('stranded claim lease renewal mutex is recognized and safely recoverable',(
   const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
   assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
 })
+test('stranded expired claim recovery mutex is recognized and safely recoverable',()=>{
+  const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:'db-coordination expired-claim-recovery recover-2177',committer:{date:'2026-08-14T19:55:00Z'}})
+  const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
+  assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
+})
 
 function splitIo(overrides={}) {
   const io=memoryIo(), original=['table plm.style_tracker_item_bridge'], combined=[...original,'index plm.item_upper_trim_item_number_idx']
@@ -2887,6 +2941,97 @@ test('claim renewal enforces a bounded lease and real CLI wiring',()=>{
   for(const leaseHours of [0,24.01,NaN])assert.throws(()=>renewExpiredClaim({...renewalOptions,leaseHours},NOW,renewalIo()),/no more than 24/)
   const io=renewalIo(),args=['--renew-claim','--claim-number','1058','--issue','853','--owner',renewalOptions.owner,'--branch',renewalOptions.branch,'--worktree',renewalOptions.worktree,'--pr','1060','--head-sha',renewalOptions.headSha,'--lease-hours','12']
   assert.equal(main(args,NOW,io),0);assert.equal(parseAuthorLease(io.issue.body,NOW).active,true)
+})
+
+function expiredPrRecoveryIo({issueNumber,claimNumber,prNumber,version,owner,branch,worktree,title,tables,children},overrides={}){
+  const io=memoryIo(),head='a'.repeat(40)
+  const claim={number:claimNumber,state:'open',title,body:claimBody({version,objects:tables,owner,branch,worktree,expiresAt:new Date('2026-08-14T19:00:00Z')})}
+  const workIssue={number:issueNumber,state:'open',body:scope('ready','structural','shared-db-orchestrator',2,tables)}
+  io.refs.set(`refs/db-claims/${version}`,'permanent')
+  io.openClaims=()=>[structuredClone(claim)]
+  io.getIssue=(number)=>Number(number)===issueNumber?structuredClone(workIssue):Number(number)===claimNumber?structuredClone(claim):null
+  io.updateCalls=0;io.updateIssue=(_number,fields)=>{io.updateCalls++;Object.assign(claim,fields);return structuredClone(claim)}
+  io.getPr=()=>({state:'open',head:{sha:head,ref:branch}})
+  io.getPrFiles=()=>[{status:'added',filename:`supabase/migrations/${version}_fixture.sql`}]
+  io.prSources=()=>[{label:`PR #${prNumber} fixture`,objects:[...tables,...children],versions:[version]}]
+  return Object.assign(io,{claim,workIssue,head,tables,children},overrides)
+}
+
+const recovery2177={issueNumber:2177,claimNumber:2182,prNumber:2183,version:'20260904001147',owner:'claude-subagent-2177',branch:'claude/2177-coldlion-cust-sp',worktree:'C:\\repos\\shared-db\\.claude\\worktrees\\coldlion-cust-sp-2177',title:'CLAIM: #2177 ColdLion customer + salesperson field projections (owner ruling issue 2081, run c5519623574)',tables:['table coldlion.customer','table coldlion.salesperson'],children:['column coldlion.customer.customer_name','column coldlion.customer.currency_code','column coldlion.customer.payment_terms','column coldlion.customer.price_level','column coldlion.customer.salesperson_code','column coldlion.customer.ship_via','column coldlion.customer.tax_code','column coldlion.salesperson.active']}
+const recovery2175={issueNumber:2175,claimNumber:2184,prNumber:2185,version:'20260903030716',owner:'claude-opus-5-subagent-2175',branch:'claude/2175-coldlion-unit-5a',worktree:'C:\\repos\\shared-db\\.claude\\worktrees\\coldlion-5a-inv-prodtrack',title:'CLAIM: Issue #2175 ColdLion landing unit 5a: create coldlion.inventory and coldlion.prod_tracking landing tables from live-sampled shapes',tables:['table coldlion.inventory','table coldlion.prod_tracking'],children:['column coldlion.inventory.company_code','column coldlion.inventory.item_pkey','column coldlion.inventory.warehouse_code','column coldlion.inventory.inventory_qty','column coldlion.inventory.inventory_cost','column coldlion.prod_tracking.company_code','column coldlion.prod_tracking.prod_order_no','column coldlion.prod_tracking.order_date','column coldlion.prod_tracking.start_date','column coldlion.prod_tracking.cancel_date','column coldlion.prod_tracking.payload_hash','column coldlion.prod_tracking.source_updated_at']}
+function recoveryOptions(fixture){return {claim:fixture.claimNumber,issue:fixture.issueNumber,owner:fixture.owner,branch:fixture.branch,worktree:fixture.worktree,pr:fixture.prNumber,headSha:'a'.repeat(40),leaseHours:12,requestId:`recover-${fixture.issueNumber}`,mutexAttempts:1}}
+
+test('#2177/#2182 expired recovery atomically appends eight PR-derived child columns and renews',()=>{
+  const io=expiredPrRecoveryIo(recovery2177),before=io.claim.body,result=recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),lease=parseAuthorLease(io.claim.body,NOW)
+  assert.deepEqual(result.added,recovery2177.children);assert.deepEqual(lease.objects,[...recovery2177.tables,...recovery2177.children].sort());assert.equal(lease.active,true);assert.equal(io.updateCalls,1)
+  assert.equal(io.claim.body.replace(/  - column .*\n/g,'').replace(/^expires_at:.*$/m,'expires_at: X'),before.replace(/^expires_at:.*$/m,'expires_at: X'))
+})
+
+test('#2175/#2184 expired recovery atomically appends twelve PR-derived child columns and renews',()=>{
+  const io=expiredPrRecoveryIo(recovery2175),before=io.claim.body,result=recoverExpiredClaimFromPr(recoveryOptions(recovery2175),NOW,io),lease=parseAuthorLease(io.claim.body,NOW)
+  assert.equal(result.added.length,12);assert.deepEqual(lease.objects,[...recovery2175.tables,...recovery2175.children].sort());assert.equal(lease.active,true);assert.equal(io.updateCalls,1)
+  assert.equal(io.claim.body.replace(/  - column .*\n/g,'').replace(/^expires_at:.*$/m,'expires_at: X'),before.replace(/^expires_at:.*$/m,'expires_at: X'))
+})
+
+test('a recovered claim can be renewed again from the same unchanged issue and PR evidence',()=>{
+  const io=expiredPrRecoveryIo(recovery2177),options=recoveryOptions(recovery2177)
+  recoverExpiredClaimFromPr(options,NOW,io)
+  const later=new Date('2026-08-16T20:00:00Z'),result=renewExpiredClaim(options,later,io)
+  assert.equal(result.idempotent,false);assert.equal(parseAuthorLease(io.claim.body,later).active,true);assert.equal(io.updateCalls,2)
+})
+
+test('expired PR recovery fails closed on collision, stale identity, active lease, or shortened head SHA',()=>{
+  let io=expiredPrRecoveryIo(recovery2177),other={number:999,body:claimBody({version:'20260905000000',objects:[recovery2177.children[0]],owner:'other',branch:'other',worktree:'C:/other',expiresAt:new Date('2026-08-17T00:00:00Z')})}
+  io.openClaims=()=>[structuredClone(io.claim),other];assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/collision/);assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177);assert.throws(()=>recoverExpiredClaimFromPr({...recoveryOptions(recovery2177),headSha:'b'.repeat(40)},NOW,io),/exact head/);assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177);io.claim.body=io.claim.body.replace('2026-08-14T19:00:00.000Z','2026-08-15T09:00:00.000Z');assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/must be non-legacy and expired/);assert.equal(io.updateCalls,0)
+  assert.throws(()=>recoverExpiredClaimFromPr({...recoveryOptions(recovery2177),headSha:'a'.repeat(7)},NOW,expiredPrRecoveryIo(recovery2177)),/40-character/)
+})
+
+test('expired PR recovery refuses every authority, scope, parser, reservation, and version mismatch before writing',()=>{
+  for(const change of [{owner:'wrong'},{branch:'wrong'},{worktree:'wrong'}]){const io=expiredPrRecoveryIo(recovery2177);assert.throws(()=>recoverExpiredClaimFromPr({...recoveryOptions(recovery2177),...change},NOW,io),/owner, branch, or worktree/);assert.equal(io.updateCalls,0)}
+  let io=expiredPrRecoveryIo(recovery2177);io.refs.delete(`refs/db-claims/${recovery2177.version}`);assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/reservation/);assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177);io.workIssue.body=scope('blocked','structural','shared-db-orchestrator',2,recovery2177.tables);assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/open ready structural/);assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177);io.prSources=()=>[];assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/parser source/);assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177);io.getPrFiles=()=>[{filename:`supabase/migrations/${recovery2177.version}_a.sql`},{filename:'supabase/migrations/20260904001148_b.sql'}];assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/migration version/);assert.equal(io.updateCalls,0)
+})
+
+test('expired PR recovery refuses concurrent identity changes and never rolls back after mutex ownership loss',()=>{
+  let io=expiredPrRecoveryIo(recovery2177),baseGet=io.getIssue,workReads=0
+  io.getIssue=(number)=>{const value=baseGet(number);if(Number(number)===2177&&++workReads===2)value.body=scope('blocked','structural','shared-db-orchestrator',2,recovery2177.tables);return value}
+  assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/issue changed concurrently/);assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177);const before=io.claim.body,baseUpdate=io.updateIssue
+  io.updateIssue=(number,fields)=>{const result=baseUpdate(number,fields);io.refs.set(MUTEX_REF,'successor');return result}
+  assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/ROLLBACK NOT ATTEMPTED/);assert.notEqual(io.claim.body,before);assert.equal(io.updateCalls,1)
+})
+
+test('expired PR recovery rolls back its single atomic write after an ambiguous update failure',()=>{
+  const io=expiredPrRecoveryIo(recovery2177),before=io.claim.body,baseUpdate=io.updateIssue;let first=true
+  io.updateIssue=(number,fields)=>{const result=baseUpdate(number,fields);if(first){first=false;throw new LaneError('response lost after PATCH')}return result}
+  assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/response lost/);assert.equal(io.claim.body,before);assert.equal(io.updateCalls,2)
+})
+
+test('THE DEADLOCK: an expired claim whose PR objects exceed it is refused by BOTH renewal and expansion, and only recovery frees it',()=>{
+  // Reproduces the live #2182/#2184/#2226/#2195 stall: the lease has expired AND the PR
+  // parses objects the claim never covered, so each pre-existing path refuses on the other's
+  // precondition. Without recoverExpiredClaimFromPr the lane is unrecoverable.
+  let io=expiredPrRecoveryIo(recovery2177)
+  assert.equal(parseAuthorLease(io.claim.body,NOW).active,false,'fixture lease must already be expired')
+  assert.throws(()=>renewExpiredClaim(recoveryOptions(recovery2177),NOW,io),/claim does not cover parsed pull request objects/)
+  assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177)
+  assert.throws(()=>expandActiveClaimFromPr({...recoveryOptions(recovery2177),claim:recovery2177.claimNumber},NOW,io),/target claim lease is legacy or expired/)
+  assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177)
+  const result=recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),lease=parseAuthorLease(io.claim.body,NOW)
+  assert.deepEqual(result.added,recovery2177.children)
+  assert.equal(lease.active,true,'recovery must both cover the PR objects and restore a live lease')
+  assert.equal(io.updateCalls,1)
+})
+
+test('REAL main command wires expired PR expansion and renewal as one recovery',()=>{
+  const io=expiredPrRecoveryIo(recovery2177),f=recovery2177,args=['--recover-expired-claim-from-pr','--claim-number',String(f.claimNumber),'--issue',String(f.issueNumber),'--owner',f.owner,'--branch',f.branch,'--worktree',f.worktree,'--pr',String(f.prNumber),'--head-sha','a'.repeat(40),'--lease-hours','12']
+  assert.equal(main(args,NOW,io),0);assert.equal(parseAuthorLease(io.claim.body,NOW).active,true);assert.equal(io.updateCalls,1)
 })
 
 function reversionIo(overrides={}){
