@@ -5701,9 +5701,11 @@ test('a reinstatement naming a different exclusion is corruption, not a lift',()
 
 // Draw heads until `reviewer` is the one assigned, and answer with the head and
 // the durable assignment SHA, which is the evidence a real exclusion carries.
-function drawUntilAssigned(io,{issue,pr,reviewer}){
+function drawUntilAssigned(io,{issue,pr,reviewer,salt=''}){
   for(let n=0;n<ACTIVE_REVIEWERS.length*2;n+=1){
-    const head=`${n}`.padEnd(40,'e')
+    // `salt` keeps heads distinct across repeated draws in one test; reusing a
+    // head reuses the per-head return ref and the write is refused as a clash.
+    const head=`${n}${salt}`.padEnd(40,'e')
     io.getPr=()=>({number:pr,state:'open',head:{sha:head,ref:'codex/x'}})
     const drawn=assignNextReviewer({issue,pr,headSha:head,slot:1},io)
     if(drawn.reviewer===reviewer)return {headSha:head,evidenceSha:io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${head}`)}
@@ -5751,6 +5753,33 @@ test('a second, unlifted generation is idempotent and is never lifted by the FIR
   // The gen-2 exclusion is an independence guarantee and cannot be lifted.
   assert.throws(()=>reinstateReviewerExclusion({issue,pr,reviewer},io),/with reason already-reviewed/)
   assert.equal(io.refs.has(reviewReinstatementRef({issue,pr,reviewer,generation:2})),false)
+})
+
+test('when every generation has been LIFTED, the refusal says the reviewer is not excluded',()=>{
+  // Exhausting the generation loop is only reachable when every generation was
+  // lifted -- a live one returns first. The refusal used to say "every one of
+  // them is live, so the reviewer is already excluded", which is the opposite of
+  // the truth and sends the caller to fix an exclusion that bars nobody.
+  const io=doctoredIo(),issue=2224,pr=2184
+  const {reviewer}=excludeFor(io,{issue,pr,reason:'terminal-unavailable'})
+  reinstateReviewerExclusion({issue,pr,reviewer},io)
+  let evidenceSha=null
+  for(let generation=2;generation<=REVIEW_EXCLUSION_GENERATION_LIMIT;generation+=1){
+    evidenceSha=drawUntilAssigned(io,{issue,pr,reviewer,salt:`${generation}`}).evidenceSha
+    const later=excludeReviewerForPr({issue,pr,reviewer,reason:'terminal-unavailable',evidenceSha},io)
+    assert.equal(later.ref,reviewExclusionRef({issue,pr,reviewer,generation}))
+    reinstateReviewerExclusion({issue,pr,reviewer},io)
+  }
+  const refCount=io.refs.size
+  assert.throws(()=>excludeReviewerForPr({issue,pr,reviewer,reason:'terminal-unavailable',evidenceSha},io),(error)=>{
+    const message=String(error.message)
+    assert.match(message,/every one of them has been lifted/)
+    assert.match(message,/NOT currently excluded/)
+    assert.doesNotMatch(message,/every one of them is live/)
+    assert.doesNotMatch(message,/nothing is being lost/)
+    return true
+  })
+  assert.equal(io.refs.size,refCount,'a refused exclusion must write no ref')
 })
 
 test('the generation suffix can never collide with a reviewer name',()=>{

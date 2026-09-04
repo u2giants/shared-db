@@ -2448,7 +2448,12 @@ function liveExclusionGeneration({issue,pr,reviewer,reason,evidenceSha},io){
     if(parsed.issue!==issue||parsed.pr!==pr||parsed.reviewer!==reviewer)throw new LaneError('durable reviewer exclusion does not match its ref identity')
     return row
   }
-  throw new LaneError(`reviewer ${reviewer} has already used all ${REVIEW_EXCLUSION_GENERATION_LIMIT} durable exclusion generations for issue #${issue} PR #${pr}; every one of them is live, so nothing is being lost -- the reviewer is already excluded and no further record is needed`)
+  // Reaching here means every generation exists AND every one was lifted: a live
+  // generation returns above, so the loop can only run out on lifted rows. The
+  // reviewer is therefore NOT currently excluded -- there is simply no generation
+  // left to record a new exclusion in. Saying "every one is live" here would send
+  // the caller to fix an exclusion that is not barring anything.
+  throw new LaneError(`reviewer ${reviewer} has used all ${REVIEW_EXCLUSION_GENERATION_LIMIT} durable exclusion generations for issue #${issue} PR #${pr} and every one of them has been lifted, so the reviewer is NOT currently excluded and no generation remains in which to record a new exclusion`)
 }
 
 export function excludeReviewerForPr({issue,pr,reviewer,reason,evidenceSha},io=githubIo){
