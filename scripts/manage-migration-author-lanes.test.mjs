@@ -2138,6 +2138,30 @@ test('issue 1688 never leaves a durable ordinary-merge authorization before the 
   assert.match(productionWorkflow,/production-apply:[\s\S]+permissions:[\s\S]+statuses: write/)
 })
 
+test('issue 2116 the production freeze names itself and restores every authorization it revoked', () => {
+  const productionWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/shared-supabase-migrations.yml',import.meta.url)),'utf8')
+  const revoke=productionWorkflow.indexOf('name: Revoke every pre-existing merge authorization while frozen')
+  const release=productionWorkflow.indexOf('name: Release the exclusive production lane with ownership proof')
+  const restore=productionWorkflow.indexOf('name: Restore the merge authorizations this freeze revoked')
+  assert.ok(revoke >= 0 && release >= 0 && restore >= 0)
+  // The restoration has to outlive the promotion, so it comes after the lane is
+  // released and it runs unconditionally.
+  assert.ok(release < restore, 'the restoration must run after the production lane is released')
+  const restoreStep=productionWorkflow.slice(restore)
+  assert.match(restoreStep,/if: always\(\) && steps\.revoke_frozen_authorizations\.outcome == 'success'/)
+  // A revoked head must be traceable to the run that took it, and the refusal must
+  // name the one command that puts it back.
+  const revokeStep=productionWorkflow.slice(revoke,release)
+  assert.match(revokeStep,/description="Revoked by production freeze run \$\{GITHUB_RUN_ID\}; re-run guarded-migration-merge\.yml"/)
+  assert.match(revokeStep,/target_url=.*actions\/runs\/\$\{GITHUB_RUN_ID\}/)
+  // Restoration clears the freeze's own marker to `pending`. Granting `success`
+  // here would assert a merge lock nobody holds; only guarded-migration-merge.yml
+  // may write that, and #1688's assertion above still proves it is the only writer.
+  assert.match(restoreStep,/state=pending/)
+  assert.doesNotMatch(restoreStep,/state=success/)
+  assert.match(restoreStep,/marker="production freeze run \$\{GITHUB_RUN_ID\}"/)
+})
+
 test('historical preview recovery shares the preview lock and requires current main plus merged source PR',()=>{
   const io=memoryIo()
   io.getPr=()=>({merged:true,merge_commit_sha:'merged'})

@@ -1278,7 +1278,23 @@ jobs:
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
           test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
           MAIN_SHA="$REQUESTED_SHA" node scripts/check-main-tip-freshness.mjs
+      # The freeze revokes authorization on the head of EVERY open pull request,
+      # including PRs with nothing to do with this promotion. Two things were wrong
+      # with the first version of this step (issue #2116):
+      #
+      #   1. The description said only "production promotion is active", so once the
+      #      promotion ended the leftover red check was indistinguishable from a
+      #      genuine merge failure or a stale review. An operator could not tell
+      #      "your authorization was taken by a freeze" from "your head moved".
+      #   2. The freeze is bounded; the revocation was not. Nothing put the
+      #      authorizations back, so every affected lane had to be re-authorized by
+      #      hand without ever being told so.
+      #
+      # The description now names THIS run and the exact recovery command, the status
+      # links to this run, and the promotion restores what it took -- see the paired
+      # step after the production lane is released.
       - name: Revoke every pre-existing merge authorization while frozen
+        id: revoke_frozen_authorizations
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -1290,7 +1306,8 @@ jobs:
             gh api "repos/u2giants/shared-db/statuses/$head_sha" \
               -f state=failure \
               -f context='Migration guarded merge authorization' \
-              -f description='Production promotion is active; guarded merge authorization revoked'
+              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+              -f description="Revoked by production freeze run ${GITHUB_RUN_ID}; re-run guarded-migration-merge.yml"
           done < "$RUNNER_TEMP/open-pr-heads"
       # Re-verify after the environment wait. GitHub artifacts are retention-
       # bound, so this both pins the original ZIP digest and copies the verified
@@ -1542,3 +1559,44 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OWNER_SHA: ${{ steps.production_lock.outputs.owner_sha }}
         run: node scripts/manage-migration-author-lanes.mjs --release-production --owner-sha "$OWNER_SHA"
+      # THE FREEZE PUTS BACK WHAT IT TOOK (issue #2116). Runs on `always()`, after the
+      # lane is released, so a failed or cancelled promotion cannot leave every open
+      # pull request in the repository red forever.
+      #
+      # Only revocations written by THIS run are cleared: the current state must still
+      # be `failure` AND its description must still name this run id. A head that has
+      # since been re-authorized, or revoked for a real reason by
+      # `guarded-migration-merge.yml`, is left exactly as it is.
+      #
+      # Cleared to `pending`, NEVER to `success`. Authorization means "the exclusive
+      # merge lock is held and this exact head was revalidated", which is not true
+      # after a freeze, and only `guarded-migration-merge.yml` may assert it. Clearing
+      # to pending restores the ability to tell a freeze from a real failure and names
+      # the one command that grants authorization, without granting it. A pending
+      # required check still blocks an unguarded merge, so this fails safe.
+      - name: Restore the merge authorizations this freeze revoked
+        if: always() && steps.revoke_frozen_authorizations.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          heads="$RUNNER_TEMP/open-pr-heads"
+          if [ ! -s "$heads" ]; then echo 'this freeze revoked no authorizations'; exit 0; fi
+          marker="production freeze run ${GITHUB_RUN_ID}"
+          while IFS= read -r head_sha; do
+            [ -n "$head_sha" ] || continue
+            current="$(gh api "repos/u2giants/shared-db/commits/$head_sha/status" \
+              --jq '[.statuses[] | select(.context == "Migration guarded merge authorization")] | first | "\(.state)|\(.description)"' 2>/dev/null || echo '')"
+            state="${current%%|*}"
+            description="${current#*|}"
+            case "$state|$description" in
+              failure*"$marker"*) ;;
+              *) echo "$head_sha: left as-is (state='${state:-none}')"; continue ;;
+            esac
+            gh api "repos/u2giants/shared-db/statuses/$head_sha" \
+              -f state=pending \
+              -f context='Migration guarded merge authorization' \
+              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+              -f description="Production freeze ${GITHUB_RUN_ID} ended; re-run guarded-migration-merge.yml"
+            echo "$head_sha: freeze revocation cleared to pending"
+          done < "$heads"
