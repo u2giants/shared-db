@@ -1,6 +1,9 @@
--- Issue #2094 — contract tests for the six ColdLion MASTER landing tables.
+-- Contract tests for the ColdLion MASTER landing tables.
+-- Issue #2094 — the six master tables (sections A-I).
+-- Issue #2171 — coldlion.division, the durable division dictionary (sections J-M).
 --
--- Migration: 20260902054548_coldlion_master_landing_season_salesperson.sql
+-- Migrations: 20260902054548_coldlion_master_landing_season_salesperson.sql (A-I)
+--             20260903200951_coldlion_division_reference_table.sql       (J-M, issue #2171)
 --
 -- Everything below is invented and rolled back. No fixture depends on a
 -- pre-existing row, because CI replays every migration into an EMPTY database
@@ -409,9 +412,243 @@ begin
 end;
 $$;
 
+-- =====================================================================================
+-- J. Issue #2171 — coldlion.division, the durable division dictionary.
+--
+--    Migration: 20260903200951_coldlion_division_reference_table.sql
+--
+--    Field disposition came from a LIVE sample on 2026-09-03 (both active=Y and
+--    active=N passes; 10 rows, 26 properties), never from `/api-docs`, which
+--    types this feed as a bare {"type":"object"}. 24 properties are ingested;
+--    `createdUser` and `modUser` are DECLINED, following the owner's 2026-09-03
+--    ruling on those two exact field names for `/seasons` and the narrow
+--    `/salespersons` projection (#2081 comment 5519623574).
+--
+--    Every literal below is a labelled synthetic value (ZZTEST / ZZ*). The one
+--    real-world literal is `EP001`, which is already published in
+--    docs/coldlion-open-questions.md as permanently out of scope.
+-- =====================================================================================
+do $$
+declare
+  v_keydef text;
+  v_col    text;
+  v_projection constant text[] := array[
+    'company_code','division_code','division_desc','acc_div_code','edi_division_code',
+    'general_ledger_code','item_no_code','manu_facturer_code','duns_no','currency_code',
+    'country_code','address1','address2','city','state','zip_code','phone_no','fax_no',
+    'upc_current','upc_start','upc_end','active','created_time','mod_time'
+  ];
+begin
+  if to_regclass('coldlion.division') is null then
+    raise exception 'J FAILED: coldlion.division does not exist';
+  end if;
+
+  select pg_get_constraintdef(oid) into v_keydef
+  from pg_constraint
+  where conrelid = 'coldlion.division'::regclass and contype = 'p';
+
+  if v_keydef is distinct from 'PRIMARY KEY (company_code, division_code)' then
+    raise exception 'J FAILED: coldlion.division natural key is %, expected PRIMARY KEY (company_code, division_code)',
+      coalesce(v_keydef, '<none>');
+  end if;
+
+  foreach v_col in array v_projection loop
+    if not exists (
+      select 1 from information_schema.columns
+      where table_schema = 'coldlion' and table_name = 'division' and column_name = v_col
+    ) then
+      raise exception 'J FAILED: coldlion.division is missing approved column %', v_col;
+    end if;
+  end loop;
+
+  foreach v_col in array array['run_id','fetched_at','source_hash','first_seen_at','last_seen_at'] loop
+    if not exists (
+      select 1 from information_schema.columns
+      where table_schema = 'coldlion' and table_name = 'division' and column_name = v_col
+    ) then
+      raise exception 'J FAILED: coldlion.division is missing common landing column %', v_col;
+    end if;
+  end loop;
+
+  raise notice 'J PASSED: coldlion.division exists with the company+division key and all 24 approved columns.';
+end;
+$$;
 
 -- =====================================================================================
--- J. Issue #2177 — `/customers` is projected in full.
+-- K. The DECLINED properties are absent, and no curation column crept in.
+--    A later session must not be able to "finish" this projection by inference.
+-- =====================================================================================
+do $$
+declare
+  v_found text;
+begin
+  select string_agg(column_name, ', ' order by column_name) into v_found
+  from information_schema.columns
+  where table_schema = 'coldlion' and table_name = 'division'
+    and (column_name in ('created_user','mod_user','createduser','moduser',
+                         'resolution_status','resolved_by','resolved_at','match_status',
+                         'licensor_id','property_id','core_id','is_active','active_flag','raw')
+         or column_name like 'resolved%'
+         or column_name like 'match\_%');
+
+  if v_found is not null then
+    raise exception 'K FAILED: coldlion.division carries declined or curation columns: %', v_found;
+  end if;
+
+  -- `active` must be the vendor Y/N string, not a boolean we invented.
+  if (select data_type from information_schema.columns
+      where table_schema = 'coldlion' and table_name = 'division' and column_name = 'active')
+     <> 'text' then
+    raise exception 'K FAILED: coldlion.division.active is not the raw vendor string; this layer does not interpret';
+  end if;
+
+  raise notice 'K PASSED: createdUser/modUser are absent, no curation columns, active is uninterpreted.';
+end;
+$$;
+
+-- =====================================================================================
+-- L. The key BEHAVES. The same division code under two companies is two rows,
+--    replay on the natural key is idempotent, and EP001 is refused.
+-- =====================================================================================
+do $$
+declare
+  v_run  uuid;
+  v_now  constant timestamptz := now();
+  v_hash constant text := repeat('d', 64);
+begin
+  insert into coldlion.sync_run (endpoint, company_code, requested_by)
+  values ('/divisions', 'ZZTEST', 'ZZTEST') returning id into v_run;
+
+  -- Same division code, two companies. The live feed does exactly this: CW001
+  -- appears under three company codes. A division-only key would merge them.
+  insert into coldlion.division
+    (company_code, division_code, run_id, fetched_at, source_hash, first_seen_at, last_seen_at)
+  values
+    ('ZZTEST',  'ZZ001', v_run, v_now, v_hash, v_now, v_now),
+    ('ZZTEST2', 'ZZ001', v_run, v_now, v_hash, v_now, v_now);
+
+  if (select count(*) from coldlion.division where division_code = 'ZZ001') <> 2 then
+    raise exception 'L FAILED: one division code under two companies did not survive as two rows';
+  end if;
+
+  -- Replay of the same natural key is a conflict, not a duplicate row. This is
+  -- what makes an upsert loader idempotent.
+  begin
+    insert into coldlion.division
+      (company_code, division_code, run_id, fetched_at, source_hash, first_seen_at, last_seen_at)
+    values ('ZZTEST', 'ZZ001', v_run, v_now, v_hash, v_now, v_now);
+    raise exception 'L FAILED: the same (company_code, division_code) was accepted twice';
+  exception when unique_violation then null;
+  end;
+
+  -- A real upsert replay updates in place and does not multiply rows.
+  insert into coldlion.division
+    (company_code, division_code, run_id, fetched_at, source_hash, first_seen_at, last_seen_at)
+  values ('ZZTEST', 'ZZ001', v_run, v_now, v_hash, v_now, v_now + interval '1 hour')
+  on conflict (company_code, division_code)
+    do update set last_seen_at = excluded.last_seen_at;
+
+  if (select count(*) from coldlion.division where company_code = 'ZZTEST') <> 1 then
+    raise exception 'L FAILED: upsert replay did not stay at one row per natural key';
+  end if;
+
+  -- EP001 is refused by the table, not merely filtered by a loader.
+  begin
+    insert into coldlion.division
+      (company_code, division_code, run_id, fetched_at, source_hash, first_seen_at, last_seen_at)
+    values ('ZZTEST', 'EP001', v_run, v_now, v_hash, v_now, v_now);
+    raise exception 'L FAILED: EP001 was accepted; it is permanently out of scope by owner ruling';
+  exception when check_violation then null;
+  end;
+
+  -- last_seen_at may never precede first_seen_at.
+  begin
+    insert into coldlion.division
+      (company_code, division_code, run_id, fetched_at, source_hash, first_seen_at, last_seen_at)
+    values ('ZZTEST', 'ZZ009', v_run, v_now, v_hash, v_now, v_now - interval '1 day');
+    raise exception 'L FAILED: last_seen_at was allowed to precede first_seen_at';
+  exception when check_violation then null;
+  end;
+
+  -- A non-SHA-256 source_hash is refused.
+  begin
+    insert into coldlion.division
+      (company_code, division_code, run_id, fetched_at, source_hash, first_seen_at, last_seen_at)
+    values ('ZZTEST', 'ZZ010', v_run, v_now, 'not-a-hash', v_now, v_now);
+    raise exception 'L FAILED: a malformed source_hash was accepted';
+  exception when check_violation then null;
+  end;
+
+  raise notice 'L PASSED: company+division keeps codes apart, replay is idempotent, EP001 and malformed provenance are refused.';
+end;
+$$;
+
+-- =====================================================================================
+-- M. coldlion.division carries the closed-landing posture and documents it.
+-- =====================================================================================
+do $$
+declare
+  v_role    text;
+  v_priv    text;
+  v_comment text;
+begin
+  if not (select relrowsecurity from pg_class c
+          join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'coldlion' and c.relname = 'division') then
+    raise exception 'M FAILED: row level security is not enabled on coldlion.division';
+  end if;
+
+  if exists (select 1 from pg_policies
+             where schemaname = 'coldlion' and tablename = 'division') then
+    raise exception 'M FAILED: coldlion.division carries an RLS policy; this layer is closed, not filtered';
+  end if;
+
+  foreach v_role in array array['anon', 'authenticated'] loop
+    foreach v_priv in array array['SELECT','INSERT','UPDATE','DELETE'] loop
+      if has_table_privilege(v_role, 'coldlion.division', v_priv) then
+        raise exception 'M FAILED: % holds % on coldlion.division', v_role, v_priv;
+      end if;
+    end loop;
+  end loop;
+
+  if exists (
+    select 1
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    cross join lateral aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a
+    where n.nspname = 'coldlion' and c.relname = 'division' and a.grantee = 0
+  ) then
+    raise exception 'M FAILED: coldlion.division carries a grant to PUBLIC';
+  end if;
+
+  foreach v_priv in array array['SELECT','INSERT','UPDATE'] loop
+    if not has_table_privilege('service_role', 'coldlion.division', v_priv) then
+      raise exception 'M FAILED: service_role lacks % on coldlion.division', v_priv;
+    end if;
+  end loop;
+
+  select obj_description('coldlion.division'::regclass, 'pg_class') into v_comment;
+  if v_comment is null or v_comment not ilike '%no grants to application roles%' then
+    raise exception 'M FAILED: coldlion.division does not document the landing-layer contract: %',
+      coalesce(v_comment, '<none>');
+  end if;
+
+  select col_description('coldlion.division'::regclass,
+           (select ordinal_position from information_schema.columns
+             where table_schema = 'coldlion' and table_name = 'division'
+               and column_name = 'source_hash')::int)
+    into v_comment;
+  if v_comment is null or v_comment not ilike '%before projection%' then
+    raise exception 'M FAILED: coldlion.division.source_hash does not record that it covers the COMPLETE fetched record before projection';
+  end if;
+
+  raise notice 'M PASSED: coldlion.division is closed to applications and carries its contract in the catalog.';
+end;
+$$;
+
+
+-- =====================================================================================
+-- N. Issue #2177 — `/customers` is projected in full.
 --    Migration: 20260903025816_coldlion_customer_full_projection_and_salesperson_active.sql
 --    Every property of the 2026-09-03 live sample of GET /EhpApi/customers is a
 --    column, exactly once. The list is the SAMPLED SHAPE; /api-docs types this
@@ -439,20 +676,20 @@ begin
     where table_schema = 'coldlion' and table_name = 'customer' and column_name = needed
   );
   if v_missing is not null then
-    raise exception 'J FAILED: coldlion.customer is missing sampled /customers field(s): %', v_missing;
+    raise exception 'N FAILED: coldlion.customer is missing sampled /customers field(s): %', v_missing;
   end if;
 
   if array_length(v_expected, 1) <> 39 then
-    raise exception 'J FAILED: the sampled /customers field list is % long, expected the 39 of the 2026-09-03 sample',
+    raise exception 'N FAILED: the sampled /customers field list is % long, expected the 39 of the 2026-09-03 sample',
       array_length(v_expected, 1);
   end if;
 
-  raise notice 'J PASSED: all 39 sampled /customers properties are columns.';
+  raise notice 'N PASSED: all 39 sampled /customers properties are columns.';
 end;
 $$;
 
 -- =====================================================================================
--- K. Issue #2177 — THE DECLINED-FIELD GATE for coldlion.salesperson.
+-- O. Issue #2177 — THE DECLINED-FIELD GATE for coldlion.salesperson.
 --
 --    Owner ruling #2081 comment 5519623574 (Albert Hazan, 2026-09-03):
 --    `/salespersons` stores NAME, CODE, COMPANY and ACTIVE STATUS ONLY. E-mail,
@@ -460,7 +697,7 @@ $$;
 --    about named people with no established business use. Declined, not pending.
 --    Widening requires a NEW owner ruling recorded the same way.
 --
---    K1 is a POSITIVE CONTROL: it builds a deliberately DIRTY table shaped like
+--    O1 is a POSITIVE CONTROL: it builds a deliberately DIRTY table shaped like
 --    coldlion.salesperson plus declined columns, and fails if the gate predicate
 --    does NOT flag it. A gate nobody has seen fail is not evidence, so the proof
 --    that this one can fail runs on every CI execution rather than once, by hand,
@@ -505,16 +742,16 @@ begin
 
   if v_flagged is null then
     raise exception
-      'K1 FAILED: the declined-field gate did not flag a deliberately dirty table. The gate cannot fail, so its silence on the real table proves nothing.';
+      'O1 FAILED: the declined-field gate did not flag a deliberately dirty table. The gate cannot fail, so its silence on the real table proves nothing.';
   end if;
 
   if v_flagged <> 'address1, commission_perc, email, phone_no, quota' then
-    raise exception 'K1 FAILED: the gate flagged %, expected all five planted declined columns', v_flagged;
+    raise exception 'O1 FAILED: the gate flagged %, expected all five planted declined columns', v_flagged;
   end if;
 
   drop table coldlion.zz_declined_gate_probe;
 
-  raise notice 'K1 PASSED (positive control): the declined-field gate flags a dirty table — %', v_flagged;
+  raise notice 'O1 PASSED (positive control): the declined-field gate flags a dirty table — %', v_flagged;
 end;
 $$;
 
@@ -529,7 +766,7 @@ declare
     'run_id','fetched_at','source_hash','first_seen_at','last_seen_at'
   ];
 begin
-  -- K2. The same predicate, now against the real table. It must find nothing.
+  -- O2. The same predicate, now against the real table. It must find nothing.
   select string_agg(column_name, ', ' order by column_name) into v_offending
   from information_schema.columns
   where table_schema = 'coldlion'
@@ -552,11 +789,11 @@ begin
     );
   if v_offending is not null then
     raise exception
-      'K2 FAILED: coldlion.salesperson carries DECLINED personal-data column(s): %. Owner ruling #2081 comment 5519623574 permits name, code, company and active status only.',
+      'O2 FAILED: coldlion.salesperson carries DECLINED personal-data column(s): %. Owner ruling #2081 comment 5519623574 permits name, code, company and active status only.',
       v_offending;
   end if;
 
-  -- K3. The exact permitted set, so a declined field under a name the patterns
+  -- O3. The exact permitted set, so a declined field under a name the patterns
   --     do not anticipate is caught too.
   select string_agg(column_name, ', ' order by column_name) into v_unexpected
   from information_schema.columns
@@ -565,11 +802,11 @@ begin
     and not (column_name = any (v_allowed));
   if v_unexpected is not null then
     raise exception
-      'K3 FAILED: coldlion.salesperson carries column(s) outside the owner-approved projection: %',
+      'O3 FAILED: coldlion.salesperson carries column(s) outside the owner-approved projection: %',
       v_unexpected;
   end if;
 
-  -- K4. The four approved fields are present, so K2/K3 cannot pass vacuously.
+  -- O4. The four approved fields are present, so O2/O3 cannot pass vacuously.
   select string_agg(needed, ', ' order by needed) into v_missing
   from unnest(array['company_code','salesperson_code','last_name','active']) needed
   where not exists (
@@ -577,15 +814,15 @@ begin
     where table_schema = 'coldlion' and table_name = 'salesperson' and column_name = needed
   );
   if v_missing is not null then
-    raise exception 'K4 FAILED: coldlion.salesperson is missing owner-approved field(s): %', v_missing;
+    raise exception 'O4 FAILED: coldlion.salesperson is missing owner-approved field(s): %', v_missing;
   end if;
 
-  raise notice 'K PASSED: /salespersons projection is exactly name, code, company, active status.';
+  raise notice 'O PASSED: /salespersons projection is exactly name, code, company, active status.';
 end;
 $$;
 
 -- =====================================================================================
--- L. Issue #2177 — the ruling is recorded IN THE CATALOG, not only in a file.
+-- P. Issue #2177 — the ruling is recorded IN THE CATALOG, not only in a file.
 --    A future session reading coldlion.salesperson from a database, with no
 --    repository to hand, must be told that the narrowness is a decision.
 --    Replay is idempotent: re-running the migration adds nothing, because every
@@ -599,13 +836,13 @@ declare
 begin
   select obj_description('coldlion.salesperson'::regclass, 'pg_class') into v_comment;
   if v_comment is null or v_comment not ilike '%declined%' or v_comment not ilike '%5519623574%' then
-    raise exception 'L FAILED: coldlion.salesperson does not record the owner ruling in its comment: %',
+    raise exception 'P FAILED: coldlion.salesperson does not record the owner ruling in its comment: %',
       coalesce(v_comment, '<none>');
   end if;
 
   select obj_description('coldlion.customer'::regclass, 'pg_class') into v_comment;
   if v_comment is null or v_comment not ilike '%5519623574%' then
-    raise exception 'L FAILED: coldlion.customer does not record the owner ruling in its comment: %',
+    raise exception 'P FAILED: coldlion.customer does not record the owner ruling in its comment: %',
       coalesce(v_comment, '<none>');
   end if;
 
@@ -620,11 +857,11 @@ begin
   where table_schema = 'coldlion' and table_name in ('customer','salesperson');
 
   if v_after <> v_before then
-    raise exception 'L FAILED: replaying the migration column adds changed the column count from % to %',
+    raise exception 'P FAILED: replaying the migration column adds changed the column count from % to %',
       v_before, v_after;
   end if;
 
-  raise notice 'L PASSED: the ruling is in the catalog and the column adds replay idempotently.';
+  raise notice 'P PASSED: the ruling is in the catalog and the column adds replay idempotently.';
 end;
 $$;
 

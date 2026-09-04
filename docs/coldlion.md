@@ -4,7 +4,7 @@
 except by a broken link. Everything ColdLion lives in the documents below. Read this page
 first, then go to the one you need.
 
-**Last reviewed: 2026-09-01.**
+**Last reviewed: 2026-09-03.**
 
 ---
 
@@ -31,6 +31,17 @@ administer. Questions go **from Albert**, never sent by an AI session:
 | API behaviour, fields, data meaning | **JamieLynn** |
 | Division and company codes | **Uma** |
 | Whether we even want to ask | **Albert** (some register entries are owner decisions, not ColdLion questions) |
+
+---
+
+## Field dispositions and the `/seasons` defect — where the rulings live
+
+**`/vendors` and `/seasons` field dispositions are both SETTLED owner rulings (2026-08-19
+and 2026-09-03) and must never be re-opened, and the unfiltered `/seasons` call must never
+be used.** This page is a map, so it does not restate them: read
+[`coldlion-open-questions.md`](coldlion-open-questions.md) §5, which carries both rulings in
+full and the `/seasons` vendor defect that silently drops 13 of 21 records. Do not ask about,
+re-derive, or re-open any of it before reading that section.
 
 ---
 
