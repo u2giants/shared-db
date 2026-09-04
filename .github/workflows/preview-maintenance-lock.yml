@@ -1,0 +1,57 @@
+name: Preview Maintenance Lock
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Ready repo-maintenance issue number
+        required: true
+        type: string
+      commit_sha:
+        description: Exact current main SHA
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  issues: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+      - name: Acquire recoverable shared preview lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/manage-preview-maintenance-lock.mjs --acquire --issue "${{ inputs.issue }}" --owner "github-actions:${GITHUB_RUN_ID}" --head-sha "${{ inputs.commit_sha }}" > "$RUNNER_TEMP/preview-lock.json"
+          cat "$RUNNER_TEMP/preview-lock.json"
+          owner_sha="$(jq -r .ownerSha "$RUNNER_TEMP/preview-lock.json")"
+          {
+            echo "## Preview lock acquired"
+            echo 'Release after teardown with:'
+            echo "\`node scripts/manage-preview-maintenance-lock.mjs --release --owner-sha $owner_sha\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Keep the owning run live while the out-of-band rehearsal holds the
+          # lease. A 404 proves release; an unreadable API does not. Exit promptly
+          # after owner-bound release, with a conservative hard ceiling.
+          for _ in $(seq 1 470); do
+            if current="$(gh api 'repos/u2giants/shared-db/git/ref/db-coordination/preview' --jq .object.sha 2>"$RUNNER_TEMP/ref-error")"; then
+              if test "$current" != "$owner_sha"; then
+                echo "Preview ref moved to another owner while this run was live; refusing a green completion." >&2
+                exit 2
+              fi
+            elif grep -q 'HTTP 404' "$RUNNER_TEMP/ref-error"; then
+              exit 0
+            else
+              cat "$RUNNER_TEMP/ref-error" >&2
+            fi
+            sleep 30
+          done
+          echo 'Preview maintenance lock reached its 235-minute ceiling. Abort any still-running rehearsal, then release or recover the lane before further preview work.' >&2
+          exit 2
