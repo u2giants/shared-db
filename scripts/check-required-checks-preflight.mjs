@@ -18,10 +18,12 @@ export class PreflightError extends Error {}
 // Posted by the guarded merge itself, after this pre-flight has passed. Requiring
 // it here would make the pre-flight unsatisfiable on every first run.
 export const SELF_CONTEXT = 'Migration guarded merge authorization'
+export const SELF_CHECK_RUN = 'merge'
 
 // A skipped or neutral required check can still be refused by the merge API.
 // Accept only explicit success so that refusal happens before the merge lock.
-const SUCCESS = new Set(['success'])
+const REQUIRED_SUCCESS = new Set(['success'])
+const REPORTED_SUCCESS = new Set(['success', 'neutral', 'skipped'])
 
 // A required context can be answered by either a commit status or a check run.
 // Latest wins for each name; a check run that has not completed has no conclusion
@@ -115,7 +117,7 @@ export function evaluateWithoutRequiredList({ statuses, checkRuns, reason, mirro
   requireContexts(mirrorContexts.filter((c) => c !== SELF_CONTEXT), states, `main's required list is unreadable (${reason}), so the committed mirror ${REQUIRED_CHECKS_MIRROR} was used`)
   // Half two: everything else that reported must also be green, so a context added
   // live but not yet mirrored cannot slip through once it starts reporting.
-  const bad = [...states].filter(([name, state]) => name !== SELF_CONTEXT && !SUCCESS.has(state))
+  const bad = [...states].filter(([name, state]) => ![SELF_CONTEXT, SELF_CHECK_RUN].includes(name) && !REPORTED_SUCCESS.has(state))
   if (bad.length) throw new PreflightError(`${describe(bad)} on the reviewed head. The required list came from the committed mirror, so EVERY reported check must pass. No retry can clear this, so the merge lane was not taken.`)
   return { required: mirrorContexts.filter((c) => c !== SELF_CONTEXT).length, mode: 'committed-mirror' }
 }
@@ -134,7 +136,7 @@ function requireContexts(required, states, prefix) {
   for (const context of required) {
     if (!states.has(context)) { missing.push(context); continue }
     const state = states.get(context)
-    if (!SUCCESS.has(state)) bad.push([context, state])
+    if (!REQUIRED_SUCCESS.has(state)) bad.push([context, state])
   }
   if (!missing.length && !bad.length) return
   const parts = []
@@ -152,7 +154,7 @@ export function evaluatePreflight({ requiredContexts, statuses, checkRuns, prote
   for (const context of required) {
     const state = states.get(context)
     if (state === undefined) missing.push(context)
-    else if (SUCCESS.has(state)) continue
+    else if (REQUIRED_SUCCESS.has(state)) continue
     else if (state === 'pending' || state === '') pending.push(`${context}`)
     else failing.push(`${context} (${state})`)
   }

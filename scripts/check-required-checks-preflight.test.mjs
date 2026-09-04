@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { evaluatePreflight, evaluateWithoutRequiredList, gatherPreflightInput, isPermissionRefusal, observedStates, readRequiredChecksMirror, requireWholePage, sanitize, PreflightError, REQUIRED_CHECKS_MIRROR, SELF_CONTEXT, PINNED_REQUIRED_CONTEXTS, MIRROR_BOOTSTRAP_MAIN_SHA } from './check-required-checks-preflight.mjs'
+import { evaluatePreflight, evaluateWithoutRequiredList, gatherPreflightInput, isPermissionRefusal, observedStates, readRequiredChecksMirror, requireWholePage, sanitize, PreflightError, REQUIRED_CHECKS_MIRROR, SELF_CONTEXT, SELF_CHECK_RUN, PINNED_REQUIRED_CONTEXTS, MIRROR_BOOTSTRAP_MAIN_SHA } from './check-required-checks-preflight.mjs'
 
 const ok = (name) => ({ name, status: 'completed', conclusion: 'success', completed_at: '2026-09-03T00:00:00Z' })
 
@@ -162,6 +162,16 @@ test('THE HEAD CANNOT REMOVE A CONTEXT main REQUIRES — only main is tested', (
     HEAD: doc('SQL migration guards'),
   }))
   assert.deepEqual(contexts, PINNED_REQUIRED_CONTEXTS)
+})
+
+test('optional skipped jobs and the running merge job cannot deadlock the preflight', () => {
+  const result = evaluateWithoutRequiredList({
+    reason: REASON, mirrorContexts: MIRROR, statuses: [],
+    checkRuns: [ok('SQL migration guards'), ok('Tools offline tests'),
+      { name: 'preview', status: 'completed', conclusion: 'skipped' },
+      { name: SELF_CHECK_RUN, status: 'in_progress', conclusion: null }],
+  })
+  assert.equal(result.mode, 'committed-mirror')
 })
 
 test('the head cannot inject a context into the trusted list', () => {
