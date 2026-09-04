@@ -121,7 +121,7 @@ jobs:
           # which is indistinguishable from "not green yet", so a broken token spent a
           # full minute of the exclusive lock looking like eventual consistency (#1201).
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            observed="$(gh api "repos/u2giants/shared-db/commits/$REQUESTED_SHA/status"               --jq '[.statuses[] | select(.context == "Migration guarded merge authorization")] | first | .state')"
+            observed="$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" api "repos/u2giants/shared-db/commits/$REQUESTED_SHA/status"               --jq '[.statuses[] | select(.context == "Migration guarded merge authorization")] | first | .state')"
             [ "$observed" = 'success' ] && break
             echo "authorization not visible yet (attempt $attempt, observed='${observed:-none}'); waiting"
             sleep 6

@@ -1118,6 +1118,54 @@ named it as current until 2026-08-20. See §4 rule 2.
 
 Never commit anon keys, service-role keys, database passwords, or `.env` files.
 
+### 5.2-B Every governed gate reaches GitHub the same way (added 2026-09-04, issue #2342)
+
+Three consecutive production-apply runs (`33920952504`, `33921168245`, `33921406952`)
+each refused promotion while naming a **different** file that demonstrably existed. That
+is the signature of a spurious read, not a real fault. The survey that followed found
+**eight** independently hand-rolled `gh` wrappers under `scripts/`, of which exactly two
+retried anything, plus workflow steps making bare `gh api` calls under `set -euo pipefail`
+— two of them while holding the merge lock. Nothing caught that: there was no lint rule,
+no conformance test, and no written rule anywhere in this file, `docs/`, or any `plan_*.md`.
+
+**The primary fix is batching, not retrying.** Read §5.2-A above before proposing a retry:
+a retry wrapper there turned a fast failure into a slower, identically-named failure. Each
+collision and lease gate resolved file content with a per-file Contents call
+(`repos/:repo/contents/:path?ref=:sha`), so comparing every open pull request cost up to
+112 sequential calls and **any one** of them could refuse promotion. Retrying a read you
+should not be making 112 times is §5.2-A's mistake with a longer wall clock. The exposure
+is removed by asking GitHub once per ref.
+
+The rule, in four parts:
+
+1. **One transport.** Node code under `scripts/` reaches GitHub only through
+   `scripts/lib/github-transport.mjs`. Retry policy, the transient/semantic classifier and
+   the never-replay-a-write rule are decided in one place. Pass `wrapError` to keep your
+   gate's own named refusal.
+2. **One tree read per ref.** File content comes from `scripts/lib/github-tree.mjs`:
+   `git/trees/<ref>?recursive=1` once, then blobs **by SHA**. A file identical across
+   twelve pull-request heads has one blob SHA and is fetched once; path existence is
+   answered from the tree already in hand and costs nothing. **No gate may build a
+   per-file Contents URL.** A truncated tree is refused outright — it would make present
+   files look absent, which in a gate whose job is to refuse is a silent false clear.
+3. **Workflows call a script, not `gh api`.** A read in a `run:` block goes through
+   `node scripts/gh-read.mjs api …`. A **write** stays a direct `gh api` call and that is
+   deliberate: neither `gh` nor any wrapper can tell "the request never landed" from "it
+   landed and the response was lost", so a write gets exactly one attempt whichever door
+   it goes through, and `gh-read.mjs` refuses mutations outright.
+4. **404 is not transient, and must not be made one.** It is tempting to widen the
+   classifier because the spurious failures were 404s. Across this repository a 404 is an
+   *answer* ("does this ref exist yet?"), and a gate that concludes "absent" only after
+   exhausting a retry budget has made its absence proof depend on a timeout — fail-open,
+   which is worse than fail-closed. Retries are for HTTP 5xx, rate limits and connection
+   or TLS failures only.
+
+**This is enforced, not advised.** `scripts/check-github-transport-conformance.mjs` fails
+the build on a ninth wrapper, a bare workflow `gh api` read, or a per-file Contents URL,
+and runs in `tools-offline-tests.yml`. Its own tests feed it a known-dirty tree containing
+each forbidden shape and assert it refuses, *before* asserting anything about the real
+tree — a green run on clean input proves nothing.
+
 ### 8.1 API-exposed schemas (PostgREST) — `dam` is NOT exposed (2026-07-15)
 
 `pgrst.db_schemas` on prod = `public, graphql_public, api, crm, pim, core, app`.

@@ -14,6 +14,8 @@
     "scripts/db-coordination-events.mjs",
     "scripts/lib/documents-only-change.mjs",
     "scripts/lib/exclusive-lease.mjs",
+    "scripts/lib/github-transport.mjs",
+    "scripts/lib/github-tree.mjs",
     "scripts/lib/review-verdict-artifact.mjs",
     "scripts/lib/review-verdict.mjs",
     "scripts/lib/work-dependencies.mjs",

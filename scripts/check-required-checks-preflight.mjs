@@ -10,6 +10,7 @@
 // check runs BEFORE the lock is taken and names the exact contexts that are not
 // satisfied on the reviewed head.
 import { execFileSync } from 'node:child_process'
+import { runGitHubCommand } from './lib/github-transport.mjs'
 import { pathToFileURL } from 'node:url'
 import { REPO } from './manage-migration-author-lanes.mjs'
 
@@ -171,8 +172,10 @@ export function evaluatePreflight({ requiredContexts, statuses, checkRuns, prote
 function gh(args) {
   // No 2>/dev/null || echo '' here: an HTTP 401/403 or a network failure must be
   // reported as itself, never as an empty result that reads like "not green yet".
-  try { return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }) }
-  catch (e) { throw new PreflightError(`GitHub read failed: ${String(e.stderr || e.message).trim()}`) }
+  // Issue #2342: shared transport, identical refusal.
+  return runGitHubCommand(args, {
+    wrapError: (detail) => new PreflightError(`GitHub read failed: ${detail}`),
+  })
 }
 function json(args) { const raw = gh(args); try { return JSON.parse(raw) } catch { throw new PreflightError('GitHub returned malformed JSON') } }
 
