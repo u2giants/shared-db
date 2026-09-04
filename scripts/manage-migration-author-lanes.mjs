@@ -10,6 +10,19 @@ import { classifyDependencies, findCompletionRecord, findDependencyCycles, valid
 import { assertLease, evaluateRecovery, formatLeaseMessage, parseLeaseMessage, recoveredLeaseMetadata, LeaseError } from './lib/exclusive-lease.mjs'
 import { coordinationEvent, formatEventComment, parseEventComment, auditTimeline, renderTimeline } from './db-coordination-events.mjs'
 import { reconcileFlow, persistInitialReady, preparePreviewDispatch, repairPreviewReady } from './orchestrator-flow/reconcile.mjs'
+import { SELF_CONTEXT as MERGE_SELF_CONTEXT } from './check-required-checks-preflight.mjs'
+
+// `Migration guarded merge authorization` is posted by the guarded merge ITSELF,
+// after this gate has already passed -- see SELF_CONTEXT in
+// check-required-checks-preflight.mjs. Every other consumer of the required list
+// strips it; the preview gate did not, which made the gate self-referential:
+// preview could never be prepared, because the only thing that sets that context
+// is the merge that preview is a precondition of. Exported so the exclusion is
+// covered by a test rather than only by the live gate.
+export function pendingRequiredContexts(protectedContexts=[],observed=new Map()){
+  const byName=observed instanceof Map?observed:new Map(Object.entries(observed))
+  return protectedContexts.filter((name)=>name!==MERGE_SELF_CONTEXT&&byName.get(name)!=='SUCCESS')
+}
 import { buildEvidenceBundle, canonicalJson, sha256 } from './orchestrator-flow/evidence-bundle.mjs'
 import { selectPreviewRoute } from './orchestrator-flow/select-preview-route.mjs'
 import { PROJECT_REFS } from './orchestrator-flow/read-preview-ledger.mjs'; import { verdictOpensLine as sharedVerdictOpensLine, evidenceTiedToHead as sharedEvidenceTiedToHead, isApprovalFor as sharedIsApprovalFor, isVerdictFor as sharedIsVerdictFor, anyVerdictFor as sharedAnyVerdictFor } from './lib/review-verdict.mjs'
@@ -1331,7 +1344,7 @@ export const githubIo = {
     const protectedContexts=ghJson(['api',`repos/${REPO}/branches/main/protection/required_status_checks`])?.contexts??[]
     const checks=JSON.parse(gh(['pr','checks',String(pr),'--repo',REPO,'--json','name,state']))
     const byName=new Map(checks.map((row)=>[row.name,String(row.state).toUpperCase()]))
-    const failed=protectedContexts.filter((name)=>byName.get(name)!=='SUCCESS')
+    const failed=pendingRequiredContexts(protectedContexts,byName)
     if(failed.length)throw new LaneError(`required full CI is not successful on the current head: ${failed.join(', ')}`)
     assertDurableReviewApproval(issue,pr,head,this)
     const states=dependencies.length?this.dependencyStates(dependencies):{},closure=classifyDependencies(issue,dependencies,states)
