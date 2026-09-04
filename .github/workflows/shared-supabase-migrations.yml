@@ -349,6 +349,7 @@ jobs:
             echo "REFUSED: name merged_preview_source_pr OR merged_preview_source_pr_map, not both." >&2
             exit 1
           fi
+          MAP_PROVEN=""
           if [ -n "${SOURCE_MAP:-}" ]; then
             # EVERY pull request in the map is proved merged here, not only the
             # one the lane lock is filed under. The per-version merge-commit
@@ -399,10 +400,16 @@ jobs:
                 echo "REFUSED: pull request #${MAP_PR} is not merged. A post-merge rehearsal never runs from unmerged code." >&2
                 exit 1
               fi
+              # #2140: keep every proven pair, not only the last one. The instance
+              # binding used to be filed under MAP_LAST_PR alone, so per-version
+              # historical recovery could never pass for any earlier version in the
+              # batch -- the binding genuinely did not name that version's author.
+              MAP_PROVEN="${MAP_PROVEN}${MAP_PR}:${MAP_MERGE_SHA} "
             done
             echo "merged_preview_source_pr_map: proved ${MAP_PR_COUNT} pull request(s) merged: $(printf '%s' "$MAP_PRS" | tr '\n' ' ')"
             SOURCE_PR="$MAP_LAST_PR"
           fi
+          echo "source_pr_merge_map=${MAP_PROVEN}" >> "$GITHUB_OUTPUT"
           MERGE_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_PR}" --jq '.merge_commit_sha // ""')"
           MERGED="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_PR}" --jq '.merged')"
           if [ "$MERGED" != "true" ] || [ -z "$MERGE_SHA" ]; then
@@ -825,6 +832,7 @@ jobs:
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
           MERGED_SOURCE_PR: ${{ steps.merged_rehearsal.outputs.source_pr }}
           MERGE_COMMIT_SHA: ${{ steps.merged_rehearsal.outputs.merge_commit_sha }}
+          SOURCE_PR_MERGE_MAP: ${{ steps.merged_rehearsal.outputs.source_pr_merge_map }}
           HISTORICAL_SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
           HISTORICAL_SOURCE_MAP: ${{ inputs.historical_preview_source_pr_map }}
         run: |
@@ -842,6 +850,30 @@ jobs:
             --source-pr "${MERGED_SOURCE_PR:-}" \
             --merge-commit-sha "${MERGE_COMMIT_SHA:-}" \
             --output "$RUNNER_TEMP/preview-instance.json"
+          # ONE BINDING PER AUTHORING PULL REQUEST (#2140). The file above is filed
+          # under the map's LAST pull request, which is the only one the historical
+          # lane could ever recover per version. Every other version in the batch was
+          # authored by a different pull request, and the gate compares the binding
+          # against THAT pull request -- correctly, because the binding never named
+          # it. So one binding is written per proven pull request, each naming its own
+          # source pull request and its own merge commit. Nothing else changes: every
+          # file carries the same run, applied commit, preview project and complete
+          # allowlist, and the gate's strict comparison is unchanged.
+          for PAIR in ${SOURCE_PR_MERGE_MAP:-}; do
+            PAIR_PR="${PAIR%%:*}"
+            PAIR_SHA="${PAIR#*:}"
+            test -n "$PAIR_PR" && test -n "$PAIR_SHA"
+            python scripts/preview_instance_binding.py \
+              --applied-commit "$APPLIED_COMMIT" \
+              --preview-project-ref "$PREVIEW_PROJECT_REF" \
+              --production-project-ref "$PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE" \
+              --run-id "$GITHUB_RUN_ID" \
+              --allowlist "$PREVIEW_ALLOWLIST" \
+              --rehearsal-mode "$MODE" \
+              --source-pr "$PAIR_PR" \
+              --merge-commit-sha "$PAIR_SHA" \
+              --output "$RUNNER_TEMP/preview-instance-${PAIR_PR}.json"
+          done
       - name: Save preview evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -853,6 +885,7 @@ jobs:
             ${{ runner.temp }}/preview-apply.txt
             ${{ runner.temp }}/preview-ledger-after.txt
             ${{ runner.temp }}/preview-instance.json
+            ${{ runner.temp }}/preview-instance-*.json
             ${{ runner.temp }}/bounded-preview/supabase/migration-content-manifest.json
             ${{ runner.temp }}/historical-preview-source.json
           if-no-files-found: warn
