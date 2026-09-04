@@ -50,7 +50,7 @@ query = snapshot_query(
     }
 )
 snapshot = psql(query, capture=True)
-if "\n" not in snapshot or "pg_catalog" not in snapshot:
+if "\n" not in snapshot or "CREATE OR REPLACE" not in snapshot.upper():
     raise SystemExit("snapshot did not contain executable newline-separated definitions")
 
 psql(
