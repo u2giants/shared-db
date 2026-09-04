@@ -19,7 +19,7 @@ permissions:
 jobs:
   acquire:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,3 +37,13 @@ jobs:
             echo 'Release after teardown with:'
             echo "\`node scripts/manage-preview-maintenance-lock.mjs --release --owner-sha $owner_sha\`"
           } >> "$GITHUB_STEP_SUMMARY"
+          # Keep the owning run live while the out-of-band rehearsal holds the
+          # lease. Exit promptly after its owner-bound release, or after a hard
+          # 55-minute ceiling so recovery can eventually prove a crashed holder.
+          for _ in $(seq 1 110); do
+            current="$(gh api 'repos/u2giants/shared-db/git/ref/db-coordination/preview' --jq .object.sha 2>/dev/null || true)"
+            test "$current" = "$owner_sha" || exit 0
+            sleep 30
+          done
+          echo 'Preview maintenance lock reached its 55-minute holding ceiling; release or recover it before any further preview work.' >&2
+          exit 2

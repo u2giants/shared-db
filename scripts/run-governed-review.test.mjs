@@ -19,7 +19,9 @@ test('adapter forwards a freshly justified doctor skip to reviewer preflight',()
     ?{status:0,stdout:JSON.stringify({html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-124'})}
     :{status:0,stdout:`Coverage: scripts.\nVERDICT: APPROVE ${options.headSha}`}
   runGovernedReview({...options,skipDoctor:'true'},{spawn,resolve:(name)=>name,preflight:(row)=>{preflightOptions=row},record:()=>({ref:'refs/db-review-verdicts/x',sha:'b'.repeat(40)})})
-  assert.equal(preflightOptions.skipDoctor,'true')
+  assert.equal(preflightOptions.skipDoctor,true)
+  runGovernedReview({...options,skipDoctor:'false'},{spawn,resolve:(name)=>name,preflight:(row)=>{preflightOptions=row},record:()=>({ref:'refs/db-review-verdicts/y',sha:'c'.repeat(40)})})
+  assert.equal(preflightOptions.skipDoctor,false)
 })
 
 test('recording failure leaves an explicit durable non-authorizing notice',()=>{

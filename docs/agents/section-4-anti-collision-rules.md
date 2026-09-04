@@ -629,6 +629,10 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    re-reads the open issue and refuses unless its scope is exactly ready
    `repo-maintenance`; it holds the same preview ref and releases it with
    `node scripts/manage-preview-maintenance-lock.mjs --release --owner-sha <acquisition SHA>`.
+   The acquisition workflow remains live while that ref is held (up to 55
+   minutes) and exits promptly after the owner-bound release. This keeps the
+   existing recovery test honest: a rehearsal in progress is backed by an
+   in-progress GitHub run, never by a run that already reported success.
 
    **What that lock does NOT do, stated exactly.** It does not exclude a merge
    or a production promotion. `EXCLUSIVE_REFS` gives merge and production their
