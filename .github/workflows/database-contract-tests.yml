@@ -464,7 +464,7 @@ jobs:
           PGUSER: postgres
           PGPASSWORD: postgres
           PGDATABASE: postgres
-        run: python scripts/test_pass2_routine_restoration_live.py
+        run: python scripts/verify_pass2_routine_restoration_live.py
 
       # THE SYNTHETIC FIXTURE SEED (issue #754)
       # ---------------------------------------
