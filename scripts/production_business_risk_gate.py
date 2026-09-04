@@ -1048,7 +1048,16 @@ def prove_bound_mainline_post_merge_original(
     applied commit and complete per-run allowlist, both execution commits are the
     same main-line commit, and the source merge is its ancestor.
     """
-    raw = texts.get("preview-instance.json")
+    # ONE BINDING PER AUTHORING PULL REQUEST (#2140). A batch rehearsed from a
+    # merged_preview_source_pr_map files `preview-instance.json` under the map's
+    # LAST pull request only, while this proof compares the binding against the
+    # pull request that authored THIS version. Those disagree for every version
+    # in the batch except the last, so per-version historical recovery could
+    # never pass. The rehearsal now also writes `preview-instance-<pr>.json` for
+    # every proven pull request in the map. Prefer this version's own file; the
+    # comparison below is unchanged and still strict, so a file naming the wrong
+    # pull request, run, commit or allowlist is refused exactly as before.
+    raw = texts.get(f"preview-instance-{source_pr}.json") or texts.get("preview-instance.json")
     try:
         binding = json.loads(raw) if raw else None
     except (json.JSONDecodeError, TypeError) as exc:
