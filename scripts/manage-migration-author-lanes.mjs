@@ -2025,8 +2025,9 @@ export function parseReviewLease(commit){
   //     belonged to. Saying so keeps those leases freed by their own verdict, as
   //     they always have been; leaving them UNKNOWN under the round-3 fail-closed
   //     liveness sentinel would have pinned them busy forever.
-  // `slot === null` means "not stated", and every caller falls back to the
-  // pre-#2208 any-slot question for those, so no legacy lease changes behavior.
+  // `slot === null` means "not stated". Liveness callers map that ambiguity to
+  // the slot-0 sentinel so no sibling verdict can reclaim the lease; the lease
+  // remains busy until its slot identity is repaired or otherwise resolved.
   const leaseMatch=/^db-coordination reviewer-lease generation=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40}) sequence=(\d+)$/i.exec(message)
   const cursorMatch=leaseMatch?null:/^db-coordination reviewer-cursor sequence=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40})(?: slot=(\d+))?$/i.exec(message)
   const replacementMatch=(leaseMatch||cursorMatch)?null:/^db-coordination reviewer-(?:failure-)?replacement sequence=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40})(?: slot=(\d+))? /i.exec(message)
