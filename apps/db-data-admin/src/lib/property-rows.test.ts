@@ -55,6 +55,22 @@ describe('flattenProperties', () => {
     expect(flattenProperties(tree)).toHaveLength(nested + tree.orphanProperties.length)
   })
 
+  it('carries updated_at onto every row as the status-change concurrency token', () => {
+    // Issue #1322: api.db_data_admin_set_property_status compares the caller's
+    // token against the live row, so the grid row must carry what the tree
+    // contract returned — and degrade to null, never "undefined", when absent.
+    const withTokens = flattenProperties({
+      ...tree,
+      licensors: tree.licensors.map(licensor => ({
+        ...licensor,
+        properties: licensor.properties.map(property => ({ ...property, updated_at: '2026-08-20T12:00:00Z' })),
+      })),
+      orphanProperties: tree.orphanProperties.map(orphan => ({ ...orphan, updated_at: '2026-08-20T13:00:00Z' })),
+    })
+    expect(withTokens.every(row => row.updated_at === '2026-08-20T12:00:00Z' || row.updated_at === '2026-08-20T13:00:00Z')).toBe(true)
+    expect(flattenProperties(tree).every(row => row.updated_at === null)).toBe(true)
+  })
+
   it('returns no rows for an empty tree', () => {
     expect(flattenProperties({ licensors: [], orphanProperties: [] })).toEqual([])
   })

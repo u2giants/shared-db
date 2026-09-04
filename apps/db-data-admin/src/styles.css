@@ -38,6 +38,9 @@ h1 { margin: 18px 0 12px; font-size: clamp(36px, 6vw, 62px); line-height: 1; let
 .scraped-property-group h2 { margin-bottom: 4px; }
 .scraped-property-group .grid-wrap { height: 280px; min-height: 280px; }
 .scraped-properties revo-grid .unmapped-creative-cell { background: #fff0f0; color: #8a1c1c; }
+/* Issue #1322: an inactive Property is muted, not red — a state to see at a glance, not an anomaly to fix. */
+revo-grid .inactive-property-cell { background: #f2f4f7; color: #838da0; }
+.property-status-target { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; padding: 10px 12px; background: #f5f7fb; border: 1px solid #dbe2ee; border-radius: 8px; }
 .review-text-cell { height: 100%; padding: 7px 8px; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; cursor: help; }
 .review-text-cell:focus-visible { outline: 2px solid #2955c8; outline-offset: -2px; border-radius: 3px; }
 .filter-header { position: relative; height: 48px; padding: 2px 4px; display: flex; flex-direction: column; gap: 2px; overflow: visible; }

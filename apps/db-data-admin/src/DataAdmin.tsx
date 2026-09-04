@@ -10,6 +10,7 @@ import {
 import { RecordEditor } from './RecordEditor'
 import { MergeDialog } from './MergeDialog'
 import { ProductDepthTable } from './ProductDepthTable'
+import { PropertyTable } from './PropertyTable'
 import { PropertyMatchReview } from './PropertyMatchReview'
 import { ScrapedPropertiesTable } from './ScrapedPropertiesTable'
 import { INLINE_EDITABLE_PROPS, INLINE_EDIT_REASON, INLINE_UNDO_REASON, saveInlineRow } from './lib/inline-edit'
@@ -67,7 +68,7 @@ const baseColumns: ColumnRegular[] = [
 
 export function DataAdmin({ client, email, environmentLabel, onSignOut }: Props) {
   const [kind, setKind] = useState<EntityKind>('customer')
-  const [section, setSection] = useState<'entity' | 'scraped-property' | 'property-match' | 'product-depth'>('entity')
+  const [section, setSection] = useState<'entity' | 'scraped-property' | 'property-match' | 'product-depth' | 'property'>('entity')
   const [query, setQuery] = useState<QueryState>(initialQuery)
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
@@ -322,8 +323,16 @@ export function DataAdmin({ client, email, environmentLabel, onSignOut }: Props)
       <button className={section === 'scraped-property' ? 'active' : ''} onClick={() => setSection('scraped-property')}>Scraped Properties</button>
       <button className={section === 'property-match' ? 'active' : ''} onClick={() => setSection('property-match')}>Property Matches</button>
       <button className={section === 'product-depth' ? 'active' : ''} onClick={() => setSection('product-depth')}>Product Depth</button>
+      {/* Issue #1322, owner ruling 2026-08-20: the 66 unmatched ColdLion codes were
+          admitted only on condition that we can mark a property inactive on OUR side,
+          because ColdLion has no licence-expiry flag. The control has to be reachable
+          for that condition to be met, so this tab is part of the ruling, not a
+          product preference. */}
+      <button className={section === 'property' ? 'active' : ''} onClick={() => setSection('property')}>Properties</button>
     </nav>
-    {section === 'product-depth'
+    {section === 'property'
+      ? <PropertyTable client={client} />
+      : section === 'product-depth'
       ? <ProductDepthTable client={client} />
       : section === 'property-match'
       ? <PropertyMatchReview client={client} />

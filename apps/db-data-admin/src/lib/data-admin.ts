@@ -213,6 +213,42 @@ export async function loadLicensorTree(client: ApiClient, params: { includeInact
   }
 }
 
+// ---- Issue #1322: guarded Property active/inactive transition ----------------
+//
+// Owner ruling 2026-08-20: ColdLion has no licence-expiry flag and never will,
+// so "inactive on our side" is owned here. The RPC is the only write path — it
+// re-checks licensing-manager access, refuses a blank reason, and compares the
+// caller's updated_at token against the live row, so the client's only jobs are
+// to generate a fresh operation id, collect a real reason, and forward the row's
+// current updated_at unchanged.
+
+export type PropertyStatus = 'active' | 'inactive'
+export type PropertyStatusResult = {
+  success: boolean; code?: string; message?: string
+  row?: AdminRow; current?: AdminRow
+  audit_id?: string; authorization_id?: string; idempotent_replay?: boolean
+}
+
+export async function setPropertyStatus(
+  client: ApiClient,
+  propertyId: string,
+  status: PropertyStatus,
+  input: { expectedUpdatedAt: string; reason: string },
+) {
+  // An absent concurrency token is sent as NULL on purpose: the RPC answers a
+  // NULL token with its stale_token refusal ("reload and try again") instead of
+  // letting an empty string die in parameter casting as a bogus server error.
+  const { data, error } = await client.rpc('db_data_admin_set_property_status', {
+    p_property_id: propertyId,
+    p_status: status,
+    p_expected_updated_at: input.expectedUpdatedAt || null,
+    p_operation_id: crypto.randomUUID(),
+    p_reason: input.reason,
+  })
+  if (error) throw error
+  return data as PropertyStatusResult
+}
+
 // ---- Retained source-declared Properties -----------------------------------
 
 export type ScrapedPropertyRow = AdminRow & {
