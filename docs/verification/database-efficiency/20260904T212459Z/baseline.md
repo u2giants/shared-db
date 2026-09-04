@@ -410,3 +410,40 @@ an answer.
 7. No script was added under `scripts/database-efficiency/`. Manual extraction repeated
    cleanly twice and every statement is recorded verbatim in `queries.md`, so the plan's
    condition for adding code was not met.
+
+## 11. Incidental finding — the issue #1684 EOL table, and a guard that cannot see across columns
+
+Not part of Step 1's capture list, but it fell out of the census and is recorded
+here because it is evidence about production that someone will otherwise
+re-measure.
+
+**The DesignFlow copies of the EOL mixed table are still present and are inert.**
+
+| Relation | Total bytes | Live tuples | Planner rows | Inserts | Updates | Deletes | Seq scans | Index scans | Ever vacuumed/analyzed |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `dflow.properties_and_characters` | 3,006,464 | 0 | 10,122 | 0 | 0 | 0 | 1 | 1 | never |
+| `dflow_prod.properties_and_characters` | 49,152 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | never |
+
+These are `dflow` / `dflow_prod`, **not** `core.properties_and_characters`. Both
+carry zero live tuples and zero recorded write activity over the window; the
+`dflow` copy's 10,122 planner rows against 0 live tuples means the planner
+estimate is stale, not that rows exist — nothing has ever analyzed it. Between
+them they hold 16 index entries (all `idx_scan` 0) and are named by 8 foreign-key
+rows. All 16 indexes appear in the `unused_index` performance rule.
+
+Read this as "not reproduced as active", not "empty": `n_live_tup` is a counter,
+and `pg_stat_database.stats_reset` is NULL (section 2), so these zeros cannot be
+dated. Per the plan's gate, no claim is inferred from a NULL/zero counter alone —
+this row says only that no activity was observed, and a `select count(*)` was
+deliberately not run because Step 1 is forbidden from capturing row contents.
+
+**The guard defect.** The first CI run of this PR failed `SQL migration guards`
+on the issue #1684 EOL reference rule. Every flagged occurrence was one of the
+`dflow` rows above, which that guard explicitly exempts — but its exemption strips
+`dflow.properties_and_characters` as a single adjacent string, and a tabular
+extract holds the schema and the table in separate columns, so the bare table name
+never meets the strip. Any future evidence file, migration inventory, or CSV export
+that lists relations in columns will trip the same rule for the same wrong reason.
+The extracts were schema-qualified rather than the guard edited; `queries.md`
+records the exact transformation and the guard source that proves the false
+positive.

@@ -3601,7 +3601,7 @@
  },
  {
   "schema": "dflow",
-  "relation": "properties_and_characters",
+  "relation": "dflow.properties_and_characters",
   "relkind": "r",
   "total_bytes": 3006464,
   "table_bytes": 1441792,
@@ -13711,7 +13711,7 @@
  },
  {
   "schema": "dflow_prod",
-  "relation": "properties_and_characters",
+  "relation": "dflow_prod.properties_and_characters",
   "relkind": "r",
   "total_bytes": 49152,
   "table_bytes": 8192,

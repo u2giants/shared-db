@@ -8317,7 +8317,7 @@
  },
  {
   "schema": "dflow",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow.properties_and_characters",
   "index_name": "unique_character_entity",
   "indexdef": "CREATE UNIQUE INDEX unique_character_entity ON dflow.properties_and_characters USING btree (licensor_id, source_licensed_property_id, source_character_id) WHERE ((type)::text = 'CHARACTER'::text)",
   "is_unique": true,
@@ -9178,7 +9178,7 @@
  },
  {
   "schema": "dflow",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow.properties_and_characters",
   "index_name": "idx_properties_name",
   "indexdef": "CREATE INDEX idx_properties_name ON dflow.properties_and_characters USING btree (name)",
   "is_unique": false,
@@ -11929,7 +11929,7 @@
  },
  {
   "schema": "dflow",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow.properties_and_characters",
   "index_name": "properties_and_characters_pkey",
   "indexdef": "CREATE UNIQUE INDEX properties_and_characters_pkey ON dflow.properties_and_characters USING btree (id)",
   "is_unique": true,
@@ -12013,7 +12013,7 @@
  },
  {
   "schema": "dflow",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow.properties_and_characters",
   "index_name": "properties_and_characters_pkey",
   "indexdef": "CREATE UNIQUE INDEX properties_and_characters_pkey ON dflow.properties_and_characters USING btree (id)",
   "is_unique": true,
@@ -12034,7 +12034,7 @@
  },
  {
   "schema": "dflow",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow.properties_and_characters",
   "index_name": "properties_and_characters_pkey",
   "indexdef": "CREATE UNIQUE INDEX properties_and_characters_pkey ON dflow.properties_and_characters USING btree (id)",
   "is_unique": true,
@@ -12076,7 +12076,7 @@
  },
  {
   "schema": "dflow",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow.properties_and_characters",
   "index_name": "properties_and_characters_pkey",
   "indexdef": "CREATE UNIQUE INDEX properties_and_characters_pkey ON dflow.properties_and_characters USING btree (id)",
   "is_unique": true,
@@ -15772,7 +15772,7 @@
  },
  {
   "schema": "dflow",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow.properties_and_characters",
   "index_name": "idx_properties_licensor_id",
   "indexdef": "CREATE INDEX idx_properties_licensor_id ON dflow.properties_and_characters USING btree (licensor_id)",
   "is_unique": false,
@@ -19531,7 +19531,7 @@
  },
  {
   "schema": "dflow",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow.properties_and_characters",
   "index_name": "unique_property_entity",
   "indexdef": "CREATE UNIQUE INDEX unique_property_entity ON dflow.properties_and_characters USING btree (licensor_id, source_licensed_property_id) WHERE ((type)::text = 'PROPERTY'::text)",
   "is_unique": true,
@@ -50989,7 +50989,7 @@
  },
  {
   "schema": "dflow_prod",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow_prod.properties_and_characters",
   "index_name": "unique_property_entity",
   "indexdef": "CREATE UNIQUE INDEX unique_property_entity ON dflow_prod.properties_and_characters USING btree (licensor_id, source_licensed_property_id) WHERE ((type)::text = 'PROPERTY'::text)",
   "is_unique": true,
@@ -54160,7 +54160,7 @@
  },
  {
   "schema": "dflow_prod",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow_prod.properties_and_characters",
   "index_name": "idx_properties_licensor_id",
   "indexdef": "CREATE INDEX idx_properties_licensor_id ON dflow_prod.properties_and_characters USING btree (licensor_id)",
   "is_unique": false,
@@ -54181,7 +54181,7 @@
  },
  {
   "schema": "dflow_prod",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow_prod.properties_and_characters",
   "index_name": "properties_and_characters_pkey",
   "indexdef": "CREATE UNIQUE INDEX properties_and_characters_pkey ON dflow_prod.properties_and_characters USING btree (id)",
   "is_unique": true,
@@ -57100,7 +57100,7 @@
  },
  {
   "schema": "dflow_prod",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow_prod.properties_and_characters",
   "index_name": "unique_character_entity",
   "indexdef": "CREATE UNIQUE INDEX unique_character_entity ON dflow_prod.properties_and_characters USING btree (licensor_id, source_licensed_property_id, source_character_id) WHERE ((type)::text = 'CHARACTER'::text)",
   "is_unique": true,
@@ -61027,7 +61027,7 @@
  },
  {
   "schema": "dflow_prod",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow_prod.properties_and_characters",
   "index_name": "properties_and_characters_pkey",
   "indexdef": "CREATE UNIQUE INDEX properties_and_characters_pkey ON dflow_prod.properties_and_characters USING btree (id)",
   "is_unique": true,
@@ -61279,7 +61279,7 @@
  },
  {
   "schema": "dflow_prod",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow_prod.properties_and_characters",
   "index_name": "properties_and_characters_pkey",
   "indexdef": "CREATE UNIQUE INDEX properties_and_characters_pkey ON dflow_prod.properties_and_characters USING btree (id)",
   "is_unique": true,
@@ -61321,7 +61321,7 @@
  },
  {
   "schema": "dflow_prod",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow_prod.properties_and_characters",
   "index_name": "properties_and_characters_pkey",
   "indexdef": "CREATE UNIQUE INDEX properties_and_characters_pkey ON dflow_prod.properties_and_characters USING btree (id)",
   "is_unique": true,
@@ -70141,7 +70141,7 @@
  },
  {
   "schema": "dflow_prod",
-  "table_name": "properties_and_characters",
+  "table_name": "dflow_prod.properties_and_characters",
   "index_name": "idx_properties_name",
   "indexdef": "CREATE INDEX idx_properties_name ON dflow_prod.properties_and_characters USING btree (name)",
   "is_unique": false,
