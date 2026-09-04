@@ -2,11 +2,10 @@
 
 import { randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
-import { acquireMutex, acquireRef, EXCLUSIVE_REFS, githubIo, parseQueueScope, releaseOwnedRef } from './manage-migration-author-lanes.mjs'
+import { acquireMutex, acquireRef, EXCLUSIVE_REFS, githubIo, MUTEX_REF, parseQueueScope, releaseOwnedRef } from './manage-migration-author-lanes.mjs'
 import { formatLeaseMessage } from './lib/exclusive-lease.mjs'
 
 export class PreviewMaintenanceLockError extends Error {}
-const MUTEX_REF = 'refs/db-coordination/author-acquisition'
 
 export function acquirePreviewMaintenanceLock({ issue, owner, headSha, now = new Date() }, io = githubIo) {
   const number = Number(issue)
@@ -41,7 +40,13 @@ export function acquirePreviewMaintenanceLock({ issue, owner, headSha, now = new
 
 export function releasePreviewMaintenanceLock(ownerSha, io = githubIo) {
   if (!/^[0-9a-f]{40}$/i.test(String(ownerSha ?? ''))) throw new PreviewMaintenanceLockError('release requires the exact acquisition SHA')
-  releaseOwnedRef(EXCLUSIVE_REFS.preview, ownerSha, io)
+  const releaseOwnerSha = io.makeOwnerCommit(`db-coordination preview release-${randomUUID()}`)
+  acquireMutex(releaseOwnerSha, io)
+  try {
+    releaseOwnedRef(EXCLUSIVE_REFS.preview, ownerSha, io)
+  } finally {
+    if (io.readRef(MUTEX_REF) === releaseOwnerSha) releaseOwnedRef(MUTEX_REF, releaseOwnerSha, io)
+  }
 }
 
 function args(argv) {

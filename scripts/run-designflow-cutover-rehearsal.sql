@@ -1,26 +1,25 @@
 \set ON_ERROR_STOP on
 \if :{?scratch_schema}
 \else
-  \echo 'scratch_schema is required'
-  \quit 2
+  DO $guard$ BEGIN RAISE EXCEPTION 'scratch_schema is required'; END $guard$;
 \endif
 \if :{?expected_project_ref}
 \else
-  \echo 'expected_project_ref is required'
-  \quit 2
+  DO $guard$ BEGIN RAISE EXCEPTION 'expected_project_ref is required'; END $guard$;
 \endif
 
 SET statement_timeout = '20min';
 SET lock_timeout = '5s';
 SET idle_in_transaction_session_timeout = '2min';
 SELECT set_config('issue771.expected_project_ref', :'expected_project_ref', false);
+SELECT set_config('issue771.connection_user', :'USER', false);
 SELECT set_config('issue771.scratch_schema', :'scratch_schema', false);
 
 DO $guard$
 BEGIN
   IF current_database() <> 'postgres'
      OR current_user <> 'postgres'
-     OR NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres.' || current_setting('issue771.expected_project_ref')) THEN
+     OR current_setting('issue771.connection_user') <> ('postgres.' || current_setting('issue771.expected_project_ref')) THEN
     RAISE EXCEPTION 'target is not the expected Supabase preview project';
   END IF;
 END
@@ -33,7 +32,7 @@ BEGIN
 END
 $guard$;
 SELECT jsonb_build_object('database', current_database(), 'user', current_user,
-  'server_address', inet_server_addr(), 'expected_project_ref', :'expected_project_ref') AS target_proof;
+  'connection_user', :'USER', 'server_address', inet_server_addr(), 'expected_project_ref', :'expected_project_ref') AS target_proof;
 
 CREATE SCHEMA :"scratch_schema";
 SET search_path = :"scratch_schema", dflow, public;

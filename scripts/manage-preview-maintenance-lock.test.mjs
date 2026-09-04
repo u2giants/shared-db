@@ -5,8 +5,10 @@ import { acquirePreviewMaintenanceLock, releasePreviewMaintenanceLock } from './
 function io() {
   const refs = new Map()
   let counter = 0
+  let previewReleaseHeldMutex = false
   return {
     refs,
+    get previewReleaseHeldMutex() { return previewReleaseHeldMutex },
     mainSha: () => 'a'.repeat(40),
     getIssue: () => ({ state: 'open', body: '```db-work-scope\nstatus: ready\nwork_type: repo-maintenance\nroute: repo-maintenance\npriority: 1\ndepends_on:\nobjects:\n```' }),
     makeOwnerCommit: () => (++counter).toString(16).padStart(40, '0'),
@@ -16,7 +18,10 @@ function io() {
       refs.set(ref, sha)
       return true
     },
-    deleteRef: (ref) => refs.delete(ref),
+    deleteRef: (ref) => {
+      if (ref === 'refs/db-coordination/preview') previewReleaseHeldMutex = refs.has('refs/db-coordination/author-acquisition')
+      return refs.delete(ref)
+    },
     run: () => ({ status: 200 }),
   }
 }
@@ -31,6 +36,8 @@ test('ready repository maintenance acquires and safely releases the shared previ
     assert.equal(fake.refs.has('refs/db-coordination/author-acquisition'), false)
     releasePreviewMaintenanceLock(lock.ownerSha, fake)
     assert.equal(fake.refs.has(lock.ref), false)
+    assert.equal(fake.previewReleaseHeldMutex, true)
+    assert.equal(fake.refs.has('refs/db-coordination/author-acquisition'), false)
   } finally {
     delete process.env.GITHUB_RUN_ID
     delete process.env.GITHUB_RUN_ATTEMPT

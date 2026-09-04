@@ -1,8 +1,7 @@
 \set ON_ERROR_STOP on
 \if :{?schema_name}
 \else
-  \echo 'schema_name is required'
-  \quit 2
+  DO $guard$ BEGIN RAISE EXCEPTION 'schema_name is required'; END $guard$;
 \endif
 
 BEGIN READ ONLY;
