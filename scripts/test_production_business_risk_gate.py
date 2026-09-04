@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from production_business_risk_gate import api_field, api_list, api_object, api_sublist, authored_merge, exact_main, ProvedTarget, tracked_paths_at, PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_governed_historical_supersession, prove_governed_original_reconciliation, prove_historical_original_apply_runs, prove_preview, prove_preview_migration_contents, prove_preview_producer_matches_main, prove_pr_and_checks, REQUIRED_CHECKS, GOVERNED_HISTORICAL_SUPERSESSION, GOVERNED_ORIGINAL_RECONCILIATION
+from production_business_risk_gate import preview_instance_text, api_field, api_list, api_object, api_sublist, authored_merge, exact_main, ProvedTarget, tracked_paths_at, PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_governed_historical_supersession, prove_governed_original_reconciliation, prove_bound_mainline_post_merge_original, prove_historical_original_apply_runs, prove_preview, prove_preview_migration_contents, prove_preview_producer_matches_main, prove_pr_and_checks, REQUIRED_CHECKS, GOVERNED_HISTORICAL_SUPERSESSION, GOVERNED_ORIGINAL_RECONCILIATION
 
 
 def tree_ref(endpoint):
@@ -403,7 +403,8 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             if "/git/trees/" in endpoint:
                 ref = tree_ref(endpoint)
                 return {"truncated": False,
-                        "tree": [{"path": p} for (p, r) in blobs if r == ref]}
+                        "tree": [{"path": p, "type": "blob", "sha": sha}
+                                 for (p, r), sha in blobs.items() if r == ref]}
             if "/compare/" in endpoint:
                 if compare is None:
                     raise RuntimeError("compare not stubbed")
@@ -478,11 +479,13 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             )
 
     def test_unreadable_producer_file_fails_closed(self):
-        """A producer file that BOTH trees list but GitHub will not hand over.
+        """A producer file BOTH trees list but whose entry carries no blob SHA.
 
-        Absence is now proved from the tree, so this test states a file that is
-        present on both sides and unreadable anyway. Skipping it would be
-        exactly the fail-open the producer pin exists to prevent.
+        Absence is now proved from the tree, and since issue #2191 the blob SHA
+        comes from that same tree read. So this test states a file present on
+        both sides whose listing contradicts itself -- listed, but with nothing
+        to compare. Skipping it would be exactly the fail-open the producer pin
+        exists to prevent.
         """
         c1, head, main = "1" * 40, "2" * 40, "3" * 40
         run = {
@@ -498,9 +501,12 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             if "/git/trees/" in endpoint:
                 tree_ref(endpoint)
                 return {"truncated": False,
-                        "tree": [{"path": p} for p in PREVIEW_PRODUCER_PATHS]}
+                        "tree": [
+                            {"path": p, "type": "blob"} if p == PREVIEW_WORKFLOW
+                            else {"path": p, "type": "blob", "sha": "a" * 40}
+                            for p in PREVIEW_PRODUCER_PATHS]}
             if "/contents/" in endpoint:
-                raise RuntimeError("GitHub 500")
+                raise RuntimeError("the gate must not read /contents/ for a producer file")
             return run
 
         with self.assertRaisesRegex(RiskGateError, "is unreadable at"):
@@ -709,6 +715,123 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                                                      "tree": [{"path": "a"}, {"nope": 1}]}),
             frozenset({"a"}),
         )
+
+    def test_producer_blob_shas_come_from_the_tree_read_not_per_file_contents(self):
+        """Issue #2191: one atomic tree read, never ~40 racing Contents calls.
+
+        `blob_sha` issued a Contents request per producer file, and `gh_json`
+        grants transport retries only to the owner-comment read, so each of
+        those got a single attempt. One spurious 500/504/404 anywhere in the
+        sequence failed the whole promotion, naming a DIFFERENT genuinely
+        present file each run (runs 33920952504, 33921168245, 33921406952 at
+        f462a411). The recursive tree of the same ref already carries every
+        blob SHA, so membership and content now come from ONE consistent
+        snapshot. This test refuses to let a regression reintroduce the
+        per-file read: the fake raises on any `/contents/` endpoint.
+        """
+        ref, main = "1" * 40, "3" * 40
+        seen = []
+        blobs = {(path, r): "same-blob"
+                 for path in PREVIEW_PRODUCER_PATHS for r in (ref, main)}
+
+        def api(endpoint):
+            seen.append(endpoint)
+            if "/contents/" in endpoint:
+                raise AssertionError("the producer pin must not read /contents/")
+            ref_ = tree_ref(endpoint)
+            return {"truncated": False,
+                    "tree": [{"path": p, "type": "blob", "sha": blobs[(p, ref_)]}
+                             for p in PREVIEW_PRODUCER_PATHS]}
+
+        prove_preview_producer_matches_main(ref, exact_main(main), main, api)
+        # Exactly two reads for two commits, no matter how long the producer
+        # list grows. That count IS the fix.
+        self.assertEqual(len(seen), 2)
+        self.assertTrue(all("/git/trees/" in e for e in seen))
+
+    def test_the_tree_sourced_producer_pin_still_refuses_both_dirty_cases(self):
+        """A green run on clean input proves nothing; feed it known-dirty input.
+
+        Case 1 -- a producer file genuinely missing from one commit's tree:
+        a real difference in the machinery that ran, refused by name.
+        Case 2 -- a producer file present on both sides whose blob SHA differs:
+        the promoted evidence was produced by different code, refused by name.
+        Case 3 -- a listed path that is not a blob: the listing contradicts
+        itself and there is nothing to compare, so the gate fails closed rather
+        than treating a directory as a producer file.
+        """
+        ref, main = "1" * 40, "3" * 40
+        victim = "scripts/production-verification-sidecars/20260727154500.json"
+
+        def tree_api(entries_for):
+            def api(endpoint):
+                r = tree_ref(endpoint)
+                return {"truncated": False, "tree": entries_for(r)}
+            return api
+
+        # Case 1: missing on `ref`, present on main.
+        missing = tree_api(lambda r: [
+            {"path": p, "type": "blob", "sha": "same-blob"}
+            for p in PREVIEW_PRODUCER_PATHS
+            if not (r == ref and p == victim)
+        ])
+        with self.assertRaisesRegex(
+            RiskGateError, f"{re.escape(victim)} absent where exact main has it present"
+        ):
+            prove_preview_producer_matches_main(ref, exact_main(main), main, missing)
+
+        # Case 2: present on both, different bytes.
+        differing = tree_api(lambda r: [
+            {"path": p, "type": "blob",
+             "sha": ("forged-blob" if (r == ref and p == victim) else "same-blob")}
+            for p in PREVIEW_PRODUCER_PATHS
+        ])
+        with self.assertRaisesRegex(
+            RiskGateError, f"a different {re.escape(victim)} than exact main"
+        ):
+            prove_preview_producer_matches_main(ref, exact_main(main), main, differing)
+
+        # Case 3: listed, but not a file / carrying no SHA.
+        for broken in ({"path": victim, "type": "tree", "sha": "same-blob"},
+                       {"path": victim, "type": "blob"},
+                       {"path": victim, "type": "blob", "sha": ""}):
+            api = tree_api(lambda r, b=broken: [
+                b if p == victim else {"path": p, "type": "blob", "sha": "same-blob"}
+                for p in PREVIEW_PRODUCER_PATHS
+            ])
+            with self.subTest(entry=broken), self.assertRaisesRegex(
+                RiskGateError, f"preview producer file {re.escape(victim)} is (unreadable|not a file) at"
+            ):
+                prove_preview_producer_matches_main(ref, exact_main(main), main, api)
+
+    def test_the_tree_read_receives_transport_retries(self):
+        """The tree read now carries the producer pin for a whole promotion.
+
+        Issue #2191: a single transient 502 there would stop production for a
+        reason unrelated to the evidence. Retries are granted only for
+        transient transport markers, and the read still fails closed once the
+        attempts are spent -- nothing verified is relaxed.
+        """
+        calls = []
+
+        def runner(cmd, **kwargs):
+            calls.append(cmd)
+            if len(calls) < 3:
+                return subprocess.CompletedProcess([], 1, "", "gh: HTTP 502")
+            return subprocess.CompletedProcess([], 0, '{"truncated": false, "tree": []}', "")
+
+        self.assertEqual(
+            gh_json(f"repos/u2giants/shared-db/git/trees/{'1' * 40}?recursive=1",
+                    runner=runner, sleep=lambda _s: None),
+            {"truncated": False, "tree": []},
+        )
+        self.assertEqual(len(calls), 3)
+        # Spent attempts still refuse; the gate does not fail open.
+        with self.assertRaisesRegex(RiskGateError, "GitHub API request failed"):
+            gh_json(f"repos/u2giants/shared-db/git/trees/{'1' * 40}?recursive=1",
+                    runner=lambda cmd, **k: subprocess.CompletedProcess(
+                        [], 1, "", "gh: HTTP 502"),
+                    sleep=lambda _s: None)
 
     # ------------------------------------------------------------------
     # POST-MERGE REHEARSAL PROVENANCE AND INSTANCE BINDING (#1208)
@@ -1830,7 +1953,8 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             if "/git/trees/" in endpoint:
                 tree_ref(endpoint)
                 return {"truncated": False,
-                        "tree": [{"path": p} for p in PREVIEW_PRODUCER_PATHS]}
+                        "tree": [{"path": p, "type": "blob", "sha": "a" * 40}
+                                 for p in PREVIEW_PRODUCER_PATHS]}
             if "/contents/" in endpoint:
                 # Producer files identical at the run head and at main, so this
                 # test still exercises the digest check it is named for.
@@ -2213,6 +2337,21 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                         absent = set()
                     return [p for p in PREVIEW_PRODUCER_PATHS if p not in absent]
 
+                def producer_blob(ref, path):
+                    """That path's blob SHA at that commit.
+
+                    The tree read is now the single source for BOTH membership
+                    and content (issue #2191), so the fake tree must carry the
+                    same bytes the per-file read used to hand back.
+                    """
+                    if merge_commit_blobs and ref == merge_sha:
+                        return merge_commit_blobs.get(path, "identical-producer-blob")
+                    if original_head_blobs and ref == original_head:
+                        return original_head_blobs.get(path, "identical-producer-blob")
+                    if original_run_blobs and ref in (original_head, original_commit):
+                        return original_run_blobs.get(path, "identical-producer-blob")
+                    return "identical-producer-blob"
+
                 def api(endpoint):
                     if endpoint == f"repos/u2giants/shared-db/actions/runs/{original_run}":
                         # `__replace__` returns a NON-DICT payload, which no
@@ -2242,9 +2381,13 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                     if "/git/trees/" in endpoint:
                         ref = tree_ref(endpoint)
                         return {"truncated": False,
-                                "tree": [{"path": p} for p in producer_tree(ref)]}
+                                "tree": [{"path": p, "type": "blob",
+                                          "sha": producer_blob(ref, p)}
+                                         for p in producer_tree(ref)]}
                     if "/contents/" in endpoint:
                         path, ref = endpoint.split("/contents/", 1)[1].split("?ref=")
+                        # Retained so a regression that reverts to per-file
+                        # Contents reads still exercises the same blob values.
                         # RAISE ON A PATH THAT IS NOT IN THAT TREE, exactly as
                         # GitHub 404s and exactly as `preview_api` already did.
                         # The round-6 version of this stub answered
@@ -3160,6 +3303,151 @@ class GovernedHistoricalSupersessionTests(unittest.TestCase):
             self.exercise(mutate=lambda _check, applied: applied["after"][0].update(
                 statements=["select 2"]
             ))
+
+
+class PerPullRequestBindingIsActuallyWritten(unittest.TestCase):
+    """The PRODUCER half of #2140, which the reader tests cannot see.
+
+    The reader tests below inject a `texts` dict, so they pass whether or not the
+    workflow ever writes a per-pull-request file. A governed review named two
+    mutations that stayed green under them: deleting the map accumulation, the
+    `source_pr_merge_map` output, the per-pair write loop and the upload glob; and
+    passing the LAST pull request's number and merge commit into the loop instead
+    of the pair's own, so every file would name the same pull request. Both would
+    reinstate exactly the defect #2140 exists to fix, silently. These assertions
+    are what make those mutations fail.
+    """
+
+    def workflow(self) -> str:
+        return (Path(__file__).resolve().parents[1] / PREVIEW_WORKFLOW).read_text(encoding="utf-8")
+
+    def test_the_batch_publishes_a_proved_pull_request_to_merge_commit_map(self):
+        text = self.workflow()
+        self.assertIn("MAP_PROVEN=", text)
+        self.assertIn('MAP_PROVEN="${MAP_PROVEN}${MAP_PR}:${MAP_MERGE_SHA} "', text)
+        self.assertIn('echo "source_pr_merge_map=${MAP_PROVEN}" >> "$GITHUB_OUTPUT"', text)
+        self.assertIn("steps.merged_rehearsal.outputs.source_pr_merge_map", text)
+
+    def test_each_pair_binds_its_OWN_pull_request_and_merge_commit(self):
+        # The whole point. `--source-pr "$MERGED_SOURCE_PR"` here would file the
+        # last pull request's identity under every filename in the batch, and the
+        # reader tests would not notice because the bodies would still be
+        # internally consistent.
+        text = self.workflow()
+        self.assertIn('PAIR_PR="${PAIR%%:*}"', text)
+        self.assertIn('PAIR_SHA="${PAIR#*:}"', text)
+        self.assertIn('--source-pr "$PAIR_PR"', text)
+        self.assertIn('--merge-commit-sha "$PAIR_SHA"', text)
+        self.assertIn('--output "$RUNNER_TEMP/preview-instance-${PAIR_PR}.json"', text)
+
+    def test_the_per_pull_request_files_are_uploaded_with_the_evidence(self):
+        # A file written into RUNNER_TEMP and never uploaded is not a binding
+        # anyone can recover from.
+        self.assertIn("preview-instance-*.json", self.workflow())
+
+
+class EveryReaderResolvesTheBindingTheSameWay(unittest.TestCase):
+    """A promotion must not read its own binding at one gate and the shared one
+    at another. Three call sites resolve the artifact; they go through one
+    function so they cannot drift apart."""
+
+    def binding(self, pr: int) -> str:
+        return json.dumps({"schema": "shared-db-preview-instance-binding/v1", "sourcePr": pr})
+
+    def test_a_pull_request_gets_its_own_file_not_the_shared_one(self):
+        texts = {
+            "preview-instance.json": self.binding(901),
+            "preview-instance-900.json": self.binding(900),
+        }
+        self.assertEqual(preview_instance_text(texts, 900), texts["preview-instance-900.json"])
+
+    def test_the_shared_file_still_serves_an_artifact_written_before_2140(self):
+        texts = {"preview-instance.json": self.binding(901)}
+        self.assertEqual(preview_instance_text(texts, 901), texts["preview-instance.json"])
+
+    def test_a_missing_binding_stays_missing_rather_than_being_invented(self):
+        self.assertIsNone(preview_instance_text({}, 900))
+
+    def test_a_non_integer_source_pr_cannot_build_a_filename(self):
+        texts = {"preview-instance.json": self.binding(901)}
+        for bogus in (None, "900", True, 9.0):
+            self.assertEqual(preview_instance_text(texts, bogus), texts["preview-instance.json"])
+
+
+class PerPullRequestPreviewInstanceBinding(unittest.TestCase):
+    """One binding per authoring pull request (#2140).
+
+    A batch rehearsal proves several merged pull requests in one run. It used to
+    file `preview-instance.json` under the LAST pull request in the map only,
+    while this proof compares the binding against the pull request that authored
+    the version under recovery. Every version except the last therefore had no
+    recoverable binding. The rehearsal now also writes `preview-instance-<pr>.json`
+    for each proven pull request; these tests hold BOTH halves: the per-pull-request
+    file is read, and it is checked exactly as strictly as the shared one.
+    """
+
+    RUN_HEAD = "a" * 40
+    MAIN_SHA = "b" * 40
+    MERGE_SHA = "c" * 40
+
+    def binding(self, **overrides):
+        payload = {
+            "schema": "shared-db-preview-instance-binding/v1",
+            "rehearsalMode": "merged-main-rehearsal",
+            "appliedCommit": self.RUN_HEAD,
+            "previewProjectRef": "mvpkijzfmfcxhnzqogzs",
+            "runId": 4242,
+            "allowlist": ["20260101000000"],
+            "sourcePr": 900,
+            "mergeCommitSha": self.MERGE_SHA,
+        }
+        payload.update(overrides)
+        return json.dumps(payload)
+
+    def exercise(self, texts, *, source_pr=900):
+        def api(endpoint):
+            return {"status": "ahead", "behind_by": 0}
+
+        prove_bound_mainline_post_merge_original(
+            texts=texts, run={"run_attempt": 1}, run_id=4242, run_head=self.RUN_HEAD,
+            original_commit=self.RUN_HEAD, run_versions=["20260101000000"],
+            source_pr=source_pr, merge_sha=self.MERGE_SHA, main_sha=self.MAIN_SHA,
+            api=api, producer_error=RiskGateError("preview producer drift"),
+        )
+
+    def test_per_pull_request_binding_is_accepted(self):
+        self.exercise({"preview-instance-900.json": self.binding()})
+
+    def test_earlier_pull_request_in_a_batch_is_recoverable(self):
+        # The shared file names the LAST pull request in the map. Before #2140
+        # this was the only file, so this recovery was impossible.
+        self.exercise({
+            "preview-instance.json": self.binding(sourcePr=901),
+            "preview-instance-900.json": self.binding(sourcePr=900),
+        })
+
+    def test_shared_binding_is_still_read_when_no_per_pr_file_exists(self):
+        self.exercise({"preview-instance.json": self.binding()})
+
+    def test_per_pull_request_file_naming_another_pull_request_is_refused(self):
+        # A file called `preview-instance-900.json` whose body says 901 is a
+        # forgery the filename alone would wave through.
+        with self.assertRaises(RiskGateError):
+            self.exercise({"preview-instance-900.json": self.binding(sourcePr=901)})
+
+    def test_per_pull_request_file_with_a_wrong_field_is_refused(self):
+        with self.assertRaises(RiskGateError):
+            self.exercise({"preview-instance-900.json": self.binding(runId=4243)})
+
+    def test_per_pull_request_file_naming_production_is_refused(self):
+        with self.assertRaises(RiskGateError):
+            self.exercise({"preview-instance-900.json": self.binding(
+                previewProjectRef=PRODUCTION_PROJECT_REF
+            )})
+
+    def test_missing_binding_is_still_refused(self):
+        with self.assertRaises(RiskGateError):
+            self.exercise({})
 
 
 if __name__ == "__main__":
