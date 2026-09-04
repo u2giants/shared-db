@@ -407,6 +407,26 @@ MARKER_REVIEW_CHECK_KEYS = {"line_start", "line_end", "disposition", "check_ids"
 MARKER_REVIEW_EMPTY_KEYS = {"line_start", "line_end", "disposition", "reason"}
 BEHAVIOR_ROW_COUNT_KEYS = {"id", "kind", "relation", "filters", "expected_count"}
 BEHAVIOR_CATALOG_CONTRACT_KEYS = {"id", "kind", "contract", "expected_count"}
+# ISSUE #2029. Every sidecar contract is asserted against the FINAL database
+# state, but an ordered batch may deliberately replace an object more than once.
+# During the #1703 promotion, forward 6's contract asserted strings from its own
+# `search_dam_documents` body -- a body forwards 7 and 8 replace later in the
+# SAME batch. Forwards 7 and 8 passed; only the superseded intermediate one
+# failed, so a correct promotion reported a red job and a genuine failure now
+# looks like the benign case.
+#
+# An OPTIONAL `superseded_by` on a catalog_contract check names the later
+# migration version that replaces this contract's subject. The check is skipped
+# ONLY when that version is in the SAME allowlist -- i.e. only when the
+# replacement is actually part of this batch and the final state is therefore
+# the successor's, not this one's. If the named version is not in the allowlist
+# the check runs exactly as before, because nothing in this batch replaced it.
+#
+# It is deliberately DECLARED rather than inferred: `CATALOG_CONTRACTS` maps a
+# name to a SQL expression and carries no machine-readable subject, so "the last
+# contract that touches each object" is not derivable, and guessing it would
+# silently stop asserting contracts nobody meant to retire.
+BEHAVIOR_CATALOG_CONTRACT_SUPERSEDED_KEYS = BEHAVIOR_CATALOG_CONTRACT_KEYS | {"superseded_by"}
 BEHAVIOR_FILTER_KEYS = {"column", "type", "equals"}
 BEHAVIOR_ENUM_VALUES = {
     "app.entity_status": {"active", "inactive", "archived", "deleted", "potential"},
@@ -1647,7 +1667,11 @@ def load_behavior_sidecars(
             allowed_keys = (
                 BEHAVIOR_ROW_COUNT_KEYS
                 if kind == "exact_row_count"
-                else BEHAVIOR_CATALOG_CONTRACT_KEYS
+                else (
+                    BEHAVIOR_CATALOG_CONTRACT_SUPERSEDED_KEYS
+                    if isinstance(value, dict) and "superseded_by" in value
+                    else BEHAVIOR_CATALOG_CONTRACT_KEYS
+                )
                 if kind == "catalog_contract"
                 else None
             )
@@ -1679,6 +1703,29 @@ def load_behavior_sidecars(
                 parsed["relation"] = f"catalog:{contract}"
                 parsed["migration_version"] = version
                 parsed["migration_sha256"] = actual_hash
+                # ISSUE #2029. Validated here, resolved against the allowlist
+                # below, so a malformed declaration costs an error rather than
+                # silently retiring a contract.
+                superseded_by = check.get("superseded_by")
+                if superseded_by is not None:
+                    if not isinstance(superseded_by, str) or not re.fullmatch(r"\d{14}", superseded_by):
+                        raise GuardError(
+                            f"{path}: superseded_by must be a 14-digit migration version, got {superseded_by!r}"
+                        )
+                    if superseded_by <= version:
+                        raise GuardError(
+                            f"{path}: superseded_by {superseded_by} must be LATER than {version}; "
+                            "a contract cannot be superseded by itself or by an earlier migration"
+                        )
+                    if superseded_by not in migrations:
+                        raise GuardError(
+                            f"{path}: superseded_by {superseded_by} is not a migration in this repository"
+                        )
+                    parsed["superseded_by"] = superseded_by
+                    # Skipped ONLY when the replacement is part of THIS batch. If
+                    # the successor is not being applied here, nothing in this run
+                    # replaced the contract and it must still be asserted.
+                    parsed["superseded_in_batch"] = superseded_by in set(allowlist)
                 checked.append(parsed)
                 continue
             relation = check["relation"]
@@ -1762,8 +1809,25 @@ def _typed_sql_literal(value: object, scalar_type: str) -> str:
     raise GuardError(f"unsupported behavioral scalar type: {scalar_type!r}")
 
 
+def is_superseded_in_batch(check: dict) -> bool:
+    """ISSUE #2029. True only for a contract this batch itself replaces later."""
+    return bool(check.get("superseded_in_batch"))
+
+
+def assertable_checks(checks: list[dict]) -> list[dict]:
+    """The checks that describe the FINAL state of this batch.
+
+    Every sidecar contract is asserted against the final database state, so a
+    contract a LATER migration in the same allowlist deliberately replaces
+    describes an intermediate state that no longer exists by the time the
+    verification runs. Asserting it turns a correct promotion red.
+    """
+    return [check for check in checks if not is_superseded_in_batch(check)]
+
+
 def build_behavior_sql(checks: list[dict]) -> str:
     """Build one SELECT from typed assertions. Sidecars cannot supply SQL."""
+    checks = assertable_checks(checks)
     if not checks:
         raise GuardError("cannot build behavioral SQL without checks")
     rows: list[str] = []
@@ -3166,6 +3230,17 @@ def render_report(
                         failures.append(f"duplicate behavioral result id: {row['id']}")
                     result_rows[row["id"]] = row
     for check in checks:
+        # ISSUE #2029. A contract this same batch replaces later is not asserted
+        # and is not a failure -- but it is REPORTED, naming its successor, so an
+        # operator can tell a designed supersession from a real absence without
+        # reading three contract rows.
+        if is_superseded_in_batch(check):
+            add(
+                f"| `{check['id']}` | `{check['migration_version']}` | "
+                f"`{check['relation']}` | {check['expected_count']} | _not asserted_ | "
+                f"**SUPERSEDED by `{check['superseded_by']}` in this batch** |"
+            )
+            continue
         row = result_rows.pop(check["id"], None)
         actual = row.get("actual_count") if isinstance(row, dict) else None
         returned_expected = row.get("expected_count") if isinstance(row, dict) else None
@@ -3620,11 +3695,15 @@ def verify(
     behavior_error: str | None = None
 
     declaration = targets.noop_declaration
-    if behavior_checks:
+    # ISSUE #2029. A batch whose only contracts are superseded by later members of
+    # the SAME batch has nothing left to assert; building a SELECT from zero rows
+    # would raise and read as a failure.
+    assertable = assertable_checks(behavior_checks)
+    if assertable:
         try:
             behavior_results = extract_report(
                 run_query(
-                    project_ref, token, build_behavior_sql(behavior_checks), api
+                    project_ref, token, build_behavior_sql(assertable), api
                 )
             )
         except (urllib.error.URLError, GuardError, ValueError, OSError) as exc:
@@ -3632,12 +3711,12 @@ def verify(
             errors.append(f"behavioral query failed: {exc}")
 
     has_catalog_contract = any(
-        check.get("kind") == "catalog_contract" for check in behavior_checks
+        check.get("kind") == "catalog_contract" for check in assertable
     )
-    if targets.is_empty() and behavior_checks and not has_catalog_contract:
+    if targets.is_empty() and assertable and not has_catalog_contract:
         errors.append(
             "the allowlisted migrations named no catalog object, but supplied "
-            f"{len(behavior_checks)} hash-bound behavioral assertion(s)."
+            f"{len(assertable)} hash-bound behavioral assertion(s)."
         )
     elif targets.is_empty() and has_catalog_contract:
         # The strict named contract is the durable verification surface. This

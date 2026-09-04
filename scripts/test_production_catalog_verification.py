@@ -37,6 +37,8 @@ from production_catalog_verification import (  # noqa: E402
     assert_privileges,
     build_catalog_sql,
     build_behavior_sql,
+    assertable_checks,
+    is_superseded_in_batch,
     build_row_count_sql,
     derive_targets,
     extract_report,
@@ -2395,6 +2397,113 @@ class BehaviourQueryErrorHonestyTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("expected 1 row(s)", failures[0])
 
+
+class SupersededCatalogContractTests(unittest.TestCase):
+    """ISSUE #2029 - a contract superseded by a later migration in the SAME
+    batch must not be asserted against production, because production only
+    ever sees the end state of the batch."""
+
+    EARLY = "20260101000000"
+    LATE = "20260102000000"
+    SQL = "do $$ begin update core.property set name = 'x'; end $$;\n"
+
+    def fixture(self, superseded_by=None, kind="catalog_contract"):
+        temp = tempfile.TemporaryDirectory()
+        root = Path(temp.name)
+        migrations = root / "supabase" / "migrations"
+        sidecars = root / "scripts" / "production-verification-sidecars"
+        migrations.mkdir(parents=True)
+        sidecars.mkdir(parents=True)
+        paths = {}
+        for version in (self.EARLY, self.LATE):
+            path = migrations / f"{version}_data.sql"
+            path.write_text(self.SQL, encoding="utf-8")
+            paths[version] = path
+        import hashlib
+        check = {
+            "id": "popdam_final_marker",
+            "kind": kind,
+            "expected_count": 1,
+        }
+        if kind == "catalog_contract":
+            check["contract"] = "popdam_1427_active_marker_v1"
+        else:
+            check["relation"] = "core.property"
+            check["filters"] = []
+        if superseded_by is not None:
+            check["superseded_by"] = superseded_by
+        sidecar = {
+            "schema_version": 1,
+            "migration_version": self.EARLY,
+            "migration_sha256": hashlib.sha256(
+                paths[self.EARLY].read_bytes().replace(b"\r\n", b"\n")
+            ).hexdigest(),
+            "checks": [check],
+        }
+        (sidecars / f"{self.EARLY}.json").write_text(
+            json.dumps(sidecar), encoding="utf-8"
+        )
+        return temp, root, paths
+
+    def load(self, root, paths, allowlist):
+        return load_behavior_sidecars(root, dict(paths), list(allowlist))
+
+    def test_superseded_within_the_batch_is_not_asserted(self):
+        temp, root, paths = self.fixture(superseded_by=self.LATE)
+        with temp:
+            checks = self.load(root, paths, [self.EARLY, self.LATE])
+        self.assertTrue(checks[0]["superseded_in_batch"])
+        self.assertEqual(checks[0]["superseded_by"], self.LATE)
+        self.assertEqual(assertable_checks(checks), [])
+
+    def test_superseded_outside_the_batch_is_still_asserted(self):
+        temp, root, paths = self.fixture(superseded_by=self.LATE)
+        with temp:
+            checks = self.load(root, paths, [self.EARLY])
+            self.assertFalse(checks[0]["superseded_in_batch"])
+            self.assertEqual(assertable_checks(checks), checks)
+            sql = build_behavior_sql(assertable_checks(checks))
+        self.assertTrue(sql.lower().startswith("select "))
+
+    def test_a_contract_with_no_supersession_is_unchanged(self):
+        temp, root, paths = self.fixture()
+        with temp:
+            checks = self.load(root, paths, [self.EARLY, self.LATE])
+        self.assertFalse(is_superseded_in_batch(checks[0]))
+        self.assertEqual(assertable_checks(checks), checks)
+
+    def test_malformed_supersession_versions_fail_closed(self):
+        for bad, pattern in (
+            ("not-a-version", "14-digit migration version"),
+            (20260102000000, "14-digit migration version"),
+            (self.EARLY, "must be LATER"),
+            ("20250101000000", "must be LATER"),
+            ("20991231000000", "not a migration in this repository"),
+        ):
+            with self.subTest(superseded_by=bad):
+                temp, root, paths = self.fixture(superseded_by=bad)
+                with temp, self.assertRaisesRegex(GuardError, pattern):
+                    self.load(root, paths, [self.EARLY, self.LATE])
+
+    def test_supersession_is_not_accepted_on_a_row_count_check(self):
+        temp, root, paths = self.fixture(
+            superseded_by=self.LATE, kind="exact_row_count"
+        )
+        with temp, self.assertRaisesRegex(GuardError, "unknown=.*superseded_by"):
+            self.load(root, paths, [self.EARLY, self.LATE])
+
+    def test_a_fully_superseded_batch_reports_rather_than_raising(self):
+        temp, root, paths = self.fixture(superseded_by=self.LATE)
+        with temp:
+            checks = self.load(root, paths, [self.EARLY, self.LATE])
+        lines = []
+        for check in checks:
+            if is_superseded_in_batch(check):
+                lines.append(
+                    f"SUPERSEDED by `{check['superseded_by']}` in this batch"
+                )
+        self.assertEqual(len(lines), 1)
+        self.assertIn(self.LATE, lines[0])
 
 if __name__ == "__main__":
     unittest.main()
