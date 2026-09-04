@@ -133,7 +133,7 @@ def snapshot_query(
             "from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
             "cross join lateral (values "
             "(1, format('do $pass2$ begin if to_regprocedure(%L) is not null then execute %L; end if; end $pass2$;', "
-            "format('%I.%I(%s)', n.nspname, p.proname, pg_get_function_identity_arguments(p.oid)), "
+            "format('%I.%I(%s)', n.nspname, p.proname, pg_catalog.oidvectortypes(p.proargtypes)), "
             "format('alter %s %I.%I(%s) reset all', case p.prokind when 'p' then 'procedure' else 'function' end, "
             "n.nspname, p.proname, pg_get_function_identity_arguments(p.oid)))), "
             "(2, pg_get_functiondef(p.oid) || E';\\n'), "

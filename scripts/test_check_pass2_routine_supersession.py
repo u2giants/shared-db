@@ -59,6 +59,7 @@ class Pass2RoutineSupersessionTests(unittest.TestCase):
         self.assertIn("p.prosecdef", query)
         self.assertIn("p.prokind", query)
         self.assertIn("to_regprocedure", query)
+        self.assertIn("oidvectortypes", query)
 
 
 class Pass2PrivilegeSupersessionTests(unittest.TestCase):
