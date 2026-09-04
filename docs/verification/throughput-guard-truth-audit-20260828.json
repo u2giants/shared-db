@@ -477,6 +477,13 @@
       "reason": "This site reports which required status checks are absent, pending, or failing on a reviewed head; it makes no claim about migration application truth."
     },
     {
+      "site": "scripts/check-required-checks-preflight.mjs:236",
+      "semantic_key": "scripts/check-required-checks-preflight.mjs:24c3c0ab70095b05c8c27076eedee14fc9f7ef9edaf6a02f199e1ecf00b43773:1",
+      "line_sha256": "24c3c0ab70095b05c8c27076eedee14fc9f7ef9edaf6a02f199e1ecf00b43773",
+      "disposition": "excluded",
+      "reason": "Reviewed for issue 2282: this comment explains why the required-checks pre-flight refuses when GitHub does not report how many status checks or check runs exist on a reviewed head. It is about the completeness of a GitHub API read, not about a migration, an applied object, or dynamic DDL, so it carries no throughput truth claim to enrich."
+    },
+    {
       "site": "scripts/check-required-checks-preflight.mjs:143",
       "semantic_key": "scripts/check-required-checks-preflight.mjs:29652be90fbcc2eec5eb9f25bf44c1c18331319f9ee021f4cd9b6c274f323233:1",
       "line_sha256": "29652be90fbcc2eec5eb9f25bf44c1c18331319f9ee021f4cd9b6c274f323233",
@@ -1779,7 +1786,7 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     }
   ],
-  "call_site_count": 252,
-  "call_site_sha256": "3844694198400f968d5960404d29c3278900ec4d780736c971f638645d1fc945",
+  "call_site_count": 253,
+  "call_site_sha256": "5d1063779b90bd66c089d532e85103fb37211ff484bd9211f02d376c4e6e1556",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
