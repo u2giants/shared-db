@@ -1336,6 +1336,55 @@ test('a retired reviewer is replaced cleanly, without an exclusion deadlock (#20
   assert.deepEqual(replaceFailedReviewer({...replacementRequest,failureCode:'wrapper_terminal_failure'},io),replacement)
 })
 
+test('a failed reviewer holding an UNRELATED live lease no longer blocks its own replacement (#2106)',()=>{
+  // ISSUE #2106 -- the second reviewer-pool deadlock mode. The reviewer that
+  // failed on THIS head has since been drawn onto a different review. A reviewer
+  // holds at most one lease, so that proves the lease this failure is about was
+  // already released. Replacement used to refuse outright, and freeing every
+  // OTHER reviewer in the pool could not clear it: only this one reviewer going
+  // idle would. During marker #2074 two assignments each needed four draws.
+  const io=failedReviewIo()
+  const failedName='grok-4.6'
+  assert.equal(io.refs.has(reviewActiveRef(failedName)),true,'the fixture must start with the failed reviewer holding its own lease')
+  // Same head so the unrelated lease is LIVE, not stale -- the point of the test
+  // is an active unrelated review, not a leftover to be swept.
+  const unrelated=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=99 reviewer=${failedName} issue=777 pr=778 head=${failedReview.headSha}`)
+  io.refs.set(reviewActiveRef(failedName),unrelated)
+  let protectedByCas=false
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  const applyAtomic=(changes)=>{
+    for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null)
+    for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}
+  }
+  io.atomicReviewRefs=(changes)=>{
+    if(changes.some((change)=>change.ref===`${REVIEW_REPLACEMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}-1`)){
+      const preservation=changes.find((change)=>change.ref===reviewActiveRef(failedName))
+      assert.deepEqual(preservation,{ref:reviewActiveRef(failedName),expected:unrelated,sha:unrelated},'the unrelated lease must be protected by the same atomic compare-and-swap')
+      protectedByCas=true
+    }
+    applyAtomic(changes)
+  }
+  io.atomicReviewMutexRelease=(ownerSha)=>applyAtomic([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(protectedByCas,true)
+  assert.equal(replacement.reviewer,'glm-5.3')
+  assert.equal(io.refs.get(reviewActiveRef(failedName)),unrelated,'the unrelated review must be left exactly as it was found')
+  assert.equal(io.refs.get(reviewActiveRef('glm-5.3')),replacement.replacementSha)
+  // Still idempotent, and still does not touch the unrelated lease on retry.
+  assert.deepEqual(replaceFailedReviewer(replacementRequest,io),replacement)
+  assert.equal(io.refs.get(reviewActiveRef(failedName)),unrelated)
+})
+
+test('a MATCHING failed lease is still released, and the relaxation is not a blanket one (#2106)',()=>{
+  // The control for the test above. Nothing about a lease that genuinely belongs
+  // to this failure changes: it is still released, and the outcome does not claim
+  // it was already gone.
+  const io=failedReviewIo()
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(io.refs.get(reviewActiveRef('grok-4.6'))??null,null,'the matching failed lease is released exactly as before')
+})
+
 test('three terminal providers do not grow replacement preflight past the fixed wire budget (#1962)',()=>{
   const io=failedReviewIo();let attempts=0;const labels=[]
   const rawGetCommit=io.getCommit
