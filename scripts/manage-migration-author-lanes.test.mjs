@@ -2151,9 +2151,14 @@ test('issue 2116 the production freeze names itself and restores every authoriza
   // can never satisfy these assertions on the restoration's behalf.
   const afterRestore=productionWorkflow.indexOf('\n      - name:',restore+1)
   const restoreStep=productionWorkflow.slice(restore,afterRestore>=0?afterRestore:undefined)
-  // A partially-failed revoke is exactly the damage this repairs, so it must run on
-  // a FAILED revoke too, not only a clean one.
-  assert.match(restoreStep,/if: always\(\) && \(steps\.revoke_frozen_authorizations\.outcome == 'success' \|\| steps\.revoke_frozen_authorizations\.outcome == 'failure'\)/)
+  // A partially-failed revoke is exactly the damage this repairs, and so is a
+  // CANCELLED one -- a cancelled step reports neither success nor failure, so any
+  // condition that enumerates outcomes skips itself on the very case that leaves
+  // heads revoked with nobody coming back for them. The condition must therefore be
+  // bare `always()`, and this asserts the absence of a narrowing clause, not merely
+  // the presence of `always()`.
+  assert.match(restoreStep,/\n +if: always\(\)\r?\n/,'the restoration must run on every outcome of the revoke step, cancellation included')
+  assert.doesNotMatch(restoreStep,/revoke_frozen_authorizations\.(outcome|conclusion)/,'the restoration must not narrow itself to particular revoke outcomes')
   // A revoked head must be traceable to the run that took it, and the refusal must
   // name the one command that puts it back.
   const revokeStep=productionWorkflow.slice(revoke,release)

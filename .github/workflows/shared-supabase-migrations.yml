@@ -1608,12 +1608,20 @@ jobs:
       # the one command that grants authorization, without granting it. A pending
       # required check still blocks an unguarded merge, so this fails safe.
       - name: Restore the merge authorizations this freeze revoked
-        # Also on a FAILED revoke, never only a clean one. The revoke loop runs
-        # under `set -e`, so one bad POST aborts it with earlier heads already
-        # revoked -- exactly the partial damage this step exists to repair. The
-        # description match below is what makes running here safe: a failed
-        # revoke simply leaves fewer heads carrying this run's description.
-        if: always() && (steps.revoke_frozen_authorizations.outcome == 'success' || steps.revoke_frozen_authorizations.outcome == 'failure')
+        # UNCONDITIONAL, and it must stay that way. The revoke loop runs under
+        # `set -e`, so one bad POST aborts it with earlier heads already revoked --
+        # exactly the partial damage this step exists to repair -- and a CANCELLED
+        # revoke (workflow cancelled, runner killed, job timeout) does the same thing
+        # while reporting neither success nor failure. An earlier version named the
+        # two outcomes it wanted and therefore skipped itself on `cancelled`, leaving
+        # every open pull request in the repository red forever: the precise failure
+        # issue #2116 exists to end, reintroduced by the repair for it.
+        #
+        # Running when there was nothing to revoke is free: the heads file is absent
+        # or empty and the step exits 0 immediately. Running when the revocations are
+        # not this run's is free too: the description match below leaves them alone.
+        # There is no outcome of the revoke step under which NOT running is safer.
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
