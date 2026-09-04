@@ -8,6 +8,7 @@
   DO $guard$ BEGIN RAISE EXCEPTION 'expected_project_ref is required'; END $guard$;
 \endif
 
+BEGIN;
 SET statement_timeout = '5min';
 SET lock_timeout = '5s';
 SET idle_in_transaction_session_timeout = '1min';
@@ -36,3 +37,4 @@ SELECT jsonb_build_object(
   'scratch_schema', :'scratch_schema',
   'scratch_schema_exists', to_regnamespace(:'scratch_schema') IS NOT NULL
 ) AS teardown_proof;
+COMMIT;

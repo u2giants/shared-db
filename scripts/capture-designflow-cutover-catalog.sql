@@ -1,4 +1,5 @@
 \set ON_ERROR_STOP on
+-- Internal operational evidence only: index and constraint definitions are not for public issue comments.
 \if :{?schema_name}
 \else
   DO $guard$ BEGIN RAISE EXCEPTION 'schema_name is required'; END $guard$;

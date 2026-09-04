@@ -8,6 +8,10 @@
   DO $guard$ BEGIN RAISE EXCEPTION 'expected_project_ref is required'; END $guard$;
 \endif
 
+-- Keep search_path, custom settings, and every scratch write on one backend even
+-- through the transaction-mode pooler. ON_ERROR_STOP disconnects and rolls the
+-- whole scratch schema back if any step fails.
+BEGIN;
 SET statement_timeout = '20min';
 SET lock_timeout = '5s';
 SET idle_in_transaction_session_timeout = '2min';
@@ -231,3 +235,4 @@ FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = :'scratch_schema' AND c.relkind IN ('r','p');
 
 SELECT row_to_json(t) FROM :"scratch_schema".timings t ORDER BY started_at, phase, object_name;
+COMMIT;
