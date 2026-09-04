@@ -931,6 +931,3 @@ grant execute on function public.check_taxonomy_sync_health(interval, jsonb) to 
 revoke all on function public.record_taxonomy_parallel_observation(date, jsonb) from public;
 revoke all on function public.record_taxonomy_parallel_observation(date, jsonb) from anon, authenticated;
 grant execute on function public.record_taxonomy_parallel_observation(date, jsonb) to service_role;
-
-
-
