@@ -872,10 +872,28 @@ def assert_atomic_batches(allowlist: list[str], remote: set[str]) -> None:
     """
     chosen = set(allowlist)
     for name, basis, why, members in ATOMIC_BATCHES:
+        already = members & remote
+        remote_is_partial = bool(already) and already != members
+        remaining = members - already
+        if remote_is_partial and not remaining.issubset(chosen):
+            missing_recovery = sorted(remaining - chosen)
+            raise GuardError(
+                f"production is already resting inside batch {name}; "
+                f"batch {name} is {basis}. "
+                f"The allowlist must include every remaining batch member before "
+                f"anything else may be promoted.\n"
+                f"  Excluded because production already has them "
+                f"({len(already)}): {', '.join(sorted(already))}\n"
+                f"  recovery still required ({len(missing_recovery)}): "
+                f"{', '.join(missing_recovery)}\n"
+                f"Promote every remaining {name} version together before any "
+                f"unrelated migration. This fail-closed recovery rule prevents "
+                f"production from silently remaining in a state the contract "
+                f"forbids."
+            )
         present = chosen & members
         if not present:
             continue
-        already = members & remote
         missing = sorted((members - already) - chosen)
         if not missing:
             continue

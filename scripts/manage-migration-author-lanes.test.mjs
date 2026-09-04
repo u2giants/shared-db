@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_PAGE_LIMIT, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -629,7 +629,7 @@ test('replacement selection skips reviewers durably excluded for the PR',()=>{
 
 test('active reviewer lease parser round-trips exact identity and fails closed',()=>{
   const reviewer=ACTIVE_REVIEWERS[0].name, message=`db-coordination reviewer-lease generation=7 reviewer=${reviewer} issue=1767 pr=1800 head=${'a'.repeat(40)} sequence=9`
-  assert.deepEqual(parseReviewLease({message}),{generation:7,reviewer,issue:1767,pr:1800,headSha:'a'.repeat(40),sequence:9})
+  assert.deepEqual(parseReviewLease({message}),{generation:7,reviewer,issue:1767,pr:1800,headSha:'a'.repeat(40),sequence:9,slot:1})
   assert.throws(()=>parseReviewLease({message:message.replace(reviewer,'unknown-reviewer')}),/malformed/)
   assert.throws(()=>parseReviewLease({message:message.replace('head='+('a'.repeat(40)),'head=not-a-sha')}),/malformed/)
   const legacy=parseReviewLease({message:message.replace('a'.repeat(40),'abcdef1')})
@@ -934,7 +934,7 @@ test('retired reviewer names stay resolvable so historical review evidence never
 test('the active rotation is exactly the current models, in a stable order',()=>{
   // Order and length are the round robin. A change here silently reassigns every
   // in-flight sequence to a different reviewer, so it must be asserted, not assumed.
-  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3','muse-spark-1.2-contributor','codex-gpt-5.6-sol'])
+  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','muse-spark-1.2-contributor','codex-gpt-5.6-sol'])
   assert.deepEqual(OVERFLOW_REVIEWERS,[])
   assert.equal(REVIEWERS.find((r)=>r.name==='kimi-k3').wrapper,'ai-kimi')
   assert.equal(REVIEWERS.find((r)=>r.name==='codex-gpt-5.6-sol').wrapper,'ai-codex-review')
@@ -962,6 +962,65 @@ test('the roster records, per reviewer, whether its wrapper reads the repository
   assert.equal(reviewerReadsRepository('deepseek-chat'),false)
   assert.equal(reviewerReadsRepository('nobody-at-all'),false,'an unknown reviewer must fail closed')
   assert.equal(reviewerReadsRepository(undefined),false)
+})
+
+// ---------------------------------------------------------------------------
+// Issue #2127: the marker resolver exits non-zero for answers it is CERTAIN of.
+// `--resolve` exits 3 for `state: none` and 1 for ambiguous/invalid/unsafe, so a
+// bare try/catch around execFileSync turned a correct answer into "could not be
+// resolved" and froze reviewer assignment repository-wide with zero markers open.
+//
+// `exitingResolver` reproduces the exact spawn failure shape execFileSync throws:
+// a non-zero status with the JSON still on `error.stdout`.
+const exitingResolver=(stdout,status)=>()=>{const error=new Error(`Command failed: node scripts/check-orchestrator-marker.mjs --resolve --json`);error.status=status;error.stdout=stdout;throw error}
+const NONE_JSON=JSON.stringify({state:'none',routing:null,message:'NO ACTIVE ORCHESTRATOR: zero open markers.'})
+const AMBIGUOUS_JSON=JSON.stringify({state:'ambiguous',routing:null,message:'AMBIGUOUS and UNSAFE: 2 open markers (#10, #11).'})
+
+test('zero open markers is an ANSWER, not a resolver failure (#2127)',()=>{
+  const resolved=readOrchestratorResolution(exitingResolver(NONE_JSON,3))
+  assert.equal(resolved.state,'none')
+  // The whole point of the fix: `state: none` excludes nothing, so it must not
+  // refuse, and it must never be described as an unresolvable/unreadable engine.
+  assert.equal(orchestratorEngineFromResolution(resolved),null)
+  assert.deepEqual(reviewersForOrchestrator(null).map((row)=>row.name),ACTIVE_REVIEWERS.map((row)=>row.name))
+})
+
+test('a genuinely broken resolver is still refused, and named as a run failure (#2127)',()=>{
+  // Nothing parseable on stdout -- a crash, a missing file, exit 2 UNKNOWN.
+  assert.throws(()=>readOrchestratorResolution(exitingResolver('',2)),(error)=>{
+    assert.ok(error instanceof LaneError)
+    assert.match(error.message,/resolver could not be run/)
+    return true
+  })
+  assert.throws(()=>readOrchestratorResolution(()=>{throw Object.assign(new Error('spawn ENOENT'),{stdout:undefined})}),/resolver could not be run/)
+  // Output that is present but not JSON is a fault too, and says so distinctly.
+  assert.throws(()=>readOrchestratorResolution(exitingResolver('<html>502 Bad Gateway</html>',1)),/resolver produced unreadable output/)
+  assert.throws(()=>readOrchestratorResolution(()=>JSON.stringify({routing:null})),/returned no state/)
+})
+
+test('two open markers still fail closed, and the refusal names ambiguity (#2127)',()=>{
+  const resolved=readOrchestratorResolution(exitingResolver(AMBIGUOUS_JSON,1))
+  assert.equal(resolved.state,'ambiguous')
+  assert.throws(()=>orchestratorEngineFromResolution(resolved),(error)=>{
+    assert.ok(error instanceof LaneError)
+    assert.match(error.message,/marker is ambiguous/)
+    assert.doesNotMatch(error.message,/could not be resolved/)
+    return true
+  })
+  for(const state of ['invalid','unsafe'])assert.throws(()=>orchestratorEngineFromResolution({state,routing:null}),new RegExp(`marker is ${state}`))
+  // A declared marker still excludes its own engine, unchanged.
+  assert.equal(orchestratorEngineFromResolution({state:'declared',routing:{engine:'Claude'}}),'claude')
+  assert.throws(()=>orchestratorEngineFromResolution({state:'declared',routing:{}}),/declares no engine/)
+})
+
+test('with no orchestrator running the full rotation is drawable (#2127)',()=>{
+  const io=reviewIo();io.resolveOrchestratorEngine=()=> null
+  const assigned=[]
+  for(let n=1;n<=ACTIVE_REVIEWERS.length;n++)assigned.push(assignNextReviewer({issue:7100+n,pr:8100+n,headSha:n.toString(16).padStart(40,'c')},io).reviewer)
+  for(const row of ACTIVE_REVIEWERS)assert.ok(assigned.includes(row.name),`${row.name} must be drawable when no orchestrator marker is open`)
+  // An io with no resolver at all is still UNREADABLE and still refuses --
+  // `undefined` must never be read as "no orchestrator is running".
+  assert.throws(()=>reviewersForOrchestrator(undefined),/engine is unreadable/)
 })
 
 test('the orchestrator engine is never eligible to review its own work',()=>{
@@ -1253,7 +1312,7 @@ test('terminal provider failure advances exactly once and retry is idempotent',(
   const io=failedReviewIo(), first=replaceFailedReviewer(replacementRequest,io), second=replaceFailedReviewer(replacementRequest,io)
   assert.equal(first.sequence,2);assert.equal(first.reviewer,'glm-5.3');assert.deepEqual(second,first)
   assert.equal(assignNextReviewer(failedReview,io).reviewer,'glm-5.3')
-  assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'kimi-k3')
+  assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'muse-spark-1.2-contributor')
 })
 
 test('a retired reviewer is replaced cleanly, without an exclusion deadlock (#2078)',()=>{
@@ -1672,7 +1731,7 @@ test('two consecutive terminal no-verdict failures form an immutable idempotent 
   const first=replaceFailedReviewer(replacementRequest,io)
   const secondRequest={...replacementRequest,failedSequence:first.sequence,failureCode:'turn_limit_cancelled'}
   const second=replaceFailedReviewer(secondRequest,io)
-  assert.equal(first.sequence,2);assert.equal(second.sequence,3);assert.equal(second.reviewer,'kimi-k3')
+  assert.equal(first.sequence,2);assert.equal(second.sequence,3);assert.equal(second.reviewer,'muse-spark-1.2-contributor')
   assert.deepEqual(replaceFailedReviewer(replacementRequest,io),first)
   assert.deepEqual(replaceFailedReviewer(secondRequest,io),second)
   assert.equal(assignNextReviewer(failedReview,io).sequence,3)
@@ -1748,15 +1807,15 @@ test('reviewer replacement rejects a mismatched original assignment',()=>{
 // is a false invariant, and it is deliberately not asserted here. Both halves are
 // pinned below, with the exact successor named in each case.
 test('one intervening assignment gives a failed reviewer a named replacement',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,5,'this test describes the approved five-reviewer rotation (deepseek-chat retired, #2078)')
+  assert.equal(ACTIVE_REVIEWERS.length,4,'this test describes the approved four-reviewer rotation (deepseek-chat retired, #2078; kimi-k3 paused 2026-09-03)')
   const io=failedReviewIo()
   assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
   const replacement=replaceFailedReviewer(replacementRequest,io)
-  assert.equal(replacement.reviewer,'kimi-k3')
+  assert.equal(replacement.reviewer,'muse-spark-1.2-contributor')
 })
 
 test('N-1 intervening assignments skip the failed provider instead of stranding the replacement',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,5,'this test describes the approved five-reviewer rotation (deepseek-chat retired, #2078)')
+  assert.equal(ACTIVE_REVIEWERS.length,4,'this test describes the approved four-reviewer rotation (deepseek-chat retired, #2078; kimi-k3 paused 2026-09-03)')
   const io=failedReviewIo()
   for(let n=0;n<ACTIVE_REVIEWERS.length-1;n+=1){
     assignNextReviewer({issue:20+n,pr:120+n,headSha:`abcde${n}f`},io)
@@ -1790,7 +1849,7 @@ test('a chained replacement skips TWO already-failed providers to reach the last
   const cursorBefore=parseReviewCursor(io.getCommit(io.refs.get(REVIEW_CURSOR_REF)))
   assert.equal(cursorBefore.sequence%ACTIVE_REVIEWERS.length,0,'the cursor must sit on a roster boundary for this to be a two-name skip')
   const second=replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence},io)
-  assert.equal(second.reviewer,'kimi-k3')
+  assert.equal(second.reviewer,'muse-spark-1.2-contributor')
   assert.equal(second.sequence,cursorBefore.sequence+3)
   assert.deepEqual(replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence},io),second)
 })
@@ -1859,12 +1918,15 @@ test('review lease age is truthful for known and unknown commit dates',()=>{
   assert.equal(reviewLeaseAgeHours('not-a-date',new Date('2026-09-01T12:00:00Z')),null)
 })
 
-test('capacity report classifies free, live, stale, verdict, aged, and unknown leases without mutation',()=>{
+test('capacity report classifies free, live, stale, aged, and unknown leases without mutation',()=>{
   const io=reviewIo(),snapshot=new Map(),states=new Map(),now=new Date('2026-09-02T12:00:00Z')
+  // Four cases, one per active reviewer (kimi-k3 paused 2026-09-03 dropped the
+  // roster to four) -- 'verdict' is cut here rather than 'moved' since both
+  // reached the same 'stale-reclaimable' classification and one demonstration
+  // of that path is enough once the roster no longer has a fifth slot to spare.
   const cases=[
     {kind:'live',date:'2026-09-02T11:00:00Z'},
     {kind:'moved',date:'2026-09-02T10:00:00Z'},
-    {kind:'verdict',date:'2026-09-02T09:00:00Z'},
     {kind:'aged',date:'2026-08-31T00:00:00Z'},
     {kind:'unknown',date:null},
   ]
@@ -1878,16 +1940,16 @@ test('capacity report classifies free, live, stale, verdict, aged, and unknown l
   io.readActiveReviewLeases=()=>snapshot
   io.readReviewStates=()=>states
   const before=new Map(io.refs),report=reviewerCapacityReport(io,now)
-  assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','stale-reclaimable','suspect-aged','unknown'])
-  assert.deepEqual(report.summary,{total:5,free:0,live:2,reclaimable:2,unknown:1})
+  assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown'])
+  assert.deepEqual(report.summary,{total:4,free:0,live:2,reclaimable:1,unknown:1})
   assert.deepEqual(io.refs,before,'capacity report must be read-only')
-  // 'free' is the sixth classification and it is a property of an ABSENT lease, so
+  // 'free' is the fifth classification and it is a property of an ABSENT lease, so
   // it is proved by removing one rather than by needing a spare roster name.
   const freed=ACTIVE_REVIEWERS.at(-1).name
   snapshot.delete(reviewActiveRef(freed));io.refs.delete(reviewActiveRef(freed))
   const withFree=reviewerCapacityReport(io,now)
-  assert.deepEqual(withFree.reviewers.map((row)=>row.classification),['live','stale-reclaimable','stale-reclaimable','suspect-aged','free'])
-  assert.deepEqual(withFree.summary,{total:5,free:1,live:2,reclaimable:2,unknown:0})
+  assert.deepEqual(withFree.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','free'])
+  assert.deepEqual(withFree.summary,{total:4,free:1,live:2,reclaimable:1,unknown:0})
 })
 
 test('release refuses a verdict or a changed lease under the mutex',()=>{
@@ -3582,7 +3644,7 @@ test('cutover activation fails closed when the ref listing refuses as possibly t
   const io=freshCutoverIo(),headSha='f'.repeat(40)
   io.openPulls=()=>[{number:420,head:{sha:headSha}}]
   seedAssignment(io,{issue:42,pr:420,headSha,reviewer:'grok-4.6'})
-  io.listReviewRefsPaged=()=>{throw new LaneError(`refs/db-review-assignments exceeded ${REVIEW_REF_PAGE_LIMIT} pages of 100 refs; refusing a possibly truncated reviewer audit`)}
+  io.listReviewRefsPaged=()=>{throw new LaneError(`refs/db-review-assignments returned 1200 refs, at or past the ${REVIEW_REF_ROW_LIMIT}-ref ceiling; refusing a possibly truncated reviewer audit. Retire refs rather than raising the ceiling (#2152)`)}
   assert.throws(()=>activateReviewCutover(io),/refusing a possibly truncated reviewer audit/)
   assert.equal(io.refs.has(REVIEW_ACTIVE_CUTOVER_REF),false)
   assert.equal(io.refs.has(MUTEX_REF),false)
@@ -3622,6 +3684,31 @@ test('cutover activation skips a pre-cutover assignment that already has a verdi
   const result=activateReviewCutover(io)
   assert.deepEqual(result.backfilled,[])
   assert.equal(io.refs.has(reviewActiveRef('grok-4.6')),false)
+})
+
+test('cutover activation still backfills a live SLOT 2 lease when only slot 1 has a verdict (issue #2208 follow-up F3)',()=>{
+  // The activation asked the any-slot verdict question, so slot 1's verdict made
+  // slot 2's reviewer look answered and it never got its protective lease -- the
+  // busy probe then goes blind and the same provider can be handed slot 2 again,
+  // the exact double-assignment hazard this activation exists to prevent.
+  const io=freshCutoverIo(),headSha='d'.repeat(40)
+  io.openPulls=()=>[{number:111,head:{sha:headSha}}]
+  const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=2 reviewer=glm-5.3 issue=11 pr=111 head=${headSha} slot=2`)
+  io.refs.set(`${REVIEW_ASSIGNMENT_REF_PREFIX}/11-111-${headSha}-slot2`,sha)
+  giveVerdict(io,{issue:11,pr:111,headSha,slot:1})
+  const result=activateReviewCutover(io)
+  assert.deepEqual(result.backfilled,[{reviewer:'glm-5.3',issue:11,pr:111,headSha,ref:reviewActiveRef('glm-5.3')}])
+  assert.ok(io.refs.has(reviewActiveRef('glm-5.3')))
+})
+
+test('cutover activation still backfills a live SLOT 1 lease when only slot 2 has a verdict (issue #2208)',()=>{
+  const io=freshCutoverIo(),headSha='e'.repeat(40)
+  io.openPulls=()=>[{number:112,head:{sha:headSha}}]
+  const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=3 reviewer=grok-4.6 issue=12 pr=112 head=${headSha}`)
+  io.refs.set(`${REVIEW_ASSIGNMENT_REF_PREFIX}/12-112-${headSha}`,sha)
+  giveVerdict(io,{issue:12,pr:112,headSha,slot:2})
+  const result=activateReviewCutover(io)
+  assert.deepEqual(result.backfilled,[{reviewer:'grok-4.6',issue:12,pr:112,headSha,ref:reviewActiveRef('grok-4.6')}])
 })
 
 // REGRESSION (issue #1822, glm-5.3 sequence 524 High). The BATCHED verdict
@@ -3735,7 +3822,9 @@ test('cutover activation with a live in-progress review stays inside the real wi
   //   getRateLimit        -> 2 (REST rate_limit + GraphQL rateLimit)
   //   readReviewRecords   -> 2 (GraphQL for explicit refs + REST prefix list),
   //                          and `.matching` rows carry NO commit message
-  //   listReviewRefsPaged -> 1 per 100-ref page
+  //   listReviewRefsPaged -> 1, flat, for any namespace size (issue #2152:
+  //                          git/matching-refs is not paginated and returns
+  //                          the whole namespace in a single request)
   //   readActiveReviewLeases -> 1, and it warms reviewCommitBase, so
   //   makeOwnerCommit     -> 1 after it (3 only when the base is still cold)
   io.getRateLimit=()=>{wire(2,'quota');return {remaining:5000,limit:5000,reset:1787943986,graphRemaining:5000,graphLimit:5000,graphReset:1787943986}}
@@ -3745,13 +3834,14 @@ test('cutover activation with a live in-progress review stays inside the real wi
   io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
   io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
   // These namespaces are append-only across the repository's WHOLE review
-  // history, so a fixture holding two refs would charge one page while the real
-  // repository charges four and two (370 assignment refs / 106 replacement refs,
-  // measured 2026-08-29). Charging the fixture one page apiece is precisely the
-  // friendlier-than-production fiction that let the previous version of this
-  // test pass over a broken activation, so the real page counts are charged here.
-  const REAL_REF_PAGES={[REVIEW_ASSIGNMENT_REF_PREFIX]:4,[REVIEW_REPLACEMENT_REF_PREFIX]:2}
-  io.listReviewRefsPaged=(prefix)=>{wire(REAL_REF_PAGES[prefix]??1,`listReviewRefsPaged:${prefix}`);return [...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha}))}
+  // history (726 assignment refs / 229 replacement refs, measured 2026-09-02),
+  // and this used to charge four and two requests for them because the listing
+  // walked pages. It no longer does: `git/matching-refs` is not a paginated
+  // endpoint, so one request returns the whole namespace whatever its size
+  // (issue #2152). Charging ONE here is now the production-faithful price, and
+  // it is the size-independent one -- the cost can no longer drift up as refs
+  // accumulate, which is what made the old charge a moving target.
+  io.listReviewRefsPaged=(prefix)=>{wire(1,`listReviewRefsPaged:${prefix}`);return [...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha}))}
   io.readReviewRecords=(refs,prefix)=>{
     assert.ok(refs.length,'production readReviewRecords builds an EMPTY GraphQL selection set for an empty ref list, which GitHub rejects outright')
     wire(prefix?2:1,'readReviewRecords')
@@ -3837,6 +3927,150 @@ test('slot 2 keeps its own ref namespace: it never disturbs or is confused with 
   assert.deepEqual(assignNextReviewer({...request,slot:2},io),second)
 })
 
+test('slot 2 is drawable as a genuine first-time assignment even though slot 1 already has a durable verdict for this exact head (issue #2208)',()=>{
+  // Reviewers are asynchronous: slot 1 finishing (and recording its durable
+  // verdict) before slot 2 is even drawn is the ORDINARY case, not an edge
+  // case. `hasVerdictForHead` used to answer "does ANY slot have a verdict for
+  // this head" with no slot filter, so the post-mutex freshness recheck inside
+  // the ordinary assignment path mistook slot 1's pre-existing, unrelated
+  // verdict for "the verdict state changed after I took the mutex" and refused
+  // to draw slot 2 at all -- forever, for that head. The only workaround was
+  // discarding slot 1's already-valid verdict by pushing a new head and
+  // redrawing both slots together.
+  const io=withAtomicRefs(reviewIo()),request={issue:2208,pr:2299,headSha:'e'.repeat(40)}
+  io.getPr=()=>({number:request.pr,state:'open',head:{sha:request.headSha,ref:'codex/x'}})
+  const first=assignNextReviewer(request,io)
+  giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:1})
+  const second=assignNextReviewer({...request,slot:2},io)
+  assert.equal(second.slot,2)
+  assert.notEqual(second.reviewer,first.reviewer)
+  // Idempotent retry of the same slot-2 draw must still work once it exists.
+  assert.deepEqual(assignNextReviewer({...request,slot:2},io),second)
+})
+
+test("a live slot-2 reviewer stays BUSY while slot 1 holds a verdict for the same head (issue #2208 follow-up, codex-gpt-5.6-sol REJECT)",()=>{
+  // The busy-reviewer scan used to ask "does ANY slot have a verdict for this
+  // head", so the moment slot 1 recorded its verdict, slot 2's still-working
+  // reviewer was classified stale and its active lease became reclaimable --
+  // two sessions could then hold the same slot at once. The lease knows which
+  // slot it belongs to; the question must be asked on behalf of that slot.
+  const io=withAtomicRefs(reviewIo()),request={issue:2211,pr:2302,headSha:'c3'.repeat(20)}
+  io.getPr=()=>({number:request.pr,state:'open',head:{sha:request.headSha,ref:'codex/x'}})
+  const first=assignNextReviewer(request,io)
+  const second=assignNextReviewer({...request,slot:2},io)
+  assert.notEqual(first.reviewer,second.reviewer)
+  // Slot 1 finishes. Slot 2 has NOT.
+  giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:1})
+  const busy=findBusyReviewers(io)
+  assert.ok(busy,'busy scan must be readable')
+  // Slot 1's reviewer is genuinely free -- its own verdict landed.
+  assert.ok(!busy.has(first.reviewer),`${first.reviewer} recorded slot 1's verdict and must be free`)
+  assert.ok(!busy.stale.some((row)=>row.assignment.reviewer===second.reviewer),`${second.reviewer} is still working slot 2 and must NOT be reclaimable`)
+  assert.ok(busy.has(second.reviewer),`${second.reviewer} still holds a live slot-2 lease and must stay busy`)
+  // The capacity report must tell the same story.
+  const report=reviewerCapacityReport(io)
+  const slotTwoRow=report.reviewers.find((row)=>row.reviewer===second.reviewer)
+  assert.equal(slotTwoRow.verdictPresent,false)
+  assert.notEqual(slotTwoRow.classification,'stale-reclaimable')
+  // And once slot 2 itself records a verdict, its reviewer frees normally.
+  giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:2})
+  assert.ok(!findBusyReviewers(io).has(second.reviewer))
+})
+
+test("a sibling slot's verdict must NOT free a genuinely unknown-slot live lease (issue #2208 follow-up round 3)",()=>{
+  // REVERSE DIRECTION, on the ONE record shape that is still genuinely
+  // ambiguous: a pre-#2077 replacement message, which carries no `slot=` token
+  // at all. Scoping is meant to NARROW what blocks an action; in the liveness
+  // path the old head-wide fallback did the opposite -- "a verdict exists" went
+  // TRUE the moment ANY sibling slot finished, so a live lease became
+  // reclaimable by a stranger's verdict. Absence of a slot must never be
+  // permission to reclaim.
+  const io=reviewIo(),issue=2213,pr=2304,headSha='c5'.repeat(20)
+  const message=`db-coordination reviewer-replacement sequence=8 reviewer=grok-4.6 issue=${issue} pr=${pr} head=${headSha} failed-sequence=7 prior-sequence=7 failure-ref=${'b'.repeat(40)}`
+  assert.equal(parseReviewLease({message}).slot,null,'this fixture must be the UNKNOWN-slot shape')
+  io.refs.set(reviewActiveRef('grok-4.6'),io.makeOwnerCommit(message))
+  io.getPr=(number)=>({number:Number(number),state:'open',head:{sha:headSha}})
+  // A stranger finishes slot 2. Our lease does not say it is not slot 2.
+  giveVerdict(io,{issue,pr,headSha,slot:2})
+  const busy=findBusyReviewers(io)
+  assert.ok(busy,'busy scan must be readable')
+  assert.ok(busy.has('grok-4.6'),"a sibling slot's verdict must not free an unknown-slot lease")
+  assert.ok(!busy.stale.some((row)=>row.assignment.reviewer==='grok-4.6'),'and it must not be reclaimable')
+  assert.equal(reviewerCapacityReport(io).reviewers.find((row)=>row.reviewer==='grok-4.6').verdictPresent,false)
+  // Holding it conservatively must not strand it: the ordinary releases still
+  // work. The head moves...
+  const moved={...io,getPr:()=>({number:pr,state:'open',head:{sha:'9'.repeat(40)}})}
+  assert.ok(!findBusyReviewers(moved).has('grok-4.6'))
+  // ...or the PR closes.
+  const closed={...io,getPr:()=>({number:pr,state:'closed',head:{sha:headSha}})}
+  assert.ok(!findBusyReviewers(closed).has('grok-4.6'))
+})
+
+test('a replacement lease STATES its slot even for slot 1, so its own verdict still frees it (issue #2208 follow-up round 3)',()=>{
+  // The conservative unknown-slot branch must not become a leak. Every
+  // replacement record written from now on states `slot=`, slot 1 included --
+  // its active lease ref is NOT slot-namespaced, so the message is the only
+  // place the slot can come from. This pins the written message shape, not just
+  // the behaviour that depends on it.
+  const io=withAtomicRefs(reviewIo()),request={issue:2214,pr:2305,headSha:'c6'.repeat(20)}
+  io.getPr=()=>({number:request.pr,state:'open',head:{sha:request.headSha,ref:'codex/x'}})
+  const first=assignNextReviewer(request,io)
+  const replacement=replaceFailedReviewer({...request,failedSequence:first.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)
+  const leaseSha=io.refs.get(reviewActiveRef(replacement.reviewer))
+  assert.match(io.getCommit(leaseSha).message,/ slot=1 /,'a slot-1 replacement message must state its slot')
+  assert.equal(parseReviewLease(io.getCommit(leaseSha)).slot,1)
+  assert.ok(findBusyReviewers(io).has(replacement.reviewer))
+  giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:1})
+  assert.ok(!findBusyReviewers(io).has(replacement.reviewer),"its own slot's verdict must still free it")
+})
+
+test('parseReviewLease reads the slot from the message form, and never guesses one (issue #2208 follow-up)',()=>{
+  const cursorTwo=parseReviewLease({message:'db-coordination reviewer-cursor sequence=7 reviewer=grok-4.6 issue=1 pr=2 head='+'a'.repeat(40)+' slot=2'})
+  assert.equal(cursorTwo.slot,2)
+  // Current --assign-reviewer omits ` slot=` for slot 1, so absent MEANS 1 here.
+  const cursorOne=parseReviewLease({message:'db-coordination reviewer-cursor sequence=7 reviewer=grok-4.6 issue=1 pr=2 head='+'a'.repeat(40)})
+  assert.equal(cursorOne.slot,1)
+  // Pre-#2077 replacement messages carry no slot token: UNKNOWN, never 1.
+  const legacyReplacement=parseReviewLease({message:'db-coordination reviewer-replacement sequence=8 reviewer=glm-5.3 issue=1 pr=2 head='+'a'.repeat(40)+' failed-sequence=7 prior-sequence=7 failure-ref='+'b'.repeat(40)})
+  assert.equal(legacyReplacement.slot,null)
+  const replacementTwo=parseReviewLease({message:'db-coordination reviewer-replacement sequence=8 reviewer=glm-5.3 issue=1 pr=2 head='+'a'.repeat(40)+' slot=2 failed-sequence=7 prior-sequence=7 failure-ref='+'b'.repeat(40)})
+  assert.equal(replacementTwo.slot,2)
+  // The legacy generation-form lease is SLOT 1 (round 3). Nothing writes that
+  // form any more; it is read-only history from before review slots existed, so
+  // slot 1 is the only slot it could ever have belonged to. Under the round-3
+  // fail-closed liveness sentinel, leaving it UNKNOWN would pin those leases
+  // busy forever -- `a recorded verdict and a moved head both free the reviewer
+  // that held them` is the guard that says so.
+  const generation=parseReviewLease({message:'db-coordination reviewer-lease generation=3 reviewer=kimi-k3 issue=1 pr=2 head='+'a'.repeat(40)+' sequence=9'})
+  assert.equal(generation.slot,1)
+  assert.equal(generation.sequence,9)
+})
+
+test('hasVerdictForHead: an optional slot narrows the match; omitted, it still answers for ANY slot (issue #2208)',()=>{
+  const io=reviewIo(),issue=2210,pr=2301,headSha='f2'.repeat(20)
+  assert.equal(hasVerdictForHead(issue,pr,headSha,io),false)
+  giveVerdict(io,{issue,pr,headSha,slot:1})
+  // No slot given: unchanged pre-#2208 behavior, any slot's verdict counts.
+  assert.equal(hasVerdictForHead(issue,pr,headSha,io),true)
+  // Asked on behalf of slot 1 specifically: still true, it's slot 1's own verdict.
+  assert.equal(hasVerdictForHead(issue,pr,headSha,io,{slot:1}),true)
+  // Asked on behalf of slot 2 specifically: false. Slot 1's verdict is a
+  // SIBLING slot's state, not slot 2's own -- this is the exact distinction
+  // #2208's lockout collapsed.
+  assert.equal(hasVerdictForHead(issue,pr,headSha,io,{slot:2}),false)
+  giveVerdict(io,{issue,pr,headSha,slot:2})
+  assert.equal(hasVerdictForHead(issue,pr,headSha,io,{slot:2}),true)
+})
+
+test('releasing a failed slot 2 reviewer is still refused once slot 2 ITSELF already has a durable verdict (issue #2208 does not weaken same-slot protection)',()=>{
+  const io=withAtomicRefs(reviewIo()),request={issue:2209,pr:2300,headSha:'f1'.repeat(20)}
+  io.getPr=()=>({number:request.pr,state:'open',head:{sha:request.headSha,ref:'codex/x'}})
+  assignNextReviewer(request,io)
+  const second=assignNextReviewer({...request,slot:2},io)
+  giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:2})
+  assert.throws(()=>releaseFailedReviewer({issue:request.issue,pr:request.pr,headSha:request.headSha,failedSequence:second.sequence,slot:2,failureCode:'provider_unavailable',confirmNoVerdict:true,confirmNoArtifact:true},io),/verdict/)
+})
+
 test('an invalid review slot is refused',()=>{
   const io=reviewIo()
   assert.throws(()=>assignNextReviewer({issue:205,pr:305,headSha:'a'.repeat(40),slot:0},io),/positive integer/)
@@ -3844,12 +4078,13 @@ test('an invalid review slot is refused',()=>{
 })
 
 test('retrying a slot-2 assignment must still refuse a reviewer that is no longer independent from the live orchestrator',()=>{
-  // Occupy grok-4.6, glm-5.3 and kimi-k3 with unrelated live review work so the
+  // Occupy grok-4.6 and glm-5.3 with unrelated live review work so the
   // rotation's next two picks for our real request land on muse (slot 1) then
   // codex-gpt-5.6-sol (slot 2), while the orchestrator engine is still 'claude'
-  // and codex is eligible.
+  // and codex is eligible. (kimi-k3 paused 2026-09-03, dropping the roster to
+  // four names, so only two reviewers need occupying now, not three.)
   const io=reviewIo()
-  for(let n=0;n<3;n++)assignNextReviewer({issue:600+n,pr:700+n,headSha:`${n}`.repeat(40)},io)
+  for(let n=0;n<2;n++)assignNextReviewer({issue:600+n,pr:700+n,headSha:`${n}`.repeat(40)},io)
   const request={issue:206,pr:306,headSha:'9'.repeat(40)}
   const first=assignNextReviewer(request,io)
   assert.equal(first.reviewer,'muse-spark-1.2-contributor')
@@ -4217,6 +4452,63 @@ test('a failed slot-2 reviewer can be replaced without touching slot 1 (issue #1
   assert.equal(io.refs.get(reviewActiveRef(slotTwo.reviewer))??null,null,'the failed slot-2 reviewer lease must lapse through the replacement')
   // Idempotent retry, same as slot 1 has always been.
   assert.deepEqual(replaceFailedReviewer({...request,slot:2,failedSequence:slotTwo.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io),replaced)
+})
+
+test('a slot-1 verdict neither frees nor blocks a live slot-2 replacement (issue #2208)',()=>{
+  const io=withAtomicRefs(reviewIo()),request={issue:2208,pr:2221,headSha:'d8'.repeat(20)}
+  io.getPr=()=>({state:'open',head:{sha:request.headSha}})
+  const slotOne=assignNextReviewer(request,io)
+  const slotTwo=assignNextReviewer({...request,slot:2},io)
+  const replacementRequest={...request,slot:2,failedSequence:slotTwo.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true}
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:1})
+  const assigned=assignNextReviewer({...request,slot:2},io)
+  assert.equal(assigned.reviewer,replacement.reviewer,'slot-1 completion must not clear the live slot-2 replacement lease')
+  assert.equal(assigned.replacementSha,replacement.replacementSha)
+  assert.deepEqual(replaceFailedReviewer(replacementRequest,io),replacement,'slot-1 completion must not block an idempotent slot-2 replacement retry')
+  assert.equal(io.refs.get(reviewActiveRef(replacement.reviewer)),replacement.replacementSha)
+  assert.notEqual(replacement.reviewer,slotOne.reviewer)
+})
+
+test('a slot-2 verdict never frees a live slot-1 replacement (issue #2208)',()=>{
+  const io=withAtomicRefs(reviewIo()),request={issue:2208,pr:2221,headSha:'f8'.repeat(20)}
+  io.getPr=()=>({state:'open',head:{sha:request.headSha}})
+  const slotOne=assignNextReviewer(request,io)
+  assignNextReviewer({...request,slot:2},io)
+  const replacementRequest={...request,failedSequence:slotOne.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true}
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:2})
+  const busy=findBusyReviewers(io)
+  assert.ok(busy.has(replacement.reviewer))
+  assert.equal(io.refs.get(reviewActiveRef(replacement.reviewer)),replacement.replacementSha)
+  assert.deepEqual(replaceFailedReviewer(replacementRequest,io),replacement)
+})
+
+test("end to end: slot 1's verdict must not refuse --replace-failed-reviewer --review-slot 2 at the same head (issue #2208 follow-up F2)",()=>{
+  // The unit check above proves the predicate; this proves the COMMAND. With
+  // assertAssignmentWasNotTerminallyReleased after a slot-2 release, a refusal
+  // here leaves slot 2 unfillable at that head and the only escape is pushing a
+  // new head -- which discards slot 1's valid verdict. The merge gate's own
+  // disregarded-verdict note tells operators to run exactly this command.
+  const io=withAtomicRefs(reviewIo()),request={issue:2212,pr:2303,headSha:'c4'.repeat(20)}
+  io.getPr=()=>({number:request.pr,state:'open',head:{sha:request.headSha,ref:'codex/x'}})
+  assignNextReviewer(request,io)
+  const second=assignNextReviewer({...request,slot:2},io)
+  giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:1})
+  const replacement=replaceFailedReviewer({...request,slot:2,failedSequence:second.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)
+  assert.notEqual(replacement.reviewer,second.reviewer)
+  // Same-slot protection is NOT weakened: slot 2's own verdict still forbids it.
+  giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:2})
+  assert.throws(()=>replaceFailedReviewer({...request,slot:2,failedSequence:replacement.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io),/verdict/)
+})
+
+test('replacement refusal is scoped to the requested review slot (issue #2208)',()=>{
+  const io=reviewIo(),issue=2208,pr=2221,headSha='e8'.repeat(20)
+  giveVerdict(io,{issue,pr,headSha,slot:1})
+  assert.equal(headVerdictBlocksReplacement(issue,pr,headSha,io,{slot:2}),false)
+  assert.equal(headVerdictBlocksReplacement(issue,pr,headSha,io,{slot:1}),true)
+  assert.equal(headVerdictBlocksReplacement(issue,pr,headSha,io,{slot:null}),true,'an unknown slot remains fail-closed')
+  assert.equal(headVerdictBlocksReplacement(issue,pr,headSha,io),true,'legacy omitted-slot callers remain fail-closed')
 })
 
 test('a slot-2 replacement request must never be answered from slot 1 records (issue #1832)',()=>{
@@ -4952,4 +5244,312 @@ test('a malformed assignment ref still held by the excluded reviewer stops the e
   assert.throws(()=>excludeReviewerForPr({issue:2077,pr:2105,reviewer:first.reviewer,reason:'independence-conflict',evidenceSha},io),/cannot be named by the shared ref parser/)
   assert.equal(io.refs.get(legacy),evidenceSha)
   assert.equal(io.readRef(`${REVIEW_EXCLUSION_REF_PREFIX}/2077-2105-${first.reviewer}`),null)
+})
+
+// ---------------------------------------------------------------------------
+// listReviewRefsPaged against a namespace that GENUINELY exceeds one page
+// (issue #2152).
+//
+// The broken pager shipped because every test for it used a fixture holding
+// fewer than 100 refs, where `chunk.length<100` fires on the first request and
+// a page-1-repeating endpoint is indistinguishable from a correct one. These
+// tests use a fake transport that models the REAL endpoint measured on
+// 2026-09-02: `git/matching-refs` ignores BOTH `per_page` and `page`, sends no
+// Link header, and returns the complete matching set in one response.
+// ---------------------------------------------------------------------------
+
+// The fake endpoint. Deliberately ignores every pagination parameter, exactly
+// as the real one does -- that is the whole point of the fixture.
+const matchingRefsServer=(count,{link=null}={})=>{
+  const calls=[]
+  const rows=Array.from({length:count},(_,i)=>({ref:`refs/db-review-assignments/${i}-${i+1}-${String(i).padStart(40,'0')}`,object:{sha:String(i).padStart(40,'0')}}))
+  return {calls,rows,serve(endpoint){calls.push(endpoint);return rows},headers:link?{link}:{}}
+}
+
+// The pager as it stood on main at bd00aaa7, copied verbatim except that its
+// request goes to the fake server instead of `gh`. Kept here as the CONTROL: a
+// test that only the new implementation can pass is worth nothing unless the
+// old one demonstrably fails it.
+const brokenPagerAtBd00aaa7=(prefix,server,pageLimit=6)=>{
+  const short=prefix.replace(/^refs\//,'')
+  const rows=[]
+  for(let page=1;page<=pageLimit;page++){
+    const chunk=server.serve(`repos/u2giants/shared-db/git/matching-refs/${short}?per_page=100&page=${page}`)
+    if(!Array.isArray(chunk))throw new LaneError(`GitHub page ${page} for ${prefix} was incomplete or malformed`)
+    rows.push(...chunk.map((row)=>({ref:row.ref,sha:row.object?.sha})).filter((row)=>row.sha))
+    if(chunk.length<100)return rows
+  }
+  throw new LaneError(`${prefix} exceeded ${pageLimit} pages of 100 refs; refusing a possibly truncated reviewer audit`)
+}
+
+test('CONTROL: the pre-#2152 pager refuses on a 726-ref namespace served by a page-ignoring endpoint',()=>{
+  const server=matchingRefsServer(726)
+  assert.throws(()=>brokenPagerAtBd00aaa7(REVIEW_ASSIGNMENT_REF_PREFIX,server),/exceeded 6 pages of 100 refs/)
+  assert.equal(server.calls.length,6,'it spent six counted requests to learn nothing')
+})
+
+// EVIDENCE FOR THE #2152 POST-MORTEM QUESTION -- did any decision ever run on a
+// DUPLICATED ref list? Not from a namespace that held still. The old loop
+// returns early only on `chunk.length<100`, and a page-1-repeating endpoint
+// returns a short page only when the namespace itself holds under 100 refs --
+// in which case one request already held the whole namespace and the list was
+// correct and duplicate-free. At 100 refs or more every request is full, so the
+// loop runs to the ceiling and THROWS. Against a STABLE namespace the two
+// outcomes are "correct list" and "loud refusal", with nothing between them.
+// The next test shows the one case that does fall between them.
+test('CONTROL: the pre-#2152 pager has no path that returns a duplicated list from a STABLE namespace',()=>{
+  for(const count of [0,1,99]){
+    const server=matchingRefsServer(count)
+    const rows=brokenPagerAtBd00aaa7(REVIEW_ASSIGNMENT_REF_PREFIX,server)
+    assert.equal(server.calls.length,1,'a sub-100 namespace answered in one request, so nothing repeated')
+    assert.equal(rows.length,count)
+    assert.equal(new Set(rows.map((row)=>row.ref)).size,count)
+  }
+  for(const count of [100,120,726]){
+    const server=matchingRefsServer(count)
+    assert.throws(()=>brokenPagerAtBd00aaa7(REVIEW_ASSIGNMENT_REF_PREFIX,server),/refusing a possibly truncated reviewer audit/,`a ${count}-ref namespace must refuse, never return`)
+  }
+})
+
+// The same page-ignoring endpoint, but the namespace SHRINKS between requests.
+// That is what a concurrent ref retirement looks like from the pager's side,
+// and refs/db-review-retired-verdicts means retirement is a routine operation
+// here, not a thought experiment.
+const shrinkingMatchingRefsServer=(counts)=>{
+  const calls=[]
+  const rowsFor=(count)=>Array.from({length:count},(_,i)=>({ref:`refs/db-review-assignments/${i}-${i+1}-${String(i).padStart(40,'0')}`,object:{sha:String(i).padStart(40,'0')}}))
+  return {calls,serve(endpoint){const count=counts[Math.min(calls.length,counts.length-1)];calls.push(endpoint);return rowsFor(count)},headers:{}}
+}
+
+// This test previously claimed the duplicated list needed a RAISED ceiling, and
+// proved it by CONSTRUCTING the duplicate rows inside its own catch block --
+// an assertion that passed whatever the pager did. Replaced with the real path
+// (#2155 review 2). No fabrication: every row here came out of the old loop.
+test('CONTROL: the pre-#2152 pager DOES return a duplicated list when the namespace shrinks mid-walk',()=>{
+  const server=shrinkingMatchingRefsServer([120,120,99])
+  const rows=brokenPagerAtBd00aaa7(REVIEW_ASSIGNMENT_REF_PREFIX,server)
+  assert.equal(server.calls.length,3,'the third request came back short, so the loop RETURNED instead of refusing')
+  assert.equal(rows.length,339,'120 + 120 + 99 rows accumulated from three requests that were all page 1')
+  assert.equal(new Set(rows.map((row)=>row.ref)).size,120,'only 120 distinct refs exist; the rest are repeats a caller would have counted twice')
+})
+
+test('CONTROL: raising the pre-#2152 page ceiling buys more requests and the SAME refusal',()=>{
+  // Raising the ceiling was never the fix: against a stable 726-ref namespace
+  // every ceiling spends its full budget of requests and then refuses anyway.
+  for(const ceiling of [3,6,12]){
+    const server=matchingRefsServer(726)
+    assert.throws(()=>brokenPagerAtBd00aaa7(REVIEW_ASSIGNMENT_REF_PREFIX,server,ceiling),new RegExp(`exceeded ${ceiling} pages of 100 refs`))
+    assert.equal(server.calls.length,ceiling,'and each of those requests was charged to the wire budget')
+  }
+})
+
+// THE CONTROL THAT MUST GO RED IF THE FIX IS REVERTED (#2155 review 2). It
+// drives the PRODUCTION listing against the endpoint as measured on 2026-09-02
+// -- page-ignoring, no Link header, 726 refs in one response -- which is the
+// exact shape that took the governed reviewer system down.
+//
+// The request count is asserted FIRST, and deliberately so. The pre-#2152 pager
+// accepted no transport argument at all, so on a reverted tree the injected
+// server is never called and THIS line is the failure: it names the defect (the
+// listing did not read the namespace in a single injected request) instead of
+// reporting whatever the reverted page walk did on the live wire.
+test('CONTROL: the fixed listing reads a 726-ref namespace in ONE injected request and returns it whole',()=>{
+  const server=matchingRefsServer(726)
+  let rows=null,refusal=null
+  try{rows=githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,(endpoint)=>({rows:server.serve(endpoint),headers:server.headers}))}
+  catch(error){refusal=error}
+  assert.equal(server.calls.length,1,'the production listing must read the whole namespace in exactly ONE request through the injected transport')
+  assert.equal(refusal,null,`a 726-ref namespace must not refuse: ${refusal?.message??''}`)
+  assert.equal(rows.length,726,'every ref came back')
+  assert.equal(new Set(rows.map((row)=>row.ref)).size,726,'once each')
+  assert.equal(/[?&]page=/.test(server.calls[0]),false,'and it did not ask for a page the endpoint ignores')
+})
+
+test('listReviewRefsPaged returns every ref of a 726-ref namespace, once each, in ONE request',()=>{
+  const server=matchingRefsServer(726)
+  const rows=githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,(endpoint)=>({rows:server.serve(endpoint),headers:server.headers}))
+  assert.equal(rows.length,726)
+  assert.equal(new Set(rows.map((row)=>row.ref)).size,726,'no duplicates')
+  assert.equal(server.calls.length,1,'one counted wire request, whatever the namespace holds')
+  assert.equal(/[?&]page=/.test(server.calls[0]),false,'the endpoint ignores page=N, so asking for one is a lie about what came back')
+})
+
+test('listReviewRefsPaged refuses LOUDLY when GitHub advertises a further page',()=>{
+  const server=matchingRefsServer(100,{link:'<https://api.github.com/repositories/1/git/matching-refs/x?page=2>; rel="next", <https://api.github.com/repositories/1/git/matching-refs/x?page=9>; rel="last"'})
+  assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,(endpoint)=>({rows:server.serve(endpoint),headers:server.headers})),/paginated Link header.*refusing a possibly truncated reviewer audit/s)
+})
+
+test('listReviewRefsPaged accepts a Link header that offers only prev/last',()=>{
+  const server=matchingRefsServer(3,{link:'<https://api.github.com/repositories/1/git/matching-refs/x?page=1>; rel="prev"'})
+  assert.equal(githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,(endpoint)=>({rows:server.serve(endpoint),headers:server.headers})).length,3)
+})
+
+test('listReviewRefsPaged refuses at the row ceiling rather than trusting a possibly capped list',()=>{
+  const server=matchingRefsServer(REVIEW_REF_ROW_LIMIT)
+  assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,(endpoint)=>({rows:server.serve(endpoint),headers:server.headers})),new RegExp(`returned ${REVIEW_REF_ROW_LIMIT} refs, at or past the ${REVIEW_REF_ROW_LIMIT}-ref ceiling`))
+})
+
+test('the row ceiling sits above every namespace this repository actually holds',()=>{
+  // 726 assignment refs measured 2026-09-02; the ceiling must clear it or the
+  // audit paths refuse on day one. See REVIEW_REF_ROW_LIMIT for the derivation.
+  assert.ok(REVIEW_REF_ROW_LIMIT>726,`ceiling ${REVIEW_REF_ROW_LIMIT} must exceed the largest live namespace`)
+})
+
+test('listReviewRefsPaged refuses a malformed body instead of reading it as an empty namespace',()=>{
+  assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,()=>({rows:{message:'Not Found'},headers:{}})),/incomplete or malformed/)
+})
+
+test('parseGhIncludeResponse splits real gh -i output and lowercases header names',()=>{
+  const body=JSON.stringify([{ref:'refs/db-review-assignments/1-2-abc',object:{sha:'abc'}}])
+  const {rows,headers}=parseGhIncludeResponse(`HTTP/2.0 200 OK\r\nContent-Type: application/json\r\nLink: <https://api.github.com/x?page=2>; rel="next"\r\n\r\n${body}`)
+  assert.equal(rows.length,1)
+  assert.equal(headers['content-type'],'application/json')
+  assert.equal(hasNextPageLink(headers),true)
+  assert.equal(hasNextPageLink({}),false)
+  assert.equal(hasNextPageLink({link:'<https://api.github.com/x?page=1>; rel="last"'}),false)
+})
+
+test('parseGhIncludeResponse refuses output with no header/body boundary',()=>{
+  assert.throws(()=>parseGhIncludeResponse('HTTP/2.0 200 OK'),/no header\/body boundary/)
+})
+
+
+// ---------------------------------------------------------------------------
+// The Link-header truncation detector (issue #2152, glm-5.3 review of #2155).
+//
+// hasNextPageLink is the load-bearing guard for a function whose failure
+// direction is fail-OPEN: a missed rel="next" is a silently truncated reviewer
+// audit, which reads as "no verdict". Three ways the first implementation could
+// have been fooled, none of them producible against GitHub today -- which is
+// not a property this repository controls.
+// ---------------------------------------------------------------------------
+
+const rawGhResponse=(headerLines,body)=>[...headerLines,'',JSON.stringify(body)].join('\r\n')
+const linkPagerFetch=(headers,rows=[])=>()=>({rows,headers})
+
+test('a repeated Link header line is JOINED, so rel="next" on the FIRST line still refuses',()=>{
+  // gh prints one line per header field. Building the map with
+  // Object.fromEntries kept only the LAST Link line, so this rel="next" was
+  // invisible and the listing returned as if it were the complete set.
+  const {headers,rows}=parseGhIncludeResponse(rawGhResponse([
+    'HTTP/2.0 200 OK',
+    'Content-Type: application/json',
+    'Link: <https://api.github.com/repositories/1/git/matching-refs/x?page=2>; rel="next"',
+    'Link: <https://api.github.com/repositories/1/git/matching-refs/x?page=9>; rel="last"',
+  ],[{ref:'refs/db-review-assignments/1-2-abc',object:{sha:'abc'}}]))
+  assert.equal(rows.length,1)
+  assert.match(headers.link,/rel="next".*rel="last"/,'both lines must survive, joined per RFC 9110')
+  assert.equal(hasNextPageLink(headers),true)
+  assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,linkPagerFetch(headers)),/paginated Link header/)
+})
+
+test('an array of Link values is also searched in full, not just its last entry',()=>{
+  assert.equal(hasNextPageLink({link:['<https://a/x?page=2>; rel="next"','<https://a/x?page=1>; rel="prev"']}),true)
+})
+
+test('rel=next inside a QUOTED parameter value is not a next page and must not refuse',()=>{
+  // `title="rel=next"` is a value, not a parameter. The old regex matched the
+  // text wherever it sat and refused a complete listing -- a false alarm on a
+  // guard that must only fire on a real further page.
+  const headers={link:'<https://a/x?page=1>; rel="prev"; title="rel=next"'}
+  assert.equal(hasNextPageLink(headers),false)
+  const rows=githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,linkPagerFetch(headers,[{ref:'refs/db-review-assignments/1-2-abc',object:{sha:'abc'}}]))
+  assert.equal(rows.length,1)
+})
+
+test('rel is matched as a whitespace-separated token list, never as a substring',()=>{
+  assert.equal(hasNextPageLink({link:'<https://a/x>; rel="nextish"'}),false)
+  assert.equal(hasNextPageLink({link:'<https://a/x>; rel="noopener next"'}),true)
+  assert.equal(hasNextPageLink({link:'<https://a/x>; rel=next'}),true)
+})
+
+test('an unparseable Link value REFUSES rather than reading as "no further pages"',()=>{
+  // The last four are the holes the first version of this parser left OPEN
+  // (#2155 review 2): a parameter with no `=` at all, an empty unquoted value,
+  // and an unquoted value swallowing a stray quote. Each parsed cleanly into a
+  // rel that was not `next`, so a malformed truncation marker answered "no
+  // further pages" -- the fail-open direction this guard exists to close.
+  for(const broken of ['garbage','<https://a/x; rel="next"','<https://a/x>; rel="next','<https://a/x>; = "next"','<https://a/x> rel="next"','<https://a/x>; rel','<https://a/x>; rel="prev"; next','<https://a/x>; rel=','<https://a/x>; rel=next"']){
+    assert.throws(()=>hasNextPageLink({link:broken}),/unparseable Link header/,`must refuse: ${broken}`)
+    assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,linkPagerFetch({link:broken})),/unparseable Link header/)
+  }
+})
+
+test('a link value carrying NO relation refuses rather than reading as "no further pages"',()=>{
+  // The third hole of the same class (#2155 review 3). A link value with no
+  // `rel` at all parsed cleanly with an empty relation, so hasNextPageLink
+  // answered false when the truth was UNKNOWN. A header truncated at the
+  // semicolon -- `<uri>; rel="next"` cut to `<uri>` -- lands exactly here, which
+  // is the silent truncation this whole change exists to prevent. RFC 8288
+  // requires a rel on every link value, so both shapes below are malformed.
+  for(const broken of ['<https://a/x?page=2>','<https://a/x?page=2>; title="next"','<https://a/x?page=2>; rel="next", <https://a/x?page=9>']){
+    assert.throws(()=>hasNextPageLink({link:broken}),/unparseable Link header \(a link value carries no rel relation\)/,`must refuse: ${broken}`)
+    assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,linkPagerFetch({link:broken})),/unparseable Link header/)
+  }
+  assert.throws(()=>parseLinkHeader('<https://a/x?page=2>'),/unparseable Link header/)
+})
+
+test('an absent or empty Link header is simply no further pages',()=>{
+  assert.equal(hasNextPageLink({}),false)
+  assert.equal(hasNextPageLink({link:''}),false)
+  assert.equal(hasNextPageLink({link:'   '}),false)
+  assert.equal(hasNextPageLink(undefined),false)
+})
+
+// ---------------------------------------------------------------------------
+// THE STRICT REWRITE (#2152 review 4). Four review rounds found four fail-OPEN
+// holes of the SAME family in a scanner that accepted whatever it had not
+// specifically objected to. The parser now PROVES a header is well formed
+// before returning anything, and refuses everything it cannot account for.
+// These cases pin each known variant plus the two shapes that must still parse.
+// ---------------------------------------------------------------------------
+test('an UNTERMINATED <URI> cannot swallow the next link value',()=>{
+  // The fourth hole. The closing `>` was searched for across the WHOLE
+  // remaining header, so a first value missing its bracket ran past the comma
+  // and ate the second value's `>`. The literal rel="next" ended up inside the
+  // URI text and the surviving parameters gave a different relation, so a
+  // TRUNCATED listing read as complete -- fail OPEN, again.
+  const broken='<https://a/x?page=2; rel="next", <https://b/y>; rel="prev"'
+  assert.throws(()=>hasNextPageLink({link:broken}),/unparseable Link header \(a second < inside <URI>, so an earlier <URI> was never closed\)/,`must refuse: ${broken}`)
+  assert.throws(()=>parseLinkHeader('<https://a/x?page=2; rel="next"'),/unparseable Link header \(unterminated <URI>\)/,'a lone unterminated <URI> refuses too')
+  assert.throws(()=>githubIo.listReviewRefsPaged(REVIEW_ASSIGNMENT_REF_PREFIX,linkPagerFetch({link:broken})),/unparseable Link header/)
+})
+
+test('a header ending in a TRAILING comma refuses rather than parsing as one good value',()=>{
+  // The fifth hole, found by the external reviewer. A trailing comma leaves an
+  // empty final link value: a header cut mid-transmission looks like a clean
+  // single value, so a truncated listing answers "no further pages".
+  for(const broken of ['<https://a/x?page=2>; rel="next",','<https://a/x?page=2>; rel="next", ',', <https://a/x?page=2>; rel="next"','<https://a/x?page=2>; rel="next",, <https://b/y>; rel="last"']){
+    assert.throws(()=>hasNextPageLink({link:broken}),/unparseable Link header \(an empty link value \(a leading, doubled or trailing comma\)\)/,`must refuse: ${broken}`)
+  }
+})
+
+test('a link value with NO rel, a parameter with no =, and an unquoted value holding a quote all refuse',()=>{
+  assert.throws(()=>hasNextPageLink({link:'<https://a/x?page=2>'}),/a link value carries no rel relation/,'no rel')
+  assert.throws(()=>hasNextPageLink({link:'<https://a/x?page=2>; rel'}),/link parameter "rel" has no value/,'parameter with no =')
+  assert.throws(()=>hasNextPageLink({link:'<https://a/x?page=2>; rel=next"'}),/unparseable Link header/,'an unquoted value may not hold a quote')
+  assert.throws(()=>hasNextPageLink({link:'<https://a/x?page=2> rel="next"'}),/leftover text in a link value/,'leftover text between > and the next parameter')
+})
+
+test('a , and a ; INSIDE the URI and inside a quoted parameter still read as a real next page',()=>{
+  // The strict shape must not become strict in the wrong direction: commas and
+  // semicolons are ordinary text inside <URI> and inside a quoted value, and a
+  // real further page must still be SEEN, not refused.
+  const header='<https://api.github.com/x?q=a,b;c&page=2>; rel="next"; title="page 2, of 3; final", <https://api.github.com/x?q=a,b;c&page=3>; rel="last"'
+  assert.equal(hasNextPageLink({link:header}),true)
+  const links=parseLinkHeader(header)
+  assert.equal(links.length,2,'the commas inside the URI and inside the quoted title must not split the header')
+  assert.equal(links[0].uri,'https://api.github.com/x?q=a,b;c&page=2')
+  assert.equal(links[0].params.title,'page 2, of 3; final')
+  assert.equal(links[1].params.rel,'last')
+})
+
+
+test('parseLinkHeader reads uri and parameters structurally',()=>{
+  const links=parseLinkHeader('<https://a/x?page=2>; rel="next"; title="a, b; c", <https://a/x?page=9>; rel="last"')
+  assert.equal(links.length,2)
+  assert.equal(links[0].uri,'https://a/x?page=2')
+  assert.equal(links[0].params.rel,'next')
+  assert.equal(links[0].params.title,'a, b; c','a comma or semicolon inside quotes must not split the value')
+  assert.equal(links[1].params.rel,'last')
 })
