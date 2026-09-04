@@ -27,4 +27,11 @@ jobs:
       - name: Acquire recoverable shared preview lock
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/manage-preview-maintenance-lock.mjs --acquire --issue "${{ inputs.issue }}" --owner "github-actions:${GITHUB_RUN_ID}" --head-sha "${{ inputs.commit_sha }}"
+        run: |
+          node scripts/manage-preview-maintenance-lock.mjs --acquire --issue "${{ inputs.issue }}" --owner "github-actions:${GITHUB_RUN_ID}" --head-sha "${{ inputs.commit_sha }}" | tee "$RUNNER_TEMP/preview-lock.json"
+          owner_sha="$(jq -r .ownerSha "$RUNNER_TEMP/preview-lock.json")"
+          {
+            echo "## Preview lock acquired"
+            echo 'Release after teardown with:'
+            echo "\`node scripts/manage-preview-maintenance-lock.mjs --release --owner-sha $owner_sha\`"
+          } >> "$GITHUB_STEP_SUMMARY"

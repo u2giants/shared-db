@@ -14,6 +14,7 @@ SET statement_timeout = '20min';
 SET lock_timeout = '5s';
 SET idle_in_transaction_session_timeout = '2min';
 SELECT set_config('issue771.expected_project_ref', :'expected_project_ref', false);
+SELECT set_config('issue771.scratch_schema', :'scratch_schema', false);
 
 DO $guard$
 BEGIN
@@ -21,6 +22,13 @@ BEGIN
      OR current_user <> 'postgres'
      OR NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres.' || current_setting('issue771.expected_project_ref')) THEN
     RAISE EXCEPTION 'target is not the expected Supabase preview project';
+  END IF;
+END
+$guard$;
+DO $guard$
+BEGIN
+  IF current_setting('issue771.scratch_schema') !~ '^zz_rehearsal_cutover_[0-9]{8}_[0-9]{6}$' THEN
+    RAISE EXCEPTION 'scratch_schema does not match the issue #771 rehearsal allowlist';
   END IF;
 END
 $guard$;
@@ -171,7 +179,8 @@ BEGIN
     INSERT INTO timings VALUES
       ('full_ordered_hash', r.table_name, began, clock_timestamp(),
        extract(epoch FROM clock_timestamp() - began) * 1000,
-       result->>'source_count' = result->>'copy_count' AND result->>'source_hash' = result->>'copy_hash', result);
+       result->>'source_count' IS NOT DISTINCT FROM result->>'copy_count'
+         AND result->>'source_hash' IS NOT DISTINCT FROM result->>'copy_hash', result);
   END LOOP;
 END
 $block$;
@@ -194,10 +203,10 @@ SELECT record_timing(
   $sql$, :'scratch_schema', :'scratch_schema', :'scratch_schema', :'scratch_schema'));
 
 UPDATE timings
-SET ok = detail->>'source_count' = detail->>'copy_count'
-     AND detail->>'source_min_id' = detail->>'copy_min_id'
-     AND detail->>'source_max_id' = detail->>'copy_max_id'
-     AND detail->>'source_tail_hash' = detail->>'copy_tail_hash'
+SET ok = detail->>'source_count' IS NOT DISTINCT FROM detail->>'copy_count'
+     AND detail->>'source_min_id' IS NOT DISTINCT FROM detail->>'copy_min_id'
+     AND detail->>'source_max_id' IS NOT DISTINCT FROM detail->>'copy_max_id'
+     AND detail->>'source_tail_hash' IS NOT DISTINCT FROM detail->>'copy_tail_hash'
 WHERE phase = 'auditlog_gate';
 
 DO $block$
