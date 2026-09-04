@@ -10,6 +10,10 @@ Provide the database URL only through `SUPABASE_DB_URL`; never put it in a comma
 
 libpq reads the whole URI, not only its authority, and `host`, `hostaddr`, `user`, `port`, `dbname`, `service` and `passfile` given as query parameters override the host and user a reader would see. Those parameters are therefore refused outright rather than interpreted, a URL with no host is refused so libpq cannot take one from the environment, a fragment is refused, and the identity the preview ref must appear in is built from the user, host, path and query together and casefolded before comparison.
 
+The runner removes every inherited environment variable whose name begins with
+`PG`, including `PGPASSWORD`, before starting the child process. Authentication
+must therefore come from `SUPABASE_DB_URL`; ambient libpq settings are ignored.
+
 ## What the SQL check actually checks
 
 Transaction control is refused, including PostgreSQL's own synonyms `END` and `ABORT`, which end the rehearsal transaction exactly as `COMMIT` and `ROLLBACK` do. Statements that cannot be rolled back are refused. Every backslash is refused, because psql honours a meta-command after a semicolon as readily as at the start of a line and `\connect` would open a new autocommit session this guard never inspected; a rehearsal fixture has no legitimate use for one.
