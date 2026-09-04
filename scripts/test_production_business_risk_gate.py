@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from production_business_risk_gate import api_field, api_list, api_object, api_sublist, authored_merge, exact_main, ProvedTarget, tracked_paths_at, PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_governed_historical_supersession, prove_governed_original_reconciliation, prove_bound_mainline_post_merge_original, prove_historical_original_apply_runs, prove_preview, prove_preview_migration_contents, prove_preview_producer_matches_main, prove_pr_and_checks, REQUIRED_CHECKS, GOVERNED_HISTORICAL_SUPERSESSION, GOVERNED_ORIGINAL_RECONCILIATION
+from production_business_risk_gate import preview_instance_text, api_field, api_list, api_object, api_sublist, authored_merge, exact_main, ProvedTarget, tracked_paths_at, PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_governed_historical_supersession, prove_governed_original_reconciliation, prove_bound_mainline_post_merge_original, prove_historical_original_apply_runs, prove_preview, prove_preview_migration_contents, prove_preview_producer_matches_main, prove_pr_and_checks, REQUIRED_CHECKS, GOVERNED_HISTORICAL_SUPERSESSION, GOVERNED_ORIGINAL_RECONCILIATION
 
 
 def tree_ref(endpoint):
@@ -3160,6 +3160,75 @@ class GovernedHistoricalSupersessionTests(unittest.TestCase):
             self.exercise(mutate=lambda _check, applied: applied["after"][0].update(
                 statements=["select 2"]
             ))
+
+
+class PerPullRequestBindingIsActuallyWritten(unittest.TestCase):
+    """The PRODUCER half of #2140, which the reader tests cannot see.
+
+    The reader tests below inject a `texts` dict, so they pass whether or not the
+    workflow ever writes a per-pull-request file. A governed review named two
+    mutations that stayed green under them: deleting the map accumulation, the
+    `source_pr_merge_map` output, the per-pair write loop and the upload glob; and
+    passing the LAST pull request's number and merge commit into the loop instead
+    of the pair's own, so every file would name the same pull request. Both would
+    reinstate exactly the defect #2140 exists to fix, silently. These assertions
+    are what make those mutations fail.
+    """
+
+    def workflow(self) -> str:
+        return (Path(__file__).resolve().parents[1] / PREVIEW_WORKFLOW).read_text(encoding="utf-8")
+
+    def test_the_batch_publishes_a_proved_pull_request_to_merge_commit_map(self):
+        text = self.workflow()
+        self.assertIn("MAP_PROVEN=", text)
+        self.assertIn('MAP_PROVEN="${MAP_PROVEN}${MAP_PR}:${MAP_MERGE_SHA} "', text)
+        self.assertIn('echo "source_pr_merge_map=${MAP_PROVEN}" >> "$GITHUB_OUTPUT"', text)
+        self.assertIn("steps.merged_rehearsal.outputs.source_pr_merge_map", text)
+
+    def test_each_pair_binds_its_OWN_pull_request_and_merge_commit(self):
+        # The whole point. `--source-pr "$MERGED_SOURCE_PR"` here would file the
+        # last pull request's identity under every filename in the batch, and the
+        # reader tests would not notice because the bodies would still be
+        # internally consistent.
+        text = self.workflow()
+        self.assertIn('PAIR_PR="${PAIR%%:*}"', text)
+        self.assertIn('PAIR_SHA="${PAIR#*:}"', text)
+        self.assertIn('--source-pr "$PAIR_PR"', text)
+        self.assertIn('--merge-commit-sha "$PAIR_SHA"', text)
+        self.assertIn('--output "$RUNNER_TEMP/preview-instance-${PAIR_PR}.json"', text)
+
+    def test_the_per_pull_request_files_are_uploaded_with_the_evidence(self):
+        # A file written into RUNNER_TEMP and never uploaded is not a binding
+        # anyone can recover from.
+        self.assertIn("preview-instance-*.json", self.workflow())
+
+
+class EveryReaderResolvesTheBindingTheSameWay(unittest.TestCase):
+    """A promotion must not read its own binding at one gate and the shared one
+    at another. Three call sites resolve the artifact; they go through one
+    function so they cannot drift apart."""
+
+    def binding(self, pr: int) -> str:
+        return json.dumps({"schema": "shared-db-preview-instance-binding/v1", "sourcePr": pr})
+
+    def test_a_pull_request_gets_its_own_file_not_the_shared_one(self):
+        texts = {
+            "preview-instance.json": self.binding(901),
+            "preview-instance-900.json": self.binding(900),
+        }
+        self.assertEqual(preview_instance_text(texts, 900), texts["preview-instance-900.json"])
+
+    def test_the_shared_file_still_serves_an_artifact_written_before_2140(self):
+        texts = {"preview-instance.json": self.binding(901)}
+        self.assertEqual(preview_instance_text(texts, 901), texts["preview-instance.json"])
+
+    def test_a_missing_binding_stays_missing_rather_than_being_invented(self):
+        self.assertIsNone(preview_instance_text({}, 900))
+
+    def test_a_non_integer_source_pr_cannot_build_a_filename(self):
+        texts = {"preview-instance.json": self.binding(901)}
+        for bogus in (None, "900", True, 9.0):
+            self.assertEqual(preview_instance_text(texts, bogus), texts["preview-instance.json"])
 
 
 class PerPullRequestPreviewInstanceBinding(unittest.TestCase):

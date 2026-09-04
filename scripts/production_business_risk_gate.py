@@ -1057,7 +1057,7 @@ def prove_bound_mainline_post_merge_original(
     # every proven pull request in the map. Prefer this version's own file; the
     # comparison below is unchanged and still strict, so a file naming the wrong
     # pull request, run, commit or allowlist is refused exactly as before.
-    raw = texts.get(f"preview-instance-{source_pr}.json") or texts.get("preview-instance.json")
+    raw = preview_instance_text(texts, source_pr)
     try:
         binding = json.loads(raw) if raw else None
     except (json.JSONDecodeError, TypeError) as exc:
@@ -1088,6 +1088,30 @@ def prove_bound_mainline_post_merge_original(
     ancestry = api_object(api, f"repos/{REPOSITORY}/compare/{merge_sha}...{run_head}")
     if ancestry.get("status") not in {"ahead", "identical"} or ancestry.get("behind_by") != 0:
         raise producer_error
+
+
+def preview_instance_text(texts: dict, source_pr) -> str | None:
+    """The binding this pull request filed, else the shared last-PR file.
+
+    ONE BINDING PER AUTHORING PULL REQUEST (#2140). A batch rehearsed from a
+    `merged_preview_source_pr_map` used to file `preview-instance.json` under the
+    map's LAST pull request only, so every earlier pull request in the batch had
+    no recoverable binding of its own. The rehearsal now also writes
+    `preview-instance-<pr>.json` for every proven pull request.
+
+    Every reader must resolve the binding the SAME way, or a promotion of a
+    non-last pull request reads the stale shared file at one gate and its own
+    file at another. That is why this is one function and not three call sites.
+    The shared file remains the fallback so an old artifact, written before the
+    per-pull-request files existed, still recovers. Nothing here relaxes a check:
+    the caller still verifies the body names the right pull request, run, commit
+    and allowlist, so a file naming the wrong one is refused exactly as before.
+    """
+    if isinstance(source_pr, int) and not isinstance(source_pr, bool):
+        own = texts.get(f"preview-instance-{source_pr}.json")
+        if own:
+            return own
+    return texts.get("preview-instance.json")
 
 
 def prove_historical_original_apply_runs(
@@ -1318,7 +1342,7 @@ def prove_historical_original_apply_runs(
         # by another. The byte half is still pinned to exact main, so production
         # cannot be handed bytes nobody rehearsed; what is not proved is that the
         # CURRENT preview ran them.
-        instance = texts.get("preview-instance.json")
+        instance = preview_instance_text(texts, source_pr)
         if instance:
             try:
                 binding = json.loads(instance)
@@ -1515,7 +1539,7 @@ def prove_preview(
     # deleted and rebuilt on 2026-08-18; without this, its proof would still be
     # good for a production write today.
     verify_preview_instance_binding(
-        texts.get("preview-instance.json"),
+        preview_instance_text(texts, source_pr),
         applied_commit=applied_commit, preview_project_ref=preview_project_ref,
         production_project_ref=PRODUCTION_PROJECT_REF, run_id=run_id, allowlist=allowlist,
         source_pr=source_pr, merge_commit_sha=merge_commit_sha,
