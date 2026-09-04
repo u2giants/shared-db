@@ -1575,24 +1575,40 @@ jobs:
       # the one command that grants authorization, without granting it. A pending
       # required check still blocks an unguarded merge, so this fails safe.
       - name: Restore the merge authorizations this freeze revoked
-        if: always() && steps.revoke_frozen_authorizations.outcome == 'success'
+        # Also on a FAILED revoke, never only a clean one. The revoke loop runs
+        # under `set -e`, so one bad POST aborts it with earlier heads already
+        # revoked -- exactly the partial damage this step exists to repair. The
+        # description match below is what makes running here safe: a failed
+        # revoke simply leaves fewer heads carrying this run's description.
+        if: always() && (steps.revoke_frozen_authorizations.outcome == 'success' || steps.revoke_frozen_authorizations.outcome == 'failure')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           heads="$RUNNER_TEMP/open-pr-heads"
           if [ ! -s "$heads" ]; then echo 'this freeze revoked no authorizations'; exit 0; fi
-          marker="production freeze run ${GITHUB_RUN_ID}"
+          # EXACT, not a substring. Matching on the run id alone lets run 8812345
+          # claim a revocation written by run 881234567, because the shorter id is a
+          # prefix of the longer one. Comparing the whole description anchors both
+          # ends for free, and it must stay byte-identical to the revoke step's.
+          expected="Revoked by production freeze run ${GITHUB_RUN_ID}; re-run guarded-migration-merge.yml"
           while IFS= read -r head_sha; do
             [ -n "$head_sha" ] || continue
-            current="$(gh api "repos/u2giants/shared-db/commits/$head_sha/status" \
-              --jq '[.statuses[] | select(.context == "Migration guarded merge authorization")] | first | "\(.state)|\(.description)"' 2>/dev/null || echo '')"
+            # NO `|| echo ''` here. An unreadable status is NOT "no status":
+            # swallowing the failure would print "left as-is" and exit 0 while a head
+            # this run revoked stays red forever -- the exact outcome #2116 exists to
+            # kill, with a misleading audit line on top. Fail the step and say why.
+            if ! current="$(gh api "repos/u2giants/shared-db/commits/$head_sha/status" \
+              --jq '[.statuses[] | select(.context == "Migration guarded merge authorization")] | first | "\(.state)|\(.description)"')"; then
+              echo "$head_sha: could not READ the authorization status, so this freeze's revocation may still stand. Re-run guarded-migration-merge.yml for this head." >&2
+              exit 1
+            fi
             state="${current%%|*}"
             description="${current#*|}"
-            case "$state|$description" in
-              failure*"$marker"*) ;;
-              *) echo "$head_sha: left as-is (state='${state:-none}')"; continue ;;
-            esac
+            if [ "$state" != 'failure' ] || [ "$description" != "$expected" ]; then
+              echo "$head_sha: left as-is (state='${state:-none}')"
+              continue
+            fi
             gh api "repos/u2giants/shared-db/statuses/$head_sha" \
               -f state=pending \
               -f context='Migration guarded merge authorization' \
