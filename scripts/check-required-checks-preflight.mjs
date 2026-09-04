@@ -192,7 +192,10 @@ export function collectPages(payload, key) {
   const out = []
   for (const page of pages) {
     const rows = page?.[key]
-    if (rows === undefined || rows === null) continue
+    // A page that does not carry the list AT ALL is not an empty page -- it is a
+    // read we did not understand. Skipping it silently drops however many reports
+    // it held, and the whole point of paginating was to stop dropping reports.
+    if (rows === undefined || rows === null) throw new PreflightError(`GitHub returned a page with no "${key}" list`)
     if (!Array.isArray(rows)) throw new PreflightError(`GitHub returned a non-list "${key}" page`)
     out.push(...rows)
   }
@@ -230,7 +233,12 @@ export function reportedTotal(payload) {
 // means the second half of the fallback (every OTHER check must also be passing)
 // was judged on a partial list, so it refuses rather than guesses.
 export function requireWholePage(what, totalCount, page) {
-  if (!Number.isInteger(totalCount) || !Array.isArray(page)) return
+  // A missing total is NOT "we saw everything". Both endpoints document
+  // `total_count`, so its absence means the payload is not the one we think we are
+  // reading, and answering "complete" for an unrecognised payload is the same
+  // fail-open this whole change exists to close.
+  if (!Number.isInteger(totalCount)) throw new PreflightError(`GitHub did not report how many ${what} exist on the reviewed head, so the read cannot be shown to be complete. The merge lane was not taken.`)
+  if (!Array.isArray(page)) throw new PreflightError(`The ${what} read did not produce a list, so it cannot be compared against GitHub's own count. The merge lane was not taken.`)
   if (totalCount > page.length) {
     throw new PreflightError(`GitHub reported ${totalCount} ${what} on the reviewed head but pagination returned only ${page.length}, so some checks were never seen. The merge lane was not taken.`)
   }
