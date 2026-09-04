@@ -72,6 +72,29 @@ function gh(args) {
 }
 function json(args) { const raw = gh(args); try { return JSON.parse(raw) } catch { throw new PreflightError('GitHub returned malformed JSON') } }
 
+// `gh api --paginate --slurp` returns an ARRAY of page objects; a single-page read
+// through the same path still returns that array with one element. Flattening here
+// rather than at each call site is what keeps the >100 case honest.
+//
+// WHY THIS IS NOT COSMETIC (#2274). Both reads used to be a bare `per_page=100`
+// with no pagination. This repository already reports seventeen checks on a head,
+// and a re-run adds a report rather than replacing one. Past a hundred reports a
+// context that really did pass would come back absent, `evaluatePreflight` would
+// call it "never reported", and the merge would be refused for a reason no one
+// could act on. That is the safe direction, but it is an unexplainable block on
+// the ONLY merge path, so it is fixed rather than documented.
+export function collectPages(payload, key) {
+  const pages = Array.isArray(payload) ? payload : [payload]
+  const out = []
+  for (const page of pages) {
+    const rows = page?.[key]
+    if (rows === undefined || rows === null) continue
+    if (!Array.isArray(rows)) throw new PreflightError(`GitHub returned a non-list "${key}" page`)
+    out.push(...rows)
+  }
+  return out
+}
+
 export function gatherPreflightInput(env = process.env) {
   const sha = String(env.REQUESTED_SHA ?? '').trim()
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new PreflightError('REQUESTED_SHA must be a 40-character head SHA')
@@ -82,9 +105,18 @@ export function gatherPreflightInput(env = process.env) {
     // exactly, rather than degrading to a weaker test that would pass anyway.
     throw new PreflightError(`${e.message} (the workflow token needs "administration: read" to list main's required status checks)`)
   }
-  const combined = json(['api', `repos/${REPO}/commits/${sha}/status?per_page=100`])
-  const runs = json(['api', `repos/${REPO}/commits/${sha}/check-runs?per_page=100`])
-  return { requiredContexts: protection?.contexts ?? [], statuses: combined?.statuses ?? [], checkRuns: runs?.check_runs ?? [] }
+  const combined = json(['api', '--paginate', '--slurp', `repos/${REPO}/commits/${sha}/status?per_page=100`])
+  const runs = json(['api', '--paginate', '--slurp', `repos/${REPO}/commits/${sha}/check-runs?per_page=100`])
+  // NO `?? []` ON THE REQUIRED LIST (#2274). A 404 from branch protection already
+  // fails closed above, but a 200 whose body carries no `contexts` array used to
+  // become an EMPTY required list, and an empty list passes having checked nothing.
+  // Passing the raw value through lets `evaluatePreflight` refuse it as the
+  // non-list it is, which is the same direction every other unreadable input takes.
+  return {
+    requiredContexts: protection?.contexts,
+    statuses: collectPages(combined, 'statuses'),
+    checkRuns: collectPages(runs, 'check_runs'),
+  }
 }
 
 export function main(env = process.env) {
