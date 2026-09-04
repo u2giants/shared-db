@@ -99,7 +99,48 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
   // terminal verdict line that a downstream parser would read as a decision is
   // refused here, while nothing has been written to GitHub yet.
   const extra=extraVerdictLines(rawBody)
-  if(extra.length)throw new Error(`review findings carry ${extra.length} line(s) a downstream verdict parser would read as a decision besides the terminal verdict line (first: ${JSON.stringify(extra[0].trim().slice(0,120))}); nothing was posted and no verdict was recorded`)
+  if(extra.length){
+    // PRESERVE THE FINDINGS, AUTHORIZE NOTHING (issue #2207).
+    //
+    // This round can never produce a verdict: a body carrying a second parseable
+    // decision line is exactly the shape that deadlocks a pull request (#2075), and
+    // that judgement is NOT relaxed here. What changed is the DISPOSAL. Throwing the
+    // whole review away also destroyed findings that were correct and expensive --
+    // the reviewer slot was already spent, the lease was already held, and the only
+    // surviving copy was in the wrapper's own transcript, outside the governed path.
+    //
+    // So the findings are posted with EVERY parseable decision line voided by the
+    // same routine the post-record failure path uses, and no verdict artifact is
+    // recorded. The round still fails; it just no longer fails silently.
+    //
+    // FAIL CLOSED. The neutralised body is proved inert against all three readers --
+    // the runner's own parser, the lanes' consumer predicate, and the scan that
+    // rejected the body in the first place -- BEFORE anything reaches GitHub. This is
+    // strictly safer than the post-then-void path, which proves the same property
+    // only after the write. If any proof fails, nothing is posted and the original
+    // refusal stands unchanged.
+    const reason=`the findings carry ${extra.length} line(s) a verdict parser would read as a decision besides the terminal verdict line`
+    const detail=`review findings carry ${extra.length} line(s) a downstream verdict parser would read as a decision besides the terminal verdict line (first: ${JSON.stringify(extra[0].trim().slice(0,120))}); no verdict was recorded`
+    let preserved=null
+    try{
+      const edited=neutraliseVerdictLine(rawBody,reason)
+      if(edited===null)throw new Error('carried no line to void')
+      if(extraVerdictLines(edited).length)throw new Error('a decision line survived the void')
+      if(verdictFromOutput(edited,options.headSha)!==null)throw new Error('the voided body is still read as a verdict by the runner')
+      if(isVerdictFor({author_association:'OWNER',body:edited},options.headSha))throw new Error('the voided body is still read as a verdict by the shared consumer predicate')
+      preserved=edited
+    }catch{preserved=null}
+    if(preserved===null)throw new Error(`${detail}; nothing was posted because the findings could not be made inert`)
+    const kept=deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body:`GOVERNED REVIEW FINDINGS PRESERVED - NON-AUTHORIZING, NO VERDICT WAS RECORDED
+
+This round cannot be recorded as a verdict, so none was. The reviewer's findings are kept below with every parseable decision line voided. Acting on them requires a fresh governed review at this head.
+
+${preserved}`}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
+    if(kept.error||kept.status!==0)throw new Error(`${detail}; the findings could not be preserved durably either`)
+    let keptUrl=null
+    try{keptUrl=JSON.parse(kept.stdout).html_url}catch{keptUrl=null}
+    throw new Error(`${detail}; the findings were preserved as a non-authorizing comment${keptUrl?` (${keptUrl})`:''} and this head needs a fresh governed review`)
+  }
   const body=`GOVERNED REVIEW FINDINGS — NON-AUTHORIZING UNLESS THE MATCHING CREATE-ONLY VERDICT ARTIFACT EXISTS\n\n${rawBody}`
   const posted=deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
   if(posted.error||posted.status!==0)throw new Error('review findings could not be posted durably; no verdict was recorded')
