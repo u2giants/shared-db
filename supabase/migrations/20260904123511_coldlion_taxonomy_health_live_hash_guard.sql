@@ -1,4 +1,5 @@
 -- Issue #552: keep taxonomy health from accepting an unreviewed licensor-status state.
+-- derived-from: 20260804120000
 -- Migration-only. This file activates no baseline and invokes none of these functions.
 --
 -- The two PL/pgSQL bodies are the current definitions from
