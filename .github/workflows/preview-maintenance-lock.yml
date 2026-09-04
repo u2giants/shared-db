@@ -19,7 +19,7 @@ permissions:
 jobs:
   acquire:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,12 +38,20 @@ jobs:
             echo "\`node scripts/manage-preview-maintenance-lock.mjs --release --owner-sha $owner_sha\`"
           } >> "$GITHUB_STEP_SUMMARY"
           # Keep the owning run live while the out-of-band rehearsal holds the
-          # lease. Exit promptly after its owner-bound release, or after a hard
-          # 55-minute ceiling so recovery can eventually prove a crashed holder.
-          for _ in $(seq 1 110); do
-            current="$(gh api 'repos/u2giants/shared-db/git/ref/db-coordination/preview' --jq .object.sha 2>/dev/null || true)"
-            test "$current" = "$owner_sha" || exit 0
+          # lease. A 404 proves release; an unreadable API does not. Exit promptly
+          # after owner-bound release, with a conservative hard ceiling.
+          for _ in $(seq 1 470); do
+            if current="$(gh api 'repos/u2giants/shared-db/git/ref/db-coordination/preview' --jq .object.sha 2>"$RUNNER_TEMP/ref-error")"; then
+              if test "$current" != "$owner_sha"; then
+                echo "Preview ref moved to another owner while this run was live; refusing a green completion." >&2
+                exit 2
+              fi
+            elif grep -q 'HTTP 404' "$RUNNER_TEMP/ref-error"; then
+              exit 0
+            else
+              cat "$RUNNER_TEMP/ref-error" >&2
+            fi
             sleep 30
           done
-          echo 'Preview maintenance lock reached its 55-minute holding ceiling; release or recover it before any further preview work.' >&2
+          echo 'Preview maintenance lock reached its 235-minute ceiling. Abort any still-running rehearsal, then release or recover the lane before further preview work.' >&2
           exit 2

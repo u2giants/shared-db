@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { randomUUID } from 'node:crypto'
-import { pathToFileURL } from 'node:url'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { acquireMutex, acquireRef, EXCLUSIVE_REFS, githubIo, MUTEX_REF, parseQueueScope, releaseOwnedRef } from './manage-migration-author-lanes.mjs'
 import { formatLeaseMessage } from './lib/exclusive-lease.mjs'
 
@@ -74,4 +75,4 @@ export function main(argv, io = githubIo) {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) process.exitCode = main(process.argv.slice(2))
+if (process.argv[1] && path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1])) process.exitCode = main(process.argv.slice(2))
