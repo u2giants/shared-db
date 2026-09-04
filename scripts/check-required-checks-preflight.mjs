@@ -66,6 +66,13 @@ export function observedStates({ statuses = [], checkRuns = [] }) {
 // live but not yet mirrored is still caught the moment it reports. A missing or empty
 // mirror is a refusal, never an empty required list.
 export const REQUIRED_CHECKS_MIRROR = 'docs/verification/main-required-status-checks.json'
+export const MIRROR_BOOTSTRAP_MAIN_SHA = 'e0532e3c974a199f623f160f56416bdef4037461'
+export const PINNED_REQUIRED_CONTEXTS = Object.freeze([
+  'Cancelled work guard', 'Cross-PR object collision', 'Domain ownership',
+  'Handoff contract', 'Intake pointer guard', 'Migration author lease',
+  'Migration guarded merge authorization', 'Orchestrator marker guard',
+  'Promotion contract tests (offline)', 'SQL migration guards', 'Tools offline tests',
+])
 
 export function parseMirror(raw, where) {
   let parsed
@@ -78,28 +85,26 @@ export function parseMirror(raw, where) {
   return contexts
 }
 
-// The guarded merge checks out the proposed head. Once main has a mirror, the head
-// cannot weaken it: both copies are unioned. The only head-only case is the one-time
-// bootstrap commit that introduces the mirror before main has any copy at all.
+// The proposed head must never supply the list used to judge itself. Once main has
+// the mirror, only that protected copy is read. The first merge is bound to the exact
+// current main SHA and the independently reviewed immutable context floor above.
 export function readRequiredChecksMirror(root = process.cwd(), run = execFileSync) {
-  const show = (ref) => {
-    try { return run('git', ['show', `${ref}:${REQUIRED_CHECKS_MIRROR}`], { encoding: 'utf8', cwd: root, maxBuffer: 8 * 1024 * 1024 }) }
-    catch { return null }
+  let raw
+  try { raw = run('git', ['show', `origin/main:${REQUIRED_CHECKS_MIRROR}`], { encoding: 'utf8', cwd: root, maxBuffer: 8 * 1024 * 1024 }) }
+  catch (e) {
+    let mainSha = ''
+    try { mainSha = String(run('git', ['rev-parse', 'origin/main'], { encoding: 'utf8', cwd: root })).trim() } catch {}
+    if (mainSha === MIRROR_BOOTSTRAP_MAIN_SHA) return [...PINNED_REQUIRED_CONTEXTS]
+    throw new PreflightError(`the trusted origin/main mirror ${REQUIRED_CHECKS_MIRROR} is missing or unreadable (${sanitize(e.message)}), so the required list is unknown from both sources`)
   }
-  const onMain = show('origin/main')
-  const onHead = show('HEAD')
-  if (onMain === null && onHead === null) {
-    throw new PreflightError(`the required-checks mirror ${REQUIRED_CHECKS_MIRROR} is on neither origin/main nor the reviewed head, so the required list is unknown from both sources`)
-  }
-  const contexts = [...new Set([
-    ...(onMain === null ? [] : parseMirror(onMain, 'origin/main')),
-    ...(onHead === null ? [] : parseMirror(onHead, 'the reviewed head')),
-  ])].sort()
+  const contexts = parseMirror(raw, 'origin/main')
   // The pre-flight strips its own context before testing, so a mirror naming ONLY
   // that context leaves nothing to test and would pass with zero coverage.
   if (contexts.filter((c) => c !== SELF_CONTEXT).length === 0) {
     throw new PreflightError(`${REQUIRED_CHECKS_MIRROR} names no context other than ${SELF_CONTEXT}, so the mirror would test nothing`)
   }
+  const missingPinned = PINNED_REQUIRED_CONTEXTS.filter((context) => !contexts.includes(context))
+  if (missingPinned.length) throw new PreflightError(`the trusted origin/main mirror is a stale subset; missing pinned contexts: ${missingPinned.join(', ')}`)
   return contexts
 }
 
@@ -110,7 +115,7 @@ export function evaluateWithoutRequiredList({ statuses, checkRuns, reason, mirro
   requireContexts(mirrorContexts.filter((c) => c !== SELF_CONTEXT), states, `main's required list is unreadable (${reason}), so the committed mirror ${REQUIRED_CHECKS_MIRROR} was used`)
   // Half two: everything else that reported must also be green, so a context added
   // live but not yet mirrored cannot slip through once it starts reporting.
-  const bad = [...states].filter(([, state]) => !SUCCESS.has(state))
+  const bad = [...states].filter(([name, state]) => name !== SELF_CONTEXT && !SUCCESS.has(state))
   if (bad.length) throw new PreflightError(`${describe(bad)} on the reviewed head. The required list came from the committed mirror, so EVERY reported check must pass. No retry can clear this, so the merge lane was not taken.`)
   return { required: mirrorContexts.filter((c) => c !== SELF_CONTEXT).length, mode: 'committed-mirror' }
 }

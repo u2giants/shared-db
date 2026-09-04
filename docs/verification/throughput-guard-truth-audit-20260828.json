@@ -519,6 +519,13 @@
       "reason": "Reviewed for issue 2274: this line is about a required STATUS CHECK that has not reported on a head, or about the committed required-checks mirror being absent. It makes no claim about a migration, an applied object or dynamic DDL, so it carries no throughput truth claim to enrich."
     },
     {
+      "site": "scripts/check-required-checks-preflight.mjs:107",
+      "semantic_key": "scripts/check-required-checks-preflight.mjs:ae42c3fa7107cafbec1a45ca6c9819483e07b222a0ea0a66d569287d76088751:1",
+      "line_sha256": "ae42c3fa7107cafbec1a45ca6c9819483e07b222a0ea0a66d569287d76088751",
+      "disposition": "excluded",
+      "reason": "Reviewed for issue 2274: this line refuses a stale required-status-check mirror. It makes no claim about a migration, an applied object or dynamic DDL, so it carries no throughput truth claim to enrich."
+    },
+    {
       "site": "scripts/check-required-checks-preflight.mjs:57",
       "semantic_key": "scripts/check-required-checks-preflight.mjs:b65134d98e50a3e578da4927db4b15921f1db0e3db0bf57e073e1effbd43fa40:1",
       "line_sha256": "b65134d98e50a3e578da4927db4b15921f1db0e3db0bf57e073e1effbd43fa40",
@@ -545,6 +552,13 @@
       "line_sha256": "f2678a5e3f2f88032a4500f6592894f87ac27e141ec33e7db2c4b866b070a392",
       "disposition": "excluded",
       "reason": "Reviewed for issue 2274: this line is about a required STATUS CHECK that has not reported on a head, or about the committed required-checks mirror being absent. It makes no claim about a migration, an applied object or dynamic DDL, so it carries no throughput truth claim to enrich."
+    },
+    {
+      "site": "scripts/check-required-checks-preflight.mjs:98",
+      "semantic_key": "scripts/check-required-checks-preflight.mjs:ff3afcf6c7d2681f3a02c901ae3b0ead1e5a9901bd9b38c3180bf0805805f591:1",
+      "line_sha256": "ff3afcf6c7d2681f3a02c901ae3b0ead1e5a9901bd9b38c3180bf0805805f591",
+      "disposition": "excluded",
+      "reason": "Reviewed for issue 2274: this line refuses an unreadable required-status-check mirror. It makes no claim about a migration, an applied object or dynamic DDL, so it carries no throughput truth claim to enrich."
     },
     {
       "site": "scripts/check-skill-drift.mjs:172",
@@ -1737,7 +1751,7 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     }
   ],
-  "call_site_count": 246,
-  "call_site_sha256": "de9fbf330bf75a2fc9c9a9832a6ff78db58db66af4e58f4ba9f9e4e18a8458b5",
+  "call_site_count": 248,
+  "call_site_sha256": "9489e1e2b72e3c5c6c485bf486b8a92dfd692d2c90899e529a2b0b46389511a0",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }

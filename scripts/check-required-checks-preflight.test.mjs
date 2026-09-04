@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { evaluatePreflight, evaluateWithoutRequiredList, gatherPreflightInput, isPermissionRefusal, observedStates, readRequiredChecksMirror, requireWholePage, sanitize, PreflightError, REQUIRED_CHECKS_MIRROR, SELF_CONTEXT } from './check-required-checks-preflight.mjs'
+import { evaluatePreflight, evaluateWithoutRequiredList, gatherPreflightInput, isPermissionRefusal, observedStates, readRequiredChecksMirror, requireWholePage, sanitize, PreflightError, REQUIRED_CHECKS_MIRROR, SELF_CONTEXT, PINNED_REQUIRED_CONTEXTS, MIRROR_BOOTSTRAP_MAIN_SHA } from './check-required-checks-preflight.mjs'
 
 const ok = (name) => ({ name, status: 'completed', conclusion: 'success', completed_at: '2026-09-03T00:00:00Z' })
 
@@ -122,22 +122,27 @@ test('the fallback refuses a head whose required context never reported, even wi
 test('the mirror does not have to name the workflow own context', () => {
   const result = evaluatePreflight({
     protectionUnreadable: REASON, mirrorContexts: [...MIRROR, SELF_CONTEXT],
-    statuses: [], checkRuns: [ok('SQL migration guards'), ok('Tools offline tests')],
+    statuses: [], checkRuns: [ok('SQL migration guards'), ok('Tools offline tests'),
+      { name: SELF_CONTEXT, status: 'completed', conclusion: 'failure' }],
   })
   assert.equal(result.mode, 'committed-mirror')
 })
 
 // The mirror reader is given a fake `git show`; only origin/main may be read.
 const mirrorRun = (byRef) => (bin, args) => {
+  if (args[0] === 'rev-parse') {
+    if (!('origin/main@sha' in byRef)) throw new Error('origin/main is unreadable')
+    return byRef['origin/main@sha']
+  }
   const ref = String(args[1]).split(':')[0]
   if (!(ref in byRef)) throw new Error(`fatal: path does not exist in '${ref}'`)
   return byRef[ref]
 }
 const doc = (...contexts) => JSON.stringify({ contexts })
 
-test('a mirror missing from both origin/main and the head is refused', () => {
+test('a missing mirror on origin/main is refused, never replaced by the head copy', () => {
   assert.throws(() => readRequiredChecksMirror('/x', mirrorRun({})), (e) => {
-    assert.ok(e.message.includes('neither origin/main nor the reviewed head'))
+    assert.ok(e.message.includes('trusted origin/main mirror'))
     return true
   })
 })
@@ -146,29 +151,30 @@ test('an unusable mirror body is refused, never read as an empty required list',
   for (const body of ['{}', '{"contexts":[]}', '{"contexts":"SQL migration guards"}', '{"contexts":[1,2]}', 'not json']) {
     assert.throws(() => readRequiredChecksMirror('/x', mirrorRun({ 'origin/main': body })), PreflightError)
   }
-  assert.deepEqual(readRequiredChecksMirror('/x', mirrorRun({ 'origin/main': doc('a') })), ['a'])
+  assert.deepEqual(readRequiredChecksMirror('/x', mirrorRun({ 'origin/main': doc(...PINNED_REQUIRED_CONTEXTS) })), PINNED_REQUIRED_CONTEXTS)
 })
 
 test('THE HEAD CANNOT REMOVE A CONTEXT main REQUIRES — only main is tested', () => {
   // A pull request that deletes `Domain ownership` from its own copy of the mirror
   // must not thereby stop the pre-flight from requiring it.
   const contexts = readRequiredChecksMirror('/x', mirrorRun({
-    'origin/main': doc('Domain ownership', 'SQL migration guards'),
+    'origin/main': doc(...PINNED_REQUIRED_CONTEXTS),
     HEAD: doc('SQL migration guards'),
   }))
-  assert.deepEqual(contexts, ['Domain ownership', 'SQL migration guards'])
+  assert.deepEqual(contexts, PINNED_REQUIRED_CONTEXTS)
 })
 
-test('a context added by the head is enforced immediately', () => {
+test('the head cannot inject a context into the trusted list', () => {
   const contexts = readRequiredChecksMirror('/x', mirrorRun({
-    'origin/main': doc('SQL migration guards'),
+    'origin/main': doc(...PINNED_REQUIRED_CONTEXTS),
     HEAD: doc('SQL migration guards', 'Brand new guard'),
   }))
-  assert.deepEqual(contexts, ['Brand new guard', 'SQL migration guards'])
+  assert.deepEqual(contexts, PINNED_REQUIRED_CONTEXTS)
 })
 
-test('the one-time bootstrap uses the head only when main has no mirror yet', () => {
-  assert.deepEqual(readRequiredChecksMirror('/x', mirrorRun({ HEAD: doc('SQL migration guards') })), ['SQL migration guards'])
+test('the first mirror merge bootstraps only at the exact reviewed main head', () => {
+  assert.deepEqual(readRequiredChecksMirror('/x', mirrorRun({ 'origin/main@sha': MIRROR_BOOTSTRAP_MAIN_SHA })), PINNED_REQUIRED_CONTEXTS)
+  assert.throws(() => readRequiredChecksMirror('/x', mirrorRun({ 'origin/main@sha': 'f'.repeat(40), HEAD: doc('SQL migration guards') })), /missing or unreadable/)
 })
 
 test('a mirror naming only the workflow own context would test nothing, so it is refused', () => {
@@ -189,36 +195,22 @@ test('the committed mirror on disk is real and includes the workflow own context
 // Pinning the exact list is the defence against mirror rot in the shrinking
 // direction: the workflow reads origin/main, and origin/main can only change through
 // a pull request whose tests must pass, so dropping a context here fails CI first.
-const LIVE_REQUIRED = [
-  'Cancelled work guard',
-  'Cross-PR object collision',
-  'Domain ownership',
-  'Handoff contract',
-  'Intake pointer guard',
-  'Migration author lease',
-  'Migration guarded merge authorization',
-  'Orchestrator marker guard',
-  'Promotion contract tests (offline)',
-  'SQL migration guards',
-  'Tools offline tests',
-]
-
 test('the committed mirror is exactly the list main requires today', () => {
   const onDisk = JSON.parse(readFileSync(new URL(`../${REQUIRED_CHECKS_MIRROR}`, import.meta.url), 'utf8'))
-  assert.deepEqual([...onDisk.contexts].sort(), [...LIVE_REQUIRED].sort())
+  assert.deepEqual([...onDisk.contexts].sort(), [...PINNED_REQUIRED_CONTEXTS].sort())
   assert.equal(onDisk.strict, false, 'strict must stay false — owner ruling, issue #1286')
   assert.ok(onDisk.contexts.includes(SELF_CONTEXT))
 })
 
 test('a stale-subset HEAD mirror cannot hide a required main context', () => {
   const contexts = readRequiredChecksMirror('/x', mirrorRun({
-    'origin/main': doc('SQL migration guards', 'Domain ownership'),
+    'origin/main': doc(...PINNED_REQUIRED_CONTEXTS),
     HEAD: doc('SQL migration guards'),
   }))
   assert.throws(() => evaluateWithoutRequiredList({
     statuses: [], reason: REASON, mirrorContexts: contexts,
     checkRuns: [ok('SQL migration guards')],
-  }), /never reported: Domain ownership/)
+  }), /never reported:.*Domain ownership/)
 })
 
 test('a page that did not hold every reported check is refused, not judged partially', () => {
@@ -279,7 +271,7 @@ test('a readable required list still takes precedence over the fallback', () => 
 // test still passed, because nothing exercised `gatherPreflightInput` -> `evaluatePreflight`.
 const SHA = 'e'.repeat(40)
 const ENV = { REQUESTED_SHA: SHA }
-const MIRROR_DEP = { root: '/x', run: () => '{"contexts":["SQL migration guards"]}' } // both refs answer the same
+const MIRROR_DEP = { root: '/x', run: () => doc(...PINNED_REQUIRED_CONTEXTS) }
 const reader = ({ protection, statuses = [], checkRuns = [] }) => (args) => {
   const path = args[1]
   if (path.includes('/protection/')) { if (protection instanceof Error) throw protection; return protection }
@@ -289,10 +281,10 @@ const reader = ({ protection, statuses = [], checkRuns = [] }) => (args) => {
 const refusal = () => Object.assign(new PreflightError('GitHub read failed: HTTP 403: Resource not accessible by integration'), {})
 
 test('a 403 on the protection read reaches evaluatePreflight as the fallback, not as "nothing required"', () => {
-  const input = gatherPreflightInput(ENV, { ...MIRROR_DEP, json: reader({ protection: refusal(), checkRuns: [ok('SQL migration guards')] }) })
+  const input = gatherPreflightInput(ENV, { ...MIRROR_DEP, json: reader({ protection: refusal(), checkRuns: PINNED_REQUIRED_CONTEXTS.filter((context) => context !== SELF_CONTEXT).map(ok) }) })
   assert.ok(input.protectionUnreadable)
   assert.equal(input.requiredContexts, null)
-  assert.deepEqual(input.mirrorContexts, ['SQL migration guards'])
+  assert.deepEqual(input.mirrorContexts, PINNED_REQUIRED_CONTEXTS)
   assert.equal(evaluatePreflight(input).mode, 'committed-mirror')
 })
 
