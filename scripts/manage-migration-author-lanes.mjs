@@ -2069,6 +2069,45 @@ export function parseReviewExclusion(commit){
   return {reviewer:match[1],issue:Number(match[2]),pr:Number(match[3]),reason:match[4],evidenceSha:match[5]}
 }
 
+// EXCLUSION GENERATIONS -- WHY A LIFTED EXCLUSION MUST NOT KEEP THE SLOT.
+//
+// The exclusion ref is create-only, so before generations a reinstatement
+// permanently spent the ONLY exclusion slot for that reviewer+PR: a later
+// `already-reviewed` or `independence-conflict` exclusion hit the lifted
+// record and was refused, and draw-time selection reads only the live
+// exclusion set. The independence rule "a provider that already judged these
+// bytes is never re-drawn" therefore could not be enforced for any reinstated
+// reviewer on that pull request (#2224 review 2, High).
+//
+// The repair keeps EVERY record append-only. Nothing is ever deleted or
+// rewritten: a later exclusion is written to the NEXT generation ref, and a
+// generation only stops barring the reviewer when its OWN reinstatement ref
+// lifts it. So gen1 lifted + gen2 `already-reviewed` bars the reviewer again,
+// and the whole history -- exclusion, lift, re-exclusion -- stays readable.
+export const REVIEW_EXCLUSION_GENERATION_LIMIT = 4
+function reviewGenerationSuffix(generation){
+  const value=Number(generation)
+  if(!Number.isInteger(value)||value<1||value>REVIEW_EXCLUSION_GENERATION_LIMIT)throw new LaneError(`reviewer exclusion generation must be an integer 1..${REVIEW_EXCLUSION_GENERATION_LIMIT}`)
+  return value===1?'':`-gen${value}`
+}
+// Generation 1 keeps the historical ref name EXACTLY, so every exclusion and
+// reinstatement recorded before this change reads unchanged.
+export function reviewExclusionRef({issue,pr,reviewer,generation=1}){
+  return `${REVIEW_EXCLUSION_REF_PREFIX}/${Number(issue)}-${Number(pr)}-${requireGenerationSafeReviewer(reviewer)}${reviewGenerationSuffix(generation)}`
+}
+export function reviewReinstatementRef({issue,pr,reviewer,generation=1}){
+  return `${REVIEW_REINSTATEMENT_REF_PREFIX}/${Number(issue)}-${Number(pr)}-${requireGenerationSafeReviewer(reviewer)}${reviewGenerationSuffix(generation)}`
+}
+// A reviewer literally named `x-gen2` would make gen1 of `x-gen2` and gen2 of
+// `x` the SAME ref, which would silently merge two providers' records. No such
+// name is in the registry and this refuses one ever being added quietly.
+function requireGenerationSafeReviewer(reviewer){
+  const name=String(reviewer??'')
+  if(/-gen\d+$/i.test(name))throw new LaneError(`reviewer name ${name} collides with the exclusion generation ref suffix`)
+  return name
+}
+export const REVIEW_EXCLUSION_GENERATIONS = Object.freeze(Array.from({length:REVIEW_EXCLUSION_GENERATION_LIMIT},(_,index)=>index+1))
+
 function reviewerExclusions(issue,pr,io,{fresh=false}={}){
   const prefix=`${REVIEW_EXCLUSION_REF_PREFIX}/${Number(issue)}-${Number(pr)}-`
   const result=new Map()
@@ -2077,13 +2116,13 @@ function reviewerExclusions(issue,pr,io,{fresh=false}={}){
   // getCommit request per exclusion while the global reviewer mutex is held.
   // That variable cost defeated the mutex-section request reserve (#1833).
   // Exact reads also make absence explicit and cannot be truncated.
-  const refs=REVIEWERS.map(({name})=>`${prefix}${name}`)
+  const refs=REVIEWERS.flatMap(({name})=>REVIEW_EXCLUSION_GENERATIONS.map((generation)=>reviewExclusionRef({issue,pr,reviewer:name,generation})))
   // The reinstatement refs ride in the SAME batched record read as the
   // exclusions, so lifting a reinstated exclusion costs ZERO extra requests on
   // the production io and the mutex-section reserve is unchanged (#1833). Only
   // test doubles without `readReviewRecords` pay a second prefix listing.
   const reinstatePrefix=`${REVIEW_REINSTATEMENT_REF_PREFIX}/${Number(issue)}-${Number(pr)}-`
-  const reinstateRefs=REVIEWERS.map(({name})=>`${reinstatePrefix}${name}`)
+  const reinstateRefs=REVIEWERS.flatMap(({name})=>REVIEW_EXCLUSION_GENERATIONS.map((generation)=>reviewReinstatementRef({issue,pr,reviewer:name,generation})))
   const exact=io.readReviewRecords?.([...refs,...reinstateRefs],null)
   const rows=exact
     ? refs.map((ref)=>{const row=exact.get(ref);return row?{ref,...row}:null}).filter(Boolean)
@@ -2098,13 +2137,18 @@ function reviewerExclusions(issue,pr,io,{fresh=false}={}){
   const reinstated=new Map()
   for(const row of reinstateRows){
     const record=parseReviewReinstatement(row.commit??io.getCommit(row.sha))
-    if(record.issue!==Number(issue)||record.pr!==Number(pr)||row.ref!==`${reinstatePrefix}${record.reviewer}`)throw new LaneError('durable reviewer reinstatement does not match its ref identity')
-    reinstated.set(record.reviewer,record)
+    const generation=REVIEW_EXCLUSION_GENERATIONS.find((each)=>row.ref===reviewReinstatementRef({issue,pr,reviewer:record.reviewer,generation:each}))
+    if(record.issue!==Number(issue)||record.pr!==Number(pr)||!generation)throw new LaneError('durable reviewer reinstatement does not match its ref identity')
+    reinstated.set(`${record.reviewer}#${generation}`,record)
   }
   for(const row of rows){
     const exclusion=parseReviewExclusion(row.commit??io.getCommit(row.sha))
-    if(exclusion.issue!==Number(issue)||exclusion.pr!==Number(pr)||row.ref!==`${prefix}${exclusion.reviewer}`)throw new LaneError('durable reviewer exclusion does not match its ref identity')
-    const lift=reinstated.get(exclusion.reviewer)
+    const generation=REVIEW_EXCLUSION_GENERATIONS.find((each)=>row.ref===reviewExclusionRef({issue,pr,reviewer:exclusion.reviewer,generation:each}))
+    if(exclusion.issue!==Number(issue)||exclusion.pr!==Number(pr)||!generation)throw new LaneError('durable reviewer exclusion does not match its ref identity')
+    // A lift only ever answers for its OWN generation. A later generation's
+    // exclusion is untouched by an earlier generation's reinstatement, which is
+    // what lets an independence exclusion be recorded after a lift.
+    const lift=reinstated.get(`${exclusion.reviewer}#${generation}`)
     if(lift){
       // An exclusion ref is create-only and its commit never moves, so a
       // reinstatement naming a DIFFERENT exclusion SHA cannot be produced by any
@@ -2131,6 +2175,12 @@ function reviewerExclusions(issue,pr,io,{fresh=false}={}){
 // wrapper's own `doctor` output verbatim in its commit body. The header line
 // carries a digest of that body, so a record whose evidence was edited or
 // truncated stops matching its own header.
+// The SAME count the writer records and the reader re-derives. A header may
+// not claim more passing checks than the stored body actually contains
+// (#2224 review 2, Low): `checks=` is re-counted from the proof, not trusted.
+export function countDoctorPassLines(proof){
+  return String(proof??'').split(/\r?\n/).filter((line)=>/^\s*PASS\s+\S/.test(line)||/^\s*\S(?:.*\S)?\s+:\s*(?:PASS|OK)\b/.test(line)).length
+}
 export function parseReviewReinstatement(commit){
   if(!commit)return null
   const message=String(commit.message??commit.commit?.message??'')
@@ -2140,6 +2190,9 @@ export function parseReviewReinstatement(commit){
   const match=/^db-coordination reviewer-reinstatement reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) exclusion=([0-9a-f]{7,40}) reason=([a-z-]+) wrapper=(\S+) proof=sha256:([0-9a-f]{64}) checks=(\d+)$/i.exec(header)
   if(!match||!REVIEWERS.some((row)=>row.name===match[1])||!REINSTATABLE_EXCLUSION_REASONS.has(match[5])||Number(match[8])<1)throw new LaneError('reviewer reinstatement is malformed')
   if(createHash('sha256').update(proof,'utf8').digest('hex')!==match[7].toLowerCase())throw new LaneError('reviewer reinstatement proof does not match its recorded digest')
+  // Digest self-consistency is not proof CONTENT. A record whose header claims
+  // passing checks its own body does not contain is refused outright.
+  if(countDoctorPassLines(proof)!==Number(match[8]))throw new LaneError(`reviewer reinstatement claims ${Number(match[8])} passing checks but its recorded proof contains ${countDoctorPassLines(proof)}`)
   return {reviewer:match[1],issue:Number(match[2]),pr:Number(match[3]),exclusionSha:match[4].toLowerCase(),reason:match[5],wrapper:match[6],proofDigest:match[7].toLowerCase(),passedChecks:Number(match[8]),proof}
 }
 
@@ -2151,17 +2204,20 @@ export function reinstateReviewerExclusion({issue,pr,reviewer},io=githubIo){
     io=reviewOperationIo(io);issue=Number(issue);pr=Number(pr);reviewer=String(reviewer??'')
     const approved=REVIEWERS.find((row)=>row.name===reviewer)
     if(!Number.isInteger(issue)||!Number.isInteger(pr)||!approved)throw new LaneError('reviewer reinstatement requires issue, PR, and a known reviewer')
-    const exclusionRef=`${REVIEW_EXCLUSION_REF_PREFIX}/${issue}-${pr}-${reviewer}`
-    const exclusionSha=io.readRef(exclusionRef)
-    if(!exclusionSha)throw new LaneError(`reviewer ${reviewer} has no durable exclusion for issue #${issue} PR #${pr}; there is nothing to reinstate`)
-    const exclusion=parseReviewExclusion(io.getCommit(exclusionSha))
+    // The NEWEST generation is the one that is actually barring the reviewer;
+    // lifting an older, already-lifted one would prove nothing.
+    const generations=reviewExclusionGenerationRows({issue,pr,reviewer},io)
+    const newest=[...generations].reverse().find((row)=>row.sha)
+    if(!newest)throw new LaneError(`reviewer ${reviewer} has no durable exclusion for issue #${issue} PR #${pr}; there is nothing to reinstate`)
+    const exclusionRef=newest.ref,exclusionSha=newest.sha,generation=newest.generation
+    const exclusion=parseReviewExclusion(newest.commit??io.getCommit(exclusionSha))
     if(exclusion.issue!==issue||exclusion.pr!==pr||exclusion.reviewer!==reviewer)throw new LaneError('durable reviewer exclusion does not match its ref identity')
     // THE WHOLE POINT OF THE NARROW REASON SET. `already-reviewed` and
     // `independence-conflict` say this provider must never judge these bytes;
     // no doctor output makes that untrue. Refused before any probe is run.
     if(!REINSTATABLE_EXCLUSION_REASONS.has(exclusion.reason))throw new LaneError(`reviewer ${reviewer} is excluded for issue #${issue} PR #${pr} with reason ${exclusion.reason}; only ${[...REINSTATABLE_EXCLUSION_REASONS].join(', ')} may be reinstated because the others are independence guarantees, not claims about whether the provider can run`)
-    const ref=`${REVIEW_REINSTATEMENT_REF_PREFIX}/${issue}-${pr}-${reviewer}`
-    const existing=io.readRef(ref)
+    const ref=newest.reinstatementRef
+    const existing=newest.reinstatementSha??io.readRef(ref)
     if(existing){
       const prior=parseReviewReinstatement(io.getCommit(existing))
       if(prior.issue!==issue||prior.pr!==pr||prior.reviewer!==reviewer||prior.exclusionSha!==String(exclusionSha).toLowerCase())throw new LaneError(`reviewer ${reviewer} already has a different durable reinstatement for issue #${issue} PR #${pr}`)
@@ -2182,7 +2238,7 @@ export function reinstateReviewerExclusion({issue,pr,reviewer},io=githubIo){
     }
     if(doctor.format!=='checks')throw new LaneError(`reviewer reinstatement refused: ${approved.wrapper} doctor produced no readable PASS check (format ${doctor.format??'unknown'}). Unreadable output is not proof that the provider works.`)
     const proof=String(doctor.output??'').trim()
-    const passedChecks=proof.split(/\r?\n/).filter((line)=>/^\s*PASS\s+\S/.test(line)||/^\s*\S(?:.*\S)?\s+:\s*(?:PASS|OK)\b/.test(line)).length
+    const passedChecks=countDoctorPassLines(proof)
     if(!proof||!passedChecks)throw new LaneError(`reviewer reinstatement refused: ${approved.wrapper} doctor returned no quotable PASS line to record as evidence`)
     const digest=createHash('sha256').update(proof,'utf8').digest('hex')
     const message=`db-coordination reviewer-reinstatement reviewer=${reviewer} issue=${issue} pr=${pr} exclusion=${String(exclusionSha).toLowerCase()} reason=${exclusion.reason} wrapper=${approved.wrapper} proof=sha256:${digest} checks=${passedChecks}\n\n${proof}`
@@ -2202,8 +2258,15 @@ export function reinstateReviewerExclusion({issue,pr,reviewer},io=githubIo){
         // command adds a record; it never removes one.
         if(after.get(exclusionRef)!==exclusionSha)throw new LaneError('reviewer reinstatement must leave the original exclusion record untouched')
       }
-      else if(!io.createRef(ref,sha)&&readRefAfterWrite(ref,sha,io)!==sha)throw new LaneError('reviewer reinstatement record could not be proved')
-      return {issue,pr,reviewer,reason:exclusion.reason,wrapper:approved.wrapper,exclusionRef,exclusionSha,ref,sha,proofDigest:digest,passedChecks,proof,repeat:false}
+      else{
+        if(!io.createRef(ref,sha)&&readRefAfterWrite(ref,sha,io)!==sha)throw new LaneError('reviewer reinstatement record could not be proved')
+        // The non-atomic path gets the SAME proof the atomic one gets: the
+        // original exclusion is read back and must still be exactly where it
+        // was (#2224 review 2, Low). Create-only is not by itself evidence
+        // that nothing else moved.
+        if(io.readRef(exclusionRef)!==exclusionSha)throw new LaneError('reviewer reinstatement must leave the original exclusion record untouched')
+      }
+      return {issue,pr,reviewer,reason:exclusion.reason,wrapper:approved.wrapper,exclusionRef,exclusionSha,generation,ref,sha,proofDigest:digest,passedChecks,proof,repeat:false}
     }
     finally{finalizeReviewMutex(ownerSha,io)}
   })
@@ -2352,6 +2415,42 @@ function outstandingRetirements(rows,{issue,pr},io){
   return rows.filter((row,index)=>Boolean(raced.get(refs[index])))
 }
 
+// Which generation does a NEW exclusion belong in, and which one does a
+// reinstatement answer? Both questions are read from the durable records only.
+// A generation whose own reinstatement ref exists has been lifted, so it no
+// longer bars anyone and no longer holds the slot: the walk moves on to the
+// next generation. The first generation that is NOT lifted is the live one --
+// absent (create it), identical (idempotent no-op), or different (the existing
+// refusal). Nothing here deletes or rewrites a record.
+function reviewExclusionGenerationRows({issue,pr,reviewer},io,{fresh=false}={}){
+  const exclusionRefs=REVIEW_EXCLUSION_GENERATIONS.map((generation)=>reviewExclusionRef({issue,pr,reviewer,generation}))
+  const reinstateRefs=REVIEW_EXCLUSION_GENERATIONS.map((generation)=>reviewReinstatementRef({issue,pr,reviewer,generation}))
+  // One batched GraphQL read on the production io. Test doubles without it pay
+  // two prefix listings, which reviewOperationIo caches, rather than one read
+  // per generation.
+  const exact=io.readReviewRecords?.([...exclusionRefs,...reinstateRefs],null)
+  const listed=exact?null:new Map([...((fresh?io.__freshListRefs(`${REVIEW_EXCLUSION_REF_PREFIX}/${issue}-${pr}-`):io.listRefs(`${REVIEW_EXCLUSION_REF_PREFIX}/${issue}-${pr}-`))??[]),
+    ...((fresh?io.__freshListRefs(`${REVIEW_REINSTATEMENT_REF_PREFIX}/${issue}-${pr}-`):io.listRefs(`${REVIEW_REINSTATEMENT_REF_PREFIX}/${issue}-${pr}-`))??[])].map((row)=>[row.ref,row]))
+  const shaOf=(ref)=>(exact?exact.get(ref)?.sha:listed.get(ref)?.sha)??null
+  const commitOf=(ref,sha)=>(exact?exact.get(ref)?.commit:listed.get(ref)?.commit)??io.getCommit(sha)
+  return REVIEW_EXCLUSION_GENERATIONS.map((generation)=>{
+    const ref=exclusionRefs[generation-1],sha=shaOf(ref)
+    return {generation,ref,sha,commit:sha?commitOf(ref,sha):null,reinstatementRef:reinstateRefs[generation-1],reinstatementSha:shaOf(reinstateRefs[generation-1])}
+  })
+}
+
+function liveExclusionGeneration({issue,pr,reviewer,reason,evidenceSha},io){
+  for(const row of reviewExclusionGenerationRows({issue,pr,reviewer},io)){
+    if(!row.sha)return row
+    // Lifted: it bars nobody, so it does not hold the slot either.
+    if(row.reinstatementSha)continue
+    const parsed=parseReviewExclusion(row.commit)
+    if(parsed.issue!==issue||parsed.pr!==pr||parsed.reviewer!==reviewer)throw new LaneError('durable reviewer exclusion does not match its ref identity')
+    return row
+  }
+  throw new LaneError(`reviewer ${reviewer} has already used all ${REVIEW_EXCLUSION_GENERATION_LIMIT} durable exclusion generations for issue #${issue} PR #${pr}; every one of them is live, so nothing is being lost -- the reviewer is already excluded and no further record is needed`)
+}
+
 export function excludeReviewerForPr({issue,pr,reviewer,reason,evidenceSha},io=githubIo){
   return withReviewRequestBudget(()=>{
     io=reviewOperationIo(io);issue=Number(issue);pr=Number(pr);reviewer=String(reviewer??'');reason=String(reason??'');evidenceSha=String(evidenceSha??'')
@@ -2451,10 +2550,14 @@ export function excludeReviewerForPr({issue,pr,reviewer,reason,evidenceSha},io=g
     // REFUSES rather than falling back. The exclusion record itself, which
     // creates but never clears, still has a safe fallback below.
     if(held.length&&typeof io.atomicReviewRefs!=='function')throw new LaneError('returning a review slot requires atomic compare-and-swap ref support; reviewer exclusion refused before mutex acquisition')
-    const ref=`${REVIEW_EXCLUSION_REF_PREFIX}/${issue}-${pr}-${reviewer}`,existing=io.readRef(ref)
+    // GENERATIONS (#2224 review 2, High): a reinstated exclusion no longer
+    // occupies this reviewer's only slot, so a LATER independence exclusion is
+    // recorded in the next generation instead of being refused.
+    const live=liveExclusionGeneration({issue,pr,reviewer,reason,evidenceSha},io)
+    const ref=live.ref,existing=live.sha
     let repeat=null
     if(existing){
-      const parsed=parseReviewExclusion(io.getCommit(existing))
+      const parsed=parseReviewExclusion(live.commit??io.getCommit(existing))
       if(parsed.issue!==issue||parsed.pr!==pr||parsed.reviewer!==reviewer||parsed.reason!==reason||parsed.evidenceSha!==evidenceSha)throw new LaneError(`reviewer ${reviewer} already has a different durable exclusion for issue #${issue} PR #${pr}`)
       // Idempotent when nothing is left to hand back. When an assignment IS
       // still outstanding this is the repair route for a pull request excluded

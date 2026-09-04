@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reinstateReviewerExclusion, parseReviewReinstatement, REVIEW_REINSTATEMENT_REF_PREFIX, REINSTATABLE_EXCLUSION_REASONS, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reinstateReviewerExclusion, parseReviewReinstatement, REVIEW_REINSTATEMENT_REF_PREFIX, REINSTATABLE_EXCLUSION_REASONS, reviewExclusionRef, reviewReinstatementRef, REVIEW_EXCLUSION_GENERATION_LIMIT, countDoctorPassLines, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -5684,4 +5684,120 @@ test('a reinstatement naming a different exclusion is corruption, not a lift',()
   io.refs.set(result.ref,io.makeOwnerCommit(forged))
   io.getPr=()=>({state:'open',head:{sha:'b'.repeat(40),ref:'codex/x'}})
   assert.throws(()=>assignNextReviewer({issue,pr,headSha:'b'.repeat(40)},io),/stopped for audit/)
+})
+
+
+// ---------------------------------------------------------------------------
+// A LIFT MUST NOT SPEND THE ONLY EXCLUSION SLOT (#2224 review 2, High).
+//
+// The exclusion ref is create-only. Before generations, a reinstatement left
+// that single ref occupied forever, so a LATER `already-reviewed` exclusion --
+// the record that enforces "a provider that already judged these bytes is
+// never re-drawn" -- was refused as "already has a different durable
+// exclusion", and draw-time selection reads only the live exclusion set. The
+// independence rule was therefore unenforceable for any reinstated reviewer on
+// that pull request. Generations fix that while keeping every record.
+// ---------------------------------------------------------------------------
+
+// Draw heads until `reviewer` is the one assigned, and answer with the head and
+// the durable assignment SHA, which is the evidence a real exclusion carries.
+function drawUntilAssigned(io,{issue,pr,reviewer}){
+  for(let n=0;n<ACTIVE_REVIEWERS.length*2;n+=1){
+    const head=`${n}`.padEnd(40,'e')
+    io.getPr=()=>({number:pr,state:'open',head:{sha:head,ref:'codex/x'}})
+    const drawn=assignNextReviewer({issue,pr,headSha:head,slot:1},io)
+    if(drawn.reviewer===reviewer)return {headSha:head,evidenceSha:io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${head}`)}
+  }
+  throw new Error(`${reviewer} was never drawn again`)
+}
+
+test('after a lift, a LATER already-reviewed exclusion is recorded and bars the reviewer again',()=>{
+  const io=doctoredIo(),issue=2224,pr=2186
+  const {reviewer,excluded}=excludeFor(io,{issue,pr,reason:'terminal-unavailable'})
+  const lift=reinstateReviewerExclusion({issue,pr,reviewer},io)
+  assert.equal(lift.repeat,false)
+  const redrawn=drawUntilAssigned(io,{issue,pr,reviewer})
+
+  // The independence exclusion the old code could not record at all.
+  const later=excludeReviewerForPr({issue,pr,reviewer,reason:'already-reviewed',evidenceSha:redrawn.evidenceSha},io)
+  assert.equal(later.ref,reviewExclusionRef({issue,pr,reviewer,generation:2}))
+  assert.notEqual(later.sha,excluded.sha)
+  // APPEND-ONLY: the first exclusion and its lift are byte-for-byte intact.
+  assert.equal(io.refs.get(reviewExclusionRef({issue,pr,reviewer})),excluded.sha,'the original exclusion record must survive')
+  assert.equal(io.refs.get(reviewReinstatementRef({issue,pr,reviewer})),lift.sha,'the reinstatement record must survive')
+  assert.equal(parseReviewExclusion(io.getCommit(later.sha)).reason,'already-reviewed')
+
+  // AND IT ACTUALLY KEEPS THEM OUT, at every LATER head of the same PR.
+  const names=[]
+  for(let n=0;n<ACTIVE_REVIEWERS.length;n+=1){
+    const head=`${n}`.padEnd(40,'f')
+    io.getPr=()=>({number:pr,state:'open',head:{sha:head,ref:'codex/x'}})
+    try{names.push(assignNextReviewer({issue,pr,headSha:head,slot:1},io).reviewer)}
+    catch(error){assert.match(String(error.message),/no reviewer is available|no independent reviewer/)}
+  }
+  assert.equal(names.includes(reviewer),false,'a reviewer re-excluded for independence must never be drawn again on this PR')
+})
+
+test('a second, unlifted generation is idempotent and is never lifted by the FIRST generation reinstatement',()=>{
+  const io=doctoredIo(),issue=2224,pr=2185
+  const {reviewer}=excludeFor(io,{issue,pr,reason:'terminal-unavailable'})
+  reinstateReviewerExclusion({issue,pr,reviewer},io)
+  const redrawn=drawUntilAssigned(io,{issue,pr,reviewer})
+  const later=excludeReviewerForPr({issue,pr,reviewer,reason:'already-reviewed',evidenceSha:redrawn.evidenceSha},io)
+  const refCount=io.refs.size
+  const again=excludeReviewerForPr({issue,pr,reviewer,reason:'already-reviewed',evidenceSha:redrawn.evidenceSha},io)
+  assert.equal(again.sha,later.sha,'an identical re-run must be the same record')
+  assert.equal(io.refs.size,refCount,'an identical re-run must write no new ref')
+  // The gen-2 exclusion is an independence guarantee and cannot be lifted.
+  assert.throws(()=>reinstateReviewerExclusion({issue,pr,reviewer},io),/with reason already-reviewed/)
+  assert.equal(io.refs.has(reviewReinstatementRef({issue,pr,reviewer,generation:2})),false)
+})
+
+test('the generation suffix can never collide with a reviewer name',()=>{
+  for(const {name} of REVIEWERS)assert.doesNotMatch(name,/-gen\d+$/i,`reviewer ${name} would collide with the exclusion generation ref suffix`)
+  assert.throws(()=>reviewExclusionRef({issue:1,pr:2,reviewer:'x-gen2'}),/collides with the exclusion generation ref suffix/)
+  assert.throws(()=>reviewExclusionRef({issue:1,pr:2,reviewer:ACTIVE_REVIEWERS[0].name,generation:REVIEW_EXCLUSION_GENERATION_LIMIT+1}),/generation must be an integer/)
+  assert.equal(reviewExclusionRef({issue:1,pr:2,reviewer:'grok-4.6'}),`${REVIEW_EXCLUSION_REF_PREFIX}/1-2-grok-4.6`,'generation 1 must keep the historical ref name exactly')
+  assert.equal(reviewReinstatementRef({issue:1,pr:2,reviewer:'grok-4.6'}),`${REVIEW_REINSTATEMENT_REF_PREFIX}/1-2-grok-4.6`)
+})
+
+// ---------------------------------------------------------------------------
+// THE READ-PATH INDEPENDENCE GUARD (#2224 review 2, Medium).
+//
+// `parseReviewReinstatement` only checks the record's OWN header reason, so a
+// planted reinstatement sitting beside an `already-reviewed` exclusion parses
+// cleanly. The reader proves the reason from the EXCLUSION commit instead, and
+// stops the whole exclusion read rather than dropping an independence bar.
+// ---------------------------------------------------------------------------
+test('a planted reinstatement can never lift an independence exclusion on the READ path',()=>{
+  for(const reason of ['already-reviewed','independence-conflict']){
+    const io=doctoredIo(),issue=2224,pr=reason==='already-reviewed'?2184:2183
+    // A genuine reinstatement record, minted on a different PR of the same io.
+    const donorPr=pr-100
+    const donor=excludeFor(io,{issue,pr:donorPr,reason:'terminal-unavailable'})
+    const genuine=io.getCommit(reinstateReviewerExclusion({issue,pr:donorPr,reviewer:donor.reviewer},io).sha).message
+
+    const {reviewer,excluded}=excludeFor(io,{issue,pr,reason})
+    // Re-headed onto the independence exclusion. The digest still matches --
+    // it covers the body only -- and the header reason is the reinstatable one,
+    // so the record itself parses. Only the cross-check from the exclusion
+    // commit can catch it.
+    const forged=genuine.replace(`reviewer=${donor.reviewer}`,`reviewer=${reviewer}`).replace(`issue=${issue} pr=${donorPr}`,`issue=${issue} pr=${pr}`).replace(/exclusion=[0-9a-f]{7,40}/,`exclusion=${String(excluded.sha).toLowerCase()}`)
+    assert.equal(parseReviewReinstatement({message:forged}).reason,'terminal-unavailable','the plant must parse, or this test proves nothing')
+    io.refs.set(reviewReinstatementRef({issue,pr,reviewer}),io.makeOwnerCommit(forged))
+
+    io.getPr=()=>({number:pr,state:'open',head:{sha:'b'.repeat(40),ref:'codex/x'}})
+    assert.throws(()=>assignNextReviewer({issue,pr,headSha:'b'.repeat(40)},io),new RegExp(`reinstatement exists for a ${reason} exclusion`),'an independence exclusion must never be dropped from the live set')
+  }
+})
+
+test('a reinstatement header may not claim more passing checks than its own proof holds',()=>{
+  const io=doctoredIo('PASS provider=codex sandbox=read-only\nPASS provider=codex auth=ok\n'),issue=2224,pr=2182
+  const {reviewer}=excludeFor(io,{issue,pr,reason:'terminal-unavailable'})
+  const result=reinstateReviewerExclusion({issue,pr,reviewer},io)
+  assert.equal(result.passedChecks,2)
+  assert.equal(countDoctorPassLines('PASS a b\nnoise\nthing : OK\n'),2)
+  // Same body, inflated count: the digest still matches, the claim does not.
+  const message=io.getCommit(result.sha).message
+  assert.throws(()=>parseReviewReinstatement({message:message.replace('checks=2','checks=9')}),/claims 9 passing checks but its recorded proof contains 2/)
 })

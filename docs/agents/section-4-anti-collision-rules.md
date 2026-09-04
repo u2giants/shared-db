@@ -350,6 +350,21 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    idempotent and writes no second record. The reason is proved from the
    EXCLUSION commit, never from the reinstatement's copy of it.
 
+   A LIFT DOES NOT SPEND THE SLOT. An exclusion ref is create-only, so a
+   reinstatement used to occupy the reviewer's only exclusion record for that
+   pull request forever: a later `already-reviewed` or `independence-conflict`
+   exclusion -- the record that enforces "a provider that already judged these
+   bytes is never re-drawn" -- was refused as a different durable exclusion, and
+   the independence rule became unenforceable for that reviewer on that pull
+   request. A later exclusion is now written to the NEXT GENERATION ref,
+   `refs/db-review-exclusions/<issue>-<pr>-<reviewer>-gen<N>` (generation 1 keeps
+   the historical name unchanged), and each generation is barred until its OWN
+   `-gen<N>` reinstatement lifts it. Nothing is deleted or rewritten: the whole
+   history -- exclusion, lift, re-exclusion -- stays readable, and
+   `--reinstate-reviewer-exclusion` always answers the NEWEST generation, so an
+   independence re-exclusion after a lift can never itself be lifted. Four
+   generations are read; using all four is a refusal, not a silent overwrite.
+
    The merge gate that reads these records is `check-exact-head-approval.mjs`,
    the script the guarded merge workflow runs BEFORE the merge -- not only the
    preview gate, which under merge-first runs after it. Both read the return
