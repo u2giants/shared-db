@@ -358,6 +358,13 @@
       "line_sha256": "e47fc51b7d39934fc8bf83e0788a61943d78d1174ad1dd72357cc9f5e75b2b97"
     },
     {
+      "site": "scripts/check-applied-migration-edit.mjs:35",
+      "disposition": "excluded",
+      "reason": "A comment in the applied-migration-edit guard explaining that an unreadable ledger exits 2 rather than being reported as \"not applied\"; it is prose about fail-closed behaviour, not a throughput call site.",
+      "semantic_key": "scripts/check-applied-migration-edit.mjs:eea90ebb6704b333bda8c31dab907dc4d9d086fa20cd901465707c1aea303fb3:1",
+      "line_sha256": "eea90ebb6704b333bda8c31dab907dc4d9d086fa20cd901465707c1aea303fb3"
+    },
+    {
       "site": "scripts/check-business-rule-library.mjs:44",
       "disposition": "excluded",
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation.",
@@ -1660,7 +1667,7 @@
       "line_sha256": "c306e35745386b717b583be41a182e378d17ce899e352842a4d0cfbae51ccc3c"
     }
   ],
-  "call_site_count": 235,
-  "call_site_sha256": "0f7a366224c2063619c4a2f9b0004e6af4d7a7fc4136ba3329444bad900d2340",
+  "call_site_count": 236,
+  "call_site_sha256": "eb8d6f9b212ba6b551e625f8f248177e1c113955775f8a0636ab7a02cad8062a",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
