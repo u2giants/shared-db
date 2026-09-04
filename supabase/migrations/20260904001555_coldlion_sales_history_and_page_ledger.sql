@@ -323,6 +323,45 @@ create trigger history_page_ledger_scope_guard
   before insert or update on coldlion.history_page_ledger
   for each row execute function coldlion.history_page_ledger_scope_guard();
 
+-- A parent scope is the identity copied onto every page. Once pages exist, changing
+-- that identity would make the parent and its evidence disagree. Loaded scope is
+-- immutable even if its pages are later found missing through outside corruption.
+create or replace function coldlion.window_ledger_scope_immutable_with_pages()
+returns trigger
+language plpgsql
+security definer
+set search_path = coldlion, pg_temp
+as $fn$
+begin
+  if new.endpoint is not distinct from old.endpoint
+     and new.company_code is not distinct from old.company_code
+     and new.division_code is not distinct from old.division_code
+     and new.stage_code is not distinct from old.stage_code
+     and new.window_from is not distinct from old.window_from
+     and new.window_to is not distinct from old.window_to then
+    return new;
+  end if;
+
+  if old.state = 'loaded' or exists (
+    select 1 from coldlion.history_page_ledger where window_id = old.id
+  ) then
+    raise exception
+      'window % scope cannot change after page evidence exists or the window is loaded',
+      old.id;
+  end if;
+
+  return new;
+end;
+$fn$;
+
+comment on function coldlion.window_ledger_scope_immutable_with_pages() is
+  'Prevents a ColdLion history window scope from diverging from existing page evidence and seals the scope of loaded windows (issue #2173).';
+
+drop trigger if exists window_ledger_scope_immutable_with_pages on coldlion.window_ledger;
+create trigger window_ledger_scope_immutable_with_pages
+  before update on coldlion.window_ledger
+  for each row execute function coldlion.window_ledger_scope_immutable_with_pages();
+
 -- (b) A window becomes `loaded` ONLY on page evidence. This is the whole point of the
 --     unit: one sync_run row never proves a multi-page window complete. It is a
 --     CONSTRAINT trigger so the check can be deferred when needed, but pages must be
@@ -429,21 +468,33 @@ security definer
 set search_path = coldlion, pg_temp
 as $fn$
 declare
-  v_state text;
-  v_window_id uuid;
+  v_parent record;
+  v_window_ids uuid[];
 begin
-  v_window_id := case when tg_op = 'INSERT' then new.window_id else old.window_id end;
-  -- Serialize with a concurrent parent transition to loaded; otherwise an INSERT
-  -- and the completion UPDATE could both observe the pre-loaded state and commit.
-  select state into v_state
-    from coldlion.window_ledger
-   where id = v_window_id
-   for update;
-  if v_state = 'loaded' then
-    raise exception
-      'page evidence for window % cannot be added, changed or removed while that window is loaded',
-      v_window_id;
+  if tg_op = 'INSERT' then
+    v_window_ids := array[new.window_id];
+  elsif tg_op = 'DELETE' then
+    v_window_ids := array[old.window_id];
+  else
+    v_window_ids := array[old.window_id, new.window_id];
   end if;
+
+  -- Lock both parents in deterministic order. An UPDATE that re-parents a page
+  -- must protect its loaded destination as well as its source, and deterministic
+  -- ordering avoids deadlocks when two transactions move pages in opposite ways.
+  for v_parent in
+    select id, state
+      from coldlion.window_ledger
+     where id = any(v_window_ids)
+     order by id
+     for update
+  loop
+    if v_parent.state = 'loaded' then
+      raise exception
+        'page evidence for window % cannot be added, changed or removed while that window is loaded',
+        v_parent.id;
+    end if;
+  end loop;
   return case when tg_op = 'DELETE' then old else new end;
 end;
 $fn$;
@@ -612,6 +663,10 @@ create table coldlion.order_history_component (
 
 create index if not exists coldlion_order_history_component_line_idx
   on coldlion.order_history_component (line_id);
+create index if not exists coldlion_order_history_line_run_idx
+  on coldlion.order_history_line (run_id);
+create index if not exists coldlion_order_history_component_run_idx
+  on coldlion.order_history_component (run_id);
 
 comment on table coldlion.order_history_component is
   'One component design of one sales-order line version, with a mandatory FK to that version - every component has exactly one parent. On a non-prepack row there is exactly one component and sub_item_no is NULL. order_qty and invoice_qty are ColdLion''s own per-SKU numbers and are the ones to read; a prepack row with order_qty = 0 against a non-zero parent line_qty is the rounding artefact of a partial prepack (§10.6), not an empty line. An invoice number never proves the row was invoiced - fulfilment state comes from the quantities (§10.8) - and no document type is inferred or stored. Issue #2173.';
@@ -669,6 +724,8 @@ create index if not exists coldlion_order_history_invoice_ref_line_idx
   on coldlion.order_history_invoice_ref (line_id);
 create index if not exists coldlion_order_history_invoice_ref_component_idx
   on coldlion.order_history_invoice_ref (component_id);
+create index if not exists coldlion_order_history_invoice_ref_run_idx
+  on coldlion.order_history_invoice_ref (run_id);
 
 comment on table coldlion.order_history_invoice_ref is
   'One invoice-number token from a comma-separated invoiceNoString, in payload order. Ownership is as the payload proves it: line_id always, component_id only where the token demonstrably belongs to one component. The date token is aligned by ordinal ONLY when the number and date lists have equal cardinality; otherwise date_alignment_proven stays false, both lists are still preserved, and no pairing is invented. The presence of an invoice number does not mean the row was invoiced (§10.8). Issue #2173.';
@@ -701,6 +758,8 @@ create index if not exists coldlion_order_history_pick_ticket_ref_line_idx
   on coldlion.order_history_pick_ticket_ref (line_id);
 create index if not exists coldlion_order_history_pick_ticket_ref_component_idx
   on coldlion.order_history_pick_ticket_ref (component_id);
+create index if not exists coldlion_order_history_pick_ticket_ref_run_idx
+  on coldlion.order_history_pick_ticket_ref (run_id);
 
 comment on table coldlion.order_history_pick_ticket_ref is
   'One pick-ticket token from a comma-separated pickTicketNoString, in payload order, stored as text. Ownership is as the payload proves it. 58 rows of the 1,823-row corpus carry a pick ticket and no invoice, so a pick ticket proves nothing about invoicing and no document type is inferred. Issue #2173.';

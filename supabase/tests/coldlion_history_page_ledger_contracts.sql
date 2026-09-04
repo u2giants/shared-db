@@ -77,6 +77,7 @@ declare
   v_run uuid;
   v_window uuid;
   v_unscoped uuid;
+  v_source_window uuid;
 begin
   insert into coldlion.sync_run(endpoint, company_code, requested_by, started_at)
   values ('/orderHistory', 'TESTCO', 'contract-test', now())
@@ -248,6 +249,58 @@ begin
     raise exception 'a fully evidenced window was refused';
   end if;
 
+  -- A loaded parent's scope is sealed independently of its page rows.
+  begin
+    update coldlion.window_ledger
+       set window_to = date '2026-06-09'
+     where id = v_window;
+    raise exception 'a loaded window scope was changed';
+  exception when raise_exception then
+    if sqlerrm not like 'window % scope cannot change after page evidence exists or the window is loaded' then
+      raise;
+    end if;
+  when others then raise;
+  end;
+
+  -- Build a pending source page, then prove it cannot be re-parented into the
+  -- loaded destination even when all copied scope columns are changed to match.
+  insert into coldlion.window_ledger(
+    endpoint, company_code, division_code, window_from, window_to)
+  values ('/orderHistory', 'TESTCO', 'DIV1', date '2026-06-09', date '2026-06-15')
+  returning id into v_source_window;
+
+  insert into coldlion.history_page_ledger(
+    window_id, endpoint, company_code, division_code, window_from, page_number,
+    requested_page_size, returned_page_size, state)
+  values (v_source_window, '/orderHistory', 'TESTCO', 'DIV1', date '2026-06-09',
+          0, 2000, 200, 'running');
+
+  begin
+    update coldlion.history_page_ledger
+       set window_id = v_window, window_from = date '2026-06-02'
+     where window_id = v_source_window and page_number = 0;
+    raise exception 'a page was re-parented into a loaded window';
+  exception when raise_exception then
+    if sqlerrm not like 'page evidence for window % cannot be added, changed or removed while that window is loaded' then
+      raise;
+    end if;
+  when others then raise;
+  end;
+
+  -- Pending does not mean mutable once page evidence exists: changing the parent
+  -- scope would immediately diverge from the copied scope on that page.
+  begin
+    update coldlion.window_ledger
+       set window_to = date '2026-06-16'
+     where id = v_source_window;
+    raise exception 'a pending window with page evidence changed scope';
+  exception when raise_exception then
+    if sqlerrm not like 'window % scope cannot change after page evidence exists or the window is loaded' then
+      raise;
+    end if;
+  when others then raise;
+  end;
+
   -- Completion evidence is sealed in both directions. A late page would make the
   -- already-loaded parent false after its completion trigger had succeeded.
   begin
@@ -259,7 +312,10 @@ begin
             2000, 200, 1, true, 202, 3, 'loaded', v_run, now());
     raise exception 'a late page was added after its window was loaded';
   exception when raise_exception then
-    if sqlerrm like 'a late page was added%' then raise; end if;
+    if sqlerrm not like 'page evidence for window % cannot be added, changed or removed while that window is loaded' then
+      raise;
+    end if;
+  when others then raise;
   end;
 
   -- The evidence behind a loaded window is not erasable.

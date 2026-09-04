@@ -160,6 +160,18 @@ begin
   ) then
     raise exception 'an inferred source-document type was stored';
   end if;
+
+  -- Every run_id foreign key used by the redesigned history grain has a leading
+  -- index, so deleting or reconciling a sync run cannot degrade into four scans.
+  if (select count(*) from pg_indexes
+      where schemaname = 'coldlion'
+        and indexname in (
+          'coldlion_order_history_line_run_idx',
+          'coldlion_order_history_component_run_idx',
+          'coldlion_order_history_invoice_ref_run_idx',
+          'coldlion_order_history_pick_ticket_ref_run_idx')) <> 4 then
+    raise exception 'one or more order-history run_id foreign keys lacks an index';
+  end if;
 end $$;
 
 do $$
