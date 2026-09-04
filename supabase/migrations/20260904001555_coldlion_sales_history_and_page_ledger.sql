@@ -1,7 +1,7 @@
 -- =====================================================================================
 -- Issue #2173 - ColdLion landing unit 3: sales-history redesign and the stage/page
 -- completion ledger. Tracker #2081; plan `plan_coldlion_landing_schema_completion.md`
--- §9 Step 4. Claim #2181 reserves version 20260903025751 and exactly these objects:
+-- §9 Step 4. Claim #2181 reserves version 20260904001555 and exactly these objects:
 --
 --   coldlion.window_ledger                 (repaired in place - stage/division/page scope)
 --   coldlion.history_page_ledger           (new)
