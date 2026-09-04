@@ -31,6 +31,11 @@ export type MatchCandidate = QueueCandidate & {
   property_name: string | null
 }
 
+export type OpaPropertyOption = {
+  licensed_property_id: number
+  property_name: string
+}
+
 export type MatchState = 'exact' | 'multiple' | 'none'
 
 export type PropertyMatchRow = {
@@ -127,6 +132,27 @@ export async function attachCandidateNames(client: ApiClient, rows: PropertyMatc
   }))
 }
 
+/** Load the complete OPA Property vocabulary; Supabase caps one select at 1,000 rows. */
+export async function loadOpaPropertyOptions(client: ApiClient) {
+  const options: OpaPropertyOption[] = []
+  const pageSize = 1000
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await client
+      .from('opa_property_reconciliation')
+      .select('licensed_property_id, opa_property_name')
+      .order('opa_property_name')
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    const page = (data ?? []) as { licensed_property_id: number; opa_property_name: string | null }[]
+    options.push(...page.filter(row => row.opa_property_name).map(row => ({
+      licensed_property_id: Number(row.licensed_property_id),
+      property_name: row.opa_property_name as string,
+    })))
+    if (page.length < pageSize) break
+  }
+  return options
+}
+
 /** Why this row needs a human: no candidate, exactly one, or a choice between several. */
 export function matchState(row: PropertyMatchRow): MatchState {
   if (row.candidates.length === 0) return 'none'
@@ -136,7 +162,7 @@ export function matchState(row: PropertyMatchRow): MatchState {
 export function describeMatchState(row: PropertyMatchRow) {
   switch (matchState(row)) {
     case 'multiple':
-      return `${row.candidates.length} OPA Properties are proposed for this contract clause. Tick every one the clause covers.`
+      return `${row.candidates.length} OPA Properties are proposed for this contract clause. Remove any the clause does not cover.`
     case 'none':
       return 'No OPA Property was proposed. Reject it, or check the contract evidence before deciding.'
     default:
@@ -145,11 +171,11 @@ export function describeMatchState(row: PropertyMatchRow) {
 }
 
 /**
- * A single candidate is pre-ticked because there is nothing to choose between.
- * A choice between several is never pre-made for the reviewer.
+ * Every recorded candidate remains visible as a removable suggestion. Nothing
+ * is applied until the reviewer supplies a reason and confirms the decision.
  */
 export function defaultSelection(row: PropertyMatchRow) {
-  return row.candidates.length === 1 ? [row.candidates[0].licensed_property_id] : []
+  return row.candidates.map(candidate => candidate.licensed_property_id)
 }
 
 export async function loadPropertyMatchQueue(client: ApiClient, search: string | null = null) {
