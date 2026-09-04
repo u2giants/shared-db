@@ -176,6 +176,32 @@ function gh(args) {
 }
 function json(args) { const raw = gh(args); try { return JSON.parse(raw) } catch { throw new PreflightError('GitHub returned malformed JSON') } }
 
+// `gh api --paginate --slurp` returns an ARRAY of page objects; a single-page read
+// through the same path still returns that array with one element. Flattening here
+// rather than at each call site is what keeps the >100 case honest.
+//
+// WHY THIS IS NOT COSMETIC (#2274). Both reads used to be a bare `per_page=100`
+// with no pagination. This repository already reports seventeen checks on a head,
+// and a re-run adds a report rather than replacing one. Past a hundred reports a
+// context that really did pass would come back absent, `evaluatePreflight` would
+// call it "never reported", and the merge would be refused for a reason no one
+// could act on. That is the safe direction, but it is an unexplainable block on
+// the ONLY merge path, so it is fixed rather than documented.
+export function collectPages(payload, key) {
+  const pages = Array.isArray(payload) ? payload : [payload]
+  const out = []
+  for (const page of pages) {
+    const rows = page?.[key]
+    // A page that does not carry the list AT ALL is not an empty page -- it is a
+    // read we did not understand. Skipping it silently drops however many reports
+    // it held, and the whole point of paginating was to stop dropping reports.
+    if (rows === undefined || rows === null) throw new PreflightError(`GitHub returned a page with no "${key}" list`)
+    if (!Array.isArray(rows)) throw new PreflightError(`GitHub returned a non-list "${key}" page`)
+    out.push(...rows)
+  }
+  return out
+}
+
 // The refusal text is printed into a public workflow log, so the API's own error
 // string is flattened and bounded rather than passed through whole.
 export function sanitize(text) {
@@ -193,10 +219,28 @@ export function isPermissionRefusal(message) {
   return /\b(403|401)\b|resource not accessible|must have admin|not accessible by integration/i.test(String(message ?? ''))
 }
 
+// The count GitHub itself reports, taken from the FIRST page of a slurped read.
+// Every page repeats it, and a payload that was never an array still answers.
+export function reportedTotal(payload) {
+  const first = Array.isArray(payload) ? payload[0] : payload
+  return first?.total_count
+}
+
+// Kept as a belt-and-braces check ALONGSIDE real pagination, not instead of it.
+// `--paginate` should now return every report, so this can only fire if the
+// pagination itself came up short -- a truncated read, a `Link` header GitHub did
+// not send, a mocked dependency. Reading fewer reports than GitHub says exist
+// means the second half of the fallback (every OTHER check must also be passing)
+// was judged on a partial list, so it refuses rather than guesses.
 export function requireWholePage(what, totalCount, page) {
-  if (!Number.isInteger(totalCount) || !Array.isArray(page)) return
+  // A missing total is NOT "we saw everything". Both endpoints document
+  // `total_count`, so its absence means the payload is not the one we think we are
+  // reading, and answering "complete" for an unrecognised payload is the same
+  // fail-open this whole change exists to close.
+  if (!Number.isInteger(totalCount)) throw new PreflightError(`GitHub did not report how many ${what} exist on the reviewed head, so the read cannot be shown to be complete. The merge lane was not taken.`)
+  if (!Array.isArray(page)) throw new PreflightError(`The ${what} read did not produce a list, so it cannot be compared against GitHub's own count. The merge lane was not taken.`)
   if (totalCount > page.length) {
-    throw new PreflightError(`GitHub reported ${totalCount} ${what} on the reviewed head but only ${page.length} fit on one page, so some checks were never seen. The merge lane was not taken.`)
+    throw new PreflightError(`GitHub reported ${totalCount} ${what} on the reviewed head but pagination returned only ${page.length}, so some checks were never seen. The merge lane was not taken.`)
   }
 }
 
@@ -210,21 +254,26 @@ export function gatherPreflightInput(env = process.env, deps = { json }) {
     if (!isPermissionRefusal(e.message)) throw e
     protectionUnreadable = sanitize(e.message)
   }
-  const combined = read(['api', `repos/${REPO}/commits/${sha}/status?per_page=100`])
-  const runs = read(['api', `repos/${REPO}/commits/${sha}/check-runs?per_page=100`])
-  // One page only. A required context beyond page 1 would look like "never reported"
-  // and fail closed, but a FAILING extra check beyond page 1 would be invisible to
-  // the second half of the fallback. Refuse rather than judge a partial page.
-  requireWholePage('commit statuses', combined?.total_count, combined?.statuses)
-  requireWholePage('check runs', runs?.total_count, runs?.check_runs)
+  // #2274: BOTH reads are paginated. Seventeen checks report on a head here and a
+  // re-run adds a report rather than replacing one, so a hundred is reachable. Past
+  // it, an unpaginated read made a context that really did pass look like it had
+  // never reported, and the only merge path refused for a reason nobody could act
+  // on. `--slurp` returns an array of pages; `collectPages` flattens it, and a
+  // single-page read comes back through the same path unchanged.
+  const combined = read(['api', '--paginate', '--slurp', `repos/${REPO}/commits/${sha}/status?per_page=100`])
+  const runs = read(['api', '--paginate', '--slurp', `repos/${REPO}/commits/${sha}/check-runs?per_page=100`])
+  const statuses = collectPages(combined, 'statuses')
+  const checkRuns = collectPages(runs, 'check_runs')
+  requireWholePage('commit statuses', reportedTotal(combined), statuses)
+  requireWholePage('check runs', reportedTotal(runs), checkRuns)
   // NO `?? []` on the contexts. An empty list must never be read as "nothing is
   // required" -- that is the fail-open this whole script exists to prevent.
   return {
     protectionUnreadable,
     mirrorContexts: protectionUnreadable ? readRequiredChecksMirror(deps.root ?? process.cwd(), deps.run ?? execFileSync) : null,
     requiredContexts: protectionUnreadable ? null : protection?.contexts,
-    statuses: combined?.statuses ?? [],
-    checkRuns: runs?.check_runs ?? [],
+    statuses,
+    checkRuns,
   }
 }
 
