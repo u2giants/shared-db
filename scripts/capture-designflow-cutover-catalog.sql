@@ -1,4 +1,9 @@
 \set ON_ERROR_STOP on
+\if :{?schema_name}
+\else
+  \echo 'schema_name is required'
+  \quit 2
+\endif
 
 BEGIN READ ONLY;
 SET LOCAL statement_timeout = '2min';

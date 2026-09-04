@@ -207,7 +207,11 @@ SET ok = detail->>'source_count' IS NOT DISTINCT FROM detail->>'copy_count'
      AND detail->>'source_min_id' IS NOT DISTINCT FROM detail->>'copy_min_id'
      AND detail->>'source_max_id' IS NOT DISTINCT FROM detail->>'copy_max_id'
      AND detail->>'source_tail_hash' IS NOT DISTINCT FROM detail->>'copy_tail_hash'
-WHERE phase = 'auditlog_gate';
+WHERE phase = 'auditlog_gate'
+  AND detail ? 'source_count'
+  AND detail ? 'copy_count'
+  AND detail ? 'source_tail_hash'
+  AND detail ? 'copy_tail_hash';
 
 DO $block$
 DECLARE r record;
