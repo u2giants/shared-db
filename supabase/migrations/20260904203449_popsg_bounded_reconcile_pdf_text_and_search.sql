@@ -127,6 +127,34 @@ create index if not exists idx_sgf_reconcile_root_active_run_id
   on public.style_guide_files (root_label, crawl_run_id, id)
   where is_active;
 
+-- The two style-guide matviews predate this repository's migration history: they
+-- exist in production but are absent from supabase/ci-bootstrap, so a replay from
+-- the baseline has nothing to index. These two statements are a NO-OP in
+-- production (IF NOT EXISTS) and reconstruct the exact live definitions, verbatim
+-- from the production catalogue, wherever the relations are missing. Both
+-- relations are inside this migration's object claim.
+create materialized view if not exists public.style_guide_file_groups as
+  select md5((coalesce(root_label, ''::text) || '/'::text) || coalesce(directory_path, ''::text)) as group_key,
+         root_label,
+         directory_path,
+         licensor_name,
+         property_folder,
+         style_guide_folder,
+         coalesce(nullif(style_guide_folder, ''::text), nullif(property_folder, ''::text),
+                  licensor_name, 'Unfiled'::text) as style_guide_name,
+         (count(*))::integer as file_count,
+         max(modified_at) as latest_modified_at,
+         (sum(coalesce(size_bytes, (0)::bigint)))::bigint as total_size_bytes,
+         (array_remove(array_agg(thumbnail_url order by modified_at desc nulls last), null::text))[1] as sample_thumbnail_url
+    from public.style_guide_files
+   where is_active = true
+   group by root_label, directory_path, licensor_name, property_folder, style_guide_folder;
+
+create materialized view if not exists public.style_guide_folders as
+  select distinct licensor_name, property_folder
+    from public.style_guide_files
+   where is_active = true and licensor_name is not null;
+
 -- `style_guide_folders` had NO unique index, which is why its refresh was
 -- blocking. NULLS NOT DISTINCT because property_folder is nullable and
 -- REFRESH ... CONCURRENTLY must be able to match those rows.

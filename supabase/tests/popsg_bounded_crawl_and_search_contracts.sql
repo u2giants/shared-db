@@ -18,13 +18,15 @@ begin;
 create or replace function pg_temp.mk_file(
   p_root text, p_run uuid, p_path text, p_ext text default 'pdf', p_active boolean default true
 ) returns uuid language sql as $$
+  -- licensor_name is GENERATED ALWAYS AS split_part(relative_path, '/', 1), so it
+  -- cannot be written directly -- the path carries it.
   insert into public.style_guide_files
     (crawl_run_id, root_label, relative_path, directory_path, filename, basename_no_ext,
-     file_extension, normalized_name, licensor_name, property_folder, style_guide_folder,
+     file_extension, normalized_name, property_folder, style_guide_folder,
      size_bytes, modified_at, is_active, tag_names, tag_search_text)
   values
-    (p_run, p_root, p_path, 'dir/' || p_root, p_path, replace(p_path, '.pdf', ''),
-     p_ext, lower(p_path), 'TestLicensor', 'TestProperty', 'TestGuide',
+    (p_run, p_root, 'TestLicensor/' || p_path, 'dir/' || p_root, p_path, replace(p_path, '.pdf', ''),
+     p_ext, lower(p_path), 'TestProperty', 'TestGuide',
      1024, timestamptz '2026-01-01 00:00:00+00', p_active, array['alpha','beta'], 'alpha beta')
   returning id;
 $$;
@@ -181,7 +183,7 @@ begin
   -- a second crawl re-sees three of the four; the fourth is genuinely stale
   insert into public.style_guide_crawl_runs (status, files_found) values ('pending', 3) returning id into v_run_a2;
   update public.style_guide_files set crawl_run_id = v_run_a2
-   where root_label = 'ROOT_A' and relative_path in ('a1.pdf','a2.pdf','a3.pdf');
+   where root_label = 'ROOT_A' and relative_path in ('TestLicensor/a1.pdf','TestLicensor/a2.pdf','TestLicensor/a3.pdf');
 
   select count(*) into v_before from public.style_guide_files where root_label = 'ROOT_A' and is_active;
 
@@ -211,7 +213,7 @@ begin
   -- now hand the root to a NEW run that re-sees only a5 and a6 plus four others,
   -- leaving exactly three stale rows behind
   update public.style_guide_files set crawl_run_id = v_run_b2
-   where root_label = 'ROOT_A' and relative_path in ('a1.pdf','a2.pdf','a5.pdf');
+   where root_label = 'ROOT_A' and relative_path in ('TestLicensor/a1.pdf','TestLicensor/a2.pdf','TestLicensor/a5.pdf');
   update public.style_guide_crawl_runs set files_found = 3 where id = v_run_b2;
 
   -- 3 of 6 re-seen is a ratio of 0.5, which is NOT below the 0.5 floor
@@ -295,7 +297,7 @@ begin
 
   insert into public.style_guide_crawl_runs (status, files_found) values ('pending', 1) returning id into v_run_c;
   update public.style_guide_files set crawl_run_id = v_run_c
-   where root_label = 'ROOT_B' and relative_path = 'b1.pdf';
+   where root_label = 'ROOT_B' and relative_path = 'TestLicensor/b1.pdf';
 
   select count(*) into v_before from public.style_guide_files where root_label = 'ROOT_B' and is_active;
   select * into v_batch from public.reconcile_stale_sg_files_batch('ROOT_B', v_run_c);
@@ -344,7 +346,7 @@ begin
   insert into public.style_guide_crawl_runs (status, files_found, inaccessible_roots)
   values ('pending', 3, array['ROOT_C']) returning id into v_file;
   update public.style_guide_files set crawl_run_id = v_file
-   where root_label = 'ROOT_C' and relative_path = 'c1.pdf';
+   where root_label = 'ROOT_C' and relative_path = 'TestLicensor/c1.pdf';
 
   select count(*) into v_before from public.style_guide_files where root_label = 'ROOT_C' and is_active;
   select * into v_batch from public.reconcile_stale_sg_files_batch('ROOT_C', v_file);
@@ -372,7 +374,7 @@ begin
   -- verify 11: PDF claim is restart-safe and identity-invalidating
   -- =========================================================================
   select id into v_file from public.style_guide_files
-   where root_label = 'ROOT_C' and relative_path = 'c2.pdf';
+   where root_label = 'ROOT_C' and relative_path = 'TestLicensor/c2.pdf';
 
   select count(*) into v_claim_count from public.claim_style_guide_pdf_text('worker-1', 50);
   if v_claim_count = 0 then
@@ -509,7 +511,7 @@ begin
      set search_vector = d.search_vector
        || setweight(to_tsvector('simple', 'zzzunmistakabletoken'), 'D')
    where d.style_guide_file_id = (select id from public.style_guide_files
-                                   where root_label = 'ROOT_C' and relative_path = 'c2.pdf');
+                                   where root_label = 'ROOT_C' and relative_path = 'TestLicensor/c2.pdf');
   v_result := public.search_style_guide_library(p_query => 'zzzunmistakabletoken');
   if (v_result ->> 'total')::bigint <> 1 then
     raise exception 'contract 13: PDF text is not searchable (total=%)', v_result ->> 'total';
