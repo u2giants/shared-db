@@ -162,7 +162,7 @@ export function matchState(row: PropertyMatchRow): MatchState {
 export function describeMatchState(row: PropertyMatchRow) {
   switch (matchState(row)) {
     case 'multiple':
-      return `${row.candidates.length} OPA Properties are proposed for this contract clause. Tick every one the clause covers.`
+      return `${row.candidates.length} OPA Properties are proposed for this contract clause. Remove any the clause does not cover.`
     case 'none':
       return 'No OPA Property was proposed. Reject it, or check the contract evidence before deciding.'
     default:
@@ -171,11 +171,11 @@ export function describeMatchState(row: PropertyMatchRow) {
 }
 
 /**
- * A single candidate is pre-ticked because there is nothing to choose between.
- * A choice between several is never pre-made for the reviewer.
+ * Every recorded candidate remains visible as a removable suggestion. Nothing
+ * is applied until the reviewer supplies a reason and confirms the decision.
  */
 export function defaultSelection(row: PropertyMatchRow) {
-  return row.candidates.length === 1 ? [row.candidates[0].licensed_property_id] : []
+  return row.candidates.map(candidate => candidate.licensed_property_id)
 }
 
 export async function loadPropertyMatchQueue(client: ApiClient, search: string | null = null) {

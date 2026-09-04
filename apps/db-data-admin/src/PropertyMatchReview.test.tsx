@@ -94,9 +94,9 @@ describe('property match queue data', () => {
     await expect(loadPropertyMatchQueue(clientOf(rpc))).rejects.toBeInstanceOf(ReviewQueueUnavailableError)
   })
 
-  it('pre-ticks a lone candidate but never pre-makes a choice', () => {
+  it('preselects every recorded candidate as a removable suggestion', () => {
     expect(defaultSelection(row())).toEqual([333])
-    expect(defaultSelection(row({ candidates: [candidate(11, 1), candidate(12, 2)] as never }))).toEqual([])
+    expect(defaultSelection(row({ candidates: [candidate(11, 1), candidate(12, 2)] as never }))).toEqual([11, 12])
   })
 
   it('explains why each row is in the queue', () => {
@@ -169,8 +169,10 @@ describe('PropertyMatchReview', () => {
     ])
     render(<PropertyMatchReview client={client} />)
     await screen.findByRole('heading', { name: 'Pinocchio' })
+    expect(screen.getByText('Pinocchio · OPA 11')).toBeInTheDocument()
+    expect(screen.getByText('Pinocchio (Live-Action) · OPA 12')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove OPA Property 12' }))
     const autocomplete = screen.getByPlaceholderText(/Type to search every Disney Property/)
-    fireEvent.change(autocomplete, { target: { value: 'Pinocchio · OPA 11' } })
     fireEvent.change(autocomplete, { target: { value: 'Pinocchio (Live-Action) · OPA 12' } })
     fireEvent.change(screen.getByPlaceholderText(/Why this decision/), { target: { value: 'Clause covers both' } })
     fireEvent.click(screen.getByRole('button', { name: /Confirm 2 matches/ }))
