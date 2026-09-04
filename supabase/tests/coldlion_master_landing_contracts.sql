@@ -649,7 +649,7 @@ $$;
 
 -- =====================================================================================
 -- N. Issue #2177 — `/customers` is projected in full.
---    Migration: 20260903025816_coldlion_customer_full_projection_and_salesperson_active.sql
+--    Migration: 20260904001147_coldlion_customer_full_projection_and_salesperson_active.sql
 --    Every property of the 2026-09-03 live sample of GET /EhpApi/customers is a
 --    column, exactly once. The list is the SAMPLED SHAPE; /api-docs types this
 --    feed as a bare object and cannot be used for it.
