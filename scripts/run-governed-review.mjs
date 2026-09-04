@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { recordReviewVerdict, reviewerExecutionPreflight, resolveCommandPath } from './manage-migration-author-lanes.mjs'
 import { lineOpensWithVerdictWord, isVerdictFor } from './lib/review-verdict.mjs'
@@ -82,14 +84,76 @@ export function wrapperSpawnPlan(resolved,args,platform=process.platform){
   if(platform==='win32'&&/\.(cmd|bat)$/i.test(resolved))return{file:process.env.ComSpec||'cmd.exe',args:['/d','/s','/c',resolved,...args]}
   return{file:resolved,args}
 }
-export function runGovernedReview(options,deps={spawn:spawnSync,preflight:reviewerExecutionPreflight,record:recordReviewVerdict,resolve:resolveCommandPath}){
+// A ROUND THAT CANNOT BE RECORDED MUST STILL LEAVE ITS FINDINGS BEHIND (issue #2207).
+// Both refusals below happen AFTER the expensive part: the reviewer slot is spent, the
+// lease is held, and the reviewer has already produced real findings. Throwing at that
+// point used to discard the analysis entirely -- the only surviving copy was inside the
+// wrapper's own transcript, which is not part of the governed path and which a successor
+// session had no reason to know about. So every round, refused or not, writes the raw
+// wrapper output to a local evidence file first.
+//
+// This file is EVIDENCE, NEVER AUTHORITY. It is untracked (`.ai/governed-review-evidence/`
+// is gitignored), it is never posted to GitHub, and no consumer reads it: a real verdict
+// is the create-only durable artifact and nothing else. Persisting it therefore cannot
+// reconstruct the verdict this runner just refused to record.
+export const REVIEW_EVIDENCE_DIR='.ai/governed-review-evidence'
+export function evidenceFilename(options,at=new Date()){
+  const stamp=at.toISOString().replace(/[-:]/g,'').replace(/\.\d+Z$/,'Z')
+  const reviewer=String(options.reviewer??'unknown-reviewer').replace(/[^A-Za-z0-9._-]+/g,'-')
+  return `${stamp}-pr${options.pr??'unknown'}-${String(options.headSha??'').slice(0,8)||'nohead'}-${reviewer}.md`
+}
+export function renderReviewEvidence(options,round){
+  const head=[
+    '# Governed review round — RAW REVIEWER OUTPUT (evidence only, authorizes nothing)',
+    '',
+    `- pull request: #${options.pr}`,
+    `- issue: #${options.issue}`,
+    `- head: ${options.headSha}`,
+    `- reviewer: ${options.reviewer} (slot ${options.slot})`,
+    `- wrapper: ${options.wrapper} ${(options.wrapperArgs??[]).join(' ')}`.trimEnd(),
+    `- wrapper exit: ${round.status??'unknown'}${round.error?` (${sanitizeVoidReason(round.error)})`:''}`,
+    `- captured: ${round.at.toISOString()}`,
+    `- outcome: ${round.failure?`REFUSED — ${sanitizeVoidReason(round.failure)}`:'recordable'}`
+  ]
+  if(round.extra?.length)head.push('',`## Lines that tripped the decision-word scan (${round.extra.length})`,'',...round.extra.map((line)=>`- ${JSON.stringify(line.trim().slice(0,300))}`))
+  head.push('','## Raw stdout','','```text',String(round.rawBody??''),'```')
+  if(round.stderr?.trim())head.push('','## Raw stderr','','```text',round.stderr.trim(),'```')
+  return `${head.join('\n')}\n`
+}
+export function persistReviewerOutput(options,round,io={mkdir:mkdirSync,write:writeFileSync}){
+  // Persistence is a courtesy to the next reader; it must never be the reason a
+  // recordable review fails. Every failure here is swallowed and reported as `null`,
+  // which the refusal message then names explicitly rather than implying a file exists.
+  try{
+    const dir=path.resolve(options.evidenceDir??REVIEW_EVIDENCE_DIR)
+    io.mkdir(dir,{recursive:true})
+    const file=path.join(dir,evidenceFilename(options,round.at))
+    io.write(file,renderReviewEvidence(options,round),'utf8')
+    return file
+  }catch{return null}
+}
+export function runGovernedReview(options,deps={spawn:spawnSync,preflight:reviewerExecutionPreflight,record:recordReviewVerdict,resolve:resolveCommandPath,persist:persistReviewerOutput}){
   deps.preflight({reviewer:options.reviewer,wrapper:options.wrapper,worktree:options.worktree,headSha:options.headSha})
   const resolved=(deps.resolve??resolveCommandPath)(options.wrapper)
   if(!resolved)throw new Error(`review wrapper ${options.wrapper} is not executable`)
   const plan=wrapperSpawnPlan(resolved,options.wrapperArgs)
   const run=deps.spawn(plan.file,plan.args,{cwd:options.worktree,encoding:'utf8',maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe']})
   const rawBody=String(run.stdout??'').trim(),verdict=verdictFromOutput(rawBody,options.headSha)
-  if(run.error||run.status!==0||!verdict)throw new Error(`review wrapper did not produce a recordable terminal verdict (exit ${run.status??'unknown'})`)
+  // Both refusals are decided BEFORE either is thrown, so the evidence file can name the
+  // outcome and the exact lines that tripped the scan (issue #2207).
+  const extra=extraVerdictLines(rawBody)
+  const failure=(run.error||run.status!==0||!verdict)
+    ? `review wrapper did not produce a recordable terminal verdict (exit ${run.status??'unknown'})`
+    : extra.length
+      ? `review findings carry ${extra.length} line(s) a downstream verdict parser would read as a decision besides the terminal verdict line (first: ${JSON.stringify(extra[0].trim().slice(0,120))}); nothing was posted and no verdict was recorded`
+      : null
+  // Guarded at the CALL SITE as well as inside the default implementation: an injected
+  // `persist` is arbitrary code, and preserving evidence must never be able to fail a
+  // review that was otherwise recordable.
+  let evidence=null
+  try{evidence=(deps.persist??persistReviewerOutput)(options,{rawBody,stderr:String(run.stderr??''),status:run.status??null,error:run.error?.message??null,extra,failure,at:new Date()})}catch{evidence=null}
+  const preserved=evidence?`the reviewer's raw output was preserved at ${evidence}`:'the reviewer\'s raw output COULD NOT BE PRESERVED — it survives only in the wrapper transcript'
+  if(failure)throw new Error(`${failure} — ${preserved}`)
   // CLOSE THE ORDERING HOLE AT THE ONLY POINT WHERE IT CAN BE CLOSED.
   // Recording BEFORE posting is impossible: `recordReviewVerdict` binds the
   // artifact to `findings_ref` (a durable comment URL on this exact PR) and to
@@ -98,8 +162,6 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
   // harmless as possible BEFORE it is posted instead: any line beyond the single
   // terminal verdict line that a downstream parser would read as a decision is
   // refused here, while nothing has been written to GitHub yet.
-  const extra=extraVerdictLines(rawBody)
-  if(extra.length)throw new Error(`review findings carry ${extra.length} line(s) a downstream verdict parser would read as a decision besides the terminal verdict line (first: ${JSON.stringify(extra[0].trim().slice(0,120))}); nothing was posted and no verdict was recorded`)
   const body=`GOVERNED REVIEW FINDINGS — NON-AUTHORIZING UNLESS THE MATCHING CREATE-ONLY VERDICT ARTIFACT EXISTS\n\n${rawBody}`
   const posted=deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
   if(posted.error||posted.status!==0)throw new Error('review findings could not be posted durably; no verdict was recorded')
