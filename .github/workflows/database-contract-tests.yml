@@ -457,6 +457,15 @@ jobs:
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      - name: Prove pass-2 routine restoration against live PostgreSQL
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 54322
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: python scripts/test_pass2_routine_restoration_live.py
+
       # THE SYNTHETIC FIXTURE SEED (issue #754)
       # ---------------------------------------
       # Eleven contract tests assert RLS, grants, merge behaviour and read contracts, and

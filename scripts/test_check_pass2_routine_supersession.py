@@ -54,6 +54,11 @@ class Pass2RoutineSupersessionTests(unittest.TestCase):
         self.assertIn("'public.f'", query)
         self.assertIn("'plm.g'", query)
         self.assertIn("pg_get_function_identity_arguments", query)
+        self.assertIn("reset all", query)
+        self.assertIn("security %s", query)
+        self.assertIn("p.prosecdef", query)
+        self.assertIn("p.prokind", query)
+        self.assertIn("to_regprocedure", query)
 
 
 class Pass2PrivilegeSupersessionTests(unittest.TestCase):
