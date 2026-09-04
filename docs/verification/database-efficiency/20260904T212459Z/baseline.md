@@ -187,7 +187,7 @@ Reconciliation against the plan's 2026-09-03 figures:
 | --- | --- | --- |
 | `rebuild_style_groups_batch`: 3,973 calls, 2,982.5 ms mean, 11,849,391.9 ms total | identical to the digit | **confirmed, and dormant since** |
 | `clear_style_group_batch`: 287 calls, 34,617.3 ms mean, 9,935,165.1 ms total | identical to the digit | **confirmed, and dormant since** |
-| `refresh_style_guide_matviews`: 540 direct calls, 8,623.8 ms mean, plus one PostgREST call | now 658 direct calls, 8,036.5 ms mean; the single PostgREST call is still there at 1 call / 7,467 ms | **confirmed and still running** |
+| `refresh_style_guide_matviews`: 540 direct calls, 8,623.8 ms mean, plus one PostgREST call | now 658 direct calls (run 1: 657); mean 8,036.5 ms in run 1 and 8,030.7 ms in run 2; the single PostgREST call is still there at 1 call / 7,467 ms | **confirmed and still running** |
 | `refresh_style_group_counts_batch`: six all-group calls, 98,583.3 ms mean | now 7 calls, 95,637.5 ms mean | **confirmed, +1 call since** |
 
 Three things follow, and none of them was visible before the window was dated.
@@ -228,8 +228,13 @@ Three things follow, and none of them was visible before the window was dated.
 
 Reconciliation notes:
 
-- `public.assets` grew from 3,405,258,752 to 3,405,725,696 bytes; its heap grew by 133.9 MB
-  since the 2026-09-03 reading. Its HOT ratio is 739,983 of 1,478,880 updates — exactly 50%.
+- `public.assets` grew from 3,405,258,752 to 3,405,725,696 total bytes since the 2026-09-03
+  reading — **+466,944 bytes**, not the 133.9 MB an earlier draft of this note claimed. That
+  133.9 MB was an artefact of comparing two different metrics: Q1's `table_bytes` is
+  `pg_table_size`, which *includes* TOAST (2,256,191,488 = 2,122,924,032 heap + 133,267,456
+  TOAST), while the 2026-09-03 plan figure 2,122,317,824 is heap-only `pg_relation_size`.
+  Subtracting one from the other returns the TOAST remainder, not growth. On the same metric
+  the heap moved 2,122,317,824 → 2,122,924,032, i.e. **+606,208 bytes (about 592 KB)**. Its HOT ratio is 739,983 of 1,478,880 updates — exactly 50%.
   This is the one relation where the plan's rejected "lower fillfactor broadly" idea would
   have had a plausible target, and the counter says half the updates are already HOT.
 - **`dam_search_documents` has the worst HOT ratio on the list: 215,191 HOT out of 3,437,857
@@ -383,7 +388,7 @@ or zero counter alone; where a counter is absent it is recorded as **unknown**.
 | # | Claim | Status | Evidence |
 | --- | --- | --- | --- |
 | 1 | 340 security advisor findings across 7 rules | **confirmed** | both runs, identical rule-by-rule |
-| 2 | 763 unused-index notices | **superseded** | now 739; 24 indexes recorded a first scan, one more during our own window |
+| 2 | 763 unused-index notices | **superseded** | count only: now 739. Which 24 left the set cannot be recovered (see §3). One index, `cron.job.job_pkey`, was observed leaving the zero-scan set inside our own 5m36s window |
 | 3 | 426 unindexed foreign keys | **confirmed** | advisor; catalog cross-check finds 433 by leading-column test |
 | 4 | 125 multiple-permissive-policy, 68 RLS-initplan, 22 duplicate-index, 9 no-PK, 1 auth-connection | **confirmed** | both runs |
 | 5 | "127 RLS-disabled exposed tables" | **not reproduced** | no such rule in either advisor response |
@@ -391,7 +396,7 @@ or zero counter alone; where a counter is absent it is recorded as **unknown**.
 | 7 | Three RLS-disabled tables have some `authenticated` DML privilege | **not reproduced** | the same scan found **0**, not 3. Either the earlier scan used a broader definition or state changed. Step 2 must settle it with both catalog and HTTP evidence rather than inheriting either number |
 | 8 | `rebuild_style_groups_batch` 3,973 calls / 2,982.5 ms mean / 11,849,391.9 ms total | **confirmed**, and dormant since 2026-09-03 | pg_stat_statements, unchanged to the digit |
 | 9 | `clear_style_group_batch` 287 calls / 34,617.3 ms mean / 9,935,165.1 ms total | **confirmed**, and dormant since 2026-09-03 | as above |
-| 10 | `refresh_style_guide_matviews` 540 direct calls / 8,623.8 ms mean | **superseded** — now 658 calls / 8,036.5 ms mean, actively running | advanced during our own 5m36s window |
+| 10 | `refresh_style_guide_matviews` 540 direct calls / 8,623.8 ms mean | **superseded** — run 1: 657 calls / 8,036.5 ms mean; run 2: 658 calls / 8,030.7 ms mean, actively running | advanced during our own 5m36s window |
 | 11 | `refresh_style_group_counts_batch` six all-group calls / 98,583.3 ms mean | **confirmed**, now 7 calls / 95,637.5 ms | pg_stat_statements |
 | 12 | pg_stat_statements totals have no proven reset timestamp | **superseded** | `extensions.pg_stat_statements_info.stats_reset = 2026-08-28 21:01:00.960228-04` |
 | 13 | Table/index/tuple counters have no derivable reset timestamp | **confirmed** | `pg_stat_database.stats_reset` is NULL for all four databases |

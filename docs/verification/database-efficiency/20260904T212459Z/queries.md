@@ -294,3 +294,32 @@ Two further review notes were accepted rather than argued:
 Nothing in these corrections came from a new production read. Every corrected
 figure was recomputed from the extracts already committed in `run1/` and `run2/`,
 so the two recorded runs remain the only production access in this artifact.
+
+## Corrections applied after the second governed review at head b69e9e8d
+
+The slot-2 reviewer (grok-4.6) returned REVISE at head
+`b69e9e902b5b480a5e4f81a04ee9d990ba453bd0` with two remaining defects. Both were
+verified against the committed extracts before being fixed, and both were real:
+
+1. **A heap-growth figure compared two different metrics.** Section 6 said
+   `public.assets` "grew by 133.9 MB" since 2026-09-03. Q1 records `table_bytes`
+   as `pg_table_size`, which includes TOAST; the 2026-09-03 plan figure
+   (2,122,317,824) is heap-only `pg_relation_size`. The difference between them
+   is the TOAST remainder (133,267,456 bytes), not growth. On the same metric the
+   heap moved 2,122,317,824 -> 2,122,924,032 (+606,208 bytes) and the total moved
+   3,405,258,752 -> 3,405,725,696 (+466,944 bytes). Section 6 now says exactly
+   that, and names the metric mismatch so the wrong number cannot be re-derived.
+2. **Section 9 restated the first-scan inference that section 3 had already
+   withdrawn.** Claim 2's evidence cell still read "24 indexes recorded a first
+   scan". The 763 -> 739 move is a count delta only; the 24 in
+   `delta-run1-run2.txt` is a different set (indexes whose `idx_scan` advanced
+   inside our window). The cell now says "count only", points at section 3 for
+   why the membership is unrecoverable, and cites the one transition actually
+   observed live, `cron.job.job_pkey`.
+
+One further note was accepted: claim 10 and the section 7 prose paired run 2's
+call count with run 1's mean. Both now print each run's own figure (657 calls /
+8,036.5 ms mean in run 1; 658 calls / 8,030.7 ms mean in run 2).
+
+As before, nothing here came from a new production read. Every corrected figure
+was recomputed from the extracts already committed in `run1/` and `run2/`.
