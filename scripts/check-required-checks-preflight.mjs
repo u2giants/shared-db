@@ -79,7 +79,7 @@ export function evaluateWithoutRequiredList({ statuses, checkRuns, reason }) {
 
 export function evaluatePreflight({ requiredContexts, statuses, checkRuns, protectionUnreadable }) {
   if (protectionUnreadable) return evaluateWithoutRequiredList({ statuses, checkRuns, reason: protectionUnreadable })
-  if (!Array.isArray(requiredContexts)) throw new PreflightError('branch protection returned no required status check list')
+  if (!Array.isArray(requiredContexts) || requiredContexts.length === 0) throw new PreflightError('branch protection returned no required status check list, which is not the same as "nothing is required"')
   const required = requiredContexts.filter((c) => c !== SELF_CONTEXT)
   const states = observedStates({ statuses, checkRuns })
   const missing = [], pending = [], failing = []
@@ -115,19 +115,34 @@ export function sanitize(text) {
   return (flat.length > 200 ? `${flat.slice(0, 200)}...` : flat) || 'no reason was reported'
 }
 
-export function gatherPreflightInput(env = process.env) {
+// ONLY a permission refusal degrades. A 403 from this token is permanent and is the
+// documented reason the fallback exists; a 5xx, a timeout or malformed JSON is
+// transient, and quietly switching tests on a blip would hide a real outage behind a
+// different check. Those refuse, and the merge is retried later.
+export function isPermissionRefusal(message) {
+  return /(403|401)|resource not accessible|must have admin|not accessible by integration/i.test(String(message ?? ''))
+}
+
+export function gatherPreflightInput(env = process.env, deps = { json }) {
+  const read = deps.json ?? json
   const sha = String(env.REQUESTED_SHA ?? '').trim()
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new PreflightError('REQUESTED_SHA must be a 40-character head SHA')
-  let protection, protectionUnreadable = null
-  // A token WITHOUT administration access -- which is every token this workflow can
-  // have -- gets a 403 here. That is expected, not exceptional, so it degrades to
-  // the STRICTLY STRONGER all-reported-checks test rather than to a weaker one or
-  // to a refusal that would block every merge forever.
-  try { protection = json(['api', `repos/${REPO}/branches/main/protection/required_status_checks`]) }
-  catch (e) { protectionUnreadable = sanitize(e.message) }
-  const combined = json(['api', `repos/${REPO}/commits/${sha}/status?per_page=100`])
-  const runs = json(['api', `repos/${REPO}/commits/${sha}/check-runs?per_page=100`])
-  return { requiredContexts: protection?.contexts ?? [], statuses: combined?.statuses ?? [], checkRuns: runs?.check_runs ?? [] }
+  let protection = null, protectionUnreadable = null
+  try { protection = read(['api', `repos/${REPO}/branches/main/protection/required_status_checks`]) }
+  catch (e) {
+    if (!isPermissionRefusal(e.message)) throw e
+    protectionUnreadable = sanitize(e.message)
+  }
+  const combined = read(['api', `repos/${REPO}/commits/${sha}/status?per_page=100`])
+  const runs = read(['api', `repos/${REPO}/commits/${sha}/check-runs?per_page=100`])
+  // NO `?? []` on the contexts. An empty list must never be read as "nothing is
+  // required" -- that is the fail-open this whole script exists to prevent.
+  return {
+    protectionUnreadable,
+    requiredContexts: protectionUnreadable ? null : protection?.contexts,
+    statuses: combined?.statuses ?? [],
+    checkRuns: runs?.check_runs ?? [],
+  }
 }
 
 export function main(env = process.env) {

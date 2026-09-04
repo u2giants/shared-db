@@ -21,6 +21,10 @@ permissions:
   issues: read
   pull-requests: write
   statuses: write
+  # The pre-flight reads `commits/{sha}/check-runs`. Unspecified permissions are
+  # `none`, so without this the read is a 403 and every merge dies at the pre-flight
+  # -- a parseable workflow that still cannot merge.
+  checks: read
   # THERE IS NO `administration` PERMISSION IN GITHUB ACTIONS. Adding one made this
   # file unparseable, and because this workflow is the ONLY path to `main`, every
   # merge in the repository was refused at dispatch with HTTP 422. The pre-flight
