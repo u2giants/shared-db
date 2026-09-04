@@ -4344,6 +4344,18 @@ export function renewExpiredClaim(options, now = new Date(), io = githubIo) {
   } finally {if(io.readRef(MUTEX_REF)===ownerSha)releaseOwnedRef(MUTEX_REF,ownerSha,io)}
 }
 
+function appendClaimObjects(body, version, objects) {
+  const fences=[...body.matchAll(/```db-claim\s*\n([\s\S]*?)```/g)]
+  if(fences.length!==1)throw new LaneError('claim body must contain exactly one manager-owned db-claim block')
+  const block=fences[0][1],newline=block.includes('\r\n')?'\r\n':'\n'
+  const versionMatches=block.match(/^version:\s*.+$/gm)??[],writeHeaders=block.match(/^(?:writes|objects):\s*$/gm)??[],readHeaders=block.match(/^reads:\s*$/gm)??[]
+  if(versionMatches.length!==1||versionMatches[0]!==`version: ${version}`||writeHeaders.length!==1||readHeaders.length>1)throw new LaneError('claim object block is ambiguous')
+  const insertion=readHeaders.length?block.search(/^reads:\s*$/m):block.length
+  const added=objects.map((object)=>`  - ${normalizeObject(object)}${newline}`).join('')
+  const replacement=block.slice(0,insertion)+added+block.slice(insertion)
+  return body.slice(0,fences[0].index)+fences[0][0].replace(block,()=>replacement)+body.slice(fences[0].index+fences[0][0].length)
+}
+
 export function recoverExpiredClaimFromPr(options, now = new Date(), io = githubIo) {
   for(const key of ['claim','issue','owner','branch','worktree','pr','headSha','leaseHours'])if(options[key]===undefined||options[key]===null||options[key]==='')throw new LaneError(`expired claim recovery requires ${key}`)
   if(!/^\d+$/.test(String(options.issue))||!/^\d+$/.test(String(options.claim))||!/^\d+$/.test(String(options.pr))||!/^[0-9a-f]{40}$/i.test(String(options.headSha)))throw new LaneError('expired claim recovery requires numeric issue, claim, PR, and an exact 40-character head SHA')
@@ -4369,7 +4381,7 @@ export function recoverExpiredClaimFromPr(options, now = new Date(), io = github
     const fileVersions=migrationVersions(io.getPrFiles(options.pr))
     if(fileVersions.length!==1||fileVersions[0]!==lease.version)throw new LaneError('pull request migration version does not match the permanent claim version')
     const sources=io.prSources(),targets=sources.filter((source)=>new RegExp(`^PR #${options.pr}(?:\\s|$)`).test(source.label))
-    if(targets.length!==1)throw new LaneError('pull request parser source is missing or ambiguous')
+    if(targets.length!==1)throw new LaneError('pull request parser source is unavailable or ambiguous')
     const target=targets[0]
     if(target.versions?.length!==1||String(target.versions[0])!==lease.version)throw new LaneError('parsed pull request version does not match the permanent claim version')
     const claimed=new Set(lease.objects.map(normalizeObject)),parsed=validateClaimObjects(target.objects??[])
@@ -4378,7 +4390,7 @@ export function recoverExpiredClaimFromPr(options, now = new Date(), io = github
     const expanded=[...lease.objects.map(normalizeObject),...uncovered]
     const others=claims.filter((claim)=>String(claim.number)!==String(options.claim)),otherPrs=sources.filter((source)=>source!==target)
     assertLaneAvailable(others,expanded,now,{ignoreCapacity:true,prSources:otherPrs})
-    const expectedBody=replaceLeaseExpiry(replaceClaimObjects(before.body,lease.version,expanded),desiredExpiry)
+    const expectedBody=replaceLeaseExpiry(appendClaimObjects(before.body,lease.version,uncovered),desiredExpiry)
     requireOwnedRef(MUTEX_REF,ownerSha,io)
     const freshWorkIssue=io.getIssue(options.issue),freshClaim=io.getIssue(options.claim),freshPr=io.getPr(options.pr)
     if(freshWorkIssue?.state!==workIssue?.state||freshWorkIssue?.body!==workIssue?.body)throw new LaneError('recovery issue changed concurrently')
