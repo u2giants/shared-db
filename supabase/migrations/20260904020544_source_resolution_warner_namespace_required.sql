@@ -2,7 +2,7 @@
 -- Require a non-blank namespace after the `warner:` prefix in the plm.source_resolution
 -- source vocabulary.
 --
--- Migration: 20260903192914_source_resolution_warner_namespace_required.sql
+-- Migration: 20260904020544_source_resolution_warner_namespace_required.sql
 -- Issue:     u2giants/shared-db #2159
 -- Claim:     u2giants/shared-db #2226 -- table plm.source_resolution. Nothing else.
 -- derived-from: none
