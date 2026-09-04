@@ -769,7 +769,10 @@ rules below are the operative summary.
 
 4. **New timestamped migration files only.** Each change is a new `YYYYMMDDHHMMSS_*.sql` file.
    **Never edit a migration that has already been applied anywhere** — that is how two sessions
-   silently clobber each other.
+   silently clobber each other. Since issue #2037 this is ENFORCED, not merely written down:
+   `scripts/check-applied-migration-edit.mjs` runs in the `SQL migration guards` job and refuses
+   any pull request that modifies, deletes or renames a migration file whose version is present
+   in the preview or production ledger. Fix forward at a new version instead.
 
 5. **Never reuse a timestamp — a duplicate SILENTLY SKIPS a migration.** The ledger
    (`supabase_migrations.schema_migrations`) keys on the **version alone, not the filename**. If
