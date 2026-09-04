@@ -18,7 +18,7 @@
 
 | Step | State | Date | Evidence / next action |
 |---|---|---|---|
-| 0.1 Reconfirm repository, ledger, live catalog, and object ownership | ✅ Complete | 2026-09-04 | Current main `f462a411`; production target `qsllyeztdwjgirsysgai`; 589 applied versions, no applied-not-merged versions, 19 intentional exclusions and five unrelated genuinely pending versions. Live object checks recorded below. |
+| 0.1 Reconfirm repository, ledger, live catalog, and object ownership | ✅ Complete | 2026-09-04 | Current main `f462a411`; production target `qsllyeztdwjgirsysgai`; 589 applied versions, no applied-not-merged versions, 19 intentional exclusions and five genuinely pending versions. Evidence: `docs/verification/licensing-master-data-phase0-2026-09-04/README.md`. |
 | 0.2 Reserve migration lanes and versions | ✅ Complete for current split | 2026-09-04 | Missing shape was split into exact successors #2333-#2336. Claims/versions belong to the live orchestrator, not this tracker session. |
 | 1.0 Install a durable licensing write guard and stop every non-authoritative writer | ✅ Complete | 2026-08-21 | Guard is present in production; #1140 and #1339 record the governed six-migration FRIENDS/FRIDA production bundle and live verification. |
 | 1.1 Repair Character ownership without losing data | 🟨 Partial | 2026-09-04 | #1684/PR #1712 created the separate production Character structure. Canonical aliases/provenance remain #2333; compatibility retirement remains Step 7.2. |
@@ -56,9 +56,9 @@ Every implementing session must update this table, the current-state sections it
 
 This tracker remains open and non-dispatchable. Production is not complete: `core.franchise`, `core.property_style_guide`, `core.property_franchise`, `dam.asset_property`, `dam.asset_style_guide`, `dam.asset_franchise`, `plm.licensing_source_scope`, and `plm.licensing_relationship_resolution` are absent from both current main and the production catalog. The general consolidation and reversible merge contracts are also absent. These are now bounded by #2333-#2336 in dependency order.
 
-The production ledger comparison proved no applied version missing from current main. It reported 24 merged-not-applied versions: 19 are explicitly retired or deliberately held, while five are genuinely pending and unrelated to this tracker (`20260902222649`, `20260903125728`, `20260903200951`, `20260904121037`, `20260904143518`). Those unrelated pending versions are not evidence for or blockers to the licensing deliverables.
+The production ledger comparison proved no applied version missing from current main. It reported 24 merged-not-applied versions: 19 are explicitly retired or deliberately held, while five are genuinely pending. Two are licensing-related (`20260902222649` Property uniqueness/curated promotion and `20260903125728` Character promotion); three are other workstreams (`20260903200951`, `20260904121037`, `20260904143518`). A merged-but-unapplied licensing version remains pending and is not completion evidence.
 
-Confirmed live foundations are the transaction-bound licensing write guard (#1140/#1339), separate Property and Character structure (#1684), Warner relationship evidence adapter (#1380), source-purpose DB Data Admin presentation and authority corrections, and durable `plm.source_resolution`. Closed issues or merged SQL were not counted as complete without production-ledger/catalog or live application evidence. Source captures, curated review (#1941), weekly automation, consumer cutover, and compatibility retirement stay open until their owning sessions publish direct end-to-end proof.
+Confirmed live foundations are the transaction-bound licensing write guard (#1140/#1339), separate Property and Character structure (#1684), Warner relationship evidence adapter (#1380), source-purpose DB Data Admin presentation and authority corrections, and durable `plm.source_resolution`. Closed issues or merged SQL were not counted as complete without production-ledger/catalog or live application evidence. Source captures, curated review (#1941), weekly automation, consumer cutover, and compatibility retirement stay open until their owning sessions publish direct end-to-end proof. The exact catalog queries, ledger classification, successor scopes and evidence limitations are recorded in `docs/verification/licensing-master-data-phase0-2026-09-04/README.md`.
 
 ---
 
@@ -202,9 +202,9 @@ The controlling architecture is committed on `main` in [`docs/core-master-data-c
 
 `core.franchise`, `core.property_style_guide`, `core.property_franchise`, `dam.asset_property`, `dam.asset_style_guide`, and `dam.asset_franchise` do not have canonical table definitions on `main` as of the starting commit. The implementer must still re-run the Phase 0 migration and live-catalog checks before acting, because `main` may advance.
 
-### 5.3 Durable source resolution already authored but not live everywhere
+### 5.3 Durable source resolution is live; its remaining scope is bounded
 
-Migration `supabase/migrations/20260814224937_source_resolution_durable_home.sql:9` creates `plm.source_resolution` for Property, Character, Style Guide, and Asset decisions. Migration `20260814233423_remaining_source_resolution_durable_home.sql` extends the backfill/guard coverage to remaining sources.
+The original migrations `20260814224937` and `20260814233423` were retired without production apply. Their supported replacement, `20260902024541_source_resolution_supported_home.sql`, and browser setter `20260902031743_api_set_source_resolution.sql` are both applied in production. Live catalog inspection on 2026-09-04 proved `plm.source_resolution` present.
 
 The source-resolution model is the correct foundation and must be extended, not replaced. Current gaps:
 
@@ -213,7 +213,7 @@ The source-resolution model is the correct foundation and must be extended, not 
 - no source-scope table proving which canonical Licensor a full portal `source_system` represents;
 - no canonical relationship-resolution record for direct source edges.
 
-Production ledger evidence from GitHub Actions run `31979756895` on 2026-08-16 showed 467 versions on `main`, 453 applied, and 14 merged-but-not-applied versions. The source-resolution migrations were among the genuinely pending set. This plan must not assume those objects exist in production and must not promote the unrelated pending set as a batch.
+The remaining source-scope, Licensor/Franchise vocabulary, relationship-resolution and queue work is structural successor #2335. It must extend the live contract and must not revive either retired migration.
 
 ### 5.4 Source landing tables already exist
 
@@ -225,13 +225,13 @@ Production ledger evidence from GitHub Actions run `31979756895` on 2026-08-16 s
 
 Do not duplicate these tables. Source adapters must read their latest complete, validated capture contracts.
 
-The 2026-08-13 evidence recorded zero rows in every Warner normalized landing table. Treat that as dated evidence, not current truth: Phase 0 rechecks it, and Step 3.0 requires the first complete validated Warner capture on preview before the Warner adapter may run.
+The old 2026-08-13 zero-row Warner observation is superseded. #1380/PR #1385 delivered and production-verified the Warner evidence bridges, guarded sync, and candidate view in run 32659028280. Ongoing source loads remain owned by the private Warner source-data session.
 
 ### 5.5 Current operational scheduling
 
 ColdLion has preview and production workflows with daily snapshot/promotion/comparison and hourly health lanes in `.github/workflows/coldlion-licensor-property-*.yml`.
 
-The four private licensor-source repositories had no checked-in `.github/workflows` schedules in the local clean/current copies inspected on 2026-08-16. Their working copies and branches must be refreshed before implementation. Weekly licensor refresh automation is therefore not complete.
+No current cross-repository evidence package proves the plan's required two successful weekly cycles plus one injected failure for every source. The 2026-08-16 local schedule inventory is historical only. Step 6.1 stays open until each owning private source session publishes current proof; this public tracker must not copy licensed rows or private workflow artifacts.
 
 ### 5.6 Existing plans that are now subordinate
 
@@ -376,6 +376,9 @@ If authentication or portal availability prevents a run, record a failure/due st
 11. DB Data Admin is the licensing review and audit surface.
 12. A Property created from an authorized scrape starts `potential`, never `active`; only guarded ColdLion membership may set `active`.
 13. An unmatched ColdLion Property under a Licensor with no authorized scrape data may be created from ColdLion's canonical name and ownership through the guarded path. Ambiguous identity or coverage requires Licensing review. A later authorized portal scrape overrides the Property values inside its coverage and preserves the prior spelling as an alias.
+14. Warner signed agreement plus countersigned Amendments 1-3 controls Warner entitlement membership; portal visibility is not entitlement. Private contract rows remain only in the authorized private source repository.
+15. Marvel submissions use Disney OPA from December 2025, while Marvel Creative Assets remain authoritative in ASGARD. OPA and ASGARD evidence retain separate provenance.
+16. OPA cannot distinguish Marvel from Disney within its `disney` branch. For that split, the signed contract schedule controls; Lucasfilm / Star Wars retains its direct OPA branch rule.
 
 ### Implementation choices fixed by this plan
 
