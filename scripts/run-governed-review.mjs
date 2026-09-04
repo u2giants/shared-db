@@ -20,6 +20,10 @@ export function verdictFromOutput(body,headSha){
 }
 export const VOID_MARKER='VERDICT LINE VOIDED BY THE GOVERNED REVIEW RUNNER'
 export const VOID_LINE_PREFIX='> VOIDED REVIEWER LINE - '
+// The header on a preserved-but-unrecordable findings comment (issue #2207). It is
+// exported so a test can prove the header ITSELF is inert, independently of any
+// findings body it is glued to.
+export const PRESERVED_HEADER='GOVERNED REVIEW FINDINGS PRESERVED - NON-AUTHORIZING, NO VERDICT WAS RECORDED\n\nThis round cannot be recorded as a verdict, so none was. The reviewer findings are kept below with every parseable decision line voided. Acting on them requires a fresh governed review at this head.'
 
 // Every line a DOWNSTREAM consumer would read as a verdict, other than the one
 // terminal strict `VERDICT:` line this runner itself recorded. `verdictFromOutput`
@@ -99,7 +103,57 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
   // terminal verdict line that a downstream parser would read as a decision is
   // refused here, while nothing has been written to GitHub yet.
   const extra=extraVerdictLines(rawBody)
-  if(extra.length)throw new Error(`review findings carry ${extra.length} line(s) a downstream verdict parser would read as a decision besides the terminal verdict line (first: ${JSON.stringify(extra[0].trim().slice(0,120))}); nothing was posted and no verdict was recorded`)
+  if(extra.length){
+    // PRESERVE THE FINDINGS, AUTHORIZE NOTHING (issue #2207).
+    //
+    // This round can never produce a verdict: a body carrying a second parseable
+    // decision line is exactly the shape that deadlocks a pull request (#2075), and
+    // that judgement is NOT relaxed here. What changed is the DISPOSAL. Throwing the
+    // whole review away also destroyed findings that were correct and expensive --
+    // the reviewer slot was already spent, the lease was already held, and the only
+    // surviving copy was in the wrapper's own transcript, outside the governed path.
+    //
+    // So the findings are posted with EVERY parseable decision line voided by the
+    // same routine the post-record failure path uses, and no verdict artifact is
+    // recorded. The round still fails; it just no longer fails silently.
+    //
+    // FAIL CLOSED. The EXACT BYTES THAT WILL BE POSTED -- header and voided body
+    // together, not the voided body alone -- are proved inert against all three
+    // readers BEFORE anything reaches GitHub: the runner's own parser, the consumer
+    // predicate the lanes and the merge gate use, and the scan that rejected the body
+    // in the first place. Proving the voided body alone would have left the header
+    // outside the proof, so a later edit to the header, or a widening of the verdict
+    // word set to match it, could make the composite readable while the proved part
+    // stayed inert (external review, muse-spark-1.2, PR #2298). If any proof fails,
+    // nothing is posted and the original refusal stands unchanged.
+    //
+    // HONEST ABOUT THE TRADE. Posting nothing was an unconditional guarantee; this is
+    // a checked one, and a check can rot. It holds only while `neutraliseVerdictLine`
+    // stays aligned with every reader, and an already-posted comment cannot be voided
+    // again later. Two things bound that: the proofs import the LIVE predicates rather
+    // than re-deriving them, so they move together; and authorization now comes from a
+    // create-only durable ref, so even a misread comment cannot authorize a merge.
+    // What is traded is a hard property for a checked one. What is bought is that an
+    // expensive, correct review is no longer destroyed by its own wording.
+    const reason=`the findings carry ${extra.length} line(s) a verdict parser would read as a decision besides the terminal verdict line`
+    const detail=`review findings carry ${extra.length} line(s) a downstream verdict parser would read as a decision besides the terminal verdict line (first: ${JSON.stringify(extra[0].trim().slice(0,120))}); no verdict was recorded`
+    let preserved=null
+    try{
+      const edited=neutraliseVerdictLine(rawBody,reason)
+      if(edited===null)throw new Error('carried no line to void')
+      const candidate=`${PRESERVED_HEADER}\n\n${edited}`
+      if(extraVerdictLines(candidate).length)throw new Error('a decision line survived the void')
+      if(verdictFromOutput(candidate,options.headSha)!==null)throw new Error('the body to be posted is still read as a verdict by the runner')
+      if(isVerdictFor({author_association:'OWNER',body:candidate},options.headSha))throw new Error('the body to be posted is still read as a verdict by the shared consumer predicate')
+      preserved=candidate
+    }catch{preserved=null}
+    if(preserved===null)throw new Error(`${detail}; nothing was posted because the findings could not be made inert`)
+    const kept=deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body:preserved}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
+    if(kept.error||kept.status!==0)throw new Error(`${detail}; the findings could not be preserved durably either`)
+    let keptUrl=null
+    try{keptUrl=JSON.parse(kept.stdout).html_url}catch{keptUrl=null}
+    throw new Error(`${detail}; the findings were preserved as a non-authorizing comment${keptUrl?` (${keptUrl})`:''} and this head needs a fresh governed review`)
+  }
   const body=`GOVERNED REVIEW FINDINGS — NON-AUTHORIZING UNLESS THE MATCHING CREATE-ONLY VERDICT ARTIFACT EXISTS\n\n${rawBody}`
   const posted=deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
   if(posted.error||posted.status!==0)throw new Error('review findings could not be posted durably; no verdict was recorded')

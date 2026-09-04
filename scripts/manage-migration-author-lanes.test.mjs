@@ -1336,6 +1336,55 @@ test('a retired reviewer is replaced cleanly, without an exclusion deadlock (#20
   assert.deepEqual(replaceFailedReviewer({...replacementRequest,failureCode:'wrapper_terminal_failure'},io),replacement)
 })
 
+test('a failed reviewer holding an UNRELATED live lease no longer blocks its own replacement (#2106)',()=>{
+  // ISSUE #2106 -- the second reviewer-pool deadlock mode. The reviewer that
+  // failed on THIS head has since been drawn onto a different review. A reviewer
+  // holds at most one lease, so that proves the lease this failure is about was
+  // already released. Replacement used to refuse outright, and freeing every
+  // OTHER reviewer in the pool could not clear it: only this one reviewer going
+  // idle would. During marker #2074 two assignments each needed four draws.
+  const io=failedReviewIo()
+  const failedName='grok-4.6'
+  assert.equal(io.refs.has(reviewActiveRef(failedName)),true,'the fixture must start with the failed reviewer holding its own lease')
+  // Same head so the unrelated lease is LIVE, not stale -- the point of the test
+  // is an active unrelated review, not a leftover to be swept.
+  const unrelated=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=99 reviewer=${failedName} issue=777 pr=778 head=${failedReview.headSha}`)
+  io.refs.set(reviewActiveRef(failedName),unrelated)
+  let protectedByCas=false
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  const applyAtomic=(changes)=>{
+    for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null)
+    for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}
+  }
+  io.atomicReviewRefs=(changes)=>{
+    if(changes.some((change)=>change.ref===`${REVIEW_REPLACEMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}-1`)){
+      const preservation=changes.find((change)=>change.ref===reviewActiveRef(failedName))
+      assert.deepEqual(preservation,{ref:reviewActiveRef(failedName),expected:unrelated,sha:unrelated},'the unrelated lease must be protected by the same atomic compare-and-swap')
+      protectedByCas=true
+    }
+    applyAtomic(changes)
+  }
+  io.atomicReviewMutexRelease=(ownerSha)=>applyAtomic([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(protectedByCas,true)
+  assert.equal(replacement.reviewer,'glm-5.3')
+  assert.equal(io.refs.get(reviewActiveRef(failedName)),unrelated,'the unrelated review must be left exactly as it was found')
+  assert.equal(io.refs.get(reviewActiveRef('glm-5.3')),replacement.replacementSha)
+  // Still idempotent, and still does not touch the unrelated lease on retry.
+  assert.deepEqual(replaceFailedReviewer(replacementRequest,io),replacement)
+  assert.equal(io.refs.get(reviewActiveRef(failedName)),unrelated)
+})
+
+test('a MATCHING failed lease is still released, and the relaxation is not a blanket one (#2106)',()=>{
+  // The control for the test above. Nothing about a lease that genuinely belongs
+  // to this failure changes: it is still released, and the outcome does not claim
+  // it was already gone.
+  const io=failedReviewIo()
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(io.refs.get(reviewActiveRef('grok-4.6'))??null,null,'the matching failed lease is released exactly as before')
+})
+
 test('three terminal providers do not grow replacement preflight past the fixed wire budget (#1962)',()=>{
   const io=failedReviewIo();let attempts=0;const labels=[]
   const rawGetCommit=io.getCommit
@@ -2136,6 +2185,51 @@ test('issue 1688 never leaves a durable ordinary-merge authorization before the 
   assert.ok(acquire >= 0 && acquire < revoke && revoke < release)
   assert.match(productionWorkflow.slice(revoke,release),/state=failure[\s\S]+Migration guarded merge authorization/)
   assert.match(productionWorkflow,/production-apply:[\s\S]+permissions:[\s\S]+statuses: write/)
+})
+
+test('issue 2116 the production freeze names itself and restores every authorization it revoked', () => {
+  const productionWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/shared-supabase-migrations.yml',import.meta.url)),'utf8')
+  const revoke=productionWorkflow.indexOf('name: Revoke every pre-existing merge authorization while frozen')
+  const release=productionWorkflow.indexOf('name: Release the exclusive production lane with ownership proof')
+  const restore=productionWorkflow.indexOf('name: Restore the merge authorizations this freeze revoked')
+  assert.ok(revoke >= 0 && release >= 0 && restore >= 0)
+  // The restoration has to outlive the promotion, so it comes after the lane is
+  // released and it runs unconditionally.
+  assert.ok(release < restore, 'the restoration must run after the production lane is released')
+  // Bounded to this step, not sliced to end-of-file, so a step appended after it
+  // can never satisfy these assertions on the restoration's behalf.
+  const afterRestore=productionWorkflow.indexOf('\n      - name:',restore+1)
+  const restoreStep=productionWorkflow.slice(restore,afterRestore>=0?afterRestore:undefined)
+  // A partially-failed revoke is exactly the damage this repairs, and so is a
+  // CANCELLED one -- a cancelled step reports neither success nor failure, so any
+  // condition that enumerates outcomes skips itself on the very case that leaves
+  // heads revoked with nobody coming back for them. The condition must therefore be
+  // bare `always()`, and this asserts the absence of a narrowing clause, not merely
+  // the presence of `always()`.
+  assert.match(restoreStep,/\n +if: always\(\)\r?\n/,'the restoration must run on every outcome of the revoke step, cancellation included')
+  assert.doesNotMatch(restoreStep,/revoke_frozen_authorizations\.(outcome|conclusion)/,'the restoration must not narrow itself to particular revoke outcomes')
+  // A revoked head must be traceable to the run that took it, and the refusal must
+  // name the one command that puts it back.
+  const revokeStep=productionWorkflow.slice(revoke,release)
+  const description='Revoked by production freeze run ${GITHUB_RUN_ID}; re-run guarded-migration-merge.yml'
+  assert.ok(revokeStep.includes(`description="${description}"`),'the revocation must name the run that wrote it')
+  assert.match(revokeStep,/target_url=.*actions\/runs\/\$\{GITHUB_RUN_ID\}/)
+  // Restoration clears the freeze's own marker to `pending`. Granting `success`
+  // here would assert a merge lock nobody holds; only guarded-migration-merge.yml
+  // may write that, and #1688's assertion above still proves it is the only writer.
+  assert.match(restoreStep,/state=pending/)
+  assert.doesNotMatch(restoreStep,/state=success/)
+  // OWNERSHIP IS THE WHOLE SAFETY ARGUMENT, so pin its USE, not merely the
+  // definition of the string it compares against. The previous version asserted
+  // only that the marker was assigned; the comparison itself could have been
+  // deleted with the test still green, and a freeze would then have restored
+  // revocations written by guarded-migration-merge.yml or by another freeze run.
+  assert.ok(restoreStep.includes(`expected="${description}"`),'the restoration must know the exact description it wrote')
+  assert.match(restoreStep,/\[ "\$state" != 'failure' \] \|\| \[ "\$description" != "\$expected" \]/,'the restoration must compare the FULL description, not a run-id substring')
+  // An unreadable status is not "no status". Swallowing the read would leave a
+  // revoked head red forever while the log claimed it was left alone deliberately.
+  assert.doesNotMatch(restoreStep,/2>\/dev\/null \|\| echo/)
+  assert.match(restoreStep,/could not READ the authorization status/)
 })
 
 test('historical preview recovery shares the preview lock and requires current main plus merged source PR',()=>{
