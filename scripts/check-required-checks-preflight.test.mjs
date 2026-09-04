@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { evaluatePreflight, observedStates, PreflightError, SELF_CONTEXT } from './check-required-checks-preflight.mjs'
+import { evaluatePreflight, evaluateWithoutRequiredList, observedStates, sanitize, PreflightError, SELF_CONTEXT } from './check-required-checks-preflight.mjs'
 
 const ok = (name) => ({ name, status: 'completed', conclusion: 'success', completed_at: '2026-09-03T00:00:00Z' })
 
@@ -61,4 +61,63 @@ test('the latest report wins when a context was re-run', () => {
 test('a missing required-contexts list is refused rather than read as "nothing required"', () => {
   assert.throws(() => evaluatePreflight({ requiredContexts: undefined, statuses: [], checkRuns: [] }),
     (e) => e instanceof PreflightError && /no required status check list/.test(e.message))
+})
+
+// The fallback used when `github.token` cannot read main's branch protection.
+// It has to be STRICTLY STRONGER than the check it replaces, never weaker, and it
+// must not read an unchecked head as a green one.
+const REASON = 'HTTP 403: Resource not accessible by integration'
+
+test('an unreadable required list is not a pass: every reported check must be green', () => {
+  const result = evaluatePreflight({
+    protectionUnreadable: REASON,
+    statuses: [], checkRuns: [ok('SQL migration guards'), ok('Tools offline tests')],
+  })
+  assert.equal(result.mode, 'all-reported-checks')
+  assert.equal(result.required, 2)
+})
+
+test('the fallback blocks a NON-required failing check, which the required-list test would have allowed', () => {
+  const args = {
+    statuses: [], checkRuns: [ok('SQL migration guards'), { name: 'optional lint', status: 'completed', conclusion: 'failure', completed_at: '2026-09-03T00:00:00Z' }],
+  }
+  assert.equal(evaluatePreflight({ ...args, requiredContexts: ['SQL migration guards'] }).required, 1)
+  assert.throws(() => evaluatePreflight({ ...args, protectionUnreadable: REASON }), (e) => {
+    assert.ok(e instanceof PreflightError)
+    assert.ok(e.message.includes('optional lint (failure)'))
+    return true
+  })
+})
+
+test('a head with nothing reported at all is refused, not treated as green', () => {
+  assert.throws(() => evaluatePreflight({ protectionUnreadable: REASON, statuses: [], checkRuns: [] }), (e) => {
+    assert.ok(e.message.includes('NOTHING has reported'))
+    return true
+  })
+})
+
+test('the fallback names still-running checks separately from failing ones', () => {
+  assert.throws(() => evaluateWithoutRequiredList({
+    statuses: [], reason: REASON,
+    checkRuns: [{ name: 'preview', status: 'in_progress', started_at: '2026-09-03T00:00:00Z' }],
+  }), (e) => {
+    assert.ok(e.message.includes('still running: preview'))
+    return true
+  })
+})
+
+test('the reason is flattened and bounded before it reaches a public workflow log', () => {
+  assert.equal(sanitize('  HTTP 403:\n  not\taccessible  '), 'HTTP 403: not accessible')
+  assert.equal(sanitize(''), 'no reason was reported')
+  assert.equal(sanitize(undefined), 'no reason was reported')
+  assert.equal(sanitize('x'.repeat(500)).length, 203)
+})
+
+test('a readable required list still takes precedence over the fallback', () => {
+  const result = evaluatePreflight({
+    protectionUnreadable: null,
+    requiredContexts: ['SQL migration guards'],
+    statuses: [], checkRuns: [ok('SQL migration guards')],
+  })
+  assert.equal(result.mode, 'required-contexts')
 })
