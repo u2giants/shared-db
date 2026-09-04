@@ -124,11 +124,8 @@ export function productionDuplicateTripwire(rows) {
     values.add(projection);
     groups.set(key, values);
   }
-  const ambiguous = [...groups.entries()].filter(([, values]) => values.size > 1).map(([key]) => key);
-  if (ambiguous.length) {
-    throw new Error(`AMBIGUOUS PRODUCTION IDENTITY: ${ambiguous.length} key group(s) differ outside last* fields`);
-  }
-  return { repeatedKeys: [...groups.values()].filter((values) => values.size === 1).length };
+  const ambiguousGroups = [...groups.values()].filter((values) => values.size > 1).length;
+  return { ambiguousGroups };
 }
 
 export function pageRelativePath(scope, window, page) {
@@ -209,7 +206,11 @@ export async function captureScope({ outputDir, scope, window, apiKey, fetchImpl
   }
   const complete = verifyCompletePages(pages, scope);
   if (scope.endpoint === "prodHistory") {
-    productionDuplicateTripwire(pages.flatMap((page) => page.content));
+    const tripwire = productionDuplicateTripwire(pages.flatMap((page) => page.content));
+    if (tripwire.ambiguousGroups > 0) {
+      process.stderr.write(`ALERT: ${scope.endpoint} ${scope.stage} ${window.from}..${window.to} has ${tripwire.ambiguousGroups} identity group(s) differing outside last* fields; raw rows were preserved without collapse.\n`);
+    }
+    return { ...complete, ...tripwire };
   }
   return complete;
 }

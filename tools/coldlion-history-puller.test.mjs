@@ -71,10 +71,12 @@ test("wire HTTP 400 is permanent even when the body claims status 500", async ()
   assert.equal(calls, 1);
 });
 
-test("production tripwire allows last-field fan-out but rejects business-field disagreement", () => {
+test("production tripwire ignores last-field fan-out and counts business-field disagreements", () => {
   const base = { prodOrderNo: 10, prodLineSeq: 2, itemNo: "A", prepackItemNo: "B", prodOrderQty: 4 };
-  assert.doesNotThrow(() => productionDuplicateTripwire([{ ...base, lastProdCost: 1 }, { ...base, lastProdCost: 2 }]));
-  assert.throws(() => productionDuplicateTripwire([base, { ...base, prodOrderQty: 5 }]), /AMBIGUOUS/);
+  assert.deepEqual(productionDuplicateTripwire([{ ...base, lastProdCost: 1 }, { ...base, lastProdCost: 2 }]),
+    { ambiguousGroups: 0 });
+  assert.deepEqual(productionDuplicateTripwire([base, { ...base, prodOrderQty: 5 }]),
+    { ambiguousGroups: 1 });
 });
 
 test("capture resumes saved pages and writes newly fetched pages atomically", async () => {
