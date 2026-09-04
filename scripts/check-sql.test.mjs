@@ -1007,3 +1007,36 @@ test('verify-cost guard sees VACUUM and CLUSTER written with their options', () 
     assert.match(result.stderr, /reads a plm object/)
   })
 })
+
+test('verify-cost guard sees REINDEX table and index forms', () => {
+  for (const [name,statement] of [
+    ['table', 'reindex table plm.large_table;'],
+    ['index-options', 'reindex (verbose) index concurrently plm.large_index;'],
+  ]) withFixture([`20260801120000_reindex_${name}.sql`], (dir) => {
+    writeFileSync(path.join(dir, `20260801120000_reindex_${name}.sql`), `
+      do $verify$
+      begin
+        ${statement}
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
+
+test('verify-cost guard sees a quoted LANGUAGE name on a DO block', () => {
+  withFixture(['20260801120000_quoted_language.sql'], (dir) => {
+    writeFileSync(path.join(dir, '20260801120000_quoted_language.sql'), `
+      do language "plpgsql" $verify$
+      begin
+        perform count(*) from plm.large_table;
+      end
+      $verify$;
+    `)
+    const result = runGuards(dir, { mainNewest: '20260801100000' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /reads a plm object/)
+  })
+})
