@@ -38,6 +38,7 @@ from production_catalog_verification import (  # noqa: E402
     build_catalog_sql,
     build_behavior_sql,
     build_row_count_sql,
+    catalog_contract_objects,
     derive_targets,
     extract_report,
     parse_dynamic_acl,
@@ -217,6 +218,53 @@ class DeriveTargetsTests(unittest.TestCase):
         self.assertTrue(
             any("DROP INDEX was not safely parseable" in note for note in t.notes)
         )
+
+    def test_real_2042_drop_index_batch_from_the_repository_files(self):
+        # Issue #2043 item 1. PR #2042's own tests used a synthetic
+        # single-file fixture, so a regression that re-breaks the REAL
+        # two-file batch would not fail the suite. This is that batch:
+        # 20260831234750 creates
+        # public.hts_rag_product_family_allowlist_enabled_idx and
+        # 20260901011306 (the #2035 review fixes) drops it. The files are
+        # exercised exactly as they sit in supabase/migrations -- no invented
+        # shape -- so the derivation must follow the drop across files in the
+        # ordered allowlist, exactly as production applies them.
+        versions = ["20260831234750", "20260901011306"]
+        migrations = {
+            path.name[:14]: path
+            for path in (REPO / "supabase" / "migrations").glob("*.sql")
+        }
+        missing = [v for v in versions if v not in migrations]
+        if missing:
+            self.fail(
+                "the real #2042 drop-index batch is not in the tree: "
+                f"{', '.join(missing)}. Rebuild the fixture from the recorded "
+                "content of 20260831234750_hts_rag_durable_precedent_contract.sql "
+                "and "
+                "20260901011306_hts_rag_durable_precedent_contract_review_fixes"
+                ".sql rather than inventing a shape."
+            )
+        dropped = (
+            "public.hts_rag_product_family_allowlist_enabled_idx",
+            "public.hts_rag_product_family_allowlist",
+        )
+        # Positive control: without the second file the index MUST be demanded.
+        first_only = derive_targets(migrations, versions[:1])
+        self.assertIn(dropped, first_only.indexes)
+        batch = derive_targets(migrations, versions)
+        self.assertNotIn(dropped, batch.indexes)
+        # The drop removed exactly that one expectation -- every sibling the
+        # first file created is still required, so a lexer that loses the
+        # whole file's indexes cannot pass this either.
+        self.assertEqual(set(first_only.indexes) - set(batch.indexes), {dropped})
+        self.assertIn(
+            (
+                "public.hts_rag_extraction_jobs_pending_claim_idx",
+                "public.hts_rag_extraction_jobs",
+            ),
+            batch.indexes,
+        )
+        self.assertTrue(any("dropped index" in note for note in batch.notes))
 
     def test_create_table_is_found(self):
         t = targets_for("create table if not exists plm.widget (id bigint);")
@@ -1938,6 +1986,407 @@ class BehavioralSidecarTests(unittest.TestCase):
         ))
         self.assertEqual(sql.count("status = 'active'::app.entity_status"), 5)
         self.assertNotIn("status = 'active'::text", sql)
+
+
+class SupersededContractBatchTests(unittest.TestCase):
+    """Issue #2029: an intermediate contract must not fail a correct batch.
+
+    Every behavioral check is asserted against the FINAL state the whole
+    ordered batch left behind. When a later version in the SAME allowlist
+    re-asserts an object an earlier version's contract also asserts, the
+    earlier check is SUPERSEDED -- recorded, visible, never a failure -- and
+    only the last version's assertion for that object runs.
+    """
+
+    BATCH = ["20260831184547", "20260831212757", "20260831221607"]
+    FORWARD_6 = "popdam_ranked_search_private_keyed_visibility_forward_6"
+    FORWARD_7 = "popdam_ranked_search_single_heap_fetch_forward_7"
+    FORWARD_8 = "popdam_ranked_search_rank_keys_through_visibility_forward_8"
+
+    @staticmethod
+    def real_checks(versions):
+        migrations = {
+            path.name[:14]: path
+            for path in (REPO / "supabase" / "migrations").glob("*.sql")
+        }
+        return load_behavior_sidecars(REPO, migrations, versions)
+
+    @staticmethod
+    def load_versions(specs):
+        """Build temp migrations + hash-bound sidecars for several versions.
+
+        specs: list of (version, migration sql, sidecar checks list). The
+        versions are loaded in the order given, which is the ordered batch.
+        """
+        import hashlib
+
+        temp = tempfile.TemporaryDirectory()
+        root = Path(temp.name)
+        migrations = root / "supabase" / "migrations"
+        sidecars = root / "scripts" / "production-verification-sidecars"
+        migrations.mkdir(parents=True)
+        sidecars.mkdir(parents=True)
+        index = {}
+        for version, sql, checks in specs:
+            path = migrations / f"{version}_test.sql"
+            path.write_text(sql, encoding="utf-8")
+            index[version] = path
+            (sidecars / f"{version}.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "migration_version": version,
+                        "migration_sha256": hashlib.sha256(
+                            path.read_bytes().replace(b"\r\n", b"\n")
+                        ).hexdigest(),
+                        "checks": checks,
+                    }
+                ),
+                encoding="utf-8",
+            )
+        return temp, root, index
+
+    @staticmethod
+    def contract_check(check_id, contract):
+        return {
+            "id": check_id,
+            "kind": "catalog_contract",
+            "contract": contract,
+            "expected_count": 1,
+        }
+
+    def test_real_2029_batch_marks_forwards_6_and_7_superseded_and_asserts_8(self):
+        # The exact production batch from the issue: forward 6 installs
+        # popdam_ranked_search_private_keyed_visibility_v2 over
+        # public.search_dam_documents, forwards 7 and 8 rewrite that body, so
+        # forward 6's contract asserts strings that are deliberately gone.
+        checks = self.real_checks(self.BATCH)
+        by_id = {check["id"]: check for check in checks}
+        self.assertEqual(
+            set(by_id), {self.FORWARD_6, self.FORWARD_7, self.FORWARD_8}
+        )
+        for early in (self.FORWARD_6, self.FORWARD_7):
+            self.assertEqual(by_id[early]["superseded_by"], "20260831221607")
+            self.assertEqual(
+                by_id[early]["superseded_objects"],
+                [
+                    "routine:public.search_dam_documents("
+                    "text,jsonb,integer,integer,text[],extensions.vector,real)"
+                ],
+            )
+        self.assertNotIn("superseded_by", by_id[self.FORWARD_8])
+        # Only the last version's contract reaches the database.
+        sql = build_behavior_sql(checks)
+        self.assertNotIn(self.FORWARD_6, sql)
+        self.assertNotIn(self.FORWARD_7, sql)
+        self.assertIn(self.FORWARD_8, sql)
+        # The superseded intermediate expectation is gone from the probe...
+        self.assertNotIn("from candidate_asset_ids c", sql)
+        # ...and the final one is what runs.
+        self.assertIn("c.keyword_rank, c.semantic_rank, c.rank, c.asset_id id", sql)
+
+    def test_superseded_checks_are_visible_in_the_report_and_never_a_failure(self):
+        checks = self.real_checks(self.BATCH)
+        final = next(c for c in checks if c["id"] == self.FORWARD_8)
+        markdown, failures = render_report(
+            self.BATCH,
+            Targets(set(), set(), set(), set(), set(), set()),
+            None,
+            None,
+            [],
+            True,
+            behavior_checks=checks,
+            behavior_results={"behavior_checks": [{
+                "id": final["id"], "actual_count": 1, "expected_count": 1,
+            }]},
+        )
+        self.assertEqual(failures, [])
+        # Not silence: the verdict, the superseded check ids, the superseding
+        # version and the objects that caused it are all in the artifact.
+        self.assertEqual(markdown.count("| **SUPERSEDED** |"), 2)
+        self.assertIn(self.FORWARD_6, markdown)
+        self.assertIn(self.FORWARD_7, markdown)
+        self.assertIn("superseded by `20260831221607`", markdown)
+        self.assertIn("routine:public.search_dam_documents(", markdown)
+        self.assertIn("was SUPERSEDED by migration `20260831221607`", markdown)
+
+    def test_a_failing_final_contract_is_not_masked_by_supersession(self):
+        # Supersession hides only intermediate expectations. The LAST
+        # version's contract still runs, and when it fails the job fails.
+        checks = self.real_checks(self.BATCH)
+        final = next(c for c in checks if c["id"] == self.FORWARD_8)
+        _, failures = render_report(
+            self.BATCH,
+            Targets(set(), set(), set(), set(), set(), set()),
+            None,
+            None,
+            [],
+            True,
+            behavior_checks=checks,
+            behavior_results={"behavior_checks": [{
+                "id": final["id"], "actual_count": 0, "expected_count": 1,
+            }]},
+        )
+        self.assertEqual(len(failures), 1)
+        self.assertIn(self.FORWARD_8, failures[0])
+        self.assertIn("expected 1 row(s) but received 0", failures[0])
+
+    def test_supersession_never_reaches_outside_the_allowlist(self):
+        # Scoping constraint: the sidecars for forwards 7 and 8 exist in the
+        # repository, but a single-version allowlist is its own ordered batch,
+        # so nothing outside it may supersede forward 6's contract.
+        checks = self.real_checks(["20260831184547"])
+        self.assertEqual(len(checks), 1)
+        self.assertNotIn("superseded_by", checks[0])
+        sql = build_behavior_sql(checks)
+        self.assertIn(self.FORWARD_6, sql)
+        self.assertIn("from candidate_asset_ids c", sql)
+
+    def test_a_check_whose_objects_no_later_version_asserts_is_still_asserted(self):
+        # The normal case is untouched. Three temp versions: A asserts the
+        # plm style-tracker routines, B and C assert
+        # public.search_dam_documents. Only B -- not A -- is superseded.
+        specs = [
+            ("20260101000001", "do $ begin perform 1; end $;\n",
+             [self.contract_check("style_tracker_functions_hold",
+                                  "style_tracker_functions_v1")]),
+            ("20260101000002", "do $ begin perform 1; end $;\n",
+             [self.contract_check("single_heap_fetch_hold",
+                                  "popdam_ranked_search_single_heap_fetch_v3")]),
+            ("20260101000003", "do $ begin perform 1; end $;\n",
+             [self.contract_check("rank_keys_hold",
+                                  "popdam_ranked_search_rank_keys_through_visibility_v4")]),
+        ]
+        temp, root, index = self.load_versions(specs)
+        with temp:
+            versions = [spec[0] for spec in specs]
+            checks = load_behavior_sidecars(root, index, versions)
+        by_id = {check["id"]: check for check in checks}
+        self.assertNotIn("superseded_by", by_id["style_tracker_functions_hold"])
+        self.assertEqual(
+            by_id["single_heap_fetch_hold"]["superseded_by"], "20260101000003"
+        )
+        self.assertNotIn("superseded_by", by_id["rank_keys_hold"])
+        sql = build_behavior_sql(checks)
+        self.assertIn("style_tracker_functions_hold", sql)
+        self.assertNotIn("single_heap_fetch_hold", sql)
+        self.assertIn("rank_keys_hold", sql)
+
+    def test_checks_in_the_same_version_do_not_supersede_each_other(self):
+        # Only a STRICTLY LATER VERSION supersedes. Two checks in one version
+        # are both "the last version" for the object and both stay asserted.
+        specs = [
+            ("20260101000001", "do $ begin perform 1; end $;\n", [
+                self.contract_check("heap_fetch_first",
+                                    "popdam_ranked_search_single_heap_fetch_v3"),
+                self.contract_check("rank_keys_second",
+                                    "popdam_ranked_search_rank_keys_through_visibility_v4"),
+            ]),
+        ]
+        temp, root, index = self.load_versions(specs)
+        with temp:
+            checks = load_behavior_sidecars(root, index, [specs[0][0]])
+        self.assertTrue(all("superseded_by" not in check for check in checks))
+        self.assertEqual(
+            len(build_behavior_sql(checks).split(" union all ")), 2
+        )
+
+    def test_the_extractor_only_claims_unambiguous_literal_objects(self):
+        # Fail-safe direction of issue #2029: a contract that names its
+        # objects through format('%I', ...) or array unnest extracts NO
+        # objects, so it can never be superseded and stays asserted as today.
+        self.assertEqual(
+            catalog_contract_objects(CATALOG_CONTRACTS["core_person_role_lookups_v1"]),
+            set(),
+        )
+        self.assertEqual(
+            catalog_contract_objects(CATALOG_CONTRACTS["api_rls_realtime_v1"]),
+            set(),
+        )
+        # The literal spellings ARE claimed, with the full routine identity.
+        self.assertEqual(
+            catalog_contract_objects(
+                CATALOG_CONTRACTS["popdam_ranked_search_single_heap_fetch_v3"]
+            ),
+            {
+                "routine:public.search_dam_documents("
+                "text,jsonb,integer,integer,text[],extensions.vector,real)",
+            },
+        )
+        # Overload precision: a different argument signature is a different
+        # object and must not collide with the search routine above.
+        self.assertEqual(
+            catalog_contract_objects("select to_regprocedure('public.f(text)') is null"),
+            {"routine:public.f(text)"},
+        )
+
+
+class CatalogAbsenceCheckTests(unittest.TestCase):
+    """Issue #2043 item 2: assert a named object is genuinely ABSENT.
+
+    The inverse of every present-assertion. An index that survives a
+    legitimate DROP INDEX used to pass silently, because the drop removed it
+    from the expected-object set and nothing ever probed it again. A
+    `catalog_absence` check fails when the object is still there.
+    """
+
+    VERSION = "20260101000000"
+    # The real dropped index from the #2035/#2043 batch.
+    DROPPED_INDEX = "public.hts_rag_product_family_allowlist_enabled_idx"
+
+    def fixture(self, object_name=None, mutate=None):
+        import hashlib
+
+        temp = tempfile.TemporaryDirectory()
+        root = Path(temp.name)
+        migrations = root / "supabase" / "migrations"
+        sidecars = root / "scripts" / "production-verification-sidecars"
+        migrations.mkdir(parents=True)
+        sidecars.mkdir(parents=True)
+        migration = migrations / f"{self.VERSION}_test.sql"
+        migration.write_text("do $ begin perform 1; end $;\n", encoding="utf-8")
+        check = {
+            "id": "retired_index_is_gone",
+            "kind": "catalog_absence",
+            "object": object_name or self.DROPPED_INDEX,
+            "expected_count": 1,
+        }
+        sidecar = {
+            "schema_version": 1,
+            "migration_version": self.VERSION,
+            "migration_sha256": hashlib.sha256(
+                migration.read_bytes().replace(b"\r\n", b"\n")
+            ).hexdigest(),
+            "checks": [check],
+        }
+        if mutate:
+            mutate(sidecar)
+        (sidecars / f"{self.VERSION}.json").write_text(
+            json.dumps(sidecar), encoding="utf-8"
+        )
+        return temp, root, migration
+
+    def load(self, root, migration):
+        return load_behavior_sidecars(
+            root, {self.VERSION: migration}, [self.VERSION]
+        )
+
+    def render(self, actual_count, checks):
+        return render_report(
+            [self.VERSION],
+            Targets(set(), set(), set(), set(), set(), set()),
+            None,
+            None,
+            [],
+            True,
+            behavior_checks=checks,
+            behavior_results={"behavior_checks": [{
+                "id": checks[0]["id"],
+                "actual_count": actual_count,
+                "expected_count": 1,
+            }]},
+        )
+
+    def test_relation_absence_probes_to_regclass_and_stays_select_only(self):
+        temp, root, migration = self.fixture()
+        with temp:
+            checks = self.load(root, migration)
+            sql = build_behavior_sql(checks)
+        self.assertEqual(checks[0]["relation"], f"absent:{self.DROPPED_INDEX}")
+        self.assertIn(f"to_regclass('{self.DROPPED_INDEX}') is null", sql)
+        self.assertNotIn("to_regprocedure", sql)
+        self.assertTrue(sql.lower().startswith("select "))
+        self.assertNotIn(";", sql[:-1])
+        # A BARE schema.name is a RELATION probe, the convention to_regclass
+        # itself uses -- pinned so nobody reads a bare routine name as a
+        # routine assertion. A routine must carry its argument signature
+        # (see test_routine_absence_probes_to_regprocedure); without one the
+        # probe looks at the relation namespace and would pass while the
+        # routine exists, which is exactly the silent pass this kind refuses.
+
+    def test_routine_absence_probes_to_regprocedure(self):
+        temp, root, migration = self.fixture("public.get_filter_counts(jsonb)")
+        with temp:
+            sql = build_behavior_sql(self.load(root, migration))
+        self.assertIn("to_regprocedure('public.get_filter_counts(jsonb)') is null", sql)
+        self.assertNotIn("to_regclass", sql)
+
+    def test_absent_as_expected_passes(self):
+        temp, root, migration = self.fixture()
+        with temp:
+            checks = self.load(root, migration)
+            markdown, failures = self.render(1, checks)
+        self.assertEqual(failures, [])
+        self.assertIn("**PASS**", markdown)
+
+    def test_a_surviving_dropped_object_fails(self):
+        # The exact gap #2043 item 2 names: the DROP INDEX was legitimate, the
+        # index survived anyway, and nothing used to notice. Now it is a
+        # FAILURE like any other broken expectation.
+        temp, root, migration = self.fixture()
+        with temp:
+            checks = self.load(root, migration)
+            markdown, failures = self.render(0, checks)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("retired_index_is_gone", failures[0])
+        self.assertIn("expected 1 row(s) but received 0", failures[0])
+        self.assertIn("**FAIL**", markdown)
+
+    def test_malformed_and_unsafe_absence_objects_fail_closed(self):
+        for object_name in (
+            "public.x'; drop table y --",
+            "widget",                      # no schema: search-path relative
+            "PUBLIC.Widget",               # not a plain lowercase identifier
+        ):
+            with self.subTest(object=object_name):
+                temp, root, migration = self.fixture(object_name)
+                with temp:
+                    with self.assertRaisesRegex(GuardError, "invalid absence object"):
+                        self.load(root, migration)
+
+    def test_absence_check_extra_fields_and_wrong_count_fail_closed(self):
+        def inject_sql(sidecar):
+            sidecar["checks"][0]["sql"] = "select 1"
+        temp, root, migration = self.fixture(mutate=inject_sql)
+        with temp:
+            with self.assertRaisesRegex(GuardError, "unknown=.*sql"):
+                self.load(root, migration)
+
+        def wrong_count(sidecar):
+            sidecar["checks"][0]["expected_count"] = 0
+        temp, root, migration = self.fixture(mutate=wrong_count)
+        with temp:
+            with self.assertRaisesRegex(GuardError, "expected_count must be 1"):
+                self.load(root, migration)
+
+    def test_a_later_absence_supersedes_an_earlier_contract_on_the_same_object(self):
+        # The object key space is polarity-agnostic, so the LAST version's
+        # assertion wins whichever way it points: a later drop supersedes an
+        # earlier present-contract just as a later rewrite does.
+        specs = [
+            ("20260101000001", "do $ begin perform 1; end $;\n", [{
+                "id": "helper_is_present", "kind": "catalog_contract",
+                "contract": "popdam_ranked_search_single_heap_fetch_v3",
+                "expected_count": 1,
+            }]),
+            ("20260101000002", "do $ begin perform 1; end $;\n", [{
+                "id": "helper_is_gone", "kind": "catalog_absence",
+                "object": "public.search_dam_documents(text,jsonb,integer,integer,"
+                          "text[],extensions.vector,real)",
+                "expected_count": 1,
+            }]),
+        ]
+        temp, root, index = SupersededContractBatchTests.load_versions(specs)
+        with temp:
+            checks = load_behavior_sidecars(root, index, [s[0] for s in specs])
+        by_id = {check["id"]: check for check in checks}
+        self.assertEqual(by_id["helper_is_present"]["superseded_by"], "20260101000002")
+        self.assertNotIn("superseded_by", by_id["helper_is_gone"])
+        sql = build_behavior_sql(checks)
+        self.assertNotIn("helper_is_present", sql)
+        self.assertIn("helper_is_gone", sql)
+        self.assertIn("to_regprocedure('public.search_dam_documents(text,jsonb,"
+                      "integer,integer,text[],extensions.vector,real)') is null", sql)
 
 
 class NetAclTests(unittest.TestCase):

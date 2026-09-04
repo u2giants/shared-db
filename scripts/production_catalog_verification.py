@@ -85,6 +85,36 @@ happened. That is not an argument for staying quiet. A red run is what makes a
 human open the artifact, and the artifact is retained for 90 days.
 
 
+SUPERSEDED CONTRACTS, AND ABSENCE ASSERTIONS (issues #2029 and #2043)
+--------------------------------------------------------------------
+Behavioral sidecar checks run AFTER the whole ordered batch has applied, so
+every one of them is asserted against the FINAL database state. That is
+usually the right shape -- but a batch may legitimately replace a routine body
+several times over (the 1703/2054 PopDAM forwards rewrote
+`public.search_dam_documents` three times in one allowlist), and an earlier
+version's contract then describes a body that a LATER version of the SAME
+batch deliberately destroyed. Asserting it against the end state fails a
+correct promotion, which is exactly the false-positive class this module
+refuses to manufacture elsewhere (see the privilege "last statement wins"
+rule, issue #790).
+
+  * SUPERSEDED, never FAIL -- when two or more versions in ONE ordered
+    allowlist assert against the same database object, only the LAST
+    version's assertion for that object runs. The earlier one is recorded in
+    the report and the JSON payload as superseded, naming the version and the
+    objects that superseded it. Supersession is scoped to the allowlist: a
+    contract is never superseded by a version outside the batch being
+    verified, and the last assertion itself is never superseded by anything,
+    so a failing FINAL contract still fails the job.
+  * HARD FAIL (through an absence assertion) -- a sidecar may assert that a
+    named object is genuinely ABSENT (`kind: catalog_absence`). This is the
+    missing inverse of every present-assertion above: an index that survives
+    a legitimate `DROP INDEX` used to pass silently, because the drop removed
+    it from the expected-object set and nothing ever looked at it again. The
+    object is probed with `to_regclass` / `to_regprocedure`; if it is still
+    there, the check fails like any other.
+
+
 WHAT THIS CANNOT PROVE -- read this before trusting it
 ------------------------------------------------------
   * The derivation is a LEXER over SQL text, and lexer bugs have twice been the
@@ -407,6 +437,21 @@ MARKER_REVIEW_CHECK_KEYS = {"line_start", "line_end", "disposition", "check_ids"
 MARKER_REVIEW_EMPTY_KEYS = {"line_start", "line_end", "disposition", "reason"}
 BEHAVIOR_ROW_COUNT_KEYS = {"id", "kind", "relation", "filters", "expected_count"}
 BEHAVIOR_CATALOG_CONTRACT_KEYS = {"id", "kind", "contract", "expected_count"}
+# Issue #2043 item 2. The inverse of every present-assertion: a named object
+# that must NOT be there. Same shape as a catalog_contract check -- one id, one
+# verifier-owned target, expected_count pinned to 1 -- so the whole result-row
+# pipeline (actual vs expected, MISSING, ERROR) is reused unchanged.
+BEHAVIOR_CATALOG_ABSENCE_KEYS = {"id", "kind", "object", "expected_count"}
+# `object` is either a schema-qualified relation (table, view, sequence or
+# INDEX -- `to_regclass` resolves all four) or a routine WITH its full argument
+# signature, which is what names a routine (`to_regprocedure`), exactly the
+# convention Postgres itself uses. The charsets are closed on purpose: the
+# value is interpolated into the probe SQL, so anything that could carry a
+# quote, a dash or a semicolon is rejected here and re-rejected at build time.
+ABSENCE_RELATION_RE = re.compile(rf"{QUALIFIED}\Z")
+ABSENCE_ROUTINE_RE = re.compile(
+    rf"{QUALIFIED}\([a-z0-9_,. \[\]]*\)\Z"
+)
 BEHAVIOR_FILTER_KEYS = {"column", "type", "equals"}
 BEHAVIOR_ENUM_VALUES = {
     "app.entity_status": {"active", "inactive", "archived", "deleted", "potential"},
@@ -1588,6 +1633,119 @@ def _validate_marker_reviews(item: dict, path: Path, migration_sql: str, check_i
         raise GuardError(f"{path}: empty checks require only no_durable_target reviews")
 
 
+# ---------------------------------------------------------------------------
+# SUPERSESSION WITHIN ONE ORDERED BATCH (issue #2029)
+#
+# Every behavioral check is asserted against the FINAL state the whole batch
+# left behind, so a contract bound to an intermediate version of a routine body
+# fails on a correct promotion when a LATER version in the SAME allowlist
+# replaced that body. Production hit exactly this with the batch
+# 20260831184547, 20260831212757, 20260831221607: forward 6 installed
+# `popdam_ranked_search_private_keyed_visibility_v2`, forwards 7 and 8 rewrote
+# `public.search_dam_documents` under it, and the job went red on a database
+# that was exactly right.
+#
+# The objects a contract asserts are read out of its SQL by the SAME
+# conservative principle the migration lexer uses: only the three unambiguous,
+# literal spellings are recognised (`to_regclass('x')`, `to_regprocedure('x')`
+# and the quoted-routine argument of `has_function_privilege`). A contract that
+# names its objects any other way -- through `format('%I', ...)`, array
+# `unnest`, or `information_schema` string comparisons -- extracts NO objects
+# and is therefore NEVER superseded, which is the fail-safe direction: it stays
+# asserted exactly as it is today.
+# ---------------------------------------------------------------------------
+CONTRACT_TO_REGCLASS_RE = re.compile(r"\bto_regclass\(\s*'([^']+)'\s*\)")
+CONTRACT_TO_REGPROCEDURE_RE = re.compile(r"\bto_regprocedure\(\s*'([^']+)'\s*\)")
+CONTRACT_ROUTINE_PRIVILEGE_RE = re.compile(
+    r"\bhas_function_privilege\(\s*'[^']+'\s*,\s*'([^']+)'\s*,"
+)
+
+
+def catalog_contract_objects(contract_sql: str | None) -> set[str]:
+    """The database objects a catalog contract asserts, as comparison keys.
+
+    A routine is keyed by its FULL identity including the argument signature,
+    because a different overload is a different object: coarsening the key to
+    the bare name would supersede a contract about one overload because a later
+    version asserted a different one.
+    """
+    text = contract_sql or ""
+    objects: set[str] = set()
+    objects.update(f"relation:{name}" for name in CONTRACT_TO_REGCLASS_RE.findall(text))
+    objects.update(
+        f"routine:{name}"
+        for name in CONTRACT_TO_REGPROCEDURE_RE.findall(text)
+    )
+    objects.update(
+        f"routine:{name}"
+        for name in CONTRACT_ROUTINE_PRIVILEGE_RE.findall(text)
+    )
+    return objects
+
+
+def asserted_objects(check: dict) -> set[str]:
+    """Comparison keys for one loaded behavioral check, whatever its kind.
+
+    `exact_row_count` checks deliberately extract nothing: they assert row
+    CONTENT, not an object's definition, and #2029 is about definitions an
+    intermediate version left behind. Absence checks assert the same key space
+    as contracts, in the negative: a later version re-asserting the object
+    (either polarity) is the later statement about that object, and it wins.
+    """
+    kind = check.get("kind")
+    if kind == "catalog_contract":
+        return catalog_contract_objects(CATALOG_CONTRACTS.get(check.get("contract"), ""))
+    if kind == "catalog_absence":
+        object_name = str(check.get("object", ""))
+        prefix = "routine:" if ABSENCE_ROUTINE_RE.fullmatch(object_name) else "relation:"
+        return {prefix + object_name}
+    return set()
+
+
+def mark_superseded_contract_checks(checks: list[dict], allowlist: list[str]) -> None:
+    """Mark checks whose objects a LATER version in this batch re-asserts.
+
+    Scoped to one ordered batch by construction: only the allowlist's own
+    checks are visible here, so a version outside the batch can never supersede
+    anything. Only a STRICTLY LATER VERSION supersedes -- two checks in the same
+    version are both "the last version" and both stay asserted. The last
+    assertion for each object is never marked, so nothing can mask a failing
+    FINAL contract.
+
+    `checks` must be in allowlist order (the order `load_behavior_sidecars`
+    builds them in); `allowlist` is the ordered batch.
+    """
+    order = {version: index for index, version in enumerate(allowlist)}
+    objects_by_position = [asserted_objects(check) for check in checks]
+    last_position_by_object: dict[str, int] = {}
+    for position, objects in enumerate(objects_by_position):
+        for object_key in objects:
+            last_position_by_object[object_key] = position
+    for position, check in enumerate(checks):
+        if not objects_by_position[position]:
+            continue
+        version = str(check.get("migration_version", ""))
+        rank = order.get(version, position)
+        superseded_objects: list[str] = []
+        superseder_position: int | None = None
+        for object_key in objects_by_position[position]:
+            last_position = last_position_by_object[object_key]
+            last_check = checks[last_position]
+            last_rank = order.get(
+                str(last_check.get("migration_version", "")), last_position
+            )
+            if last_rank <= rank:
+                continue
+            superseded_objects.append(object_key)
+            if superseder_position is None or last_position > superseder_position:
+                superseder_position = last_position
+        if superseded_objects:
+            check["superseded_by"] = str(
+                checks[superseder_position].get("migration_version", "")
+            )
+            check["superseded_objects"] = sorted(superseded_objects)
+
+
 def load_behavior_sidecars(
     repo: Path, migrations: dict[str, Path], allowlist: list[str]
 ) -> list[dict]:
@@ -1649,6 +1807,8 @@ def load_behavior_sidecars(
                 if kind == "exact_row_count"
                 else BEHAVIOR_CATALOG_CONTRACT_KEYS
                 if kind == "catalog_contract"
+                else BEHAVIOR_CATALOG_ABSENCE_KEYS
+                if kind == "catalog_absence"
                 else None
             )
             if allowed_keys is None:
@@ -1677,6 +1837,34 @@ def load_behavior_sidecars(
                     raise GuardError(f"{path}: catalog contract expected_count must be 1")
                 parsed = dict(check)
                 parsed["relation"] = f"catalog:{contract}"
+                parsed["migration_version"] = version
+                parsed["migration_sha256"] = actual_hash
+                checked.append(parsed)
+                continue
+            if kind == "catalog_absence":
+                # Issue #2043 item 2. The object name is validated against the
+                # same closed charsets the build step re-asserts, because it is
+                # interpolated into the probe SQL. BARE name -> RELATION probe
+                # (`to_regclass`: table, view, sequence or index); name WITH an
+                # argument signature -> ROUTINE probe (`to_regprocedure`), the
+                # same convention Postgres itself uses. A signature-less
+                # routine name therefore probes the RELATION namespace and
+                # passes while the routine exists -- a routine must carry its
+                # full argument signature, which is why the report names the
+                # probe it used.
+                object_name = check["object"]
+                if not isinstance(object_name, str) or not (
+                    ABSENCE_ROUTINE_RE.fullmatch(object_name)
+                    or ABSENCE_RELATION_RE.fullmatch(object_name)
+                ):
+                    raise GuardError(
+                        f"{path}: invalid absence object {object_name!r}; expected "
+                        "schema.relation or schema.routine(arg types)"
+                    )
+                if expected_count != 1:
+                    raise GuardError(f"{path}: absence expected_count must be 1")
+                parsed = dict(check)
+                parsed["relation"] = f"absent:{object_name}"
                 parsed["migration_version"] = version
                 parsed["migration_sha256"] = actual_hash
                 checked.append(parsed)
@@ -1743,6 +1931,11 @@ def load_behavior_sidecars(
         if not checks and "marker_reviews" not in item:
             raise GuardError(f"{path}: empty checks require a reviewed marker declaration")
         sidecars.extend(checked)
+    # Issue #2029: an intermediate version's contract must not fail a batch a
+    # later version in the SAME allowlist deliberately rewrote. Marked here so
+    # every caller (verify, the offline sidecar checker, tests) sees the same
+    # verdict data; `build_behavior_sql` and `render_report` honour it below.
+    mark_superseded_contract_checks(sidecars, allowlist)
     return sidecars
 
 
@@ -1768,6 +1961,11 @@ def build_behavior_sql(checks: list[dict]) -> str:
         raise GuardError("cannot build behavioral SQL without checks")
     rows: list[str] = []
     for check in checks:
+        if check.get("superseded_by"):
+            # Issue #2029: superseded by a later version in the same ordered
+            # batch, so its intermediate expectation is deliberately not run
+            # against the final state. It stays visible in the report.
+            continue
         check_id = check["id"].replace("'", "''")
         expected = check["expected_count"]
         if check["kind"] == "catalog_contract":
@@ -1778,6 +1976,28 @@ def build_behavior_sql(checks: list[dict]) -> str:
             rows.append(
                 "select '" + check_id + "'::text as id, "
                 + "case when (" + expression + ") then 1 else 0 end::bigint as actual_count, "
+                + str(expected) + "::bigint as expected_count"
+            )
+            continue
+        if check["kind"] == "catalog_absence":
+            # Issue #2043 item 2: assert the object is genuinely NOT there. The
+            # name is re-validated against the same closed charsets the loader
+            # enforces, because it is interpolated into the probe -- the same
+            # re-assertion `relation` and `column` get above the loop.
+            object_name = check["object"]
+            if not isinstance(object_name, str) or not (
+                ABSENCE_ROUTINE_RE.fullmatch(object_name)
+                or ABSENCE_RELATION_RE.fullmatch(object_name)
+            ):
+                raise GuardError(f"refusing unsafe absence object: {object_name!r}")
+            probe = (
+                f"to_regprocedure('{object_name}') is null"
+                if ABSENCE_ROUTINE_RE.fullmatch(object_name)
+                else f"to_regclass('{object_name}') is null"
+            )
+            rows.append(
+                "select '" + check_id + "'::text as id, "
+                + "case when (" + probe + ") then 1 else 0 end::bigint as actual_count, "
                 + str(expected) + "::bigint as expected_count"
             )
             continue
@@ -1796,6 +2016,15 @@ def build_behavior_sql(checks: list[dict]) -> str:
             "select '" + check_id + "'::text as id, count(*)::bigint as actual_count, "
             + str(expected) + "::bigint as expected_count from " + relation
             + " where " + " and ".join(predicates)
+        )
+    if not rows:
+        # Unreachable while the last assertion for an object is never marked
+        # superseded (a non-empty check list always keeps at least one), but a
+        # silent empty UNION is broken SQL that would surface as a confusing
+        # query error -- refuse it by name instead.
+        raise GuardError(
+            "cannot build behavioral SQL: every check is superseded by a later "
+            "version in this batch"
         )
     return (
         "select jsonb_build_object('behavior_checks', coalesce(jsonb_agg("
@@ -3154,6 +3383,20 @@ def render_report(
         "catalog contracts owned by the verifier."
     )
     add("")
+    add(
+        "**Every check is asserted against the FINAL state the whole ordered "
+        "batch left behind.** When a later version in this same allowlist "
+        "re-asserts an object an earlier version's contract also asserts, the "
+        "earlier check is reported as **SUPERSEDED** and is not run -- the "
+        "last version's assertion for that object is the one that describes "
+        "the end state (issue #2029). Supersession never reaches outside this "
+        "allowlist and never applies to the last assertion for an object, so "
+        "a failing final contract still fails the job. A "
+        "`catalog_absence` check (issue #2043) asserts the named object is "
+        "genuinely NOT in the catalog; a surviving object there is a failure "
+        "exactly like a missing expected one."
+    )
+    add("")
     add("| check | migration | relation | expected rows | actual rows | verdict |")
     add("| --- | --- | --- | --- | --- | --- |")
     result_rows = {}
@@ -3165,7 +3408,32 @@ def render_report(
                     if row["id"] in result_rows:
                         failures.append(f"duplicate behavioral result id: {row['id']}")
                     result_rows[row["id"]] = row
+    superseded_notes: list[str] = []
     for check in checks:
+        superseded_by = check.get("superseded_by")
+        if superseded_by:
+            # Issue #2029: a DISTINCT, visible outcome, never silence. The row
+            # names the superseding version, and the note below the table names
+            # the objects it re-asserted. It contributes no failure and consumes
+            # no result row, because the check was deliberately not run against
+            # the final state.
+            superseded_objects = ", ".join(
+                f"`{object_key}`" for object_key in check.get("superseded_objects") or []
+            )
+            add(
+                f"| `{check['id']}` | `{check['migration_version']}` | "
+                f"`{check['relation']}` | {check['expected_count']} | "
+                f"_superseded by `{superseded_by}`_ | **SUPERSEDED** |"
+            )
+            superseded_notes.append(
+                f"- `{check['id']}` (migration `{check['migration_version']}`) was "
+                f"SUPERSEDED by migration `{superseded_by}`, which re-asserted "
+                f"{superseded_objects or '_unspecified objects_'}. Its expectation "
+                "describes an intermediate state of this same ordered batch, so "
+                "only the LAST version's assertion for those objects was run "
+                "against the final database state."
+            )
+            continue
         row = result_rows.pop(check["id"], None)
         actual = row.get("actual_count") if isinstance(row, dict) else None
         returned_expected = row.get("expected_count") if isinstance(row, dict) else None
@@ -3203,6 +3471,12 @@ def render_report(
         failures.append(f"unexpected behavioral result id: {unexpected}")
     if not checks:
         add("| _no behavioral sidecar for this allowlist_ | | | | | |")
+    if superseded_notes:
+        add("")
+        add("Superseded intermediate assertions (issue #2029):")
+        add("")
+        superseded_notes.sort()
+        lines.extend(superseded_notes)
     add("")
     add(f"Allowlist: `{', '.join(allowlist)}`")
     add("")
@@ -3620,11 +3894,18 @@ def verify(
     behavior_error: str | None = None
 
     declaration = targets.noop_declaration
-    if behavior_checks:
+    # Issue #2029: superseded checks are deliberately not run against the final
+    # state, so they must not reach the database and must not be reported as
+    # ERROR/MISSING when the query either runs or is skipped. They stay in
+    # `behavior_checks`, which is what the report and the JSON payload render.
+    assertable_checks = [
+        check for check in behavior_checks if not check.get("superseded_by")
+    ]
+    if assertable_checks:
         try:
             behavior_results = extract_report(
                 run_query(
-                    project_ref, token, build_behavior_sql(behavior_checks), api
+                    project_ref, token, build_behavior_sql(assertable_checks), api
                 )
             )
         except (urllib.error.URLError, GuardError, ValueError, OSError) as exc:
