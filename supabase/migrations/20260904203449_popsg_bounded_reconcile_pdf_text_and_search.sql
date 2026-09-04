@@ -635,7 +635,9 @@ begin
   if p_run_id is not null then
     update public.style_guide_crawl_runs
        set refresh_completed_at = v_now,
-           search_documents_synced = search_documents_synced + v_synced
+           -- qualified: `search_documents_synced` is also this function's output
+           -- parameter, so the bare name would be ambiguous
+           search_documents_synced = style_guide_crawl_runs.search_documents_synced + v_synced
      where id = p_run_id;
   end if;
 
@@ -669,6 +671,11 @@ language plpgsql
 security definer
 set search_path to 'public'
 as $function$
+-- The RETURNS TABLE output parameters share their names with the columns this
+-- body reads, so an unqualified name -- `on conflict (style_guide_file_id)` in
+-- particular, where the inference list cannot be qualified -- is ambiguous.
+-- Columns win; every variable here is either `p_`- or `v_`-prefixed.
+#variable_conflict use_column
 declare
   v_batch integer := greatest(1, least(coalesce(p_batch_size, 10), 500));
 begin
