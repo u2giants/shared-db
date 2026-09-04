@@ -77,7 +77,7 @@ export function validatePage(payload, requestedPage, scope) {
     throw new Error(`${scope.endpoint} returned an impossible page size ${payload.size}`);
   }
   if (scope.stage) {
-    const mismatch = payload.content.find((row) => row?.stageCode !== scope.stage);
+    const mismatch = payload.content.find((row) => String(row?.stageCode ?? "").toUpperCase() !== scope.stage);
     if (mismatch) throw new Error(`${scope.endpoint} returned a stage other than requested ${scope.stage}`);
   }
   return payload;
@@ -207,10 +207,15 @@ export async function captureScope({ outputDir, scope, window, apiKey, fetchImpl
   const complete = verifyCompletePages(pages, scope);
   if (scope.endpoint === "prodHistory") {
     const tripwire = productionDuplicateTripwire(pages.flatMap((page) => page.content));
+    const stageCaseMismatches = pages.flatMap((page) => page.content)
+      .filter((row) => row.stageCode !== scope.stage).length;
     if (tripwire.ambiguousGroups > 0) {
       process.stderr.write(`ALERT: ${scope.endpoint} ${scope.stage} ${window.from}..${window.to} has ${tripwire.ambiguousGroups} identity group(s) differing outside last* fields; raw rows were preserved without collapse.\n`);
     }
-    return { ...complete, ...tripwire };
+    if (stageCaseMismatches > 0) {
+      process.stderr.write(`ALERT: ${scope.endpoint} ${scope.stage} ${window.from}..${window.to} returned ${stageCaseMismatches} row(s) with non-canonical stage casing; raw values were preserved.\n`);
+    }
+    return { ...complete, ...tripwire, stageCaseMismatches };
   }
   return complete;
 }

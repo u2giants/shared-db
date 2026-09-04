@@ -49,6 +49,8 @@ test("page validation refuses raw arrays and returned-stage mismatch", () => {
   assert.throws(() => validatePage([], 0, { endpoint: "orderHistory", stage: null }), /paged envelope/);
   assert.throws(() => validatePage(page(0, [{ stageCode: "ISS" }]), 0,
     { endpoint: "prodHistory", stage: "REC" }), /stage other than requested/);
+  assert.doesNotThrow(() => validatePage(page(0, [{ stageCode: "iss" }]), 0,
+    { endpoint: "prodHistory", stage: "ISS" }));
 });
 
 test("completion requires every contiguous page and agreeing totals", () => {
