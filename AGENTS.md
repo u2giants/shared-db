@@ -27,6 +27,7 @@ The guarded row-application work is planned in [`plan_historical_mg_reclassifica
 
 ## Active contracts and implementation plans
 
+- **Author-lane abandonment lifecycle (issue #2301):** [`plan_author_lane_abandonment_lifecycle.md`](plan_author_lane_abandonment_lifecycle.md). Read its STATUS table first. Repository-maintenance work outside the structure/schema orchestrator. It preserves every object/version claim while allowing evidence-backed capacity relinquishment, adds recovery-gated resume and immutable retirement tombstones, and forbids expiry-only release, ref deletion, automatic PR closure, or worktree mutation.
 - **Database efficiency and Data API security program (issue #2209):** [`plan_database_efficiency_and_api_security.md`](plan_database_efficiency_and_api_security.md). Read its STATUS table first. It is the evidence-gated umbrella plan for Supabase advisor findings, expensive rebuilds, effective-tag churn, foreign-key/index review, RLS and privileged-API validation, maintenance statistics, and replication attribution. It authorizes no bulk fix: each structural change must be split into its own orchestrator issue, while application scheduling/batching changes remain with the owning application repo. The unused-index decision for four high-churn tables remains frozen under issue #1966 until its 2026-09-17 delta reading.
 - PopDAM OrderList linked to Master Data: [`plan_popdam_order_list.md`](plan_popdam_order_list.md). Read its STATUS table first. Do not re-derive or re-plan completed steps.
 - **Companywide business rules (read before interpreting business meaning):** start at [`docs/business-rules/application-map.md`](docs/business-rules/application-map.md). Licensing Master Data starts at [`docs/business-rules/licensing-master-data.md`](docs/business-rules/licensing-master-data.md); its detailed architecture remains in [`docs/core-master-data-consolidation-aim.md`](docs/core-master-data-consolidation-aim.md).
@@ -679,8 +680,10 @@ preview rehearsal and its recovery lane:
 Read it in full before you claim a lane, author a migration, or rehearse on preview.** The five
 rules below are the operative summary.
 
-1. **Up to three unrelated migrations may be authored at once. Preview, merges, and production
-   promotion remain one at a time** (owner ruling, 2026-08-14). A fourth author is refused.
+1. **Up to eight unrelated migrations may hold active-author capacity at once. Preview, merges,
+   and production promotion remain one at a time** (owner ruling implemented 2026-08-28 under
+   issue #1738). A ninth active author is refused. Protected relinquished claims remain outside
+   that capacity count but continue blocking every object/version collision.
 
    **Do not open a migration file first.** Acquire an author lane, an exact object claim, and a
    centrally reserved 14-digit version as one dispatch operation:
