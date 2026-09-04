@@ -78,14 +78,23 @@ export function parseMirror(raw, where) {
   return contexts
 }
 
-// The guarded merge checks out the proposed head, so that checkout must never supply
-// the list used to judge itself. The workflow fetches origin/main immediately before
-// this script; only the protected branch's mirror is trusted.
+// The guarded merge checks out the proposed head. Once main has a mirror, the head
+// cannot weaken it: both copies are unioned. The only head-only case is the one-time
+// bootstrap commit that introduces the mirror before main has any copy at all.
 export function readRequiredChecksMirror(root = process.cwd(), run = execFileSync) {
-  let raw
-  try { raw = run('git', ['show', `origin/main:${REQUIRED_CHECKS_MIRROR}`], { encoding: 'utf8', cwd: root, maxBuffer: 8 * 1024 * 1024 }) }
-  catch (e) { throw new PreflightError(`the trusted origin/main mirror ${REQUIRED_CHECKS_MIRROR} is missing or unreadable (${sanitize(e.message)}), so the required list is unknown from both sources`) }
-  const contexts = parseMirror(raw, 'origin/main')
+  const show = (ref) => {
+    try { return run('git', ['show', `${ref}:${REQUIRED_CHECKS_MIRROR}`], { encoding: 'utf8', cwd: root, maxBuffer: 8 * 1024 * 1024 }) }
+    catch { return null }
+  }
+  const onMain = show('origin/main')
+  const onHead = show('HEAD')
+  if (onMain === null && onHead === null) {
+    throw new PreflightError(`the required-checks mirror ${REQUIRED_CHECKS_MIRROR} is on neither origin/main nor the reviewed head, so the required list is unknown from both sources`)
+  }
+  const contexts = [...new Set([
+    ...(onMain === null ? [] : parseMirror(onMain, 'origin/main')),
+    ...(onHead === null ? [] : parseMirror(onHead, 'the reviewed head')),
+  ])].sort()
   // The pre-flight strips its own context before testing, so a mirror naming ONLY
   // that context leaves nothing to test and would pass with zero coverage.
   if (contexts.filter((c) => c !== SELF_CONTEXT).length === 0) {

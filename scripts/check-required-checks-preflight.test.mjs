@@ -71,6 +71,20 @@ test('the latest report wins when a context was re-run', () => {
   assert.equal(stale.get('Intake pointer guard'), 'failure')
 })
 
+test('a newer check run beats an older commit status with the same exact name', () => {
+  const states = observedStates({
+    statuses: [{ context: 'Domain ownership', state: 'success', updated_at: '2026-09-03T00:00:00Z' }],
+    checkRuns: [{ name: 'Domain ownership', status: 'completed', conclusion: 'failure', completed_at: '2026-09-03T01:00:00Z' }],
+  })
+  assert.equal(states.get('Domain ownership'), 'failure')
+})
+
+test('only the exact self-context is excluded', () => {
+  assert.throws(() => evaluatePreflight({
+    requiredContexts: [`${SELF_CONTEXT} extra`], statuses: [], checkRuns: [],
+  }), new RegExp(`never reported: ${SELF_CONTEXT} extra`))
+})
+
 test('a missing required-contexts list is refused rather than read as "nothing required"', () => {
   assert.throws(() => evaluatePreflight({ requiredContexts: undefined, statuses: [], checkRuns: [] }),
     (e) => e instanceof PreflightError && /no required status check list/.test(e.message))
@@ -121,9 +135,9 @@ const mirrorRun = (byRef) => (bin, args) => {
 }
 const doc = (...contexts) => JSON.stringify({ contexts })
 
-test('a missing mirror on origin/main is refused, never replaced by the head copy', () => {
+test('a mirror missing from both origin/main and the head is refused', () => {
   assert.throws(() => readRequiredChecksMirror('/x', mirrorRun({})), (e) => {
-    assert.ok(e.message.includes('trusted origin/main mirror'))
+    assert.ok(e.message.includes('neither origin/main nor the reviewed head'))
     return true
   })
 })
@@ -145,12 +159,16 @@ test('THE HEAD CANNOT REMOVE A CONTEXT main REQUIRES — only main is tested', (
   assert.deepEqual(contexts, ['Domain ownership', 'SQL migration guards'])
 })
 
-test('the head cannot inject a context into the trusted list', () => {
+test('a context added by the head is enforced immediately', () => {
   const contexts = readRequiredChecksMirror('/x', mirrorRun({
     'origin/main': doc('SQL migration guards'),
     HEAD: doc('SQL migration guards', 'Brand new guard'),
   }))
-  assert.deepEqual(contexts, ['SQL migration guards'])
+  assert.deepEqual(contexts, ['Brand new guard', 'SQL migration guards'])
+})
+
+test('the one-time bootstrap uses the head only when main has no mirror yet', () => {
+  assert.deepEqual(readRequiredChecksMirror('/x', mirrorRun({ HEAD: doc('SQL migration guards') })), ['SQL migration guards'])
 })
 
 test('a mirror naming only the workflow own context would test nothing, so it is refused', () => {
