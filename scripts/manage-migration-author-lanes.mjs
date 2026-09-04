@@ -3648,9 +3648,35 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     // separate single-ref read it used to do is gone.
     const hasVerdict=headVerdictBlocksReplacement(request.issue,request.pr,request.headSha,io,{slot:request.slot})
     if(hasVerdict)throw new LaneError('an existing verdict for the exact head forbids reviewer replacement')
-    const failedLeaseRef=reviewActiveRef(original.reviewer),cachedFailed=preflightBusy.leases?.get(original.reviewer),failedLeaseSha=cachedFailed?.sha??io.readRef(failedLeaseRef)
-    const failedLease=failedLeaseSha?(cachedFailed?.sha===failedLeaseSha?cachedFailed.lease:parseReviewLease(io.getCommit(failedLeaseSha))):null
-    if(failedLease&&(![failedLease.issue,failedLease.pr,failedLease.headSha,failedLease.sequence,failedLease.reviewer].every((value,index)=>value===[request.issue,request.pr,request.headSha,request.failedSequence,original.reviewer][index])))throw new LaneError('failed reviewer active lease does not match the permanent failure evidence')
+    const failedLeaseRef=reviewActiveRef(original.reviewer),cachedFailed=preflightBusy.leases?.get(original.reviewer),liveFailedLeaseSha=cachedFailed?.sha??io.readRef(failedLeaseRef)
+    const liveFailedLease=liveFailedLeaseSha?(cachedFailed?.sha===liveFailedLeaseSha?cachedFailed.lease:parseReviewLease(io.getCommit(liveFailedLeaseSha))):null
+    // ISSUE #2106 -- the SECOND reviewer-pool deadlock mode, distinct from the
+    // release-welded-to-replacement one #2075 records.
+    //
+    // A reviewer holds at most ONE active lease, so if this reviewer's lease ref
+    // now names a DIFFERENT issue, PR, head or sequence, the lease this failure
+    // is about has already been released and the reviewer has since been drawn
+    // onto unrelated work. This used to throw, which made the replacement
+    // impossible until that unrelated review finished -- and freeing every OTHER
+    // reviewer in the pool could not help, because only this one reviewer being
+    // idle would clear it. Two assignments during marker #2074 each needed four
+    // draws for exactly this reason.
+    //
+    // Replacement does not need the failed lease. It needs the failed lease GONE,
+    // and an unrelated lease proves it is. So an unrelated lease is now carried
+    // through as "already released, not ours to touch": it is never deleted,
+    // never rolled back, and every readback below expects it to survive the
+    // replacement byte-for-byte. What is NOT relaxed: a lease that matches this
+    // failure is still released exactly as before, and nothing about the failure
+    // evidence, the verdict gate or the cursor is weakened.
+    const failedLeaseMatches=Boolean(liveFailedLease)&&[liveFailedLease.issue,liveFailedLease.pr,liveFailedLease.headSha,liveFailedLease.sequence,liveFailedLease.reviewer].every((value,index)=>value===[request.issue,request.pr,request.headSha,request.failedSequence,original.reviewer][index])
+    const unrelatedFailedLeaseSha=liveFailedLease&&!failedLeaseMatches?liveFailedLeaseSha:null
+    const failedLeaseSha=failedLeaseMatches?liveFailedLeaseSha:null
+    const failedLease=failedLeaseMatches?liveFailedLease:null
+    // What the failed reviewer's lease ref must read AFTER a successful
+    // replacement: empty when we released our own lease, unchanged when the ref
+    // belongs to somebody else's review.
+    const failedLeaseAfter=unrelatedFailedLeaseSha
     // The failing check rides along in the immutable evidence, so a later reader
     // can tell a real provider outage from a stopped local service without
     // re-deriving it from memory.
@@ -3719,12 +3745,12 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
         if(failedLeaseSha)changes.splice(changes.length-1,0,{ref:failedLeaseRef,expected:failedLeaseSha,sha:null})
         io.atomicReviewRefs(changes)
         const refs=io.readReviewRefs([MUTEX_REF,failureRef,REVIEW_CURSOR_REF,replacementRef,failedLeaseRef,replacementLeaseRef])
-        if(refs.get(MUTEX_REF)!==ownerSha||refs.get(failureRef)!==failureSha||refs.get(REVIEW_CURSOR_REF)!==cursorReplacementSha||refs.get(replacementRef)!==replacementSha||refs.get(failedLeaseRef)!==null||refs.get(replacementLeaseRef)!==replacementLeaseSha)throw new LaneError('atomic review replacement readback mismatch')
+        if(refs.get(MUTEX_REF)!==ownerSha||refs.get(failureRef)!==failureSha||refs.get(REVIEW_CURSOR_REF)!==cursorReplacementSha||refs.get(replacementRef)!==replacementSha||refs.get(failedLeaseRef)!==failedLeaseAfter||refs.get(replacementLeaseRef)!==replacementLeaseSha)throw new LaneError('atomic review replacement readback mismatch')
         return {sequence,reviewer:reviewer.name,wrapper:reviewer.wrapper,...request,priorSequence:cursor.sequence,failureCode:String(failureCode),failureSha,replacementSha}
       }
       if(io.readReviewRefs){
         const locked=io.readReviewRefs([MUTEX_REF,REVIEW_CURSOR_REF,failedLeaseRef,...(replacementStale?[replacementLeaseRef]:[])])
-        if(locked.get(MUTEX_REF)!==ownerSha||locked.get(REVIEW_CURSOR_REF)!==cursorSha||locked.get(failedLeaseRef)!==failedLeaseSha||(replacementStale&&locked.get(replacementLeaseRef)!==replacementStale.sha))throw new LaneError('review replacement state changed after preflight')
+        if(locked.get(MUTEX_REF)!==ownerSha||locked.get(REVIEW_CURSOR_REF)!==cursorSha||locked.get(failedLeaseRef)!==liveFailedLeaseSha||(replacementStale&&locked.get(replacementLeaseRef)!==replacementStale.sha))throw new LaneError('review replacement state changed after preflight')
       }else {requireOwnedRef(MUTEX_REF,ownerSha,io);if(io.readRef(REVIEW_CURSOR_REF)!==cursorSha)throw new LaneError('reviewer cursor changed after preflight')}
       if(releasedFailureSha){if(io.readRef(failureRef)!==releasedFailureSha)throw new LaneError('review release evidence changed after preflight')}
       else {if(!io.createRef(failureRef,failureSha))throw new LaneError('review failure evidence already exists without a replacement; manual audit required');failureCreated=true}
@@ -3741,7 +3767,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
       replacementLeaseCreated=true
       if(io.readReviewRefs){
         const refs=io.readReviewRefs([MUTEX_REF,failureRef,REVIEW_CURSOR_REF,replacementRef,failedLeaseRef,replacementLeaseRef])
-        if(refs.get(MUTEX_REF)!==ownerSha||refs.get(failureRef)!==failureSha||refs.get(REVIEW_CURSOR_REF)!==cursorReplacementSha||refs.get(replacementRef)!==replacementSha||refs.get(failedLeaseRef)!==null||refs.get(replacementLeaseRef)!==replacementLeaseSha)throw new LaneError('batched review replacement readback mismatch')
+        if(refs.get(MUTEX_REF)!==ownerSha||refs.get(failureRef)!==failureSha||refs.get(REVIEW_CURSOR_REF)!==cursorReplacementSha||refs.get(replacementRef)!==replacementSha||refs.get(failedLeaseRef)!==failedLeaseAfter||refs.get(replacementLeaseRef)!==replacementLeaseSha)throw new LaneError('batched review replacement readback mismatch')
       }
       return {sequence,reviewer:reviewer.name,wrapper:reviewer.wrapper,...request,priorSequence:cursor.sequence,failureCode:String(failureCode),failureSha,replacementSha}
     }catch(error){
