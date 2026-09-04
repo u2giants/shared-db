@@ -10,6 +10,8 @@
 // check runs BEFORE the lock is taken and names the exact contexts that are not
 // satisfied on the reviewed head.
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { REPO } from './manage-migration-author-lanes.mjs'
 
@@ -42,43 +44,75 @@ export function observedStates({ statuses = [], checkRuns = [] }) {
   return new Map([...seen].map(([name, v]) => [name, v.state]))
 }
 
-// WHEN THE REQUIRED LIST CANNOT BE READ AT ALL.
+// WHEN THE REQUIRED LIST CANNOT BE READ FROM THE API.
 //
-// Reading `branches/main/protection/required_status_checks` needs administration
-// access, and GitHub Actions HAS NO `administration` PERMISSION -- declaring one
-// makes the workflow file unparseable, which took the only merge path in this
-// repository down entirely (#2274 follow-up). `github.token` therefore cannot read
-// that list from inside the guarded merge.
+// That read needs administration access, and GitHub Actions HAS NO `administration`
+// permission scope -- declaring one makes the workflow file unparseable, which took
+// the only merge path in this repository down entirely. So `github.token` cannot read
+// it, ever.
 //
-// The answer is NOT to skip the check, and NOT to hard-code a list that would
-// silently rot the day someone adds a required context. It is to fall back to a
-// test that is STRICTLY STRONGER than the one that could not be performed: every
-// context reported on the head must be passing, not merely the required subset.
-// Anything the required list would have demanded is necessarily included, because
-// a required context that never reported at all is caught by the emptiness guard
-// below. The cost is that a genuinely failing NON-required check now blocks too --
-// which is the safe direction on the only path to `main`, and is visible and
-// explainable when it happens, unlike the opaque retry loop this whole script
-// exists to replace.
-export function evaluateWithoutRequiredList({ statuses, checkRuns, reason }) {
-  const states = observedStates({ statuses, checkRuns })
-  if (states.size === 0) {
-    throw new PreflightError(`main's required status check list is unreadable (${reason}) and NOTHING has reported on the reviewed head. That is not a green head; it is an unchecked one.`)
-  }
-  const bad = [...states].filter(([, state]) => !SUCCESS.has(state))
-  if (bad.length) {
-    const pending = bad.filter(([, s]) => s === 'pending' || s === '').map(([n]) => n)
-    const failing = bad.filter(([, s]) => s !== 'pending' && s !== '').map(([n, s]) => `${n} (${s})`)
-    const parts = []
-    if (failing.length) parts.push(`failing: ${failing.join(', ')}`)
-    if (pending.length) parts.push(`still running: ${pending.join(', ')}`)
-    throw new PreflightError(`main's required status check list is unreadable (${reason}), so EVERY reported check must pass. ${parts.join('; ')}. No retry can clear this, so the merge lane was not taken.`)
-  }
-  return { required: states.size, mode: 'all-reported-checks' }
+// The first attempt at this fallback checked only that every check REPORTED on the
+// head was green, and claimed that was strictly stronger. It is not, and a governed
+// review produced the counterexample: a head with one green non-required check and a
+// required context that never reported at all passes the reported-checks test and
+// fails the required-list test. Not knowing the required list means not being able to
+// notice one is missing.
+//
+// So the fallback does not guess. It reads a COMMITTED MIRROR of the required list
+// (`docs/verification/main-required-status-checks.json`, rewritten by
+// `scripts/update-required-checks.mjs` whenever it changes the live list) and applies
+// BOTH tests: every mirrored context must be green, AND every check reported on the
+// head must be green. The second half is what covers mirror rot -- a context added
+// live but not yet mirrored is still caught the moment it reports. A missing or empty
+// mirror is a refusal, never an empty required list.
+export const REQUIRED_CHECKS_MIRROR = 'docs/verification/main-required-status-checks.json'
+
+export function readRequiredChecksMirror(root = process.cwd(), read = readFileSync) {
+  let parsed
+  try { parsed = JSON.parse(read(join(root, REQUIRED_CHECKS_MIRROR), 'utf8')) }
+  catch (e) { throw new PreflightError(`the committed required-checks mirror ${REQUIRED_CHECKS_MIRROR} is missing or unreadable (${sanitize(e.message)}), so the required list is unknown from both sources`) }
+  const contexts = parsed?.contexts
+  if (!Array.isArray(contexts) || contexts.length === 0) throw new PreflightError(`${REQUIRED_CHECKS_MIRROR} carries no contexts, which is not the same as "nothing is required"`)
+  return contexts
 }
 
-export function evaluatePreflight({ requiredContexts, statuses, checkRuns, protectionUnreadable }) {
-  if (protectionUnreadable) return evaluateWithoutRequiredList({ statuses, checkRuns, reason: protectionUnreadable })
+export function evaluateWithoutRequiredList({ statuses, checkRuns, reason, mirrorContexts }) {
+  const states = observedStates({ statuses, checkRuns })
+  // Half one: every MIRRORED required context must be green. This is the half the
+  // reported-checks test cannot do, and the half the review's counterexample needed.
+  requireContexts(mirrorContexts.filter((c) => c !== SELF_CONTEXT), states, `main's required list is unreadable (${reason}), so the committed mirror ${REQUIRED_CHECKS_MIRROR} was used`)
+  // Half two: everything else that reported must also be green, so a context added
+  // live but not yet mirrored cannot slip through once it starts reporting.
+  const bad = [...states].filter(([, state]) => !SUCCESS.has(state))
+  if (bad.length) throw new PreflightError(`${describe(bad)} on the reviewed head. The required list came from the committed mirror, so EVERY reported check must pass. No retry can clear this, so the merge lane was not taken.`)
+  return { required: mirrorContexts.length, mode: 'committed-mirror' }
+}
+
+function describe(bad) {
+  const pending = bad.filter(([, s]) => s === 'pending' || s === '').map(([n]) => n)
+  const failing = bad.filter(([, s]) => s !== 'pending' && s !== '').map(([n, s]) => `${n} (${s})`)
+  const parts = []
+  if (failing.length) parts.push(`failing: ${failing.join(', ')}`)
+  if (pending.length) parts.push(`still running: ${pending.join(', ')}`)
+  return parts.join('; ')
+}
+
+function requireContexts(required, states, prefix) {
+  const missing = [], bad = []
+  for (const context of required) {
+    if (!states.has(context)) { missing.push(context); continue }
+    const state = states.get(context)
+    if (!SUCCESS.has(state)) bad.push([context, state])
+  }
+  if (!missing.length && !bad.length) return
+  const parts = []
+  if (missing.length) parts.push(`never reported: ${missing.join(', ')}`)
+  if (bad.length) parts.push(describe(bad))
+  throw new PreflightError(`${prefix}. ${parts.join('; ')}. No retry can clear this, so the merge lane was not taken.`)
+}
+
+export function evaluatePreflight({ requiredContexts, statuses, checkRuns, protectionUnreadable, mirrorContexts }) {
+  if (protectionUnreadable) return evaluateWithoutRequiredList({ statuses, checkRuns, reason: protectionUnreadable, mirrorContexts })
   if (!Array.isArray(requiredContexts) || requiredContexts.length === 0) throw new PreflightError('branch protection returned no required status check list, which is not the same as "nothing is required"')
   const required = requiredContexts.filter((c) => c !== SELF_CONTEXT)
   const states = observedStates({ statuses, checkRuns })
@@ -139,6 +173,7 @@ export function gatherPreflightInput(env = process.env, deps = { json }) {
   // required" -- that is the fail-open this whole script exists to prevent.
   return {
     protectionUnreadable,
+    mirrorContexts: protectionUnreadable ? readRequiredChecksMirror(deps.root ?? process.cwd(), deps.read ?? readFileSync) : null,
     requiredContexts: protectionUnreadable ? null : protection?.contexts,
     statuses: combined?.statuses ?? [],
     checkRuns: runs?.check_runs ?? [],
@@ -150,7 +185,7 @@ export function main(env = process.env) {
     const { required, mode } = evaluatePreflight(gatherPreflightInput(env))
     console.log(mode === 'required-contexts'
       ? `Required status checks satisfied on the reviewed head (${required} contexts).`
-      : `main's required list was unreadable, so the stronger test was applied: all ${required} checks reported on the reviewed head are passing.`)
+      : `main's required list was unreadable from the API, so the committed mirror was used: all ${required} mirrored contexts and every other check reported on the reviewed head are passing.`)
     return 0
   } catch (e) { console.error(`REFUSED: ${e.message}`); return 2 }
 }

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { evaluatePreflight, evaluateWithoutRequiredList, gatherPreflightInput, isPermissionRefusal, observedStates, sanitize, PreflightError, SELF_CONTEXT } from './check-required-checks-preflight.mjs'
+import { evaluatePreflight, evaluateWithoutRequiredList, gatherPreflightInput, isPermissionRefusal, observedStates, readRequiredChecksMirror, sanitize, PreflightError, SELF_CONTEXT } from './check-required-checks-preflight.mjs'
 
 const ok = (name) => ({ name, status: 'completed', conclusion: 'success', completed_at: '2026-09-03T00:00:00Z' })
 
@@ -68,13 +68,55 @@ test('a missing required-contexts list is refused rather than read as "nothing r
 // must not read an unchecked head as a green one.
 const REASON = 'HTTP 403: Resource not accessible by integration'
 
-test('an unreadable required list is not a pass: every reported check must be green', () => {
+const MIRROR = ['SQL migration guards', 'Tools offline tests']
+
+test('an unreadable required list uses the committed mirror, and every reported check must also be green', () => {
   const result = evaluatePreflight({
-    protectionUnreadable: REASON,
+    protectionUnreadable: REASON, mirrorContexts: MIRROR,
     statuses: [], checkRuns: [ok('SQL migration guards'), ok('Tools offline tests')],
   })
-  assert.equal(result.mode, 'all-reported-checks')
+  assert.equal(result.mode, 'committed-mirror')
   assert.equal(result.required, 2)
+})
+
+// THE COUNTEREXAMPLE A GOVERNED REVIEW FOUND, and the reason the reported-checks-only
+// fallback was not, in fact, strictly stronger: one green non-required check on a head
+// whose required context never reported at all. Without the mirror this PASSED.
+test('the fallback refuses a head whose required context never reported, even with other checks green', () => {
+  assert.throws(() => evaluatePreflight({
+    protectionUnreadable: REASON, mirrorContexts: MIRROR,
+    statuses: [], checkRuns: [ok('SQL migration guards')],
+  }), (e) => {
+    assert.ok(e.message.includes('never reported: Tools offline tests'))
+    return true
+  })
+})
+
+test('the mirror does not have to name the workflow own context', () => {
+  const result = evaluatePreflight({
+    protectionUnreadable: REASON, mirrorContexts: [...MIRROR, SELF_CONTEXT],
+    statuses: [], checkRuns: [ok('SQL migration guards'), ok('Tools offline tests')],
+  })
+  assert.equal(result.mode, 'committed-mirror')
+})
+
+test('a missing or empty mirror is refused, never read as an empty required list', () => {
+  const boom = () => { throw new Error('ENOENT: no such file') }
+  assert.throws(() => readRequiredChecksMirror('/nowhere', boom), (e) => {
+    assert.ok(e.message.includes('missing or unreadable'))
+    return true
+  })
+  for (const body of ['{}', '{"contexts":[]}', '{"contexts":"SQL migration guards"}']) {
+    assert.throws(() => readRequiredChecksMirror('/x', () => body), PreflightError)
+  }
+  assert.deepEqual(readRequiredChecksMirror('/x', () => '{"contexts":["a"]}'), ['a'])
+})
+
+test('the committed mirror on disk is real, non-empty, and matches what main requires', () => {
+  const contexts = readRequiredChecksMirror(new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
+  assert.ok(contexts.length >= 10)
+  assert.ok(contexts.includes('SQL migration guards'))
+  assert.ok(contexts.includes(SELF_CONTEXT))
 })
 
 test('the fallback blocks a NON-required failing check, which the required-list test would have allowed', () => {
@@ -82,7 +124,7 @@ test('the fallback blocks a NON-required failing check, which the required-list 
     statuses: [], checkRuns: [ok('SQL migration guards'), { name: 'optional lint', status: 'completed', conclusion: 'failure', completed_at: '2026-09-03T00:00:00Z' }],
   }
   assert.equal(evaluatePreflight({ ...args, requiredContexts: ['SQL migration guards'] }).required, 1)
-  assert.throws(() => evaluatePreflight({ ...args, protectionUnreadable: REASON }), (e) => {
+  assert.throws(() => evaluatePreflight({ ...args, protectionUnreadable: REASON, mirrorContexts: ['SQL migration guards'] }), (e) => {
     assert.ok(e instanceof PreflightError)
     assert.ok(e.message.includes('optional lint (failure)'))
     return true
@@ -90,15 +132,15 @@ test('the fallback blocks a NON-required failing check, which the required-list 
 })
 
 test('a head with nothing reported at all is refused, not treated as green', () => {
-  assert.throws(() => evaluatePreflight({ protectionUnreadable: REASON, statuses: [], checkRuns: [] }), (e) => {
-    assert.ok(e.message.includes('NOTHING has reported'))
+  assert.throws(() => evaluatePreflight({ protectionUnreadable: REASON, mirrorContexts: MIRROR, statuses: [], checkRuns: [] }), (e) => {
+    assert.ok(e.message.includes('never reported'))
     return true
   })
 })
 
 test('the fallback names still-running checks separately from failing ones', () => {
   assert.throws(() => evaluateWithoutRequiredList({
-    statuses: [], reason: REASON,
+    statuses: [], reason: REASON, mirrorContexts: ['preview'],
     checkRuns: [{ name: 'preview', status: 'in_progress', started_at: '2026-09-03T00:00:00Z' }],
   }), (e) => {
     assert.ok(e.message.includes('still running: preview'))
@@ -126,6 +168,7 @@ test('a readable required list still takes precedence over the fallback', () => 
 // test still passed, because nothing exercised `gatherPreflightInput` -> `evaluatePreflight`.
 const SHA = 'e'.repeat(40)
 const ENV = { REQUESTED_SHA: SHA }
+const MIRROR_DEP = { root: '/x', read: () => '{"contexts":["SQL migration guards"]}' }
 const reader = ({ protection, statuses = [], checkRuns = [] }) => (args) => {
   const path = args[1]
   if (path.includes('/protection/')) { if (protection instanceof Error) throw protection; return protection }
@@ -135,14 +178,15 @@ const reader = ({ protection, statuses = [], checkRuns = [] }) => (args) => {
 const refusal = () => Object.assign(new PreflightError('GitHub read failed: HTTP 403: Resource not accessible by integration'), {})
 
 test('a 403 on the protection read reaches evaluatePreflight as the fallback, not as "nothing required"', () => {
-  const input = gatherPreflightInput(ENV, { json: reader({ protection: refusal(), checkRuns: [ok('SQL migration guards')] }) })
+  const input = gatherPreflightInput(ENV, { ...MIRROR_DEP, json: reader({ protection: refusal(), checkRuns: [ok('SQL migration guards')] }) })
   assert.ok(input.protectionUnreadable)
   assert.equal(input.requiredContexts, null)
-  assert.equal(evaluatePreflight(input).mode, 'all-reported-checks')
+  assert.deepEqual(input.mirrorContexts, ['SQL migration guards'])
+  assert.equal(evaluatePreflight(input).mode, 'committed-mirror')
 })
 
 test('a 403 does not become a pass when the head is not green', () => {
-  const input = gatherPreflightInput(ENV, { json: reader({ protection: refusal(), checkRuns: [{ name: 'SQL migration guards', status: 'completed', conclusion: 'failure', completed_at: '2026-09-03T00:00:00Z' }] }) })
+  const input = gatherPreflightInput(ENV, { ...MIRROR_DEP, json: reader({ protection: refusal(), checkRuns: [{ name: 'SQL migration guards', status: 'completed', conclusion: 'failure', completed_at: '2026-09-03T00:00:00Z' }] }) })
   assert.throws(() => evaluatePreflight(input), PreflightError)
 })
 
@@ -171,7 +215,7 @@ test('a readable protection list is passed through and used', () => {
 test('the fallback refuses a head missing a check that reported on an earlier attempt', () => {
   // The dangerous case: green noise on the SHA and the real guard absent.
   assert.throws(() => evaluateWithoutRequiredList({
-    statuses: [], reason: 'x',
+    statuses: [], reason: 'x', mirrorContexts: ['SQL migration guards'],
     checkRuns: [ok('some unrelated job'), { name: 'SQL migration guards', status: 'queued', started_at: '2026-09-03T00:00:00Z' }],
   }), PreflightError)
 })

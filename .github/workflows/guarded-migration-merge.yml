@@ -20,6 +20,8 @@ permissions:
   contents: write
   issues: read
   pull-requests: write
+  # `statuses: write` implies read for the combined-status call, but the read is a
+  # real dependency of the pre-flight and is declared as one.
   statuses: write
   # The pre-flight reads `commits/{sha}/check-runs`. Unspecified permissions are
   # `none`, so without this the read is a 403 and every merge dies at the pre-flight

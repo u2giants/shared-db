@@ -2,8 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   parseArgs, planUnion, renderPlan, validateLiveDocument, readLive, applyUnion,
-  verifyReadback, main, RequiredChecksError, DEFAULT_REPO, DEFAULT_BRANCH, ghSpawnOptions,
-} from './update-required-checks.mjs'
+  verifyReadback, main, RequiredChecksError, DEFAULT_REPO, DEFAULT_BRANCH, ghSpawnOptions, mirrorDocument, writeMirror, MIRROR_PATH } from './update-required-checks.mjs'
 
 const LIVE = Object.freeze({
   strict: false,
@@ -223,4 +222,28 @@ test('--help exits 0 without touching GitHub', async () => {
 test('RequiredChecksError is the single error type callers can catch', () => {
   assert.throws(() => validateLiveDocument(null), RequiredChecksError)
   assert.throws(() => parseArgs(['--nope']), RequiredChecksError)
+})
+
+
+// The pre-flight falls back to the committed mirror, so a mirror that does not match
+// what was actually written is a stale guard. It is built from the READBACK, never
+// from the requested change.
+test('the mirror is written from the readback and is sorted, stable and complete', () => {
+  const written = []
+  writeMirror({ contexts: ['Zed', 'Alpha'], strict: false }, { repo: 'u2giants/shared-db', branch: 'main' },
+    { root: '/repo', write: (path, body) => written.push([path, body]), now: new Date('2026-09-04T00:00:00Z') })
+  assert.equal(written.length, 1)
+  assert.ok(written[0][0].endsWith('main-required-status-checks.json'.replace(/\//g, '')) || written[0][0].includes('main-required-status-checks.json'))
+  const doc = JSON.parse(written[0][1])
+  assert.deepEqual(doc.contexts, ['Alpha', 'Zed'])
+  assert.equal(doc.strict, false)
+  assert.equal(doc.branch, 'main')
+  assert.equal(doc.capturedIso, '2026-09-04T00:00:00.000Z')
+  assert.ok(doc._why.includes('MIRROR'))
+})
+
+test('the mirror records strict exactly as read back, not as requested', () => {
+  const doc = JSON.parse(mirrorDocument({ contexts: ['A'], strict: true }, 'u2giants/shared-db', 'main', new Date(0)))
+  assert.equal(doc.strict, true)
+  assert.equal(MIRROR_PATH, 'docs/verification/main-required-status-checks.json')
 })
