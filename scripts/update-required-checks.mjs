@@ -37,6 +37,8 @@
 // It reads back after applying, because an unverified write is not evidence.
 
 import { execFileSync } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 export const DEFAULT_REPO = 'u2giants/shared-db'
 export const DEFAULT_BRANCH = 'main'
@@ -217,6 +219,29 @@ export function applyUnion({ repo, branch }, plan, io = {}) {
   return body
 }
 
+// The guarded merge pre-flight cannot read branch protection: that read needs
+// administration access and GitHub Actions has no such permission scope. It falls
+// back to this committed mirror, so this tool -- the only thing that changes the live
+// list -- rewrites the mirror from the READBACK, never from the request. A mirror
+// written from the intended change would record a write that did not happen.
+export const MIRROR_PATH = 'docs/verification/main-required-status-checks.json'
+
+export function mirrorDocument(validated, repo, branch, now = new Date()) {
+  return `${JSON.stringify({
+    _why: 'MIRROR of the live required status checks on the protected branch, NOT the authority. GitHub branch protection still enforces at merge time. scripts/check-required-checks-preflight.mjs reads this because the merge workflow token cannot read branch protection (there is no `administration` permission scope in GitHub Actions; declaring one makes the workflow unparseable). Rewritten by scripts/update-required-checks.mjs from the post-write readback. Do not hand-edit.',
+    repo, branch,
+    capturedIso: now.toISOString(),
+    strict: validated.strict,
+    contexts: [...validated.contexts].sort(),
+  }, null, 2)}
+`
+}
+
+export function writeMirror(validated, { repo, branch }, io = {}) {
+  const write = io.write ?? writeFileSync
+  write(join(io.root ?? process.cwd(), MIRROR_PATH), mirrorDocument(validated, repo, branch, io.now), 'utf8')
+}
+
 export function verifyReadback(live, plan) {
   const validated = validateLiveDocument(live)
   // ORDER MATTERS. Report a LOST context before a missing addition: losing a guard
@@ -280,6 +305,9 @@ export async function main(argv, io = {}) {
     log('')
     log(`READBACK OK — ${after.contexts.length} contexts required, strict: ${after.strict}`)
     for (const context of after.contexts) log(`    = ${context}`)
+    writeMirror(after, options, io)
+    log('')
+    log(`Rewrote ${MIRROR_PATH} from the readback. COMMIT IT: the guarded merge pre-flight reads it when it cannot read branch protection, and a stale mirror is a stale guard.`)
     return 0
   } catch (verifyError) {
     error(String(verifyError.message))
