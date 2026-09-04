@@ -256,3 +256,28 @@ end;
 $$;
 
 rollback;
+
+-- Issue #552: replacing the detector bodies must retain the established
+-- service-role-only execution surface on both implementation and wrappers.
+do $$
+declare
+  v_signature text;
+begin
+  foreach v_signature in array array[
+    'plm.check_taxonomy_sync_health(interval,jsonb)',
+    'plm.record_taxonomy_parallel_observation(date,jsonb)',
+    'public.check_taxonomy_sync_health(interval,jsonb)',
+    'public.record_taxonomy_parallel_observation(date,jsonb)'
+  ] loop
+    if not has_function_privilege('service_role', v_signature, 'execute') then
+      raise exception 'service_role must execute %', v_signature;
+    end if;
+    if has_function_privilege('authenticated', v_signature, 'execute')
+       or has_function_privilege('anon', v_signature, 'execute') then
+      raise exception 'browser roles must not execute %', v_signature;
+    end if;
+  end loop;
+
+  raise notice 'OK: taxonomy health implementation and wrapper grants remain service-role-only';
+end;
+$$;

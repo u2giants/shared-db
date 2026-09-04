@@ -179,6 +179,38 @@ $$;
 
 rollback;
 
+-- Issue #552: both table-driven detectors must refuse an unreviewed live
+-- licensor-status hash before they can write operational evidence.
+do $$
+declare
+  v_health_def text := pg_get_functiondef(
+    'plm.check_taxonomy_sync_health(interval,jsonb)'::regprocedure);
+  v_observation_def text := pg_get_functiondef(
+    'plm.record_taxonomy_parallel_observation(date,jsonb)'::regprocedure);
+begin
+  if position('taxonomy health refused: live licensor_status_hash is outside the reviewed transition'
+              in v_health_def) = 0
+     or position('d9b07759bf80ff227e2fa9bd635d2138' in v_health_def) = 0
+     or position('00bf7069fff79b9deab1d14dbd9112b2' in v_health_def) = 0 then
+    raise exception 'FAIL: taxonomy health function lacks the reviewed two-hash live guard';
+  end if;
+
+  if position('taxonomy health refused: live licensor_status_hash is outside the reviewed transition'
+              in v_observation_def) = 0
+     or position('d9b07759bf80ff227e2fa9bd635d2138' in v_observation_def) = 0
+     or position('00bf7069fff79b9deab1d14dbd9112b2' in v_observation_def) = 0 then
+    raise exception 'FAIL: taxonomy observation function lacks the reviewed two-hash live guard';
+  end if;
+
+  if position('taxonomy_baseline_pin_set' in v_health_def) = 0
+     or position('taxonomy_baseline_pin_set' in v_observation_def) = 0 then
+    raise exception 'FAIL: issue #552 replaced the table-driven baseline contract';
+  end if;
+
+  raise notice 'OK: both taxonomy detectors retain table-driven pins and the reviewed live-hash guard';
+end;
+$$;
+
 -- ---------------------------------------------------------------------------------------
 -- Production-safety gate (AGENTS.md 6.5): with no baseline activated, both
 -- detectors must REFUSE -- durable evidence, no pass, no breaker trip.
