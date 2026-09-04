@@ -12,45 +12,53 @@
 
 **Review revision:** rewritten from merged plan commit `1e7daffd7ac6d1507a76dc8452462bef6f876d0a` on repository base `b262a9fd698b60ab0e455d63b8b97a965eb9bfbb` after GLM 5.3 review and a two-turn Grok 4.6 review. Sections 6.1 and 6.2 record every finding and its disposition. Grok's final verdict was **Ready**.
 
-**Fresh-session starting point:** Phase 0, Step 0.1. Re-read the settled architecture, refresh `origin/main`, audit the current migration ledger and live catalog, then claim the first exact-object migration lane. Do not begin from the older Character/Style Guide or ColdLion plans without applying this plan's supersession rules.
+**Fresh-session starting point:** Do not dispatch #1090 literally. It is a documentation tracker. Continue through the bounded structural successors #2333-#2336 and the application/source-data work named in the STATUS table. Re-resolve current main, the production ledger/catalog, and the live orchestrator marker before every successor action.
 
 ## STATUS
 
 | Step | State | Date | Evidence / next action |
 |---|---|---|---|
-| 0.1 Reconfirm repository, ledger, live catalog, and object ownership | ⬜ Open | 2026-08-17 | Start here. Produce `docs/verification/licensing-master-data-phase0-<date>/` from the commands in §9. |
-| 0.2 Reserve migration lanes and versions | ⬜ Open | 2026-08-17 | After 0.1. Claim exact objects with `scripts/manage-migration-author-lanes.mjs`; never choose versions manually. |
-| 1.0 Install a durable licensing write guard and stop every non-authoritative writer | ⬜ Open | 2026-08-19 | Must block DesignFlow and keep ColdLion writes inside the settled Licensor-name, uncovered-Property, and status boundaries. |
-| 1.1 Repair Character ownership without losing data | ⬜ Open | 2026-08-17 | Add bridge compatibility first; scalar removal waits for Step 7.2. |
-| 1.2 Create canonical Franchise | ⬜ Open | 2026-08-17 | Add canonical entity and aliases with source-scoped identity. |
-| 1.3 Replace scalar Style Guide ownership with a bridge | ⬜ Open | 2026-08-17 | Add bridge compatibility first; scalar removal waits for Step 7.2. |
-| 1.4 Standardize direct relationship bridges | ⬜ Open | 2026-08-17 | Preserve canonical pair identity and add per-source support tables; Step 2.3 replaces the old axis invariant after the queue exists. |
-| 1.5 Extend canonical provenance and Asset freshness | ⬜ Open | 2026-08-17 | Preserve source identity, freshness, and compatibility fields. |
-| 2.1 Extend and backfill `plm.source_resolution` | ⬜ Open | 2026-08-17 | Preserve all existing portal decisions and freeze only portal landing-resolution columns. ColdLion `erp_*` stays writable until Step 4.0. |
-| 2.2 Add authorized source scope | ⬜ Open | 2026-08-17 | Scope each full portal `source_system` to one authorized Licensor and allowed facts. |
-| 2.3 Add relationship-resolution and candidate contracts | ⬜ Open | 2026-08-17 | Latest complete captures only. |
-| 2.4 Implement preview/dry-run-first consolidation | ⬜ Open | 2026-08-17 | New scraped Properties must start `potential`, never `active`. |
-| 2.5 Add canonical duplicate merge and ownership history | ⬜ Open | 2026-08-17 | Repoint safely, retain aliases/tombstone, audit, and support reversal. |
-| 3.0 Prove a complete validated preview capture for each source | ⬜ Open | 2026-08-17 | Includes the first Warner capture before its adapter can run. |
+| 0.1 Reconfirm repository, ledger, live catalog, and object ownership | ✅ Complete | 2026-09-04 | Current main `f462a411`; production target `qsllyeztdwjgirsysgai`; 589 applied versions, no applied-not-merged versions, 19 intentional exclusions and five unrelated genuinely pending versions. Live object checks recorded below. |
+| 0.2 Reserve migration lanes and versions | ✅ Complete for current split | 2026-09-04 | Missing shape was split into exact successors #2333-#2336. Claims/versions belong to the live orchestrator, not this tracker session. |
+| 1.0 Install a durable licensing write guard and stop every non-authoritative writer | ✅ Complete | 2026-08-21 | Guard is present in production; #1140 and #1339 record the governed six-migration FRIENDS/FRIDA production bundle and live verification. |
+| 1.1 Repair Character ownership without losing data | 🟨 Partial | 2026-09-04 | #1684/PR #1712 created the separate production Character structure. Canonical aliases/provenance remain #2333; compatibility retirement remains Step 7.2. |
+| 1.2 Create canonical Franchise | ⬜ Open | 2026-09-04 | `core.franchise` is absent from current main and production. Structural successor #2333. |
+| 1.3 Replace scalar Style Guide ownership with a bridge | ⬜ Open | 2026-09-04 | `core.property_style_guide` is absent from current main and production. Structural successor #2334. |
+| 1.4 Standardize direct relationship bridges | 🟨 Partial | 2026-09-04 | Warner-specific production bridges are proven by #1380/PR #1385; the general canonical bridge set is absent and belongs to #2334. |
+| 1.5 Extend canonical provenance and Asset freshness | 🟨 Partial | 2026-09-04 | Source-specific lifecycle work exists, but the canonical cross-source entity/Asset contract is not proven complete. #2333 owns the missing shape; #1275 remains the source-landing lifecycle track. |
+| 2.1 Extend and backfill `plm.source_resolution` | 🟨 Partial | 2026-09-04 | Durable home and browser setter are live from `20260902024541` and `20260902031743`; Licensor/Franchise vocabulary and any legacy parity work remain #2335. |
+| 2.2 Add authorized source scope | ⬜ Open | 2026-09-04 | `plm.licensing_source_scope` is absent from current main and production. Structural successor #2335. |
+| 2.3 Add relationship-resolution and candidate contracts | ⬜ Open | 2026-09-04 | General relationship-resolution and queue contracts are absent. Structural successor #2335. |
+| 2.4 Implement preview/dry-run-first consolidation | ⬜ Open | 2026-09-04 | No general hash-pinned licensing consolidation contract exists. Structural successor #2336. |
+| 2.5 Add canonical duplicate merge and ownership history | ⬜ Open | 2026-09-04 | No general reversible canonical merge/history contract exists. Structural successor #2336. |
+| 3.0 Prove a complete validated preview capture for each source | 🟨 Partial | 2026-09-04 | Source landing and inventory have advanced substantially, but no one current artifact proves a complete validated cycle for every source named by this plan. |
 | 3.1 Disney adapter | ⬜ Open | 2026-08-17 | Use authorized OPA and DCP identities and direct relationships. |
 | 3.2 NBCU adapter | ⬜ Open | 2026-08-17 | Preserve IP Family terminology and direct links. |
 | 3.3 Paramount adapter | ⬜ Open | 2026-08-17 | Keep co-occurrence evidence out of direct bridges. |
-| 3.4 Warner adapter | ⬜ Open | 2026-08-17 | Run only after Step 3.0 has a complete Warner preview capture. |
+| 3.4 Warner adapter | ✅ Complete | 2026-08-23 | #1380/PR #1385 delivered the Warner evidence bridges, guarded sync and candidate view through production run 32659028280. |
 | 3.5 Consolidated preview and performance proof | ⬜ Open | 2026-08-17 | Correctness, idempotency, timing, and lock-budget evidence. |
-| 4.0 Build ColdLion-to-canonical Property mapping | ⬜ Open | 2026-08-25 | Still open. #1177 widens the legacy fingerprinted gate by only the five owner-approved Paramount Properties (552 typed mappings / 276 canonical UUIDs); durable `plm.source_resolution` retargeting and general reviewed create-new handling remain required. |
+| 4.0 Build ColdLion-to-canonical Property mapping | 🟨 Partial | 2026-09-04 | The durable resolution home and review work exist, but #1941 remains open and no evidence proves all ColdLion decisions migrated to the durable home. |
 | 4.1 Apply guarded ColdLion authority | ⬜ Open | 2026-08-19 | Apply Licensor names, uncovered ColdLion-only Property truth, and Active/Inactive without overriding scrape-covered Property authority. |
 | 4.2 Remove DesignFlow comparison from authority decisions | ⬜ Open | 2026-08-17 | Check `dflow.*`, Cloud SQL, APIs, `plm.import_master_data`, and `plm-sync`. |
-| 5.1 Expand DB Data Admin server-side APIs | ⬜ Open | 2026-08-17 | Depends on Phases 1–4 contracts. |
-| 5.2 Implement and visually verify DB Data Admin UI | ⬜ Open | 2026-08-17 | Requires role tests and screenshots. |
+| 5.1 Expand DB Data Admin server-side APIs | 🟨 Partial | 2026-09-04 | Scraped Properties, protected Licensor/Property tree, property-status and review APIs are live; the missing entity/relationship/consolidation contracts prevent the full planned API surface. |
+| 5.2 Implement and visually verify DB Data Admin UI | 🟨 Partial | 2026-09-04 | Live source-purpose and review surfaces have direct evidence, but #1941 still has unresolved review work and the full planned relationship/consolidation UI is not proven. |
 | 6.1 Add weekly automation in each private source repo | ⬜ Open | 2026-08-17 | Two complete preview cycles plus one injected failure per source. |
 | 6.2 Add freshness monitoring and escalation | ⬜ Open | 2026-08-17 | Second consecutive missed weekly deadline disables scope and pages a human. |
 | 7.1 Cut every consumer over to canonical APIs | ⬜ Open | 2026-08-17 | No app-repo schema changes. |
 | 7.2 Retire compatibility scalar fields and views | ⬜ Open | 2026-08-17 | Separate post-cutover migration after search and live telemetry prove zero readers. |
-| 8.1 Assemble the exact bounded production package | ⬜ Open | 2026-08-17 | Separate fresh session, merge freeze, held-version exclusions, immutable evidence. |
-| 8.2 Promote structure, curated data, status, and consumers | ⬜ Open | 2026-08-17 | Production is not authorized by this plan. |
+| 8.1 Assemble the exact bounded production package | 🟨 Partial | 2026-09-04 | Completed bounded successors have their own immutable evidence; no single package exists for the still-missing phases, and broad promotion remains forbidden. |
+| 8.2 Promote structure, curated data, status, and consumers | 🟨 Partial | 2026-09-04 | Multiple bounded successors are live, but #2333-#2336, #1941, remaining source operations, and consumer cutover are unfinished. |
 | 8.3 Retire superseded paths safely | ⬜ Open | 2026-08-17 | Only after sustained verified operation and recovery proof. |
 
 Every implementing session must update this table, the current-state sections it changes, and its verification evidence before stopping. A row marked complete must cite an artifact or commit, never a remembered count.
+
+### 2026-09-04 current-state reconciliation
+
+This tracker remains open and non-dispatchable. Production is not complete: `core.franchise`, `core.property_style_guide`, `core.property_franchise`, `dam.asset_property`, `dam.asset_style_guide`, `dam.asset_franchise`, `plm.licensing_source_scope`, and `plm.licensing_relationship_resolution` are absent from both current main and the production catalog. The general consolidation and reversible merge contracts are also absent. These are now bounded by #2333-#2336 in dependency order.
+
+The production ledger comparison proved no applied version missing from current main. It reported 24 merged-not-applied versions: 19 are explicitly retired or deliberately held, while five are genuinely pending and unrelated to this tracker (`20260902222649`, `20260903125728`, `20260903200951`, `20260904121037`, `20260904143518`). Those unrelated pending versions are not evidence for or blockers to the licensing deliverables.
+
+Confirmed live foundations are the transaction-bound licensing write guard (#1140/#1339), separate Property and Character structure (#1684), Warner relationship evidence adapter (#1380), source-purpose DB Data Admin presentation and authority corrections, and durable `plm.source_resolution`. Closed issues or merged SQL were not counted as complete without production-ledger/catalog or live application evidence. Source captures, curated review (#1941), weekly automation, consumer cutover, and compatibility retirement stay open until their owning sessions publish direct end-to-end proof.
 
 ---
 
