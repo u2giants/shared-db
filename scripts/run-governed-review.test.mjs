@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { runGovernedReview, verdictFromOutput, neutraliseVerdictLine } from './run-governed-review.mjs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { runGovernedReview, verdictFromOutput, neutraliseVerdictLine, evidenceFilename, persistReviewerOutput, renderReviewEvidence } from './run-governed-review.mjs'
 import { anyVerdictFor } from './lib/review-verdict.mjs'
 
-const options={issue:1824,pr:2000,headSha:'a'.repeat(40),reviewer:'glm-5.3',wrapper:'ai-glm',worktree:'C:/review',slot:1,wrapperArgs:['review']}
+// Every round persists its raw reviewer output (issue #2207). The suite aims that at a
+// throwaway directory so running the tests never writes evidence into the repository.
+const evidenceDir=mkdtempSync(path.join(os.tmpdir(),'governed-review-evidence-'))
+process.on('exit',()=>{try{rmSync(evidenceDir,{recursive:true,force:true})}catch{}})
+
+const options={issue:1824,pr:2000,headSha:'a'.repeat(40),reviewer:'glm-5.3',wrapper:'ai-glm',worktree:'C:/review',slot:1,wrapperArgs:['review'],evidenceDir}
 
 test('adapter with real process payload shapes posts findings and records before returning output',()=>{
   const order=[],spawn=(command)=>{order.push(command);return command==='gh'?{status:0,stdout:JSON.stringify({html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-123'})}:{status:0,stdout:`Coverage: scripts.\nVERDICT: APPROVE ${options.headSha}`}}
@@ -141,4 +149,69 @@ test('wrapper refusal forms remain terminal verdicts, not transport failures',()
   assert.equal(verdictFromOutput(`VERDICT: REJECT ${options.headSha}`,options.headSha),'REJECT')
   assert.equal(verdictFromOutput(`VERDICT: APPROVE ${options.headSha}\nVERDICT: REJECT ${options.headSha}`,options.headSha),null)
   assert.equal(verdictFromOutput(`VERDICT: APPROVE ${'b'.repeat(40)}`,options.headSha),null)
+})
+
+// ---------------------------------------------------------------------------
+// Issue #2207 — a refused round must not discard the reviewer's findings.
+// The refusals below all happen after the reviewer slot has been spent, so the
+// analysis has to survive somewhere a successor session can find without knowing
+// which wrapper produced it.
+// ---------------------------------------------------------------------------
+
+function refusedRound({stdout,dir}){
+  let thrown
+  try{runGovernedReview({...options,evidenceDir:dir},{spawn:()=>({status:0,stdout}),resolve:(name)=>name,preflight:()=>{},record:()=>assert.fail('must not record')})}
+  catch(error){thrown=error}
+  const files=readdirSync(dir)
+  return{thrown,files,text:files.length===1?readFileSync(path.join(dir,files[0]),'utf8'):null}
+}
+
+test('issue 2207: a decision word in the body still preserves the findings and names the tripping line',()=>{
+  const dir=mkdtempSync(path.join(os.tmpdir(),'gr-2207-a-'))
+  const findings='REVISE. The direction of the change is right, but the lease ref is stale.'
+  const {thrown,text}=refusedRound({dir,stdout:`${findings}\nVERDICT: REVISE ${options.headSha}`})
+  assert.match(thrown.message,/would read as a decision/)
+  assert.match(thrown.message,/raw output was preserved at/)
+  assert.match(text,/REFUSED/)
+  assert.match(text,/Lines that tripped the decision-word scan \(1\)/)
+  assert.ok(text.includes(findings),'the reviewer analysis itself must be in the evidence file')
+  rmSync(dir,{recursive:true,force:true})
+})
+
+test('issue 2207: a round with no recordable verdict is preserved too',()=>{
+  const dir=mkdtempSync(path.join(os.tmpdir(),'gr-2207-b-'))
+  const {thrown,text}=refusedRound({dir,stdout:'I reviewed every file and found no issues.'})
+  assert.match(thrown.message,/did not produce a recordable terminal verdict/)
+  assert.match(thrown.message,/raw output was preserved at/)
+  assert.ok(text.includes('I reviewed every file and found no issues.'))
+  rmSync(dir,{recursive:true,force:true})
+})
+
+test('issue 2207: an unwritable evidence directory refuses honestly instead of implying a file exists',()=>{
+  let thrown
+  try{runGovernedReview(options,{spawn:()=>({status:0,stdout:'no verdict here'}),resolve:(name)=>name,preflight:()=>{},record:()=>assert.fail('must not record'),persist:()=>null})}
+  catch(error){thrown=error}
+  assert.match(thrown.message,/COULD NOT BE PRESERVED/)
+})
+
+test('issue 2207: persistence failure never turns a recordable review into a refusal',()=>{
+  const result=runGovernedReview(options,{
+    spawn:(command)=>command==='gh'?{status:0,stdout:JSON.stringify({id:1,html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-1'})}:{status:0,stdout:`Coverage: scripts.\nVERDICT: APPROVE ${options.headSha}`},
+    resolve:(name)=>name,preflight:()=>{},record:()=>({ref:'refs/db-review-verdicts/x',sha:'b'.repeat(40)}),
+    persist:()=>{throw new Error('disk full')}
+  })
+  assert.match(result.body,/Coverage/)
+})
+
+test('issue 2207: persistReviewerOutput swallows io failure and reports null',()=>{
+  assert.equal(persistReviewerOutput(options,{rawBody:'x',at:new Date()},{mkdir:()=>{throw new Error('EACCES')},write:()=>{}}),null)
+})
+
+test('issue 2207: the evidence file name pins the pull request, head and reviewer',()=>{
+  assert.equal(evidenceFilename(options,new Date('2026-09-04T02:03:04.567Z')),'20260904T020304Z-pr2000-aaaaaaaa-glm-5.3.md')
+})
+
+test('issue 2207: the evidence file states plainly that it authorizes nothing',()=>{
+  const text=renderReviewEvidence(options,{rawBody:`VERDICT: APPROVE ${options.headSha}`,status:0,at:new Date(),failure:null})
+  assert.match(text,/evidence only, authorizes nothing/)
 })
