@@ -1744,6 +1744,16 @@ def mark_superseded_contract_checks(checks: list[dict], allowlist: list[str]) ->
                 checks[superseder_position].get("migration_version", "")
             )
             check["superseded_objects"] = sorted(superseded_objects)
+            # A check is ONE boolean over possibly several objects, so skipping
+            # it also drops whatever it said about objects nobody re-asserted.
+            # That loss is real and it must never be silent: these are the
+            # objects this check was the LAST to assert, and after supersession
+            # nothing in this batch asserts them at all. The report prints them
+            # under their own heading so a reviewer can re-establish coverage
+            # deliberately, instead of discovering the hole from an incident.
+            check["unreasserted_objects"] = sorted(
+                objects_by_position[position] - set(superseded_objects)
+            )
 
 
 def load_behavior_sidecars(
@@ -3433,6 +3443,21 @@ def render_report(
                 "only the LAST version's assertion for those objects was run "
                 "against the final database state."
             )
+            # Issue #2279 review finding: the coverage this drops is stated,
+            # not implied. A superseded check stops asserting EVERYTHING it
+            # asserted, including objects the superseding version never
+            # mentioned, and those objects then have no assertion left in this
+            # batch.
+            unreasserted = check.get("unreasserted_objects") or []
+            if unreasserted:
+                dropped = ", ".join(f"`{object_key}`" for object_key in unreasserted)
+                superseded_notes.append(
+                    f"  - COVERAGE DROPPED by that supersession: {dropped}. "
+                    f"`{check['migration_version']}` was the last version in this "
+                    "batch to assert them and its check no longer runs, so NOTHING "
+                    "in this batch asserts them against the final state. Re-assert "
+                    "them in the superseding version's sidecar if they still matter."
+                )
             continue
         row = result_rows.pop(check["id"], None)
         actual = row.get("actual_count") if isinstance(row, dict) else None

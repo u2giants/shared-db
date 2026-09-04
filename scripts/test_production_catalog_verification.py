@@ -43,6 +43,7 @@ from production_catalog_verification import (  # noqa: E402
     extract_report,
     parse_dynamic_acl,
     load_behavior_sidecars,
+    mark_superseded_contract_checks,
     render_report,
     split_statements,
     verify,
@@ -2843,6 +2844,155 @@ class BehaviourQueryErrorHonestyTests(unittest.TestCase):
         self.assertIn("MISSING", report)
         self.assertEqual(len(failures), 1)
         self.assertIn("expected 1 row(s)", failures[0])
+
+
+class SupersessionStatesTheCoverageItDrops(unittest.TestCase):
+    """Issue #2279 review finding: whole-check supersession loses coverage.
+
+    A check is ONE boolean over possibly several objects. When a later version
+    re-asserts even one of them, the whole check stops running -- including
+    everything it said about objects the later version never mentioned. That is
+    deliberate (the alternative does not fix the real #2029 batch), but it must
+    never be SILENT: after supersession, nothing in the batch asserts those
+    objects at all, and a reviewer has to be able to see exactly which ones.
+    """
+
+    def checks(self):
+        # Two versions. The earlier asserts A and B; the later re-asserts only
+        # A. B is then asserted by nothing.
+        return [
+            {
+                "id": "earlier",
+                "kind": "catalog_absence",
+                "object": "public.thing_a",
+                "expected_count": 1,
+                "migration_version": "20260101000000",
+                "relation": "public.thing_a",
+            },
+            {
+                "id": "later",
+                "kind": "catalog_absence",
+                "object": "public.thing_a",
+                "expected_count": 1,
+                "migration_version": "20260102000000",
+                "relation": "public.thing_a",
+            },
+        ]
+
+    def test_the_dropped_objects_are_recorded_on_the_superseded_check(self):
+        # A contract-shaped check carrying two objects, superseded on one of
+        # them. `catalog_contract` objects come from the contract SQL, so drive
+        # the marker directly with a stubbed extraction to keep the fixture
+        # honest about what it is testing.
+        checks = self.checks()
+        with mock.patch(
+            "production_catalog_verification.asserted_objects",
+            side_effect=[
+                {"relation:public.thing_a", "relation:public.thing_b"},
+                {"relation:public.thing_a"},
+            ],
+        ):
+            mark_superseded_contract_checks(
+                checks, ["20260101000000", "20260102000000"]
+            )
+        self.assertEqual(checks[0]["superseded_by"], "20260102000000")
+        self.assertEqual(checks[0]["superseded_objects"], ["relation:public.thing_a"])
+        self.assertEqual(
+            checks[0]["unreasserted_objects"], ["relation:public.thing_b"]
+        )
+        self.assertNotIn("superseded_by", checks[1])
+
+    def test_nothing_is_reported_dropped_when_everything_is_re_asserted(self):
+        checks = self.checks()
+        mark_superseded_contract_checks(checks, ["20260101000000", "20260102000000"])
+        self.assertEqual(checks[0]["superseded_by"], "20260102000000")
+        self.assertEqual(checks[0]["unreasserted_objects"], [])
+
+    def test_the_report_names_the_dropped_objects_and_says_nothing_asserts_them(self):
+        checks = self.checks()
+        checks[0]["superseded_by"] = "20260102000000"
+        checks[0]["superseded_objects"] = ["relation:public.thing_a"]
+        checks[0]["unreasserted_objects"] = ["relation:public.thing_b"]
+        report, failures = render_report(
+            ["20260101000000", "20260102000000"],
+            derive_targets({}, []),
+            {"rows": []},
+            None,
+            [],
+            True,
+            behavior_checks=checks,
+            behavior_results={"behavior_checks": [
+                {"id": "later", "expected_count": 1, "actual_count": 1}
+            ]},
+        )
+        self.assertIn("COVERAGE DROPPED", report)
+        self.assertIn("relation:public.thing_b", report)
+        self.assertIn("NOTHING", report)
+        # Visibility is not a failure: the batch is still correct.
+        self.assertEqual(failures, [])
+
+    def test_the_dropped_line_is_absent_when_no_coverage_was_lost(self):
+        checks = self.checks()
+        checks[0]["superseded_by"] = "20260102000000"
+        checks[0]["superseded_objects"] = ["relation:public.thing_a"]
+        checks[0]["unreasserted_objects"] = []
+        report, _ = render_report(
+            ["20260101000000", "20260102000000"],
+            derive_targets({}, []),
+            {"rows": []},
+            None,
+            [],
+            True,
+            behavior_checks=checks,
+            behavior_results={"behavior_checks": [
+                {"id": "later", "expected_count": 1, "actual_count": 1}
+            ]},
+        )
+        self.assertNotIn("COVERAGE DROPPED", report)
+
+
+class AbsenceNamesAreRevalidatedAtSqlBuildTime(unittest.TestCase):
+    """The build-time re-validation must be load-bearing, not decorative.
+
+    `load_behavior_sidecars` validates absence object names, so every test that
+    goes through a sidecar file feeds `build_behavior_sql` an already-clean
+    name -- and the re-validation there could be deleted with the whole suite
+    still green (the mutation the #2279 reviewer named). These tests hand the
+    builder a check directly, which is the only way that second gate is ever
+    exercised.
+    """
+
+    def check(self, object_name):
+        return {
+            "id": "absent",
+            "kind": "catalog_absence",
+            "object": object_name,
+            "expected_count": 1,
+            "migration_version": "20260101000000",
+            "relation": object_name,
+        }
+
+    def test_a_clean_name_still_builds(self):
+        sql = build_behavior_sql([self.check("public.widget_idx")])
+        self.assertIn("to_regclass('public.widget_idx')", sql)
+
+    def test_a_quote_in_the_name_is_refused_at_build_time(self):
+        with self.assertRaises(GuardError):
+            build_behavior_sql([self.check("public.widget'; drop table x --")])
+
+    def test_a_semicolon_in_the_name_is_refused_at_build_time(self):
+        with self.assertRaises(GuardError):
+            build_behavior_sql([self.check("public.widget; select 1")])
+
+    def test_an_uppercase_name_is_refused_at_build_time(self):
+        # Mixed case is not merely stylistic: an unquoted uppercase identifier
+        # folds, so the probe would silently target a different object.
+        with self.assertRaises(GuardError):
+            build_behavior_sql([self.check("PUBLIC.Widget")])
+
+    def test_an_unqualified_name_is_refused_at_build_time(self):
+        with self.assertRaises(GuardError):
+            build_behavior_sql([self.check("widget")])
 
 
 if __name__ == "__main__":
