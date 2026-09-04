@@ -1,0 +1,68 @@
+#!/usr/bin/env node
+
+import { randomUUID } from 'node:crypto'
+import { pathToFileURL } from 'node:url'
+import { acquireMutex, acquireRef, EXCLUSIVE_REFS, githubIo, parseQueueScope, releaseOwnedRef } from './manage-migration-author-lanes.mjs'
+import { formatLeaseMessage } from './lib/exclusive-lease.mjs'
+
+export class PreviewMaintenanceLockError extends Error {}
+
+export function acquirePreviewMaintenanceLock({ issue, owner, headSha, now = new Date() }, io = githubIo) {
+  const number = Number(issue)
+  if (!Number.isInteger(number) || number <= 0 || !owner || !/^[0-9a-f]{40}$/i.test(String(headSha ?? ''))) {
+    throw new PreviewMaintenanceLockError('acquire requires an issue, owner, and exact 40-character head SHA')
+  }
+  const mainSha = io.mainSha?.()
+  if (!mainSha || headSha !== mainSha) throw new PreviewMaintenanceLockError('preview maintenance requires the exact current main SHA')
+  const work = io.getIssue?.(number)
+  if (!work || work.state !== 'open') throw new PreviewMaintenanceLockError(`issue #${number} is not open`)
+  const scope = parseQueueScope(work.body ?? '')
+  if (scope?.status !== 'ready' || scope?.workType !== 'repo-maintenance' || scope?.route !== 'repo-maintenance') {
+    throw new PreviewMaintenanceLockError(`issue #${number} is not ready repo-maintenance work`)
+  }
+
+  const holderId = `repo-maintenance:${number}`
+  const ownerSha = io.makeOwnerCommit(formatLeaseMessage('preview-maintenance', {
+    requestId: randomUUID(), holderId, owner, headSha, generation: 1,
+    acquiredAt: now.toISOString(), pr: null, migrationVersions: [],
+  }))
+  acquireMutex(ownerSha, io)
+  try {
+    acquireRef(EXCLUSIVE_REFS.preview, ownerSha, io)
+    return { kind: 'preview-maintenance', ref: EXCLUSIVE_REFS.preview, ownerSha, holderId, issue: number, headSha }
+  } finally {
+    if (io.readRef('refs/db-coordination/author-mutex') === ownerSha) releaseOwnedRef('refs/db-coordination/author-mutex', ownerSha, io)
+  }
+}
+
+export function releasePreviewMaintenanceLock(ownerSha, io = githubIo) {
+  if (!/^[0-9a-f]{40}$/i.test(String(ownerSha ?? ''))) throw new PreviewMaintenanceLockError('release requires the exact acquisition SHA')
+  releaseOwnedRef(EXCLUSIVE_REFS.preview, ownerSha, io)
+}
+
+function args(argv) {
+  const out = {}
+  for (let i = 0; i < argv.length; i += 1) {
+    const key = argv[i]
+    if (key === '--acquire') out.mode = 'acquire'
+    else if (key === '--release') out.mode = 'release'
+    else if (['--issue','--owner','--head-sha','--owner-sha'].includes(key)) out[key.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = argv[++i]
+    else throw new PreviewMaintenanceLockError(`unknown argument: ${key}`)
+  }
+  return out
+}
+
+export function main(argv, io = githubIo) {
+  try {
+    const options = args(argv)
+    if (options.mode === 'acquire') console.log(JSON.stringify(acquirePreviewMaintenanceLock(options, io), null, 2))
+    else if (options.mode === 'release') releasePreviewMaintenanceLock(options.ownerSha, io)
+    else throw new PreviewMaintenanceLockError('choose --acquire or --release')
+    return 0
+  } catch (error) {
+    console.error(`REFUSED: ${error.message}`)
+    return 2
+  }
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) process.exitCode = main(process.argv.slice(2))

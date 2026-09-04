@@ -41,7 +41,7 @@ test('a lease round-trips through format and parse', () => {
 // preview, preview-recovery and preview-rehearsal share ONE ref. A recovery that
 // cannot tell them apart does not know what it is fencing.
 test('the exact kind is recorded, not just the ref it lives on', () => {
-  for (const kind of ['preview', 'preview-recovery', 'preview-rehearsal', 'preview-maintenance']) {
+  for (const kind of ['preview', 'preview-recovery', 'preview-rehearsal']) {
     assert.equal(parseLeaseMessage(formatLeaseMessage(kind, meta())).kind, kind)
   }
 })

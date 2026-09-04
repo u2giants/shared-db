@@ -383,7 +383,6 @@ export const EXCLUSIVE_REFS = Object.freeze({
   // unchanged; an earlier comment here claimed the exclusion existed (#1213
   // round 7 audit).
   'preview-rehearsal': 'refs/db-coordination/preview',
-  'preview-maintenance': 'refs/db-coordination/preview',
   merge: 'refs/db-coordination/merge',
   production: 'refs/db-coordination/production',
 })
@@ -4729,7 +4728,7 @@ export function recoverExclusive(kind, { holderId, apply = false, now = new Date
 export function acquireExclusive(kind, metadata, io = githubIo) {
   const ref = EXCLUSIVE_REFS[kind]
   if (!ref) throw new LaneError(`unknown exclusive lane: ${kind}`)
-  if (!metadata.owner || !metadata.headSha || (!['production','preview-maintenance'].includes(kind) && !metadata.pr)) throw new LaneError('exclusive lane requires owner, exact head SHA, and a PR number except for production or preview maintenance')
+  if (!metadata.owner || !metadata.headSha || (kind !== 'production' && !metadata.pr)) throw new LaneError('exclusive lane requires owner, exact head SHA, and a PR number except for production')
   const requestId = metadata.requestId ?? randomUUID()
   // STRUCTURED LEASE (Step 6, issue #1366). The first line keeps the exact shape
   // recoverStaleAuthorMutex recognises; the metadata follows. A format that broke
@@ -4753,14 +4752,6 @@ export function acquireExclusive(kind, metadata, io = githubIo) {
     if (kind === 'production') {
       if (metadata.headSha !== io.mainSha?.()) throw new LaneError('production lane requires the exact current main SHA')
       if (io.readRef(EXCLUSIVE_REFS.merge)) throw new LaneError('a guarded merge is active; production promotion must wait')
-    } else if (kind === 'preview-maintenance') {
-      if (metadata.headSha !== io.mainSha?.()) throw new LaneError('preview maintenance requires the exact current main SHA')
-      const issueNumber = Number(metadata.issue)
-      if (!Number.isInteger(issueNumber) || issueNumber <= 0) throw new LaneError('preview maintenance requires an issue number')
-      const issue = io.getIssue?.(issueNumber)
-      if (!issue || issue.state !== 'open') throw new LaneError(`preview maintenance issue #${issueNumber} is not open`)
-      const scope = parseQueueScope(issue.body ?? '')
-      if (scope?.workType !== 'repo-maintenance' || scope?.route !== 'repo-maintenance' || scope?.status !== 'ready') throw new LaneError(`preview maintenance issue #${issueNumber} is not ready repo-maintenance work`)
     } else if (kind === 'preview-rehearsal') {
       // POST-MERGE PREVIEW REHEARSAL -- the path that makes "merge first, then
       // rehearse on preview from merged main, then promote" executable. There is
@@ -4897,8 +4888,8 @@ function parseArgs(argv) {
     else if (a === '--reissue-merged-stranded-claim') out.reissueMergedClaim = true
     else if (a === '--reversion-active-claim' || a === '--supersede-active-claim-version') out.reversionClaim = true
     else if (a === '--confirm-stale') out.confirmStale = true
-    else if (/^--acquire-(preview|preview-recovery|preview-rehearsal|preview-maintenance|merge|production)$/.test(a)) out.acquireExclusive = a.slice(10)
-    else if (/^--release-(preview|preview-recovery|preview-rehearsal|preview-maintenance|merge|production)$/.test(a)) out.releaseExclusive = a.slice(10)
+    else if (/^--acquire-(preview|preview-recovery|preview-rehearsal|merge|production)$/.test(a)) out.acquireExclusive = a.slice(10)
+    else if (/^--release-(preview|preview-recovery|preview-rehearsal|merge|production)$/.test(a)) out.releaseExclusive = a.slice(10)
     else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--claim-number','--failed-sequence','--failure-code','--failing-check','--old-version','--reviewer','--wrapper','--version-pr-map','--blocked-on','--review-slot','--reason','--evidence-sha','--verdict','--findings-ref','--replacement-sequence'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
     else if(a==='--confirm-local-dependency-unfixable')out.confirmLocalDependencyUnfixable=true
     else if(a==='--skip-doctor')out.skipDoctor=true
@@ -4951,7 +4942,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.reviewerPreflight){console.log(JSON.stringify(reviewerExecutionPreflight(o,io),null,2));return 0}
     if(o.assignReviewer){assertReviewerDrawIsWarranted(o.pr,io);console.log(JSON.stringify(assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
     if(o.activateReviewCutover){console.log(JSON.stringify(activateReviewCutover(io),null,2));return 0}
-    if (o.acquireExclusive) { console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, issue:o.issue, pr:o.pr, headSha:o.headSha, versions:o.versions, versionPrMap:o.versionPrMap }, io), null, 2)); return 0 }
+    if (o.acquireExclusive) { console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha, versions:o.versions, versionPrMap:o.versionPrMap }, io), null, 2)); return 0 }
     if (o.releaseExclusive) { if (!o.ownerSha) throw new LaneError('--owner-sha is required for safe release'); releaseOwnedRef(EXCLUSIVE_REFS[o.releaseExclusive], o.ownerSha, io); return 0 }
     const claims = io.openClaims()
     if (o.returnIssue) { console.log(JSON.stringify(returnIssueToOwner(o.returnIssue, io), null, 2)); return 0 }

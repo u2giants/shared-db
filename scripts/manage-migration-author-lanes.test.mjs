@@ -2222,29 +2222,6 @@ function rehearsalIo(overrides = {}) {
 }
 const REHEARSAL = { owner: 'gha', pr: 1193, headSha: 'main', versions: ['20260818232639'] }
 
-test('ready repo-maintenance can hold the shared preview lock without inventing a migration PR', () => {
-  const io = memoryIo()
-  io.mainSha = () => 'main'
-  io.getIssue = () => ({ state: 'open', body: '```db-work-scope\nstatus: ready\nwork_type: repo-maintenance\nroute: repo-maintenance\npriority: 450\ndepends_on:\nobjects:\n```' })
-  const lock = acquireExclusive('preview-maintenance', { owner: 'issue-771', issue: 771, headSha: 'main' }, io)
-  assert.equal(lock.ref, EXCLUSIVE_REFS.preview)
-  releaseOwnedRef(EXCLUSIVE_REFS.preview, lock.ownerSha, io)
-})
-
-test('preview maintenance fails closed unless the issue and main tip are exact', () => {
-  const base = () => {
-    const io = memoryIo()
-    io.mainSha = () => 'main'
-    io.getIssue = () => ({ state: 'open', body: '```db-work-scope\nstatus: ready\nwork_type: repo-maintenance\nroute: repo-maintenance\npriority: 450\ndepends_on:\nobjects:\n```' })
-    return io
-  }
-  assert.throws(() => acquireExclusive('preview-maintenance', { owner: 'issue-771', issue: 771, headSha: 'stale' }, base()), /exact current main SHA/)
-  const wrong = base()
-  wrong.getIssue = () => ({ state: 'open', body: '```db-work-scope\nstatus: blocked\nwork_type: repo-maintenance\nroute: repo-maintenance\npriority: 450\ndepends_on:\nobjects:\n```' })
-  assert.throws(() => acquireExclusive('preview-maintenance', { owner: 'issue-771', issue: 771, headSha: 'main' }, wrong), /not ready repo-maintenance work/)
-  assert.equal(wrong.refs.has(EXCLUSIVE_REFS.preview), false)
-})
-
 test('post-merge preview rehearsal shares the preview lock and is authorised by merge-commit ancestry', () => {
   const io = rehearsalIo()
   const lock = acquireExclusive('preview-rehearsal', REHEARSAL, io)

@@ -621,13 +621,14 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    lane adds no second door.
 
    **Repository-maintenance rehearsal.** A ready `repo-maintenance` issue that
-   must write only temporary preview objects uses `--acquire-preview-maintenance`
+   must write only temporary preview objects uses
+   `node scripts/manage-preview-maintenance-lock.mjs --acquire`
    with its issue number and the exact current `main` SHA. This route requires
    no migration pull request or author claim, because inventing either would
    misclassify repository maintenance as structural delivery. The command
    re-reads the open issue and refuses unless its scope is exactly ready
    `repo-maintenance`; it holds the same preview ref and releases it with
-   `--release-preview-maintenance --owner-sha <acquisition SHA>`.
+   `node scripts/manage-preview-maintenance-lock.mjs --release --owner-sha <acquisition SHA>`.
 
    **What that lock does NOT do, stated exactly.** It does not exclude a merge
    or a production promotion. `EXCLUSIVE_REFS` gives merge and production their
