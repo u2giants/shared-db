@@ -17,7 +17,7 @@ This plan was requested after the Supabase dashboard AI proposed performance, re
 | Step | Deliverable | State | Evidence |
 |---|---|---|---|
 | 0 | Register the evidence-gated plan, handoff, router entry, and tracking issue | ✅ done 2026-09-03 | PR #2210 merged as `5c3bf67e767b6fcd85062f9cb98805535498d17f`; guarded merge run `33778748037`; exact-head Muse verdict ref recorded for `9cb7ad230f13697cb9e22e60dcd0c7c7434d8ce7` |
-| 1 | Capture a reproducible production baseline and reconcile every advisor claim | ⬜ open | Required artifact: `docs/verification/database-efficiency/<timestamp>/baseline.md` plus machine-readable extracts |
+| 1 | Capture a reproducible production baseline and reconcile every advisor claim | ✅ done 2026-09-04 | Artifact: `docs/verification/database-efficiency/20260904T212459Z/baseline.md`; verbatim query log `queries.md`; two read-only runs (21:25:25Z and 21:31:01Z) with `run1/`, `run2/` extracts and `delta-run1-run2.txt`; 340 security findings confirmed rule-by-rule, `unused_index` moved 763 → 739 |
 | 2 | Prove or disprove Data API exposure with role and HTTP behavior tests | ⬜ open | Required artifact: `docs/verification/database-efficiency/<timestamp>/api-access-matrix.md` with no row contents |
 | 3 | Trace expensive rebuilds and projection churn to callers and changed-row sets | ⬜ open | Required artifacts: call graph, timestamped deltas, and safe preview timings |
 | 4 | Implement and verify application-owned write-amplification reductions | ⬜ open | Separate app issues/PRs, deployed SHAs, and post-deploy deltas |
