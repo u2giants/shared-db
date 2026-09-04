@@ -1350,7 +1350,24 @@ test('a failed reviewer holding an UNRELATED live lease no longer blocks its own
   // is an active unrelated review, not a leftover to be swept.
   const unrelated=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=99 reviewer=${failedName} issue=777 pr=778 head=${failedReview.headSha}`)
   io.refs.set(reviewActiveRef(failedName),unrelated)
+  let protectedByCas=false
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  const applyAtomic=(changes)=>{
+    for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null)
+    for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}
+  }
+  io.atomicReviewRefs=(changes)=>{
+    if(changes.some((change)=>change.ref===`${REVIEW_REPLACEMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}-1`)){
+      const preservation=changes.find((change)=>change.ref===reviewActiveRef(failedName))
+      assert.deepEqual(preservation,{ref:reviewActiveRef(failedName),expected:unrelated,sha:unrelated},'the unrelated lease must be protected by the same atomic compare-and-swap')
+      protectedByCas=true
+    }
+    applyAtomic(changes)
+  }
+  io.atomicReviewMutexRelease=(ownerSha)=>applyAtomic([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
   const replacement=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(protectedByCas,true)
   assert.equal(replacement.reviewer,'glm-5.3')
   assert.equal(io.refs.get(reviewActiveRef(failedName)),unrelated,'the unrelated review must be left exactly as it was found')
   assert.equal(io.refs.get(reviewActiveRef('glm-5.3')),replacement.replacementSha)
