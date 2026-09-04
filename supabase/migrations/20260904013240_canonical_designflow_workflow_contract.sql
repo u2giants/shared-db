@@ -2,6 +2,7 @@
 -- multi-schema application tables. Existing history is retained without being
 -- guessed or copied; NOT VALID foreign keys enforce canonical identity for all
 -- new rows while permitting pre-existing legacy-keyed history to remain.
+-- derived-from: 20260901221310
 
 set lock_timeout = '5s';
 set statement_timeout = '5min';
