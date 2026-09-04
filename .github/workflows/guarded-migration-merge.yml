@@ -20,10 +20,19 @@ permissions:
   contents: write
   issues: read
   pull-requests: write
+  # `statuses: write` implies read for the combined-status call, but the read is a
+  # real dependency of the pre-flight and is declared as one.
   statuses: write
-  # Reading main's required status check list is what lets the pre-flight below
-  # name the exact unsatisfied context instead of retrying a refusal it cannot fix (#1201).
-  administration: read
+  # The pre-flight reads `commits/{sha}/check-runs`. Unspecified permissions are
+  # `none`, so without this the read is a 403 and every merge dies at the pre-flight
+  # -- a parseable workflow that still cannot merge.
+  checks: read
+  # THERE IS NO `administration` PERMISSION IN GITHUB ACTIONS. Adding one made this
+  # file unparseable, and because this workflow is the ONLY path to `main`, every
+  # merge in the repository was refused at dispatch with HTTP 422. The pre-flight
+  # therefore cannot read main's required status check list with `github.token`;
+  # it detects that and applies a STRICTLY STRONGER test instead. See
+  # `scripts/check-required-checks-preflight.mjs`.
 
 jobs:
   merge:
@@ -56,6 +65,11 @@ jobs:
           # An assignment is not an approval, and an approval of an earlier head
           # is not an approval of these bytes (#1816).
           PR_NUMBER="${{ inputs.pull_request }}" REQUESTED_SHA="${{ inputs.head_sha }}" node scripts/check-exact-head-approval.mjs
+      # `github.token` cannot read branch protection (there is no `administration`
+      # permission scope), so this falls back to the committed mirror. It reads that
+      # mirror only from trusted `origin/main`; the checked-out pull request cannot
+      # alter the list that judges it. This first mirror merge has an exact-head-bound,
+      # immutable bootstrap floor. The step above fetches and proves current main.
       - name: Pre-flight the required status checks before taking the merge lane
         env:
           GH_TOKEN: ${{ github.token }}
