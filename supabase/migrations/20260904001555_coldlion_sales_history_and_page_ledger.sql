@@ -325,9 +325,8 @@ create trigger history_page_ledger_scope_guard
 
 -- (b) A window becomes `loaded` ONLY on page evidence. This is the whole point of the
 --     unit: one sync_run row never proves a multi-page window complete. It is a
---     CONSTRAINT trigger so a loader may write its pages and flip its window in one
---     transaction in either order, and so the check can be deferred by a loader that
---     needs to.
+--     CONSTRAINT trigger so the check can be deferred when needed, but pages must be
+--     recorded before the parent becomes loaded because loaded evidence is immutable.
 create or replace function coldlion.window_ledger_completion_guard()
 returns trigger
 language plpgsql

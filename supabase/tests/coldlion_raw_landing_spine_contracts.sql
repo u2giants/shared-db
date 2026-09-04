@@ -395,7 +395,7 @@ begin
 
   update coldlion.window_ledger
      set state = 'loaded', row_count = 265, last_page_number = 1, loaded_at = now(), last_run_id = v_run,
-         attempt_count = 1, updated_at = timestamptz '2000-01-01Z'
+         reported_total_elements = 265, attempt_count = 1, updated_at = timestamptz '2000-01-01Z'
    where endpoint = '/prodHistory' and company_code = 'ZZTEST' and window_from = date '2026-02-03';
 
   select updated_at into v_updated_after from coldlion.window_ledger

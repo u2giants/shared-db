@@ -1,12 +1,18 @@
 {
   "schema_version": 1,
   "migration_version": "20260904001555",
-  "migration_sha256": "3a574b2e41c1aeed4a74766606802eb31547066ee3311e6804694b40b595cda5",
+  "migration_sha256": "bb4a7e07f393f073c84796f71e986e23eef430cec6f4db6b3ea802ee2cb5de8b",
   "marker_schema_version": 1,
   "marker_reviews": [
     {
-      "line_start": 722,
-      "line_end": 724,
+      "line_start": 482,
+      "line_end": 482,
+      "disposition": "no_durable_target",
+      "reason": "This dynamic SELECT is the pre-drop emptiness refusal for the two obsolete ColdLion history tables. It writes nothing and deliberately has no durable verification target: if either table contains a row, the migration raises and stops before either DROP TABLE can execute."
+    },
+    {
+      "line_start": 721,
+      "line_end": 723,
       "disposition": "no_durable_target",
       "reason": "These three dynamic statements only set access posture on the ColdLion landing tables: enable row level security, revoke every privilege from public, anon and authenticated, and grant to service_role. They insert, update and delete nothing, so there is no row, key or catalog value a typed row-count check could read back. The posture they produce is asserted instead by the repository contract tests coldlion_order_history_contracts.sql, coldlion_history_page_ledger_contracts.sql and coldlion_raw_landing_phases_2_6_contracts.sql, which fail if any ColdLion landing table lacks row security or carries an application-role grant."
     }
