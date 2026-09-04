@@ -225,6 +225,18 @@ begin
          run_id = v_run, loaded_at = now()
    where window_id = v_window and page_number = 1;
 
+  -- The vendor's totalElements is mandatory completion evidence, not optional
+  -- metadata that a loader may omit while still declaring success.
+  begin
+    update coldlion.window_ledger
+       set state = 'loaded', row_count = 201, last_page_number = 1,
+           reported_total_elements = null, loaded_at = now(), last_run_id = v_run
+     where id = v_window;
+    raise exception 'a window completed without vendor totalElements';
+  exception when raise_exception then
+    if sqlerrm like 'a window completed%' then raise; end if;
+  end;
+
   -- Now, and only now, the window is complete: pages 0..1, both loaded, one flagged
   -- last, 200 + 1 = 201 = the vendor's totalElements.
   update coldlion.window_ledger
@@ -235,6 +247,20 @@ begin
   if (select state from coldlion.window_ledger where id = v_window) <> 'loaded' then
     raise exception 'a fully evidenced window was refused';
   end if;
+
+  -- Completion evidence is sealed in both directions. A late page would make the
+  -- already-loaded parent false after its completion trigger had succeeded.
+  begin
+    insert into coldlion.history_page_ledger(
+      window_id, endpoint, company_code, division_code, window_from, page_number,
+      requested_page_size, returned_page_size, page_row_count, is_last_page,
+      reported_total_elements, reported_total_pages, state, run_id, loaded_at)
+    values (v_window, '/orderHistory', 'TESTCO', 'DIV1', date '2026-06-02', 2,
+            2000, 200, 1, true, 202, 3, 'loaded', v_run, now());
+    raise exception 'a late page was added after its window was loaded';
+  exception when raise_exception then
+    if sqlerrm like 'a late page was added%' then raise; end if;
+  end;
 
   -- The evidence behind a loaded window is not erasable.
   begin

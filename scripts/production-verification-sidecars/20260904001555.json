@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "migration_version": "20260904001555",
-  "migration_sha256": "5c59f9f7ebfcb37ac823ebe23fe4123d868f83a4c77b21d60eedcbadab71560e",
+  "migration_sha256": "3a574b2e41c1aeed4a74766606802eb31547066ee3311e6804694b40b595cda5",
   "marker_schema_version": 1,
   "marker_reviews": [
     {
-      "line_start": 686,
-      "line_end": 688,
+      "line_start": 722,
+      "line_end": 724,
       "disposition": "no_durable_target",
       "reason": "These three dynamic statements only set access posture on the ColdLion landing tables: enable row level security, revoke every privilege from public, anon and authenticated, and grant to service_role. They insert, update and delete nothing, so there is no row, key or catalog value a typed row-count check could read back. The posture they produce is asserted instead by the repository contract tests coldlion_order_history_contracts.sql, coldlion_history_page_ledger_contracts.sql and coldlion_raw_landing_phases_2_6_contracts.sql, which fail if any ColdLion landing table lacks row security or carries an application-role grant."
     }

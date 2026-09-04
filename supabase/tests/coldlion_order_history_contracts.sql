@@ -306,6 +306,24 @@ begin
     raise exception 'pick-ticket list did not survive the round trip';
   end if;
 
+  -- An ordinal identifies one position in one ordered payload list. A different
+  -- token at the same position must not create a second, contradictory position.
+  begin
+    insert into coldlion.order_history_invoice_ref(
+      line_id, component_id, ordinal, invoice_no, run_id, fetched_at)
+    values (v_line, v_comp_a, 1, 'DIFFERENT-INVOICE', v_run, now());
+    raise exception 'two invoice tokens occupied the same ordinal';
+  exception when unique_violation then null;
+  end;
+
+  begin
+    insert into coldlion.order_history_pick_ticket_ref(
+      line_id, component_id, ordinal, pick_ticket_no, run_id, fetched_at)
+    values (v_line, v_comp_a, 1, 'DIFFERENT-PICK', v_run, now());
+    raise exception 'two pick-ticket tokens occupied the same ordinal';
+  exception when unique_violation then null;
+  end;
+
   -- A date may not be attached unless its alignment was proven. Two numbers and three
   -- dates is a mismatch, and inventing the pairing would fabricate an invoice date.
   begin

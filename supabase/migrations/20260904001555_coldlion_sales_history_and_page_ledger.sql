@@ -396,8 +396,13 @@ begin
       new.id, new.row_count, v_rows;
   end if;
 
-  if new.reported_total_elements is not null
-     and new.reported_total_elements is distinct from v_rows then
+  if new.reported_total_elements is null then
+    raise exception
+      'window % cannot be loaded: vendor totalElements was not recorded',
+      new.id;
+  end if;
+
+  if new.reported_total_elements is distinct from v_rows then
     raise exception
       'window % cannot be loaded: vendor totalElements % does not equal the summed page rows %',
       new.id, new.reported_total_elements, v_rows;
@@ -426,23 +431,30 @@ set search_path = coldlion, pg_temp
 as $fn$
 declare
   v_state text;
+  v_window_id uuid;
 begin
-  select state into v_state from coldlion.window_ledger where id = old.window_id;
+  v_window_id := case when tg_op = 'INSERT' then new.window_id else old.window_id end;
+  -- Serialize with a concurrent parent transition to loaded; otherwise an INSERT
+  -- and the completion UPDATE could both observe the pre-loaded state and commit.
+  select state into v_state
+    from coldlion.window_ledger
+   where id = v_window_id
+   for update;
   if v_state = 'loaded' then
     raise exception
-      'page evidence for window % cannot be changed or removed while that window is loaded',
-      old.window_id;
+      'page evidence for window % cannot be added, changed or removed while that window is loaded',
+      v_window_id;
   end if;
   return case when tg_op = 'DELETE' then old else new end;
 end;
 $fn$;
 
 comment on function coldlion.history_page_ledger_immutable_when_loaded() is
-  'Protects the page evidence behind a loaded window from being rewritten or deleted. Part of the history_page_ledger table contract (issue #2173).';
+  'Protects the page evidence behind a loaded window from being added, rewritten or deleted. Part of the history_page_ledger table contract (issue #2173).';
 
 drop trigger if exists history_page_ledger_immutable_when_loaded on coldlion.history_page_ledger;
 create trigger history_page_ledger_immutable_when_loaded
-  before update or delete on coldlion.history_page_ledger
+  before insert or update or delete on coldlion.history_page_ledger
   for each row execute function coldlion.history_page_ledger_immutable_when_loaded();
 
 -- -------------------------------------------------------------------------------------
@@ -454,6 +466,30 @@ create trigger history_page_ledger_immutable_when_loaded
 -- tables, 0 rows in all 17, re-verified read-only 2026-09-02), so no evidence is lost.
 -- Their key - (salesOrderNo, itemNo, labelCode) - was superseded the moment the vendor
 -- exposed `salesOrderLineNo` on 2026-09-01, and neither table had a parent FK.
+
+-- The 2026-09-02 census found both obsolete tables empty, but application time is
+-- not frozen at census time. Refuse rather than destroy evidence if any writer has
+-- populated either table before this migration is applied.
+do $fn$
+declare
+  v_table regclass;
+  v_has_rows boolean;
+begin
+  foreach v_table in array array[
+    to_regclass('coldlion.order_history_component'),
+    to_regclass('coldlion.order_history_line')
+  ] loop
+    if v_table is not null then
+      execute format('select exists (select 1 from %s limit 1)', v_table)
+        into v_has_rows;
+      if v_has_rows then
+        raise exception
+          'refusing to replace non-empty obsolete ColdLion history table %', v_table;
+      end if;
+    end if;
+  end loop;
+end;
+$fn$;
 
 drop table if exists coldlion.order_history_component;
 drop table if exists coldlion.order_history_line;
@@ -627,7 +663,7 @@ create table coldlion.order_history_invoice_ref (
   constraint coldlion_order_history_invoice_ref_date_needs_alignment
     check (date_alignment_proven or (invoice_date_token is null and invoice_date is null)),
   constraint coldlion_order_history_invoice_ref_identity_unique
-    unique nulls not distinct (line_id, component_id, ordinal, invoice_no)
+    unique nulls not distinct (line_id, component_id, ordinal)
 );
 
 create index if not exists coldlion_order_history_invoice_ref_line_idx
@@ -659,7 +695,7 @@ create table coldlion.order_history_pick_ticket_ref (
   constraint coldlion_order_history_pick_ticket_ref_token_not_blank
     check (length(btrim(pick_ticket_no)) > 0),
   constraint coldlion_order_history_pick_ticket_ref_identity_unique
-    unique nulls not distinct (line_id, component_id, ordinal, pick_ticket_no)
+    unique nulls not distinct (line_id, component_id, ordinal)
 );
 
 create index if not exists coldlion_order_history_pick_ticket_ref_line_idx
