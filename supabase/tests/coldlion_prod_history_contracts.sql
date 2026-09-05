@@ -255,8 +255,8 @@ declare
   v_link boolean;
   h64 text := repeat('a', 64);
 begin
-  insert into coldlion.sync_run (endpoint, status, started_at)
-  values ('/prodHistory', 'running', now())
+  insert into coldlion.sync_run (endpoint, requested_by, status, started_at)
+  values ('/prodHistory', 'issue-2174-contract', 'running', now())
   returning id into v_run;
 
   -- CONTRACT 1: a returned stage that differs from the requested stage aborts.
@@ -461,8 +461,8 @@ declare
   v_count integer;
   v_base timestamptz := timestamptz '2026-09-01 00:00:00+00';
 begin
-  insert into coldlion.sync_run (endpoint, status, started_at)
-  values ('/prodHistory', 'running', now())
+  insert into coldlion.sync_run (endpoint, requested_by, status, started_at)
+  values ('/prodHistory', 'issue-2174-contract', 'running', now())
   returning id into v_run;
 
   -- Four versions of ONE purchase line in one stage.
