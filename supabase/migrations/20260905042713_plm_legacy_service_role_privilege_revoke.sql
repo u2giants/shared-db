@@ -42,6 +42,14 @@
 --          or has_table_privilege('service_role', c.oid, 'TRIGGER'))
 --      order by 1;
 --
+-- Governed review round 2 (2026-09-05) raised plm.opa_property_character as a possible
+-- 38th member, on the reasoning that 20260807170000 created it while the schema default
+-- was still GRANT ALL. The live catalog read above refutes that: on the shared database
+-- the query returns exactly the 37 names listed below, and
+-- has_table_privilege('service_role', 'plm.opa_property_character', 'TRUNCATE') is false.
+-- That table was granted only select/insert/update/delete at creation and never held the
+-- four bits, so it is correctly outside this population.
+--
 -- ------------------------------------------------------------------------------------
 -- WHY IT IS SAFE -- THE OWNER DECISION BEHIND IT
 -- ------------------------------------------------------------------------------------
