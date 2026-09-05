@@ -128,14 +128,19 @@ begin
     raise exception 'C FAILED: created_at is nullable; a null sorts unpredictably in the unread list';
   end if;
 
-  insert into app.user_notification(type, created_date, event, unread, message, title, user_id_fk)
-  values ('issue-2204', current_date, 'issue-2204-first', true, 'first', 'first', -2147482204)
+  -- The two instants below are written explicitly because the now() default is
+  -- TRANSACTION-scoped: every row a single transaction inserts shares one instant by
+  -- design, so that all recipients of one workflow action are stamped identically.
+  -- Two notifications raised by two separate application transactions on the same day
+  -- are the case this section is about, and these literals stand in for them.
+  insert into app.user_notification(type, created_date, event, unread, message, title, user_id_fk, created_at)
+  values ('issue-2204', date '2098-06-01', 'issue-2204-first', true, 'first', 'first', -2147482204,
+          timestamptz '2098-06-01 09:15:00+00')
   returning id into v_same_day_first;
 
-  perform pg_sleep(0.01);
-
-  insert into app.user_notification(type, created_date, event, unread, message, title, user_id_fk)
-  values ('issue-2204', current_date, 'issue-2204-second', true, 'second', 'second', -2147482204)
+  insert into app.user_notification(type, created_date, event, unread, message, title, user_id_fk, created_at)
+  values ('issue-2204', date '2098-06-01', 'issue-2204-second', true, 'second', 'second', -2147482204,
+          timestamptz '2098-06-01 17:40:00+00')
   returning id into v_same_day_second;
 
   if (select created_at from app.user_notification where id = v_same_day_second)
