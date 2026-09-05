@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process'
+import { runGitHubCommand as sharedRunGitHubCommand, isTransientGitHubTransport } from './lib/github-transport.mjs'
+import { createTreeReader } from './lib/github-tree.mjs'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -10,6 +12,19 @@ import { classifyDependencies, findCompletionRecord, findDependencyCycles, valid
 import { assertLease, evaluateRecovery, formatLeaseMessage, parseLeaseMessage, recoveredLeaseMetadata, LeaseError } from './lib/exclusive-lease.mjs'
 import { coordinationEvent, formatEventComment, parseEventComment, auditTimeline, renderTimeline } from './db-coordination-events.mjs'
 import { reconcileFlow, persistInitialReady, preparePreviewDispatch, repairPreviewReady } from './orchestrator-flow/reconcile.mjs'
+import { MERGE_SELF_CONTEXT } from './lib/merge-self-context.mjs'
+
+// `Migration guarded merge authorization` is posted by the guarded merge ITSELF,
+// after this gate has already passed -- see SELF_CONTEXT in
+// lib/merge-self-context.mjs (and the merge pre-flight). Every other consumer of the required list
+// strips it; the preview gate did not, which made the gate self-referential:
+// preview could never be prepared, because the only thing that sets that context
+// is the merge that preview is a precondition of. Exported so the exclusion is
+// covered by a test rather than only by the live gate.
+export function pendingRequiredContexts(protectedContexts=[],observed=new Map()){
+  const byName=observed instanceof Map?observed:new Map(Object.entries(observed))
+  return protectedContexts.filter((name)=>name!==MERGE_SELF_CONTEXT&&byName.get(name)!=='SUCCESS')
+}
 import { buildEvidenceBundle, canonicalJson, sha256 } from './orchestrator-flow/evidence-bundle.mjs'
 import { selectPreviewRoute } from './orchestrator-flow/select-preview-route.mjs'
 import { PROJECT_REFS } from './orchestrator-flow/read-preview-ledger.mjs'; import { verdictOpensLine as sharedVerdictOpensLine, evidenceTiedToHead as sharedEvidenceTiedToHead, isApprovalFor as sharedIsApprovalFor, isVerdictFor as sharedIsVerdictFor, anyVerdictFor as sharedAnyVerdictFor } from './lib/review-verdict.mjs'
@@ -849,9 +864,12 @@ export function claimBody({ version, objects, writes, reads = [], owner, branch,
   return lines.join('\n')
 }
 
-export function isTransientGitHubTransport(error) {
-  return /HTTP 5\d\d|connection (?:reset|timed out)|TLS handshake timeout|No server is currently available/i.test(String(error?.stderr ?? error?.message ?? error ?? ''))
-}
+// Re-exported from the one shared transport (issue #2342) so this repository has
+// exactly ONE definition of "transient". Widening it -- notably to 404, which the
+// observed production failures were -- is a governed decision documented there.
+const laneTreeReader=createTreeReader({wrapError:(detail)=>new LaneError(detail)})
+
+export { isTransientGitHubTransport }
 // An EXPECTED failure is one this code asks a question with: "does this ref
 // exist yet?" answers with HTTP 404, and "create this ref" answers with
 // "reference already exists". Both are answers, not faults, but the GitHub CLI
@@ -882,32 +900,28 @@ export function withReviewRequestBudget(fn){
   reviewWireBudget={count:0}
   try{return fn(reviewWireBudget)}finally{reviewWireBudget=null;reviewCommitBase=null;freshDurableVerdictRefs=null}
 }
-export function runGitHubCommand(args,{executor=execFileSync,wait=(ms)=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms),attempts=4,expectedFailure=null,reportStderr=(text)=>process.stderr.write(text)}={}) {
-  let last
-  const allowedAttempts=reviewWireBudget?.locked?1:attempts
-  for(let attempt=0;attempt<allowedAttempts;attempt++){
-    consumeReviewWireRequest()
-    try{return executor('gh',args,{encoding:'utf8',maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe']})}
-    catch(error){
-      last=error
-      if(!isTransientGitHubTransport(error)||attempt===allowedAttempts-1){
-        const captured=String(error.stderr??'').trim()
-        const detail=captured||String(error.message??'').trim()
-        const wrapped=new LaneError(`GitHub command failed: ${detail}`)
-        wrapped.transientTransport=isTransientGitHubTransport(error)
-        wrapped.stderr=captured
-        if(captured&&!(expectedFailure&&expectedFailure.test(detail)))reportStderr(`gh ${args.join(' ')}\n${captured}\n`)
-        throw wrapped
-      }
-      wait(2**attempt*1000)
-    }
-  }
-  throw last
+// Issue #2342: the retry loop, the classifier and the stderr policy now live in
+// scripts/lib/github-transport.mjs, which is the ONE transport every governed
+// gate uses. What stays here is the part that is specific to this file: the
+// reviewer-operation request BUDGET, which must be charged once per attempt —
+// so it is charged inside the executor the shared transport calls, not around
+// it. Writes default to one attempt. Only the ref helpers below opt into replay,
+// because they prove the requested end state with an owner-bound readback.
+export function runGitHubCommand(args,{executor=execFileSync,wait=(ms)=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms),attempts=4,expectedFailure=null,reportStderr=(text)=>process.stderr.write(text),idempotentWrite=false}={}) {
+  return sharedRunGitHubCommand(args,{
+    executor:(bin,cmdArgs,options)=>{consumeReviewWireRequest();return executor(bin,cmdArgs,options)},
+    wait,
+    attempts:reviewWireBudget?.locked?1:attempts,
+    idempotentWrite,
+    expectedFailure,
+    reportStderr,
+    wrapError:(detail)=>new LaneError(`GitHub command failed: ${detail}`),
+  })
 }
 function gh(args,options) { return runGitHubCommand(args,options) }
 
 export function createRefWithReadback(ref,sha,{run=gh,readRef}={}) {
-  try{run(['api','-X','POST',`repos/${REPO}/git/refs`,'-f',`ref=${ref}`,'-f',`sha=${sha}`],{expectedFailure:EXPECTED_REF_PRESENCE});return true}
+  try{run(['api','-X','POST',`repos/${REPO}/git/refs`,'-f',`ref=${ref}`,'-f',`sha=${sha}`],{expectedFailure:EXPECTED_REF_PRESENCE,idempotentWrite:true});return true}
   catch(error){
     if(/reference already exists/i.test(error.message)){
       if(!readRef)return false
@@ -921,7 +935,7 @@ export function createRefWithReadback(ref,sha,{run=gh,readRef}={}) {
   }
 }
 export function deleteRefWithReadback(ref,{run=gh,readRef}={}) {
-  try{run(['api','-X','DELETE',`repos/${REPO}/git/refs/${ref.replace(/^refs\//,'')}`],{expectedFailure:EXPECTED_REF_ABSENCE});return}
+  try{run(['api','-X','DELETE',`repos/${REPO}/git/refs/${ref.replace(/^refs\//,'')}`],{expectedFailure:EXPECTED_REF_ABSENCE,idempotentWrite:true});return}
   catch(error){
     if(isConfirmedRefAbsence(error))return
     if(/reference does not exist/i.test(error.message)&&readRef&&readRef(ref)===null)return
@@ -1168,7 +1182,7 @@ export const githubIo = {
     let graph
     try{graph=JSON.parse(graphText)?.data?.rateLimit}catch{return null}
     return rest&&graph?{remaining:Number(rest.remaining),limit:Number(rest.limit),reset:Number(rest.reset),graphRemaining:Number(graph.remaining),graphLimit:Number(graph.limit),graphReset:Math.floor(new Date(graph.resetAt).getTime()/1000)}:null
-  },previewApplyRun(runId){return{run:ghJson(['api',`repos/${REPO}/actions/runs/${runId}`]),artifacts:ghJson(['api',`repos/${REPO}/actions/runs/${runId}/artifacts`]),logs:execFileSync('gh',['run','view',String(runId),'--repo',REPO,'--log'],{encoding:'utf8'})}},
+  },previewApplyRun(runId){return{run:ghJson(['api',`repos/${REPO}/actions/runs/${runId}`]),artifacts:ghJson(['api',`repos/${REPO}/actions/runs/${runId}/artifacts`]),logs:runGitHubCommand(['run','view',String(runId),'--repo',REPO,'--log'])}},
   readActiveReviewLeases(){
     const names=[...ACTIVE_REVIEWERS,...OVERFLOW_REVIEWERS].map((row)=>row.name)
     const allowed=new Set(names)
@@ -1325,13 +1339,16 @@ export const githubIo = {
   branchPulls(branch) { return ghPaginated(`repos/${REPO}/pulls?state=all&head=${REPO.split('/')[0]}:${encodeURIComponent(branch)}&per_page=100`) },
   getPr(number) { return ghJson(['api', `repos/${REPO}/pulls/${number}`]) },
   getPrFiles(number) { return ghPaginated(`repos/${REPO}/pulls/${number}/files?per_page=100`) },
-  getFileAt(file,ref){const value=ghJson(['api',`repos/${REPO}/contents/${file}?ref=${ref}`]);if(value?.encoding!=='base64'||!value.content)throw new LaneError(`could not read ${file} at ${ref}`);return Buffer.from(value.content.replace(/\s/g,''),'base64').toString('utf8')},
-  treeFiles(ref){const value=ghJson(['api',`repos/${REPO}/git/trees/${ref}?recursive=1`]);if(value?.truncated||!Array.isArray(value?.tree))throw new LaneError(`repository tree at ${ref} is unreadable or truncated`);return value.tree.filter((row)=>row.type==='blob').map((row)=>row.path)},
+  // Issue #2342: the caller reads a whole SET of files at one ref, which used to
+  // be a Contents call each. One recursive tree read now answers every path, and
+  // blobs are cached by SHA, so a file unchanged across refs is fetched once.
+  getFileAt(file,ref){const text=laneTreeReader.readFileAtRef(REPO,file,ref);if(text===null)throw new LaneError(`could not read ${file} at ${ref}`);return text},
+  treeFiles(ref){return laneTreeReader.pathsAtRef(REPO,ref)},
   previewGateProof(issue,pr,head,bundleId,dependencies=[]){
     const protectedContexts=ghJson(['api',`repos/${REPO}/branches/main/protection/required_status_checks`])?.contexts??[]
     const checks=JSON.parse(gh(['pr','checks',String(pr),'--repo',REPO,'--json','name,state']))
     const byName=new Map(checks.map((row)=>[row.name,String(row.state).toUpperCase()]))
-    const failed=protectedContexts.filter((name)=>byName.get(name)!=='SUCCESS')
+    const failed=pendingRequiredContexts(protectedContexts,byName)
     if(failed.length)throw new LaneError(`required full CI is not successful on the current head: ${failed.join(', ')}`)
     assertDurableReviewApproval(issue,pr,head,this)
     const states=dependencies.length?this.dependencyStates(dependencies):{},closure=classifyDependencies(issue,dependencies,states)
@@ -1459,7 +1476,7 @@ export const githubIo = {
       readRef:(target)=>this.readRef(target),
     })
   },
-  updateRef(ref, sha) { gh(['api','-X','PATCH',`repos/${REPO}/git/refs/${ref.replace(/^refs\//,'')}`,'-f',`sha=${sha}`,'-F','force=true']) },
+  updateRef(ref, sha) { gh(['api','-X','PATCH',`repos/${REPO}/git/refs/${ref.replace(/^refs\//,'')}`,'-f',`sha=${sha}`,'-F','force=true'],{idempotentWrite:true}) },
   readCommitMessage(sha) { try { return ghJson(['api',`repos/${REPO}/git/commits/${sha}`]).message } catch { return null } },
   // LIVE run state for lease recovery. `latestAttemptActive` re-reads the CURRENT
   // attempt rather than trusting the one recorded in the lease: a re-run reuses
