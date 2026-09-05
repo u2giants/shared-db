@@ -2048,7 +2048,10 @@ test('the six-hour #2237 shape probes and reclaims after an unchanged confirmati
   assert.ok(released.releaseSha);assert.equal(io.refs.get(leaseRef)??null,null)
   assert.ok([...io.refs.keys()].some((ref)=>ref.startsWith(REVIEW_SILENCE_RELEASE_REF_PREFIX)))
   assert.equal(TERMINAL_FAILURE_CODES.length,6)
+  assert.equal(TERMINAL_FAILURE_CODES.includes('silent_worker_observed'),false)
   assert.throws(()=>assignNextReviewer(request,io),/silent lease was reclaimed/)
+  const replacement=replaceFailedReviewer({...options,failureCode:'silent_worker_observed'},io)
+  assert.notEqual(replacement.reviewer,assigned.reviewer)
 })
 
 test('capacity reports a silence probe and only calls it reclaimable after confirmation',()=>{
@@ -2090,7 +2093,8 @@ test('a four-minute stale-reclaimable lease is untouchable by both silence comma
 test('reviewer queue serves the oldest live ticket and drops a moved-head ticket',()=>{
   const io=reviewIo(),heads=new Map([[301,'a'.repeat(40)],[302,'b'.repeat(40)]])
   io.enableReviewerQueue=true;io.getPr=(pr)=>({number:Number(pr),state:'open',head:{sha:heads.get(Number(pr))}})
-  const olderSha=io.makeOwnerCommit(`db-coordination reviewer-queue-ticket issue=201 pr=301 slot=1 head=${'a'.repeat(40)} requested-at=2026-09-04T10:00:00.000Z`)
+  const requestedAt=new Date(Date.now()-60*60*1000).toISOString()
+  const olderSha=io.makeOwnerCommit(`db-coordination reviewer-queue-ticket issue=201 pr=301 slot=1 head=${'a'.repeat(40)} requested-at=${requestedAt}`)
   io.refs.set(`${REVIEW_QUEUE_REF_PREFIX}/201-301-1`,olderSha)
   assert.throws(()=>assignNextReviewer({issue:202,pr:302,headSha:'b'.repeat(40)},io),/older ticket #201/)
   const firstMutexWrite=io.calls.findIndex((call)=>call[0]==='create'&&call[1]===MUTEX_REF),firstQueueWrite=io.calls.findIndex((call)=>call[0]==='create'&&call[1]===`${REVIEW_QUEUE_REF_PREFIX}/202-302-1`)
@@ -2100,6 +2104,16 @@ test('reviewer queue serves the oldest live ticket and drops a moved-head ticket
   const staleSha=io.makeOwnerCommit(`db-coordination reviewer-queue-ticket issue=203 pr=303 slot=1 head=${'c'.repeat(40)} requested-at=2026-09-04T09:00:00.000Z`)
   io.refs.set(`${REVIEW_QUEUE_REF_PREFIX}/203-303-1`,staleSha);heads.set(303,'d'.repeat(40))
   assert.ok(assignNextReviewer({issue:202,pr:302,headSha:'b'.repeat(40)},io).reviewer)
+})
+
+test('an abandoned head-of-line reviewer ticket expires and cannot wedge later assignments',()=>{
+  const io=reviewIo(),heads=new Map([[305,'a'.repeat(40)],[306,'b'.repeat(40)]])
+  io.enableReviewerQueue=true;io.getPr=(pr)=>({number:Number(pr),state:'open',head:{sha:heads.get(Number(pr))}})
+  const expiredAt=new Date(Date.now()-3*60*60*1000).toISOString()
+  const expiredSha=io.makeOwnerCommit(`db-coordination reviewer-queue-ticket issue=205 pr=305 slot=1 head=${'a'.repeat(40)} requested-at=${expiredAt}`)
+  io.refs.set(`${REVIEW_QUEUE_REF_PREFIX}/205-305-1`,expiredSha)
+  assert.ok(assignNextReviewer({issue:206,pr:306,headSha:'b'.repeat(40)},io).reviewer)
+  assert.equal(io.refs.has(`${REVIEW_QUEUE_REF_PREFIX}/205-305-1`),false)
 })
 
 test('an unreadable reviewer queue does not invent a FIFO refusal',()=>{

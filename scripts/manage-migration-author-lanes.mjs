@@ -71,10 +71,13 @@ export const REVIEW_RETURN_REF_PREFIX = 'refs/db-review-returns'
 export const REVIEW_RETIRED_VERDICT_REF_PREFIX = 'refs/db-review-retired-verdicts'
 export const REVIEW_ACTIVE_CUTOVER_REF = 'refs/db-coordination/reviewer-index-cutover'
 export const REVIEW_OPERATION_REQUEST_LIMIT = 25, REVIEW_MUTEX_SECTION_RESERVE = 15 // slot 2 = 10 pre-mutex + this reserve; slot 1 = 7 + reserve. RE-DERIVED, NOT WIDENED (issue #2075): every reviewer operation now proves 'a verdict exists for this head' from the create-only durable verdict refs instead of from comment prose. That costs exactly ONE listing of refs/db-review-verdict pre-mutex (cached for the rest of the operation by reviewOperationIo) and ONE uncached re-listing inside the mutex section, so each half grew by exactly one request. Measured totals moved 21->23 (slot-2 assignment), 18->20 (slot-2 replacement), and 8->9 pre-mutex for the first replacement, with the post-mutex replacement section going 10->11. The bounded per-PR exclusion read is now inside the mutex so it cannot race assignment. This entry gate refuses to acquire the mutex unless the whole mutex-held section still fits. Release is guaranteed separately by cleanupReserve. Derivation: docs/verification/reviewer-assignment-api-budget-2026-08-28.md (#1812, #1833)
+export const REVIEW_QUEUE_ASSIGNMENT_REQUEST_LIMIT = 75
+export const REVIEW_CAPACITY_REQUEST_LIMIT = 64
 export const REVIEW_QUOTA_RESERVE = 100
 export const REVIEW_LEASE_SUSPECT_HOURS = 24 // Advisory visibility only. Age never releases a lease.
 export const SILENCE_MIN_AGE_HOURS = 2
 export const SILENCE_CONFIRM_HOURS = 2
+export const REVIEW_QUEUE_TTL_HOURS = 2
 export const REVIEW_QUEUE_ROW_LIMIT = 32
 // Row ceiling for listReviewRefsPaged. It is a REFUSAL, not a truncation: past
 // this the reviewer audit stops rather than reporting a partial view of the
@@ -897,13 +900,14 @@ export const EXPECTED_REF_PRESENCE=/reference already exists/i
 let reviewWireBudget=null,reviewCommitBase=null,freshDurableVerdictRefs=null
 function consumeReviewWireRequest(){
   if(!reviewWireBudget)return
-  const usable=reviewWireBudget.locked&&!reviewWireBudget.cleanup?REVIEW_OPERATION_REQUEST_LIMIT-(reviewWireBudget.cleanupReserve??0):REVIEW_OPERATION_REQUEST_LIMIT
+  const limit=reviewWireBudget.limit??REVIEW_OPERATION_REQUEST_LIMIT
+  const usable=reviewWireBudget.locked&&!reviewWireBudget.cleanup?limit-(reviewWireBudget.cleanupReserve??0):limit
   if(reviewWireBudget.count>=usable)throw new LaneError(`reviewer operation request budget exhausted before request ${reviewWireBudget.count+1}`)
   reviewWireBudget.count+=1
 }
-export function withReviewRequestBudget(fn){
+export function withReviewRequestBudget(fn,limit=REVIEW_OPERATION_REQUEST_LIMIT){
   if(reviewWireBudget)return fn(reviewWireBudget)
-  reviewWireBudget={count:0}
+  reviewWireBudget={count:0,limit}
   try{return fn(reviewWireBudget)}finally{reviewWireBudget=null;reviewCommitBase=null;freshDurableVerdictRefs=null}
 }
 // Issue #2342: the retry loop, the classifier and the stderr policy now live in
@@ -2439,11 +2443,12 @@ function reviewOperationIo(io){
   const quota=typeof io.getRateLimit==='function'?io.getRateLimit():{remaining:5000,graphRemaining:5000,reset:0,graphReset:0}
   if(!quota||!Number.isFinite(Number(quota.remaining)))throw new LaneError('GitHub quota is unreadable; reviewer assignment refused before mutex acquisition')
   if(!Number.isFinite(Number(quota.graphRemaining)))throw new LaneError('GitHub GraphQL quota is unreadable; reviewer assignment refused before mutex acquisition')
-  if(Number(quota.remaining)<REVIEW_QUOTA_RESERVE+REVIEW_OPERATION_REQUEST_LIMIT){
+  const operationLimit=reviewWireBudget?.limit??REVIEW_OPERATION_REQUEST_LIMIT
+  if(Number(quota.remaining)<REVIEW_QUOTA_RESERVE+operationLimit){
     const reset=new Date(Number(quota.reset)*1000).toLocaleString('en-US',{timeZone:'America/New_York',timeZoneName:'short'})
     throw new LaneError(`GitHub quota is too low (${quota.remaining} remaining); reviewer assignment refused before mutex acquisition. Reset: ${reset}`)
   }
-  if(Number(quota.graphRemaining)<REVIEW_QUOTA_RESERVE+REVIEW_OPERATION_REQUEST_LIMIT){
+  if(Number(quota.graphRemaining)<REVIEW_QUOTA_RESERVE+operationLimit){
     const reset=new Date(Number(quota.graphReset)*1000).toLocaleString('en-US',{timeZone:'America/New_York',timeZoneName:'short'})
     throw new LaneError(`GitHub GraphQL quota is too low (${quota.graphRemaining} remaining); reviewer assignment refused before mutex acquisition. Reset: ${reset}`)
   }
@@ -2486,7 +2491,7 @@ function finalizeReviewMutex(ownerSha,io){
   }catch(error){throw new LaneError(`${error.message}; RECOVERY REQUIRED: ${MUTEX_REF} expected SHA ${ownerSha}. Use the guarded recover-author-mutex.yml procedure and do not retry blindly`)}
   finally{if(reviewWireBudget)reviewWireBudget.cleanup=previous}
 }
-function requireReviewWireCapacity(required,when='refused before mutex acquisition'){if(reviewWireBudget&&reviewWireBudget.count+required>REVIEW_OPERATION_REQUEST_LIMIT)throw new LaneError(`reviewer operation cannot fit ${required} remaining requests inside the ${REVIEW_OPERATION_REQUEST_LIMIT}-request budget; ${when}`)}
+function requireReviewWireCapacity(required,when='refused before mutex acquisition'){const limit=reviewWireBudget?.limit??REVIEW_OPERATION_REQUEST_LIMIT;if(reviewWireBudget&&reviewWireBudget.count+required>limit)throw new LaneError(`reviewer operation cannot fit ${required} remaining requests inside the ${limit}-request budget; ${when}`)}
 function acquireReviewMutex(ownerSha,io){
   if(reviewWireBudget){reviewWireBudget.cleanupReserve=io.atomicReviewMutexRelease?2:8;reviewWireBudget.locked=true}
   let acquired
@@ -2959,7 +2964,8 @@ function reclaimSilentReviewerOperation(options,now,io){
   if(io.readRef(releaseRef))throw new LaneError('silent reviewer lease was already reclaimed with immutable evidence')
   const probe=parseSilenceProbe(io.getCommit(probeSha))
   if(probe.issue!==request.issue||probe.pr!==request.pr||probe.headSha!==request.headSha||probe.sequence!==request.sequence||probe.slot!==request.slot||probe.reviewer!==original.reviewer)throw new LaneError('silence probe does not match the exact active lease')
-  if(reviewLeaseAgeHours(probe.observedAt,now)<SILENCE_CONFIRM_HOURS)throw new LaneError(`silent reviewer reclaim requires an unchanged probe for at least ${SILENCE_CONFIRM_HOURS} hours`)
+  const probeAge=reviewLeaseAgeHours(probe.observedAt,now)
+  if(probeAge===null||probeAge<SILENCE_CONFIRM_HOURS)throw new LaneError(`silent reviewer reclaim requires an unchanged readable probe for at least ${SILENCE_CONFIRM_HOURS} hours`)
   const observed=activityFingerprintForLease({...original,slot:request.slot},io)
   if(observed.fingerprint!==probe.fingerprint)throw new LaneError('silent reviewer reclaim refused because the activity fingerprint changed after the probe')
   if(typeof io.atomicReviewRefs!=='function'||typeof io.readReviewRefs!=='function')throw new LaneError('silent reviewer reclaim requires atomic compare-and-swap ref support')
@@ -3015,7 +3021,7 @@ function reviewerCapacityReportOperation(io,now){
   return {generatedAt:new Date(now).toISOString(),advisorySuspectHours:REVIEW_LEASE_SUSPECT_HOURS,silenceMinAgeHours:SILENCE_MIN_AGE_HOURS,silenceConfirmHours:SILENCE_CONFIRM_HOURS,summary:{total:rows.length,free:rows.filter((row)=>row.classification==='free').length,live:rows.filter((row)=>['live','suspect-aged','silence-probed'].includes(row.classification)).length,reclaimable:rows.filter((row)=>['stale-reclaimable','silence-reclaimable'].includes(row.classification)).length,silenceProbed:rows.filter((row)=>row.classification==='silence-probed').length,silenceReclaimable:rows.filter((row)=>row.classification==='silence-reclaimable').length,unknown:rows.filter((row)=>row.classification==='unknown').length},queue,reviewers:rows}
 }
 
-export function reviewerCapacityReport(io=githubIo,now=new Date()){return withReviewRequestBudget(()=>reviewerCapacityReportOperation(reviewOperationIo(io),now))}
+export function reviewerCapacityReport(io=githubIo,now=new Date()){return withReviewRequestBudget(()=>reviewerCapacityReportOperation(reviewOperationIo(io),now),REVIEW_CAPACITY_REQUEST_LIMIT)}
 
 export function describeMovedAssignmentHead(request,recorded){
   return `the durable reviewer assignment is NOT missing: sequence=${recorded.sequence} reviewer=${recorded.reviewer} for issue #${request.issue} PR #${request.pr} is recorded under head ${recorded.headSha}, and this request names head ${request.headSha}. The PR head moved after that reviewer was assigned, so the exact code that reviewer was given is no longer this PR's head. A replacement would bind a new reviewer -- and later a verdict -- to a commit the failed reviewer never saw, so it is refused. Assign a reviewer to the current code instead: --assign-reviewer --issue ${request.issue} --pr ${request.pr} --head-sha <the PR's current head>. Nothing was lost and nothing needs reconstructing.`
@@ -3172,15 +3178,23 @@ function parseReviewerQueueTicket(commit){
   return {issue:Number(match[1]),pr:Number(match[2]),slot:Number(match[3]),headSha:match[4],requestedAt:match[5]}
 }
 
-function liveReviewerQueue(io){
-  if(typeof io.readReviewerQueue==='function')return io.readReviewerQueue().filter((row)=>row.pr?.state==='open'&&row.pr?.head?.sha===row.ticket.headSha).map((row)=>({...row.ticket,ref:row.ref,sha:row.sha})).sort((a,b)=>Date.parse(a.requestedAt)-Date.parse(b.requestedAt)||a.issue-b.issue||a.pr-b.pr||a.slot-b.slot)
+function reviewerQueueTicketExpired(ticket,now){const age=reviewLeaseAgeHours(ticket?.requestedAt,now);return age!==null&&age>=REVIEW_QUEUE_TTL_HOURS}
+function liveReviewerQueue(io,now=new Date(),mutexOwnerSha=null){
+  if(typeof io.readReviewerQueue==='function')return io.readReviewerQueue().filter((row)=>!reviewerQueueTicketExpired(row.ticket,now)&&row.pr?.state==='open'&&row.pr?.head?.sha===row.ticket.headSha).map((row)=>({...row.ticket,ref:row.ref,sha:row.sha})).sort((a,b)=>Date.parse(a.requestedAt)-Date.parse(b.requestedAt)||a.issue-b.issue||a.pr-b.pr||a.slot-b.slot)
   const reader=typeof io.listReviewRefsPaged==='function'?io.listReviewRefsPaged.bind(io):io.listRefs?.bind(io)
   if(!reader)throw new LaneError('reviewer queue refs are unreadable')
-  const rows=reader(REVIEW_QUEUE_REF_PREFIX)??[],live=[]
+  const rows=reader(REVIEW_QUEUE_REF_PREFIX)??[],live=[],expired=[]
   for(const row of rows){
     const ticket=parseReviewerQueueTicket(row.commit??io.getCommit(row.sha)),pr=io.getPr(ticket.pr)
-    if(pr?.state==='open'&&pr?.head?.sha===ticket.headSha)live.push({...ticket,ref:row.ref,sha:row.sha})
+    if(reviewerQueueTicketExpired(ticket,now))expired.push({ref:row.ref,sha:row.sha})
+    else if(pr?.state==='open'&&pr?.head?.sha===ticket.headSha)live.push({...ticket,ref:row.ref,sha:row.sha})
   }
+  if(expired.length&&mutexOwnerSha&&typeof io.atomicReviewRefs==='function'&&typeof io.readReviewRefs==='function'){
+    requireOwnedRef(MUTEX_REF,mutexOwnerSha,io)
+    io.atomicReviewRefs([{ref:MUTEX_REF,expected:mutexOwnerSha,sha:mutexOwnerSha},...expired.map((row)=>({ref:row.ref,expected:row.sha,sha:null}))])
+    const after=io.readReviewRefs([MUTEX_REF,...expired.map((row)=>row.ref)])
+    if(after.get(MUTEX_REF)!==mutexOwnerSha||expired.some((row)=>after.get(row.ref)!==null))throw new LaneError('expired reviewer queue ticket evacuation readback mismatch')
+  }else if(expired.length&&mutexOwnerSha){for(const row of expired)if(io.readRef(row.ref)===row.sha)releaseOwnedRef(row.ref,row.sha,io)}
   return live.sort((a,b)=>Date.parse(a.requestedAt)-Date.parse(b.requestedAt)||a.issue-b.issue||a.pr-b.pr||a.slot-b.slot)
 }
 
@@ -3196,10 +3210,10 @@ function ensureReviewerQueueTurn(request,io,now=new Date()){
     const priorSha=io.readRef(ref);let sha=priorSha
     if(priorSha){const prior=parseReviewerQueueTicket(io.getCommit(priorSha)),fresh=io.getPr(prior.pr)
       if(prior.issue!==request.issue||prior.pr!==request.pr||prior.slot!==request.slot)throw new LaneError('reviewer queue ticket identity is corrupt')
-      if(prior.headSha!==request.headSha||fresh?.state!=='open'||fresh?.head?.sha!==prior.headSha){releaseOwnedRef(ref,priorSha,io);sha=null}}
+      if(prior.headSha!==request.headSha||fresh?.state!=='open'||fresh?.head?.sha!==prior.headSha||reviewerQueueTicketExpired(prior,now)){releaseOwnedRef(ref,priorSha,io);sha=null}}
     if(!sha){sha=ticketSha;if(!io.createRef(ref,sha)&&readRefAfterWrite(ref,sha,io)!==sha)throw new LaneError('reviewer queue ticket could not be recorded')}
     let queue
-    try{queue=liveReviewerQueue(io)}catch{return {ref,sha,queue:null}}
+    try{queue=liveReviewerQueue(io,now,ownerSha)}catch{return {ref,sha,queue:null}}
     const first=queue[0]
     if(first?.ref!==ref)throw new LaneError(`reviewer queue is FIFO; older ticket #${first.issue}/PR #${first.pr} slot ${first.slot} requested ${first.requestedAt} must be served first`)
     return {ref,sha,queue}
@@ -3436,10 +3450,14 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
 
 export function assignNextReviewer(request,io=githubIo){
   const normalized={...request,issue:Number(request.issue),pr:Number(request.pr),slot:Number(request.slot??1),headSha:String(request.headSha??'')}
-  const ticket=io.enableReviewerQueue?withReviewRequestBudget(()=>ensureReviewerQueueTurn(normalized,reviewOperationIo(io))):null
-  const result=withReviewRequestBudget(()=>assignNextReviewerOperation(normalized,reviewOperationIo(io)))
-  if(ticket)withReviewRequestBudget(()=>finishReviewerQueueTurn(ticket,reviewOperationIo(io)))
-  return result
+  if(!io.enableReviewerQueue)return withReviewRequestBudget(()=>assignNextReviewerOperation(normalized,reviewOperationIo(io)))
+  return withReviewRequestBudget(()=>{const operationIo=reviewOperationIo(io),ticket=ensureReviewerQueueTurn(normalized,operationIo),result=assignNextReviewerOperation(normalized,operationIo);finishReviewerQueueTurn(ticket,operationIo);return result},REVIEW_QUEUE_ASSIGNMENT_REQUEST_LIMIT)
+}
+function parseSilenceRelease(commit){
+  const message=commit?.message??commit?.commit?.message??''
+  const match=/^db-coordination reviewer-silence-release reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{40}) sequence=(\d+) code=silent_worker_observed probe=([0-9a-f]{7,40}) observed-at=([^ ]+) confirmed-at=([^ ]+) verdict=none artifact=none replacement=none$/i.exec(message)
+  if(!match)throw new LaneError('reviewer silence release evidence is unreadable')
+  return {reviewer:match[1],issue:Number(match[2]),pr:Number(match[3]),headSha:match[4],sequence:Number(match[5]),probeSha:match[6],observedAt:match[7],confirmedAt:match[8]}
 }
 
 function replaceClaimVersion(body,oldVersion,newVersion){
@@ -3715,7 +3733,11 @@ export function releaseFailedReviewer(options,io=githubIo){
 
 function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failureCode,failingCheck,confirmLocalDependencyUnfixable,confirmNoVerdict,confirmNoArtifact,slot=1},io){
   io=reviewOperationIo(io)
-  const request=validateTerminalReviewerFailure({issue,pr,headSha,failedSequence,failureCode,failingCheck,confirmLocalDependencyUnfixable,confirmNoVerdict,confirmNoArtifact,slot},'reviewer replacement')
+  const silenceReplacement=String(failureCode)==='silent_worker_observed'
+  const request=silenceReplacement
+    ?{issue:Number(issue),pr:Number(pr),headSha:String(headSha??''),failedSequence:Number(failedSequence),slot:Number(slot??1)}
+    :validateTerminalReviewerFailure({issue,pr,headSha,failedSequence,failureCode,failingCheck,confirmLocalDependencyUnfixable,confirmNoVerdict,confirmNoArtifact,slot},'reviewer replacement')
+  if(silenceReplacement&&(!Number.isInteger(request.issue)||!Number.isInteger(request.pr)||!/^[0-9a-f]{40}$/i.test(request.headSha)||!Number.isInteger(request.failedSequence)||!Number.isInteger(request.slot)||request.slot<1||!confirmNoVerdict||!confirmNoArtifact||String(failingCheck??'').trim()))throw new LaneError('silent reviewer replacement requires exact issue, PR, 40-character head SHA, failed sequence, review slot, no failing check, and explicit confirmation of no verdict and no artifact')
   const eligible=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
   const eligibleNames=new Set(eligible.map((row)=>row.name))
   // A LOCAL fault is not the reviewer's fault. Replacing on one spends a
@@ -3820,6 +3842,12 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     const predecessors=parsedReplacements.filter((row)=>row.sequence===request.failedSequence)
     const original=request.failedSequence===initial.sequence?initial:predecessors.length===1?predecessors[0]:null
     if(!original||original.issue!==request.issue||original.pr!==request.pr||original.headSha!==request.headSha)throw new LaneError('durable reviewer assignment or replacement does not match the replacement request')
+    if(silenceReplacement){
+      const releaseRef=silenceReleaseRef({...request,sequence:request.failedSequence}),releaseSha=io.readRef(releaseRef)
+      if(!releaseSha)throw new LaneError('silent reviewer replacement requires immutable silence-release evidence for the exact failed sequence')
+      const release=parseSilenceRelease(io.getCommit(releaseSha))
+      if(release.issue!==request.issue||release.pr!==request.pr||release.headSha!==request.headSha||release.sequence!==request.failedSequence||release.reviewer!==original.reviewer)throw new LaneError('immutable silence-release evidence does not match the replacement request')
+    }
     const releasedFailureSha=fixedRecords?(fixedRecords.get(failureRef)?.sha??null):io.readRef(failureRef)
     let releasedFailure=null
     if(releasedFailureSha){
