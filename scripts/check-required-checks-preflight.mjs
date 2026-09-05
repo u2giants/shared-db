@@ -12,12 +12,13 @@
 import { execFileSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { REPO } from './manage-migration-author-lanes.mjs'
+import { MERGE_SELF_CONTEXT as SELF_CONTEXT } from './lib/merge-self-context.mjs'
 
 export class PreflightError extends Error {}
 
 // Posted by the guarded merge itself, after this pre-flight has passed. Requiring
 // it here would make the pre-flight unsatisfiable on every first run.
-export const SELF_CONTEXT = 'Migration guarded merge authorization'
+export { SELF_CONTEXT }
 export const SELF_CHECK_RUN = 'merge'
 
 // A skipped or neutral required check can still be refused by the merge API.
