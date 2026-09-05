@@ -2337,7 +2337,7 @@ test('post-merge preview rehearsal never needs or reads a live author claim', ()
 // Deliberately a SECOND import statement, placed here rather than appended to the
 // import list at the top of the file: PR #1359 appends to that same line, and two
 // appends to one line is a merge conflict for no benefit.
-import { parseVersionPrMap } from './manage-migration-author-lanes.mjs'
+import { parseVersionPrMap, pendingRequiredContexts } from './manage-migration-author-lanes.mjs'
 
 // ---------------------------------------------------------------------------
 // POST-MERGE REHEARSAL OF A BATCH AUTHORED BY SEVERAL PULL REQUESTS (#1350)
@@ -5742,4 +5742,16 @@ test('parseLinkHeader reads uri and parameters structurally',()=>{
   assert.equal(links[0].params.rel,'next')
   assert.equal(links[0].params.title,'a, b; c','a comma or semicolon inside quotes must not split the value')
   assert.equal(links[1].params.rel,'last')
+})
+
+test('the preview gate excludes the context the guarded merge sets for itself', () => {
+  const required=['SQL migration guards','Migration author lease','Migration guarded merge authorization']
+  const green=new Map([['SQL migration guards','SUCCESS'],['Migration author lease','SUCCESS']])
+  // The self-set context is absent from the head's checks, exactly as it is
+  // before any merge has run. It must not hold preview back.
+  assert.deepEqual(pendingRequiredContexts(required,green),[])
+  // Positive control: a genuinely failing required check must still be reported,
+  // so the exclusion above is proven to be narrow rather than a blanket pass.
+  const red=new Map([['SQL migration guards','FAILURE'],['Migration author lease','SUCCESS']])
+  assert.deepEqual(pendingRequiredContexts(required,red),['SQL migration guards'])
 })
