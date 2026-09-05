@@ -680,6 +680,13 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
+      "site": "scripts/lib/github-tree.mjs:9",
+      "semantic_key": "scripts/lib/github-tree.mjs:d42caab78e23b72a16ebeb2b7e70c15a150772c05bf47eabc5cc7a6df6fe078c:1",
+      "line_sha256": "d42caab78e23b72a16ebeb2b7e70c15a150772c05bf47eabc5cc7a6df6fe078c",
+      "disposition": "excluded",
+      "reason": "This is an explanatory fail-closed design comment, not a catalog or migration evidence decision."
+    },
+    {
       "site": "scripts/lib/orchestrator-routing.mjs:185",
       "semantic_key": "scripts/lib/orchestrator-routing.mjs:7319eba8ac13186491dbe421fd89ac14f2c50eaf078c7428f3fac6479e2d0434:1",
       "line_sha256": "7319eba8ac13186491dbe421fd89ac14f2c50eaf078c7428f3fac6479e2d0434",
@@ -1793,7 +1800,7 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     }
   ],
-  "call_site_count": 254,
-  "call_site_sha256": "064b71f3e87c4b1fe10b049ed12ed2b79ef632456da19041d1169800a29e9aa0",
+  "call_site_count": 255,
+  "call_site_sha256": "486b86d54ad9cc498a7a130ca47cefff1663d98c8304f27da745d2cd3e2a768a",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
