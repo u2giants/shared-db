@@ -31,8 +31,11 @@
 -- back.
 --
 -- Proves, for the baseline pins:
---   * the expected baseline is DATA, not compiled-in constants -- neither function
---     body contains the retired hash d9b07759bf80ff227e2fa9bd635d2138
+--   * the expected baseline is DATA, not compiled-in constants -- the retired hash
+--     d9b07759bf80ff227e2fa9bd635d2138 never appears as a compiled-in BASELINE PIN.
+--     Issue #552 legitimately compiles it in as one of the two allowed LIVE
+--     licensor-status fingerprints, always paired with 00bf7069fff79b9deab1d14dbd9112b2,
+--     so the proof is now the pairing invariant below rather than a blanket ban.
 --   * all twelve metrics have exactly one live pin, and the live licensor status
 --     hash is the post-owner-ruling value
 --   * a live observation passes with baseline_ok = true carrying the NEW hash
@@ -87,9 +90,18 @@ begin
     raise exception 'FAIL: record_taxonomy_parallel_observation does not read plm.taxonomy_baseline_pin';
   end if;
 
-  if position('d9b07759bf80ff227e2fa9bd635d2138' in v_health_def) > 0
-     or position('d9b07759bf80ff227e2fa9bd635d2138' in v_obs_def) > 0 then
-    raise exception 'FAIL: the retired licensor status hash is still hardcoded in a health/observation function';
+  -- The retired hash may appear ONLY as part of the issue #552 live-hash
+  -- allowlist, where it is always written alongside the current hash. A
+  -- compiled-in BASELINE PIN would be an unpaired occurrence, so requiring the
+  -- two counts to match still fails any hardcoded baseline while permitting the
+  -- reviewed live guard. Deleting this check outright was rejected.
+  if (length(v_health_def) - length(replace(v_health_def, 'd9b07759bf80ff227e2fa9bd635d2138', '')))
+     <> (length(v_health_def) - length(replace(v_health_def, '00bf7069fff79b9deab1d14dbd9112b2', ''))) then
+    raise exception 'FAIL: the retired licensor status hash is hardcoded in check_taxonomy_sync_health outside the reviewed live-hash allowlist';
+  end if;
+  if (length(v_obs_def) - length(replace(v_obs_def, 'd9b07759bf80ff227e2fa9bd635d2138', '')))
+     <> (length(v_obs_def) - length(replace(v_obs_def, '00bf7069fff79b9deab1d14dbd9112b2', ''))) then
+    raise exception 'FAIL: the retired licensor status hash is hardcoded in record_taxonomy_parallel_observation outside the reviewed live-hash allowlist';
   end if;
 
   -- The baseline must be resolved in the BODY, not the DECLARE block, or the
