@@ -275,6 +275,22 @@ class GuardTests(unittest.TestCase):
         with self.assertRaisesRegex(GuardError, "20260903200951"):
             parse_allowlist("20260903200951,20260905024139")
         self.assertEqual(parse_allowlist("20260905024139"), ["20260905024139"])
+    def test_stranded_coldlion_division_reissue_is_byte_identical(self) -> None:
+        """The reissue is only safe because it is the SAME executable SQL.
+
+        Nothing else in the suite pins that. If a later edit touches either
+        file, the hard block on 20260903200951 would be retiring a version
+        whose replacement no longer matches it.
+        """
+        migrations = REPO / "supabase" / "migrations"
+        original = (
+            migrations / "20260903200951_coldlion_division_reference_table.sql"
+        ).read_bytes()
+        reissue = (
+            migrations
+            / "20260905024139_reissue_coldlion_division_reference_table.sql"
+        ).read_bytes()
+        self.assertEqual(original, reissue)
 
     def test_stranded_issue_505_original_is_permanently_blocked(self) -> None:
         with self.assertRaisesRegex(GuardError, "20260830195655"):
