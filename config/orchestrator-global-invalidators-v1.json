@@ -16,6 +16,7 @@
     "scripts/lib/exclusive-lease.mjs",
     "scripts/lib/github-transport.mjs",
     "scripts/lib/github-tree.mjs",
+    "scripts/lib/merge-self-context.mjs",
     "scripts/lib/review-verdict-artifact.mjs",
     "scripts/lib/review-verdict.mjs",
     "scripts/lib/work-dependencies.mjs",

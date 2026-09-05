@@ -89,7 +89,8 @@ export function wrapperSpawnPlan(resolved,args,platform=process.platform){
   return{file:resolved,args}
 }
 export function runGovernedReview(options,deps={spawn:spawnSync,preflight:reviewerExecutionPreflight,record:recordReviewVerdict,resolve:resolveCommandPath}){
-  deps.preflight({reviewer:options.reviewer,wrapper:options.wrapper,worktree:options.worktree,headSha:options.headSha})
+  const skipDoctor=options.skipDoctor===true||options.skipDoctor==='true'
+  deps.preflight({reviewer:options.reviewer,wrapper:options.wrapper,worktree:options.worktree,headSha:options.headSha,skipDoctor})
   const resolved=(deps.resolve??resolveCommandPath)(options.wrapper)
   if(!resolved)throw new Error(`review wrapper ${options.wrapper} is not executable`)
   const plan=wrapperSpawnPlan(resolved,options.wrapperArgs)
@@ -156,7 +157,8 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
     try{keptUrl=JSON.parse(kept.stdout).html_url}catch{keptUrl=null}
     throw new Error(`${detail}; the findings were preserved as a non-authorizing comment${keptUrl?` (${keptUrl})`:''} and this head needs a fresh governed review`)
   }
-  const body=`GOVERNED REVIEW FINDINGS — NON-AUTHORIZING UNLESS THE MATCHING CREATE-ONLY VERDICT ARTIFACT EXISTS\n\n${rawBody}`
+  const preflightNote=skipDoctor?'REVIEW PREFLIGHT: automated doctor skipped; the caller must retain the fresh external doctor proof that justified this exception.\n\n':''
+  const body=`GOVERNED REVIEW FINDINGS — NON-AUTHORIZING UNLESS THE MATCHING CREATE-ONLY VERDICT ARTIFACT EXISTS\n\n${preflightNote}${rawBody}`
   const posted=spawnGitHub(['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{executor:deps.spawn,input:JSON.stringify({body})})
   if(posted.error||posted.status!==0)throw new Error('review findings could not be posted durably; no verdict was recorded')
   let comment
