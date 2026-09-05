@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -1998,7 +1998,7 @@ test('capacity report classifies free, live, stale, aged, and unknown leases wit
   io.readReviewStates=()=>states
   const before=new Map(io.refs),report=reviewerCapacityReport(io,now)
   assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown'])
-  assert.deepEqual(report.summary,{total:4,free:0,live:2,reclaimable:1,unknown:1})
+  assert.deepEqual(report.summary,{total:4,free:0,live:2,reclaimable:1,silenceProbed:0,silenceReclaimable:0,unknown:1})
   assert.deepEqual(io.refs,before,'capacity report must be read-only')
   // 'free' is the fifth classification and it is a property of an ABSENT lease, so
   // it is proved by removing one rather than by needing a spare roster name.
@@ -2006,7 +2006,130 @@ test('capacity report classifies free, live, stale, aged, and unknown leases wit
   snapshot.delete(reviewActiveRef(freed));io.refs.delete(reviewActiveRef(freed))
   const withFree=reviewerCapacityReport(io,now)
   assert.deepEqual(withFree.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','free'])
-  assert.deepEqual(withFree.summary,{total:4,free:1,live:2,reclaimable:1,unknown:0})
+  assert.deepEqual(withFree.summary,{total:4,free:1,live:2,reclaimable:1,silenceProbed:0,silenceReclaimable:0,unknown:0})
+})
+
+function silentLeaseIo({heldSince='2026-09-04T10:00:00Z',activity=[]}={}){
+  const io=withAtomicRefs(reviewIo()),request={issue:2345,pr:2237,headSha:'a'.repeat(40),slot:1}
+  io.enableReviewerSilence=true
+  io.getPr=()=>({number:request.pr,state:'open',draft:true,head:{sha:request.headSha}})
+  const assigned=assignNextReviewer(request,io),leaseRef=reviewActiveRef(assigned.reviewer),leaseSha=io.refs.get(leaseRef),rawGet=io.getCommit
+  io.getCommit=(sha)=>sha===leaseSha?{...rawGet(sha),committedDate:heldSince}:rawGet(sha)
+  io.readLeaseActivity=()=>({issueComments:activity,reviewComments:[],reviews:[],checkRuns:[],workflowRuns:[]})
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  return {io,request,assigned,leaseRef,leaseSha}
+}
+
+test('silence fingerprint changes on reviewer progress and ignores an unrelated main dispatch',()=>{
+  const fixture=silentLeaseIo(),lease={...fixture.assigned,slot:1}
+  const first=activityFingerprintForLease(lease,fixture.io)
+  fixture.io.readLeaseActivity=()=>({issueComments:[{updated_at:'2026-09-04T12:30:00Z'}],reviewComments:[],reviews:[],checkRuns:[],workflowRuns:[]})
+  const second=activityFingerprintForLease(lease,fixture.io)
+  assert.notEqual(first.fingerprint,second.fingerprint)
+  assert.equal(first.lastActivityIso,'none','a workflow run not returned for the lease head cannot count as reviewer activity')
+})
+
+test('a genuinely working lane cannot be probed or reclaimed after one comment',()=>{
+  const active=silentLeaseIo({activity:[{updated_at:'2026-09-04T12:30:00Z'}]})
+  assert.throws(()=>probeSilentReviewer({...active.request,failedSequence:active.assigned.sequence},new Date('2026-09-04T13:00:00Z'),active.io),/activity occurred after/)
+  const quiet=silentLeaseIo(),options={...quiet.request,failedSequence:quiet.assigned.sequence,confirmNoVerdict:true,confirmNoArtifact:true}
+  probeSilentReviewer(options,new Date('2026-09-04T12:00:00Z'),quiet.io)
+  quiet.io.readLeaseActivity=()=>({issueComments:[{updated_at:'2026-09-04T13:00:00Z'}],reviewComments:[],reviews:[],checkRuns:[],workflowRuns:[]})
+  assert.throws(()=>reclaimSilentReviewer(options,new Date('2026-09-04T14:00:00Z'),quiet.io),/fingerprint changed/)
+  assert.equal(quiet.io.refs.get(quiet.leaseRef),quiet.leaseSha)
+})
+
+test('the six-hour #2237 shape probes and reclaims after an unchanged confirmation window',()=>{
+  const {io,request,assigned,leaseRef}=silentLeaseIo(),options={...request,failedSequence:assigned.sequence,confirmNoVerdict:true,confirmNoArtifact:true}
+  const probe=probeSilentReviewer(options,new Date('2026-09-04T12:00:00Z'),io)
+  assert.ok(probe.probeRef.startsWith(REVIEW_SILENCE_PROBE_REF_PREFIX))
+  assert.throws(()=>reclaimSilentReviewer(options,new Date('2026-09-04T13:59:59Z'),io),/at least 2 hours/)
+  const released=reclaimSilentReviewer(options,new Date('2026-09-04T14:00:00Z'),io)
+  assert.ok(released.releaseSha);assert.equal(io.refs.get(leaseRef)??null,null)
+  assert.ok([...io.refs.keys()].some((ref)=>ref.startsWith(REVIEW_SILENCE_RELEASE_REF_PREFIX)))
+  assert.equal(TERMINAL_FAILURE_CODES.length,6)
+  assert.equal(TERMINAL_FAILURE_CODES.includes('silent_worker_observed'),false)
+  assert.throws(()=>assignNextReviewer(request,io),/silent lease was reclaimed/)
+  const replacement=replaceFailedReviewer({...options,failureCode:'silent_worker_observed'},io)
+  assert.notEqual(replacement.reviewer,assigned.reviewer)
+})
+
+test('capacity reports a silence probe and only calls it reclaimable after confirmation',()=>{
+  const {io,request,assigned}=silentLeaseIo(),options={...request,failedSequence:assigned.sequence}
+  probeSilentReviewer(options,new Date('2026-09-04T12:00:00Z'),io)
+  const waiting=reviewerCapacityReport(io,new Date('2026-09-04T13:00:00Z')).reviewers.find((row)=>row.reviewer===assigned.reviewer)
+  assert.equal(waiting.classification,'silence-probed');assert.equal(waiting.lastActivityIso,'none');assert.ok(waiting.silenceProbe?.sha)
+  const ready=reviewerCapacityReport(io,new Date('2026-09-04T14:00:00Z')).reviewers.find((row)=>row.reviewer===assigned.reviewer)
+  assert.equal(ready.classification,'silence-reclaimable')
+})
+
+test('silent reclaim frees a slot even when the entire reviewer pool is occupied',()=>{
+  const fixture=silentLeaseIo(),heads=new Map([[fixture.request.pr,fixture.request.headSha]]),baseGetPr=fixture.io.getPr
+  ACTIVE_REVIEWERS.filter((row)=>row.name!==fixture.assigned.reviewer).forEach((row,index)=>{
+    const issue=2400+index,pr=2500+index,headSha=`${index+2}`.repeat(40),sha=fixture.io.makeOwnerCommit(`db-coordination reviewer-lease generation=${index+2} reviewer=${row.name} issue=${issue} pr=${pr} head=${headSha} sequence=${index+2}`)
+    fixture.io.refs.set(reviewActiveRef(row.name),sha);heads.set(pr,headSha)
+  })
+  fixture.io.getPr=(pr)=>heads.has(Number(pr))?{number:Number(pr),state:'open',draft:false,head:{sha:heads.get(Number(pr))}}:baseGetPr(pr)
+  fixture.io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:fixture.io.getPr(lease.pr),evidence:[]}]))
+  assert.equal(findBusyReviewers(fixture.io).size,ACTIVE_REVIEWERS.length)
+  const options={...fixture.request,failedSequence:fixture.assigned.sequence,confirmNoVerdict:true,confirmNoArtifact:true}
+  probeSilentReviewer(options,new Date('2026-09-04T12:00:00Z'),fixture.io)
+  reclaimSilentReviewer(options,new Date('2026-09-04T14:00:00Z'),fixture.io)
+  assert.equal(findBusyReviewers(fixture.io).size,ACTIVE_REVIEWERS.length-1)
+  const next={issue:2600,pr:2700,headSha:'f'.repeat(40)};heads.set(next.pr,next.headSha)
+  assert.equal(assignNextReviewer(next,fixture.io).reviewer,fixture.assigned.reviewer)
+})
+
+test('a four-minute stale-reclaimable lease is untouchable by both silence commands',()=>{
+  const fixture=silentLeaseIo({heldSince:'2026-09-04T12:00:00Z'}),moved='b'.repeat(40),original=fixture.io.getPr
+  fixture.io.getPr=()=>({...original(),head:{sha:moved}})
+  const options={...fixture.request,failedSequence:fixture.assigned.sequence,confirmNoVerdict:true,confirmNoArtifact:true}
+  assert.throws(()=>probeSilentReviewer(options,new Date('2026-09-04T12:04:00Z'),fixture.io),/live lease|exact open PR head/)
+  assert.throws(()=>reclaimSilentReviewer(options,new Date('2026-09-04T16:00:00Z'),fixture.io),/prior silence probe/)
+  const matching=silentLeaseIo({heldSince:'2026-09-04T12:00:00Z'})
+  assert.throws(()=>probeSilentReviewer({...matching.request,failedSequence:matching.assigned.sequence},new Date('2026-09-04T12:04:00Z'),matching.io),/at least 2 hours/)
+})
+
+test('reviewer queue serves the oldest live ticket and drops a moved-head ticket',()=>{
+  const io=reviewIo(),heads=new Map([[301,'a'.repeat(40)],[302,'b'.repeat(40)]])
+  io.enableReviewerQueue=true;io.getPr=(pr)=>({number:Number(pr),state:'open',head:{sha:heads.get(Number(pr))}})
+  const requestedAt=new Date(Date.now()-60*60*1000).toISOString()
+  const olderSha=io.makeOwnerCommit(`db-coordination reviewer-queue-ticket issue=201 pr=301 slot=1 head=${'a'.repeat(40)} requested-at=${requestedAt}`)
+  io.refs.set(`${REVIEW_QUEUE_REF_PREFIX}/201-301-1`,olderSha)
+  assert.throws(()=>assignNextReviewer({issue:202,pr:302,headSha:'b'.repeat(40)},io),/older ticket #201/)
+  const firstMutexWrite=io.calls.findIndex((call)=>call[0]==='create'&&call[1]===MUTEX_REF),firstQueueWrite=io.calls.findIndex((call)=>call[0]==='create'&&call[1]===`${REVIEW_QUEUE_REF_PREFIX}/202-302-1`)
+  assert.ok(firstMutexWrite>=0&&firstMutexWrite<firstQueueWrite,'queue tickets must be serialized under the reviewer mutex')
+  const first=assignNextReviewer({issue:201,pr:301,headSha:'a'.repeat(40)},io)
+  assert.ok(first.reviewer);assert.equal(io.refs.has(`${REVIEW_QUEUE_REF_PREFIX}/201-301-1`),false)
+  const staleSha=io.makeOwnerCommit(`db-coordination reviewer-queue-ticket issue=203 pr=303 slot=1 head=${'c'.repeat(40)} requested-at=2026-09-04T09:00:00.000Z`)
+  io.refs.set(`${REVIEW_QUEUE_REF_PREFIX}/203-303-1`,staleSha);heads.set(303,'d'.repeat(40))
+  assert.ok(assignNextReviewer({issue:202,pr:302,headSha:'b'.repeat(40)},io).reviewer)
+})
+
+test('an abandoned head-of-line reviewer ticket expires and cannot wedge later assignments',()=>{
+  const io=reviewIo(),heads=new Map([[305,'a'.repeat(40)],[306,'b'.repeat(40)]])
+  io.enableReviewerQueue=true;io.getPr=(pr)=>({number:Number(pr),state:'open',head:{sha:heads.get(Number(pr))}})
+  const expiredAt=new Date(Date.now()-3*60*60*1000).toISOString()
+  const expiredSha=io.makeOwnerCommit(`db-coordination reviewer-queue-ticket issue=205 pr=305 slot=1 head=${'a'.repeat(40)} requested-at=${expiredAt}`)
+  io.refs.set(`${REVIEW_QUEUE_REF_PREFIX}/205-305-1`,expiredSha)
+  assert.ok(assignNextReviewer({issue:206,pr:306,headSha:'b'.repeat(40)},io).reviewer)
+  assert.equal(io.refs.has(`${REVIEW_QUEUE_REF_PREFIX}/205-305-1`),false)
+})
+
+test('a failed head-of-line assignment evacuates its own ticket immediately',()=>{
+  const io=reviewIo(),request={issue:207,pr:307,headSha:'c'.repeat(40)}
+  io.enableReviewerQueue=true;io.getPr=()=>({number:307,state:'open',head:{sha:request.headSha}})
+  for(const reviewer of ACTIVE_REVIEWERS){const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=20 reviewer=${reviewer.name} issue=999 pr=998 head=${'d'.repeat(40)}`);io.refs.set(reviewActiveRef(reviewer.name),sha)}
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  assert.throws(()=>assignNextReviewer(request,io),/no reviewer is available/)
+  assert.equal(io.refs.has(`${REVIEW_QUEUE_REF_PREFIX}/207-307-1`),false)
+})
+
+test('an unreadable reviewer queue does not invent a FIFO refusal',()=>{
+  const io=reviewIo(),request={issue:204,pr:304,headSha:'e'.repeat(40)}
+  io.enableReviewerQueue=true;io.getPr=()=>({number:304,state:'open',head:{sha:request.headSha}})
+  const list=io.listRefs;io.listRefs=(prefix)=>{if(prefix===REVIEW_QUEUE_REF_PREFIX)throw new Error('unreadable queue');return list(prefix)}
+  assert.ok(assignNextReviewer(request,io).reviewer)
 })
 
 test('release refuses a verdict or a changed lease under the mutex',()=>{
@@ -2710,6 +2833,13 @@ test('stranded reviewer assignment and replacement mutexes are recoverable',()=>
   for(const kind of ['reviewer-assignment-lock','reviewer-replacement-lock']){
     const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:`db-coordination ${kind} issue=1 pr=2 head=abcdef0`,committer:{date:'2026-08-14T19:55:00Z'}})
     assert.equal(recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io).released,'4a69fbbc')
+  }
+})
+test('stranded reviewer queue and silence-release mutexes are recoverable',()=>{
+  for(const kind of ['reviewer-queue-lock','reviewer-silence-release-lock']){
+    const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:`db-coordination ${kind} issue=1 pr=2 head=${'a'.repeat(40)} sequence=3`,committer:{date:'2026-08-14T19:55:00Z'}})
+    assert.equal(recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io).released,'4a69fbbc')
+    assert.equal(io.refs.has(MUTEX_REF),false)
   }
 })
 test('stranded claim lease renewal mutex is recognized and safely recoverable',()=>{
