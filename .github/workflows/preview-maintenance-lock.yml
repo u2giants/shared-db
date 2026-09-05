@@ -41,15 +41,16 @@ jobs:
           # lease. A 404 proves release; an unreadable API does not. Exit promptly
           # after owner-bound release, with a conservative hard ceiling.
           for _ in $(seq 1 470); do
-            if current="$(gh api 'repos/u2giants/shared-db/git/ref/db-coordination/preview' --jq .object.sha 2>"$RUNNER_TEMP/ref-error")"; then
-              if test "$current" != "$owner_sha"; then
-                echo "Preview ref moved to another owner while this run was live; refusing a green completion." >&2
-                exit 2
-              fi
-            elif grep -q 'HTTP 404' "$RUNNER_TEMP/ref-error"; then
+            state="$(node scripts/manage-preview-maintenance-lock.mjs --probe --owner-sha "$owner_sha" | jq -r .state)"
+            if test "$state" = released; then
               exit 0
-            else
-              cat "$RUNNER_TEMP/ref-error" >&2
+            fi
+            if test "$state" = unreadable; then
+              echo 'Preview lock ownership could not be read after bounded transport retries; keeping the holder live and trying again.' >&2
+            fi
+            if test "$state" = foreign-owner; then
+              echo 'Preview ref moved to another owner while this run was live; refusing a green completion.' >&2
+              exit 2
             fi
             sleep 30
           done

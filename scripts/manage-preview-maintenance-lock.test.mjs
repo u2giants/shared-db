@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { acquirePreviewMaintenanceLock, releasePreviewMaintenanceLock } from './manage-preview-maintenance-lock.mjs'
+import { acquirePreviewMaintenanceLock, probePreviewMaintenanceLock, releasePreviewMaintenanceLock } from './manage-preview-maintenance-lock.mjs'
 
 function io() {
   const refs = new Map()
@@ -47,20 +47,36 @@ test('ready repository maintenance acquires and safely releases the shared previ
 test('wrong main, issue routing, or occupied preview fails closed', () => {
   process.env.GITHUB_RUN_ID = '123'
   process.env.GITHUB_RUN_ATTEMPT = '1'
-  const stale = io()
-  assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'b'.repeat(40) }, stale), /exact current main/)
-  const wrong = io()
-  wrong.getIssue = () => ({ state: 'open', body: '```db-work-scope\nstatus: blocked\nwork_type: repo-maintenance\nroute: repo-maintenance\npriority: 1\ndepends_on:\nobjects:\n```' })
-  assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'a'.repeat(40) }, wrong), /not ready/)
-  const busy = io()
-  busy.refs.set('refs/db-coordination/preview', 'c'.repeat(40))
-  assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'a'.repeat(40) }, busy), /occupied/)
-  delete process.env.GITHUB_RUN_ID
-  delete process.env.GITHUB_RUN_ATTEMPT
+  try {
+    const stale = io()
+    assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'b'.repeat(40) }, stale), /exact current main/)
+    const wrong = io()
+    wrong.getIssue = () => ({ state: 'open', body: '```db-work-scope\nstatus: blocked\nwork_type: repo-maintenance\nroute: repo-maintenance\npriority: 1\ndepends_on:\nobjects:\n```' })
+    assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'a'.repeat(40) }, wrong), /not ready/)
+    const busy = io()
+    busy.refs.set('refs/db-coordination/preview', 'c'.repeat(40))
+    assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'a'.repeat(40) }, busy), /occupied/)
+  } finally {
+    delete process.env.GITHUB_RUN_ID
+    delete process.env.GITHUB_RUN_ATTEMPT
+  }
 })
 
 test('local acquisition is refused because it would be unrecoverable after a crash', () => {
   delete process.env.GITHUB_RUN_ID
   delete process.env.GITHUB_RUN_ATTEMPT
   assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'a'.repeat(40) }, io()), /must run in GitHub Actions/)
+})
+
+test('owner probe distinguishes a held lock, a released lock, and another owner', () => {
+  const fake = io()
+  const ownerSha = 'd'.repeat(40)
+  fake.refs.set('refs/db-coordination/preview', ownerSha)
+  assert.deepEqual(probePreviewMaintenanceLock(ownerSha, fake), { state: 'owned', ownerSha })
+  fake.refs.delete('refs/db-coordination/preview')
+  assert.deepEqual(probePreviewMaintenanceLock(ownerSha, fake), { state: 'released' })
+  fake.refs.set('refs/db-coordination/preview', 'e'.repeat(40))
+  assert.deepEqual(probePreviewMaintenanceLock(ownerSha, fake), { state: 'foreign-owner' })
+  fake.readRef = () => { throw new Error('HTTP 502') }
+  assert.deepEqual(probePreviewMaintenanceLock(ownerSha, fake), { state: 'unreadable' })
 })

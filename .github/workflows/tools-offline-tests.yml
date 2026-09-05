@@ -79,6 +79,21 @@ jobs:
             echo "::error::Missing scripts/check-main-tip-freshness.test.mjs"; exit 1; }
           node --test scripts/check-main-tip-freshness.test.mjs
 
+      - name: Run the GitHub transport tests and the conformance check (#2342)
+        # Named explicitly, like the freshness gate above: these decide how every
+        # governed gate reaches GitHub. The conformance check is the half that
+        # cannot be left to a reviewer's eye -- eight hand-rolled `gh` wrappers
+        # accumulated with nobody noticing, and a ninth could be added tomorrow in
+        # good faith. The tests run FIRST so the checker is proven able to refuse a
+        # known-dirty tree before its verdict on the real tree is believed.
+        run: |
+          set -euo pipefail
+          for f in scripts/lib/github-transport.test.mjs scripts/lib/github-tree.test.mjs scripts/check-github-transport-conformance.test.mjs; do
+            test -f "$f" || { echo "::error::Missing $f"; exit 1; }
+          done
+          node --test scripts/lib/github-transport.test.mjs scripts/lib/github-tree.test.mjs scripts/check-github-transport-conformance.test.mjs
+          node scripts/check-github-transport-conformance.mjs
+
       - name: Refuse to run with any production authorization present
         run: |
           set -euo pipefail

@@ -527,6 +527,18 @@ PREVIEW_PRODUCER_PATHS = (
     # differ from exact main, the applied commit and the preview project ref in
     # the evidence would be whatever a doctored checkout chose to write.
     "scripts/preview_instance_binding.py",
+    # Issue #2342. The preview job's `gh api` evidence reads now go through this
+    # thin CLI, and it and the transport beneath it decide what may be retried,
+    # what may never be replayed, and when a read fails closed. A doctored copy
+    # could turn a failed evidence read into a silent empty success, so both are
+    # pinned exactly like the entry points above.
+    "scripts/gh-read.mjs",
+    "scripts/lib/github-transport.mjs",
+    # Imported by the pinned collision and lane tools. It is the only permitted
+    # reader of file CONTENT at a ref, so an unpinned copy could hand a gate
+    # different SQL than the commit actually holds -- the same one-level-down
+    # door the .mjs entries above were pinned to close.
+    "scripts/lib/github-tree.mjs",
     # Data, not code, but it routes which apply mechanism the rehearsal
     # exercises. Pinned for rehearsal fidelity.
     "config/atomic-migration-allowlist.json",
