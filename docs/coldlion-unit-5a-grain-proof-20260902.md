@@ -2,7 +2,7 @@
 
 Measured 2026-09-02 against `http://x5.coldlion.com/EhpApi`. Issue #2175, tracker #2081,
 plan `plan_coldlion_landing_schema_completion.md` §9 Step 6. Migration
-`20260903030716_coldlion_landing_unit_5a_inventory_prod_tracking.sql`, test
+`20260905104449_coldlion_landing_unit_5a_inventory_prod_tracking.sql`, test
 `supabase/tests/coldlion_remainder_landing_contracts.sql`.
 
 Field names, counts, shapes and distinct-key counts only. No row values, no customer or
