@@ -88,9 +88,19 @@ def inventory(repo: Path, files: list[str]) -> tuple[list[dict], dict[str, str]]
     return rows, digests
 
 
-def checkpoint_metadata(files: list[str], command: list[str], digests: dict[str, str], workers: int) -> dict:
+def command_input_digests(repo: Path, command: list[str]) -> dict[str, str]:
+    inputs = {}
+    for argument in command:
+        candidate = repo / argument
+        if candidate.is_file():
+            inputs[argument] = digest(candidate)
+    return inputs
+
+
+def checkpoint_metadata(files: list[str], command: list[str], digests: dict[str, str], workers: int,
+                        suite_digests: dict[str, str] | None = None) -> dict:
     return {"schema": CHECKPOINT_SCHEMA, "files": files, "command": command,
-            "source_digests": digests, "workers": workers}
+            "source_digests": digests, "suite_digests": suite_digests or {}, "workers": workers}
 
 
 def load_checkpoint(path: Path, expected: dict) -> dict[str, dict]:
@@ -196,7 +206,8 @@ def main(argv: list[str] | None = None) -> int:
     for ordinal, row in enumerate(rows, start=1):
         row["ordinal"] = ordinal
     selected = rows[:args.limit] if args.limit else rows
-    metadata = checkpoint_metadata(args.files, command, digests, args.workers)
+    suite_digests = command_input_digests(repo, command)
+    metadata = checkpoint_metadata(args.files, command, digests, args.workers, suite_digests)
     deadline = time.time() + args.max_seconds
     partitions = [[row for index, row in enumerate(selected) if index % args.workers == worker]
                   for worker in range(args.workers)]
@@ -230,7 +241,8 @@ def main(argv: list[str] | None = None) -> int:
     ordered = sorted(merged.values(), key=lambda row: row["ordinal"])
     survivors = [row for row in ordered if row["survived"]]
     atomic_json(output, {"schema": REPORT_SCHEMA, "command": command, "files": args.files,
-        "source_digests": digests, "workers": args.workers, "total_guards": len(ordered),
+        "source_digests": digests, "suite_digests": suite_digests, "workers": args.workers,
+        "total_guards": len(ordered),
         "survivors": len(survivors), "results": ordered, "restoration_verified": True,
         "final_baseline_green": True})
     for worker in range(args.workers):

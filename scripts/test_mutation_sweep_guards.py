@@ -18,6 +18,17 @@ class MutationSweepSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "checkpoint does not match"):
                 sweep.load_checkpoint(path, changed)
 
+    def test_checkpoint_rejects_changed_test_suite_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary, "checkpoint.json")
+            expected = sweep.checkpoint_metadata(["guard.py"], ["python", "tests.py"],
+                                                 {"guard.py": "same"}, 2, {"tests.py": "old"})
+            sweep.save_checkpoint(path, expected, {"guard.py:1": {"id": "guard.py:1", "ordinal": 1}})
+            changed = sweep.checkpoint_metadata(["guard.py"], ["python", "tests.py"],
+                                                {"guard.py": "same"}, 2, {"tests.py": "new"})
+            with self.assertRaisesRegex(ValueError, "checkpoint does not match"):
+                sweep.load_checkpoint(path, changed)
+
     def test_checkpoint_rejects_duplicate_results_before_merge(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary, "checkpoint.json")
