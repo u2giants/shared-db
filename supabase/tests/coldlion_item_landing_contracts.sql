@@ -1,6 +1,6 @@
 -- Issue #2172 — contract tests for the corrected ColdLion ITEM landing structures.
 --
--- Migration: 20260903115949_coldlion_item_landing_structures.sql
+-- Migration: 20260905014719_coldlion_item_landing_structures.sql
 -- Plan gate: plan_coldlion_landing_schema_completion.md §9 Step 3 — "two identical
 -- item numbers in different divisions survive; a cleared slot disappears; every
 -- approved live field maps once; ignored fields map nowhere; an unknown field causes
