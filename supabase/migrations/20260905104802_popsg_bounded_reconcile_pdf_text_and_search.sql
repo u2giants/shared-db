@@ -150,6 +150,28 @@ create materialized view if not exists public.style_guide_file_groups as
    where is_active = true
    group by root_label, directory_path, licensor_name, property_folder, style_guide_folder;
 
+-- `style_guide_file_groups` is refreshed CONCURRENTLY below, which requires a
+-- unique index. Production already has one; a fresh replay from the baseline
+-- reconstructs the matview above and would otherwise have none, so the refresh
+-- would error. Created only when the relation has no unique index at all, so
+-- this stays a NO-OP in production.
+do $$
+begin
+  if not exists (
+    select 1
+      from pg_index i
+      join pg_class c on c.oid = i.indrelid
+      join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'public'
+       and c.relname = 'style_guide_file_groups'
+       and i.indisunique
+  ) then
+    execute 'create unique index sgfilegroups_group_uidx on public.style_guide_file_groups '
+            || '(root_label, directory_path, licensor_name, property_folder, style_guide_folder) nulls not distinct';
+  end if;
+end
+$$;
+
 create materialized view if not exists public.style_guide_folders as
   select distinct licensor_name, property_folder
     from public.style_guide_files
@@ -380,6 +402,14 @@ declare
   v_deactivated integer := 0;
   v_remaining bigint;
 begin
+  -- Serialize every reconciliation of a single root. Without this, two accepted
+  -- runs that each crawled roughly half of one root each see the OTHER run's
+  -- rows as stale; both pass the ratio guard on their own half, and together they
+  -- inactivate every active row of the root. FOR UPDATE SKIP LOCKED does not
+  -- prevent that -- the two batches touch disjoint rows, so neither ever blocks.
+  -- The lock is transaction-scoped, so it is released with the caller's commit.
+  perform pg_advisory_xact_lock(hashtext(p_root_label));
+
   select * into v_preview
     from public.preview_stale_sg_files(p_root_label, p_run_id, p_min_ratio);
 
@@ -454,7 +484,8 @@ begin
      set files_deactivated = files_deactivated + v_deactivated,
          reconcile_batches = reconcile_batches + 1,
          stale_remaining = v_remaining::integer,
-         reconcile_completed_at = case when v_remaining = 0 then coalesce(reconcile_completed_at, now()) end
+         reconcile_completed_at = case when v_remaining = 0 then coalesce(reconcile_completed_at, now())
+                                       else reconcile_completed_at end
    where id = p_run_id;
 
   deactivated  := v_deactivated;
@@ -578,6 +609,11 @@ begin
        where (p_run_id is null or f.crawl_run_id = p_run_id)
          and f.is_active
          and (d.style_guide_file_id is null
+              -- A file that went stale and later came back unchanged keeps its
+              -- stored source_identity, but reconcile_stale_sg_files_batch left
+              -- the document is_active = false. Without this clause the row is
+              -- never re-selected and stays invisible to unified search forever.
+              or d.is_active is distinct from f.is_active
               or d.source_identity is distinct from
                  md5(f.relative_path || '|' || coalesce(f.size_bytes::text, '') || '|' ||
                      coalesce(f.modified_at::text, '') || '|' || coalesce(f.tag_search_text, '') || '|' ||

@@ -40,6 +40,11 @@ declare
   v_run_c uuid;  -- empty-crawl guard
   v_run_d uuid;  -- inaccessible-root guard
   v_run_e uuid;  -- completion invariant
+  v_run_f uuid;  -- search-document re-activation
+  v_run_f2 uuid;
+  v_run_f3 uuid;
+  v_run_g uuid;  -- multi-batch reconcile of an already-completed run
+  v_run_g2 uuid;
   v_file uuid;
   v_reactivated uuid;
   v_preview record;
@@ -524,7 +529,134 @@ begin
     raise exception 'contract 13: inactive documents were returned by the search RPC';
   end if;
 
-  raise notice 'issue #2212 PopSG contracts: all 13 checks passed';
+  -- =========================================================================
+  -- verify 14: a re-activated file is re-activated in unified search
+  -- =========================================================================
+  -- reconcile_stale_sg_files_batch sets style_guide_search_documents.is_active
+  -- = false. The stored source_identity was computed while the file was still
+  -- active, so when a later crawl re-sees the file UNCHANGED the identity still
+  -- matches and an identity-only candidate predicate would never re-select the
+  -- row: the file would be active and permanently invisible to search.
+  delete from public.style_guide_search_documents;
+
+  insert into public.style_guide_crawl_runs (status, files_found) values ('pending', 2) returning id into v_run_f;
+  v_file := pg_temp.mk_file('ROOT_F', v_run_f, 'f1.pdf');
+  perform pg_temp.mk_file('ROOT_F', v_run_f, 'f2.pdf');
+
+  -- the search document as refresh_style_guide_matviews would have written it
+  insert into public.style_guide_search_documents
+    (style_guide_file_id, root_label, licensor_name, property_folder, style_guide_folder,
+     style_guide_name, directory_path, relative_path, filename, file_extension,
+     tag_names, size_bytes, modified_at, is_active, source_identity, search_vector)
+  select f.id, f.root_label, f.licensor_name, f.property_folder, f.style_guide_folder,
+         'TestGuide', f.directory_path, f.relative_path, f.filename, f.file_extension,
+         f.tag_names, f.size_bytes, f.modified_at, f.is_active,
+         md5(f.relative_path || '|' || coalesce(f.size_bytes::text, '') || '|' ||
+             coalesce(f.modified_at::text, '') || '|' || coalesce(f.tag_search_text, '') || '|' ||
+             coalesce(f.style_guide_folder, '') || '|' || coalesce(f.property_folder, '') || '|' ||
+             coalesce(f.licensor_name, '') || '|' || f.is_active::text),
+         to_tsvector('simple', f.filename)
+    from public.style_guide_files f
+   where f.root_label = 'ROOT_F';
+
+  select source_identity into v_identity
+    from public.style_guide_search_documents where style_guide_file_id = v_file;
+
+  -- a crawl that re-sees only f2 makes f1 stale
+  insert into public.style_guide_crawl_runs (status, files_found) values ('pending', 1) returning id into v_run_f2;
+  update public.style_guide_files set crawl_run_id = v_run_f2
+   where root_label = 'ROOT_F' and relative_path = 'TestLicensor/f2.pdf';
+  update public.style_guide_crawl_runs set files_found = 1 where id = v_run_f2;
+
+  select * into v_batch from public.reconcile_stale_sg_files_batch('ROOT_F', v_run_f2, 100, 0.5);
+  if v_batch.guard_state <> 'ok' or v_batch.deactivated <> 1 then
+    raise exception 'contract 14: expected exactly one stale row (state=%, deactivated=%)',
+      v_batch.guard_state, v_batch.deactivated;
+  end if;
+  if (select is_active from public.style_guide_search_documents where style_guide_file_id = v_file) then
+    raise exception 'contract 14: the search document of a stale file was not deactivated';
+  end if;
+
+  -- a later crawl re-sees f1 UNCHANGED
+  insert into public.style_guide_crawl_runs (status, files_found) values ('pending', 2) returning id into v_run_f3;
+  update public.style_guide_files set is_active = true, crawl_run_id = v_run_f3, last_seen_at = now()
+   where id = v_file;
+  update public.style_guide_files set crawl_run_id = v_run_f3
+   where root_label = 'ROOT_F' and relative_path = 'TestLicensor/f2.pdf';
+
+  -- the file is active again and its identity is UNCHANGED, so an identity-only
+  -- predicate cannot see it. This is the premise of the defect, asserted rather
+  -- than assumed.
+  if v_identity is distinct from (
+       select md5(f.relative_path || '|' || coalesce(f.size_bytes::text, '') || '|' ||
+                  coalesce(f.modified_at::text, '') || '|' || coalesce(f.tag_search_text, '') || '|' ||
+                  coalesce(f.style_guide_folder, '') || '|' || coalesce(f.property_folder, '') || '|' ||
+                  coalesce(f.licensor_name, '') || '|' || f.is_active::text)
+         from public.style_guide_files f where f.id = v_file) then
+    raise exception 'contract 14: the re-seen file no longer has its stored identity, so the test proves nothing';
+  end if;
+
+  -- therefore the refresh candidate predicate MUST also key on is_active drift.
+  -- refresh_style_guide_matviews cannot be called here (it issues REFRESH ...
+  -- CONCURRENTLY, which PostgreSQL forbids inside a transaction block), so the
+  -- deployed definition is read from the catalogue.
+  if position('d.is_active is distinct from f.is_active' in
+              pg_get_functiondef('public.refresh_style_guide_matviews(uuid,integer)'::regprocedure)) = 0 then
+    raise exception 'contract 14: refresh_style_guide_matviews cannot re-activate a returning file, so it stays invisible to search';
+  end if;
+
+  -- and the document itself must be re-activated once refreshed
+  update public.style_guide_search_documents d
+     set is_active = f.is_active, document_updated_at = now()
+    from public.style_guide_files f
+   where f.id = d.style_guide_file_id and d.is_active is distinct from f.is_active;
+  if not (select is_active from public.style_guide_search_documents where style_guide_file_id = v_file) then
+    raise exception 'contract 14: the re-activated file did not become visible to search again';
+  end if;
+
+  -- =========================================================================
+  -- verify 15: a multi-batch reconcile of an ALREADY-completed run survives
+  -- =========================================================================
+  -- reconcile_completed_at must not be nulled on a non-final batch: on a run
+  -- that already reached 'completed' that violates
+  -- style_guide_crawl_runs_completion_requires_reconcile and aborts the call.
+  insert into public.style_guide_crawl_runs (status, files_found) values ('pending', 4) returning id into v_run_g;
+  perform pg_temp.mk_file('ROOT_G', v_run_g, 'g1.pdf');
+  perform pg_temp.mk_file('ROOT_G', v_run_g, 'g2.pdf');
+  perform pg_temp.mk_file('ROOT_G', v_run_g, 'g3.pdf');
+  perform pg_temp.mk_file('ROOT_G', v_run_g, 'g4.pdf');
+
+  insert into public.style_guide_crawl_runs (status, files_found) values ('pending', 2) returning id into v_run_g2;
+  update public.style_guide_files set crawl_run_id = v_run_g2
+   where root_label = 'ROOT_G' and relative_path in ('TestLicensor/g1.pdf','TestLicensor/g2.pdf');
+  update public.style_guide_crawl_runs
+     set files_found = 2,
+         reconcile_completed_at = now(),
+         refresh_completed_at = now(),
+         lifecycle_state = 'completed',
+         status = 'completed'
+   where id = v_run_g2;
+
+  -- batch size 1 over two stale rows: the FIRST call is non-final
+  select * into v_batch from public.reconcile_stale_sg_files_batch('ROOT_G', v_run_g2, 1, 0.5);
+  if v_batch.guard_state <> 'ok' or v_batch.done then
+    raise exception 'contract 15: expected an unfinished first batch (state=%, done=%)',
+      v_batch.guard_state, v_batch.done;
+  end if;
+  if (select reconcile_completed_at from public.style_guide_crawl_runs where id = v_run_g2) is null then
+    raise exception 'contract 15: a non-final batch nulled reconcile_completed_at on a completed run';
+  end if;
+
+  select * into v_batch from public.reconcile_stale_sg_files_batch('ROOT_G', v_run_g2, 1, 0.5);
+  if not v_batch.done then
+    raise exception 'contract 15: the second batch did not finish the reconciliation';
+  end if;
+  if (select reconcile_completed_at from public.style_guide_crawl_runs where id = v_run_g2) is null
+     or (select lifecycle_state from public.style_guide_crawl_runs where id = v_run_g2) <> 'completed' then
+    raise exception 'contract 15: the completed run lost its reconciliation stamp';
+  end if;
+
+  raise notice 'issue #2212 PopSG contracts: all 15 checks passed';
 end
 $contracts$;
 
