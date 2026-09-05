@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -23,17 +23,25 @@ test('current migration version refuses when live main cannot be refreshed',()=>
   assert.throws(()=>currentMainMaxVersion('C:/worktree',()=>{throw new Error('offline')}),/offline/)
 })
 
-test('GitHub coordination transport retries bounded transient failures with identical deterministic arguments',()=>{
+test('GitHub coordination transport retries only explicitly idempotent writes with identical deterministic arguments',()=>{
   const calls=[],waits=[],args=['api','-X','POST','repos/u2giants/shared-db/git/commits','-f','message=exact']
   const result=runGitHubCommand(args,{executor:(command,actual)=>{
     calls.push([command,[...actual]])
     if(calls.length<3)throw commandFailure('HTTP 503: No server is currently available')
     return '{"sha":"same"}'
-  },wait:waits.push.bind(waits)})
+  },wait:waits.push.bind(waits),idempotentWrite:true})
   assert.equal(result,'{"sha":"same"}')
   assert.deepEqual(waits,[1000,2000])
   assert.equal(calls.length,3)
   assert.ok(calls.every(([,actual])=>JSON.stringify(actual)===JSON.stringify(args)))
+})
+
+test('GitHub coordination transport never replays an unproven write by default',()=>{
+  let calls=0
+  assert.throws(()=>runGitHubCommand(['issue','comment','1','--body','once'],{
+    executor:()=>{calls+=1;throw commandFailure('HTTP 503: response lost')},wait:()=>{},
+  }),error=>error instanceof LaneError&&error.transientTransport===true)
+  assert.equal(calls,1)
 })
 
 test('GitHub coordination transport exhausts after four attempts and never retries 4xx',()=>{
@@ -2337,7 +2345,7 @@ test('post-merge preview rehearsal never needs or reads a live author claim', ()
 // Deliberately a SECOND import statement, placed here rather than appended to the
 // import list at the top of the file: PR #1359 appends to that same line, and two
 // appends to one line is a merge conflict for no benefit.
-import { parseVersionPrMap } from './manage-migration-author-lanes.mjs'
+import { parseVersionPrMap, pendingRequiredContexts } from './manage-migration-author-lanes.mjs'
 
 // ---------------------------------------------------------------------------
 // POST-MERGE REHEARSAL OF A BATCH AUTHORED BY SEVERAL PULL REQUESTS (#1350)
@@ -2709,6 +2717,11 @@ test('stranded claim lease renewal mutex is recognized and safely recoverable',(
   const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
   assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
 })
+test('stranded expired claim recovery mutex is recognized and safely recoverable',()=>{
+  const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:'db-coordination expired-claim-recovery recover-2177',committer:{date:'2026-08-14T19:55:00Z'}})
+  const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
+  assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
+})
 
 function splitIo(overrides={}) {
   const io=memoryIo(), original=['table plm.style_tracker_item_bridge'], combined=[...original,'index plm.item_upper_trim_item_number_idx']
@@ -2936,6 +2949,97 @@ test('claim renewal enforces a bounded lease and real CLI wiring',()=>{
   for(const leaseHours of [0,24.01,NaN])assert.throws(()=>renewExpiredClaim({...renewalOptions,leaseHours},NOW,renewalIo()),/no more than 24/)
   const io=renewalIo(),args=['--renew-claim','--claim-number','1058','--issue','853','--owner',renewalOptions.owner,'--branch',renewalOptions.branch,'--worktree',renewalOptions.worktree,'--pr','1060','--head-sha',renewalOptions.headSha,'--lease-hours','12']
   assert.equal(main(args,NOW,io),0);assert.equal(parseAuthorLease(io.issue.body,NOW).active,true)
+})
+
+function expiredPrRecoveryIo({issueNumber,claimNumber,prNumber,version,owner,branch,worktree,title,tables,children},overrides={}){
+  const io=memoryIo(),head='a'.repeat(40)
+  const claim={number:claimNumber,state:'open',title,body:claimBody({version,objects:tables,owner,branch,worktree,expiresAt:new Date('2026-08-14T19:00:00Z')})}
+  const workIssue={number:issueNumber,state:'open',body:scope('ready','structural','shared-db-orchestrator',2,tables)}
+  io.refs.set(`refs/db-claims/${version}`,'permanent')
+  io.openClaims=()=>[structuredClone(claim)]
+  io.getIssue=(number)=>Number(number)===issueNumber?structuredClone(workIssue):Number(number)===claimNumber?structuredClone(claim):null
+  io.updateCalls=0;io.updateIssue=(_number,fields)=>{io.updateCalls++;Object.assign(claim,fields);return structuredClone(claim)}
+  io.getPr=()=>({state:'open',head:{sha:head,ref:branch}})
+  io.getPrFiles=()=>[{status:'added',filename:`supabase/migrations/${version}_fixture.sql`}]
+  io.prSources=()=>[{label:`PR #${prNumber} fixture`,objects:[...tables,...children],versions:[version]}]
+  return Object.assign(io,{claim,workIssue,head,tables,children},overrides)
+}
+
+const recovery2177={issueNumber:2177,claimNumber:2182,prNumber:2183,version:'20260904001147',owner:'claude-subagent-2177',branch:'claude/2177-coldlion-cust-sp',worktree:'C:\\repos\\shared-db\\.claude\\worktrees\\coldlion-cust-sp-2177',title:'CLAIM: #2177 ColdLion customer + salesperson field projections (owner ruling issue 2081, run c5519623574)',tables:['table coldlion.customer','table coldlion.salesperson'],children:['column coldlion.customer.customer_name','column coldlion.customer.currency_code','column coldlion.customer.payment_terms','column coldlion.customer.price_level','column coldlion.customer.salesperson_code','column coldlion.customer.ship_via','column coldlion.customer.tax_code','column coldlion.salesperson.active']}
+const recovery2175={issueNumber:2175,claimNumber:2184,prNumber:2185,version:'20260903030716',owner:'claude-opus-5-subagent-2175',branch:'claude/2175-coldlion-unit-5a',worktree:'C:\\repos\\shared-db\\.claude\\worktrees\\coldlion-5a-inv-prodtrack',title:'CLAIM: Issue #2175 ColdLion landing unit 5a: create coldlion.inventory and coldlion.prod_tracking landing tables from live-sampled shapes',tables:['table coldlion.inventory','table coldlion.prod_tracking'],children:['column coldlion.inventory.company_code','column coldlion.inventory.item_pkey','column coldlion.inventory.warehouse_code','column coldlion.inventory.inventory_qty','column coldlion.inventory.inventory_cost','column coldlion.prod_tracking.company_code','column coldlion.prod_tracking.prod_order_no','column coldlion.prod_tracking.order_date','column coldlion.prod_tracking.start_date','column coldlion.prod_tracking.cancel_date','column coldlion.prod_tracking.payload_hash','column coldlion.prod_tracking.source_updated_at']}
+function recoveryOptions(fixture){return {claim:fixture.claimNumber,issue:fixture.issueNumber,owner:fixture.owner,branch:fixture.branch,worktree:fixture.worktree,pr:fixture.prNumber,headSha:'a'.repeat(40),leaseHours:12,requestId:`recover-${fixture.issueNumber}`,mutexAttempts:1}}
+
+test('#2177/#2182 expired recovery atomically appends eight PR-derived child columns and renews',()=>{
+  const io=expiredPrRecoveryIo(recovery2177),before=io.claim.body,result=recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),lease=parseAuthorLease(io.claim.body,NOW)
+  assert.deepEqual(result.added,recovery2177.children);assert.deepEqual(lease.objects,[...recovery2177.tables,...recovery2177.children].sort());assert.equal(lease.active,true);assert.equal(io.updateCalls,1)
+  assert.equal(io.claim.body.replace(/  - column .*\n/g,'').replace(/^expires_at:.*$/m,'expires_at: X'),before.replace(/^expires_at:.*$/m,'expires_at: X'))
+})
+
+test('#2175/#2184 expired recovery atomically appends twelve PR-derived child columns and renews',()=>{
+  const io=expiredPrRecoveryIo(recovery2175),before=io.claim.body,result=recoverExpiredClaimFromPr(recoveryOptions(recovery2175),NOW,io),lease=parseAuthorLease(io.claim.body,NOW)
+  assert.equal(result.added.length,12);assert.deepEqual(lease.objects,[...recovery2175.tables,...recovery2175.children].sort());assert.equal(lease.active,true);assert.equal(io.updateCalls,1)
+  assert.equal(io.claim.body.replace(/  - column .*\n/g,'').replace(/^expires_at:.*$/m,'expires_at: X'),before.replace(/^expires_at:.*$/m,'expires_at: X'))
+})
+
+test('a recovered claim can be renewed again from the same unchanged issue and PR evidence',()=>{
+  const io=expiredPrRecoveryIo(recovery2177),options=recoveryOptions(recovery2177)
+  recoverExpiredClaimFromPr(options,NOW,io)
+  const later=new Date('2026-08-16T20:00:00Z'),result=renewExpiredClaim(options,later,io)
+  assert.equal(result.idempotent,false);assert.equal(parseAuthorLease(io.claim.body,later).active,true);assert.equal(io.updateCalls,2)
+})
+
+test('expired PR recovery fails closed on collision, stale identity, active lease, or shortened head SHA',()=>{
+  let io=expiredPrRecoveryIo(recovery2177),other={number:999,body:claimBody({version:'20260905000000',objects:[recovery2177.children[0]],owner:'other',branch:'other',worktree:'C:/other',expiresAt:new Date('2026-08-17T00:00:00Z')})}
+  io.openClaims=()=>[structuredClone(io.claim),other];assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/collision/);assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177);assert.throws(()=>recoverExpiredClaimFromPr({...recoveryOptions(recovery2177),headSha:'b'.repeat(40)},NOW,io),/exact head/);assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177);io.claim.body=io.claim.body.replace('2026-08-14T19:00:00.000Z','2026-08-15T09:00:00.000Z');assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/must be non-legacy and expired/);assert.equal(io.updateCalls,0)
+  assert.throws(()=>recoverExpiredClaimFromPr({...recoveryOptions(recovery2177),headSha:'a'.repeat(7)},NOW,expiredPrRecoveryIo(recovery2177)),/40-character/)
+})
+
+test('expired PR recovery refuses every authority, scope, parser, reservation, and version mismatch before writing',()=>{
+  for(const change of [{owner:'wrong'},{branch:'wrong'},{worktree:'wrong'}]){const io=expiredPrRecoveryIo(recovery2177);assert.throws(()=>recoverExpiredClaimFromPr({...recoveryOptions(recovery2177),...change},NOW,io),/owner, branch, or worktree/);assert.equal(io.updateCalls,0)}
+  let io=expiredPrRecoveryIo(recovery2177);io.refs.delete(`refs/db-claims/${recovery2177.version}`);assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/reservation/);assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177);io.workIssue.body=scope('blocked','structural','shared-db-orchestrator',2,recovery2177.tables);assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/open ready structural/);assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177);io.prSources=()=>[];assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/parser source/);assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177);io.getPrFiles=()=>[{filename:`supabase/migrations/${recovery2177.version}_a.sql`},{filename:'supabase/migrations/20260904001148_b.sql'}];assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/migration version/);assert.equal(io.updateCalls,0)
+})
+
+test('expired PR recovery refuses concurrent identity changes and never rolls back after mutex ownership loss',()=>{
+  let io=expiredPrRecoveryIo(recovery2177),baseGet=io.getIssue,workReads=0
+  io.getIssue=(number)=>{const value=baseGet(number);if(Number(number)===2177&&++workReads===2)value.body=scope('blocked','structural','shared-db-orchestrator',2,recovery2177.tables);return value}
+  assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/issue changed concurrently/);assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177);const before=io.claim.body,baseUpdate=io.updateIssue
+  io.updateIssue=(number,fields)=>{const result=baseUpdate(number,fields);io.refs.set(MUTEX_REF,'successor');return result}
+  assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/ROLLBACK NOT ATTEMPTED/);assert.notEqual(io.claim.body,before);assert.equal(io.updateCalls,1)
+})
+
+test('expired PR recovery rolls back its single atomic write after an ambiguous update failure',()=>{
+  const io=expiredPrRecoveryIo(recovery2177),before=io.claim.body,baseUpdate=io.updateIssue;let first=true
+  io.updateIssue=(number,fields)=>{const result=baseUpdate(number,fields);if(first){first=false;throw new LaneError('response lost after PATCH')}return result}
+  assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),/response lost/);assert.equal(io.claim.body,before);assert.equal(io.updateCalls,2)
+})
+
+test('THE DEADLOCK: an expired claim whose PR objects exceed it is refused by BOTH renewal and expansion, and only recovery frees it',()=>{
+  // Reproduces the live #2182/#2184/#2226/#2195 stall: the lease has expired AND the PR
+  // parses objects the claim never covered, so each pre-existing path refuses on the other's
+  // precondition. Without recoverExpiredClaimFromPr the lane is unrecoverable.
+  let io=expiredPrRecoveryIo(recovery2177)
+  assert.equal(parseAuthorLease(io.claim.body,NOW).active,false,'fixture lease must already be expired')
+  assert.throws(()=>renewExpiredClaim(recoveryOptions(recovery2177),NOW,io),/claim does not cover parsed pull request objects/)
+  assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177)
+  assert.throws(()=>expandActiveClaimFromPr({...recoveryOptions(recovery2177),claim:recovery2177.claimNumber},NOW,io),/target claim lease is legacy or expired/)
+  assert.equal(io.updateCalls,0)
+  io=expiredPrRecoveryIo(recovery2177)
+  const result=recoverExpiredClaimFromPr(recoveryOptions(recovery2177),NOW,io),lease=parseAuthorLease(io.claim.body,NOW)
+  assert.deepEqual(result.added,recovery2177.children)
+  assert.equal(lease.active,true,'recovery must both cover the PR objects and restore a live lease')
+  assert.equal(io.updateCalls,1)
+})
+
+test('REAL main command wires expired PR expansion and renewal as one recovery',()=>{
+  const io=expiredPrRecoveryIo(recovery2177),f=recovery2177,args=['--recover-expired-claim-from-pr','--claim-number',String(f.claimNumber),'--issue',String(f.issueNumber),'--owner',f.owner,'--branch',f.branch,'--worktree',f.worktree,'--pr',String(f.prNumber),'--head-sha','a'.repeat(40),'--lease-hours','12']
+  assert.equal(main(args,NOW,io),0);assert.equal(parseAuthorLease(io.claim.body,NOW).active,true);assert.equal(io.updateCalls,1)
 })
 
 function reversionIo(overrides={}){
@@ -5646,4 +5750,16 @@ test('parseLinkHeader reads uri and parameters structurally',()=>{
   assert.equal(links[0].params.rel,'next')
   assert.equal(links[0].params.title,'a, b; c','a comma or semicolon inside quotes must not split the value')
   assert.equal(links[1].params.rel,'last')
+})
+
+test('the preview gate excludes the context the guarded merge sets for itself', () => {
+  const required=['SQL migration guards','Migration author lease','Migration guarded merge authorization']
+  const green=new Map([['SQL migration guards','SUCCESS'],['Migration author lease','SUCCESS']])
+  // The self-set context is absent from the head's checks, exactly as it is
+  // before any merge has run. It must not hold preview back.
+  assert.deepEqual(pendingRequiredContexts(required,green),[])
+  // Positive control: a genuinely failing required check must still be reported,
+  // so the exclusion above is proven to be narrow rather than a blanket pass.
+  const red=new Map([['SQL migration guards','FAILURE'],['Migration author lease','SUCCESS']])
+  assert.deepEqual(pendingRequiredContexts(required,red),['SQL migration guards'])
 })
