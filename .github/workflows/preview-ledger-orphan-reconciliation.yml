@@ -152,14 +152,18 @@ jobs:
           ARTIFACT_ID: ${{ inputs.preview_artifact_id }}
         run: |
           set -euo pipefail
-          gh api "repos/${GITHUB_REPOSITORY}/issues/$ISSUE" > "$RUNNER_TEMP/issue.json"
-          gh api "repos/${GITHUB_REPOSITORY}/issues/$CLAIM" > "$RUNNER_TEMP/claim.json"
-          gh api "repos/${GITHUB_REPOSITORY}/pulls/$SOURCE_PR" > "$RUNNER_TEMP/pr.json"
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/$SOURCE_PR/files?per_page=100" > "$RUNNER_TEMP/pr-files-pages.json"
+          # Issue #2342: seven sequential reads under `set -euo pipefail`, each of
+          # which used to abort this whole reconciliation on one spurious 502. They
+          # go through the one shared transport now, which retries transport faults
+          # only and still fails closed -- nothing this step verifies is relaxed.
+          node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" --out "$RUNNER_TEMP/issue.json" api "repos/${GITHUB_REPOSITORY}/issues/$ISSUE"
+          node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" --out "$RUNNER_TEMP/claim.json" api "repos/${GITHUB_REPOSITORY}/issues/$CLAIM"
+          node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" --out "$RUNNER_TEMP/pr.json" api "repos/${GITHUB_REPOSITORY}/pulls/$SOURCE_PR"
+          node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" --out "$RUNNER_TEMP/pr-files-pages.json" api --paginate "repos/${GITHUB_REPOSITORY}/pulls/$SOURCE_PR/files?per_page=100"
           python -c 'import json,sys; p=json.load(open(sys.argv[1])); json.dump([x for page in p for x in page] if p and isinstance(p[0],list) else p,open(sys.argv[2],"w"))' "$RUNNER_TEMP/pr-files-pages.json" "$RUNNER_TEMP/pr-files.json"
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$PREVIEW_RUN_ID" > "$RUNNER_TEMP/run.json"
-          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/$ARTIFACT_ID" > "$RUNNER_TEMP/artifact.json"
-          gh api -H 'Accept: application/vnd.github+json' "repos/${GITHUB_REPOSITORY}/actions/artifacts/$ARTIFACT_ID/zip" > "$RUNNER_TEMP/preview.zip"
+          node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" --out "$RUNNER_TEMP/run.json" api "repos/${GITHUB_REPOSITORY}/actions/runs/$PREVIEW_RUN_ID"
+          node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" --out "$RUNNER_TEMP/artifact.json" api "repos/${GITHUB_REPOSITORY}/actions/artifacts/$ARTIFACT_ID"
+          node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" --out "$RUNNER_TEMP/preview.zip" api -H 'Accept: application/vnd.github+json' "repos/${GITHUB_REPOSITORY}/actions/artifacts/$ARTIFACT_ID/zip"
           mkdir "$RUNNER_TEMP/preview-evidence"
           unzip -q "$RUNNER_TEMP/preview.zip" -d "$RUNNER_TEMP/preview-evidence"
       - name: Materialize exact reviewed and applied source commits

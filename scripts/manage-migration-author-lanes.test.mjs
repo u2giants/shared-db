@@ -23,17 +23,25 @@ test('current migration version refuses when live main cannot be refreshed',()=>
   assert.throws(()=>currentMainMaxVersion('C:/worktree',()=>{throw new Error('offline')}),/offline/)
 })
 
-test('GitHub coordination transport retries bounded transient failures with identical deterministic arguments',()=>{
+test('GitHub coordination transport retries only explicitly idempotent writes with identical deterministic arguments',()=>{
   const calls=[],waits=[],args=['api','-X','POST','repos/u2giants/shared-db/git/commits','-f','message=exact']
   const result=runGitHubCommand(args,{executor:(command,actual)=>{
     calls.push([command,[...actual]])
     if(calls.length<3)throw commandFailure('HTTP 503: No server is currently available')
     return '{"sha":"same"}'
-  },wait:waits.push.bind(waits)})
+  },wait:waits.push.bind(waits),idempotentWrite:true})
   assert.equal(result,'{"sha":"same"}')
   assert.deepEqual(waits,[1000,2000])
   assert.equal(calls.length,3)
   assert.ok(calls.every(([,actual])=>JSON.stringify(actual)===JSON.stringify(args)))
+})
+
+test('GitHub coordination transport never replays an unproven write by default',()=>{
+  let calls=0
+  assert.throws(()=>runGitHubCommand(['issue','comment','1','--body','once'],{
+    executor:()=>{calls+=1;throw commandFailure('HTTP 503: response lost')},wait:()=>{},
+  }),error=>error instanceof LaneError&&error.transientTransport===true)
+  assert.equal(calls,1)
 })
 
 test('GitHub coordination transport exhausts after four attempts and never retries 4xx',()=>{
@@ -2337,7 +2345,7 @@ test('post-merge preview rehearsal never needs or reads a live author claim', ()
 // Deliberately a SECOND import statement, placed here rather than appended to the
 // import list at the top of the file: PR #1359 appends to that same line, and two
 // appends to one line is a merge conflict for no benefit.
-import { parseVersionPrMap } from './manage-migration-author-lanes.mjs'
+import { parseVersionPrMap, pendingRequiredContexts } from './manage-migration-author-lanes.mjs'
 
 // ---------------------------------------------------------------------------
 // POST-MERGE REHEARSAL OF A BATCH AUTHORED BY SEVERAL PULL REQUESTS (#1350)
@@ -5742,4 +5750,16 @@ test('parseLinkHeader reads uri and parameters structurally',()=>{
   assert.equal(links[0].params.rel,'next')
   assert.equal(links[0].params.title,'a, b; c','a comma or semicolon inside quotes must not split the value')
   assert.equal(links[1].params.rel,'last')
+})
+
+test('the preview gate excludes the context the guarded merge sets for itself', () => {
+  const required=['SQL migration guards','Migration author lease','Migration guarded merge authorization']
+  const green=new Map([['SQL migration guards','SUCCESS'],['Migration author lease','SUCCESS']])
+  // The self-set context is absent from the head's checks, exactly as it is
+  // before any merge has run. It must not hold preview back.
+  assert.deepEqual(pendingRequiredContexts(required,green),[])
+  // Positive control: a genuinely failing required check must still be reported,
+  // so the exclusion above is proven to be narrow rather than a blanket pass.
+  const red=new Map([['SQL migration guards','FAILURE'],['Migration author lease','SUCCESS']])
+  assert.deepEqual(pendingRequiredContexts(required,red),['SQL migration guards'])
 })
