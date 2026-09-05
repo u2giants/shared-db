@@ -143,7 +143,7 @@ export const REVIEWERS = Object.freeze([
   { name:'kimi-k3', wrapper:'ai-kimi', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-kimi: read-only agent profile over the checkout/worktree' } },
   { name:'qwen-3.8-max', wrapper:'ai-qwen', readsRepository:true,
-    readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-qwen: retired from the rotation; wrapper hands the model a real checkout' } },
+    readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-qwen: quarantined pending live qualification, not retired; wrapper hands the model a real checkout' } },
   { name:'glm-5.2', wrapper:'ai-glm', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'historical label for the ai-glm wrapper above; same checkout' } },
   { name:'muse-spark-1.2-contributor', wrapper:'ai-muse', readsRepository:true,
@@ -271,9 +271,22 @@ export const REVIEWERS = Object.freeze([
 // Capacity is worth having on its own terms: twice on 2026-08-19 a second reviewer
 // overturned the first's conclusion, once by refuting an author's design rationale
 // using the author's own test fixture. A rotation of one is not a rotation.
-// Qwen remains historical-only, and Gemini remains outside the registry, while
-// ai-devops reviewer reliability is being repaired (owner instruction,
-// 2026-08-28). Historical names are never deleted because durable refs use them.
+// Gemini remains outside the registry while ai-devops reviewer reliability is
+// being repaired (owner instruction, 2026-08-28). Historical names are never
+// deleted because durable refs use them.
+//
+// QWEN IS NOT RETIRED (owner instruction, 2026-09-04). Every statement that
+// 'qwen-3.8-max' is retired, paused or historical-only has been removed from
+// this repository, and the name is no longer carried in RETIRED_REVIEWERS.
+// It is QUARANTINED instead, which is a different and narrower fact: as of
+// 2026-09-04 `ai-review-preflight status qwen` reports `status: quarantined`
+// with `failure_class: live-qualification-required`, live re-qualification was
+// attempted that day and FAILED (`terminal-result-error`; two hand runs died
+// after 900s and 240s returning no answer), and that quarantine has NOT been
+// cleared. Clearing it without a passing qualification would be symptom
+// suppression, so the roster keeps Qwen undrawable until ai-devops qualifies it.
+// Un-quarantining is a one-line deletion from QUARANTINED_REVIEWERS below, to be
+// made only after `ai-review-preflight qualify qwen` passes for real.
 //
 // RETIRED 2026-09-01 (issue #2078): 'deepseek-chat'. NOT a provider-quality pause
 // and not a health-check failure -- `ai-deepseek-agent` is structurally incapable
@@ -295,7 +308,16 @@ export const REVIEWERS = Object.freeze([
 // 2026-09-04T16:55Z. Whoever is orchestrating then should verify the cap has
 // actually lifted (do not assume the clock alone; confirm with a real doctor/attempt)
 // before removing 'kimi-k3' from this list and restoring its original rotation slot.
-export const RETIRED_REVIEWERS = Object.freeze(['qwen-3.8-max', 'glm-5.2', 'deepseek-chat', 'kimi-k3'])
+export const RETIRED_REVIEWERS = Object.freeze(['glm-5.2', 'deepseek-chat', 'kimi-k3'])
+
+// Not retired -- quarantined pending a passing live qualification (see the Qwen
+// note above). Kept separate from RETIRED_REVIEWERS on purpose: retirement is a
+// permanent disposition, quarantine is a reversible one, and conflating them is
+// what put a false 'Qwen is retired' claim into the roster in the first place.
+// Both lists are excluded from ACTIVE_REVIEWERS, so this changes no rotation
+// order, no in-flight sequence and no draw. Names here stay readable in
+// REVIEWERS forever because durable refs name them.
+export const QUARANTINED_REVIEWERS = Object.freeze(['qwen-3.8-max'])
 
 // The single fact the gate was missing (#2078). A verdict is evidence only if the
 // reviewer could open the file. Unknown names fail closed.
@@ -333,7 +355,7 @@ export function reviewerKnownNonReading(name, reviewers=REVIEWERS){
 // edge-dev before activation and returns
 // `PASS provider=codex sandbox=read-only reasoning=explicit command=codex`.
 export const OVERFLOW_REVIEWERS = Object.freeze([])
-export const ACTIVE_REVIEWERS = Object.freeze(REVIEWERS.filter((row)=>!RETIRED_REVIEWERS.includes(row.name)))
+export const ACTIVE_REVIEWERS = Object.freeze(REVIEWERS.filter((row)=>!RETIRED_REVIEWERS.includes(row.name)&&!QUARANTINED_REVIEWERS.includes(row.name)))
 
 // `engine === null` is a POSITIVE answer, not an absent one: the marker resolver
 // said `state: none`, so no orchestrator is running and there is no same-engine
@@ -3281,7 +3303,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
       // trail. The exclusion of the REVIEWER is absolute either way -- they can
       // never be drawn again for this pull request.
       if(exclusions.has(replacement.reviewer))throw new LaneError(`durable replacement reviewer ${replacement.reviewer} is excluded for this PR (${exclusions.get(replacement.reviewer).reason}); re-run the identical --exclude-reviewer to return this slot. The returned record is a REPLACEMENT, so --assign-reviewer will not refill it: draw the new reviewer with --replace-failed-reviewer for the same --failed-sequence.`)
-      if(!eligibleNames.has(replacement.reviewer))throw new LaneError(`durable replacement sequence ${replacement.sequence} belongs to a retired reviewer or orchestrator-conflicting reviewer ${replacement.reviewer}; its active lease was not recreated. Record a new governed replacement for this exact head`)
+      if(!eligibleNames.has(replacement.reviewer))throw new LaneError(`durable replacement sequence ${replacement.sequence} belongs to a retired, quarantined or orchestrator-conflicting reviewer ${replacement.reviewer}; its active lease was not recreated. Record a new governed replacement for this exact head`)
       const replacementLeaseRef=reviewActiveRef(reviewer.name),liveReplacement=preflightBusy.leases.get(reviewer.name),staleReplacement=preflightBusy.stale.find((row)=>row.ref===replacementLeaseRef)
       if(liveReplacement&&liveReplacement.sha!==replacement.replacementSha&&!staleReplacement)throw new LaneError(`reviewer ${reviewer.name} has an unrelated live lease; assignment retry repair refused`)
       const failed=[...preflightBusy.leases.values()].find((row)=>row.lease.issue===request.issue&&row.lease.pr===request.pr&&row.lease.headSha===request.headSha&&row.lease.sequence===replacement.failedSequence)
@@ -3320,7 +3342,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
       // was independent when assigned can become a same-provider conflict by
       // the time a retry lands here. Every return path below must fail the
       // same way a fresh assignment would, never hand back a stale answer.
-      if(!eligibleNames.has(prior.reviewer))throw new LaneError(`durable assignment sequence ${prior.sequence} belongs to a retired reviewer or orchestrator-conflicting reviewer ${prior.reviewer}; its active lease was not recreated. Record a governed replacement for this exact head`)
+      if(!eligibleNames.has(prior.reviewer))throw new LaneError(`durable assignment sequence ${prior.sequence} belongs to a retired, quarantined or orchestrator-conflicting reviewer ${prior.reviewer}; its active lease was not recreated. Record a governed replacement for this exact head`)
       if(preflightLease?.sha===priorSha&&preflightLease.lease.issue===prior.issue&&preflightLease.lease.pr===prior.pr&&preflightLease.lease.headSha===prior.headSha&&preflightLease.lease.sequence===prior.sequence&&!stalePrior){
         assertAssignmentWasNotTerminallyReleased(request,prior,io)
         requireOwnedRef(MUTEX_REF,ownerSha,io)
@@ -3365,7 +3387,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
       // Refuse here, before any ref is created, with the same repair route.
       if(!eligibleNames.has(current.reviewer))throw new LaneError(ACTIVE_REVIEWERS.some((row)=>row.name===current.reviewer)
         ?`current reviewer ${current.reviewer} conflicts with the live orchestrator engine; assign an independent reviewer`
-        :`current reviewer cursor sequence ${current.sequence} belongs to a retired reviewer or orchestrator-conflicting reviewer ${current.reviewer}; no assignment was recorded and no lease was taken. Record a governed replacement for this exact head`)
+        :`current reviewer cursor sequence ${current.sequence} belongs to a retired, quarantined or orchestrator-conflicting reviewer ${current.reviewer}; no assignment was recorded and no lease was taken. Record a governed replacement for this exact head`)
       assertAssignmentWasNotTerminallyReleased(request,current,io)
       if(!io.createRef(assignmentRef,cursorSha)&&readRefAfterWrite(assignmentRef,cursorSha,io)!==cursorSha)throw new LaneError('review assignment record could not be proved; retry the same assignment')
       const live=io.getPr(current.pr)
@@ -3779,7 +3801,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
       const rawParsed=parseReviewReplacement(fixedRecords?.get(replacementRef)?.sha===priorReplacement?fixedRecords.get(replacementRef).commit:io.getCommit(priorReplacement)),parsed={...rawParsed,failureSha:rawParsed.failureSha==='self'?priorReplacement:rawParsed.failureSha}, reviewer=REVIEWERS.find((r)=>r.name===parsed.reviewer)
       if(parsed.issue!==request.issue||parsed.pr!==request.pr||parsed.headSha!==request.headSha||parsed.failedSequence!==request.failedSequence||!reviewer)throw new LaneError('durable reviewer replacement does not match this retry')
       requireReplacementEvidence(parsed,io)
-      if(!eligibleNames.has(parsed.reviewer))throw new LaneError(`durable replacement sequence ${parsed.sequence} belongs to a retired reviewer or orchestrator-conflicting reviewer ${parsed.reviewer}; its active lease was not recreated. Record a new governed replacement for this exact head`)
+      if(!eligibleNames.has(parsed.reviewer))throw new LaneError(`durable replacement sequence ${parsed.sequence} belongs to a retired, quarantined or orchestrator-conflicting reviewer ${parsed.reviewer}; its active lease was not recreated. Record a new governed replacement for this exact head`)
       const failed=[...preflightBusy.leases.values()].find((row)=>row.lease.issue===request.issue&&row.lease.pr===request.pr&&row.lease.headSha===request.headSha&&row.lease.sequence===request.failedSequence)
       const replacementLeaseRef=reviewActiveRef(parsed.reviewer)
       const staleReplacement=preflightBusy.stale.find((row)=>row.ref===replacementLeaseRef)

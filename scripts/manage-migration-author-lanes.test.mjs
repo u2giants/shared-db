@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
+import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -949,7 +949,16 @@ test('the active rotation is exactly the current models, in a stable order',()=>
   assert.equal(REVIEWERS.find((r)=>r.name==='glm-5.3').wrapper,'ai-glm')
   assert.equal(REVIEWERS.find((r)=>r.name==='muse-spark-1.2-contributor').wrapper,'ai-muse')
   assert.equal(REVIEWERS.find((r)=>r.name==='deepseek-chat').wrapper,'ai-deepseek-agent')
-  assert.ok(!ACTIVE_REVIEWERS.some((r)=>/qwen|gemini/i.test(r.name)),'Qwen and Gemini must remain outside the active rotation')
+  // Qwen is NOT retired (owner instruction, 2026-09-04) and must not be named as
+  // retired anywhere. It is quarantined pending a live qualification that failed
+  // on 2026-09-04, so it is still undrawable -- via QUARANTINED_REVIEWERS, not
+  // RETIRED_REVIEWERS. Both halves are asserted because either one alone is a
+  // silent regression: dropping the first re-introduces the false retirement
+  // claim, dropping the second puts an unqualified provider into the rotation.
+  assert.ok(!RETIRED_REVIEWERS.includes('qwen-3.8-max'),'qwen-3.8-max must never be listed as retired')
+  assert.deepEqual(QUARANTINED_REVIEWERS,['qwen-3.8-max'])
+  assert.ok(!ACTIVE_REVIEWERS.some((r)=>/qwen|gemini/i.test(r.name)),'quarantined Qwen and unregistered Gemini must remain outside the active rotation')
+  assert.equal(REVIEWERS.find((r)=>r.name==='qwen-3.8-max').wrapper,'ai-qwen')
 })
 
 test('deepseek-chat can never be drawn for a code review (#2078)',()=>{
@@ -1159,11 +1168,14 @@ test('cursor-only legacy assignment recreates its missing permanent and active r
 })
 
 test('a live historical assignment never recreates an active lease for a retired reviewer',()=>{
+  // RETIRED_REVIEWERS[0] is positional, so assert the property the test actually
+  // needs -- that this name cannot be drawn -- rather than trusting the index.
   const io=reviewIo(),request={issue:99,pr:199,headSha:'6'.repeat(40)},reviewer=RETIRED_REVIEWERS[0]
+  assert.ok(!ACTIVE_REVIEWERS.some((r)=>r.name===reviewer),`${reviewer} must be ineligible for this test to mean anything`)
   io.getPr=()=>({state:'open',head:{sha:request.headSha}})
   const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=7 reviewer=${reviewer} issue=${request.issue} pr=${request.pr} head=${request.headSha}`)
   io.refs.set(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}`,sha)
-  assert.throws(()=>assignNextReviewer(request,io),/retired reviewer/)
+  assert.throws(()=>assignNextReviewer(request,io),/retired, quarantined or orchestrator-conflicting reviewer/)
   assert.equal(io.refs.has(`${REVIEW_ACTIVE_REF_PREFIX}/${reviewer}`),false);assert.equal(io.refs.has(MUTEX_REF),false)
 })
 
@@ -1334,7 +1346,7 @@ test('a retired reviewer is replaced cleanly, without an exclusion deadlock (#20
   io.refs.set(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}`,sha)
   io.refs.set(reviewActiveRef('deepseek-chat'),sha)
   io.refs.set(REVIEW_CURSOR_REF,sha)
-  assert.throws(()=>assignNextReviewer(failedReview,io),/belongs to a retired reviewer[\s\S]*Record a governed replacement for this exact head/)
+  assert.throws(()=>assignNextReviewer(failedReview,io),/belongs to a retired, quarantined or orchestrator-conflicting reviewer[\s\S]*Record a governed replacement for this exact head/)
   const replacement=replaceFailedReviewer({...replacementRequest,failureCode:'wrapper_terminal_failure'},io)
   assert.equal(replacement.reviewer,'glm-5.3')
   assert.equal(reviewerReadsRepository(replacement.reviewer),true,'the replacement must be a reviewer that reads the code')
@@ -1514,11 +1526,12 @@ test('replacement retry repairs a crash between permanent evidence and lease upd
 
 test('a historical replacement never recreates an active lease for a retired reviewer',()=>{
   const io=failedReviewIo(),reviewer=RETIRED_REVIEWERS[0],sequence=2
+  assert.ok(!ACTIVE_REVIEWERS.some((r)=>r.name===reviewer),`${reviewer} must be ineligible for this test to mean anything`)
   const sha=io.makeOwnerCommit(`db-coordination reviewer-failure-replacement sequence=${sequence} reviewer=${reviewer} issue=${failedReview.issue} pr=${failedReview.pr} head=${failedReview.headSha} failed-sequence=1 prior-sequence=1 failure-ref=self failed-reviewer=grok-4.6 code=provider_unavailable verdict=none artifact=none`)
   io.refs.set(`${REVIEW_REPLACEMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}-1`,sha)
   io.refs.set(`refs/db-review-failures/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}-1`,sha)
-  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/retired reviewer/)
-  assert.throws(()=>assignNextReviewer(failedReview,io),/retired reviewer/)
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/retired, quarantined or orchestrator-conflicting reviewer/)
+  assert.throws(()=>assignNextReviewer(failedReview,io),/retired, quarantined or orchestrator-conflicting reviewer/)
   assert.equal(io.refs.has(`${REVIEW_ACTIVE_REF_PREFIX}/${reviewer}`),false);assert.equal(io.refs.has(MUTEX_REF),false)
 })
 
@@ -1760,14 +1773,14 @@ test('--failing-check is refused for every code that is not a local fault',()=>{
   assert.doesNotMatch(io.getCommit(io.refs.get(failureRef)).message,/failing-check/)
 })
 
-test('paused Qwen evidence remains readable but Qwen receives no new assignment',()=>{
+test('quarantined Qwen evidence remains readable but Qwen receives no new assignment',()=>{
   // AMENDED 2026-09-01 (#2079). This test previously asserted that the
-  // cursor-echo branch HANDS BACK the retired reviewer (`recovered.reviewer ===
+  // cursor-echo branch HANDS BACK the ineligible reviewer (`recovered.reviewer ===
   // 'qwen-3.8-max'`). That was the defect, not the contract: the branch created
-  // the durable assignment ref and returned a retired name while taking no
+  // the durable assignment ref and returned an ineligible name while taking no
   // lease, so no verdict could ever follow -- wasted work, and a refusal
   // inconsistent with the prior-assignment path four lines above it. What the
-  // test was really protecting -- that a retired name stays READABLE forever,
+  // test was really protecting -- that an ineligible name stays READABLE forever,
   // because durable refs name it -- is asserted directly below and unchanged.
   const io=reviewIo(), request={issue:9,pr:109,headSha:'abcdef9'}
   const historical=io.makeOwnerCommit('db-coordination reviewer-cursor sequence=64 reviewer=qwen-3.8-max issue=9 pr=109 head=abcdef9')
@@ -1775,7 +1788,7 @@ test('paused Qwen evidence remains readable but Qwen receives no new assignment'
   // Still readable: the historical cursor parses and the name resolves.
   assert.equal(parseReviewCursor(io.getCommit(historical)).reviewer,'qwen-3.8-max')
   assert.equal(REVIEWERS.find((row)=>row.name==='qwen-3.8-max')?.wrapper,'ai-qwen')
-  assert.throws(()=>assignNextReviewer(request,io),/belongs to a retired reviewer[\s\S]*Record a governed replacement for this exact head/)
+  assert.throws(()=>assignNextReviewer(request,io),/belongs to a retired, quarantined or orchestrator-conflicting reviewer[\s\S]*Record a governed replacement for this exact head/)
   // Refused BEFORE any side effect: no assignment ref, no lease.
   assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith(REVIEW_ASSIGNMENT_REF_PREFIX)),false)
   assert.equal(io.refs.get(reviewActiveRef('qwen-3.8-max'))??null,null)
