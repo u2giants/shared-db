@@ -50,7 +50,7 @@ class MutationSweepSafetyTests(unittest.TestCase):
             checkpoint = Path(temporary, "worker.json")
             metadata = sweep.checkpoint_metadata(["guard.py"], ["fake-test"], {"guard.py": sweep.digest(source)}, 1)
             calls = []
-            def fake_suite(_command, isolated):
+            def fake_suite(_command, isolated, _timeout):
                 calls.append(isolated)
                 self.assertNotEqual(isolated.resolve(), repo.resolve())
                 expected = "if enabled:" if len(calls) == 1 else "if False:"
@@ -137,6 +137,27 @@ class MutationSweepSafetyTests(unittest.TestCase):
             mutated = sweep.mutate(text, guard)
             self.assertIn("\r\nif False:\r\n", mutated)
             self.assertIn("value = 'keep'", mutated)
+
+    def test_non_ascii_before_guard_end_uses_ast_byte_columns_safely(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary, "guard.py")
+            path.write_bytes("if label == 'café':\n    raise RuntimeError()\n".encode("utf-8"))
+            text, found = sweep.guards(path)
+            mutated = sweep.mutate(text, {"id": "guard.py:1", **found[0]})
+            self.assertEqual(mutated, "if False:\n    raise RuntimeError()\n")
+
+    def test_run_suite_enforces_timeout_and_replaces_bad_output_bytes(self):
+        completed = mock.Mock(returncode=0, stdout="ok", stderr="")
+        with mock.patch.object(sweep.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(sweep.run_suite(["test"], Path("."), 12.5), (True, "ok"))
+        self.assertEqual(run.call_args.kwargs["timeout"], 12.5)
+        self.assertEqual(run.call_args.kwargs["encoding"], "utf-8")
+        self.assertEqual(run.call_args.kwargs["errors"], "replace")
+
+    def test_run_suite_timeout_is_not_classified_as_a_caught_guard(self):
+        with mock.patch.object(sweep.subprocess, "run", side_effect=sweep.subprocess.TimeoutExpired("test", 1)):
+            with self.assertRaisesRegex(TimeoutError, "exceeded"):
+                sweep.run_suite(["test"], Path("."), 1)
 
     def test_entry_point_raise_is_not_a_refusal_guard(self):
         with tempfile.TemporaryDirectory() as temporary:

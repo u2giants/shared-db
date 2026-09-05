@@ -44,10 +44,16 @@ def line_offsets(text: str) -> list[int]:
     return offsets
 
 
+def character_column(line: str, byte_column: int) -> int:
+    """Convert the UTF-8 byte columns reported by ast into string columns."""
+    return len(line.encode("utf-8")[:byte_column].decode("utf-8"))
+
+
 def guards(path: Path) -> tuple[str, list[dict]]:
     with path.open("r", encoding="utf-8", newline="") as source:
         text = source.read()
     offsets = line_offsets(text)
+    lines = text.splitlines(keepends=True)
     found = []
     for node in ast.walk(ast.parse(text)):
         if not isinstance(node, ast.If) or not any(isinstance(stmt, ast.Raise) for stmt in node.body):
@@ -55,8 +61,10 @@ def guards(path: Path) -> tuple[str, list[dict]]:
         if (isinstance(node.test, ast.Compare) and isinstance(node.test.left, ast.Name)
                 and node.test.left.id == "__name__"):
             continue
-        start = offsets[node.test.lineno - 1] + node.test.col_offset
-        end = offsets[node.test.end_lineno - 1] + node.test.end_col_offset
+        start = offsets[node.test.lineno - 1] + character_column(
+            lines[node.test.lineno - 1], node.test.col_offset)
+        end = offsets[node.test.end_lineno - 1] + character_column(
+            lines[node.test.end_lineno - 1], node.test.end_col_offset)
         found.append({"line": node.test.lineno, "test": " ".join(text[start:end].split())[:200],
                       "start": start, "end": end})
     found.sort(key=lambda row: row["start"])
@@ -72,8 +80,19 @@ def mutate(text: str, guard: dict) -> str:
     return mutated
 
 
-def run_suite(command: list[str], repo: Path) -> tuple[bool, str]:
-    process = subprocess.run(command, cwd=repo, capture_output=True, text=True)
+def remaining_seconds(deadline: float) -> float:
+    remaining = deadline - time.time()
+    if remaining <= 0:
+        raise TimeoutError("mutation sweep deadline expired")
+    return remaining
+
+
+def run_suite(command: list[str], repo: Path, timeout: float) -> tuple[bool, str]:
+    try:
+        process = subprocess.run(command, cwd=repo, capture_output=True, text=True,
+                                 encoding="utf-8", errors="replace", timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        raise TimeoutError(f"test suite exceeded the mutation sweep deadline in {repo}") from error
     return process.returncode == 0, (process.stdout + process.stderr)[-2000:]
 
 
@@ -138,7 +157,7 @@ def worker_run(payload: dict) -> list[dict]:
     with tempfile.TemporaryDirectory(prefix=f"guard-sweep-{payload['worker']}-") as temporary:
         isolated = Path(temporary, "repo")
         copy_repo(repo, isolated)
-        green, tail = run_suite(metadata["command"], isolated)
+        green, tail = run_suite(metadata["command"], isolated, remaining_seconds(payload["deadline"]))
         if not green:
             raise RuntimeError(f"isolated clean baseline is red: {tail}")
         for guard in payload["guards"]:
@@ -154,7 +173,8 @@ def worker_run(payload: dict) -> list[dict]:
             started = time.time()
             try:
                 path.write_text(mutate(text, guard), encoding="utf-8", newline="")
-                still_green, tail = run_suite(metadata["command"], isolated)
+                still_green, tail = run_suite(metadata["command"], isolated,
+                                              remaining_seconds(payload["deadline"]))
             finally:
                 path.write_bytes(original)
             if hashlib.sha256(path.read_bytes()).hexdigest() != metadata["source_digests"][guard["file"]]:
@@ -197,7 +217,12 @@ def main(argv: list[str] | None = None) -> int:
     output = repo / args.out
     checkpoint_prefix = repo / (args.checkpoint or f"{args.out}.checkpoint")
     output.unlink(missing_ok=True)
-    green, tail = run_suite(command, repo)
+    deadline = time.time() + args.max_seconds
+    try:
+        green, tail = run_suite(command, repo, remaining_seconds(deadline))
+    except TimeoutError as error:
+        print(f"INCOMPLETE: no report written: {error}", file=sys.stderr)
+        return 3
     if not green:
         print("REFUSED: baseline is red; no mutation result would be trustworthy.", file=sys.stderr)
         print(tail, file=sys.stderr)
@@ -208,7 +233,6 @@ def main(argv: list[str] | None = None) -> int:
     selected = rows[:args.limit] if args.limit else rows
     suite_digests = command_input_digests(repo, command)
     metadata = checkpoint_metadata(args.files, command, digests, args.workers, suite_digests)
-    deadline = time.time() + args.max_seconds
     partitions = [[row for index, row in enumerate(selected) if index % args.workers == worker]
                   for worker in range(args.workers)]
     merged: dict[str, dict] = {}
@@ -233,7 +257,11 @@ def main(argv: list[str] | None = None) -> int:
     if len(merged) != len(rows) or set(merged) != {row["id"] for row in rows}:
         print(f"INCOMPLETE: {len(merged)} of {len(rows)} guards checkpointed; no report written.", file=sys.stderr)
         return 3
-    green, tail = run_suite(command, repo)
+    try:
+        green, tail = run_suite(command, repo, remaining_seconds(deadline))
+    except TimeoutError as error:
+        print(f"INCOMPLETE: checkpoints retained; no report written: {error}", file=sys.stderr)
+        return 3
     if not green:
         print("REFUSED: final clean baseline is red; no report written.", file=sys.stderr)
         print(tail, file=sys.stderr)
