@@ -166,8 +166,10 @@ begin
        and c.relname = 'style_guide_file_groups'
        and i.indisunique
   ) then
-    execute 'create unique index sgfilegroups_group_uidx on public.style_guide_file_groups '
-            || '(root_label, directory_path, licensor_name, property_folder, style_guide_folder) nulls not distinct';
+    create unique index if not exists sgfilegroups_group_uidx
+      on public.style_guide_file_groups
+         (root_label, directory_path, licensor_name, property_folder, style_guide_folder)
+         nulls not distinct;
   end if;
 end
 $$;
