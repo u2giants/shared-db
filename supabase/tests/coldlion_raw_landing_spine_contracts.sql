@@ -373,7 +373,7 @@ begin
    where endpoint = '/prodHistory' and company_code = 'ZZTEST' and window_from = date '2026-02-03';
 
 
-  -- Since 20260904001555 a window may become loaded only on page evidence, so record
+  -- Since 20260905104512 a window may become loaded only on page evidence, so record
   -- the single page this 265-row window actually returned before completing it.
   insert into coldlion.history_page_ledger (
     window_id, endpoint, company_code, stage_code, window_from, page_number,

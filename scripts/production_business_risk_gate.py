@@ -1858,7 +1858,7 @@ PREVIEW_PRODUCER_PATHS += (
     "scripts/production-verification-sidecars/20260831212757.json",
     "scripts/production-verification-sidecars/20260831221607.json",
     "scripts/production-verification-sidecars/20260901142825.json",
-    "scripts/production-verification-sidecars/20260904001555.json",
+    "scripts/production-verification-sidecars/20260905104512.json",
     "scripts/production-verification-sidecars/20260903083204.json",
     "scripts/production-verification-sidecars/20260905063701.json",
     # Invoked by check-sql.sh during preview; pin the reviewed parser so the
