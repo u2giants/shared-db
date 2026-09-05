@@ -24,6 +24,9 @@
 --      pruning of the whole partition.
 --  11. Closed landing posture: RLS on, no anon/authenticated grants, no raw column.
 --  12. No FK to coldlion.item_header and no FK from coldlion into core.
+--  13. The documented non-prepack grain is storable: prepack_item_no is nullable and a
+--      component with NULL prepack_item_no and a real sub_item_no is accepted, while a
+--      blank prepack_item_no is still refused.
 -- =====================================================================================
 
 begin;
@@ -92,6 +95,26 @@ begin
       and is_nullable = 'YES'
   ) then
     raise exception 'FAIL: a stage column on prod_history_line is nullable';
+  end if;
+
+  -- company_code is NOT NULL: companyCode is 100% populated in the feed and a
+  -- production line with no company cannot be partitioned for retention.
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'coldlion' and table_name = 'prod_history_line'
+      and column_name = 'company_code' and is_nullable = 'YES'
+  ) then
+    raise exception 'FAIL: prod_history_line.company_code is nullable';
+  end if;
+
+  -- CONTRACT 13: prepack_item_no MUST be nullable - a documented non-prepack row has
+  -- an empty prepackItemNo and still carries subItemNo, so NOT NULL would refuse it.
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'coldlion' and table_name = 'prod_history_component'
+      and column_name = 'prepack_item_no' and is_nullable = 'NO'
+  ) then
+    raise exception 'FAIL: prod_history_component.prepack_item_no is NOT NULL, which refuses documented non-prepack rows';
   end if;
 
   -- Identity uniqueness under NULLS NOT DISTINCT on all three tables.
@@ -361,6 +384,35 @@ begin
     raise exception 'FAIL: a two-component line did not stay one parent row';
   end if;
 
+  -- CONTRACT 13: the documented NON-PREPACK grain - prepackItemNo empty, subItemNo
+  -- still present - must be storable. This is the shape a /prodHistory loader meets on
+  -- roughly a quarter of real rows.
+  insert into coldlion.prod_history_component
+    (line_id, prepack_item_no, sub_item_no, ppk_detail_qty, line_price,
+     component_source_hash, run_id, fetched_at)
+  values (v_line_b, null, 'SUB-NONPREPACK', 3000, 1.25, repeat('a',64), v_run, now());
+
+  if not exists (
+    select 1 from coldlion.prod_history_component
+    where line_id = v_line_b and prepack_item_no is null and sub_item_no = 'SUB-NONPREPACK'
+  ) then
+    raise exception 'FAIL: a non-prepack component (NULL prepack_item_no, real sub_item_no) was not stored';
+  end if;
+
+  -- CONTRACT 13: a BLANK prepack_item_no is still refused - empty must be normalised to
+  -- NULL, never stored as '' masquerading as a prepack item number.
+  begin
+    insert into coldlion.prod_history_component
+      (line_id, prepack_item_no, sub_item_no, ppk_detail_qty,
+       component_source_hash, run_id, fetched_at)
+    values (v_line_b, '   ', 'SUB-BLANK', 1, repeat('b',64), v_run, now());
+    raise exception 'FAIL: a blank prepack_item_no was stored instead of being normalised to NULL';
+  exception when check_violation then null;
+  end;
+
+  delete from coldlion.prod_history_component
+   where line_id = v_line_b and sub_item_no = 'SUB-NONPREPACK';
+
   -- CONTRACT 5: 1500 + 2000 = 3500, not the parent's 4500, so the assertion is refused.
   begin
     update coldlion.prod_history_line
@@ -517,6 +569,34 @@ begin
     raise exception 'FAIL: a single-version partition was pruned';
   exception when raise_exception then
     if sqlerrm like 'FAIL:%' then raise; end if;
+  end;
+
+  -- CONTRACT 10: a backfill baseline is refused even in a FOUR-version partition, where
+  -- the newest-three floor would otherwise let the oldest row go. This is the claim the
+  -- column and function comments make, tested on the case that can actually break it.
+  declare
+    v_bl_ids uuid[] := '{}';
+    v_bl_id uuid;
+  begin
+    for i in 1..4 loop
+      insert into coldlion.prod_history_line
+        (company_code, prod_order_no, prod_line_seq, requested_stage_code, stage_code,
+         source_observed_at, source_version_seq, line_source_hash, run_id, fetched_at,
+         is_backfill_baseline)
+      values ('EDGEHOME', 91500, 1, 'REC', 'REC',
+              v_base + (i || ' hours')::interval, i,
+              lpad('b' || i::text, 64, '0'), v_run, now(),
+              i = 1)
+      returning id into v_bl_id;
+      v_bl_ids := v_bl_ids || v_bl_id;
+    end loop;
+
+    begin
+      delete from coldlion.prod_history_line where id = v_bl_ids[1];
+      raise exception 'FAIL: a backfill baseline was pruned from a four-version partition';
+    exception when raise_exception then
+      if sqlerrm like 'FAIL:%' then raise; end if;
+    end;
   end;
 
   -- An ambiguity flag anywhere in the partition stops pruning entirely, even of the

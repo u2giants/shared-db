@@ -77,6 +77,13 @@ end $$;
 -- The 2026-09-02 census found all three tables empty, but application time is not
 -- frozen at census time. Refuse rather than destroy evidence if any writer has
 -- populated one of them before this migration is applied.
+--
+-- The emptiness proof and the DROP must be ONE atomic step. A bare `select exists`
+-- takes only AccessShareLock, so a service_role writer (the old tables still carry
+-- GRANT ALL) could INSERT and commit between the check and the DROP, and the DROP
+-- would then destroy rows nothing ever looked at. Each table is therefore locked in
+-- ACCESS EXCLUSIVE MODE first, re-checked while that lock is held, and dropped
+-- without ever releasing it - the lock is held to the end of this transaction.
 do $fn$
 declare
   v_table regclass;
@@ -88,17 +95,21 @@ begin
     to_regclass('coldlion.prod_history_line')
   ] loop
     if v_table is not null then
+      execute format('lock table %s in access exclusive mode', v_table);
       execute format('select exists (select 1 from %s limit 1)', v_table)
         into v_has_rows;
       if v_has_rows then
         raise exception
           'refusing to replace non-empty obsolete ColdLion production-history table %', v_table;
       end if;
+      execute format('drop table %s', v_table);
     end if;
   end loop;
 end;
 $fn$;
 
+-- Belt and braces for a table that did not exist above (nothing to lock, nothing to
+-- lose): the named drops are no-ops after the guarded drops succeed.
 drop table if exists coldlion.prod_history_last_lookup;
 drop table if exists coldlion.prod_history_component;
 drop table if exists coldlion.prod_history_line;
@@ -284,7 +295,15 @@ create table coldlion.prod_history_component (
   line_id uuid not null
     references coldlion.prod_history_line(id) on delete cascade,
 
-  prepack_item_no text not null,
+  -- NULLABLE ON PURPOSE. §4.3 of the history-shape note: a non-prepack production row
+  -- is identified by (prodOrderNo, prodLineSeq, itemNo) with an EMPTY prepackItemNo,
+  -- and the field census puts prepackItemNo at 73.9% - about a quarter of real rows.
+  -- Those rows still need a component row, because subItemNo (100%) and linePrice (83%)
+  -- live only here. NOT NULL would refuse documented feed rows outright. Empty strings
+  -- are normalised to NULL, exactly as order_history_component.sub_item_no does for the
+  -- analogous sales-history case; the not-blank check below refuses a blank that was
+  -- not normalised, so '' can never masquerade as a prepack item number.
+  prepack_item_no text,
   prepack_item_pkey text,
   prepack_dim_code text,
   prepack_division_code text,
@@ -316,7 +335,7 @@ create table coldlion.prod_history_component (
   created_at timestamptz not null default now(),
 
   constraint coldlion_prod_history_component_prepack_item_not_blank
-    check (length(btrim(prepack_item_no)) > 0),
+    check (prepack_item_no is null or length(btrim(prepack_item_no)) > 0),
   constraint coldlion_prod_history_component_division_not_ep001
     check (prepack_division_code is null or prepack_division_code <> 'EP001'),
   constraint coldlion_prod_history_component_quantities_non_negative
@@ -596,6 +615,17 @@ begin
       old.id, v_ties;
   end if;
 
+  -- The column and function comments promise that a backfill baseline is never pruned.
+  -- The <= 3 floor alone does not keep that promise: a fourth version makes the oldest
+  -- row eligible even when it IS the baseline. The baseline is the only version that is
+  -- an observation of the world before we were watching - it is not reconstructable, so
+  -- it is refused outright rather than merely being usually protected by the floor.
+  if old.is_backfill_baseline then
+    raise exception
+      'refusing to prune production line %: it is the backfill baseline of its partition',
+      old.id;
+  end if;
+
   if v_live <= 3 then
     raise exception
       'refusing to prune production line %: retention keeps the newest three and its partition holds % version(s)%',
@@ -623,7 +653,7 @@ end;
 $fn$;
 
 comment on function coldlion.prod_history_line_retention_guard() is
-  'The retention contract of coldlion.prod_history_line, enforced one DELETE at a time so the maintenance operation is restartable. Partitions by the full source identity (company, prodOrderNo, prodLineSeq, stage), orders newest by source_observed_at then source_version_seq then the stable line_source_hash tie-breaker, retains the newest three, allows only the oldest to be pruned, and REFUSES to prune at all when ordering or identity is ambiguous or when the partition holds three or fewer versions - which is why a single backfill baseline is never pruned. Issue #2174.';
+  'The retention contract of coldlion.prod_history_line, enforced one DELETE at a time so the maintenance operation is restartable. Partitions by the full source identity (company, prodOrderNo, prodLineSeq, stage), orders newest by source_observed_at then source_version_seq then the stable line_source_hash tie-breaker, retains the newest three, allows only the oldest to be pruned, and REFUSES to prune at all when ordering or identity is ambiguous, when the partition holds three or fewer versions, or when the row being deleted is the backfill baseline - the baseline refusal is explicit and does not depend on the three-version floor. Issue #2174.';
 
 drop trigger if exists prod_history_line_retention_guard on coldlion.prod_history_line;
 create trigger prod_history_line_retention_guard
