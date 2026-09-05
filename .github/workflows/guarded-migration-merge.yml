@@ -93,7 +93,7 @@ jobs:
           REQUESTED_SHA: ${{ inputs.head_sha }}
         run: |
           set -euo pipefail
-          test "$(gh pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
+          test "$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
           git fetch origin main
           node scripts/check-main-tip-freshness.mjs --contains
           node scripts/check-pr-object-collisions.mjs
@@ -121,7 +121,7 @@ jobs:
           # which is indistinguishable from "not green yet", so a broken token spent a
           # full minute of the exclusive lock looking like eventual consistency (#1201).
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            observed="$(gh api "repos/u2giants/shared-db/commits/$REQUESTED_SHA/status"               --jq '[.statuses[] | select(.context == "Migration guarded merge authorization")] | first | .state')"
+            observed="$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" api "repos/u2giants/shared-db/commits/$REQUESTED_SHA/status"               --jq '[.statuses[] | select(.context == "Migration guarded merge authorization")] | first | .state')"
             [ "$observed" = 'success' ] && break
             echo "authorization not visible yet (attempt $attempt, observed='${observed:-none}'); waiting"
             sleep 6
@@ -141,7 +141,7 @@ jobs:
               break
             fi
             echo "guarded merge attempt $attempt hit the known authorization propagation delay; re-proving the head and retrying"
-            test "$(gh pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
+            test "$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
             git fetch origin main
             node scripts/check-main-tip-freshness.mjs --contains
             sleep 10
