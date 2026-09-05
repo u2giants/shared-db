@@ -106,8 +106,9 @@ create unique index if not exists franchise_licensor_source_key
 
 -- Codes, where used, are unique within a licensor. PARTIAL, not NULLS NOT DISTINCT:
 -- `code` is optional, so a NULLS NOT DISTINCT key would let a licensor hold exactly ONE
--- franchise without a code and refuse every later one. (core.property carries that
--- shape; it is not copied here on purpose.) Uniqueness of a real code is preserved --
+-- franchise without a code and refuse every later one. (core.property once carried that
+-- shape and 20260902222649 relaxed it for exactly this reason, to NULLS DISTINCT; a
+-- partial index expresses the same rule and is used here.) Uniqueness of a real code is preserved --
 -- only the meaningless "no code at all" collision is allowed.
 create unique index if not exists franchise_licensor_code_key
   on core.franchise (licensor_id, code) where code is not null;

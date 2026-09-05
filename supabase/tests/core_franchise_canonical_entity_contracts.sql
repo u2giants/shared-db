@@ -25,17 +25,22 @@ begin;
 
 -- core.licensor is protected by the licensing write-authority guard
 -- (20260817124545 / 20260819151527), which refuses any canonical write without an
--- exact transaction-bound authorization. This is the CI harness's sanctioned way for a
--- contract test to seed the two synthetic licensors it needs, and is the same call
--- clickup_task_import_contracts.sql and the fr_owner_ruling tests make. The guard is
--- NOT weakened, bypassed or edited: the authorization is real, transaction-bound, and
--- disappears with the rollback at the end of this file.
-select public.ci_authorize_licensing_contract_test();
+-- exact transaction-bound authorization. Each synthetic licensor this file seeds is
+-- authorized individually, immediately before its own insert, by the narrow route the
+-- guard is designed to consume: one plm.licensing_write_authorization row naming this
+-- backend, this transaction, the exact target table and the exact protected columns.
+-- That is the same pattern core_licensor_code_nulls_distinct_contracts.sql and the CI
+-- fixture seed use. The blanket helper public.ci_authorize_licensing_contract_test() is
+-- deliberately NOT used here: scripts/database-contract-authorization.test.mjs pins the
+-- in-file callers of that helper to one legacy contract file. The guard is NOT weakened,
+-- bypassed or edited; every authorization below is real, transaction-bound, scoped to a
+-- single write, and disappears with the rollback at the end of this file.
 
 do $contracts$
 declare
   v_licensor_a uuid;
   v_licensor_b uuid;
+  v_licensor_c uuid;
   v_franchise_a uuid;
   v_franchise_b uuid;
   v_rls boolean;
@@ -98,9 +103,28 @@ begin
   end if;
 
   -- Seed two licensors ------------------------------------------------------
+  insert into plm.licensing_write_authorization (
+    backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
+    actor, protected_columns, expires_at
+  ) values (
+    pg_backend_pid(), txid_current(), 'core.licensor', 'licensing_review_create',
+    '23330000-0000-4000-8000-000000000001', repeat('a', 64),
+    'issue-2333 synthetic contract', array['name','code','status'],
+    clock_timestamp() + interval '1 minute'
+  );
   insert into core.licensor (name, code)
   values ('CONTRACT 2333 Licensor A', 'ctr2333a')
   returning id into v_licensor_a;
+
+  insert into plm.licensing_write_authorization (
+    backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
+    actor, protected_columns, expires_at
+  ) values (
+    pg_backend_pid(), txid_current(), 'core.licensor', 'licensing_review_create',
+    '23330000-0000-4000-8000-000000000002', repeat('b', 64),
+    'issue-2333 synthetic contract', array['name','code','status'],
+    clock_timestamp() + interval '1 minute'
+  );
   insert into core.licensor (name, code)
   values ('CONTRACT 2333 Licensor B', 'ctr2333b')
   returning id into v_licensor_b;
@@ -245,13 +269,30 @@ begin
     v_sample_source_id := '10421';
   end if;
 
+  -- This row gets a licensor of its own. Licensors A and B already hold
+  -- ('paramount', '12'), and on a populated landing table the sampled
+  -- franchise_source_id could legitimately BE 12; reusing one of them would then
+  -- fail unique_violation for a reason this assertion does not test.
+  insert into plm.licensing_write_authorization (
+    backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
+    actor, protected_columns, expires_at
+  ) values (
+    pg_backend_pid(), txid_current(), 'core.licensor', 'licensing_review_create',
+    '23330000-0000-4000-8000-000000000003', repeat('c', 64),
+    'issue-2333 synthetic contract', array['name','code','status'],
+    clock_timestamp() + interval '1 minute'
+  );
+  insert into core.licensor (name, code)
+  values ('CONTRACT 2333 Licensor C', 'ctr2333c')
+  returning id into v_licensor_c;
+
   insert into core.franchise (licensor_id, name, source_system, source_id, source_evidence)
-  values (v_licensor_b, v_sample_name, 'paramount',
+  values (v_licensor_c, v_sample_name, 'paramount',
           v_sample_source_id, 'contract test: plm.pmt_franchise shape');
 
   if not exists (
     select 1 from core.franchise
-    where licensor_id = v_licensor_b
+    where licensor_id = v_licensor_c
       and source_system = 'paramount'
       and source_id = v_sample_source_id
       and source_id::bigint = v_sample_source_id::bigint
