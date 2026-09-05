@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { executeMerge, initialQuery, loadAllRows, loadGridState, previewMerge, saveGridState, searchMergeCandidates, toRpcParams, updateRecord } from './data-admin'
+import { executeMerge, initialQuery, loadAllRows, loadGridState, previewMerge, saveGridState, searchMergeCandidates, setPropertyStatus, toRpcParams, updateRecord } from './data-admin'
 
 describe('DB Data Admin query contracts', () => {
   it('maps the customer-only channel without changing the vendor signature', () => {
@@ -65,5 +65,45 @@ describe('DB Data Admin query contracts', () => {
       p_survivor_id: 'keep', p_loser_id: 'absorb', p_preview_token: 'token',
       p_reason: 'Duplicate', p_resolutions: { 'crm.status': 'survivor' },
     }))
+  })
+})
+
+describe('setPropertyStatus (issue #1322)', () => {
+  it('calls the guarded RPC with exactly its five arguments', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: { success: true, idempotent_replay: false }, error: null })
+    await setPropertyStatus({ rpc } as never, 'p-avengers', 'inactive', {
+      expectedUpdatedAt: '2026-08-20T12:00:00Z', reason: 'Licence lapsed',
+    })
+    expect(rpc).toHaveBeenCalledTimes(1)
+    const [name, params] = rpc.mock.calls[0]
+    expect(name).toBe('db_data_admin_set_property_status')
+    expect(Object.keys(params).sort()).toEqual([
+      'p_expected_updated_at', 'p_operation_id', 'p_property_id', 'p_reason', 'p_status',
+    ])
+    expect(params.p_property_id).toBe('p-avengers')
+    expect(params.p_status).toBe('inactive')
+    expect(params.p_expected_updated_at).toBe('2026-08-20T12:00:00Z')
+    expect(params.p_reason).toBe('Licence lapsed')
+    // A fresh operation id per call is what makes an interrupted save safely
+    // replayable; the RPC refuses an operation id that belongs to another action.
+    expect(params.p_operation_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    rpc.mockClear()
+    await setPropertyStatus({ rpc } as never, 'p-avengers', 'active', {
+      expectedUpdatedAt: '2026-08-21T08:00:00Z', reason: 'Relicenced',
+    })
+    expect(rpc.mock.calls[0][1].p_operation_id).not.toBe(params.p_operation_id)
+  })
+
+  it('sends a missing concurrency token as NULL so the RPC refuses it as stale rather than a cast error', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: { success: false, code: 'stale_token' }, error: null })
+    await setPropertyStatus({ rpc } as never, 'p-avengers', 'inactive', { expectedUpdatedAt: '', reason: 'Licence lapsed' })
+    expect(rpc.mock.calls[0][1].p_expected_updated_at).toBeNull()
+  })
+
+  it('rethrows the RPC’s own error instead of swallowing it', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: new Error('db_data_admin property status: a reason is required') })
+    await expect(setPropertyStatus({ rpc } as never, 'p-avengers', 'inactive', {
+      expectedUpdatedAt: '2026-08-20T12:00:00Z', reason: '',
+    })).rejects.toThrow('a reason is required')
   })
 })

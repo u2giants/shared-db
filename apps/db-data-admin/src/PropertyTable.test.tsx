@@ -1,7 +1,9 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PropertyTable } from './PropertyTable'
+import { propertyColumns } from './property-columns'
 import type { ApiClient, LicensorTreeResult } from './lib/data-admin'
+import type { PropertyRow } from './lib/property-rows'
 
 afterEach(cleanup)
 
@@ -78,5 +80,40 @@ describe('PropertyTable', () => {
   it('surfaces other load failures as an inline error', async () => {
     render(<PropertyTable client={makeFailingClient('connection reset')} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('connection reset')
+  })
+
+  // Issue #1322: same shape as the fixture, plus a ColdLion-sourced property
+  // that our side has marked inactive — the exact row class the owner's paired
+  // requirement exists to suppress from the default view.
+  const inactiveFixture: LicensorTreeResult = {
+    ...fixture,
+    licensors: [{
+      ...fixture.licensors[0],
+      properties: [
+        fixture.licensors[0].properties[0],
+        {
+          id: 'p-lapsed', name: 'Lapsed IP', code: 'LPS', status: 'inactive', character_count: 0,
+          source_refs: [{ source_system: 'coldlion', source_table: 'property', source_id: 'c-1', source_code: 'LPS', source_name: null }],
+          plm_context: [], updated_at: '2026-08-20T09:00:00Z',
+        },
+      ],
+    }],
+  }
+
+  it('hides inactive properties from the default view and reveals them on request', async () => {
+    const client = makeClient(inactiveFixture)
+    render(<PropertyTable client={client} />)
+    expect(await screen.findByText('2 of 2 properties')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Include inactive'))
+    expect(await screen.findByText('3 of 3 properties')).toBeInTheDocument()
+    // The checkbox also re-queries the tree so inactive licensors return too.
+    expect(vi.mocked(client.rpc).mock.calls[1][1]).toMatchObject({ p_include_inactive: true })
+  })
+
+  it('marks every cell of an inactive property as visibly distinct, and no others', () => {
+    const inactive = { id: 'x', name: 'X', code: null, status: 'inactive', licensor_name: 'L', licensor_code: null, character_count: 0, source_display: '', plm_display: '', is_orphan: false, updated_at: null } satisfies PropertyRow
+    const active = { ...inactive, status: 'active' }
+    expect(propertyColumns.every(column => column.cellProperties?.({ model: inactive } as never)?.className === 'inactive-property-cell')).toBe(true)
+    expect(propertyColumns.every(column => column.cellProperties?.({ model: active } as never) === undefined)).toBe(true)
   })
 })

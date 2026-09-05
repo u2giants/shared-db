@@ -1,23 +1,14 @@
-import { RevoGrid, Template, type ColumnRegular } from '@revolist/react-datagrid'
+import { RevoGrid, Template } from '@revolist/react-datagrid'
 import { RefreshCw, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FilterHeader } from './FilterHeader'
-import { loadLicensorTree, type ApiClient, type LoadedTree } from './lib/data-admin'
+import { loadLicensorTree, setPropertyStatus, type ApiClient, type LoadedTree, type PropertyStatus, type PropertyStatusResult } from './lib/data-admin'
 import { getDistinctColumnValues, rowMatchesFilters } from './lib/grid-filters'
 import { flattenProperties, type PropertyRow } from './lib/property-rows'
+import { propertyColumns } from './property-columns'
+import { PropertyStatusDialog } from './PropertyStatusDialog'
 
 type Props = { client: ApiClient }
-
-const propertyColumns: ColumnRegular[] = [
-  { prop: 'name', name: 'Property', size: 240, sortable: true },
-  { prop: 'code', name: 'Code', size: 110, sortable: true },
-  { prop: 'licensor_name', name: 'Licensor', size: 200, sortable: true },
-  { prop: 'licensor_code', name: 'Licensor code', size: 130, sortable: true },
-  { prop: 'status', name: 'Status', size: 105, sortable: true },
-  { prop: 'character_count', name: 'Characters', size: 105, sortable: true },
-  { prop: 'plm_display', name: 'PLM divisions', size: 260 },
-  { prop: 'source_display', name: 'Source', size: 280 },
-]
 
 export function PropertyTable({ client }: Props) {
   const [tree, setTree] = useState<LoadedTree | null>(null)
@@ -30,6 +21,8 @@ export function PropertyTable({ client }: Props) {
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
   const [setFiltersState, setSetFiltersState] = useState<Record<string, ReadonlySet<string> | null>>({})
+  const [statusTargetId, setStatusTargetId] = useState<string | null>(null)
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null); setDenied(false)
@@ -55,7 +48,40 @@ export function PropertyTable({ client }: Props) {
     return () => clearTimeout(handle)
   }, [search])
 
-  const rows = useMemo(() => (tree ? flattenProperties(tree) : []), [tree])
+  // Issue #1322 decision: inactive Properties are filtered OUT by default.
+  // Evidence: the tree RPC's p_include_inactive only gates LICENSOR status (its
+  // where clause is `l.status <> 'inactive'`), so the server will happily keep
+  // returning every property ColdLion still calls active — and the whole point
+  // of the owner's paired requirement is that our own flag is what suppresses
+  // lapsed licences. "Include inactive" already re-queries with
+  // p_include_inactive true, so one checkbox reveals inactive licensors and
+  // inactive properties together, matching the opt-in on Customers/Vendors.
+  // The filtering lives here rather than in flattenProperties so the lib keeps
+  // its "never drops a property" contract with the tree's reconciliation.
+  const rows = useMemo(
+    () => tree ? flattenProperties(tree).filter(row => includeInactive || row.status !== 'inactive') : [],
+    [tree, includeInactive],
+  )
+
+  // The status target is an id, not a row copy: after a save or refresh the
+  // tree reloads, and the target re-resolves to the fresh row (new updated_at)
+  // instead of keeping a stale concurrency token. A row that leaves the view —
+  // freshly inactive with "Include inactive" unchecked — deselects itself.
+  const statusTarget = useMemo(() => rows.find(row => row.id === statusTargetId) ?? null, [rows, statusTargetId])
+
+  // Passes the row's current updated_at through untouched: the RPC compares it
+  // against the live row, and a mismatch must surface as its stale_token
+  // refusal, never as a silent retry. Errors are deliberately not caught here
+  // so the dialog shows the RPC's own text.
+  const savePropertyStatus = useCallback(async (status: PropertyStatus, reason: string): Promise<PropertyStatusResult> => {
+    if (!statusTarget) return { success: false, code: 'not_found', message: 'Select a property row first.' }
+    const result = await setPropertyStatus(client, statusTarget.id, status, {
+      expectedUpdatedAt: statusTarget.updated_at ?? '',
+      reason,
+    })
+    if (result.success) void load()
+    return result
+  }, [client, load, statusTarget])
 
   const updateFilter = useCallback((prop: string, value: string) => {
     setFilters(current => ({ ...current, [prop]: value }))
@@ -113,9 +139,16 @@ export function PropertyTable({ client }: Props) {
     </div>
 
     <p className="muted">
-      Read-only. DesignFlow owns the Licensor → Property relationship; this table shows the same
-      records as the Licensors tree, one row per property.
+      DesignFlow owns the Licensor → Property relationship; this table shows the same
+      records as the Licensors tree, one row per property. Click a row to change its
+      status on our side. Properties marked inactive are hidden until “Include inactive”
+      is checked.
     </p>
+
+    {statusTarget && !statusDialogOpen && <div className="property-status-target" role="status">
+      <span><strong>{statusTarget.name}</strong>{statusTarget.code ? <> · {statusTarget.code}</> : null} — currently {statusTarget.status}.</span>
+      <button className="secondary" onClick={() => setStatusDialogOpen(true)}>Set status…</button>
+    </div>}
 
     {error && <div className="inline-error" role="alert">{error}</div>}
     {orphanCount > 0 && (
@@ -125,9 +158,27 @@ export function PropertyTable({ client }: Props) {
     )}
 
     <div className="grid-wrap" aria-busy={loading}>
-      <RevoGrid theme="material" readonly accessible resize columns={columns} source={visibleRows} rowHeaders />
+      <RevoGrid
+        theme="material"
+        readonly
+        accessible
+        resize
+        columns={columns}
+        source={visibleRows}
+        rowHeaders
+        onBeforecellfocus={event => {
+          const row = visibleRows[event.detail.rowIndex]
+          if (row) setStatusTargetId(row.id)
+        }}
+      />
       {loading && <div className="grid-loading">Loading…</div>}
     </div>
     <footer className="grid-footer"><span>{visibleRows.length} of {rows.length} properties</span></footer>
+    {statusDialogOpen && statusTarget && <PropertyStatusDialog
+      property={statusTarget}
+      onCancel={() => setStatusDialogOpen(false)}
+      onSave={savePropertyStatus}
+      onRefresh={() => { setStatusDialogOpen(false); void load() }}
+    />}
   </section>
 }
