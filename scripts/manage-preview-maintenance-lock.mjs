@@ -56,7 +56,7 @@ export function probePreviewMaintenanceLock(ownerSha, io = githubIo) {
   try { current = io.readRef(EXCLUSIVE_REFS.preview) }
   catch { return { state: 'unreadable' } }
   if (current === null) return { state: 'released' }
-  if (current !== ownerSha) throw new PreviewMaintenanceLockError('preview ref moved to another owner while this run was live')
+  if (current !== ownerSha) return { state: 'foreign-owner' }
   return { state: 'owned', ownerSha }
 }
 

@@ -14,6 +14,7 @@ import {
   isTransientGitHubTransport,
   isMutatingCall,
   GitHubTransportError,
+  spawnGitHub,
 } from './github-transport.mjs'
 
 const noWait = () => {}
@@ -175,4 +176,26 @@ test('malformed JSON is refused by name, not swallowed', () => {
     () => ghJson(['api', 'repos/o/r/pulls'], { executor: () => 'not json', wait: noWait }),
     /invalid JSON/,
   )
+})
+
+test('spawnGitHub preserves stdin and issues a mutation exactly once', () => {
+  const calls = []
+  const result = spawnGitHub(['api', '-X', 'POST', 'repos/o/r/issues/1/comments', '--input', '-'], {
+    input: '{"body":"one"}',
+    executor: (bin, args, options) => {
+      calls.push({ bin, args, options })
+      return { status: 0, stdout: '{"id":1}', stderr: '' }
+    },
+  })
+  assert.equal(result.status, 0)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].bin, 'gh')
+  assert.equal(calls[0].options.input, '{"body":"one"}')
+  assert.deepEqual(calls[0].options.stdio, ['pipe', 'pipe', 'pipe'])
+})
+
+test('spawnGitHub refuses reads and retry requests', () => {
+  const executor = () => assert.fail('executor must not run')
+  assert.throws(() => spawnGitHub(['api', 'repos/o/r'], { executor }), /for mutations/)
+  assert.throws(() => spawnGitHub(['api', '-X', 'DELETE', 'repos/o/r/git/refs/x'], { executor, idempotentWrite: true }), /never replays/)
 })

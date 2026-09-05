@@ -12,6 +12,7 @@
     "scripts/check-dispatch-collision.mjs",
     "scripts/check-pr-object-collisions.mjs",
     "scripts/db-coordination-events.mjs",
+    "scripts/gh-read.mjs",
     "scripts/lib/documents-only-change.mjs",
     "scripts/lib/exclusive-lease.mjs",
     "scripts/lib/github-transport.mjs",

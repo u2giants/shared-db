@@ -48,6 +48,10 @@ jobs:
             if test "$state" = unreadable; then
               echo 'Preview lock ownership could not be read after bounded transport retries; keeping the holder live and trying again.' >&2
             fi
+            if test "$state" = foreign-owner; then
+              echo 'Preview ref moved to another owner while this run was live; refusing a green completion.' >&2
+              exit 2
+            fi
             sleep 30
           done
           echo 'Preview maintenance lock reached its 235-minute ceiling. Abort any still-running rehearsal, then release or recover the lane before further preview work.' >&2

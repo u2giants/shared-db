@@ -1138,10 +1138,11 @@ is removed by asking GitHub once per ref.
 
 The rule, in four parts:
 
-1. **One transport.** Node code under `scripts/` reaches GitHub only through
+1. **One governed transport.** Node gates under `scripts/` reach GitHub through
    `scripts/lib/github-transport.mjs`. Retry policy, the transient/semantic classifier and
    the never-replay-a-write rule are decided in one place. Pass `wrapError` to keep your
-   gate's own named refusal.
+   gate's own named refusal. Local maintenance utilities that do not produce or validate
+   governed evidence are outside this rule and must not be mistaken for gate transport.
 2. **One tree read per ref.** File content comes from `scripts/lib/github-tree.mjs`:
    `git/trees/<ref>?recursive=1` once, then blobs **by SHA**. A file identical across
    twelve pull-request heads has one blob SHA and is fetched once; path existence is
@@ -1161,10 +1162,11 @@ The rule, in four parts:
    only; rate-limit responses remain semantic failures and are not retried.
 
 **This is enforced, not advised.** `scripts/check-github-transport-conformance.mjs` fails
-the build on a ninth wrapper, a bare workflow `gh api` read, or a per-file Contents URL,
-and runs in `tools-offline-tests.yml`. Its own tests feed it a known-dirty tree containing
-each forbidden shape and assert it refuses, *before* asserting anything about the real
-tree — a green run on clean input proves nothing.
+the build on direct Node `gh` process calls, literal shell-wrapped governed `gh` calls, a
+bare workflow `gh api` read, or a per-file Contents URL, and runs in
+`tools-offline-tests.yml`. Its own tests feed it a known-dirty tree containing each
+forbidden shape and assert it refuses, *before* asserting anything about the real tree —
+a green run on clean input proves nothing.
 
 ### 8.1 API-exposed schemas (PostgREST) — `dam` is NOT exposed (2026-07-15)
 

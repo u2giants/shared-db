@@ -74,7 +74,9 @@ export function main(argv, { log = (t) => process.stdout.write(t), err = console
   }
   let body
   try {
-    body = run(parsed.args)
+    // `--out` is also used for artifact zip downloads. Keep bytes as bytes;
+    // decoding arbitrary binary data as UTF-8 corrupts it before unzip.
+    body = run(parsed.args, { encoding: parsed.out ? null : 'utf8' })
   } catch (error) {
     // Fail closed and loudly. The step must still stop for a real fault.
     err(`::error::gh-read failed after retries: ${error.message}`)

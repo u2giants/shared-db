@@ -112,6 +112,7 @@ export function runGitHubCommand(args, {
   reportStderr = (text) => process.stderr.write(text),
   maxBuffer = 64 * 1024 * 1024,
   input,
+  encoding = 'utf8',
 } = {}) {
   const mutating = isMutatingCall(args) || input !== undefined
   const allowed = mutating && !idempotentWrite ? 1 : Math.max(1, attempts)
@@ -122,8 +123,8 @@ export function runGitHubCommand(args, {
   // directly and never exercised the real stdin path. Naming 'ignore' here
   // would silently discard the body, so it is omitted when input is present.
   const spawnOptions = input === undefined
-    ? { encoding: 'utf8', maxBuffer, stdio: ['ignore', 'pipe', 'pipe'] }
-    : { encoding: 'utf8', maxBuffer, input }
+    ? { encoding, maxBuffer, stdio: ['ignore', 'pipe', 'pipe'] }
+    : { encoding, maxBuffer, input }
   let attempt = 0
   for (;;) {
     try {
