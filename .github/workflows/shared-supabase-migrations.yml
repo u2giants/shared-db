@@ -394,8 +394,14 @@ jobs:
                 echo "REFUSED: merged_preview_source_pr_map names a non-numeric pull request: ${MAP_PR}" >&2
                 exit 1 ;;
               esac
-              MAP_MERGED="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${MAP_PR}" --jq '.merged')"
-              MAP_MERGE_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${MAP_PR}" --jq '.merge_commit_sha // ""')"
+              # #2342: ONE read per pull request, not two. This asked GitHub the
+              # same question twice per PR, and under `set -euo pipefail` either
+              # call could abort the whole rehearsal on a spurious 502. The read
+              # now goes through the shared transport, which retries transient
+              # transport failures only and never a mutation.
+              MAP_FACTS="$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" api "repos/${GITHUB_REPOSITORY}/pulls/${MAP_PR}" --jq '"\(.merged)\t\(.merge_commit_sha // "")"')"
+              MAP_MERGED="${MAP_FACTS%%$'\t'*}"
+              MAP_MERGE_SHA="${MAP_FACTS#*$'\t'}"
               if [ "$MAP_MERGED" != "true" ] || [ -z "$MAP_MERGE_SHA" ]; then
                 echo "REFUSED: pull request #${MAP_PR} is not merged. A post-merge rehearsal never runs from unmerged code." >&2
                 exit 1
@@ -410,8 +416,10 @@ jobs:
             SOURCE_PR="$MAP_LAST_PR"
           fi
           echo "source_pr_merge_map=${MAP_PROVEN}" >> "$GITHUB_OUTPUT"
-          MERGE_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_PR}" --jq '.merge_commit_sha // ""')"
-          MERGED="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_PR}" --jq '.merged')"
+          # #2342: one read, two facts. See the MAP_FACTS note above.
+          SOURCE_FACTS="$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_PR}" --jq '"\(.merged)\t\(.merge_commit_sha // "")"')"
+          MERGED="${SOURCE_FACTS%%$'\t'*}"
+          MERGE_SHA="${SOURCE_FACTS#*$'\t'}"
           if [ "$MERGED" != "true" ] || [ -z "$MERGE_SHA" ]; then
             echo "REFUSED: pull request #${SOURCE_PR} is not merged. A post-merge rehearsal never runs from unmerged code." >&2
             exit 1
@@ -1332,7 +1340,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api --paginate 'repos/u2giants/shared-db/pulls?state=open&per_page=100' \
+          node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" \
+            api --paginate 'repos/u2giants/shared-db/pulls?state=open&per_page=100' \
             --jq '.[].head.sha' | sort -u > "$RUNNER_TEMP/open-pr-heads"
           while IFS= read -r head_sha; do
             [ -n "$head_sha" ] || continue
@@ -1639,7 +1648,7 @@ jobs:
             # swallowing the failure would print "left as-is" and exit 0 while a head
             # this run revoked stays red forever -- the exact outcome #2116 exists to
             # kill, with a misleading audit line on top. Fail the step and say why.
-            if ! current="$(gh api "repos/u2giants/shared-db/commits/$head_sha/status" \
+            if ! current="$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" api "repos/u2giants/shared-db/commits/$head_sha/status" \
               --jq '[.statuses[] | select(.context == "Migration guarded merge authorization")] | first | "\(.state)|\(.description)"')"; then
               echo "$head_sha: could not READ the authorization status, so this freeze's revocation may still stand. Re-run guarded-migration-merge.yml for this head." >&2
               exit 1

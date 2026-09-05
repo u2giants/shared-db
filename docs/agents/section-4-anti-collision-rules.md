@@ -8,7 +8,7 @@ Reviewer availability is the bounded `refs/db-review-active/<reviewer>` index. P
 
 An exact-head verdict, terminal failure/replacement, moved head, merged PR, or closed PR makes a lease stale. Stale leases are deleted only while the global mutex is owned and the fixed ref still matches its expected SHA. If release cannot be proved, preserve the named ref/SHA and use the guarded `recover-author-mutex.yml` procedure.
 
-Phase 2 rules: protected object claims and active-author capacity are separate; relinquishment never releases a claim. Preview dependencies produce `PREVIEW_WAIT`, never a successful workflow. Immediately before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector/fresh-ledger check, and dispatch only its matching stored instruction. Historical recovery is `mode=apply` only; historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest requires an owner decision and no mutation. Reviewer reservations serialize approved provider/wrapper execution keys and create an ordered durable `review-wait` when all eligible keys are busy. The live orchestrator engine is excluded from review; Qwen and Gemini are inactive while ai-devops reliability is repaired. **With zero open orchestrator markers (`state: none`) the exclusion list is empty and the whole rotation stays drawable** (issue #2127): the exclusion is a same-engine conflict guard, and with no live engine there is no conflict, so closing a marker must not freeze merging repository-wide. `ambiguous`, `invalid` and `unsafe` marker states still refuse. The marker resolver exits non-zero for answers it is certain of (3 for `none`, 1 for the refusing states), so a non-zero exit carrying parseable JSON is an ANSWER; only unreadable output is a resolver fault, and the refusal names which it was.
+Phase 2 rules: protected object claims and active-author capacity are separate; relinquishment never releases a claim. The follow-on abandonment/recovery lifecycle is planned in [`../../plan_author_lane_abandonment_lifecycle.md`](../../plan_author_lane_abandonment_lifecycle.md); read its STATUS table before changing author-capacity behavior. Preview dependencies produce `PREVIEW_WAIT`, never a successful workflow. Immediately before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector/fresh-ledger check, and dispatch only its matching stored instruction. Historical recovery is `mode=apply` only; historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest requires an owner decision and no mutation. Reviewer reservations serialize approved provider/wrapper execution keys and create an ordered durable `review-wait` when all eligible keys are busy. The live orchestrator engine is excluded from review; Gemini is inactive while ai-devops reliability is repaired. **With zero open orchestrator markers (`state: none`) the exclusion list is empty and the whole rotation stays drawable** (issue #2127): the exclusion is a same-engine conflict guard, and with no live engine there is no conflict, so closing a marker must not freeze merging repository-wide. `ambiguous`, `invalid` and `unsafe` marker states still refuse. The marker resolver exits non-zero for answers it is certain of (3 for `none`, 1 for the refusing states), so a non-zero exit carrying parseable JSON is an ANSWER; only unreadable output is a resolver fault, and the refusal names which it was.
 
 Relocated from `AGENTS.md` on 2026-08-20 (issue #1331, PR #1212) so the router stays under its
 80 KB ceiling. **Text unchanged, section number unchanged.** `AGENTS.md` §4 carries the operative
@@ -254,8 +254,8 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    repeat, skipping any reviewer whose engine matches the live orchestrator.
    Codex cannot review when Codex orchestrates; Claude cannot review when Claude
    orchestrates. Albert approved Codex on 2026-08-28 after its wrapper
-   qualified. Qwen 3.8 Max, Gemini, and the retired `glm-5.2` label
-   are paused until an explicit owner instruction restores them.
+   qualified. Gemini and the retired `glm-5.2` label are paused until an explicit
+   owner instruction restores them.
 
    **DeepSeek was RETIRED on 2026-09-01 (issue #2078) and is not drawable.**
    `ai-deepseek-agent` is a conversational API client with no filesystem, no
@@ -619,6 +619,22 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    lock, so it is mutually exclusive with an ordinary preview run and with a
    historical recovery — every lane that writes preview holds one ref, and this
    lane adds no second door.
+
+   **Repository-maintenance rehearsal.** A ready `repo-maintenance` issue that
+   must write only temporary preview objects uses
+   `node scripts/manage-preview-maintenance-lock.mjs --acquire`
+   with its issue number and the exact current `main` SHA. This route requires
+   no migration pull request or author claim, because inventing either would
+   misclassify repository maintenance as structural delivery. The command
+   re-reads the open issue and refuses unless its scope is exactly ready
+   `repo-maintenance`; it holds the same preview ref and releases it with
+   `node scripts/manage-preview-maintenance-lock.mjs --release --owner-sha <acquisition SHA>`.
+   The acquisition workflow remains live while that ref is held (up to 235
+   minutes) and exits promptly after the owner-bound release. This keeps the
+   existing recovery test honest: a rehearsal in progress is backed by an
+   in-progress GitHub run, never by a run that already reported success.
+   A transient unreadable ref API is treated as still held; only a proved 404
+   is treated as an owner-bound release.
 
    **What that lock does NOT do, stated exactly.** It does not exclude a merge
    or a production promotion. `EXCLUSIVE_REFS` gives merge and production their
