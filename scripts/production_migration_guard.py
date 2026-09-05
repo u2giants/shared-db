@@ -94,6 +94,16 @@ HARD_BLOCKED = {
     # state with catalogue-only verification. Applying either original is forbidden.
     "20260819011639",
     "20260819151536",
+    # #2171 / #2349 merged-stranded original. Its only preview apply (run
+    # 33754529571) was a pre-merge branch rehearsal carrying a different
+    # scripts/production_migration_guard.py than the authoring PR #2199 merge
+    # commit 477ef03cd516c79188d81b6c21260575a43a9239, so the production
+    # business-risk gate refuses its byte binding (measured, run 33926573085).
+    # Preview already holds the version after the orphan-reconciliation rename
+    # in run 33821298999, so no fresh preview ledger delta can ever exist for
+    # it. 20260905024139 carries byte-identical executable SQL (git blob
+    # adc49fb5a103a70e03d9a98afc5be4b6518ac92a). Never apply this original.
+    "20260903200951",
     # #1532 original Universe B contract. The original is byte-identical to
     # 20260825192610, which was rehearsed under current producer machinery and
     # applied alone to production in run 32892984889. Never apply both versions.
@@ -217,6 +227,7 @@ RETIRED_VERSION_REASONS = {
     "20260814233342": "never applied and fully superseded; it replaces api.source_capture_inventory wholesale with the 2026-08-14 body, which silently regresses the Sega, Peanuts and WildBrain branches added by later applied migrations",
     "20260825010603": "preview-only historical #1427 contract; production timed out and rolled back, and complete forward replacement 20260825031841 supersedes it",
     "20260825025154": "preview-only historical #1427 accelerator; its later version cannot precede the earlier production-pending contract, and 20260825031841 supersedes both",
+    "20260903200951": "unpromotable producer provenance (original apply run 33754529571 was a pre-merge branch rehearsal whose producer files differ from PR 2199 merge commit 477ef03cd516c79188d81b6c21260575a43a9239) and preview already holds the version after orphan reconciliation run 33821298999, so no qualifying evidence can ever be produced; replaced byte-for-byte by 20260905024139 under issue 2349",
     "20260825031841": "preview-only historical #1471 forward; production timed out and rolled back because its full reconciliation remained one statement; use prerequisite 20260825041343 and its governed dependent recovery",
 }
 RETIRED_VERSIONS = frozenset(RETIRED_VERSION_REASONS)
