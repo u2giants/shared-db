@@ -44,7 +44,11 @@ begin
   join pg_language l on l.oid = p.prolang
   where n.nspname = 'public'
     and p.proname = 'refresh_style_group_counts_batch'
-    and pg_catalog.pg_get_function_identity_arguments(p.oid) = 'uuid[]';
+    -- Match on argument TYPES, not on pg_get_function_identity_arguments(): that
+    -- function includes the parameter NAME ("p_group_ids uuid[]"), so comparing it to
+    -- 'uuid[]' silently matches nothing and reports a present function as missing.
+    and p.pronargs = 1
+    and p.proargtypes[0] = 'uuid[]'::regtype;
 
   if v_oid is null then
     raise exception 'CONTRACT: public.refresh_style_group_counts_batch(uuid[]) is missing. Issue #2214 replaces this exact signature and must not change it.';
