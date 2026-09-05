@@ -66,7 +66,7 @@ Confirmed live foundations are the transaction-bound licensing write guard (#114
 
 POP will have one official, shared licensing catalogue in Supabase for Licensors, Properties, Characters, Style Guides, Asset metadata, and Franchises. Every POP application will read the same records and relationships.
 
-ColdLion will control official Licensor names. Authorized licensor portals will control Property names, Property ownership, entities, and direct relationships inside their scrape coverage. For a ColdLion-only Property under a Licensor with no scrape data, ColdLion's Property name and owning Licensor will be canonical truth. ColdLion will also control whether a Property is Active or Inactive. The stale DesignFlow pull will have no authority. All four authorized source programs will refresh at least weekly, with visible freshness, failure, and review information.
+ColdLion will control official Licensor names. Authorized licensor portals will control Property names, Property ownership, entities, and direct relationships inside their scrape coverage. For a ColdLion-only Property under a Licensor with no scrape data, ColdLion's Property name and owning Licensor will be canonical truth. ColdLion controls general Active/Inactive membership; Warner entitlement instead follows the signed agreement plus countersigned Amendments 1-3. The stale DesignFlow pull will have no authority. All four authorized source programs will refresh at least weekly, with visible freshness, failure, and review information.
 
 When finished:
 
@@ -76,7 +76,7 @@ When finished:
 - every canonical record can be traced to stable source identities and capture history;
 - uncertain matches wait for licensing review instead of being guessed;
 - missing source records are retained and reviewed, never deleted;
-- a complete ColdLion set calculates Property Active/Inactive safely;
+- a complete ColdLion set calculates general Property Active/Inactive safely, while Warner contract entitlement remains authoritative for Warner scope;
 - DB Data Admin is the human review and audit surface;
 - applications stop reading licensing truth from DesignFlow and competing legacy tables.
 
@@ -258,7 +258,7 @@ ColdLion already has resolution state in `plm.erp_licensor`, `plm.erp_property`,
 5. `dam.asset` is the established canonical metadata home and already has application relationships. Creating `core.asset` would create a competing canonical table. The plan therefore extends `dam.asset` and its bridges.
 6. Durable human source resolution is live through supported migrations `20260902024541` and `20260902031743`. The implementation extends that mechanism rather than reviving retired 20260814 migrations or writing canonical IDs into replaceable landing snapshots.
 7. Paramount explicitly proves why relationship evidence needs a type: Property/Franchise co-occurrence is not a direct relationship. Canonical bridges may contain only direct source statements or explicit curated decisions; co-occurrence remains in labelled evidence views/tables.
-8. ColdLion does not supply Characters, Style Guides, Assets, or Franchises. It is canonical for Licensor names, Active/Inactive membership, and ColdLion-only Property identity under Licensors with no authorized scrape data. Inside scrape coverage, the portal remains canonical for Property names and ownership.
+8. ColdLion does not supply Characters, Style Guides, Assets, or Franchises. It is canonical for Licensor names, general Active/Inactive membership, and ColdLion-only Property identity under Licensors with no authorized scrape data. Warner is the exception: signed agreement plus countersigned Amendments 1-3 control entitlement. Inside scrape coverage, the portal remains canonical for Property names and ownership. These business rules and locked decisions 12-16 supersede the older architecture matrix where it says ColdLion is the sole status authority.
 9. Weekly licensor-source scheduling is absent from the inspected private repositories, so database freshness columns and alerts must be implemented together with private-repo operations.
 10. Production migration drift is real. A live catalog absence can mean “merged but not applied,” not “never built.” Every phase starts by comparing `origin/main`, preview ledger, and production ledger.
 11. New scraped Properties cannot rely on the current `core.property.status` default because it is `active`. Consolidation must insert `potential`; guarded status calculation later applies ColdLion membership or, for Warner scope, the signed agreement and countersigned amendments.
@@ -492,7 +492,7 @@ Create `core.franchise` with:
 - RLS and grants matching the shared licensing catalogue, with service-role write and authenticated role-scoped read;
 - no uniqueness on normalized name alone.
 
-Also create `core.franchise_alias` and `core.character_alias` following the reviewed alias patterns while using a source-neutral normalizer. Add `core.style_guide_alias` if current source measurements show alternate official/internal spellings that must be searchable.
+Also create only `core.franchise_alias`, following the reviewed alias patterns with a source-neutral normalizer. Character alias/source provenance is separate successor #2355; any future Style Guide alias requires its own measured, exact-object successor.
 
 Verification gate: contract tests prove same-name Franchises can exist under different Licensors/source scopes, aliases cannot point across the wrong Licensor, unauthenticated users cannot read, and authenticated licensing/application roles can read without gaining direct writes.
 
@@ -527,13 +527,17 @@ Do not place Paramount or Warner co-occurrence rows in `core.property_franchise`
 
 Verification gate: tests preserve the existing `core.property_character_associations` endpoint-pair contract, insert two independent source-support rows for one canonical pair without duplicate business display, retire one source observation without removing the other support, reject `evidence_kind='cooccurrence'` from direct support tables, create no inferred edge, and prove endpoint deletion is blocked.
 
-#### Step 1.5: extend canonical provenance and Asset freshness
+#### Step 1.5a: extend canonical source provenance (#2355)
 
-Extend `core.taxonomy_source_ref` with the existing collision-proof `source_system` plus complete source-specific `source_id`, entity kind constraints, `first_seen_at`, `last_seen_at`, `is_current`, `missing_since`, and audit metadata. Add integrity enforcement so a source ref cannot silently point at a nonexistent or wrong-kind target.
+Extend `core.taxonomy_source_ref` with the existing collision-proof `source_system` plus complete source-specific `source_id`, entity kind constraints, `first_seen_at`, `last_seen_at`, `is_current`, `missing_since`, and audit metadata. Add `core.character_alias` and integrity enforcement so a source ref cannot silently point at a nonexistent or wrong-kind target.
 
-Extend `dam.asset` with the same freshness/current-state facts and retain the established `(source_system, source_id)` identity. If Phase 0 proves an actual collision, assign a distinct full `source_system` value consistent with the durable-resolution model rather than introducing a second namespace key. Keep the scalar Asset Property/Licensor fields as deprecated, read-only compatibility fields during Phases 1–7. Step 7.2 retires them only after all consumers use bridges.
+Verification gate: source refs preserve multiple source identities for one entity, reject cross-kind targets, and mark missing/current without deleting; Character aliases remain Licensor-safe.
 
-Verification gate: source refs preserve multiple source identities for one entity, reject cross-kind targets, and mark missing/current without deleting. Asset tests prove multiple Properties/Style Guides/Franchises can link to one Asset.
+#### Step 1.5b: extend Asset freshness (#2356)
+
+Extend only `dam.asset` with the same freshness/current-state facts and retain the established `(source_system, source_id)` identity. If Phase 0 proves an actual collision, assign a distinct full `source_system` value consistent with the durable-resolution model rather than introducing a second namespace key. Keep the scalar Asset Property/Licensor fields as deprecated, read-only compatibility fields during Phases 1–7. Step 7.2 retires them only after all consumers use bridges.
+
+Verification gate: existing Asset callers and indexes remain compatible; freshness/current state changes do not alter source identity; bridge tests prove multiple Properties/Style Guides/Franchises can link to one Asset.
 
 ### Phase 2: durable resolution, provenance, and consolidation engine
 
@@ -783,7 +787,7 @@ Behavior:
 - no Property is deleted;
 - rerun is idempotent.
 
-Verification gate: fault tests for short pull, missing division, pagination loss, duplicate key, suspicious shrink, and stale plan all refuse mutation. An unresolved fixture protects only its candidate canonical rows while unrelated mapped/present rows activate and resolved-absence rows deactivate. Invalid exclusion reasons refuse. A complete two-cycle rehearsal activates/preserves/deactivates exactly the expected fixture Properties without renaming or re-parenting them; the status function cannot obtain authority for name, code, or `licensor_id`.
+Verification gate: fault tests for short pull, missing division, pagination loss, duplicate key, suspicious shrink, and stale plan all refuse mutation. An unresolved fixture protects only its candidate canonical rows while unrelated mapped/present rows activate and resolved-absence rows deactivate. Private-contract fixtures prove a Warner-entitled Property absent from ColdLion stays Active and a Creative-visible but unentitled Warner Property cannot become Active. Invalid exclusion reasons refuse. A complete two-cycle rehearsal activates/preserves/deactivates exactly the expected fixture Properties without renaming or re-parenting them; the status function cannot obtain authority for name, code, or `licensor_id`.
 
 #### Step 4.2: remove DesignFlow comparison from authority decisions
 
