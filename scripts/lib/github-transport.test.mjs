@@ -119,6 +119,16 @@ test('mutating calls are detected in every shape used in this repository', () =>
   assert.equal(isMutatingCall(['pr', 'list', '--state', 'open']), false)
 })
 
+test('non-api state-changing subcommands cannot pass through the read front door', () => {
+  for (const args of [
+    ['variable', 'set', 'KEY'], ['variable', 'update', 'KEY'], ['release', 'upload', 'v1', 'asset.zip'],
+    ['cache', 'delete', '1'], ['workflow', 'enable', 'build.yml'], ['repo', 'fork', 'o/r'],
+  ]) assert.equal(isMutatingCall(args), true, args.join(' '))
+  for (const args of [['variable', 'get', 'KEY'], ['pr', 'view', '1'], ['issue', 'list']]) {
+    assert.equal(isMutatingCall(args), false, args.join(' '))
+  }
+})
+
 test('a mutating call is NOT retried even when the failure is transient', () => {
   // gh cannot distinguish "never landed" from "landed, response lost", so a
   // retried POST can create the ref twice.

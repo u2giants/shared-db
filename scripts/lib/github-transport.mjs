@@ -66,6 +66,7 @@ export function isTransientGitHubTransport(error) {
 const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE'])
 const MUTATING_SUBCOMMANDS = new Set([
   'merge', 'close', 'edit', 'comment', 'create', 'review', 'cancel', 'rerun', 'delete', 'reopen',
+  'set', 'update', 'upload', 'enable', 'disable', 'add', 'remove', 'fork', 'logout', 'refresh',
 ])
 
 export function isMutatingCall(args) {

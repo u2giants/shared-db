@@ -47,16 +47,19 @@ test('ready repository maintenance acquires and safely releases the shared previ
 test('wrong main, issue routing, or occupied preview fails closed', () => {
   process.env.GITHUB_RUN_ID = '123'
   process.env.GITHUB_RUN_ATTEMPT = '1'
-  const stale = io()
-  assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'b'.repeat(40) }, stale), /exact current main/)
-  const wrong = io()
-  wrong.getIssue = () => ({ state: 'open', body: '```db-work-scope\nstatus: blocked\nwork_type: repo-maintenance\nroute: repo-maintenance\npriority: 1\ndepends_on:\nobjects:\n```' })
-  assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'a'.repeat(40) }, wrong), /not ready/)
-  const busy = io()
-  busy.refs.set('refs/db-coordination/preview', 'c'.repeat(40))
-  assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'a'.repeat(40) }, busy), /occupied/)
-  delete process.env.GITHUB_RUN_ID
-  delete process.env.GITHUB_RUN_ATTEMPT
+  try {
+    const stale = io()
+    assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'b'.repeat(40) }, stale), /exact current main/)
+    const wrong = io()
+    wrong.getIssue = () => ({ state: 'open', body: '```db-work-scope\nstatus: blocked\nwork_type: repo-maintenance\nroute: repo-maintenance\npriority: 1\ndepends_on:\nobjects:\n```' })
+    assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'a'.repeat(40) }, wrong), /not ready/)
+    const busy = io()
+    busy.refs.set('refs/db-coordination/preview', 'c'.repeat(40))
+    assert.throws(() => acquirePreviewMaintenanceLock({ issue: 771, owner: 'codex', headSha: 'a'.repeat(40) }, busy), /occupied/)
+  } finally {
+    delete process.env.GITHUB_RUN_ID
+    delete process.env.GITHUB_RUN_ATTEMPT
+  }
 })
 
 test('local acquisition is refused because it would be unrecoverable after a crash', () => {

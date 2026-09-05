@@ -93,7 +93,7 @@ jobs:
           REQUESTED_SHA: ${{ inputs.head_sha }}
         run: |
           set -euo pipefail
-          test "$(gh pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
+          test "$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
           git fetch origin main
           node scripts/check-main-tip-freshness.mjs --contains
           node scripts/check-pr-object-collisions.mjs
@@ -141,7 +141,7 @@ jobs:
               break
             fi
             echo "guarded merge attempt $attempt hit the known authorization propagation delay; re-proving the head and retrying"
-            test "$(gh pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
+            test "$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
             git fetch origin main
             node scripts/check-main-tip-freshness.mjs --contains
             sleep 10
