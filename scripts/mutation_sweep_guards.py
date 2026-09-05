@@ -45,11 +45,15 @@ def line_offsets(text: str) -> list[int]:
 
 
 def guards(path: Path) -> tuple[str, list[dict]]:
-    text = path.read_text(encoding="utf-8")
+    with path.open("r", encoding="utf-8", newline="") as source:
+        text = source.read()
     offsets = line_offsets(text)
     found = []
     for node in ast.walk(ast.parse(text)):
         if not isinstance(node, ast.If) or not any(isinstance(stmt, ast.Raise) for stmt in node.body):
+            continue
+        if (isinstance(node.test, ast.Compare) and isinstance(node.test.left, ast.Name)
+                and node.test.left.id == "__name__"):
             continue
         start = offsets[node.test.lineno - 1] + node.test.col_offset
         end = offsets[node.test.end_lineno - 1] + node.test.end_col_offset
@@ -57,6 +61,15 @@ def guards(path: Path) -> tuple[str, list[dict]]:
                       "start": start, "end": end})
     found.sort(key=lambda row: row["start"])
     return text, found
+
+
+def mutate(text: str, guard: dict) -> str:
+    mutated = text[:guard["start"]] + "False" + text[guard["end"]:]
+    try:
+        ast.parse(mutated)
+    except (SyntaxError, IndentationError) as error:
+        raise RuntimeError(f"mutation did not produce valid Python for {guard['id']}: {error}") from error
+    return mutated
 
 
 def run_suite(command: list[str], repo: Path) -> tuple[bool, str]:
@@ -102,6 +115,9 @@ def copy_repo(source: Path, target: Path) -> None:
     def ignored(_directory: str, names: list[str]) -> set[str]:
         return {name for name in names if name in {".git", "node_modules", ".ai-1223-workers", "__pycache__"}}
     shutil.copytree(source, target, ignore=ignored)
+    process = subprocess.run(["git", "init", "--quiet"], cwd=target, capture_output=True, text=True)
+    if process.returncode:
+        raise RuntimeError(f"could not initialize isolated Git metadata: {process.stderr[-1000:]}")
 
 
 def worker_run(payload: dict) -> list[dict]:
@@ -112,6 +128,9 @@ def worker_run(payload: dict) -> list[dict]:
     with tempfile.TemporaryDirectory(prefix=f"guard-sweep-{payload['worker']}-") as temporary:
         isolated = Path(temporary, "repo")
         copy_repo(repo, isolated)
+        green, tail = run_suite(metadata["command"], isolated)
+        if not green:
+            raise RuntimeError(f"isolated clean baseline is red: {tail}")
         for guard in payload["guards"]:
             if guard["id"] in results:
                 continue
@@ -124,8 +143,7 @@ def worker_run(payload: dict) -> list[dict]:
             text = original.decode("utf-8")
             started = time.time()
             try:
-                path.write_text(text[:guard["start"]] + "False" + text[guard["end"]:],
-                                encoding="utf-8", newline="")
+                path.write_text(mutate(text, guard), encoding="utf-8", newline="")
                 still_green, tail = run_suite(metadata["command"], isolated)
             finally:
                 path.write_bytes(original)
@@ -168,6 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     command = shlex.split(args.command, posix=os.name != "nt")
     output = repo / args.out
     checkpoint_prefix = repo / (args.checkpoint or f"{args.out}.checkpoint")
+    output.unlink(missing_ok=True)
     green, tail = run_suite(command, repo)
     if not green:
         print("REFUSED: baseline is red; no mutation result would be trustworthy.", file=sys.stderr)
