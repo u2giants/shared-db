@@ -74,4 +74,6 @@ test('owner probe distinguishes a held lock, a released lock, and another owner'
   assert.deepEqual(probePreviewMaintenanceLock(ownerSha, fake), { state: 'released' })
   fake.refs.set('refs/db-coordination/preview', 'e'.repeat(40))
   assert.throws(() => probePreviewMaintenanceLock(ownerSha, fake), /moved to another owner/)
+  fake.readRef = () => { throw new Error('HTTP 502') }
+  assert.deepEqual(probePreviewMaintenanceLock(ownerSha, fake), { state: 'unreadable' })
 })

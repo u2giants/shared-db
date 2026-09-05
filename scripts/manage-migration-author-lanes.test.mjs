@@ -23,17 +23,25 @@ test('current migration version refuses when live main cannot be refreshed',()=>
   assert.throws(()=>currentMainMaxVersion('C:/worktree',()=>{throw new Error('offline')}),/offline/)
 })
 
-test('GitHub coordination transport retries bounded transient failures with identical deterministic arguments',()=>{
+test('GitHub coordination transport retries only explicitly idempotent writes with identical deterministic arguments',()=>{
   const calls=[],waits=[],args=['api','-X','POST','repos/u2giants/shared-db/git/commits','-f','message=exact']
   const result=runGitHubCommand(args,{executor:(command,actual)=>{
     calls.push([command,[...actual]])
     if(calls.length<3)throw commandFailure('HTTP 503: No server is currently available')
     return '{"sha":"same"}'
-  },wait:waits.push.bind(waits)})
+  },wait:waits.push.bind(waits),idempotentWrite:true})
   assert.equal(result,'{"sha":"same"}')
   assert.deepEqual(waits,[1000,2000])
   assert.equal(calls.length,3)
   assert.ok(calls.every(([,actual])=>JSON.stringify(actual)===JSON.stringify(args)))
+})
+
+test('GitHub coordination transport never replays an unproven write by default',()=>{
+  let calls=0
+  assert.throws(()=>runGitHubCommand(['issue','comment','1','--body','once'],{
+    executor:()=>{calls+=1;throw commandFailure('HTTP 503: response lost')},wait:()=>{},
+  }),error=>error instanceof LaneError&&error.transientTransport===true)
+  assert.equal(calls,1)
 })
 
 test('GitHub coordination transport exhausts after four attempts and never retries 4xx',()=>{

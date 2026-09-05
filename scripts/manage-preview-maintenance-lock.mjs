@@ -52,7 +52,9 @@ export function releasePreviewMaintenanceLock(ownerSha, io = githubIo) {
 
 export function probePreviewMaintenanceLock(ownerSha, io = githubIo) {
   if (!/^[0-9a-f]{40}$/i.test(String(ownerSha ?? ''))) throw new PreviewMaintenanceLockError('probe requires the exact acquisition SHA')
-  const current = io.readRef(EXCLUSIVE_REFS.preview)
+  let current
+  try { current = io.readRef(EXCLUSIVE_REFS.preview) }
+  catch { return { state: 'unreadable' } }
   if (current === null) return { state: 'released' }
   if (current !== ownerSha) throw new PreviewMaintenanceLockError('preview ref moved to another owner while this run was live')
   return { state: 'owned', ownerSha }

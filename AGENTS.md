@@ -1157,8 +1157,8 @@ The rule, in four parts:
    classifier because the spurious failures were 404s. Across this repository a 404 is an
    *answer* ("does this ref exist yet?"), and a gate that concludes "absent" only after
    exhausting a retry budget has made its absence proof depend on a timeout — fail-open,
-   which is worse than fail-closed. Retries are for HTTP 5xx, rate limits and connection
-   or TLS failures only.
+   which is worse than fail-closed. Retries are for HTTP 5xx and connection or TLS failures
+   only; rate-limit responses remain semantic failures and are not retried.
 
 **This is enforced, not advised.** `scripts/check-github-transport-conformance.mjs` fails
 the build on a ninth wrapper, a bare workflow `gh api` read, or a per-file Contents URL,
