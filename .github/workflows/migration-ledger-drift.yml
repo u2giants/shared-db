@@ -141,7 +141,7 @@ jobs:
 
           # Enumerate and match client-side, not with a server-side search
           # filter: an eventually-consistent empty answer files a duplicate.
-          EXISTING="$(gh api --paginate "repos/${REPO}/issues?state=open&per_page=100" \
+          EXISTING="$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" api --paginate "repos/${REPO}/issues?state=open&per_page=100" \
             --jq "[.[] | select(.pull_request == null) | select(.title == \"${TITLE}\") | .number] | .[0] // empty")"
 
           if [ -n "${EXISTING}" ]; then
