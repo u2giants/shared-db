@@ -23,6 +23,15 @@
 
 begin;
 
+-- core.licensor is protected by the licensing write-authority guard
+-- (20260817124545 / 20260819151527), which refuses any canonical write without an
+-- exact transaction-bound authorization. This is the CI harness's sanctioned way for a
+-- contract test to seed the two synthetic licensors it needs, and is the same call
+-- clickup_task_import_contracts.sql and the fr_owner_ruling tests make. The guard is
+-- NOT weakened, bypassed or edited: the authorization is real, transaction-bound, and
+-- disappears with the rollback at the end of this file.
+select public.ci_authorize_licensing_contract_test();
+
 do $contracts$
 declare
   v_licensor_a uuid;
