@@ -3,6 +3,8 @@ import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { recordReviewVerdict, reviewerExecutionPreflight, resolveCommandPath } from './manage-migration-author-lanes.mjs'
 import { lineOpensWithVerdictWord, isVerdictFor } from './lib/review-verdict.mjs'
+// Issue #2342: one shared transport owns the never-replay-a-write policy.
+import { spawnGitHub } from './lib/github-transport.mjs'
 
 export function parseArgs(argv){
   const split=argv.indexOf('--'),own=split<0?argv:argv.slice(0,split),wrapperArgs=split<0?[]:argv.slice(split+1),out={wrapperArgs,slot:1}
@@ -149,7 +151,7 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
       preserved=candidate
     }catch{preserved=null}
     if(preserved===null)throw new Error(`${detail}; nothing was posted because the findings could not be made inert`)
-    const kept=deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body:preserved}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
+    const kept=spawnGitHub(['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{executor:deps.spawn,input:JSON.stringify({body:preserved})})
     if(kept.error||kept.status!==0)throw new Error(`${detail}; the findings could not be preserved durably either`)
     let keptUrl=null
     try{keptUrl=JSON.parse(kept.stdout).html_url}catch{keptUrl=null}
@@ -157,7 +159,7 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
   }
   const preflightNote=skipDoctor?'REVIEW PREFLIGHT: automated doctor skipped; the caller must retain the fresh external doctor proof that justified this exception.\n\n':''
   const body=`GOVERNED REVIEW FINDINGS — NON-AUTHORIZING UNLESS THE MATCHING CREATE-ONLY VERDICT ARTIFACT EXISTS\n\n${preflightNote}${rawBody}`
-  const posted=deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
+  const posted=spawnGitHub(['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{executor:deps.spawn,input:JSON.stringify({body})})
   if(posted.error||posted.status!==0)throw new Error('review findings could not be posted durably; no verdict was recorded')
   let comment
   try{comment=JSON.parse(posted.stdout)}catch{throw new Error('durable findings response was unreadable; no verdict was recorded')}
@@ -182,14 +184,14 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
       // head: those are exactly the conditions under which the lane tooling reads
       // a comment, so they are the conditions the void has to survive.
       if(isVerdictFor({author_association:'OWNER',body:edited},options.headSha))throw new Error('the neutralised body is still read as a verdict by the shared verdict predicate')
-      const patch=deps.spawn('gh',['api','-X','PATCH',`repos/u2giants/shared-db/issues/comments/${comment.id}`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body:edited}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
+      const patch=spawnGitHub(['api','-X','PATCH',`repos/u2giants/shared-db/issues/comments/${comment.id}`,'--input','-'],{executor:deps.spawn,input:JSON.stringify({body:edited})})
       if(patch.error||patch.status!==0)throw new Error(`gh exited ${patch.status??'unknown'}${patch.error?` (${patch.error.message})`:''}`)
     }catch(voidError){voidStatus=`FAILED: ${voidError.message}`}
     const stillLive=voidStatus!=='voided'
     const note=stillLive
       ? `\n\nTHE VOIDING EDIT ITSELF ${voidStatus}. A PARSEABLE VERDICT LINE IS STILL LIVE ON COMMENT ${comment.id} (${comment.html_url}). Lane tooling will read it as a real verdict at ${options.headSha} and deadlock this pull request. That line must be neutralised BY HAND on comment ${comment.id} before this pull request can proceed.`
       : `\n\nEvery parseable verdict line on comment ${comment.id} was voided so no tool can read it as a verdict at ${options.headSha}. The reviewer's findings were left intact.`
-    deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body:`REVIEW RECORDING FAILED — the preceding findings comment is non-authorizing and no verdict artifact was recorded. Reason: ${error.message}${note}`}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
+    spawnGitHub(['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{executor:deps.spawn,input:JSON.stringify({body:`REVIEW RECORDING FAILED — the preceding findings comment is non-authorizing and no verdict artifact was recorded. Reason: ${error.message}${note}`})})
     if(stillLive)throw new Error(`${error.message} — and the voiding edit ${voidStatus}; a parseable verdict line is still live on comment ${comment.id} and must be neutralised by hand`)
     throw error
   }

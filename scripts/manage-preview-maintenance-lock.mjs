@@ -50,12 +50,23 @@ export function releasePreviewMaintenanceLock(ownerSha, io = githubIo) {
   }
 }
 
+export function probePreviewMaintenanceLock(ownerSha, io = githubIo) {
+  if (!/^[0-9a-f]{40}$/i.test(String(ownerSha ?? ''))) throw new PreviewMaintenanceLockError('probe requires the exact acquisition SHA')
+  let current
+  try { current = io.readRef(EXCLUSIVE_REFS.preview) }
+  catch { return { state: 'unreadable' } }
+  if (current === null) return { state: 'released' }
+  if (current !== ownerSha) return { state: 'foreign-owner' }
+  return { state: 'owned', ownerSha }
+}
+
 function args(argv) {
   const out = {}
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i]
     if (key === '--acquire') out.mode = 'acquire'
     else if (key === '--release') out.mode = 'release'
+    else if (key === '--probe') out.mode = 'probe'
     else if (['--issue','--owner','--head-sha','--owner-sha'].includes(key)) out[key.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = argv[++i]
     else throw new PreviewMaintenanceLockError(`unknown argument: ${key}`)
   }
@@ -67,7 +78,8 @@ export function main(argv, io = githubIo) {
     const options = args(argv)
     if (options.mode === 'acquire') console.log(JSON.stringify(acquirePreviewMaintenanceLock(options, io), null, 2))
     else if (options.mode === 'release') releasePreviewMaintenanceLock(options.ownerSha, io)
-    else throw new PreviewMaintenanceLockError('choose --acquire or --release')
+    else if (options.mode === 'probe') console.log(JSON.stringify(probePreviewMaintenanceLock(options.ownerSha, io)))
+    else throw new PreviewMaintenanceLockError('choose --acquire, --release, or --probe')
     return 0
   } catch (error) {
     console.error(`REFUSED: ${error.message}`)
