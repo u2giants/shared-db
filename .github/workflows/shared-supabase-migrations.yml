@@ -349,6 +349,7 @@ jobs:
             echo "REFUSED: name merged_preview_source_pr OR merged_preview_source_pr_map, not both." >&2
             exit 1
           fi
+          MAP_PROVEN=""
           if [ -n "${SOURCE_MAP:-}" ]; then
             # EVERY pull request in the map is proved merged here, not only the
             # one the lane lock is filed under. The per-version merge-commit
@@ -393,18 +394,32 @@ jobs:
                 echo "REFUSED: merged_preview_source_pr_map names a non-numeric pull request: ${MAP_PR}" >&2
                 exit 1 ;;
               esac
-              MAP_MERGED="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${MAP_PR}" --jq '.merged')"
-              MAP_MERGE_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${MAP_PR}" --jq '.merge_commit_sha // ""')"
+              # #2342: ONE read per pull request, not two. This asked GitHub the
+              # same question twice per PR, and under `set -euo pipefail` either
+              # call could abort the whole rehearsal on a spurious 502. The read
+              # now goes through the shared transport, which retries transient
+              # transport failures only and never a mutation.
+              MAP_FACTS="$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" api "repos/${GITHUB_REPOSITORY}/pulls/${MAP_PR}" --jq '"\(.merged)\t\(.merge_commit_sha // "")"')"
+              MAP_MERGED="${MAP_FACTS%%$'\t'*}"
+              MAP_MERGE_SHA="${MAP_FACTS#*$'\t'}"
               if [ "$MAP_MERGED" != "true" ] || [ -z "$MAP_MERGE_SHA" ]; then
                 echo "REFUSED: pull request #${MAP_PR} is not merged. A post-merge rehearsal never runs from unmerged code." >&2
                 exit 1
               fi
+              # #2140: keep every proven pair, not only the last one. The instance
+              # binding used to be filed under MAP_LAST_PR alone, so per-version
+              # historical recovery could never pass for any earlier version in the
+              # batch -- the binding genuinely did not name that version's author.
+              MAP_PROVEN="${MAP_PROVEN}${MAP_PR}:${MAP_MERGE_SHA} "
             done
             echo "merged_preview_source_pr_map: proved ${MAP_PR_COUNT} pull request(s) merged: $(printf '%s' "$MAP_PRS" | tr '\n' ' ')"
             SOURCE_PR="$MAP_LAST_PR"
           fi
-          MERGE_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_PR}" --jq '.merge_commit_sha // ""')"
-          MERGED="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_PR}" --jq '.merged')"
+          echo "source_pr_merge_map=${MAP_PROVEN}" >> "$GITHUB_OUTPUT"
+          # #2342: one read, two facts. See the MAP_FACTS note above.
+          SOURCE_FACTS="$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_PR}" --jq '"\(.merged)\t\(.merge_commit_sha // "")"')"
+          MERGED="${SOURCE_FACTS%%$'\t'*}"
+          MERGE_SHA="${SOURCE_FACTS#*$'\t'}"
           if [ "$MERGED" != "true" ] || [ -z "$MERGE_SHA" ]; then
             echo "REFUSED: pull request #${SOURCE_PR} is not merged. A post-merge rehearsal never runs from unmerged code." >&2
             exit 1
@@ -825,6 +840,7 @@ jobs:
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
           MERGED_SOURCE_PR: ${{ steps.merged_rehearsal.outputs.source_pr }}
           MERGE_COMMIT_SHA: ${{ steps.merged_rehearsal.outputs.merge_commit_sha }}
+          SOURCE_PR_MERGE_MAP: ${{ steps.merged_rehearsal.outputs.source_pr_merge_map }}
           HISTORICAL_SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
           HISTORICAL_SOURCE_MAP: ${{ inputs.historical_preview_source_pr_map }}
         run: |
@@ -842,6 +858,30 @@ jobs:
             --source-pr "${MERGED_SOURCE_PR:-}" \
             --merge-commit-sha "${MERGE_COMMIT_SHA:-}" \
             --output "$RUNNER_TEMP/preview-instance.json"
+          # ONE BINDING PER AUTHORING PULL REQUEST (#2140). The file above is filed
+          # under the map's LAST pull request, which is the only one the historical
+          # lane could ever recover per version. Every other version in the batch was
+          # authored by a different pull request, and the gate compares the binding
+          # against THAT pull request -- correctly, because the binding never named
+          # it. So one binding is written per proven pull request, each naming its own
+          # source pull request and its own merge commit. Nothing else changes: every
+          # file carries the same run, applied commit, preview project and complete
+          # allowlist, and the gate's strict comparison is unchanged.
+          for PAIR in ${SOURCE_PR_MERGE_MAP:-}; do
+            PAIR_PR="${PAIR%%:*}"
+            PAIR_SHA="${PAIR#*:}"
+            test -n "$PAIR_PR" && test -n "$PAIR_SHA"
+            python scripts/preview_instance_binding.py \
+              --applied-commit "$APPLIED_COMMIT" \
+              --preview-project-ref "$PREVIEW_PROJECT_REF" \
+              --production-project-ref "$PRODUCTION_PROJECT_REF_NEVER_WRITE_HERE" \
+              --run-id "$GITHUB_RUN_ID" \
+              --allowlist "$PREVIEW_ALLOWLIST" \
+              --rehearsal-mode "$MODE" \
+              --source-pr "$PAIR_PR" \
+              --merge-commit-sha "$PAIR_SHA" \
+              --output "$RUNNER_TEMP/preview-instance-${PAIR_PR}.json"
+          done
       - name: Save preview evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -853,6 +893,7 @@ jobs:
             ${{ runner.temp }}/preview-apply.txt
             ${{ runner.temp }}/preview-ledger-after.txt
             ${{ runner.temp }}/preview-instance.json
+            ${{ runner.temp }}/preview-instance-*.json
             ${{ runner.temp }}/bounded-preview/supabase/migration-content-manifest.json
             ${{ runner.temp }}/historical-preview-source.json
           if-no-files-found: warn
@@ -1278,19 +1319,37 @@ jobs:
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
           test "$(git rev-parse origin/main)" = "$REQUESTED_SHA"
           MAIN_SHA="$REQUESTED_SHA" node scripts/check-main-tip-freshness.mjs
+      # The freeze revokes authorization on the head of EVERY open pull request,
+      # including PRs with nothing to do with this promotion. Two things were wrong
+      # with the first version of this step (issue #2116):
+      #
+      #   1. The description said only "production promotion is active", so once the
+      #      promotion ended the leftover red check was indistinguishable from a
+      #      genuine merge failure or a stale review. An operator could not tell
+      #      "your authorization was taken by a freeze" from "your head moved".
+      #   2. The freeze is bounded; the revocation was not. Nothing put the
+      #      authorizations back, so every affected lane had to be re-authorized by
+      #      hand without ever being told so.
+      #
+      # The description now names THIS run and the exact recovery command, the status
+      # links to this run, and the promotion restores what it took -- see the paired
+      # step after the production lane is released.
       - name: Revoke every pre-existing merge authorization while frozen
+        id: revoke_frozen_authorizations
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api --paginate 'repos/u2giants/shared-db/pulls?state=open&per_page=100' \
+          node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" \
+            api --paginate 'repos/u2giants/shared-db/pulls?state=open&per_page=100' \
             --jq '.[].head.sha' | sort -u > "$RUNNER_TEMP/open-pr-heads"
           while IFS= read -r head_sha; do
             [ -n "$head_sha" ] || continue
             gh api "repos/u2giants/shared-db/statuses/$head_sha" \
               -f state=failure \
               -f context='Migration guarded merge authorization' \
-              -f description='Production promotion is active; guarded merge authorization revoked'
+              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+              -f description="Revoked by production freeze run ${GITHUB_RUN_ID}; re-run guarded-migration-merge.yml"
           done < "$RUNNER_TEMP/open-pr-heads"
       # Re-verify after the environment wait. GitHub artifacts are retention-
       # bound, so this both pins the original ZIP digest and copies the verified
@@ -1542,3 +1601,68 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OWNER_SHA: ${{ steps.production_lock.outputs.owner_sha }}
         run: node scripts/manage-migration-author-lanes.mjs --release-production --owner-sha "$OWNER_SHA"
+      # THE FREEZE PUTS BACK WHAT IT TOOK (issue #2116). Runs on `always()`, after the
+      # lane is released, so a failed or cancelled promotion cannot leave every open
+      # pull request in the repository red forever.
+      #
+      # Only revocations written by THIS run are cleared: the current state must still
+      # be `failure` AND its description must still name this run id. A head that has
+      # since been re-authorized, or revoked for a real reason by
+      # `guarded-migration-merge.yml`, is left exactly as it is.
+      #
+      # Cleared to `pending`, NEVER to `success`. Authorization means "the exclusive
+      # merge lock is held and this exact head was revalidated", which is not true
+      # after a freeze, and only `guarded-migration-merge.yml` may assert it. Clearing
+      # to pending restores the ability to tell a freeze from a real failure and names
+      # the one command that grants authorization, without granting it. A pending
+      # required check still blocks an unguarded merge, so this fails safe.
+      - name: Restore the merge authorizations this freeze revoked
+        # UNCONDITIONAL, and it must stay that way. The revoke loop runs under
+        # `set -e`, so one bad POST aborts it with earlier heads already revoked --
+        # exactly the partial damage this step exists to repair -- and a CANCELLED
+        # revoke (workflow cancelled, runner killed, job timeout) does the same thing
+        # while reporting neither success nor failure. An earlier version named the
+        # two outcomes it wanted and therefore skipped itself on `cancelled`, leaving
+        # every open pull request in the repository red forever: the precise failure
+        # issue #2116 exists to end, reintroduced by the repair for it.
+        #
+        # Running when there was nothing to revoke is free: the heads file is absent
+        # or empty and the step exits 0 immediately. Running when the revocations are
+        # not this run's is free too: the description match below leaves them alone.
+        # There is no outcome of the revoke step under which NOT running is safer.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          heads="$RUNNER_TEMP/open-pr-heads"
+          if [ ! -s "$heads" ]; then echo 'this freeze revoked no authorizations'; exit 0; fi
+          # EXACT, not a substring. Matching on the run id alone lets run 8812345
+          # claim a revocation written by run 881234567, because the shorter id is a
+          # prefix of the longer one. Comparing the whole description anchors both
+          # ends for free, and it must stay byte-identical to the revoke step's.
+          expected="Revoked by production freeze run ${GITHUB_RUN_ID}; re-run guarded-migration-merge.yml"
+          while IFS= read -r head_sha; do
+            [ -n "$head_sha" ] || continue
+            # NO `|| echo ''` here. An unreadable status is NOT "no status":
+            # swallowing the failure would print "left as-is" and exit 0 while a head
+            # this run revoked stays red forever -- the exact outcome #2116 exists to
+            # kill, with a misleading audit line on top. Fail the step and say why.
+            if ! current="$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" api "repos/u2giants/shared-db/commits/$head_sha/status" \
+              --jq '[.statuses[] | select(.context == "Migration guarded merge authorization")] | first | "\(.state)|\(.description)"')"; then
+              echo "$head_sha: could not READ the authorization status, so this freeze's revocation may still stand. Re-run guarded-migration-merge.yml for this head." >&2
+              exit 1
+            fi
+            state="${current%%|*}"
+            description="${current#*|}"
+            if [ "$state" != 'failure' ] || [ "$description" != "$expected" ]; then
+              echo "$head_sha: left as-is (state='${state:-none}')"
+              continue
+            fi
+            gh api "repos/u2giants/shared-db/statuses/$head_sha" \
+              -f state=pending \
+              -f context='Migration guarded merge authorization' \
+              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+              -f description="Production freeze ${GITHUB_RUN_ID} ended; re-run guarded-migration-merge.yml"
+            echo "$head_sha: freeze revocation cleared to pending"
+          done < "$heads"

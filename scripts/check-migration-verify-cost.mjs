@@ -153,7 +153,7 @@ export function scanSql(sql) {
 // `do $verify$`, `do language plpgsql $verify$`, and the same with comments in
 // between -- the lead is read from the COMMENT-BLANKED text, so a comment can
 // neither hide the keyword nor forge one.
-const DO_LEAD = /\bdo(?:\s+language\s+[A-Za-z_][A-Za-z0-9_]*)?$/i
+const DO_LEAD = /\bdo(?:\s+language\s+(?:[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")*"))?$/i
 
 // The lead used to be read through a fixed 200-character window, so a long comment
 // or a long LANGUAGE clause between `do` and its tag pushed the keyword out of view
@@ -264,7 +264,7 @@ export function searchPathReachesPlm(scannable, literal, { fileScopeOnly = false
 // A maintenance command puts an option list or VERBOSE between its keyword and the
 // object, so `vacuum (analyze) plm.t` and `cluster verbose plm.t` need the gap
 // spelled out (external review, glm-5.3, PR #2139).
-const MAINTENANCE = String.raw`(?:vacuum(?:\s*\([^)]*\))?(?:\s+full)?(?:\s+freeze)?(?:\s+verbose)?(?:\s+analyze)?|analyze(?:\s*\([^)]*\))?(?:\s+verbose)?|cluster(?:\s+verbose)?|refresh\s+materialized\s+view(?:\s+concurrently)?)`
+const MAINTENANCE = String.raw`(?:vacuum(?:\s*\([^)]*\))?(?:\s+full)?(?:\s+freeze)?(?:\s+verbose)?(?:\s+analyze)?|analyze(?:\s*\([^)]*\))?(?:\s+verbose)?|cluster(?:\s+verbose)?|reindex(?:\s*\([^)]*\))?(?:\s+(?:table|index))?(?:\s+concurrently)?|refresh\s+materialized\s+view(?:\s+concurrently)?)`
 const READ_CONTEXT = String.raw`\b(?:from|join|into|update|delete\s+from|truncate(?:\s+table)?|copy|${MAINTENANCE})\s+(?:only\s+)?`
 const INVENTORY = String.raw`(?:"?api"?\s*\.\s*)?"?source_capture_inventory"?(?![A-Za-z0-9_])`
 const PLM_OBJECT = String.raw`"?plm"?\s*\.\s*"?[A-Za-z_][A-Za-z0-9_]*"?`
