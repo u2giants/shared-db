@@ -473,9 +473,8 @@ The structural ownership repair is already live from migration `20260829004145`.
 Behavior:
 
 1. Treat `core.character` plus `core.property_character_associations` as the live endpoint/bridge contract.
-2. Add source-support provenance to that bridge without changing its application-facing endpoint pair or manufacturing inferred edges.
-3. Audit every compatibility reader of the retired scalar/legacy shapes and move it to the live bridge before Step 7.2 removes compatibility routes.
-4. Keep Character identity Licensor-scoped and never deduplicate on name alone.
+2. Audit every compatibility reader of the retired scalar/legacy shapes and move it to the live bridge before Step 7.2 removes compatibility routes.
+3. Keep Character identity Licensor-scoped and never deduplicate on name alone. Character alias/source provenance is Step 1.5a/#2355; association source support is Step 1.4/#2334.
 
 Verification gate: SQL tests prove one Character can link to two Properties through `core.property_character_associations`; deleting/inactivating a Property cannot delete the Character; no retired `core.property_character` object returns; and every compatibility reader has a tested migration result.
 
@@ -580,11 +579,20 @@ This table is how each full Disney, NBCU, Paramount, or Warner `source_system` p
 
 Verification gate: a source adapter cannot propose or promote an entity outside its authorized Licensor/kind scope; disabled or stale scopes fail loudly; audit fields are mandatory.
 
-#### Step 2.3: add relationship-resolution and candidate contracts
+#### Step 2.3a: add relationship-resolution decisions (#2335)
 
-Create audited structures for unresolved source entities and direct source edges, using exact names selected after the Phase 0 collision audit. Recommended names:
+Create only the audited direct-edge decision structure:
 
 - `plm.licensing_relationship_resolution`
+
+It uses exact source/endpoint identities, decision status, actor, reason, timestamps, and optimistic locking. It records reviewed decisions without inferring a direct edge or exposing licensed rows.
+
+Verification gate: wrong-kind endpoints fail; first-writer and optimistic-lock rules hold; direct/evidence-only classifications remain distinct; no API view is created in this unit.
+
+#### Step 2.3b: add browser candidate and review APIs (#2357)
+
+Create only the browser-safe views:
+
 - `api.licensing_entity_candidates`
 - `api.licensing_relationship_candidates`
 - `api.licensing_resolution_queue`
@@ -595,7 +603,7 @@ Candidate views must read only the latest complete validated capture for sources
 
 After `api.licensing_resolution_queue` exists, replace the scalar-derived rule in `supabase/tests/opa_property_character_landing_contracts.sql:334-353`. The successor behavior is: direct Property/Character source evidence creates current support; a Style Guide linked to a Property and Character does not by itself manufacture that direct edge; any potentially missing direct edge appears in the audited relationship queue with its two supporting facts. This replacement belongs here, not Step 1.4 or Step 7.2.
 
-Verification gate: fixtures for each source show the exact three-part identity key, correct stable identities, and direct/evidence distinction; equal source IDs in Disney/Lucasfilm/Marvel/Twentieth Century remain distinct through their existing `source_system` names; incomplete captures return no promotable candidates; display names are never used as the sole key; the old axis test is replaced and no inferred direct edge is created.
+Verification gate: fixtures for each source show the exact three-part identity key, correct stable identities, and direct/evidence distinction; equal source IDs in Disney/Lucasfilm/Marvel/Twentieth Century remain distinct through their existing `source_system` names; incomplete captures return no promotable candidates; display names are never used as the sole key; browser roles can read only permitted evidence; the old axis test is replaced and no inferred direct edge is created.
 
 #### Step 2.4: implement preview/dry-run-first consolidation
 
