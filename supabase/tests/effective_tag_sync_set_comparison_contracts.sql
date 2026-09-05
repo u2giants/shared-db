@@ -275,7 +275,9 @@ begin
   -- CASE F -- the other two branches are unchanged and still exact. An
   -- asset-tag write must still add and remove exactly its own single row.
   -- ---------------------------------------------------------------------
-  update public.asset_tags set status = 'rejected'
+  -- asset_tags_rejection_check requires rejected_at whenever status is
+  -- 'rejected', so set both together.
+  update public.asset_tags set status = 'rejected', rejected_at = now()
    where asset_id = v_asset and tag = v_file_tag_2;
 
   if exists (
