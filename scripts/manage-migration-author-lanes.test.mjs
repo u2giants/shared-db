@@ -2116,6 +2116,15 @@ test('an abandoned head-of-line reviewer ticket expires and cannot wedge later a
   assert.equal(io.refs.has(`${REVIEW_QUEUE_REF_PREFIX}/205-305-1`),false)
 })
 
+test('a failed head-of-line assignment evacuates its own ticket immediately',()=>{
+  const io=reviewIo(),request={issue:207,pr:307,headSha:'c'.repeat(40)}
+  io.enableReviewerQueue=true;io.getPr=()=>({number:307,state:'open',head:{sha:request.headSha}})
+  for(const reviewer of ACTIVE_REVIEWERS){const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=20 reviewer=${reviewer.name} issue=999 pr=998 head=${'d'.repeat(40)}`);io.refs.set(reviewActiveRef(reviewer.name),sha)}
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  assert.throws(()=>assignNextReviewer(request,io),/no reviewer is available/)
+  assert.equal(io.refs.has(`${REVIEW_QUEUE_REF_PREFIX}/207-307-1`),false)
+})
+
 test('an unreadable reviewer queue does not invent a FIFO refusal',()=>{
   const io=reviewIo(),request={issue:204,pr:304,headSha:'e'.repeat(40)}
   io.enableReviewerQueue=true;io.getPr=()=>({number:304,state:'open',head:{sha:request.headSha}})

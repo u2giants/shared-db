@@ -3180,12 +3180,12 @@ function parseReviewerQueueTicket(commit){
 
 function reviewerQueueTicketExpired(ticket,now){const age=reviewLeaseAgeHours(ticket?.requestedAt,now);return age!==null&&age>=REVIEW_QUEUE_TTL_HOURS}
 function liveReviewerQueue(io,now=new Date(),mutexOwnerSha=null){
-  if(typeof io.readReviewerQueue==='function')return io.readReviewerQueue().filter((row)=>!reviewerQueueTicketExpired(row.ticket,now)&&row.pr?.state==='open'&&row.pr?.head?.sha===row.ticket.headSha).map((row)=>({...row.ticket,ref:row.ref,sha:row.sha})).sort((a,b)=>Date.parse(a.requestedAt)-Date.parse(b.requestedAt)||a.issue-b.issue||a.pr-b.pr||a.slot-b.slot)
   const reader=typeof io.listReviewRefsPaged==='function'?io.listReviewRefsPaged.bind(io):io.listRefs?.bind(io)
-  if(!reader)throw new LaneError('reviewer queue refs are unreadable')
-  const rows=reader(REVIEW_QUEUE_REF_PREFIX)??[],live=[],expired=[]
+  const rows=typeof io.readReviewerQueue==='function'?io.readReviewerQueue():reader?.(REVIEW_QUEUE_REF_PREFIX)
+  if(!rows)throw new LaneError('reviewer queue refs are unreadable')
+  const live=[],expired=[]
   for(const row of rows){
-    const ticket=parseReviewerQueueTicket(row.commit??io.getCommit(row.sha)),pr=io.getPr(ticket.pr)
+    const ticket=row.ticket??parseReviewerQueueTicket(row.commit??io.getCommit(row.sha)),pr=row.pr??io.getPr(ticket.pr)
     if(reviewerQueueTicketExpired(ticket,now))expired.push({ref:row.ref,sha:row.sha})
     else if(pr?.state==='open'&&pr?.head?.sha===ticket.headSha)live.push({...ticket,ref:row.ref,sha:row.sha})
   }
@@ -3451,7 +3451,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
 export function assignNextReviewer(request,io=githubIo){
   const normalized={...request,issue:Number(request.issue),pr:Number(request.pr),slot:Number(request.slot??1),headSha:String(request.headSha??'')}
   if(!io.enableReviewerQueue)return withReviewRequestBudget(()=>assignNextReviewerOperation(normalized,reviewOperationIo(io)))
-  return withReviewRequestBudget(()=>{const operationIo=reviewOperationIo(io),ticket=ensureReviewerQueueTurn(normalized,operationIo),result=assignNextReviewerOperation(normalized,operationIo);finishReviewerQueueTurn(ticket,operationIo);return result},REVIEW_QUEUE_ASSIGNMENT_REQUEST_LIMIT)
+  return withReviewRequestBudget(()=>{const operationIo=reviewOperationIo(io),ticket=ensureReviewerQueueTurn(normalized,operationIo);try{return assignNextReviewerOperation(normalized,operationIo)}finally{finishReviewerQueueTurn(ticket,operationIo)}},REVIEW_QUEUE_ASSIGNMENT_REQUEST_LIMIT)
 }
 function parseSilenceRelease(commit){
   const message=commit?.message??commit?.commit?.message??''
