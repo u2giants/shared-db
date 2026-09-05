@@ -13,7 +13,7 @@
 --
 --  2. The function accepted no expected prior step, so a stale browser could
 --     overwrite a newer transition once it won the item lock. An optional
---     p_expected_prior_step_id is compared under the same FOR UPDATE lock and
+--     expected_prior_step_id routing-context key is compared under the same FOR UPDATE lock and
 --     BEFORE any write; a mismatch raises 40001 so the caller can refetch and
 --     retry.
 --
@@ -121,16 +121,28 @@ grant select on dflow.item_workflow_handoff to authenticated, service_role;
 
 -- ----------------------------------------------------------------- function --
 
--- The four new parameters all carry defaults, so every existing eleven-argument
--- call site keeps compiling. The old function is DROPPED rather than left
--- beside the new one on purpose: two functions of the same name whose first
--- eleven parameter types are identical make an eleven-argument call ambiguous
--- ("function is not unique") and would break every in-flight caller instead of
--- carrying it forward.
-drop function if exists dflow.record_item_workflow_action(
-  integer,integer,text,uuid,text,text,boolean,text,text,text,jsonb
-);
-
+-- The signature is deliberately UNCHANGED. The four new inputs arrive as
+-- reserved keys inside the existing p_routing_context object rather than as new
+-- parameters, because adding defaulted parameters would create a SECOND
+-- function whose first eleven parameter types are identical to this one -- and
+-- every existing eleven-argument call would then fail with "function is not
+-- unique". Dropping the old signature does not rescue that: the replay harness
+-- snapshots each routine's live definition, re-runs the earlier migration that
+-- declares it, and restores the snapshot, so a dropped overload is recreated
+-- and both exist again. One signature is the only shape that cannot break.
+--
+-- The reserved keys are STRIPPED before the routing context is stored, and the
+-- facts they carry land in the typed columns above. They are transport, not
+-- storage -- the issue's objection to fallback facts living as free JSON is
+-- about where the facts are KEPT, and they are now kept in real columns.
+--
+--   expected_prior_step_id      number   reject the call unless the item is
+--                                        still on this step (stale write)
+--   require_recipient           boolean  default true; roll back a handoff that
+--                                        resolves no recipient
+--   fallback_recipient_user_id  number   notify this user instead of the
+--                                        original requester
+--   fallback_reason             string   required whenever a fallback is set
 create or replace function dflow.record_item_workflow_action(
   p_rfq_item_id integer,
   p_new_step_id integer,
@@ -142,11 +154,7 @@ create or replace function dflow.record_item_workflow_action(
   p_notification_type text default 'workflow',
   p_notification_title text default 'RFQ workflow update',
   p_notification_message text default 'An RFQ item needs your attention',
-  p_routing_context jsonb default '{}'::jsonb,
-  p_expected_prior_step_id integer default null,
-  p_require_recipient boolean default true,
-  p_fallback_recipient_user_id integer default null,
-  p_fallback_reason text default null
+  p_routing_context jsonb default '{}'::jsonb
 )
 returns bigint
 language plpgsql
@@ -165,7 +173,10 @@ declare
   v_source_action_id bigint;
   v_original_actor integer;
   v_recipient integer;
-  v_fallback_reason text := nullif(btrim(p_fallback_reason), '');
+  v_expected_prior_step_id integer;
+  v_require_recipient boolean := true;
+  v_fallback_recipient_user_id integer;
+  v_fallback_reason text;
   v_notified integer;
 begin
   if p_correlation_key is null then
@@ -180,7 +191,39 @@ begin
   if p_return_to_original_handoff and (v_from is null or v_to is null) then
     raise exception 'return routing requires from and to function keys' using errcode = '22023';
   end if;
-  if p_fallback_recipient_user_id is not null then
+
+  -- Reserved routing-context keys are the transport for the new inputs. Each is
+  -- type-checked here rather than coerced, so a malformed value is refused
+  -- loudly instead of silently disabling a guard.
+  if jsonb_typeof(p_routing_context -> 'expected_prior_step_id') not in ('null', 'undefined') then
+    if jsonb_typeof(p_routing_context -> 'expected_prior_step_id') <> 'number' then
+      raise exception 'routing context expected_prior_step_id must be a number' using errcode = '22023';
+    end if;
+    v_expected_prior_step_id := (p_routing_context ->> 'expected_prior_step_id')::integer;
+  end if;
+
+  if jsonb_typeof(p_routing_context -> 'require_recipient') not in ('null', 'undefined') then
+    if jsonb_typeof(p_routing_context -> 'require_recipient') <> 'boolean' then
+      raise exception 'routing context require_recipient must be a boolean' using errcode = '22023';
+    end if;
+    v_require_recipient := (p_routing_context ->> 'require_recipient')::boolean;
+  end if;
+
+  if jsonb_typeof(p_routing_context -> 'fallback_recipient_user_id') not in ('null', 'undefined') then
+    if jsonb_typeof(p_routing_context -> 'fallback_recipient_user_id') <> 'number' then
+      raise exception 'routing context fallback_recipient_user_id must be a number' using errcode = '22023';
+    end if;
+    v_fallback_recipient_user_id := (p_routing_context ->> 'fallback_recipient_user_id')::integer;
+  end if;
+
+  if jsonb_typeof(p_routing_context -> 'fallback_reason') not in ('null', 'undefined') then
+    if jsonb_typeof(p_routing_context -> 'fallback_reason') <> 'string' then
+      raise exception 'routing context fallback_reason must be a string' using errcode = '22023';
+    end if;
+    v_fallback_reason := nullif(btrim(p_routing_context ->> 'fallback_reason'), '');
+  end if;
+
+  if v_fallback_recipient_user_id is not null then
     if not p_return_to_original_handoff then
       raise exception 'a fallback recipient is only valid on a return to the original handoff'
         using errcode = '22023';
@@ -217,11 +260,11 @@ begin
 
   -- Stale-write rejection, under the item lock and before any write. A caller
   -- that read the item at step X may only move it from step X.
-  if p_expected_prior_step_id is not null
-     and v_prior_step is distinct from p_expected_prior_step_id then
+  if v_expected_prior_step_id is not null
+     and v_prior_step is distinct from v_expected_prior_step_id then
     raise exception
       'RFQ item % moved to step % since it was read at step %; refetch and retry',
-      p_rfq_item_id, v_prior_step, p_expected_prior_step_id
+      p_rfq_item_id, v_prior_step, v_expected_prior_step_id
       using errcode = '40001';
   end if;
 
@@ -254,7 +297,7 @@ begin
 
     -- The original actor is immutable and always read back from the source
     -- action. A fallback changes only who is notified.
-    v_recipient := coalesce(p_fallback_recipient_user_id, v_original_actor);
+    v_recipient := coalesce(v_fallback_recipient_user_id, v_original_actor);
 
     perform 1 from dflow.users u where u.id = v_recipient;
     if not found then
@@ -262,7 +305,14 @@ begin
     end if;
   end if;
 
-  v_context := p_routing_context || jsonb_strip_nulls(jsonb_build_object(
+  -- The reserved keys are transport only. They are stripped here so the stored
+  -- routing context never becomes the record of a fact that has a real column.
+  v_context := (p_routing_context
+                  - 'expected_prior_step_id'
+                  - 'require_recipient'
+                  - 'fallback_recipient_user_id'
+                  - 'fallback_reason')
+               || jsonb_strip_nulls(jsonb_build_object(
     'from_function_key', v_from,
     'to_function_key', v_to,
     'return_to_original_handoff', p_return_to_original_handoff
@@ -275,8 +325,8 @@ begin
   ) values (
     p_rfq_item_id, v_actor, v_auth_actor, v_prior_step, p_new_step_id,
     lower(btrim(p_action_key)), p_correlation_key, v_context,
-    v_source_action_id, p_fallback_recipient_user_id, v_fallback_reason,
-    p_fallback_recipient_user_id is not null
+    v_source_action_id, v_fallback_recipient_user_id, v_fallback_reason,
+    v_fallback_recipient_user_id is not null
   )
   on conflict (correlation_key) do nothing
   returning id into v_action_id;
@@ -331,7 +381,7 @@ begin
   -- A handoff that names a destination function is a required transition: it
   -- must not commit with nobody told. Raising here rolls back the action row,
   -- the item step change and the notification attempt together.
-  if p_require_recipient and v_to is not null and coalesce(v_notified, 0) = 0 then
+  if v_require_recipient and v_to is not null and coalesce(v_notified, 0) = 0 then
     raise exception
       'no eligible active recipient in function % for RFQ item %; transition rolled back',
       v_to, p_rfq_item_id
@@ -342,11 +392,11 @@ begin
 end
 $function$;
 
-revoke all on function dflow.record_item_workflow_action(integer,integer,text,uuid,text,text,boolean,text,text,text,jsonb,integer,boolean,integer,text) from public;
-grant execute on function dflow.record_item_workflow_action(integer,integer,text,uuid,text,text,boolean,text,text,text,jsonb,integer,boolean,integer,text) to authenticated, service_role;
+revoke all on function dflow.record_item_workflow_action(integer,integer,text,uuid,text,text,boolean,text,text,text,jsonb) from public;
+grant execute on function dflow.record_item_workflow_action(integer,integer,text,uuid,text,text,boolean,text,text,text,jsonb) to authenticated, service_role;
 
-comment on function dflow.record_item_workflow_action(integer,integer,text,uuid,text,text,boolean,text,text,text,jsonb,integer,boolean,integer,text) is
-  'Records one immutable RFQ workflow action. Rejects stale transitions against p_expected_prior_step_id, links a return to the latest OPEN handoff via source_action_id, and rolls back a recipient-required transition that resolves nobody.';
+comment on function dflow.record_item_workflow_action(integer,integer,text,uuid,text,text,boolean,text,text,text,jsonb) is
+  'Records one immutable RFQ workflow action. Rejects stale transitions against v_expected_prior_step_id, links a return to the latest OPEN handoff via source_action_id, and rolls back a recipient-required transition that resolves nobody.';
 comment on column dflow.item_workflow_action.source_action_id is
   'The handoff action this action answers. At most one action may answer any handoff, which is what makes a handoff open or closed across repeated pricing cycles.';
 comment on column dflow.item_workflow_action.fallback_recipient_user_id is

@@ -66,10 +66,14 @@ begin
   perform dflow.set_item_user_assignment(v_item,'sourcing',v_sourcing,true);
 
   -- ===================================================================================
-  -- A. Exactly one record_item_workflow_action exists. Leaving the superseded
-  --    eleven-argument function beside the new one would make every existing
-  --    eleven-argument call ambiguous ("function is not unique"), which is a
-  --    production outage dressed up as backwards compatibility.
+  -- A. Exactly one record_item_workflow_action exists, on its original eleven-
+  --    parameter signature. A second same-named function whose leading parameter
+  --    types match would make every existing eleven-argument call ambiguous
+  --    ("function is not unique") -- a production outage dressed up as backwards
+  --    compatibility. Dropping the superseded one does not fix that either: the
+  --    replay harness restores routine definitions around re-run migrations, so a
+  --    dropped overload comes back. The new inputs therefore travel as reserved
+  --    keys inside p_routing_context and the signature never changes.
   -- ===================================================================================
   select count(*)::integer into v_overloads
     from pg_catalog.pg_proc p
@@ -78,6 +82,14 @@ begin
   if v_overloads <> 1 then
     raise exception 'A FAILED: % record_item_workflow_action overloads exist; exactly one is required',
       v_overloads;
+  end if;
+  -- One signature, and it is still the ELEVEN-parameter one every existing caller
+  -- compiles against. New inputs travel as reserved routing-context keys precisely
+  -- so that no second overload can ever make an existing call ambiguous.
+  if (select p.pronargs from pg_catalog.pg_proc p
+        join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'dflow' and p.proname = 'record_item_workflow_action') <> 11 then
+    raise exception 'A FAILED: the function signature changed; existing eleven-argument callers would break';
   end if;
   raise notice 'A PASSED: one unambiguous record_item_workflow_action.';
 
@@ -185,8 +197,8 @@ begin
     perform dflow.record_item_workflow_action(
       v_item, v_step_sourcing, 'send_to_sourcing', 'a2203001-0000-4000-8000-000000000007',
       'sales', 'sourcing', false,
-      'workflow', 'RFQ workflow update', 'An RFQ item needs your attention', '{}'::jsonb,
-      v_step_start);
+      'workflow', 'RFQ workflow update', 'An RFQ item needs your attention',
+      jsonb_build_object('expected_prior_step_id', v_step_start));
     raise exception 'E FAILED: a stale transition from an old step was accepted';
   exception when sqlstate '40001' then null;
   end;
@@ -204,8 +216,8 @@ begin
   v_handoff_3 := dflow.record_item_workflow_action(
     v_item, v_step_sourcing, 'send_to_sourcing', 'a2203001-0000-4000-8000-000000000008',
     'sales', 'sourcing', false,
-    'workflow', 'RFQ workflow update', 'An RFQ item needs your attention', '{}'::jsonb,
-    v_step_before);
+    'workflow', 'RFQ workflow update', 'An RFQ item needs your attention',
+    jsonb_build_object('expected_prior_step_id', v_step_before));
   if v_handoff_3 is null then
     raise exception 'E FAILED: the correct expected prior step was rejected too';
   end if;
@@ -219,8 +231,8 @@ begin
   v_retry := dflow.record_item_workflow_action(
     v_item, v_step_sourcing, 'send_to_sourcing', 'a2203001-0000-4000-8000-000000000008',
     'sales', 'sourcing', false,
-    'workflow', 'RFQ workflow update', 'An RFQ item needs your attention', '{}'::jsonb,
-    v_step_before);
+    'workflow', 'RFQ workflow update', 'An RFQ item needs your attention',
+    jsonb_build_object('expected_prior_step_id', v_step_before));
   if v_retry <> v_handoff_3 then
     raise exception 'F FAILED: a retried call created a second action';
   end if;
@@ -245,8 +257,9 @@ begin
   v_return_3 := dflow.record_item_workflow_action(
     v_item, v_step_sales, 'return_to_sales', 'a2203001-0000-4000-8000-000000000009',
     'sourcing', 'sales', true,
-    'workflow', 'RFQ workflow update', 'An RFQ item needs your attention', '{}'::jsonb,
-    null, true, v_admin, 'original requester is inactive');
+    'workflow', 'RFQ workflow update', 'An RFQ item needs your attention',
+    jsonb_build_object('fallback_recipient_user_id', v_admin,
+                       'fallback_reason', 'original requester is inactive'));
 
   if (select user_id_fk from app.user_notification where workflow_action_id = v_return_3)
        <> v_admin then
@@ -265,13 +278,33 @@ begin
     raise exception 'G FAILED: the fallback reason is not queryable';
   end if;
 
+  -- The reserved keys are transport, not storage: they must not survive into the
+  -- stored routing context, or the fallback facts would be free JSON again.
+  if (select routing_context from dflow.item_workflow_action where id = v_return_3)
+       ?| array['fallback_recipient_user_id','fallback_reason',
+                'expected_prior_step_id','require_recipient'] then
+    raise exception 'G FAILED: a reserved routing-context key was stored on the action row';
+  end if;
+
+  -- A malformed reserved key is refused rather than silently ignored -- a
+  -- mistyped guard input must never quietly disable the guard.
+  begin
+    perform dflow.record_item_workflow_action(
+      v_item, v_step_sales, 'return_to_sales', 'a2203001-0000-4000-8000-00000000000e',
+      'sourcing', 'sales', true,
+      'workflow', 'RFQ workflow update', 'An RFQ item needs your attention',
+      jsonb_build_object('require_recipient', 'yes'));
+    raise exception 'G FAILED: a non-boolean require_recipient was accepted';
+  exception when sqlstate '22023' then null;
+  end;
+
   -- An unlabeled fallback is refused: the reason may not be optional.
   begin
     perform dflow.record_item_workflow_action(
       v_item, v_step_sales, 'return_to_sales', 'a2203001-0000-4000-8000-00000000000a',
       'sourcing', 'sales', true,
-      'workflow', 'RFQ workflow update', 'An RFQ item needs your attention', '{}'::jsonb,
-      null, true, v_admin, null);
+      'workflow', 'RFQ workflow update', 'An RFQ item needs your attention',
+      jsonb_build_object('fallback_recipient_user_id', v_admin));
     raise exception 'G FAILED: an unlabeled fallback was accepted';
   exception when sqlstate '22023' then null;
   end;
@@ -322,8 +355,8 @@ begin
   if dflow.record_item_workflow_action(
        v_item, v_step_quality, 'send_to_quality', 'a2203001-0000-4000-8000-00000000000d',
        'sales', 'quality', false,
-       'workflow', 'RFQ workflow update', 'An RFQ item needs your attention', '{}'::jsonb,
-       null, false) is null then
+       'workflow', 'RFQ workflow update', 'An RFQ item needs your attention',
+       jsonb_build_object('require_recipient', false)) is null then
     raise exception 'H FAILED: an explicitly non-required handoff was refused';
   end if;
   raise notice 'H PASSED: recipient-required transitions roll back; opt-out still works.';
