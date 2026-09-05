@@ -83,9 +83,13 @@ INSERT INTO selected_tables VALUES
   ('productUserAssignment'), ('users');
 
 WITH RECURSIVE dependency_tables(table_name) AS (
-  SELECT table_name FROM selected_tables
+  -- pg_class.relname uses the catalog's "C" collation on PostgreSQL 17 while
+  -- the scratch text column inherits the database default. Recursive terms
+  -- must agree exactly, so pin both sides instead of relying on deployment
+  -- locale.
+  SELECT table_name COLLATE "C" FROM selected_tables
   UNION
-  SELECT parent.relname
+  SELECT parent.relname COLLATE "C"
   FROM dependency_tables d
   JOIN pg_class child ON child.relname = d.table_name
   JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace AND child_ns.nspname = 'dflow'
