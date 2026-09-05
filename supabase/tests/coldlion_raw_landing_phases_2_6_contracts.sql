@@ -55,7 +55,7 @@ begin
     where table_schema='coldlion' and table_name='item_detail' and column_name in ('color_code','size_code')
   ) then raise exception 'D12 violated: colour/size leaked into item_detail'; end if;
 
-  -- The sales-history grain was redesigned in 20260904001555 (issue #2173): identity now
+  -- The sales-history grain was redesigned in 20260905105038 (issue #2173): identity now
   -- carries the vendor's salesOrderLineNo, and components hang off a surrogate parent id.
   -- The full contract lives in coldlion_order_history_contracts.sql; this is the anchor.
   if not exists (
