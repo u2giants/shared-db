@@ -565,7 +565,11 @@ Add `reviewerCapacityReport(io)` near `findBusyReviewers` (line 1741) and a
 (`JSON.stringify(..., null, 2)`, matching how `--reviewer-preflight` prints at line
 2944). One row per reviewer in `ACTIVE_REVIEWERS`, each with:
 
-`reviewer, held (bool), issue, pr, headSha, sequence, heldSinceIso, ageHours (or null), prState, headMatches (bool), verdictPresent (bool), classification`
+`reviewer, held (bool), issue, pr, headSha, sequence, heldSinceIso, ageHours (or null), prState, headMatches (bool), verdictPresent (bool or null), verdictReadError (string or null), classification`
+
+`verdictPresent: null` plus a non-null `verdictReadError` means the durable
+verdict namespace could not be read.  That row is classified `unknown`; it must
+never be presented as a confident no-verdict lease.
 
 where `classification` is one of `free`, `live`, `stale-reclaimable` (the existing
 `busy.stale` conditions), `suspect-aged` (held longer than the advisory threshold

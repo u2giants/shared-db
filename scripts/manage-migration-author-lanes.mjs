@@ -2042,8 +2042,9 @@ export function parseReviewLease(commit){
   //     belonged to. Saying so keeps those leases freed by their own verdict, as
   //     they always have been; leaving them UNKNOWN under the round-3 fail-closed
   //     liveness sentinel would have pinned them busy forever.
-  // `slot === null` means "not stated", and every caller falls back to the
-  // pre-#2208 any-slot question for those, so no legacy lease changes behavior.
+  // `slot === null` means "not stated". Liveness callers map that ambiguity to
+  // the slot-0 sentinel so no sibling verdict can reclaim the lease; the lease
+  // remains busy until its slot identity is repaired or otherwise resolved.
   const leaseMatch=/^db-coordination reviewer-lease generation=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40}) sequence=(\d+)$/i.exec(message)
   const cursorMatch=leaseMatch?null:/^db-coordination reviewer-cursor sequence=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40})(?: slot=(\d+))?$/i.exec(message)
   const replacementMatch=(leaseMatch||cursorMatch)?null:/^db-coordination reviewer-(?:failure-)?replacement sequence=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40})(?: slot=(\d+))? /i.exec(message)
@@ -2862,18 +2863,18 @@ export function reviewerCapacityReport(io=githubIo,now=new Date()){
   const staleByReviewer=new Map(busy.stale.map((row)=>[row.assignment.reviewer,row]))
   const rows=ACTIVE_REVIEWERS.map((reviewer)=>{
     const record=busy.leases.get(reviewer.name)
-    if(!record)return {reviewer:reviewer.name,held:false,issue:null,pr:null,headSha:null,sequence:null,heldSinceIso:null,ageHours:null,prState:null,headMatches:null,verdictPresent:false,classification:'free'}
+    if(!record)return {reviewer:reviewer.name,held:false,issue:null,pr:null,headSha:null,sequence:null,heldSinceIso:null,ageHours:null,prState:null,headMatches:null,verdictPresent:false,verdictReadError:null,classification:'free'}
     const state=busy.states?.get(`${record.lease.issue}:${record.lease.pr}`),pr=state?.pr
-    let verdictPresent=false
-    try{verdictPresent=hasVerdictForHead(record.lease.issue,record.lease.pr,record.lease.headSha,io,leaseVerdictOptions(record.lease))}catch{verdictPresent=false}
+    let verdictPresent=false,verdictReadError=null
+    try{verdictPresent=hasVerdictForHead(record.lease.issue,record.lease.pr,record.lease.headSha,io,leaseVerdictOptions(record.lease))}catch(error){verdictPresent=null;verdictReadError=String(error?.message??error)}
     const ageHours=reviewLeaseAgeHours(record.heldSince,now)
     let classification
-    if(!state||!pr)classification='unknown'
+    if(verdictReadError!==null||!state||!pr)classification='unknown'
     else if(staleByReviewer.has(reviewer.name))classification='stale-reclaimable'
     else if(ageHours===null)classification='unknown'
     else if(ageHours>=REVIEW_LEASE_SUSPECT_HOURS)classification='suspect-aged'
     else classification='live'
-    return {reviewer:reviewer.name,held:true,issue:record.lease.issue,pr:record.lease.pr,headSha:record.lease.headSha,sequence:record.lease.sequence,heldSinceIso:record.heldSince??null,ageHours:ageHours===null?null:Number(ageHours.toFixed(2)),prState:pr?.state??null,headMatches:pr?pr.head?.sha===record.lease.headSha:null,verdictPresent,classification}
+    return {reviewer:reviewer.name,held:true,issue:record.lease.issue,pr:record.lease.pr,headSha:record.lease.headSha,sequence:record.lease.sequence,heldSinceIso:record.heldSince??null,ageHours:ageHours===null?null:Number(ageHours.toFixed(2)),prState:pr?.state??null,headMatches:pr?pr.head?.sha===record.lease.headSha:null,verdictPresent,verdictReadError,classification}
   })
   return {generatedAt:new Date(now).toISOString(),advisorySuspectHours:REVIEW_LEASE_SUSPECT_HOURS,summary:{total:rows.length,free:rows.filter((row)=>row.classification==='free').length,live:rows.filter((row)=>['live','suspect-aged'].includes(row.classification)).length,reclaimable:rows.filter((row)=>row.classification==='stale-reclaimable').length,unknown:rows.filter((row)=>row.classification==='unknown').length},reviewers:rows}
 }
