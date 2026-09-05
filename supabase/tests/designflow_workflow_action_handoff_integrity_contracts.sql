@@ -36,6 +36,12 @@ declare
   v_notifications_before bigint;
   v_step_before integer;
   v_overloads integer;
+  v_open_count integer;
+  v_legacy_item integer;
+  v_legacy_send bigint;
+  v_legacy_return bigint;
+  v_search_path text;
+  v_failed boolean;
 begin
   -- ===================================================================================
   -- Fixtures.
@@ -381,7 +387,164 @@ begin
   ) then
     raise exception 'I FAILED: record_item_workflow_action does not pin search_path';
   end if;
+  -- "some search_path is pinned" is not the contract; the exact one is. A definer
+  -- function that resolved plm or app through a caller-supplied path would still
+  -- pass a mere existence check.
+  select c into v_search_path
+    from pg_catalog.pg_proc p
+    join pg_catalog.pg_namespace n on n.oid = p.pronamespace,
+         unnest(coalesce(p.proconfig, array[]::text[])) c
+   where n.nspname = 'dflow' and p.proname = 'record_item_workflow_action'
+     and c like 'search_path=%';
+  if v_search_path is distinct from 'search_path=pg_catalog, dflow, auth' then
+    raise exception 'I FAILED: search_path is % rather than the pinned pg_catalog, dflow, auth', v_search_path;
+  end if;
+  if not has_table_privilege('authenticated','dflow.item_workflow_handoff','SELECT') then
+    raise exception 'I FAILED: authenticated lost SELECT on the handoff view';
+  end if;
+  if not has_function_privilege('authenticated',
+       'dflow.record_item_workflow_action(integer,integer,text,uuid,text,text,boolean,text,text,text,jsonb)','EXECUTE') then
+    raise exception 'I FAILED: authenticated lost EXECUTE on record_item_workflow_action';
+  end if;
+  if has_function_privilege('public',
+       'dflow.record_item_workflow_action(integer,integer,text,uuid,text,text,boolean,text,text,text,jsonb)','EXECUTE') then
+    raise exception 'I FAILED: EXECUTE was not revoked from PUBLIC';
+  end if;
   raise notice 'I PASSED: access and search_path pinning hold.';
+
+  -- ===================================================================================
+  -- J. The view answers the GLOBAL question, not just "is this id open". A return
+  --    also carries to_function_key, so admitting returns would leave every one of
+  --    them open forever and make "are there open handoffs" permanently wrong.
+  -- ===================================================================================
+  -- Every sales->sourcing cycle above was answered, so none of them may still be
+  -- open. Block H deliberately left sales->quality sends outstanding; those are
+  -- the only rows allowed to be open.
+  select count(*)::integer into v_open_count
+    from dflow.item_workflow_handoff
+   where rfq_item_id = v_item and is_open and to_function_key = 'sourcing';
+  if v_open_count <> 0 then
+    raise exception 'J FAILED: % answered handoffs still report open', v_open_count;
+  end if;
+  if exists (
+    select 1 from dflow.item_workflow_handoff
+     where rfq_item_id = v_item and is_open and to_function_key is distinct from 'quality'
+  ) then
+    raise exception 'J FAILED: an unexpected row is reported as an open handoff';
+  end if;
+  if exists (
+    select 1 from dflow.item_workflow_handoff h
+      join dflow.item_workflow_action a on a.id = h.handoff_action_id
+     where a.routing_context ->> 'return_to_original_handoff' = 'true'
+        or a.source_action_id is not null
+  ) then
+    raise exception 'J FAILED: a return is exposed as an originating handoff';
+  end if;
+  raise notice 'J PASSED: the view exposes originating handoffs only and none stay open.';
+
+  -- ===================================================================================
+  -- K. Pre-migration shape. A return that names no source may not exist at all after
+  --    this migration, and a return may never be answered as if it were a handoff.
+  -- ===================================================================================
+  if exists (
+    select 1 from dflow.item_workflow_action
+     where routing_context ->> 'return_to_original_handoff' = 'true'
+       and source_action_id is null
+  ) then
+    raise exception 'K FAILED: an unlinked historical return survived the backfill';
+  end if;
+
+  insert into plm."RFQItem"("rfqItem_step") values (v_step_sourcing) returning "rfqItem_id" into v_legacy_item;
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'role','authenticated','sub','a2203000-0000-4000-8000-00000000000a',
+    'email','issue-2203-sales-a@example.test')::text, true);
+  perform dflow.set_item_user_assignment(v_legacy_item,'sales',v_sales_a,true);
+  perform dflow.set_item_user_assignment(v_legacy_item,'sourcing',v_sourcing,true);
+  -- A raw insert mimicking a pre-migration handoff; the append-only trigger guards
+  -- only UPDATE and DELETE, so this is the shape historical rows really have.
+  insert into dflow.item_workflow_action(
+    rfq_item_id, actor_user_id, actor_auth_user_id, prior_step_id, new_step_id, action_key, correlation_key, routing_context)
+  values (v_legacy_item, v_sales_a, 'a2203000-0000-4000-8000-00000000000a', v_step_start, v_step_sourcing, 'send_to_sourcing',
+          'a2203009-0000-4000-8000-000000000001',
+          jsonb_build_object('from_function_key','sales','to_function_key','sourcing'))
+  returning id into v_legacy_send;
+
+  v_failed := false;
+  begin
+    insert into dflow.item_workflow_action(
+      rfq_item_id, actor_user_id, actor_auth_user_id, prior_step_id, new_step_id, action_key, correlation_key, routing_context)
+    values (v_legacy_item, v_sourcing, 'a2203000-0000-4000-8000-00000000000b', v_step_sourcing, v_step_sales, 'return_to_sales',
+            'a2203009-0000-4000-8000-000000000002',
+            jsonb_build_object('from_function_key','sourcing','to_function_key','sales',
+                               'return_to_original_handoff',true));
+  exception when check_violation then
+    v_failed := true;
+  end;
+  if not v_failed then
+    raise exception 'K FAILED: a return with no source_action_id was accepted';
+  end if;
+
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'role','authenticated','sub','a2203000-0000-4000-8000-00000000000b',
+    'email','issue-2203-sourcing@example.test')::text, true);
+  v_legacy_return := dflow.record_item_workflow_action(
+    v_legacy_item, v_step_sales, 'return_to_sales', 'a2203009-0000-4000-8000-000000000003',
+    'sourcing', 'sales', true);
+  if (select source_action_id from dflow.item_workflow_action where id = v_legacy_return)
+       is distinct from v_legacy_send then
+    raise exception 'K FAILED: the return did not answer the pre-migration handoff';
+  end if;
+
+  -- The return itself carries from=sourcing,to=sales. Answering it as though it
+  -- were an open sourcing->sales handoff must be refused, not silently allowed.
+  v_failed := false;
+  begin
+    perform dflow.record_item_workflow_action(
+      v_legacy_item, v_step_sourcing, 'return_again', 'a2203009-0000-4000-8000-000000000004',
+      'sales', 'sourcing', true);
+  exception when no_data_found then
+    v_failed := true;
+  end;
+  if not v_failed then
+    raise exception 'K FAILED: a return was answered as if it were an open handoff';
+  end if;
+  raise notice 'K PASSED: historical shapes are closed out and a return is not a handoff.';
+
+  -- ===================================================================================
+  -- L. Reserved-key typing. A non-number expected_prior_step_id must be refused
+  --    rather than silently ignored, and a fallback outside a return is refused.
+  -- ===================================================================================
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'role','authenticated','sub','a2203000-0000-4000-8000-00000000000a',
+    'email','issue-2203-sales-a@example.test')::text, true);
+  v_failed := false;
+  begin
+    perform dflow.record_item_workflow_action(
+      v_item, v_step_quality, 'type_probe', 'a2203009-0000-4000-8000-000000000005',
+      'sales', 'quality', false, 'workflow', 'RFQ workflow update',
+      'An RFQ item needs your attention',
+      jsonb_build_object('expected_prior_step_id','not-a-number'));
+  exception when sqlstate '22023' then
+    v_failed := true;
+  end;
+  if not v_failed then
+    raise exception 'L FAILED: a non-number expected_prior_step_id was accepted';
+  end if;
+
+  v_failed := false;
+  begin
+    perform dflow.record_item_workflow_action(
+      v_item, v_step_quality, 'fallback_probe', 'a2203009-0000-4000-8000-000000000006',
+      'sales', 'quality', false, 'workflow', 'RFQ workflow update',
+      'An RFQ item needs your attention',
+      jsonb_build_object('fallback_recipient_user_id', v_admin, 'fallback_reason','no return in flight'));
+  exception when sqlstate '22023' then
+    v_failed := true;
+  end;
+  if not v_failed then
+    raise exception 'L FAILED: a fallback was accepted outside a return';
+  end if;
+  raise notice 'L PASSED: reserved keys are type-checked and fallback is return-only.';
 end
 $test$;
 

@@ -31,7 +31,10 @@
 -- The #1987 migration is not edited. dflow.item_workflow_action rows remain
 -- append-only (the #1987 trigger rejects every UPDATE and DELETE), which is why
 -- the "handoff is closed" fact is modelled as a child row pointing back at its
--- parent rather than as a flag updated on the parent.
+-- parent rather than as a flag updated on the parent. The single exception is
+-- the one-time backfill below, which fills in source_action_id on rows written
+-- before this column existed; it disables and unconditionally restores that
+-- trigger, writes no other column, and inserts and deletes nothing.
 
 set lock_timeout = '5s';
 set statement_timeout = '5min';
@@ -44,10 +47,21 @@ alter table dflow.item_workflow_action
   add column if not exists fallback_reason text,
   add column if not exists requires_admin_review boolean not null default false;
 
+-- The self-reference is COMPOSITE on purpose: a return may only answer a
+-- handoff recorded against the SAME RFQ item. A plain (source_action_id) -> (id)
+-- reference left that rule to the function body; carrying rfq_item_id through
+-- the reference makes it structural, so no future writer -- function, backfill
+-- or manual repair -- can bind a return to another item's handoff. MATCH SIMPLE
+-- means a NULL source_action_id is unconstrained, which is the open case.
+alter table dflow.item_workflow_action
+  drop constraint if exists item_workflow_action_id_rfq_item_key,
+  add constraint item_workflow_action_id_rfq_item_key unique (id, rfq_item_id);
+
 alter table dflow.item_workflow_action
   drop constraint if exists item_workflow_action_source_action_id_fkey,
   add constraint item_workflow_action_source_action_id_fkey
-    foreign key (source_action_id) references dflow.item_workflow_action(id)
+    foreign key (source_action_id, rfq_item_id)
+    references dflow.item_workflow_action(id, rfq_item_id)
     on delete restrict;
 
 alter table dflow.item_workflow_action
@@ -92,6 +106,90 @@ create index if not exists item_workflow_action_admin_review
   on dflow.item_workflow_action (rfq_item_id, occurred_at)
   where requires_admin_review;
 
+-- ------------------------------------------------------------------ backfill --
+
+-- Rows written before this migration carry no source_action_id, so without this
+-- step every historical handoff would stay open forever: a second return
+-- against an already-completed cycle would still find the old send, move
+-- plm."RFQItem" again and notify again -- exactly the hole this change exists to
+-- close. Historical returns are recognisable structurally (the #1987 function
+-- stamped return_to_original_handoff into routing_context), so each is paired
+-- with the latest still-unlinked reverse-direction handoff that preceded it on
+-- the same item. Oldest return first, so repeated cycles pair in the order they
+-- actually happened. The #1987 append-only trigger is disabled for the duration
+-- of this single statement block and unconditionally restored; nothing but
+-- source_action_id is written, and no row is inserted or deleted.
+do $backfill$
+declare
+  v_return record;
+  v_source bigint;
+  v_paired integer := 0;
+  v_unpaired integer := 0;
+begin
+  alter table dflow.item_workflow_action disable trigger item_workflow_action_immutable;
+
+  for v_return in
+    select a.id,
+           a.rfq_item_id,
+           a.occurred_at,
+           a.routing_context ->> 'from_function_key' as from_key,
+           a.routing_context ->> 'to_function_key'   as to_key
+      from dflow.item_workflow_action a
+     where a.source_action_id is null
+       and coalesce((a.routing_context ->> 'return_to_original_handoff')::boolean, false)
+       and a.routing_context ->> 'from_function_key' is not null
+       and a.routing_context ->> 'to_function_key' is not null
+     order by a.occurred_at, a.id
+  loop
+    select h.id
+      into v_source
+      from dflow.item_workflow_action h
+     where h.rfq_item_id = v_return.rfq_item_id
+       and h.routing_context ->> 'from_function_key' = v_return.to_key
+       and h.routing_context ->> 'to_function_key' = v_return.from_key
+       and h.source_action_id is null
+       and coalesce((h.routing_context ->> 'return_to_original_handoff')::boolean, false) is not true
+       and (h.occurred_at, h.id) < (v_return.occurred_at, v_return.id)
+       and not exists (
+             select 1 from dflow.item_workflow_action r where r.source_action_id = h.id
+           )
+     order by h.occurred_at desc, h.id desc
+     limit 1;
+
+    if v_source is null then
+      -- A return with no recoverable partner is left alone. It cannot be
+      -- invented, and leaving source_action_id null keeps it out of the
+      -- originating-handoff view rather than corrupting another cycle.
+      v_unpaired := v_unpaired + 1;
+    else
+      update dflow.item_workflow_action set source_action_id = v_source where id = v_return.id;
+      v_paired := v_paired + 1;
+    end if;
+    v_source := null;
+  end loop;
+
+  alter table dflow.item_workflow_action enable trigger item_workflow_action_immutable;
+  raise notice 'handoff backfill: % historical returns bound, % left unpaired', v_paired, v_unpaired;
+exception when others then
+  alter table dflow.item_workflow_action enable trigger item_workflow_action_immutable;
+  raise;
+end
+$backfill$;
+
+-- With the backfill done, the "a return always names the handoff it answers"
+-- rule becomes structural rather than a property of one migration run. Any
+-- historical return the backfill could not pair fails this constraint and stops
+-- the apply loudly, instead of surviving as an unclosable open handoff. Compared
+-- as text on purpose: a cast in a CHECK would turn a malformed context into an
+-- error with a much worse message.
+alter table dflow.item_workflow_action
+  drop constraint if exists item_workflow_action_return_names_its_source,
+  add constraint item_workflow_action_return_names_its_source
+    check (
+      routing_context ->> 'return_to_original_handoff' is distinct from 'true'
+      or source_action_id is not null
+    );
+
 -- ----------------------------------------------------------------- read API --
 
 -- Queryable open-handoff state for the read APIs and for tests: one row per
@@ -114,7 +212,14 @@ select
 from dflow.item_workflow_action a
 left join dflow.item_workflow_action r
        on r.source_action_id = a.id
-where a.routing_context ->> 'to_function_key' is not null;
+-- ORIGINATING handoffs only. A return also carries to_function_key (the
+-- function requires both keys on a return and writes both into the stored
+-- context), and nothing ever points at a return, so admitting returns here
+-- would leave every one of them is_open = true forever and make the global
+-- "no open handoff" question unanswerable.
+where a.routing_context ->> 'to_function_key' is not null
+  and a.source_action_id is null
+  and coalesce((a.routing_context ->> 'return_to_original_handoff')::boolean, false) is not true;
 
 revoke all on dflow.item_workflow_handoff from anon, authenticated;
 grant select on dflow.item_workflow_handoff to authenticated, service_role;
@@ -282,6 +387,11 @@ begin
      where a.rfq_item_id = p_rfq_item_id
        and a.routing_context ->> 'from_function_key' = v_to
        and a.routing_context ->> 'to_function_key' = v_from
+       -- A return is not an open handoff. Without these two predicates the
+       -- reverse-direction return written by the previous half-cycle is itself
+       -- a candidate, so a second return could answer a return.
+       and a.source_action_id is null
+       and coalesce((a.routing_context ->> 'return_to_original_handoff')::boolean, false) is not true
        and not exists (
              select 1
                from dflow.item_workflow_action r
