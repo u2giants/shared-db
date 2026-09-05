@@ -2,9 +2,11 @@
 
 ## Scope and identity
 
-This is read-only evidence for tracker #1090. It authorizes no database or data change. The repository base was `origin/main` at `f462a411801973371a7dff8b21ae9dd326d191e3`. The production query target was proved by the repository's protected configuration as Supabase project `qsllyeztdwjgirsysgai`. No licensed row values were read or recorded.
+This is a sanitized read-only reconciliation summary for tracker #1090. It authorizes no database or data change. The repository base was `origin/main` at `f462a411801973371a7dff8b21ae9dd326d191e3`. The production query target was proved by the repository's protected configuration as Supabase project `qsllyeztdwjgirsysgai`. No licensed row values were read or recorded.
 
-The live orchestrator marker was re-resolved immediately before routing and was open marker #2330. #1090 itself remains `work_type: documentation`, `route: repo-maintenance`, `status: blocked`; it is not an author assignment.
+The live orchestrator marker was re-resolved immediately before routing on 2026-09-04. Its number is historical evidence only and must never be reused as a routing target. #1090 itself remains `work_type: documentation`, `route: repo-maintenance`, `status: blocked`; it is not an author assignment.
+
+This directory does not yet satisfy the full Step 0.1 gate: it contains no saved preview ledger, source-capture freshness census, complete dependency/row-count output, or machine-readable command/exit-code artifacts. Those omissions keep Step 0.1 partial.
 
 ## Production migration ledger
 
@@ -29,7 +31,7 @@ Present and applied:
 - `plm.source_resolution` — present; supported replacement `20260902024541` and browser setter `20260902031743` are applied;
 - `core.character` — present; separate Character replacement `20260829004145` is applied;
 - `core.property_character_associations` — present;
-- Warner-specific canonical evidence bridges — production completion #1380, PR #1385, run 32659028280.
+- Warner-specific evidence bridges, guarded sync, and candidate view — production proof #1380, PR #1385, run 32659028280. This is not proof of the full canonical Warner adapter.
 
 Absent from both current migration truth and the production catalog:
 
@@ -51,12 +53,16 @@ Repository search also found no general `plm.plan_licensing_consolidation`, `plm
 
 ## Bounded successors and routing
 
-- #2333, ready: canonical Franchise, aliases, canonical provenance and Asset freshness. Exact writes are `core.franchise`, `core.franchise_alias`, `core.character_alias`, `core.taxonomy_source_ref`, and `dam.asset`.
+- #2333, ready: canonical Franchise and Franchise alias only.
 - #2334, blocked on #2333: general canonical relationship bridges and their source-support tables. It preserves and audits the live Property/Character association contract.
-- #2335, blocked on #2333/#2334: extend the live durable entity-resolution vocabulary and add source scope, relationship decisions, and candidate/review APIs.
-- #2336, blocked on #2333/#2334/#2335: hash-pinned consolidation and reversible canonical merge/history contracts.
+- #2335, blocked on #2333/#2334: extend the live durable entity-resolution vocabulary and add source scope and relationship decisions.
+- #2336, blocked on #2333/#2334/#2335: hash-pinned consolidation only.
+- #2355, blocked on #2333: Character alias and canonical source-provenance facts.
+- #2356, blocked on #2334/#2355: canonical Asset freshness/current-state facts only.
+- #2357, blocked on #2335: browser-safe licensing candidate and review API views.
+- #2358, blocked on #2336: reversible canonical merge functions and immutable history.
 
-All four carry the `db-work` label, `work_type: structural`, `route: shared-db-orchestrator`, exact object scopes, and no data-load authority. They were routed to freshly resolved marker #2330. At routing time all eight author lanes were occupied; #2333 was queued behind an overlapping protected claim, while later successors remained dependency-blocked.
+All eight carry the `db-work` label, `work_type: structural`, `route: shared-db-orchestrator`, explicit object scopes, and no data-load authority. They were announced only after a fresh marker resolution. Claims and versions remain unproven until the live orchestrator accepts each unit; Step 0.2 therefore stays partial.
 
 ## Still unproven and therefore open
 
