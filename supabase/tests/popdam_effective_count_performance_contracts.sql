@@ -239,4 +239,179 @@ begin
 end;
 $$;
 
+-- #2242: the block above pins Arm 1 and Arm 2 by their comments only, and was
+-- written when the helper had exactly two matched arms. It cannot see Arm 1T at
+-- all: a later `create or replace` could delete the tag-leading scan, keep both
+-- pinned comments, and this file would still pass while the tag facet returned
+-- to the ~8.1s whole-table scan #2151 removed. Migration 20260904121037 pins the
+-- three-arm shape in an apply-time DO guard, but that guard runs exactly once and
+-- never again. This block is the durable copy of it.
+--
+-- Whitespace is folded before anything is inspected, so every pin below is a
+-- contiguous piece of real syntax in its real position. Comments are NOT
+-- stripped: two of the pins are deliberately the arm comments, and stripping
+-- them would silently disarm those.
+do $$
+declare
+  v_helper text := lower(regexp_replace(pg_get_functiondef(
+    'public.get_effective_filter_counts_unchecked_1703(jsonb)'::regprocedure), '\s+', ' ', 'g'));
+  v_arm1 int := position('-- arm 1: no identity filter' in v_helper);
+  v_arm1t int := position('-- arm 1t: no identity filter, tag filter present' in v_helper);
+  v_arm2 int := position('-- arm 2: an identity filter is present' in v_helper);
+  v_arms int;
+  v_pin text;
+begin
+  -- Three matched arms, in this order. Arm 1T sits between the two arms the
+  -- older block already pins, so an edit that deletes it is visible here even
+  -- though both surviving comments still match.
+  if v_arm1t = 0 then
+    raise exception 'effective count helper lost its tag-leading Arm 1T';
+  end if;
+  if v_arm1 = 0 or v_arm2 = 0 or not (v_arm1 < v_arm1t and v_arm1t < v_arm2) then
+    raise exception 'effective count helper lost the arm 1 / arm 1T / arm 2 ordering';
+  end if;
+
+  -- Five identity arms plus three matched arms is seven UNION ALLs. Counting
+  -- them is what stops a later edit from deleting the tag arm while every
+  -- substring below still appears somewhere else in the body.
+  v_arms := (length(v_helper) - length(replace(v_helper, 'union all', '')))
+              / length('union all');
+  if v_arms <> 7 then
+    raise exception 'effective count helper must keep five identity arms and three matched arms (seven UNION ALLs), found %', v_arms;
+  end if;
+
+  foreach v_pin in array array[
+    -- The tag is an index condition on asset_effective_tags, not one side of an
+    -- OR, and the asset is then reached by primary key. This exact shape is what
+    -- the (tag, asset_id) index can serve under the generic plan a bound
+    -- PostgREST argument produces.
+    'from ( select distinct e.asset_id from public.asset_effective_tags e where nullif(v_base_filters ->> ''tagfilter'','''') is not null and e.tag = v_base_filters ->> ''tagfilter'' ) t join public.assets a on a.id = t.asset_id',
+    -- DISTINCT is a correctness pin, not a performance one: the projection is
+    -- keyed (asset_id, tag, scope), so one asset can carry the same tag at both
+    -- 'asset' and 'style_group' scope and would be counted twice without it.
+    'select distinct e.asset_id',
+    -- The exclusivity pair. Arm 1 runs only when no tag is supplied and Arm 1T
+    -- only when one is; losing either half makes both arms match a tag-filtered
+    -- call and doubles every count.
+    'and nullif(v_base_filters ->> ''customerid'', '''') is null and nullif(v_base_filters ->> ''tagfilter'', '''') is null and a.is_deleted = false',
+    'and nullif(v_base_filters ->> ''customerid'', '''') is null and nullif(v_base_filters ->> ''tagfilter'', '''') is not null and a.is_deleted = false',
+    -- The identity arm keeps the tag as an EXISTS: it is already index-led
+    -- there, and rewriting it would be a change nothing has measured.
+    'and (nullif(v_base_filters ->> ''tagfilter'','''') is null or exists ( select 1 from public.asset_effective_tags e where e.asset_id = a.id and e.tag = v_base_filters ->> ''tagfilter''))'
+  ] loop
+    if position(v_pin in v_helper) = 0 then
+      raise exception 'effective count helper lost a pinned Arm 1T property: %', v_pin;
+    end if;
+  end loop;
+
+  -- Arm 1T must not be routed through the identity candidates: that is the
+  -- whole-table self-join #2054 removed from Arm 1, and it would cost the
+  -- index-only path here for the same reason.
+  if position('identity_asset_ids' in substr(v_helper, v_arm1t, v_arm2 - v_arm1t)) > 0 then
+    raise exception 'tag-filtered facet counts were routed back through identity candidates';
+  end if;
+  -- And Arm 1T is the only matched arm that may drive from the tag table.
+  if position('from public.asset_effective_tags' in substr(v_helper, v_arm1, v_arm1t - v_arm1)) > 0 then
+    raise exception 'the no-tag arm reintroduced a scan of public.asset_effective_tags';
+  end if;
+end;
+$$;
+
+-- #2242: the same asset carrying one tag at two scopes is what makes the
+-- DISTINCT inside Arm 1T load-bearing. Nothing covered it: the parity test in
+-- popdam_effective_asset_filter_contracts.sql only ever writes one scope, so a
+-- dropped DISTINCT counts that asset twice and every check still passes.
+do $$
+declare
+  v_licensor uuid := gen_random_uuid();
+  v_property uuid := gen_random_uuid();
+  v_customer uuid := gen_random_uuid();
+  v_group uuid := gen_random_uuid();
+  v_a1 uuid := gen_random_uuid();
+  v_a2 uuid := gen_random_uuid();
+  v_a3 uuid := gen_random_uuid();
+  v_tag text := 'zz2242-tag-' || txid_current();
+  v_filters jsonb;
+  v_counts jsonb;
+  v_listed bigint;
+  v_facet bigint;
+begin
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
+     actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.licensor', 'scrape_consolidation',
+     gen_random_uuid(), repeat('4',64), 'issue-2242-contract-test',
+     array['name','code','status'], clock_timestamp() + interval '1 minute'),
+    (pg_backend_pid(), txid_current(), 'core.property', 'scrape_consolidation',
+     gen_random_uuid(), repeat('5',64), 'issue-2242-contract-test',
+     array['licensor_id','name','code','status'], clock_timestamp() + interval '1 minute');
+
+  insert into core.licensor (id,name,code,status)
+  values (v_licensor,'ZZ2242 Licensor','ZZ2242L-'||txid_current(),'active');
+  insert into core.property (id,licensor_id,name,code,status)
+  values (v_property,v_licensor,'ZZ2242 Property','ZZ2242P-'||txid_current(),'potential');
+  insert into core.customer (id,name,status)
+  values (v_customer,'ZZ2242 Customer '||txid_current(),'active');
+  insert into public.style_groups
+    (id,sku,folder_path,licensor_id,property_id,customer_id,licensor_name,property_name)
+  values (v_group,'ZZ2242-'||txid_current(),'ZZ2242',v_licensor,v_property,v_customer,
+    'ZZ2242 Licensor','ZZ2242 Property');
+
+  insert into public.assets
+    (id,filename,relative_path,file_type,quick_hash,modified_at,style_group_id,
+     licensor_id,property_id,customer_id,status,content_type,product_material,
+     thumbnail_url,thumbnail_error,product_category,is_deleted)
+  values
+    (v_a1,'zz2242-a.ai','ZZ2242/a.ai','ai','zz2242-a-'||txid_current(),now(),v_group,
+      null,null,null,'pending','source_art',array['cotton'],'https://example.invalid/a.png',null,'Wall',false),
+    (v_a2,'zz2242-b.pdf','ZZ2242/b.pdf','pdf','zz2242-b-'||txid_current(),now(),v_group,
+      null,null,null,'pending','source_art',array['cotton'],'https://example.invalid/b.png',null,'Wall',false),
+    (v_a3,'zz2242-c.ai','ZZ2242/c.ai','ai','zz2242-c-'||txid_current(),now(),null,
+      v_licensor,v_property,v_customer,'tagged','product_photo',array['metal'],
+      'https://example.invalid/c.png',null,'Other',false);
+
+  -- v_a1 carries the tag twice, once per scope -- exactly what the unique index
+  -- (asset_id, tag, scope) permits, and what the projection produces when an
+  -- asset is tagged directly and also inherits the same tag from its style
+  -- group. v_a2 carries it once. v_a3 does not carry it at all.
+  insert into public.asset_effective_tags (asset_id, tag, scope)
+  values (v_a1, v_tag, 'asset'),
+         (v_a1, v_tag, 'style_group'),
+         (v_a2, v_tag, 'asset');
+
+  -- No identity filter and a tag filter: this is Arm 1T, alone.
+  v_filters := jsonb_build_object('tagFilter', v_tag);
+  v_counts := public.get_effective_filter_counts(v_filters);
+  select count(*) into v_listed from public.filter_effective_assets(v_filters);
+
+  if v_listed <> 2 then
+    raise exception 'two-scope tag fixture listed % assets, expected 2', v_listed;
+  end if;
+  if (v_counts ->> 'total')::bigint <> 2 then
+    raise exception 'tag-filtered total % double-counts the asset tagged at two scopes (expected 2); Arm 1T lost its DISTINCT',
+      v_counts ->> 'total';
+  end if;
+
+  select coalesce(sum(value::bigint), 0) into v_facet
+  from jsonb_each_text(v_counts -> 'fileType');
+  if v_facet <> 2 then
+    raise exception 'tag-filtered fileType facet totals % but only 2 assets carry the tag; Arm 1T lost its DISTINCT', v_facet;
+  end if;
+  if v_counts -> 'fileType' ->> 'ai' <> '1' or v_counts -> 'fileType' ->> 'pdf' <> '1' then
+    raise exception 'tag-filtered fileType facet is %, expected one ai and one pdf', v_counts -> 'fileType';
+  end if;
+
+  -- The identity arm reaches the same asset through its EXISTS, which
+  -- deduplicates implicitly. Pinning it keeps the two arms answering alike.
+  v_filters := jsonb_build_object('licensorId', v_licensor, 'tagFilter', v_tag);
+  v_counts := public.get_effective_filter_counts(v_filters);
+  select count(*) into v_listed from public.filter_effective_assets(v_filters);
+  if (v_counts ->> 'total')::bigint <> 2 or v_listed <> 2 then
+    raise exception 'identity+tag arm disagrees with the tag arm: count %, listed %',
+      v_counts ->> 'total', v_listed;
+  end if;
+end;
+$$;
+
 rollback;
