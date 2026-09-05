@@ -102,8 +102,8 @@ describe('property match queue data', () => {
   it('explains why each row is in the queue', () => {
     const many = row({ candidates: [candidate(11, 1), candidate(12, 2)] as never })
     expect(matchState(many)).toBe('multiple')
-    expect(describeMatchState(many)).toContain('2 OPA Properties')
-    expect(describeMatchState(row({ candidates: [] }))).toContain('No OPA Property was proposed')
+    expect(describeMatchState(many)).toContain('2 submissions-system (OPA) names')
+    expect(describeMatchState(row({ candidates: [] }))).toContain('No submissions-system (OPA) name was proposed')
   })
 
   it('refuses to approve with nothing selected, or with no reason', async () => {
