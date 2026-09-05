@@ -135,7 +135,7 @@ On 2026-08-16 Albert Hazan settled the central architecture in [`docs/core-maste
 - authorized licensor scrapes are canonical for Property spelling and owning Licensor inside their coverage;
 - ColdLion-only Property data under a Licensor with no scrape data is canonical truth;
 - those scrapes are canonical for Characters, Style Guides, Asset metadata, Franchises, and direct source-published relationships;
-- ColdLion also decides Property Active/Inactive;
+- ColdLion decides general Property Active/Inactive; Warner scope follows signed contract entitlement;
 - DesignFlow, including the one stale Supabase pull, has no authority;
 - the authorized source programs run weekly.
 
@@ -156,7 +156,7 @@ This is not a bug reproduction. It is a database and application architecture im
 - retain provenance, aliases, first-seen, last-seen, current/missing state, and audit history;
 - add guarded source-to-canonical consolidation contracts;
 - integrate Disney, NBCU, Paramount, and Warner landing tables through source-specific adapters;
-- implement ColdLion-driven Property Active/Inactive as a separate guarded step;
+- implement guarded Property Active/Inactive with ColdLion as the general membership source and Warner contract entitlement as the scoped exception;
 - add DB Data Admin review, conflict, freshness, and audit behavior;
 - establish weekly source-run evidence and alerting;
 - cut consumers over to canonical API contracts;
@@ -323,7 +323,7 @@ The one DesignFlow pull is stale and explicitly has no authority. DesignFlow may
 
 ### Rejected: let ColdLion rename or re-parent canonical Properties
 
-ColdLion's role is Active/Inactive membership only. Portal spelling and ownership win.
+ColdLion's role is general Active/Inactive membership only. Warner signed-contract entitlement is the scoped status exception. Portal spelling and ownership win.
 
 ### Rejected: create a second canonical entity family
 
@@ -364,7 +364,7 @@ If authentication or portal availability prevents a run, record a failure/due st
 ### Locked decisions, do not relitigate
 
 1. Authorized licensor scrapes control Property spelling, Property ownership, entities, and direct source-published relationships. Date: 2026-08-16.
-2. ColdLion controls official Licensor names and Property Active/Inactive. Under Licensors with no authorized scrape data, ColdLion-only Property names and ownership are canonical truth. Date: clarified by Albert Hazan on 2026-08-19.
+2. ColdLion controls official Licensor names and general Property Active/Inactive. Warner scope follows signed agreement plus countersigned Amendments 1-3. Under Licensors with no authorized scrape data, ColdLion-only Property names and ownership are canonical truth. Dates: ColdLion authority clarified 2026-08-19; Warner entitlement rule recorded 2026-09-04.
 3. DesignFlow has no authority. Date: 2026-08-16.
 4. A Character may belong to multiple Properties. Owner/licensing decision recorded before this plan and reaffirmed by the architecture.
 5. Style Guide/Character is many-to-many.
@@ -726,7 +726,7 @@ Performance and lock gate:
 
 Verification gate: `docs/verification/licensing-master-data-phase3-<date>/README.md` records the exact preview project, restored-snapshot identity, capture IDs/hashes, commands, exit codes, invariant totals, three-run timing/lock evidence, and calculated production budget without licensed values.
 
-### Phase 4: guarded ColdLion Active/Inactive
+### Phase 4: guarded Property status authority
 
 #### Step 4.0: build ColdLion-to-canonical mapping with bounded ColdLion identity authority
 
@@ -1136,7 +1136,7 @@ On this Windows machine, injected environment values do not cross into bare WSL 
 - [ ] All four source adapters pass complete/incomplete/idempotency tests on preview.
 - [ ] A complete validated Warner preview capture exists before Warner consolidation.
 - [ ] Every scrape-created Property starts `potential`; consolidation never sets Active/Inactive.
-- [ ] ColdLion changes official Licensor names, uncovered ColdLion-only Property truth, and Property Active/Inactive only within its authority scope, and fails closed on bad input.
+- [ ] ColdLion changes official Licensor names, uncovered ColdLion-only Property truth, and general Property Active/Inactive only within its authority scope; Warner status follows signed entitlement; both fail closed on bad input.
 - [ ] ColdLion-to-canonical mapping supports guarded create-new outside scrape coverage and refuses to overwrite scrape-covered Property truth.
 - [ ] ColdLion tools use durable resolution, the published status map passes parity, and legacy `erp_*` decision columns are frozen only after caller cutover.
 - [ ] Duplicate canonical entities have one reversible, audited merge path with complete relationship/source repointing.
