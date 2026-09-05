@@ -55,10 +55,13 @@ begin
     where table_schema='coldlion' and table_name='item_detail' and column_name in ('color_code','size_code')
   ) then raise exception 'D12 violated: colour/size leaked into item_detail'; end if;
 
+  -- The sales-history grain was redesigned in 20260905105038 (issue #2173): identity now
+  -- carries the vendor's salesOrderLineNo, and components hang off a surrogate parent id.
+  -- The full contract lives in coldlion_order_history_contracts.sql; this is the anchor.
   if not exists (
     select 1 from pg_constraint
     where conrelid='coldlion.order_history_line'::regclass and contype='u'
-      and pg_get_constraintdef(oid) like '%NULLS NOT DISTINCT%sales_order_no%item_no%label_code%line_source_hash%'
+      and pg_get_constraintdef(oid) like '%NULLS NOT DISTINCT%sales_order_no%sales_order_line_no%master_item_no%line_source_hash%'
   ) then raise exception 'resolved orderHistory identity/version contract missing'; end if;
 
   if not exists (
@@ -115,30 +118,34 @@ end $$;
 do $$
 declare
   v_run uuid;
+  v_line uuid;
 begin
   insert into coldlion.sync_run(endpoint,requested_by)
   values('/orderHistory','history-grain-contract') returning id into v_run;
 
   insert into coldlion.order_history_line(
-    sales_order_no,item_no,label_code,line_qty,prepack_qty,line_source_hash,run_id,fetched_at)
-  values(9001,'PACK-1',null,12,12,repeat('d',64),v_run,now());
+    company_code,sales_order_no,sales_order_line_no,master_item_no,label_code,
+    line_qty,prepack_qty,line_source_hash,run_id,fetched_at)
+  values('EDGEHOME',9001,1,'PACK-1',null,12,12,repeat('d',64),v_run,now())
+  returning id into v_line;
 
   insert into coldlion.order_history_component(
-    sales_order_no,item_no,label_code,sub_item_no,line_price,quantity,
+    line_id,sub_item_no,sub_label_code,line_price,quantity,
     component_source_hash,run_id,fetched_at)
   values
-    (9001,'PACK-1',null,'COMP-A',3.09,5,repeat('e',64),v_run,now()),
-    (9001,'PACK-1',null,'COMP-B',3.64,7,repeat('f',64),v_run,now());
+    (v_line,'COMP-A',null,3.09,5,repeat('e',64),v_run,now()),
+    (v_line,'COMP-B',null,3.64,7,repeat('f',64),v_run,now());
 
   if (select count(*) from coldlion.order_history_line where sales_order_no=9001) <> 1
-     or (select count(*) from coldlion.order_history_component where sales_order_no=9001) <> 2 then
+     or (select count(*) from coldlion.order_history_component where line_id=v_line) <> 2 then
     raise exception 'multi-component sales line fanned out its parent';
   end if;
 
   begin
     insert into coldlion.order_history_line(
-      sales_order_no,item_no,label_code,line_qty,prepack_qty,line_source_hash,run_id,fetched_at)
-    values(9001,'PACK-1',null,12,12,repeat('d',64),v_run,now());
+      company_code,sales_order_no,sales_order_line_no,master_item_no,label_code,
+      line_qty,prepack_qty,line_source_hash,run_id,fetched_at)
+    values('EDGEHOME',9001,1,'PACK-1',null,12,12,repeat('d',64),v_run,now());
     raise exception 'nullable-label replay duplicated';
   exception when unique_violation then null;
   end;
