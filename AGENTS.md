@@ -27,6 +27,7 @@ The guarded row-application work is planned in [`plan_historical_mg_reclassifica
 
 ## Active contracts and implementation plans
 
+- **Author-lane abandonment lifecycle (issue #2301):** [`plan_author_lane_abandonment_lifecycle.md`](plan_author_lane_abandonment_lifecycle.md). Read its STATUS table first. Repository-maintenance work outside the structure/schema orchestrator. It preserves every object/version claim while allowing evidence-backed capacity relinquishment, adds recovery-gated resume and immutable retirement tombstones, and forbids expiry-only release, ref deletion, automatic PR closure, or worktree mutation.
 - **Database efficiency and Data API security program (issue #2209):** [`plan_database_efficiency_and_api_security.md`](plan_database_efficiency_and_api_security.md). Read its STATUS table first. It is the evidence-gated umbrella plan for Supabase advisor findings, expensive rebuilds, effective-tag churn, foreign-key/index review, RLS and privileged-API validation, maintenance statistics, and replication attribution. It authorizes no bulk fix: each structural change must be split into its own orchestrator issue, while application scheduling/batching changes remain with the owning application repo. The unused-index decision for four high-churn tables remains frozen under issue #1966 until its 2026-09-17 delta reading.
 - PopDAM OrderList linked to Master Data: [`plan_popdam_order_list.md`](plan_popdam_order_list.md). Read its STATUS table first. Do not re-derive or re-plan completed steps.
 - **Companywide business rules (read before interpreting business meaning):** start at [`docs/business-rules/application-map.md`](docs/business-rules/application-map.md). Licensing Master Data starts at [`docs/business-rules/licensing-master-data.md`](docs/business-rules/licensing-master-data.md); its detailed architecture remains in [`docs/core-master-data-consolidation-aim.md`](docs/core-master-data-consolidation-aim.md).
@@ -39,7 +40,7 @@ The guarded row-application work is planned in [`plan_historical_mg_reclassifica
 - **Reviewer-assignment GitHub API budget (issue #1767, complete):** [`plan_reviewer_assignment_api_budget.md`](plan_reviewer_assignment_api_budget.md). Read its STATUS table and verification link before investigating regressions; do not reimplement it or test scale by scanning live historical assignment refs. Slot 1 is capped at 19 requests, while mandatory slot 2 has a documented 22-request normal-path ceiling after PR #1813.
 - **Reviewer lease capacity truth (issues #2058 and #1851):** [`plan_reviewer_lease_capacity_truth.md`](plan_reviewer_lease_capacity_truth.md). Read its STATUS table first — do not re-derive its root cause or re-plan its steps. Repository-maintenance work that authorizes **no** database change; implement it in a fresh isolated session outside the structure/schema orchestrator. It releases terminally failed reviewer slots without requiring a replacement draw, timestamps leases, adds a read-only capacity report, and makes the exhaustion refusal name its true cause. Never hand-delete a `refs/db-review-active/*` ref and never post a synthetic verdict to free capacity — both were considered and rejected, and both silently un-review a database change.
 - **Orchestrator throughput Phase 2 (issue #1738):** [`plan_orchestrator_throughput_phase_2.md`](plan_orchestrator_throughput_phase_2.md). Read its STATUS table first. It uses the completed `shared-db.orch` transcript to separate protected claims from worker capacity, preserve content-addressed evidence across unrelated `main` movement, schedule shared-preview dependencies, and qualify routes before expensive gates. This is repository-maintenance work outside the structure/schema orchestrator.
-  Phase 2 is active: protected claims never disappear when author capacity is relinquished; preview dependencies are waits, not successful checks. Before manual preview dispatch resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector/fresh-ledger check, and use only the matching instruction. Historical recovery is apply-only; historical dry-run proves nothing. `--repair-preview-ready <ready-id> --issue <n>` may repair only a v2-bound stale wrong digest; a corrupt live digest stops for owner decision without mutation. Reviewer reservations serialize approved provider/wrapper execution keys and create durable ordered waits when all eligible reviewers are busy. The live orchestrator engine is always excluded: Codex cannot review a Codex-orchestrated change, and Claude cannot review a Claude-orchestrated change. Qwen and Gemini remain outside the active rotation while ai-devops reliability is repaired.
+  Phase 2 is active: protected claims never disappear when author capacity is relinquished; preview dependencies are waits, not successful checks. Before manual preview dispatch resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector/fresh-ledger check, and use only the matching instruction. Historical recovery is apply-only; historical dry-run proves nothing. `--repair-preview-ready <ready-id> --issue <n>` may repair only a v2-bound stale wrong digest; a corrupt live digest stops for owner decision without mutation. Reviewer reservations serialize approved provider/wrapper execution keys and create durable ordered waits when all eligible reviewers are busy. The live orchestrator engine is always excluded: Codex cannot review a Codex-orchestrated change, and Claude cannot review a Claude-orchestrated change. Gemini remains outside the active rotation while ai-devops reliability is repaired.
 - **Making throughput guards tell the truth (hash-bound verification sidecars, typed catalog truth, regression corpus and causal blocker measures):** [`plan_orchestrator_throughput_guard_truth.md`](plan_orchestrator_throughput_guard_truth.md). Read its STATUS table first — do not re-derive its analysis or re-plan its steps. Repository-maintenance work that authorizes **no** database change; do not route it to the structure/schema orchestrator. It preserves every refusal while separating migration-file, ledger and live-catalog evidence so “not derivable” is never reported as “absent.”
 - **Paramount capture validation after the 2026-08-24 preview rehearsal:** [`fix_Paramount_capture_against_preview.md`](fix_Paramount_capture_against_preview.md). **Complete — do not re-run it to make the document current.** The three required migrations and the JSON-null repair are on preview, and the full Paramount capture succeeded and was verified there. The JSON-null structural repair alone was later promoted to production under separate owner authorization (issue #1418). No production Paramount *data capture* has been authorized or performed; that remains a separate owner decision.
 - OrderList source contract: [`docs/app-migration-notes/popdam-order-list.md`](docs/app-migration-notes/popdam-order-list.md), with formula detail in [`docs/app-migration-notes/popdam-order-list-formula-audit-20260807.md`](docs/app-migration-notes/popdam-order-list-formula-audit-20260807.md). Owner ruling: Google OrderList and future Coldlion rows are the same orders; `plm.item` is the ultimate item list. One canonical order/line must retain separate Google and Coldlion source refs.
@@ -679,8 +680,10 @@ preview rehearsal and its recovery lane:
 Read it in full before you claim a lane, author a migration, or rehearse on preview.** The five
 rules below are the operative summary.
 
-1. **Up to three unrelated migrations may be authored at once. Preview, merges, and production
-   promotion remain one at a time** (owner ruling, 2026-08-14). A fourth author is refused.
+1. **Up to eight unrelated migrations may hold active-author capacity at once. Preview, merges,
+   and production promotion remain one at a time** (owner ruling implemented 2026-08-28 under
+   issue #1738). A ninth active author is refused. Protected relinquished claims remain outside
+   that capacity count but continue blocking every object/version collision.
 
    **Do not open a migration file first.** Acquire an author lane, an exact object claim, and a
    centrally reserved 14-digit version as one dispatch operation:
@@ -730,7 +733,7 @@ rules below are the operative summary.
      truncated-output failure. Never replace `REVISE` or reduce coverage: exhaust active providers
     not failed on the exact head, then fail closed with the exact blocker. The configured rotation is
     Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.2 Contributor, and Codex GPT-5.6 Sol,
-    minus the live orchestrator's own engine. Qwen, Gemini and DeepSeek are inactive; DeepSeek
+    minus the live orchestrator's own engine. Gemini and DeepSeek are inactive; DeepSeek
     was RETIRED on 2026-09-01 (issue #2078) and is not drawable.
 
    The `Cross-PR object collision` CI check is only the backstop. By the time it fires, somebody's
@@ -1114,6 +1117,56 @@ its ref changes when it is; `rjyboqwcdzcocqgmsyel` was deleted on 2026-08-18 and
 named it as current until 2026-08-20. See §4 rule 2.
 
 Never commit anon keys, service-role keys, database passwords, or `.env` files.
+
+### 5.2-B Every governed gate reaches GitHub the same way (added 2026-09-04, issue #2342)
+
+Three consecutive production-apply runs (`33920952504`, `33921168245`, `33921406952`)
+each refused promotion while naming a **different** file that demonstrably existed. That
+is the signature of a spurious read, not a real fault. The survey that followed found
+**eight** independently hand-rolled `gh` wrappers under `scripts/`, of which exactly two
+retried anything, plus workflow steps making bare `gh api` calls under `set -euo pipefail`
+— two of them while holding the merge lock. Nothing caught that: there was no lint rule,
+no conformance test, and no written rule anywhere in this file, `docs/`, or any `plan_*.md`.
+
+**The primary fix is batching, not retrying.** Read §5.2-A above before proposing a retry:
+a retry wrapper there turned a fast failure into a slower, identically-named failure. Each
+collision and lease gate resolved file content with a per-file Contents call
+(`repos/:repo/contents/:path?ref=:sha`), so comparing every open pull request cost up to
+112 sequential calls and **any one** of them could refuse promotion. Retrying a read you
+should not be making 112 times is §5.2-A's mistake with a longer wall clock. The exposure
+is removed by asking GitHub once per ref.
+
+The rule, in four parts:
+
+1. **One governed transport.** Node gates under `scripts/` reach GitHub through
+   `scripts/lib/github-transport.mjs`. Retry policy, the transient/semantic classifier and
+   the never-replay-a-write rule are decided in one place. Pass `wrapError` to keep your
+   gate's own named refusal. Local maintenance utilities that do not produce or validate
+   governed evidence are outside this rule and must not be mistaken for gate transport.
+2. **One tree read per ref.** File content comes from `scripts/lib/github-tree.mjs`:
+   `git/trees/<ref>?recursive=1` once, then blobs **by SHA**. A file identical across
+   twelve pull-request heads has one blob SHA and is fetched once; path existence is
+   answered from the tree already in hand and costs nothing. **No gate may build a
+   per-file Contents URL.** A truncated tree is refused outright — it would make present
+   files look absent, which in a gate whose job is to refuse is a silent false clear.
+3. **Workflows call a script, not `gh api`.** A read in a `run:` block goes through
+   `node scripts/gh-read.mjs api …`. A **write** stays a direct `gh api` call and that is
+   deliberate: neither `gh` nor any wrapper can tell "the request never landed" from "it
+   landed and the response was lost", so a write gets exactly one attempt whichever door
+   it goes through, and `gh-read.mjs` refuses mutations outright.
+4. **404 is not transient, and must not be made one.** It is tempting to widen the
+   classifier because the spurious failures were 404s. Across this repository a 404 is an
+   *answer* ("does this ref exist yet?"), and a gate that concludes "absent" only after
+   exhausting a retry budget has made its absence proof depend on a timeout — fail-open,
+   which is worse than fail-closed. Retries are for HTTP 5xx and connection or TLS failures
+   only; rate-limit responses remain semantic failures and are not retried.
+
+**This is enforced, not advised.** `scripts/check-github-transport-conformance.mjs` fails
+the build on direct Node `gh` process calls, literal shell-wrapped governed `gh` calls, a
+bare workflow `gh api` read, or a per-file Contents URL, and runs in
+`tools-offline-tests.yml`. Its own tests feed it a known-dirty tree containing each
+forbidden shape and assert it refuses, *before* asserting anything about the real tree —
+a green run on clean input proves nothing.
 
 ### 8.1 API-exposed schemas (PostgREST) — `dam` is NOT exposed (2026-07-15)
 

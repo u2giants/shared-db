@@ -10,14 +10,16 @@
 // check runs BEFORE the lock is taken and names the exact contexts that are not
 // satisfied on the reviewed head.
 import { execFileSync } from 'node:child_process'
+import { runGitHubCommand } from './lib/github-transport.mjs'
 import { pathToFileURL } from 'node:url'
 import { REPO } from './manage-migration-author-lanes.mjs'
+import { MERGE_SELF_CONTEXT as SELF_CONTEXT } from './lib/merge-self-context.mjs'
 
 export class PreflightError extends Error {}
 
 // Posted by the guarded merge itself, after this pre-flight has passed. Requiring
 // it here would make the pre-flight unsatisfiable on every first run.
-export const SELF_CONTEXT = 'Migration guarded merge authorization'
+export { SELF_CONTEXT }
 export const SELF_CHECK_RUN = 'merge'
 
 // A skipped or neutral required check can still be refused by the merge API.
@@ -171,8 +173,10 @@ export function evaluatePreflight({ requiredContexts, statuses, checkRuns, prote
 function gh(args) {
   // No 2>/dev/null || echo '' here: an HTTP 401/403 or a network failure must be
   // reported as itself, never as an empty result that reads like "not green yet".
-  try { return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }) }
-  catch (e) { throw new PreflightError(`GitHub read failed: ${String(e.stderr || e.message).trim()}`) }
+  // Issue #2342: shared transport, identical refusal.
+  return runGitHubCommand(args, {
+    wrapError: (detail) => new PreflightError(`GitHub read failed: ${detail}`),
+  })
 }
 function json(args) { const raw = gh(args); try { return JSON.parse(raw) } catch { throw new PreflightError('GitHub returned malformed JSON') } }
 
