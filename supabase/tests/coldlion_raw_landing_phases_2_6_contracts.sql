@@ -119,6 +119,7 @@ do $$
 declare
   v_run uuid;
   v_line uuid;
+  v_prod_line uuid;
 begin
   insert into coldlion.sync_run(endpoint,requested_by)
   values('/orderHistory','history-grain-contract') returning id into v_run;
@@ -150,29 +151,41 @@ begin
   exception when unique_violation then null;
   end;
 
+  -- Production history now follows the issue #2174 shape: a surrogate parent id, child
+  -- FKs to it, and the requested/returned stage agreement. The invariants asserted here
+  -- are unchanged - child-grain variation must not fan out the parent, and the stage is
+  -- part of line identity.
   insert into coldlion.prod_history_line(
-    prod_order_no,prod_line_seq,stage_code,prod_order_qty,line_source_hash,run_id,fetched_at)
-  values
-    (7001,1,'ISS',12,repeat('1',64),v_run,now()),
-    (7001,1,'REC',12,repeat('1',64),v_run,now());
+    company_code,prod_order_no,prod_line_seq,requested_stage_code,stage_code,
+    prod_order_qty,source_observed_at,line_source_hash,run_id,fetched_at)
+  values('EDGEHOME',7001,1,'ISS','ISS',12,now(),repeat('1',64),v_run,now())
+  returning id into v_prod_line;
+
+  insert into coldlion.prod_history_line(
+    company_code,prod_order_no,prod_line_seq,requested_stage_code,stage_code,
+    prod_order_qty,source_observed_at,line_source_hash,run_id,fetched_at)
+  values('EDGEHOME',7001,1,'REC','REC',12,now(),repeat('1',64),v_run,now());
 
   insert into coldlion.prod_history_component(
-    prod_order_no,prod_line_seq,stage_code,prepack_item_no,sub_item_no,line_price,
+    line_id,prepack_item_no,sub_item_no,line_price,
     component_source_hash,run_id,fetched_at)
   values
-    (7001,1,'ISS','COMP-A','SUB-A',4.10,repeat('2',64),v_run,now()),
-    (7001,1,'ISS','COMP-B','SUB-B',4.20,repeat('3',64),v_run,now());
+    (v_prod_line,'COMP-A','SUB-A',4.10,repeat('2',64),v_run,now()),
+    (v_prod_line,'COMP-B','SUB-B',4.20,repeat('3',64),v_run,now());
 
   insert into coldlion.prod_history_last_lookup(
-    prod_order_no,prod_line_seq,stage_code,last_prod_ref_no,last_prod_cost,
+    line_id,last_prod_ref_no,last_prod_cost,
     lookup_source_hash,run_id,fetched_at)
   values
-    (7001,1,'ISS','OLD',3.25,repeat('4',64),v_run,now()),
-    (7001,1,'ISS','NEW',3.50,repeat('5',64),v_run,now());
+    (v_prod_line,'OLD',3.25,repeat('4',64),v_run,now()),
+    (v_prod_line,'NEW',3.50,repeat('5',64),v_run,now());
 
-  if (select count(*) from coldlion.prod_history_line where prod_order_no=7001 and stage_code='ISS') <> 1
-     or (select count(*) from coldlion.prod_history_component where prod_order_no=7001 and stage_code='ISS') <> 2
-     or (select count(*) from coldlion.prod_history_last_lookup where prod_order_no=7001 and stage_code='ISS') <> 2 then
+  if (select count(*) from coldlion.prod_history_line
+        where prod_order_no=7001 and stage_code='ISS') <> 1
+     or (select count(*) from coldlion.prod_history_component
+        where line_id=v_prod_line) <> 2
+     or (select count(*) from coldlion.prod_history_last_lookup
+        where line_id=v_prod_line) <> 2 then
     raise exception 'production component/last lookup variation fanned out its parent';
   end if;
 
