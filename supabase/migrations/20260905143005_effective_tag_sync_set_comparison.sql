@@ -1,6 +1,13 @@
 -- Issue #2213 (parent #2209): stop the measured no-op write amplification in the
 -- effective-tag projection.
 --
+-- derived-from: 20260830110517
+--
+-- The body below is re-derived from that migration's
+-- public.sync_asset_effective_tags(), which the #2213 evidence confirms is
+-- byte-for-byte identical to pg_get_functiondef in production. This file must
+-- not be applied to a database that does not already hold that base.
+--
 -- EVIDENCE THIS IMPLEMENTS (issue #2213, the #2209 Steps 1 & 3 read-only
 -- production comment). Over a 7.556-day window ending 2026-09-05:
 --

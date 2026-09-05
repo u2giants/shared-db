@@ -24,8 +24,6 @@ begin;
 
 do $$
 declare
-  v_licensor uuid := gen_random_uuid();
-  v_property uuid := gen_random_uuid();
   v_group_a uuid := gen_random_uuid();
   v_group_b uuid := gen_random_uuid();
   v_asset uuid := gen_random_uuid();
@@ -77,19 +75,13 @@ begin
     raise exception 'the three effective-tag sync triggers are not all present and enabled';
   end if;
 
-  insert into core.licensor (id, name, code, status)
-  values (v_licensor, 'ZZ2213 Licensor', 'ZZ2213L-' || v_suffix, 'active');
-
-  insert into core.property (id, licensor_id, name, code, status)
-  values (v_property, v_licensor, 'ZZ2213 Property', 'ZZ2213P-' || v_suffix, 'active');
-
-  insert into public.style_groups
-    (id, sku, folder_path, licensor_id, property_id, licensor_name, property_name)
-  values
-    (v_group_a, 'ZZ2213-A-' || v_suffix, 'ZZ2213/A', v_licensor, v_property,
-      'ZZ2213 Licensor', 'ZZ2213 Property'),
-    (v_group_b, 'ZZ2213-B-' || v_suffix, 'ZZ2213/B', v_licensor, v_property,
-      'ZZ2213 Licensor', 'ZZ2213 Property');
+  -- The projection is derived from tags alone, so this fixture deliberately
+  -- carries NO licensor or property identity. That keeps it clear of the
+  -- canonical licensing write authority guard without weakening anything the
+  -- effective-tag contract actually asserts.
+  insert into public.style_groups (id, sku, folder_path)
+  values (v_group_a, 'ZZ2213-A-' || v_suffix, 'ZZ2213/A'),
+         (v_group_b, 'ZZ2213-B-' || v_suffix, 'ZZ2213/B');
 
   insert into public.style_group_tags (style_group_id, tag, category, source, status, rejected_at)
   values (v_group_a, v_group_a_tag_1, 'theme', 'manual', 'active', null),
