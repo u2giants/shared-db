@@ -42,6 +42,18 @@
 --          or has_table_privilege('service_role', c.oid, 'TRIGGER'))
 --      order by 1;
 --
+-- CENSUS PROVENANCE (AGENTS.md 4.2 target proof, 2026-09-05)
+-- The census below was re-run read-only against the PRODUCTION project ref
+-- qsllyeztdwjgirsysgai (the only ref the read-only Supabase MCP server is pinned to;
+-- supabase_migrations.schema_migrations there holds 595 rows, max version 20260905024139).
+-- It returned exactly the 37 names listed in this file and no others.
+--
+-- Governed review round 3 (2026-09-05) raised plm.coldlion_promotion_audit and
+-- plm.coldlion_promotion_quarantine, created with `grant all` by 20260729230000. They are
+-- already cleaned by 20260812020000 (revoke of truncate on the append-only evidence tables),
+-- which sorts AFTER 20260729230000, so no linear apply can leave them dirty. The production
+-- census confirms neither table holds the four bits.
+--
 -- Governed review round 2 (2026-09-05) raised plm.opa_property_character as a possible
 -- 38th member, on the reasoning that 20260807170000 created it while the schema default
 -- was still GRANT ALL. The live catalog read above refutes that: on the shared database
