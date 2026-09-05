@@ -20,7 +20,19 @@ permissions:
   contents: write
   issues: read
   pull-requests: write
+  # `statuses: write` implies read for the combined-status call, but the read is a
+  # real dependency of the pre-flight and is declared as one.
   statuses: write
+  # The pre-flight reads `commits/{sha}/check-runs`. Unspecified permissions are
+  # `none`, so without this the read is a 403 and every merge dies at the pre-flight
+  # -- a parseable workflow that still cannot merge.
+  checks: read
+  # THERE IS NO `administration` PERMISSION IN GITHUB ACTIONS. Adding one made this
+  # file unparseable, and because this workflow is the ONLY path to `main`, every
+  # merge in the repository was refused at dispatch with HTTP 422. The pre-flight
+  # therefore cannot read main's required status check list with `github.token`;
+  # it detects that and applies a STRICTLY STRONGER test instead. See
+  # `scripts/check-required-checks-preflight.mjs`.
 
 jobs:
   merge:
@@ -53,6 +65,16 @@ jobs:
           # An assignment is not an approval, and an approval of an earlier head
           # is not an approval of these bytes (#1816).
           PR_NUMBER="${{ inputs.pull_request }}" REQUESTED_SHA="${{ inputs.head_sha }}" node scripts/check-exact-head-approval.mjs
+      # `github.token` cannot read branch protection (there is no `administration`
+      # permission scope), so this falls back to the committed mirror. It reads that
+      # mirror only from trusted `origin/main`; the checked-out pull request cannot
+      # alter the list that judges it. This first mirror merge has an exact-head-bound,
+      # immutable bootstrap floor. The step above fetches and proves current main.
+      - name: Pre-flight the required status checks before taking the merge lane
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SHA: ${{ inputs.head_sha }}
+        run: node scripts/check-required-checks-preflight.mjs
       - name: Acquire the exclusive merge lane
         id: merge_lock
         env:
@@ -71,7 +93,7 @@ jobs:
           REQUESTED_SHA: ${{ inputs.head_sha }}
         run: |
           set -euo pipefail
-          test "$(gh pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
+          test "$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
           git fetch origin main
           node scripts/check-main-tip-freshness.mjs --contains
           node scripts/check-pr-object-collisions.mjs
@@ -93,21 +115,33 @@ jobs:
           # turns green, or every merge attempt is refused, the step exits non-zero and the
           # revoke step withdraws authorization exactly as before. Nothing is merged on an
           # unproven approval.
+          #
+          # The readback below does NOT swallow API errors. A 401/403 or a network
+          # failure used to be turned into an empty string by `2>/dev/null || echo ''`,
+          # which is indistinguishable from "not green yet", so a broken token spent a
+          # full minute of the exclusive lock looking like eventual consistency (#1201).
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            observed="$(gh api "repos/u2giants/shared-db/commits/$REQUESTED_SHA/status" \
-              --jq '[.statuses[] | select(.context == "Migration guarded merge authorization")] | first | .state' 2>/dev/null || echo '')"
+            observed="$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" api "repos/u2giants/shared-db/commits/$REQUESTED_SHA/status"               --jq '[.statuses[] | select(.context == "Migration guarded merge authorization")] | first | .state')"
             [ "$observed" = 'success' ] && break
             echo "authorization not visible yet (attempt $attempt, observed='${observed:-none}'); waiting"
             sleep 6
           done
           test "$observed" = 'success'
+          # Retry ONLY the eventual-consistency refusal this loop exists for. Any other
+          # refusal is a policy or state fact no retry can change, and retrying it holds
+          # the repository-wide merge lock for two more minutes before failing (#1201).
           merged=0
           for attempt in 1 2 3 4 5; do
-            if gh pr merge "${{ inputs.pull_request }}" --repo u2giants/shared-db --merge --match-head-commit "${{ inputs.head_sha }}"; then
+            if gh pr merge "${{ inputs.pull_request }}" --repo u2giants/shared-db --merge --match-head-commit "${{ inputs.head_sha }}" 2>"$RUNNER_TEMP/merge-error.txt"; then
               merged=1; break
             fi
-            echo "guarded merge attempt $attempt was refused; re-proving the head and retrying"
-            test "$(gh pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
+            cat "$RUNNER_TEMP/merge-error.txt"
+            if ! grep -qi 'base branch policy prohibits the merge' "$RUNNER_TEMP/merge-error.txt"; then
+              echo "guarded merge was refused for a reason no retry can resolve; releasing the merge lane now"
+              break
+            fi
+            echo "guarded merge attempt $attempt hit the known authorization propagation delay; re-proving the head and retrying"
+            test "$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" pr view '${{ inputs.pull_request }}' --repo u2giants/shared-db --json headRefOid --jq .headRefOid)" = "$REQUESTED_SHA"
             git fetch origin main
             node scripts/check-main-tip-freshness.mjs --contains
             sleep 10
