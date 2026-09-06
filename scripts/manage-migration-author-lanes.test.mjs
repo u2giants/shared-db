@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
+import { CLAIM_CLOSE_REASONS, RECOVERABLE_CLAIM_CLOSE_REASONS, LEGACY_GUARDED_CLEANUP_CLOSE_REASON, ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -2678,6 +2678,87 @@ test('explicit claim release is mutex-protected, owner-confirmed, and refuses an
   closed=null;io.openPulls=()=>[{head:{ref:'codex/7'}}]
   assert.equal(main(['--release-claim','7','--owner','agent-7','--confirm-finished'],NOW,io),2)
   assert.equal(closed,null)
+})
+
+// ISSUE #2454. Duplicate claims on one branch cannot be cleared by the ordinary
+// release path, because that path refuses any branch with an open PR — and the
+// duplicate's branch legitimately has one. The narrow path below proves, from
+// live GitHub state alone, that the claim it closes is NOT the authority.
+function duplicateIo({prVersion='20260814200007',files=null}={}){
+  const io=memoryIo()
+  // #7 is the authority (version 20260814200007, the version the PR uses);
+  // #8 is the duplicate opened by a dispatch error on the same branch.
+  io.openClaims=()=>[
+    {number:7,body:body(['table core.x'],'7')},
+    {number:8,body:claimBody({version:'20260814209999',objects:['table core.y'],owner:'agent-7',branch:'codex/7',worktree:'C:/w/8',expiresAt:new Date('2026-08-15T08:00:00.000Z')})},
+  ]
+  io.openPulls=()=>[{number:2409,head:{ref:'codex/7'}}]
+  io.getPrFiles=()=>files??[{filename:`supabase/migrations/${prVersion}_add_bridges.sql`,status:'added'}]
+  return io
+}
+
+test('a duplicate claim on a branch with an open PR releases with a truthful reason',()=>{
+  const io=duplicateIo();let closed=null,reason=null
+  io.closeClaim=(n,r)=>{closed=n;reason=r}
+  assert.equal(main(['--release-duplicate-claim','8','--owner','agent-7','--confirm-finished'],NOW,io),0)
+  assert.equal(closed,8)
+  assert.equal(reason,CLAIM_CLOSE_REASONS.duplicateRelease)
+  assert.doesNotMatch(reason,/Expired migration-author lease|guarded cleanup/)
+  assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('the authority claim on the same branch is refused',()=>{
+  const io=duplicateIo();let closed=null
+  io.closeClaim=(n)=>{closed=n}
+  assert.equal(main(['--release-duplicate-claim','7','--owner','agent-7','--confirm-finished'],NOW,io),2)
+  assert.equal(closed,null)
+  assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('a lone claim on a branch with an open PR is still refused',()=>{
+  const io=duplicateIo();let closed=null
+  io.closeClaim=(n)=>{closed=n}
+  io.openClaims=()=>[{number:7,body:body(['table core.x'],'7')}]
+  assert.equal(main(['--release-duplicate-claim','7','--owner','agent-7','--confirm-finished'],NOW,io),2)
+  // And the ordinary release path still refuses it too — nothing was widened.
+  assert.equal(main(['--release-claim','7','--owner','agent-7','--confirm-finished'],NOW,io),2)
+  assert.equal(closed,null)
+})
+
+test('duplicate release refuses a wrong owner, a missing PR migration, and a missing authority holder',()=>{
+  let closed=null
+  const wrongOwner=duplicateIo();wrongOwner.closeClaim=(n)=>{closed=n}
+  assert.equal(main(['--release-duplicate-claim','8','--owner','agent-9','--confirm-finished'],NOW,wrongOwner),2)
+  const noMigration=duplicateIo({files:[{filename:'docs/notes.md',status:'added'}]});noMigration.closeClaim=(n)=>{closed=n}
+  assert.equal(main(['--release-duplicate-claim','8','--owner','agent-7','--confirm-finished'],NOW,noMigration),2)
+  // The PR uses a version NEITHER open claim holds: nothing is proved, so nothing closes.
+  const unproved=duplicateIo({prVersion:'20260814201111'});unproved.closeClaim=(n)=>{closed=n}
+  assert.equal(main(['--release-duplicate-claim','8','--owner','agent-7','--confirm-finished'],NOW,unproved),2)
+  // There is no override flag to force it.
+  const forced=duplicateIo({prVersion:'20260814201111'});forced.closeClaim=(n)=>{closed=n}
+  assert.equal(main(['--release-duplicate-claim','8','--owner','agent-7','--confirm-finished','--force'],NOW,forced),2)
+  assert.equal(closed,null)
+})
+
+// ISSUE #2448. No close path may claim an expiry sweep that never runs.
+test('every claim-close reason states its own cause and never asserts expiry',()=>{
+  for(const reason of Object.values(CLAIM_CLOSE_REASONS)){
+    assert.doesNotMatch(reason,/[Ee]xpired migration-author lease|guarded cleanup/)
+    assert.match(reason,/No lease expired and no cleanup sweep ran\./)
+  }
+  // Historical recovery still reads pre-repair closures, and now also reads the
+  // truthful explicit-release reason, so it does not start refusing valid ones.
+  assert.equal(RECOVERABLE_CLAIM_CLOSE_REASONS.has(LEGACY_GUARDED_CLEANUP_CLOSE_REASON),true)
+  assert.equal(RECOVERABLE_CLAIM_CLOSE_REASONS.has(CLAIM_CLOSE_REASONS.explicitRelease),true)
+  assert.equal(RECOVERABLE_CLAIM_CLOSE_REASONS.has(CLAIM_CLOSE_REASONS.acquisitionRollback),false)
+})
+
+test('an explicit release states an explicit release, not an expiry sweep',()=>{
+  const io=memoryIo();let reason=null
+  io.openClaims=()=>[{number:7,body:body(['table core.x'],'7')}]
+  io.closeClaim=(n,r)=>{reason=r}
+  assert.equal(main(['--release-claim','7','--owner','agent-7','--confirm-finished'],NOW,io),0)
+  assert.equal(reason,CLAIM_CLOSE_REASONS.explicitRelease)
 })
 
 test('audit reports every malformed claim and exits 2 without becoming unusable',()=>{
