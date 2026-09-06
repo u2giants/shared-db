@@ -59,11 +59,17 @@
 --   inferred                 we derived it from other fields;
 --   co_occurrence            two things merely appeared together on the same asset.
 -- `is_direct_source_relationship` is a GENERATED column, not a default and not a
--- caller-supplied flag, so an inferred row cannot be relabelled as direct: this is the
+-- caller-supplied flag, so the FLAG itself can never be written or forged: this is the
 -- CHECK-pinned discipline of plm.pmt_property_franchise_evidence (20260810020000),
 -- strengthened from "cannot be overridden by an INSERT" to "cannot be written at all".
 --
--- Inferred and co-occurrence evidence can never BECOME a direct canonical edge. On each
+-- Note the exact scope of that: the flag is unforgeable, but `evidence_kind` is an ordinary
+-- updatable column, so a writer with UPDATE rights can still relabel an inferred row as
+-- direct and the flag will follow. What the schema guarantees is that the flag always tells
+-- the truth about `evidence_kind`, not that `evidence_kind` never changes. Judging whether a
+-- claim really is the licensor's own assertion remains a curation duty, not a constraint.
+--
+-- Inferred and co-occurrence evidence can never silently BECOME a direct canonical edge. On each
 -- of the five NEW canonical bridges, core.require_direct_support_for_canonical_edge()
 -- refuses any row that is not backed by a CURRENT direct_source_assertion support edge
 -- for that exact pair. A table full of co-occurrence therefore supports nothing.
@@ -265,6 +271,90 @@ comment on function core.refuse_unsupporting_update_of_support_edge() is
   'repointing the pair. Supersession by replacement, and supersession of a pair no canonical edge '
   'cites, both remain free. Together with the BEFORE DELETE guard it makes the bridges'' documented '
   '"only while currently supported" invariant continuous rather than write-time only.';
+
+
+-- ----------------------------------------------------------------
+-- Review finding (round 2, High): the BEFORE UPDATE guard above is a ROW trigger, so the
+-- query it runs to look for a replacement assertion cannot see the SAME statement's already
+-- applied updates to other rows of the same table. One bulk statement that withdraws every
+-- current direct assertion for a cited pair therefore passes row by row -- each row still
+-- "sees" the others as current -- and commits an orphaned canonical edge. The row guard
+-- stays (it fails fast with a precise message on the common one-row path); this DEFERRABLE
+-- CONSTRAINT trigger re-checks the same invariant at COMMIT, where every statement in the
+-- transaction is visible, so no statement shape and no multi-statement sequence can leave a
+-- canonical bridge row standing on zero current direct evidence.
+create or replace function core.assert_canonical_edge_still_supported()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_bridge    text := tg_argv[0];   -- fully qualified canonical bridge table
+  v_left_col  text := tg_argv[1];
+  v_right_col text := tg_argv[2];
+  v_left      uuid;
+  v_right     uuid;
+  v_bridged   boolean;
+  v_supported boolean;
+begin
+  -- Only the loss of a current direct assertion can orphan anything.
+  if not (old.is_current and old.evidence_kind = 'direct_source_assertion') then
+    return null;
+  end if;
+
+  if tg_op = 'UPDATE'
+     and new.is_current
+     and new.evidence_kind = 'direct_source_assertion'
+     and (to_jsonb(new) ->> v_left_col) is not distinct from (to_jsonb(old) ->> v_left_col)
+     and (to_jsonb(new) ->> v_right_col) is not distinct from (to_jsonb(old) ->> v_right_col) then
+    return null;
+  end if;
+
+  v_left  := (to_jsonb(old) ->> v_left_col)::uuid;
+  v_right := (to_jsonb(old) ->> v_right_col)::uuid;
+
+  execute format(
+    'select exists (select 1 from %s b where b.%I = $1 and b.%I = $2)',
+    v_bridge, v_left_col, v_right_col)
+  into v_bridged
+  using v_left, v_right;
+
+  if not v_bridged then
+    return null;
+  end if;
+
+  -- At COMMIT the whole transaction is visible, so this sees the true end state: any
+  -- replacement recorded anywhere in the transaction counts, and every withdrawal in it
+  -- has already been applied.
+  execute format(
+    'select exists (select 1 from %I.%I s where s.%I = $1 and s.%I = $2 '
+    'and s.is_current '
+    'and s.evidence_kind = ''direct_source_assertion''::core.relationship_evidence_kind)',
+    tg_table_schema, tg_table_name, v_left_col, v_right_col)
+  into v_supported
+  using v_left, v_right;
+
+  if v_supported then
+    return null;
+  end if;
+
+  raise exception
+    'Refused at commit: the canonical edge in % (% = %, % = %) would be left with no current '
+    'direct source assertion in %.%. Every direct assertion behind it was withdrawn or removed '
+    'in this transaction. Record the replacing direct assertion in the same transaction, or '
+    'remove the canonical edge in a governed migration.',
+    v_bridge, v_left_col, v_left, v_right_col, v_right,
+    tg_table_schema, tg_table_name
+    using errcode = 'P0001';
+end;
+$$;
+
+comment on function core.assert_canonical_edge_still_supported() is
+  'DEFERRABLE CONSTRAINT trigger (AFTER UPDATE OR DELETE) on every *_source_edge table '
+  '(issue #2334, round-2 review finding). Re-checks at COMMIT that any canonical bridge row '
+  'citing the affected pair still has a CURRENT direct source assertion under it. The BEFORE '
+  'row guards cannot see their own statement''s other-row effects, so a single bulk withdrawal '
+  'statement slips past them; this check runs when the whole transaction is visible and closes '
+  'that hole for every statement shape.';
 
 
 
@@ -590,6 +680,12 @@ create trigger refuse_unsupporting_update
   for each row execute function core.refuse_unsupporting_update_of_support_edge(
     'core.property_character_associations', 'property_id', 'character_id');
 
+create constraint trigger assert_canonical_edge_still_supported
+  after update or delete on core.property_character_source_edge
+  deferrable initially deferred
+  for each row execute function core.assert_canonical_edge_still_supported(
+    'core.property_character_associations', 'property_id', 'character_id');
+
 alter table core.property_character_source_edge enable row level security;
 
 create policy shared_read on core.property_character_source_edge
@@ -719,6 +815,12 @@ create trigger refuse_delete_of_current_support
 create trigger refuse_unsupporting_update
   before update on core.property_style_guide_source_edge
   for each row execute function core.refuse_unsupporting_update_of_support_edge(
+    'core.property_style_guide', 'property_id', 'style_guide_id');
+
+create constraint trigger assert_canonical_edge_still_supported
+  after update or delete on core.property_style_guide_source_edge
+  deferrable initially deferred
+  for each row execute function core.assert_canonical_edge_still_supported(
     'core.property_style_guide', 'property_id', 'style_guide_id');
 
 alter table core.property_style_guide_source_edge enable row level security;
@@ -852,6 +954,12 @@ create trigger refuse_unsupporting_update
   for each row execute function core.refuse_unsupporting_update_of_support_edge(
     'core.property_franchise', 'property_id', 'franchise_id');
 
+create constraint trigger assert_canonical_edge_still_supported
+  after update or delete on core.property_franchise_source_edge
+  deferrable initially deferred
+  for each row execute function core.assert_canonical_edge_still_supported(
+    'core.property_franchise', 'property_id', 'franchise_id');
+
 alter table core.property_franchise_source_edge enable row level security;
 
 create policy shared_read on core.property_franchise_source_edge
@@ -981,6 +1089,12 @@ create trigger refuse_delete_of_current_support
 create trigger refuse_unsupporting_update
   before update on core.style_guide_character_source_edge
   for each row execute function core.refuse_unsupporting_update_of_support_edge(
+    'core.style_guide_character', 'style_guide_id', 'character_id');
+
+create constraint trigger assert_canonical_edge_still_supported
+  after update or delete on core.style_guide_character_source_edge
+  deferrable initially deferred
+  for each row execute function core.assert_canonical_edge_still_supported(
     'core.style_guide_character', 'style_guide_id', 'character_id');
 
 alter table core.style_guide_character_source_edge enable row level security;
@@ -1114,6 +1228,12 @@ create trigger refuse_unsupporting_update
   for each row execute function core.refuse_unsupporting_update_of_support_edge(
     'dam.asset_property', 'asset_id', 'property_id');
 
+create constraint trigger assert_canonical_edge_still_supported
+  after update or delete on dam.asset_property_source_edge
+  deferrable initially deferred
+  for each row execute function core.assert_canonical_edge_still_supported(
+    'dam.asset_property', 'asset_id', 'property_id');
+
 alter table dam.asset_property_source_edge enable row level security;
 
 revoke all on dam.asset_property_source_edge from public, anon, authenticated;
@@ -1238,6 +1358,12 @@ create trigger refuse_delete_of_current_support
 create trigger refuse_unsupporting_update
   before update on dam.asset_character_source_edge
   for each row execute function core.refuse_unsupporting_update_of_support_edge(
+    'dam.asset_character', 'asset_id', 'character_id');
+
+create constraint trigger assert_canonical_edge_still_supported
+  after update or delete on dam.asset_character_source_edge
+  deferrable initially deferred
+  for each row execute function core.assert_canonical_edge_still_supported(
     'dam.asset_character', 'asset_id', 'character_id');
 
 alter table dam.asset_character_source_edge enable row level security;
@@ -1366,6 +1492,12 @@ create trigger refuse_unsupporting_update
   for each row execute function core.refuse_unsupporting_update_of_support_edge(
     'dam.asset_style_guide', 'asset_id', 'style_guide_id');
 
+create constraint trigger assert_canonical_edge_still_supported
+  after update or delete on dam.asset_style_guide_source_edge
+  deferrable initially deferred
+  for each row execute function core.assert_canonical_edge_still_supported(
+    'dam.asset_style_guide', 'asset_id', 'style_guide_id');
+
 alter table dam.asset_style_guide_source_edge enable row level security;
 
 revoke all on dam.asset_style_guide_source_edge from public, anon, authenticated;
@@ -1490,6 +1622,12 @@ create trigger refuse_delete_of_current_support
 create trigger refuse_unsupporting_update
   before update on dam.asset_franchise_source_edge
   for each row execute function core.refuse_unsupporting_update_of_support_edge(
+    'dam.asset_franchise', 'asset_id', 'franchise_id');
+
+create constraint trigger assert_canonical_edge_still_supported
+  after update or delete on dam.asset_franchise_source_edge
+  deferrable initially deferred
+  for each row execute function core.assert_canonical_edge_still_supported(
     'dam.asset_franchise', 'asset_id', 'franchise_id');
 
 alter table dam.asset_franchise_source_edge enable row level security;

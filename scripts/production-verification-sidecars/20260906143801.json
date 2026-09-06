@@ -1,21 +1,27 @@
 {
   "schema_version": 1,
   "migration_version": "20260906143801",
-  "migration_sha256": "0a37396c93e0a65ca75e4c026a4b8a7e01ff5e9d76735818f9206c4484a653a6",
+  "migration_sha256": "0dbcfaf82f225cff276eceb555b8dc0b88d1fed667648d3c310c51b4b0324a9e",
   "checks": [],
   "marker_schema_version": 1,
   "marker_reviews": [
     {
-      "line_start": 155,
-      "line_end": 175,
+      "line_start": 161,
+      "line_end": 181,
       "disposition": "no_durable_target",
-      "reason": "The EXECUTE format() on line 162 is a read-only existence probe inside the BEFORE INSERT OR UPDATE guard core.require_direct_support_for_canonical_edge(). It runs only while a row is being written, it creates, alters and drops no catalog object, and it writes no row, so a post-apply catalog assertion has no durable target to bind to. Its identifiers are not user input: they are the three literal trigger arguments written in this same migration, passed through format %s and %I quoting, so no untrusted text can reach the statement. The behaviour it implements - that an inferred or co-occurrence support edge can never sustain a direct canonical bridge row - is asserted instead in supabase/tests/canonical_licensing_relationship_bridges.sql, which runs against an ephemeral database on every pull request."
+      "reason": "The EXECUTE format() on line 168 is a read-only existence probe inside the BEFORE INSERT OR UPDATE guard core.require_direct_support_for_canonical_edge(). It runs only while a row is being written, it creates, alters and drops no catalog object, and it writes no row, so a post-apply catalog assertion has no durable target to bind to. Its identifiers are not user input: they are the three literal trigger arguments written in this same migration, passed through format %s and %I quoting, so no untrusted text can reach the statement. The behaviour it implements - that an inferred or co-occurrence support edge can never sustain a direct canonical bridge row - is asserted instead in supabase/tests/canonical_licensing_relationship_bridges.sql, which runs against an ephemeral database on every pull request."
     },
     {
-      "line_start": 220,
-      "line_end": 245,
+      "line_start": 226,
+      "line_end": 251,
       "disposition": "no_durable_target",
-      "reason": "The two EXECUTE format() statements on lines 226 and 238 are read-only existence probes inside the BEFORE UPDATE guard core.refuse_unsupporting_update_of_support_edge(), added to close review finding H-1. They run only while a support-edge row is being updated, they create, alter and drop no catalog object, and they write no row, so a post-apply catalog assertion has no durable target to bind to. Their identifiers are not user input: the bridge table and the two column names are the three literal trigger arguments written in this same migration, and the support-edge table name comes from tg_table_schema/tg_table_name, all passed through format %s and %I quoting, so no untrusted text can reach either statement. The behaviour they implement - that withdrawing the last current direct source assertion behind a standing canonical edge is refused, while supersession by replacement stays free - is asserted instead in supabase/tests/canonical_licensing_relationship_bridges.sql steps 5d and 5e, which run against an ephemeral database on every pull request."
+      "reason": "The two EXECUTE format() statements on lines 232 and 244 are read-only existence probes inside the BEFORE UPDATE guard core.refuse_unsupporting_update_of_support_edge(), added to close review finding H-1. They run only while a support-edge row is being updated, they create, alter and drop no catalog object, and they write no row, so a post-apply catalog assertion has no durable target to bind to. Their identifiers are not user input: the bridge table and the two column names are the three literal trigger arguments written in this same migration, and the support-edge table name comes from tg_table_schema/tg_table_name, all passed through format %s and %I quoting, so no untrusted text can reach either statement. The behaviour they implement - that withdrawing the last current direct source assertion behind a standing canonical edge is refused, while supersession by replacement stays free - is asserted instead in supabase/tests/canonical_licensing_relationship_bridges.sql steps 5d and 5e, which run against an ephemeral database on every pull request."
+    },
+    {
+      "line_start": 305,
+      "line_end": 335,
+      "disposition": "no_durable_target",
+      "reason": "The two EXECUTE format() statements on lines 315 and 328 are read-only existence probes inside the deferrable constraint trigger function core.assert_canonical_edge_still_supported(), added to close the round-2 review finding that a single bulk UPDATE statement slips past the BEFORE row guard because a row trigger cannot see its own statement's other-row effects. They run only at commit time while checking a support-edge row that was updated or deleted, they create, alter and drop no catalog object, and they write no row, so a post-apply catalog assertion has no durable target to bind to. Their identifiers are not user input: the bridge table and the two column names are the three literal trigger arguments written in this same migration, and the support-edge table name comes from tg_table_schema/tg_table_name, all passed through format %s and %I quoting, so no untrusted text can reach either statement. The behaviour they implement - that no statement shape may leave a canonical bridge row standing with no current direct source assertion under it - is asserted instead in supabase/tests/canonical_licensing_relationship_bridges.sql step 5f2, which runs against an ephemeral database on every pull request."
     }
   ]
 }

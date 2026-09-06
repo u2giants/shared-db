@@ -387,6 +387,42 @@ begin
     raise exception 'superseded support could not be deleted';
   end if;
 
+  -- 5f2. Round-2 review finding (High). The BEFORE row guard proved in 5d is a ROW trigger:
+  --      the query it runs cannot see its own statement's already-applied updates to other
+  --      rows, so ONE statement that withdraws EVERY current direct assertion for the pair
+  --      passes row by row and would commit an orphaned canonical edge. The deferrable
+  --      constraint trigger re-checks at commit, where the whole transaction is visible.
+  --      SET CONSTRAINTS ALL IMMEDIATE forces that commit-time check to run here.
+  insert into core.property_style_guide_source_edge
+    (property_id, style_guide_id, licensor_id, source_system, source_id, evidence_kind)
+    values (v_property, v_style_guide, v_licensor, 'zz_fixture_2334_bulk', 'psg-3',
+            'direct_source_assertion');
+
+  v_raised := false;
+  begin
+    update core.property_style_guide_source_edge
+       set is_current = false, superseded_at = now(), superseded_reason = 'fixture bulk'
+     where property_id = v_property
+       and style_guide_id = v_style_guide
+       and is_current
+       and evidence_kind = 'direct_source_assertion';
+    set constraints all immediate;
+  exception when sqlstate 'P0001' then v_raised := true;
+  end;
+  if not v_raised then
+    raise exception 'one bulk statement withdrew every current direct assertion for a cited '
+      'pair, leaving the canonical edge standing with no evidence under it';
+  end if;
+
+  -- The refused bulk withdrawal left the evidence in place.
+  if not exists (
+    select 1 from core.property_style_guide_source_edge
+    where property_id = v_property and style_guide_id = v_style_guide
+      and is_current and evidence_kind = 'direct_source_assertion'
+  ) then
+    raise exception 'a refused bulk withdrawal still removed the current direct support';
+  end if;
+
   -- 5g. Review finding M-1. TRUNCATE never fires a row-level DELETE trigger, so a
   --     truncate-and-reload loader would erase every current claim straight past the guard
   --     proved in 5a. No role may hold it on a support-edge table.
