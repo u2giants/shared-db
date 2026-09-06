@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "migration_version": "20260906033021",
+  "migration_sha256": "8fba79c5af77b5866f10e456f877ccb61ce419e49febfef7fcdbb2d5fc54b840",
+  "checks": [],
+  "marker_schema_version": 1,
+  "marker_reviews": [
+    {
+      "line_start": 155,
+      "line_end": 175,
+      "disposition": "no_durable_target",
+      "reason": "The EXECUTE format() on line 162 is a read-only existence probe inside the BEFORE INSERT OR UPDATE guard core.require_direct_support_for_canonical_edge(). It runs only while a row is being written, it creates, alters and drops no catalog object, and it writes no row, so a post-apply catalog assertion has no durable target to bind to. Its identifiers are not user input: they are the three literal trigger arguments written in this same migration, passed through format %s and %I quoting, so no untrusted text can reach the statement. The behaviour it implements - that an inferred or co-occurrence support edge can never sustain a direct canonical bridge row - is asserted instead in supabase/tests/canonical_licensing_relationship_bridges.sql, which runs against an ephemeral database on every pull request."
+    }
+  ]
+}
