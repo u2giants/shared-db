@@ -27,6 +27,10 @@ declare
   v_legacy_ref uuid;
   v_blank_ref  uuid;
   v_relic_char uuid;
+  v_drift_char uuid;
+  v_drift_alias uuid;
+  v_null_ref   uuid;
+  v_last_seen  timestamptz;
   v_relic_ref  uuid;
   v_txt      text;
   v_uuid     uuid;
@@ -42,7 +46,7 @@ begin
     raise exception '#2355: core.character_alias is absent';
   end if;
 
-  foreach v_txt in array array['source_licensor_id','first_seen_at','last_seen_at','missing_since','is_current'] loop
+  foreach v_txt in array array['source_licensor_id','first_seen_at','last_seen_at','missing_since'] loop
     if not exists (
       select 1 from information_schema.columns
       where table_schema = 'core' and table_name = 'taxonomy_source_ref' and column_name = v_txt
@@ -51,10 +55,26 @@ begin
     end if;
   end loop;
 
-  -- is_current must be DERIVED. A writable duplicate of missing_since would drift.
-  if (select is_generated from information_schema.columns
-      where table_schema='core' and table_name='taxonomy_source_ref' and column_name='is_current') <> 'ALWAYS' then
-    raise exception '#2355: taxonomy_source_ref.is_current must be a generated column';
+  -- "Current" is the PREDICATE `missing_since is null`, never a stored column. A STORED
+  -- generated column would have rewritten the whole live table under ACCESS EXCLUSIVE for
+  -- information the predicate already carries, and a plain boolean would be a duplicate
+  -- free to drift. Neither is acceptable, so the column must not exist at all -- and the
+  -- partial index that serves the predicate must.
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'core' and table_name = 'taxonomy_source_ref' and column_name = 'is_current'
+  ) then
+    raise exception
+      '#2355: taxonomy_source_ref.is_current exists -- current state is the predicate `missing_since is null`, not a stored column that rewrites the table to add and can drift once added';
+  end if;
+  if not exists (
+    select 1 from pg_indexes
+    where schemaname = 'core' and tablename = 'taxonomy_source_ref'
+      and indexname = 'taxonomy_source_ref_current_idx'
+      and indexdef ilike '%missing_since IS NULL%'
+  ) then
+    raise exception
+      '#2355: taxonomy_source_ref_current_idx (partial on missing_since is null) is absent -- the read path for "what does this source currently assert?" is unserved';
   end if;
   if (select is_generated from information_schema.columns
       where table_schema='core' and table_name='character_alias' and column_name='normalized_alias') <> 'ALWAYS' then
@@ -138,13 +158,41 @@ begin
   -- =========================================================================
   select count(*) into v_legacy from core.taxonomy_source_ref;
 
-  if to_regprocedure('public.ci_authorize_licensing_contract_test()') is not null then
-    perform public.ci_authorize_licensing_contract_test();
-  end if;
-
+  -- core.licensor is protected by the licensing write-authority guard (20260817124545 /
+  -- 20260819151527). Each synthetic licensor below is authorized INDIVIDUALLY, immediately
+  -- before its own insert, by the narrow route the guard is designed to consume: one
+  -- plm.licensing_write_authorization row naming this backend, this transaction, the exact
+  -- target table and the exact protected columns. This is the pattern
+  -- core_franchise_canonical_entity_contracts.sql uses. The blanket helper
+  -- public.ci_authorize_licensing_contract_test() is deliberately NOT used:
+  -- scripts/database-contract-authorization.test.mjs pins the in-file callers of that
+  -- helper to one legacy contract file, and a blanket authorization would leave the guard
+  -- open for every later write in this file. The guard is not weakened, bypassed or
+  -- edited; each authorization is real, transaction-bound, scoped to one write, and
+  -- disappears with the rollback. core.character needs no authorization -- the guard's
+  -- target_table domain is core.licensor and core.property only.
+  insert into plm.licensing_write_authorization (
+    backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
+    actor, protected_columns, expires_at
+  ) values (
+    pg_backend_pid(), txid_current(), 'core.licensor', 'licensing_review_create',
+    '23550000-0000-4000-8000-000000000001', repeat('a', 64),
+    'issue-2355 synthetic contract', array['name','code','status'],
+    clock_timestamp() + interval '1 minute'
+  );
   insert into core.licensor (name, code, status)
   values ('ZZ #2355 Licensor A ' || v_suffix, 'Z55A-' || substr(v_suffix, 12), 'active')
   returning id into v_lic_a;
+
+  insert into plm.licensing_write_authorization (
+    backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
+    actor, protected_columns, expires_at
+  ) values (
+    pg_backend_pid(), txid_current(), 'core.licensor', 'licensing_review_create',
+    '23550000-0000-4000-8000-000000000002', repeat('b', 64),
+    'issue-2355 synthetic contract', array['name','code','status'],
+    clock_timestamp() + interval '1 minute'
+  );
   insert into core.licensor (name, code, status)
   values ('ZZ #2355 Licensor B ' || v_suffix, 'Z55B-' || substr(v_suffix, 12), 'active')
   returning id into v_lic_b;
@@ -277,6 +325,67 @@ begin
     raise exception '#2355: a character with live aliases was deleted';
   end if;
 
+  -- =====================================================================
+  -- C10. THE ALIAS SCOPE FOLLOWS THE PARENT, OR THE MOVE IS REFUSED.
+  --      C5 and C6 only retarget the ALIAS row, and a trigger on
+  --      core.character_alias sees nothing when the PARENT moves. If
+  --      `update core.character set licensor_id = <B>` were allowed to
+  --      leave the alias behind, the alias would still occupy licensor A's
+  --      (licensor, normalized name) slot while the character belongs to
+  --      B: resolving that name for A would return B's character, and A
+  --      could never register its own. That is the exact cross-licensor
+  --      misattribution this table exists to prevent, so either the alias
+  --      moves with the character or the move is refused -- never drift.
+  -- =====================================================================
+  insert into core.character (licensor_id, name, code, status)
+  values (v_lic_a, 'ZZ Drift Probe ' || v_suffix, 'Z55DP-' || substr(v_suffix, 12), 'active')
+  returning id into v_drift_char;
+
+  insert into core.character_alias (character_id, licensor_id, alias, source_system)
+  values (v_drift_char, v_lic_a, 'Drift Probe Alias ' || v_suffix, 'manual')
+  returning id into v_drift_alias;
+
+  v_raised := false;
+  begin
+    update core.character set licensor_id = v_lic_b where id = v_drift_char;
+  exception when others then
+    v_raised := true;
+  end;
+
+  if v_raised then
+    -- Refusing the re-licensing outright is an acceptable answer: nothing drifted.
+    if (select licensor_id from core.character_alias where id = v_drift_alias) <> v_lic_a then
+      raise exception
+        '#2355: the parent re-licensing was refused, yet the alias licensor changed anyway';
+    end if;
+  else
+    if (select licensor_id from core.character where id = v_drift_char) <> v_lic_b then
+      raise exception
+        '#2355: the re-licensing fixture did not move the character, so C10 tests nothing';
+    end if;
+    if (select licensor_id from core.character_alias where id = v_drift_alias) <> v_lic_b then
+      raise exception
+        '#2355: the parent character was re-licensed to B but its alias is still scoped to A -- resolving that name for A now returns B''s character, and A can never register its own';
+    end if;
+  end if;
+
+  -- And the pair must be structurally bound, not merely trigger-checked: a trigger on
+  -- core.character_alias cannot see a write to core.character at all.
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'core.character_alias'::regclass
+      and contype = 'f'
+      and confrelid = 'core.character'::regclass
+      and (
+        select array_agg(a.attname order by a.attname)
+        from unnest(conkey) as k(attnum)
+        join pg_attribute a on a.attrelid = conrelid and a.attnum = k.attnum
+      ) = array['character_id','licensor_id']
+  ) then
+    raise exception
+      '#2355: core.character_alias has no composite (character_id, licensor_id) foreign key to core.character -- the licensor scope of an alias is only checked when the ALIAS is written, so re-licensing the parent silently strands it';
+  end if;
+
   -- =========================================================================
   -- D. core.taxonomy_source_ref -- provenance cannot be recorded without its source
   -- =========================================================================
@@ -285,7 +394,7 @@ begin
   insert into core.taxonomy_source_ref
     (entity_schema, entity_table, entity_id, source_system, source_table, source_id)
   values ('core', 'character', v_char_a, 'zz_portal_2355', 'characters', '5')
-  returning id, source_licensor_id, is_current into v_ref, v_uuid, v_bool;
+  returning id, source_licensor_id, (missing_since is null) into v_ref, v_uuid, v_bool;
   if v_uuid <> v_lic_a then
     raise exception '#2355: source_licensor_id was not derived from the entity (% <> %)', v_uuid, v_lic_a;
   end if;
@@ -550,10 +659,66 @@ begin
       '#2355: a metadata-only correction was recorded as a fresh source sighting -- last_seen_at advanced without the source re-asserting anything';
   end if;
 
-  -- D7. Absence is RECORDED, not deleted. missing_since flips is_current.
+  -- =====================================================================
+  -- D6d. THE FIRST RE-ASSERTION ON A TRUE LEGACY ROW RECORDS *NOW*.
+  --      Pre-#2355 rows carry first_seen_at and last_seen_at NULL --
+  --      `alter column ... set default` back-fills nothing. On the ordinary
+  --      importer upsert the identity guard fills last_seen_at from
+  --      created_at, and the bump trigger then compares that against the
+  --      OLD null, sees "the caller supplied a value", and leaves it alone.
+  --      The first sighting after this migration would therefore be
+  --      recorded as the row's creation date, often years old, and a
+  --      freshness job would read live evidence as "the source dropped
+  --      this". A second upsert heals it; the first -- the production path
+  --      for every existing row -- must not need healing.
+  --      D2b/D7c do NOT cover this: they omit the freshness columns from
+  --      the insert list, so the column DEFAULTS fill now(). Only an
+  --      EXPLICIT null produces a genuine legacy row, and the guard plus
+  --      the two present-constraints must both be stood down to write one.
+  -- =====================================================================
+  alter table core.taxonomy_source_ref disable trigger a_taxonomy_source_ref_identity_guard;
+  alter table core.taxonomy_source_ref drop constraint taxonomy_source_ref_first_seen_present;
+  alter table core.taxonomy_source_ref drop constraint taxonomy_source_ref_last_seen_present;
+  insert into core.taxonomy_source_ref
+    (entity_schema, entity_table, entity_id, source_system, source_table, source_id,
+     first_seen_at, last_seen_at)
+  values ('core', 'character', v_char_a, 'zz_portal_2355', 'null_ts_legacy', '91',
+          null, null)
+  returning id into v_null_ref;
+  alter table core.taxonomy_source_ref
+    add constraint taxonomy_source_ref_first_seen_present
+    check (first_seen_at is not null) not valid;
+  alter table core.taxonomy_source_ref
+    add constraint taxonomy_source_ref_last_seen_present
+    check (last_seen_at is not null) not valid;
+  alter table core.taxonomy_source_ref enable trigger a_taxonomy_source_ref_identity_guard;
+
+  if (select first_seen_at is not null or last_seen_at is not null
+        from core.taxonomy_source_ref where id = v_null_ref) then
+    raise exception
+      '#2355: the null-timestamp fixture was back-filled on insert, so D6d does not test a genuine pre-migration row at all';
+  end if;
+
+  -- The ordinary importer upsert: it re-supplies the target and names no freshness column.
+  update core.taxonomy_source_ref set entity_id = v_char_a where id = v_null_ref;
+
+  select last_seen_at into v_last_seen from core.taxonomy_source_ref where id = v_null_ref;
+  if v_last_seen is null then
+    raise exception '#2355: the first re-assertion on a legacy row left last_seen_at null';
+  end if;
+  if v_last_seen < now() - interval '1 minute' then
+    raise exception
+      '#2355: the FIRST re-assertion on a pre-migration row recorded last_seen_at = % (its created_at), not now() -- a freshness job would read live evidence as "the source dropped this"',
+      v_last_seen;
+  end if;
+  if (select first_seen_at from core.taxonomy_source_ref where id = v_null_ref) is null then
+    raise exception '#2355: first_seen_at was not back-filled on a legacy row';
+  end if;
+
+  -- D7. Absence is RECORDED, not deleted. missing_since is what makes a row non-current.
   update core.taxonomy_source_ref set missing_since = now() where id = v_ref;
-  if (select is_current from core.taxonomy_source_ref where id = v_ref) then
-    raise exception '#2355: is_current stayed true after missing_since was set';
+  if (select missing_since is null from core.taxonomy_source_ref where id = v_ref) then
+    raise exception '#2355: the row stayed current after missing_since was set';
   end if;
   if (select first_seen_at from core.taxonomy_source_ref where id = v_ref) is null then
     raise exception '#2355: first_seen_at was lost on update';
@@ -575,7 +740,7 @@ begin
   end if;
 
   update core.taxonomy_source_ref set missing_since = null where id = v_ref;
-  if not (select is_current from core.taxonomy_source_ref where id = v_ref) then
+  if not (select missing_since is null from core.taxonomy_source_ref where id = v_ref) then
     raise exception '#2355: clearing missing_since did not make the row current again';
   end if;
   if (select last_seen_at from core.taxonomy_source_ref where id = v_ref) < now() - interval '1 minute' then
@@ -600,12 +765,12 @@ begin
   alter table core.taxonomy_source_ref enable trigger a_taxonomy_source_ref_identity_guard;
 
   update core.taxonomy_source_ref set missing_since = now() where id = v_blank_ref;
-  if (select is_current from core.taxonomy_source_ref where id = v_blank_ref) then
+  if (select missing_since is null from core.taxonomy_source_ref where id = v_blank_ref) then
     raise exception
       '#2355: a freshness-only update to a legacy row with a blank source key did not take effect';
   end if;
   update core.taxonomy_source_ref set missing_since = null where id = v_blank_ref;
-  if not (select is_current from core.taxonomy_source_ref where id = v_blank_ref) then
+  if not (select missing_since is null from core.taxonomy_source_ref where id = v_blank_ref) then
     raise exception
       '#2355: a legacy row with a blank source key could not be re-asserted after an absence';
   end if;
@@ -647,7 +812,7 @@ begin
   end if;
 
   update core.taxonomy_source_ref set missing_since = now() where id = v_relic_ref;
-  if (select is_current from core.taxonomy_source_ref where id = v_relic_ref) then
+  if (select missing_since is null from core.taxonomy_source_ref where id = v_relic_ref) then
     raise exception
       '#2355: a freshness-only update to a provenance row whose target was re-licensed was refused or lost';
   end if;

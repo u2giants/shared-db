@@ -36,10 +36,18 @@
 -- be repointed to another licensor's entity. A silent misattribution becomes a loud
 -- failure, with no importer signature changed.
 --
--- It also does NOT alter core.character, core.property, core.licensor or core.franchise.
--- core.character is a read for this issue, so the licensor consistency of an alias is
--- enforced by a trigger rather than by a composite foreign key: a composite foreign key
--- would require a new unique index ON core.character, which this claim does not own.
+-- It does NOT alter core.property, core.licensor or core.franchise. It makes exactly one
+-- additive change to core.character: a unique index on (id, licensor_id). That index adds
+-- no rule core.character did not already have -- id is already the primary key, so the
+-- pair is already unique -- and it exists solely to be the target of a composite foreign
+-- key from core.character_alias. Without it, core.character_alias.licensor_id is only
+-- checked when the ALIAS is written: re-licensing the parent character
+-- (`update core.character set licensor_id = ...`) would leave the alias still occupying
+-- the OLD licensor's (licensor, normalized name) slot while the character now belongs to
+-- another licensor -- so resolving that name for the old licensor would return the new
+-- licensor's character, which is precisely the cross-licensor misattribution this table
+-- exists to prevent. core.property_alias (20260731150000) and core.franchise_alias
+-- (20260905083426) both solve it this way; this follows the same established pattern.
 --
 -- GRANDFATHERING
 -- --------------
@@ -49,6 +57,14 @@
 -- freshness columns are therefore added nullable, and their "must be present" rules are
 -- declared NOT VALID so they bind every new and every modified row while leaving
 -- pre-existing rows exactly as they are. Do not VALIDATE them.
+--
+-- Nothing here rewrites the table. Adding a nullable column with no default is a catalog
+-- change only, and every constraint added against existing data is either NOT VALID or
+-- trivially true. There is deliberately NO `is_current` column: a STORED generated column
+-- would have forced a full ACCESS EXCLUSIVE rewrite of a live table, contradicting the
+-- promise above, and it would have carried no information of its own -- "current" is
+-- exactly `missing_since is null`. Read it with that predicate; the partial index
+-- taxonomy_source_ref_current_idx serves it.
 --
 -- STRICTNESS, CALIBRATED
 -- ----------------------
@@ -91,12 +107,6 @@ alter table core.taxonomy_source_ref
   alter column first_seen_at set default now();
 alter table core.taxonomy_source_ref
   alter column last_seen_at set default now();
-
--- Current state is derived, never independently editable: a row is current exactly while
--- the source has not been observed to have dropped it.
-alter table core.taxonomy_source_ref
-  add column if not exists is_current boolean
-    generated always as (missing_since is null) stored;
 
 do $freshness_constraints$
 begin
@@ -152,7 +162,9 @@ create index if not exists taxonomy_source_ref_entity_idx
 create index if not exists taxonomy_source_ref_source_licensor_idx
   on core.taxonomy_source_ref (source_licensor_id);
 
--- Read path for "what does this source currently assert?".
+-- Read path for "what does this source currently assert?". `missing_since is null` IS the
+-- definition of current -- there is no is_current column, so there is no stored duplicate
+-- of that predicate to drift, and no table rewrite to add one.
 create index if not exists taxonomy_source_ref_current_idx
   on core.taxonomy_source_ref (source_system, source_table)
   where missing_since is null;
@@ -403,7 +415,21 @@ set search_path = core, pg_catalog
 as $bump$
 begin
   if new.missing_since is null
-     and new.last_seen_at is not distinct from old.last_seen_at then
+     and (
+       -- The ordinary case: the caller named no last_seen_at of its own.
+       new.last_seen_at is not distinct from old.last_seen_at
+       -- THE LEGACY ROW. A pre-#2355 row carries last_seen_at NULL, and the identity
+       -- guard -- which runs first -- has just back-filled it from old.created_at.
+       -- Compared against the OLD null that looks exactly like "the caller supplied a
+       -- value", so without this branch the FIRST re-assertion on every grandfathered
+       -- row (the production path for all of them) would record created_at, often years
+       -- old, and a freshness job would read live evidence as "the source dropped this".
+       -- Only the guard's own back-fill is recognised here -- it always leaves
+       -- last_seen_at equal to first_seen_at -- so a caller that genuinely names a
+       -- last_seen_at is still respected, and greatest() can never move the column back.
+       or (old.last_seen_at is null
+           and new.last_seen_at is not distinct from new.first_seen_at)
+     ) then
     new.last_seen_at := greatest(new.last_seen_at, now());
   end if;
   return new;
@@ -444,8 +470,6 @@ comment on column core.taxonomy_source_ref.missing_since is
   'When the source stopped asserting this. Absence is recorded, never deleted: a vanished '
   'source row is evidence, and deleting it would destroy the audit trail behind a royalty '
   'or approval decision.';
-comment on column core.taxonomy_source_ref.is_current is
-  'Generated: true while missing_since is null. Never write it directly.';
 
 -- ---------------------------------------------------------------------------
 -- 3. core.character_alias
@@ -457,11 +481,12 @@ create table if not exists core.character_alias (
   -- underneath them. Retiring a character is a status change, never a delete.
   character_id      uuid not null references core.character(id) on delete restrict,
 
-  -- Denormalized on purpose: it is the scope of alias uniqueness. It cannot drift --
-  -- the guard trigger below requires it to equal the parent character's licensor_id.
-  -- (core.franchise_alias binds the equivalent field with a composite foreign key; that
-  -- is not available here because it would need a new unique index ON core.character,
-  -- which issue #2355 reads but does not own.)
+  -- Denormalized on purpose: it is the scope of alias uniqueness. It cannot drift: the
+  -- composite foreign key added below binds it to the parent character's own licensor_id
+  -- structurally, so re-licensing the character carries its aliases with it instead of
+  -- stranding them in the old licensor's namespace. The guard trigger is kept as well --
+  -- it is what produces a readable refusal, and what refuses an alias for a character
+  -- that has no licensor at all.
   licensor_id       uuid not null references core.licensor(id) on delete restrict,
 
   alias             text not null,
@@ -497,6 +522,36 @@ create table if not exists core.character_alias (
   constraint character_alias_source_id_not_blank
     check (source_id is null or length(btrim(source_id)) > 0)
 );
+
+-- LICENSOR-SAFE INTEGRITY, STRUCTURALLY. A trigger on core.character_alias can only check
+-- the alias when the ALIAS is written; it is blind to
+-- `update core.character set licensor_id = ...`. This composite pair is what makes a
+-- drifted alias unrepresentable, and ON UPDATE CASCADE is what carries the aliases along
+-- when a character is legitimately re-licensed. The target index adds no new rule to
+-- core.character -- id is already its primary key, so (id, licensor_id) is already unique
+-- -- it only makes that fact referenceable. Same shape as core.property_alias
+-- (20260731150000) and core.franchise_alias (20260905083426).
+create unique index if not exists character_id_licensor_id_key
+  on core.character (id, licensor_id);
+
+do $character_alias_parent_fk$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'core.character_alias'::regclass
+      and conname = 'character_alias_parent_matches_character'
+  ) then
+    alter table core.character_alias
+      add constraint character_alias_parent_matches_character
+      foreign key (character_id, licensor_id)
+      references core.character (id, licensor_id)
+      on update cascade
+      -- ON DELETE RESTRICT, matching the single-column reference above: a canonical
+      -- character that aliases resolve to may not vanish underneath them.
+      on delete restrict;
+  end if;
+end
+$character_alias_parent_fk$;
 
 -- THE SAFETY PROPERTY. Within one licensor, a normalized observed name may never resolve
 -- to two different characters. Scoped to the licensor because the same character name
@@ -588,8 +643,12 @@ comment on table core.character_alias is
   'creating migration: #2355 authorizes structure only.';
 comment on column core.character_alias.licensor_id is
   'The licensor of the parent character, carried here as the scope of alias uniqueness. Not '
-  'independently editable: core.guard_character_alias_licensor requires it to equal the parent '
-  'character''s licensor_id on every insert and update.';
+  'independently editable: the composite foreign key character_alias_parent_matches_character '
+  'requires (character_id, licensor_id) to be a pair that actually exists in core.character, '
+  'and cascades on update so re-licensing a character carries its aliases with it rather than '
+  'stranding them in the old licensor''s namespace. core.guard_character_alias_licensor '
+  'enforces the same rule on every insert and update with a readable message, and additionally '
+  'refuses an alias for a character that has no licensor at all.';
 comment on column core.character_alias.normalized_alias is
   'Generated by core.normalize_popsg_property_observation. Never write it directly, and never '
   'change that function without rebaselining every generated column that depends on it.';
