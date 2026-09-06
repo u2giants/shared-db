@@ -215,8 +215,13 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
     // row. The correct behaviour is to report loudly and STOP: the artifact and
     // the comment are both left exactly as they are, and a human decides.
     if(error.verdictArtifactCreated){
-      const {ref,sha}=error.verdictArtifactCreated
-      spawnGitHub(['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{executor:deps.spawn,input:JSON.stringify({body:`REVIEW RECORDING INCOMPLETE — THE DURABLE VERDICT ARTIFACT WAS CREATED AND IS LEFT INTACT.
+      // The marker also arrives UNCONFIRMED: the read that would have proved the
+      // ref threw, so we cannot say the artifact exists -- only that it may. The
+      // behaviour is identical either way, because voiding is irreversible and
+      // not voiding is not, but the notice must not claim more than was proved.
+      const {ref,sha,confirmed}=error.verdictArtifactCreated
+      const state=confirmed===false?'MAY HAVE BEEN CREATED':'WAS CREATED AND IS LEFT INTACT'
+      spawnGitHub(['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{executor:deps.spawn,input:JSON.stringify({body:`REVIEW RECORDING INCOMPLETE — THE DURABLE VERDICT ARTIFACT ${state}.
 
 Artifact: \`${ref}\` = \`${sha}\`
 
@@ -226,7 +231,7 @@ The preceding findings comment (${comment.html_url}) has been left UNTOUCHED on 
 
     gh api repos/u2giants/shared-db/git/ref/${ref.replace(/^refs\//,'')}
 `})})
-      throw new Error(`${error.message} — the durable verdict artifact ${ref} = ${sha} WAS created; the findings comment ${comment.id} was deliberately left untouched so its digest stays valid. Nothing was voided.`)
+      throw new Error(`${error.message} — the durable verdict artifact ${ref} = ${sha} ${confirmed===false?'MAY have been created and could not be read back':'WAS created'}; the findings comment ${comment.id} was deliberately left untouched so its digest stays valid. Nothing was voided.`)
     }
     let voidStatus='voided'
     try{

@@ -173,3 +173,34 @@ test('POSITIVE CONTROL: a create that truly did not land still refuses unmarked 
   assert.match(caught.message,/no winner exists/)
   assert.equal(caught.verdictArtifactCreated,undefined)
 })
+
+// #2464 (muse-spark, PR #2468 round 2). A WINNER READ THAT THROWS PROVES NOTHING.
+// io.readRef returns null only on a confirmed 404 and rethrows every other
+// transport error, and the retry helper lets a thrown read propagate. After a
+// failed create, that leaves us unable to say whether the ref landed -- so the
+// failure is marked UNCONFIRMED and the runner still refuses to void. Voiding is
+// irreversible; not voiding is not. A CONFIRMED absence is different and stays
+// unmarked, which the positive control above already pins.
+test('a winner read that throws after a failed create is marked unconfirmed (#2464)',()=>{
+  const io=ioFixture()
+  io.wait=()=>{}
+  const originalCreate=io.createRef
+  let created=false
+  io.createRef=(ref,sha)=>{created=true;originalCreate(ref,sha);throw new Error('502 from the create')}
+  const real=io.readRef
+  io.readRef=(ref)=>{if(created&&ref.startsWith('refs/db-review-verdicts/'))throw new Error('503 reading the ref back');return real(ref)}
+  let caught=null
+  try{recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io)}catch(error){caught=error}
+  assert.ok(caught)
+  assert.ok(caught.verdictArtifactCreated,'an unprovable ref state must still refuse the void')
+  assert.equal(caught.verdictArtifactCreated.confirmed,false)
+})
+test('a confirmed marker says so, so a notice cannot overclaim (#2464)',()=>{
+  const io=ioFixture()
+  io.wait=()=>{}
+  const real=io.readRef
+  io.readRef=(ref)=>ref.startsWith('refs/db-review-verdicts/')?null:real(ref)
+  let caught=null
+  try{recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io)}catch(error){caught=error}
+  assert.equal(caught.verdictArtifactCreated.confirmed,true)
+})

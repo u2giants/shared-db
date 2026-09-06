@@ -2038,9 +2038,18 @@ export function recordReviewVerdict(options,io=githubIo){
     // over. So the winner is read with the same absence-retry as the success
     // path, and once the winner is known to be our own SHA, EVERY error out of
     // this branch carries the marker.
-    const winner=readRefAfterWrite(ref,sha,io)
+    // The winner READ can itself throw -- readRef returns null only on a
+    // confirmed 404 and rethrows every other transport error (muse-spark,
+    // PR #2468, round 2). A thrown read leaves us unable to prove the ref is
+    // absent, and the create may well have landed, so the failure is marked
+    // UNCONFIRMED rather than left bare: refusing to void is safe when we do not
+    // know, while voiding is irreversible. A confirmed absence after the full
+    // retry is a different thing and stays unmarked -- nothing was created.
+    let winner=null
+    try{winner=readRefAfterWrite(ref,sha,io)}
+    catch(readError){readError.verdictArtifactCreated={ref,sha,confirmed:false};throw readError}
     if(!winner)throw new LaneError('create-only verdict ref failed and no winner exists; do not retry blindly')
-    const markIfOurs=(failure)=>{if(winner===sha)failure.verdictArtifactCreated={ref,sha};return failure}
+    const markIfOurs=(failure)=>{if(winner===sha)failure.verdictArtifactCreated={ref,sha,confirmed:true};return failure}
     try{
       const winnerRecord=parseVerdictCommit(io.getCommit(winner))
       const winnerBody=io.readFindings(winnerRecord.findings_ref)
@@ -2072,7 +2081,7 @@ export function recordReviewVerdict(options,io=githubIo){
     if(seen!==sha)throw new LaneError(`create-only verdict readback could not confirm the created object at ${ref} (read ${seen===null?'absent':seen}, expected ${sha}); the artifact WAS created and must not be voided`)
     return validateVerdictArtifact({ref,sha,commit:io.getCommit(sha),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
   }catch(error){
-    error.verdictArtifactCreated={ref,sha}
+    error.verdictArtifactCreated={ref,sha,confirmed:true}
     throw error
   }
 }
