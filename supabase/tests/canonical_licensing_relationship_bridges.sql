@@ -21,6 +21,8 @@ declare
   v_franchise   uuid;
   v_asset       uuid;
   v_edge        uuid;
+  v_edge2       uuid;
+  v_table       text;
   v_raised      boolean;
   v_count       integer;
   t             text;
@@ -345,7 +347,38 @@ begin
     raise exception 'current support did not survive the refused endpoint delete';
   end if;
 
-  -- 5d. Superseded support does NOT block: only CURRENT support does.
+  -- 5d. Review finding H-1. Withdrawing support by UPDATE is the same orphaning as
+  --     deleting it, so it is refused the same way while a canonical edge cites the pair
+  --     and no other current direct assertion covers it. Without this the delete guard in
+  --     5a is decorative: set is_current = false and the evidence is gone anyway, leaving
+  --     core.property_style_guide standing on nothing.
+  v_raised := false;
+  begin
+    update core.property_style_guide_source_edge
+       set is_current = false, superseded_at = now(), superseded_reason = 'fixture withdrawal'
+     where id = v_edge;
+  exception when sqlstate 'P0001' then v_raised := true;
+  end;
+  if not v_raised then
+    raise exception 'the LAST current direct support was withdrawn by UPDATE, leaving a '
+      'canonical edge standing with no evidence under it';
+  end if;
+
+  -- And the withdrawal really did not take effect.
+  if not (select is_current from core.property_style_guide_source_edge where id = v_edge) then
+    raise exception 'a refused withdrawal still cleared is_current';
+  end if;
+
+  -- 5e. Supersession BY REPLACEMENT stays legal, which is the whole point of supersession:
+  --     a second source's current direct assertion keeps the canonical edge supported, so
+  --     the first may then be superseded and deleted.
+  insert into core.property_style_guide_source_edge
+    (property_id, style_guide_id, licensor_id, source_system, source_id, evidence_kind)
+    values (v_property, v_style_guide, v_licensor, 'zz_fixture_2334_replacement', 'psg-2',
+            'direct_source_assertion')
+    returning id into v_edge2;
+
+  -- 5f. Superseded support does NOT block: only CURRENT support does.
   update core.property_style_guide_source_edge
      set is_current = false, superseded_at = now(), superseded_reason = 'fixture supersession'
    where id = v_edge;
@@ -353,6 +386,29 @@ begin
   if exists (select 1 from core.property_style_guide_source_edge where id = v_edge) then
     raise exception 'superseded support could not be deleted';
   end if;
+
+  -- 5g. Review finding M-1. TRUNCATE never fires a row-level DELETE trigger, so a
+  --     truncate-and-reload loader would erase every current claim straight past the guard
+  --     proved in 5a. No role may hold it on a support-edge table.
+  foreach v_table in array array[
+    'core.property_character_source_edge',
+    'core.property_franchise_source_edge',
+    'core.property_style_guide_source_edge',
+    'core.style_guide_character_source_edge',
+    'dam.asset_character_source_edge',
+    'dam.asset_franchise_source_edge',
+    'dam.asset_property_source_edge',
+    'dam.asset_style_guide_source_edge'
+  ] loop
+    if has_table_privilege('service_role', v_table, 'TRUNCATE') then
+      raise exception 'service_role may TRUNCATE %, which bypasses the fail-closed delete guard',
+        v_table;
+    end if;
+    if has_table_privilege('authenticated', v_table, 'TRUNCATE')
+       or has_table_privilege('anon', v_table, 'TRUNCATE') then
+      raise exception 'a client role may TRUNCATE %', v_table;
+    end if;
+  end loop;
 
   raise notice 'issue #2334 canonical licensing relationship contracts: all assertions passed';
 end

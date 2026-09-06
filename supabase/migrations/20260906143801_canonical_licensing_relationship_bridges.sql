@@ -185,6 +185,88 @@ comment on function core.require_direct_support_for_canonical_edge() is
   'edge may exist only while a CURRENT direct_source_assertion support edge names the same '
   'pair, so inferred/co-occurrence evidence can never be promoted into canon.';
 
+-- 2c. Supersession may not silently orphan a canonical edge (review finding H-1).
+-- The BEFORE DELETE guard above refuses to DELETE current support, but the documented
+-- withdrawal path is an UPDATE that sets is_current = false. Without this guard that
+-- UPDATE achieves exactly what the delete guard forbids: a canonical bridge row left
+-- standing with no current direct evidence under it, which is the royalty-decision
+-- failure this migration exists to prevent. The bridge comments state the invariant in
+-- the present continuous ("may exist only WHILE ... holds a CURRENT direct source
+-- assertion"), so it has to be enforced continuously, not only at bridge-write time.
+create or replace function core.refuse_unsupporting_update_of_support_edge()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_bridge    text := tg_argv[0];   -- fully qualified canonical bridge table
+  v_left_col  text := tg_argv[1];
+  v_right_col text := tg_argv[2];
+  v_left      uuid;
+  v_right     uuid;
+  v_bridged   boolean;
+  v_other     boolean;
+begin
+  -- Only a row that IS current direct support today can withdraw any.
+  if not (old.is_current and old.evidence_kind = 'direct_source_assertion') then
+    return new;
+  end if;
+
+  -- Still current direct support for the same pair afterwards: nothing was withdrawn.
+  if new.is_current
+     and new.evidence_kind = 'direct_source_assertion'
+     and (to_jsonb(new) ->> v_left_col) is not distinct from (to_jsonb(old) ->> v_left_col)
+     and (to_jsonb(new) ->> v_right_col) is not distinct from (to_jsonb(old) ->> v_right_col) then
+    return new;
+  end if;
+
+  v_left  := (to_jsonb(old) ->> v_left_col)::uuid;
+  v_right := (to_jsonb(old) ->> v_right_col)::uuid;
+
+  -- No canonical edge cites this pair, so nothing can be orphaned by withdrawing it.
+  execute format(
+    'select exists (select 1 from %s b where b.%I = $1 and b.%I = $2)',
+    v_bridge, v_left_col, v_right_col)
+  into v_bridged
+  using v_left, v_right;
+
+  if not v_bridged then
+    return new;
+  end if;
+
+  -- Supersession BY REPLACEMENT stays legal: another current direct assertion already
+  -- covers the pair, so the canonical edge keeps standing on real evidence.
+  execute format(
+    'select exists (select 1 from %I.%I s where s.%I = $1 and s.%I = $2 '
+    'and s.id <> $3 and s.is_current '
+    'and s.evidence_kind = ''direct_source_assertion''::core.relationship_evidence_kind)',
+    tg_table_schema, tg_table_name, v_left_col, v_right_col)
+  into v_other
+  using v_left, v_right, old.id;
+
+  if v_other then
+    return new;
+  end if;
+
+  raise exception
+    'Refused: %.% row % is the LAST current direct source assertion behind the canonical edge '
+    'in % (% = %, % = %). Withdrawing it would leave that canonical edge standing with no '
+    'evidence at all. Record the replacing direct assertion first, or remove the canonical edge '
+    'in a governed migration.',
+    tg_table_schema, tg_table_name, old.id, v_bridge,
+    v_left_col, v_left, v_right_col, v_right
+    using errcode = 'P0001';
+end;
+$$;
+
+comment on function core.refuse_unsupporting_update_of_support_edge() is
+  'BEFORE UPDATE guard on every *_source_edge table (issue #2334, review finding H-1). Refuses '
+  'an update that withdraws the LAST current direct source assertion behind an existing canonical '
+  'bridge row -- by clearing is_current, by relabelling evidence_kind away from direct, or by '
+  'repointing the pair. Supersession by replacement, and supersession of a pair no canonical edge '
+  'cites, both remain free. Together with the BEFORE DELETE guard it makes the bridges'' documented '
+  '"only while currently supported" invariant continuous rather than write-time only.';
+
+
 
 -- ---------------------------------------------------------------------------
 -- 3. The five missing canonical bridges
@@ -501,6 +583,13 @@ create trigger refuse_delete_of_current_support
   before delete on core.property_character_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
 
+-- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
+-- same orphaning the delete guard above refuses, so it is refused the same way.
+create trigger refuse_unsupporting_update
+  before update on core.property_character_source_edge
+  for each row execute function core.refuse_unsupporting_update_of_support_edge(
+    'core.property_character_associations', 'property_id', 'character_id');
+
 alter table core.property_character_source_edge enable row level security;
 
 create policy shared_read on core.property_character_source_edge
@@ -510,6 +599,9 @@ create policy shared_read on core.property_character_source_edge
 revoke all on core.property_character_source_edge from public, anon, authenticated;
 grant select on core.property_character_source_edge to authenticated;
 grant all on core.property_character_source_edge to service_role;
+-- Review finding M-1: TRUNCATE never fires row-level DELETE triggers, so leaving it in
+-- ALL would let a truncate-and-reload loader erase every current claim past the guard.
+revoke truncate on core.property_character_source_edge from service_role;
 
 comment on table core.property_character_source_edge is
   'Per-source support evidence for the property <-> character relationship (issue #2334). '
@@ -622,6 +714,13 @@ create trigger refuse_delete_of_current_support
   before delete on core.property_style_guide_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
 
+-- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
+-- same orphaning the delete guard above refuses, so it is refused the same way.
+create trigger refuse_unsupporting_update
+  before update on core.property_style_guide_source_edge
+  for each row execute function core.refuse_unsupporting_update_of_support_edge(
+    'core.property_style_guide', 'property_id', 'style_guide_id');
+
 alter table core.property_style_guide_source_edge enable row level security;
 
 create policy shared_read on core.property_style_guide_source_edge
@@ -631,6 +730,9 @@ create policy shared_read on core.property_style_guide_source_edge
 revoke all on core.property_style_guide_source_edge from public, anon, authenticated;
 grant select on core.property_style_guide_source_edge to authenticated;
 grant all on core.property_style_guide_source_edge to service_role;
+-- Review finding M-1: TRUNCATE never fires row-level DELETE triggers, so leaving it in
+-- ALL would let a truncate-and-reload loader erase every current claim past the guard.
+revoke truncate on core.property_style_guide_source_edge from service_role;
 
 comment on table core.property_style_guide_source_edge is
   'Per-source support evidence for the property <-> style guide relationship (issue #2334). '
@@ -743,6 +845,13 @@ create trigger refuse_delete_of_current_support
   before delete on core.property_franchise_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
 
+-- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
+-- same orphaning the delete guard above refuses, so it is refused the same way.
+create trigger refuse_unsupporting_update
+  before update on core.property_franchise_source_edge
+  for each row execute function core.refuse_unsupporting_update_of_support_edge(
+    'core.property_franchise', 'property_id', 'franchise_id');
+
 alter table core.property_franchise_source_edge enable row level security;
 
 create policy shared_read on core.property_franchise_source_edge
@@ -752,6 +861,9 @@ create policy shared_read on core.property_franchise_source_edge
 revoke all on core.property_franchise_source_edge from public, anon, authenticated;
 grant select on core.property_franchise_source_edge to authenticated;
 grant all on core.property_franchise_source_edge to service_role;
+-- Review finding M-1: TRUNCATE never fires row-level DELETE triggers, so leaving it in
+-- ALL would let a truncate-and-reload loader erase every current claim past the guard.
+revoke truncate on core.property_franchise_source_edge from service_role;
 
 comment on table core.property_franchise_source_edge is
   'Per-source support evidence for the property <-> franchise relationship (issue #2334). '
@@ -864,6 +976,13 @@ create trigger refuse_delete_of_current_support
   before delete on core.style_guide_character_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
 
+-- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
+-- same orphaning the delete guard above refuses, so it is refused the same way.
+create trigger refuse_unsupporting_update
+  before update on core.style_guide_character_source_edge
+  for each row execute function core.refuse_unsupporting_update_of_support_edge(
+    'core.style_guide_character', 'style_guide_id', 'character_id');
+
 alter table core.style_guide_character_source_edge enable row level security;
 
 create policy shared_read on core.style_guide_character_source_edge
@@ -873,6 +992,9 @@ create policy shared_read on core.style_guide_character_source_edge
 revoke all on core.style_guide_character_source_edge from public, anon, authenticated;
 grant select on core.style_guide_character_source_edge to authenticated;
 grant all on core.style_guide_character_source_edge to service_role;
+-- Review finding M-1: TRUNCATE never fires row-level DELETE triggers, so leaving it in
+-- ALL would let a truncate-and-reload loader erase every current claim past the guard.
+revoke truncate on core.style_guide_character_source_edge from service_role;
 
 comment on table core.style_guide_character_source_edge is
   'Per-source support evidence for the style guide <-> character relationship (issue #2334). '
@@ -985,10 +1107,20 @@ create trigger refuse_delete_of_current_support
   before delete on dam.asset_property_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
 
+-- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
+-- same orphaning the delete guard above refuses, so it is refused the same way.
+create trigger refuse_unsupporting_update
+  before update on dam.asset_property_source_edge
+  for each row execute function core.refuse_unsupporting_update_of_support_edge(
+    'dam.asset_property', 'asset_id', 'property_id');
+
 alter table dam.asset_property_source_edge enable row level security;
 
 revoke all on dam.asset_property_source_edge from public, anon, authenticated;
 grant all on dam.asset_property_source_edge to service_role;
+-- Review finding M-1: TRUNCATE never fires row-level DELETE triggers, so leaving it in
+-- ALL would let a truncate-and-reload loader erase every current claim past the guard.
+revoke truncate on dam.asset_property_source_edge from service_role;
 
 comment on table dam.asset_property_source_edge is
   'Per-source support evidence for the asset <-> property relationship (issue #2334). '
@@ -1101,10 +1233,20 @@ create trigger refuse_delete_of_current_support
   before delete on dam.asset_character_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
 
+-- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
+-- same orphaning the delete guard above refuses, so it is refused the same way.
+create trigger refuse_unsupporting_update
+  before update on dam.asset_character_source_edge
+  for each row execute function core.refuse_unsupporting_update_of_support_edge(
+    'dam.asset_character', 'asset_id', 'character_id');
+
 alter table dam.asset_character_source_edge enable row level security;
 
 revoke all on dam.asset_character_source_edge from public, anon, authenticated;
 grant all on dam.asset_character_source_edge to service_role;
+-- Review finding M-1: TRUNCATE never fires row-level DELETE triggers, so leaving it in
+-- ALL would let a truncate-and-reload loader erase every current claim past the guard.
+revoke truncate on dam.asset_character_source_edge from service_role;
 
 comment on table dam.asset_character_source_edge is
   'Per-source support evidence for the asset <-> character relationship (issue #2334). '
@@ -1217,10 +1359,20 @@ create trigger refuse_delete_of_current_support
   before delete on dam.asset_style_guide_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
 
+-- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
+-- same orphaning the delete guard above refuses, so it is refused the same way.
+create trigger refuse_unsupporting_update
+  before update on dam.asset_style_guide_source_edge
+  for each row execute function core.refuse_unsupporting_update_of_support_edge(
+    'dam.asset_style_guide', 'asset_id', 'style_guide_id');
+
 alter table dam.asset_style_guide_source_edge enable row level security;
 
 revoke all on dam.asset_style_guide_source_edge from public, anon, authenticated;
 grant all on dam.asset_style_guide_source_edge to service_role;
+-- Review finding M-1: TRUNCATE never fires row-level DELETE triggers, so leaving it in
+-- ALL would let a truncate-and-reload loader erase every current claim past the guard.
+revoke truncate on dam.asset_style_guide_source_edge from service_role;
 
 comment on table dam.asset_style_guide_source_edge is
   'Per-source support evidence for the asset <-> style guide relationship (issue #2334). '
@@ -1333,10 +1485,20 @@ create trigger refuse_delete_of_current_support
   before delete on dam.asset_franchise_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
 
+-- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
+-- same orphaning the delete guard above refuses, so it is refused the same way.
+create trigger refuse_unsupporting_update
+  before update on dam.asset_franchise_source_edge
+  for each row execute function core.refuse_unsupporting_update_of_support_edge(
+    'dam.asset_franchise', 'asset_id', 'franchise_id');
+
 alter table dam.asset_franchise_source_edge enable row level security;
 
 revoke all on dam.asset_franchise_source_edge from public, anon, authenticated;
 grant all on dam.asset_franchise_source_edge to service_role;
+-- Review finding M-1: TRUNCATE never fires row-level DELETE triggers, so leaving it in
+-- ALL would let a truncate-and-reload loader erase every current claim past the guard.
+revoke truncate on dam.asset_franchise_source_edge from service_role;
 
 comment on table dam.asset_franchise_source_edge is
   'Per-source support evidence for the asset <-> franchise relationship (issue #2334). '
