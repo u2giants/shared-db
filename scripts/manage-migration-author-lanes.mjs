@@ -2028,13 +2028,26 @@ export function recordReviewVerdict(options,io=githubIo){
   }
   const sha=io.makeReviewVerdictCommit(formatVerdictMessage(record),assignmentSha)
   try{if(!io.createRef(ref,sha))throw new Error('create returned false')}catch(error){
-    const winner=io.readRef(ref)
+    // #2464 (muse-spark, PR #2468). A FAILED create does not mean nothing was
+    // created. The create can land and still report an error -- a dropped
+    // response, a proxy timeout -- in which case the winner of this "race" is
+    // THIS round's own commit, bound to THIS round's findings comment. Every
+    // read below (getCommit, readFindings, validation) can then fail
+    // transiently, and an unmarked throw sends the runner down its void path,
+    // editing the very comment the artifact's findings_digest was computed
+    // over. So the winner is read with the same absence-retry as the success
+    // path, and once the winner is known to be our own SHA, EVERY error out of
+    // this branch carries the marker.
+    const winner=readRefAfterWrite(ref,sha,io)
     if(!winner)throw new LaneError('create-only verdict ref failed and no winner exists; do not retry blindly')
-    const winnerRecord=parseVerdictCommit(io.getCommit(winner))
-    const winnerBody=io.readFindings(winnerRecord.findings_ref)
-    const validated=validateVerdictArtifact({ref,sha:winner,commit:io.getCommit(winner),findingsBody:winnerBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
-    if(validated.verdict!==verdict)throw new LaneError('a contradictory create-only verdict won the race; this tuple is permanently refused')
-    return validated
+    const markIfOurs=(failure)=>{if(winner===sha)failure.verdictArtifactCreated={ref,sha};return failure}
+    try{
+      const winnerRecord=parseVerdictCommit(io.getCommit(winner))
+      const winnerBody=io.readFindings(winnerRecord.findings_ref)
+      const validated=validateVerdictArtifact({ref,sha:winner,commit:io.getCommit(winner),findingsBody:winnerBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
+      if(validated.verdict!==verdict)throw new LaneError('a contradictory create-only verdict won the race; this tuple is permanently refused')
+      return validated
+    }catch(failure){throw markIfOurs(failure)}
   }
   // #2464. THE CREATE SUCCEEDED. Everything from here on is confirmation of an
   // object that already exists durably, so two rules apply.

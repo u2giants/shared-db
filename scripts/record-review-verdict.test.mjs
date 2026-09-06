@@ -127,3 +127,49 @@ test('an existing artifact is validated against its own findings comment, not th
   assert.equal(second.sha,first.sha)
   assert.equal(second.findings_ref,findingsRef)
 })
+
+// #2464 (muse-spark, PR #2468). A FAILED CREATE THAT ACTUALLY LANDED IS OURS.
+// The create can report an error after the ref landed -- a dropped response, a
+// proxy timeout. The winner of that "race" is this round's own commit, bound to
+// this round's findings comment, so a transient failure in the reads that follow
+// must NOT reach the runner unmarked: the void path would edit the very comment
+// the artifact's findings_digest was computed over. The positive control below
+// shows a genuine race, won by ANOTHER round's commit, still throws unmarked.
+test('a create that errors after landing our own SHA marks every later failure (#2464)',()=>{
+  const io=ioFixture()
+  io.wait=()=>{}
+  const originalCreate=io.createRef
+  io.createRef=(ref,sha)=>{originalCreate(ref,sha);throw new Error('502 from the create; the ref landed anyway')}
+  const originalGetCommit=io.getCommit
+  io.getCommit=(sha)=>{if(sha===assignmentSha)return originalGetCommit(sha);throw new Error('transient 500 reading the winner commit')}
+  let caught=null
+  try{recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io)}catch(error){caught=error}
+  assert.ok(caught,'the failure must still be reported')
+  assert.ok(caught.verdictArtifactCreated,'a failure after OUR SHA landed must carry the artifact marker')
+  assert.equal(io.refs.get(caught.verdictArtifactCreated.ref),caught.verdictArtifactCreated.sha)
+})
+test('POSITIVE CONTROL: a race lost to another round throws unmarked (#2464)',()=>{
+  const io=ioFixture()
+  io.wait=()=>{}
+  const originalCreate=io.createRef
+  io.createRef=(ref,sha)=>{
+    const row=JSON.parse(io.commits.get(sha).message.slice('db-review-verdict '.length))
+    originalCreate(ref,io.makeReviewVerdictCommit(`db-review-verdict ${JSON.stringify({...row,verdict:'REJECT'})}`,assignmentSha))
+    throw new Error('already exists')
+  }
+  let caught=null
+  try{recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io)}catch(error){caught=error}
+  assert.ok(caught)
+  assert.match(caught.message,/contradictory create-only verdict/)
+  assert.equal(caught.verdictArtifactCreated,undefined,'another round\'s artifact is not ours to protect')
+})
+test('POSITIVE CONTROL: a create that truly did not land still refuses unmarked (#2464)',()=>{
+  const io=ioFixture()
+  io.wait=()=>{}
+  io.createRef=()=>{throw new Error('the create never landed')}
+  let caught=null
+  try{recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io)}catch(error){caught=error}
+  assert.ok(caught)
+  assert.match(caught.message,/no winner exists/)
+  assert.equal(caught.verdictArtifactCreated,undefined)
+})
