@@ -44,7 +44,7 @@
 --
 -- WHAT THIS IS NOT
 -- ----------------
--- ADDITIVE ONLY. This migration creates one enum, two trigger functions and thirteen
+-- ADDITIVE ONLY. This migration creates one enum, five trigger functions and thirteen
 -- tables. It ALTERS NOTHING that already exists: not the three pre-existing bridges,
 -- not core.property / character / style_guide / franchise, not dam.asset, and not any
 -- existing view, function, policy or grant. It seeds NO rows. #2334 authorizes no
@@ -95,7 +95,7 @@
 -- 1. The evidence vocabulary
 -- ---------------------------------------------------------------------------
 -- An enum, not a per-table text CHECK. Thirteen hand-copied CHECK constraints would be
--- thirteen chances to drift, and the two trigger functions below need one authoritative
+-- thirteen chances to drift, and the trigger functions below need one authoritative
 -- name for "direct". Adding a fourth kind later is an explicit, reviewable migration --
 -- which is the correct cost for widening what may count as licensing evidence.
 create type core.relationship_evidence_kind as enum (
@@ -113,14 +113,22 @@ comment on type core.relationship_evidence_kind is
 
 
 -- ---------------------------------------------------------------------------
--- 2. The two guards
+-- 2. The guards
 -- ---------------------------------------------------------------------------
--- Both are new objects with novel names, created only to serve the tables below.
+-- All are new objects with novel names, created only to serve the tables below. Each pins
+-- its search_path and revokes EXECUTE from every client role (round-3 review hardening).
 
 -- 2a. Fail-closed deletion of current support.
 create or replace function core.refuse_delete_of_current_support_edge()
 returns trigger
 language plpgsql
+-- Round-3 review finding (hardening). This guard runs dynamic SQL, so its search_path
+-- is pinned: every object it touches is written schema-qualified in this file, and
+-- nothing may be resolved through a caller's or a temporary schema. EXECUTE is revoked
+-- below so a signed-in caller cannot invoke the existence probe directly and use it as
+-- an oracle over licensing evidence; firing a trigger does not require the privilege,
+-- so nothing legitimate loses anything.
+set search_path = pg_catalog, pg_temp
 as $$
 begin
   -- Deliberately blind to WHY the delete is happening. It fires the same for a direct
@@ -146,10 +154,19 @@ comment on function core.refuse_delete_of_current_support_edge() is
   'current; superseded support deletes freely. Fires on cascades too, which is how endpoint '
   'deletion fails closed for the pre-existing ON DELETE CASCADE bridges.';
 
+revoke all on function core.refuse_delete_of_current_support_edge() from public, anon, authenticated;
+
 -- 2b. Inferred and co-occurrence evidence can never become a direct canonical edge.
 create or replace function core.require_direct_support_for_canonical_edge()
 returns trigger
 language plpgsql
+-- Round-3 review finding (hardening). This guard runs dynamic SQL, so its search_path
+-- is pinned: every object it touches is written schema-qualified in this file, and
+-- nothing may be resolved through a caller's or a temporary schema. EXECUTE is revoked
+-- below so a signed-in caller cannot invoke the existence probe directly and use it as
+-- an oracle over licensing evidence; firing a trigger does not require the privilege,
+-- so nothing legitimate loses anything.
+set search_path = pg_catalog, pg_temp
 as $$
 declare
   v_support   text := tg_argv[0];   -- fully qualified support-edge table
@@ -191,6 +208,8 @@ comment on function core.require_direct_support_for_canonical_edge() is
   'edge may exist only while a CURRENT direct_source_assertion support edge names the same '
   'pair, so inferred/co-occurrence evidence can never be promoted into canon.';
 
+revoke all on function core.require_direct_support_for_canonical_edge() from public, anon, authenticated;
+
 -- 2c. Supersession may not silently orphan a canonical edge (review finding H-1).
 -- The BEFORE DELETE guard above refuses to DELETE current support, but the documented
 -- withdrawal path is an UPDATE that sets is_current = false. Without this guard that
@@ -202,6 +221,13 @@ comment on function core.require_direct_support_for_canonical_edge() is
 create or replace function core.refuse_unsupporting_update_of_support_edge()
 returns trigger
 language plpgsql
+-- Round-3 review finding (hardening). This guard runs dynamic SQL, so its search_path
+-- is pinned: every object it touches is written schema-qualified in this file, and
+-- nothing may be resolved through a caller's or a temporary schema. EXECUTE is revoked
+-- below so a signed-in caller cannot invoke the existence probe directly and use it as
+-- an oracle over licensing evidence; firing a trigger does not require the privilege,
+-- so nothing legitimate loses anything.
+set search_path = pg_catalog, pg_temp
 as $$
 declare
   v_bridge    text := tg_argv[0];   -- fully qualified canonical bridge table
@@ -272,6 +298,8 @@ comment on function core.refuse_unsupporting_update_of_support_edge() is
   'cites, both remain free. Together with the BEFORE DELETE guard it makes the bridges'' documented '
   '"only while currently supported" invariant continuous rather than write-time only.';
 
+revoke all on function core.refuse_unsupporting_update_of_support_edge() from public, anon, authenticated;
+
 
 -- ----------------------------------------------------------------
 -- Review finding (round 2, High): the BEFORE UPDATE guard above is a ROW trigger, so the
@@ -286,6 +314,13 @@ comment on function core.refuse_unsupporting_update_of_support_edge() is
 create or replace function core.assert_canonical_edge_still_supported()
 returns trigger
 language plpgsql
+-- Round-3 review finding (hardening). This guard runs dynamic SQL, so its search_path
+-- is pinned: every object it touches is written schema-qualified in this file, and
+-- nothing may be resolved through a caller's or a temporary schema. EXECUTE is revoked
+-- below so a signed-in caller cannot invoke the existence probe directly and use it as
+-- an oracle over licensing evidence; firing a trigger does not require the privilege,
+-- so nothing legitimate loses anything.
+set search_path = pg_catalog, pg_temp
 as $$
 declare
   v_bridge    text := tg_argv[0];   -- fully qualified canonical bridge table
@@ -355,6 +390,81 @@ comment on function core.assert_canonical_edge_still_supported() is
   'row guards cannot see their own statement''s other-row effects, so a single bulk withdrawal '
   'statement slips past them; this check runs when the whole transaction is visible and closes '
   'that hole for every statement shape.';
+
+revoke all on function core.assert_canonical_edge_still_supported() from public, anon, authenticated;
+
+
+-- 2e. A support row's licensor must be its endpoints' licensor (round-3 review finding).
+-- licensor_id is NOT NULL and part of the identity key, which correctly stops one
+-- licensor's source ids from colliding with another's. But nothing tied that licensor to
+-- the endpoints the row is actually about, so a loader could file a Disney property/style
+-- guide pair under Sega's licensor id and no constraint would object -- and every royalty
+-- and approval decision reading that row would attribute it to the wrong licensor, which
+-- is precisely the error the licensor in the identity key exists to prevent.
+--
+-- An endpoint whose own licensor_id is NULL is unattributed, not contradictory, so it is
+-- allowed: core.franchise declares licensor_id NOT NULL, while core.property,
+-- core.character, core.style_guide and dam.asset all permit NULL, and refusing those would
+-- block legitimate evidence about an entity nobody has attributed yet. Whenever an endpoint
+-- DOES declare a licensor, it must be the one the claim is filed under.
+create or replace function core.require_support_edge_licensor_matches_endpoints()
+returns trigger
+language plpgsql
+-- Pinned search_path and revoked EXECUTE for the same reason as the guards above: this
+-- function runs dynamic SQL and reads licensing attribution.
+set search_path = pg_catalog, pg_temp
+as $$
+declare
+  v_left_table  text := tg_argv[0];   -- fully qualified left endpoint entity table
+  v_left_col    text := tg_argv[1];
+  v_right_table text := tg_argv[2];   -- fully qualified right endpoint entity table
+  v_right_col   text := tg_argv[3];
+  v_table       text;
+  v_col         text;
+  v_endpoint    uuid;
+  v_licensor    uuid;
+  i             integer;
+begin
+  for i in 0..1 loop
+    if i = 0 then
+      v_table := v_left_table;
+      v_col   := v_left_col;
+    else
+      v_table := v_right_table;
+      v_col   := v_right_col;
+    end if;
+
+    -- to_jsonb for the same reason as the guards above: one function serves all eight
+    -- support-edge tables instead of eight near-identical copies.
+    v_endpoint := (to_jsonb(new) ->> v_col)::uuid;
+
+    execute format('select e.licensor_id from %s e where e.id = $1', v_table)
+      into v_licensor
+      using v_endpoint;
+
+    if v_licensor is not null and v_licensor <> new.licensor_id then
+      raise exception
+        'Refused: this %.% row is filed under licensor %, but its endpoint % = % in % belongs '
+        'to licensor %. Filing one licensor''s relationship under another licensor''s id '
+        'misattributes royalties and approvals -- record the claim under the licensor that '
+        'actually owns the endpoints.',
+        tg_table_schema, tg_table_name, new.licensor_id, v_col, v_endpoint, v_table, v_licensor
+        using errcode = 'P0001';
+    end if;
+  end loop;
+
+  return new;
+end;
+$$;
+
+comment on function core.require_support_edge_licensor_matches_endpoints() is
+  'BEFORE INSERT OR UPDATE guard on every *_source_edge table (issue #2334, round-3 review '
+  'finding). A support row''s licensor_id must equal the licensor of both endpoints it names, '
+  'whenever those endpoints declare one. Without it the licensor in the identity key is '
+  'unanchored: a loader could file one licensor''s pair under another licensor''s id with no '
+  'error, which is a royalty misattribution rather than a cosmetic one.';
+
+revoke all on function core.require_support_edge_licensor_matches_endpoints() from public, anon, authenticated;
 
 
 
@@ -669,6 +779,13 @@ create index property_character_source_edge_direct_current_idx
 create trigger set_updated_at before update on core.property_character_source_edge
   for each row execute function app.set_updated_at();
 
+-- Round-3 review finding: the licensor a claim is filed under must be the licensor its
+-- endpoints belong to, so one licensor's pair can never be filed under another's id.
+create trigger require_matching_licensor
+  before insert or update on core.property_character_source_edge
+  for each row execute function core.require_support_edge_licensor_matches_endpoints(
+    'core.property', 'property_id', 'core.character', 'character_id');
+
 create trigger refuse_delete_of_current_support
   before delete on core.property_character_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
@@ -805,6 +922,13 @@ create index property_style_guide_source_edge_direct_current_idx
 
 create trigger set_updated_at before update on core.property_style_guide_source_edge
   for each row execute function app.set_updated_at();
+
+-- Round-3 review finding: the licensor a claim is filed under must be the licensor its
+-- endpoints belong to, so one licensor's pair can never be filed under another's id.
+create trigger require_matching_licensor
+  before insert or update on core.property_style_guide_source_edge
+  for each row execute function core.require_support_edge_licensor_matches_endpoints(
+    'core.property', 'property_id', 'core.style_guide', 'style_guide_id');
 
 create trigger refuse_delete_of_current_support
   before delete on core.property_style_guide_source_edge
@@ -943,6 +1067,13 @@ create index property_franchise_source_edge_direct_current_idx
 create trigger set_updated_at before update on core.property_franchise_source_edge
   for each row execute function app.set_updated_at();
 
+-- Round-3 review finding: the licensor a claim is filed under must be the licensor its
+-- endpoints belong to, so one licensor's pair can never be filed under another's id.
+create trigger require_matching_licensor
+  before insert or update on core.property_franchise_source_edge
+  for each row execute function core.require_support_edge_licensor_matches_endpoints(
+    'core.property', 'property_id', 'core.franchise', 'franchise_id');
+
 create trigger refuse_delete_of_current_support
   before delete on core.property_franchise_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
@@ -1079,6 +1210,13 @@ create index style_guide_character_source_edge_direct_current_idx
 
 create trigger set_updated_at before update on core.style_guide_character_source_edge
   for each row execute function app.set_updated_at();
+
+-- Round-3 review finding: the licensor a claim is filed under must be the licensor its
+-- endpoints belong to, so one licensor's pair can never be filed under another's id.
+create trigger require_matching_licensor
+  before insert or update on core.style_guide_character_source_edge
+  for each row execute function core.require_support_edge_licensor_matches_endpoints(
+    'core.style_guide', 'style_guide_id', 'core.character', 'character_id');
 
 create trigger refuse_delete_of_current_support
   before delete on core.style_guide_character_source_edge
@@ -1217,6 +1355,13 @@ create index asset_property_source_edge_direct_current_idx
 create trigger set_updated_at before update on dam.asset_property_source_edge
   for each row execute function app.set_updated_at();
 
+-- Round-3 review finding: the licensor a claim is filed under must be the licensor its
+-- endpoints belong to, so one licensor's pair can never be filed under another's id.
+create trigger require_matching_licensor
+  before insert or update on dam.asset_property_source_edge
+  for each row execute function core.require_support_edge_licensor_matches_endpoints(
+    'dam.asset', 'asset_id', 'core.property', 'property_id');
+
 create trigger refuse_delete_of_current_support
   before delete on dam.asset_property_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
@@ -1348,6 +1493,13 @@ create index asset_character_source_edge_direct_current_idx
 
 create trigger set_updated_at before update on dam.asset_character_source_edge
   for each row execute function app.set_updated_at();
+
+-- Round-3 review finding: the licensor a claim is filed under must be the licensor its
+-- endpoints belong to, so one licensor's pair can never be filed under another's id.
+create trigger require_matching_licensor
+  before insert or update on dam.asset_character_source_edge
+  for each row execute function core.require_support_edge_licensor_matches_endpoints(
+    'dam.asset', 'asset_id', 'core.character', 'character_id');
 
 create trigger refuse_delete_of_current_support
   before delete on dam.asset_character_source_edge
@@ -1481,6 +1633,13 @@ create index asset_style_guide_source_edge_direct_current_idx
 create trigger set_updated_at before update on dam.asset_style_guide_source_edge
   for each row execute function app.set_updated_at();
 
+-- Round-3 review finding: the licensor a claim is filed under must be the licensor its
+-- endpoints belong to, so one licensor's pair can never be filed under another's id.
+create trigger require_matching_licensor
+  before insert or update on dam.asset_style_guide_source_edge
+  for each row execute function core.require_support_edge_licensor_matches_endpoints(
+    'dam.asset', 'asset_id', 'core.style_guide', 'style_guide_id');
+
 create trigger refuse_delete_of_current_support
   before delete on dam.asset_style_guide_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
@@ -1612,6 +1771,13 @@ create index asset_franchise_source_edge_direct_current_idx
 
 create trigger set_updated_at before update on dam.asset_franchise_source_edge
   for each row execute function app.set_updated_at();
+
+-- Round-3 review finding: the licensor a claim is filed under must be the licensor its
+-- endpoints belong to, so one licensor's pair can never be filed under another's id.
+create trigger require_matching_licensor
+  before insert or update on dam.asset_franchise_source_edge
+  for each row execute function core.require_support_edge_licensor_matches_endpoints(
+    'dam.asset', 'asset_id', 'core.franchise', 'franchise_id');
 
 create trigger refuse_delete_of_current_support
   before delete on dam.asset_franchise_source_edge

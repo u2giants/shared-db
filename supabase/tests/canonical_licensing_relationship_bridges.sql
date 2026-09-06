@@ -8,7 +8,15 @@
 --   * is_direct_source_relationship cannot be written, so evidence cannot lie about itself;
 --   * deleting CURRENT support fails closed -- directly, and by cascade from a deleted
 --     endpoint, which is how the three pre-existing ON DELETE CASCADE bridges are covered;
---   * superseded support does NOT block deletion.
+--   * superseded support does NOT block deletion;
+--   * every guard function pins its search_path and is callable by no client role;
+--   * all five bridges and all eight support-edge wirings are pinned by ARGUMENT
+--     VALUE, not by trigger name -- every endpoint column is uuid, so a swapped
+--     pair would otherwise type check and guard the wrong relationship silently;
+--   * repointing a canonical bridge row by UPDATE is held to the same evidence
+--     standard as inserting it;
+--   * a support row's licensor must be its endpoints' licensor, so one licensor's
+--     pair can never be filed under another licensor's id.
 begin;
 
 do $contracts$
@@ -22,6 +30,13 @@ declare
   v_asset       uuid;
   v_edge        uuid;
   v_edge2       uuid;
+  v_licensor2   uuid;
+  v_property3   uuid;
+  v_style_guide2 uuid;
+  v_spec        jsonb;
+  v_def         text;
+  v_needle      text;
+  v_oid         oid;
   v_table       text;
   v_raised      boolean;
   v_count       integer;
@@ -104,6 +119,168 @@ begin
       where conrelid = t::regclass and contype = 'f' and confdeltype <> 'r'
     ) then
       raise exception '% has an endpoint foreign key that is not ON DELETE RESTRICT', t;
+    end if;
+  end loop;
+
+  -- =========================================================================
+  -- 1b. Round-3 review finding (hardening). Every #2334 guard function pins its
+  --     search_path and grants EXECUTE to no client role. They run dynamic SQL, and an
+  --     unrevoked probe is an existence oracle over licensing evidence that any signed-in
+  --     caller could query directly. A trigger fires without the privilege, so revoking it
+  --     costs nothing.
+  -- =========================================================================
+  foreach t in array array[
+    'core.refuse_delete_of_current_support_edge()',
+    'core.require_direct_support_for_canonical_edge()',
+    'core.refuse_unsupporting_update_of_support_edge()',
+    'core.assert_canonical_edge_still_supported()',
+    'core.require_support_edge_licensor_matches_endpoints()'
+  ] loop
+    if to_regprocedure(t) is null then
+      raise exception '#2334 guard function % is absent', t;
+    end if;
+    if not exists (
+      select 1 from pg_proc
+      where oid = to_regprocedure(t)
+        and proconfig is not null
+        and exists (select 1 from unnest(proconfig) c where left(c, 12) = 'search_path=')
+    ) then
+      raise exception '% runs dynamic SQL with no pinned search_path', t;
+    end if;
+    if has_function_privilege('public', to_regprocedure(t), 'execute')
+       or has_function_privilege('anon', to_regprocedure(t), 'execute')
+       or has_function_privilege('authenticated', to_regprocedure(t), 'execute') then
+      raise exception '% is directly callable by a client role, which makes its dynamic-SQL '
+        'existence probe an oracle over licensing evidence', t;
+    end if;
+  end loop;
+
+  -- =========================================================================
+  -- 1c. Round-3 review finding. Asserting a trigger by NAME alone proves nothing about
+  --     WHICH pair it guards: every endpoint column here is uuid, so a wiring that swapped
+  --     two arguments -- or named the wrong bridge or the wrong support table -- would type
+  --     check, fire, and silently guard the wrong relationship. Each of the five bridges and
+  --     all eight support-edge wirings is therefore pinned by its ARGUMENT VALUES, read back
+  --     out of the catalog with pg_get_triggerdef.
+  -- =========================================================================
+  for v_spec in
+    select * from jsonb_array_elements($wiring$[
+      {"t":"core.property_style_guide",  "g":"require_direct_support",
+       "f":"core.require_direct_support_for_canonical_edge",
+       "a":"'core.property_style_guide_source_edge', 'property_id', 'style_guide_id'"},
+      {"t":"core.property_franchise",    "g":"require_direct_support",
+       "f":"core.require_direct_support_for_canonical_edge",
+       "a":"'core.property_franchise_source_edge', 'property_id', 'franchise_id'"},
+      {"t":"dam.asset_property",         "g":"require_direct_support",
+       "f":"core.require_direct_support_for_canonical_edge",
+       "a":"'dam.asset_property_source_edge', 'asset_id', 'property_id'"},
+      {"t":"dam.asset_style_guide",      "g":"require_direct_support",
+       "f":"core.require_direct_support_for_canonical_edge",
+       "a":"'dam.asset_style_guide_source_edge', 'asset_id', 'style_guide_id'"},
+      {"t":"dam.asset_franchise",        "g":"require_direct_support",
+       "f":"core.require_direct_support_for_canonical_edge",
+       "a":"'dam.asset_franchise_source_edge', 'asset_id', 'franchise_id'"},
+
+      {"t":"core.property_character_source_edge",    "g":"refuse_unsupporting_update",
+       "f":"core.refuse_unsupporting_update_of_support_edge",
+       "a":"'core.property_character_associations', 'property_id', 'character_id'"},
+      {"t":"core.property_style_guide_source_edge",  "g":"refuse_unsupporting_update",
+       "f":"core.refuse_unsupporting_update_of_support_edge",
+       "a":"'core.property_style_guide', 'property_id', 'style_guide_id'"},
+      {"t":"core.property_franchise_source_edge",    "g":"refuse_unsupporting_update",
+       "f":"core.refuse_unsupporting_update_of_support_edge",
+       "a":"'core.property_franchise', 'property_id', 'franchise_id'"},
+      {"t":"core.style_guide_character_source_edge", "g":"refuse_unsupporting_update",
+       "f":"core.refuse_unsupporting_update_of_support_edge",
+       "a":"'core.style_guide_character', 'style_guide_id', 'character_id'"},
+      {"t":"dam.asset_property_source_edge",         "g":"refuse_unsupporting_update",
+       "f":"core.refuse_unsupporting_update_of_support_edge",
+       "a":"'dam.asset_property', 'asset_id', 'property_id'"},
+      {"t":"dam.asset_character_source_edge",        "g":"refuse_unsupporting_update",
+       "f":"core.refuse_unsupporting_update_of_support_edge",
+       "a":"'dam.asset_character', 'asset_id', 'character_id'"},
+      {"t":"dam.asset_style_guide_source_edge",      "g":"refuse_unsupporting_update",
+       "f":"core.refuse_unsupporting_update_of_support_edge",
+       "a":"'dam.asset_style_guide', 'asset_id', 'style_guide_id'"},
+      {"t":"dam.asset_franchise_source_edge",        "g":"refuse_unsupporting_update",
+       "f":"core.refuse_unsupporting_update_of_support_edge",
+       "a":"'dam.asset_franchise', 'asset_id', 'franchise_id'"},
+
+      {"t":"core.property_character_source_edge",    "g":"assert_canonical_edge_still_supported",
+       "f":"core.assert_canonical_edge_still_supported",
+       "a":"'core.property_character_associations', 'property_id', 'character_id'"},
+      {"t":"core.property_style_guide_source_edge",  "g":"assert_canonical_edge_still_supported",
+       "f":"core.assert_canonical_edge_still_supported",
+       "a":"'core.property_style_guide', 'property_id', 'style_guide_id'"},
+      {"t":"core.property_franchise_source_edge",    "g":"assert_canonical_edge_still_supported",
+       "f":"core.assert_canonical_edge_still_supported",
+       "a":"'core.property_franchise', 'property_id', 'franchise_id'"},
+      {"t":"core.style_guide_character_source_edge", "g":"assert_canonical_edge_still_supported",
+       "f":"core.assert_canonical_edge_still_supported",
+       "a":"'core.style_guide_character', 'style_guide_id', 'character_id'"},
+      {"t":"dam.asset_property_source_edge",         "g":"assert_canonical_edge_still_supported",
+       "f":"core.assert_canonical_edge_still_supported",
+       "a":"'dam.asset_property', 'asset_id', 'property_id'"},
+      {"t":"dam.asset_character_source_edge",        "g":"assert_canonical_edge_still_supported",
+       "f":"core.assert_canonical_edge_still_supported",
+       "a":"'dam.asset_character', 'asset_id', 'character_id'"},
+      {"t":"dam.asset_style_guide_source_edge",      "g":"assert_canonical_edge_still_supported",
+       "f":"core.assert_canonical_edge_still_supported",
+       "a":"'dam.asset_style_guide', 'asset_id', 'style_guide_id'"},
+      {"t":"dam.asset_franchise_source_edge",        "g":"assert_canonical_edge_still_supported",
+       "f":"core.assert_canonical_edge_still_supported",
+       "a":"'dam.asset_franchise', 'asset_id', 'franchise_id'"},
+
+      {"t":"core.property_character_source_edge",    "g":"require_matching_licensor",
+       "f":"core.require_support_edge_licensor_matches_endpoints",
+       "a":"'core.property', 'property_id', 'core.character', 'character_id'"},
+      {"t":"core.property_style_guide_source_edge",  "g":"require_matching_licensor",
+       "f":"core.require_support_edge_licensor_matches_endpoints",
+       "a":"'core.property', 'property_id', 'core.style_guide', 'style_guide_id'"},
+      {"t":"core.property_franchise_source_edge",    "g":"require_matching_licensor",
+       "f":"core.require_support_edge_licensor_matches_endpoints",
+       "a":"'core.property', 'property_id', 'core.franchise', 'franchise_id'"},
+      {"t":"core.style_guide_character_source_edge", "g":"require_matching_licensor",
+       "f":"core.require_support_edge_licensor_matches_endpoints",
+       "a":"'core.style_guide', 'style_guide_id', 'core.character', 'character_id'"},
+      {"t":"dam.asset_property_source_edge",         "g":"require_matching_licensor",
+       "f":"core.require_support_edge_licensor_matches_endpoints",
+       "a":"'dam.asset', 'asset_id', 'core.property', 'property_id'"},
+      {"t":"dam.asset_character_source_edge",        "g":"require_matching_licensor",
+       "f":"core.require_support_edge_licensor_matches_endpoints",
+       "a":"'dam.asset', 'asset_id', 'core.character', 'character_id'"},
+      {"t":"dam.asset_style_guide_source_edge",      "g":"require_matching_licensor",
+       "f":"core.require_support_edge_licensor_matches_endpoints",
+       "a":"'dam.asset', 'asset_id', 'core.style_guide', 'style_guide_id'"},
+      {"t":"dam.asset_franchise_source_edge",        "g":"require_matching_licensor",
+       "f":"core.require_support_edge_licensor_matches_endpoints",
+       "a":"'dam.asset', 'asset_id', 'core.franchise', 'franchise_id'"}
+    ]$wiring$::jsonb)
+  loop
+    select oid into v_oid from pg_trigger
+     where tgrelid = (v_spec->>'t')::regclass
+       and not tgisinternal
+       and tgname = v_spec->>'g';
+    if v_oid is null then
+      raise exception 'trigger % is absent from %', v_spec->>'g', v_spec->>'t';
+    end if;
+
+    -- The function identity is compared by OID, not by the rendered name, so a change of
+    -- search_path in the session running this file can never turn a real mismatch green.
+    if (select tgfoid from pg_trigger where oid = v_oid)
+       <> to_regprocedure((v_spec->>'f') || '()') then
+      raise exception 'trigger %.% calls the wrong function; expected %',
+        v_spec->>'t', v_spec->>'g', v_spec->>'f';
+    end if;
+
+    -- And the ARGUMENT VALUES, which is the whole point: every endpoint column here is
+    -- uuid, so a swapped or misnamed pair type checks and fires against the wrong pair.
+    v_def := pg_get_triggerdef(v_oid);
+    v_needle := '(' || (v_spec->>'a') || ')';
+    if position(v_needle in v_def) = 0 then
+      raise exception 'trigger %.% is wired with the wrong arguments. expected to contain: '
+        '% -- actual: %',
+        v_spec->>'t', v_spec->>'g', v_needle, v_def;
     end if;
   end loop;
 
@@ -445,6 +622,143 @@ begin
       raise exception 'a client role may TRUNCATE %', v_table;
     end if;
   end loop;
+
+  -- =========================================================================
+  -- 6. Round-3 review findings, exercised against real rows.
+  -- =========================================================================
+
+  -- 6a. An UPDATE that REPOINTS a canonical bridge row is a write of a new pair, and it is
+  --     held to the same evidence standard as an INSERT. Without this the guard is an
+  --     insert-only formality: state a supported pair once, then repoint it anywhere.
+  --     (v_property2 has no direct support for v_style_guide -- proved at 4e.)
+  v_raised := false;
+  begin
+    update core.property_style_guide
+       set property_id = v_property2
+     where property_id = v_property and style_guide_id = v_style_guide;
+  exception when sqlstate 'P0001' then v_raised := true;
+  end;
+  if not v_raised then
+    raise exception 'a canonical bridge row was REPOINTED onto a pair with no direct source '
+      'assertion behind it';
+  end if;
+
+  -- The refused repoint left the original edge exactly where it was.
+  if not exists (
+    select 1 from core.property_style_guide
+    where property_id = v_property and style_guide_id = v_style_guide
+  ) then
+    raise exception 'a refused repoint still moved the canonical edge';
+  end if;
+  if exists (
+    select 1 from core.property_style_guide
+    where property_id = v_property2 and style_guide_id = v_style_guide
+  ) then
+    raise exception 'a refused repoint still created the unsupported pair';
+  end if;
+
+  -- And a repoint onto a pair that IS directly supported succeeds, so the guard is
+  -- discriminating rather than simply refusing every update.
+  insert into core.property_style_guide_source_edge
+    (property_id, style_guide_id, licensor_id, source_system, source_id, evidence_kind)
+    values (v_property2, v_style_guide, v_licensor, 'zz_fixture_2334_repoint', 'psg-4',
+            'direct_source_assertion');
+  update core.property_style_guide
+     set property_id = v_property2
+   where property_id = v_property and style_guide_id = v_style_guide;
+  if not exists (
+    select 1 from core.property_style_guide
+    where property_id = v_property2 and style_guide_id = v_style_guide
+  ) then
+    raise exception 'a repoint onto a directly supported pair was refused';
+  end if;
+
+  -- 6b. Round-3 review finding. licensor_id is NOT NULL and in the identity key, which
+  --     separates identical source ids across licensors -- but nothing tied it to the
+  --     endpoints the row is about, so a loader could file one licensor's pair under
+  --     another licensor's id and no constraint would object. That is a royalty
+  --     misattribution, not a cosmetic one.
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
+     actor, protected_columns, expires_at)
+  values (pg_backend_pid(), txid_current(), 'core.licensor', 'scrape_consolidation',
+          gen_random_uuid(), repeat('4', 64), 'issue-2334-contract',
+          array['name','code','status'], clock_timestamp() + interval '1 minute');
+  insert into core.licensor (name, code, status)
+    values ('ZZ Fixture Licensor 2334 B', 'ZZ2334B', 'active')
+    returning id into v_licensor2;
+
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
+     actor, protected_columns, expires_at)
+  values (pg_backend_pid(), txid_current(), 'core.property', 'licensing_review_create',
+          gen_random_uuid(), repeat('5', 64), 'issue-2334-contract',
+          array['licensor_id','name','code','status'], clock_timestamp() + interval '1 minute');
+  insert into core.property (licensor_id, name, code, status)
+    values (v_licensor2, 'ZZ Fixture Property 2334 C', 'ZZP2334C', 'potential')
+    returning id into v_property3;
+
+  insert into core.style_guide (licensor_id, property_id, name)
+    values (v_licensor2, v_property3, 'ZZ Fixture Style Guide 2334 B')
+    returning id into v_style_guide2;
+
+  -- The LEFT endpoint belongs to licensor B, so filing the claim under licensor A is refused.
+  v_raised := false;
+  begin
+    insert into core.property_style_guide_source_edge
+      (property_id, style_guide_id, licensor_id, source_system, source_id, evidence_kind)
+      values (v_property3, v_style_guide, v_licensor, 'zz_fixture_2334_cross', 'x-1',
+              'direct_source_assertion');
+  exception when sqlstate 'P0001' then v_raised := true;
+  end;
+  if not v_raised then
+    raise exception 'one licensor''s property was filed as a relationship under ANOTHER '
+      'licensor''s id, which misattributes royalties';
+  end if;
+
+  -- The RIGHT endpoint is checked too: property belongs to B, style guide to A, so neither
+  -- licensor id can carry the pair.
+  v_raised := false;
+  begin
+    insert into core.property_style_guide_source_edge
+      (property_id, style_guide_id, licensor_id, source_system, source_id, evidence_kind)
+      values (v_property3, v_style_guide, v_licensor2, 'zz_fixture_2334_cross', 'x-2',
+              'direct_source_assertion');
+  exception when sqlstate 'P0001' then v_raised := true;
+  end;
+  if not v_raised then
+    raise exception 'only the left endpoint''s licensor is checked; a cross-licensor pair was '
+      'accepted on the right endpoint';
+  end if;
+
+  -- An UPDATE cannot smuggle in what the INSERT refused.
+  v_raised := false;
+  begin
+    update core.property_style_guide_source_edge
+       set licensor_id = v_licensor2
+     where property_id = v_property and style_guide_id = v_style_guide;
+  exception when sqlstate 'P0001' then v_raised := true;
+  end;
+  if not v_raised then
+    raise exception 'a support row was RELABELLED to another licensor by UPDATE, past the '
+      'guard the INSERT path enforces';
+  end if;
+
+  -- The legitimate second-licensor case still works, and -- the reason licensor_id is in the
+  -- identity key at all -- the SAME source id under a different licensor is a different
+  -- claim, not a collision.
+  insert into core.property_style_guide_source_edge
+    (property_id, style_guide_id, licensor_id, source_system, source_id, evidence_kind)
+    values (v_property, v_style_guide, v_licensor, 'zz_fixture_2334', 'sg-1',
+            'direct_source_assertion');
+  insert into core.property_style_guide_source_edge
+    (property_id, style_guide_id, licensor_id, source_system, source_id, evidence_kind)
+    values (v_property3, v_style_guide2, v_licensor2, 'zz_fixture_2334', 'sg-1',
+            'direct_source_assertion');
+  if (select count(*) from core.property_style_guide_source_edge
+      where source_system = 'zz_fixture_2334' and source_id = 'sg-1' and is_current) <> 2 then
+    raise exception 'the identity key stopped separating one source id across two licensors';
+  end if;
 
   raise notice 'issue #2334 canonical licensing relationship contracts: all assertions passed';
 end
