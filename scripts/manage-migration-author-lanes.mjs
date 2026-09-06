@@ -1941,7 +1941,7 @@ export function recoverStaleAuthorMutex({ expectedSha, confirmStale, serializedR
     const message=commit?.message ?? commit?.commit?.message ?? ''
     const dateText=commit?.committer?.date ?? commit?.commit?.committer?.date
     const acquiredAt=new Date(dateText)
-    if(!/^db-coordination (?:author-acquisition|author-capacity-relinquish|author-capacity-resume|preview|merge|production|claim-release|claim-split-recovery|claim-object-expansion|claim-reversion|claim-version-supersession|claim-lease-renewal|expired-claim-recovery|reviewer-assignment-lock|reviewer-replacement-lock|reviewer-queue-lock|reviewer-silence-release-lock|reviewer-failure(?:-replacement)?|reviewer-index-cutover-activation-audit)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
+    if(!/^db-coordination (?:author-acquisition|author-capacity-relinquish|author-capacity-resume|preview|merge|production|claim-release|duplicate-claim-release|claim-split-recovery|claim-object-expansion|claim-reversion|claim-version-supersession|claim-lease-renewal|expired-claim-recovery|reviewer-assignment-lock|reviewer-replacement-lock|reviewer-queue-lock|reviewer-silence-release-lock|reviewer-failure(?:-replacement)?|reviewer-index-cutover-activation-audit)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
     if(Number.isNaN(acquiredAt.valueOf()))throw new LaneError('refusing recovery: mutex owner time is unreadable')
     const age=now-acquiredAt
     if(age<minAgeMs)throw new LaneError(`refusing recovery: mutex is only ${Math.max(0,Math.floor(age/1000))} seconds old`)
@@ -5541,18 +5541,32 @@ export function main(argv, now = new Date(), io = githubIo) {
           .map((x)=>({claim:x,lease:parseAuthorLease(x.body,now)}))
           .filter((row)=>!row.lease.legacy&&row.lease.branch===lease.branch)
         if(siblings.length===0)throw new LaneError(`claim #${claim.number} is the only open claim on branch ${lease.branch}; there is no duplicate to release`)
-        const pulls=((io.openPulls?.() ?? io.prSources())).filter((pr)=>(pr.head?.ref ?? pr.branch)===lease.branch)
-        if(pulls.length!==1)throw new LaneError(`branch ${lease.branch} must have exactly one open pull request to prove which claim is the authority; found ${pulls.length}`)
-        const pr=pulls[0], versions=[...new Set(migrationVersions(io.getPrFiles(pr.number)))]
-        if(versions.length===0)throw new LaneError(`open pull request #${pr.number} changes no migration file, so no authority claim can be proved`)
-        // (2) the claim being released does NOT hold a version the PR uses
-        if(versions.includes(lease.version))throw new LaneError(`claim #${claim.number} holds migration version ${lease.version}, which open pull request #${pr.number} uses; it is the authority claim for branch ${lease.branch}, not a duplicate`)
-        // (3) exactly one OTHER open claim on the branch DOES hold such a version
-        const authority=siblings.filter((row)=>versions.includes(row.lease.version))
-        if(authority.length!==1)throw new LaneError(`exactly one other open claim on branch ${lease.branch} must hold a migration version used by open pull request #${pr.number}; found ${authority.length}`)
+        // (2)+(3) are proved from a LIVE read of the branch's open pull request
+        // and its files. The read is repeated under the mutex immediately before
+        // the close, so a push landing between the two reads cannot let a stale
+        // snapshot stand in as the authority proof.
+        const provePullRequestAuthority=()=>{
+          const pulls=((io.openPulls?.() ?? io.prSources())).filter((row)=>(row.head?.ref ?? row.branch)===lease.branch)
+          if(pulls.length!==1)throw new LaneError(`branch ${lease.branch} must have exactly one open pull request to prove which claim is the authority; found ${pulls.length}`)
+          const pr=pulls[0], versions=[...new Set(migrationVersions(io.getPrFiles(pr.number)))]
+          if(versions.length===0)throw new LaneError(`open pull request #${pr.number} changes no migration file, so no authority claim can be proved`)
+          // the claim being released must NOT hold a version the PR uses
+          if(versions.includes(lease.version))throw new LaneError(`claim #${claim.number} holds migration version ${lease.version}, which open pull request #${pr.number} uses; it is the authority claim for branch ${lease.branch}, not a duplicate`)
+          // exactly one OTHER open claim on the branch DOES hold such a version
+          const authority=siblings.filter((row)=>versions.includes(row.lease.version))
+          if(authority.length!==1)throw new LaneError(`exactly one other open claim on branch ${lease.branch} must hold a migration version used by open pull request #${pr.number}; found ${authority.length}`)
+          return {pr,versions,authority}
+        }
+        const first=provePullRequestAuthority()
         // (4) owner matched above, and the mutex is still ours at the write
         requireOwnedRef(MUTEX_REF,ownerSha,io)
+        // (5) re-prove after the ownership check, against a fresh read, and
+        // refuse if the branch's pull request or its authority claim moved.
+        const proof=provePullRequestAuthority()
+        if(String(proof.pr.number)!==String(first.pr.number)||String(proof.authority[0].claim.number)!==String(first.authority[0].claim.number)||proof.authority[0].lease.version!==first.authority[0].lease.version)throw new LaneError(`branch ${lease.branch} changed while the duplicate release was being proved; nothing was closed`)
+        requireOwnedRef(MUTEX_REF,ownerSha,io)
         io.closeClaim(claim.number, CLAIM_CLOSE_REASONS.duplicateRelease)
+        const {pr,authority}=proof
         console.error(`Closed duplicate claim #${claim.number} on branch ${lease.branch}. Authority claim #${authority[0].claim.number} holds ${authority[0].lease.version}, the version open pull request #${pr.number} uses. The duplicate's migration version ${lease.version} remains permanently reserved.`)
       } finally { if(io.readRef(MUTEX_REF)===ownerSha)releaseOwnedRef(MUTEX_REF,ownerSha,io) }
       return 0

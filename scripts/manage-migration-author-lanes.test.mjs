@@ -2740,6 +2740,20 @@ test('duplicate release refuses a wrong owner, a missing PR migration, and a mis
   assert.equal(closed,null)
 })
 
+// ISSUE #2454 review. The PR file snapshot must be re-read under the mutex
+// immediately before the close, so a push landing mid-proof cannot be closed on.
+test('a pull-request change between the two proofs refuses the duplicate release',()=>{
+  const io=duplicateIo();let closed=null,calls=0
+  io.closeClaim=(n)=>{closed=n}
+  // First read proves #7 is the authority; the second read shows the PR now
+  // carrying the DUPLICATE's own version instead.
+  io.getPrFiles=()=>{calls+=1;return calls===1?[{filename:'supabase/migrations/20260814200007_add_bridges.sql',status:'added'}]:[{filename:'supabase/migrations/20260814209999_add_bridges.sql',status:'added'}]}
+  assert.equal(main(['--release-duplicate-claim','8','--owner','agent-7','--confirm-finished'],NOW,io),2)
+  assert.equal(closed,null)
+  assert.ok(calls>=2,'the pull-request files must be re-read under the mutex before the close')
+  assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
 // ISSUE #2448. No close path may claim an expiry sweep that never runs.
 test('every claim-close reason states its own cause and never asserts expiry',()=>{
   for(const reason of Object.values(CLAIM_CLOSE_REASONS)){
@@ -2943,6 +2957,15 @@ test('stranded reviewer queue and silence-release mutexes are recoverable',()=>{
     assert.equal(io.refs.has(MUTEX_REF),false)
   }
 })
+// ISSUE #2454. The duplicate-release path mints its own mutex owner commit, so
+// stale-mutex recovery must recognize that lock kind — otherwise a death between
+// acquire and release wedges every author lane with no sanctioned way out.
+test('stranded duplicate-claim-release mutex is recognized and safely recoverable',()=>{
+  const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:'db-coordination duplicate-claim-release 1f0c3a2e-0000-4000-8000-000000000000',committer:{date:'2026-08-14T19:55:00Z'}})
+  const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
+  assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
 test('stranded claim lease renewal mutex is recognized and safely recoverable',()=>{
   const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:'db-coordination claim-lease-renewal renew-853',committer:{date:'2026-08-14T19:55:00Z'}})
   const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
