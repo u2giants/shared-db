@@ -164,7 +164,9 @@ declare
   v_target_regclass regclass;
   v_target_exists   boolean;
   v_derived         uuid;
+  v_old_derived     uuid;
   v_target_changed  boolean;
+  v_last_seen_given boolean;
   v_licensor_scoped constant text[] := array['licensor', 'property', 'character', 'franchise'];
 begin
   -- Blank strings are not identifiers. A blank source_id in particular is the classic
@@ -270,6 +272,40 @@ begin
       using errcode = 'P0001';
   end if;
 
+  -- THE SAME RULE FOR THE ROWS WE GRANDFATHERED. Every pre-#2355 row carries
+  -- source_licensor_id null, so the rule above -- which keys off the OLD licensor --
+  -- has nothing to compare against on the FIRST conflicting upsert, and the block
+  -- higher up would simply stamp the incoming licensor onto the stolen row. Those
+  -- legacy rows are precisely the ones a colliding importer reaches first, so the
+  -- owner is re-derived from the OLD target instead. Deliberately silent when the old
+  -- target is gone or was never licensor-scoped: a row whose old entity has since been
+  -- retired stays editable for its freshness fields, exactly as before.
+  if tg_op = 'UPDATE'
+     and old.source_licensor_id is null
+     and new.source_licensor_id is not null
+     and v_target_changed
+     and btrim(old.entity_schema) = 'core'
+     and btrim(old.entity_table) = any (v_licensor_scoped) then
+    case btrim(old.entity_table)
+      when 'licensor' then
+        select l.id into v_old_derived from core.licensor l where l.id = old.entity_id;
+      when 'property' then
+        select p.licensor_id into v_old_derived from core.property p where p.id = old.entity_id;
+      when 'character' then
+        select c.licensor_id into v_old_derived from core.character c where c.id = old.entity_id;
+      when 'franchise' then
+        select f.licensor_id into v_old_derived from core.franchise f where f.id = old.entity_id;
+    end case;
+
+    if v_old_derived is not null and v_old_derived <> new.source_licensor_id then
+      raise exception
+        'core.taxonomy_source_ref refused: (%, %, %) is licensor %''s provenance by the entity it already points at; repointing it to licensor % would attribute one licensor''s entity to another. Source ids collide across licensors -- record a separate row.',
+        new.source_system, new.source_table, new.source_id,
+        v_old_derived, new.source_licensor_id
+        using errcode = 'P0001';
+    end if;
+  end if;
+
   -- FRESHNESS. Filled here rather than by column defaults so that an explicit null from
   -- an importer still produces a usable row, and so first_seen_at can never be moved
   -- forward by a later sighting.
@@ -277,11 +313,26 @@ begin
     new.first_seen_at := coalesce(new.first_seen_at, now());
     new.last_seen_at  := coalesce(new.last_seen_at, new.first_seen_at);
   else
+    -- Did the caller name last_seen_at itself? Decided BEFORE the column is filled in.
+    v_last_seen_given := new.last_seen_at is not null
+      and new.last_seen_at is distinct from old.last_seen_at;
+
     new.first_seen_at := coalesce(new.first_seen_at, old.first_seen_at, old.created_at);
     new.last_seen_at  := coalesce(new.last_seen_at, old.last_seen_at, new.first_seen_at);
     if old.first_seen_at is not null and new.first_seen_at > old.first_seen_at then
       -- "First seen" is a fact about the past. A later observation updates last_seen_at.
       new.first_seen_at := old.first_seen_at;
+    end if;
+
+    -- A RE-ASSERTION ADVANCES last_seen_at. Every importer in this repository upserts
+    -- with `on conflict ... do update set entity_id = excluded.entity_id` and names no
+    -- freshness column, so if the guard did not advance it here it could never advance
+    -- at all, and "when the source most recently still asserted this" would be a
+    -- permanent lie. Two exclusions, both deliberate: an explicit value from a caller
+    -- is respected rather than overwritten, and an update that RECORDS ABSENCE
+    -- (missing_since present) is not a sighting and must not be logged as one.
+    if not v_last_seen_given and new.missing_since is null then
+      new.last_seen_at := greatest(new.last_seen_at, now());
     end if;
   end if;
 
@@ -307,7 +358,11 @@ comment on column core.taxonomy_source_ref.first_seen_at is
   'When this source assertion was first recorded. Never moves forward. Null only on rows that '
   'predate issue #2355; use created_at for those.';
 comment on column core.taxonomy_source_ref.last_seen_at is
-  'When the source most recently still asserted this. Null only on pre-#2355 rows.';
+  'When the source most recently still asserted this. Advanced to now() by '
+  'core.guard_taxonomy_source_ref_identity on any update that re-asserts the row, so an '
+  'importer upserting only entity_id keeps it honest without naming it. Not advanced when '
+  'the caller supplies a value of its own, and not advanced by an update that sets '
+  'missing_since -- recording an absence is not a sighting. Null only on pre-#2355 rows.';
 comment on column core.taxonomy_source_ref.missing_since is
   'When the source stopped asserting this. Absence is recorded, never deleted: a vanished '
   'source row is evidence, and deleting it would destroy the audit trail behind a royalty '

@@ -19,8 +19,10 @@ declare
   v_lic_a    uuid;
   v_lic_b    uuid;
   v_char_a   uuid;
+  v_char_a2  uuid;
   v_char_b   uuid;
   v_ref      uuid;
+  v_legacy_ref uuid;
   v_txt      text;
   v_uuid     uuid;
   v_bool     boolean;
@@ -148,6 +150,12 @@ begin
   insert into core.character (licensor_id, name, code, status)
   values (v_lic_b, 'ZZ Blue Runner ' || v_suffix, 'Z55CB-' || substr(v_suffix, 12), 'active')
   returning id into v_char_b;
+
+  -- A SECOND character under licensor A, so a same-licensor repoint can be told apart
+  -- from a cross-licensor one.
+  insert into core.character (licensor_id, name, code, status)
+  values (v_lic_a, 'ZZ Blue Runner Two ' || v_suffix, 'Z55CA2-' || substr(v_suffix, 12), 'active')
+  returning id into v_char_a2;
 
   -- =========================================================================
   -- C. core.character_alias behaviour
@@ -320,6 +328,63 @@ begin
     raise exception '#2355: the refused collision still repointed licensor A''s provenance row';
   end if;
 
+  -- =====================================================================
+  -- D2b. THE GRANDFATHERED COLLISION. Every row that predates this
+  --      migration carries source_licensor_id NULL. The immutability rule
+  --      D2 proves keys off the row's ALREADY-STAMPED licensor, so on a
+  --      legacy row it has nothing to compare against, and the FIRST
+  --      conflicting upsert would stamp the thief's licensor on and call
+  --      it settled. Those are exactly the rows a colliding importer
+  --      reaches first. The old TARGET still says who the row belonged
+  --      to, so this must FAIL too.
+  --      A legacy-shaped row can only be fabricated with the guard off:
+  --      the guard stamps a licensor on every row it is shown.
+  -- =====================================================================
+  alter table core.taxonomy_source_ref disable trigger a_taxonomy_source_ref_identity_guard;
+  insert into core.taxonomy_source_ref
+    (entity_schema, entity_table, entity_id, source_system, source_table, source_id)
+  values ('core', 'character', v_char_a, 'zz_portal_2355', 'legacy_characters', '5')
+  returning id into v_legacy_ref;
+  alter table core.taxonomy_source_ref enable trigger a_taxonomy_source_ref_identity_guard;
+
+  if (select source_licensor_id from core.taxonomy_source_ref where id = v_legacy_ref) is not null then
+    raise exception
+      '#2355: the pre-migration fixture row was stamped with a licensor, so it does not test the grandfathered path at all';
+  end if;
+
+  v_raised := false;
+  begin
+    update core.taxonomy_source_ref
+       set entity_id = v_char_b
+     where id = v_legacy_ref;
+  exception when others then
+    v_raised := true;
+  end;
+  if not v_raised then
+    raise exception
+      '#2355: a pre-migration row with a null source_licensor_id was re-attributed to another licensor on its first conflicting write';
+  end if;
+  if (select entity_id from core.taxonomy_source_ref where id = v_legacy_ref) <> v_char_a then
+    raise exception '#2355: the refused legacy re-attribution still repointed the row';
+  end if;
+  if (select source_licensor_id from core.taxonomy_source_ref where id = v_legacy_ref) is not null then
+    raise exception '#2355: the refused legacy re-attribution still stamped a licensor on the row';
+  end if;
+
+  -- D2c. ...but HEALING a legacy row is not stealing it. A repoint that stays inside
+  --      the SAME licensor must still succeed and stamp the licensor it always had,
+  --      or the rule above has quietly become a blanket ban on touching any
+  --      pre-migration row -- which would strand every grandfathered row forever.
+  update core.taxonomy_source_ref
+     set entity_id = v_char_a2
+   where id = v_legacy_ref
+  returning source_licensor_id into v_uuid;
+  if v_uuid is distinct from v_lic_a then
+    raise exception
+      '#2355: a same-licensor heal of a pre-migration row was refused or mis-stamped (% <> %) -- the anti-collision rule has become a blanket refusal',
+      v_uuid, v_lic_a;
+  end if;
+
   -- D3. Licensor B may record its OWN '5' under a distinct source_table. Recording
   --     provenance separately is always available; only the merge is refused.
   insert into core.taxonomy_source_ref
@@ -395,6 +460,18 @@ begin
   end;
   if not v_raised then
     raise exception '#2355: a licensor uuid was accepted as a character entity_id';
+  end if;
+
+  -- D6b. A RE-ASSERTION advances last_seen_at. Importers upsert entity_id and name no
+  --      freshness column, so if the guard did not advance it the column would be a
+  --      permanent lie about when the source last said this.
+  update core.taxonomy_source_ref
+     set first_seen_at = now() - interval '3 days',
+         last_seen_at  = now() - interval '2 days'
+   where id = v_ref;
+  update core.taxonomy_source_ref set entity_id = v_char_a where id = v_ref;
+  if (select last_seen_at from core.taxonomy_source_ref where id = v_ref) < now() - interval '1 minute' then
+    raise exception '#2355: last_seen_at was not advanced by a re-assertion';
   end if;
 
   -- D7. Absence is RECORDED, not deleted. missing_since flips is_current.
