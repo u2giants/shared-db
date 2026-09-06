@@ -152,6 +152,8 @@ export const REVIEWERS = Object.freeze([
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-codex-review: codex exec --sandbox read-only over the sandbox copy' } },
   { name:'deepseek-chat', wrapper:'ai-deepseek-agent', readsRepository:false,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-deepseek-agent: HTTP chat completions only; --worktree sets a spawn cwd it never uses' } },
+  { name:'gemini-3.8-flash-high', wrapper:'ai-gemini', readsRepository:true,
+    readsRepositoryVerified:{ date:'2026-09-06', evidence:'ai-devops/bin/ai-gemini: disposable sandbox copy of the checkout under --sandbox with a byte inventory; the live re-qualification review of merged commit 99fbefcb cited specific file lines from it' } },
 ])
 // Keep REVIEWERS as the historical evidence registry. Paused providers remain
 // readable forever, but only ACTIVE_REVIEWERS can receive new work.
@@ -224,15 +226,27 @@ export const REVIEWERS = Object.freeze([
 // any Muse failure, and never record a bare "incomplete" from this wrapper without
 // having read the raw provider stream.
 //
-// NOT ADDED, deliberately: 'gemini-3.7-flash-high'. `ai-gemini doctor` passes, so the
-// install is sound, but two attempts produced `no usable Gemini verdict` and then a
-// bare `PASS` with an EMPTY report. Two attempts is thin evidence and an empty report
-// is the worst possible failure mode for a review gate. Retry only after someone
-// establishes why the report comes back empty. This supersedes the narrower #1203.
+// ADDED 2026-09-06 (ai-devops issue #285): 'gemini-3.8-flash-high'. It was held out
+// because `ai-gemini doctor` passed while two live attempts produced `no usable
+// Gemini verdict` and then a bare `PASS` with an EMPTY report -- the worst failure
+// mode for a review gate, because a decision token with no analysis behind it is
+// indistinguishable from a real approval. The hold is lifted on evidence, not on
+// hope: `ai-review-preflight qualify gemini` now records a live safety
+// qualification bound to wrapper sha256, agy 1.1.27 and model gemini-3.8-flash-high,
+// and a live review of merged commit 99fbefcb returned a well-formed
+// `VERDICT APPROVE 99fbefcb4cf3388a3d46e77a2fdddb1f06bd25a1` line above 3,137
+// characters of real analysis citing specific lines. The empty-report mode is also
+// now caught rather than trusted: ai-devops `bin/ai-review-lifecycle` converts any
+// APPROVE or REJECT whose report carries no substantive analysis into BLOCKED
+// (`empty-report`), for every provider. Evidence:
+// ai-devops tests/verification/reviewer-usable-reconciliation/.
 //
 // ROTATION SLOTS. 'glm-5.3' still occupies the slot 'glm-5.2' held. Muse was
 // APPENDED, so it took the slot kimi-k3's pause vacated rather than displacing
 // anyone.
+// 'gemini-3.8-flash-high' was likewise APPENDED to the end of REVIEWERS, so no
+// existing name changes position and no in-flight sequence is reassigned out of
+// order. It only adds capacity.
 //
 // KIMI-K3 UNPAUSED, 2026-08-25 (owner instruction, with the lane cap raise to
 // five). It returns to its ORIGINAL position in REVIEWERS, so the rotation is
