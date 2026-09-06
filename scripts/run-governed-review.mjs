@@ -84,6 +84,28 @@ export function neutraliseVerdictLine(body,reason){
     "> The reviewer's findings are otherwise unchanged and remain readable as evidence. A real decision requires a fresh governed review that records a create-only verdict artifact."
   ].join('\n')
 }
+// A wrapper may speak its own verdict grammar. `ai-gemini` normally asks Gemini
+// to OPEN its reply with a `## Verdict` heading and a bare decision word, which
+// this runner voids as a stray decision line, and it prints a PASS summary line
+// instead of the review. Its `--governed-verdict <head>` mode switches both the
+// prompt contract and its own verdict gate to the terminal
+// `VERDICT: <DECISION> <head>` line this runner records, and emits the review on
+// standard output. The caller must not have to remember that, and a caller that
+// passes the wrong head must not be silently accepted, so the flag is injected
+// here from the head this review is actually recording against.
+export function wrapperVerdictContractArgs(wrapper,args,headSha){
+  const name=String(wrapper??'').split(/[\/]/).pop().replace(/\.(cmd|bat|exe)$/i,'').toLowerCase()
+  if(name!=='ai-gemini')return args
+  const list=[...args]
+  const existing=list.indexOf('--governed-verdict')
+  if(existing>=0){
+    if(String(list[existing+1]??'').toLowerCase()!==String(headSha??'').toLowerCase())throw new Error('the wrapper --governed-verdict head does not match the head under review')
+    return list
+  }
+  if(!['new','ask'].includes(String(list[0]??'')))throw new Error('ai-gemini governed reviews must start with the new or ask subcommand')
+  list.splice(1,0,'--governed-verdict',String(headSha))
+  return list
+}
 export function wrapperSpawnPlan(resolved,args,platform=process.platform){
   if(platform==='win32'&&/\.(cmd|bat)$/i.test(resolved))return{file:process.env.ComSpec||'cmd.exe',args:['/d','/s','/c',resolved,...args]}
   return{file:resolved,args}
@@ -93,7 +115,7 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
   deps.preflight({reviewer:options.reviewer,wrapper:options.wrapper,worktree:options.worktree,headSha:options.headSha,skipDoctor})
   const resolved=(deps.resolve??resolveCommandPath)(options.wrapper)
   if(!resolved)throw new Error(`review wrapper ${options.wrapper} is not executable`)
-  const plan=wrapperSpawnPlan(resolved,options.wrapperArgs)
+  const plan=wrapperSpawnPlan(resolved,wrapperVerdictContractArgs(options.wrapper,options.wrapperArgs,options.headSha))
   const run=deps.spawn(plan.file,plan.args,{cwd:options.worktree,encoding:'utf8',maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe']})
   const rawBody=String(run.stdout??'').trim(),verdict=verdictFromOutput(rawBody,options.headSha)
   if(run.error||run.status!==0||!verdict)throw new Error(`review wrapper did not produce a recordable terminal verdict (exit ${run.status??'unknown'})`)
