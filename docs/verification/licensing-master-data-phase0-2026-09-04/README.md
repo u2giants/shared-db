@@ -21,6 +21,13 @@ Result: 613 versions on current main, 589 applied in production, 24 merged but n
 
 The two licensing-related pending versions are not counted as delivered. A migration file or merged pull request is not production proof.
 
+> **Superseded 2026-09-05 (issue #2377).** The reading above is the measurement as taken
+> on 2026-09-04 and is left unedited as a record. `20260903200951` is no longer pending: it
+> was permanently hard-blocked and retired, and reissued byte-for-byte as `20260905024139`
+> under issue #2349 (merge commit `cafeedb32a4a09fb617d54ac0594c61410a33942`). The three
+> other-workstream versions have since been applied, and `Migration Ledger Drift` run
+> 33944448666 reports a genuinely-pending count of zero.
+
 ## Live catalog findings
 
 Each object was checked with `node scripts/catalog-truth.mjs --target production <typed-object>`. The tool reads the production migration ledger and catalog through the Management API with `read_only: true`.
