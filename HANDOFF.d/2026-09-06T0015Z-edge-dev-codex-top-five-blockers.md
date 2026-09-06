@@ -6,8 +6,7 @@ owner: codex/top-five-blockers
 
 # Session handoff — top five shared-db blockers
 
-Covers issues 771, 770, 810, 1031 and 1090. The frontmatter carries 770 because the
-handoff contract requires a single bare issue number; 771 and 810 are already closed.
+> Contract header names #770; this file also covers #1031 and #1090. (#771 and #810 are closed.)
 
 ## 0. Owner decisions required
 
