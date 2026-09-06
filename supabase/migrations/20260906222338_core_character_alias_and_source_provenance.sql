@@ -172,29 +172,50 @@ declare
   v_derived         uuid;
   v_old_derived     uuid;
   v_target_changed  boolean;
+  v_source_changed  boolean;
+  v_licensor_changed boolean;
   v_licensor_scoped constant text[] := array['licensor', 'property', 'character', 'franchise'];
 begin
-  -- Blank strings are not identifiers. A blank source_id in particular is the classic
-  -- way a whole feed collapses onto one provenance row.
-  if new.entity_schema is null or length(btrim(new.entity_schema)) = 0 then
-    raise exception 'core.taxonomy_source_ref refused: entity_schema must be a real schema name'
-      using errcode = 'P0001';
-  end if;
-  if new.entity_table is null or length(btrim(new.entity_table)) = 0 then
-    raise exception 'core.taxonomy_source_ref refused: entity_table must be a real table name'
-      using errcode = 'P0001';
-  end if;
-  if new.source_system is null or length(btrim(new.source_system)) = 0
-     or new.source_table is null or length(btrim(new.source_table)) = 0
-     or new.source_id is null or length(btrim(new.source_id)) = 0 then
-    raise exception
-      'core.taxonomy_source_ref refused: source_system, source_table and source_id must all be non-blank -- provenance without a named source is not provenance'
-      using errcode = 'P0001';
-  end if;
-
+  -- WHAT THIS WRITE ACTUALLY TOUCHES. Every rule below is scoped to the part of the row
+  -- it governs. An UPDATE that only records freshness (last_seen_at, missing_since) must
+  -- stay possible on a pre-#2355 row, including one whose source key or target was never
+  -- filled in properly -- otherwise the very writes this migration exists to make would
+  -- be refused on exactly the legacy rows that need them.
   v_target_changed := tg_op = 'INSERT'
     or (old.entity_schema, old.entity_table, old.entity_id)
          is distinct from (new.entity_schema, new.entity_table, new.entity_id);
+
+  v_source_changed := tg_op = 'INSERT'
+    or (old.source_system, old.source_table, old.source_id)
+         is distinct from (new.source_system, new.source_table, new.source_id);
+
+  v_licensor_changed := tg_op = 'INSERT'
+    or old.source_licensor_id is distinct from new.source_licensor_id;
+
+  -- Blank strings are not identifiers. A blank source_id in particular is the classic
+  -- way a whole feed collapses onto one provenance row. Checked on INSERT and on any
+  -- write that actually SETS these columns -- never on a freshness-only update, which
+  -- would otherwise freeze every legacy row that already carries a blank key.
+  if v_target_changed then
+    if new.entity_schema is null or length(btrim(new.entity_schema)) = 0 then
+      raise exception 'core.taxonomy_source_ref refused: entity_schema must be a real schema name'
+        using errcode = 'P0001';
+    end if;
+    if new.entity_table is null or length(btrim(new.entity_table)) = 0 then
+      raise exception 'core.taxonomy_source_ref refused: entity_table must be a real table name'
+        using errcode = 'P0001';
+    end if;
+  end if;
+
+  if v_source_changed then
+    if new.source_system is null or length(btrim(new.source_system)) = 0
+       or new.source_table is null or length(btrim(new.source_table)) = 0
+       or new.source_id is null or length(btrim(new.source_id)) = 0 then
+      raise exception
+        'core.taxonomy_source_ref refused: source_system, source_table and source_id must all be non-blank -- provenance without a named source is not provenance'
+        using errcode = 'P0001';
+    end if;
+  end if;
 
   -- KIND-SAFE TARGET INTEGRITY. entity_id is an untyped uuid: nothing in the catalog
   -- stops it naming a row in a completely different table, or no row at all. Checked
@@ -217,7 +238,14 @@ begin
 
   -- COLLISION-PROOF SOURCE IDENTITY. Derive the licensor the provenance actually belongs
   -- to, from the entity it points at. A supplied value is checked, never trusted.
-  if btrim(new.entity_schema) = 'core' and btrim(new.entity_table) = any (v_licensor_scoped) then
+  -- Scoped exactly like the target-integrity check above. Re-deriving on EVERY write
+  -- would mean a target that has since been re-licensed (or orphaned) makes every later
+  -- write to its provenance row fail -- including the missing_since / last_seen_at writes
+  -- this change exists to make -- because the derived licensor no longer matches the
+  -- licensor already stamped on the row, which the immutability rule below forbids
+  -- changing. So it runs only when the write actually touches the target or the licensor.
+  if (v_target_changed or v_licensor_changed)
+     and btrim(new.entity_schema) = 'core' and btrim(new.entity_table) = any (v_licensor_scoped) then
     -- Static, one branch per licensor-scoped kind. No dynamic SQL: the set of kinds
     -- that carry a licensor is a settled business fact, not a runtime lookup, and a
     -- statically written branch is the only form a reviewer can verify by reading it.
@@ -361,6 +389,12 @@ create trigger a_taxonomy_source_ref_identity_guard
 -- exclusions, both deliberate: an explicit last_seen_at from the caller is respected
 -- rather than overwritten, and an update that RECORDS ABSENCE (missing_since present)
 -- is not a sighting.
+--
+-- missing_since is in the UPDATE OF list for the RE-APPEARANCE case: clearing it is the
+-- source asserting this again after an absence, which is a sighting and must advance
+-- last_seen_at, or a re-appeared row would keep claiming it was last seen before it went
+-- missing. Listing the column does NOT make recording an absence a sighting -- the
+-- function's own `new.missing_since is null` test still refuses that direction.
 create or replace function core.bump_taxonomy_source_ref_last_seen()
 returns trigger
 language plpgsql
@@ -384,7 +418,8 @@ drop trigger if exists b_taxonomy_source_ref_last_seen on core.taxonomy_source_r
 create trigger b_taxonomy_source_ref_last_seen
   before update of
       entity_schema, entity_table, entity_id,
-      source_system, source_table, source_id, source_licensor_id
+      source_system, source_table, source_id, source_licensor_id,
+      missing_since
     on core.taxonomy_source_ref
   for each row execute function core.bump_taxonomy_source_ref_last_seen();
 

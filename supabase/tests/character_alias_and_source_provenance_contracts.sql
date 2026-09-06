@@ -25,6 +25,9 @@ declare
   v_orphan_prop uuid;
   v_orphan_ref  uuid;
   v_legacy_ref uuid;
+  v_blank_ref  uuid;
+  v_relic_char uuid;
+  v_relic_ref  uuid;
   v_txt      text;
   v_uuid     uuid;
   v_bool     boolean;
@@ -554,6 +557,104 @@ begin
   end if;
   if (select first_seen_at from core.taxonomy_source_ref where id = v_ref) is null then
     raise exception '#2355: first_seen_at was lost on update';
+  end if;
+
+  -- =====================================================================
+  -- D7b. RE-APPEARANCE IS A SIGHTING. Clearing missing_since is the source
+  --      asserting this again after an absence. If last_seen_at did not
+  --      advance, a re-appeared row would go on claiming it was last seen
+  --      before it vanished -- older than the absence it just ended.
+  --      (Setting missing_since is still NOT a sighting: D7 above and the
+  --      guard's own `new.missing_since is null` test cover that direction.)
+  -- =====================================================================
+  update core.taxonomy_source_ref
+     set last_seen_at = now() - interval '2 days'
+   where id = v_ref;
+  if (select last_seen_at from core.taxonomy_source_ref where id = v_ref) > now() - interval '1 day' then
+    raise exception '#2355: the re-appearance fixture could not be aged, so D7b tests nothing';
+  end if;
+
+  update core.taxonomy_source_ref set missing_since = null where id = v_ref;
+  if not (select is_current from core.taxonomy_source_ref where id = v_ref) then
+    raise exception '#2355: clearing missing_since did not make the row current again';
+  end if;
+  if (select last_seen_at from core.taxonomy_source_ref where id = v_ref) < now() - interval '1 minute' then
+    raise exception
+      '#2355: a re-assertion after an absence did not advance last_seen_at -- the row still claims it was last seen before it went missing';
+  end if;
+
+  -- =====================================================================
+  -- D7c. A LEGACY ROW WITH A BLANK SOURCE KEY STAYS EDITABLE FOR FRESHNESS.
+  --      Pre-#2355 rows were written with no blank-key guard, so some carry
+  --      a blank source_id. If the guard checked blank keys on EVERY write
+  --      rather than on writes that set them, those rows could never be
+  --      updated again -- including by the missing_since / last_seen_at
+  --      writes this migration exists to make. The guard must be off to
+  --      fabricate such a row: it refuses to CREATE one.
+  -- =====================================================================
+  alter table core.taxonomy_source_ref disable trigger a_taxonomy_source_ref_identity_guard;
+  insert into core.taxonomy_source_ref
+    (entity_schema, entity_table, entity_id, source_system, source_table, source_id)
+  values ('core', 'character', v_char_a, 'zz_portal_2355', 'blank_key_legacy', '   ')
+  returning id into v_blank_ref;
+  alter table core.taxonomy_source_ref enable trigger a_taxonomy_source_ref_identity_guard;
+
+  update core.taxonomy_source_ref set missing_since = now() where id = v_blank_ref;
+  if (select is_current from core.taxonomy_source_ref where id = v_blank_ref) then
+    raise exception
+      '#2355: a freshness-only update to a legacy row with a blank source key did not take effect';
+  end if;
+  update core.taxonomy_source_ref set missing_since = null where id = v_blank_ref;
+  if not (select is_current from core.taxonomy_source_ref where id = v_blank_ref) then
+    raise exception
+      '#2355: a legacy row with a blank source key could not be re-asserted after an absence';
+  end if;
+  -- ...but the blank key is still refused the moment the write actually SETS it.
+  v_raised := false;
+  begin
+    update core.taxonomy_source_ref
+       set source_id = '  '
+     where id = v_blank_ref;
+  exception when others then
+    v_raised := true;
+  end;
+  if not v_raised then
+    raise exception
+      '#2355: scoping the blank-key check to real key writes disabled it entirely -- a blank source_id was accepted';
+  end if;
+
+  -- =====================================================================
+  -- D7d. A RE-LICENSED TARGET DOES NOT FREEZE ITS PROVENANCE ROW.
+  --      Characters get moved between licensors. If the guard re-derived
+  --      the licensor on every write, the derived value would then disagree
+  --      with the licensor already stamped on the row, the immutability
+  --      rule would refuse the change, and the row could never record its
+  --      own absence again. Derivation must be scoped to writes that touch
+  --      the target or the licensor.
+  -- =====================================================================
+  insert into core.character (licensor_id, name, code, status)
+  values (v_lic_a, 'ZZ Relicensed ' || v_suffix, 'Z55RL-' || substr(v_suffix, 12), 'active')
+  returning id into v_relic_char;
+
+  insert into core.taxonomy_source_ref
+    (entity_schema, entity_table, entity_id, source_system, source_table, source_id)
+  values ('core', 'character', v_relic_char, 'zz_portal_2355', 'relicensed', '77')
+  returning id into v_relic_ref;
+
+  update core.character set licensor_id = v_lic_b where id = v_relic_char;
+  if (select licensor_id from core.character where id = v_relic_char) <> v_lic_b then
+    raise exception '#2355: the re-licensing fixture did not move the character, so D7d tests nothing';
+  end if;
+
+  update core.taxonomy_source_ref set missing_since = now() where id = v_relic_ref;
+  if (select is_current from core.taxonomy_source_ref where id = v_relic_ref) then
+    raise exception
+      '#2355: a freshness-only update to a provenance row whose target was re-licensed was refused or lost';
+  end if;
+  -- The stamped licensor is a historical fact and must NOT be silently re-derived.
+  if (select source_licensor_id from core.taxonomy_source_ref where id = v_relic_ref) is distinct from v_lic_a then
+    raise exception
+      '#2355: a freshness-only update silently re-derived source_licensor_id from the re-licensed target';
   end if;
 
   -- D8. first_seen_at is a fact about the past and may not be moved forward.
