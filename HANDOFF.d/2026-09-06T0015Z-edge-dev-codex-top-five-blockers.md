@@ -1,12 +1,12 @@
 ---
-issue: 771
+issue: 770
 status: OPEN
 owner: codex/top-five-blockers
 ---
 
 # Session handoff — top five shared-db blockers
 
-> Contract header names #771; this file also covers #770, #810, #1031 and #1090.
+> Contract header names #770; this file also covers #1031 and #1090. (#771 and #810 are closed.)
 
 ## 0. Owner decisions required
 
