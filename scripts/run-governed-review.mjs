@@ -94,14 +94,24 @@ export function neutraliseVerdictLine(body,reason){
 // passes the wrong head must not be silently accepted, so the flag is injected
 // here from the head this review is actually recording against.
 export function wrapperVerdictContractArgs(wrapper,args,headSha){
-  const name=String(wrapper??'').split(/[\/]/).pop().replace(/\.(cmd|bat|exe)$/i,'').toLowerCase()
+  const name=String(wrapper??'').split(/[\\/]/).pop().replace(/\.(cmd|bat|exe)$/i,'').toLowerCase()
   if(name!=='ai-gemini')return args
-  const list=[...args]
-  const existing=list.indexOf('--governed-verdict')
-  if(existing>=0){
-    if(String(list[existing+1]??'').toLowerCase()!==String(headSha??'').toLowerCase())throw new Error('the wrapper --governed-verdict head does not match the head under review')
-    return list
+  const list=[...args],head=String(headSha??'').toLowerCase()
+  // EVERY spelling of the flag is checked, not the first one found: `--x value`,
+  // `--x=value`, and a repeat later in the argument list. A single unchecked
+  // occurrence would let a caller bind the wrapper's verdict grammar to a head
+  // this review is not recording against.
+  let supplied=false
+  for(let i=0;i<list.length;i+=1){
+    const token=String(list[i]??'')
+    let value=null
+    if(token==='--governed-verdict')value=String(list[i+1]??'')
+    else if(token.startsWith('--governed-verdict='))value=token.slice('--governed-verdict='.length)
+    else continue
+    if(value.toLowerCase()!==head)throw new Error('the wrapper --governed-verdict head does not match the head under review')
+    supplied=true
   }
+  if(supplied)return list
   if(!['new','ask'].includes(String(list[0]??'')))throw new Error('ai-gemini governed reviews must start with the new or ask subcommand')
   list.splice(1,0,'--governed-verdict',String(headSha))
   return list

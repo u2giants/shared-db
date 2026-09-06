@@ -229,3 +229,34 @@ VERDICT: APPROVE ${head}`}}
   runGovernedReview({...options,reviewer:'gemini-3.8-flash-high',wrapper:'ai-gemini',wrapperArgs:['new','sess','--prompt','x']},{spawn,resolve:(name)=>name,preflight:()=>{},record:()=>({ref:'refs/db-review-verdicts/x',sha:'b'.repeat(40)})})
   assert.deepEqual(seen[0][1],['new','--governed-verdict',head,'sess','--prompt','x'])
 })
+
+test('every spelling of a caller-supplied gemini verdict head is checked',()=>{
+  const head='e'.repeat(40),other='f'.repeat(40)
+  assert.deepEqual(wrapperVerdictContractArgs('ai-gemini',['new','--governed-verdict='+head,'sess'],head),['new','--governed-verdict='+head,'sess'])
+  assert.throws(()=>wrapperVerdictContractArgs('ai-gemini',['new','--governed-verdict='+other,'sess'],head),/does not match the head under review/)
+  assert.throws(()=>wrapperVerdictContractArgs('ai-gemini',['new','--governed-verdict',head,'sess','--governed-verdict',other],head),/does not match the head under review/)
+})
+
+test('the gemini wrapper is recognised through path form, extension and case',()=>{
+  const head='a'.repeat(40)
+  for(const wrapper of [String.raw`C:\\tools\\AI-Gemini.CMD`,'/usr/local/bin/ai-gemini','ai-gemini.exe'])assert.deepEqual(wrapperVerdictContractArgs(wrapper,['new','sess'],head),['new','--governed-verdict',head,'sess'])
+  for(const wrapper of ['ai-gemini-review','my-ai-gemini','ai-geminix'])assert.deepEqual(wrapperVerdictContractArgs(wrapper,['new','sess'],head),['new','sess'])
+})
+
+test('a mismatched gemini verdict head stops the review before the wrapper runs',()=>{
+  const head='a'.repeat(40),seen=[]
+  assert.throws(()=>runGovernedReview({...options,reviewer:'gemini-3.8-flash-high',wrapper:'ai-gemini',wrapperArgs:['new','--governed-verdict','f'.repeat(40),'sess']},{spawn:(c)=>{seen.push(c);return{status:0,stdout:''}},resolve:(name)=>name,preflight:()=>{},record:()=>{throw new Error('must not record')}}),/does not match the head under review/)
+  assert.deepEqual(seen,[])
+})
+
+test('the gemini path still preflights, then spawns, then records the head under review',()=>{
+  const head='a'.repeat(40),order=[],recorded=[]
+  const spawn=(command,args)=>{order.push(command==='gh'?'findings':'spawn');return command==='gh'?{status:0,stdout:JSON.stringify({html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-1'})}:{status:0,stdout:`Findings.
+VERDICT: APPROVE ${head}`}}
+  runGovernedReview({...options,reviewer:'gemini-3.8-flash-high',wrapper:'ai-gemini',wrapperArgs:['new','sess']},{spawn,resolve:(name)=>name,preflight:()=>{order.push('preflight')},record:(input)=>{order.push('record');recorded.push(input);return{ref:'refs/db-review-verdicts/x',sha:'b'.repeat(40)}}})
+  assert.equal(order[0],'preflight','preflight runs before the wrapper is spawned')
+  assert.equal(order[1],'spawn')
+  assert.equal(order.indexOf('record'),order.length-1,'the verdict is recorded last')
+  assert.equal(recorded.length,1)
+  assert.equal(recorded[0].headSha,head,'the recorded head is the head under review, not one the wrapper chose')
+})
