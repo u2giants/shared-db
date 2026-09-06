@@ -184,8 +184,9 @@ test('a create that reports failure with no readable winner refuses and marks un
 // transport error, and the retry helper lets a thrown read propagate. After a
 // failed create, that leaves us unable to say whether the ref landed -- so the
 // failure is marked UNCONFIRMED and the runner still refuses to void. Voiding is
-// irreversible; not voiding is not. A CONFIRMED absence is different and stays
-// unmarked, which the positive control above already pins.
+// irreversible; not voiding is not. A repeated null is marked unconfirmed for the
+// same reason (round 3); the only unmarked exit left is a winner that is
+// demonstrably another round's object, which the positive control above pins.
 test('a winner read that throws after a failed create is marked unconfirmed (#2464)',()=>{
   const io=ioFixture()
   io.wait=()=>{}

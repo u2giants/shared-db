@@ -317,4 +317,9 @@ test('an UNCONFIRMED marker is reported tentatively and still edits nothing (#24
   assert.match(note,/THE DURABLE VERDICT ARTIFACT MAY HAVE BEEN CREATED/)
   assert.equal(/WAS CREATED AND IS LEFT INTACT/.test(note),false,'an unconfirmed artifact must not be reported as created')
   assert.match(thrown.message,/MAY have been created and could not be read back/)
+  // glm-5.3, PR #2468 round 4: the HEADLINE was tentative but the body prose
+  // still asserted an artifact that exists. The whole notice must hedge.
+  assert.equal(/a verdict that already exists/.test(note),false,'the unconfirmed notice body must not assert the artifact exists')
+  assert.match(note,/could permanently invalidate a verdict that may already exist/)
+  assert.equal(/so its digest stays valid/.test(thrown.message),false,'the unconfirmed throw must not assert a recorded digest')
 })

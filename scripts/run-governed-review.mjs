@@ -227,11 +227,11 @@ Artifact: \`${ref}\` = \`${sha}\`
 
 The step AFTER the create failed: ${error.message}
 
-The preceding findings comment (${comment.html_url}) has been left UNTOUCHED on purpose. Its body is what the artifact's recorded findings_digest was computed over, so editing it would permanently invalidate a verdict that already exists and cannot be rewritten. Do not re-run this review at this head and do not edit that comment. Confirm the artifact with:
+The preceding findings comment (${comment.html_url}) has been left UNTOUCHED on purpose. Its body is what ${confirmed===false?'any artifact recorded by this round would have computed its findings_digest over, so editing it could permanently invalidate a verdict that may already exist':"the artifact's recorded findings_digest was computed over, so editing it would permanently invalidate a verdict that already exists"} and cannot be rewritten. Do not re-run this review at this head and do not edit that comment. Confirm the artifact with:
 
     gh api repos/u2giants/shared-db/git/ref/${ref.replace(/^refs\//,'')}
 `})})
-      throw new Error(`${error.message} — the durable verdict artifact ${ref} = ${sha} ${confirmed===false?'MAY have been created and could not be read back':'WAS created'}; the findings comment ${comment.id} was deliberately left untouched so its digest stays valid. Nothing was voided.`)
+      throw new Error(`${error.message} — the durable verdict artifact ${ref} = ${sha} ${confirmed===false?'MAY have been created and could not be read back':'WAS created'}; the findings comment ${comment.id} was deliberately left untouched so ${confirmed===false?'any digest recorded over it stays valid':'its digest stays valid'}. Nothing was voided.`)
     }
     let voidStatus='voided'
     try{

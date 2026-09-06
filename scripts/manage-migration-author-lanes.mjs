@@ -2043,8 +2043,9 @@ export function recordReviewVerdict(options,io=githubIo){
     // PR #2468, round 2). A thrown read leaves us unable to prove the ref is
     // absent, and the create may well have landed, so the failure is marked
     // UNCONFIRMED rather than left bare: refusing to void is safe when we do not
-    // know, while voiding is irreversible. A confirmed absence after the full
-    // retry is a different thing and stays unmarked -- nothing was created.
+    // know, while voiding is irreversible. Round 4 extended the same reasoning
+    // to a repeated null: see the block below -- after a FAILED create, no exit
+    // in this branch is treated as proof of absence.
     let winner=null
     try{winner=readRefAfterWrite(ref,sha,io)}
     catch(readError){readError.verdictArtifactCreated={ref,sha,confirmed:false};throw readError}
