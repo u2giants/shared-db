@@ -22,6 +22,8 @@ declare
   v_char_a2  uuid;
   v_char_b   uuid;
   v_ref      uuid;
+  v_orphan_prop uuid;
+  v_orphan_ref  uuid;
   v_legacy_ref uuid;
   v_txt      text;
   v_uuid     uuid;
@@ -395,6 +397,63 @@ begin
     raise exception '#2355: licensor B''s own provenance row was not scoped to licensor B';
   end if;
 
+  -- =====================================================================
+  -- D3b. A LICENSOR-LESS TARGET IS ACCEPTED, NOT REFUSED.
+  --      core.property.licensor_id is NULLABLE (20260621150815_app_core.sql
+  --      declares it `on delete set null`) and orphan properties exist by
+  --      design -- 20260829004145_separate_property_and_character.sql builds
+  --      an explicit list of them. If the guard raised whenever the derived
+  --      licensor came back null, every provenance write against an orphan
+  --      property -- writes this table accepts today -- would become a hard
+  --      failure. The honest record is a NULL owner, not an error.
+  -- =====================================================================
+  insert into core.property (licensor_id, name, code, status)
+  values (null, 'ZZ #2355 Orphan Property ' || v_suffix, 'Z55OP-' || substr(v_suffix, 12), 'active')
+  returning id into v_orphan_prop;
+  if (select licensor_id from core.property where id = v_orphan_prop) is not null then
+    raise exception '#2355: the orphan-property fixture acquired a licensor, so it tests nothing';
+  end if;
+
+  insert into core.taxonomy_source_ref
+    (entity_schema, entity_table, entity_id, source_system, source_table, source_id)
+  values ('core', 'property', v_orphan_prop, 'zz_portal_2355', 'properties', 'orphan-1')
+  returning id, source_licensor_id into v_orphan_ref, v_uuid;
+  if v_uuid is not null then
+    raise exception
+      '#2355: provenance for a licensor-less property was stamped with licensor % out of nowhere', v_uuid;
+  end if;
+  if (select first_seen_at from core.taxonomy_source_ref where id = v_orphan_ref) is null then
+    raise exception '#2355: the licensor-less provenance row was not given a first_seen_at';
+  end if;
+
+  -- ...but a caller may not attribute it to a licensor the entity does not belong to.
+  v_raised := false;
+  begin
+    insert into core.taxonomy_source_ref
+      (entity_schema, entity_table, entity_id, source_system, source_table, source_id, source_licensor_id)
+    values ('core', 'property', v_orphan_prop, 'zz_portal_2355', 'properties', 'orphan-2', v_lic_a);
+  exception when others then
+    v_raised := true;
+  end;
+  if not v_raised then
+    raise exception
+      '#2355: provenance for a licensor-less property was attributed to a licensor the property does not belong to';
+  end if;
+
+  -- ...and a target that does not exist AT ALL still raises. Accepting a null derived
+  -- licensor must not have quietly turned the existence check off with it.
+  v_raised := false;
+  begin
+    insert into core.taxonomy_source_ref
+      (entity_schema, entity_table, entity_id, source_system, source_table, source_id)
+    values ('core', 'property', gen_random_uuid(), 'zz_portal_2355', 'properties', 'orphan-3');
+  exception when others then
+    v_raised := true;
+  end;
+  if not v_raised then
+    raise exception '#2355: provenance was recorded against a property that does not exist';
+  end if;
+
   -- D4. A source_licensor_id that disagrees with the entity is refused, not trusted.
   v_raised := false;
   begin
@@ -472,6 +531,20 @@ begin
   update core.taxonomy_source_ref set entity_id = v_char_a where id = v_ref;
   if (select last_seen_at from core.taxonomy_source_ref where id = v_ref) < now() - interval '1 minute' then
     raise exception '#2355: last_seen_at was not advanced by a re-assertion';
+  end if;
+
+  -- D6c. ...but a METADATA-ONLY correction is NOT a sighting. Fixing a display name the
+  --      source never re-sent must not be written into the record as "the source said
+  --      this again today", or last_seen_at stops meaning anything at all.
+  update core.taxonomy_source_ref
+     set last_seen_at = now() - interval '2 days'
+   where id = v_ref;
+  update core.taxonomy_source_ref
+     set source_name = 'ZZ corrected label ' || v_suffix
+   where id = v_ref;
+  if (select last_seen_at from core.taxonomy_source_ref where id = v_ref) > now() - interval '1 day' then
+    raise exception
+      '#2355: a metadata-only correction was recorded as a fresh source sighting -- last_seen_at advanced without the source re-asserting anything';
   end if;
 
   -- D7. Absence is RECORDED, not deleted. missing_since flips is_current.

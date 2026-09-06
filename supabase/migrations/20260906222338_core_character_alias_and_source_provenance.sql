@@ -24,7 +24,7 @@
 -- WHAT THIS IS NOT
 -- ----------------
 -- This migration is ADDITIVE. It creates one table, adds columns, constraints, indexes
--- and two guard triggers, and seeds NO rows: #2355 authorizes no curated Master Data,
+-- and three triggers (two guards and one freshness bump), and seeds NO rows: #2355 authorizes no curated Master Data,
 -- and no licensed evidence.
 --
 -- It deliberately does NOT drop, replace or narrow the existing
@@ -52,12 +52,18 @@
 --
 -- STRICTNESS, CALIBRATED
 -- ----------------------
--- Licensor derivation is REQUIRED for the four licensor-scoped core kinds
--- (licensor, property, character, franchise). core.property.licensor_id and
--- core.franchise.licensor_id are already NOT NULL, and a licensor is its own licensor,
--- so three of the four can never fail. Only core.character.licensor_id is nullable, and
--- core.character is empty under the #1684 contract, so the strict rule costs nothing
--- today and closes the collision permanently.
+-- Licensor derivation is ATTEMPTED for the four licensor-scoped core kinds
+-- (licensor, property, character, franchise), and the derived value is what gets
+-- recorded. It is deliberately NOT required to be non-null. core.property.licensor_id is
+-- NULLABLE (20260621150815_app_core.sql defines it `references core.licensor(id) on
+-- delete set null`, and 20260829004145_separate_property_and_character.sql builds an
+-- explicit orphan-property list), and core.character.licensor_id is nullable too and
+-- core.character can now be populated by curated loads. Raising on a null derived
+-- licensor would therefore turn writes this table accepts today into hard failures for
+-- every licensor-less property. So a licensor-less target records a null
+-- source_licensor_id -- honest about having no owner -- while a target that does not
+-- exist at all still raises, and a caller-supplied licensor that contradicts the derived
+-- one (including contradicting "this entity has no licensor") still raises.
 
 -- ---------------------------------------------------------------------------
 -- 1. core.taxonomy_source_ref -- source identity, target integrity, freshness
@@ -166,7 +172,6 @@ declare
   v_derived         uuid;
   v_old_derived     uuid;
   v_target_changed  boolean;
-  v_last_seen_given boolean;
   v_licensor_scoped constant text[] := array['licensor', 'property', 'character', 'franchise'];
 begin
   -- Blank strings are not identifiers. A blank source_id in particular is the classic
@@ -239,20 +244,26 @@ begin
         using errcode = 'P0001';
     end if;
 
-    if v_derived is null then
-      raise exception
-        'core.taxonomy_source_ref refused: %.% row % has no licensor, so its provenance has no owner -- source ids are only unique within a licensor and must never be recorded bare',
-        new.entity_schema, new.entity_table, new.entity_id
-        using errcode = 'P0001';
-    end if;
-
-    if new.source_licensor_id is null then
-      new.source_licensor_id := v_derived;
-    elsif new.source_licensor_id <> v_derived then
-      raise exception
-        'core.taxonomy_source_ref refused: source_licensor_id % disagrees with the licensor % of the entity it points at',
-        new.source_licensor_id, v_derived
-        using errcode = 'P0001';
+    -- A NULL DERIVED LICENSOR IS A FACT, NOT A FAULT. core.property.licensor_id is
+    -- nullable and orphan properties exist by design, so refusing here would convert
+    -- writes this table accepts today into hard failures. The derived value -- null
+    -- included -- is what gets recorded. A caller-supplied value is still never trusted:
+    -- it must equal the derived one, and when the entity has no licensor at all the only
+    -- honest supplied value is none.
+    if new.source_licensor_id is distinct from v_derived then
+      if new.source_licensor_id is null then
+        new.source_licensor_id := v_derived;
+      elsif v_derived is null then
+        raise exception
+          'core.taxonomy_source_ref refused: source_licensor_id % was supplied, but %.% row % has no licensor of its own -- provenance may not be attributed to a licensor the entity does not belong to',
+          new.source_licensor_id, new.entity_schema, new.entity_table, new.entity_id
+          using errcode = 'P0001';
+      else
+        raise exception
+          'core.taxonomy_source_ref refused: source_licensor_id % disagrees with the licensor % of the entity it points at',
+          new.source_licensor_id, v_derived
+          using errcode = 'P0001';
+      end if;
     end if;
   end if;
 
@@ -313,27 +324,16 @@ begin
     new.first_seen_at := coalesce(new.first_seen_at, now());
     new.last_seen_at  := coalesce(new.last_seen_at, new.first_seen_at);
   else
-    -- Did the caller name last_seen_at itself? Decided BEFORE the column is filled in.
-    v_last_seen_given := new.last_seen_at is not null
-      and new.last_seen_at is distinct from old.last_seen_at;
-
     new.first_seen_at := coalesce(new.first_seen_at, old.first_seen_at, old.created_at);
     new.last_seen_at  := coalesce(new.last_seen_at, old.last_seen_at, new.first_seen_at);
     if old.first_seen_at is not null and new.first_seen_at > old.first_seen_at then
       -- "First seen" is a fact about the past. A later observation updates last_seen_at.
       new.first_seen_at := old.first_seen_at;
     end if;
-
-    -- A RE-ASSERTION ADVANCES last_seen_at. Every importer in this repository upserts
-    -- with `on conflict ... do update set entity_id = excluded.entity_id` and names no
-    -- freshness column, so if the guard did not advance it here it could never advance
-    -- at all, and "when the source most recently still asserted this" would be a
-    -- permanent lie. Two exclusions, both deliberate: an explicit value from a caller
-    -- is respected rather than overwritten, and an update that RECORDS ABSENCE
-    -- (missing_since present) is not a sighting and must not be logged as one.
-    if not v_last_seen_given and new.missing_since is null then
-      new.last_seen_at := greatest(new.last_seen_at, now());
-    end if;
+    -- last_seen_at is NOT advanced here. Advancing it on every update would log a
+    -- metadata-only correction as a fresh source sighting. The advance lives in
+    -- core.bump_taxonomy_source_ref_last_seen, whose trigger fires only when the
+    -- source-facing columns are actually re-supplied.
   end if;
 
   return new;
@@ -349,20 +349,62 @@ create trigger a_taxonomy_source_ref_identity_guard
   before insert or update on core.taxonomy_source_ref
   for each row execute function core.guard_taxonomy_source_ref_identity();
 
+-- A RE-ASSERTION ADVANCES last_seen_at -- AND NOTHING ELSE DOES. Every importer in this
+-- repository upserts with `on conflict ... do update set entity_id = excluded.entity_id`
+-- and names no freshness column, so without this the column could never advance and
+-- "when the source most recently still asserted this" would be a permanent lie. But
+-- advancing on ANY update is the opposite error: a metadata-only correction (fixing
+-- evidence notes, clearing missing_since, an unrelated column) would be recorded as a
+-- fresh sighting the source never made. The trigger is therefore restricted with
+-- UPDATE OF to the source-facing columns: it fires only when the write actually
+-- re-supplies what the source said, whether or not the value changed. Two further
+-- exclusions, both deliberate: an explicit last_seen_at from the caller is respected
+-- rather than overwritten, and an update that RECORDS ABSENCE (missing_since present)
+-- is not a sighting.
+create or replace function core.bump_taxonomy_source_ref_last_seen()
+returns trigger
+language plpgsql
+security definer
+set search_path = core, pg_catalog
+as $bump$
+begin
+  if new.missing_since is null
+     and new.last_seen_at is not distinct from old.last_seen_at then
+    new.last_seen_at := greatest(new.last_seen_at, now());
+  end if;
+  return new;
+end
+$bump$;
+
+revoke execute on function core.bump_taxonomy_source_ref_last_seen() from public;
+
+drop trigger if exists b_taxonomy_source_ref_last_seen on core.taxonomy_source_ref;
+-- Named to sort AFTER the identity guard (which fills last_seen_at) and before the
+-- ColdLion breaker guards.
+create trigger b_taxonomy_source_ref_last_seen
+  before update of
+      entity_schema, entity_table, entity_id,
+      source_system, source_table, source_id, source_licensor_id
+    on core.taxonomy_source_ref
+  for each row execute function core.bump_taxonomy_source_ref_last_seen();
+
 comment on column core.taxonomy_source_ref.source_licensor_id is
   'The licensor this provenance belongs to, derived from the entity it points at and never '
   'trusted from the caller. Source ids are unique only within a licensor -- Disney and Sega '
-  'both number from small integers -- so a bare source id is not an identity. Null only on rows '
-  'that predate issue #2355 or that point at a kind which is not licensor-scoped.';
+  'both number from small integers -- so a bare source id is not an identity. Null on rows that '
+  'predate issue #2355, on rows pointing at a kind which is not licensor-scoped, and on rows '
+  'whose target genuinely has no licensor of its own (core.property.licensor_id and '
+  'core.character.licensor_id are both nullable, and orphan properties exist by design).';
 comment on column core.taxonomy_source_ref.first_seen_at is
   'When this source assertion was first recorded. Never moves forward. Null only on rows that '
   'predate issue #2355; use created_at for those.';
 comment on column core.taxonomy_source_ref.last_seen_at is
   'When the source most recently still asserted this. Advanced to now() by '
-  'core.guard_taxonomy_source_ref_identity on any update that re-asserts the row, so an '
-  'importer upserting only entity_id keeps it honest without naming it. Not advanced when '
-  'the caller supplies a value of its own, and not advanced by an update that sets '
-  'missing_since -- recording an absence is not a sighting. Null only on pre-#2355 rows.';
+  'core.bump_taxonomy_source_ref_last_seen, whose trigger fires only on an update that '
+  're-supplies the source-facing columns, so an importer upserting only entity_id keeps it '
+  'honest without naming it while a metadata-only correction is not logged as a sighting. Not '
+  'advanced when the caller supplies a value of its own, and not advanced by an update that '
+  'sets missing_since -- recording an absence is not a sighting. Null only on pre-#2355 rows.';
 comment on column core.taxonomy_source_ref.missing_since is
   'When the source stopped asserting this. Absence is recorded, never deleted: a vanished '
   'source row is evidence, and deleting it would destroy the audit trail behind a royalty '
@@ -440,6 +482,7 @@ create unique index if not exists character_alias_licensor_source_key
   on core.character_alias (licensor_id, source_system, source_id)
   where source_id is not null;
 
+drop trigger if exists set_updated_at on core.character_alias;
 create trigger set_updated_at before update on core.character_alias
   for each row execute function app.set_updated_at();
 
@@ -492,6 +535,7 @@ alter table core.character_alias enable row level security;
 -- Read for the same role set every other core.* entity uses. There is deliberately no
 -- write policy for `authenticated`: RLS and GRANTs independently keep browser roles
 -- read-only, exactly as core.franchise_alias does.
+drop policy if exists shared_read on core.character_alias;
 create policy shared_read on core.character_alias
   for select to authenticated
   using (app.has_any_role(array['administrator','sales','licensing','designer','viewer','vendor']::app.app_role[]));
