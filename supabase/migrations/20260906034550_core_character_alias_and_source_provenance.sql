@@ -206,24 +206,35 @@ begin
       raise exception 'core.taxonomy_source_ref refused: entity_id must name a row'
         using errcode = 'P0001';
     end if;
-    execute format('select exists (select 1 from %s where id = $1)', v_target_regclass)
-      into v_target_exists using new.entity_id;
-    if not v_target_exists then
-      raise exception
-        'core.taxonomy_source_ref refused: no row % in %.% -- provenance may not point at a non-existent entity',
-        new.entity_id, new.entity_schema, new.entity_table
-        using errcode = 'P0001';
-    end if;
   end if;
 
   -- COLLISION-PROOF SOURCE IDENTITY. Derive the licensor the provenance actually belongs
   -- to, from the entity it points at. A supplied value is checked, never trusted.
   if btrim(new.entity_schema) = 'core' and btrim(new.entity_table) = any (v_licensor_scoped) then
-    if btrim(new.entity_table) = 'licensor' then
-      v_derived := new.entity_id;
-    else
-      execute format('select licensor_id from core.%I where id = $1', btrim(new.entity_table))
-        into v_derived using new.entity_id;
+    -- Static, one branch per licensor-scoped kind. No dynamic SQL: the set of kinds
+    -- that carry a licensor is a settled business fact, not a runtime lookup, and a
+    -- statically written branch is the only form a reviewer can verify by reading it.
+    case btrim(new.entity_table)
+      when 'licensor' then
+        select l.id into v_derived from core.licensor l where l.id = new.entity_id;
+      when 'property' then
+        select p.licensor_id into v_derived from core.property p where p.id = new.entity_id;
+      when 'character' then
+        select c.licensor_id into v_derived from core.character c where c.id = new.entity_id;
+      when 'franchise' then
+        select f.licensor_id into v_derived from core.franchise f where f.id = new.entity_id;
+    end case;
+    v_target_exists := found;
+
+    -- KIND-SAFE TARGET INTEGRITY. entity_id is an untyped uuid: nothing in the catalog
+    -- stops it naming a row in a different table, or no row at all. Checked only when
+    -- the target actually changes, so pre-existing rows whose target has since been
+    -- retired stay editable for their freshness fields.
+    if v_target_changed and not v_target_exists then
+      raise exception
+        'core.taxonomy_source_ref refused: no row % in %.% -- provenance may not point at a non-existent entity',
+        new.entity_id, new.entity_schema, new.entity_table
+        using errcode = 'P0001';
     end if;
 
     if v_derived is null then
