@@ -58,6 +58,13 @@ This tracker remains open and non-dispatchable. Production is not complete: `cor
 
 The production ledger comparison proved no applied version missing from current main. It reported 24 merged-not-applied versions: 19 are explicitly retired or deliberately held, while five are genuinely pending. Two are licensing-related (`20260902222649` Property uniqueness/curated promotion and `20260903125728` Character promotion); three are other workstreams (`20260903200951`, `20260904121037`, `20260904143518`). A merged-but-unapplied licensing version remains pending and is not completion evidence.
 
+> **Superseded 2026-09-05 (issue #2377).** The reading above is the measurement as taken
+> on 2026-09-04 and is left unedited as a record. `20260903200951` is no longer pending: it
+> was permanently hard-blocked and retired, and reissued byte-for-byte as `20260905024139`
+> under issue #2349 (merge commit `cafeedb32a4a09fb617d54ac0594c61410a33942`). The three
+> other-workstream versions have since been applied, and `Migration Ledger Drift` run
+> 33944448666 reports a genuinely-pending count of zero.
+
 Confirmed live foundations are the transaction-bound licensing write guard (#1140/#1339), separate Property and Character structure (#1684), Warner relationship evidence adapter (#1380), source-purpose DB Data Admin presentation and authority corrections, and durable `plm.source_resolution`. Closed issues or merged SQL were not counted as complete without production-ledger/catalog or live application evidence. Source captures, curated review (#1941), weekly automation, consumer cutover, and compatibility retirement stay open until their owning sessions publish direct end-to-end proof. The exact catalog queries, ledger classification, successor scopes and evidence limitations are recorded in `docs/verification/licensing-master-data-phase0-2026-09-04/README.md`.
 
 ---
