@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
+import { CLAIM_CLOSE_REASONS, RECOVERABLE_CLAIM_CLOSE_REASONS, LEGACY_GUARDED_CLEANUP_CLOSE_REASON, ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -942,7 +942,7 @@ test('retired reviewer names stay resolvable so historical review evidence never
 test('the active rotation is exactly the current models, in a stable order',()=>{
   // Order and length are the round robin. A change here silently reassigns every
   // in-flight sequence to a different reviewer, so it must be asserted, not assumed.
-  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','muse-spark-1.2-contributor','codex-gpt-5.6-sol'])
+  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','muse-spark-1.2-contributor','codex-gpt-5.6-sol','gemini-3.8-flash-high'])
   assert.deepEqual(OVERFLOW_REVIEWERS,[])
   assert.equal(REVIEWERS.find((r)=>r.name==='kimi-k3').wrapper,'ai-kimi')
   assert.equal(REVIEWERS.find((r)=>r.name==='codex-gpt-5.6-sol').wrapper,'ai-codex-review')
@@ -957,7 +957,13 @@ test('the active rotation is exactly the current models, in a stable order',()=>
   // claim, dropping the second puts an unqualified provider into the rotation.
   assert.ok(!RETIRED_REVIEWERS.includes('qwen-3.8-max'),'qwen-3.8-max must never be listed as retired')
   assert.deepEqual(QUARANTINED_REVIEWERS,['qwen-3.8-max'])
-  assert.ok(!ACTIVE_REVIEWERS.some((r)=>/qwen|gemini/i.test(r.name)),'quarantined Qwen and unregistered Gemini must remain outside the active rotation')
+  assert.ok(!ACTIVE_REVIEWERS.some((r)=>/qwen/i.test(r.name)),'quarantined Qwen must remain outside the active rotation')
+  // Gemini was added on 2026-09-06 (ai-devops #285) only after a recorded live
+  // safety qualification AND a live review that returned a well-formed verdict
+  // above a substantive report. Its wrapper is asserted so a future rename cannot
+  // quietly point the rotation at nothing.
+  assert.equal(REVIEWERS.find((r)=>r.name==='gemini-3.8-flash-high').wrapper,'ai-gemini')
+  assert.ok(ACTIVE_REVIEWERS.some((r)=>r.name==='gemini-3.8-flash-high'),'gemini-3.8-flash-high must be drawable')
   assert.equal(REVIEWERS.find((r)=>r.name==='qwen-3.8-max').wrapper,'ai-qwen')
 })
 
@@ -1877,7 +1883,7 @@ test('reviewer replacement rejects a mismatched original assignment',()=>{
 // is a false invariant, and it is deliberately not asserted here. Both halves are
 // pinned below, with the exact successor named in each case.
 test('one intervening assignment gives a failed reviewer a named replacement',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,4,'this test describes the approved four-reviewer rotation (deepseek-chat retired, #2078; kimi-k3 paused 2026-09-03)')
+  assert.equal(ACTIVE_REVIEWERS.length,5,'this test describes the approved five-reviewer rotation (deepseek-chat retired, #2078; kimi-k3 paused 2026-09-03; gemini-3.8-flash-high added 2026-09-06)')
   const io=failedReviewIo()
   assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
   const replacement=replaceFailedReviewer(replacementRequest,io)
@@ -1885,7 +1891,7 @@ test('one intervening assignment gives a failed reviewer a named replacement',()
 })
 
 test('N-1 intervening assignments skip the failed provider instead of stranding the replacement',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,4,'this test describes the approved four-reviewer rotation (deepseek-chat retired, #2078; kimi-k3 paused 2026-09-03)')
+  assert.equal(ACTIVE_REVIEWERS.length,5,'this test describes the approved five-reviewer rotation (deepseek-chat retired, #2078; kimi-k3 paused 2026-09-03; gemini-3.8-flash-high added 2026-09-06)')
   const io=failedReviewIo()
   for(let n=0;n<ACTIVE_REVIEWERS.length-1;n+=1){
     assignNextReviewer({issue:20+n,pr:120+n,headSha:`abcde${n}f`},io)
@@ -1990,15 +1996,16 @@ test('review lease age is truthful for known and unknown commit dates',()=>{
 
 test('capacity report classifies free, live, stale, aged, and unknown leases without mutation',()=>{
   const io=reviewIo(),snapshot=new Map(),states=new Map(),now=new Date('2026-09-02T12:00:00Z')
-  // Four cases, one per active reviewer (kimi-k3 paused 2026-09-03 dropped the
-  // roster to four) -- 'verdict' is cut here rather than 'moved' since both
-  // reached the same 'stale-reclaimable' classification and one demonstration
-  // of that path is enough once the roster no longer has a fifth slot to spare.
+  // Five cases, one per active reviewer. 'verdict' returns here because
+  // gemini-3.8-flash-high (added 2026-09-06) restored the fifth slot: it reaches
+  // 'stale-reclaimable' by a different route than 'moved' -- a recorded verdict
+  // rather than a head that moved -- and both routes are worth proving.
   const cases=[
     {kind:'live',date:'2026-09-02T11:00:00Z'},
     {kind:'moved',date:'2026-09-02T10:00:00Z'},
     {kind:'aged',date:'2026-08-31T00:00:00Z'},
     {kind:'unknown',date:null},
+    {kind:'verdict',date:'2026-09-02T10:00:00Z'},
   ]
   cases.forEach((entry,index)=>{
     const reviewer=ACTIVE_REVIEWERS[index],issue=2300+index,pr=2400+index,headSha=`${index+1}`.repeat(40),sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=${index+1} reviewer=${reviewer.name} issue=${issue} pr=${pr} head=${headSha}`),commit={...io.getCommit(sha),committedDate:entry.date}
@@ -2010,16 +2017,16 @@ test('capacity report classifies free, live, stale, aged, and unknown leases wit
   io.readActiveReviewLeases=()=>snapshot
   io.readReviewStates=()=>states
   const before=new Map(io.refs),report=reviewerCapacityReport(io,now)
-  assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown'])
-  assert.deepEqual(report.summary,{total:4,free:0,live:2,reclaimable:1,silenceProbed:0,silenceReclaimable:0,unknown:1})
+  assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','stale-reclaimable'])
+  assert.deepEqual(report.summary,{total:5,free:0,live:2,reclaimable:2,silenceProbed:0,silenceReclaimable:0,unknown:1})
   assert.deepEqual(io.refs,before,'capacity report must be read-only')
   // 'free' is the fifth classification and it is a property of an ABSENT lease, so
   // it is proved by removing one rather than by needing a spare roster name.
   const freed=ACTIVE_REVIEWERS.at(-1).name
   snapshot.delete(reviewActiveRef(freed));io.refs.delete(reviewActiveRef(freed))
   const withFree=reviewerCapacityReport(io,now)
-  assert.deepEqual(withFree.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','free'])
-  assert.deepEqual(withFree.summary,{total:4,free:1,live:2,reclaimable:1,silenceProbed:0,silenceReclaimable:0,unknown:0})
+  assert.deepEqual(withFree.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','free'])
+  assert.deepEqual(withFree.summary,{total:5,free:1,live:2,reclaimable:1,silenceProbed:0,silenceReclaimable:0,unknown:1})
 })
 
 function silentLeaseIo({heldSince='2026-09-04T10:00:00Z',activity=[]}={}){
@@ -2673,6 +2680,101 @@ test('explicit claim release is mutex-protected, owner-confirmed, and refuses an
   assert.equal(closed,null)
 })
 
+// ISSUE #2454. Duplicate claims on one branch cannot be cleared by the ordinary
+// release path, because that path refuses any branch with an open PR — and the
+// duplicate's branch legitimately has one. The narrow path below proves, from
+// live GitHub state alone, that the claim it closes is NOT the authority.
+function duplicateIo({prVersion='20260814200007',files=null}={}){
+  const io=memoryIo()
+  // #7 is the authority (version 20260814200007, the version the PR uses);
+  // #8 is the duplicate opened by a dispatch error on the same branch.
+  io.openClaims=()=>[
+    {number:7,body:body(['table core.x'],'7')},
+    {number:8,body:claimBody({version:'20260814209999',objects:['table core.y'],owner:'agent-7',branch:'codex/7',worktree:'C:/w/8',expiresAt:new Date('2026-08-15T08:00:00.000Z')})},
+  ]
+  io.openPulls=()=>[{number:2409,head:{ref:'codex/7'}}]
+  io.getPrFiles=()=>files??[{filename:`supabase/migrations/${prVersion}_add_bridges.sql`,status:'added'}]
+  return io
+}
+
+test('a duplicate claim on a branch with an open PR releases with a truthful reason',()=>{
+  const io=duplicateIo();let closed=null,reason=null
+  io.closeClaim=(n,r)=>{closed=n;reason=r}
+  assert.equal(main(['--release-duplicate-claim','8','--owner','agent-7','--confirm-finished'],NOW,io),0)
+  assert.equal(closed,8)
+  assert.equal(reason,CLAIM_CLOSE_REASONS.duplicateRelease)
+  assert.doesNotMatch(reason,/Expired migration-author lease|guarded cleanup/)
+  assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('the authority claim on the same branch is refused',()=>{
+  const io=duplicateIo();let closed=null
+  io.closeClaim=(n)=>{closed=n}
+  assert.equal(main(['--release-duplicate-claim','7','--owner','agent-7','--confirm-finished'],NOW,io),2)
+  assert.equal(closed,null)
+  assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('a lone claim on a branch with an open PR is still refused',()=>{
+  const io=duplicateIo();let closed=null
+  io.closeClaim=(n)=>{closed=n}
+  io.openClaims=()=>[{number:7,body:body(['table core.x'],'7')}]
+  assert.equal(main(['--release-duplicate-claim','7','--owner','agent-7','--confirm-finished'],NOW,io),2)
+  // And the ordinary release path still refuses it too — nothing was widened.
+  assert.equal(main(['--release-claim','7','--owner','agent-7','--confirm-finished'],NOW,io),2)
+  assert.equal(closed,null)
+})
+
+test('duplicate release refuses a wrong owner, a missing PR migration, and a missing authority holder',()=>{
+  let closed=null
+  const wrongOwner=duplicateIo();wrongOwner.closeClaim=(n)=>{closed=n}
+  assert.equal(main(['--release-duplicate-claim','8','--owner','agent-9','--confirm-finished'],NOW,wrongOwner),2)
+  const noMigration=duplicateIo({files:[{filename:'docs/notes.md',status:'added'}]});noMigration.closeClaim=(n)=>{closed=n}
+  assert.equal(main(['--release-duplicate-claim','8','--owner','agent-7','--confirm-finished'],NOW,noMigration),2)
+  // The PR uses a version NEITHER open claim holds: nothing is proved, so nothing closes.
+  const unproved=duplicateIo({prVersion:'20260814201111'});unproved.closeClaim=(n)=>{closed=n}
+  assert.equal(main(['--release-duplicate-claim','8','--owner','agent-7','--confirm-finished'],NOW,unproved),2)
+  // There is no override flag to force it.
+  const forced=duplicateIo({prVersion:'20260814201111'});forced.closeClaim=(n)=>{closed=n}
+  assert.equal(main(['--release-duplicate-claim','8','--owner','agent-7','--confirm-finished','--force'],NOW,forced),2)
+  assert.equal(closed,null)
+})
+
+// ISSUE #2454 review. The PR file snapshot must be re-read under the mutex
+// immediately before the close, so a push landing mid-proof cannot be closed on.
+test('a pull-request change between the two proofs refuses the duplicate release',()=>{
+  const io=duplicateIo();let closed=null,calls=0
+  io.closeClaim=(n)=>{closed=n}
+  // First read proves #7 is the authority; the second read shows the PR now
+  // carrying the DUPLICATE's own version instead.
+  io.getPrFiles=()=>{calls+=1;return calls===1?[{filename:'supabase/migrations/20260814200007_add_bridges.sql',status:'added'}]:[{filename:'supabase/migrations/20260814209999_add_bridges.sql',status:'added'}]}
+  assert.equal(main(['--release-duplicate-claim','8','--owner','agent-7','--confirm-finished'],NOW,io),2)
+  assert.equal(closed,null)
+  assert.ok(calls>=2,'the pull-request files must be re-read under the mutex before the close')
+  assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+// ISSUE #2448. No close path may claim an expiry sweep that never runs.
+test('every claim-close reason states its own cause and never asserts expiry',()=>{
+  for(const reason of Object.values(CLAIM_CLOSE_REASONS)){
+    assert.doesNotMatch(reason,/[Ee]xpired migration-author lease|guarded cleanup/)
+    assert.match(reason,/No lease expired and no cleanup sweep ran\./)
+  }
+  // Historical recovery still reads pre-repair closures, and now also reads the
+  // truthful explicit-release reason, so it does not start refusing valid ones.
+  assert.equal(RECOVERABLE_CLAIM_CLOSE_REASONS.has(LEGACY_GUARDED_CLEANUP_CLOSE_REASON),true)
+  assert.equal(RECOVERABLE_CLAIM_CLOSE_REASONS.has(CLAIM_CLOSE_REASONS.explicitRelease),true)
+  assert.equal(RECOVERABLE_CLAIM_CLOSE_REASONS.has(CLAIM_CLOSE_REASONS.acquisitionRollback),false)
+})
+
+test('an explicit release states an explicit release, not an expiry sweep',()=>{
+  const io=memoryIo();let reason=null
+  io.openClaims=()=>[{number:7,body:body(['table core.x'],'7')}]
+  io.closeClaim=(n,r)=>{reason=r}
+  assert.equal(main(['--release-claim','7','--owner','agent-7','--confirm-finished'],NOW,io),0)
+  assert.equal(reason,CLAIM_CLOSE_REASONS.explicitRelease)
+})
+
 test('audit reports every malformed claim and exits 2 without becoming unusable',()=>{
   const io=memoryIo();io.openClaims=()=>[{number:1,body:'bad'},{number:2,body:'also bad'}]
   assert.equal(main(['--audit'],NOW,io),2)
@@ -2855,6 +2957,15 @@ test('stranded reviewer queue and silence-release mutexes are recoverable',()=>{
     assert.equal(io.refs.has(MUTEX_REF),false)
   }
 })
+// ISSUE #2454. The duplicate-release path mints its own mutex owner commit, so
+// stale-mutex recovery must recognize that lock kind — otherwise a death between
+// acquire and release wedges every author lane with no sanctioned way out.
+test('stranded duplicate-claim-release mutex is recognized and safely recoverable',()=>{
+  const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:'db-coordination duplicate-claim-release 1f0c3a2e-0000-4000-8000-000000000000',committer:{date:'2026-08-14T19:55:00Z'}})
+  const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
+  assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
 test('stranded claim lease renewal mutex is recognized and safely recoverable',()=>{
   const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:'db-coordination claim-lease-renewal renew-853',committer:{date:'2026-08-14T19:55:00Z'}})
   const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
@@ -5905,4 +6016,26 @@ test('the preview gate excludes the context the guarded merge sets for itself', 
   // so the exclusion above is proven to be narrow rather than a blanket pass.
   const red=new Map([['SQL migration guards','FAILURE'],['Migration author lease','SUCCESS']])
   assert.deepEqual(pendingRequiredContexts(required,red),['SQL migration guards'])
+})
+
+test('#2460 expired recovery works for a claim legitimately expanded beyond its issue scope, and still enforces the subset guarantee',()=>{
+  // A claim that --expand-active-claim-from-pr has already grown holds a STRICT SUPERSET of its
+  // work issue's scope objects. That state is tool-produced and sanctioned, so recovery must not
+  // refuse it on a count-equality test. The guarantee that matters — every object the work issue
+  // names is covered by the claim — is the subset test, and it is unchanged.
+  const f=recovery2177,alreadyExpanded='table coldlion.previously_expanded'
+  const io=expiredPrRecoveryIo(f),superset=[...f.tables,alreadyExpanded]
+  io.claim.body=claimBody({version:f.version,objects:superset,owner:f.owner,branch:f.branch,worktree:f.worktree,expiresAt:new Date('2026-08-14T19:00:00Z')})
+  assert.equal(parseAuthorLease(io.claim.body,NOW).active,false,'fixture lease must already be expired')
+  assert.deepEqual(parseQueueScope(io.workIssue.body).objects,f.tables,'work issue scope must be a strict subset of the claim')
+  const result=recoverExpiredClaimFromPr(recoveryOptions(f),NOW,io),lease=parseAuthorLease(io.claim.body,NOW)
+  assert.deepEqual(result.added,f.children,'recovery must add exactly the uncovered PR objects')
+  assert.deepEqual(lease.objects,[...superset,...f.children].sort())
+  assert.equal(lease.active,true,'recovery must restore a live lease')
+  assert.equal(io.updateCalls,1)
+  // Unchanged precondition: an object the work issue names but the claim does not cover is refused.
+  const missing=expiredPrRecoveryIo(f)
+  missing.workIssue.body=scope('ready','structural','shared-db-orchestrator',2,[...f.tables,'table coldlion.never_claimed'])
+  assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(f),NOW,missing),/do not exactly match the permanent claim objects/)
+  assert.equal(missing.updateCalls,0)
 })

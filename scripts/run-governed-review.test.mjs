@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { runGovernedReview, verdictFromOutput, neutraliseVerdictLine, extraVerdictLines, PRESERVED_HEADER } from './run-governed-review.mjs'
+import { runGovernedReview, wrapperVerdictContractArgs, verdictFromOutput, neutraliseVerdictLine, extraVerdictLines, PRESERVED_HEADER } from './run-governed-review.mjs'
 import { anyVerdictFor } from './lib/review-verdict.mjs'
 
 const options={issue:1824,pr:2000,headSha:'a'.repeat(40),reviewer:'glm-5.3',wrapper:'ai-glm',worktree:'C:/review',slot:1,wrapperArgs:['review']}
@@ -200,4 +200,63 @@ test('issue 2207: the preserved-findings header is inert on its own',()=>{
   assert.deepEqual(extraVerdictLines(PRESERVED_HEADER),[],'the header carries no line a verdict parser would read as a decision')
   assert.equal(verdictFromOutput(PRESERVED_HEADER,sha),null,'the header is not read as a verdict by the runner')
   assert.equal(anyVerdictFor([{author_association:'OWNER',body:PRESERVED_HEADER}],sha),false,'the header is not read as a verdict by the shared consumer predicate')
+})
+
+test('ai-gemini governed reviews are given the head under review as their verdict contract',()=>{
+  const head='c'.repeat(40)
+  assert.deepEqual(wrapperVerdictContractArgs('ai-gemini',['new','sess','--prompt','x'],head),['new','--governed-verdict',head,'sess','--prompt','x'])
+  assert.deepEqual(wrapperVerdictContractArgs('C:/tools/ai-gemini.cmd',['ask','sess'],head),['ask','--governed-verdict',head,'sess'])
+})
+
+test('other wrappers keep their arguments untouched',()=>{
+  assert.deepEqual(wrapperVerdictContractArgs('ai-glm',['review'],'d'.repeat(40)),['review'])
+})
+
+test('a caller-supplied gemini verdict head must match the head under review',()=>{
+  const head='e'.repeat(40)
+  assert.deepEqual(wrapperVerdictContractArgs('ai-gemini',['new','--governed-verdict',head,'sess'],head),['new','--governed-verdict',head,'sess'])
+  assert.throws(()=>wrapperVerdictContractArgs('ai-gemini',['new','--governed-verdict','f'.repeat(40),'sess'],head),/does not match the head under review/)
+})
+
+test('a gemini review that does not start with a subcommand is refused',()=>{
+  assert.throws(()=>wrapperVerdictContractArgs('ai-gemini',['--prompt','x'],'a'.repeat(40)),/new or ask subcommand/)
+})
+
+test('the injected contract reaches the spawned gemini wrapper',()=>{
+  const head='a'.repeat(40),seen=[]
+  const spawn=(command,args)=>{seen.push([command,args]);return command==='gh'?{status:0,stdout:JSON.stringify({html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-1'})}:{status:0,stdout:`Findings.
+VERDICT: APPROVE ${head}`}}
+  runGovernedReview({...options,reviewer:'gemini-3.8-flash-high',wrapper:'ai-gemini',wrapperArgs:['new','sess','--prompt','x']},{spawn,resolve:(name)=>name,preflight:()=>{},record:()=>({ref:'refs/db-review-verdicts/x',sha:'b'.repeat(40)})})
+  assert.deepEqual(seen[0][1],['new','--governed-verdict',head,'sess','--prompt','x'])
+})
+
+test('every spelling of a caller-supplied gemini verdict head is checked',()=>{
+  const head='e'.repeat(40),other='f'.repeat(40)
+  assert.deepEqual(wrapperVerdictContractArgs('ai-gemini',['new','--governed-verdict='+head,'sess'],head),['new','--governed-verdict='+head,'sess'])
+  assert.throws(()=>wrapperVerdictContractArgs('ai-gemini',['new','--governed-verdict='+other,'sess'],head),/does not match the head under review/)
+  assert.throws(()=>wrapperVerdictContractArgs('ai-gemini',['new','--governed-verdict',head,'sess','--governed-verdict',other],head),/does not match the head under review/)
+})
+
+test('the gemini wrapper is recognised through path form, extension and case',()=>{
+  const head='a'.repeat(40)
+  for(const wrapper of [String.raw`C:\\tools\\AI-Gemini.CMD`,'/usr/local/bin/ai-gemini','ai-gemini.exe'])assert.deepEqual(wrapperVerdictContractArgs(wrapper,['new','sess'],head),['new','--governed-verdict',head,'sess'])
+  for(const wrapper of ['ai-gemini-review','my-ai-gemini','ai-geminix'])assert.deepEqual(wrapperVerdictContractArgs(wrapper,['new','sess'],head),['new','sess'])
+})
+
+test('a mismatched gemini verdict head stops the review before the wrapper runs',()=>{
+  const head='a'.repeat(40),seen=[]
+  assert.throws(()=>runGovernedReview({...options,reviewer:'gemini-3.8-flash-high',wrapper:'ai-gemini',wrapperArgs:['new','--governed-verdict','f'.repeat(40),'sess']},{spawn:(c)=>{seen.push(c);return{status:0,stdout:''}},resolve:(name)=>name,preflight:()=>{},record:()=>{throw new Error('must not record')}}),/does not match the head under review/)
+  assert.deepEqual(seen,[])
+})
+
+test('the gemini path still preflights, then spawns, then records the head under review',()=>{
+  const head='a'.repeat(40),order=[],recorded=[]
+  const spawn=(command,args)=>{order.push(command==='gh'?'findings':'spawn');return command==='gh'?{status:0,stdout:JSON.stringify({html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-1'})}:{status:0,stdout:`Findings.
+VERDICT: APPROVE ${head}`}}
+  runGovernedReview({...options,reviewer:'gemini-3.8-flash-high',wrapper:'ai-gemini',wrapperArgs:['new','sess']},{spawn,resolve:(name)=>name,preflight:()=>{order.push('preflight')},record:(input)=>{order.push('record');recorded.push(input);return{ref:'refs/db-review-verdicts/x',sha:'b'.repeat(40)}}})
+  assert.equal(order[0],'preflight','preflight runs before the wrapper is spawned')
+  assert.equal(order[1],'spawn')
+  assert.equal(order.indexOf('record'),order.length-1,'the verdict is recorded last')
+  assert.equal(recorded.length,1)
+  assert.equal(recorded[0].headSha,head,'the recorded head is the head under review, not one the wrapper chose')
 })

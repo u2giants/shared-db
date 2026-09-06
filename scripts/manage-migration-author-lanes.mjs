@@ -152,6 +152,8 @@ export const REVIEWERS = Object.freeze([
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-codex-review: codex exec --sandbox read-only over the sandbox copy' } },
   { name:'deepseek-chat', wrapper:'ai-deepseek-agent', readsRepository:false,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-deepseek-agent: HTTP chat completions only; --worktree sets a spawn cwd it never uses' } },
+  { name:'gemini-3.8-flash-high', wrapper:'ai-gemini', readsRepository:true,
+    readsRepositoryVerified:{ date:'2026-09-06', evidence:'ai-devops/bin/ai-gemini: disposable sandbox copy of the checkout under --sandbox with a byte inventory; the live re-qualification review of merged commit 99fbefcb cited specific file lines from it' } },
 ])
 // Keep REVIEWERS as the historical evidence registry. Paused providers remain
 // readable forever, but only ACTIVE_REVIEWERS can receive new work.
@@ -224,15 +226,27 @@ export const REVIEWERS = Object.freeze([
 // any Muse failure, and never record a bare "incomplete" from this wrapper without
 // having read the raw provider stream.
 //
-// NOT ADDED, deliberately: 'gemini-3.7-flash-high'. `ai-gemini doctor` passes, so the
-// install is sound, but two attempts produced `no usable Gemini verdict` and then a
-// bare `PASS` with an EMPTY report. Two attempts is thin evidence and an empty report
-// is the worst possible failure mode for a review gate. Retry only after someone
-// establishes why the report comes back empty. This supersedes the narrower #1203.
+// ADDED 2026-09-06 (ai-devops issue #285): 'gemini-3.8-flash-high'. It was held out
+// because `ai-gemini doctor` passed while two live attempts produced `no usable
+// Gemini verdict` and then a bare `PASS` with an EMPTY report -- the worst failure
+// mode for a review gate, because a decision token with no analysis behind it is
+// indistinguishable from a real approval. The hold is lifted on evidence, not on
+// hope: `ai-review-preflight qualify gemini` now records a live safety
+// qualification bound to wrapper sha256, agy 1.1.27 and model gemini-3.8-flash-high,
+// and a live review of merged commit 99fbefcb returned a well-formed
+// `VERDICT APPROVE 99fbefcb4cf3388a3d46e77a2fdddb1f06bd25a1` line above 3,137
+// characters of real analysis citing specific lines. The empty-report mode is also
+// now caught rather than trusted: ai-devops `bin/ai-review-lifecycle` converts any
+// APPROVE or REJECT whose report carries no substantive analysis into BLOCKED
+// (`empty-report`), for every provider. Evidence:
+// ai-devops tests/verification/reviewer-usable-reconciliation/.
 //
 // ROTATION SLOTS. 'glm-5.3' still occupies the slot 'glm-5.2' held. Muse was
 // APPENDED, so it took the slot kimi-k3's pause vacated rather than displacing
 // anyone.
+// 'gemini-3.8-flash-high' was likewise APPENDED to the end of REVIEWERS, so no
+// existing name changes position and no in-flight sequence is reassigned out of
+// order. It only adds capacity.
 //
 // KIMI-K3 UNPAUSED, 2026-08-25 (owner instruction, with the lane cap raise to
 // five). It returns to its ORIGINAL position in REVIEWERS, so the rotation is
@@ -1194,6 +1208,26 @@ export function assertReviewerDrawIsWarranted(pr,io=githubIo){
   throw new LaneError(`PR #${pr} is a documents-only change (${verdict.reason}), so it does not draw from the database reviewer pool (#2102). Every automated check still runs and it still merges through the guarded merge lane; the merge gate does not require a reviewer verdict for it. Rulebook files -- AGENTS.md, skills, plan_*.md -- are never documents for this purpose and would have been drawn for.`)
 }
 
+// ISSUE #2448 — a close comment must state the cause that actually ran.
+// Every path that closes a claim names its own mechanism; nothing claims an
+// expiry sweep, because no expiry sweep exists (`--cleanup-stale` closes
+// nothing). The legacy string is retained ONLY so historical recovery can still
+// read claims that were closed before this repair.
+export const LEGACY_GUARDED_CLEANUP_CLOSE_REASON = 'Expired migration-author lease closed by guarded cleanup. Its migration version remains unavailable.'
+export const CLAIM_CLOSE_REASONS = {
+  acquisitionRollback: 'Migration-author claim closed by acquisition rollback: the coordination mutex was lost before this newly created claim could be confirmed. No lease expired and no cleanup sweep ran. Its migration version remains unavailable.',
+  explicitRelease: 'Migration-author claim closed by an explicit owner-confirmed release (--release-claim). No lease expired and no cleanup sweep ran. Its migration version remains unavailable.',
+  duplicateRelease: 'Duplicate migration-author claim closed by an explicit owner-confirmed duplicate release (--release-duplicate-claim), proved against live GitHub state: another open claim on the same branch holds the migration version that the single open pull request on that branch actually uses. No lease expired and no cleanup sweep ran. Its migration version remains unavailable.',
+}
+// A closed claim may be recovered only when its close comment records a
+// deliberate, owner-confirmed release (or the pre-repair legacy string that
+// such releases used to post). A rollback close is not recoverable.
+export const RECOVERABLE_CLAIM_CLOSE_REASONS = new Set([LEGACY_GUARDED_CLEANUP_CLOSE_REASON, CLAIM_CLOSE_REASONS.explicitRelease])
+function requireClaimCloseReason(reason) {
+  if (typeof reason !== 'string' || !reason.trim()) throw new LaneError('closing a claim requires an exact stated reason')
+  return reason
+}
+
 export const githubIo = {
   enableReviewerQueue:true,
   enableReviewerSilence:true,
@@ -1556,7 +1590,7 @@ export const githubIo = {
   commentIssue(number, body) { gh(['issue','comment',String(number),'--repo',REPO,'--body',body]) },
   issueComments(number) { return ghPaginated(`repos/${REPO}/issues/${number}/comments?per_page=100`).map((c)=>({ body: c.body })) },
   closeIssue(number) { gh(['issue','close',String(number),'--repo',REPO]) },
-  closeClaim(number) { gh(['issue', 'close', String(number), '--repo', REPO, '--comment', 'Expired migration-author lease closed by guarded cleanup. Its migration version remains unavailable.']) },
+  closeClaim(number, reason) { gh(['issue', 'close', String(number), '--repo', REPO, '--comment', requireClaimCloseReason(reason)]) },
   reversionFiles(worktree,oldVersion) {
     let referenced=[];const riskGatePath=['scripts','production_business_risk_gate.py'].join('/')
     try{referenced=execFileSync('git',['-C',worktree,'grep','-l',oldVersion,'--','supabase/migrations','supabase/tests',riskGatePath,'docs'],{encoding:'utf8'}).trim().split(/\r?\n/).filter(Boolean)}
@@ -1907,7 +1941,7 @@ export function recoverStaleAuthorMutex({ expectedSha, confirmStale, serializedR
     const message=commit?.message ?? commit?.commit?.message ?? ''
     const dateText=commit?.committer?.date ?? commit?.commit?.committer?.date
     const acquiredAt=new Date(dateText)
-    if(!/^db-coordination (?:author-acquisition|author-capacity-relinquish|author-capacity-resume|preview|merge|production|claim-release|claim-split-recovery|claim-object-expansion|claim-reversion|claim-version-supersession|claim-lease-renewal|expired-claim-recovery|reviewer-assignment-lock|reviewer-replacement-lock|reviewer-queue-lock|reviewer-silence-release-lock|reviewer-failure(?:-replacement)?|reviewer-index-cutover-activation-audit)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
+    if(!/^db-coordination (?:author-acquisition|author-capacity-relinquish|author-capacity-resume|preview|merge|production|claim-release|duplicate-claim-release|claim-split-recovery|claim-object-expansion|claim-reversion|claim-version-supersession|claim-lease-renewal|expired-claim-recovery|reviewer-assignment-lock|reviewer-replacement-lock|reviewer-queue-lock|reviewer-silence-release-lock|reviewer-failure(?:-replacement)?|reviewer-index-cutover-activation-audit)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
     if(Number.isNaN(acquiredAt.valueOf()))throw new LaneError('refusing recovery: mutex owner time is unreadable')
     const age=now-acquiredAt
     if(age<minAgeMs)throw new LaneError(`refusing recovery: mutex is only ${Math.max(0,Math.floor(age/1000))} seconds old`)
@@ -4386,7 +4420,7 @@ export function acquireAuthorLane(options, now = new Date(), io = githubIo) {
     catch(error) {
       const number=/\/(\d+)\/?$/.exec(String(url))?.[1]
       if(!number)throw new LaneError(`lost mutex ownership after claim creation and could not identify the claim to close: ${error.message}`)
-      io.closeClaim(number)
+      io.closeClaim(number, CLAIM_CLOSE_REASONS.acquisitionRollback)
       throw error
     }
     return { version: reservation.version, claim: url, expiresAt: expiresAt.toISOString(), requestId }
@@ -4671,7 +4705,7 @@ export function recoverExpiredClaimFromPr(options, now = new Date(), io = github
     if(lease.owner!==options.owner||lease.branch!==options.branch||lease.worktree!==options.worktree)throw new LaneError('claim owner, branch, or worktree mismatch')
     if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError('permanent version reservation is unreadable')
     const workIssue=io.getIssue(options.issue)
-    renewalIssueScope(workIssue,lease,[Number(options.issue)])
+    renewalIssueScope(workIssue,lease,[Number(options.issue)],{allowClaimSuperset:true})
     const pr=io.getPr(options.pr)
     if(pr?.state!=='open'||pr.head?.ref!==options.branch||pr.head?.sha!==options.headSha)throw new LaneError('open pull request branch or exact head mismatch')
     const fileVersions=migrationVersions(io.getPrFiles(options.pr))
@@ -4692,7 +4726,7 @@ export function recoverExpiredClaimFromPr(options, now = new Date(), io = github
     if(freshWorkIssue?.state!==workIssue?.state||freshWorkIssue?.body!==workIssue?.body)throw new LaneError('recovery issue changed concurrently')
     if(freshClaim?.state!==before.state||freshClaim?.body!==before.body||freshClaim?.title!==before.title)throw new LaneError('claim changed concurrently during expired recovery')
     if(freshPr?.state!==pr.state||freshPr?.head?.ref!==pr.head.ref||freshPr?.head?.sha!==pr.head.sha)throw new LaneError('pull request changed concurrently during expired recovery')
-    renewalIssueScope(freshWorkIssue,lease,[Number(options.issue)])
+    renewalIssueScope(freshWorkIssue,lease,[Number(options.issue)],{allowClaimSuperset:true})
     requireOwnedRef(MUTEX_REF,ownerSha,io)
     possiblyChanged=true;io.updateIssue(options.claim,{body:expectedBody})
     requireOwnedRef(MUTEX_REF,ownerSha,io)
@@ -4812,7 +4846,7 @@ export function recoverSameOwnerSplit(options, now = new Date(), io = githubIo) 
     if(releasedBefore?.state!=='closed'||activeBefore?.state!=='open')throw new LaneError('split recovery requires one closed original claim and one open active claim')
     if(workstreamKey(releasedBefore.title)!=='#853/#868'||workstreamKey(activeBefore.title)!=='#853/#868')throw new LaneError('claims do not belong to the pinned #853/#868 workstream')
     const closeComments=io.getIssueComments(options.releasedClaim)
-    if(closeComments.at(-1)?.body!=='Expired migration-author lease closed by guarded cleanup. Its migration version remains unavailable.')throw new LaneError('closed claim does not have the exact guarded-release reason')
+    if(!RECOVERABLE_CLAIM_CLOSE_REASONS.has(closeComments.at(-1)?.body))throw new LaneError('closed claim does not have the exact guarded-release reason')
     const released=parseAuthorLease(releasedBefore.body,now),active=parseAuthorLease(activeBefore.body,now)
     if(released.legacy||active.legacy||released.owner!==active.owner)throw new LaneError('claims do not have the same exact manager owner')
     if(!released.active||!active.active)throw new LaneError('split recovery requires both exact leases to remain unexpired')
@@ -5241,6 +5275,7 @@ function parseArgs(argv) {
     else if (a === '--reviewer-preflight') out.reviewerPreflight = true
     else if (a === '--cleanup-stale') out.cleanup = true
     else if (a === '--release-claim') out.releaseClaim = next(i), i++
+    else if (a === '--release-duplicate-claim') out.releaseDuplicateClaim = next(i), i++
     else if (a === '--confirm-finished') out.confirmFinished = true
     else if (a === '--recover-author-mutex') out.recoverMutex = true
     else if (a === '--recover-same-owner-split') out.recoverSplit = true
@@ -5480,7 +5515,59 @@ export function main(argv, now = new Date(), io = githubIo) {
         if(lease.owner!==o.owner)throw new LaneError(`claim #${o.releaseClaim} belongs to a different owner`)
         if((io.openPulls?.() ?? io.prSources()).some((pr)=>(pr.head?.ref ?? pr.branch)===lease.branch))throw new LaneError(`claim branch ${lease.branch} still has an open pull request`)
         requireOwnedRef(MUTEX_REF,ownerSha,io)
-        io.closeClaim(claim.number)
+        io.closeClaim(claim.number, CLAIM_CLOSE_REASONS.explicitRelease)
+      } finally { if(io.readRef(MUTEX_REF)===ownerSha)releaseOwnedRef(MUTEX_REF,ownerSha,io) }
+      return 0
+    }
+    // ISSUE #2454 — release a DUPLICATE author claim on a branch that
+    // legitimately has an open PR. The ordinary --release-claim guard stays
+    // exactly as it is: it cannot tell "the" claim for a branch from "a"
+    // duplicate, and widening it would let real in-flight work be released.
+    // Instead every precondition below is PROVED from live GitHub state, and
+    // there is no caller-supplied override: the tool itself must establish
+    // that the claim being closed is not the authority for the branch.
+    if (o.releaseDuplicateClaim) {
+      if (!o.confirmFinished || !o.owner) throw new LaneError('--release-duplicate-claim requires exact --owner and --confirm-finished')
+      const requestId=randomUUID(), ownerSha=io.makeOwnerCommit(`db-coordination duplicate-claim-release ${requestId}`)
+      acquireMutex(ownerSha,io)
+      try {
+        const fresh=io.openClaims(), claim=fresh.find((x)=>String(x.number)===String(o.releaseDuplicateClaim))
+        if(!claim)throw new LaneError(`claim #${o.releaseDuplicateClaim} is not open`)
+        const lease=parseAuthorLease(claim.body,now)
+        if(lease.legacy)throw new LaneError(`claim #${claim.number} is a legacy claim and cannot be proved to be a duplicate`)
+        if(lease.owner!==o.owner)throw new LaneError(`claim #${claim.number} belongs to a different owner`)
+        // (1) at least one OTHER open non-legacy claim declares the same branch
+        const siblings=fresh.filter((x)=>String(x.number)!==String(claim.number))
+          .map((x)=>({claim:x,lease:parseAuthorLease(x.body,now)}))
+          .filter((row)=>!row.lease.legacy&&row.lease.branch===lease.branch)
+        if(siblings.length===0)throw new LaneError(`claim #${claim.number} is the only open claim on branch ${lease.branch}; there is no duplicate to release`)
+        // (2)+(3) are proved from a LIVE read of the branch's open pull request
+        // and its files. The read is repeated under the mutex immediately before
+        // the close, so a push landing between the two reads cannot let a stale
+        // snapshot stand in as the authority proof.
+        const provePullRequestAuthority=()=>{
+          const pulls=((io.openPulls?.() ?? io.prSources())).filter((row)=>(row.head?.ref ?? row.branch)===lease.branch)
+          if(pulls.length!==1)throw new LaneError(`branch ${lease.branch} must have exactly one open pull request to prove which claim is the authority; found ${pulls.length}`)
+          const pr=pulls[0], versions=[...new Set(migrationVersions(io.getPrFiles(pr.number)))]
+          if(versions.length===0)throw new LaneError(`open pull request #${pr.number} changes no migration file, so no authority claim can be proved`)
+          // the claim being released must NOT hold a version the PR uses
+          if(versions.includes(lease.version))throw new LaneError(`claim #${claim.number} holds migration version ${lease.version}, which open pull request #${pr.number} uses; it is the authority claim for branch ${lease.branch}, not a duplicate`)
+          // exactly one OTHER open claim on the branch DOES hold such a version
+          const authority=siblings.filter((row)=>versions.includes(row.lease.version))
+          if(authority.length!==1)throw new LaneError(`exactly one other open claim on branch ${lease.branch} must hold a migration version used by open pull request #${pr.number}; found ${authority.length}`)
+          return {pr,versions,authority}
+        }
+        const first=provePullRequestAuthority()
+        // (4) owner matched above, and the mutex is still ours at the write
+        requireOwnedRef(MUTEX_REF,ownerSha,io)
+        // (5) re-prove after the ownership check, against a fresh read, and
+        // refuse if the branch's pull request or its authority claim moved.
+        const proof=provePullRequestAuthority()
+        if(String(proof.pr.number)!==String(first.pr.number)||String(proof.authority[0].claim.number)!==String(first.authority[0].claim.number)||proof.authority[0].lease.version!==first.authority[0].lease.version)throw new LaneError(`branch ${lease.branch} changed while the duplicate release was being proved; nothing was closed`)
+        requireOwnedRef(MUTEX_REF,ownerSha,io)
+        io.closeClaim(claim.number, CLAIM_CLOSE_REASONS.duplicateRelease)
+        const {pr,authority}=proof
+        console.error(`Closed duplicate claim #${claim.number} on branch ${lease.branch}. Authority claim #${authority[0].claim.number} holds ${authority[0].lease.version}, the version open pull request #${pr.number} uses. The duplicate's migration version ${lease.version} remains permanently reserved.`)
       } finally { if(io.readRef(MUTEX_REF)===ownerSha)releaseOwnedRef(MUTEX_REF,ownerSha,io) }
       return 0
     }
