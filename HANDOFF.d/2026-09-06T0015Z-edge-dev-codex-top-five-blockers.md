@@ -1,13 +1,13 @@
 ---
-issue: 771
+issue: 770
 status: OPEN
 owner: codex/top-five-blockers
 ---
 
 # Session handoff — top five shared-db blockers
 
-Covers issues 771, 770, 810, 1031 and 1090. The frontmatter carries 771 because the
-handoff contract requires a single bare issue number.
+Covers issues 771, 770, 810, 1031 and 1090. The frontmatter carries 770 because the
+handoff contract requires a single bare issue number; 771 and 810 are already closed.
 
 ## 0. Owner decisions required
 
