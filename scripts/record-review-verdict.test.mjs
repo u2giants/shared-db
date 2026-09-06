@@ -73,3 +73,57 @@ test('a verdict from a reviewer that does read the repository still records (#20
   assert.equal(recorded.verdict,'APPROVE')
   assert.equal(io.commits.get(recorded.sha).parents[0].sha,assignmentSha)
 })
+
+// #2464. THE CREATE SUCCEEDED, SO THE READBACK MUST BE ASKED UNTIL IT CAN ANSWER.
+// GitHub's create-ref response can arrive before the ref is visible to a
+// following GET. Asked exactly once, that transient absence was reported as
+// "create-only verdict readback disagrees with the created object; this tuple is
+// permanently refused" -- and the runner then voided the findings comment whose
+// digest the just-created artifact records, burning the tuple. On PR #2409 that
+// fired on four consecutive rounds while the APPROVE artifact sat in the
+// namespace the whole time.
+test('a create-only verdict survives a transient absent readback after a successful create (#2464)',()=>{
+  const io=ioFixture()
+  const real=io.readRef
+  let stale=2
+  io.wait=()=>{}
+  io.readRef=(ref)=>{
+    if(ref.startsWith('refs/db-review-verdict')&&stale>0){stale--;return null}
+    return real(ref)
+  }
+  const recorded=recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io)
+  assert.equal(stale,0)
+  assert.equal(recorded.verdict,'APPROVE')
+  assert.equal(io.refs.get(recorded.ref),recorded.sha)
+})
+
+// A readback that never catches up still refuses -- the guarantee is not weakened
+// -- but the refusal now carries the created artifact so no caller can void the
+// comment the artifact's digest was computed over.
+test('a readback that never confirms still refuses, and names the created artifact (#2464)',()=>{
+  const io=ioFixture()
+  io.wait=()=>{}
+  const real=io.readRef
+  io.readRef=(ref)=>ref.startsWith('refs/db-review-verdict')?null:real(ref)
+  let caught=null
+  try{recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io)}catch(error){caught=error}
+  assert.ok(caught,'a readback that never confirms must still refuse')
+  assert.match(caught.message,/readback could not confirm the created object/)
+  assert.ok(caught.verdictArtifactCreated,'the refusal must carry the artifact that WAS created')
+  assert.equal(io.refs.get(caught.verdictArtifactCreated.ref),caught.verdictArtifactCreated.sha)
+})
+
+// An artifact that already exists is validated against ITS OWN findings comment.
+// Validating it against the comment THIS round posted reported "findings digest
+// does not match the durable findings" for a valid artifact, and the runner voided
+// the new comment too -- the cascade that made the tuple unrecoverable.
+test('an existing artifact is validated against its own findings comment, not this round\'s (#2464)',()=>{
+  const io=ioFixture()
+  const first=recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io)
+  const laterRef='https://github.com/u2giants/shared-db/pull/2000#issuecomment-456'
+  const originalFindings=io.readFindings
+  io.readFindings=(url)=>url===laterRef?'A LATER ROUND POSTED A DIFFERENT BODY':originalFindings(url)
+  const second=recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef:laterRef},io)
+  assert.equal(second.sha,first.sha)
+  assert.equal(second.findings_ref,findingsRef)
+})

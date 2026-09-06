@@ -2011,8 +2011,19 @@ export function recordReviewVerdict(options,io=githubIo){
   const ref=verdictRef({issue,pr,headSha,slot,replacementSequence})
   const existing=io.readRef(ref)
   if(existing){
-    const validated=validateVerdictArtifact({ref,sha:existing,commit:io.getCommit(existing),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
-    if(JSON.stringify(validated.verdict)!==JSON.stringify(verdict))throw new LaneError('a different create-only verdict already exists')
+    // #2464. An artifact that ALREADY EXISTS is validated against ITS OWN
+    // findings comment, never against the comment this round just posted. The
+    // artifact is immutable and records the `findings_ref` it was bound to; a
+    // re-run posts a NEW comment, so digesting this round's body against a
+    // previous round's artifact reported "findings digest does not match the
+    // durable findings" for a perfectly valid artifact and burned the tuple.
+    // The create-race path below already read the winner's own findings; this
+    // path now does the same.
+    const existingCommit=io.getCommit(existing)
+    const existingRecord=parseVerdictCommit(existingCommit)
+    const existingBody=io.readFindings(existingRecord.findings_ref)
+    const validated=validateVerdictArtifact({ref,sha:existing,commit:existingCommit,findingsBody:existingBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
+    if(validated.verdict!==verdict)throw new LaneError('a different create-only verdict already exists')
     return validated
   }
   const sha=io.makeReviewVerdictCommit(formatVerdictMessage(record),assignmentSha)
@@ -2025,8 +2036,32 @@ export function recordReviewVerdict(options,io=githubIo){
     if(validated.verdict!==verdict)throw new LaneError('a contradictory create-only verdict won the race; this tuple is permanently refused')
     return validated
   }
-  if(io.readRef(ref)!==sha)throw new LaneError('create-only verdict readback disagrees with the created object; this tuple is permanently refused')
-  return validateVerdictArtifact({ref,sha,commit:io.getCommit(sha),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
+  // #2464. THE CREATE SUCCEEDED. Everything from here on is confirmation of an
+  // object that already exists durably, so two rules apply.
+  //
+  // FIRST, the readback is retried. GitHub's create-ref response can arrive
+  // before the new custom ref is visible to a following GET -- the eventual
+  // consistency `readRefAfterWrite` was written for. Asked exactly once, a
+  // successful create followed by a transient 404 was indistinguishable from a
+  // create that never landed, and it refused a real APPROVE four rounds running
+  // on PR #2409 while `refs/db-review-verdicts/2334-2409-2835169...-slot2` sat
+  // there holding the APPROVE payload. A DIFFERENT sha still fails closed on the
+  // first read, exactly as before: this is not a weaker check, it is the same
+  // check asked until the API can answer it.
+  //
+  // SECOND, any failure past this point is marked `verdictArtifactCreated`. The
+  // runner's failure path voids the findings comment, which permanently breaks
+  // the `findings_digest` recorded INSIDE the artifact that was just written --
+  // destroying the evidence for a verdict that exists and is valid. A caller
+  // that sees this marker must report loudly and STOP, touching nothing.
+  try{
+    const seen=readRefAfterWrite(ref,sha,io)
+    if(seen!==sha)throw new LaneError(`create-only verdict readback could not confirm the created object at ${ref} (read ${seen===null?'absent':seen}, expected ${sha}); the artifact WAS created and must not be voided`)
+    return validateVerdictArtifact({ref,sha,commit:io.getCommit(sha),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
+  }catch(error){
+    error.verdictArtifactCreated={ref,sha}
+    throw error
+  }
 }
 
 // THE EXACT RECOVERY ROUTE FOR A NON-READING REVIEWER (#2079).
