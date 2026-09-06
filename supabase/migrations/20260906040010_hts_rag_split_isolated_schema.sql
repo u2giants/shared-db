@@ -439,30 +439,59 @@ create table if not exists hts_rag_split.hts_rag_product_family_allowlist (
 -- =====================================================================================
 -- Security posture, applied to exactly the nine tables this migration creates.
 -- =====================================================================================
-do $$
-declare
-  v_table text;
-begin
-  foreach v_table in array array[
-    'hts_rag_determinations',
-    'hts_rag_extraction_jobs',
-    'hts_rag_precedents',
-    'hts_rag_precedent_rulings',
-    'hts_rag_product_examples',
-    'hts_rag_product_family_allowlist',
-    'hts_rag_provider_responses',
-    'hts_rag_review_events',
-    'hts_rag_rulings'
-  ]
-  loop
-    execute format('alter table hts_rag_split.%I enable row level security', v_table);
-    execute format('revoke all on table hts_rag_split.%I from public', v_table);
-    execute format('revoke all on table hts_rag_split.%I from anon', v_table);
-    execute format('revoke all on table hts_rag_split.%I from authenticated', v_table);
-    execute format('grant all on table hts_rag_split.%I to service_role', v_table);
-  end loop;
-end
-$$;
+alter table hts_rag_split.hts_rag_determinations enable row level security;
+revoke all on table hts_rag_split.hts_rag_determinations from public;
+revoke all on table hts_rag_split.hts_rag_determinations from anon;
+revoke all on table hts_rag_split.hts_rag_determinations from authenticated;
+grant all on table hts_rag_split.hts_rag_determinations to service_role;
+
+alter table hts_rag_split.hts_rag_extraction_jobs enable row level security;
+revoke all on table hts_rag_split.hts_rag_extraction_jobs from public;
+revoke all on table hts_rag_split.hts_rag_extraction_jobs from anon;
+revoke all on table hts_rag_split.hts_rag_extraction_jobs from authenticated;
+grant all on table hts_rag_split.hts_rag_extraction_jobs to service_role;
+
+alter table hts_rag_split.hts_rag_precedents enable row level security;
+revoke all on table hts_rag_split.hts_rag_precedents from public;
+revoke all on table hts_rag_split.hts_rag_precedents from anon;
+revoke all on table hts_rag_split.hts_rag_precedents from authenticated;
+grant all on table hts_rag_split.hts_rag_precedents to service_role;
+
+alter table hts_rag_split.hts_rag_precedent_rulings enable row level security;
+revoke all on table hts_rag_split.hts_rag_precedent_rulings from public;
+revoke all on table hts_rag_split.hts_rag_precedent_rulings from anon;
+revoke all on table hts_rag_split.hts_rag_precedent_rulings from authenticated;
+grant all on table hts_rag_split.hts_rag_precedent_rulings to service_role;
+
+alter table hts_rag_split.hts_rag_product_examples enable row level security;
+revoke all on table hts_rag_split.hts_rag_product_examples from public;
+revoke all on table hts_rag_split.hts_rag_product_examples from anon;
+revoke all on table hts_rag_split.hts_rag_product_examples from authenticated;
+grant all on table hts_rag_split.hts_rag_product_examples to service_role;
+
+alter table hts_rag_split.hts_rag_product_family_allowlist enable row level security;
+revoke all on table hts_rag_split.hts_rag_product_family_allowlist from public;
+revoke all on table hts_rag_split.hts_rag_product_family_allowlist from anon;
+revoke all on table hts_rag_split.hts_rag_product_family_allowlist from authenticated;
+grant all on table hts_rag_split.hts_rag_product_family_allowlist to service_role;
+
+alter table hts_rag_split.hts_rag_provider_responses enable row level security;
+revoke all on table hts_rag_split.hts_rag_provider_responses from public;
+revoke all on table hts_rag_split.hts_rag_provider_responses from anon;
+revoke all on table hts_rag_split.hts_rag_provider_responses from authenticated;
+grant all on table hts_rag_split.hts_rag_provider_responses to service_role;
+
+alter table hts_rag_split.hts_rag_review_events enable row level security;
+revoke all on table hts_rag_split.hts_rag_review_events from public;
+revoke all on table hts_rag_split.hts_rag_review_events from anon;
+revoke all on table hts_rag_split.hts_rag_review_events from authenticated;
+grant all on table hts_rag_split.hts_rag_review_events to service_role;
+
+alter table hts_rag_split.hts_rag_rulings enable row level security;
+revoke all on table hts_rag_split.hts_rag_rulings from public;
+revoke all on table hts_rag_split.hts_rag_rulings from anon;
+revoke all on table hts_rag_split.hts_rag_rulings from authenticated;
+grant all on table hts_rag_split.hts_rag_rulings to service_role;
 
 -- =====================================================================================
 -- POST-APPLY VERIFICATION -- asserts BEHAVIOUR, not "the statements ran".
@@ -492,16 +521,35 @@ begin
     raise exception 'VERIFY FAILED: schema hts_rag_split does not exist';
   end if;
 
+  -- Emptiness is the property the whole pilot depends on. Static SQL: every one of
+  -- the nine tables is named literally, so this cannot silently skip a table.
+  select sum(n) into v_rows from (
+    select count(*) from hts_rag_split.hts_rag_determinations
+    union all
+    select count(*) from hts_rag_split.hts_rag_extraction_jobs
+    union all
+    select count(*) from hts_rag_split.hts_rag_precedents
+    union all
+    select count(*) from hts_rag_split.hts_rag_precedent_rulings
+    union all
+    select count(*) from hts_rag_split.hts_rag_product_examples
+    union all
+    select count(*) from hts_rag_split.hts_rag_product_family_allowlist
+    union all
+    select count(*) from hts_rag_split.hts_rag_provider_responses
+    union all
+    select count(*) from hts_rag_split.hts_rag_review_events
+    union all
+    select count(*) from hts_rag_split.hts_rag_rulings
+  ) as counts(n);
+  if v_rows <> 0 then
+    raise exception 'VERIFY FAILED: schema hts_rag_split holds % row(s) in total; it must be EMPTY', v_rows;
+  end if;
+
   foreach v_table in array v_expected
   loop
     if to_regclass('hts_rag_split.' || quote_ident(v_table)) is null then
       raise exception 'VERIFY FAILED: hts_rag_split.% does not exist', v_table;
-    end if;
-
-    -- Emptiness is the property the whole pilot depends on.
-    execute format('select count(*) from hts_rag_split.%I', v_table) into v_rows;
-    if v_rows <> 0 then
-      raise exception 'VERIFY FAILED: hts_rag_split.% holds % row(s); this schema must be EMPTY', v_table, v_rows;
     end if;
 
     select count(*) into v_count
