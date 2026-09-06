@@ -135,9 +135,14 @@ export function PropertyMatchReview({ client }: Props) {
       <button className="icon-button" aria-label="Refresh property matches" onClick={() => void load()}><RefreshCw /></button>
     </div>
     <p className="muted">
-      Each row is one DCP Vault Property waiting on a decision about which OPA Property it is.
-      OPA cannot tell Marvel from Disney on its own, so the signed contract evidence shown beside
-      each row is the controlling authority. Nothing here is placed automatically.
+      Three systems name the same property differently, and this screen reconciles them.
+      The heading on each row is the name in the <strong>creative library</strong> (DCP Vault),
+      where the artwork and style guides live. The tick boxes are names in the
+      <strong>submissions system</strong> (OPA), where product approvals are filed. The
+      <strong>signed contract</strong> (K2557) decides which studio the property belongs to,
+      because the submissions system cannot tell Marvel from Disney on its own. Pick the
+      submissions name (or names) that mean the same property as the creative name.
+      Nothing here is placed automatically.
     </p>
     {error && <div className="inline-error" role="alert">{error}</div>}
     {saved && <p className="muted" role="status">{saved}</p>}
@@ -150,20 +155,23 @@ export function PropertyMatchReview({ client }: Props) {
         const reason = (reasons[row.resolution_id] ?? '').trim()
         const state = matchState(row)
         return <article key={row.resolution_id} className="match-row" aria-labelledby={`match-${row.resolution_id}`}>
+          <p className="source-kind">Creative library (DCP Vault)</p>
           <header>
             <h2 id={`match-${row.resolution_id}`}>{row.display_label}</h2>
             <span className={`match-state match-state-${state}`}>{stateLabel[state]}</span>
           </header>
           <p className="muted">{describeMatchState(row)}</p>
           <p className="muted contract-evidence">
-            {row.contract_asserted_studio_code && <>Contract says <strong>{row.contract_asserted_studio_code}</strong>. </>}
-            {row.contract_evidence_reference && <>Evidence: {row.contract_evidence_reference}. </>}
+            {row.contract_asserted_studio_code && <>Signed contract says this is <strong>{row.contract_asserted_studio_code}</strong>. </>}
+            {row.contract_evidence_reference && <>Contract evidence: {row.contract_evidence_reference}. </>}
+            
             <span className="source-id">{row.source_property_id}</span>
           </p>
           {row.prior_approval_status && <p className="muted">
             Previously {row.prior_approval_status} at version {row.prior_decision_version}
             {row.prior_contract_asserted_studio_code && <> as {row.prior_contract_asserted_studio_code}</>}.
           </p>}
+          <p className="source-kind">Submissions system (OPA) — the name product approvals are filed under</p>
           <label className="property-autocomplete">
             <span>Disney Property</span>
             <input
@@ -178,7 +186,7 @@ export function PropertyMatchReview({ client }: Props) {
             />
           </label>
           {picked.length === 0
-            ? <p className="muted">No Disney Property selected.</p>
+            ? <p className="muted">No submissions-system (OPA) Property selected.</p>
             : <ul className="match-candidates">
               {picked.map(id => {
                 const option = propertyOptions.find(candidate => candidate.licensed_property_id === id)

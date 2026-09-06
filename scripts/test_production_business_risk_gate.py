@@ -111,13 +111,79 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         self.assertEqual(sleeps,[1])
 
     def test_non_comment_evidence_read_never_retries(self):
-        calls=[]
-        def runner(*args,**kwargs):
-            calls.append(1); return subprocess.CompletedProcess([],1,"","HTTP 503: unavailable")
-        with self.assertRaisesRegex(RiskGateError,"HTTP 503"):
-            gh_json("repos/u2giants/shared-db/pulls/1108",runner=runner,
-                sleep=lambda _: self.fail("non-comment read slept"))
-        self.assertEqual(len(calls),1)
+        """Issue #2342: pin the retry ALLOWLIST itself, not one example endpoint.
+
+        Rewritten, not deleted. The original asserted a single `pulls/` read did
+        not retry, which stayed green whatever the allowlist grew into -- and the
+        allowlist is the whole policy. Three production applies in a row
+        (33920952504, 33921168245, 33921406952) were stopped by a spurious read,
+        and the tempting repair was to widen retries until nothing spurious could
+        surface. That is the wrong direction: a gate that concludes "absent" only
+        after exhausting a retry budget has made its refusal depend on a timeout.
+        The fix was to stop making the read 112 times (see
+        scripts/lib/github-tree.mjs); retry stays narrow and evidence-based.
+
+        Each endpoint below is checked in BOTH directions -- that the retrying
+        ones really retry, and the single-attempt ones really do not -- so this
+        test fails if the allowlist is widened or narrowed without a decision.
+        """
+        retrying = [
+            # A live owner decision, and the recursive tree read that carries the
+            # producer pin for a whole promotion (#2191). Both are irreducible
+            # single calls with no batched alternative.
+            "repos/u2giants/shared-db/issues/comments/7",
+            "repos/u2giants/shared-db/git/trees/abc123?recursive=1",
+        ]
+        single_attempt = [
+            "repos/u2giants/shared-db/pulls/1108",
+            "repos/u2giants/shared-db/pulls/1108/files?per_page=100",
+            "repos/u2giants/shared-db/commits/abc123/status",
+            "repos/u2giants/shared-db/actions/runs/33920952504",
+            "repos/u2giants/shared-db/git/ref/db-claims/20260816110750",
+        ]
+
+        def counting_runner(calls, stderr):
+            def runner(*args, **kwargs):
+                calls.append(1)
+                return subprocess.CompletedProcess([], 1, "", stderr)
+            return runner
+
+        for endpoint in retrying:
+            with self.subTest(endpoint=endpoint, expected="retries"):
+                calls, sleeps = [], []
+                with self.assertRaisesRegex(RiskGateError, "HTTP 503"):
+                    gh_json(endpoint, runner=counting_runner(calls, "HTTP 503: unavailable"),
+                            sleep=sleeps.append)
+                self.assertEqual(len(calls), 4, "an allowlisted read spends its whole budget")
+                self.assertEqual(sleeps, [1, 2, 4], "and backs off between attempts")
+
+        for endpoint in single_attempt:
+            with self.subTest(endpoint=endpoint, expected="one attempt"):
+                calls = []
+                with self.assertRaisesRegex(RiskGateError, "HTTP 503"):
+                    gh_json(endpoint, runner=counting_runner(calls, "HTTP 503: unavailable"),
+                            sleep=lambda _: self.fail(f"{endpoint} slept"))
+                self.assertEqual(len(calls), 1)
+
+        # A SEMANTIC failure is never retried even on an allowlisted endpoint.
+        # 404 is an ANSWER this repository depends on believing; retrying it
+        # would make an absence proof depend on a timeout, which is fail-open.
+        for endpoint in retrying:
+            for stderr in ("HTTP 404: Not Found", "HTTP 403: Forbidden", "HTTP 422: Unprocessable"):
+                with self.subTest(endpoint=endpoint, stderr=stderr):
+                    calls = []
+                    with self.assertRaises(RiskGateError):
+                        gh_json(endpoint, runner=counting_runner(calls, stderr),
+                                sleep=lambda _: self.fail("a semantic failure slept"))
+                    self.assertEqual(len(calls), 1)
+
+        # And a retry never turns a failure into a pass: the read still fails
+        # CLOSED once the budget is spent. Nothing the gate verifies is relaxed.
+        calls = []
+        with self.assertRaisesRegex(RiskGateError, "GitHub API request failed"):
+            gh_json(retrying[0], runner=counting_runner(calls, "HTTP 503: unavailable"),
+                    sleep=lambda _: None)
+        self.assertEqual(len(calls), 4)
 
     def test_live_owner_comment_permanent_absence_never_retries(self):
         calls=[]

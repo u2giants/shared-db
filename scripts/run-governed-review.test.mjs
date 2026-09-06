@@ -13,6 +13,17 @@ test('adapter with real process payload shapes posts findings and records before
   assert.match(result.body,/NON-AUTHORIZING UNLESS/)
 })
 
+test('adapter forwards a freshly justified doctor skip to reviewer preflight',()=>{
+  let preflightOptions
+  const spawn=(command)=>command==='gh'
+    ?{status:0,stdout:JSON.stringify({html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-124'})}
+    :{status:0,stdout:`Coverage: scripts.\nVERDICT: APPROVE ${options.headSha}`}
+  runGovernedReview({...options,skipDoctor:'true'},{spawn,resolve:(name)=>name,preflight:(row)=>{preflightOptions=row},record:()=>({ref:'refs/db-review-verdicts/x',sha:'b'.repeat(40)})})
+  assert.equal(preflightOptions.skipDoctor,true)
+  runGovernedReview({...options,skipDoctor:'false'},{spawn,resolve:(name)=>name,preflight:(row)=>{preflightOptions=row},record:()=>({ref:'refs/db-review-verdicts/y',sha:'c'.repeat(40)})})
+  assert.equal(preflightOptions.skipDoctor,false)
+})
+
 test('recording failure leaves an explicit durable non-authorizing notice',()=>{
   const posts=[]
   const spawn=(command,args,spawnOptions)=>{if(command!=='gh')return{status:0,stdout:`VERDICT: APPROVE ${options.headSha}`};if(args[2]==='POST')posts.push(JSON.parse(spawnOptions.input).body);return{status:0,stdout:JSON.stringify({id:123,html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-123'})}}

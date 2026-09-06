@@ -100,7 +100,7 @@ jobs:
           # server-side search filter is exactly the eventually-consistent
           # mechanism this guard exists because of: if the dedupe lookup
           # wrongly returns empty, we file a duplicate.
-          EXISTING="$(gh api --paginate "repos/${REPO}/issues?state=open&per_page=100" \
+          EXISTING="$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" api --paginate "repos/${REPO}/issues?state=open&per_page=100" \
             --jq "[.[] | select(.pull_request == null) | select(.title == \"${TITLE}\") | .number] | .[0] // empty")"
 
           if [ -n "${EXISTING}" ]; then
