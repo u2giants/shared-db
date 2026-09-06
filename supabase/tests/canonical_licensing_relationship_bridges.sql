@@ -145,12 +145,36 @@ begin
   -- =========================================================================
   -- 3. Fixtures. Invented rows, rolled back with the transaction.
   -- =========================================================================
-  insert into core.licensor (name, code) values ('ZZ Fixture Licensor 2334', 'ZZ2334')
+  -- core.licensor and core.property carry the exact-column transaction-bound
+  -- licensing write guard (20260817124545). Fixtures use the real guard rather
+  -- than working around it: one authorization row per insert, naming exactly
+  -- the columns that insert changes. Property must be created as 'potential'.
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
+     actor, protected_columns, expires_at)
+  values (pg_backend_pid(), txid_current(), 'core.licensor', 'scrape_consolidation',
+          gen_random_uuid(), repeat('1', 64), 'issue-2334-contract',
+          array['name','code','status'], clock_timestamp() + interval '1 minute');
+  insert into core.licensor (name, code, status)
+    values ('ZZ Fixture Licensor 2334', 'ZZ2334', 'active')
     returning id into v_licensor;
-  insert into core.property (licensor_id, name, code)
-    values (v_licensor, 'ZZ Fixture Property 2334', 'ZZP2334') returning id into v_property;
-  insert into core.property (licensor_id, name, code)
-    values (v_licensor, 'ZZ Fixture Property 2334 B', 'ZZP2334B') returning id into v_property2;
+
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
+     actor, protected_columns, expires_at)
+  values
+    (pg_backend_pid(), txid_current(), 'core.property', 'licensing_review_create',
+     gen_random_uuid(), repeat('2', 64), 'issue-2334-contract',
+     array['licensor_id','name','code','status'], clock_timestamp() + interval '1 minute'),
+    (pg_backend_pid(), txid_current(), 'core.property', 'licensing_review_create',
+     gen_random_uuid(), repeat('3', 64), 'issue-2334-contract',
+     array['licensor_id','name','code','status'], clock_timestamp() + interval '1 minute');
+  insert into core.property (licensor_id, name, code, status)
+    values (v_licensor, 'ZZ Fixture Property 2334', 'ZZP2334', 'potential')
+    returning id into v_property;
+  insert into core.property (licensor_id, name, code, status)
+    values (v_licensor, 'ZZ Fixture Property 2334 B', 'ZZP2334B', 'potential')
+    returning id into v_property2;
   insert into core.character (licensor_id, name)
     values (v_licensor, 'ZZ Fixture Character 2334') returning id into v_character;
   insert into core.style_guide (licensor_id, property_id, name)
