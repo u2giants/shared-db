@@ -2,7 +2,7 @@
 --
 -- core.character_alias, and collision-proof / freshness-aware core.taxonomy_source_ref.
 -- Issue #2355 (structural successor to #1090). Claim issue #2410,
--- reserved version 20260906034550.
+-- reserved version 20260906222338.
 --
 -- WHY THIS EXISTS
 -- ---------------
