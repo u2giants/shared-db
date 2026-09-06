@@ -116,7 +116,10 @@ comment on type core.relationship_evidence_kind is
 -- 2. The guards
 -- ---------------------------------------------------------------------------
 -- All are new objects with novel names, created only to serve the tables below. Each pins
--- its search_path and revokes EXECUTE from every client role (round-3 review hardening).
+-- its search_path and revokes EXECUTE from every client role (round-3 review hardening),
+-- and each is SECURITY DEFINER so the guard can read the catalog-of-record tables the
+-- WRITING role has no SELECT on (round-4 review finding, and the convention every
+-- comparable guard in this repository already follows).
 
 -- 2a. Fail-closed deletion of current support.
 create or replace function core.refuse_delete_of_current_support_edge()
@@ -128,6 +131,17 @@ language plpgsql
 -- below so a signed-in caller cannot invoke the existence probe directly and use it as
 -- an oracle over licensing evidence; firing a trigger does not require the privilege,
 -- so nothing legitimate loses anything.
+--
+-- Round-4 review finding. SECURITY DEFINER, matching the convention of every comparable
+-- guard in this repository (plm.reject_legacy_landing_resolution_write(),
+-- public.sync_asset_effective_tags()). The guard reads catalog-of-record tables that the
+-- WRITING role need not be able to read: service_role holds writes on the dam support-edge
+-- tables but is granted no SELECT on dam.asset or dam.asset_character, so an invoker-rights
+-- guard would fail with permission denied on the ordinary loader path. Widening the grants
+-- instead would hand a write role standing read access it does not otherwise have, so the
+-- definer is the narrower change as well as the conventional one. search_path is pinned
+-- above and EXECUTE is revoked below, which is what makes the definer safe.
+security definer
 set search_path = pg_catalog, pg_temp
 as $$
 begin
@@ -166,6 +180,17 @@ language plpgsql
 -- below so a signed-in caller cannot invoke the existence probe directly and use it as
 -- an oracle over licensing evidence; firing a trigger does not require the privilege,
 -- so nothing legitimate loses anything.
+--
+-- Round-4 review finding. SECURITY DEFINER, matching the convention of every comparable
+-- guard in this repository (plm.reject_legacy_landing_resolution_write(),
+-- public.sync_asset_effective_tags()). The guard reads catalog-of-record tables that the
+-- WRITING role need not be able to read: service_role holds writes on the dam support-edge
+-- tables but is granted no SELECT on dam.asset or dam.asset_character, so an invoker-rights
+-- guard would fail with permission denied on the ordinary loader path. Widening the grants
+-- instead would hand a write role standing read access it does not otherwise have, so the
+-- definer is the narrower change as well as the conventional one. search_path is pinned
+-- above and EXECUTE is revoked below, which is what makes the definer safe.
+security definer
 set search_path = pg_catalog, pg_temp
 as $$
 declare
@@ -227,6 +252,17 @@ language plpgsql
 -- below so a signed-in caller cannot invoke the existence probe directly and use it as
 -- an oracle over licensing evidence; firing a trigger does not require the privilege,
 -- so nothing legitimate loses anything.
+--
+-- Round-4 review finding. SECURITY DEFINER, matching the convention of every comparable
+-- guard in this repository (plm.reject_legacy_landing_resolution_write(),
+-- public.sync_asset_effective_tags()). The guard reads catalog-of-record tables that the
+-- WRITING role need not be able to read: service_role holds writes on the dam support-edge
+-- tables but is granted no SELECT on dam.asset or dam.asset_character, so an invoker-rights
+-- guard would fail with permission denied on the ordinary loader path. Widening the grants
+-- instead would hand a write role standing read access it does not otherwise have, so the
+-- definer is the narrower change as well as the conventional one. search_path is pinned
+-- above and EXECUTE is revoked below, which is what makes the definer safe.
+security definer
 set search_path = pg_catalog, pg_temp
 as $$
 declare
@@ -320,6 +356,17 @@ language plpgsql
 -- below so a signed-in caller cannot invoke the existence probe directly and use it as
 -- an oracle over licensing evidence; firing a trigger does not require the privilege,
 -- so nothing legitimate loses anything.
+--
+-- Round-4 review finding. SECURITY DEFINER, matching the convention of every comparable
+-- guard in this repository (plm.reject_legacy_landing_resolution_write(),
+-- public.sync_asset_effective_tags()). The guard reads catalog-of-record tables that the
+-- WRITING role need not be able to read: service_role holds writes on the dam support-edge
+-- tables but is granted no SELECT on dam.asset or dam.asset_character, so an invoker-rights
+-- guard would fail with permission denied on the ordinary loader path. Widening the grants
+-- instead would hand a write role standing read access it does not otherwise have, so the
+-- definer is the narrower change as well as the conventional one. search_path is pinned
+-- above and EXECUTE is revoked below, which is what makes the definer safe.
+security definer
 set search_path = pg_catalog, pg_temp
 as $$
 declare
@@ -410,8 +457,12 @@ revoke all on function core.assert_canonical_edge_still_supported() from public,
 create or replace function core.require_support_edge_licensor_matches_endpoints()
 returns trigger
 language plpgsql
--- Pinned search_path and revoked EXECUTE for the same reason as the guards above: this
--- function runs dynamic SQL and reads licensing attribution.
+-- Pinned search_path, revoked EXECUTE and SECURITY DEFINER for the same reasons as the
+-- guards above: this function runs dynamic SQL and reads licensing attribution out of the
+-- endpoint entity tables. service_role writes dam.asset_property_source_edge and its three
+-- siblings but is granted no SELECT on dam.asset, so an invoker-rights guard would refuse
+-- every ordinary DAM support-edge write with a permission error (round-4 review finding).
+security definer
 set search_path = pg_catalog, pg_temp
 as $$
 declare

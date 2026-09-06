@@ -9,14 +9,18 @@
 --   * deleting CURRENT support fails closed -- directly, and by cascade from a deleted
 --     endpoint, which is how the three pre-existing ON DELETE CASCADE bridges are covered;
 --   * superseded support does NOT block deletion;
---   * every guard function pins its search_path and is callable by no client role;
+--   * every guard function pins its search_path to EXACTLY 'pg_catalog, pg_temp', is
+--     SECURITY DEFINER, and is callable by no client role;
+--   * the guards work for service_role, the role that actually loads DAM support edges and
+--     that holds no SELECT on dam.asset or dam.asset_character;
 --   * all five bridges and all eight support-edge wirings are pinned by ARGUMENT
 --     VALUE, not by trigger name -- every endpoint column is uuid, so a swapped
 --     pair would otherwise type check and guard the wrong relationship silently;
 --   * repointing a canonical bridge row by UPDATE is held to the same evidence
 --     standard as inserting it;
 --   * a support row's licensor must be its endpoints' licensor, so one licensor's
---     pair can never be filed under another licensor's id.
+--     pair can never be filed under another licensor's id -- enforced as the migration
+--     owner AND as service_role.
 begin;
 
 do $contracts$
@@ -39,6 +43,8 @@ declare
   v_oid         oid;
   v_table       text;
   v_raised      boolean;
+  v_sqlstate    text;
+  v_message     text;
   v_count       integer;
   t             text;
 begin
@@ -128,6 +134,15 @@ begin
   --     unrevoked probe is an existence oracle over licensing evidence that any signed-in
   --     caller could query directly. A trigger fires without the privilege, so revoking it
   --     costs nothing.
+  --
+  --     Round-4 review finding. The search_path assertion below used to accept any value
+  --     beginning 'search_path=', so 'search_path = public' -- which is a settable,
+  --     caller-influenced schema and defeats the whole point of pinning -- would have
+  --     passed it. The EXACT expected value is asserted instead. Each function is also
+  --     required to be SECURITY DEFINER: the guards read catalog-of-record tables the
+  --     writing role has no SELECT on (service_role writes the dam support-edge tables but
+  --     is granted no SELECT on dam.asset or dam.asset_character), so losing the definer
+  --     would make every ordinary DAM loader write fail with a permission error.
   -- =========================================================================
   foreach t in array array[
     'core.refuse_delete_of_current_support_edge()',
@@ -143,9 +158,17 @@ begin
       select 1 from pg_proc
       where oid = to_regprocedure(t)
         and proconfig is not null
-        and exists (select 1 from unnest(proconfig) c where left(c, 12) = 'search_path=')
+        and proconfig @> array['search_path=pg_catalog, pg_temp']
     ) then
-      raise exception '% runs dynamic SQL with no pinned search_path', t;
+      raise exception '% does not pin search_path to exactly ''pg_catalog, pg_temp'' '
+        '(actual proconfig: %)', t,
+        coalesce((select proconfig::text from pg_proc where oid = to_regprocedure(t)), '<null>');
+    end if;
+    if not (select prosecdef from pg_proc where oid = to_regprocedure(t)) then
+      raise exception '% is not SECURITY DEFINER, so it reads the endpoint and bridge tables '
+        'as the WRITING role -- service_role holds no SELECT on dam.asset or '
+        'dam.asset_character, so the guard would fail closed with a permission error on the '
+        'ordinary DAM loader path', t;
     end if;
     if has_function_privilege('public', to_regprocedure(t), 'execute')
        or has_function_privilege('anon', to_regprocedure(t), 'execute')
@@ -758,6 +781,91 @@ begin
   if (select count(*) from core.property_style_guide_source_edge
       where source_system = 'zz_fixture_2334' and source_id = 'sg-1' and is_current) <> 2 then
     raise exception 'the identity key stopped separating one source id across two licensors';
+  end if;
+
+  -- 6c. Round-4 review finding. Every case above writes as the migration owner, which can
+  --     read every table in the database. The role that actually loads DAM support edges in
+  --     production is service_role: it is granted ALL on the dam *_source_edge tables, but it
+  --     holds no SELECT on dam.asset or on the pre-existing dam.asset_character bridge -- the
+  --     schema-wide read grants cover core, not dam. The guards read both. An invoker-rights
+  --     guard would therefore refuse the ordinary loader path with 'permission denied for
+  --     table asset', which is a guard that fails on legitimate work rather than on a bad
+  --     write. The guards are SECURITY DEFINER (asserted structurally at 1b); this exercises
+  --     that decision against real rows, as the real role.
+  --
+  --     Note what a regression looks like here: v_sqlstate is reported, so a 42501 permission
+  --     failure can never be mistaken for the P0001 refusal the guard is supposed to raise.
+
+  -- A legitimate DAM support-edge write as service_role. dam.asset carries no licensor here
+  -- (unattributed, which the guard allows) and core.character belongs to licensor A, so the
+  -- guard must read both endpoint tables and then accept.
+  begin
+    execute 'set local role service_role';
+    insert into dam.asset_character_source_edge
+      (asset_id, character_id, licensor_id, source_system, source_id, evidence_kind)
+      values (v_asset, v_character, v_licensor, 'zz_fixture_2334_svc', 'svc-1',
+              'direct_source_assertion')
+      returning id into v_edge2;
+    execute 'set local role none';
+  exception when others then
+    get stacked diagnostics v_sqlstate = returned_sqlstate, v_message = message_text;
+    execute 'set local role none';
+    raise exception 'service_role could not make a LEGITIMATE dam support-edge write: % (%). '
+      'The endpoint-licensor guard reads dam.asset, which service_role may not select; the '
+      'guard must be SECURITY DEFINER or the ordinary DAM loader path is broken',
+      v_message, v_sqlstate;
+  end;
+
+  if v_edge2 is null then
+    raise exception 'the service_role dam support-edge write recorded no row';
+  end if;
+
+  -- And the guard still REFUSES a cross-licensor claim when it runs as service_role: the
+  -- character belongs to licensor A, so filing the pair under licensor B must raise P0001 --
+  -- not a permission error, and not nothing at all.
+  v_raised := false;
+  v_sqlstate := null;
+  begin
+    execute 'set local role service_role';
+    insert into dam.asset_character_source_edge
+      (asset_id, character_id, licensor_id, source_system, source_id, evidence_kind)
+      values (v_asset, v_character, v_licensor2, 'zz_fixture_2334_svc', 'svc-2',
+              'direct_source_assertion');
+    execute 'set local role none';
+  exception when others then
+    get stacked diagnostics v_sqlstate = returned_sqlstate, v_message = message_text;
+    execute 'set local role none';
+    v_raised := true;
+  end;
+  if not v_raised then
+    raise exception 'as service_role, a cross-licensor dam support edge was ACCEPTED -- the '
+      'endpoint-licensor guard did not run on the real loader path';
+  end if;
+  if v_sqlstate <> 'P0001' then
+    raise exception 'as service_role, the cross-licensor write failed with % (%) instead of '
+      'the guard''s own P0001 refusal -- the guard is failing on privilege, not on the claim',
+      v_sqlstate, v_message;
+  end if;
+
+  -- The supersession guard reads the pre-existing dam.asset_character bridge, which
+  -- service_role also may not select. Superseding this edge is legitimate (no canonical edge
+  -- depends on it alone), so it must succeed rather than fail on privilege.
+  begin
+    execute 'set local role service_role';
+    update dam.asset_character_source_edge
+       set is_current = false, superseded_at = now(), superseded_reason = 'service_role fixture'
+     where id = v_edge2;
+    execute 'set local role none';
+  exception when others then
+    get stacked diagnostics v_sqlstate = returned_sqlstate, v_message = message_text;
+    execute 'set local role none';
+    raise exception 'service_role could not supersede its own dam support edge: % (%). The '
+      'supersession guard reads dam.asset_character, which service_role may not select',
+      v_message, v_sqlstate;
+  end;
+
+  if (select is_current from dam.asset_character_source_edge where id = v_edge2) then
+    raise exception 'the service_role supersession did not take effect';
   end if;
 
   raise notice 'issue #2334 canonical licensing relationship contracts: all assertions passed';
