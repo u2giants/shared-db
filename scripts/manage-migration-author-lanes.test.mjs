@@ -6017,3 +6017,25 @@ test('the preview gate excludes the context the guarded merge sets for itself', 
   const red=new Map([['SQL migration guards','FAILURE'],['Migration author lease','SUCCESS']])
   assert.deepEqual(pendingRequiredContexts(required,red),['SQL migration guards'])
 })
+
+test('#2460 expired recovery works for a claim legitimately expanded beyond its issue scope, and still enforces the subset guarantee',()=>{
+  // A claim that --expand-active-claim-from-pr has already grown holds a STRICT SUPERSET of its
+  // work issue's scope objects. That state is tool-produced and sanctioned, so recovery must not
+  // refuse it on a count-equality test. The guarantee that matters — every object the work issue
+  // names is covered by the claim — is the subset test, and it is unchanged.
+  const f=recovery2177,alreadyExpanded='table coldlion.previously_expanded'
+  const io=expiredPrRecoveryIo(f),superset=[...f.tables,alreadyExpanded]
+  io.claim.body=claimBody({version:f.version,objects:superset,owner:f.owner,branch:f.branch,worktree:f.worktree,expiresAt:new Date('2026-08-14T19:00:00Z')})
+  assert.equal(parseAuthorLease(io.claim.body,NOW).active,false,'fixture lease must already be expired')
+  assert.deepEqual(parseQueueScope(io.workIssue.body).objects,f.tables,'work issue scope must be a strict subset of the claim')
+  const result=recoverExpiredClaimFromPr(recoveryOptions(f),NOW,io),lease=parseAuthorLease(io.claim.body,NOW)
+  assert.deepEqual(result.added,f.children,'recovery must add exactly the uncovered PR objects')
+  assert.deepEqual(lease.objects,[...superset,...f.children].sort())
+  assert.equal(lease.active,true,'recovery must restore a live lease')
+  assert.equal(io.updateCalls,1)
+  // Unchanged precondition: an object the work issue names but the claim does not cover is refused.
+  const missing=expiredPrRecoveryIo(f)
+  missing.workIssue.body=scope('ready','structural','shared-db-orchestrator',2,[...f.tables,'table coldlion.never_claimed'])
+  assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(f),NOW,missing),/do not exactly match the permanent claim objects/)
+  assert.equal(missing.updateCalls,0)
+})
