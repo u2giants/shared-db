@@ -235,118 +235,41 @@ comment on function core.require_direct_support_for_canonical_edge() is
 
 revoke all on function core.require_direct_support_for_canonical_edge() from public, anon, authenticated;
 
--- 2c. Supersession may not silently orphan a canonical edge (review finding H-1).
+-- 2c. Supersession may not silently orphan a canonical edge (review finding H-1),
+-- and it is checked at COMMIT rather than at the statement (round-5 review finding).
 -- The BEFORE DELETE guard above refuses to DELETE current support, but the documented
--- withdrawal path is an UPDATE that sets is_current = false. Without this guard that
--- UPDATE achieves exactly what the delete guard forbids: a canonical bridge row left
--- standing with no current direct evidence under it, which is the royalty-decision
--- failure this migration exists to prevent. The bridge comments state the invariant in
--- the present continuous ("may exist only WHILE ... holds a CURRENT direct source
--- assertion"), so it has to be enforced continuously, not only at bridge-write time.
-create or replace function core.refuse_unsupporting_update_of_support_edge()
-returns trigger
-language plpgsql
--- Round-3 review finding (hardening). This guard runs dynamic SQL, so its search_path
--- is pinned: every object it touches is written schema-qualified in this file, and
--- nothing may be resolved through a caller's or a temporary schema. EXECUTE is revoked
--- below so a signed-in caller cannot invoke the existence probe directly and use it as
--- an oracle over licensing evidence; firing a trigger does not require the privilege,
--- so nothing legitimate loses anything.
+-- withdrawal path is an UPDATE that sets is_current = false, which would otherwise achieve
+-- exactly what the delete guard forbids: a canonical bridge row left standing with no
+-- current direct evidence under it. The bridge comments state the invariant in the present
+-- continuous ("may exist only WHILE ... holds a CURRENT direct source assertion"), so it
+-- has to be enforced continuously, not only at bridge-write time.
 --
--- Round-4 review finding. SECURITY DEFINER, matching the convention of every comparable
--- guard in this repository (plm.reject_legacy_landing_resolution_write(),
--- public.sync_asset_effective_tags()). The guard reads catalog-of-record tables that the
--- WRITING role need not be able to read: service_role holds writes on the dam support-edge
--- tables but is granted no SELECT on dam.asset or dam.asset_character, so an invoker-rights
--- guard would fail with permission denied on the ordinary loader path. Widening the grants
--- instead would hand a write role standing read access it does not otherwise have, so the
--- definer is the narrower change as well as the conventional one. search_path is pinned
--- above and EXECUTE is revoked below, which is what makes the definer safe.
-security definer
-set search_path = pg_catalog, pg_temp
-as $$
-declare
-  v_bridge    text := tg_argv[0];   -- fully qualified canonical bridge table
-  v_left_col  text := tg_argv[1];
-  v_right_col text := tg_argv[2];
-  v_left      uuid;
-  v_right     uuid;
-  v_bridged   boolean;
-  v_other     boolean;
-begin
-  -- Only a row that IS current direct support today can withdraw any.
-  if not (old.is_current and old.evidence_kind = 'direct_source_assertion') then
-    return new;
-  end if;
-
-  -- Still current direct support for the same pair afterwards: nothing was withdrawn.
-  if new.is_current
-     and new.evidence_kind = 'direct_source_assertion'
-     and (to_jsonb(new) ->> v_left_col) is not distinct from (to_jsonb(old) ->> v_left_col)
-     and (to_jsonb(new) ->> v_right_col) is not distinct from (to_jsonb(old) ->> v_right_col) then
-    return new;
-  end if;
-
-  v_left  := (to_jsonb(old) ->> v_left_col)::uuid;
-  v_right := (to_jsonb(old) ->> v_right_col)::uuid;
-
-  -- No canonical edge cites this pair, so nothing can be orphaned by withdrawing it.
-  execute format(
-    'select exists (select 1 from %s b where b.%I = $1 and b.%I = $2)',
-    v_bridge, v_left_col, v_right_col)
-  into v_bridged
-  using v_left, v_right;
-
-  if not v_bridged then
-    return new;
-  end if;
-
-  -- Supersession BY REPLACEMENT stays legal: another current direct assertion already
-  -- covers the pair, so the canonical edge keeps standing on real evidence.
-  execute format(
-    'select exists (select 1 from %I.%I s where s.%I = $1 and s.%I = $2 '
-    'and s.id <> $3 and s.is_current '
-    'and s.evidence_kind = ''direct_source_assertion''::core.relationship_evidence_kind)',
-    tg_table_schema, tg_table_name, v_left_col, v_right_col)
-  into v_other
-  using v_left, v_right, old.id;
-
-  if v_other then
-    return new;
-  end if;
-
-  raise exception
-    'Refused: %.% row % is the LAST current direct source assertion behind the canonical edge '
-    'in % (% = %, % = %). Withdrawing it would leave that canonical edge standing with no '
-    'evidence at all. Record the replacing direct assertion first, or remove the canonical edge '
-    'in a governed migration.',
-    tg_table_schema, tg_table_name, old.id, v_bridge,
-    v_left_col, v_left, v_right_col, v_right
-    using errcode = 'P0001';
-end;
-$$;
-
-comment on function core.refuse_unsupporting_update_of_support_edge() is
-  'BEFORE UPDATE guard on every *_source_edge table (issue #2334, review finding H-1). Refuses '
-  'an update that withdraws the LAST current direct source assertion behind an existing canonical '
-  'bridge row -- by clearing is_current, by relabelling evidence_kind away from direct, or by '
-  'repointing the pair. Supersession by replacement, and supersession of a pair no canonical edge '
-  'cites, both remain free. Together with the BEFORE DELETE guard it makes the bridges'' documented '
-  '"only while currently supported" invariant continuous rather than write-time only.';
-
-revoke all on function core.refuse_unsupporting_update_of_support_edge() from public, anon, authenticated;
+-- An earlier revision of this migration enforced it with an IMMEDIATE BEFORE UPDATE row
+-- trigger, which made the ordinary single-source supersession impossible. Each support
+-- table has a partial unique index over (left, right, licensor_id, source_system,
+-- evidence_kind) WHERE is_current, so when one upstream system is the only asserter of a
+-- pair -- the normal case; Disney DCP alone publishes Disney style guides -- a loader could
+-- neither insert the replacement first (duplicate key against the still-current row) nor
+-- retire the old row first (the immediate trigger refused it because the replacement did
+-- not exist yet). Not even inside one transaction, since an immediate row trigger fires on
+-- the first statement. The invariant is therefore enforced ONLY by the DEFERRABLE
+-- INITIALLY DEFERRED constraint trigger below, which runs at COMMIT with the whole
+-- transaction visible: retire-then-replace in one transaction commits, and a transaction
+-- that withdraws the last supporting assertion without recording a replacement still
+-- fails. Nothing is relaxed; the check simply happens at the point where the end state of
+-- the transaction is the thing being judged.
 
 
 -- ----------------------------------------------------------------
--- Review finding (round 2, High): the BEFORE UPDATE guard above is a ROW trigger, so the
--- query it runs to look for a replacement assertion cannot see the SAME statement's already
--- applied updates to other rows of the same table. One bulk statement that withdraws every
--- current direct assertion for a cited pair therefore passes row by row -- each row still
--- "sees" the others as current -- and commits an orphaned canonical edge. The row guard
--- stays (it fails fast with a precise message on the common one-row path); this DEFERRABLE
--- CONSTRAINT trigger re-checks the same invariant at COMMIT, where every statement in the
--- transaction is visible, so no statement shape and no multi-statement sequence can leave a
--- canonical bridge row standing on zero current direct evidence.
+-- Review finding (round 2, High): a BEFORE UPDATE ROW trigger cannot see the SAME
+-- statement's already applied updates to other rows of the same table, so one bulk
+-- statement that withdraws every current direct assertion for a cited pair would pass row
+-- by row -- each row still "sees" the others as current -- and commit an orphaned canonical
+-- edge. This DEFERRABLE CONSTRAINT trigger checks the invariant at COMMIT, where every
+-- statement in the transaction is visible, so no statement shape and no multi-statement
+-- sequence can leave a canonical bridge row standing on zero current direct evidence -- and,
+-- per the round-5 finding above, a legitimate same-source retire-then-replace inside one
+-- transaction is judged on its end state and commits.
 create or replace function core.assert_canonical_edge_still_supported()
 returns trigger
 language plpgsql
@@ -432,11 +355,13 @@ $$;
 
 comment on function core.assert_canonical_edge_still_supported() is
   'DEFERRABLE CONSTRAINT trigger (AFTER UPDATE OR DELETE) on every *_source_edge table '
-  '(issue #2334, round-2 review finding). Re-checks at COMMIT that any canonical bridge row '
-  'citing the affected pair still has a CURRENT direct source assertion under it. The BEFORE '
-  'row guards cannot see their own statement''s other-row effects, so a single bulk withdrawal '
-  'statement slips past them; this check runs when the whole transaction is visible and closes '
-  'that hole for every statement shape.';
+  '(issue #2334, round-2 review finding). Checks at COMMIT that any canonical bridge row '
+  'citing the affected pair still has a CURRENT direct source assertion under it. This is the '
+  'SOLE enforcement point for the invariant on withdrawal (round-5 review finding): a BEFORE '
+  'UPDATE row guard cannot see its own statement''s other-row effects, and an immediate one '
+  'deadlocks the ordinary same-source supersession against the partial unique claim key. '
+  'Judging the transaction''s end state closes the hole for every statement shape while '
+  'leaving retire-then-replace in one transaction legal.';
 
 revoke all on function core.assert_canonical_edge_still_supported() from public, anon, authenticated;
 
@@ -474,8 +399,12 @@ declare
   v_col         text;
   v_endpoint    uuid;
   v_licensor    uuid;
+  v_new         jsonb;
   i             integer;
 begin
+  -- Round-5 review finding: serialize the row ONCE, not once per endpoint.
+  v_new := to_jsonb(new);
+
   for i in 0..1 loop
     if i = 0 then
       v_table := v_left_table;
@@ -485,9 +414,9 @@ begin
       v_col   := v_right_col;
     end if;
 
-    -- to_jsonb for the same reason as the guards above: one function serves all eight
-    -- support-edge tables instead of eight near-identical copies.
-    v_endpoint := (to_jsonb(new) ->> v_col)::uuid;
+    -- A jsonb projection for the same reason as the guards above: one function serves all
+    -- eight support-edge tables instead of eight near-identical copies.
+    v_endpoint := (v_new ->> v_col)::uuid;
 
     execute format('select e.licensor_id from %s e where e.id = $1', v_table)
       into v_licensor
@@ -821,6 +750,12 @@ create unique index property_character_source_edge_current_claim_key
 create index property_character_source_edge_character_id_idx on core.property_character_source_edge (character_id);
 create index property_character_source_edge_licensor_idx on core.property_character_source_edge (licensor_id);
 
+-- Round-5 review finding. property_id is ON DELETE CASCADE, and its only other index is the
+-- leading column of a PARTIAL (WHERE is_current) index, which Postgres cannot use for a
+-- referential integrity check. Without this unconditional index, deleting one row from the
+-- referenced entity table sequentially scans this whole support table.
+create index property_character_source_edge_property_id_idx on core.property_character_source_edge (property_id);
+
 -- Serving the canonical-edge guard: it asks "is there current direct support for this
 -- pair?" on every write to the bridge.
 create index property_character_source_edge_direct_current_idx
@@ -840,13 +775,6 @@ create trigger require_matching_licensor
 create trigger refuse_delete_of_current_support
   before delete on core.property_character_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
-
--- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
--- same orphaning the delete guard above refuses, so it is refused the same way.
-create trigger refuse_unsupporting_update
-  before update on core.property_character_source_edge
-  for each row execute function core.refuse_unsupporting_update_of_support_edge(
-    'core.property_character_associations', 'property_id', 'character_id');
 
 create constraint trigger assert_canonical_edge_still_supported
   after update or delete on core.property_character_source_edge
@@ -965,6 +893,12 @@ create unique index property_style_guide_source_edge_current_claim_key
 create index property_style_guide_source_edge_style_guide_id_idx on core.property_style_guide_source_edge (style_guide_id);
 create index property_style_guide_source_edge_licensor_idx on core.property_style_guide_source_edge (licensor_id);
 
+-- Round-5 review finding. property_id is ON DELETE CASCADE, and its only other index is the
+-- leading column of a PARTIAL (WHERE is_current) index, which Postgres cannot use for a
+-- referential integrity check. Without this unconditional index, deleting one row from the
+-- referenced entity table sequentially scans this whole support table.
+create index property_style_guide_source_edge_property_id_idx on core.property_style_guide_source_edge (property_id);
+
 -- Serving the canonical-edge guard: it asks "is there current direct support for this
 -- pair?" on every write to the bridge.
 create index property_style_guide_source_edge_direct_current_idx
@@ -984,13 +918,6 @@ create trigger require_matching_licensor
 create trigger refuse_delete_of_current_support
   before delete on core.property_style_guide_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
-
--- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
--- same orphaning the delete guard above refuses, so it is refused the same way.
-create trigger refuse_unsupporting_update
-  before update on core.property_style_guide_source_edge
-  for each row execute function core.refuse_unsupporting_update_of_support_edge(
-    'core.property_style_guide', 'property_id', 'style_guide_id');
 
 create constraint trigger assert_canonical_edge_still_supported
   after update or delete on core.property_style_guide_source_edge
@@ -1109,6 +1036,12 @@ create unique index property_franchise_source_edge_current_claim_key
 create index property_franchise_source_edge_franchise_id_idx on core.property_franchise_source_edge (franchise_id);
 create index property_franchise_source_edge_licensor_idx on core.property_franchise_source_edge (licensor_id);
 
+-- Round-5 review finding. property_id is ON DELETE CASCADE, and its only other index is the
+-- leading column of a PARTIAL (WHERE is_current) index, which Postgres cannot use for a
+-- referential integrity check. Without this unconditional index, deleting one row from the
+-- referenced entity table sequentially scans this whole support table.
+create index property_franchise_source_edge_property_id_idx on core.property_franchise_source_edge (property_id);
+
 -- Serving the canonical-edge guard: it asks "is there current direct support for this
 -- pair?" on every write to the bridge.
 create index property_franchise_source_edge_direct_current_idx
@@ -1128,13 +1061,6 @@ create trigger require_matching_licensor
 create trigger refuse_delete_of_current_support
   before delete on core.property_franchise_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
-
--- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
--- same orphaning the delete guard above refuses, so it is refused the same way.
-create trigger refuse_unsupporting_update
-  before update on core.property_franchise_source_edge
-  for each row execute function core.refuse_unsupporting_update_of_support_edge(
-    'core.property_franchise', 'property_id', 'franchise_id');
 
 create constraint trigger assert_canonical_edge_still_supported
   after update or delete on core.property_franchise_source_edge
@@ -1253,6 +1179,12 @@ create unique index style_guide_character_source_edge_current_claim_key
 create index style_guide_character_source_edge_character_id_idx on core.style_guide_character_source_edge (character_id);
 create index style_guide_character_source_edge_licensor_idx on core.style_guide_character_source_edge (licensor_id);
 
+-- Round-5 review finding. style_guide_id is ON DELETE CASCADE, and its only other index is the
+-- leading column of a PARTIAL (WHERE is_current) index, which Postgres cannot use for a
+-- referential integrity check. Without this unconditional index, deleting one row from the
+-- referenced entity table sequentially scans this whole support table.
+create index style_guide_character_source_edge_style_guide_id_idx on core.style_guide_character_source_edge (style_guide_id);
+
 -- Serving the canonical-edge guard: it asks "is there current direct support for this
 -- pair?" on every write to the bridge.
 create index style_guide_character_source_edge_direct_current_idx
@@ -1272,13 +1204,6 @@ create trigger require_matching_licensor
 create trigger refuse_delete_of_current_support
   before delete on core.style_guide_character_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
-
--- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
--- same orphaning the delete guard above refuses, so it is refused the same way.
-create trigger refuse_unsupporting_update
-  before update on core.style_guide_character_source_edge
-  for each row execute function core.refuse_unsupporting_update_of_support_edge(
-    'core.style_guide_character', 'style_guide_id', 'character_id');
 
 create constraint trigger assert_canonical_edge_still_supported
   after update or delete on core.style_guide_character_source_edge
@@ -1397,6 +1322,12 @@ create unique index asset_property_source_edge_current_claim_key
 create index asset_property_source_edge_property_id_idx on dam.asset_property_source_edge (property_id);
 create index asset_property_source_edge_licensor_idx on dam.asset_property_source_edge (licensor_id);
 
+-- Round-5 review finding. asset_id is ON DELETE CASCADE, and its only other index is the
+-- leading column of a PARTIAL (WHERE is_current) index, which Postgres cannot use for a
+-- referential integrity check. Without this unconditional index, deleting one row from the
+-- referenced entity table sequentially scans this whole support table.
+create index asset_property_source_edge_asset_id_idx on dam.asset_property_source_edge (asset_id);
+
 -- Serving the canonical-edge guard: it asks "is there current direct support for this
 -- pair?" on every write to the bridge.
 create index asset_property_source_edge_direct_current_idx
@@ -1416,13 +1347,6 @@ create trigger require_matching_licensor
 create trigger refuse_delete_of_current_support
   before delete on dam.asset_property_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
-
--- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
--- same orphaning the delete guard above refuses, so it is refused the same way.
-create trigger refuse_unsupporting_update
-  before update on dam.asset_property_source_edge
-  for each row execute function core.refuse_unsupporting_update_of_support_edge(
-    'dam.asset_property', 'asset_id', 'property_id');
 
 create constraint trigger assert_canonical_edge_still_supported
   after update or delete on dam.asset_property_source_edge
@@ -1536,6 +1460,12 @@ create unique index asset_character_source_edge_current_claim_key
 create index asset_character_source_edge_character_id_idx on dam.asset_character_source_edge (character_id);
 create index asset_character_source_edge_licensor_idx on dam.asset_character_source_edge (licensor_id);
 
+-- Round-5 review finding. asset_id is ON DELETE CASCADE, and its only other index is the
+-- leading column of a PARTIAL (WHERE is_current) index, which Postgres cannot use for a
+-- referential integrity check. Without this unconditional index, deleting one row from the
+-- referenced entity table sequentially scans this whole support table.
+create index asset_character_source_edge_asset_id_idx on dam.asset_character_source_edge (asset_id);
+
 -- Serving the canonical-edge guard: it asks "is there current direct support for this
 -- pair?" on every write to the bridge.
 create index asset_character_source_edge_direct_current_idx
@@ -1555,13 +1485,6 @@ create trigger require_matching_licensor
 create trigger refuse_delete_of_current_support
   before delete on dam.asset_character_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
-
--- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
--- same orphaning the delete guard above refuses, so it is refused the same way.
-create trigger refuse_unsupporting_update
-  before update on dam.asset_character_source_edge
-  for each row execute function core.refuse_unsupporting_update_of_support_edge(
-    'dam.asset_character', 'asset_id', 'character_id');
 
 create constraint trigger assert_canonical_edge_still_supported
   after update or delete on dam.asset_character_source_edge
@@ -1675,6 +1598,12 @@ create unique index asset_style_guide_source_edge_current_claim_key
 create index asset_style_guide_source_edge_style_guide_id_idx on dam.asset_style_guide_source_edge (style_guide_id);
 create index asset_style_guide_source_edge_licensor_idx on dam.asset_style_guide_source_edge (licensor_id);
 
+-- Round-5 review finding. asset_id is ON DELETE CASCADE, and its only other index is the
+-- leading column of a PARTIAL (WHERE is_current) index, which Postgres cannot use for a
+-- referential integrity check. Without this unconditional index, deleting one row from the
+-- referenced entity table sequentially scans this whole support table.
+create index asset_style_guide_source_edge_asset_id_idx on dam.asset_style_guide_source_edge (asset_id);
+
 -- Serving the canonical-edge guard: it asks "is there current direct support for this
 -- pair?" on every write to the bridge.
 create index asset_style_guide_source_edge_direct_current_idx
@@ -1694,13 +1623,6 @@ create trigger require_matching_licensor
 create trigger refuse_delete_of_current_support
   before delete on dam.asset_style_guide_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
-
--- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
--- same orphaning the delete guard above refuses, so it is refused the same way.
-create trigger refuse_unsupporting_update
-  before update on dam.asset_style_guide_source_edge
-  for each row execute function core.refuse_unsupporting_update_of_support_edge(
-    'dam.asset_style_guide', 'asset_id', 'style_guide_id');
 
 create constraint trigger assert_canonical_edge_still_supported
   after update or delete on dam.asset_style_guide_source_edge
@@ -1814,6 +1736,12 @@ create unique index asset_franchise_source_edge_current_claim_key
 create index asset_franchise_source_edge_franchise_id_idx on dam.asset_franchise_source_edge (franchise_id);
 create index asset_franchise_source_edge_licensor_idx on dam.asset_franchise_source_edge (licensor_id);
 
+-- Round-5 review finding. asset_id is ON DELETE CASCADE, and its only other index is the
+-- leading column of a PARTIAL (WHERE is_current) index, which Postgres cannot use for a
+-- referential integrity check. Without this unconditional index, deleting one row from the
+-- referenced entity table sequentially scans this whole support table.
+create index asset_franchise_source_edge_asset_id_idx on dam.asset_franchise_source_edge (asset_id);
+
 -- Serving the canonical-edge guard: it asks "is there current direct support for this
 -- pair?" on every write to the bridge.
 create index asset_franchise_source_edge_direct_current_idx
@@ -1833,13 +1761,6 @@ create trigger require_matching_licensor
 create trigger refuse_delete_of_current_support
   before delete on dam.asset_franchise_source_edge
   for each row execute function core.refuse_delete_of_current_support_edge();
-
--- Review finding H-1: withdrawing the last current direct assertion by UPDATE is the
--- same orphaning the delete guard above refuses, so it is refused the same way.
-create trigger refuse_unsupporting_update
-  before update on dam.asset_franchise_source_edge
-  for each row execute function core.refuse_unsupporting_update_of_support_edge(
-    'dam.asset_franchise', 'asset_id', 'franchise_id');
 
 create constraint trigger assert_canonical_edge_still_supported
   after update or delete on dam.asset_franchise_source_edge

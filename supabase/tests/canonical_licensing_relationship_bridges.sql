@@ -147,7 +147,6 @@ begin
   foreach t in array array[
     'core.refuse_delete_of_current_support_edge()',
     'core.require_direct_support_for_canonical_edge()',
-    'core.refuse_unsupporting_update_of_support_edge()',
     'core.assert_canonical_edge_still_supported()',
     'core.require_support_edge_licensor_matches_endpoints()'
   ] loop
@@ -179,6 +178,46 @@ begin
   end loop;
 
   -- =========================================================================
+  -- 1b2. Round-5 review finding (High). The invariant is enforced at COMMIT by the
+  --      deferrable constraint trigger ONLY. An IMMEDIATE BEFORE UPDATE row guard makes the
+  --      ordinary single-source supersession impossible: the partial unique index over
+  --      (left, right, licensor_id, source_system, evidence_kind) WHERE is_current refuses
+  --      the replacement while the old row is still current, and an immediate guard refuses
+  --      the retirement while the replacement does not yet exist -- a deadlock no ordering
+  --      inside one transaction can escape. Reintroducing such a guard must fail here.
+  -- =========================================================================
+  if to_regprocedure('core.refuse_unsupporting_update_of_support_edge()') is not null then
+    raise exception 'the immediate BEFORE UPDATE support-withdrawal guard is back; it '
+      'deadlocks same-source supersession against the partial unique claim key (round-5 '
+      'review finding). The deferrable constraint trigger is the enforcement point.';
+  end if;
+
+  foreach v_table in array array[
+    'core.property_character_source_edge',
+    'core.property_style_guide_source_edge',
+    'core.property_franchise_source_edge',
+    'core.style_guide_character_source_edge',
+    'dam.asset_property_source_edge',
+    'dam.asset_character_source_edge',
+    'dam.asset_style_guide_source_edge',
+    'dam.asset_franchise_source_edge'
+  ] loop
+    if exists (
+      select 1 from pg_trigger tg
+      where tg.tgrelid = v_table::regclass
+        and not tg.tgisinternal
+        and tg.tgdeferrable = false
+        and (tg.tgtype & 16) <> 0                          -- UPDATE
+        and (tg.tgtype & 2) <> 0                           -- BEFORE
+        and tg.tgfoid <> 'app.set_updated_at()'::regprocedure
+        and tg.tgfoid <> 'core.require_support_edge_licensor_matches_endpoints()'::regprocedure
+    ) then
+      raise exception 'an unexpected IMMEDIATE BEFORE UPDATE trigger exists on %, which is '
+        'how same-source supersession was deadlocked before the round-5 fix', v_table;
+    end if;
+  end loop;
+
+  -- =========================================================================
   -- 1c. Round-3 review finding. Asserting a trigger by NAME alone proves nothing about
   --     WHICH pair it guards: every endpoint column here is uuid, so a wiring that swapped
   --     two arguments -- or named the wrong bridge or the wrong support table -- would type
@@ -203,31 +242,6 @@ begin
       {"t":"dam.asset_franchise",        "g":"require_direct_support",
        "f":"core.require_direct_support_for_canonical_edge",
        "a":"'dam.asset_franchise_source_edge', 'asset_id', 'franchise_id'"},
-
-      {"t":"core.property_character_source_edge",    "g":"refuse_unsupporting_update",
-       "f":"core.refuse_unsupporting_update_of_support_edge",
-       "a":"'core.property_character_associations', 'property_id', 'character_id'"},
-      {"t":"core.property_style_guide_source_edge",  "g":"refuse_unsupporting_update",
-       "f":"core.refuse_unsupporting_update_of_support_edge",
-       "a":"'core.property_style_guide', 'property_id', 'style_guide_id'"},
-      {"t":"core.property_franchise_source_edge",    "g":"refuse_unsupporting_update",
-       "f":"core.refuse_unsupporting_update_of_support_edge",
-       "a":"'core.property_franchise', 'property_id', 'franchise_id'"},
-      {"t":"core.style_guide_character_source_edge", "g":"refuse_unsupporting_update",
-       "f":"core.refuse_unsupporting_update_of_support_edge",
-       "a":"'core.style_guide_character', 'style_guide_id', 'character_id'"},
-      {"t":"dam.asset_property_source_edge",         "g":"refuse_unsupporting_update",
-       "f":"core.refuse_unsupporting_update_of_support_edge",
-       "a":"'dam.asset_property', 'asset_id', 'property_id'"},
-      {"t":"dam.asset_character_source_edge",        "g":"refuse_unsupporting_update",
-       "f":"core.refuse_unsupporting_update_of_support_edge",
-       "a":"'dam.asset_character', 'asset_id', 'character_id'"},
-      {"t":"dam.asset_style_guide_source_edge",      "g":"refuse_unsupporting_update",
-       "f":"core.refuse_unsupporting_update_of_support_edge",
-       "a":"'dam.asset_style_guide', 'asset_id', 'style_guide_id'"},
-      {"t":"dam.asset_franchise_source_edge",        "g":"refuse_unsupporting_update",
-       "f":"core.refuse_unsupporting_update_of_support_edge",
-       "a":"'dam.asset_franchise', 'asset_id', 'franchise_id'"},
 
       {"t":"core.property_character_source_edge",    "g":"assert_canonical_edge_still_supported",
        "f":"core.assert_canonical_edge_still_supported",
@@ -547,26 +561,63 @@ begin
     raise exception 'current support did not survive the refused endpoint delete';
   end if;
 
-  -- 5d. Review finding H-1. Withdrawing support by UPDATE is the same orphaning as
-  --     deleting it, so it is refused the same way while a canonical edge cites the pair
-  --     and no other current direct assertion covers it. Without this the delete guard in
-  --     5a is decorative: set is_current = false and the evidence is gone anyway, leaving
-  --     core.property_style_guide standing on nothing.
+  -- 5d. Review finding H-1, re-pointed at COMMIT by the round-5 finding. Withdrawing
+  --     support by UPDATE is the same orphaning as deleting it, so a transaction that
+  --     retires the LAST current direct assertion and records NO replacement must fail --
+  --     at commit, which is where the end state of the transaction is judged. Without this
+  --     the delete guard in 5a is decorative: set is_current = false and the evidence is
+  --     gone anyway, leaving core.property_style_guide standing on nothing. SET CONSTRAINTS
+  --     ALL IMMEDIATE forces the deferred check to run here rather than at COMMIT.
   v_raised := false;
   begin
     update core.property_style_guide_source_edge
        set is_current = false, superseded_at = now(), superseded_reason = 'fixture withdrawal'
      where id = v_edge;
+    set constraints all immediate;
   exception when sqlstate 'P0001' then v_raised := true;
   end;
   if not v_raised then
-    raise exception 'the LAST current direct support was withdrawn by UPDATE, leaving a '
-      'canonical edge standing with no evidence under it';
+    raise exception 'a transaction retired the LAST current direct support with no '
+      'replacement and was allowed to commit, leaving a canonical edge standing with no '
+      'evidence under it';
   end if;
 
   -- And the withdrawal really did not take effect.
   if not (select is_current from core.property_style_guide_source_edge where id = v_edge) then
     raise exception 'a refused withdrawal still cleared is_current';
+  end if;
+
+  -- 5d2. Round-5 review finding (High). THE ORDINARY CASE: exactly ONE upstream system
+  --      asserts the pair (Disney DCP alone publishes Disney style guides) and publishes a
+  --      corrected claim. The loader must be able to retire the old row and insert the
+  --      replacement under the SAME source_system inside ONE transaction. Neither order
+  --      works statement-by-statement -- insert first collides with the partial unique claim
+  --      key while the old row is still current, retire first has no replacement yet -- so
+  --      this can only pass if the invariant is judged on the transaction's END STATE.
+  --      SET CONSTRAINTS ALL IMMEDIATE runs the commit-time check without ending the test
+  --      transaction; anything it raises escapes this block and fails the test.
+  update core.property_style_guide_source_edge
+     set is_current = false, superseded_at = now(), superseded_reason = 'fixture same-source'
+   where id = v_edge;
+
+  insert into core.property_style_guide_source_edge
+    (property_id, style_guide_id, licensor_id, source_system, source_id, evidence_kind)
+    values (v_property, v_style_guide, v_licensor, 'zz_fixture_2334', 'sg-1-corrected',
+            'direct_source_assertion')
+    returning id into v_edge;
+
+  set constraints all immediate;
+  set constraints all deferred;
+
+  if not (select is_current from core.property_style_guide_source_edge where id = v_edge) then
+    raise exception 'the same-source replacement assertion is not current';
+  end if;
+  if (select count(*) from core.property_style_guide_source_edge
+      where property_id = v_property and style_guide_id = v_style_guide
+        and source_system = 'zz_fixture_2334'
+        and evidence_kind = 'direct_source_assertion'
+        and is_current) <> 1 then
+    raise exception 'same-source supersession did not leave exactly one current claim';
   end if;
 
   -- 5e. Supersession BY REPLACEMENT stays legal, which is the whole point of supersession:
@@ -587,11 +638,11 @@ begin
     raise exception 'superseded support could not be deleted';
   end if;
 
-  -- 5f2. Round-2 review finding (High). The BEFORE row guard proved in 5d is a ROW trigger:
-  --      the query it runs cannot see its own statement's already-applied updates to other
-  --      rows, so ONE statement that withdraws EVERY current direct assertion for the pair
-  --      passes row by row and would commit an orphaned canonical edge. The deferrable
-  --      constraint trigger re-checks at commit, where the whole transaction is visible.
+  -- 5f2. Round-2 review finding (High). A BEFORE UPDATE ROW guard cannot see its own
+  --      statement's already-applied updates to other rows, so ONE statement that withdraws
+  --      EVERY current direct assertion for the pair would pass row by row and commit an
+  --      orphaned canonical edge. The deferrable constraint trigger judges the end state at
+  --      commit, where the whole transaction is visible, so the bulk shape is refused too.
   --      SET CONSTRAINTS ALL IMMEDIATE forces that commit-time check to run here.
   insert into core.property_style_guide_source_edge
     (property_id, style_guide_id, licensor_id, source_system, source_id, evidence_kind)
