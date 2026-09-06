@@ -181,6 +181,13 @@ test('classifies retired and deliberately-held versions from every existing Pyth
   assert.match(result['20260824181600'].reason, /20260825192610, applied to production 2026-08-25/)
 })
 
+test('classifies the stranded coldlion.division original as retired, not pending', () => {
+  const result = guardClassifications(['20260903200951'], [])
+  assert.equal(result['20260903200951'].kind, 'retired')
+  assert.match(result['20260903200951'].reason, /replaced byte-for-byte by 20260905024139/)
+  assert.match(result['20260903200951'].reason, /issue 2349/)
+})
+
 test('classifies preview-only historical restoration as deliberately held',()=>{
   const result=guardClassifications(['20260817150944'],[])
   assert.equal(result['20260817150944'].kind,'deliberately-held')
