@@ -291,3 +291,30 @@ test('a failure AFTER the create-only artifact exists never edits the findings c
   assert.match(thrown.message,/WAS created/)
   assert.equal(/REVIEW RECORDING FAILED/.test(note),false,'this is not the voiding failure notice')
 })
+
+// The marker also arrives UNCONFIRMED, when the read that would have proved the
+// ref threw. The behaviour is identical -- nothing is edited -- but the notice
+// must not claim the artifact exists. Without this case, code that always
+// printed the definite wording would pass the test above (muse-spark, round 3).
+test('an UNCONFIRMED marker is reported tentatively and still edits nothing (#2464)',()=>{
+  const calls=[]
+  const spawn=(command,args,spawnOptions)=>{
+    if(command!=='gh')return{status:0,stdout:wrapperOut}
+    calls.push({verb:args[2],body:JSON.parse(spawnOptions.input).body})
+    return{status:0,stdout:commentJson}
+  }
+  const record=()=>{
+    const error=new Error('the winner read threw after a failed create')
+    error.verdictArtifactCreated={ref:'refs/db-review-verdicts/2334-2000-'+'a'.repeat(40)+'-slot2',sha:'d'.repeat(40),confirmed:false}
+    throw error
+  }
+  let thrown
+  try{runGovernedReview(options,{spawn,resolve:(name)=>name,preflight:()=>{},record})}
+  catch(error){thrown=error}
+  assert.ok(thrown)
+  assert.equal(calls.some((call)=>call.verb==='PATCH'),false,'an unprovable ref state must not be voided either')
+  const note=calls.filter((call)=>call.verb==='POST').at(-1).body
+  assert.match(note,/THE DURABLE VERDICT ARTIFACT MAY HAVE BEEN CREATED/)
+  assert.equal(/WAS CREATED AND IS LEFT INTACT/.test(note),false,'an unconfirmed artifact must not be reported as created')
+  assert.match(thrown.message,/MAY have been created and could not be read back/)
+})

@@ -163,15 +163,20 @@ test('POSITIVE CONTROL: a race lost to another round throws unmarked (#2464)',()
   assert.match(caught.message,/contradictory create-only verdict/)
   assert.equal(caught.verdictArtifactCreated,undefined,'another round\'s artifact is not ours to protect')
 })
-test('POSITIVE CONTROL: a create that truly did not land still refuses unmarked (#2464)',()=>{
+// After an ERRORED create, a repeated null is not proof of absence -- the same
+// eventual consistency that hides a fresh ref once can hide it twelve times
+// (muse-spark, PR #2468 round 3). So this exit refuses AND marks unconfirmed.
+// The only unmarked outcome left in the branch is a winner that is demonstrably
+// another round's object, pinned by the positive control above.
+test('a create that reports failure with no readable winner refuses and marks unconfirmed (#2464)',()=>{
   const io=ioFixture()
   io.wait=()=>{}
   io.createRef=()=>{throw new Error('the create never landed')}
   let caught=null
   try{recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io)}catch(error){caught=error}
   assert.ok(caught)
-  assert.match(caught.message,/no winner exists/)
-  assert.equal(caught.verdictArtifactCreated,undefined)
+  assert.match(caught.message,/no winner could be read/)
+  assert.equal(caught.verdictArtifactCreated?.confirmed,false)
 })
 
 // #2464 (muse-spark, PR #2468 round 2). A WINNER READ THAT THROWS PROVES NOTHING.
@@ -203,4 +208,26 @@ test('a confirmed marker says so, so a notice cannot overclaim (#2464)',()=>{
   let caught=null
   try{recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io)}catch(error){caught=error}
   assert.equal(caught.verdictArtifactCreated.confirmed,true)
+})
+
+// A replacement round writes to the -<sequence> namespace, so the marker must
+// name THAT ref, not the base one. Nothing else about the branch changes, which
+// is exactly why an untested tuple is worth pinning (muse-spark, round 3).
+test('a replacement-sequence round marks the replacement ref, not the base ref (#2464)',()=>{
+  const replacementSequence=3
+  const io=ioFixture()
+  io.wait=()=>{}
+  const assignmentRef=`refs/db-review-replacements/${issue}-${pr}-${headSha}-${replacementSequence}`
+  io.refs.set(assignmentRef,assignmentSha)
+  const originalCreate=io.createRef
+  let created=false
+  io.createRef=(ref,sha)=>{created=true;originalCreate(ref,sha);throw new Error('502 from the create')}
+  const realGet=io.getCommit
+  io.getCommit=(sha)=>{if(sha===assignmentSha||!created)return realGet(sha);throw new Error('transient 500')}
+  let caught=null
+  try{recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef,replacementSequence},io)}catch(error){caught=error}
+  assert.ok(caught)
+  assert.ok(caught.verdictArtifactCreated,'a replacement round must be protected exactly like a first round')
+  assert.match(caught.verdictArtifactCreated.ref,new RegExp(`^refs/db-review-verdict-replacements/${issue}-${pr}-${headSha}-${replacementSequence}$`))
+  assert.equal(io.refs.get(caught.verdictArtifactCreated.ref),caught.verdictArtifactCreated.sha)
 })

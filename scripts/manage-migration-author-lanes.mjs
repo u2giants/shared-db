@@ -2048,7 +2048,14 @@ export function recordReviewVerdict(options,io=githubIo){
     let winner=null
     try{winner=readRefAfterWrite(ref,sha,io)}
     catch(readError){readError.verdictArtifactCreated={ref,sha,confirmed:false};throw readError}
-    if(!winner)throw new LaneError('create-only verdict ref failed and no winner exists; do not retry blindly')
+    // A repeated null after an ERRORED create is not proof of absence either
+    // (muse-spark, PR #2468 round 3). The create reported a failure, so landing
+    // is unknown, and the same eventual consistency that hides a fresh ref for
+    // one read can hide it for all twelve. This exit is therefore marked
+    // unconfirmed as well: after a failed create, NOTHING in this branch is
+    // proven absent, and the only unmarked outcome left is a winner that is
+    // demonstrably another round's object, which is not ours to protect.
+    if(!winner){const absent=new LaneError('create-only verdict ref failed and no winner could be read; the ref may still hold the commit this round created, so nothing may be voided and this must not be retried blindly');absent.verdictArtifactCreated={ref,sha,confirmed:false};throw absent}
     const markIfOurs=(failure)=>{if(winner===sha)failure.verdictArtifactCreated={ref,sha,confirmed:true};return failure}
     try{
       const winnerRecord=parseVerdictCommit(io.getCommit(winner))
