@@ -1,0 +1,135 @@
+-- Issue #2506: focused contracts for authorized file/guide search and launch filters.
+begin;
+
+do $contracts$
+declare
+  v_result jsonb;
+begin
+  if to_regprocedure('public.search_style_guide_library_v2(text,text,text[],text[],text[],text[],text[],text[],text[],text[],timestamptz,timestamptz,text,integer,integer)') is null then
+    raise exception 'contract 1: v2 search RPC is missing';
+  end if;
+  if has_function_privilege('anon', 'public.search_style_guide_library_v2(text,text,text[],text[],text[],text[],text[],text[],text[],text[],timestamptz,timestamptz,text,integer,integer)', 'execute') then
+    raise exception 'contract 1: anon can execute v2 search';
+  end if;
+  if not has_function_privilege('authenticated', 'public.search_style_guide_library_v2(text,text,text[],text[],text[],text[],text[],text[],text[],text[],timestamptz,timestamptz,text,integer,integer)', 'execute') then
+    raise exception 'contract 1: authenticated lost execute on v2 search';
+  end if;
+
+  perform set_config('session_replication_role', 'replica', true);
+  insert into auth.users (id, email) values
+    ('25060000-0000-4000-8000-000000000001', 'zz2506-authorized@example.invalid'),
+    ('25060000-0000-4000-8000-000000000002', 'zz2506-denied@example.invalid');
+  perform set_config('session_replication_role', 'origin', true);
+
+  insert into public.app_access (user_id, app)
+  values ('25060000-0000-4000-8000-000000000001', 'styleguides');
+
+  insert into public.style_guide_files
+    (id, root_label, relative_path, directory_path, filename, basename_no_ext,
+     file_extension, normalized_name, property_folder, style_guide_folder,
+     size_bytes, modified_at, is_active, thumbnail_url, thumbnail_error)
+  values
+    ('25060000-0000-4000-8000-000000000011', 'ZZ2506', 'TestLicensor/GuideA/alpha.pdf', 'GuideA', 'alpha.pdf', 'alpha', 'pdf', 'alpha', 'TestProperty', 'GuideA', 100, '2026-09-01', true, null, 'retryable'),
+    ('25060000-0000-4000-8000-000000000012', 'ZZ2506', 'TestLicensor/GuideA/other.ai', 'GuideA', 'other.ai', 'other', 'ai', 'other', 'TestProperty', 'GuideA', 200, '2026-09-01', true, null, null),
+    ('25060000-0000-4000-8000-000000000013', 'ZZ2506', 'TestLicensor/GuideB/alpha.jpg', 'GuideB', 'alpha.jpg', 'alpha', 'jpg', 'alpha', 'TestProperty', 'GuideB', 300, '2026-09-01', true, 'https://example.invalid/preview.jpg', null),
+    ('25060000-0000-4000-8000-000000000014', 'ZZ2506', 'TestLicensor/GuideC/alpha.pdf', 'GuideC', 'alpha.pdf', 'alpha', 'pdf', 'alpha', 'TestProperty', 'GuideC', 400, '2026-09-01', true, null, 'terminal'),
+    ('25060000-0000-4000-8000-000000000015', 'ZZ2506', 'TestLicensor/Inactive/alpha.pdf', 'Inactive', 'alpha.pdf', 'alpha', 'pdf', 'alpha', 'TestProperty', 'Inactive', 500, '2026-09-01', false, null, null);
+
+  insert into public.style_guide_search_documents
+    (style_guide_file_id, root_label, licensor_name, property_folder, style_guide_folder,
+     style_guide_name, directory_path, relative_path, filename, file_extension,
+     tag_names, size_bytes, modified_at, thumbnail_url, is_active,
+     pdf_text_status, pdf_text_length, source_identity, search_vector)
+  select f.id, f.root_label, f.licensor_name, f.property_folder, f.style_guide_folder,
+         f.style_guide_folder, f.directory_path, f.relative_path, f.filename,
+         f.file_extension, array['alpha-tag'], f.size_bytes, f.modified_at,
+         f.thumbnail_url, f.is_active,
+         case when f.id = '25060000-0000-4000-8000-000000000011' then 'extracted' else null end,
+         case when f.id = '25060000-0000-4000-8000-000000000011' then 25 else 0 end,
+         md5(f.id::text),
+         to_tsvector('simple', case when f.filename = 'other.ai' then 'other' else 'alpha uniquechildtoken' end)
+    from public.style_guide_files f where f.root_label = 'ZZ2506';
+
+  insert into public.style_guide_render_queue
+    (style_guide_file_id, status, attempts, error_message)
+  values
+    ('25060000-0000-4000-8000-000000000011', 'failed', 1, 'retryable'),
+    ('25060000-0000-4000-8000-000000000012', 'pending', 0, null),
+    ('25060000-0000-4000-8000-000000000014', 'failed', 3, 'terminal');
+
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+  v_result := public.search_style_guide_library_v2(
+    p_result_mode => 'guides', p_query => 'uniquechildtoken',
+    p_sort => 'modified_desc', p_limit => 1, p_offset => 0
+  );
+  if (v_result->>'total')::integer <> 3 then
+    raise exception 'contract 2: guide child-match total expected 3, got %', v_result->>'total';
+  end if;
+  if jsonb_array_length(v_result->'results') <> 1
+     or v_result->'results'->0->>'result_mode' <> 'guides' then
+    raise exception 'contract 2: guide paging did not return one guide result';
+  end if;
+
+  -- Same timestamps force the final guide identity tiebreak. Pages must be
+  -- stable, distinct, and retain one exact guide total.
+  if public.search_style_guide_library_v2('guides', 'uniquechildtoken', p_limit => 1, p_offset => 0)
+       ->'results'->0->>'guide_key'
+     = public.search_style_guide_library_v2('guides', 'uniquechildtoken', p_limit => 1, p_offset => 1)
+       ->'results'->0->>'guide_key' then
+    raise exception 'contract 3: guide pages repeated a guide';
+  end if;
+  if public.search_style_guide_library_v2('guides', 'uniquechildtoken', p_limit => 1, p_offset => 1)
+       ->'results'->0->>'guide_key'
+     is distinct from public.search_style_guide_library_v2('guides', 'uniquechildtoken', p_limit => 1, p_offset => 1)
+       ->'results'->0->>'guide_key' then
+    raise exception 'contract 3: repeated guide page is unstable';
+  end if;
+
+  v_result := public.search_style_guide_library_v2(
+    p_result_mode => 'guides', p_query => 'uniquechildtoken',
+    p_preview_states => array['missing'],
+    p_render_exception_states => array['recoverable_error'],
+    p_pdf_content_states => array['available']
+  );
+  if (v_result->>'total')::integer <> 1
+     or v_result->'results'->0->>'style_guide_name' <> 'GuideA'
+     or (v_result->'results'->0->>'matched_file_count')::integer <> 1 then
+    raise exception 'contract 4: combined child filters did not yield GuideA once: %', v_result;
+  end if;
+  if not exists (
+    select 1 from jsonb_array_elements(v_result->'facets'->'render_exception_states') facet
+     where facet->>'value' = 'recoverable_error' and (facet->>'count')::integer = 1
+  ) then
+    raise exception 'contract 4: facets do not describe the same filtered guide set';
+  end if;
+
+  v_result := public.search_style_guide_library_v2(
+    p_result_mode => 'files', p_query => 'uniquechildtoken', p_limit => 200
+  );
+  if (v_result->>'total')::integer <> 3
+     or exists (select 1 from jsonb_array_elements(v_result->'results') item
+                 where item->>'style_guide_name' = 'Inactive') then
+    raise exception 'contract 5: file mode returned inactive content or a wrong total';
+  end if;
+
+  execute 'set local role authenticated';
+  perform set_config('request.jwt.claims',
+    '{"sub":"25060000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+  perform public.search_style_guide_library_v2(p_result_mode => 'files', p_limit => 1);
+
+  perform set_config('request.jwt.claims',
+    '{"sub":"25060000-0000-4000-8000-000000000002","role":"authenticated"}', true);
+  begin
+    perform public.search_style_guide_library_v2(p_result_mode => 'files', p_limit => 1);
+    raise exception 'contract 6: user without PopSG access reached search';
+  exception when insufficient_privilege then null;
+  end;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  raise notice 'issue #2506 PopSG v2 search contracts: all 6 checks passed';
+end
+$contracts$;
+
+rollback;
