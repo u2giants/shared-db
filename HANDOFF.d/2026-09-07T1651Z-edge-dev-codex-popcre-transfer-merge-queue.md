@@ -60,7 +60,7 @@ Albert asked for a much more robust plan. The previous queue issue #1435 and PR 
 
 ## 6. Exact next steps
 
-1. Merge this documentation plan through the normal docs-only path. **Worked when:** plan, router link, and this handoff are on `main`, with #2530 still open.
+1. Merge this rulebook plan through the normal exact-head review and guarded merge path; `plan_*.md` and `AGENTS.md` are intentionally not eligible for the documents-only exemption. **Worked when:** plan, router link, and this handoff are on `main`, with #2530 still open.
 2. Start a fresh repo-maintenance session at plan Step 0 and consolidate the three owner decisions. **Worked when:** #2530 records exact authorization and the change window.
 3. Execute plan Phase A in a clean worktree. **Worked when:** redacted baseline exists and transfer-compatible identity code is merged without changing queue behavior.
 4. Execute Phase B only inside the authorized quiescent window. **Worked when:** same immutable repository ID/SHA is at `popcre/shared-db`, settings/access/credentials compare cleanly, canonical identity is updated, and all nine sync jobs pass.

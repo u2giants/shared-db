@@ -94,6 +94,7 @@ This baseline was read live on 2026-09-07 at `origin/main` commit `85015041f660b
 ### GitHub state
 
 - Repository: `u2giants/shared-db`; owner type `User`; public; default branch `main`; auto-merge disabled.
+- Tracking issue #2530 is open with the required `db-work` label and a valid documentation/repo-maintenance scope block.
 - `popcre/shared-db` did not resolve, so the destination name appeared available to the authenticated account.
 - `popcre` is an organization; its default repository permission is `read`; members may create public repositories.
 - There are no repository rulesets and `main` has no required merge queue.
@@ -113,7 +114,7 @@ This baseline was read live on 2026-09-07 at `origin/main` commit `85015041f660b
 - `.github/workflows/shared-supabase-migrations.yml:1344-1662` has live hard-coded repository API paths in the production-freeze authorization handling.
 - `scripts/manage-migration-author-lanes.mjs:34`, `scripts/check-orchestrator-marker.mjs:86`, `scripts/update-required-checks.mjs:44`, and several other operational scripts default to the old slug.
 - `scripts/run-governed-review.mjs:186-253` posts review evidence to hard-coded old-owner API paths.
-- `AGENTS.md:3,70,1025`, `HANDOFF.md:27`, and `COORDINATOR_INTAKE.md:13` point workers to the old canonical owner.
+- `AGENTS.md:3,71,1026`, `HANDOFF.md:27`, and `COORDINATOR_INTAKE.md:13` point workers to the old canonical owner.
 - `.github/workflows/sync.yml:39-47` names nine consumer destinations. It authenticates with `SYNC_TOKEN`; moving the source repository must not change those targets.
 - `docs/verification/main-required-status-checks.json` is the committed mirror of the live required contexts and must not shrink during this work.
 - No current required workflow declares the `merge_group` trigger.
