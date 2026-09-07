@@ -1982,6 +1982,15 @@ export function parseReviewCursor(commit) {
   return {sequence:Number(match[1]),reviewer:match[2],issue:Number(match[3]),pr:Number(match[4]),headSha:match[5],slot:match[6]?Number(match[6]):null}
 }
 
+// #2430. KEY ORDER IS NOT IDENTITY. Two verdict payloads carrying the same fields
+// with the same values are the same record whichever order JSON.stringify emitted
+// them in, so records are compared over sorted key/value pairs, never over the
+// message text.
+export function sameVerdictRecord(left,right){
+  if(!left||!right)return false
+  const keys=[...new Set([...Object.keys(left),...Object.keys(right)])].sort()
+  return keys.every((key)=>JSON.stringify(left[key])===JSON.stringify(right[key]))
+}
 export function recordReviewVerdict(options,io=githubIo){
   const issue=Number(options.issue),pr=Number(options.pr),slot=Number(options.slot??1),headSha=String(options.headSha??'').toLowerCase()
   const verdict=String(options.verdict??'').toUpperCase(),findingsRef=String(options.findingsRef??'')
@@ -2086,7 +2095,24 @@ export function recordReviewVerdict(options,io=githubIo){
   // that sees this marker must report loudly and STOP, touching nothing.
   try{
     const seen=readRefAfterWrite(ref,sha,io)
-    if(seen!==sha)throw new LaneError(`create-only verdict readback could not confirm the created object at ${ref} (read ${seen===null?'absent':seen}, expected ${sha}); the artifact WAS created and must not be voided`)
+    // #2430. A DIFFERENT SHA IS NOT AUTOMATICALLY CORRUPTION. The create is
+    // confirmed, so something written by THIS call stands at the ref -- and a
+    // retried create can produce a second commit object with a different SHA
+    // and an identical payload (the commit carries a timestamp; the record does
+    // not). Refusing on the SHA alone threw away a completed, paid-for review on
+    // PR #2415 at head 0fab4ace. So the CONTENT standing at the ref is compared
+    // against the record this call intended to write: an equivalent record that
+    // still validates as a full artifact is this verdict, and is a success.
+    // Anything else -- an unreadable commit, a genuinely different record, an
+    // absent ref after a confirmed create -- is still a permanent refusal, and
+    // still marked created so the runner never voids the findings comment.
+    if(seen!==sha){
+      if(!seen)throw new LaneError(`create-only verdict readback could not confirm the created object at ${ref} (read absent, expected ${sha}); the artifact WAS created and must not be voided`)
+      let standing=null
+      try{standing=parseVerdictCommit(io.getCommit(seen))}catch{standing=null}
+      if(!sameVerdictRecord(standing,record))throw new LaneError(`create-only verdict readback could not confirm the created object at ${ref} (read ${seen}, expected ${sha}); the artifact WAS created and must not be voided`)
+      return validateVerdictArtifact({ref,sha:seen,commit:io.getCommit(seen),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
+    }
     return validateVerdictArtifact({ref,sha,commit:io.getCommit(sha),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
   }catch(error){
     error.verdictArtifactCreated={ref,sha,confirmed:true}
