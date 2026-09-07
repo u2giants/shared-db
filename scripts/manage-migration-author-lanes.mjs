@@ -322,7 +322,18 @@ export const REVIEWERS = Object.freeze([
 // 2026-09-04T16:55Z. Whoever is orchestrating then should verify the cap has
 // actually lifted (do not assume the clock alone; confirm with a real doctor/attempt)
 // before removing 'kimi-k3' from this list and restoring its original rotation slot.
-export const RETIRED_REVIEWERS = Object.freeze(['glm-5.2', 'deepseek-chat', 'kimi-k3'])
+//
+// RETIRED 2026-09-06 (owner instruction, chat directive, no issue):
+// 'codex-gpt-5.6-sol'. Its account usage limit was exhausted for the whole of a
+// working session: every draw on PRs #2468 and #2479 came back
+// `ERROR: You've hit your usage limit`, each one costing a failed run plus a
+// replacement round while the rest of the queue waited. The owner directed
+// permanent removal from the pool. This is a disposition on the ACCOUNT, not on
+// the wrapper: `ai-codex-review` reads the repository correctly and its row in
+// REVIEWERS keeps `readsRepository:true`, so every durable artifact this
+// reviewer already recorded still authorizes exactly as before. Restoring it is
+// a one-line deletion from this list once the account has quota again.
+export const RETIRED_REVIEWERS = Object.freeze(['glm-5.2', 'deepseek-chat', 'kimi-k3', 'codex-gpt-5.6-sol'])
 
 // Not retired -- quarantined pending a passing live qualification (see the Qwen
 // note above). Kept separate from RETIRED_REVIEWERS on purpose: retirement is a
