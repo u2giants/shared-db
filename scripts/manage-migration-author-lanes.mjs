@@ -2030,7 +2030,17 @@ export function recordReviewVerdict(options,io=githubIo){
     if(validated.verdict!==verdict)throw new LaneError('a contradictory create-only verdict won the race; this tuple is permanently refused')
     return validated
   }
-  if(io.readRef(ref)!==sha)throw new LaneError('create-only verdict readback disagrees with the created object; this tuple is permanently refused')
+  // GitHub custom refs are eventually consistent: a ref that HAS been created can
+  // read back as absent for several seconds. Asked ONCE, that stale absence was
+  // indistinguishable from a failed create, so a correct, expensive review was
+  // declared permanently refused -- and the runner then voided its findings
+  // comment, which broke the artifact's findings digest for good. That burned the
+  // slot-1 tuple on PR #2415 twice (2026-09-07, issue #2486) and on PR #2415's
+  // predecessor head before it. Retry ONLY the stale-absence answer, exactly as
+  // readRefAfterWrite already does for every other create-only ref in this file.
+  // Any answer that is a DIFFERENT sha is a real conflict and still fails closed
+  // on the first read, so the create-only guarantee is unchanged.
+  if(readRefAfterWrite(ref,sha,io)!==sha)throw new LaneError('create-only verdict readback disagrees with the created object; this tuple is permanently refused')
   return validateVerdictArtifact({ref,sha,commit:io.getCommit(sha),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
 }
 

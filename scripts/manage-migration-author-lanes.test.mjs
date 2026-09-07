@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { CLAIM_CLOSE_REASONS, RECOVERABLE_CLAIM_CLOSE_REASONS, LEGACY_GUARDED_CLEANUP_CLOSE_REASON, ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution } from './manage-migration-author-lanes.mjs'
+import { CLAIM_CLOSE_REASONS, RECOVERABLE_CLAIM_CLOSE_REASONS, LEGACY_GUARDED_CLEANUP_CLOSE_REASON, ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution, recordReviewVerdict } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -5390,7 +5390,7 @@ test('durable approval still refuses a live slot with no APPROVE and never passe
 // artifact is validated against.
 test('an assignment that already carries a durable verdict is never returned (issue #1999)',()=>{
   const head='f'.repeat(40),{io,first,evidenceSha}=returnScenario(1999,2005,head)
-  io.refs.set(`refs/db-review-verdicts/1999-2005-${head}`,'verdict-sha')
+  io.refs.set(`refs/db-review-verdicts/1999-2005-${head}`,'b'.repeat(40))
   assert.throws(()=>excludeReviewerForPr({issue:1999,pr:2005,reviewer:first.reviewer,reason:'already-reviewed',evidenceSha},io),/already recorded a durable verdict/)
   assert.ok(io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/1999-2005-${head}`))
 })
@@ -5507,7 +5507,7 @@ test('a reviewed slot-2 replacement is never returned as an unreviewed slot 1',(
   const head='2'.repeat(40),{io,slotTwo,replacement,replacementRef,evidenceSha}=slotTwoReplacementScenario(2077,2101,head)
   const sequence=Number(/-(\d+)$/.exec(replacementRef)[1])
   assert.equal(sequence,slotTwo.sequence)
-  io.refs.set(`refs/db-review-verdict-replacements/2077-2101-${head}-slot2-${sequence}`,'verdict-sha')
+  io.refs.set(`refs/db-review-verdict-replacements/2077-2101-${head}-slot2-${sequence}`,'b'.repeat(40))
   assert.throws(()=>excludeReviewerForPr({issue:2077,pr:2101,reviewer:replacement.reviewer,reason:'already-reviewed',evidenceSha},io),/already recorded a durable verdict .* slot 2/)
   assert.equal(io.refs.get(replacementRef),evidenceSha)
   assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith(REVIEW_RETURN_REF_PREFIX)),false)
@@ -5566,7 +5566,7 @@ test('a verdict naming another assignment stops the exclusion for audit',()=>{
 test('a replacement assignment that already carries a durable verdict is never returned (issue #1999)',()=>{
   const head='d'.repeat(40),{io,replacement,replacementRef,evidenceSha}=replacementScenario(1999,2007,head)
   const sequence=Number(/-(\d+)$/.exec(replacementRef)[1])
-  io.refs.set(`refs/db-review-verdict-replacements/1999-2007-${head}-${sequence}`,'verdict-sha')
+  io.refs.set(`refs/db-review-verdict-replacements/1999-2007-${head}-${sequence}`,'b'.repeat(40))
   assert.throws(()=>excludeReviewerForPr({issue:1999,pr:2007,reviewer:replacement.reviewer,reason:'already-reviewed',evidenceSha},io),/already recorded a durable verdict/)
   assert.equal(io.refs.get(replacementRef),evidenceSha)
 })
@@ -5591,7 +5591,7 @@ test('a comment-only verdict never bars returning the slot (issue #1999)',()=>{
 test('a verdict recorded while the exclusion waits for the mutex still refuses the return (issue #1999)',()=>{
   const head='f'.repeat(40),{io,first,assignmentRef,evidenceSha}=returnScenario(1999,2009,head)
   const create=io.createRef
-  io.createRef=(ref,sha)=>{const made=create(ref,sha);if(ref===MUTEX_REF&&made)io.refs.set(`refs/db-review-verdicts/1999-2009-${head}`,'verdict-sha');return made}
+  io.createRef=(ref,sha)=>{const made=create(ref,sha);if(ref===MUTEX_REF&&made)io.refs.set(`refs/db-review-verdicts/1999-2009-${head}`,'b'.repeat(40));return made}
   assert.throws(()=>excludeReviewerForPr({issue:1999,pr:2009,reviewer:first.reviewer,reason:'already-reviewed',evidenceSha},io),/already recorded a durable verdict/)
   assert.equal(io.refs.get(assignmentRef),evidenceSha)
   assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith(REVIEW_RETURN_REF_PREFIX)),false)
@@ -6039,4 +6039,54 @@ test('#2460 expired recovery works for a claim legitimately expanded beyond its 
   missing.workIssue.body=scope('ready','structural','shared-db-orchestrator',2,[...f.tables,'table coldlion.never_claimed'])
   assert.throws(()=>recoverExpiredClaimFromPr(recoveryOptions(f),NOW,missing),/do not exactly match the permanent claim objects/)
   assert.equal(missing.updateCalls,0)
+})
+
+// #2486. A verdict ref that WAS created can read back as absent for seconds.
+// Asked once, that stale absence was indistinguishable from a failed create, so
+// a genuine APPROVE was declared "permanently refused" and the runner then
+// voided its findings comment -- destroying the artifact's digest for good.
+// The retry must accept a late-but-correct answer and still refuse a real
+// third-party winner on the FIRST read, with no wait.
+function verdictIo({ readRef }) {
+  const assignmentRef='refs/db-review-assignments/2355-2415-'+'a'.repeat(40)
+  const commits=new Map([['c'.repeat(40),{message:'db-coordination reviewer-cursor sequence=7 reviewer=muse-spark-1.2-contributor issue=2355 pr=2415 head='+'a'.repeat(40)+' slot=1'}]])
+  const state={waits:0}
+  return {
+    assignmentRef, commits, state,
+    readRef, getCommit:(sha)=>commits.get(sha),
+    getPr:()=>({state:'open',head:{sha:'a'.repeat(40)}}),
+    readFindings:()=>'findings body',
+    makeReviewVerdictCommit:(message,parent)=>{commits.set('b'.repeat(40),{message,parents:[{sha:parent}]});return 'b'.repeat(40)},
+    createRef:()=>true,
+    wait:()=>{state.waits++},
+  }
+}
+const VERDICT_OPTS={issue:2355,pr:2415,slot:1,headSha:'a'.repeat(40),verdict:'APPROVE',findingsRef:'https://github.com/u2giants/shared-db/pull/2415#issuecomment-1'}
+
+test('a created verdict ref that reads back absent is retried, not burned', () => {
+  let verdictReads=0
+  const io=verdictIo({readRef(ref){
+    if(ref.startsWith('refs/db-review-assignments/'))return 'c'.repeat(40)
+    if(ref.startsWith('refs/db-review-active/'))return 'c'.repeat(40)
+    return ++verdictReads<=3 ? null : 'b'.repeat(40)
+  }})
+  const result=recordReviewVerdict(VERDICT_OPTS,io)
+  assert.equal(result.verdict,'APPROVE')
+  assert.ok(io.state.waits>0)
+})
+
+test('a genuinely different verdict winner is refused on the first read', () => {
+  const io=verdictIo({readRef(ref){
+    if(ref.startsWith('refs/db-review-assignments/'))return 'c'.repeat(40)
+    if(ref.startsWith('refs/db-review-active/'))return 'c'.repeat(40)
+    return null
+  }})
+  let seen=0
+  const inner=io.readRef
+  io.readRef=(ref)=>{
+    if(ref.startsWith('refs/db-review-verdicts/'))return ++seen===1?null:'d'.repeat(40)
+    return inner(ref)
+  }
+  assert.throws(()=>recordReviewVerdict(VERDICT_OPTS,io),/permanently refused/)
+  assert.equal(io.state.waits,0)
 })
