@@ -1375,6 +1375,10 @@ const replacementRequest={...failedReview,failedSequence:1,failureCode:'insuffic
 test('terminal provider failure advances exactly once and retry is idempotent',()=>{
   const io=failedReviewIo(), first=replaceFailedReviewer(replacementRequest,io), second=replaceFailedReviewer(replacementRequest,io)
   assert.equal(first.sequence,2);assert.equal(first.reviewer,'glm-5.3');assert.deepEqual(second,first)
+  assert.equal(first.replacementSequence,1,'the recorder needs the ref suffix, not the allocation cursor')
+  assert.equal(io.refs.get(first.assignmentRef),first.replacementSha)
+  assert.ok(first.assignmentRef.endsWith(`-${first.replacementSequence}`))
+  assert.equal(assignNextReviewer(failedReview,io).replacementSequence,first.replacementSequence)
   assert.equal(assignNextReviewer(failedReview,io).reviewer,'glm-5.3')
   assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'kimi-k3')
 })

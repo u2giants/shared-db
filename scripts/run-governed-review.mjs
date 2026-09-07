@@ -120,6 +120,22 @@ export function wrapperSpawnPlan(resolved,args,platform=process.platform){
   if(platform==='win32'&&/\.(cmd|bat)$/i.test(resolved))return{file:process.env.ComSpec||'cmd.exe',args:['/d','/s','/c',resolved,...args]}
   return{file:resolved,args}
 }
+// Provider diagnostics may contain credentials or private repository text. Only
+// fixed, recognized reasons cross into the refusal; never echo raw stderr.
+export function wrapperFailureReason(run){
+  const stderr=String(run.stderr??'')
+  const reasons=[]
+  if(run.error)reasons.push('the wrapper process could not complete')
+  if(run.signal)reasons.push('the wrapper process was terminated by a signal')
+  if(/unknown option/i.test(stderr))reasons.push('the wrapper rejected an unsupported option; check its --help')
+  if(/cancelled without a final answer/i.test(stderr))reasons.push('the provider cancelled without a final answer')
+  if(/timed-out|timed out|deadline|time limit/i.test(stderr))reasons.push('the wrapper reported a timeout')
+  if(/local_dependency_unavailable/i.test(stderr))reasons.push('a local reviewer dependency is unavailable')
+  if(/execution-context-denied/i.test(stderr))reasons.push('the wrapper reported execution-context-denied')
+  if(/usage-limit|insufficient.quota|quota exceeded|usage limit/i.test(stderr))reasons.push('the wrapper reported a usage limit')
+  if(/already active|already in progress|held for reconciliation|retained/i.test(stderr))reasons.push('the wrapper reported retained or active work; inspect that exact session')
+  return reasons.join('; ')||(stderr?'wrapper stderr was present but its reason was not recognized; inspect the exact wrapper session':'the wrapper supplied no recognized diagnostic')
+}
 export function runGovernedReview(options,deps={spawn:spawnSync,preflight:reviewerExecutionPreflight,record:recordReviewVerdict,resolve:resolveCommandPath}){
   const skipDoctor=options.skipDoctor===true||options.skipDoctor==='true'
   deps.preflight({reviewer:options.reviewer,wrapper:options.wrapper,worktree:options.worktree,headSha:options.headSha,skipDoctor})
@@ -128,7 +144,7 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
   const plan=wrapperSpawnPlan(resolved,wrapperVerdictContractArgs(options.wrapper,options.wrapperArgs,options.headSha))
   const run=deps.spawn(plan.file,plan.args,{cwd:options.worktree,encoding:'utf8',maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe']})
   const rawBody=String(run.stdout??'').trim(),verdict=verdictFromOutput(rawBody,options.headSha)
-  if(run.error||run.status!==0||!verdict)throw new Error(`review wrapper did not produce a recordable terminal verdict (exit ${run.status??'unknown'})`)
+  if(run.error||run.status!==0||!verdict)throw new Error(`review wrapper did not produce a recordable terminal verdict (exit ${run.status??'unknown'}): ${wrapperFailureReason(run)}`)
   // CLOSE THE ORDERING HOLE AT THE ONLY POINT WHERE IT CAN BE CLOSED.
   // Recording BEFORE posting is impossible: `recordReviewVerdict` binds the
   // artifact to `findings_ref` (a durable comment URL on this exact PR) and to
