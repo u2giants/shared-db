@@ -3,7 +3,6 @@
   "mode": "enforced",
   "activated_at": "2026-09-07",
   "grandfathered_prs": [
-    { "number": 2540, "head_sha": "c2a8facbff357c126fc27529f7063e01c4fe6b1a" },
     { "number": 2527, "head_sha": "aeb8720a00fa4829c388bcc04e4de23205a1ef95" },
     { "number": 2526, "head_sha": "d34c2824c5621c41a3afcd0c4bba5760f08079c0" },
     { "number": 2523, "head_sha": "a4991c3da4a18d87c9808655075a41d7fc6c9b88" },
@@ -17,9 +16,9 @@
   ],
   "why": "Activated after the 2026-09-07 live compatibility census. Every pre-contract open pull request is grandfathered only at its exact current head; any later push invalidates that exemption and must carry a valid contract and completion pair. This activation does not retire the legacy objects alias or change branch protection.",
   "audit_2026_09_07": {
-    "open_pull_requests_before_activation_pr": 11,
+    "open_pull_requests_before_activation_pr": 10,
     "open_pull_requests_carrying_a_contract_and_completion_pair": 0,
-    "open_pull_requests_grandfathered_at_exact_head": 11
+    "open_pull_requests_grandfathered_at_exact_head": 10
   },
   "audit_2026_08_23": {
     "open_pull_requests": 4,
