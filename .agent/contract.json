@@ -1,24 +1,44 @@
 {
   "schema_version": 1,
-  "work_issue": 2553,
+  "work_issue": 1090,
   "generation": 1,
-  "work_type": "docs",
+  "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Record in the ColdLion API reference that the items endpoint must be pulled one division at a time, because a company-wide pull returns blank merchandise-group display names.",
-  "base_sha": "b3219f73c0a111bf06889d490cdc398c9ca1018c",
-  "dispatcher": "claude",
-  "worker": "claude",
-  "branch": "claude/coldlion-items-per-division",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/disney-creative-unmapped-titles-7b4149",
-  "allowed_paths": ["docs/coldlion-erp-api-reference.md", ".agent/contract.json", ".agent/completion.json"],
-  "file_writes": ["docs/coldlion-erp-api-reference.md", ".agent/contract.json", ".agent/completion.json"],
+  "goal": "Publish a comprehensive closeout handoff for the unfinished five-issue non-orchestrator work without changing or bypassing any live gate.",
+  "base_sha": "2fd3b721865ab9409ce44a52723ef91a95479c1e",
+  "dispatcher": "codex",
+  "worker": "codex",
+  "branch": "codex/five-issues-closeout-2236",
+  "worktree": "C:/repos/shared-db-worktrees/five-issues-closeout-2236",
+  "allowed_paths": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "HANDOFF.d/2026-09-07T2236Z-edge-dev-codex-five-non-orchestrator-issues.md"
+  ],
+  "file_writes": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "HANDOFF.d/2026-09-07T2236Z-edge-dev-codex-five-non-orchestrator-issues.md"
+  ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not change any migration, script, workflow or configuration file.",
-    "Do not place licensed row data in this public repository."
+    "Do not merge the unfinished reviewer-budget repair.",
+    "Do not perform database or production mutations.",
+    "Do not alter or delete another session's handoff or canonical-checkout work."
   ],
-  "required_checks": ["node --test scripts/agent-work-contract.test.mjs"],
-  "assumptions": ["The measured counts were taken live on 2026-09-07 against the production ColdLion API."],
-  "stop_conditions": ["Stop if recording this would require changing anything outside documentation."]
+  "required_checks": [
+    "node --test scripts/check-handoff-contract.test.mjs",
+    "git diff --check",
+    "secret-pattern scan of the new handoff"
+  ],
+  "assumptions": [
+    "Issue 1090 remains open and is the contract issue for this continuing multi-issue workstream.",
+    "The handoff records live state as context and instructs the successor to re-resolve every mutable gate."
+  ],
+  "stop_conditions": [
+    "Stop if publishing the handoff would require changing the unfinished repair branch.",
+    "Stop if any secret value appears in the handoff.",
+    "Stop if the handoff contract issue is closed."
+  ]
 }

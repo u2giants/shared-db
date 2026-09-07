@@ -1,18 +1,39 @@
 {
   "schema_version": 1,
-  "work_issue": 2553,
+  "work_issue": 1090,
   "outcome": "ready-for-merge",
-  "pr": 2554,
+  "pr": 2557,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2553/1",
-  "contract_sha256": "c86ababe9d0fde6e352cf27fa5dc6c4b03da5099e021ad5578d9a31aada9ce2e",
-  "head_sha": "9731a8fdfa50dc099e2031744bb0ad1c97dc628a",
-  "files_changed": ["docs/coldlion-erp-api-reference.md"],
+  "contract_ref": "refs/db-contracts/1090/1",
+  "contract_sha256": "dec834e53f0dbea234dcf2b4b18d2cc4675038d7534f7e006d87ab63a4ab6ddd",
+  "head_sha": "2fd3b721865ab9409ce44a52723ef91a95479c1e",
+  "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "HANDOFF.d/2026-09-07T2236Z-edge-dev-codex-five-non-orchestrator-issues.md"
+  ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {"command": "node --test scripts/agent-work-contract.test.mjs", "exit_code": 0, "evidence": "contract and completion pair validate"}
+    {
+      "command": "node --test scripts/check-handoff-contract.test.mjs",
+      "exit_code": 0,
+      "evidence": "16 passed, 0 failed, 0 skipped, 0 todo"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "no whitespace errors"
+    },
+    {
+      "command": "secret-pattern scan of the new handoff",
+      "exit_code": 0,
+      "evidence": "no password, key, token, private-key, or assigned-secret patterns found"
+    }
   ],
-  "assumptions_resolved": ["Counts measured live: 4448 of 15049 blank company-wide, 16 blank when pulled per division."],
+  "assumptions_resolved": [
+    "Issue 1090 was live-verified OPEN during closeout.",
+    "Every mutable state in the handoff is paired with an instruction to re-resolve it before action."
+  ],
   "stop_conditions_hit": []
 }
