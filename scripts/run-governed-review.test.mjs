@@ -260,3 +260,66 @@ VERDICT: APPROVE ${head}`}}
   assert.equal(recorded.length,1)
   assert.equal(recorded[0].headSha,head,'the recorded head is the head under review, not one the wrapper chose')
 })
+
+// #2464. THE VOID MUST NEVER RUN AFTER THE ARTIFACT WAS CREATED.
+// `recordReviewVerdict` marks a post-create failure with `verdictArtifactCreated`.
+// The artifact's recorded findings_digest is the sha256 of the comment this run
+// posted, so editing that comment permanently invalidates a verdict that exists
+// and can never be rewritten. On PR #2409 that burned the (issue, pr, head, slot)
+// tuple on four consecutive rounds.
+test('a failure AFTER the create-only artifact exists never edits the findings comment (#2464)',()=>{
+  const calls=[]
+  const spawn=(command,args,spawnOptions)=>{
+    if(command!=='gh')return{status:0,stdout:wrapperOut}
+    calls.push({verb:args[2],url:args[3],body:JSON.parse(spawnOptions.input).body})
+    return{status:0,stdout:commentJson}
+  }
+  const record=()=>{
+    const error=new Error('readback could not confirm the created object')
+    error.verdictArtifactCreated={ref:'refs/db-review-verdicts/2334-2000-'+'a'.repeat(40)+'-slot2',sha:'d'.repeat(40)}
+    throw error
+  }
+  let thrown
+  try{runGovernedReview(options,{spawn,resolve:(name)=>name,preflight:()=>{},record})}
+  catch(error){thrown=error}
+  assert.ok(thrown,'the round still fails loudly')
+  assert.equal(calls.some((call)=>call.verb==='PATCH'),false,'the findings comment must be left untouched')
+  const note=calls.filter((call)=>call.verb==='POST').at(-1).body
+  assert.match(note,/THE DURABLE VERDICT ARTIFACT WAS CREATED AND IS LEFT INTACT/)
+  assert.match(note,/refs\/db-review-verdicts\/2334-2000-a{40}-slot2/)
+  assert.match(note,/left UNTOUCHED on purpose/)
+  assert.match(thrown.message,/WAS created/)
+  assert.equal(/REVIEW RECORDING FAILED/.test(note),false,'this is not the voiding failure notice')
+})
+
+// The marker also arrives UNCONFIRMED, when the read that would have proved the
+// ref threw. The behaviour is identical -- nothing is edited -- but the notice
+// must not claim the artifact exists. Without this case, code that always
+// printed the definite wording would pass the test above (muse-spark, round 3).
+test('an UNCONFIRMED marker is reported tentatively and still edits nothing (#2464)',()=>{
+  const calls=[]
+  const spawn=(command,args,spawnOptions)=>{
+    if(command!=='gh')return{status:0,stdout:wrapperOut}
+    calls.push({verb:args[2],body:JSON.parse(spawnOptions.input).body})
+    return{status:0,stdout:commentJson}
+  }
+  const record=()=>{
+    const error=new Error('the winner read threw after a failed create')
+    error.verdictArtifactCreated={ref:'refs/db-review-verdicts/2334-2000-'+'a'.repeat(40)+'-slot2',sha:'d'.repeat(40),confirmed:false}
+    throw error
+  }
+  let thrown
+  try{runGovernedReview(options,{spawn,resolve:(name)=>name,preflight:()=>{},record})}
+  catch(error){thrown=error}
+  assert.ok(thrown)
+  assert.equal(calls.some((call)=>call.verb==='PATCH'),false,'an unprovable ref state must not be voided either')
+  const note=calls.filter((call)=>call.verb==='POST').at(-1).body
+  assert.match(note,/THE DURABLE VERDICT ARTIFACT MAY HAVE BEEN CREATED/)
+  assert.equal(/WAS CREATED AND IS LEFT INTACT/.test(note),false,'an unconfirmed artifact must not be reported as created')
+  assert.match(thrown.message,/MAY have been created and could not be read back/)
+  // glm-5.3, PR #2468 round 4: the HEADLINE was tentative but the body prose
+  // still asserted an artifact that exists. The whole notice must hedge.
+  assert.equal(/a verdict that already exists/.test(note),false,'the unconfirmed notice body must not assert the artifact exists')
+  assert.match(note,/could permanently invalidate a verdict that may already exist/)
+  assert.equal(/so its digest stays valid/.test(thrown.message),false,'the unconfirmed throw must not assert a recorded digest')
+})
