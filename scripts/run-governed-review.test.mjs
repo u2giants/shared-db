@@ -5,6 +5,23 @@ import { anyVerdictFor } from './lib/review-verdict.mjs'
 
 const options={issue:1824,pr:2000,headSha:'a'.repeat(40),reviewer:'glm-5.3',wrapper:'ai-glm',worktree:'C:/review',slot:1,wrapperArgs:['review']}
 
+test('wrapper failure preserves a safe cause without publishing a verdict or raw diagnostics',()=>{
+  for(const [stderr,expected] of [
+    ["unknown option '--review-kind'; token=private-value",/unsupported option/],
+    ['ai-grok-review: Grok cancelled without a final answer. private-value',/provider cancelled/],
+    ['timed-out private-value',/reported a timeout/],
+    ['private-value',/reason was not recognized/],
+  ]){
+    let calls=0
+    assert.throws(()=>runGovernedReview(options,{preflight:()=>{},resolve:(x)=>x,spawn:()=>{calls++;return{status:1,stderr,stdout:`VERDICT: APPROVE ${options.headSha}`}},record:()=>assert.fail('must not record')}),(error)=>{
+      assert.match(error.message,expected)
+      assert.ok(!error.message.includes('private-value'))
+      return true
+    })
+    assert.equal(calls,1,'failed wrappers never publish to GitHub')
+  }
+})
+
 test('adapter with real process payload shapes posts findings and records before returning output',()=>{
   const order=[],spawn=(command)=>{order.push(command);return command==='gh'?{status:0,stdout:JSON.stringify({html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-123'})}:{status:0,stdout:`Coverage: scripts.\nVERDICT: APPROVE ${options.headSha}`}}
   const result=runGovernedReview(options,{spawn,resolve:(name)=>name,preflight:()=>order.push('preflight'),record:(row)=>{order.push('record');assert.equal(row.verdict,'APPROVE');return{ref:'refs/db-review-verdicts/x',sha:'b'.repeat(40)}}})
