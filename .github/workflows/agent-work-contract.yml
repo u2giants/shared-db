@@ -91,10 +91,17 @@ jobs:
             PAIR_STATE=current
           fi
 
-          if [ "$PAIR_STATE" = "partial" ]; then
-            echo "::error::A pull request must change both $CONTRACT and $REPORT together."
-            exit 1
-          fi
+          case "$PAIR_STATE" in
+            inherited|current) ;;
+            partial)
+              echo "::error::A pull request must change both $CONTRACT and $REPORT together."
+              exit 1
+              ;;
+            *)
+              echo "::error::Evidence classification returned an unknown state: $PAIR_STATE"
+              exit 1
+              ;;
+          esac
 
           if [ "$PAIR_STATE" = "inherited" ] || { [ ! -f "$CONTRACT" ] && [ ! -f "$REPORT" ]; }; then
             if [ "$MODE" = "report-only" ]; then

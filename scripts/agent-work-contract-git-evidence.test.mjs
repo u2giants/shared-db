@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyEvidencePair, main, verifyGitEvidence } from './agent-work-contract-git-evidence.mjs'
+import { classifyEvidencePair, main, prChangedFiles, verifyGitEvidence } from './agent-work-contract-git-evidence.mjs'
 
 const base = 'a'.repeat(40)
 const prBase = 'd'.repeat(40)
@@ -16,6 +16,7 @@ const report = { head_sha: implementation, files_changed: ['scripts/fix.mjs'], c
 const io = (over = {}) => ({
   isAncestor: () => true,
   changedFiles: (from) => from === prBase ? ['scripts/fix.mjs'] : ['.agent/contract.json', '.agent/completion.json'],
+  mergeBase: () => base,
   readPublishedContract: () => contract,
   ...over,
 })
@@ -51,12 +52,29 @@ test('evidence pair classification distinguishes inherited, current, and half-wr
 
 test('classification CLI compares the exact pull request base and head', () => {
   const output = []
+  const calls = []
   const originalLog = console.log
   console.log = value => output.push(value)
   try {
-    assert.equal(main(['--classify-evidence-pair', '--pr-base-sha', prBase, '--pr-head-sha', prHead], io({ changedFiles: () => ['.agent/contract.json', '.agent/completion.json'] })), 0)
+    assert.equal(main(['--classify-evidence-pair', '--pr-base-sha', prBase, '--pr-head-sha', prHead], io({
+      mergeBase: (actualBase, actualHead) => { calls.push(['merge-base', actualBase, actualHead]); return base },
+      changedFiles: (actualBase, actualHead) => { calls.push(['diff', actualBase, actualHead]); return ['.agent/contract.json', '.agent/completion.json'] },
+    })), 0)
   } finally {
     console.log = originalLog
   }
   assert.deepEqual(output, ['current'])
+  assert.deepEqual(calls, [['merge-base', prBase, prHead], ['diff', base, prHead]])
+})
+
+test('a branch behind main is classified from its merge base, not as deleting evidence added later on main', () => {
+  const files = prChangedFiles(prBase, prHead, {
+    mergeBase: () => base,
+    changedFiles: (from, to) => {
+      assert.equal(from, base)
+      assert.equal(to, prHead)
+      return ['docs/old-branch-change.md']
+    },
+  })
+  assert.equal(classifyEvidencePair(files), 'inherited')
 })

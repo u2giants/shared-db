@@ -18,6 +18,12 @@ export function classifyEvidencePair(changedFiles) {
   return 'partial'
 }
 
+export function prChangedFiles(base, head, io) {
+  const mergeBase = io.mergeBase(base, head)
+  if (!SHA_PATTERN.test(mergeBase)) throw new GitEvidenceError('could not resolve an exact merge base for PR evidence classification')
+  return io.changedFiles(mergeBase, head)
+}
+
 export function verifyGitEvidence({ contract, report, prBaseSha, prHeadSha }, io) {
   if (!SHA_PATTERN.test(String(contract.base_sha ?? ''))) throw new GitEvidenceError('PR evidence requires contract.base_sha to be an exact 40-character SHA')
   if (!SHA_PATTERN.test(String(report.head_sha ?? ''))) throw new GitEvidenceError('PR evidence requires report.head_sha to be an exact 40-character implementation SHA')
@@ -52,6 +58,9 @@ export const gitIo = {
   changedFiles(from, to) {
     return execFileSync('git', ['diff', '--name-only', '--diff-filter=ACDMRTUXB', from, to], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean)
   },
+  mergeBase(base, head) {
+    return execFileSync('git', ['merge-base', base, head], { encoding: 'utf8' }).trim()
+  },
   readPublishedContract(ref) {
     execFileSync('git', ['fetch', '--quiet', '--no-tags', 'origin', ref], { stdio: 'ignore' })
     const message = execFileSync('git', ['show', '--format=%B', '--no-patch', 'FETCH_HEAD'], { encoding: 'utf8' })
@@ -68,7 +77,7 @@ export function main(argv, io = gitIo) {
       const prBaseSha = baseIndex >= 0 ? argv[baseIndex + 1] : undefined
       const prHeadSha = headIndex >= 0 ? argv[headIndex + 1] : undefined
       if (!prBaseSha || !prHeadSha) throw new GitEvidenceError('usage: --classify-evidence-pair --pr-base-sha <sha> --pr-head-sha <sha>')
-      console.log(classifyEvidencePair(io.changedFiles(prBaseSha, prHeadSha)))
+      console.log(classifyEvidencePair(prChangedFiles(prBaseSha, prHeadSha, io)))
       return 0
     }
     const values = {}
