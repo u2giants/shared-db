@@ -400,10 +400,35 @@ declare
   v_endpoint    uuid;
   v_licensor    uuid;
   v_new         jsonb;
+  v_old         jsonb;
   i             integer;
 begin
   -- Round-5 review finding: serialize the row ONCE, not once per endpoint.
   v_new := to_jsonb(new);
+
+  -- Round-6 review finding (High). This check is scoped to writes that actually SET the
+  -- columns it governs -- the two endpoint references and licensor_id -- exactly as
+  -- core.guard_taxonomy_source_ref_identity() scopes its own rules, and for the same
+  -- reason. Endpoint re-licensing is routine and permitted: an endpoint entity may move to
+  -- a different licensor_id long after this support row was recorded. An unscoped guard
+  -- re-derives both endpoints' CURRENT licensors on every UPDATE, so once an endpoint
+  -- moves, every later write to the historical support row is refused -- including the
+  -- documented withdrawal path (is_current = false, superseded_at = ...), supersession and
+  -- ordinary metadata corrections. The row could then never record its own withdrawal, the
+  -- stale assertion would stay current forever, its canonical bridge could never be
+  -- retired, and where the two endpoints end up under different licensors NO value of
+  -- licensor_id could satisfy the guard at all -- leaving the rewriting of licensor_id on a
+  -- historical row as the only escape, which falsifies exactly the attribution this guard
+  -- exists to protect. So: enforced on INSERT, and on any UPDATE that changes an endpoint
+  -- or the licensor; never on a write that leaves all three alone.
+  if tg_op = 'UPDATE' then
+    v_old := to_jsonb(old);
+    if (v_new ->> v_left_col) is not distinct from (v_old ->> v_left_col)
+       and (v_new ->> v_right_col) is not distinct from (v_old ->> v_right_col)
+       and new.licensor_id is not distinct from old.licensor_id then
+      return new;
+    end if;
+  end if;
 
   for i in 0..1 loop
     if i = 0 then
@@ -442,7 +467,10 @@ comment on function core.require_support_edge_licensor_matches_endpoints() is
   'finding). A support row''s licensor_id must equal the licensor of both endpoints it names, '
   'whenever those endpoints declare one. Without it the licensor in the identity key is '
   'unanchored: a loader could file one licensor''s pair under another licensor''s id with no '
-  'error, which is a royalty misattribution rather than a cosmetic one.';
+  'error, which is a royalty misattribution rather than a cosmetic one. Scoped to writes that '
+  'actually set an endpoint or licensor_id (round-6 review finding): endpoint re-licensing is '
+  'permitted, and an unscoped guard would freeze every historical support row -- withdrawal '
+  'included -- the moment an endpoint moved.';
 
 revoke all on function core.require_support_edge_licensor_matches_endpoints() from public, anon, authenticated;
 

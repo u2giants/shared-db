@@ -20,7 +20,11 @@
 --     standard as inserting it;
 --   * a support row's licensor must be its endpoints' licensor, so one licensor's
 --     pair can never be filed under another licensor's id -- enforced as the migration
---     owner AND as service_role.
+--     owner AND as service_role;
+--   * that licensor check is scoped to writes that actually set an endpoint or licensor_id,
+--     so re-licensing an endpoint does not freeze the historical support row: withdrawal and
+--     metadata corrections still work, while INSERTs and governed-column UPDATEs into
+--     disagreement are still refused.
 begin;
 
 do $contracts$
@@ -37,6 +41,7 @@ declare
   v_licensor2   uuid;
   v_property3   uuid;
   v_style_guide2 uuid;
+  v_edge3       uuid;
   v_spec        jsonb;
   v_def         text;
   v_needle      text;
@@ -917,6 +922,125 @@ begin
 
   if (select is_current from dam.asset_character_source_edge where id = v_edge2) then
     raise exception 'the service_role supersession did not take effect';
+  end if;
+
+  -- 6d. Round-6 review finding (High). Endpoint re-licensing is a routine, permitted event:
+  --     an endpoint entity may move to another licensor long after a support row recorded
+  --     what a source once asserted. The endpoint-licensor guard re-derives both endpoints'
+  --     CURRENT licensors, so an UNSCOPED version of it freezes every historical support row
+  --     the moment an endpoint moves -- the documented withdrawal path included. A frozen
+  --     row can never record its own supersession, so a stale direct assertion stays current
+  --     forever and keeps its canonical bridge alive; where the two endpoints end up under
+  --     different licensors, no value of licensor_id satisfies the guard at all, and the only
+  --     escape is rewriting licensor_id on a historical row -- falsifying the very
+  --     attribution the guard exists to protect. The guard is therefore scoped to writes that
+  --     actually SET an endpoint or licensor_id, exactly as
+  --     core.guard_taxonomy_source_ref_identity() scopes its own rules.
+
+  -- A support row recorded while both endpoints agree with the claim's licensor (B).
+  insert into core.property_style_guide_source_edge
+    (property_id, style_guide_id, licensor_id, source_system, source_id, evidence_kind)
+    values (v_property3, v_style_guide2, v_licensor2, 'zz_fixture_2334_relicense', 'rl-1',
+            'direct_source_assertion')
+    returning id into v_edge3;
+
+  -- The style-guide endpoint is re-licensed to licensor A. The historical support row is
+  -- untouched and now disagrees with its right endpoint -- which is the true history, not
+  -- an error to be edited away.
+  update core.style_guide set licensor_id = v_licensor where id = v_style_guide2;
+
+  -- (a) Withdrawal STILL WORKS after re-licensing. This is the whole point: a write that
+  --     leaves both endpoint references and licensor_id alone is not a filing decision.
+  begin
+    update core.property_style_guide_source_edge
+       set is_current = false, superseded_at = now(),
+           superseded_reason = 'withdrawn after endpoint re-licensing'
+     where id = v_edge3;
+  exception when others then
+    get stacked diagnostics v_sqlstate = returned_sqlstate, v_message = message_text;
+    raise exception 'a support row could not be WITHDRAWN after its endpoint was re-licensed: '
+      '% (%). The endpoint-licensor guard is unscoped, so re-licensing permanently freezes '
+      'every historical support row -- withdrawal, supersession and metadata corrections all',
+      v_message, v_sqlstate;
+  end;
+
+  if (select is_current from core.property_style_guide_source_edge where id = v_edge3) then
+    raise exception 'the post-re-licensing withdrawal did not take effect';
+  end if;
+
+  -- A metadata-only correction is likewise not a filing decision and must still be possible.
+  begin
+    update core.property_style_guide_source_edge
+       set superseded_reason = 'withdrawn after endpoint re-licensing (corrected)'
+     where id = v_edge3;
+  exception when others then
+    get stacked diagnostics v_sqlstate = returned_sqlstate, v_message = message_text;
+    raise exception 'a metadata-only correction on a support row was refused after endpoint '
+      're-licensing: % (%)', v_message, v_sqlstate;
+  end;
+
+  -- (b) An UPDATE that actually CHANGES a governed column into disagreement is still
+  --     refused. Scoping the guard must not turn it into an insert-only formality: after
+  --     re-licensing, the style guide belongs to A and the property to B, so relabelling
+  --     the claim to A still contradicts the left endpoint.
+  v_raised := false;
+  v_sqlstate := null;
+  begin
+    update core.property_style_guide_source_edge
+       set licensor_id = v_licensor
+     where id = v_edge3;
+  exception when others then
+    get stacked diagnostics v_sqlstate = returned_sqlstate, v_message = message_text;
+    v_raised := true;
+  end;
+  if not v_raised then
+    raise exception 'scoping the endpoint-licensor guard let an UPDATE RELABEL a support row '
+      'into disagreement with its endpoints -- the guard now only runs on INSERT';
+  end if;
+  if v_sqlstate <> 'P0001' then
+    raise exception 'the governed-column UPDATE failed with % (%) instead of the guard''s own '
+      'P0001 refusal', v_sqlstate, v_message;
+  end if;
+
+  -- The refused relabel left the historical attribution exactly as recorded.
+  if (select licensor_id from core.property_style_guide_source_edge where id = v_edge3)
+     <> v_licensor2 then
+    raise exception 'a refused relabel still rewrote licensor_id on a historical support row';
+  end if;
+
+  -- Repointing an ENDPOINT reference into disagreement is governed too, not just licensor_id.
+  v_raised := false;
+  begin
+    update core.property_style_guide_source_edge
+       set property_id = v_property
+     where id = v_edge3;
+  exception when sqlstate 'P0001' then v_raised := true;
+  end;
+  if not v_raised then
+    raise exception 'a support row was REPOINTED onto an endpoint belonging to another '
+      'licensor, past the scoped endpoint-licensor guard';
+  end if;
+
+  -- (c) INSERT-time disagreement is still refused after the re-licensing. Nothing about
+  --     scoping the UPDATE path relaxes the filing decision an INSERT always is.
+  v_raised := false;
+  v_sqlstate := null;
+  begin
+    insert into core.property_style_guide_source_edge
+      (property_id, style_guide_id, licensor_id, source_system, source_id, evidence_kind)
+      values (v_property3, v_style_guide2, v_licensor2, 'zz_fixture_2334_relicense', 'rl-2',
+              'direct_source_assertion');
+  exception when others then
+    get stacked diagnostics v_sqlstate = returned_sqlstate, v_message = message_text;
+    v_raised := true;
+  end;
+  if not v_raised then
+    raise exception 'after its endpoint was re-licensed, a NEW support row was accepted under '
+      'the old licensor -- the endpoint-licensor guard no longer runs on INSERT';
+  end if;
+  if v_sqlstate <> 'P0001' then
+    raise exception 'the post-re-licensing INSERT failed with % (%) instead of the guard''s own '
+      'P0001 refusal', v_sqlstate, v_message;
   end if;
 
   raise notice 'issue #2334 canonical licensing relationship contracts: all assertions passed';
