@@ -1,34 +1,20 @@
 {
   "schema_version": 1,
-  "work_issue": 1403,
+  "work_issue": 1275,
   "outcome": "ready-for-merge",
-  "pr": 2547,
+  "pr": 2544,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/1403/2",
-  "contract_sha256": "ad49bd66c04a352c96c50a660a9e29ea93cd2243ee8bf3fedf9bfa835c91b560",
-  "head_sha": "85c6e8938ebb95c8e4d1a735ac5c98ce66391d18",
-  "files_changed": [
-    ".github/workflows/agent-work-contract.yml",
-    "scripts/agent-work-contract-git-evidence.mjs",
-    "scripts/agent-work-contract-git-evidence.test.mjs"
-  ],
+  "contract_ref": "refs/db-contracts/1275/2",
+  "contract_sha256": "0d384c56150410f140bf2f0f1e1b692ecba797fda521f60a0a0736a5ab06fa46",
+  "head_sha": "c75c5e45415cab1e177c08ba443f21de1e16640b",
+  "files_changed": ["docs/owner-rulings.md"],
   "db_reads": [],
   "db_writes": [],
-  "checks": [
-    {
-      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
-      "exit_code": 0,
-      "evidence": "44 passed, 0 failed, 0 skipped, 0 todo"
-    },
-    {
-      "command": "node scripts/agent-work-contract-activation.mjs --mode --config-file config/agent-work-contract-activation.json",
-      "exit_code": 0,
-      "evidence": "reported enforced"
-    }
-  ],
-  "assumptions_resolved": [
-    "Merge-base-to-head classification does not mistake evidence added later on main for deletions made by an older pull request.",
-    "Only a change to both evidence files reaches current-pair validation; a one-file or unknown classification fails closed."
-  ],
+  "checks": [{
+    "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
+    "exit_code": 0,
+    "evidence": "Contract is valid."
+  }],
+  "assumptions_resolved": ["All four corrections are evidenced from this repository alone: era_source_id not null at supabase/migrations/20260819014639_wildbrain_dam_source_landing.sql:448, creative_group_source_id nullable at :449, partial index at :507-508; section 6.5 at docs/owner-rulings.md:528 is the PR #408 hold and carries no marked-never-deleted principle; and the three motivations are now quoted verbatim inside section 6.20 itself rather than cited to a GitHub issue body a reviewer cannot open."],
   "stop_conditions_hit": []
 }
