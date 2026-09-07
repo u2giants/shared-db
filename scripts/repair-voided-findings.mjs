@@ -20,7 +20,8 @@
 // does not record a verdict, and it cannot manufacture one: it only restores bytes that the
 // artifact already attests to.
 import { pathToFileURL } from 'node:url'
-import { spawnGitHub } from './lib/github-transport.mjs'
+import { spawnSync } from 'node:child_process'
+import { ghJson, spawnGitHub } from './lib/github-transport.mjs'
 import { findingsDigest, parseVerdictCommit, parseVerdictRef } from './lib/review-verdict-artifact.mjs'
 import { VOID_MARKER, VOID_LINE_PREFIX } from './run-governed-review.mjs'
 
@@ -78,25 +79,40 @@ export function repairVoidedFindings({ref,apply=false},io){
   return{status:'repaired',ref,sha,commentId,digest:after}
 }
 
+// THE GOVERNED TRANSPORT HAS TWO DOORS AND THEY ARE NOT INTERCHANGEABLE
+// (glm-5.3, PR #2479). Reads go through `runGitHubCommand`/`ghJson`, which is the
+// only door that retries a transient failure; `spawnGitHub` is the mutation door,
+// it refuses a call with no request body outright, and it refuses ANY call with no
+// executor. An earlier draft of this file sent all four calls through
+// `spawnGitHub` with neither, so every one of them threw before reaching GitHub --
+// and the fixture-injected tests could not see it, because they never touch this
+// object. `githubIoCallShapes` below exists so a test can assert these shapes
+// against the transport's own contract without making a network call.
+const NOT_FOUND=/HTTP 404|Not Found|Could not resolve/i
+export const githubIoCallShapes={
+  readRef:(ref)=>({args:['api',`repos/${REPO}/git/ref/${String(ref).replace(/^refs\//,'')}`],read:true}),
+  getCommit:(sha)=>({args:['api',`repos/${REPO}/git/commits/${sha}`],read:true}),
+  readComment:(id)=>({args:['api',`repos/${REPO}/issues/comments/${id}`],read:true}),
+  patchComment:(id)=>({args:['api','-X','PATCH',`repos/${REPO}/issues/comments/${id}`,'--input','-'],read:false}),
+}
+// A read that fails is only "absent" when GitHub actually said 404. Any other
+// failure -- rate limit, network, auth -- must surface, never be flattened into
+// the same `null` that means "there is nothing there".
+function readOrAbsent(call){
+  try{return ghJson(call.args,{expectedFailure:NOT_FOUND})}
+  catch(error){if(NOT_FOUND.test(String(error?.stderr??error?.message??'')))return null;throw error}
+}
 const githubIo={
-  readRef(ref){
-    const out=spawnGitHub(['api',`repos/${REPO}/git/ref/${ref.replace(/^refs\//,'')}`])
-    if(out.status!==0)return null
-    try{return JSON.parse(out.stdout).object.sha}catch{return null}
-  },
+  readRef(ref){return readOrAbsent(githubIoCallShapes.readRef(ref))?.object?.sha??null},
   getCommit(sha){
-    const out=spawnGitHub(['api',`repos/${REPO}/git/commits/${sha}`])
-    if(out.status!==0)throw new Error(`commit ${sha} could not be read`)
-    return JSON.parse(out.stdout)
+    const commit=readOrAbsent(githubIoCallShapes.getCommit(sha))
+    if(!commit)throw new Error(`commit ${sha} could not be read`)
+    return commit
   },
-  readComment(id){
-    const out=spawnGitHub(['api',`repos/${REPO}/issues/comments/${id}`])
-    if(out.status!==0)return null
-    try{return JSON.parse(out.stdout).body}catch{return null}
-  },
+  readComment(id){return readOrAbsent(githubIoCallShapes.readComment(id))?.body??null},
   patchComment(id,body){
-    const out=spawnGitHub(['api','-X','PATCH',`repos/${REPO}/issues/comments/${id}`,'--input','-'],{input:JSON.stringify({body})})
-    if(out.status!==0)throw new Error(`comment ${id} could not be updated`)
+    const out=spawnGitHub(githubIoCallShapes.patchComment(id).args,{executor:spawnSync,input:JSON.stringify({body})})
+    if(out.status!==0)throw new Error(`comment ${id} could not be updated: ${String(out.stderr??'').trim()}`)
   },
 }
 
