@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 1,
+  "generation": 3,
   "work_issue": 2506,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
@@ -17,7 +17,11 @@
     "scripts/production-verification-sidecars/20260907183041.json",
     "scripts/production_business_risk_gate.py",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    "scripts/production_catalog_verification.py",
+    "scripts/test_production_catalog_verification.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json"
   ],
   "file_writes": [
     "supabase/migrations/20260907183041_popsg_search_v2_bounded_paging.sql",
@@ -26,7 +30,11 @@
     "scripts/production-verification-sidecars/20260907183041.json",
     "scripts/production_business_risk_gate.py",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    "scripts/production_catalog_verification.py",
+    "scripts/test_production_catalog_verification.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json"
   ],
   "db_reads": [
     "table public.style_guide_search_documents",
@@ -56,7 +64,9 @@
     "Claim2510 guards reserved forward version20260907183041",
     "Prior worker stopped per2534; successor owns isolated target",
     "Representative preview has217193active files and1773guides; no synthetic shared-preview load needed",
-    "Independent exact-head review and live governed deployment acceptance remain pending after implementation checks"
+    "Independent exact-head review and live governed deployment acceptance remain pending after implementation checks",
+    "Generation2 authorizes focused CI repair after generation1 implementation: meaningful named catalog verification and explicit semantic-audit disposition; generation1 remains immutable.",
+    "Registered catalog predicate changes source hash of detector module; regenerate bound baseline with unchanged detector behavior and historical inventory."
   ],
   "stop_conditions": [
     "Claim or marker ownership changes",

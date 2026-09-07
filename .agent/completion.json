@@ -6,13 +6,19 @@
   "migration_versions": [
     "20260907183041"
   ],
-  "contract_ref": "refs/db-contracts/2506/1",
-  "contract_sha256": "95ad5806ded1d87649bf33839c8dce47321169c4ef2b64967c2c2faa9aa3d4c7",
-  "head_sha": "476b307e216ba6c821833120e35b161118fe9eca",
+  "contract_ref": "refs/db-contracts/2506/3",
+  "contract_sha256": "10c2737512fd08375ddac6df0ac1c439a8dcfa8efb61c525273759406fec11fa",
+  "head_sha": "1d91ba642264ebf5c3149dca1dc020ef2cdeafe5",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/benchmark_popsg_search_v2.py",
     "scripts/production-verification-sidecars/20260907183041.json",
     "scripts/production_business_risk_gate.py",
+    "scripts/production_catalog_verification.py",
+    "scripts/test_production_catalog_verification.py",
     "supabase/migrations/20260907183041_popsg_search_v2_bounded_paging.sql",
     "supabase/tests/popsg_search_style_guide_library_v2_contracts.sql"
   ],
@@ -47,13 +53,39 @@
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
+    },
+    {
+      "command": "python3 scripts/test_production_catalog_verification.py",
+      "exit_code": 0,
+      "evidence": "188 tests pass; catalog predicate exact forward body hash and privilege/security contract tested."
+    },
+    {
+      "command": "node --test scripts/throughput-guard/check-production-verification-sidecars.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
+      "exit_code": 0,
+      "evidence": "10 passed; zero skipped."
+    },
+    {
+      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "exit_code": 0,
+      "evidence": "All mandatory versions and forward sidecar valid; detector baseline regenerated with all historical matches unchanged."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "256 semantically reviewed sites; one synthetic filter value explicitly excluded, no discovery narrowing."
+    },
+    {
+      "command": "docker exec -i shared-db-orch2536-2506-bench psql -U postgres -qAt -v ON_ERROR_STOP=1 < /tmp/orch2536-2506-catalog-smoke.sql",
+      "exit_code": 0,
+      "evidence": "Disposable-only transaction: exact catalog predicate false for original function, true for forward; rolled back. No live mutation."
     }
   ],
   "assumptions_resolved": [
     "Guarded claim2510 reserves20260907183041; original131610 bytes preserved.",
     "Published generation1 initialbase remains ancestor after refresh to4f093e3d.",
     "No shared DB mutation; synthetic fixtures isolated and removed.",
-    "Implementation ready for independent review/CI only: preview forward apply, optimized actual API acceptance, final historical/production evidence, both-version production batch and live acceptance remain pending."
+    "Implementation ready for independent review/CI only: preview forward apply, optimized actual API acceptance, final historical/production evidence, both-version production batch and live acceptance remain pending.",
+    "Generation3 expands evidence repair scope without altering generation1/2 refs. Migration and benchmark bytes unchanged; no repeated volume timings."
   ],
   "stop_conditions_hit": []
 }
