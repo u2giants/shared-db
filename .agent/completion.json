@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "work_issue": 1403,
+  "outcome": "ready-for-merge",
+  "pr": 2539,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/1403/1",
+  "contract_sha256": "6dfa5fdc0800d2d289276959e6dfbead37efe5460e8fb63f68e7464463a2d38f",
+  "head_sha": "ad2c11e32a00d2eb53c7ec220ca6bfa2cb19abbc",
+  "files_changed": [
+    "config/agent-work-contract-activation.json"
+  ],
+  "db_reads": [],
+  "db_writes": [],
+  "checks": [
+    {
+      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "exit_code": 0,
+      "evidence": "41 passed, 0 failed, 0 skipped, 0 todo"
+    },
+    {
+      "command": "node scripts/agent-work-contract-activation.mjs --mode --config-file config/agent-work-contract-activation.json",
+      "exit_code": 0,
+      "evidence": "reported enforced"
+    }
+  ],
+  "assumptions_resolved": [
+    "The live census found 12 pre-contract open pull requests and all 12 are grandfathered at their exact current heads.",
+    "This activation PR carries the immutable contract and truthful completion pair."
+  ],
+  "stop_conditions_hit": []
+}
