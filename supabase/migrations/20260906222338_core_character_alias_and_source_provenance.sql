@@ -46,8 +46,11 @@
 -- the OLD licensor's (licensor, normalized name) slot while the character now belongs to
 -- another licensor -- so resolving that name for the old licensor would return the new
 -- licensor's character, which is precisely the cross-licensor misattribution this table
--- exists to prevent. core.property_alias (20260731150000) and core.franchise_alias
--- (20260905083426) both solve it this way; this follows the same established pattern.
+-- exists to prevent. core.property_alias (20260731150000:140-144) is the precedent for the
+-- full shape, composite foreign key plus ON UPDATE CASCADE, and is what this follows.
+-- core.franchise_alias (20260905083426:187-189) uses the same composite pair but declares
+-- only ON DELETE RESTRICT, so it does NOT carry its aliases along when a franchise is
+-- re-licensed; cite it for the composite key, never for the cascade.
 --
 -- GRANDFATHERING
 -- --------------
@@ -80,6 +83,19 @@
 -- source_licensor_id -- honest about having no owner -- while a target that does not
 -- exist at all still raises, and a caller-supplied licensor that contradicts the derived
 -- one (including contradicting "this entity has no licensor") still raises.
+--
+-- ROW-EXISTENCE IS SCOPED TO THOSE SAME FOUR KINDS, DELIBERATELY. The "this uuid names a
+-- real row" check runs inside the licensor-derivation branch, because it is a free
+-- by-product of the derivation lookup that branch already performs. Outside those four
+-- kinds -- core.item, dam.*, plm.*, anything else -- a provenance row naming a uuid that
+-- exists in no row remains LEGAL. Closing that would require dynamic SQL built from
+-- caller-supplied schema and table names inside a security-definer trigger, which is a
+-- worse trade than the gap: the rule below is that the set of checked kinds is written
+-- out statically so a reviewer can verify it by reading it. The gap is also bounded --
+-- the misattribution this migration exists to prevent is cross-LICENSOR, and every
+-- licensor-scoped kind is inside the checked set, so a dangling uuid on a non-licensor
+-- kind is a stale pointer rather than a royalty error. Contract assertion D3c pins this
+-- limit so it stays a recorded decision rather than an accident.
 
 -- ---------------------------------------------------------------------------
 -- 1. core.taxonomy_source_ref -- source identity, target integrity, freshness
@@ -132,8 +148,13 @@ begin
       check (last_seen_at is not null) not valid;
   end if;
 
-  -- These two hold trivially for legacy rows (all three columns are null there), so they
-  -- are added VALID and bind everything.
+  -- NOT VALID, for the same reason as the two above. These two DO hold trivially for
+  -- legacy rows (all three columns are null there), so a VALID declaration would succeed
+  -- -- but it would first take ACCESS EXCLUSIVE and seq-scan the whole live
+  -- taxonomy_source_ref to prove what we already know, on a table this migration promises
+  -- not to touch. NOT VALID skips only that historical proof: PostgreSQL still enforces
+  -- the check on every INSERT and on every UPDATE, so new and modified rows are bound
+  -- exactly as they would be under VALID.
   if not exists (
     select 1 from pg_constraint
     where conrelid = 'core.taxonomy_source_ref'::regclass
@@ -141,7 +162,8 @@ begin
   ) then
     alter table core.taxonomy_source_ref
       add constraint taxonomy_source_ref_seen_order
-      check (first_seen_at is null or last_seen_at is null or last_seen_at >= first_seen_at);
+      check (first_seen_at is null or last_seen_at is null or last_seen_at >= first_seen_at)
+      not valid;
   end if;
 
   if not exists (
@@ -151,7 +173,8 @@ begin
   ) then
     alter table core.taxonomy_source_ref
       add constraint taxonomy_source_ref_missing_after_first_seen
-      check (missing_since is null or first_seen_at is null or missing_since >= first_seen_at);
+      check (missing_since is null or first_seen_at is null or missing_since >= first_seen_at)
+      not valid;
   end if;
 end
 $freshness_constraints$;
@@ -229,10 +252,12 @@ begin
     end if;
   end if;
 
-  -- KIND-SAFE TARGET INTEGRITY. entity_id is an untyped uuid: nothing in the catalog
-  -- stops it naming a row in a completely different table, or no row at all. Checked
-  -- only when the target actually changes, so pre-existing rows whose target has since
-  -- been retired remain editable for their freshness fields.
+  -- TARGET SHAPE, FOR EVERY KIND. entity_id is an untyped uuid, so for an arbitrary
+  -- schema/table the most that can be checked here is that the TABLE is real and the uuid
+  -- is present. Whether a ROW with that uuid exists is checked further down, and only for
+  -- the four licensor-scoped core kinds -- see ROW-EXISTENCE IS SCOPED in the header.
+  -- Checked only when the target actually changes, so pre-existing rows whose target has
+  -- since been retired remain editable for their freshness fields.
   if v_target_changed then
     v_target_regclass := to_regclass(
       quote_ident(btrim(new.entity_schema)) || '.' || quote_ident(btrim(new.entity_table)));
@@ -273,10 +298,12 @@ begin
     end case;
     v_target_exists := found;
 
-    -- KIND-SAFE TARGET INTEGRITY. entity_id is an untyped uuid: nothing in the catalog
-    -- stops it naming a row in a different table, or no row at all. Checked only when
-    -- the target actually changes, so pre-existing rows whose target has since been
-    -- retired stay editable for their freshness fields.
+    -- ROW EXISTENCE, FOR THESE FOUR KINDS ONLY. The derivation select above already had
+    -- to visit the target row, so FOUND answers "does it exist?" for free. This is the
+    -- ONLY place row existence is checked: a provenance row pointing at a nonexistent
+    -- uuid in any other table is accepted, by the decision recorded in the header.
+    -- Checked only when the target actually changes, so pre-existing rows whose target
+    -- has since been retired stay editable for their freshness fields.
     if v_target_changed and not v_target_exists then
       raise exception
         'core.taxonomy_source_ref refused: no row % in %.% -- provenance may not point at a non-existent entity',

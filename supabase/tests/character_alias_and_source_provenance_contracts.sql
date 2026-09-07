@@ -10,8 +10,13 @@
 --     merged into one provenance row. Disney and Sega both number from small integers.
 --     A bare source id is not an identity, and a royalty decision made on one is wrong.
 --
--- The whole file runs inside the harness's begin/rollback wrapper, so every row it
--- creates disappears.
+-- The file opens its own transaction and rolls it back at the end, so every row it
+-- creates disappears -- and so do the constraint DROPs in D6d, even when the file is run
+-- by hand with `psql -f` and stops mid-way. The CI glob wrapper adds a begin/rollback of
+-- its own; that nesting is harmless and is exactly what
+-- core_franchise_canonical_entity_contracts.sql does.
+
+begin;
 
 do $contracts$
 declare
@@ -24,6 +29,7 @@ declare
   v_ref      uuid;
   v_orphan_prop uuid;
   v_orphan_ref  uuid;
+  v_dangling_ref uuid;
   v_legacy_ref uuid;
   v_blank_ref  uuid;
   v_relic_char uuid;
@@ -519,8 +525,25 @@ begin
   --      property -- writes this table accepts today -- would become a hard
   --      failure. The honest record is a NULL owner, not an error.
   -- =====================================================================
+  -- core.property is protected by the same licensing write-authority guard as
+  -- core.licensor (20260817124545). One authorization, scoped to this single insert,
+  -- naming the exact protected columns the guard computes for a property INSERT
+  -- (licensor_id, name, code, status) -- the pattern
+  -- supabase/tests/coldlion_active_status_contracts.sql uses. The guard additionally
+  -- requires a licensing_review_create INSERT to land as 'potential', so the fixture is
+  -- created 'potential'; its status is irrelevant to this assertion, which is about the
+  -- NULL licensor.
+  insert into plm.licensing_write_authorization (
+    backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
+    actor, protected_columns, expires_at
+  ) values (
+    pg_backend_pid(), txid_current(), 'core.property', 'licensing_review_create',
+    '23550000-0000-4000-8000-000000000003', repeat('c', 64),
+    'issue-2355 synthetic contract', array['licensor_id','name','code','status'],
+    clock_timestamp() + interval '1 minute'
+  );
   insert into core.property (licensor_id, name, code, status)
-  values (null, 'ZZ #2355 Orphan Property ' || v_suffix, 'Z55OP-' || substr(v_suffix, 12), 'active')
+  values (null, 'ZZ #2355 Orphan Property ' || v_suffix, 'Z55OP-' || substr(v_suffix, 12), 'potential')
   returning id into v_orphan_prop;
   if (select licensor_id from core.property where id = v_orphan_prop) is not null then
     raise exception '#2355: the orphan-property fixture acquired a licensor, so it tests nothing';
@@ -564,6 +587,50 @@ begin
   end;
   if not v_raised then
     raise exception '#2355: provenance was recorded against a property that does not exist';
+  end if;
+
+  -- =====================================================================
+  -- D3c. THE DOCUMENTED LIMIT OF ROW-EXISTENCE CHECKING.
+  --      Row existence is verified ONLY for the four licensor-scoped core
+  --      kinds (licensor, property, character, franchise), because it is a
+  --      free by-product of the licensor-derivation lookup. For any OTHER
+  --      table, a provenance row naming a uuid that exists in no row is
+  --      ACCEPTED. That is a deliberate decision, not an oversight: closing
+  --      it would need dynamic SQL built from caller-supplied schema and
+  --      table names inside a security-definer trigger, and the harm the
+  --      guard exists to prevent is cross-licensor misattribution, which is
+  --      entirely inside the four checked kinds. This assertion exists so
+  --      the limit cannot change silently in either direction: if a later
+  --      migration widens the check, this fails and the decision gets
+  --      re-argued on purpose.
+  -- =====================================================================
+  if to_regclass('core.merch_group') is null then
+    raise exception '#2355: core.merch_group is absent, so D3c cannot test the unchecked-kind path';
+  end if;
+  insert into core.taxonomy_source_ref
+    (entity_schema, entity_table, entity_id, source_system, source_table, source_id)
+  values ('core', 'merch_group', gen_random_uuid(), 'zz_portal_2355', 'dangling_kind', 'dangling-1')
+  returning id, source_licensor_id into v_dangling_ref, v_uuid;
+  if v_dangling_ref is null then
+    raise exception
+      '#2355: provenance against a nonexistent core.merch_group row was refused -- row existence is documented as checked ONLY for the four licensor-scoped core kinds. If widening it was intended, say so in the migration header and delete this assertion.';
+  end if;
+  if v_uuid is not null then
+    raise exception
+      '#2355: a non-licensor-scoped kind was stamped with licensor % out of nowhere', v_uuid;
+  end if;
+
+  -- ...but the TABLE must still be real for every kind, checked or not.
+  v_raised := false;
+  begin
+    insert into core.taxonomy_source_ref
+      (entity_schema, entity_table, entity_id, source_system, source_table, source_id)
+    values ('core', 'zz_no_such_table_2355', gen_random_uuid(), 'zz_portal_2355', 'dangling_kind', 'dangling-2');
+  exception when others then
+    v_raised := true;
+  end;
+  if not v_raised then
+    raise exception '#2355: provenance was recorded against a table that does not exist';
   end if;
 
   -- D4. A source_licensor_id that disagrees with the entity is refused, not trusted.
@@ -854,3 +921,5 @@ begin
   raise notice '#2355 contracts: all character alias and source provenance assertions held';
 end
 $contracts$;
+
+rollback;
