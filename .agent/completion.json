@@ -7,14 +7,20 @@
   "contract_ref": "refs/db-contracts/1275/2",
   "contract_sha256": "0d384c56150410f140bf2f0f1e1b692ecba797fda521f60a0a0736a5ab06fa46",
   "head_sha": "c75c5e45415cab1e177c08ba443f21de1e16640b",
-  "files_changed": ["docs/owner-rulings.md"],
+  "files_changed": [
+    "docs/owner-rulings.md"
+  ],
   "db_reads": [],
   "db_writes": [],
-  "checks": [{
-    "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
-    "exit_code": 0,
-    "evidence": "Contract is valid."
-  }],
-  "assumptions_resolved": ["All four corrections are evidenced from this repository alone: era_source_id not null at supabase/migrations/20260819014639_wildbrain_dam_source_landing.sql:448, creative_group_source_id nullable at :449, partial index at :507-508; section 6.5 at docs/owner-rulings.md:528 is the PR #408 hold and carries no marked-never-deleted principle; and the three motivations are now quoted verbatim inside section 6.20 itself rather than cited to a GitHub issue body a reviewer cannot open."],
+  "checks": [
+    {
+      "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
+      "exit_code": 0,
+      "evidence": "Contract is valid."
+    }
+  ],
+  "assumptions_resolved": [
+    "All four corrections are evidenced from this repository alone: era_source_id not null at supabase/migrations/20260819014639_wildbrain_dam_source_landing.sql:448, creative_group_source_id nullable at :449, partial index at :507-508; section 6.5 at docs/owner-rulings.md:528 is the PR #408 hold and carries no marked-never-deleted principle; and the three motivations are now quoted verbatim inside section 6.20 itself rather than cited to a GitHub issue body a reviewer cannot open."
+  ],
   "stop_conditions_hit": []
 }

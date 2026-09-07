@@ -10,8 +10,16 @@
   "worker": "claude",
   "branch": "fix/owner-ruling-620-corrections",
   "worktree": "C:/repos/shared-db/.claude/worktrees/github-issues-albert-0d573b",
-  "allowed_paths": ["docs/owner-rulings.md", ".agent/contract.json", ".agent/completion.json"],
-  "file_writes": ["docs/owner-rulings.md", ".agent/contract.json", ".agent/completion.json"],
+  "allowed_paths": [
+    "docs/owner-rulings.md",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "file_writes": [
+    "docs/owner-rulings.md",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
@@ -19,8 +27,12 @@
     "Do not introduce any licensor value into this public repository.",
     "Do not touch any migration, workflow, script or configuration file."
   ],
-  "required_checks": ["node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json"],
-  "assumptions": ["Every corrected claim is verifiable from this repository alone, including the quoted source sentence for the motivation-count correction."],
+  "required_checks": [
+    "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json"
+  ],
+  "assumptions": [
+    "Every corrected claim is verifiable from this repository alone, including the quoted source sentence for the motivation-count correction."
+  ],
   "stop_conditions": [
     "Stop if a correction cannot be evidenced from the repository.",
     "Stop if the diff would touch any file outside allowed_paths."
