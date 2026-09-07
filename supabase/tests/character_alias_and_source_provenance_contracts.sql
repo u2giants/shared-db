@@ -27,7 +27,7 @@ declare
   v_char_a2  uuid;
   v_char_b   uuid;
   v_ref      uuid;
-  v_orphan_prop uuid;
+  v_orphan_char uuid;
   v_orphan_ref  uuid;
   v_dangling_ref uuid;
   v_legacy_ref uuid;
@@ -517,45 +517,32 @@ begin
 
   -- =====================================================================
   -- D3b. A LICENSOR-LESS TARGET IS ACCEPTED, NOT REFUSED.
-  --      core.property.licensor_id is NULLABLE (20260621150815_app_core.sql
-  --      declares it `on delete set null`) and orphan properties exist by
-  --      design -- 20260829004145_separate_property_and_character.sql builds
-  --      an explicit list of them. If the guard raised whenever the derived
-  --      licensor came back null, every provenance write against an orphan
-  --      property -- writes this table accepts today -- would become a hard
-  --      failure. The honest record is a NULL owner, not an error.
+  --      The orphan fixture is a core.character, NOT a core.property.
+  --      core.property.licensor_id was NULLABLE only until
+  --      20260724030000_coldlion_licensor_property_phase1_mirror_schema.sql
+  --      set it NOT NULL, so an orphan property can no longer exist and the
+  --      earlier version of this block failed on that constraint.
+  --      core.character.licensor_id is still nullable
+  --      (20260829004145_separate_property_and_character.sql line 34), so a
+  --      licensor-less character is the honest live example. If the guard
+  --      raised whenever the derived licensor came back null, every provenance
+  --      write against such a character would become a hard failure. The
+  --      honest record is a NULL owner, not an error.
   -- =====================================================================
-  -- core.property is protected by the same licensing write-authority guard as
-  -- core.licensor (20260817124545). One authorization, scoped to this single insert,
-  -- naming the exact protected columns the guard computes for a property INSERT
-  -- (licensor_id, name, code, status) -- the pattern
-  -- supabase/tests/coldlion_active_status_contracts.sql uses. The guard additionally
-  -- requires a licensing_review_create INSERT to land as 'potential', so the fixture is
-  -- created 'potential'; its status is irrelevant to this assertion, which is about the
-  -- NULL licensor.
-  insert into plm.licensing_write_authorization (
-    backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
-    actor, protected_columns, expires_at
-  ) values (
-    pg_backend_pid(), txid_current(), 'core.property', 'licensing_review_create',
-    '23550000-0000-4000-8000-000000000003', repeat('c', 64),
-    'issue-2355 synthetic contract', array['licensor_id','name','code','status'],
-    clock_timestamp() + interval '1 minute'
-  );
-  insert into core.property (licensor_id, name, code, status)
-  values (null, 'ZZ #2355 Orphan Property ' || v_suffix, 'Z55OP-' || substr(v_suffix, 12), 'potential')
-  returning id into v_orphan_prop;
-  if (select licensor_id from core.property where id = v_orphan_prop) is not null then
-    raise exception '#2355: the orphan-property fixture acquired a licensor, so it tests nothing';
+  insert into core.character (licensor_id, name, code, status)
+  values (null, 'ZZ #2355 Orphan Character ' || v_suffix, 'Z55OC-' || substr(v_suffix, 12), 'active')
+  returning id into v_orphan_char;
+  if (select licensor_id from core.character where id = v_orphan_char) is not null then
+    raise exception '#2355: the orphan-character fixture acquired a licensor, so it tests nothing';
   end if;
 
   insert into core.taxonomy_source_ref
     (entity_schema, entity_table, entity_id, source_system, source_table, source_id)
-  values ('core', 'property', v_orphan_prop, 'zz_portal_2355', 'properties', 'orphan-1')
+  values ('core', 'character', v_orphan_char, 'zz_portal_2355', 'characters_orphan', 'orphan-1')
   returning id, source_licensor_id into v_orphan_ref, v_uuid;
   if v_uuid is not null then
     raise exception
-      '#2355: provenance for a licensor-less property was stamped with licensor % out of nowhere', v_uuid;
+      '#2355: provenance for a licensor-less character was stamped with licensor % out of nowhere', v_uuid;
   end if;
   if (select first_seen_at from core.taxonomy_source_ref where id = v_orphan_ref) is null then
     raise exception '#2355: the licensor-less provenance row was not given a first_seen_at';
@@ -566,13 +553,13 @@ begin
   begin
     insert into core.taxonomy_source_ref
       (entity_schema, entity_table, entity_id, source_system, source_table, source_id, source_licensor_id)
-    values ('core', 'property', v_orphan_prop, 'zz_portal_2355', 'properties', 'orphan-2', v_lic_a);
+    values ('core', 'character', v_orphan_char, 'zz_portal_2355', 'characters_orphan', 'orphan-2', v_lic_a);
   exception when others then
     v_raised := true;
   end;
   if not v_raised then
     raise exception
-      '#2355: provenance for a licensor-less property was attributed to a licensor the property does not belong to';
+      '#2355: provenance for a licensor-less character was attributed to a licensor the character does not belong to';
   end if;
 
   -- ...and a target that does not exist AT ALL still raises. Accepting a null derived
