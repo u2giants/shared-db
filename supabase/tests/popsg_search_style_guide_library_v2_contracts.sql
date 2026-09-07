@@ -1,6 +1,15 @@
 -- Issue #2506: focused contracts for authorized file/guide search and launch filters.
 begin;
 
+set local session_replication_role = replica;
+insert into auth.users (id, email) values
+  ('25060000-0000-4000-8000-000000000001', 'zz2506-authorized@example.invalid'),
+  ('25060000-0000-4000-8000-000000000002', 'zz2506-denied@example.invalid');
+set local session_replication_role = origin;
+
+insert into public.app_access (user_id, app)
+values ('25060000-0000-4000-8000-000000000001', 'styleguides');
+
 do $contracts$
 declare
   v_result jsonb;
@@ -14,15 +23,6 @@ begin
   if not has_function_privilege('authenticated', 'public.search_style_guide_library_v2(text,text,text[],text[],text[],text[],text[],text[],text[],text[],timestamptz,timestamptz,text,integer,integer)', 'execute') then
     raise exception 'contract 1: authenticated lost execute on v2 search';
   end if;
-
-  perform set_config('session_replication_role', 'replica', true);
-  insert into auth.users (id, email) values
-    ('25060000-0000-4000-8000-000000000001', 'zz2506-authorized@example.invalid'),
-    ('25060000-0000-4000-8000-000000000002', 'zz2506-denied@example.invalid');
-  perform set_config('session_replication_role', 'origin', true);
-
-  insert into public.app_access (user_id, app)
-  values ('25060000-0000-4000-8000-000000000001', 'styleguides');
 
   insert into public.style_guide_files
     (id, root_label, relative_path, directory_path, filename, basename_no_ext,
