@@ -732,14 +732,19 @@ rules below are the operative summary.
      only when there is no verdict and no progress, or a concrete transport, coverage, or
      truncated-output failure. Never replace `REVISE` or reduce coverage: exhaust active providers
     not failed on the exact head, then fail closed with the exact blocker. The configured rotation is
-    Grok 4.6, GLM 5.3, Muse Spark 1.2 Contributor, Codex GPT-5.6 Sol, and
-    Gemini 3.8 Flash High, minus the live orchestrator's own engine — exactly
+    Grok 4.6, GLM 5.3, Muse Spark 1.2 Contributor, and Gemini 3.8 Flash High,
+    minus the live orchestrator's own engine — exactly
     `ACTIVE_REVIEWERS` in `scripts/manage-migration-author-lanes.mjs`. Gemini
     re-entered on 2026-09-06 (PR #2438) after a live re-qualification. **Kimi K3
     is NOT in the rotation:** it was paused on 2026-09-03 for an account-wide
     usage cap and never restored, so it sits in `RETIRED_REVIEWERS` and is not
     drawable. Qwen 3.8 Max is quarantined and also not drawable. DeepSeek is
     inactive: it was RETIRED on 2026-09-01 (issue #2078) and is not drawable.
+    **Codex GPT-5.6 Sol is NOT in the rotation:** the owner retired it
+    permanently on 2026-09-06 (issue #2485) once the other providers were
+    working, so it sits in `RETIRED_REVIEWERS` and is not drawable. Its
+    `REVIEWERS` row stays, so every durable verdict it already recorded still
+    authorizes a merge.
 
    The `Cross-PR object collision` CI check is only the backstop. By the time it fires, somebody's
    session is already wasted — on 2026-07-31, three of four were.

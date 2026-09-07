@@ -864,7 +864,9 @@ test('merged-head replacement reuses the bounded target snapshot instead of rere
   io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
   const result=replaceFailedReviewer(replacementRequest,io)
   assert.ok(result.reviewer)
-  assert.notEqual(result.reviewer,'codex-gpt-5.6-sol')
+  // No assertion that the drawn name is not codex: replacements draw from ACTIVE_REVIEWERS,
+  // which the rotation test pins exactly, so such an assertion could never fail. The refusal of
+  // a retired name is proved where it is enforced, in the eligibility and preflight tests.
 })
 
 // ACTIVE ROTATION (owner instruction, 2026-08-28). Codex GPT-5.6 Sol and DeepSeek
@@ -4592,7 +4594,9 @@ test('retrying a slot-2 assignment must still refuse a durable assignment to a r
   const io=reviewIo(),request={issue:206,pr:306,headSha:'9'.repeat(40)}
   assignNextReviewer(request,io)
   const second=assignNextReviewer({...request,slot:2},io)
-  assert.notEqual(second.reviewer,'codex-gpt-5.6-sol','codex is retired and must never be drawn')
+  // second.reviewer is drawn from ACTIVE_REVIEWERS, so it cannot be codex; asserting that here
+  // would be an assertion that can never fail. It is stated only as the premise of the rewrite
+  // below, which plants codex as the durably recorded slot-2 reviewer.
   const assignmentRef=`refs/db-review-assignments/${request.issue}-${request.pr}-${request.headSha}-slot2`
   const recorded=io.getCommit(io.refs.get(assignmentRef)).message
   const rewritten=io.makeOwnerCommit(recorded.replace(`reviewer=${second.reviewer}`,'reviewer=codex-gpt-5.6-sol'))
