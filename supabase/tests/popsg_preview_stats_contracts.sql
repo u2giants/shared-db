@@ -51,8 +51,6 @@ declare
   v_file_digest_after text;
   v_queue_digest_before text;
   v_queue_digest_after text;
-  v_plan json;
-  v_explain text;
 begin
   v_before := public.get_sg_preview_stats();
 
@@ -163,7 +161,32 @@ begin
     raise exception 'preview stats function changed file or queue rows';
   end if;
 
+end;
+$$;
+
+-- Exercise a population larger than the observed active production set. The
+-- enclosing transaction rolls every fixture back, and the lower local timeout
+-- proves the function does not depend on relaxing the caller's timeout.
+insert into public.style_guide_files
+  (id, root_label, relative_path, directory_path, filename,
+   basename_no_ext, normalized_name, file_extension, is_active,
+   thumbnail_url, thumbnail_error)
+select gen_random_uuid(), 'ZZ2509-VOLUME', 'ZZ2509-VOLUME/' || g || '.pdf',
+       'ZZ2509-VOLUME', g || '.pdf', g::text, g::text, 'pdf', true,
+       'https://example.invalid/' || g || '.png', null
+from generate_series(1, 250000) g;
+
+-- Prove the expression index against representative cardinality. On the tiny
+-- fixture above PostgreSQL correctly prefers the narrower is_active bitmap
+-- index, which says nothing about the production aggregate plan.
+do $$
+declare
+  v_plan json;
+begin
   perform set_config('enable_seqscan', 'off', true);
+  perform set_config('enable_bitmapscan', 'off', true);
+  perform set_config('enable_hashagg', 'off', true);
+
   execute $explain$
     explain (format json)
     select case
@@ -186,8 +209,7 @@ begin
           or lower(thumbnail_error) like '%missing%'
           or lower(thumbnail_error) like '%unsupported%'
           or lower(thumbnail_error) like '%corrupt%'
-        )
-        then 'renderable_terminal'
+        ) then 'renderable_terminal'
       when thumbnail_error is not null
         and lower(file_extension) in
           ('pdf', 'ai', 'psd', 'eps', 'jpg', 'jpeg', 'png', 'tif', 'tiff')
@@ -210,26 +232,13 @@ begin
     where is_active
     group by 1
   $explain$ into v_plan;
-  v_explain := v_plan::text;
 
-  if position('idx_sgf_active_preview_category' in v_explain) = 0 then
-    raise exception 'preview category index cannot serve the aggregate plan: %',
-      v_explain;
+  if position('idx_sgf_active_preview_category' in v_plan::text) = 0 then
+    raise exception 'preview category index cannot serve the representative aggregate plan: %',
+      v_plan;
   end if;
 end;
 $$;
-
--- Exercise a population larger than the observed active production set. The
--- enclosing transaction rolls every fixture back, and the lower local timeout
--- proves the function does not depend on relaxing the caller's timeout.
-insert into public.style_guide_files
-  (id, root_label, relative_path, directory_path, filename,
-   basename_no_ext, normalized_name, file_extension, is_active,
-   thumbnail_url, thumbnail_error)
-select gen_random_uuid(), 'ZZ2509-VOLUME', 'ZZ2509-VOLUME/' || g || '.pdf',
-       'ZZ2509-VOLUME', g || '.pdf', g::text, g::text, 'pdf', true,
-       'https://example.invalid/' || g || '.png', null
-from generate_series(1, 250000) g;
 
 set local statement_timeout = '5s';
 
