@@ -12,8 +12,8 @@
 --   * the new setter still enforces every rule the old one did: authenticated actor,
 --     validated target, optimistic token, identical-repeat short circuit;
 --   * anon gains nothing, and both new setters are pinned SECURITY DEFINER;
---   * the api.source_resolution target_missing limitation documented in the migration
---     header is PINNED here, so the successor that fixes it cannot forget this file;
+--   * six-kind helper behavior and authenticated reads preserve existing and dangling
+--     targets, while anonymous calls and reads are denied at runtime;
 --   * plm.licensing_source_scope makes authority explicit per licensor, per purpose and
 --     per axis, and refuses every incoherent combination;
 --   * plm.licensing_relationship_resolution records pair decisions, PRESERVES ambiguity
@@ -32,6 +32,12 @@ declare
   v_character uuid;
   v_style_guide uuid;
   v_franchise uuid;
+  v_asset uuid;
+  v_targets uuid[];
+  v_args uuid[];
+  v_kind text;
+  v_index integer;
+  v_missing uuid := gen_random_uuid();
   v_row plm.source_resolution%rowtype;
   v_row2 plm.source_resolution%rowtype;
   v_sqlstate text;
@@ -113,6 +119,43 @@ begin
   insert into core.franchise (licensor_id, name, source_system, source_id)
     values (v_licensor_a, 'ZZ Fixture Franchise 2335', 'paramount', 'zz2335')
     returning id into v_franchise;
+
+  -- Exercise the seven-argument read helper with real targets and role changes.
+  insert into dam.asset (title, source_system, source_id)
+    values ('ZZ Fixture Asset 2493', 'paramount', 'zz2493-runtime') returning id into v_asset;
+  v_targets := array[v_property,v_character,v_style_guide,v_asset,v_licensor_a,v_franchise];
+  set local role authenticated;
+  for v_index in 1..6 loop
+    v_kind := (array['property','character','style_guide','asset','licensor','franchise'])[v_index];
+    v_args := array[null::uuid,null,null,null,null,null];
+    v_args[v_index] := v_targets[v_index];
+    if plm.source_resolution_target_missing(v_kind,v_args[1],v_args[2],v_args[3],v_args[4],v_args[5],v_args[6]) is not false then
+      raise exception 'CONTRACT: authenticated helper reports existing % target missing',v_kind;
+    end if;
+    v_args[v_index] := v_missing;
+    if plm.source_resolution_target_missing(v_kind,v_args[1],v_args[2],v_args[3],v_args[4],v_args[5],v_args[6]) is not true then
+      raise exception 'CONTRACT: helper reports missing % target present',v_kind;
+    end if;
+    v_args[v_index] := null;
+    if plm.source_resolution_target_missing(v_kind,v_args[1],v_args[2],v_args[3],v_args[4],v_args[5],v_args[6]) is not true then
+      raise exception 'CONTRACT: helper reports null % target present',v_kind;
+    end if;
+  end loop;
+  if plm.source_resolution_target_missing('unknown',v_property,v_character,v_style_guide,v_asset,v_licensor_a,v_franchise) is not true
+     or plm.source_resolution_target_missing(null,v_property,v_character,v_style_guide,v_asset,v_licensor_a,v_franchise) is not true then
+    raise exception 'CONTRACT: unknown/null entity kind was treated as a valid target';
+  end if;
+  reset role;
+  set local role anon;
+  begin
+    perform plm.source_resolution_target_missing('licensor',null,null,null,null,v_licensor_a,null);
+    raise exception 'CONTRACT: anon executed the seven-argument helper';
+  exception when insufficient_privilege then null; end;
+  begin
+    perform 1 from api.source_resolution limit 1;
+    raise exception 'CONTRACT: anon read source resolutions';
+  exception when insufficient_privilege then null; end;
+  reset role;
 
   -- ---------------------------------------------------------------------------------
   -- 1. THE TWO OVERLOADS COEXIST AND NO CALL IS AMBIGUOUS.
@@ -329,12 +372,19 @@ begin
     ('paramount', 'licensor', 'zz-dangling-licensor', 'matched',
      '00000000-0000-4000-8000-000000000001'::uuid,
      'contract: preserved dangling decision', clock_timestamp(), 'issue-2493-contract');
+  set local role authenticated;
   select target_missing into v_bool from api.source_resolution
    where source_system = 'paramount' and entity_kind = 'licensor'
      and source_id = 'zz-dangling-licensor';
   if v_bool is not true then
     raise exception 'CONTRACT: api.source_resolution hid a dangling licensor target';
   end if;
+
+  if not exists (select 1 from api.source_resolution where source_id='zz-lic-1' and entity_kind='licensor' and core_licensor_id=v_licensor_a and target_missing is false)
+     or not exists (select 1 from api.source_resolution where source_id='zz-fr-1' and entity_kind='franchise' and core_franchise_id=v_franchise and target_missing is false) then
+    raise exception 'CONTRACT: authenticated new-kind read parity failed';
+  end if;
+  reset role;
 
   -- ---------------------------------------------------------------------------------
   -- 5. plm.licensing_source_scope -- authority made explicit.
