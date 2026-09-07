@@ -30,7 +30,7 @@ const licensorTree = {
   reconciliation: { licensor_count: 3, active_licensor_count: 3, property_count: 4, active_property_count: 4, properties_with_licensor: 3, orphan_property_count: 1, expected_orphan_count_is_zero: false, partition_reconciles: true },
   licensors: [
     { id: '44444444-0001-4000-8000-000000000001', name: 'Marvel', code: 'MRV', status: 'active', property_count: 2, updated_at: '2026-07-22T10:00:00Z', source_refs: [{ source_system: 'designflow_plm', source_table: 'merchGroup', source_id: 'mg-mrv', source_code: 'MRV', source_name: 'Marvel' }], plm_context: [{ plm_id: 'li-cw', division_code: 'CW001', mg_code: 'MRV', mg_type: 'licensor', mg_category: 'licensed' }, { plm_id: 'li-sp', division_code: 'SP001', mg_code: 'MRV', mg_type: 'licensor', mg_category: 'licensed' }], properties: [
-      { id: '44444444-0002-4000-8000-000000000002', name: 'Avengers', code: 'AVG', status: 'active', character_count: 6, source_refs: [{ source_system: 'designflow_plm', source_table: 'merchGroup', source_id: 'mg-avg', source_code: 'AVG', source_name: 'Avengers' }], plm_context: [{ plm_id: 'pr-avg', division_code: '1', division_name: 'POP Lic', division_external_code: 'CW001', mg_code: 'AVG', mg_type: 'property', mg_category: 'licensed' }, { plm_id: 'pr-avg-sp', division_code: '8', division_name: 'Spruce Lic', division_external_code: 'SP001', mg_code: 'AVG', mg_type: 'property', mg_category: 'licensed' }] },
+      { id: '44444444-0002-4000-8000-000000000002', name: 'Avengers', code: 'AVG', status: 'active', updated_at: '2026-07-22T10:00:00Z', character_count: 6, source_refs: [{ source_system: 'designflow_plm', source_table: 'merchGroup', source_id: 'mg-avg', source_code: 'AVG', source_name: 'Avengers' }], plm_context: [{ plm_id: 'pr-avg', division_code: '1', division_name: 'POP Lic', division_external_code: 'CW001', mg_code: 'AVG', mg_type: 'property', mg_category: 'licensed' }, { plm_id: 'pr-avg-sp', division_code: '8', division_name: 'Spruce Lic', division_external_code: 'SP001', mg_code: 'AVG', mg_type: 'property', mg_category: 'licensed' }] },
       { id: '44444444-0003-4000-8000-000000000003', name: 'Spider-Man', code: 'SPD', status: 'active', character_count: 2, source_refs: [], plm_context: [{ plm_id: 'pr-spd', division_code: 'CW001', mg_code: 'DNY', mg_type: 'property', mg_category: 'licensed' }] },
     ] },
     { id: '44444444-0004-4000-8000-000000000004', name: 'Disney', code: 'DNY', status: 'active', property_count: 1, updated_at: '2026-07-22T10:00:00Z', source_refs: [], plm_context: [{ plm_id: 'li-dny', division_code: 'CW001', mg_code: 'DNY', mg_type: 'licensor', mg_category: 'licensed' }], properties: [
@@ -62,6 +62,7 @@ async function mockAdmin(page: Page) {
     if (name === 'db_data_admin_customer_list') return route.fulfill({ json: { rows: customers, next_cursor: null, page_size: 200 } })
     if (name === 'db_data_admin_vendor_list') return route.fulfill({ json: { rows: vendors, next_cursor: null, page_size: 200 } })
     if (name === 'db_data_admin_licensor_property_tree') return route.fulfill({ json: licensorTree })
+    if (name === 'db_data_admin_set_property_status') return route.fulfill({ json: { success: true, idempotent_replay: false } })
     if (name === 'db_data_admin_scraped_properties') return route.fulfill({ json: { rows: scrapedProperties, next_cursor: null, page_size: 1000 } })
     return route.fulfill({ json: {} })
   })
@@ -287,6 +288,31 @@ test('shows licensing source data only through Scraped Properties', async ({ pag
   await expect(page.getByRole('button', { name: 'Scraped Properties' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Licensors' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Properties', exact: true })).toHaveCount(0)
+})
+
+test('offers a status-only Property control without restoring the retired licensing screens', async ({ page }) => {
+  await mockAdmin(page); await page.goto('/')
+  await page.getByRole('button', { name: 'Property Status' }).click()
+  await expect(page.getByText('Status only.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Licensors' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Properties', exact: true })).toHaveCount(0)
+  await expect.poll(() => page.locator('revo-grid').evaluate(element => (
+    element as HTMLElement & { columns: Array<{ name: string }> }
+  ).columns.map(column => column.name))).toEqual(['Property', 'Code', 'Status'])
+  await page.getByRole('gridcell', { name: 'Avengers' }).click()
+  await page.getByRole('button', { name: 'Set status…' }).click()
+  await expect(page.getByRole('dialog', { name: 'Set Property status' })).toBeVisible()
+  await expect(page.getByLabel(/^Status/)).toHaveValue('active')
+  await page.getByLabel(/^Status/).selectOption('inactive')
+  await page.getByLabel('Reason').fill('Licence lapsed')
+  const saveRequest = page.waitForRequest(request => request.url().endsWith('/rpc/db_data_admin_set_property_status'))
+  await page.getByRole('button', { name: 'Save status' }).click()
+  const body = (await saveRequest).postDataJSON()
+  expect(body).toMatchObject({
+    p_property_id: '44444444-0002-4000-8000-000000000002',
+    p_status: 'inactive', p_expected_updated_at: '2026-07-22T10:00:00Z', p_reason: 'Licence lapsed',
+  })
+  await expect(page.getByRole('status').filter({ hasText: 'Saved and audited' })).toBeVisible()
 })
 
 test('renders every scraped Property under distinct presentation Licensor headings with source provenance', async ({ page }) => {
