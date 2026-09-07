@@ -88,33 +88,44 @@ export function repairVoidedFindings({ref,apply=false},io){
 // and the fixture-injected tests could not see it, because they never touch this
 // object. `githubIoCallShapes` below exists so a test can assert these shapes
 // against the transport's own contract without making a network call.
-const NOT_FOUND=/HTTP 404|Not Found|Could not resolve/i
+// A read that fails is only "absent" when GitHub actually said 404. Every other
+// failure -- rate limit, auth, network, DNS -- must surface, never be flattened
+// into the same `null` that means "there is nothing there". This is the same rule
+// the lanes script uses (`isConfirmedRefAbsence`): the literal status, not loose
+// prose like "not found", which a transport-level error also contains.
+const NOT_FOUND=/HTTP 404/i
 export const githubIoCallShapes={
   readRef:(ref)=>({args:['api',`repos/${REPO}/git/ref/${String(ref).replace(/^refs\//,'')}`],read:true}),
   getCommit:(sha)=>({args:['api',`repos/${REPO}/git/commits/${sha}`],read:true}),
   readComment:(id)=>({args:['api',`repos/${REPO}/issues/comments/${id}`],read:true}),
   patchComment:(id)=>({args:['api','-X','PATCH',`repos/${REPO}/issues/comments/${id}`,'--input','-'],read:false}),
 }
-// A read that fails is only "absent" when GitHub actually said 404. Any other
-// failure -- rate limit, network, auth -- must surface, never be flattened into
-// the same `null` that means "there is nothing there".
-function readOrAbsent(call){
-  try{return ghJson(call.args,{expectedFailure:NOT_FOUND})}
-  catch(error){if(NOT_FOUND.test(String(error?.stderr??error?.message??'')))return null;throw error}
+
+// The CLI's real IO object is built here so a test can build the SAME object with
+// the transport doors and the process spawner injected. Asserting the call shapes
+// alone was not enough: it left the wiring -- which door each call goes through,
+// and whether the mutation call carries an executor and a body -- untested, which
+// is exactly where the defect was (grok-4.6, PR #2479).
+export function createGithubIo({ghJson:readDoor=ghJson,spawnGitHub:mutateDoor=spawnGitHub,spawner=spawnSync}={}){
+  function readOrAbsent(call){
+    try{return readDoor(call.args,{expectedFailure:NOT_FOUND})}
+    catch(error){if(NOT_FOUND.test(String(error?.stderr??error?.message??'')))return null;throw error}
+  }
+  return {
+    readRef(ref){return readOrAbsent(githubIoCallShapes.readRef(ref))?.object?.sha??null},
+    getCommit(sha){
+      const commit=readOrAbsent(githubIoCallShapes.getCommit(sha))
+      if(!commit)throw new Error(`commit ${sha} could not be read`)
+      return commit
+    },
+    readComment(id){return readOrAbsent(githubIoCallShapes.readComment(id))?.body??null},
+    patchComment(id,body){
+      const out=mutateDoor(githubIoCallShapes.patchComment(id).args,{executor:spawner,input:JSON.stringify({body})})
+      if(out.status!==0)throw new Error(`comment ${id} could not be updated: ${String(out.stderr??'').trim()}`)
+    },
+  }
 }
-const githubIo={
-  readRef(ref){return readOrAbsent(githubIoCallShapes.readRef(ref))?.object?.sha??null},
-  getCommit(sha){
-    const commit=readOrAbsent(githubIoCallShapes.getCommit(sha))
-    if(!commit)throw new Error(`commit ${sha} could not be read`)
-    return commit
-  },
-  readComment(id){return readOrAbsent(githubIoCallShapes.readComment(id))?.body??null},
-  patchComment(id,body){
-    const out=spawnGitHub(githubIoCallShapes.patchComment(id).args,{executor:spawnSync,input:JSON.stringify({body})})
-    if(out.status!==0)throw new Error(`comment ${id} could not be updated: ${String(out.stderr??'').trim()}`)
-  },
-}
+const githubIo=createGithubIo()
 
 export function main(argv=process.argv.slice(2)){
   const ref=argv[argv.indexOf('--ref')+1]

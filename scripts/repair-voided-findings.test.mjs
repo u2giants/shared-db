@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { repairVoidedFindings, unvoidFindingsBody, commentIdFromFindingsRef, githubIoCallShapes } from './repair-voided-findings.mjs'
+import { repairVoidedFindings, unvoidFindingsBody, commentIdFromFindingsRef, githubIoCallShapes, createGithubIo } from './repair-voided-findings.mjs'
 import { neutraliseVerdictLine } from './run-governed-review.mjs'
 import { findingsDigest } from './lib/review-verdict-artifact.mjs'
 import { ghJson, spawnGitHub } from './lib/github-transport.mjs'
@@ -70,35 +70,71 @@ test('the comment id comes from the findings ref',()=>{
 })
 
 // THE FIXTURE-INJECTED TESTS ABOVE CANNOT SEE THE REAL TRANSPORT (glm-5.3, PR #2479).
-// Every one of them hands `repairVoidedFindings` its own `io`, so the shipped
-// `githubIo` -- the object the CLI actually runs with -- was never executed by a
-// test at all, and shipped with all four of its calls malformed: no executor, and
-// three reads sent through the mutation door. These assert the exported call
-// shapes against the transport's OWN contract, with no network access.
-test('every shipped read call shape is rejected by the mutation door and accepted by the read door', () => {
-  for (const build of [githubIoCallShapes.readRef, githubIoCallShapes.getCommit, githubIoCallShapes.readComment]) {
-    const call = build('a'.repeat(40))
-    assert.equal(call.read, true)
-    // The mutation door must refuse it: that is the defect this proves is gone.
-    assert.throws(() => spawnGitHub(call.args, { executor: () => ({ status: 0, stdout: '{}' }) }), /use runGitHubCommand for reads/)
-    // The read door must accept it and parse it.
-    let seen = null
-    const parsed = ghJson(call.args, { executor: (file, args) => { seen = { file, args }; return '{"ok":true}' } })
-    assert.deepEqual(parsed, { ok: true })
-    assert.equal(seen.file, 'gh')
-    assert.deepEqual(seen.args, call.args)
+// Every one of them hands `repairVoidedFindings` its own `io`, so the shipped IO
+// object -- the one the CLI actually runs with -- was never executed by a test at
+// all, and shipped with all four of its calls malformed: no executor, and three
+// reads sent through the mutation door. These build the SAME object the CLI builds,
+// with the two transport doors injected, so the wiring itself is under test: put
+// any read back on the mutation door, or drop the executor or the body from the
+// PATCH, and these fail (grok-4.6, PR #2479).
+const door = () => {
+  const calls = []
+  const readDoor = (args, options) => { calls.push({ door: 'read', args, options }); return { object: { sha: 'b'.repeat(40) }, body: 'findings', message: 'm' } }
+  const mutateDoor = (args, options) => { calls.push({ door: 'mutate', args, options }); return { status: 0, stdout: '', stderr: '' } }
+  const refuseReads = (args) => { throw new Error('use runGitHubCommand for reads') }
+  return { calls, readDoor, mutateDoor, refuseReads }
+}
+
+test('every read the CLI makes goes through the read door, never the mutation door', () => {
+  const d = door()
+  // The mutation door here refuses reads exactly as the real transport does, so a
+  // regression that routes a read back through it throws instead of passing.
+  const io = createGithubIo({ ghJson: d.readDoor, spawnGitHub: () => d.refuseReads(), spawner: () => {} })
+  assert.equal(io.readRef('refs/db-review-verdicts/2461-2462-' + 'a'.repeat(40)), 'b'.repeat(40))
+  assert.equal(io.getCommit('a'.repeat(40)).message, 'm')
+  assert.equal(io.readComment(987654), 'findings')
+  assert.equal(d.calls.length, 3)
+  for (const call of d.calls) {
+    assert.equal(call.door, 'read')
+    assert.equal(call.args[0], 'api')
+    assert.equal(call.args.includes('-X'), false, 'a read must not carry a method')
   }
 })
 
-test('the shipped PATCH call shape carries a body and an executor, as the mutation door requires', () => {
-  const call = githubIoCallShapes.patchComment(12345)
-  assert.equal(call.read, false)
+test('the CLI PATCH goes through the mutation door carrying both an executor and the body', () => {
+  const d = door()
+  const io = createGithubIo({ ghJson: () => { throw new Error('a write must not use the read door') }, spawnGitHub: d.mutateDoor, spawner: 'the-spawner' })
+  io.patchComment(987654, 'repaired body')
+  assert.equal(d.calls.length, 1)
+  const [call] = d.calls
+  assert.equal(call.door, 'mutate')
   assert.deepEqual(call.args.slice(0, 3), ['api', '-X', 'PATCH'])
-  // No executor is refused outright -- the second half of the shipped defect.
-  assert.throws(() => spawnGitHub(call.args, { input: '{}' }), /requires an executor/)
-  let seen = null
-  const out = spawnGitHub(call.args, { executor: (file, args, options) => { seen = { file, args, options }; return { status: 0, stdout: '{}', stderr: '' } }, input: JSON.stringify({ body: 'x' }) })
-  assert.equal(out.status, 0)
-  assert.equal(seen.file, 'gh')
-  assert.equal(seen.options.input, JSON.stringify({ body: 'x' }))
+  assert.equal(call.options.executor, 'the-spawner', 'the mutation door refuses a call with no executor')
+  assert.equal(call.options.input, JSON.stringify({ body: 'repaired body' }))
+})
+
+test('the shipped call shapes satisfy the real transport doors', () => {
+  for (const build of [githubIoCallShapes.readRef, githubIoCallShapes.getCommit, githubIoCallShapes.readComment]) {
+    const call = build('a'.repeat(40))
+    assert.equal(call.read, true)
+    assert.throws(() => spawnGitHub(call.args, { executor: () => ({ status: 0, stdout: '{}' }) }), /use runGitHubCommand for reads/)
+    let seen = null
+    assert.deepEqual(ghJson(call.args, { executor: (file, args) => { seen = { file, args }; return '{"ok":true}' } }), { ok: true })
+    assert.deepEqual(seen.args, call.args)
+  }
+  const patch = githubIoCallShapes.patchComment(12345)
+  assert.equal(patch.read, false)
+  assert.throws(() => spawnGitHub(patch.args, { input: '{}' }), /requires an executor/)
+})
+
+test('only a real 404 is absence: every other read failure surfaces', () => {
+  const fail = (text) => createGithubIo({ ghJson: () => { const error = new Error(text); error.stderr = text; throw error }, spawnGitHub: () => {}, spawner: () => {} })
+  assert.equal(fail('gh: HTTP 404: Not Found').readRef('refs/db-review-verdicts/x'), null)
+  assert.equal(fail('gh: HTTP 404: Not Found').readComment(1), null)
+  // Loose prose is NOT absence: a transport fault says "not found" too, and a DNS
+  // failure says "could not resolve". Reporting either as "nothing to repair"
+  // would be a confident wrong answer.
+  for (const text of ['HTTP 403: rate limit exceeded', 'HTTP 401: Bad credentials', 'transport endpoint not found', 'could not resolve host: api.github.com']) {
+    assert.throws(() => fail(text).readRef('refs/db-review-verdicts/x'), (error) => error.message === text, `${text} must not be reported as absence`)
+  }
 })
