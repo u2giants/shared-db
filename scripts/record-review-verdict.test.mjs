@@ -232,3 +232,47 @@ test('a replacement-sequence round marks the replacement ref, not the base ref (
   assert.match(caught.verdictArtifactCreated.ref,new RegExp(`^refs/db-review-verdict-replacements/${issue}-${pr}-${headSha}-${replacementSequence}$`))
   assert.equal(io.refs.get(caught.verdictArtifactCreated.ref),caught.verdictArtifactCreated.sha)
 })
+
+// #2430 (PR #2415, head 0fab4ace). A DIFFERENT SHA AT THE REF IS NOT AUTOMATICALLY
+// CORRUPTION. The create is confirmed, so the object standing at the ref came from
+// this call; a retried create writes a second commit with the same record and a
+// different SHA, because the commit carries a timestamp and the record does not.
+// Refusing on the SHA alone discarded a completed, paid-for review. These pin both
+// directions: an equivalent record is a success, a different one is still refused.
+test('an equivalent record under a different SHA is the same verdict (#2430)',()=>{
+  const io=ioFixture()
+  const originalCreate=io.createRef
+  io.createRef=(ref,sha)=>{
+    // The same payload re-committed: identical record, different object.
+    const twin=io.makeReviewVerdictCommit(io.commits.get(sha).message,assignmentSha)
+    return originalCreate(ref,twin)
+  }
+  const validated=recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io)
+  assert.equal(validated.verdict,'APPROVE')
+  assert.equal(io.refs.get(validated.ref),validated.sha)
+})
+test('the same record with its keys in another order is still the same record (#2430)',()=>{
+  const io=ioFixture()
+  const originalCreate=io.createRef
+  io.createRef=(ref,sha)=>{
+    const row=JSON.parse(io.commits.get(sha).message.slice('db-review-verdict '.length))
+    const reordered=Object.fromEntries(Object.keys(row).sort().map((key)=>[key,row[key]]))
+    const twin=io.makeReviewVerdictCommit(`db-review-verdict ${JSON.stringify(reordered)}`,assignmentSha)
+    return originalCreate(ref,twin)
+  }
+  assert.equal(recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io).verdict,'APPROVE')
+})
+test('POSITIVE CONTROL: a genuinely different record under a different SHA is still refused (#2430)',()=>{
+  const io=ioFixture()
+  const originalCreate=io.createRef
+  io.createRef=(ref,sha)=>{
+    const row=JSON.parse(io.commits.get(sha).message.slice('db-review-verdict '.length))
+    const other=io.makeReviewVerdictCommit(`db-review-verdict ${JSON.stringify({...row,verdict:'REJECT'})}`,assignmentSha)
+    return originalCreate(ref,other)
+  }
+  let caught=null
+  try{recordReviewVerdict({issue,pr,headSha,verdict:'APPROVE',findingsRef},io)}catch(error){caught=error}
+  assert.ok(caught,'a different record must still refuse')
+  assert.match(caught.message,/readback could not confirm the created object/)
+  assert.ok(caught.verdictArtifactCreated,'the refusal must still carry the created artifact so nothing is voided')
+})
