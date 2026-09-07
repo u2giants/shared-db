@@ -187,11 +187,25 @@ input. Point it at Tier-1 source rows; do not point it at the retired mixed tabl
 None of these are satisfied by this document, and this route may not satisfy them.
 
 1. **Read the authoritative capture inventory first.**
-   `select * from api.source_capture_inventory order by source_system, retained_row_count desc;`
+   Since migration `20260825011609` (issue #1284) the plain view deliberately returns
+   **NULL for every count column** so that ordinary reads stay bounded. Its own
+   `count_note` column says so on every row. Reading `api.source_capture_inventory`
+   alone therefore tells you nothing about size — that is by design, not a fault.
+
+   For the shape and the per-table contract:
+   `select source_system, table_name, count_basis, latest_complete_status, count_note from api.source_capture_inventory order by source_system, table_name;`
+
+   For the actual numbers, opt in to the exact path — one table per call keeps it to a
+   single table scan, and a NULL argument returns the full historical exact inventory:
+   `select * from api.source_capture_inventory_exact('<table_name>');`
+   (`EXECUTE` is granted to `authenticated` and `service_role`. A read-only inspection
+   role such as the MCP reader is refused; use an application-grade connection.)
+
    Use `latest_complete_row_count` with `count_basis` and `latest_complete_status`.
-   A NULL there means the count cannot be derived — **it does not mean zero.** Never
-   judge a licensor's coverage by counting one guessed table; that error was made on
-   2026-08-13 and understated the landed data by hundreds of thousands of rows.
+   A NULL **from the exact function** means the count cannot be derived — **it does not
+   mean zero.** Never judge a licensor's coverage by counting one guessed table; that
+   error was made on 2026-08-13 and understated the landed data by hundreds of thousands
+   of rows.
 2. **Confirm `core.character` is still empty and still exists**, live, with a
    control in the same statement. Both facts have already flipped once on this issue.
 3. **A structural migration is required for Tier 2** before those two licensors can

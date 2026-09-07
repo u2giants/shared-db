@@ -128,10 +128,19 @@ def snapshot_query(
     parts: list[str] = []
     if collisions:
         parts.append(
-            "select 1 as ord, pg_get_functiondef(p.oid) || E';\\n' as stmt, "
-            "n.nspname as s, p.proname as f, "
+            "select x.ord, x.stmt, n.nspname as s, p.proname as f, "
             "pg_get_function_identity_arguments(p.oid) as a "
             "from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+            "cross join lateral (values "
+            "(1, format('do $pass2$ begin if to_regprocedure(%L) is not null then execute %L; end if; end $pass2$;', "
+            "format('%I.%I(%s)', n.nspname, p.proname, pg_catalog.oidvectortypes(p.proargtypes)), "
+            "format('alter %s %I.%I(%s) reset all', case p.prokind when 'p' then 'procedure' else 'function' end, "
+            "n.nspname, p.proname, pg_get_function_identity_arguments(p.oid)))), "
+            "(2, pg_get_functiondef(p.oid) || E';\\n'), "
+            "(3, format('alter %s %I.%I(%s) security %s;', "
+            "case p.prokind when 'p' then 'procedure' else 'function' end, "
+            "n.nspname, p.proname, pg_get_function_identity_arguments(p.oid), "
+            "case when p.prosecdef then 'definer' else 'invoker' end))) x(ord, stmt) "
             f"where lower(n.nspname || '.' || p.proname) in ({_literals(collisions)})"
         )
     if privilege_routines:
@@ -140,7 +149,7 @@ def snapshot_query(
         # proacl means the built-in default (EXECUTE to PUBLIC), which acldefault
         # reproduces exactly rather than being silently treated as "no grants".
         parts.append(
-            "select 2 as ord, format('grant execute on function %s to %s;', "
+            "select 4 as ord, format('grant execute on function %s to %s;', "
             "p.oid::regprocedure::text, "
             "case when acl.grantee = 0 then 'public' "
             "else acl.grantee::regrole::text end) as stmt, "

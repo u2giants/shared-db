@@ -39,13 +39,13 @@ jobs:
           APPLY_MAIN_SHA: ${{ inputs.apply_main_sha }}
         run: |
           set -euo pipefail
-          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$APPLY_RUN_ID")"
+          run="$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" api "repos/$GITHUB_REPOSITORY/actions/runs/$APPLY_RUN_ID")"
           test "$(jq -r .event <<<"$run")" = workflow_dispatch
           test "$(jq -r .status <<<"$run")" = completed
           test "$(jq -r .conclusion <<<"$run")" = failure
           test "$(jq -r .head_sha <<<"$run")" = "$APPLY_MAIN_SHA"
           test "$(jq -r .path <<<"$run")" = .github/workflows/shared-supabase-migrations.yml
-          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$APPLY_RUN_ID/artifacts?per_page=100")"
+          artifacts="$(node "$GITHUB_WORKSPACE/scripts/gh-read.mjs" api "repos/$GITHUB_REPOSITORY/actions/runs/$APPLY_RUN_ID/artifacts?per_page=100")"
           name="production-migration-apply-$APPLY_MAIN_SHA"
           count="$(jq --arg n "$name" '[.artifacts[] | select(.name == $n)] | length' <<<"$artifacts")"
           test "$count" = 1
