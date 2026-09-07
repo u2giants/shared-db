@@ -3,7 +3,7 @@
 -- plus a per-source support-edge table for all eight canonical relationships.
 --
 -- Issue #2334 (structural successor to #1090). Claim issue #2405,
--- reserved version 20260906143801.
+-- reserved version 20260907030418.
 --
 -- derived-from: none
 --
