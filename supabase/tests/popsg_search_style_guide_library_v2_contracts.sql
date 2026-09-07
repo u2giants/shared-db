@@ -117,6 +117,39 @@ begin
     raise exception 'contract 5: file mode returned inactive content or a wrong total';
   end if;
 
+  -- Inclusive source-date boundaries must agree with the same filtered child set.
+  v_result := public.search_style_guide_library_v2(
+    p_result_mode => 'files', p_query => 'uniquechildtoken',
+    p_modified_after => '2026-09-01'::timestamptz,
+    p_modified_before => '2026-09-01'::timestamptz);
+  if (v_result->>'total')::integer <> 3 then
+    raise exception 'contract 6: equal inclusive date boundary lost matching files';
+  end if;
+  if (public.search_style_guide_library_v2('files', 'uniquechildtoken',
+       p_modified_before => '2026-08-31'::timestamptz)->>'total')::integer <> 0
+     or (public.search_style_guide_library_v2('guides', 'uniquechildtoken',
+       p_modified_after => '2026-09-02'::timestamptz)->>'total')::integer <> 0 then
+    raise exception 'contract 6: source-date exclusion leaked a file or guide';
+  end if;
+
+  -- A repeated child tag contributes once to a guide facet, even with combined filters.
+  update public.style_guide_search_documents
+     set tag_names = array['alpha-tag', 'alpha-tag', null]
+   where style_guide_file_id = '25060000-0000-4000-8000-000000000011';
+  v_result := public.search_style_guide_library_v2(
+    p_result_mode => 'guides', p_query => 'uniquechildtoken',
+    p_preview_states => array['missing'],
+    p_render_exception_states => array['recoverable_error'],
+    p_pdf_content_states => array['available'],
+    p_modified_after => '2026-09-01'::timestamptz,
+    p_modified_before => '2026-09-01'::timestamptz);
+  if (v_result->>'total')::integer <> 1 or not exists (
+    select 1 from jsonb_array_elements(v_result->'facets'->'tags') facet
+     where facet->>'value' = 'alpha-tag' and (facet->>'count')::integer = 1
+  ) then
+    raise exception 'contract 7: combined date/filter guide facets double-count child tags';
+  end if;
+
   execute 'set local role authenticated';
   perform set_config('request.jwt.claims',
     '{"sub":"25060000-0000-4000-8000-000000000001","role":"authenticated"}', true);
@@ -126,13 +159,13 @@ begin
     '{"sub":"25060000-0000-4000-8000-000000000002","role":"authenticated"}', true);
   begin
     perform public.search_style_guide_library_v2(p_result_mode => 'files', p_limit => 1);
-    raise exception 'contract 6: user without PopSG access reached search';
+    raise exception 'contract 8: user without PopSG access reached search';
   exception when insufficient_privilege then null;
   end;
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
 
-  raise notice 'issue #2506 PopSG v2 search contracts: all 6 checks passed';
+  raise notice 'issue #2506 PopSG v2 search contracts: all 8 checks passed';
 end
 $contracts$;
 
