@@ -1,36 +1,24 @@
 {
   "schema_version": 1,
-  "work_issue": 2552,
+  "work_issue": 2553,
   "generation": 1,
-  "work_type": "documentation",
+  "work_type": "docs",
   "route": "repo-maintenance",
-  "goal": "Preserve the orchestrator 2536 transfer and clarify genuine commit ancestry recovery for an open pull request.",
+  "goal": "Record in the ColdLion API reference that the items endpoint must be pulled one division at a time, because a company-wide pull returns blank merchandise-group display names.",
   "base_sha": "b3219f73c0a111bf06889d490cdc398c9ca1018c",
-  "dispatcher": "codex",
-  "worker": "codex",
-  "branch": "codex/orch-2536-closeout",
-  "worktree": "C:/repos/shared-db-orch-2536-closeout",
-  "allowed_paths": [
-    "HANDOFF.d/2026-09-07T2224Z-edge-dev-codex-orchestrator-transfer.md",
-    "docs/production-promotion-procedure.md"
-  ],
-  "file_writes": [
-    "HANDOFF.d/2026-09-07T2224Z-edge-dev-codex-orchestrator-transfer.md",
-    "docs/production-promotion-procedure.md"
-  ],
+  "dispatcher": "claude",
+  "worker": "claude",
+  "branch": "claude/coldlion-items-per-division",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/disney-creative-unmapped-titles-7b4149",
+  "allowed_paths": ["docs/coldlion-erp-api-reference.md", ".agent/contract.json", ".agent/completion.json"],
+  "file_writes": ["docs/coldlion-erp-api-reference.md", ".agent/contract.json", ".agent/completion.json"],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not change database structure, data, producer code, or another session handoff."
+    "Do not change any migration, script, workflow or configuration file.",
+    "Do not place licensed row data in this public repository."
   ],
-  "required_checks": [
-    "node scripts/check-handoff-contract.mjs",
-    "git diff --check"
-  ],
-  "assumptions": [
-    "This contract covers closeout documentation only; inherited database work remains open."
-  ],
-  "stop_conditions": [
-    "Stop if documentation requires an unverified completion claim or weakens a release gate."
-  ]
+  "required_checks": ["node --test scripts/agent-work-contract.test.mjs"],
+  "assumptions": ["The measured counts were taken live on 2026-09-07 against the production ColdLion API."],
+  "stop_conditions": ["Stop if recording this would require changing anything outside documentation."]
 }

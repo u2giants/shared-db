@@ -1,33 +1,18 @@
 {
   "schema_version": 1,
-  "work_issue": 2552,
+  "work_issue": 2553,
   "outcome": "ready-for-merge",
-  "pr": 2556,
+  "pr": 2554,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2552/1",
-  "contract_sha256": "817b29aef499051a0b6815dbd040dc04a3dc6b867044289a8c8547a70e635be8",
-  "head_sha": "d7d49df4ea187796b1e92b6858e63efe2059987c",
-  "files_changed": [
-    "HANDOFF.d/2026-09-07T2224Z-edge-dev-codex-orchestrator-transfer.md",
-    "docs/production-promotion-procedure.md"
-  ],
+  "contract_ref": "refs/db-contracts/2553/1",
+  "contract_sha256": "c86ababe9d0fde6e352cf27fa5dc6c4b03da5099e021ad5578d9a31aada9ce2e",
+  "head_sha": "9731a8fdfa50dc099e2031744bb0ad1c97dc628a",
+  "files_changed": ["docs/coldlion-erp-api-reference.md"],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {
-      "evidence": "Handoff contract satisfied for 1 changed file(s).",
-      "exit_code": 0,
-      "command": "node scripts/check-handoff-contract.mjs"
-    },
-    {
-      "evidence": "No whitespace errors.",
-      "exit_code": 0,
-      "command": "git diff --check"
-    }
+    {"command": "node --test scripts/agent-work-contract.test.mjs", "exit_code": 0, "evidence": "contract and completion pair validate"}
   ],
-  "assumptions_resolved": [
-    "Open inherited work and the next three undispatched priorities remain explicitly pending.",
-    "A separate contract pair is required by enforced mode for this closeout."
-  ],
+  "assumptions_resolved": ["Counts measured live: 4448 of 15049 blank company-wide, 16 blank when pulled per division."],
   "stop_conditions_hit": []
 }
