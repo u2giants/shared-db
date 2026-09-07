@@ -105,102 +105,10 @@ comment on view api.source_resolution is
   'licensor and franchise decisions. target_missing keeps dangling decisions visible; '
   'consumers must LEFT JOIN and must not treat a missing target as an absent decision.';
 
--- Preserve the established four-through-ten-argument PLM surface, but remove the duplicated
--- enforcement body: the six-kind setter remains the only implementation of the write rules.
--- Defaults are repeated exactly so historical short-form callers keep resolving here.
-create or replace function plm.set_source_resolution(
-  p_source_system text,
-  p_entity_kind text,
-  p_source_id text,
-  p_resolution_status text,
-  p_core_property_id uuid default null,
-  p_core_character_id uuid default null,
-  p_core_style_guide_id uuid default null,
-  p_dam_asset_id uuid default null,
-  p_resolution_reason text default null,
-  p_expected_updated_at timestamptz default null
-)
-returns plm.source_resolution
-language plpgsql
-security definer
-set search_path to pg_catalog
-as $function$
-begin
-  return plm.set_source_resolution(
-    p_source_system,
-    p_entity_kind,
-    p_source_id,
-    p_resolution_status,
-    p_core_property_id,
-    p_core_character_id,
-    p_core_style_guide_id,
-    p_dam_asset_id,
-    p_resolution_reason,
-    p_expected_updated_at,
-    null,
-    null
-  );
-end;
-$function$;
-
-comment on function plm.set_source_resolution(
-  text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz) is
-  'Compatibility write surface for existing property, character, style-guide and asset '
-  'callers. Delegates to the twelve-argument six-kind setter without relaxing validation, '
-  'locking, actor stamping, retry or optimistic-concurrency rules.';
-
-revoke all on function plm.set_source_resolution(
-  text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz) from public, anon;
-grant execute on function plm.set_source_resolution(
-  text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz)
-  to authenticated, service_role;
-
--- Reinstall the browser compatibility wrapper as a thin delegation to the preserved PLM
--- signature. The twelve-argument browser wrapper remains the route for new kinds.
-create or replace function api.set_source_resolution(
-  p_source_system text,
-  p_entity_kind text,
-  p_source_id text,
-  p_resolution_status text,
-  p_core_property_id uuid default null,
-  p_core_character_id uuid default null,
-  p_core_style_guide_id uuid default null,
-  p_dam_asset_id uuid default null,
-  p_resolution_reason text default null,
-  p_expected_updated_at timestamptz default null
-)
-returns plm.source_resolution
-language plpgsql
-security definer
-set search_path to pg_catalog
-as $function$
-begin
-  return plm.set_source_resolution(
-    p_source_system,
-    p_entity_kind,
-    p_source_id,
-    p_resolution_status,
-    p_core_property_id,
-    p_core_character_id,
-    p_core_style_guide_id,
-    p_dam_asset_id,
-    p_resolution_reason,
-    p_expected_updated_at
-  );
-end;
-$function$;
-
-comment on function api.set_source_resolution(
-  text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz) is
-  'Browser compatibility wrapper for existing source-resolution callers. Delegates to '
-  'the preserved ten-argument PLM surface; new licensor and franchise callers use the '
-  'twelve-argument API overload.';
-
-revoke all on function api.set_source_resolution(
-  text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz) from public, anon;
-grant execute on function api.set_source_resolution(
-  text,text,text,text,uuid,uuid,uuid,uuid,text,timestamptz)
-  to authenticated, service_role;
+-- Keep both ten-argument setters unchanged. Repository and mirrored consumer callers use
+-- their defaults, and the PLM routine's body is part of the established serialization and
+-- optimistic-concurrency contract. The twelve-argument overloads remain the write route for
+-- licensor and franchise decisions.
 
 -- Catalog-only post-apply truth. No application rows are read or emitted.
 do $verification$
@@ -231,9 +139,9 @@ begin
     raise exception 'api.source_resolution does not expose and validate the two new targets';
   end if;
 
-  if position('plm.set_source_resolution' in lower(pg_get_functiondef(v_old_plm))) = 0
+  if position('pg_advisory_xact_lock' in lower(pg_get_functiondef(v_old_plm))) = 0
      or position('plm.set_source_resolution' in lower(pg_get_functiondef(v_old_api))) = 0 then
-    raise exception 'legacy setters are not thin compatibility delegations';
+    raise exception 'legacy setter compatibility or serialization contract changed';
   end if;
 end;
 $verification$;
