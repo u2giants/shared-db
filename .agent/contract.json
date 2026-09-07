@@ -1,43 +1,24 @@
 {
   "schema_version": 1,
-  "work_issue": 1403,
-  "generation": 2,
-  "work_type": "repo-maintenance",
+  "work_issue": 2553,
+  "generation": 1,
+  "work_type": "docs",
   "route": "repo-maintenance",
-  "goal": "Make enforced agent-work-contract checks distinguish inherited main evidence from evidence authored for the current pull request.",
-  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
-  "dispatcher": "codex",
-  "worker": "codex",
-  "branch": "codex/issue-1403-inherited-evidence",
-  "worktree": "C:/repos/shared-db-worktrees/issue-1403-inherited-evidence",
-  "allowed_paths": [
-    ".github/workflows/agent-work-contract.yml",
-    "scripts/agent-work-contract-git-evidence.mjs",
-    "scripts/agent-work-contract-git-evidence.test.mjs"
-  ],
-  "file_writes": [
-    ".github/workflows/agent-work-contract.yml",
-    "scripts/agent-work-contract-git-evidence.mjs",
-    "scripts/agent-work-contract-git-evidence.test.mjs"
-  ],
+  "goal": "Record in the ColdLion API reference that the items endpoint must be pulled one division at a time, because a company-wide pull returns blank merchandise-group display names.",
+  "base_sha": "b3219f73c0a111bf06889d490cdc398c9ca1018c",
+  "dispatcher": "claude",
+  "worker": "claude",
+  "branch": "claude/coldlion-items-per-division",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/disney-creative-unmapped-titles-7b4149",
+  "allowed_paths": ["docs/coldlion-erp-api-reference.md", ".agent/contract.json", ".agent/completion.json"],
+  "file_writes": ["docs/coldlion-erp-api-reference.md", ".agent/contract.json", ".agent/completion.json"],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not disable or weaken enforced mode.",
-    "Do not add Agent work contract as a required branch context before a new full green day completes.",
-    "Do not retire or weaken the legacy objects alias."
+    "Do not change any migration, script, workflow or configuration file.",
+    "Do not place licensed row data in this public repository."
   ],
-  "required_checks": [
-    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
-    "node scripts/agent-work-contract-activation.mjs --mode --config-file config/agent-work-contract-activation.json"
-  ],
-  "assumptions": [
-    "Evidence files inherited byte-for-byte from the pull request base are not evidence authored for that pull request.",
-    "Changing both evidence files is required before their contents can govern the current pull request."
-  ],
-  "stop_conditions": [
-    "Stop if the repair would allow a non-grandfathered enforced pull request with no current evidence pair to pass.",
-    "Stop if changing only one evidence file could be treated as a complete pair.",
-    "Stop if implementation requires changing database structure or data."
-  ]
+  "required_checks": ["node --test scripts/agent-work-contract.test.mjs"],
+  "assumptions": ["The measured counts were taken live on 2026-09-07 against the production ColdLion API."],
+  "stop_conditions": ["Stop if recording this would require changing anything outside documentation."]
 }

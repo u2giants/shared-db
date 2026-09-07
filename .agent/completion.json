@@ -1,34 +1,18 @@
 {
   "schema_version": 1,
-  "work_issue": 1403,
+  "work_issue": 2553,
   "outcome": "ready-for-merge",
-  "pr": 2547,
+  "pr": 2554,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/1403/2",
-  "contract_sha256": "ad49bd66c04a352c96c50a660a9e29ea93cd2243ee8bf3fedf9bfa835c91b560",
-  "head_sha": "7e10d7381a046a290005ba8a3b5efb703f7278e7",
-  "files_changed": [
-    ".github/workflows/agent-work-contract.yml",
-    "scripts/agent-work-contract-git-evidence.mjs",
-    "scripts/agent-work-contract-git-evidence.test.mjs"
-  ],
+  "contract_ref": "refs/db-contracts/2553/1",
+  "contract_sha256": "c86ababe9d0fde6e352cf27fa5dc6c4b03da5099e021ad5578d9a31aada9ce2e",
+  "head_sha": "9731a8fdfa50dc099e2031744bb0ad1c97dc628a",
+  "files_changed": ["docs/coldlion-erp-api-reference.md"],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {
-      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
-      "exit_code": 0,
-      "evidence": "44 passed, 0 failed, 0 skipped, 0 todo"
-    },
-    {
-      "command": "node scripts/agent-work-contract-activation.mjs --mode --config-file config/agent-work-contract-activation.json",
-      "exit_code": 0,
-      "evidence": "reported enforced"
-    }
+    {"command": "node --test scripts/agent-work-contract.test.mjs", "exit_code": 0, "evidence": "contract and completion pair validate"}
   ],
-  "assumptions_resolved": [
-    "Merge-base-to-head classification does not mistake evidence added later on main for deletions made by an older pull request.",
-    "Only a change to both evidence files reaches current-pair validation; a one-file or unknown classification fails closed."
-  ],
+  "assumptions_resolved": ["Counts measured live: 4448 of 15049 blank company-wide, 16 blank when pulled per division."],
   "stop_conditions_hit": []
 }
