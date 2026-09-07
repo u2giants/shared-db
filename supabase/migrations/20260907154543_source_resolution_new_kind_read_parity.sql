@@ -105,9 +105,6 @@ comment on view api.source_resolution is
   'licensor and franchise decisions. target_missing keeps dangling decisions visible; '
   'consumers must LEFT JOIN and must not treat a missing target as an absent decision.';
 
-revoke all on table api.source_resolution from public, anon;
-grant select on table api.source_resolution to authenticated, service_role;
-
 -- Preserve the established four-through-ten-argument PLM surface, but remove the duplicated
 -- enforcement body: the six-kind setter remains the only implementation of the write rules.
 -- Defaults are repeated exactly so historical short-form callers keep resolving here.
