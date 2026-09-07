@@ -951,7 +951,7 @@ test('the active rotation is exactly the current models, in a stable order',()=>
   // instruction after its account usage limit stayed exhausted for a full
   // session. Its row stays in REVIEWERS so durable artifacts naming it resolve.
   // kimi-k3 was unpaused on 2026-09-07 (owner instruction, PR #2483).
-  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3','muse-spark-1.2-contributor','gemini-3.8-flash-high'])
+  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3','qwen-3.8-max','muse-spark-1.2-contributor','gemini-3.8-flash-high'])
   assert.ok(RETIRED_REVIEWERS.includes('codex-gpt-5.6-sol'),'codex-gpt-5.6-sol must stay out of the rotation')
   assert.equal(reviewerReadsRepository('codex-gpt-5.6-sol'),true,'retiring the account must not invalidate the verdicts it already recorded')
   assert.deepEqual(OVERFLOW_REVIEWERS,[])
@@ -961,14 +961,16 @@ test('the active rotation is exactly the current models, in a stable order',()=>
   assert.equal(REVIEWERS.find((r)=>r.name==='muse-spark-1.2-contributor').wrapper,'ai-muse')
   assert.equal(REVIEWERS.find((r)=>r.name==='deepseek-chat').wrapper,'ai-deepseek-agent')
   // Qwen is NOT retired (owner instruction, 2026-09-04) and must not be named as
-  // retired anywhere. It is quarantined pending a live qualification that failed
-  // on 2026-09-04, so it is still undrawable -- via QUARANTINED_REVIEWERS, not
-  // RETIRED_REVIEWERS. Both halves are asserted because either one alone is a
-  // silent regression: dropping the first re-introduces the false retirement
-  // claim, dropping the second puts an unqualified provider into the rotation.
+  // retired anywhere. Its quarantine was lifted on 2026-09-07 after a live
+  // qualification that actually passed (ai-devops PR #316, merge commit
+  // 795902d8): the wrapper's credential handoff now survives the runtime's
+  // startup re-exec and runs on the live Model Studio lane. The retirement half
+  // is still asserted because dropping it re-introduces the false retirement
+  // claim; the drawable half replaces the old undrawable assertion so a silent
+  // re-quarantine cannot pass unnoticed.
   assert.ok(!RETIRED_REVIEWERS.includes('qwen-3.8-max'),'qwen-3.8-max must never be listed as retired')
-  assert.deepEqual(QUARANTINED_REVIEWERS,['qwen-3.8-max'])
-  assert.ok(!ACTIVE_REVIEWERS.some((r)=>/qwen/i.test(r.name)),'quarantined Qwen must remain outside the active rotation')
+  assert.deepEqual(QUARANTINED_REVIEWERS,[])
+  assert.ok(ACTIVE_REVIEWERS.some((r)=>r.name==='qwen-3.8-max'),'live-qualified Qwen must be drawable')
   // Gemini was added on 2026-09-06 (ai-devops #285) only after a recorded live
   // safety qualification AND a live review that returned a well-formed verdict
   // above a substantive report. Its wrapper is asserted so a future rename cannot
@@ -1821,27 +1823,34 @@ test('--failing-check is refused for every code that is not a local fault',()=>{
   assert.doesNotMatch(io.getCommit(io.refs.get(failureRef)).message,/failing-check/)
 })
 
-test('quarantined Qwen evidence remains readable but Qwen receives no new assignment',()=>{
+test('an ineligible reviewer stays readable but receives no new assignment',()=>{
   // AMENDED 2026-09-01 (#2079). This test previously asserted that the
-  // cursor-echo branch HANDS BACK the ineligible reviewer (`recovered.reviewer ===
-  // 'qwen-3.8-max'`). That was the defect, not the contract: the branch created
-  // the durable assignment ref and returned an ineligible name while taking no
-  // lease, so no verdict could ever follow -- wasted work, and a refusal
-  // inconsistent with the prior-assignment path four lines above it. What the
-  // test was really protecting -- that an ineligible name stays READABLE forever,
-  // because durable refs name it -- is asserted directly below and unchanged.
+  // cursor-echo branch HANDS BACK the ineligible reviewer. That was the defect,
+  // not the contract: the branch created the durable assignment ref and returned
+  // an ineligible name while taking no lease, so no verdict could ever follow --
+  // wasted work, and a refusal inconsistent with the prior-assignment path four
+  // lines above it. What the test was really protecting -- that an ineligible
+  // name stays READABLE forever, because durable refs name it -- is asserted
+  // directly below and unchanged.
+  //
+  // REPOINTED 2026-09-07. This used to be written around 'qwen-3.8-max', which is
+  // drawable again after its live qualification passed, so it can no longer
+  // demonstrate ineligibility. It now uses the RETIRED 'codex-gpt-5.6-sol'. The
+  // contract under test is unchanged and still covers exactly one ineligible
+  // name; only the example moved.
+  const ineligible='codex-gpt-5.6-sol'
   const io=reviewIo(), request={issue:9,pr:109,headSha:'abcdef9'}
-  const historical=io.makeOwnerCommit('db-coordination reviewer-cursor sequence=64 reviewer=qwen-3.8-max issue=9 pr=109 head=abcdef9')
+  const historical=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=64 reviewer=${ineligible} issue=9 pr=109 head=abcdef9`)
   io.refs.set(REVIEW_CURSOR_REF,historical)
   // Still readable: the historical cursor parses and the name resolves.
-  assert.equal(parseReviewCursor(io.getCommit(historical)).reviewer,'qwen-3.8-max')
-  assert.equal(REVIEWERS.find((row)=>row.name==='qwen-3.8-max')?.wrapper,'ai-qwen')
+  assert.equal(parseReviewCursor(io.getCommit(historical)).reviewer,ineligible)
+  assert.equal(REVIEWERS.find((row)=>row.name===ineligible)?.wrapper,'ai-codex-review')
   assert.throws(()=>assignNextReviewer(request,io),/belongs to a retired, quarantined or orchestrator-conflicting reviewer[\s\S]*Record a governed replacement for this exact head/)
   // Refused BEFORE any side effect: no assignment ref, no lease.
   assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith(REVIEW_ASSIGNMENT_REF_PREFIX)),false)
-  assert.equal(io.refs.get(reviewActiveRef('qwen-3.8-max'))??null,null)
+  assert.equal(io.refs.get(reviewActiveRef(ineligible))??null,null)
   const next=assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
-  assert.notEqual(next.reviewer,'qwen-3.8-max')
+  assert.notEqual(next.reviewer,ineligible)
 })
 
 test('two consecutive terminal no-verdict failures form an immutable idempotent chain',()=>{
@@ -1925,7 +1934,7 @@ test('reviewer replacement rejects a mismatched original assignment',()=>{
 // is a false invariant, and it is deliberately not asserted here. Both halves are
 // pinned below, with the exact successor named in each case.
 test('one intervening assignment gives a failed reviewer a named replacement',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,5,'this test describes the approved five-reviewer rotation (deepseek-chat retired, #2078; gemini-3.8-flash-high added 2026-09-06; codex-gpt-5.6-sol retired 2026-09-06; kimi-k3 unpaused 2026-09-07)')
+  assert.equal(ACTIVE_REVIEWERS.length,6,'this test describes the approved six-reviewer rotation (deepseek-chat retired, #2078; gemini-3.8-flash-high added 2026-09-06; codex-gpt-5.6-sol retired 2026-09-06; kimi-k3 unpaused 2026-09-07; qwen-3.8-max unquarantined 2026-09-07)')
   const io=failedReviewIo()
   assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
   const replacement=replaceFailedReviewer(replacementRequest,io)
@@ -1933,7 +1942,7 @@ test('one intervening assignment gives a failed reviewer a named replacement',()
 })
 
 test('N-1 intervening assignments skip the failed provider instead of stranding the replacement',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,5,'this test describes the approved five-reviewer rotation (deepseek-chat retired, #2078; gemini-3.8-flash-high added 2026-09-06; codex-gpt-5.6-sol retired 2026-09-06; kimi-k3 unpaused 2026-09-07)')
+  assert.equal(ACTIVE_REVIEWERS.length,6,'this test describes the approved six-reviewer rotation (deepseek-chat retired, #2078; gemini-3.8-flash-high added 2026-09-06; codex-gpt-5.6-sol retired 2026-09-06; kimi-k3 unpaused 2026-09-07; qwen-3.8-max unquarantined 2026-09-07)')
   const io=failedReviewIo()
   for(let n=0;n<ACTIVE_REVIEWERS.length-1;n+=1){
     assignNextReviewer({issue:20+n,pr:120+n,headSha:`abcde${n}f`},io)
@@ -2038,8 +2047,9 @@ test('review lease age is truthful for known and unknown commit dates',()=>{
 
 test('capacity report classifies free, live, stale, aged, and unknown leases without mutation',()=>{
   const io=reviewIo(),snapshot=new Map(),states=new Map(),now=new Date('2026-09-02T12:00:00Z')
-  // One case per active reviewer: five, after codex-gpt-5.6-sol was retired on
-  // 2026-09-06 and kimi-k3 was unpaused on 2026-09-07. 'moved' and 'verdict' both
+  // One case per active reviewer: six, after codex-gpt-5.6-sol was retired on
+  // 2026-09-06, kimi-k3 was unpaused on 2026-09-07 and qwen-3.8-max was
+  // unquarantined on 2026-09-07. 'moved' and 'verdict' both
   // reach 'stale-reclaimable' but by different routes, and both are proved:
   // 'verdict' occupies two slots here, and 'moved' is proved below by moving a
   // head under a lease that this pass classified as live.
@@ -2049,6 +2059,7 @@ test('capacity report classifies free, live, stale, aged, and unknown leases wit
     {kind:'aged',date:'2026-08-31T00:00:00Z'},
     {kind:'unknown',date:null},
     {kind:'verdict',date:'2026-09-02T10:00:00Z'},
+    {kind:'live',date:'2026-09-02T11:00:00Z'},
   ]
   const heads=new Map()
   cases.forEach((entry,index)=>{
@@ -2062,22 +2073,22 @@ test('capacity report classifies free, live, stale, aged, and unknown leases wit
   io.readActiveReviewLeases=()=>snapshot
   io.readReviewStates=()=>states
   const before=new Map(io.refs),report=reviewerCapacityReport(io,now)
-  assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','stale-reclaimable'])
-  assert.deepEqual(report.summary,{total:5,free:0,live:2,reclaimable:2,silenceProbed:0,silenceReclaimable:0,unknown:1})
+  assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','stale-reclaimable','live'])
+  assert.deepEqual(report.summary,{total:6,free:0,live:3,reclaimable:2,silenceProbed:0,silenceReclaimable:0,unknown:1})
   assert.deepEqual(io.refs,before,'capacity report must be read-only')
   // The OTHER route to 'stale-reclaimable': the reviewed head moved out from
   // under a lease this same pass just called live. No recorded verdict involved.
   const livePair=states.get(heads.get(0))
   states.set(heads.get(0),{...livePair,pr:{...livePair.pr,head:{sha:'f'.repeat(40)}}})
-  assert.deepEqual(reviewerCapacityReport(io,now).reviewers.map((row)=>row.classification),['stale-reclaimable','stale-reclaimable','suspect-aged','unknown','stale-reclaimable'])
+  assert.deepEqual(reviewerCapacityReport(io,now).reviewers.map((row)=>row.classification),['stale-reclaimable','stale-reclaimable','suspect-aged','unknown','stale-reclaimable','live'])
   states.set(heads.get(0),livePair)
   // 'free' is the fifth classification and it is a property of an ABSENT lease, so
   // it is proved by removing one rather than by needing a spare roster name.
   const freed=ACTIVE_REVIEWERS.at(-1).name
   snapshot.delete(reviewActiveRef(freed));io.refs.delete(reviewActiveRef(freed))
   const withFree=reviewerCapacityReport(io,now)
-  assert.deepEqual(withFree.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','free'])
-  assert.deepEqual(withFree.summary,{total:5,free:1,live:2,reclaimable:1,silenceProbed:0,silenceReclaimable:0,unknown:1})
+  assert.deepEqual(withFree.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','stale-reclaimable','free'])
+  assert.deepEqual(withFree.summary,{total:6,free:1,live:2,reclaimable:2,silenceProbed:0,silenceReclaimable:0,unknown:1})
 })
 
 function silentLeaseIo({heldSince='2026-09-04T10:00:00Z',activity=[]}={}){

@@ -1,33 +1,28 @@
 {
   "schema_version": 1,
-  "work_issue": 2552,
+  "work_issue": 2558,
   "outcome": "ready-for-merge",
-  "pr": 2556,
+  "pr": 2555,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2552/1",
-  "contract_sha256": "817b29aef499051a0b6815dbd040dc04a3dc6b867044289a8c8547a70e635be8",
-  "head_sha": "8b183e2190012ef32d846fb5e54d6ea3a2fb5a75",
+  "contract_ref": "refs/db-contracts/2558/3",
+  "contract_sha256": "4f531bbeeeb8de89c8ec7f24e9c612b3e0984c2af806434d88c9ccd73e998f3a",
+  "head_sha": "58a447ae1fbf95dc193c046b3e2bcdcf9c19e23f",
   "files_changed": [
-    "HANDOFF.d/2026-09-07T2224Z-edge-dev-codex-orchestrator-transfer.md",
-    "docs/production-promotion-procedure.md"
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "evidence": "Handoff contract satisfied for 1 changed file(s).",
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "command": "node scripts/check-handoff-contract.mjs"
-    },
-    {
-      "evidence": "No whitespace errors.",
-      "exit_code": 0,
-      "command": "git diff --check"
+      "evidence": "475 passed, 0 failed, 0 skipped, 0 todo"
     }
   ],
   "assumptions_resolved": [
-    "Open inherited work and the next three undispatched priorities remain explicitly pending.",
-    "A separate contract pair is required by enforced mode for this closeout."
+    "The live qualification is recorded in the reviewer's readsRepositoryVerified evidence and cites the merged commit it reviewed.",
+    "ACTIVE_REVIEWERS is six names in the unchanged roster order, with qwen-3.8-max in its existing position."
   ],
   "stop_conditions_hit": []
 }
