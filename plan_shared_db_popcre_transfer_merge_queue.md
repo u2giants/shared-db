@@ -353,12 +353,12 @@ The old owner/name may be retired, and another ownership mutation can compound a
 
 **Dependencies:** Step 8.
 
-1. Create a harmless documents-only PR that updates this plan's STATUS/evidence for Steps 8–9. It must contain no code, workflow, configuration, script, test, or migration.
+1. Create a harmless documents-only PR that adds only `docs/verification/merge-queue-canary-<UTC>.md`, stating its canary purpose and containing no code, workflow, configuration, script, test, migration, or rulebook file. Do not edit this plan, `AGENTS.md`, or another `plan_*.md` in the canary: those are rulebooks and require the full exact-head reviewer path.
 2. Use the normal guarded admission path with its exact head; do not use the web bypass or `--admin`.
 3. Observe one `merge_group` event. Record the synthetic SHA, base SHA, PR head SHA, queue ref, and workflow run IDs.
 4. Require every one of the 12 required contexts to complete successfully on the synthetic SHA. Prove the group contains exactly one PR and the PR head is its ancestor.
 5. Confirm GitHub, not the guarded workflow's direct path, performed the merge; `main` advanced once to the expected merge commit; no second PR was grouped; the source head did not move; and queue/build concurrency remained one.
-6. Re-run the normal post-merge checks and consumer sync if the plan update is in the mirrored root.
+6. Re-run the normal post-merge checks and consumer sync for the new verification note. After the canary evidence exists, update this plan's STATUS in a separate rulebook PR using the normal exact-head review and guarded queue-admission path.
 7. Exercise queue-only rollback in dry-run/read-only mode and verify it names only the new ruleset. Do not actually disable a healthy queue.
 
 **Verification gate — you'll know it worked when:** the canary is merged through one green synthetic group with all contexts, exact identity/ancestry evidence, no bypass, no direct-merge race, and healthy post-merge Actions.
