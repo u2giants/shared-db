@@ -2,7 +2,7 @@
 
 **Status:** Settled
 
-**Controlling owner rulings:** Albert Hazan, 2026-08-16, 2026-08-19, 2026-08-23, and 2026-08-25. The 2026-08-23 ruling establishes signed-contract authority for Warner Bros. licensing membership. The 2026-08-25 ruling records the Marvel portal-authority split effective December 2025.
+**Controlling owner rulings:** Albert Hazan, 2026-08-16, 2026-08-19, 2026-08-23, 2026-08-25, and 2026-09-06. The 2026-09-06 ruling records that Paramount, Viacom Multi and Nickelodeon are one Licensor. The 2026-08-23 ruling establishes signed-contract authority for Warner Bros. licensing membership. The 2026-08-25 ruling records the Marvel portal-authority split effective December 2025.
 
 ## Official business objects
 
@@ -21,6 +21,10 @@ Licensing Master Data consists of Licensors, Properties, Characters, Style Guide
 - Item or Property letters do not identify a Licensor without the accompanying description. `CC`, for example, can refer to Disney's Coco or Coca-Cola depending on the description.
 - `DY` and `DS` both describe the same Disney company for licensing identity. They must not create two Disney Licensors.
 - `FR` was not a real Licensor in the ColdLion source. Do not promote it to one from an old code alone.
+
+## Licensor naming aliases
+
+**Settled - Albert Hazan, 2026-09-06.** The Licensor recorded as `VM` / "Viacom Multi" is Paramount, and is also the Nickelodeon licensor. Paramount, Viacom and Nickelodeon are one Licensor under this single record, not three. Any item, property or asset whose description names Paramount or Nickelodeon resolves to this Licensor. Never create a separate Paramount or Nickelodeon Licensor, and never report such an item as having an unknown Licensor because the word "Paramount" does not appear in the Licensor list.
 
 ## Creation and status
 
