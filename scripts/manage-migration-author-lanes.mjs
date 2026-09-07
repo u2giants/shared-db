@@ -327,7 +327,18 @@ export const REVIEWERS = Object.freeze([
 // failure, both of which are gone: `AI_KIMI_CALLER=claude ai-kimi doctor` on this
 // machine reports kimi 0.36.1, model pin kimi-code/k3, read-only PASS, preflight
 // PASS and auth OK. Verified by running the doctor, not by reading the wrapper.
-export const RETIRED_REVIEWERS = Object.freeze(['glm-5.2', 'deepseek-chat'])
+//
+// RETIRED 2026-09-06 (owner instruction, issue #2485):
+// 'codex-gpt-5.6-sol'. Its account usage limit was exhausted for the whole of a
+// working session: every draw on PRs #2468 and #2479 came back
+// `ERROR: You've hit your usage limit`, each one costing a failed run plus a
+// replacement round while the rest of the queue waited. The owner directed
+// permanent removal from the pool. This is a disposition on the ACCOUNT, not on
+// the wrapper: `ai-codex-review` reads the repository correctly and its row in
+// REVIEWERS keeps `readsRepository:true`, so every durable artifact this
+// reviewer already recorded still authorizes exactly as before. Restoring it is
+// a one-line deletion from this list once the account has quota again.
+export const RETIRED_REVIEWERS = Object.freeze(['glm-5.2', 'deepseek-chat', 'codex-gpt-5.6-sol'])
 
 // Not retired -- quarantined pending a passing live qualification (see the Qwen
 // note above). Kept separate from RETIRED_REVIEWERS on purpose: retirement is a
@@ -359,9 +370,12 @@ export function reviewerKnownNonReading(name, reviewers=REVIEWERS){
 }
 
 // ACTIVE ROTATION EXPANSION (owner approval, 2026-08-28). Codex GPT-5.6 Sol and
-// DeepSeek are active rotation providers. No overflow provider remains; when all
-// six execution keys are occupied, assignment fails closed and the Phase 2
-// allocator records an ordered durable wait.
+// DeepSeek were added as active rotation providers then. NEITHER IS ACTIVE NOW:
+// DeepSeek was retired for fabricated reviews, and Codex on 2026-09-06 for an
+// exhausted account (see RETIRED_REVIEWERS above, which is the only roster that
+// decides this). No overflow provider remains; when all execution keys are
+// occupied, assignment fails closed and the Phase 2 allocator records an ordered
+// durable wait.
 //
 // It is listed in REVIEWERS like every other name, so a cursor commit naming it
 // still resolves to a wrapper forever (`REVIEWERS.find(...)` at parse time is
