@@ -6075,18 +6075,17 @@ test('a created verdict ref that reads back absent is retried, not burned', () =
   assert.ok(io.state.waits>0)
 })
 
-test('a genuinely different verdict winner is refused on the first read', () => {
+test('a standing verdict with a genuinely different record still refuses, and is marked created', () => {
   const io=verdictIo({readRef(ref){
     if(ref.startsWith('refs/db-review-assignments/'))return 'c'.repeat(40)
     if(ref.startsWith('refs/db-review-active/'))return 'c'.repeat(40)
     return null
   }})
-  let seen=0
   const inner=io.readRef
-  io.readRef=(ref)=>{
-    if(ref.startsWith('refs/db-review-verdicts/'))return ++seen===1?null:'d'.repeat(40)
-    return inner(ref)
-  }
-  assert.throws(()=>recordReviewVerdict(VERDICT_OPTS,io),/permanently refused/)
-  assert.equal(io.state.waits,0)
+  let seen=0
+  io.readRef=(ref)=>ref.startsWith('refs/db-review-verdicts/')?(++seen===1?null:'d'.repeat(40)):inner(ref)
+  io.commits.set('d'.repeat(40),{message:'not a verdict record at all',parents:[{sha:'c'.repeat(40)}]})
+  let error=null
+  assert.throws(()=>{try{recordReviewVerdict(VERDICT_OPTS,io)}catch(caught){error=caught;throw caught}},/must not be voided/)
+  assert.deepEqual(error.verdictArtifactCreated,{ref:'refs/db-review-verdicts/2355-2415-'+'a'.repeat(40),sha:'b'.repeat(40),confirmed:true})
 })
