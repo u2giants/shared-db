@@ -1982,6 +1982,15 @@ export function parseReviewCursor(commit) {
   return {sequence:Number(match[1]),reviewer:match[2],issue:Number(match[3]),pr:Number(match[4]),headSha:match[5],slot:match[6]?Number(match[6]):null}
 }
 
+// #2430. KEY ORDER IS NOT IDENTITY. Two verdict payloads carrying the same fields
+// with the same values are the same record whichever order JSON.stringify emitted
+// them in, so records are compared over sorted key/value pairs, never over the
+// message text.
+export function sameVerdictRecord(left,right){
+  if(!left||!right)return false
+  const keys=[...new Set([...Object.keys(left),...Object.keys(right)])].sort()
+  return keys.every((key)=>JSON.stringify(left[key])===JSON.stringify(right[key]))
+}
 export function recordReviewVerdict(options,io=githubIo){
   const issue=Number(options.issue),pr=Number(options.pr),slot=Number(options.slot??1),headSha=String(options.headSha??'').toLowerCase()
   const verdict=String(options.verdict??'').toUpperCase(),findingsRef=String(options.findingsRef??'')
@@ -2011,22 +2020,104 @@ export function recordReviewVerdict(options,io=githubIo){
   const ref=verdictRef({issue,pr,headSha,slot,replacementSequence})
   const existing=io.readRef(ref)
   if(existing){
-    const validated=validateVerdictArtifact({ref,sha:existing,commit:io.getCommit(existing),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
-    if(JSON.stringify(validated.verdict)!==JSON.stringify(verdict))throw new LaneError('a different create-only verdict already exists')
+    // #2464. An artifact that ALREADY EXISTS is validated against ITS OWN
+    // findings comment, never against the comment this round just posted. The
+    // artifact is immutable and records the `findings_ref` it was bound to; a
+    // re-run posts a NEW comment, so digesting this round's body against a
+    // previous round's artifact reported "findings digest does not match the
+    // durable findings" for a perfectly valid artifact and burned the tuple.
+    // The create-race path below already read the winner's own findings; this
+    // path now does the same.
+    const existingCommit=io.getCommit(existing)
+    const existingRecord=parseVerdictCommit(existingCommit)
+    const existingBody=io.readFindings(existingRecord.findings_ref)
+    const validated=validateVerdictArtifact({ref,sha:existing,commit:existingCommit,findingsBody:existingBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
+    if(validated.verdict!==verdict)throw new LaneError('a different create-only verdict already exists')
     return validated
   }
   const sha=io.makeReviewVerdictCommit(formatVerdictMessage(record),assignmentSha)
   try{if(!io.createRef(ref,sha))throw new Error('create returned false')}catch(error){
-    const winner=io.readRef(ref)
-    if(!winner)throw new LaneError('create-only verdict ref failed and no winner exists; do not retry blindly')
-    const winnerRecord=parseVerdictCommit(io.getCommit(winner))
-    const winnerBody=io.readFindings(winnerRecord.findings_ref)
-    const validated=validateVerdictArtifact({ref,sha:winner,commit:io.getCommit(winner),findingsBody:winnerBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
-    if(validated.verdict!==verdict)throw new LaneError('a contradictory create-only verdict won the race; this tuple is permanently refused')
-    return validated
+    // #2464 (muse-spark, PR #2468). A FAILED create does not mean nothing was
+    // created. The create can land and still report an error -- a dropped
+    // response, a proxy timeout -- in which case the winner of this "race" is
+    // THIS round's own commit, bound to THIS round's findings comment. Every
+    // read below (getCommit, readFindings, validation) can then fail
+    // transiently, and an unmarked throw sends the runner down its void path,
+    // editing the very comment the artifact's findings_digest was computed
+    // over. So the winner is read with the same absence-retry as the success
+    // path, and once the winner is known to be our own SHA, EVERY error out of
+    // this branch carries the marker.
+    // The winner READ can itself throw -- readRef returns null only on a
+    // confirmed 404 and rethrows every other transport error (muse-spark,
+    // PR #2468, round 2). A thrown read leaves us unable to prove the ref is
+    // absent, and the create may well have landed, so the failure is marked
+    // UNCONFIRMED rather than left bare: refusing to void is safe when we do not
+    // know, while voiding is irreversible. Round 4 extended the same reasoning
+    // to a repeated null: see the block below -- after a FAILED create, no exit
+    // in this branch is treated as proof of absence.
+    let winner=null
+    try{winner=readRefAfterWrite(ref,sha,io)}
+    catch(readError){readError.verdictArtifactCreated={ref,sha,confirmed:false};throw readError}
+    // A repeated null after an ERRORED create is not proof of absence either
+    // (muse-spark, PR #2468 round 3). The create reported a failure, so landing
+    // is unknown, and the same eventual consistency that hides a fresh ref for
+    // one read can hide it for all twelve. This exit is therefore marked
+    // unconfirmed as well: after a failed create, NOTHING in this branch is
+    // proven absent, and the only unmarked outcome left is a winner that is
+    // demonstrably another round's object, which is not ours to protect.
+    if(!winner){const absent=new LaneError('create-only verdict ref failed and no winner could be read; the ref may still hold the commit this round created, so nothing may be voided and this must not be retried blindly');absent.verdictArtifactCreated={ref,sha,confirmed:false};throw absent}
+    const markIfOurs=(failure)=>{if(winner===sha)failure.verdictArtifactCreated={ref,sha,confirmed:true};return failure}
+    try{
+      const winnerRecord=parseVerdictCommit(io.getCommit(winner))
+      const winnerBody=io.readFindings(winnerRecord.findings_ref)
+      const validated=validateVerdictArtifact({ref,sha:winner,commit:io.getCommit(winner),findingsBody:winnerBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
+      if(validated.verdict!==verdict)throw new LaneError('a contradictory create-only verdict won the race; this tuple is permanently refused')
+      return validated
+    }catch(failure){throw markIfOurs(failure)}
   }
-  if(io.readRef(ref)!==sha)throw new LaneError('create-only verdict readback disagrees with the created object; this tuple is permanently refused')
-  return validateVerdictArtifact({ref,sha,commit:io.getCommit(sha),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
+  // #2464. THE CREATE SUCCEEDED. Everything from here on is confirmation of an
+  // object that already exists durably, so two rules apply.
+  //
+  // FIRST, the readback is retried. GitHub's create-ref response can arrive
+  // before the new custom ref is visible to a following GET -- the eventual
+  // consistency `readRefAfterWrite` was written for. Asked exactly once, a
+  // successful create followed by a transient 404 was indistinguishable from a
+  // create that never landed, and it refused a real APPROVE four rounds running
+  // on PR #2409 while `refs/db-review-verdicts/2334-2409-2835169...-slot2` sat
+  // there holding the APPROVE payload. A DIFFERENT sha still fails closed on the
+  // first read, exactly as before: this is not a weaker check, it is the same
+  // check asked until the API can answer it.
+  //
+  // SECOND, any failure past this point is marked `verdictArtifactCreated`. The
+  // runner's failure path voids the findings comment, which permanently breaks
+  // the `findings_digest` recorded INSIDE the artifact that was just written --
+  // destroying the evidence for a verdict that exists and is valid. A caller
+  // that sees this marker must report loudly and STOP, touching nothing.
+  try{
+    const seen=readRefAfterWrite(ref,sha,io)
+    // #2430. A DIFFERENT SHA IS NOT AUTOMATICALLY CORRUPTION. The create is
+    // confirmed, so something written by THIS call stands at the ref -- and a
+    // retried create can produce a second commit object with a different SHA
+    // and an identical payload (the commit carries a timestamp; the record does
+    // not). Refusing on the SHA alone threw away a completed, paid-for review on
+    // PR #2415 at head 0fab4ace. So the CONTENT standing at the ref is compared
+    // against the record this call intended to write: an equivalent record that
+    // still validates as a full artifact is this verdict, and is a success.
+    // Anything else -- an unreadable commit, a genuinely different record, an
+    // absent ref after a confirmed create -- is still a permanent refusal, and
+    // still marked created so the runner never voids the findings comment.
+    if(seen!==sha){
+      if(!seen)throw new LaneError(`create-only verdict readback could not confirm the created object at ${ref} (read absent, expected ${sha}); the artifact WAS created and must not be voided`)
+      let standing=null
+      try{standing=parseVerdictCommit(io.getCommit(seen))}catch{standing=null}
+      if(!sameVerdictRecord(standing,record))throw new LaneError(`create-only verdict readback could not confirm the created object at ${ref} (read ${seen}, expected ${sha}); the artifact WAS created and must not be voided`)
+      return validateVerdictArtifact({ref,sha:seen,commit:io.getCommit(seen),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
+    }
+    return validateVerdictArtifact({ref,sha,commit:io.getCommit(sha),findingsBody,activeLeaseSha:assignmentSha,assignment:{sha:assignmentSha,reviewer:assignment.reviewer}})
+  }catch(error){
+    error.verdictArtifactCreated={ref,sha,confirmed:true}
+    throw error
+  }
 }
 
 // THE EXACT RECOVERY ROUTE FOR A NON-READING REVIEWER (#2079).
