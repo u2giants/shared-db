@@ -6,7 +6,7 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/1090/1",
   "contract_sha256": "dec834e53f0dbea234dcf2b4b18d2cc4675038d7534f7e006d87ab63a4ab6ddd",
-  "head_sha": "2fd3b721865ab9409ce44a52723ef91a95479c1e",
+  "head_sha": "e827dacd00b3a4a3f6a2720d3b262c00781373aa",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
