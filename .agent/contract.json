@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2558,
-  "generation": 1,
+  "generation": 2,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Return qwen-3.8-max to the active reviewer rotation now that its live qualification passed, without weakening the protection that an ineligible reviewer stays readable but receives no new assignment.",
-  "base_sha": "b3219f73c0a111bf06889d490cdc398c9ca1018c",
+  "base_sha": "2fd3b721865ab9409ce44a52723ef91a95479c1e",
   "dispatcher": "claude",
   "worker": "claude",
   "branch": "claude/qwen-rotation",
