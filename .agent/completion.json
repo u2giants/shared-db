@@ -9,9 +9,7 @@
   "head_sha": "107fecc97fa056b4a6cf63724a7b4d49d9bfc88e",
   "files_changed": [
     "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    ".agent/contract.json",
-    ".agent/completion.json"
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
