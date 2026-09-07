@@ -1,35 +1,50 @@
 {
   "schema_version": 1,
-  "work_issue": 1403,
+  "work_issue": 2509,
   "generation": 1,
-  "work_type": "repo-maintenance",
-  "route": "repo-maintenance",
-  "goal": "Activate agent work contract enforcement while grandfathering every pre-contract open pull request at its exact current head.",
-  "base_sha": "a2a5c2978d40f0200ec2926195fe83eaa60004ae",
-  "dispatcher": "codex",
-  "worker": "codex",
-  "branch": "codex/issue-1403-activate-contract",
-  "worktree": "C:/repos/shared-db-worktrees/issue-1403-activate-contract",
-  "allowed_paths": ["config/agent-work-contract-activation.json"],
-  "file_writes": ["config/agent-work-contract-activation.json"],
-  "db_reads": [],
-  "db_writes": [],
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Preserve PopSG preview-count behavior and prove its natural authenticated database-role performance with exact counts; prepare the inherited change for independent review and separately gated preview and production acceptance.",
+  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
+  "dispatcher": "codex coordinator #2536",
+  "worker": "codex repair_2501",
+  "branch": "codex/issue-2509-popsg-preview-stats",
+  "worktree": "/tmp/shared-db-orch-2536-2509",
+  "allowed_paths": [
+    "supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql",
+    "supabase/tests/popsg_preview_stats_contracts.sql"
+  ],
+  "file_writes": [
+    "supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql",
+    "supabase/tests/popsg_preview_stats_contracts.sql"
+  ],
+  "db_reads": [
+    "table public.style_guide_render_queue"
+  ],
+  "db_writes": [
+    "function public.get_sg_preview_stats",
+    "index public.idx_sgf_active_preview_category",
+    "table public.style_guide_files"
+  ],
   "prohibited_actions": [
-    "Do not retire or weaken the legacy objects alias.",
-    "Do not add Agent work contract as a required branch context before enforced mode has remained green for a full day.",
-    "Do not grandfather a pull request except at the exact live head observed immediately before activation."
+    "Do not change applied migration bytes, increase timeouts, weaken access control or count semantics.",
+    "Do not dispatch preview or production, draw reviewers, merge, or push before coordinator release.",
+    "Do not equate authenticated database-role calls with PostgREST login acceptance or fresh connections with physically cold cache."
   ],
   "required_checks": [
-    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
-    "node scripts/agent-work-contract-activation.mjs --mode --config-file config/agent-work-contract-activation.json"
+    "git diff --check",
+    "docker exec -i orch-2536-2509-proof psql -U postgres -v ON_ERROR_STOP=1 -qAt",
+    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs"
   ],
   "assumptions": [
-    "Every open pull request without a contract and completion pair can be grandfathered at its exact current head.",
-    "The activation PR itself will carry the immutable contract and truthful completion pair."
+    "Existing pre-contract implementation and this prepared test repair predate publication; this contract adopts the remaining delivery scope without claiming historical preauthorization by a ref.",
+    "The reviewed migration body remains byte-identical to inherited PR #2513.",
+    "Local proof is a review input; independent review, preview, production and authenticated application acceptance remain separate gates.",
+    "The local staging branch is codex/issue-2509-proof-2536; the declared branch is the existing destination PR branch, preserved without changing claim2511."
   ],
   "stop_conditions": [
-    "Stop if any open pull request without a contract and completion pair is absent from the exact-head grandfather list.",
-    "Stop if a listed pull request head moves or closes before the final census is recorded.",
-    "Stop if activation requires retiring the legacy objects alias or changing branch protection in this pull request."
+    "Stop before pushing until coordinator releases the remaining no-push hold.",
+    "Stop if migration bytes change or current main is no longer the implementation ancestor.",
+    "Stop if exact counts fail, natural authenticated-role timing exceeds its existing ceiling, or scope expands."
   ]
 }
