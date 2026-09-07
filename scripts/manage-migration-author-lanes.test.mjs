@@ -864,11 +864,16 @@ test('merged-head replacement reuses the bounded target snapshot instead of rere
   io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
   const result=replaceFailedReviewer(replacementRequest,io)
   assert.ok(result.reviewer)
-  assert.notEqual(result.reviewer,'codex-gpt-5.6-sol')
+  // No assertion that the drawn name is not codex: replacements draw from ACTIVE_REVIEWERS,
+  // which the rotation test pins exactly, so such an assertion could never fail. The refusal of
+  // a retired name is proved where it is enforced, in the eligibility and preflight tests.
 })
 
-// ACTIVE ROTATION (owner instruction, 2026-08-28). Codex GPT-5.6 Sol and
-// DeepSeek are ordinary approved reviewers. All-busy must fail closed.
+// ACTIVE ROTATION (owner instruction, 2026-08-28). Codex GPT-5.6 Sol and DeepSeek
+// were ordinary approved reviewers then; BOTH ARE RETIRED NOW (DeepSeek for
+// fabricated reviews, Codex on 2026-09-06 for an exhausted account), so this
+// fixture occupies whatever ACTIVE_REVIEWERS currently holds. All-busy must fail
+// closed.
 function busyIo(){
   // Each active rotation reviewer holds one live assignment: an open PR, still
   // at the head it was given, with no verdict recorded.
@@ -942,7 +947,13 @@ test('retired reviewer names stay resolvable so historical review evidence never
 test('the active rotation is exactly the current models, in a stable order',()=>{
   // Order and length are the round robin. A change here silently reassigns every
   // in-flight sequence to a different reviewer, so it must be asserted, not assumed.
-  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3','muse-spark-1.2-contributor','codex-gpt-5.6-sol','gemini-3.8-flash-high'])
+  // codex-gpt-5.6-sol was retired from the rotation on 2026-09-06 by owner
+  // instruction after its account usage limit stayed exhausted for a full
+  // session. Its row stays in REVIEWERS so durable artifacts naming it resolve.
+  // kimi-k3 was unpaused on 2026-09-07 (owner instruction, PR #2483).
+  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3','muse-spark-1.2-contributor','gemini-3.8-flash-high'])
+  assert.ok(RETIRED_REVIEWERS.includes('codex-gpt-5.6-sol'),'codex-gpt-5.6-sol must stay out of the rotation')
+  assert.equal(reviewerReadsRepository('codex-gpt-5.6-sol'),true,'retiring the account must not invalidate the verdicts it already recorded')
   assert.deepEqual(OVERFLOW_REVIEWERS,[])
   assert.equal(REVIEWERS.find((r)=>r.name==='kimi-k3').wrapper,'ai-kimi')
   assert.equal(REVIEWERS.find((r)=>r.name==='codex-gpt-5.6-sol').wrapper,'ai-codex-review')
@@ -1047,17 +1058,44 @@ test('with no orchestrator running the full rotation is drawable (#2127)',()=>{
 })
 
 test('the orchestrator engine is never eligible to review its own work',()=>{
-  assert.ok(!reviewersForOrchestrator('codex').some((row)=>row.name==='codex-gpt-5.6-sol'))
+  // grok-4.6, PR #2484: `reviewersForOrchestrator('codex')` defaults to
+  // ACTIVE_REVIEWERS, and since the 2026-09-06 retirement that list cannot hold
+  // codex whatever the engine filter does -- so the default form proves nothing
+  // any more. The filter is now asserted against REVIEWERS, which still carries
+  // the only row with an orchestratorEngine, plus the synthetic list below.
+  assert.ok(REVIEWERS.some((row)=>row.name==='codex-gpt-5.6-sol'&&row.orchestratorEngine==='codex'))
+  assert.ok(!reviewersForOrchestrator('codex',REVIEWERS).some((row)=>row.name==='codex-gpt-5.6-sol'))
   const future=[{name:'claude-opus',orchestratorEngine:'claude'},{name:'deepseek-chat'}]
   assert.deepEqual(reviewersForOrchestrator('claude',future).map((row)=>row.name),['deepseek-chat'])
   assert.throws(()=>reviewersForOrchestrator('',future),/engine is unreadable/)
 })
 
-test('a Codex orchestrator skips Codex in assignment and preflight',()=>{
+test('a Codex orchestrator draws the whole active roster and still refuses the retired Codex reviewer',()=>{
+  // grok-4.6, PR #2484: asserting that a Codex orchestrator does not DRAW codex
+  // became tautological once codex was retired -- retirement alone satisfies it.
+  // The invariant worth pinning now is the other one: no ACTIVE reviewer carries
+  // an orchestrator engine, so a live Codex orchestrator must cost the rotation
+  // nothing at all. If a future roster adds an engine-carrying reviewer, this
+  // assertion is the one that notices.
   const io=reviewIo();io.resolveOrchestratorEngine=()=> 'codex'
   const assigned=[]
   for(let n=1;n<=ACTIVE_REVIEWERS.length;n++)assigned.push(assignNextReviewer({issue:700+n,pr:800+n,headSha:n.toString(16).padStart(40,'a')},io).reviewer)
-  assert.ok(!assigned.includes('codex-gpt-5.6-sol'))
+  assert.deepEqual([...assigned].sort(),ACTIVE_REVIEWERS.map((row)=>row.name).sort(),'a Codex orchestrator must not narrow the current roster')
+  // grok-4.6, round 2: `assert.ok(!assigned.includes('codex-...'))` used to sit
+  // here and is gone -- `assigned` was just asserted equal to ACTIVE_REVIEWERS,
+  // which cannot contain a retired name, so it could not fail for any reason.
+  //
+  // The preflight refusal below is kept, but say what it now proves: a RETIRED
+  // name is refused execution. It is not engine coverage. `reviewerExecutionPreflight`
+  // resolves through `reviewersForOrchestrator()` with its ACTIVE_REVIEWERS
+  // default and takes no roster argument, so the case it used to cover -- an
+  // ACTIVE, engine-matching reviewer refused at execution time -- cannot be
+  // built at this call site at all while no active reviewer carries an engine.
+  // Swapping the resolver to 'claude' below would throw the same error. The
+  // engine filter itself is covered non-vacuously in 'the orchestrator engine is
+  // never eligible to review its own work', against REVIEWERS and a synthetic
+  // roster; the assertion above is what would notice an engine-carrying name
+  // re-entering the active roster and make this call site meaningful again.
   const preflight={...preflightIo(),resolveOrchestratorEngine:()=> 'codex'}
   assert.throws(()=>reviewerExecutionPreflight({reviewer:'codex-gpt-5.6-sol',wrapper:'ai-codex-review',worktree:'C:/review',headSha:failedReview.headSha},preflight),/approved reviewer/)
 })
@@ -1883,7 +1921,7 @@ test('reviewer replacement rejects a mismatched original assignment',()=>{
 // is a false invariant, and it is deliberately not asserted here. Both halves are
 // pinned below, with the exact successor named in each case.
 test('one intervening assignment gives a failed reviewer a named replacement',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,6,'this test describes the approved six-reviewer rotation (deepseek-chat retired, #2078; gemini-3.8-flash-high added 2026-09-06; kimi-k3 unpaused 2026-09-07 by owner instruction after a passing wrapper doctor)')
+  assert.equal(ACTIVE_REVIEWERS.length,5,'this test describes the approved five-reviewer rotation (deepseek-chat retired, #2078; gemini-3.8-flash-high added 2026-09-06; codex-gpt-5.6-sol retired 2026-09-06; kimi-k3 unpaused 2026-09-07)')
   const io=failedReviewIo()
   assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
   const replacement=replaceFailedReviewer(replacementRequest,io)
@@ -1891,7 +1929,7 @@ test('one intervening assignment gives a failed reviewer a named replacement',()
 })
 
 test('N-1 intervening assignments skip the failed provider instead of stranding the replacement',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,6,'this test describes the approved six-reviewer rotation (deepseek-chat retired, #2078; gemini-3.8-flash-high added 2026-09-06; kimi-k3 unpaused 2026-09-07 by owner instruction after a passing wrapper doctor)')
+  assert.equal(ACTIVE_REVIEWERS.length,5,'this test describes the approved five-reviewer rotation (deepseek-chat retired, #2078; gemini-3.8-flash-high added 2026-09-06; codex-gpt-5.6-sol retired 2026-09-06; kimi-k3 unpaused 2026-09-07)')
   const io=failedReviewIo()
   for(let n=0;n<ACTIVE_REVIEWERS.length-1;n+=1){
     assignNextReviewer({issue:20+n,pr:120+n,headSha:`abcde${n}f`},io)
@@ -1996,38 +2034,46 @@ test('review lease age is truthful for known and unknown commit dates',()=>{
 
 test('capacity report classifies free, live, stale, aged, and unknown leases without mutation',()=>{
   const io=reviewIo(),snapshot=new Map(),states=new Map(),now=new Date('2026-09-02T12:00:00Z')
-  // Six cases, one per active reviewer. 'verdict' returns here because it reaches
-  // 'stale-reclaimable' by a different route than 'moved' -- a recorded verdict
-  // rather than a head that moved -- and both routes are worth proving. The sixth
-  // case exists because kimi-k3 was unpaused on 2026-09-07 (owner instruction).
+  // One case per active reviewer: five, after codex-gpt-5.6-sol was retired on
+  // 2026-09-06 and kimi-k3 was unpaused on 2026-09-07. 'moved' and 'verdict' both
+  // reach 'stale-reclaimable' but by different routes, and both are proved:
+  // 'verdict' occupies two slots here, and 'moved' is proved below by moving a
+  // head under a lease that this pass classified as live.
   const cases=[
     {kind:'live',date:'2026-09-02T11:00:00Z'},
-    {kind:'moved',date:'2026-09-02T10:00:00Z'},
+    {kind:'verdict',date:'2026-09-02T10:00:00Z'},
     {kind:'aged',date:'2026-08-31T00:00:00Z'},
     {kind:'unknown',date:null},
     {kind:'verdict',date:'2026-09-02T10:00:00Z'},
-    {kind:'live',date:'2026-09-02T11:00:00Z'},
   ]
+  const heads=new Map()
   cases.forEach((entry,index)=>{
     const reviewer=ACTIVE_REVIEWERS[index],issue=2300+index,pr=2400+index,headSha=`${index+1}`.repeat(40),sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=${index+1} reviewer=${reviewer.name} issue=${issue} pr=${pr} head=${headSha}`),commit={...io.getCommit(sha),committedDate:entry.date}
     io.refs.set(reviewActiveRef(reviewer.name),sha);snapshot.set(reviewActiveRef(reviewer.name),{sha,commit})
-    states.set(`${issue}:${pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:entry.kind==='moved'?'f'.repeat(40):headSha}},evidence:[]})
+    heads.set(index,`${issue}:${pr}`)
+    states.set(`${issue}:${pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:headSha}},evidence:[]})
     if(entry.kind==='verdict')giveVerdict(io,{issue,pr,headSha})
   })
   assert.equal(cases.length,ACTIVE_REVIEWERS.length,'every reviewer must carry a lease for the occupied pass')
   io.readActiveReviewLeases=()=>snapshot
   io.readReviewStates=()=>states
   const before=new Map(io.refs),report=reviewerCapacityReport(io,now)
-  assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','stale-reclaimable','live'])
-  assert.deepEqual(report.summary,{total:6,free:0,live:3,reclaimable:2,silenceProbed:0,silenceReclaimable:0,unknown:1})
+  assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','stale-reclaimable'])
+  assert.deepEqual(report.summary,{total:5,free:0,live:2,reclaimable:2,silenceProbed:0,silenceReclaimable:0,unknown:1})
   assert.deepEqual(io.refs,before,'capacity report must be read-only')
+  // The OTHER route to 'stale-reclaimable': the reviewed head moved out from
+  // under a lease this same pass just called live. No recorded verdict involved.
+  const livePair=states.get(heads.get(0))
+  states.set(heads.get(0),{...livePair,pr:{...livePair.pr,head:{sha:'f'.repeat(40)}}})
+  assert.deepEqual(reviewerCapacityReport(io,now).reviewers.map((row)=>row.classification),['stale-reclaimable','stale-reclaimable','suspect-aged','unknown','stale-reclaimable'])
+  states.set(heads.get(0),livePair)
   // 'free' is the fifth classification and it is a property of an ABSENT lease, so
   // it is proved by removing one rather than by needing a spare roster name.
   const freed=ACTIVE_REVIEWERS.at(-1).name
   snapshot.delete(reviewActiveRef(freed));io.refs.delete(reviewActiveRef(freed))
   const withFree=reviewerCapacityReport(io,now)
-  assert.deepEqual(withFree.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','stale-reclaimable','free'])
-  assert.deepEqual(withFree.summary,{total:6,free:1,live:2,reclaimable:2,silenceProbed:0,silenceReclaimable:0,unknown:1})
+  assert.deepEqual(withFree.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','free'])
+  assert.deepEqual(withFree.summary,{total:5,free:1,live:2,reclaimable:1,silenceProbed:0,silenceReclaimable:0,unknown:1})
 })
 
 function silentLeaseIo({heldSince='2026-09-04T10:00:00Z',activity=[]}={}){
@@ -4530,27 +4576,41 @@ test('an invalid review slot is refused',()=>{
   assert.throws(()=>assignNextReviewer({issue:205,pr:305,headSha:'a'.repeat(40),slot:1.5},io),/positive integer/)
 })
 
-test('retrying a slot-2 assignment must still refuse a reviewer that is no longer independent from the live orchestrator',()=>{
-  // Occupy grok-4.6 and glm-5.3 with unrelated live review work so the
-  // rotation's next two picks for our real request land on muse (slot 1) then
-  // codex-gpt-5.6-sol (slot 2), while the orchestrator engine is still 'claude'
-  // and codex is eligible. (kimi-k3 was unpaused 2026-09-07, restoring the roster
-  // to six names, so three reviewers need occupying before codex is reached.)
-  const io=reviewIo()
-  for(let n=0;n<3;n++)assignNextReviewer({issue:600+n,pr:700+n,headSha:`${n}`.repeat(40)},io)
-  const request={issue:206,pr:306,headSha:'9'.repeat(40)}
-  const first=assignNextReviewer(request,io)
-  assert.equal(first.reviewer,'muse-spark-1.2-contributor')
+test('retrying a slot-2 assignment must still refuse a durable assignment to a reviewer that is no longer eligible',()=>{
+  // grok-4.6, PR #2484: be exact about which half of this guard the fixture
+  // proves. The refusal below is produced by RETIREMENT -- the planted lease is
+  // never consulted, because findBusyReviewers only walks ACTIVE_REVIEWERS. The
+  // engine half of the same guard has no active carrier left to provoke it and
+  // is proved directly against REVIEWERS on the last line instead. Deleting the
+  // retry-time eligibility check still fails this test: the fixture's PR head
+  // does not match, so the retry would hand the stale assignment straight back.
+  //
+  // Codex was retired from the active roster on 2026-09-06 and it is the only
+  // reviewer that ever carried an orchestrator engine, so this conflict can no
+  // longer be produced by DRAWING codex. It can still be produced by the state
+  // that matters in production: a DURABLE slot-2 assignment recorded to codex
+  // before the retirement, whose retry lands here afterwards. The guard is
+  // re-checked on every retry return, so a still-live assignment to a reviewer
+  // that is no longer eligible -- retired, quarantined, or conflicting with the
+  // live orchestrator engine -- must refuse rather than hand the slot back.
+  const io=reviewIo(),request={issue:206,pr:306,headSha:'9'.repeat(40)}
+  assignNextReviewer(request,io)
   const second=assignNextReviewer({...request,slot:2},io)
-  assert.equal(second.reviewer,'codex-gpt-5.6-sol')
-  // A live lease for codex now exists for this exact head/slot. A retry of the
-  // same slot-2 request must re-check eligibility every time, not just on a
-  // fresh assignment -- if the orchestrator engine has since become Codex,
-  // handing back the still-live Codex assignment on retry would let a Codex
-  // orchestrator review its own work.
-  io.resolveOrchestratorEngine=()=> 'codex'
+  // second.reviewer is drawn from ACTIVE_REVIEWERS, so it cannot be codex; asserting that here
+  // would be an assertion that can never fail. It is stated only as the premise of the rewrite
+  // below, which plants codex as the durably recorded slot-2 reviewer.
+  const assignmentRef=`refs/db-review-assignments/${request.issue}-${request.pr}-${request.headSha}-slot2`
+  const recorded=io.getCommit(io.refs.get(assignmentRef)).message
+  const rewritten=io.makeOwnerCommit(recorded.replace(`reviewer=${second.reviewer}`,'reviewer=codex-gpt-5.6-sol'))
+  io.refs.set(assignmentRef,rewritten)
+  io.refs.delete(reviewActiveRef(second.reviewer))
+  io.refs.set(reviewActiveRef('codex-gpt-5.6-sol'),rewritten)
   assert.throws(()=>assignNextReviewer({...request,slot:2},io),/orchestrator-conflicting reviewer codex-gpt-5\.6-sol/)
+  // Same refusal for the live-orchestrator route the retirement made
+  // undrawable: the filter itself still removes an engine-matching reviewer.
+  assert.equal(reviewersForOrchestrator('codex',REVIEWERS).some((row)=>row.name==='codex-gpt-5.6-sol'),false)
 })
+
 
 // REGRESSION (issue #1798, glm-5.3 review at d91857e). `resolveSlotOneReviewer`
 // used to spend up to three real wire requests (listRefs, readRef, getCommit)
