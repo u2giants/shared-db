@@ -1,30 +1,43 @@
 {
   "schema_version": 1,
-  "work_issue": 2546,
-  "generation": 1,
-  "work_type": "docs",
+  "work_issue": 1403,
+  "generation": 2,
+  "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Record in the merchandise and product taxonomy rules that a merchandise-group slot's code is authoritative and its display name may be blank, so a missing Licensor or Property is never judged from the name.",
+  "goal": "Make enforced agent-work-contract checks distinguish inherited main evidence from evidence authored for the current pull request.",
   "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
-  "dispatcher": "claude",
-  "worker": "claude",
-  "branch": "claude/licensor-code-vs-name",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/disney-creative-unmapped-titles-7b4149",
-  "allowed_paths": ["docs/business-rules/merchandise-and-product-taxonomy.md", ".agent/contract.json", ".agent/completion.json"],
-  "file_writes": ["docs/business-rules/merchandise-and-product-taxonomy.md", ".agent/contract.json", ".agent/completion.json"],
+  "dispatcher": "codex",
+  "worker": "codex",
+  "branch": "codex/issue-1403-inherited-evidence",
+  "worktree": "C:/repos/shared-db-worktrees/issue-1403-inherited-evidence",
+  "allowed_paths": [
+    ".github/workflows/agent-work-contract.yml",
+    "scripts/agent-work-contract-git-evidence.mjs",
+    "scripts/agent-work-contract-git-evidence.test.mjs"
+  ],
+  "file_writes": [
+    ".github/workflows/agent-work-contract.yml",
+    "scripts/agent-work-contract-git-evidence.mjs",
+    "scripts/agent-work-contract-git-evidence.test.mjs"
+  ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not change any migration, script, workflow or configuration file.",
-    "Do not place licensed row data in this public repository."
+    "Do not disable or weaken enforced mode.",
+    "Do not add Agent work contract as a required branch context before a new full green day completes.",
+    "Do not retire or weaken the legacy objects alias."
   ],
   "required_checks": [
-    "node --test scripts/agent-work-contract.test.mjs"
+    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+    "node scripts/agent-work-contract-activation.mjs --mode --config-file config/agent-work-contract-activation.json"
   ],
   "assumptions": [
-    "The owner ruling that MG05 is Licensor in the licensed divisions is already Settled in this library."
+    "Evidence files inherited byte-for-byte from the pull request base are not evidence authored for that pull request.",
+    "Changing both evidence files is required before their contents can govern the current pull request."
   ],
   "stop_conditions": [
-    "Stop if recording this rule would require changing anything outside the business-rules documentation."
+    "Stop if the repair would allow a non-grandfathered enforced pull request with no current evidence pair to pass.",
+    "Stop if changing only one evidence file could be treated as a complete pair.",
+    "Stop if implementation requires changing database structure or data."
   ]
 }
