@@ -3725,7 +3725,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
         if(staleReplacement&&io.readRef(replacementLeaseRef)===staleReplacement.sha)releaseOwnedRef(replacementLeaseRef,staleReplacement.sha,io)
         if(replacementLive&&!io.createRef(replacementLeaseRef,replacement.replacementSha)&&readRefAfterWrite(replacementLeaseRef,replacement.replacementSha,io)!==replacement.replacementSha)throw new LaneError('assignment retry replacement lease could not be restored')
       }
-      return {...replacement,slot:request.slot,wrapper:reviewer.wrapper}
+      return {...replacement,slot:request.slot,wrapper:reviewer.wrapper,replacementSequence:replacement.failedSequence,assignmentRef:`${replacementBase}-${replacement.failedSequence}`}
     }
     const priorSha=io.readRef(assignmentRef)
     if(priorSha){
@@ -4247,7 +4247,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
         if(rollback.length)throw new LaneError(`${error.message}; idempotent lease rollback incomplete: ${rollback.join('; ')}`)
         throw error
       }
-      return {...parsed,slot:request.slot,wrapper:reviewer.wrapper,failureCode:String(failureCode),replacementSha:priorReplacement}
+      return {...parsed,slot:request.slot,wrapper:reviewer.wrapper,failureCode:String(failureCode),replacementSha:priorReplacement,replacementSequence:request.failedSequence,assignmentRef:replacementRef}
     }
     const assignmentSha=fixedRecords?.get(assignmentRef)?.sha??io.readRef(assignmentRef)
     if(!assignmentSha){
@@ -4409,7 +4409,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
         io.atomicReviewRefs(changes)
         const refs=io.readReviewRefs([MUTEX_REF,failureRef,REVIEW_CURSOR_REF,replacementRef,failedLeaseRef,replacementLeaseRef])
         if(refs.get(MUTEX_REF)!==ownerSha||refs.get(failureRef)!==failureSha||refs.get(REVIEW_CURSOR_REF)!==cursorReplacementSha||refs.get(replacementRef)!==replacementSha||refs.get(failedLeaseRef)!==failedLeaseAfter||refs.get(replacementLeaseRef)!==replacementLeaseSha)throw new LaneError('atomic review replacement readback mismatch')
-        return {sequence,reviewer:reviewer.name,wrapper:reviewer.wrapper,...request,priorSequence:cursor.sequence,failureCode:String(failureCode),failureSha,replacementSha}
+        return {sequence,reviewer:reviewer.name,wrapper:reviewer.wrapper,...request,priorSequence:cursor.sequence,failureCode:String(failureCode),failureSha,replacementSha,replacementSequence:request.failedSequence,assignmentRef:replacementRef}
       }
       if(io.readReviewRefs){
         const locked=io.readReviewRefs([MUTEX_REF,REVIEW_CURSOR_REF,failedLeaseRef,...(replacementStale?[replacementLeaseRef]:[])])
@@ -4432,7 +4432,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
         const refs=io.readReviewRefs([MUTEX_REF,failureRef,REVIEW_CURSOR_REF,replacementRef,failedLeaseRef,replacementLeaseRef])
         if(refs.get(MUTEX_REF)!==ownerSha||refs.get(failureRef)!==failureSha||refs.get(REVIEW_CURSOR_REF)!==cursorReplacementSha||refs.get(replacementRef)!==replacementSha||refs.get(failedLeaseRef)!==failedLeaseAfter||refs.get(replacementLeaseRef)!==replacementLeaseSha)throw new LaneError('batched review replacement readback mismatch')
       }
-      return {sequence,reviewer:reviewer.name,wrapper:reviewer.wrapper,...request,priorSequence:cursor.sequence,failureCode:String(failureCode),failureSha,replacementSha}
+      return {sequence,reviewer:reviewer.name,wrapper:reviewer.wrapper,...request,priorSequence:cursor.sequence,failureCode:String(failureCode),failureSha,replacementSha,replacementSequence:request.failedSequence,assignmentRef:replacementRef}
     }catch(error){
       const rollback=[]
       try{if(replacementLeaseCreated&&io.readRef(replacementLeaseRef)===replacementLeaseSha)releaseOwnedRef(replacementLeaseRef,replacementLeaseSha,io)}catch(e){rollback.push(e.message)}
