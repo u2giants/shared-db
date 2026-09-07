@@ -1,51 +1,34 @@
 {
   "schema_version": 1,
-  "work_issue": 2509,
+  "work_issue": 1403,
   "outcome": "ready-for-merge",
-  "pr": 2513,
-  "migration_versions": [
-    "20260907131728"
-  ],
-  "contract_ref": "refs/db-contracts/2509/1",
-  "contract_sha256": "8a8dc8e4b29bae1f3b48f1f771e2102e806d7f8ba6c961b53de06409c8654396",
-  "head_sha": "ff168eb3f65e4e708acf421e693213c717a92c03",
+  "pr": 2547,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/1403/2",
+  "contract_sha256": "ad49bd66c04a352c96c50a660a9e29ea93cd2243ee8bf3fedf9bfa835c91b560",
+  "head_sha": "7e10d7381a046a290005ba8a3b5efb703f7278e7",
   "files_changed": [
-    "supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql",
-    "supabase/tests/popsg_preview_stats_contracts.sql"
+    ".github/workflows/agent-work-contract.yml",
+    "scripts/agent-work-contract-git-evidence.mjs",
+    "scripts/agent-work-contract-git-evidence.test.mjs"
   ],
-  "db_reads": [
-    "table public.style_guide_render_queue"
-  ],
-  "db_writes": [
-    "function public.get_sg_preview_stats",
-    "index public.idx_sgf_active_preview_category",
-    "table public.style_guide_files"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
-    {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "Passed on prepared repair and refreshed implementation3c0b9786 against main4f093e3d."
-    },
-    {
-      "command": "docker exec -i orch-2536-2509-proof psql -U postgres -v ON_ERROR_STOP=1 -qAt",
-      "exit_code": 0,
-      "evidence": "Isolated PostgreSQL17, network none: full repaired SQL contract via stdin passed in2.628s; forced index-usability proof retained, planner settings restored, authenticated role and exact all-field 250000-row volume equality verified. Separate500000-row mixed corpus matched every expected field across5 fresh connections in0.626,0.678,0.705,0.647,0.717s under5s. Local proof only: PostgREST/login, physically cold cache, preview and production NOT verified."
-    },
     {
       "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
       "exit_code": 0,
-      "evidence": "41 passed,0 failed,0 cancelled,0 skipped,0 todo at refreshed implementation."
+      "evidence": "44 passed, 0 failed, 0 skipped, 0 todo"
+    },
+    {
+      "command": "node scripts/agent-work-contract-activation.mjs --mode --config-file config/agent-work-contract-activation.json",
+      "exit_code": 0,
+      "evidence": "reported enforced"
     }
   ],
   "assumptions_resolved": [
-    "Migration Git blob matches inherited PR exactly: da47d8b3c4dbe61617bbbaf507d8027c5c5724aa.",
-    "Disposable fixture isolated from shared databases and removed after proof.",
-    "Refresh onto main4f093e3d completed. Ready-for-merge is the validator stage label only: corrected full-diff independent review, production and PopDAM Settings UI acceptance remain pending.",
-    "Governed preview run34157812748 succeeded at bcc2603977678db73b4ca12d3ed1312a1bff64e2 on mvpkijzfmfcxhnzqogzs, adding only20260907131728. Artifact10031592106 sha256:3fcd874602c5c52293448a83fdb27c126a8f0cf78e63e24af0d2a10a03128a6b. This metadata revision does not change implementation or migration bytes.",
-    "Coordinator live acceptance https://github.com/u2giants/shared-db/pull/2513#issuecomment-5575198255: service-role REST200 in943/710/714ms; authenticated SQL identical results838.757/774.011ms;217193active rows, all6legacy aggregates and new partition match; anonymous execute denied; natural index plan767.389ms. Warm cache only, no logged-in browser or production proof.",
-    "Correction https://github.com/u2giants/shared-db/pull/2513#issuecomment-5575221883: prior Muse/GLM review packet base was3c0b9786 rather than4f093e3d. Existing immutable artifacts retained but non-authorizing for this promotion; fresh full-diff packet reviews required. Cancelled guarded merge34158202931 left PR open and no merge.",
-    "Integrated unrelated current-main b48f526f87369278e0b173ded6a2d97e729818d6; SQL/test blobs unchanged. Fresh independent reviews must inspect exact b48 base and new head; no prior wrong-base verdict is reused."
+    "Merge-base-to-head classification does not mistake evidence added later on main for deletions made by an older pull request.",
+    "Only a change to both evidence files reaches current-pair validation; a one-file or unknown classification fails closed."
   ],
   "stop_conditions_hit": []
 }
