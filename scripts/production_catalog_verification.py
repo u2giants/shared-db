@@ -1144,6 +1144,35 @@ CATALOG_CONTRACTS = {
       and not has_function_privilege('anon', 'public.get_filter_counts(jsonb)', 'EXECUTE')
       and has_function_privilege('authenticated', 'public.get_filter_counts(jsonb)', 'EXECUTE')
 """,
+    "popdam_tag_totals_cold_plan_v1": """
+      (select
+        position('select distinct e.asset_id' in lower(pg_get_functiondef(p.oid))) > 0
+        and position('e.tag = p_filters ->> ''tagFilter''' in pg_get_functiondef(p.oid)) > 0
+        and position('nullif(p_filters ->> ''tagFilter'', '''') is null' in pg_get_functiondef(p.oid)) > 0
+        and p.provolatile = 's' and not p.prosecdef and p.proconfig is null
+        from pg_proc p
+        where p.oid = to_regprocedure('public.filter_effective_assets(jsonb)'))
+      and (select
+        'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        and 'plan_cache_mode=force_custom_plan' = any(coalesce(p.proconfig, '{}'))
+        and position('get_effective_filter_counts_unchecked_1703' in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        from pg_proc p
+        where p.oid = to_regprocedure('public.get_effective_filter_counts(jsonb)'))
+      and (select
+        'statement_timeout=8s' = any(coalesce(p.proconfig, '{}'))
+        and 'plan_cache_mode=force_custom_plan' = any(coalesce(p.proconfig, '{}'))
+        and position('get_effective_filter_counts_unchecked_1703' in pg_get_functiondef(p.oid)) > 0
+        and position('require_dam_access' in pg_get_functiondef(p.oid)) > 0
+        from pg_proc p
+        where p.oid = to_regprocedure('public.get_filter_counts(jsonb)'))
+      and not has_function_privilege('anon', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.filter_effective_assets(jsonb)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.get_effective_filter_counts(jsonb)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.get_filter_counts(jsonb)', 'EXECUTE')
+      and has_function_privilege('authenticated', 'public.get_filter_counts(jsonb)', 'EXECUTE')
+""",
     "popdam_ranked_search_single_heap_fetch_v3": """
       (select
         position('full_text_matches as materialized' in pg_get_functiondef(p.oid)) > 0

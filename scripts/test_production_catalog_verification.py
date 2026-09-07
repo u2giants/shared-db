@@ -1888,6 +1888,32 @@ class BehavioralSidecarTests(unittest.TestCase):
         self.assertIn("__includeOwnFacets2054", sql)
         self.assertIn("has_function_privilege('authenticated'", sql)
 
+    def test_real_2501_sidecar_is_hash_bound_and_asserts_tag_total_cold_plan(self):
+        version = "20260907154630"
+        migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))
+        checks = load_behavior_sidecars(REPO, {version: migration}, [version])
+        targets = derive_targets({version: migration}, [version])
+        sql = build_behavior_sql(checks)
+
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["kind"], "catalog_contract")
+        self.assertEqual(
+            checks[0]["migration_sha256"],
+            "90f49bc0d9cb34e44f3a795f1b15c05add6edcb0a24c261852fa9a106f615ead",
+        )
+        self.assertEqual(
+            targets.functions,
+            [
+                "public.filter_effective_assets",
+                "public.get_effective_filter_counts",
+                "public.get_filter_counts",
+            ],
+        )
+        self.assertIn("select distinct e.asset_id", sql)
+        self.assertIn("plan_cache_mode=force_custom_plan", sql)
+        self.assertIn("statement_timeout=8s", sql)
+        self.assertIn("has_function_privilege('authenticated'", sql)
+
     def test_real_1703_forward_7_sidecar_is_hash_bound_and_asserts_single_heap_fetch(self):
         version = "20260831212757"
         migration = next((REPO / "supabase" / "migrations").glob(f"{version}_*.sql"))

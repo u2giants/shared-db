@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "migration_version": "20260907154630",
+  "migration_sha256": "90f49bc0d9cb34e44f3a795f1b15c05add6edcb0a24c261852fa9a106f615ead",
+  "checks": [
+    {
+      "id": "popdam_tag_totals_cold_plan_2501",
+      "kind": "catalog_contract",
+      "contract": "popdam_tag_totals_cold_plan_v1",
+      "expected_count": 1
+    }
+  ]
+}
