@@ -157,7 +157,8 @@ create policy "Administrator read bulk_operation_runs"
 
 -- Append-only by privilege: insert and select, never update or delete, and never for
 -- a browser role beyond the RLS-gated select above.
-revoke all on public.bulk_operation_runs from public, anon, authenticated;
+-- Clear inherited default grants, including service_role UPDATE/DELETE/TRUNCATE.
+revoke all on public.bulk_operation_runs from public, anon, authenticated, service_role;
 grant select on public.bulk_operation_runs to authenticated;
 grant select, insert on public.bulk_operation_runs to service_role;
 
