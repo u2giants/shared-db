@@ -91,6 +91,8 @@ not the identity, and nothing new depends on them.
 - In Spruce non-licensed division `EH001`, those same slots mean Big Theme and Little Theme.
 - In retired book and education division `EP001`, those same slots mean Product Line and Product Type.
 
+A merchandise-group slot carries a code and a separate display name. The code is the fact; the name is a convenience label that may be absent even when the code is present. An item whose Licensor code is filled has a Licensor, regardless of whether the Licensor name is populated. Never test a slot's display name to decide whether the underlying fact is missing, and never report an item as unlicensed on that basis.
+
 `EP001` is a real retired division, not a mistaken spelling of `EH001`. DesignFlow also has older numeric division identifiers. Most historical item headers are in numeric division `2`; that history must not be silently reassigned to a current ColdLion division.
 
 Merchandise-group codes are unique only inside their Division and merchandise-group type. `FR`, for example, has represented different kinds of object in different contexts and must never be resolved from the letters alone.
