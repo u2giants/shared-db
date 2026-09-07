@@ -2,7 +2,7 @@
 -- Issue #2419 - public.reconcile_style_group_drift: a READ-ONLY detector for
 -- style-group assignment drift and effective-tag projection drift.
 -- Parent plan #2209 (`plan_database_efficiency_and_api_security.md`).
--- Claim #2473 reserves version 20260906222019 and exactly one object:
+-- Claim #2473 reserves version 20260907031246 and exactly one object:
 --
 --   function public.reconcile_style_group_drift(integer)   (created, new object)
 --

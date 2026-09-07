@@ -1,4 +1,4 @@
--- Contracts for 20260906222019_style_group_drift_reconciler.sql (issue #2419).
+-- Contracts for 20260907031246_style_group_drift_reconciler.sql (issue #2419).
 --
 -- What is being pinned:
 --   1. THE FUNCTION WRITES NOTHING, proved rather than asserted. The first block runs
