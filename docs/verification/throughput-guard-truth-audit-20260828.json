@@ -267,6 +267,13 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
+      "site": ".github/workflows/tools-offline-tests.yml:92",
+      "semantic_key": ".github/workflows/tools-offline-tests.yml:d5a626c2543aa053b14be20e283e895a018d584a660c4bcc07828a13d9cb74c8:1",
+      "line_sha256": "d5a626c2543aa053b14be20e283e895a018d584a660c4bcc07828a13d9cb74c8",
+      "disposition": "excluded",
+      "reason": "Issue #2342: a presence check that refuses when a transport test file is absent, so the conformance step cannot pass by silently running nothing. It reports a missing FILE, not a missing database object, and derives no throughput claim."
+    },
+    {
       "site": "scripts/agent-work-contract.mjs:82",
       "semantic_key": "scripts/agent-work-contract.mjs:8bdd87b3d93bc127035d83148bbb7e0c26104614f1c54ad1582e94a6caae13fe:1",
       "line_sha256": "8bdd87b3d93bc127035d83148bbb7e0c26104614f1c54ad1582e94a6caae13fe",
@@ -671,6 +678,13 @@
       "line_sha256": "c9e8f3f57271b36efcefc1a1bbce9b5f3e9b87590e592db04def218c8668e352",
       "disposition": "excluded",
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
+    },
+    {
+      "site": "scripts/lib/github-tree.mjs:9",
+      "semantic_key": "scripts/lib/github-tree.mjs:d42caab78e23b72a16ebeb2b7e70c15a150772c05bf47eabc5cc7a6df6fe078c:1",
+      "line_sha256": "d42caab78e23b72a16ebeb2b7e70c15a150772c05bf47eabc5cc7a6df6fe078c",
+      "disposition": "excluded",
+      "reason": "This is an explanatory fail-closed design comment, not a catalog or migration evidence decision."
     },
     {
       "site": "scripts/lib/orchestrator-routing.mjs:185",
@@ -1786,7 +1800,7 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     }
   ],
-  "call_site_count": 253,
-  "call_site_sha256": "5d1063779b90bd66c089d532e85103fb37211ff484bd9211f02d376c4e6e1556",
+  "call_site_count": 255,
+  "call_site_sha256": "486b86d54ad9cc498a7a130ca47cefff1663d98c8304f27da745d2cd3e2a768a",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }

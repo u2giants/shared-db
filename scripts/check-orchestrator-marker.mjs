@@ -74,6 +74,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
+import { runGitHubCommand } from './lib/github-transport.mjs'
 import { parseRoutingBlock, validateRouting } from './lib/orchestrator-routing.mjs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -352,14 +353,14 @@ export function formatTarget({ routing, marker }) {
 // ---------------------------------------------------------------------------
 
 function gh(args) {
-  let raw
-  try {
-    raw = execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
-  } catch (error) {
-    // A failed gh call is UNKNOWN. This is the whole point of B1: the previous
-    // behaviour was to treat any non-answer as "none open".
-    throw new Unknown(`\`gh ${args.join(' ')}\` failed: ${error.shortMessage || error.message}`)
-  }
+  // A failed gh call is UNKNOWN. This is the whole point of B1: the previous
+  // behaviour was to treat any non-answer as "none open". Issue #2342 moved the
+  // transport into the shared module; the refusal is unchanged.
+  const raw = runGitHubCommand(args, {
+    maxBuffer: 32 * 1024 * 1024,
+    wrapError: (detail, cause) =>
+      new Unknown(`\`gh ${args.join(' ')}\` failed: ${cause?.shortMessage || detail}`),
+  })
   if (raw === undefined || raw === null || raw.trim() === '') {
     // Observed 2026-08-09: gh printed EMPTY OUTPUT while the marker existed.
     // An empty body where a JSON array was required is not an empty array.

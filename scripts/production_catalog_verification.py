@@ -4155,6 +4155,34 @@ CATALOG_CONTRACTS["licensors_external_id_canonical_comment_v1"] = (
     CATEGORY_LICENSORS_EXTERNAL_ID_CANONICAL_COMMENT
 )
 
+# Durable catalog outcome of the single dynamic-execution marker in migration
+# 20260905063701 (`execute 'alter publication supabase_realtime add table
+# public.style_tracker_rows'`, issue #2331).
+#
+# The marker's whole effect is one publication membership row, so the contract
+# names exactly that. It also asserts the two preconditions the migration's
+# guards test, because a membership assertion that silently passed on a database
+# with no realtime publication -- or no table -- would prove nothing. On a target
+# that genuinely has no realtime stack the migration is a deliberate no-op and
+# this contract must not be cited for it.
+#
+# Replica identity is NOT asserted here: the migration deliberately leaves it at
+# DEFAULT (the table's primary key is what postgres_changes needs), so pinning it
+# would assert something the marker never wrote.
+CATEGORY_STYLE_TRACKER_ROWS_REALTIME_PUBLICATION = """
+  exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+  and to_regclass('public.style_tracker_rows') is not null
+  and exists (
+    select 1
+      from pg_publication_tables p
+     where p.pubname = 'supabase_realtime'
+       and p.schemaname = 'public'
+       and p.tablename = 'style_tracker_rows')
+"""
+CATALOG_CONTRACTS["style_tracker_rows_realtime_publication_v1"] = (
+    CATEGORY_STYLE_TRACKER_ROWS_REALTIME_PUBLICATION
+)
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

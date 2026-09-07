@@ -37,6 +37,7 @@
 // It reads back after applying, because an unverified write is not evidence.
 
 import { execFileSync } from 'node:child_process'
+import { runGitHubCommand } from './lib/github-transport.mjs'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -67,21 +68,16 @@ Exit codes:
 // answered `422 ... nil is not an object`. Every unit test passed anyway, because
 // the fake transport inspected `options.input` directly and never exercised the
 // real stdin path. Hence the `ghSpawnOptions` probe and its two tests.
+// Issue #2342: the stdin/`input` handling documented above now lives in the one
+// shared transport, which carries the same comment and the same two tests. The
+// refusal text is unchanged.
 function gh(args, { executor = execFileSync, input } = {}) {
-  const spawnOptions = { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }
-  if (input === undefined) {
-    spawnOptions.stdio = ['ignore', 'pipe', 'pipe']
-  } else {
-    // stdin must be a pipe for `input` to reach the child. Naming 'ignore' here
-    // would silently discard the request body.
-    spawnOptions.input = input
-  }
-  try {
-    return executor('gh', args, spawnOptions)
-  } catch (error) {
-    const detail = String(error.stderr ?? '').trim() || String(error.message ?? '').trim()
-    throw new RequiredChecksError(`GitHub command failed: ${detail}`)
-  }
+  return runGitHubCommand(args, {
+    executor,
+    input,
+    maxBuffer: 32 * 1024 * 1024,
+    wrapError: (detail) => new RequiredChecksError(`GitHub command failed: ${detail}`),
+  })
 }
 
 /**

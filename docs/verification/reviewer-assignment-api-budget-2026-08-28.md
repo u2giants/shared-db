@@ -2,6 +2,15 @@
 
 Issue: #1767. Scope: repository coordination only; no database, preview, production, or application data changes.
 
+> **Queue and capacity budgets, 2026-09-04 (issue #2345).** The 25-request
+> ceiling still governs the assignment transaction itself. When FIFO admission
+> is enabled, the complete public command has one honest 75-request ceiling
+> covering ticket admission, assignment, and ticket release; it no longer
+> resets the counter between those phases. The read-only capacity census has a
+> separate 64-request ceiling so a fully occupied reviewer pool remains
+> observable. Queue reads remain bounded to 32 tickets, and an unchanged ticket
+> expires after two hours so an abandoned caller cannot block every successor.
+
 > **Superseded ceiling, 2026-08-29 (issue #1812, PR #1813).** Everything below
 > was verified against a **19**-request ceiling, which was correct for a single
 > reviewer slot only. The mandatory second independent reviewer

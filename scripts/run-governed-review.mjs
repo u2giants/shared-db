@@ -3,6 +3,8 @@ import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { recordReviewVerdict, reviewerExecutionPreflight, resolveCommandPath } from './manage-migration-author-lanes.mjs'
 import { lineOpensWithVerdictWord, isVerdictFor } from './lib/review-verdict.mjs'
+// Issue #2342: one shared transport owns the never-replay-a-write policy.
+import { spawnGitHub } from './lib/github-transport.mjs'
 
 export function parseArgs(argv){
   const split=argv.indexOf('--'),own=split<0?argv:argv.slice(0,split),wrapperArgs=split<0?[]:argv.slice(split+1),out={wrapperArgs,slot:1}
@@ -82,15 +84,48 @@ export function neutraliseVerdictLine(body,reason){
     "> The reviewer's findings are otherwise unchanged and remain readable as evidence. A real decision requires a fresh governed review that records a create-only verdict artifact."
   ].join('\n')
 }
+// A wrapper may speak its own verdict grammar. `ai-gemini` normally asks Gemini
+// to OPEN its reply with a `## Verdict` heading and a bare decision word, which
+// this runner voids as a stray decision line, and it prints a PASS summary line
+// instead of the review. Its `--governed-verdict <head>` mode switches both the
+// prompt contract and its own verdict gate to the terminal
+// `VERDICT: <DECISION> <head>` line this runner records, and emits the review on
+// standard output. The caller must not have to remember that, and a caller that
+// passes the wrong head must not be silently accepted, so the flag is injected
+// here from the head this review is actually recording against.
+export function wrapperVerdictContractArgs(wrapper,args,headSha){
+  const name=String(wrapper??'').split(/[\\/]/).pop().replace(/\.(cmd|bat|exe)$/i,'').toLowerCase()
+  if(name!=='ai-gemini')return args
+  const list=[...args],head=String(headSha??'').toLowerCase()
+  // EVERY spelling of the flag is checked, not the first one found: `--x value`,
+  // `--x=value`, and a repeat later in the argument list. A single unchecked
+  // occurrence would let a caller bind the wrapper's verdict grammar to a head
+  // this review is not recording against.
+  let supplied=false
+  for(let i=0;i<list.length;i+=1){
+    const token=String(list[i]??'')
+    let value=null
+    if(token==='--governed-verdict')value=String(list[i+1]??'')
+    else if(token.startsWith('--governed-verdict='))value=token.slice('--governed-verdict='.length)
+    else continue
+    if(value.toLowerCase()!==head)throw new Error('the wrapper --governed-verdict head does not match the head under review')
+    supplied=true
+  }
+  if(supplied)return list
+  if(!['new','ask'].includes(String(list[0]??'')))throw new Error('ai-gemini governed reviews must start with the new or ask subcommand')
+  list.splice(1,0,'--governed-verdict',String(headSha))
+  return list
+}
 export function wrapperSpawnPlan(resolved,args,platform=process.platform){
   if(platform==='win32'&&/\.(cmd|bat)$/i.test(resolved))return{file:process.env.ComSpec||'cmd.exe',args:['/d','/s','/c',resolved,...args]}
   return{file:resolved,args}
 }
 export function runGovernedReview(options,deps={spawn:spawnSync,preflight:reviewerExecutionPreflight,record:recordReviewVerdict,resolve:resolveCommandPath}){
-  deps.preflight({reviewer:options.reviewer,wrapper:options.wrapper,worktree:options.worktree,headSha:options.headSha})
+  const skipDoctor=options.skipDoctor===true||options.skipDoctor==='true'
+  deps.preflight({reviewer:options.reviewer,wrapper:options.wrapper,worktree:options.worktree,headSha:options.headSha,skipDoctor})
   const resolved=(deps.resolve??resolveCommandPath)(options.wrapper)
   if(!resolved)throw new Error(`review wrapper ${options.wrapper} is not executable`)
-  const plan=wrapperSpawnPlan(resolved,options.wrapperArgs)
+  const plan=wrapperSpawnPlan(resolved,wrapperVerdictContractArgs(options.wrapper,options.wrapperArgs,options.headSha))
   const run=deps.spawn(plan.file,plan.args,{cwd:options.worktree,encoding:'utf8',maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe']})
   const rawBody=String(run.stdout??'').trim(),verdict=verdictFromOutput(rawBody,options.headSha)
   if(run.error||run.status!==0||!verdict)throw new Error(`review wrapper did not produce a recordable terminal verdict (exit ${run.status??'unknown'})`)
@@ -148,14 +183,15 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
       preserved=candidate
     }catch{preserved=null}
     if(preserved===null)throw new Error(`${detail}; nothing was posted because the findings could not be made inert`)
-    const kept=deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body:preserved}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
+    const kept=spawnGitHub(['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{executor:deps.spawn,input:JSON.stringify({body:preserved})})
     if(kept.error||kept.status!==0)throw new Error(`${detail}; the findings could not be preserved durably either`)
     let keptUrl=null
     try{keptUrl=JSON.parse(kept.stdout).html_url}catch{keptUrl=null}
     throw new Error(`${detail}; the findings were preserved as a non-authorizing comment${keptUrl?` (${keptUrl})`:''} and this head needs a fresh governed review`)
   }
-  const body=`GOVERNED REVIEW FINDINGS — NON-AUTHORIZING UNLESS THE MATCHING CREATE-ONLY VERDICT ARTIFACT EXISTS\n\n${rawBody}`
-  const posted=deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
+  const preflightNote=skipDoctor?'REVIEW PREFLIGHT: automated doctor skipped; the caller must retain the fresh external doctor proof that justified this exception.\n\n':''
+  const body=`GOVERNED REVIEW FINDINGS — NON-AUTHORIZING UNLESS THE MATCHING CREATE-ONLY VERDICT ARTIFACT EXISTS\n\n${preflightNote}${rawBody}`
+  const posted=spawnGitHub(['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{executor:deps.spawn,input:JSON.stringify({body})})
   if(posted.error||posted.status!==0)throw new Error('review findings could not be posted durably; no verdict was recorded')
   let comment
   try{comment=JSON.parse(posted.stdout)}catch{throw new Error('durable findings response was unreadable; no verdict was recorded')}
@@ -170,6 +206,33 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
     // not been converted. Every line a verdict parser would read as a decision is
     // rewritten -- not only the terminal one -- and the result is re-parsed with
     // the real consumer predicate before the void is called a success.
+    // #2464. NEVER VOID AFTER THE ARTIFACT WAS CREATED.
+    // `recordReviewVerdict` marks any failure that happens AFTER the create-only
+    // ref landed. The artifact records `findings_digest` -- the sha256 of THIS
+    // comment's body -- so voiding the comment permanently invalidates a verdict
+    // that exists, is valid, and can never be rewritten, burning the whole
+    // (issue, pr, head, slot) tuple. On PR #2409 that happened four rounds in a
+    // row. The correct behaviour is to report loudly and STOP: the artifact and
+    // the comment are both left exactly as they are, and a human decides.
+    if(error.verdictArtifactCreated){
+      // The marker also arrives UNCONFIRMED: the read that would have proved the
+      // ref threw, so we cannot say the artifact exists -- only that it may. The
+      // behaviour is identical either way, because voiding is irreversible and
+      // not voiding is not, but the notice must not claim more than was proved.
+      const {ref,sha,confirmed}=error.verdictArtifactCreated
+      const state=confirmed===false?'MAY HAVE BEEN CREATED':'WAS CREATED AND IS LEFT INTACT'
+      spawnGitHub(['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{executor:deps.spawn,input:JSON.stringify({body:`REVIEW RECORDING INCOMPLETE — THE DURABLE VERDICT ARTIFACT ${state}.
+
+Artifact: \`${ref}\` = \`${sha}\`
+
+The step AFTER the create failed: ${error.message}
+
+The preceding findings comment (${comment.html_url}) has been left UNTOUCHED on purpose. Its body is what ${confirmed===false?'any artifact recorded by this round would have computed its findings_digest over, so editing it could permanently invalidate a verdict that may already exist':"the artifact's recorded findings_digest was computed over, so editing it would permanently invalidate a verdict that already exists"} and cannot be rewritten. Do not re-run this review at this head and do not edit that comment. Confirm the artifact with:
+
+    gh api repos/u2giants/shared-db/git/ref/${ref.replace(/^refs\//,'')}
+`})})
+      throw new Error(`${error.message} — the durable verdict artifact ${ref} = ${sha} ${confirmed===false?'MAY have been created and could not be read back':'WAS created'}; the findings comment ${comment.id} was deliberately left untouched so ${confirmed===false?'any digest recorded over it stays valid':'its digest stays valid'}. Nothing was voided.`)
+    }
     let voidStatus='voided'
     try{
       const edited=neutraliseVerdictLine(body,error.message)
@@ -180,14 +243,14 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
       // head: those are exactly the conditions under which the lane tooling reads
       // a comment, so they are the conditions the void has to survive.
       if(isVerdictFor({author_association:'OWNER',body:edited},options.headSha))throw new Error('the neutralised body is still read as a verdict by the shared verdict predicate')
-      const patch=deps.spawn('gh',['api','-X','PATCH',`repos/u2giants/shared-db/issues/comments/${comment.id}`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body:edited}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
+      const patch=spawnGitHub(['api','-X','PATCH',`repos/u2giants/shared-db/issues/comments/${comment.id}`,'--input','-'],{executor:deps.spawn,input:JSON.stringify({body:edited})})
       if(patch.error||patch.status!==0)throw new Error(`gh exited ${patch.status??'unknown'}${patch.error?` (${patch.error.message})`:''}`)
     }catch(voidError){voidStatus=`FAILED: ${voidError.message}`}
     const stillLive=voidStatus!=='voided'
     const note=stillLive
       ? `\n\nTHE VOIDING EDIT ITSELF ${voidStatus}. A PARSEABLE VERDICT LINE IS STILL LIVE ON COMMENT ${comment.id} (${comment.html_url}). Lane tooling will read it as a real verdict at ${options.headSha} and deadlock this pull request. That line must be neutralised BY HAND on comment ${comment.id} before this pull request can proceed.`
       : `\n\nEvery parseable verdict line on comment ${comment.id} was voided so no tool can read it as a verdict at ${options.headSha}. The reviewer's findings were left intact.`
-    deps.spawn('gh',['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{encoding:'utf8',input:JSON.stringify({body:`REVIEW RECORDING FAILED — the preceding findings comment is non-authorizing and no verdict artifact was recorded. Reason: ${error.message}${note}`}),maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']})
+    spawnGitHub(['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{executor:deps.spawn,input:JSON.stringify({body:`REVIEW RECORDING FAILED — the preceding findings comment is non-authorizing and no verdict artifact was recorded. Reason: ${error.message}${note}`})})
     if(stillLive)throw new Error(`${error.message} — and the voiding edit ${voidStatus}; a parseable verdict line is still live on comment ${comment.id} and must be neutralised by hand`)
     throw error
   }
