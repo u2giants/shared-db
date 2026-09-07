@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "generation": 1,
+  "generation": 3,
   "work_issue": 2449,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Integrate prepared capability-preserving recovery: one operative creative-to-submission ledger, immutable original archives, explicit mapped/unmapped/conflict states, deferred invariants and unchanged canonical UUID authority. Inherited implementation and preparation predate this prospective recovery contract.",
-  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
+  "base_sha": "b48f526f87369278e0b173ded6a2d97e729818d6",
   "dispatcher": "shared-db-orchestrator/2536",
   "worker": "shared-db.orch/agent-2449",
   "branch": "claude/issue-2449-single-resolution-ledger",
@@ -21,7 +21,10 @@
     "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
     "supabase/tests/dcp_opa_marvel_disney_tiebreaker.sql",
     "supabase/tests/property_match_queue_contracts.sql",
-    "supabase/tests/scraped_properties_evidence_contracts.sql"
+    "supabase/tests/scraped_properties_evidence_contracts.sql",
+    "supabase/tests/dcp_vault_landing_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
   ],
   "file_writes": [
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
@@ -34,7 +37,10 @@
     "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
     "supabase/tests/dcp_opa_marvel_disney_tiebreaker.sql",
     "supabase/tests/property_match_queue_contracts.sql",
-    "supabase/tests/scraped_properties_evidence_contracts.sql"
+    "supabase/tests/scraped_properties_evidence_contracts.sql",
+    "supabase/tests/dcp_vault_landing_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
   ],
   "db_reads": [
     "column plm.dcp_opa_property_resolution.creative_decision_state",
@@ -96,11 +102,13 @@
     "git diff --check",
     "node scripts/check-production-verification-sidecars.mjs",
     "python3 -m unittest -q scripts.test_production_catalog_verification scripts.test_migration_derivation",
-    "python3 /tmp/shared-db-2536-2449-db/test_final.py"
+    "python3 /tmp/shared-db-2536-2449-db/test_rls_repair.py"
   ],
   "assumptions": [
     "Guarded supersession2451 reserves20260907200221 and preserves old version protection.",
-    "Prepared patch SHA256e623616daed59c4779b12be54fd10dfbe60d9d818068a8f98e88daeba4d45b68 is retained unchanged."
+    "Prepared patch SHA256e623616daed59c4779b12be54fd10dfbe60d9d818068a8f98e88daeba4d45b68 is retained unchanged.",
+    "CI exposed obsolete predicate identity test: generic private rows intentionally have stricter gates while legacy DCP reads remain permitted. This generation authorizes behavioral test repair only; migration bytes unchanged.",
+    "Full10-file scope executed cumulatively:8 pass before isolated harness deadlock,2 remaining pass on serialized recovery. The final targeted check re-proves changed RLS tests after red-control rollback; initial failed harness evidence remains explicit and is not relabeled success."
   ],
   "stop_conditions": [
     "Stop if required checks fail.",

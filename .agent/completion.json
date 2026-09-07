@@ -6,10 +6,12 @@
   "migration_versions": [
     "20260907200221"
   ],
-  "contract_ref": "refs/db-contracts/2449/1",
-  "contract_sha256": "3b856ef24e84e92b6e7efe9778a12d6a50f4b3d5c28001691dacd51bc250e64e",
-  "head_sha": "163fa0560393f16e79113eff42efcc8d468c1dcc",
+  "contract_ref": "refs/db-contracts/2449/3",
+  "contract_sha256": "679affa25c69b08ac04532d0a11214ec5cf6391a6cc11dcacda97cdcee97725b",
+  "head_sha": "bd6e75852d406e8335e962cdd640fb20eeeb3592",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/production-verification-sidecars/20260907200221.json",
     "scripts/production_business_risk_gate.py",
@@ -19,6 +21,7 @@
     "supabase/tests/creative_submission_property_resolution_contracts.sql",
     "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
     "supabase/tests/dcp_opa_marvel_disney_tiebreaker.sql",
+    "supabase/tests/dcp_vault_landing_contracts.sql",
     "supabase/tests/property_match_queue_contracts.sql",
     "supabase/tests/scraped_properties_evidence_contracts.sql"
   ],
@@ -90,15 +93,31 @@
     },
     {
       "command": "python3 /tmp/shared-db-2536-2449-db/test_final.py",
+      "exit_code": 1,
+      "evidence": "Original10-file invocation passed8 then interrupted by deadlock caused by overlapping disposable negative-control DDL. No live effect. Failed run preserved; remaining2 files rerun serially and passed, including4000groupAPI andauthority. Not relabeled as an initial pass."
+    },
+    {
+      "command": "python3 /tmp/shared-db-2536-2449-db/test_rls_repair.py",
       "exit_code": 0,
-      "evidence": "Disposable PostgreSQL17:9 SQL files passed,0 skipped, including concurrent approval and4000-group API response. Logs /tmp/2449-sql-final.log."
+      "evidence": "Both changed SQL tests pass after red-control rollback: exact full policies, entitled legacy header+member reads, unentitled signed-in denial, generic header+member denial. Two separate weakened-policy redcontrols each caught the corresponding private row leak. Cumulative10 SQLfiles passed without skipping; serial4000groupAPI/authority logs /tmp/2449-rls-*.log."
+    },
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static and recency pass; live-ledger subcheck skipped withouttoken, not clearance."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "255sites pass; source discovery unchanged."
     }
   ],
   "assumptions_resolved": [
     "Guarded reserved version20260907200221 used; old reservation and prepared patch retained.",
     "Empty and3-state populated rehearsals preserve archive row/audit hashes; UPDATE/DELETE denied.",
     "Catalog contract repaired1 and unchanged baseline0; original canonical UUID authority remains separate.",
-    "Ready for coordinator gates only: exact-head CI, independent review, preview, production and application acceptance are pending."
+    "Ready for coordinator gates only: exact-head CI, independent review, preview, production and application acceptance are pending.",
+    "CI predicate-equality assumption corrected without weakening RLS; migration unchanged. Original disposable harness deadlock resolved by serialization and targeted post-red-control validation. New gen3 changes required prospectivecheck to actual restored-state execution and preserves initial failedcheck explicitly."
   ],
   "stop_conditions_hit": []
 }
