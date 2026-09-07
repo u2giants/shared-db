@@ -42,7 +42,11 @@ jobs:
       # The offline unit tests come first. A guard whose own logic is broken must
       # never render a verdict on somebody else's pull request.
       - name: Prove the contract logic itself
-        run: node --test scripts/agent-work-contract.test.mjs
+        run: >-
+          node --test
+          scripts/agent-work-contract.test.mjs
+          scripts/agent-work-contract-activation.test.mjs
+          scripts/agent-work-contract-git-evidence.test.mjs
 
       - name: Report the activation mode, so nobody has to guess
         run: |
