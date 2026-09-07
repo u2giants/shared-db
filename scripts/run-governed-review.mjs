@@ -206,6 +206,33 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
     // not been converted. Every line a verdict parser would read as a decision is
     // rewritten -- not only the terminal one -- and the result is re-parsed with
     // the real consumer predicate before the void is called a success.
+    // #2464. NEVER VOID AFTER THE ARTIFACT WAS CREATED.
+    // `recordReviewVerdict` marks any failure that happens AFTER the create-only
+    // ref landed. The artifact records `findings_digest` -- the sha256 of THIS
+    // comment's body -- so voiding the comment permanently invalidates a verdict
+    // that exists, is valid, and can never be rewritten, burning the whole
+    // (issue, pr, head, slot) tuple. On PR #2409 that happened four rounds in a
+    // row. The correct behaviour is to report loudly and STOP: the artifact and
+    // the comment are both left exactly as they are, and a human decides.
+    if(error.verdictArtifactCreated){
+      // The marker also arrives UNCONFIRMED: the read that would have proved the
+      // ref threw, so we cannot say the artifact exists -- only that it may. The
+      // behaviour is identical either way, because voiding is irreversible and
+      // not voiding is not, but the notice must not claim more than was proved.
+      const {ref,sha,confirmed}=error.verdictArtifactCreated
+      const state=confirmed===false?'MAY HAVE BEEN CREATED':'WAS CREATED AND IS LEFT INTACT'
+      spawnGitHub(['api','-X','POST',`repos/u2giants/shared-db/issues/${options.pr}/comments`,'--input','-'],{executor:deps.spawn,input:JSON.stringify({body:`REVIEW RECORDING INCOMPLETE — THE DURABLE VERDICT ARTIFACT ${state}.
+
+Artifact: \`${ref}\` = \`${sha}\`
+
+The step AFTER the create failed: ${error.message}
+
+The preceding findings comment (${comment.html_url}) has been left UNTOUCHED on purpose. Its body is what ${confirmed===false?'any artifact recorded by this round would have computed its findings_digest over, so editing it could permanently invalidate a verdict that may already exist':"the artifact's recorded findings_digest was computed over, so editing it would permanently invalidate a verdict that already exists"} and cannot be rewritten. Do not re-run this review at this head and do not edit that comment. Confirm the artifact with:
+
+    gh api repos/u2giants/shared-db/git/ref/${ref.replace(/^refs\//,'')}
+`})})
+      throw new Error(`${error.message} — the durable verdict artifact ${ref} = ${sha} ${confirmed===false?'MAY have been created and could not be read back':'WAS created'}; the findings comment ${comment.id} was deliberately left untouched so ${confirmed===false?'any digest recorded over it stays valid':'its digest stays valid'}. Nothing was voided.`)
+    }
     let voidStatus='voided'
     try{
       const edited=neutraliseVerdictLine(body,error.message)
