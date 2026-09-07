@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2550,
-  "generation": 2,
+  "generation": 3,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Keep governed reviewer replacement within the fixed 25-request ceiling by reusing complete preflight evidence snapshots without weakening review safeguards.",
@@ -11,6 +11,8 @@
   "branch": "codex/issue-2550-review-budget",
   "worktree": "C:/repos/shared-db-worktrees/issue-2550-review-budget",
   "allowed_paths": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
     "docs/agents/section-4-anti-collision-rules.md",
@@ -18,6 +20,8 @@
     "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
   "file_writes": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
     "docs/agents/section-4-anti-collision-rules.md",
