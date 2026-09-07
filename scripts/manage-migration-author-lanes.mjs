@@ -161,7 +161,7 @@ export const REVIEWERS = Object.freeze([
   { name:'kimi-k3', wrapper:'ai-kimi', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-kimi: read-only agent profile over the checkout/worktree' } },
   { name:'qwen-3.8-max', wrapper:'ai-qwen', readsRepository:true,
-    readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-qwen: quarantined pending live qualification, not retired; wrapper hands the model a real checkout' } },
+    readsRepositoryVerified:{ date:'2026-09-07', evidence:'ai-devops/bin/ai-qwen: read-only review over a sealed evidence packet copy of the checkout; the live qualification review of merged commit 795902d8 cited specific file lines from it and returned a well-formed verdict' } },
   { name:'glm-5.2', wrapper:'ai-glm', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'historical label for the ai-glm wrapper above; same checkout' } },
   { name:'muse-spark-1.2-contributor', wrapper:'ai-muse', readsRepository:true,
@@ -358,14 +358,26 @@ export const REVIEWERS = Object.freeze([
 // a one-line deletion from this list once the account has quota again.
 export const RETIRED_REVIEWERS = Object.freeze(['glm-5.2', 'deepseek-chat', 'codex-gpt-5.6-sol'])
 
-// Not retired -- quarantined pending a passing live qualification (see the Qwen
-// note above). Kept separate from RETIRED_REVIEWERS on purpose: retirement is a
-// permanent disposition, quarantine is a reversible one, and conflating them is
-// what put a false 'Qwen is retired' claim into the roster in the first place.
-// Both lists are excluded from ACTIVE_REVIEWERS, so this changes no rotation
-// order, no in-flight sequence and no draw. Names here stay readable in
-// REVIEWERS forever because durable refs name them.
-export const QUARANTINED_REVIEWERS = Object.freeze(['qwen-3.8-max'])
+// Not retired -- quarantined pending a passing live qualification. Kept separate
+// from RETIRED_REVIEWERS on purpose: retirement is a permanent disposition,
+// quarantine is a reversible one, and conflating them is what put a false 'Qwen
+// is retired' claim into the roster in the first place. Both lists are excluded
+// from ACTIVE_REVIEWERS. Names here stay readable in REVIEWERS forever because
+// durable refs name them.
+//
+// UNQUARANTINED 2026-09-07 (owner instruction, ai-devops PR #316, merge commit
+// 795902d8): 'qwen-3.8-max' is drawable again, so this list is now empty. The
+// quarantine was real and its cause is fixed, not waived. Qwen never
+// authenticated because its credential preloader assumed a single-process
+// runtime while Qwen Code re-execs itself twice during startup, and because the
+// Alibaba Coding Plan subscription key had died (401). The wrapper now hands the
+// key over in a form that survives the re-exec while remaining strippable from
+// tool children, and runs on the Model Studio pay-per-token lane. Verified by
+// running it, not by reading it: `ai-qwen doctor --live` reports `live probe :
+// OK` on the installed command, and two live review sessions on that commit each
+// returned a single well-formed verdict on model qwen3.8-max above a substantive
+// report. Restoring the quarantine is a one-name addition back to this list.
+export const QUARANTINED_REVIEWERS = Object.freeze([])
 
 // The single fact the gate was missing (#2078). A verdict is evidence only if the
 // reviewer could open the file. Unknown names fail closed.
