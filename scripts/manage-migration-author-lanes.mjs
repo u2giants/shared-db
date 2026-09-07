@@ -328,7 +328,7 @@ export const REVIEWERS = Object.freeze([
 // machine reports kimi 0.36.1, model pin kimi-code/k3, read-only PASS, preflight
 // PASS and auth OK. Verified by running the doctor, not by reading the wrapper.
 //
-// RETIRED 2026-09-06 (owner instruction, chat directive, no issue):
+// RETIRED 2026-09-06 (owner instruction, issue #2485):
 // 'codex-gpt-5.6-sol'. Its account usage limit was exhausted for the whole of a
 // working session: every draw on PRs #2468 and #2479 came back
 // `ERROR: You've hit your usage limit`, each one costing a failed run plus a
