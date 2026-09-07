@@ -65,6 +65,7 @@ jobs:
         env:
           MODE: ${{ env.mode }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
@@ -99,5 +100,5 @@ jobs:
           fi
           node scripts/agent-work-contract.mjs --validate-completion --report-file "$REPORT" --contract-file "$CONTRACT" "${PR_ARGS[@]}"
           if [ -n "$PR_NUMBER" ]; then
-            node scripts/agent-work-contract-git-evidence.mjs --contract-file "$CONTRACT" --report-file "$REPORT" --pr-head-sha "$PR_HEAD_SHA"
+            node scripts/agent-work-contract-git-evidence.mjs --contract-file "$CONTRACT" --report-file "$REPORT" --pr-base-sha "$PR_BASE_SHA" --pr-head-sha "$PR_HEAD_SHA"
           fi

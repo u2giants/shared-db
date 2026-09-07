@@ -14,7 +14,7 @@
     "open_work_issues_unparseable": 2
   },
   "activation_gate": [
-    "Every open pull request either carries a valid contract and report, or is listed by exact number in grandfathered_prs.",
+    "Every open pull request either carries a valid contract and report, or is listed by exact number and head SHA in grandfathered_prs.",
     "Then set mode to 'enforced' and activated_at to that date, in the same pull request.",
     "Making 'Agent work contract' a required context on main is a SEPARATE action, taken only after enforced mode has run green for a full day."
   ],
