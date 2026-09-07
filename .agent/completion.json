@@ -1,34 +1,20 @@
 {
   "schema_version": 1,
-  "work_issue": 1403,
+  "work_issue": 2546,
   "outcome": "ready-for-merge",
-  "pr": 2547,
+  "pr": 2545,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/1403/2",
-  "contract_sha256": "ad49bd66c04a352c96c50a660a9e29ea93cd2243ee8bf3fedf9bfa835c91b560",
-  "head_sha": "c2c3c3e2b2baa44a111f50f6612067b5ecd1d203",
-  "files_changed": [
-    ".github/workflows/agent-work-contract.yml",
-    "scripts/agent-work-contract-git-evidence.mjs",
-    "scripts/agent-work-contract-git-evidence.test.mjs"
-  ],
+  "contract_ref": "refs/db-contracts/2546/1",
+  "contract_sha256": "bd19bd4f795a1cd5f334e2f11a08570272e4d6d854522a80e5ec4afb28cd688c",
+  "head_sha": "7d994613e9e837a5fef747a9494506b5c45ab8af",
+  "files_changed": ["docs/business-rules/merchandise-and-product-taxonomy.md"],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {
-      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
-      "exit_code": 0,
-      "evidence": "43 passed, 0 failed, 0 skipped, 0 todo"
-    },
-    {
-      "command": "node scripts/agent-work-contract-activation.mjs --mode --config-file config/agent-work-contract-activation.json",
-      "exit_code": 0,
-      "evidence": "reported enforced"
-    }
+    {"command": "node --test scripts/agent-work-contract.test.mjs", "exit_code": 0, "evidence": "contract and completion pair validate"}
   ],
   "assumptions_resolved": [
-    "Exact-base diff classification treats the activation pair inherited from main as absent from a later pull request.",
-    "Only a change to both evidence files reaches current-pair validation; a one-file change fails closed."
+    "MG05 as Licensor in the licensed divisions was already Settled and is cross-referenced, not restated."
   ],
   "stop_conditions_hit": []
 }
