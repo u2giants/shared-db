@@ -1052,16 +1052,29 @@ test('with no orchestrator running the full rotation is drawable (#2127)',()=>{
 })
 
 test('the orchestrator engine is never eligible to review its own work',()=>{
-  assert.ok(!reviewersForOrchestrator('codex').some((row)=>row.name==='codex-gpt-5.6-sol'))
+  // grok-4.6, PR #2484: `reviewersForOrchestrator('codex')` defaults to
+  // ACTIVE_REVIEWERS, and since the 2026-09-06 retirement that list cannot hold
+  // codex whatever the engine filter does -- so the default form proves nothing
+  // any more. The filter is now asserted against REVIEWERS, which still carries
+  // the only row with an orchestratorEngine, plus the synthetic list below.
+  assert.ok(REVIEWERS.some((row)=>row.name==='codex-gpt-5.6-sol'&&row.orchestratorEngine==='codex'))
+  assert.ok(!reviewersForOrchestrator('codex',REVIEWERS).some((row)=>row.name==='codex-gpt-5.6-sol'))
   const future=[{name:'claude-opus',orchestratorEngine:'claude'},{name:'deepseek-chat'}]
   assert.deepEqual(reviewersForOrchestrator('claude',future).map((row)=>row.name),['deepseek-chat'])
   assert.throws(()=>reviewersForOrchestrator('',future),/engine is unreadable/)
 })
 
-test('a Codex orchestrator skips Codex in assignment and preflight',()=>{
+test('a Codex orchestrator draws the whole active roster and still refuses the retired Codex reviewer',()=>{
+  // grok-4.6, PR #2484: asserting that a Codex orchestrator does not DRAW codex
+  // became tautological once codex was retired -- retirement alone satisfies it.
+  // The invariant worth pinning now is the other one: no ACTIVE reviewer carries
+  // an orchestrator engine, so a live Codex orchestrator must cost the rotation
+  // nothing at all. If a future roster adds an engine-carrying reviewer, this
+  // assertion is the one that notices.
   const io=reviewIo();io.resolveOrchestratorEngine=()=> 'codex'
   const assigned=[]
   for(let n=1;n<=ACTIVE_REVIEWERS.length;n++)assigned.push(assignNextReviewer({issue:700+n,pr:800+n,headSha:n.toString(16).padStart(40,'a')},io).reviewer)
+  assert.deepEqual([...assigned].sort(),ACTIVE_REVIEWERS.map((row)=>row.name).sort(),'a Codex orchestrator must not narrow the current roster')
   assert.ok(!assigned.includes('codex-gpt-5.6-sol'))
   const preflight={...preflightIo(),resolveOrchestratorEngine:()=> 'codex'}
   assert.throws(()=>reviewerExecutionPreflight({reviewer:'codex-gpt-5.6-sol',wrapper:'ai-codex-review',worktree:'C:/review',headSha:failedReview.headSha},preflight),/approved reviewer/)
@@ -4542,7 +4555,15 @@ test('an invalid review slot is refused',()=>{
   assert.throws(()=>assignNextReviewer({issue:205,pr:305,headSha:'a'.repeat(40),slot:1.5},io),/positive integer/)
 })
 
-test('retrying a slot-2 assignment must still refuse a reviewer that is no longer independent from the live orchestrator',()=>{
+test('retrying a slot-2 assignment must still refuse a durable assignment to a reviewer that is no longer eligible',()=>{
+  // grok-4.6, PR #2484: be exact about which half of this guard the fixture
+  // proves. The refusal below is produced by RETIREMENT -- the planted lease is
+  // never consulted, because findBusyReviewers only walks ACTIVE_REVIEWERS. The
+  // engine half of the same guard has no active carrier left to provoke it and
+  // is proved directly against REVIEWERS on the last line instead. Deleting the
+  // retry-time eligibility check still fails this test: the fixture's PR head
+  // does not match, so the retry would hand the stale assignment straight back.
+  //
   // Codex was retired from the active roster on 2026-09-06 and it is the only
   // reviewer that ever carried an orchestrator engine, so this conflict can no
   // longer be produced by DRAWING codex. It can still be produced by the state

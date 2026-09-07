@@ -365,9 +365,12 @@ export function reviewerKnownNonReading(name, reviewers=REVIEWERS){
 }
 
 // ACTIVE ROTATION EXPANSION (owner approval, 2026-08-28). Codex GPT-5.6 Sol and
-// DeepSeek are active rotation providers. No overflow provider remains; when all
-// six execution keys are occupied, assignment fails closed and the Phase 2
-// allocator records an ordered durable wait.
+// DeepSeek were added as active rotation providers then. NEITHER IS ACTIVE NOW:
+// DeepSeek was retired for fabricated reviews, and Codex on 2026-09-06 for an
+// exhausted account (see RETIRED_REVIEWERS above, which is the only roster that
+// decides this). No overflow provider remains; when all execution keys are
+// occupied, assignment fails closed and the Phase 2 allocator records an ordered
+// durable wait.
 //
 // It is listed in REVIEWERS like every other name, so a cursor commit naming it
 // still resolves to a wrapper forever (`REVIEWERS.find(...)` at parse time is
