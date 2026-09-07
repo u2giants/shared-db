@@ -99,7 +99,7 @@ Owner ruling 2026-08-09.
 
 ---
 
-## The five traps that have already cost us
+## The six traps that have already cost us
 
 Each of these was learned the expensive way. They are stated in full in the documents
 above; this list exists so you recognise one before it costs you the same afternoon.
@@ -119,6 +119,13 @@ above; this list exists so you recognise one before it costs you the same aftern
    populated is not necessarily dead — `subUpc` is empty by business practice and one real
    value would be meaningful.
 
+
+6. **The item master is not a product catalogue, and its non-inventory flag will not
+   tell you so.** Item rows include fee and charge codes, raw materials, sample
+   placeholders and ~450 junk records. The non-inventory flag that should separate them
+   is set on 15 of ~19,600 records and blank on ~4,700 (measured 2026-09-07), so any
+   population taken straight from `/items` overstates the catalogue. See *Non-inventory
+   items* in [`business-rules/product-items-and-identifiers.md`](business-rules/product-items-and-identifiers.md).
 ---
 
 ## Adding to this page
