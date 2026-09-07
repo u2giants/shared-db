@@ -2,5 +2,12 @@
   "schema_version": 1,
   "migration_version": "20260907183041",
   "migration_sha256": "6d9f020a370feede101069b8c9aa628b2bfed6ca7b608ad1b50295b10d392dcd",
-  "checks": []
+  "checks": [
+    {
+      "id": "popsg_search_v2_bounded_paging",
+      "kind": "catalog_contract",
+      "contract": "popsg_search_v2_bounded_paging_v1",
+      "expected_count": 1
+    }
+  ]
 }
