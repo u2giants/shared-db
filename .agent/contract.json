@@ -1,30 +1,40 @@
 {
   "schema_version": 1,
-  "work_issue": 2546,
-  "generation": 1,
-  "work_type": "docs",
+  "work_issue": 1275,
+  "generation": 2,
+  "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Record in the merchandise and product taxonomy rules that a merchandise-group slot's code is authoritative and its display name may be blank, so a missing Licensor or Property is never judged from the name.",
+  "goal": "Correct four verified factual errors in owner ruling section 6.20 of docs/owner-rulings.md without altering the owner's ruling itself.",
   "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
   "dispatcher": "claude",
   "worker": "claude",
-  "branch": "claude/licensor-code-vs-name",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/disney-creative-unmapped-titles-7b4149",
-  "allowed_paths": ["docs/business-rules/merchandise-and-product-taxonomy.md", ".agent/contract.json", ".agent/completion.json"],
-  "file_writes": ["docs/business-rules/merchandise-and-product-taxonomy.md", ".agent/contract.json", ".agent/completion.json"],
+  "branch": "fix/owner-ruling-620-corrections",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/github-issues-albert-0d573b",
+  "allowed_paths": [
+    "docs/owner-rulings.md",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "file_writes": [
+    "docs/owner-rulings.md",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not change any migration, script, workflow or configuration file.",
-    "Do not place licensed row data in this public repository."
+    "Do not change the substance of the owner's ruling; correct only the claims made around it.",
+    "Do not introduce any licensor value into this public repository.",
+    "Do not touch any migration, workflow, script or configuration file."
   ],
   "required_checks": [
-    "node --test scripts/agent-work-contract.test.mjs"
+    "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json"
   ],
   "assumptions": [
-    "The owner ruling that MG05 is Licensor in the licensed divisions is already Settled in this library."
+    "Every corrected claim is verifiable from this repository alone, including the quoted source sentence for the motivation-count correction."
   ],
   "stop_conditions": [
-    "Stop if recording this rule would require changing anything outside the business-rules documentation."
+    "Stop if a correction cannot be evidenced from the repository.",
+    "Stop if the diff would touch any file outside allowed_paths."
   ]
 }

@@ -1,20 +1,26 @@
 {
   "schema_version": 1,
-  "work_issue": 2546,
+  "work_issue": 1275,
   "outcome": "ready-for-merge",
-  "pr": 2545,
+  "pr": 2544,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2546/1",
-  "contract_sha256": "bd19bd4f795a1cd5f334e2f11a08570272e4d6d854522a80e5ec4afb28cd688c",
-  "head_sha": "7d994613e9e837a5fef747a9494506b5c45ab8af",
-  "files_changed": ["docs/business-rules/merchandise-and-product-taxonomy.md"],
+  "contract_ref": "refs/db-contracts/1275/2",
+  "contract_sha256": "0d384c56150410f140bf2f0f1e1b692ecba797fda521f60a0a0736a5ab06fa46",
+  "head_sha": "c75c5e45415cab1e177c08ba443f21de1e16640b",
+  "files_changed": [
+    "docs/owner-rulings.md"
+  ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {"command": "node --test scripts/agent-work-contract.test.mjs", "exit_code": 0, "evidence": "contract and completion pair validate"}
+    {
+      "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
+      "exit_code": 0,
+      "evidence": "Contract is valid."
+    }
   ],
   "assumptions_resolved": [
-    "MG05 as Licensor in the licensed divisions was already Settled and is cross-referenced, not restated."
+    "All four corrections are evidenced from this repository alone: era_source_id not null at supabase/migrations/20260819014639_wildbrain_dam_source_landing.sql:448, creative_group_source_id nullable at :449, partial index at :507-508; section 6.5 at docs/owner-rulings.md:528 is the PR #408 hold and carries no marked-never-deleted principle; and the three motivations are now quoted verbatim inside section 6.20 itself rather than cited to a GitHub issue body a reviewer cannot open."
   ],
   "stop_conditions_hit": []
 }
