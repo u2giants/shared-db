@@ -1,36 +1,43 @@
 {
   "schema_version": 1,
-  "work_issue": 2552,
+  "work_issue": 2558,
   "generation": 1,
-  "work_type": "documentation",
+  "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Preserve the orchestrator 2536 transfer and clarify genuine commit ancestry recovery for an open pull request.",
+  "goal": "Return qwen-3.8-max to the active reviewer rotation now that its live qualification passed, without weakening the protection that an ineligible reviewer stays readable but receives no new assignment.",
   "base_sha": "b3219f73c0a111bf06889d490cdc398c9ca1018c",
-  "dispatcher": "codex",
-  "worker": "codex",
-  "branch": "codex/orch-2536-closeout",
-  "worktree": "C:/repos/shared-db-orch-2536-closeout",
+  "dispatcher": "claude",
+  "worker": "claude",
+  "branch": "claude/qwen-rotation",
+  "worktree": "C:/repos/shared-db/.worktrees/qwen-rotation",
   "allowed_paths": [
-    "HANDOFF.d/2026-09-07T2224Z-edge-dev-codex-orchestrator-transfer.md",
-    "docs/production-promotion-procedure.md"
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    ".agent/contract.json",
+    ".agent/completion.json"
   ],
   "file_writes": [
-    "HANDOFF.d/2026-09-07T2224Z-edge-dev-codex-orchestrator-transfer.md",
-    "docs/production-promotion-procedure.md"
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    ".agent/contract.json",
+    ".agent/completion.json"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not change database structure, data, producer code, or another session handoff."
+    "Do not delete the test that proves an ineligible reviewer stays readable while receiving no new assignment.",
+    "Do not remove any name from REVIEWERS; historical evidence must stay resolvable.",
+    "Do not change database structure or data."
   ],
   "required_checks": [
-    "node scripts/check-handoff-contract.mjs",
-    "git diff --check"
+    "node --test scripts/manage-migration-author-lanes.test.mjs"
   ],
   "assumptions": [
-    "This contract covers closeout documentation only; inherited database work remains open."
+    "Qwen's live qualification on 2026-09-07 (ai-devops PR #316, merge commit 795902d8) is the evidence that lifts the quarantine.",
+    "Rotation order is unchanged; qwen-3.8-max re-enters at its existing roster position."
   ],
   "stop_conditions": [
-    "Stop if documentation requires an unverified completion claim or weakens a release gate."
+    "Stop if lifting the quarantine would require removing or weakening the ineligible-reviewer protection instead of repointing it.",
+    "Stop if the rotation change requires a database structure or data change."
   ]
 }
