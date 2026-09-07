@@ -1528,19 +1528,21 @@ test('released slot-2 replacement with slot-1 approval and a reinstated reviewer
     const result=new Map(reviewRecordRefs([...refs,...dependent],matching).map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}))
     Object.defineProperty(result,'matching',{value:matching});return result
   }
-  for(const name of ['readRef','getCommit','createRef']){const fn=io[name];io[name]=(...args)=>{wire(1,`${name}:${String(args[0])}`);return fn(...args)}}
+  for(const name of ['readRef','listRefs','getCommit','createRef']){const fn=io[name];io[name]=(...args)=>{wire(1,`${name}:${String(args[0])}`);return fn(...args)}}
   const make=io.makeOwnerCommit;io.makeOwnerCommit=(message)=>{wire(1,'commit');return make(message)}
 
   const replacement=replaceFailedReviewer(releasedRequest,io)
   assert.equal(replacement.reviewer,'grok-4.6','the reinstated independent reviewer must be drawable again')
   assert.equal(replacement.failureSha,released.failureSha,'the replacement must adopt the immutable release record')
   assert.ok(batched.includes(`${REVIEW_FAILURE_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}-${slotTwo.sequence}`),'the predecessor failure must ride in the fixed-record batch')
+  assert.equal(attempts,23,`released slot-2 replacement wire accounting drifted: ${labels.join(',')}`)
   assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`released slot-2 replacement used ${attempts} requests: ${labels.join(',')}`)
   assert.equal(labels.some((label)=>label.startsWith(`readRef:${REVIEW_FAILURE_REF_PREFIX}/`)),false,'batched predecessor evidence must not be reread individually')
   assert.equal(io.refs.get(replacement.assignmentRef),replacement.replacementSha,'the exact replacement assignment ref must read back')
 
   attempts=0;labels.length=0;batched.length=0
   assert.deepEqual(replaceFailedReviewer(releasedRequest,io),replacement)
+  assert.equal(attempts,22,`released slot-2 idempotent retry wire accounting drifted: ${labels.join(',')}`)
   assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`idempotent retry used ${attempts} requests: ${labels.join(',')}`)
   assert.equal(labels.some((label)=>label.startsWith(`readRef:${REVIEW_FAILURE_REF_PREFIX}/`)),false,'idempotent retry must reuse the same fixed evidence snapshot')
 })
