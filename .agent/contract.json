@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2550,
-  "generation": 1,
+  "generation": 2,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Keep governed reviewer replacement within the fixed 25-request ceiling by reusing complete preflight evidence snapshots without weakening review safeguards.",
@@ -14,13 +14,15 @@
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
     "docs/agents/section-4-anti-collision-rules.md",
-    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md"
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
   "file_writes": [
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
     "docs/agents/section-4-anti-collision-rules.md",
-    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md"
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
   "db_reads": [],
   "db_writes": [],
@@ -32,6 +34,7 @@
   "required_checks": [
     "node --test scripts/manage-migration-author-lanes.test.mjs",
     "node --test scripts/check-exact-head-approval.test.mjs scripts/run-governed-review.test.mjs",
+    "node scripts/check-throughput-truth-audit.mjs",
     "git diff --check"
   ],
   "assumptions": [
