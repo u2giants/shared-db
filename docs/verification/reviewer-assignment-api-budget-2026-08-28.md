@@ -11,6 +11,20 @@ Issue: #1767. Scope: repository coordination only; no database, preview, product
 > observable. Queue reads remain bounded to 32 tickets, and an unchanged ticket
 > expires after two hours so an abandoned caller cannot block every successor.
 
+> **Replacement-chain repair, 2026-09-07 (issue #2550).** The 25-request
+> ceiling is unchanged. A released slot-2 chain could exceed the pre-mutex gate
+> because every predecessor replacement reread its immutable failure ref and a
+> failed reviewer already proved absent from the complete active-lease snapshot
+> was read again. Suffixed replacement refs now pull their corresponding
+> failure refs into the same GraphQL record snapshot, and proved absence in the
+> bounded active roster is reused. Retired historical reviewers remain outside
+> that bounded roster and retain the direct read/release path. A production-cost
+> fixture covers slot-1 durable approval, slot-2 replacement and release,
+> reviewer reinstatement, independent selection, exact assignment readback and
+> idempotent retry within 25 requests. Immutable-evidence, exact-head, verdict,
+> independence, fresh mutex recheck, atomic transition and cleanup refusals are
+> unchanged.
+
 > **Superseded ceiling, 2026-08-29 (issue #1812, PR #1813).** Everything below
 > was verified against a **19**-request ceiling, which was correct for a single
 > reviewer slot only. The mandatory second independent reviewer
@@ -81,6 +95,6 @@ Measured, by the wire-attempt fixtures in `scripts/manage-migration-author-lanes
 | Slot-2 replacement, complete | 18 | 20 |
 | First replacement, pre-mutex | 8 | 9 |
 | First replacement, post-mutex section | 10 | 11 |
-| Idempotent replacement retry, pre-mutex | 9 | 10 |
+| Idempotent replacement retry, pre-mutex | 9 | 10 (reduced back to 9 by #2550 batching) |
 
 The mutex entry gate still refuses to acquire the mutex unless the whole mutex-held section fits, and the behavioural test that adds one extra counted pre-mutex call and requires a refusal BEFORE the mutex exists is unchanged and still passes.

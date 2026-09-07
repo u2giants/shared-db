@@ -822,7 +822,7 @@ test('complete replacement stays inside the real wire-attempt budget',()=>{
   assert.deepEqual(replaceFailedReviewer(replacementRequest,io),result)
   const retryMutexAt=labels.indexOf(`createRef:${MUTEX_REF}`)
   assert.notEqual(retryMutexAt,-1,`retry mutex acquisition was not observed: ${labels.join(',')}`)
-  assert.equal(retryMutexAt,10,'the idempotent path spends 10 requests before its mutex gate (issue #2075 added the durable-verdict listing)')
+  assert.equal(retryMutexAt,9,'the idempotent path spends 9 requests before its mutex gate because its predecessor failure ref rides in the fixed-record batch')
   assert.equal(labels.length-retryMutexAt,10,`idempotent replacement success path costs exactly 10 requests after mutex acquisition: ${labels.slice(retryMutexAt).join(',')}`)
   const source=readFileSync(new URL('./manage-migration-author-lanes.mjs',import.meta.url),'utf8')
   assert.match(source,/requireReviewWireCapacity\(11\);acquireReviewMutex\(ownerSha,io\);mutexAcquired=true/,'the idempotent reserve changed without re-derivation')
@@ -854,6 +854,7 @@ test('merged-head replacement reuses the bounded target snapshot instead of rere
   io.getIssueComments=()=>{throw new Error('separate verdict read is forbidden')}
   io.getPrReviews=()=>{throw new Error('separate review read is forbidden')}
   io.mergeCommitInMain=(sha)=>sha===mergeSha
+  io.refs.delete(reviewActiveRef('grok-4.6'))
   io.readActiveReviewLeases=()=>new Map()
   io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{
     issue:{state:'closed'},
@@ -1463,7 +1464,7 @@ test('three terminal providers do not grow replacement preflight past the fixed 
   io.readReviewRefs=(refs)=>{wire(1,'readReviewRefs');return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
   io.atomicReviewRefs=(changes)=>{wire(1,'atomicReviewRefs');for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
   io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
-  io.readReviewRecords=(refs,prefix)=>{wire(prefix?2:1,'readReviewRecords');const matching=prefix?[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha,commit:rawGetCommit(sha)})):[];const result=new Map(reviewRecordRefs(refs,matching).map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:matching});return result}
+  io.readReviewRecords=(refs,prefix,dependentFailurePrefix)=>{wire(prefix?2:1,'readReviewRecords');const matching=prefix?[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha,commit:rawGetCommit(sha)})):[];const dependent=dependentFailurePrefix?matching.flatMap(({ref})=>{const suffix=ref.startsWith(`${prefix}-`)?ref.slice(prefix.length+1):'';return /^\d+$/.test(suffix)?[`${dependentFailurePrefix}-${suffix}`]:[]}):[];const result=new Map(reviewRecordRefs([...refs,...dependent],matching).map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:matching});return result}
   for(const name of ['readRef','getCommit','createRef']){const fn=io[name];io[name]=(...args)=>{wire(1,`${name}:${String(args[0])}`);return fn(...args)}}
   const make=io.makeOwnerCommit;io.makeOwnerCommit=(message)=>{wire(1,'commit');return make(message)}
   const first=replaceFailedReviewer(replacementRequest,io)
@@ -1472,13 +1473,76 @@ test('three terminal providers do not grow replacement preflight past the fixed 
   const third=replaceFailedReviewer({...replacementRequest,failedSequence:second.sequence},io)
   assert.ok(third.reviewer)
   const mutexAt=labels.indexOf(`createRef:${MUTEX_REF}`)
-  assert.equal(mutexAt,11,`third terminal-provider replacement pre-mutex accounting drifted: ${labels.join(',')}`)
+  assert.equal(mutexAt,9,`third terminal-provider replacement pre-mutex accounting drifted: ${labels.join(',')}`)
   assert.equal(labels.length-mutexAt,10,`third terminal-provider replacement post-mutex accounting drifted: ${labels.join(',')}`)
-  assert.equal(attempts,21,`third terminal-provider replacement wire accounting drifted: ${labels.join(',')}`)
+  assert.equal(attempts,19,`third terminal-provider replacement wire accounting drifted: ${labels.join(',')}`)
   assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`third terminal-provider replacement used ${attempts} wire attempts`)
   const source=readFileSync(new URL('./manage-migration-author-lanes.mjs',import.meta.url),'utf8')
-  assert.match(source,/const allRefs=reviewRecordRefs\(refs,matches\)/,'the production batch must include every immutable matching replacement and verdict ref')
+  assert.match(source,/const allRefs=reviewRecordRefs\(\[\.\.\.refs,\.\.\.dependentFailures\],matches\)/,'the production batch must include every immutable matching replacement, predecessor failure and verdict ref')
   assert.match(source,/record\?\.sha===row\.sha&&record\?\.commit\?\.message\?record\.commit:undefined/,'matching replacement rows may reuse a batched commit only after exact SHA and message validation')
+})
+
+test('released slot-2 replacement with slot-1 approval and a reinstated reviewer fits the 25-request budget (#2550)',()=>{
+  const io=doctoredIo(),request={issue:2550,pr:2551,headSha:'25'.repeat(20)}
+  // Reproduce the live eligibility history: Grok was excluded as terminally
+  // unavailable, then returned to this PR only through fresh wrapper-doctor
+  // proof. The original exclusion remains immutable beside its reinstatement.
+  const excluded=excludeFor(io,{issue:request.issue,pr:request.pr,reason:'terminal-unavailable'})
+  assert.equal(excluded.reviewer,'grok-4.6')
+  const reinstated=reinstateReviewerExclusion({issue:request.issue,pr:request.pr,reviewer:excluded.reviewer},io)
+  assert.equal(io.refs.get(reviewReinstatementRef({issue:request.issue,pr:request.pr,reviewer:excluded.reviewer})),reinstated.sha)
+
+  const busyPr=9550,busyHead='9'.repeat(40)
+  io.getPr=(number)=>Number(number)===busyPr?{state:'open',head:{sha:busyHead}}:{state:'open',head:{sha:request.headSha}}
+  const slotOne=assignNextReviewer(request,io)
+  const slotTwo=assignNextReviewer({...request,slot:2},io)
+  assert.equal(slotOne.reviewer,'glm-5.3')
+  assert.equal(slotTwo.reviewer,'kimi-k3')
+  giveVerdict(io,{...request,slot:1})
+  const muse=replaceFailedReviewer({...request,slot:2,failedSequence:slotTwo.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)
+  assert.equal(muse.reviewer,'muse-spark-1.2-contributor')
+  const releasedRequest={...request,slot:2,failedSequence:muse.sequence,failureCode:'local_dependency_unavailable',failingCheck:'muse-wrapper-no-explicit-base-packet',confirmLocalDependencyUnfixable:true,confirmNoVerdict:true,confirmNoArtifact:true}
+  const released=releaseFailedReviewer(releasedRequest,io)
+  assert.equal(io.refs.get(reviewActiveRef(muse.reviewer))??null,null)
+
+  // The next rotation candidate is busy elsewhere, making the freshly
+  // reinstated Grok record materially necessary to the successful draw.
+  const busyReviewer=ACTIVE_REVIEWERS[(muse.sequence)%ACTIVE_REVIEWERS.length]
+  assert.equal(busyReviewer.name,'gemini-3.8-flash-high')
+  const busySha=io.makeOwnerCommit(`db-coordination reviewer-lease generation=1 reviewer=${busyReviewer.name} issue=9550 pr=${busyPr} head=${busyHead} sequence=9550`)
+  io.refs.set(reviewActiveRef(busyReviewer.name),busySha)
+
+  let attempts=0;const labels=[],batched=[];const rawGetCommit=io.getCommit
+  const wire=(n=1,label='wire')=>{for(let i=0;i<n;i++)runGitHubCommand(['api','fixture'],{executor:()=>{attempts++;labels.push(label);return '{}'}})}
+  io.getRateLimit=()=>{wire(2,'quota');return {remaining:5000,limit:5000,reset:1787943986,graphRemaining:5000,graphLimit:5000,graphReset:1787943986}}
+  io.readActiveReviewLeases=()=>{wire(1,'active');return new Map([...io.refs.entries()].filter(([ref])=>ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)).map(([ref,sha])=>[ref,{sha,commit:rawGetCommit(sha)}]))}
+  io.readReviewStates=(leases)=>{wire(1,'states');return new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.pr===busyPr?busyHead:request.headSha}},evidence:[]}]))}
+  io.readReviewRefs=(refs)=>{wire(1,'readReviewRefs');return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
+  io.atomicReviewRefs=(changes)=>{wire(1,'atomicReviewRefs');for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  io.readReviewRecords=(refs,prefix,dependentFailurePrefix)=>{
+    wire(prefix?2:1,'readReviewRecords')
+    const matching=prefix?[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha,commit:rawGetCommit(sha)})):[]
+    const dependent=dependentFailurePrefix?matching.flatMap(({ref})=>{const suffix=ref.startsWith(`${prefix}-`)?ref.slice(prefix.length+1):'';return /^\d+$/.test(suffix)?[`${dependentFailurePrefix}-${suffix}`]:[]}):[]
+    batched.push(...dependent)
+    const result=new Map(reviewRecordRefs([...refs,...dependent],matching).map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}))
+    Object.defineProperty(result,'matching',{value:matching});return result
+  }
+  for(const name of ['readRef','getCommit','createRef']){const fn=io[name];io[name]=(...args)=>{wire(1,`${name}:${String(args[0])}`);return fn(...args)}}
+  const make=io.makeOwnerCommit;io.makeOwnerCommit=(message)=>{wire(1,'commit');return make(message)}
+
+  const replacement=replaceFailedReviewer(releasedRequest,io)
+  assert.equal(replacement.reviewer,'grok-4.6','the reinstated independent reviewer must be drawable again')
+  assert.equal(replacement.failureSha,released.failureSha,'the replacement must adopt the immutable release record')
+  assert.ok(batched.includes(`${REVIEW_FAILURE_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}-${slotTwo.sequence}`),'the predecessor failure must ride in the fixed-record batch')
+  assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`released slot-2 replacement used ${attempts} requests: ${labels.join(',')}`)
+  assert.equal(labels.some((label)=>label.startsWith(`readRef:${REVIEW_FAILURE_REF_PREFIX}/`)),false,'batched predecessor evidence must not be reread individually')
+  assert.equal(io.refs.get(replacement.assignmentRef),replacement.replacementSha,'the exact replacement assignment ref must read back')
+
+  attempts=0;labels.length=0;batched.length=0
+  assert.deepEqual(replaceFailedReviewer(releasedRequest,io),replacement)
+  assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`idempotent retry used ${attempts} requests: ${labels.join(',')}`)
+  assert.equal(labels.some((label)=>label.startsWith(`readRef:${REVIEW_FAILURE_REF_PREFIX}/`)),false,'idempotent retry must reuse the same fixed evidence snapshot')
 })
 
 test('replacement retry releases its lease after an exact-head verdict',()=>{
@@ -2297,8 +2361,20 @@ test('reviewer replacement rejects a substantive exact-head verdict',()=>{
 test('reviewer replacement retry rejects mismatched failure sequence and missing evidence',()=>{
   const io=failedReviewIo(), done=replaceFailedReviewer(replacementRequest,io)
   assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:99},io),/does not match/)
+  // Use the production-shaped fixed-record batch and forbid a fallback read so
+  // both negative controls exercise the optimized path itself.
+  const rawGetCommit=io.getCommit,rawReadRef=io.readRef
+  io.readReviewRecords=(refs,prefix,dependentFailurePrefix)=>{
+    const matching=prefix?[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha,commit:rawGetCommit(sha)})):[]
+    const dependent=dependentFailurePrefix?matching.flatMap(({ref})=>{const suffix=ref.startsWith(`${prefix}-`)?ref.slice(prefix.length+1):'';return /^\d+$/.test(suffix)?[`${dependentFailurePrefix}-${suffix}`]:[]}):[]
+    const result=new Map(reviewRecordRefs([...refs,...dependent],matching).map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}))
+    Object.defineProperty(result,'matching',{value:matching});return result
+  }
+  io.readRef=(ref)=>{if(ref.startsWith(`${REVIEW_FAILURE_REF_PREFIX}/`))throw new Error('individual failure-ref reread is forbidden');return rawReadRef(ref)}
   const failureRef=[...io.refs.keys()].find((ref)=>ref.startsWith('refs/db-review-failures/'));io.refs.delete(failureRef)
   assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/evidence is missing/)
+  io.refs.set(failureRef,io.makeOwnerCommit('unrelated immutable record'))
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/evidence is missing or changed/)
   assert.ok(done.replacementSha)
 })
 

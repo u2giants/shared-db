@@ -1,43 +1,48 @@
 {
   "schema_version": 1,
-  "work_issue": 1403,
-  "generation": 2,
+  "work_issue": 2550,
+  "generation": 1,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Make enforced agent-work-contract checks distinguish inherited main evidence from evidence authored for the current pull request.",
-  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
+  "goal": "Keep governed reviewer replacement within the fixed 25-request ceiling by reusing complete preflight evidence snapshots without weakening review safeguards.",
+  "base_sha": "b3219f73c0a111bf06889d490cdc398c9ca1018c",
   "dispatcher": "codex",
   "worker": "codex",
-  "branch": "codex/issue-1403-inherited-evidence",
-  "worktree": "C:/repos/shared-db-worktrees/issue-1403-inherited-evidence",
+  "branch": "codex/issue-2550-review-budget",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2550-review-budget",
   "allowed_paths": [
-    ".github/workflows/agent-work-contract.yml",
-    "scripts/agent-work-contract-git-evidence.mjs",
-    "scripts/agent-work-contract-git-evidence.test.mjs"
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "docs/agents/section-4-anti-collision-rules.md",
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md"
   ],
   "file_writes": [
-    ".github/workflows/agent-work-contract.yml",
-    "scripts/agent-work-contract-git-evidence.mjs",
-    "scripts/agent-work-contract-git-evidence.test.mjs"
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "docs/agents/section-4-anti-collision-rules.md",
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not disable or weaken enforced mode.",
-    "Do not add Agent work contract as a required branch context before a new full green day completes.",
-    "Do not retire or weaken the legacy objects alias."
+    "Do not raise the 25-request ceiling.",
+    "Do not weaken exact-head, independence, immutable-evidence, atomic-transition, mutex recheck, or cleanup safeguards.",
+    "Do not hand-edit reviewer refs or run a paid provider before governed allocation succeeds."
   ],
   "required_checks": [
-    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
-    "node scripts/agent-work-contract-activation.mjs --mode --config-file config/agent-work-contract-activation.json"
+    "node --test scripts/manage-migration-author-lanes.test.mjs",
+    "node --test scripts/check-exact-head-approval.test.mjs scripts/run-governed-review.test.mjs",
+    "git diff --check"
   ],
   "assumptions": [
-    "Evidence files inherited byte-for-byte from the pull request base are not evidence authored for that pull request.",
-    "Changing both evidence files is required before their contents can govern the current pull request."
+    "The active-reviewer batch is a complete fail-closed snapshot of the bounded namespace.",
+    "A replacement-ref sequence identifies its immutable predecessor failure-ref sequence.",
+    "The current live PR 2513 head remains eligible for final allocation acceptance unless it moves."
   ],
   "stop_conditions": [
-    "Stop if the repair would allow a non-grandfathered enforced pull request with no current evidence pair to pass.",
-    "Stop if changing only one evidence file could be treated as a complete pair.",
-    "Stop if implementation requires changing database structure or data."
+    "Stop if the repair requires more than 25 counted requests.",
+    "Stop if any predecessor failure record cannot be proven from immutable evidence.",
+    "Stop if live PR 2513 no longer has the stated exact head; report the head change accurately.",
+    "Stop if implementation requires database, runner, provider installation, or workflow changes."
   ]
 }
