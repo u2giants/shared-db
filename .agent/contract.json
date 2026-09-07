@@ -1,30 +1,58 @@
 {
   "schema_version": 1,
-  "work_issue": 2546,
+  "work_issue": 2356,
   "generation": 1,
-  "work_type": "docs",
-  "route": "repo-maintenance",
-  "goal": "Record in the merchandise and product taxonomy rules that a merchandise-group slot's code is authoritative and its display name may be blank, so a missing Licensor or Property is never judged from the name.",
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Deliver additive canonical Asset lifecycle fields while preserving editable historical rows with explicit unknown freshness and enforcing complete new-row facts, non-regression and chronological consistency.",
   "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
-  "dispatcher": "claude",
-  "worker": "claude",
-  "branch": "claude/licensor-code-vs-name",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/disney-creative-unmapped-titles-7b4149",
-  "allowed_paths": ["docs/business-rules/merchandise-and-product-taxonomy.md", ".agent/contract.json", ".agent/completion.json"],
-  "file_writes": ["docs/business-rules/merchandise-and-product-taxonomy.md", ".agent/contract.json", ".agent/completion.json"],
-  "db_reads": [],
-  "db_writes": [],
+  "dispatcher": "codex coordinator #2536",
+  "worker": "codex repair_2501",
+  "branch": "codex/issue-2356-asset-freshness",
+  "worktree": "/tmp/shared-db-orch-2517-2356",
+  "allowed_paths": [
+    "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql",
+    "supabase/tests/dam_asset_freshness_current_state_contracts.sql"
+  ],
+  "file_writes": [
+    "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql",
+    "supabase/tests/dam_asset_freshness_current_state_contracts.sql"
+  ],
+  "db_reads": [
+    "table core.taxonomy_source_ref",
+    "table supabase_migrations.schema_migrations"
+  ],
+  "db_writes": [
+    "table dam.asset",
+    "column dam.asset.first_seen_at",
+    "column dam.asset.last_seen_at",
+    "column dam.asset.missing_since",
+    "constraint dam_asset_seen_order on dam.asset",
+    "constraint dam_asset_missing_after_first_seen on dam.asset",
+    "function dam.enforce_asset_freshness",
+    "trigger dam_asset_freshness_guard on dam.asset"
+  ],
   "prohibited_actions": [
-    "Do not change any migration, script, workflow or configuration file.",
-    "Do not place licensed row data in this public repository."
+    "Do not fabricate/backfill historical Asset sightings or alter established source identity and scalar compatibility fields.",
+    "Do not erase recorded freshness or remove lifecycle ordering checks.",
+    "Do not push or merge before coordinator release; do not draw reviewers or write preview/production."
   ],
   "required_checks": [
-    "node --test scripts/agent-work-contract.test.mjs"
+    "git diff --check",
+    "bash scripts/check-sql.sh",
+    "python3 -m unittest scripts.test_migration_derivation scripts.test_production_catalog_verification",
+    "docker exec -i orch-2536-2356-proof psql -U postgres -v ON_ERROR_STOP=1 -q",
+    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs"
   ],
   "assumptions": [
-    "The owner ruling that MG05 is Licensor in the licensed divisions is already Settled in this library."
+    "This is transparent successor adoption of already-authored pre-contract work; no claim that a contract ref existed before the repair.",
+    "Parent table claim #2521 covers the listed additive columns and constraints; function and trigger were separately expanded using the guarded command.",
+    "db_writes describe authored migration targets and disposable rehearsal, not a claim of live database application.",
+    "Current main must be an ancestor of the final implementation commit before evidence publication."
   ],
   "stop_conditions": [
-    "Stop if recording this rule would require changing anything outside the business-rules documentation."
+    "Stop before pushing while the coordinator no-push hold is active.",
+    "Stop if a target ledger already applies the migration before changing its bytes.",
+    "Stop on unexpected scope expansion, failed lifecycle checks, fabricated history, or current-base ancestry failure."
   ]
 }
