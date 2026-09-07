@@ -886,7 +886,12 @@ CREATIVE_SUBMISSION_CONTRACT_STATUS_CONTRACT = _shape_contract(
     ),
 )
 CREATIVE_SUBMISSION_CONTRACT_STATUS_CONTRACT += (
-    " and position('creative_submission_property_resolution' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    # Issue #2449 retired plm.creative_submission_property_resolution. The
+    # reader now takes its property mapping from the one surviving ledger,
+    # so this clause names that ledger instead. It still asserts what it
+    # always asserted: the function reads a property-mapping ledger
+    # alongside the contract ledger.
+    " and position('plm.dcp_opa_property_resolution' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
     " and position('creative_submission_contract_resolution' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
     " and position('submission_source.source_property_name' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
     " and position('mapping_state' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
@@ -4181,6 +4186,84 @@ CATEGORY_STYLE_TRACKER_ROWS_REALTIME_PUBLICATION = """
 """
 CATALOG_CONTRACTS["style_tracker_rows_realtime_publication_v1"] = (
     CATEGORY_STYLE_TRACKER_ROWS_REALTIME_PUBLICATION
+)
+
+
+# Issue #2449. One ledger records creative-to-submission property mapping.
+#
+# The migration's two dynamic executions re-derive api.db_data_admin_scraped_properties
+# and api.db_data_admin_decide_property_match from the catalog and edit them in
+# place, so the reviewed migration text does not restate either body. This
+# contract reads the durable outcome of exactly those two statements: both
+# routines exist, the reader names the surviving ledger and no longer names the
+# retired one, the writer supplies the generic submission identity, the retired
+# pair is gone, and the rebuilt member table carries the generic identity with
+# its access posture and append-only guards intact.
+_DECIDE_PROPERTY_MATCH_DEF = (
+    "pg_get_functiondef(to_regprocedure("
+    "'api.db_data_admin_decide_property_match(uuid,text,bigint[],text,uuid)'))"
+)
+SINGLE_CREATIVE_SUBMISSION_RESOLUTION_LEDGER_CONTRACT = _shape_contract(
+    relations=(
+        'plm.dcp_opa_property_resolution',
+        'plm.dcp_opa_property_resolution_member',
+        'plm.creative_submission_property_resolution_archive',
+        'plm.creative_submission_property_resolution_member_archive',
+    ),
+    routines=(
+        'api.db_data_admin_scraped_properties(text,text,integer)',
+        'api.db_data_admin_decide_property_match(uuid,text,bigint[],text,uuid)',
+    ),
+    policies=(
+        ('plm.dcp_opa_property_resolution_member',
+         'dcp_opa_property_resolution_member_read'),
+    ),
+    triggers=(
+        ('plm.dcp_opa_property_resolution_member',
+         'dcp_opa_property_resolution_member_append_only'),
+        ('plm.dcp_opa_property_resolution_member',
+         'dcp_opa_property_resolution_member_no_truncate'),
+    ),
+)
+SINGLE_CREATIVE_SUBMISSION_RESOLUTION_LEDGER_CONTRACT += (
+    " and to_regclass('plm.creative_submission_property_resolution') is null"
+    " and to_regclass('plm.creative_submission_property_resolution_member') is null"
+    " and (select count(*) from pg_attribute a"
+    " where a.attrelid=to_regclass('plm.dcp_opa_property_resolution_member')"
+    " and a.attname in ('submission_source_system','submission_source_table','submission_source_id')"
+    " and a.attnotnull and not a.attisdropped)=3"
+    " and not (select a.attnotnull from pg_attribute a"
+    " where a.attrelid=to_regclass('plm.dcp_opa_property_resolution_member')"
+    " and a.attname='licensed_property_id' and not a.attisdropped)"
+    " and (select c.relforcerowsecurity from pg_class c"
+    " where c.oid=to_regclass('plm.dcp_opa_property_resolution_member'))"
+    " and (select count(*) from pg_trigger t"
+    " where t.tgrelid=to_regclass('plm.dcp_opa_property_resolution_member')"
+    " and not t.tgisinternal and t.tgenabled='A')=2" +
+    " and position('plm.dcp_opa_property_resolution_member' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('creative_submission_property_resolution' in %s)=0" % _SCRAPED_PROPERTIES_DEF +
+    " and position('submission_source_system, submission_source_table' in %s)>0" % _DECIDE_PROPERTY_MATCH_DEF +
+    " and position('s.licensed_property_id::text, s.licensed_property_id' in %s)>0" % _DECIDE_PROPERTY_MATCH_DEF
+)
+SINGLE_CREATIVE_SUBMISSION_RESOLUTION_LEDGER_CONTRACT += (
+    " and exists (select 1 from pg_attribute where attrelid='plm.dcp_opa_property_resolution'::regclass and attname='creative_decision_state' and not attisdropped)"
+    " and to_regprocedure('plm.enforce_dcp_opa_crosswalk_members()') is not null"
+    " and exists (select 1 from pg_trigger where tgrelid='plm.dcp_opa_property_resolution'::regclass and tgname='dcp_opa_property_resolution_mapping_members_check' and tgdeferrable and tginitdeferred)"
+    " and exists (select 1 from pg_trigger where tgrelid='plm.dcp_opa_property_resolution_member'::regclass and tgname='dcp_opa_property_resolution_member_mapping_header_check' and tgdeferrable and tginitdeferred)"
+    " and has_table_privilege('service_role','plm.dcp_opa_property_resolution_member','SELECT')"
+    " and has_table_privilege('service_role','plm.dcp_opa_property_resolution_member','INSERT')"
+    " and not has_table_privilege('service_role','plm.dcp_opa_property_resolution_member','UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')"
+    " and has_table_privilege('authenticated','plm.dcp_opa_property_resolution_member','SELECT')"
+    " and not has_table_privilege('authenticated','plm.dcp_opa_property_resolution_member','INSERT,UPDATE,DELETE,TRUNCATE')"
+    " and not has_table_privilege('service_role',to_regclass('plm.creative_submission_property_resolution_archive'),'INSERT,UPDATE,DELETE,TRUNCATE')"
+    " and not has_table_privilege('service_role',to_regclass('plm.creative_submission_property_resolution_member_archive'),'INSERT,UPDATE,DELETE,TRUNCATE')"
+    " and exists (select 1 from pg_trigger where tgrelid=to_regclass('plm.creative_submission_property_resolution_archive') and tgname='creative_submission_property_resolution_archive_no_insert' and tgenabled='A')"
+    " and exists (select 1 from pg_trigger where tgrelid=to_regclass('plm.creative_submission_property_resolution_member_archive') and tgname='creative_submission_member_archive_no_insert' and tgenabled='A')"
+    " and exists (select 1 from pg_policy where polrelid='plm.dcp_opa_property_resolution'::regclass and polname='dcp_opa_property_resolution_read' and position('creative_decision_state IS NULL' in pg_get_expr(polqual,polrelid))>0)"
+    " and exists (select 1 from pg_policy where polrelid='plm.dcp_opa_property_resolution_member'::regclass and polname='dcp_opa_property_resolution_member_read' and position('creative_decision_state IS NULL' in pg_get_expr(polqual,polrelid))>0)"
+)
+CATALOG_CONTRACTS["single_creative_submission_resolution_ledger_v1"] = (
+    SINGLE_CREATIVE_SUBMISSION_RESOLUTION_LEDGER_CONTRACT
 )
 
 

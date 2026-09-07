@@ -115,8 +115,8 @@ begin
   ) returning resolution_id into v_pending_a;
 
   insert into plm.dcp_opa_property_resolution_member (
-    resolution_id, licensed_property_id, member_ordinal
-  ) values (v_pending_a, v_opa_a, 1), (v_pending_a, v_opa_b, 2);
+    resolution_id, licensed_property_id, member_ordinal, submission_source_system, submission_source_table, submission_source_id
+  ) values (v_pending_a, v_opa_a, 1, 'disney_opa', 'plm.opa_property', v_opa_a::text), (v_pending_a, v_opa_b, 2, 'disney_opa', 'plm.opa_property', v_opa_b::text);
 
   insert into plm.dcp_opa_property_resolution (
     source_system, source_table, source_property_id, decision_version,
