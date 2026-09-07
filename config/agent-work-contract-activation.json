@@ -3,7 +3,7 @@
   "mode": "enforced",
   "activated_at": "2026-09-07",
   "grandfathered_prs": [
-    { "number": 2533, "head_sha": "6ec6f0dfa0fab185ba504e2d1f9aa402861b897c" },
+    { "number": 2540, "head_sha": "c2a8facbff357c126fc27529f7063e01c4fe6b1a" },
     { "number": 2527, "head_sha": "aeb8720a00fa4829c388bcc04e4de23205a1ef95" },
     { "number": 2526, "head_sha": "d34c2824c5621c41a3afcd0c4bba5760f08079c0" },
     { "number": 2523, "head_sha": "a4991c3da4a18d87c9808655075a41d7fc6c9b88" },
