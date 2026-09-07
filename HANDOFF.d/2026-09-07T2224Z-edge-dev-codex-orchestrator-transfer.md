@@ -36,7 +36,7 @@ The session repaired/revalidated inherited implementations and preview evidence 
 
 ### 3.1 Fresh snapshot and main
 
-At 2026-09-07T22:24:21Z, live GitHub main was `b3219f73c0a111bf06889d490cdc398c9ca1018c` (maintenance PR #2547). The newest migration on that main was `20260907131610_popsg_search_style_guide_library_v2.sql`. This handoff's own prose PR will advance main; obtain its final merge SHA from #2552 and `gh api repos/u2giants/shared-db/git/ref/heads/main`. The handoff adds no producer code, migrations, or `.agent` metadata.
+At 2026-09-07T22:24:21Z, live GitHub main was `b3219f73c0a111bf06889d490cdc398c9ca1018c` (maintenance PR #2547). The newest migration on that main was `20260907131610_popsg_search_style_guide_library_v2.sql`. This handoff's own prose PR will advance main; obtain its final merge SHA from #2552 and `gh api repos/u2giants/shared-db/git/ref/heads/main`. The handoff adds no producer code or migrations. PR #2556 initially failed the enforced Agent work contract because inherited main metadata is not current evidence; the closeout therefore includes its own required `.agent` contract/completion pair.
 
 All eight inherited PRs remained OPEN, each with 13 successful and four skipped checks at the heads below. PR #2425 also had pending `Migration guarded merge authorization`. Those results cover only those heads. No currently running provider/author process was found for the inherited work at closeout. Claims are recorded as capacity-active, not evidence of active workers; expiry never releases protection.
 
