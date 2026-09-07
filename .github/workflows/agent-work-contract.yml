@@ -73,21 +73,38 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          # Convention: a PR that declares a contract commits it alongside its
-          # report under .agent/. Absent files mean "no contract on this PR",
-          # which report-only tolerates and enforced mode does not.
+          # Convention: a PR that declares a contract changes both evidence
+          # files under .agent/. The activation PR's pair remains on main, so
+          # mere filesystem presence is not current-PR evidence. Compare the
+          # exact PR base and head before reading either file.
           CONTRACT=.agent/contract.json
           REPORT=.agent/completion.json
 
-          if [ ! -f "$CONTRACT" ] && [ ! -f "$REPORT" ]; then
+          if [ -n "$PR_NUMBER" ]; then
+            PAIR_STATE=$(node scripts/agent-work-contract-git-evidence.mjs \
+              --classify-evidence-pair \
+              --pr-base-sha "$PR_BASE_SHA" \
+              --pr-head-sha "$PR_HEAD_SHA")
+          else
+            # A manual dispatch has no PR diff. Validate the checked-out pair as
+            # repository evidence, but do not render a PR gate verdict.
+            PAIR_STATE=current
+          fi
+
+          if [ "$PAIR_STATE" = "partial" ]; then
+            echo "::error::A pull request must change both $CONTRACT and $REPORT together."
+            exit 1
+          fi
+
+          if [ "$PAIR_STATE" = "inherited" ] || { [ ! -f "$CONTRACT" ] && [ ! -f "$REPORT" ]; }; then
             if [ "$MODE" = "report-only" ]; then
-              echo "No contract on this pull request; report-only mode allows it."
+              echo "No current contract on this pull request; report-only mode allows it."
               exit 0
             fi
             if node scripts/agent-work-contract-activation.mjs --is-grandfathered --config-file config/agent-work-contract-activation.json --pr "$PR_NUMBER" --head-sha "$PR_HEAD_SHA"; then
               exit 0
             fi
-            echo "::error::Enforced mode requires $CONTRACT and $REPORT on every pull request."
+            echo "::error::Enforced mode requires this pull request to change both $CONTRACT and $REPORT. Inherited main evidence does not count."
             exit 1
           fi
 

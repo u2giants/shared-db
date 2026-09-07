@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { verifyGitEvidence } from './agent-work-contract-git-evidence.mjs'
+import { classifyEvidencePair, main, verifyGitEvidence } from './agent-work-contract-git-evidence.mjs'
 
 const base = 'a'.repeat(40)
 const prBase = 'd'.repeat(40)
@@ -40,4 +40,23 @@ test('both ancestry links and full SHAs are required', () => {
 test('the checked-in contract must match its exact immutable published ref', () => {
   assert.throws(() => verifyGitEvidence({ contract, report: { ...report, contract_ref: 'refs/db-contracts/42/2' }, prBaseSha: prBase, prHeadSha: prHead }, io()), /exact immutable ref/)
   assert.throws(() => verifyGitEvidence({ contract, report, prBaseSha: prBase, prHeadSha: prHead }, io({ readPublishedContract: () => ({ ...contract, goal: 'wider after the fact' }) })), /does not match/)
+})
+
+test('evidence pair classification distinguishes inherited, current, and half-written evidence', () => {
+  assert.equal(classifyEvidencePair(['docs/change.md']), 'inherited')
+  assert.equal(classifyEvidencePair(['.agent/contract.json', '.agent/completion.json', 'docs/change.md']), 'current')
+  assert.equal(classifyEvidencePair(['.agent/contract.json', 'docs/change.md']), 'partial')
+  assert.equal(classifyEvidencePair(['.agent/completion.json']), 'partial')
+})
+
+test('classification CLI compares the exact pull request base and head', () => {
+  const output = []
+  const originalLog = console.log
+  console.log = value => output.push(value)
+  try {
+    assert.equal(main(['--classify-evidence-pair', '--pr-base-sha', prBase, '--pr-head-sha', prHead], io({ changedFiles: () => ['.agent/contract.json', '.agent/completion.json'] })), 0)
+  } finally {
+    console.log = originalLog
+  }
+  assert.deepEqual(output, ['current'])
 })
