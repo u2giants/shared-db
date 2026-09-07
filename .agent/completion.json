@@ -1,34 +1,41 @@
 {
   "schema_version": 1,
-  "work_issue": 1403,
+  "work_issue": 2550,
   "outcome": "ready-for-merge",
-  "pr": 2547,
+  "pr": 2551,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/1403/2",
-  "contract_sha256": "ad49bd66c04a352c96c50a660a9e29ea93cd2243ee8bf3fedf9bfa835c91b560",
-  "head_sha": "7e10d7381a046a290005ba8a3b5efb703f7278e7",
+  "contract_ref": "refs/db-contracts/2550/1",
+  "contract_sha256": "260d045ec3959b037fb2def32fcacfcd6ed2ace3fd7b9b26684932dbccc6e5c7",
+  "head_sha": "7418717ee453f83c6733dbd67f93923e1786db8f",
   "files_changed": [
-    ".github/workflows/agent-work-contract.yml",
-    "scripts/agent-work-contract-git-evidence.mjs",
-    "scripts/agent-work-contract-git-evidence.test.mjs"
+    "docs/agents/section-4-anti-collision-rules.md",
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "44 passed, 0 failed, 0 skipped, 0 todo"
+      "evidence": "476 passed, 0 failed, 0 skipped, 0 todo"
     },
     {
-      "command": "node scripts/agent-work-contract-activation.mjs --mode --config-file config/agent-work-contract-activation.json",
+      "command": "node --test scripts/check-exact-head-approval.test.mjs scripts/run-governed-review.test.mjs",
       "exit_code": 0,
-      "evidence": "reported enforced"
+      "evidence": "80 passed, 0 failed, 0 skipped, 0 todo"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "no whitespace errors"
     }
   ],
   "assumptions_resolved": [
-    "Merge-base-to-head classification does not mistake evidence added later on main for deletions made by an older pull request.",
-    "Only a change to both evidence files reaches current-pair validation; a one-file or unknown classification fails closed."
+    "The active/overflow reviewer snapshot is complete for its bounded roster; retired reviewers retain a direct-read path.",
+    "Each suffixed replacement sequence deterministically identifies the predecessor failure ref included in the same batch.",
+    "Live PR 2513 acceptance remains deferred until this repair merges and its exact head is rechecked."
   ],
   "stop_conditions_hit": []
 }
