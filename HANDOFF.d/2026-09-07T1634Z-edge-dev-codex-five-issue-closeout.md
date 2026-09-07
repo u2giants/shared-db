@@ -32,18 +32,18 @@ The five selected oldest high-impact non-structural/repository issues were #1031
 
 ## 3. Current state — what is true right now
 
-Moving facts were rechecked at 2026-09-07 16:34 UTC:
+Moving facts were rechecked at 2026-09-07 16:46 UTC:
 
-- Current `origin/main` was `b691e1f594d789ea1a3cd8c2f99236183cdd2ee1`. Maximum migration on that commit was `20260907131610_popsg_search_style_guide_library_v2.sql`. Recheck both before acting.
+- Current `origin/main` was `85015041f660bdebc5474751e63e12618d275b03`. Maximum migration on that commit was `20260907131610_popsg_search_style_guide_library_v2.sql`. Recheck both before acting.
 - The live marker was #2517, route `01a07bca-4662-7323-9a55-1f6499864bd1`, host `vps2`, titled `shared-db.orch PopDAM issue closeout`. This session's marker #2497 is closed. Always rerun `node scripts/check-orchestrator-marker.mjs --resolve`; do not route from this file.
 - Migration `20260906035323_style_group_rebuild_guard_and_ungroup.sql` is applied to production. Production run 34137289635 succeeded at exact main `7dade0beea9a484433297a7a4c1534ff77b65f4e`; ledger after-state contains the version and catalog checks passed for `public.rebuild_style_groups_batch` and its intended grants. Issue #2494 is closed.
 - Of the five selected issues, only #1031 is closed. #1090, #1322, #1403, and #1868 remain open.
 - #1090 is an umbrella repo-maintenance/documentation tracker. Its structural successors #2336, #2356, and #2357 are now dependency-eligible; #2358 still depends on #2336. This was sent to live orchestrator #2517.
-- #1322 remains blocked in GitHub, but its direction is recorded in its 2026-09-07 comment: replace PR #2278's restored Properties tab with the narrower linked-row status control using the existing #1952 guarded RPC and optimistic token.
+- #1322 remains open, but its narrow linked-row status control merged through PR #2514 as `85015041f660bdebc5474751e63e12618d275b03`. Do not revive PR #2278's removed Properties tree. Live/operational acceptance and the separate 66-row admission are not proven by the merge.
 - #1403 remains blocked. Its activation gates are authoritative in `config/agent-work-contract-activation.json`; do not flip either switch from the issue prose alone.
 - #1868 remains blocked while any orchestrator marker is open. Marker #2517 is open, so no reap is safe now.
 - PopSG issue #2506: PR #2512 merged at `b691e1f594d789ea1a3cd8c2f99236183cdd2ee1`; issue #2506 is still open and therefore production/closeout evidence is not complete.
-- PopSG issue #2509: PR #2513 is open, mergeable, exact head `92c168167fd6c873954ab648a9a9ff38c867d79a`; all 13 applicable CI checks pass, claim #2511 is open, and a `preview_ready` event exists. Its preview apply, governed merge, production promotion, and issue close are not proven.
+- PopSG issue #2509: PR #2513 is open and mergeable at refreshed exact head `122ff6dd76686f1399588378f422e18105760d00`; claim #2511 is open and a prior-head `preview_ready` event exists. Exact-head checks/review must be re-derived. Its preview apply, governed merge, production promotion, and issue close are not proven.
 - Preview is a shared mutable environment. This closeout did not run a fresh preview inventory. The immutable issue events prove readiness, not the current complete preview state; the live orchestrator must re-resolve the preview selector before dispatch.
 - The canonical checkout `C:\repos\shared-db` was deliberately not modified. It already contains another session's `.mcp.json` modification, four untracked `.ai/queue-audit-*.txt` files, and two older untracked handoffs. Preserve them and determine ownership before any cleanup.
 
@@ -70,7 +70,7 @@ Moving facts were rechecked at 2026-09-07 16:34 UTC:
 2. Let the live orchestrator finish #2506 from merged PR #2512 through the required production and closeout evidence. Success is issue #2506 closed with immutable run links and ledger/catalog proof.
 3. Continue #2509 / PR #2513 from exact current head only: re-resolve preview dispatch, apply preview, record matching independent verdict, guarded-merge, promote, and close. Success is issue #2509 closed, claim #2511 retired by the governed lifecycle, and production verification attached.
 4. For #1090, dispatch dependency-eligible structural successors #2336, #2356, and #2357 through independent author lanes; dispatch #2358 only after #2336 is proven complete. Success is all four successors closed with governed evidence, then #1090 reconciled and closed by its repo-maintenance owner.
-5. Resume the non-orchestrator five-issue thread for #1322 and #1403. For #1322, revise PR #2278 to the narrow status-only UI/control direction already posted. For #1403, evaluate the current activation JSON gates and change switches only if every recorded gate is true. Success is each issue closed with its required PR/live proof.
+5. Resume the non-orchestrator five-issue thread for #1322 and #1403. For #1322, verify PR #2514's narrow status-only control in the live workflow, keep the 66-row admission separate until that control is live, supersede/close PR #2278 appropriately, and close #1322 only with acceptance evidence. For #1403, evaluate the current activation JSON gates and change switches only if every recorded gate is true. Success is each issue closed with its required PR/live proof.
 6. Run #1868 only after `check-orchestrator-marker.mjs --resolve` proves zero open markers. Start with the reaper dry-run and preserve every dirty, locked, live, or unmerged worktree. Success is an evidence-backed apply report and #1868 closed without losing unique work.
 7. Re-run the queue audit and verify every remaining obligation has an open `db-work` issue. Success is a fully audited queue with no obligation existing only in prose.
 8. When all obligations above are proven complete, delete this handoff in the completing PR under the successor rule. Success is #1090 closed and every other obligation either closed or carried into a newer open handoff before deletion.
@@ -96,7 +96,7 @@ Moving facts were rechecked at 2026-09-07 16:34 UTC:
 
 ## 9. Open questions and risks
 
-- No owner question is open as of 2026-09-07 16:34 UTC.
+- No owner question is open as of 2026-09-07 16:46 UTC.
 - The marker, main SHA, maximum migration, PR heads, claims, and preview contents are moving facts; recheck immediately before action.
 - #2506 being open after merge likely means promotion/closeout is still running or pending. Do not infer production state from the merge.
 - #2513 has a non-authorizing failed-recording review comment followed by later findings. Only the durable exact-head verdict ref can authorize merge.
@@ -108,9 +108,9 @@ Moving facts were rechecked at 2026-09-07 16:34 UTC:
 ### Agent: non-orch shared-db / task `01a07bce-9266-7232-acf3-2d9f24fdaebf`
 
 - **Asked to do:** Resolve the five highest-impact non-orchestrator issues, oldest first.
-- **Actually did:** Closed #1031; completed and guarded-merged prerequisite repository repairs including #2504 / PR #2237 and #2157 / PR #2245; reconciled the remaining five-issue states and sent the structural successor request to the orchestrator.
+- **Actually did:** Closed #1031; completed and guarded-merged prerequisite repository repairs including #2504 / PR #2237 and #2157 / PR #2245; implemented the narrow #1322 control through merged PR #2514; reconciled the remaining five-issue states and sent the structural successor request to the orchestrator.
 - **Found:** #1090 cannot be closed until its exact structural successors land; #1322 had conflicting old/new owner rulings but now has a 2026-09-07 narrow-control direction; #1403 is gate-bound; #1868 is marker-bound.
-- **PR / branch:** Multiple completed prerequisite PRs are recorded on their issues; the current unfinished deliverables are the open issues and PR #2278, not one shared branch.
+- **PR / branch:** PR #2514 merged as `85015041f660bdebc5474751e63e12618d275b03`; older PR #2278 must be superseded/closed without reviving its removed tree. Other completed prerequisite PRs are recorded on their issues; remaining deliverables are issue acceptance and closure, not one shared branch.
 - **Worktree:** Worker task is no longer active in this coordinator. Its individual worktrees must be assessed by the reaper; do not assume safe from task state.
 - **Deliberately did NOT do, and why:** Did not author structural #1090 successors in a repo-maintenance context and did not reap worktrees while an orchestrator marker was open.
 
@@ -126,7 +126,7 @@ Moving facts were rechecked at 2026-09-07 16:34 UTC:
 ### Agent: issue 2509 PopSG preview stats
 
 - **Asked to do:** Repair PopSG preview-stat timeouts without increasing the timeout or removing existing behavior.
-- **Actually did:** Authored migration `20260907131728`, a contract test, and PR #2513. Exact head `92c168167fd6c873954ab648a9a9ff38c867d79a` has 13 applicable checks passing; claim #2511 remains open and a preview-ready event exists.
+- **Actually did:** Authored migration `20260907131728`, a contract test, and PR #2513. The author handoff head `92c168167fd6c873954ab648a9a9ff38c867d79a` passed its checks; the live orchestrator refreshed the branch to `122ff6dd76686f1399588378f422e18105760d00`, so exact-head gates must be re-derived. Claim #2511 remains open and a prior-head preview-ready event exists.
 - **Found:** The solution uses an additive classification contract and a compact partial expression index; the first attempted reviewer recording was invalid because its assignment was missing.
 - **PR / branch:** PR #2513 open; branch `codex/issue-2509-popsg-preview-stats`.
 - **Worktree:** Live/resumable through the current orchestrator; preserve until the issue is closed and GitHub proves merge state.
