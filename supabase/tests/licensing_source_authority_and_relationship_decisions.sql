@@ -296,20 +296,44 @@ begin
   end loop;
 
   -- ---------------------------------------------------------------------------------
-  -- 4. THE DOCUMENTED READ-SIDE LIMITATION, PINNED ON PURPOSE.
-  --    plm.source_resolution_target_missing() is NOT in issue #2335's claim, so a matched
-  --    licensor decision reads as target_missing = true through api.source_resolution.
-  --    That is the conservative direction -- "look at this", never "this is sound" -- and
-  --    it is asserted here so the successor that widens the helper and the view arrives at
-  --    a FAILING test rather than a silent behaviour change.
-  --    WHEN THAT SUCCESSOR LANDS: flip this expectation to false, do not delete it.
+  -- 4. THE READ PATH HAS PARITY WITH THE SIX-KIND WRITE PATH.
+  --    Issue #2493 widens target_missing and the view, so existing licensor and franchise
+  --    targets read as sound while a dangling durable target remains visible as missing.
   -- ---------------------------------------------------------------------------------
   select target_missing into v_bool from api.source_resolution
    where source_system = 'paramount' and entity_kind = 'licensor' and source_id = 'zz-lic-1';
+  if v_bool is not false then
+    raise exception 'CONTRACT: api.source_resolution reports an existing licensor target missing';
+  end if;
+
+  select target_missing into v_bool from api.source_resolution
+   where source_system = 'paramount' and entity_kind = 'franchise' and source_id = 'zz-fr-1';
+  if v_bool is not false then
+    raise exception 'CONTRACT: api.source_resolution reports an existing franchise target missing';
+  end if;
+
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'api' and table_name = 'source_resolution'
+       and column_name in ('core_licensor_id', 'core_franchise_id')
+     group by table_schema, table_name
+    having count(*) = 2
+  ) then
+    raise exception 'CONTRACT: api.source_resolution does not expose both new target columns';
+  end if;
+
+  insert into plm.source_resolution
+    (source_system, entity_kind, source_id, resolution_status, core_licensor_id,
+     resolution_reason, resolved_at, resolved_by)
+  values
+    ('paramount', 'licensor', 'zz-dangling-licensor', 'matched',
+     '00000000-0000-4000-8000-000000000001'::uuid,
+     'contract: preserved dangling decision', clock_timestamp(), 'issue-2493-contract');
+  select target_missing into v_bool from api.source_resolution
+   where source_system = 'paramount' and entity_kind = 'licensor'
+     and source_id = 'zz-dangling-licensor';
   if v_bool is not true then
-    raise exception 'CONTRACT: api.source_resolution.target_missing for a matched licensor '
-      'decision is no longer the documented conservative true -- the #2335 header note and '
-      'this assertion must be updated together';
+    raise exception 'CONTRACT: api.source_resolution hid a dangling licensor target';
   end if;
 
   -- ---------------------------------------------------------------------------------
