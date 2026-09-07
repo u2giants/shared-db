@@ -2263,8 +2263,9 @@ export function parseReviewLease(commit){
   //     belonged to. Saying so keeps those leases freed by their own verdict, as
   //     they always have been; leaving them UNKNOWN under the round-3 fail-closed
   //     liveness sentinel would have pinned them busy forever.
-  // `slot === null` means "not stated", and every caller falls back to the
-  // pre-#2208 any-slot question for those, so no legacy lease changes behavior.
+  // `slot === null` means "not stated". Liveness callers map that ambiguity to
+  // the slot-0 sentinel so no sibling verdict can reclaim the lease; the lease
+  // remains busy until its slot identity is repaired or otherwise resolved.
   const leaseMatch=/^db-coordination reviewer-lease generation=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40}) sequence=(\d+)$/i.exec(message)
   const cursorMatch=leaseMatch?null:/^db-coordination reviewer-cursor sequence=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40})(?: slot=(\d+))?$/i.exec(message)
   const replacementMatch=(leaseMatch||cursorMatch)?null:/^db-coordination reviewer-(?:failure-)?replacement sequence=(\d+) reviewer=([a-z0-9.-]+) issue=(\d+) pr=(\d+) head=([0-9a-f]{7,40})(?: slot=(\d+))? /i.exec(message)
@@ -3259,7 +3260,7 @@ function isReviewAssignmentLive(assignment,states,io){
 // FAIL OPEN, DELIBERATELY. If the refs cannot be listed, this returns null and
 // the caller keeps the ordinary rotation. A busy probe that cannot read GitHub
 // must never invent availability.
-export function findBusyReviewers(io,requested=[]){
+export function findBusyReviewers(io,requested=[],{keepUnreadableLeases=false}={}){
   if(typeof io.readRef!=='function')return null
   let cutover
   try{cutover=io.readRef(REVIEW_ACTIVE_CUTOVER_REF)}catch{return null}
@@ -3290,7 +3291,14 @@ export function findBusyReviewers(io,requested=[]){
     }catch{return null}
     if(prRow?.state!=='open'||prRow?.head?.sha!==assignment.headSha){stale.push({ref,sha,assignment});continue}
     let verdict
-    try{verdict=hasVerdictForHead(assignment.issue,assignment.pr,assignment.headSha,io,leaseVerdictOptions(assignment))}catch{return null}
+    try{verdict=hasVerdictForHead(assignment.issue,assignment.pr,assignment.headSha,io,leaseVerdictOptions(assignment))}catch{
+      // Capacity reporting must retain the readable lease row so it can expose
+      // the verdict read error on that row. Mutation callers keep the existing
+      // fail-closed whole-probe behavior.
+      if(!keepUnreadableLeases)return null
+      busy.add(assignment.reviewer)
+      continue
+    }
     if(verdict){stale.push({ref,sha,assignment});continue}
     busy.add(assignment.reviewer)
   }
@@ -3403,15 +3411,15 @@ function reclaimSilentReviewerOperation(options,now,io){
 export function reclaimSilentReviewer(options,now=new Date(),io=githubIo){return withReviewRequestBudget(()=>reclaimSilentReviewerOperation(options,now,io))}
 
 function reviewerCapacityReportOperation(io,now){
-  const busy=findBusyReviewers(io)
+  const busy=findBusyReviewers(io,[],{keepUnreadableLeases:true})
   if(!busy)throw new LaneError('active reviewer leases are unreadable; reviewer capacity is unknown')
   const staleByReviewer=new Map(busy.stale.map((row)=>[row.assignment.reviewer,row]))
   const rows=ACTIVE_REVIEWERS.map((reviewer)=>{
     const record=busy.leases.get(reviewer.name)
-    if(!record)return {reviewer:reviewer.name,held:false,issue:null,pr:null,headSha:null,sequence:null,heldSinceIso:null,ageHours:null,prState:null,headMatches:null,verdictPresent:false,lastActivityIso:null,silenceProbe:null,classification:'free'}
+    if(!record)return {reviewer:reviewer.name,held:false,issue:null,pr:null,headSha:null,sequence:null,heldSinceIso:null,ageHours:null,prState:null,headMatches:null,verdictPresent:false,verdictReadError:null,lastActivityIso:null,silenceProbe:null,classification:'free'}
     const state=busy.states?.get(`${record.lease.issue}:${record.lease.pr}`),pr=state?.pr
-    let verdictPresent=false
-    try{verdictPresent=hasVerdictForHead(record.lease.issue,record.lease.pr,record.lease.headSha,io,leaseVerdictOptions(record.lease))}catch{verdictPresent=false}
+    let verdictPresent=false,verdictReadError=null
+    try{verdictPresent=hasVerdictForHead(record.lease.issue,record.lease.pr,record.lease.headSha,io,leaseVerdictOptions(record.lease))}catch(error){verdictPresent=null;verdictReadError=String(error?.message??error)}
     const ageHours=reviewLeaseAgeHours(record.heldSince,now)
     let lastActivityIso=null,silenceProbe=null,silenceState=null
     if(typeof io.readLeaseActivity==='function'&&!staleByReviewer.has(reviewer.name)){
@@ -3422,13 +3430,13 @@ function reviewerCapacityReportOperation(io,now){
       }catch{silenceState='unknown'}
     }
     let classification
-    if(!state||!pr)classification='unknown'
+    if(verdictReadError!==null||!state||!pr)classification='unknown'
     else if(staleByReviewer.has(reviewer.name))classification='stale-reclaimable'
     else if(silenceState)classification=silenceState
     else if(ageHours===null)classification='unknown'
     else if(ageHours>=REVIEW_LEASE_SUSPECT_HOURS)classification='suspect-aged'
     else classification='live'
-    return {reviewer:reviewer.name,held:true,issue:record.lease.issue,pr:record.lease.pr,headSha:record.lease.headSha,sequence:record.lease.sequence,heldSinceIso:record.heldSince??null,ageHours:ageHours===null?null:Number(ageHours.toFixed(2)),prState:pr?.state??null,headMatches:pr?pr.head?.sha===record.lease.headSha:null,verdictPresent,lastActivityIso,silenceProbe,classification}
+    return {reviewer:reviewer.name,held:true,issue:record.lease.issue,pr:record.lease.pr,headSha:record.lease.headSha,sequence:record.lease.sequence,heldSinceIso:record.heldSince??null,ageHours:ageHours===null?null:Number(ageHours.toFixed(2)),prState:pr?.state??null,headMatches:pr?pr.head?.sha===record.lease.headSha:null,verdictPresent,verdictReadError,lastActivityIso,silenceProbe,classification}
   })
   let queue=[]
   if(io.enableReviewerQueue)try{queue=liveReviewerQueue(io)}catch{queue=null}
