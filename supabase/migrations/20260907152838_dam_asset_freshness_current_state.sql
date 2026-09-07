@@ -10,9 +10,9 @@
 --
 -- Existing rows are deliberately not rewritten. The new columns are nullable so
 -- their unknown historical freshness stays honest. Defaults make new rows complete,
--- while NOT VALID checks bind new and modified rows without scanning or rewriting
--- the live table. "Current" is the predicate missing_since is null, not a second
--- boolean that could drift away from the timestamp.
+-- while a row-aware guard requires freshness for new rows without scanning or
+-- rewriting history. Existing unknown timestamps survive unrelated metadata edits.
+-- "Current" is the predicate missing_since is null, not a second boolean that could drift away from the timestamp.
 
 alter table dam.asset
   add column if not exists first_seen_at timestamptz;
@@ -31,28 +31,6 @@ alter table dam.asset
 
 do $freshness_constraints$
 begin
-  if not exists (
-    select 1
-    from pg_constraint
-    where conrelid = 'dam.asset'::regclass
-      and conname = 'dam_asset_first_seen_present'
-  ) then
-    alter table dam.asset
-      add constraint dam_asset_first_seen_present
-      check (first_seen_at is not null) not valid;
-  end if;
-
-  if not exists (
-    select 1
-    from pg_constraint
-    where conrelid = 'dam.asset'::regclass
-      and conname = 'dam_asset_last_seen_present'
-  ) then
-    alter table dam.asset
-      add constraint dam_asset_last_seen_present
-      check (last_seen_at is not null) not valid;
-  end if;
-
   if not exists (
     select 1
     from pg_constraint
@@ -84,6 +62,35 @@ begin
   end if;
 end
 $freshness_constraints$;
+
+-- New rows require complete facts. Historical unknown facts remain unknown on
+-- metadata-only edits; once recorded, a fact cannot be erased back to NULL.
+create or replace function dam.enforce_asset_freshness()
+returns trigger
+language plpgsql
+security invoker
+set search_path = pg_catalog
+as $guard$
+begin
+  if tg_op = 'INSERT' then
+    if new.first_seen_at is null or new.last_seen_at is null then
+      raise check_violation using message = 'new Asset requires first_seen_at and last_seen_at';
+    end if;
+  else
+    if (old.first_seen_at is not null and new.first_seen_at is null)
+       or (old.last_seen_at is not null and new.last_seen_at is null) then
+      raise check_violation using message = 'recorded Asset freshness cannot become unknown';
+    end if;
+  end if;
+  return new;
+end;
+$guard$;
+
+revoke all on function dam.enforce_asset_freshness() from public, anon, authenticated, service_role;
+
+create or replace trigger dam_asset_freshness_guard
+before insert or update on dam.asset
+for each row execute function dam.enforce_asset_freshness();
 
 comment on column dam.asset.first_seen_at is
   'When this canonical Asset source identity was first observed. Null on rows that '
