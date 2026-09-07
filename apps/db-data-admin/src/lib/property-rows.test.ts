@@ -55,6 +55,18 @@ describe('flattenProperties', () => {
     expect(flattenProperties(tree)).toHaveLength(nested + tree.orphanProperties.length)
   })
 
+  it('carries updated_at as the status-change concurrency token', () => {
+    const rows = flattenProperties({
+      ...tree,
+      licensors: tree.licensors.map(licensor => ({
+        ...licensor,
+        properties: licensor.properties.map(property => ({ ...property, updated_at: '2026-08-20T12:00:00Z' })),
+      })),
+    })
+    expect(rows.find(row => !row.is_orphan)?.updated_at).toBe('2026-08-20T12:00:00Z')
+    expect(rows.find(row => row.is_orphan)?.updated_at).toBeNull()
+  })
+
   it('returns no rows for an empty tree', () => {
     expect(flattenProperties({ licensors: [], orphanProperties: [] })).toEqual([])
   })

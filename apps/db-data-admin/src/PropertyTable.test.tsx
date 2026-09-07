@@ -1,6 +1,6 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { PropertyTable } from './PropertyTable'
+import { PropertyTable, propertyColumns } from './PropertyTable'
 import type { ApiClient, LicensorTreeResult } from './lib/data-admin'
 
 afterEach(cleanup)
@@ -59,9 +59,31 @@ describe('PropertyTable', () => {
     expect(await screen.findByText('2 of 2 properties')).toBeInTheDocument()
   })
 
-  it('warns loudly when a property has no licensor', async () => {
+  it('does not present licensing relationships on the status-only surface', async () => {
     render(<PropertyTable client={makeClient(fixture)} />)
-    expect(await screen.findByRole('status')).toHaveTextContent('1 property has no licensor')
+    expect(await screen.findByText('2 of 2 properties')).toBeInTheDocument()
+    expect(screen.queryByText('Marvel')).not.toBeInTheDocument()
+    expect(screen.queryByText(/no licensor/i)).not.toBeInTheDocument()
+    expect(propertyColumns.map(column => column.name)).toEqual(['Property', 'Code', 'Status'])
+  })
+
+  it('hides inactive Properties by default and reveals them on request', async () => {
+    const inactiveFixture: LicensorTreeResult = {
+      ...fixture,
+      licensors: [{
+        ...fixture.licensors[0],
+        properties: [...fixture.licensors[0].properties, {
+          id: 'p-lapsed', name: 'Lapsed IP', code: 'LPS', status: 'inactive',
+          character_count: 0, source_refs: [], plm_context: [], updated_at: '2026-08-20T09:00:00Z',
+        }],
+      }],
+    }
+    const client = makeClient(inactiveFixture)
+    render(<PropertyTable client={client} />)
+    expect(await screen.findByText('2 of 2 properties')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Include inactive'))
+    expect(await screen.findByText('3 of 3 properties')).toBeInTheDocument()
+    expect(vi.mocked(client.rpc).mock.calls[1][1]).toMatchObject({ p_include_inactive: true })
   })
 
   it('stays silent about orphans when there are none', async () => {
