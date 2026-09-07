@@ -942,7 +942,7 @@ test('retired reviewer names stay resolvable so historical review evidence never
 test('the active rotation is exactly the current models, in a stable order',()=>{
   // Order and length are the round robin. A change here silently reassigns every
   // in-flight sequence to a different reviewer, so it must be asserted, not assumed.
-  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','muse-spark-1.2-contributor','codex-gpt-5.6-sol','gemini-3.8-flash-high'])
+  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3','muse-spark-1.2-contributor','codex-gpt-5.6-sol','gemini-3.8-flash-high'])
   assert.deepEqual(OVERFLOW_REVIEWERS,[])
   assert.equal(REVIEWERS.find((r)=>r.name==='kimi-k3').wrapper,'ai-kimi')
   assert.equal(REVIEWERS.find((r)=>r.name==='codex-gpt-5.6-sol').wrapper,'ai-codex-review')
@@ -1338,7 +1338,7 @@ test('terminal provider failure advances exactly once and retry is idempotent',(
   const io=failedReviewIo(), first=replaceFailedReviewer(replacementRequest,io), second=replaceFailedReviewer(replacementRequest,io)
   assert.equal(first.sequence,2);assert.equal(first.reviewer,'glm-5.3');assert.deepEqual(second,first)
   assert.equal(assignNextReviewer(failedReview,io).reviewer,'glm-5.3')
-  assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'muse-spark-1.2-contributor')
+  assert.equal(assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io).reviewer,'kimi-k3')
 })
 
 test('a retired reviewer is replaced cleanly, without an exclusion deadlock (#2078)',()=>{
@@ -1807,7 +1807,7 @@ test('two consecutive terminal no-verdict failures form an immutable idempotent 
   const first=replaceFailedReviewer(replacementRequest,io)
   const secondRequest={...replacementRequest,failedSequence:first.sequence,failureCode:'turn_limit_cancelled'}
   const second=replaceFailedReviewer(secondRequest,io)
-  assert.equal(first.sequence,2);assert.equal(second.sequence,3);assert.equal(second.reviewer,'muse-spark-1.2-contributor')
+  assert.equal(first.sequence,2);assert.equal(second.sequence,3);assert.equal(second.reviewer,'kimi-k3')
   assert.deepEqual(replaceFailedReviewer(replacementRequest,io),first)
   assert.deepEqual(replaceFailedReviewer(secondRequest,io),second)
   assert.equal(assignNextReviewer(failedReview,io).sequence,3)
@@ -1883,15 +1883,15 @@ test('reviewer replacement rejects a mismatched original assignment',()=>{
 // is a false invariant, and it is deliberately not asserted here. Both halves are
 // pinned below, with the exact successor named in each case.
 test('one intervening assignment gives a failed reviewer a named replacement',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,5,'this test describes the approved five-reviewer rotation (deepseek-chat retired, #2078; kimi-k3 paused 2026-09-03; gemini-3.8-flash-high added 2026-09-06)')
+  assert.equal(ACTIVE_REVIEWERS.length,6,'this test describes the approved six-reviewer rotation (deepseek-chat retired, #2078; gemini-3.8-flash-high added 2026-09-06; kimi-k3 unpaused 2026-09-07 by owner instruction after a passing wrapper doctor)')
   const io=failedReviewIo()
   assignNextReviewer({issue:10,pr:110,headSha:'abcdefa'},io)
   const replacement=replaceFailedReviewer(replacementRequest,io)
-  assert.equal(replacement.reviewer,'muse-spark-1.2-contributor')
+  assert.equal(replacement.reviewer,'kimi-k3')
 })
 
 test('N-1 intervening assignments skip the failed provider instead of stranding the replacement',()=>{
-  assert.equal(ACTIVE_REVIEWERS.length,5,'this test describes the approved five-reviewer rotation (deepseek-chat retired, #2078; kimi-k3 paused 2026-09-03; gemini-3.8-flash-high added 2026-09-06)')
+  assert.equal(ACTIVE_REVIEWERS.length,6,'this test describes the approved six-reviewer rotation (deepseek-chat retired, #2078; gemini-3.8-flash-high added 2026-09-06; kimi-k3 unpaused 2026-09-07 by owner instruction after a passing wrapper doctor)')
   const io=failedReviewIo()
   for(let n=0;n<ACTIVE_REVIEWERS.length-1;n+=1){
     assignNextReviewer({issue:20+n,pr:120+n,headSha:`abcde${n}f`},io)
@@ -1925,7 +1925,7 @@ test('a chained replacement skips TWO already-failed providers to reach the last
   const cursorBefore=parseReviewCursor(io.getCommit(io.refs.get(REVIEW_CURSOR_REF)))
   assert.equal(cursorBefore.sequence%ACTIVE_REVIEWERS.length,0,'the cursor must sit on a roster boundary for this to be a two-name skip')
   const second=replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence},io)
-  assert.equal(second.reviewer,'muse-spark-1.2-contributor')
+  assert.equal(second.reviewer,'kimi-k3')
   assert.equal(second.sequence,cursorBefore.sequence+3)
   assert.deepEqual(replaceFailedReviewer({...replacementRequest,failedSequence:first.sequence},io),second)
 })
@@ -1996,16 +1996,17 @@ test('review lease age is truthful for known and unknown commit dates',()=>{
 
 test('capacity report classifies free, live, stale, aged, and unknown leases without mutation',()=>{
   const io=reviewIo(),snapshot=new Map(),states=new Map(),now=new Date('2026-09-02T12:00:00Z')
-  // Five cases, one per active reviewer. 'verdict' returns here because
-  // gemini-3.8-flash-high (added 2026-09-06) restored the fifth slot: it reaches
+  // Six cases, one per active reviewer. 'verdict' returns here because it reaches
   // 'stale-reclaimable' by a different route than 'moved' -- a recorded verdict
-  // rather than a head that moved -- and both routes are worth proving.
+  // rather than a head that moved -- and both routes are worth proving. The sixth
+  // case exists because kimi-k3 was unpaused on 2026-09-07 (owner instruction).
   const cases=[
     {kind:'live',date:'2026-09-02T11:00:00Z'},
     {kind:'moved',date:'2026-09-02T10:00:00Z'},
     {kind:'aged',date:'2026-08-31T00:00:00Z'},
     {kind:'unknown',date:null},
     {kind:'verdict',date:'2026-09-02T10:00:00Z'},
+    {kind:'live',date:'2026-09-02T11:00:00Z'},
   ]
   cases.forEach((entry,index)=>{
     const reviewer=ACTIVE_REVIEWERS[index],issue=2300+index,pr=2400+index,headSha=`${index+1}`.repeat(40),sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=${index+1} reviewer=${reviewer.name} issue=${issue} pr=${pr} head=${headSha}`),commit={...io.getCommit(sha),committedDate:entry.date}
@@ -2017,16 +2018,16 @@ test('capacity report classifies free, live, stale, aged, and unknown leases wit
   io.readActiveReviewLeases=()=>snapshot
   io.readReviewStates=()=>states
   const before=new Map(io.refs),report=reviewerCapacityReport(io,now)
-  assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','stale-reclaimable'])
-  assert.deepEqual(report.summary,{total:5,free:0,live:2,reclaimable:2,silenceProbed:0,silenceReclaimable:0,unknown:1})
+  assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','stale-reclaimable','live'])
+  assert.deepEqual(report.summary,{total:6,free:0,live:3,reclaimable:2,silenceProbed:0,silenceReclaimable:0,unknown:1})
   assert.deepEqual(io.refs,before,'capacity report must be read-only')
   // 'free' is the fifth classification and it is a property of an ABSENT lease, so
   // it is proved by removing one rather than by needing a spare roster name.
   const freed=ACTIVE_REVIEWERS.at(-1).name
   snapshot.delete(reviewActiveRef(freed));io.refs.delete(reviewActiveRef(freed))
   const withFree=reviewerCapacityReport(io,now)
-  assert.deepEqual(withFree.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','free'])
-  assert.deepEqual(withFree.summary,{total:5,free:1,live:2,reclaimable:1,silenceProbed:0,silenceReclaimable:0,unknown:1})
+  assert.deepEqual(withFree.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','stale-reclaimable','free'])
+  assert.deepEqual(withFree.summary,{total:6,free:1,live:2,reclaimable:2,silenceProbed:0,silenceReclaimable:0,unknown:1})
 })
 
 function silentLeaseIo({heldSince='2026-09-04T10:00:00Z',activity=[]}={}){
@@ -4533,10 +4534,10 @@ test('retrying a slot-2 assignment must still refuse a reviewer that is no longe
   // Occupy grok-4.6 and glm-5.3 with unrelated live review work so the
   // rotation's next two picks for our real request land on muse (slot 1) then
   // codex-gpt-5.6-sol (slot 2), while the orchestrator engine is still 'claude'
-  // and codex is eligible. (kimi-k3 paused 2026-09-03, dropping the roster to
-  // four names, so only two reviewers need occupying now, not three.)
+  // and codex is eligible. (kimi-k3 was unpaused 2026-09-07, restoring the roster
+  // to six names, so three reviewers need occupying before codex is reached.)
   const io=reviewIo()
-  for(let n=0;n<2;n++)assignNextReviewer({issue:600+n,pr:700+n,headSha:`${n}`.repeat(40)},io)
+  for(let n=0;n<3;n++)assignNextReviewer({issue:600+n,pr:700+n,headSha:`${n}`.repeat(40)},io)
   const request={issue:206,pr:306,headSha:'9'.repeat(40)}
   const first=assignNextReviewer(request,io)
   assert.equal(first.reviewer,'muse-spark-1.2-contributor')

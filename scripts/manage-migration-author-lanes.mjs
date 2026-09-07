@@ -322,7 +322,12 @@ export const REVIEWERS = Object.freeze([
 // 2026-09-04T16:55Z. Whoever is orchestrating then should verify the cap has
 // actually lifted (do not assume the clock alone; confirm with a real doctor/attempt)
 // before removing 'kimi-k3' from this list and restoring its original rotation slot.
-export const RETIRED_REVIEWERS = Object.freeze(['glm-5.2', 'deepseek-chat', 'kimi-k3'])
+// UNPAUSED 2026-09-07 (owner instruction, this session): 'kimi-k3' is back in the
+// rotation. Its 2026-08-20 pause was a credit exhaustion plus wrapper launch
+// failure, both of which are gone: `AI_KIMI_CALLER=claude ai-kimi doctor` on this
+// machine reports kimi 0.36.1, model pin kimi-code/k3, read-only PASS, preflight
+// PASS and auth OK. Verified by running the doctor, not by reading the wrapper.
+export const RETIRED_REVIEWERS = Object.freeze(['glm-5.2', 'deepseek-chat'])
 
 // Not retired -- quarantined pending a passing live qualification (see the Qwen
 // note above). Kept separate from RETIRED_REVIEWERS on purpose: retirement is a
