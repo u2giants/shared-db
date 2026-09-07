@@ -1,34 +1,33 @@
 {
   "schema_version": 1,
-  "work_issue": 1403,
+  "work_issue": 2552,
   "outcome": "ready-for-merge",
-  "pr": 2547,
+  "pr": 2556,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/1403/2",
-  "contract_sha256": "ad49bd66c04a352c96c50a660a9e29ea93cd2243ee8bf3fedf9bfa835c91b560",
-  "head_sha": "7e10d7381a046a290005ba8a3b5efb703f7278e7",
+  "contract_ref": "refs/db-contracts/2552/1",
+  "contract_sha256": "817b29aef499051a0b6815dbd040dc04a3dc6b867044289a8c8547a70e635be8",
+  "head_sha": "16b961a19ec7123ebc69cd7185b1d199a7722b81",
   "files_changed": [
-    ".github/workflows/agent-work-contract.yml",
-    "scripts/agent-work-contract-git-evidence.mjs",
-    "scripts/agent-work-contract-git-evidence.test.mjs"
+    "HANDOFF.d/2026-09-07T2224Z-edge-dev-codex-orchestrator-transfer.md",
+    "docs/production-promotion-procedure.md"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "evidence": "Handoff contract satisfied for 1 changed file(s).",
       "exit_code": 0,
-      "evidence": "44 passed, 0 failed, 0 skipped, 0 todo"
+      "command": "node scripts/check-handoff-contract.mjs"
     },
     {
-      "command": "node scripts/agent-work-contract-activation.mjs --mode --config-file config/agent-work-contract-activation.json",
+      "evidence": "No whitespace errors.",
       "exit_code": 0,
-      "evidence": "reported enforced"
+      "command": "git diff --check"
     }
   ],
   "assumptions_resolved": [
-    "Merge-base-to-head classification does not mistake evidence added later on main for deletions made by an older pull request.",
-    "Only a change to both evidence files reaches current-pair validation; a one-file or unknown classification fails closed."
+    "Open inherited work and the next three undispatched priorities remain explicitly pending.",
+    "A separate contract pair is required by enforced mode for this closeout."
   ],
   "stop_conditions_hit": []
 }

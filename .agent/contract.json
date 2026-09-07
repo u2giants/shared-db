@@ -1,43 +1,36 @@
 {
   "schema_version": 1,
-  "work_issue": 1403,
-  "generation": 2,
-  "work_type": "repo-maintenance",
+  "work_issue": 2552,
+  "generation": 1,
+  "work_type": "documentation",
   "route": "repo-maintenance",
-  "goal": "Make enforced agent-work-contract checks distinguish inherited main evidence from evidence authored for the current pull request.",
-  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
+  "goal": "Preserve the orchestrator 2536 transfer and clarify genuine commit ancestry recovery for an open pull request.",
+  "base_sha": "b3219f73c0a111bf06889d490cdc398c9ca1018c",
   "dispatcher": "codex",
   "worker": "codex",
-  "branch": "codex/issue-1403-inherited-evidence",
-  "worktree": "C:/repos/shared-db-worktrees/issue-1403-inherited-evidence",
+  "branch": "codex/orch-2536-closeout",
+  "worktree": "C:/repos/shared-db-orch-2536-closeout",
   "allowed_paths": [
-    ".github/workflows/agent-work-contract.yml",
-    "scripts/agent-work-contract-git-evidence.mjs",
-    "scripts/agent-work-contract-git-evidence.test.mjs"
+    "HANDOFF.d/2026-09-07T2224Z-edge-dev-codex-orchestrator-transfer.md",
+    "docs/production-promotion-procedure.md"
   ],
   "file_writes": [
-    ".github/workflows/agent-work-contract.yml",
-    "scripts/agent-work-contract-git-evidence.mjs",
-    "scripts/agent-work-contract-git-evidence.test.mjs"
+    "HANDOFF.d/2026-09-07T2224Z-edge-dev-codex-orchestrator-transfer.md",
+    "docs/production-promotion-procedure.md"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not disable or weaken enforced mode.",
-    "Do not add Agent work contract as a required branch context before a new full green day completes.",
-    "Do not retire or weaken the legacy objects alias."
+    "Do not change database structure, data, producer code, or another session handoff."
   ],
   "required_checks": [
-    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
-    "node scripts/agent-work-contract-activation.mjs --mode --config-file config/agent-work-contract-activation.json"
+    "node scripts/check-handoff-contract.mjs",
+    "git diff --check"
   ],
   "assumptions": [
-    "Evidence files inherited byte-for-byte from the pull request base are not evidence authored for that pull request.",
-    "Changing both evidence files is required before their contents can govern the current pull request."
+    "This contract covers closeout documentation only; inherited database work remains open."
   ],
   "stop_conditions": [
-    "Stop if the repair would allow a non-grandfathered enforced pull request with no current evidence pair to pass.",
-    "Stop if changing only one evidence file could be treated as a complete pair.",
-    "Stop if implementation requires changing database structure or data."
+    "Stop if documentation requires an unverified completion claim or weakens a release gate."
   ]
 }
