@@ -3405,8 +3405,18 @@ test('active claim reversion rejects changed head, collision, dirty worktree, an
   assert.throws(()=>reversionActiveClaim(reversionArgs,NOW,reversionIo({localClean:()=>false})),/dirty/)
   assert.throws(()=>reversionActiveClaim(reversionArgs,NOW,reversionIo({reserveVersion:()=>({version:'20260816040000'})})),/not later/)
   assert.throws(()=>reversionActiveClaim({...reversionArgs,claim:999},NOW,reversionIo()),/not open/)
-  assert.throws(()=>reversionActiveClaim({...reversionArgs,issue:765},NOW,reversionIo()),/claim issue/)
-  assert.throws(()=>reversionActiveClaim({...reversionArgs,owner:'another'},NOW,reversionIo()),/claim issue/)
+  assert.throws(()=>reversionActiveClaim({...reversionArgs,issue:765},NOW,reversionIo()),/claim title does not identify exact issue #765/)
+  assert.throws(()=>reversionActiveClaim({...reversionArgs,owner:'another'},NOW,reversionIo()),/claim owner changed/)
+})
+test('issue 2188: version supersession accepts established claim-title forms and names the exact changed field',()=>{
+  for(const title of ['CLAIM: 764 sequence repair','CLAIM: issue #764 sequence repair','CLAIM: Issue 764 sequence repair']){
+    const io=reversionIo();io.issue.title=title
+    assert.equal(reversionActiveClaim(reversionArgs,NOW,io).newVersion,io.fresh,title)
+  }
+  const wrongTitle=reversionIo();wrongTitle.issue.title='CLAIM: 1764 unrelated work'
+  assert.throws(()=>reversionActiveClaim(reversionArgs,NOW,wrongTitle),/claim title does not identify exact issue #764/)
+  const wrongVersion=reversionIo();wrongVersion.issue.body=wrongVersion.issue.body.replace(reversionArgs.oldVersion,'20260816044639')
+  assert.throws(()=>reversionActiveClaim(reversionArgs,NOW,wrongVersion),/claim version changed/)
 })
 test('active claim reversion fails closed when mutex ownership is lost during partial failure',()=>{
   const io=reversionIo();io.commitAndPushReversion=()=>{io.refs.set(MUTEX_REF,'successor');throw new Error('push failed')}

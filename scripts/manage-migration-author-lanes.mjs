@@ -3923,7 +3923,11 @@ export function supersedeActiveClaimVersion(options,now=new Date(),io=githubIo){
   try{
     before=io.getIssue(request.claim);if(before?.state!=='open'||Number(before.number)!==request.claim)throw new LaneError(`claim #${request.claim} is not open`)
     const lease=parseAuthorLease(before.body,now)
-    if(lease.owner!==request.owner||lease.version!==request.oldVersion||lease.branch!==request.branch||lease.worktree!==request.worktree||!new RegExp(`#${request.issue}(?:\\D|$)`).test(before.title??''))throw new LaneError('claim issue, owner, lease, version, branch, or worktree changed')
+    if(workstreamKey(before.title)!==`#${request.issue}`)throw new LaneError(`claim title does not identify exact issue #${request.issue}: ${JSON.stringify(before.title??'')}`)
+    if(lease.owner!==request.owner)throw new LaneError('claim owner changed')
+    if(lease.version!==request.oldVersion)throw new LaneError('claim version changed')
+    if(lease.branch!==request.branch)throw new LaneError('claim branch changed')
+    if(lease.worktree!==request.worktree)throw new LaneError('claim worktree changed')
     const oldReservation=io.readRef(`refs/db-claims/${request.oldVersion}`);if(!oldReservation)throw new LaneError('old permanent reservation is missing')
     const pr=io.getPr(request.pr);if(pr?.state!=='open'||pr.head?.sha!==request.headSha||pr.head?.ref!==request.branch)throw new LaneError('open PR exact head or branch changed')
     const versions=migrationVersions(io.getPrFiles(request.pr));if(versions.length!==1||versions[0]!==request.oldVersion)throw new LaneError('PR must change exactly one migration at the current reserved version')
@@ -3983,7 +3987,9 @@ export function reissueMergedStrandedClaim(options,now=new Date(),io=githubIo){
     before=io.getIssue(request.claim)
     if(before?.state!=='open'||Number(before.number)!==request.claim)throw new LaneError(`claim #${request.claim} is not open`)
     const lease=parseAuthorLease(before.body,now)
-    if(lease.owner!==request.owner||lease.version!==request.oldVersion||!new RegExp(`#${request.issue}(?:\\D|$)`).test(before.title??''))throw new LaneError('claim issue, owner, or stranded version changed')
+    if(workstreamKey(before.title)!==`#${request.issue}`)throw new LaneError(`claim title does not identify exact issue #${request.issue}: ${JSON.stringify(before.title??'')}`)
+    if(lease.owner!==request.owner)throw new LaneError('claim owner changed')
+    if(lease.version!==request.oldVersion)throw new LaneError('claim stranded version changed')
     if(lease.branch===request.targetBranch||lease.worktree===request.targetWorktree)throw new LaneError('merged claim reissue requires a fresh target branch and worktree')
     const oldReservation=io.readRef(`refs/db-claims/${request.oldVersion}`)
     if(!oldReservation)throw new LaneError('old permanent reservation is missing')
@@ -4811,9 +4817,9 @@ export function acquireAuthorLane(options, now = new Date(), io = githubIo) {
 
 const SPLIT_REMAINDER = 'index plm.item_upper_trim_item_number_idx'
 function workstreamKey(title) {
-  const match = /^CLAIM:\s+(#[0-9]+(?:\/#?[0-9]+)*)\b/.exec(String(title ?? ''))
+  const match = /^CLAIM:\s+(?:issue\s+)?#?([0-9]+(?:\/#?[0-9]+)*)\b/i.exec(String(title ?? ''))
   if (!match) throw new LaneError('claim title does not identify one exact issue workstream')
-  return match[1]
+  return match[1].split('/').map((issue) => `#${issue.replace(/^#/, '')}`).join('/')
 }
 function migrationVersions(files) {
   const namedFiles=files.map((file)=>({file,name:file.filename ?? file.path ?? ''}))
