@@ -1,0 +1,58 @@
+#!/usr/bin/env node
+
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
+
+export class GitEvidenceError extends Error {}
+
+const SHA_PATTERN = /^[0-9a-f]{40}$/i
+const METADATA_FILES = Object.freeze(['.agent/completion.json', '.agent/contract.json'])
+
+export function verifyGitEvidence({ contract, report, prHeadSha }, io) {
+  if (!SHA_PATTERN.test(String(contract.base_sha ?? ''))) throw new GitEvidenceError('PR evidence requires contract.base_sha to be an exact 40-character SHA')
+  if (!SHA_PATTERN.test(String(report.head_sha ?? ''))) throw new GitEvidenceError('PR evidence requires report.head_sha to be an exact 40-character implementation SHA')
+  if (!SHA_PATTERN.test(String(prHeadSha ?? ''))) throw new GitEvidenceError('PR evidence requires the exact 40-character PR head SHA')
+  if (!io.isAncestor(contract.base_sha, report.head_sha)) throw new GitEvidenceError('contract base_sha is not an ancestor of the reported implementation head')
+  if (!io.isAncestor(report.head_sha, prHeadSha)) throw new GitEvidenceError('reported implementation head is not an ancestor of the checked PR head')
+
+  const actualFiles = [...io.changedFiles(contract.base_sha, report.head_sha)].sort()
+  const reportedFiles = [...report.files_changed].sort()
+  if (JSON.stringify(actualFiles) !== JSON.stringify(reportedFiles)) {
+    throw new GitEvidenceError(`reported files_changed does not match Git: expected [${actualFiles.join(', ')}], got [${reportedFiles.join(', ')}]`)
+  }
+
+  const afterImplementation = [...io.changedFiles(report.head_sha, prHeadSha)].sort()
+  if (afterImplementation.length !== METADATA_FILES.length || afterImplementation.some((file, index) => file !== METADATA_FILES[index])) {
+    throw new GitEvidenceError(`only the two .agent evidence files may follow report.head_sha; found [${afterImplementation.join(', ')}]`)
+  }
+  return true
+}
+
+export const gitIo = {
+  isAncestor(ancestor, descendant) {
+    try { execFileSync('git', ['merge-base', '--is-ancestor', ancestor, descendant], { stdio: 'ignore' }); return true }
+    catch { return false }
+  },
+  changedFiles(from, to) {
+    return execFileSync('git', ['diff', '--name-only', '--diff-filter=ACDMRTUXB', from, to], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean)
+  },
+}
+
+export function main(argv, io = gitIo) {
+  const values = {}
+  for (let i = 0; i < argv.length; i += 2) values[argv[i]] = argv[i + 1]
+  try {
+    if (!values['--contract-file'] || !values['--report-file'] || !values['--pr-head-sha']) throw new GitEvidenceError('usage: --contract-file <path> --report-file <path> --pr-head-sha <sha>')
+    const contract = JSON.parse(readFileSync(values['--contract-file'], 'utf8'))
+    const report = JSON.parse(readFileSync(values['--report-file'], 'utf8'))
+    verifyGitEvidence({ contract, report, prHeadSha: values['--pr-head-sha'] }, io)
+    console.log('Git evidence matches the contract and completion report.')
+    return 0
+  } catch (failure) {
+    console.error(failure.message)
+    return 1
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) process.exitCode = main(process.argv.slice(2))

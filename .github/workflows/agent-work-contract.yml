@@ -32,6 +32,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -45,7 +47,7 @@ jobs:
       - name: Report the activation mode, so nobody has to guess
         run: |
           set -euo pipefail
-          MODE=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('config/agent-work-contract-activation.json','utf8')).mode)")
+          MODE=$(node scripts/agent-work-contract-activation.mjs --mode --config-file config/agent-work-contract-activation.json)
           echo "mode=$MODE" >> "$GITHUB_ENV"
           {
             echo "## Agent work contract — $MODE"
@@ -62,6 +64,8 @@ jobs:
       - name: Validate any contract and report carried by this pull request
         env:
           MODE: ${{ env.mode }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           # Convention: a PR that declares a contract commits it alongside its
@@ -75,6 +79,9 @@ jobs:
               echo "No contract on this pull request; report-only mode allows it."
               exit 0
             fi
+            if node scripts/agent-work-contract-activation.mjs --is-grandfathered --config-file config/agent-work-contract-activation.json --pr "$PR_NUMBER" --head-sha "$PR_HEAD_SHA"; then
+              exit 0
+            fi
             echo "::error::Enforced mode requires $CONTRACT and $REPORT on every pull request."
             exit 1
           fi
@@ -86,4 +93,11 @@ jobs:
           if [ ! -f "$REPORT" ]; then echo "::error::$CONTRACT exists but $REPORT does not; the work never reported against its contract."; exit 1; fi
 
           node scripts/agent-work-contract.mjs --validate-contract --contract-file "$CONTRACT"
-          node scripts/agent-work-contract.mjs --validate-completion --report-file "$REPORT" --contract-file "$CONTRACT"
+          PR_ARGS=()
+          if [ -n "$PR_NUMBER" ]; then
+            PR_ARGS+=(--expected-pr "$PR_NUMBER" --expected-head-sha "$PR_HEAD_SHA")
+          fi
+          node scripts/agent-work-contract.mjs --validate-completion --report-file "$REPORT" --contract-file "$CONTRACT" "${PR_ARGS[@]}"
+          if [ -n "$PR_NUMBER" ]; then
+            node scripts/agent-work-contract-git-evidence.mjs --contract-file "$CONTRACT" --report-file "$REPORT" --pr-head-sha "$PR_HEAD_SHA"
+          fi
