@@ -7,6 +7,10 @@ insert into auth.users (id, email) values
   ('25060000-0000-4000-8000-000000000002', 'zz2506-denied@example.invalid');
 set local session_replication_role = origin;
 
+insert into public.profiles (user_id, email) values
+  ('25060000-0000-4000-8000-000000000001', 'zz2506-authorized@example.invalid'),
+  ('25060000-0000-4000-8000-000000000002', 'zz2506-denied@example.invalid');
+
 insert into public.app_access (user_id, app)
 values ('25060000-0000-4000-8000-000000000001', 'styleguides');
 
