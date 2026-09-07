@@ -383,7 +383,7 @@ begin
       and contype = 'f'
       and confrelid = 'core.character'::regclass
       and (
-        select array_agg(a.attname order by a.attname)
+        select array_agg(a.attname::text order by a.attname)
         from unnest(conkey) as k(attnum)
         join pg_attribute a on a.attrelid = conrelid and a.attnum = k.attnum
       ) = array['character_id','licensor_id']
