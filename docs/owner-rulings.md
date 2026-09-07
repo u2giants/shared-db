@@ -37,6 +37,7 @@
 | [6.17](#617-owner-ruling-designflows-numeric-division-ids-are-wrong-and-do-not-come-to-this-database-the-coldlion-division-code-is-the-only-division-there-is-albert-hazan-2026-08-19) | OWNER RULING — DesignFlow's numeric division ids are WRONG and do NOT come to this database; the ColdLion division CODE is the only division there is (Albert Hazan, 2026-08-19) |
 | [6.16](#616-owner-ruling-licence-contracts-are-not-a-source-for-this-database-and-licence-term-and-territory-do-not-belong-in-it-at-all-albert-hazan-2026-08-19) | OWNER RULING — licence CONTRACTS are NOT a source for this database, and licence TERM and TERRITORY do not belong in it at all (Albert Hazan, 2026-08-19) |
 | [6.18](#618-owner-ruling-albert-does-not-sign-off-on-technical-risk-never-gate-on-a-judgement-he-cannot-make-albert-hazan-2026-08-18) | OWNER RULING — Albert does not sign off on technical risk; never gate on a judgement he cannot make (Albert Hazan, 2026-08-18) |
+| [6.19](#619-owner-ruling-contact-information-does-not-belong-in-this-system-at-all-except-popcrm-routing-email-albert-hazan-2026-09-06) | OWNER RULING — contact information does not belong in this system at all, except PopCRM routing email (Albert Hazan, 2026-09-06) |
 
 ---
 
@@ -1585,6 +1586,43 @@ by this ruling.** Withdraw the clause in place, cite this section, and say who d
 The first application was issue #1812: a plan sentence reserving the reviewer wire-request
 ceiling for Albert was withdrawn, because keeping the old ceiling did not preserve an owner
 decision — it broke one, refusing 100% of the two-independent-reviewer assignments §4 requires.
+
+### 6.19 OWNER RULING — contact information does not belong in this system at all, except PopCRM routing email (Albert Hazan, 2026-09-06)
+
+> "we shouldn't be importing any contact information into any part of this system except
+> email addresses in popcrm to determine routing for emails."
+> — Albert Hazan, 2026-09-06
+
+**The rule.** No contact information is imported into any part of this system. Not email
+addresses, phone numbers, personal addresses, or any other means of reaching a named person
+— for artists, factory or vendor staff, customer staff, or anyone else.
+
+**The one exception.** Email addresses in **PopCRM**, held for the single purpose of
+determining routing for outbound email. That exception is bounded by its purpose: it does
+not license storing other contact fields alongside those addresses, and it does not extend
+to any other application or schema.
+
+**This is stronger than §6.14 and does not replace it.** §6.14 says personal identifiers
+must not appear in anything we *write* — documents, issues, commits — because this
+repository is public. This ruling says such data must not be *imported into the database*
+in the first place, public repository or not. Both apply.
+
+**What it obliges you to do.**
+
+1. Do not add a column, table, staging field, or import mapping that carries contact
+   information, and do not accept one from a source feed. If a source supplies it, drop it
+   at the boundary rather than landing it and cleaning it up later.
+2. When contact information is found already resident, it is removed — not masked, not
+   left in place with a note. Removal of an existing column is a structural change and takes
+   the normal migration-author route.
+3. Historical or frozen data is not exempt. First application: issue #2110, the
+   `designflow_frozen_20260710` schema, where the resident contact data was 11 rows of
+   `artists.email` plus four never-populated `customers` contact columns.
+
+**Why it matters beyond privacy.** Contact data is the one class of content whose value to
+us is near zero and whose cost on exposure is unbounded — it is not part of any business
+question this database answers. Keeping it creates an obligation with no corresponding
+benefit.
 
 ---
 
