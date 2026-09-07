@@ -12,10 +12,9 @@ import type { AdminRow, LoadedTree, PlmContextEntry, PropertyNode, TaxonomyNode 
  * The table is read-only in v1 for the same reason the tree is: DesignFlow owns
  * the Licensor -> Property edge.
  *
- * No "Updated" column: the tree contract carries `updated_at` on licensors and
- * on orphan properties, but NOT on properties nested under a licensor. Showing
- * a column that is blank for almost every row would read as missing data, so it
- * is left out until the contract carries it for every property.
+ * The current tree contract carries `updated_at` on every property. The status
+ * control forwards it as an optimistic-concurrency token but does not display
+ * the timestamp as a user-facing column.
  */
 export type PropertyRow = AdminRow & {
   id: string
@@ -28,6 +27,7 @@ export type PropertyRow = AdminRow & {
   source_display: string
   plm_display: string
   is_orphan: boolean
+  updated_at: string | null
 }
 
 /** `MV · Marvel/property · 1234` style provenance summary, one chip per ref. */
@@ -75,6 +75,7 @@ function toRow(property: PropertyNode, licensorName: string, licensorCode: strin
     source_display: formatSourceRefs(property),
     plm_display: formatPlmContext(property),
     is_orphan: isOrphan,
+    updated_at: property.updated_at ?? null,
   }
 }
 
