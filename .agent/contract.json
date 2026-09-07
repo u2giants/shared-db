@@ -1,36 +1,43 @@
 {
   "schema_version": 1,
-  "work_issue": 2552,
+  "work_issue": 2037,
   "generation": 1,
-  "work_type": "documentation",
+  "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Preserve the orchestrator 2536 transfer and clarify genuine commit ancestry recovery for an open pull request.",
-  "base_sha": "b3219f73c0a111bf06889d490cdc398c9ca1018c",
+  "goal": "Refuse pull requests that edit a migration version already applied to preview or production.",
+  "base_sha": "695a38c266b0c6d874aff1b9f1696f546f1239e6",
   "dispatcher": "codex",
   "worker": "codex",
-  "branch": "codex/orch-2536-closeout",
-  "worktree": "C:/repos/shared-db-orch-2536-closeout",
+  "branch": "codex/issue-2037-applied-migration-guard",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2037-applied-migration-guard",
   "allowed_paths": [
-    "HANDOFF.d/2026-09-07T2224Z-edge-dev-codex-orchestrator-transfer.md",
-    "docs/production-promotion-procedure.md"
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/check-applied-migration-edit.mjs",
+    "scripts/check-applied-migration-edit.test.mjs"
   ],
   "file_writes": [
-    "HANDOFF.d/2026-09-07T2224Z-edge-dev-codex-orchestrator-transfer.md",
-    "docs/production-promotion-procedure.md"
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/check-applied-migration-edit.mjs",
+    "scripts/check-applied-migration-edit.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not change database structure, data, producer code, or another session handoff."
+    "Do not change or apply any migration, database structure, or database row."
   ],
   "required_checks": [
-    "node scripts/check-handoff-contract.mjs",
+    "node --test scripts/check-applied-migration-edit.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
+    "node scripts/check-throughput-truth-audit.mjs",
     "git diff --check"
   ],
   "assumptions": [
-    "This contract covers closeout documentation only; inherited database work remains open."
+    "The completed forward migration remediation remains valid; this issue is prevention-only."
   ],
   "stop_conditions": [
-    "Stop if documentation requires an unverified completion claim or weakens a release gate."
+    "Stop if prevention requires a write-capable ledger identity or weakens the new-migration workflow."
   ]
 }

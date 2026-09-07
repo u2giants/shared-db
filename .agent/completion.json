@@ -1,23 +1,31 @@
 {
   "schema_version": 1,
-  "work_issue": 2552,
+  "work_issue": 2037,
   "outcome": "ready-for-merge",
-  "pr": 2556,
+  "pr": 2561,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2552/1",
-  "contract_sha256": "817b29aef499051a0b6815dbd040dc04a3dc6b867044289a8c8547a70e635be8",
-  "head_sha": "8b183e2190012ef32d846fb5e54d6ea3a2fb5a75",
+  "contract_ref": "refs/db-contracts/2037/1",
+  "contract_sha256": "c7ce92e2b09a6b01a304a9a21d67315e3103e79b513c0b643462776ca0788b98",
+  "head_sha": "0416f5c39cad6994ff684a8389393747e606702c",
   "files_changed": [
-    "HANDOFF.d/2026-09-07T2224Z-edge-dev-codex-orchestrator-transfer.md",
-    "docs/production-promotion-procedure.md"
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/check-applied-migration-edit.mjs",
+    "scripts/check-applied-migration-edit.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "evidence": "Handoff contract satisfied for 1 changed file(s).",
+      "evidence": "29 focused guard and semantic-audit tests passed.",
       "exit_code": 0,
-      "command": "node scripts/check-handoff-contract.mjs"
+      "command": "node --test scripts/check-applied-migration-edit.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs"
+    },
+    {
+      "evidence": "truth audit OK: call_sites=256",
+      "exit_code": 0,
+      "command": "node scripts/check-throughput-truth-audit.mjs"
     },
     {
       "evidence": "No whitespace errors.",
@@ -26,8 +34,8 @@
     }
   ],
   "assumptions_resolved": [
-    "Open inherited work and the next three undispatched priorities remain explicitly pending.",
-    "A separate contract pair is required by enforced mode for this closeout."
+    "The historic schema mismatch was already repaired forward and verified in production.",
+    "This pull request contains prevention tooling only and performs no database write."
   ],
   "stop_conditions_hit": []
 }
