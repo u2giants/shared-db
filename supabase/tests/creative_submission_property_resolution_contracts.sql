@@ -102,6 +102,7 @@ begin
   insert into plm.dcp_opa_property_resolution(resolution_id,source_system,source_table,source_property_id,
     decision_version,approval_status,evidence_reference,evidence_sha256,decision_reason)
     values(legacy,'synthetic_creative','plm.dcp_property',key_prefix||'-legacy',1,'pending','synthetic',repeat('b',64),'synthetic');
+  perform pg_temp.crosswalk_member(legacy,'legacy-member');
   select p.id,p.auth_user_id into strict profile_id,auth_id from app.profile p
     where p.status='active' and p.auth_user_id is not null order by p.created_at,p.id limit 1;
   insert into app.user_role(profile_id,role_id)
@@ -111,10 +112,18 @@ begin
   set local role authenticated;
   if not exists(select 1 from plm.dcp_opa_property_resolution where resolution_id=legacy) then
     raise exception 'positive control: original authorized DCP read was lost'; end if;
+  if not exists(select 1 from plm.dcp_opa_property_resolution_member where resolution_id=legacy) then
+    raise exception 'positive control: original authorized DCP member read was lost'; end if;
   select count(*) into current_count from plm.dcp_opa_property_resolution where resolution_id in (unmapped,conflict,first_map,second_map);
   if current_count<>0 then raise exception 'generic decisions leaked through DCP table grant'; end if;
   select count(*) into current_count from plm.dcp_opa_property_resolution_member where resolution_id in (unmapped,conflict,first_map,second_map);
   if current_count<>0 then raise exception 'generic members leaked through DCP table grant'; end if;
+  reset role;
+  perform set_config('request.jwt.claim.sub',gen_random_uuid()::text,true);
+  set local role authenticated;
+  if exists(select 1 from plm.dcp_opa_property_resolution where resolution_id=legacy)
+     or exists(select 1 from plm.dcp_opa_property_resolution_member where resolution_id=legacy) then
+    raise exception 'unentitled signed-in account gained legacy DCP access'; end if;
   reset role;
 end;
 $$;
