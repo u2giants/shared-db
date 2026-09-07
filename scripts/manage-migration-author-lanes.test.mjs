@@ -867,8 +867,11 @@ test('merged-head replacement reuses the bounded target snapshot instead of rere
   assert.notEqual(result.reviewer,'codex-gpt-5.6-sol')
 })
 
-// ACTIVE ROTATION (owner instruction, 2026-08-28). Codex GPT-5.6 Sol and
-// DeepSeek are ordinary approved reviewers. All-busy must fail closed.
+// ACTIVE ROTATION (owner instruction, 2026-08-28). Codex GPT-5.6 Sol and DeepSeek
+// were ordinary approved reviewers then; BOTH ARE RETIRED NOW (DeepSeek for
+// fabricated reviews, Codex on 2026-09-06 for an exhausted account), so this
+// fixture occupies whatever ACTIVE_REVIEWERS currently holds. All-busy must fail
+// closed.
 function busyIo(){
   // Each active rotation reviewer holds one live assignment: an open PR, still
   // at the head it was given, with no verdict recorded.
@@ -1075,7 +1078,21 @@ test('a Codex orchestrator draws the whole active roster and still refuses the r
   const assigned=[]
   for(let n=1;n<=ACTIVE_REVIEWERS.length;n++)assigned.push(assignNextReviewer({issue:700+n,pr:800+n,headSha:n.toString(16).padStart(40,'a')},io).reviewer)
   assert.deepEqual([...assigned].sort(),ACTIVE_REVIEWERS.map((row)=>row.name).sort(),'a Codex orchestrator must not narrow the current roster')
-  assert.ok(!assigned.includes('codex-gpt-5.6-sol'))
+  // grok-4.6, round 2: `assert.ok(!assigned.includes('codex-...'))` used to sit
+  // here and is gone -- `assigned` was just asserted equal to ACTIVE_REVIEWERS,
+  // which cannot contain a retired name, so it could not fail for any reason.
+  //
+  // The preflight refusal below is kept, but say what it now proves: a RETIRED
+  // name is refused execution. It is not engine coverage. `reviewerExecutionPreflight`
+  // resolves through `reviewersForOrchestrator()` with its ACTIVE_REVIEWERS
+  // default and takes no roster argument, so the case it used to cover -- an
+  // ACTIVE, engine-matching reviewer refused at execution time -- cannot be
+  // built at this call site at all while no active reviewer carries an engine.
+  // Swapping the resolver to 'claude' below would throw the same error. The
+  // engine filter itself is covered non-vacuously in 'the orchestrator engine is
+  // never eligible to review its own work', against REVIEWERS and a synthetic
+  // roster; the assertion above is what would notice an engine-carrying name
+  // re-entering the active roster and make this call site meaningful again.
   const preflight={...preflightIo(),resolveOrchestratorEngine:()=> 'codex'}
   assert.throws(()=>reviewerExecutionPreflight({reviewer:'codex-gpt-5.6-sol',wrapper:'ai-codex-review',worktree:'C:/review',headSha:failedReview.headSha},preflight),/approved reviewer/)
 })
