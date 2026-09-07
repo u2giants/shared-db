@@ -164,6 +164,11 @@ begin
 end;
 $$;
 
+-- Capture every response field before the volume insert for exact parity.
+create temporary table preview_stats_volume_baseline on commit drop as
+select public.get_sg_preview_stats()::jsonb as stats;
+grant select on preview_stats_volume_baseline to authenticated;
+
 -- Exercise a population larger than the observed active production set. The
 -- enclosing transaction rolls every fixture back, and the lower local timeout
 -- proves the function does not depend on relaxing the caller's timeout.
@@ -176,12 +181,18 @@ select gen_random_uuid(), 'ZZ2509-VOLUME', 'ZZ2509-VOLUME/' || g || '.pdf',
        'https://example.invalid/' || g || '.png', null
 from generate_series(1, 250000) g;
 
+analyze public.style_guide_files;
+analyze public.style_guide_render_queue;
+
 -- Prove the expression index against representative cardinality. On the tiny
 -- fixture above PostgreSQL correctly prefers the narrower is_active bitmap
 -- index, which says nothing about the production aggregate plan.
 do $$
 declare
   v_plan json;
+  v_seqscan text := current_setting('enable_seqscan');
+  v_bitmapscan text := current_setting('enable_bitmapscan');
+  v_hashagg text := current_setting('enable_hashagg');
 begin
   perform set_config('enable_seqscan', 'off', true);
   perform set_config('enable_bitmapscan', 'off', true);
@@ -237,18 +248,34 @@ begin
     raise exception 'preview category index cannot serve the representative aggregate plan: %',
       v_plan;
   end if;
+  -- This check proves index usability only. Restore the caller's exact
+  -- planner settings before testing its natural plan and authenticated timing.
+  perform set_config('enable_seqscan', v_seqscan, true);
+  perform set_config('enable_bitmapscan', v_bitmapscan, true);
+  perform set_config('enable_hashagg', v_hashagg, true);
 end;
 $$;
 
+set local role authenticated;
 set local statement_timeout = '5s';
 
 do $$
 declare
-  v_stats json;
+  v_stats jsonb;
+  v_expected jsonb;
 begin
-  v_stats := public.get_sg_preview_stats();
-  if (v_stats->>'has_preview')::bigint < 250000 then
-    raise exception 'representative-volume preview count was incomplete: %', v_stats;
+  if current_user <> 'authenticated' then
+    raise exception 'representative-volume call is not authenticated';
+  end if;
+  select jsonb_set(
+    jsonb_set(stats, '{total_active}',
+      to_jsonb((stats->>'total_active')::bigint + 250000)),
+    '{has_preview}', to_jsonb((stats->>'has_preview')::bigint + 250000))
+  into strict v_expected from preview_stats_volume_baseline;
+  v_stats := public.get_sg_preview_stats()::jsonb;
+  if v_stats is distinct from v_expected then
+    raise exception 'natural-plan authenticated count parity failed: expected %, actual %',
+      v_expected, v_stats;
   end if;
 end;
 $$;
