@@ -1622,7 +1622,7 @@ class BehavioralSidecarTests(unittest.TestCase):
         temp, root, migration = self.fixture(change)
         with temp:
             sql = build_behavior_sql(self.load(root, migration))
-        forward = Path(__file__).resolve().parents[1] / "supabase/migrations/20260907183041_popsg_search_v2_bounded_paging.sql"
+        forward = Path(__file__).resolve().parents[1] / "supabase/migrations/20260908195355_popsg_search_v2_bounded_paging.sql"
         import hashlib
         expected = hashlib.md5(forward.read_text().split("$function$")[1].encode()).hexdigest()
         self.assertIn(expected, sql)
