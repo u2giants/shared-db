@@ -1,77 +1,21 @@
 {
   "schema_version": 1,
-  "generation": 3,
-  "work_issue": 2506,
-  "work_type": "structural",
-  "route": "shared-db-orchestrator",
-  "goal": "Preserve exact authorized PopSG Files and Guides search results, facets and filters while meeting the existing bounded preview response budget.",
-  "base_sha": "3f1326b64d1ff0adc52fe34ee404be717328d015",
-  "dispatcher": "codex shared-db.orch marker2536 route01a07ceb-249b-7dc0-8f3a-ad5091e3a085",
-  "worker": "codex recovery_2506 successor of stopped inherited worker",
-  "branch": "codex/issue-2506-search-performance",
-  "worktree": "/tmp/shared-db-orch-2536-2506-performance",
-  "allowed_paths": [
-    "supabase/migrations/20260907183041_popsg_search_v2_bounded_paging.sql",
-    "supabase/tests/popsg_search_style_guide_library_v2_contracts.sql",
-    "scripts/benchmark_popsg_search_v2.py",
-    "scripts/production-verification-sidecars/20260907183041.json",
-    "scripts/production_business_risk_gate.py",
-    ".agent/contract.json",
-    ".agent/completion.json",
-    "scripts/production_catalog_verification.py",
-    "scripts/test_production_catalog_verification.py",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json"
-  ],
-  "file_writes": [
-    "supabase/migrations/20260907183041_popsg_search_v2_bounded_paging.sql",
-    "supabase/tests/popsg_search_style_guide_library_v2_contracts.sql",
-    "scripts/benchmark_popsg_search_v2.py",
-    "scripts/production-verification-sidecars/20260907183041.json",
-    "scripts/production_business_risk_gate.py",
-    ".agent/contract.json",
-    ".agent/completion.json",
-    "scripts/production_catalog_verification.py",
-    "scripts/test_production_catalog_verification.py",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json"
-  ],
-  "db_reads": [
-    "table public.style_guide_search_documents",
-    "table public.style_guide_files",
-    "table public.style_guide_render_queue",
-    "function public.has_app_access",
-    "function auth.uid",
-    "function auth.role"
-  ],
-  "db_writes": [
-    "function public.search_style_guide_library_v2"
-  ],
-  "prohibited_actions": [
-    "Do not edit applied version20260907131610",
-    "Do not alter indexes,grants or other functions",
-    "Do not change exact counts,facets,authorization or filter semantics",
-    "Do not push during the coordinator hold or dispatch preview,merge,production without coordinator approval",
-    "Do not publish licensed row contents or credentials"
-  ],
-  "required_checks": [
-    "bash scripts/check-sql.sh",
-    "python3 scripts/test_migration_derivation.py",
-    "python3 scripts/benchmark_popsg_search_v2.py",
-    "git diff --check"
-  ],
-  "assumptions": [
-    "Claim2510 guards reserved forward version20260907183041",
-    "Prior worker stopped per2534; successor owns isolated target",
-    "Representative preview has217193active files and1773guides; no synthetic shared-preview load needed",
-    "Independent exact-head review and live governed deployment acceptance remain pending after implementation checks",
-    "Generation2 authorizes focused CI repair after generation1 implementation: meaningful named catalog verification and explicit semantic-audit disposition; generation1 remains immutable.",
-    "Registered catalog predicate changes source hash of detector module; regenerate bound baseline with unchanged detector behavior and historical inventory."
-  ],
-  "stop_conditions": [
-    "Claim or marker ownership changes",
-    "Any necessary SQL object lies outside function public.search_style_guide_library_v2",
-    "A proposed optimization changes complete baseline JSON semantics",
-    "An evidence or production gate refuses; do not bypass or increase timeout"
-  ]
+  "work_issue": 2188,
+  "generation": 4,
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Make claim-version supersession accept established unambiguous claim-title forms and name the exact identity field that changed.",
+  "base_sha": "dc3d144055c282d0708fb8efe8d9770394f003f0",
+  "dispatcher": "codex",
+  "worker": "codex",
+  "branch": "codex/issue-2188-claim-title",
+  "worktree": "C:/Users/ahazan/.codex/worktrees/issue-2188-shared-db",
+  "allowed_paths": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
+  "file_writes": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
+  "db_reads": [],
+  "db_writes": [],
+  "prohibited_actions": ["Do not change database structure or data, relax exact-issue binding, or mutate live claims during verification."],
+  "required_checks": ["node --test scripts/manage-migration-author-lanes.test.mjs", "git diff --check"],
+  "assumptions": ["Claim titles beginning CLAIM: followed by a bare number or optional Issue token are established forms and remain unambiguous only when normalized to one exact workstream."],
+  "stop_conditions": ["Stop if accepting an established title form weakens exact issue identity or compound-workstream parsing."]
 }

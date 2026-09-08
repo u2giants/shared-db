@@ -1,91 +1,19 @@
 {
   "schema_version": 1,
-  "work_issue": 2506,
+  "work_issue": 2188,
   "outcome": "ready-for-merge",
-  "pr": 2542,
-  "migration_versions": [
-    "20260907183041"
-  ],
-  "contract_ref": "refs/db-contracts/2506/3",
-  "contract_sha256": "10c2737512fd08375ddac6df0ac1c439a8dcfa8efb61c525273759406fec11fa",
-  "head_sha": "1d91ba642264ebf5c3149dca1dc020ef2cdeafe5",
-  "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json",
-    "scripts/benchmark_popsg_search_v2.py",
-    "scripts/production-verification-sidecars/20260907183041.json",
-    "scripts/production_business_risk_gate.py",
-    "scripts/production_catalog_verification.py",
-    "scripts/test_production_catalog_verification.py",
-    "supabase/migrations/20260907183041_popsg_search_v2_bounded_paging.sql",
-    "supabase/tests/popsg_search_style_guide_library_v2_contracts.sql"
-  ],
-  "db_reads": [
-    "table public.style_guide_search_documents",
-    "table public.style_guide_files",
-    "table public.style_guide_render_queue",
-    "function public.has_app_access",
-    "function auth.uid",
-    "function auth.role"
-  ],
-  "db_writes": [
-    "function public.search_style_guide_library_v2"
-  ],
+  "pr": 2560,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2188/4",
+  "contract_sha256": "ebf2fc17e07a06347fe3217386c595d3f597035cc39ca175a1a749cc17ae5e3e",
+  "head_sha": "036b59f8bbf71f8fb43484be3038056a35aa10f9",
+  "files_changed": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
-    {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static SQL and recency pass; live ledger subcheck skipped without token/ledger, not live clearance."
-    },
-    {
-      "command": "python3 scripts/test_migration_derivation.py",
-      "exit_code": 0,
-      "evidence": "42 tests passed."
-    },
-    {
-      "command": "python3 scripts/benchmark_popsg_search_v2.py",
-      "exit_code": 0,
-      "evidence": "Synthetic 217193-document actual functions: baseline files/guides >8000ms, forward 5763/5420ms; initial40 exact JSON cases passed. Final --parity-only160 exact cases across4 sorts pass after unreachable branch cleanup. Rebase changes only unrelated governance scripts/workflow; SQL and benchmark bytes unchanged."
-    },
-    {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors."
-    },
-    {
-      "command": "python3 scripts/test_production_catalog_verification.py",
-      "exit_code": 0,
-      "evidence": "188 tests pass; catalog predicate exact forward body hash and privilege/security contract tested."
-    },
-    {
-      "command": "node --test scripts/throughput-guard/check-production-verification-sidecars.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
-      "exit_code": 0,
-      "evidence": "10 passed; zero skipped."
-    },
-    {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-      "exit_code": 0,
-      "evidence": "All mandatory versions and forward sidecar valid; detector baseline regenerated with all historical matches unchanged."
-    },
-    {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "256 semantically reviewed sites; one synthetic filter value explicitly excluded, no discovery narrowing."
-    },
-    {
-      "command": "docker exec -i shared-db-orch2536-2506-bench psql -U postgres -qAt -v ON_ERROR_STOP=1 < /tmp/orch2536-2506-catalog-smoke.sql",
-      "exit_code": 0,
-      "evidence": "Disposable-only transaction: exact catalog predicate false for original function, true for forward; rolled back. No live mutation."
-    }
+    {"command": "node --test scripts/manage-migration-author-lanes.test.mjs", "exit_code": 0, "evidence": "477 tests passed; 0 failed, skipped, cancelled, or todo."},
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
   ],
-  "assumptions_resolved": [
-    "Guarded claim2510 reserves20260907183041; original131610 bytes preserved.",
-    "Published generation1 initialbase remains ancestor after refresh to4f093e3d.",
-    "No shared DB mutation; synthetic fixtures isolated and removed.",
-    "Implementation ready for independent review/CI only: preview forward apply, optimized actual API acceptance, final historical/production evidence, both-version production batch and live acceptance remain pending.",
-    "Generation3 expands evidence repair scope without altering generation1/2 refs. Migration and benchmark bytes unchanged; no repeated volume timings."
-  ],
+  "assumptions_resolved": ["Bare-number and optional Issue claim titles normalize to the same exact issue identity; supersession and merged reissue have direct acceptance, wrong-issue, compound-workstream, and wrong-version tests."],
   "stop_conditions_hit": []
 }
