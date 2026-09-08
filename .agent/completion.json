@@ -1,65 +1,19 @@
 {
   "schema_version": 1,
-  "work_issue": 2356,
+  "work_issue": 2188,
   "outcome": "ready-for-merge",
-  "pr": 2523,
-  "migration_versions": [
-    "20260907152838"
-  ],
-  "contract_ref": "refs/db-contracts/2356/1",
-  "contract_sha256": "79621c37bfa4c5e397fc846ee8f71cc084eb749f778759676aec1c6206458f5b",
-  "head_sha": "c90eb46d1d3e4ca9cbfc9877b47dfe613a373497",
-  "files_changed": [
-    "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql",
-    "supabase/tests/dam_asset_freshness_current_state_contracts.sql"
-  ],
-  "db_reads": [
-    "table core.taxonomy_source_ref",
-    "table supabase_migrations.schema_migrations"
-  ],
-  "db_writes": [
-    "table dam.asset",
-    "column dam.asset.first_seen_at",
-    "column dam.asset.last_seen_at",
-    "column dam.asset.missing_since",
-    "constraint dam_asset_seen_order on dam.asset",
-    "constraint dam_asset_missing_after_first_seen on dam.asset",
-    "function dam.enforce_asset_freshness",
-    "trigger dam_asset_freshness_guard on dam.asset"
-  ],
+  "pr": 2560,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2188/4",
+  "contract_sha256": "ebf2fc17e07a06347fe3217386c595d3f597035cc39ca175a1a749cc17ae5e3e",
+  "head_sha": "036b59f8bbf71f8fb43484be3038056a35aa10f9",
+  "files_changed": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
-    {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "Full owned implementation delta passed after refresh onto current main b48f526f87369278e0b173ded6a2d97e729818d6; migration and SQL contract bytes unchanged from b8984877."
-    },
-    {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static SQL guards passed; live-ledger automated input was not configured, so that warning is not live ledger acceptance. Separate read-only Management API queries proved unapplied version before editing."
-    },
-    {
-      "command": "python3 -m unittest scripts.test_migration_derivation scripts.test_production_catalog_verification",
-      "exit_code": 0,
-      "evidence": "229 tests passed in0.849s, no failure or skip reported."
-    },
-    {
-      "command": "docker exec -i orch-2536-2356-proof psql -U postgres -v ON_ERROR_STOP=1 -q",
-      "exit_code": 0,
-      "evidence": "Isolated network-none PostgreSQL17: original pre-migration synthetic row title UPDATE rejected by dam_asset_first_seen_present; repaired migration permits same UPDATE while both timestamps remain NULL. Full lifecycle contract via stdin passed: explicit NULL new-row refusals, known-to-NULL refusal, historical last-sighting without invented first-sighting, chronological invalidity rejection, source-key uniqueness, scalar/index compatibility and many-to-many bridges. Disposable container removed after proof."
-    },
-    {
-      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
-      "exit_code": 0,
-      "evidence": "41 passed,0 failed,0 cancelled,0 skipped,0 todo after current-main refresh."
-    }
+    {"command": "node --test scripts/manage-migration-author-lanes.test.mjs", "exit_code": 0, "evidence": "477 tests passed; 0 failed, skipped, cancelled, or todo."},
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
   ],
-  "assumptions_resolved": [
-    "Version20260907152838 was absent in the then-current dynamically resolved preview and production ledgers before migration editing; this historical proof is not a current target binding.",
-    "Guarded claim2521 expansion succeeded for function and trigger before authoring.",
-    "Prior exact PR head b89848773087c738531726dab0f87d6b7169e4f7 had13 green applicable CI checks; new refreshed-head CI remains pending.",
-    "Prior full-change GLM approval d98a58dfc1ce0182dfdc96d54a0f343650d86cdc bound b8984877 against4f093e3d; Kimi failed without verdict. Fresh-head independent review, preview rehearsal, production apply and live business acceptance remain PENDING.",
-    "Implementation refreshed onto directly verified main b48f526f87369278e0b173ded6a2d97e729818d6 without changing either SQL file. Immutable generation1 contract remains unchanged and its original base is an ancestor. Separate two-file evidence pair replaces unrelated main evidence. Stage label ready-for-merge does not bypass pending gates."
-  ],
+  "assumptions_resolved": ["Bare-number and optional Issue claim titles normalize to the same exact issue identity; supersession and merged reissue have direct acceptance, wrong-issue, compound-workstream, and wrong-version tests."],
   "stop_conditions_hit": []
 }

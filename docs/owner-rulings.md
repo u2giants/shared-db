@@ -1941,8 +1941,15 @@ content-addressed identity is wrong on its face.
 
 **Consequence that must not be lost.** A change signal built on portal-published metadata
 cannot detect art replaced in place under an unchanged file name with unchanged metadata.
-That failure mode was the stated motivation for #1275's incremental design, and this ruling
-means the design does **not** solve it. Never claim otherwise.
+That failure mode is one of the three motivations #1275 states for its incremental design. The
+issue's own "Why" section names all three in one sentence — *"Licensors add guides, replace art in
+place under the same file name, and withdraw assets"* — and this ruling means the design does
+**not** solve the middle one. The other two, additions and withdrawals, are unaffected. Do not
+overstate this in either direction: the design is not useless, and it is not complete.
+
+(The sentence is quoted here so this claim can be checked from the repository alone. A reviewer
+working from a checkout cannot read a GitHub issue body, and a durable ruling should not rest on
+a source its reader cannot open.)
 
 #### Peanuts: the art program is the property
 
@@ -1957,8 +1964,9 @@ parent an asset belongs to.
 
 **Design consequence.** An initiative is *expected* to stop appearing when its retail window
 closes. That is normal retirement, not withdrawal. A lifecycle rule that marks a vanished
-initiative `withdrawn` under §6.5's marked-never-deleted principle will raise a false alarm
-every season and must not be written.
+initiative `withdrawn` under the marked-never-deleted principle (owner ruling 2026-08-19,
+recorded on issue #1275, not in this file) will raise a false alarm every season and must not be
+written.
 
 #### WildBrain: era and creative group are orthogonal — the earlier question was malformed
 
@@ -1969,16 +1977,23 @@ every season and must not be written.
 > — Albert Hazan, 2026-09-07
 
 `plm.wildbrain_era` (which version of the property) and `plm.wildbrain_creative_group` (what
-kind of document) are **two independent axes**. Every guide has one of each. The framing
+kind of document) are **two independent axes**. The framing
 recorded on #1275 on 2026-08-20 — "`era` vs `creative_group`" — presented them as competing
 candidates and is **withdrawn**.
 
 The live catalog already agrees: `plm.wildbrain_asset` carries **both** `era_source_id` and
 `creative_group_source_id`.
 
+**But the two axes are not symmetric, and the schema says so.** In
+`supabase/migrations/20260819014639_wildbrain_dam_source_landing.sql`, `era_source_id` is
+`not null` (line 448) while `creative_group_source_id` is nullable (line 449), and its index is
+partial on `is not null` (lines 507-508). Every asset carries exactly one era; an asset may carry
+no creative group at all. Do not write "every guide has one of each" — it is false.
+
 **Design consequence.** Both tables are durable entities and both take lifecycle columns.
-Era is the property-shaped entity wherever a single parent is required; creative group is a
-document-type dimension of equal standing, not a child of era.
+Era is the property-shaped entity wherever a single parent is required, and it is the mandatory
+axis; creative group is an optional document-type dimension — independent of era, not a child of
+it, and not of equal standing.
 
 #### The general lesson this ruling encodes
 
