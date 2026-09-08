@@ -1,53 +1,53 @@
 {
   "schema_version": 1,
-  "work_issue": 2509,
+  "work_issue": 2570,
   "outcome": "ready-for-merge",
-  "pr": 2513,
-  "migration_versions": [
-    "20260907131728"
-  ],
-  "contract_ref": "refs/db-contracts/2509/1",
-  "contract_sha256": "8a8dc8e4b29bae1f3b48f1f771e2102e806d7f8ba6c961b53de06409c8654396",
-  "head_sha": "7701925d80082816111cb4a8dd479958181e8d3e",
+  "pr": 2571,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2570/1",
+  "contract_sha256": "8674dd1cb8613302a159630c764467510154718fbde1f884ca770d7cdfb74b25",
+  "head_sha": "7df6b3cf09ba29be6b11bc85ae671e244385a8ee",
   "files_changed": [
-    "supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql",
-    "supabase/tests/popsg_preview_stats_contracts.sql"
+    "docs/verification/issue-2570-historical-producer-restoration.md",
+    "scripts/historical-migration-restorations.mjs",
+    "scripts/historical-migration-restorations.test.mjs",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py"
   ],
-  "db_reads": [
-    "table public.style_guide_render_queue"
-  ],
-  "db_writes": [
-    "function public.get_sg_preview_stats",
-    "index public.idx_sgf_active_preview_category",
-    "table public.style_guide_files"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
-      "command": "git diff --check",
+      "command": "python -m unittest scripts.test_production_business_risk_gate",
       "exit_code": 0,
-      "evidence": "Passed full implementation delta after a genuine normal merge of current main b74cacdf2ef7416e5cd6f08b4714f226f407a6c9; the original previewed bcc26039 remains in ancestry."
+      "evidence": "Focused production gate suite: 137 passed; 0 failed or skipped."
     },
     {
-      "command": "docker exec -i orch-2536-2509-proof psql -U postgres -v ON_ERROR_STOP=1 -qAt",
+      "command": "node --test scripts/historical-migration-restorations.test.mjs",
       "exit_code": 0,
-      "evidence": "Isolated PostgreSQL17, network none: full repaired SQL contract via stdin passed in2.628s; forced index-usability proof retained, planner settings restored, authenticated role and exact all-field 250000-row volume equality verified. Separate500000-row mixed corpus matched every expected field across5 fresh connections in0.626,0.678,0.705,0.647,0.717s under5s. Local proof only: PostgREST/login, physically cold cache, preview and production NOT verified."
+      "evidence": "Historical restoration registry suite: 6 passed; 0 failed, skipped, cancelled, or todo; exact positive and wrong version, run, dispatch commit, applied commit, source PR, merge commit, digest, and bytes cases executed."
     },
     {
       "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
       "exit_code": 0,
-      "evidence": "44 passed,0 failed,0 cancelled,0 skipped,0 todo in110.072ms on refreshed-history implementation; current main contract tooling preserved."
+      "evidence": "Contract and exact Git evidence suite: 44 passed; 0 failed, skipped, cancelled, or todo."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors."
+    },
+    {
+      "command": "python -m unittest discover -s scripts -p test_*.py",
+      "exit_code": 0,
+      "evidence": "Full Python guard discovery: 925 passed, 8 skipped, 0 failed in 56.495 seconds."
     }
   ],
   "assumptions_resolved": [
-    "Migration Git blob matches inherited PR exactly: da47d8b3c4dbe61617bbbaf507d8027c5c5724aa.",
-    "Disposable fixture isolated from shared databases and removed after proof.",
-    "Governed preview run34157812748 succeeded at bcc2603977678db73b4ca12d3ed1312a1bff64e2 on the dynamically resolved preview target, adding only20260907131728. Artifact10031592106 sha256:3fcd874602c5c52293448a83fdb27c126a8f0cf78e63e24af0d2a10a03128a6b. This metadata revision does not change implementation or migration bytes.",
-    "Coordinator live acceptance https://github.com/u2giants/shared-db/pull/2513#issuecomment-5575198255: service-role REST200 in943/710/714ms; authenticated SQL identical results838.757/774.011ms;217193active rows, all6legacy aggregates and new partition match; anonymous execute denied; natural index plan767.389ms. Warm cache only, no logged-in browser or production proof.",
-    "Correction https://github.com/u2giants/shared-db/pull/2513#issuecomment-5575221883: prior Muse/GLM review packet base was3c0b9786 rather than4f093e3d. Existing immutable artifacts retained but non-authorizing for this promotion; fresh full-diff packet reviews required. Cancelled guarded merge34158202931 left PR open and no merge.",
-    "Normal merge37bd8229 retains actual original PR2513 previewed commit bcc2603977678db73b4ca12d3ed1312a1bff64e2 as an ancestor; merge5a0a9c94 integrates prior main b3219f73c0a111bf06889d490cdc398c9ca1018c. No graft, replace ref, synthetic commit ancestry or ours merge strategy.",
-    "Normal merge334054a4 integrates prior main9f07a3b3 while preserving migration blob da47d8b3 and test blob9bbe02b9 byte-identically.",
-    "Normal merge7701925d integrates current main b74cacdf, including the byte-pinned historical-restoration registry for this exact migration, while preserving migration blob da47d8b3 and test blob9bbe02b9 byte-identically. Claim2511, version20260907131728 and exact object scope are unchanged.",
-    "All approvals before the new evidence head are historical only. Fresh exact-head full-change independent reviews and CI, guarded merge, renewed preview provenance, production proof and application acceptance remain pending. Existing generation1 immutable contract is preserved unchanged."
+    "Run 34216634560 failed in the pre-write business-risk job and the production apply job was skipped; its exact refusal named run 34157812748 dispatch commit 4f093e3d and producer mismatch against merge c5f85ad3.",
+    "Version 20260907131728 still matches registered file digest 03648ecb and statement digest d273d46a; the migration was not edited.",
+    "The existing source PR merge and main-line ancestry proofs remain mandatory outside the narrow registry adapter.",
+    "Open PR 2565 has no changed-file overlap with this implementation. Marker 2559 still resolves to the coordinating session."
   ],
   "stop_conditions_hit": []
 }
