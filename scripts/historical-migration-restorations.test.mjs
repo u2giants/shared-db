@@ -12,11 +12,16 @@ test('pins the issue 2509 preview restoration without changing production eligib
   assert.equal(row.fileSha256,'03648ecbbee473f539c27f929a248c503c18d5fb906efe1409d11593cfdb5d7e')
   assert.equal(row.statementBytes,9125)
   assert.equal(row.statementSha256,'d273d46aa662d3ae24502da44e3226e9c5932c7646b8d5d430b76563fa9d2191')
+  assert.equal(Object.isFrozen(row),true)
   assert.deepEqual(row.objects,[
     'function public.get_sg_preview_stats',
     'index public.idx_sgf_active_preview_category',
     'table public.style_guide_files',
   ])
+  assert.throws(
+    ()=>validateHistoricalRestorationFile('supabase/migrations/20260907131728_wrong.sql','select 1;\n'),
+    /not an approved exact historical restoration/,
+  )
 })
 
 test('pins the one authenticated preview historical restoration',()=>{
