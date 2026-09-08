@@ -21,7 +21,7 @@ on:
         description: 'Earliest date to reach back to (YYYY-MM-DD)'
         required: true
       to:
-        description: 'Latest date (YYYY-MM-DD). Defaults to today.'
+        description: 'Latest date (YYYY-MM-DD). Clamped to the newest CLOSED window.'
         required: false
       limit:
         description: 'Maximum window/scope pairs to load in this run'

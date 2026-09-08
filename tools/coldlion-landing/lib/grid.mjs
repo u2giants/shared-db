@@ -61,12 +61,30 @@ export function* windowRange(fromIso, toIso) {
   for (let index = first; index <= last; index += 1) yield windowAtIndex(index);
 }
 
-/** The N most recent complete-grid windows ending with the one containing `toIso`. */
-export function recentWindows(toIso, count) {
+/**
+ * The index of the newest window that has FINISHED.
+ *
+ * The window containing `asOfIso` is still open: rows written on any of its remaining
+ * days have not been sent yet. That matters here far more than it looks, because a
+ * window is sealed the moment it is loaded -- the ledger declines it, and the database
+ * forbids adding page evidence to it afterwards -- so a window fetched on day one of its
+ * seven is a permanently incomplete week that the ledger will nonetheless report as
+ * complete. Only closed windows may be loaded.
+ */
+export function lastClosedWindowIndex(asOfIso) {
+  const current = windowContaining(asOfIso).index;
+  if (current === 0) {
+    throw new Error(`no seven-day window has closed yet as of ${asOfIso}`);
+  }
+  return current - 1;
+}
+
+/** The N most recent CLOSED windows as of `asOfIso`, oldest first. */
+export function recentClosedWindows(asOfIso, count) {
   if (!Number.isInteger(count) || count < 1) {
     throw new Error("--windows must be a positive integer");
   }
-  const last = windowContaining(toIso).index;
+  const last = lastClosedWindowIndex(asOfIso);
   const first = Math.max(0, last - count + 1);
   const windows = [];
   for (let index = first; index <= last; index += 1) windows.push(windowAtIndex(index));

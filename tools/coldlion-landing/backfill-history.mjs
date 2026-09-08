@@ -9,11 +9,15 @@
 // already proven loaded is skipped, so re-running after any interruption continues where
 // the evidence stops. It walks oldest-first for the same reason.
 //
+// `--to` is clamped to the newest window that has CLOSED, whatever was asked for. Loading
+// a window seals it, so reaching into the current week would freeze a one-day-old week as
+// a finished one and lose its remaining six days silently.
+//
 // The backfill writes ONE baseline version per production line. That is a baseline, not
 // reconstructed change history, and the retention guard refuses to prune it.
 
 import { readColdlionApiKey } from "../coldlion-sync-common.mjs";
-import { isoDate, windowRange } from "./lib/grid.mjs";
+import { isoDate, lastClosedWindowIndex, windowAtIndex, windowRange } from "./lib/grid.mjs";
 import { proveTarget } from "./lib/db.mjs";
 import { COMPANY_CODE, PAGE_SIZE, PROD_STAGES } from "./lib/scopes.mjs";
 import { allScopes, ledgerKey, loadWindowScope, loadedWindows, scopeLabel } from "./lib/run-history.mjs";
@@ -37,9 +41,16 @@ export function parseArgs(argv) {
     }
   }
   if (!args.from) throw new Error("--from YYYY-MM-DD is required");
-  if (!args.to) args.to = isoDate(new Date());
+  // The end of the newest window that has CLOSED, never today. A backfill that reached
+  // into the current week would seal a window on the first of its seven days, and a
+  // sealed window can never be added to: the rest of that week would be lost silently.
+  const lastClosed = windowAtIndex(lastClosedWindowIndex(isoDate(new Date())));
+  if (!args.to || args.to > lastClosed.to) args.to = lastClosed.to;
   if (!Number.isFinite(args.limit) && args.limit !== Infinity) {
     throw new Error("--limit must be a number");
+  }
+  if (args.limit !== Infinity && (!Number.isInteger(args.limit) || args.limit < 1)) {
+    throw new Error("--limit must be a positive whole number");
   }
   if (args.stage && !PROD_STAGES.includes(args.stage)) {
     throw new Error(`--stage must be one of ${PROD_STAGES.join(", ")}`);

@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { GRID_ANCHOR, recentWindows, windowAtIndex, windowContaining, windowRange } from "./coldlion-landing/lib/grid.mjs";
+import { GRID_ANCHOR, isoDate, lastClosedWindowIndex, recentClosedWindows, windowAtIndex, windowContaining, windowRange } from "./coldlion-landing/lib/grid.mjs";
 import { ORDER_HISTORY, allScopes, prodHistoryScope } from "./coldlion-landing/lib/scopes.mjs";
 import { assertPagesComplete, buildPageUrl, fetchPage, fetchWindowScope, requestParams, validatePage } from "./coldlion-landing/lib/http.mjs";
 import { bigint, canonical, date, num, sourceHash, splitTokens, sqlText, text } from "./coldlion-landing/lib/values.mjs";
@@ -46,9 +46,24 @@ test("windowRange is oldest first and inclusive of the end window", () => {
   assert.deepEqual(windows.map((window) => window.from), ["2019-01-01", "2019-01-08", "2019-01-15"]);
 });
 
-test("recentWindows ends with the window containing the given date", () => {
-  const windows = recentWindows("2019-01-20", 2);
-  assert.deepEqual(windows.map((window) => window.from), ["2019-01-08", "2019-01-15"]);
+// A window is SEALED by being loaded, so selecting the window a date falls inside would
+// freeze a still-open week as a finished one. Everything below pins that boundary; before
+// these existed the arithmetic was tested and the open/closed question never was.
+test("the newest selectable window is the one that has closed, never the current one", () => {
+  const windows = recentClosedWindows("2019-01-20", 2);
+  assert.deepEqual(windows.map((window) => window.from), ["2019-01-01", "2019-01-08"]);
+  assert.equal(windows.at(-1).to < "2019-01-20", true, "the selected windows have all ended");
+});
+
+test("the window containing the date is excluded on every day of its life", () => {
+  for (const day of ["2019-01-15", "2019-01-18", "2019-01-21"]) {
+    const windows = recentClosedWindows(day, 3);
+    assert.equal(windows.at(-1).to < day, true, `${day} selected a window that had not ended`);
+  }
+});
+
+test("nothing can be loaded before the first window has closed", () => {
+  assert.throws(() => lastClosedWindowIndex("2019-01-03"), /no seven-day window has closed/);
 });
 
 // ---------------------------------------------------------------------------------
@@ -502,11 +517,25 @@ test("production history asserts component quantities only after the components 
 // CLI arguments
 // ---------------------------------------------------------------------------------
 
-test("the backfill requires a start and defaults the end to today", () => {
+test("the backfill requires a start and ends at the newest closed window", () => {
   assert.throws(() => parseBackfillArgs([]), /--from/);
+  const today = isoDate(new Date());
   const args = parseBackfillArgs(["--from", "2019-01-01", "--limit", "5"]);
   assert.equal(args.limit, 5);
   assert.match(args.to, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(args.to < today, true, "the default end must be a window that has already ended");
+  assert.equal(
+    parseBackfillArgs(["--from", "2019-01-01", "--to", "2999-01-01"]).to,
+    args.to,
+    "an end date in the future is clamped, not obeyed",
+  );
+});
+
+test("the backfill refuses a limit that would silently drop work", () => {
+  // `work.slice(0, -1)` drops the LAST outstanding pair and reports success.
+  assert.throws(() => parseBackfillArgs(["--from", "2019-01-01", "--limit", "-1"]), /positive whole number/);
+  assert.throws(() => parseBackfillArgs(["--from", "2019-01-01", "--limit", "0"]), /positive whole number/);
+  assert.throws(() => parseBackfillArgs(["--from", "2019-01-01", "--limit", "2.5"]), /positive whole number/);
 });
 
 test("the backfill can be narrowed to one endpoint or one stage", () => {
@@ -520,6 +549,8 @@ test("the scheduled sync trails more than one window by default", () => {
   const args = parseSyncArgs([]);
   assert.ok(args.windows >= 2, "an order edited days later falls in an older window");
   assert.throws(() => parseSyncArgs(["--windows", "0"]), /positive integer/);
+  const windows = recentClosedWindows(parseSyncArgs([]).to, args.windows);
+  assert.equal(windows.at(-1).to < isoDate(new Date()), true, "the sync never selects the open week");
 });
 
 // ---------------------------------------------------------------------------------

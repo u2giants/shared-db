@@ -3,16 +3,25 @@
 //
 //   node tools/coldlion-landing/sync-history.mjs [--windows 3] [--to 2026-09-07]
 //
-// It re-fetches the most recent N grid windows every run, because a window that is
-// already loaded is skipped and a window that is not is completed. Trailing more than
-// one window is deliberate: an order edited days after it was written falls in an older
-// window, and a sync that only ever looked at the current week would never see it.
+// It re-fetches the most recent N CLOSED grid windows every run, because a window that is
+// already loaded is skipped and a window that is not is completed.
+//
+// THE CURRENT WEEK IS NEVER LOADED. Loading a window seals it: the ledger declines it
+// afterwards and the database forbids adding page evidence to a loaded window. So a
+// window fetched on the first of its seven days would be a permanently incomplete week
+// that the ledger reports as complete, and every order written over the remaining six
+// days would be lost with no trace. The newest window this ever touches is the one that
+// has finished, which means the feed trails real time by up to a week by design.
+//
+// Trailing more than one closed window is still deliberate: a run that failed, a window
+// the vendor refused, and an outage all leave older windows unloaded, and this is what
+// completes them without anybody having to notice.
 //
 // It never marks a loaded window dirty and it never rewrites page evidence. Picking up a
-// changed row is the change-log unit's job, not this one's.
+// row that CHANGED after its window closed is the change-log unit's job, not this one's.
 
 import { readColdlionApiKey } from "../coldlion-sync-common.mjs";
-import { isoDate, recentWindows } from "./lib/grid.mjs";
+import { isoDate, recentClosedWindows } from "./lib/grid.mjs";
 import { proveTarget } from "./lib/db.mjs";
 import { COMPANY_CODE, PAGE_SIZE } from "./lib/scopes.mjs";
 import { allScopes, ledgerKey, loadWindowScope, loadedWindows, scopeLabel } from "./lib/run-history.mjs";
@@ -46,7 +55,7 @@ export async function main(argv = process.argv.slice(2)) {
   const target = proveTarget();
   console.log(`target ${target.database} at ${target.host}`);
 
-  const windows = recentWindows(args.to, args.windows);
+  const windows = recentClosedWindows(args.to, args.windows);
   const done = loadedWindows({ companyCode: args.company });
   const work = [];
   for (const window of windows) {
@@ -55,7 +64,8 @@ export async function main(argv = process.argv.slice(2)) {
     }
   }
   console.log(
-    `${windows.length} recent window(s) to ${args.to}; ${work.length} window/scope pair(s) outstanding`,
+    `${windows.length} closed window(s) as of ${args.to} (newest ends ${windows.at(-1).to}); ` +
+      `${work.length} window/scope pair(s) outstanding`,
   );
   if (args.dryRun) return { outstanding: work.length, loaded: 0, failures: 0 };
 
