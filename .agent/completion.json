@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260907200221"
   ],
-  "contract_ref": "refs/db-contracts/2449/3",
-  "contract_sha256": "679affa25c69b08ac04532d0a11214ec5cf6391a6cc11dcacda97cdcee97725b",
-  "head_sha": "bd6e75852d406e8335e962cdd640fb20eeeb3592",
+  "contract_ref": "refs/db-contracts/2449/8",
+  "contract_sha256": "c8109bcdce1bd4940f7b7a14829956a38daf5b3012f35fa3d84cb33894b7d687",
+  "head_sha": "c740c820963f310ee16db4b67f833bdda433d852",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -84,40 +84,45 @@
     {
       "command": "node scripts/check-production-verification-sidecars.mjs",
       "exit_code": 0,
-      "evidence": "Sidecar hash and historical inventory validation passed."
+      "evidence": "All 43 hash-bound sidecars, marker locations, and the regenerated detector baseline passed."
     },
     {
       "command": "python3 -m unittest -q scripts.test_production_catalog_verification scripts.test_migration_derivation",
       "exit_code": 0,
-      "evidence": "229 tests passed,0 failures."
+      "evidence": "229 tests passed with zero failures."
     },
     {
-      "command": "python3 /tmp/shared-db-2536-2449-db/test_final.py",
-      "exit_code": 1,
-      "evidence": "Original10-file invocation passed8 then interrupted by deadlock caused by overlapping disposable negative-control DDL. No live effect. Failed run preserved; remaining2 files rerun serially and passed, including4000groupAPI andauthority. Not relabeled as an initial pass."
+      "command": "python3 /tmp/shared-db-2536-2449-db/test_issue2449_fixes.py",
+      "exit_code": 0,
+      "evidence": "Three focused SQL contracts passed. Disabling each named trigger failed the catalog contract; downgrading append-only or no-truncate from A to O also failed; an unrelated fourth trigger passed. The old leaf reader produced the expected regression failure. Archive identities, counts, and row hashes were unchanged."
     },
     {
       "command": "python3 /tmp/shared-db-2536-2449-db/test_rls_repair.py",
       "exit_code": 0,
-      "evidence": "Both changed SQL tests pass after red-control rollback: exact full policies, entitled legacy header+member reads, unentitled signed-in denial, generic header+member denial. Two separate weakened-policy redcontrols each caught the corresponding private row leak. Cumulative10 SQLfiles passed without skipping; serial4000groupAPI/authority logs /tmp/2449-rls-*.log."
+      "evidence": "Both privacy SQL tests passed, including entitled legacy reads, signed-in denial, generic header/member denial, and weakened-policy red controls."
     },
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static and recency pass; live-ledger subcheck skipped withouttoken, not clearance."
+      "evidence": "Static, expected-count, verification-cost, and EOL-reference guards passed; the live-ledger subcheck was explicitly skipped because no token was configured and is not treated as clearance."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "255sites pass; source discovery unchanged."
+      "evidence": "Truth audit passed all 255 call sites."
+    },
+    {
+      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "exit_code": 0,
+      "evidence": "41 tests passed with zero failures or skips."
     }
   ],
   "assumptions_resolved": [
-    "Guarded reserved version20260907200221 used; old reservation and prepared patch retained.",
-    "Empty and3-state populated rehearsals preserve archive row/audit hashes; UPDATE/DELETE denied.",
-    "Catalog contract repaired1 and unchanged baseline0; original canonical UUID authority remains separate.",
-    "Ready for coordinator gates only: exact-head CI, independent review, preview, production and application acceptance are pending.",
-    "CI predicate-equality assumption corrected without weakening RLS; migration unchanged. Original disposable harness deadlock resolved by serialization and targeted post-red-control validation. New gen3 changes required prospectivecheck to actual restored-state execution and preserves initial failedcheck explicitly."
+    "Claim #2451 remains open and unchanged with reserved version 20260907200221 and the exact original object list.",
+    "The newest terminal approved or rejected decision controls Scraped Properties; later pending remains queued without hiding approval, and later rejection supersedes approval.",
+    "Pending and rejected rows remain immutable; archive relation identities, counts, and row hashes are unchanged and UPDATE/DELETE remain denied.",
+    "All three intended member triggers are named and enabled; append-only and no-truncate require ENABLE ALWAYS, while mapping-header remains deferrable and initially deferred.",
+    "Current origin/main 8d64a75812beec85d2f8b2c78669e5e17635359d is merged. Review, preview, merge, production apply, and claim release remain coordinator gates and were not performed."
   ],
   "stop_conditions_hit": []
 }
