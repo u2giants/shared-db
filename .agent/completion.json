@@ -1,18 +1,15 @@
 {
   "schema_version": 1,
-  "work_issue": 2591,
+  "work_issue": 2244,
   "outcome": "ready-for-merge",
-  "pr": 2592,
+  "pr": 2595,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2591/2",
-  "contract_sha256": "5ec267202df85cdb4b7d77a0f3fadf5f3107051585091da6d83dabea4f424f42",
-  "head_sha": "7dfd5604939fe37b86e213d478bae22f93498540",
+  "contract_ref": "refs/db-contracts/2244/2",
+  "contract_sha256": "78f593334841aebd4d8ae11c141b11a072cbc86b3231007d27918e20ba807792",
+  "head_sha": "64c953cc089744442a660708b96b32b361f6002c",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    ".github/workflows/agent-work-contract.yml",
-    "scripts/check-documents-only-pull-request.mjs",
-    "scripts/check-documents-only-pull-request.test.mjs"
+    "scripts/run-governed-review.mjs",
+    "scripts/run-governed-review.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
@@ -20,17 +17,17 @@
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Contract is valid; published as refs/db-contracts/2591/2."
+      "evidence": "Contract is valid; published as refs/db-contracts/2244/2 (generation 1 belongs to the superseded PR #2564)."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Report satisfies contract generation 2 pinned by hash 5ec26720."
+      "evidence": "Report satisfies contract generation 2 pinned by hash 78f59333."
     },
     {
-      "command": "node --test scripts/check-documents-only-pull-request.test.mjs",
+      "command": "node --test scripts/run-governed-review.test.mjs",
       "exit_code": 0,
-      "evidence": "9 tests pass, including a known-dirty case: a rename out of supabase/migrations/ into a .md path is refused, rulebook prose is refused, and missing or malformed arguments are a usage error."
+      "evidence": "45 tests pass, 0 fail. 11 are new and 6 of those are known-dirty cases: a report reviewing a different commit, a missing reviewed-commit row, a missing or duplicated verdict section, a BLOCKED decision, an unrecognised decision word, empty findings, a missing result section, a report path outside the wrapper report directory, and a report path that is not a published report name are each refused rather than guessed."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
@@ -38,21 +35,28 @@
       "evidence": "truth audit OK: call_sites=265."
     },
     {
+      "command": "node scripts/check-github-transport-conformance.mjs",
+      "exit_code": 0,
+      "evidence": "200 files scanned; every GitHub call goes through scripts/lib/github-transport.mjs."
+    },
+    {
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
     },
     {
-      "command": "node scripts/check-github-transport-conformance.mjs",
+      "command": "positive control: git archive HEAD scripts | tar -x, then run the real wrapper output shape through the pre-fix runner and this branch's runner",
       "exit_code": 0,
-      "evidence": "200 files scanned; every GitHub call goes through scripts/lib/github-transport.mjs."
+      "evidence": "BEFORE (pre-fix tree taken straight from git, never hand-reverted): 'review wrapper did not produce a recordable terminal verdict (exit 0): the wrapper supplied no recognized diagnostic' - verbatim the symptom issue #2244 reports. AFTER (this branch): 'recorded refs/db-review-verdicts/x verdict APPROVE'."
     }
   ],
   "assumptions_resolved": [
-    "This pull request changes three code files plus the two .agent evidence files, so the exemption it adds does not apply to itself.",
-    "No database was read or written.",
-    "The classifier was proven able to refuse: unreadable input, empty lists, mixed paginated shapes, rulebook prose, a migration rename and malformed arguments all classify as not documents-only.",
-    "The GitHub read goes through the shared transport library, not a direct call from the workflow step, so the transport conformance check passes."
+    "The codex wrapper is not broken; only the transcription was missing. It publishes a complete report to .ai/reviews/codex-<mode>-<runid>.md and prints that path as its final line of standard output, confirmed by reading the wrapper source at C:/repos/ai-devops/bin/ai-codex-review.",
+    "The head under review is never taken from the report. It comes only from the runner's pinned options.headSha; the report's reviewed-commit row can only REFUSE a mismatch, never supply a head.",
+    "The wrapper's header table is deliberately left out of the posted body: its 64-character source digest opens with 40 hex characters that unambiguouslyTiedToHead would read as a foreign commit sha.",
+    "No runner rule was relaxed. The single-terminal-verdict rule, the extra-decision-word refusal, the auto-void path, the #2207 preservation path and the #2464 never-void-after-artifact path are all unchanged, and a transcribed body still passes through extraVerdictLines before anything is posted.",
+    "A failed wrapper run never reads a report, so a stale report left by an earlier run cannot rescue it.",
+    "No database was read or written."
   ],
   "stop_conditions_hit": []
 }
