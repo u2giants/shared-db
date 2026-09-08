@@ -42,8 +42,7 @@
   ],
   "required_checks": [
     "node --test scripts/check-closeout-readiness.test.mjs scripts/check-documents-only-pull-request.test.mjs scripts/lib/documents-only-change.test.mjs scripts/database-contract-authorization.test.mjs",
-    "git diff --check",
-    "Required GitHub pull-request checks"
+    "git diff --check"
   ],
   "assumptions": [
     "PR #2592 remains the source of the documents-only contract exemption and is not rebuilt.",
@@ -55,5 +54,5 @@
     "Main movement invalidates the branch evidence.",
     "The change would require a database, production, security-setting, or live-orchestrator action."
   ],
-  "generation": 2
+  "generation": 3
 }

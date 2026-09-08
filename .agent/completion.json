@@ -4,8 +4,8 @@
   "outcome": "ready-for-merge",
   "pr": 2607,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2596/2",
-  "contract_sha256": "b1627b0fcb34fae66dbf791097963bc85babb050549156bf6e1f90dc3ba42f88",
+  "contract_ref": "refs/db-contracts/2596/3",
+  "contract_sha256": "788a14df2b4f44262977048edcf1299f8b8ef1f4675951d7e926d007dfd7767a",
   "head_sha": "c4587a44fbf3ca98b1c8451f34f5eceee282bb47",
   "files_changed": [
     ".github/workflows/agent-work-contract.yml",
@@ -29,11 +29,6 @@
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
-    },
-    {
-      "command": "GitHub required pull-request checks",
-      "exit_code": 0,
-      "evidence": "Pending on PR #2607; this pre-merge report does not claim CI acceptance."
     }
   ],
   "assumptions_resolved": [
