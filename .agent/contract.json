@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generation": 1,
   "work_issue": 2535,
+  "generation": 1,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Add an additive, service-only HTS dual-model debate audit table and immutable typed promotion provenance without changing existing precedent classifications or enabling automatic Apply.",
