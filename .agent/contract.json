@@ -1,21 +1,62 @@
 {
   "schema_version": 1,
-  "work_issue": 2188,
-  "generation": 4,
-  "work_type": "repo-maintenance",
-  "route": "repo-maintenance",
-  "goal": "Make claim-version supersession accept established unambiguous claim-title forms and name the exact identity field that changed.",
-  "base_sha": "dc3d144055c282d0708fb8efe8d9770394f003f0",
-  "dispatcher": "codex",
-  "worker": "codex",
-  "branch": "codex/issue-2188-claim-title",
-  "worktree": "C:/Users/ahazan/.codex/worktrees/issue-2188-shared-db",
-  "allowed_paths": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
-  "file_writes": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
-  "db_reads": [],
-  "db_writes": [],
-  "prohibited_actions": ["Do not change database structure or data, relax exact-issue binding, or mutate live claims during verification."],
-  "required_checks": ["node --test scripts/manage-migration-author-lanes.test.mjs", "git diff --check"],
-  "assumptions": ["Claim titles beginning CLAIM: followed by a bare number or optional Issue token are established forms and remain unambiguous only when normalized to one exact workstream."],
-  "stop_conditions": ["Stop if accepting an established title form weakens exact issue identity or compound-workstream parsing."]
+  "work_issue": 2493,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Recover inherited PR2526 under enforced contract governance, preserving its four-file implementation and adding six-kind helper and role runtime tests. This records prospective recovery authority; original implementation predates publication.",
+  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
+  "dispatcher": "shared-db-orchestrator/2536",
+  "worker": "codex-orch-2517-issue-2493",
+  "branch": "codex/issue-2493-source-resolution-new-kinds",
+  "worktree": "/tmp/shared-db-orch-2517-2493",
+  "allowed_paths": [
+    "scripts/production-verification-sidecars/20260907154543.json",
+    "scripts/production_business_risk_gate.py",
+    "supabase/migrations/20260907154543_source_resolution_new_kind_read_parity.sql",
+    "supabase/tests/licensing_source_authority_and_relationship_decisions.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "file_writes": [
+    "scripts/production-verification-sidecars/20260907154543.json",
+    "scripts/production_business_risk_gate.py",
+    "supabase/migrations/20260907154543_source_resolution_new_kind_read_parity.sql",
+    "supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
+  ],
+  "db_reads": [
+    "table core.property",
+    "table core.character",
+    "table core.style_guide",
+    "table dam.asset",
+    "table core.licensor",
+    "table core.franchise",
+    "table plm.source_resolution",
+    "function plm.set_source_resolution",
+    "function api.set_source_resolution"
+  ],
+  "db_writes": [
+    "function plm.source_resolution_target_missing",
+    "view api.source_resolution"
+  ],
+  "prohibited_actions": [
+    "Do not edit applied migration bytes.",
+    "Do not rewrite or retire either existing setter or five-argument helper.",
+    "No production or preview writes outside governed coordinator gates.",
+    "No push during the coordinator hold."
+  ],
+  "required_checks": [
+    "git diff --check",
+    "node scripts/check-production-verification-sidecars.mjs",
+    "psql -X -v ON_ERROR_STOP=1 -d case2493runtime -f supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
+  ],
+  "assumptions": [
+    "Inherited implementation and earlier test patch predate this recovery contract; no retrospective publication claim.",
+    "Exact-head independent review, CI, preview and production/consumer acceptance remain coordinator gates outside this implementation completion record."
+  ],
+  "stop_conditions": [
+    "Stop if migration bytes or setter definitions change.",
+    "Stop if test assertions fail.",
+    "Stop if scope extends beyond the four implementation files."
+  ],
+  "generation": 1
 }
