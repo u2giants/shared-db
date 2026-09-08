@@ -12,18 +12,18 @@ Put this whole list to Albert in one message before starting work; do not raise 
 
 ### Blocking now
 
-1. **Rotate two exposed bearer credentials.** During this session a diagnostic process listing printed the live DesignFlow MCP and NAS MCP bearer values into a private Codex tool transcript. They were not copied into a repository, issue, PR, message, or artifact, but the values must be treated as compromised. Recommendation: authorize rotation of both credentials now; this blocks closing the security incident, not ordinary read-only queue work.
-2. **Approve or continue holding production migration `20260907031246` for issue #2548.** No exact production authorization was found. Recommendation: keep it held until Albert explicitly names that version and production action.
-3. **Supply the signed Laura/Ilona review for #1941.** All 2,880 curated decisions remain blank. Recommendation: keep #1941 and dependent #2541 blocked rather than guessing any licensed match.
-4. **Settle the remaining 53 field decisions on #2179.** Recommendation: keep that source blocked; do not infer decisions from current payloads.
+1. **Approve or continue holding production migration `20260907031246` for issue #2548.** No exact production authorization was found. Recommendation: keep it held until Albert explicitly names that version and production action.
+2. **Supply the signed Laura/Ilona review for #1941.** All 2,880 curated decisions remain blank. Recommendation: keep #1941 and dependent #2541 blocked rather than guessing any licensed match.
+3. **Settle the remaining 53 field decisions on #2179.** Recommendation: keep that source blocked; do not infer decisions from current payloads.
 
 ### Later owner gate, not blocking current implementation
 
-5. **HTS machine-promoted precedents may become operative only after calibration.** The locked gate is at least 100 representative cases, at least 25 in the proposed family, zero known false promotions in that family, and a one-sided 95% precision lower bound of at least 97%. Recommendation: make no decision until Step 7 evidence exists; #2535 remains additive, non-operative structure.
+4. **HTS machine-promoted precedents may become operative only after calibration.** The locked gate is at least 100 representative cases, at least 25 in the proposed family, zero known false promotions in that family, and a one-sided 95% precision lower bound of at least 97%. Recommendation: make no decision until Step 7 evidence exists; #2535 remains additive, non-operative structure.
 
 ### Already settled — do not re-ask
 
 - 2026-09-08: this session may finish the inherited and transfer-priority queue through each governed gate; it does not waive exact target, review, preview, merge, or production proof.
+- 2026-09-08: Albert authorized rotation of the exposed DesignFlow MCP and NAS MCP bearer credentials. Both were rotated in place; new credentials returned HTTP 200, retired credentials returned 403 and 401 respectively, and the local encrypted cache was retired.
 - 2026-09-07: HTS Apply is not correctness evidence; Spark and Luna must form independent first opinions and final blind votes, and auto-promoted precedents remain non-operative during calibration.
 - 2026-08-13: shared-db governs database shape, not ordinary application rows; outside-sourced curated Master Data remains gated.
 - 2026-08-13: claims protect objects even when worker capacity is relinquished or a lease expires; never hand-delete claim refs.
@@ -79,7 +79,7 @@ The business objective is uninterrupted, truthful schema delivery: preserve ever
 - #1941 and #2541 are curated Master Data forks and stay blocked on signed human decisions.
 - #2548 is an owner-decision structural item; no production action without exact authorization for `20260907031246`.
 - #2538 is repo-maintenance and must be handled by a separately started repo session, not this orchestrator.
-- #2590 is repo-maintenance for the newly proven guard conflict where mandatory `.agent` evidence makes an otherwise prose-only PR consume an external database reviewer. Preserve both controls; do not weaken branch protection or guarded merge.
+- #2590 is closed. PR #2592 merged the permanent fix: documents-only classification now runs before agent-contract enforcement, so prose-only PRs do not need the JSON evidence pair and do not consume an external reviewer.
 - #2179 remains blocked on 53 owner field decisions and its source prerequisites.
 - Open repo-maintenance items shown by queue audit are visibility only. Do not consume orchestrator context or author lanes for them.
 
@@ -95,7 +95,7 @@ The full licensing Master Data, PopSG production-readiness, and HTS dual-model d
 - #2535’s first reviewer acquisition briefly hit the shared lock. Retrying after the lock cleared was valid; replacing the now-active Grok reviewer is not.
 - Queue-audit output is large and can time out at 30 seconds. Use a bounded running session and poll once; do not infer an empty queue from no initial output.
 - The PopSG preview-stats timeout was not repaired by raising timeouts. Its structural path was kept bounded and queued; application acceptance remains separate.
-- This handoff PR initially failed the enforced Agent work contract because a prose-only PR now also needs `.agent/contract.json` and `.agent/completion.json`. Adding the required pair then made the deterministic documents-only classifier treat the PR as non-document and require an external reviewer. The contradiction is recorded as repo-maintenance #2590; do not bypass either guard.
+- This handoff PR initially hit a contradictory gate: adding mandatory `.agent` evidence made prose consume an external reviewer. PR #2592 fixed the workflow by classifying prose before enforcing the evidence pair. Future prose-only PRs carry no pair, retain every automated check, and use the guarded docs-only merge path without an external review.
 - A broad Windows process query exposed two bearer values in private tool output. Never inspect process command lines broadly; use targeted process identity/status checks that omit command-line arguments.
 
 ## 5. Root causes and key findings
@@ -143,13 +143,13 @@ The full licensing Master Data, PopSG production-readiness, and HTS dual-model d
 - Host: EDGE-DEV, PowerShell, workspace `C:\repos\shared-db`.
 - GitHub CLI is authenticated for `u2giants`; DesignFlow repositories use the `popcre` organization.
 - Supabase secrets live in 1Password vault `vibe_coding`; use protected injection and never print values. Preview checked here was `mvpkijzfmfcxhnzqogzs`; production identity must be freshly proven before any action.
-- Current handoff worktree: `C:\repos\shared-db-worktrees\orchestrator-handoff-20260908-1735`, branch `codex/orchestrator-handoff-20260908-1735`.
+- Current handoff worktree: `C:\repos\shared-db-worktrees\orchestrator-handoff-rapid-close`, branch `codex/orchestrator-handoff-20260908-rapid-close`.
 - Active structural worktrees and branches are named in section 3. Treat every other dirty, locked, divergent, or untracked worktree as owned until independently proven otherwise.
 - Relevant plans: `plan_licensing_master_data_implementation.md`; PopSG `plan_popsg_production_readiness.md` in `u2giants/popdam3`; HTS debate `plan_hts-rag-dual-model-debate-promotion.md` and count-based graduation plan in DesignFlow backend.
 
 ## 9. Open questions and risks
 
-- 2026-09-08: credential rotation authorization is still unanswered. Until rotation, avoid any diagnostic that can expose process arguments; assume the two printed values are compromised.
+- 2026-09-08: the exposed DesignFlow MCP and NAS MCP bearer credentials were rotated and the retired credentials were proved unusable. Continue to avoid diagnostics that print process command lines.
 - 2026-09-08: #2548 exact production authorization is absent. Keep held.
 - 2026-09-08: #2439’s final superseding version does not exist yet, so production authorization must bind the replacement exact version after safe supersession.
 - 2026-09-08: #2403 cannot reach target acceptance without a governed lane for `xupnyeifmpsacrqahwwm`; creating or changing that lane is repository/infrastructure work outside an author claim.
@@ -337,9 +337,9 @@ The full licensing Master Data, PopSG production-readiness, and HTS dual-model d
 
 ## Queue seed and closeout audit
 
-Every outstanding item above has an open GitHub issue: #2535, #2582, #2493, #2501, #2506, #2507, #2439, #2403, #2503, #2543, #2576, #2579, #2357, #2580, #1941, #2541, #2548, #2179, repo-maintenance #2590, and documentation handover #2586. Private successors are licensor-source-data #61, #67, #68, and #69. Nothing outstanding exists only in this file.
+Every outstanding item above has an open GitHub issue: #2535, #2582, #2493, #2501, #2506, #2507, #2439, #2403, #2503, #2543, #2576, #2579, #2357, #2580, #1941, #2541, #2548, #2179, and documentation handover #2586. Repo-maintenance #2590 is resolved by merged PR #2592. Private successors are licensor-source-data #61, #67, #68, and #69. Nothing outstanding exists only in this file.
 
-Secrets/licensed-data sweep: no credential value, licensed row, filename, contract row, provider payload, or private artifact is present in this handoff or its branch. The two credentials exposed in private tool output remain an incident requiring rotation authorization; no repository copy was created.
+Secrets/licensed-data sweep: no credential value, licensed row, filename, contract row, provider payload, or private artifact is present in this handoff or its branch. The two exposed credentials were rotated, their retired values were denied by both services, and no repository copy was created.
 
 Docs pass: no operating document changed in this session except this handoff. Known plan STATUS drift is explicitly recorded in section 3 and remains attached to open tracker #1090 rather than silently rewritten from partial queue work.
 
@@ -348,7 +348,7 @@ Self-audit:
 1. Could a new session continue without this chat? **Yes** — exact branches, heads, worktrees, claims, versions, order, blockers, and gates are above.
 2. Are unsuccessful attempts and deliberate omissions preserved? **Yes** — sections 4 and Part B name them separately.
 3. Does every unfinished deliverable have a queue item and verification gate? **Yes** — the queue seed maps every survivor to an open issue.
-4. Would Albert see every decision by reading only section 0? **Yes** — credential rotation, #2548, #1941, #2179, and the later HTS operative gate are consolidated there.
+4. Would Albert see every decision by reading only section 0? **Yes** — #2548, #1941, #2179, and the later HTS operative gate are consolidated there; credential rotation is recorded as settled.
 
 Exact fresh-session prompt:
 
