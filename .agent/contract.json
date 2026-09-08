@@ -1,30 +1,24 @@
 {
-  "schema_version": 1,
-  "generation": 1,
-  "work_issue": 2439,
-  "work_type": "structural",
-  "route": "shared-db-orchestrator",
-  "goal": "Retain append-only bulk-operation terminal history with administrator-only browser reads and narrow worker INSERT/SELECT privileges.",
-  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
-  "dispatcher": "codex shared-db.orch marker2536 route01a07ceb-249b-7dc0-8f3a-ad5091e3a085",
-  "worker": "codex recovery_2506 successor of stopped inherited2439 worker",
-  "branch": "claude/issue-2439-bulk-operation-runs",
-  "worktree": "/tmp/shared-db-orch-2536-2439",
-  "allowed_paths": [
-    "supabase/migrations/20260907200137_bulk_operation_runs_history.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql",
-    ".agent/contract.json",
-    ".agent/completion.json"
+  "stop_conditions": [
+    "Claim or coordinator ownership changes",
+    "Main movement invalidates branch evidence",
+    "SQL scope widens or any required check refuses"
   ],
-  "file_writes": [
-    "supabase/migrations/20260907200137_bulk_operation_runs_history.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql",
-    ".agent/contract.json",
-    ".agent/completion.json"
+  "assumptions": [
+    "Claim2443 owner/path identifiers preserved; guarded newversion20260907200137 at published0a8307da",
+    "Earlier disposable red-control and full SQL contracts passed; exact same SQL/test bytes apart from guarded version metadata",
+    "Independent review and full live structural acceptance pending; worker append and alert wiring belong to PopDAM"
   ],
-  "db_reads": [
-    "function app.has_any_role",
-    "type app.app_role"
+  "required_checks": [
+    "bash scripts/check-sql.sh",
+    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+    "node scripts/check-throughput-truth-audit.mjs",
+    "git diff --check"
+  ],
+  "prohibited_actions": [
+    "No shared database writes,review allocation,merge or deployment without coordinator order",
+    "No inherited claim relocation or applied migration editing",
+    "No consumer worker changes or data seeding"
   ],
   "db_writes": [
     "table public.bulk_operation_runs",
@@ -38,25 +32,31 @@
     "index public.bulk_operation_runs_operation_started_idx",
     "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
   ],
-  "prohibited_actions": [
-    "No shared database writes,review allocation,merge or deployment without coordinator order",
-    "No inherited claim relocation or applied migration editing",
-    "No consumer worker changes or data seeding"
+  "db_reads": [
+    "function app.has_any_role",
+    "type app.app_role"
   ],
-  "required_checks": [
-    "bash scripts/check-sql.sh",
-    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-    "node scripts/check-throughput-truth-audit.mjs",
-    "git diff --check"
+  "file_writes": [
+    "supabase/migrations/20260907200137_bulk_operation_runs_history.sql",
+    "supabase/tests/bulk_operation_runs_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
   ],
-  "assumptions": [
-    "Claim2443 owner/path identifiers preserved; guarded newversion20260907200137 at published0a8307da",
-    "Earlier disposable red-control and full SQL contracts passed; exact same SQL/test bytes apart from guarded version metadata",
-    "Independent review and full live structural acceptance pending; worker append and alert wiring belong to PopDAM"
+  "allowed_paths": [
+    "supabase/migrations/20260907200137_bulk_operation_runs_history.sql",
+    "supabase/tests/bulk_operation_runs_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
   ],
-  "stop_conditions": [
-    "Claim or coordinator ownership changes",
-    "Main movement invalidates branch evidence",
-    "SQL scope widens or any required check refuses"
-  ]
+  "worktree": "/tmp/shared-db-orch-2536-2439",
+  "branch": "claude/issue-2439-bulk-operation-runs",
+  "worker": "codex recovery_2506 successor of stopped inherited2439 worker",
+  "dispatcher": "codex shared-db.orch marker2536 route01a07ceb-249b-7dc0-8f3a-ad5091e3a085",
+  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
+  "goal": "Retain append-only bulk-operation terminal history with administrator-only browser reads and narrow worker INSERT/SELECT privileges.",
+  "route": "shared-db-orchestrator",
+  "work_type": "structural",
+  "work_issue": 2439,
+  "generation": 1,
+  "schema_version": 1
 }
