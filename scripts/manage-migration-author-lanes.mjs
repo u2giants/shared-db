@@ -161,11 +161,13 @@ export const REVIEWERS = Object.freeze([
   { name:'kimi-k3', wrapper:'ai-kimi', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-kimi: read-only agent profile over the checkout/worktree' } },
   { name:'qwen-3.8-max', wrapper:'ai-qwen', readsRepository:true,
-    readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-qwen: quarantined pending live qualification, not retired; wrapper hands the model a real checkout' } },
+    readsRepositoryVerified:{ date:'2026-09-07', evidence:'ai-devops/bin/ai-qwen: read-only review over a sealed evidence packet copy of the checkout; the live qualification review of merged commit 795902d8 cited specific file lines from it and returned a well-formed verdict' } },
   { name:'glm-5.2', wrapper:'ai-glm', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'historical label for the ai-glm wrapper above; same checkout' } },
   { name:'muse-spark-1.2-contributor', wrapper:'ai-muse', readsRepository:true,
-    readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-muse: ai-review-sandbox ensure-copy clone plus evidence packet; the doctor probe reads a file inside it' } },
+    readsRepositoryVerified:{ date:'2026-09-01', evidence:'historical label for the ai-muse wrapper; durable assignments and verdicts recorded before issue #2285 still resolve through this row' } },
+  { name:'muse-spark-1.3-contributor', wrapper:'ai-muse', readsRepository:true,
+    readsRepositoryVerified:{ date:'2026-09-08', evidence:'ai-devops/bin/ai-muse: sealed evidence-packet checkout; live issue #2285 qualification identified meta-model-api/muse-spark-1.3-contributor and cited the reviewed files' } },
   { name:'codex-gpt-5.6-sol', wrapper:'ai-codex-review', orchestratorEngine:'codex', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-codex-review: codex exec --sandbox read-only over the sandbox copy' } },
   { name:'deepseek-chat', wrapper:'ai-deepseek-agent', readsRepository:false,
@@ -235,9 +237,11 @@ export const REVIEWERS = Object.freeze([
 // Reviewer issue `20260820T004602Z-edge-dev-kimi-k3-385556` carries the raw evidence.
 // This is a PAUSE, not a retirement.
 //
-// ADDED 2026-08-20 (owner instruction, issue #1290): 'muse-spark-1.2-contributor'.
-// A registry addition, not an un-pause -- it was never listed. On the head-to-head
-// trial it produced a complete seven-point review ending in `VERDICT: APPROVE`.
+// UPGRADED 2026-09-08 (owner instruction, issue #2285): 'muse-spark-1.3-contributor'.
+// The active slot moved from 1.2 to the live-qualified 1.3 model. The historical
+// 1.2 name remains in REVIEWERS and RETIRED_REVIEWERS because immutable assignments
+// and verdicts still name it; deleting or renaming it would orphan that evidence.
+// On the head-to-head trial 1.3 produced a complete review ending in APPROVE.
 // KNOWN DEFECT, and the caller must handle it: the wrapper's verdict DETECTION fails
 // and writes "This is not a review result" over correct work. It SAVES the output, so
 // every such result is fully recoverable -- READ THE SAVED ARTIFACT before recording
@@ -268,7 +272,7 @@ export const REVIEWERS = Object.freeze([
 //
 // KIMI-K3 UNPAUSED, 2026-08-25 (owner instruction, with the lane cap raise to
 // five). It returns to its ORIGINAL position in REVIEWERS, so the rotation is
-// ['grok-4.6','glm-5.3','kimi-k3','muse-spark-1.2-contributor'] -- FOUR names.
+// ['grok-4.6','glm-5.3','kimi-k3','muse-spark-1.3-contributor'] -- FOUR names.
 // Verified before unpausing, not assumed: `AI_KIMI_CALLER=claude ai-kimi doctor`
 // on edge-dev reports kimi 0.36.1, model pin kimi-code/k3, read-only profile
 // PASS and `auth : OK`. Its one FAIL, `preflight (execution-context-denied)`,
@@ -356,16 +360,28 @@ export const REVIEWERS = Object.freeze([
 // REVIEWERS keeps `readsRepository:true`, so every durable artifact this
 // reviewer already recorded still authorizes exactly as before. Restoring it is
 // a one-line deletion from this list once the account has quota again.
-export const RETIRED_REVIEWERS = Object.freeze(['glm-5.2', 'deepseek-chat', 'codex-gpt-5.6-sol'])
+export const RETIRED_REVIEWERS = Object.freeze(['glm-5.2', 'muse-spark-1.2-contributor', 'deepseek-chat', 'codex-gpt-5.6-sol'])
 
-// Not retired -- quarantined pending a passing live qualification (see the Qwen
-// note above). Kept separate from RETIRED_REVIEWERS on purpose: retirement is a
-// permanent disposition, quarantine is a reversible one, and conflating them is
-// what put a false 'Qwen is retired' claim into the roster in the first place.
-// Both lists are excluded from ACTIVE_REVIEWERS, so this changes no rotation
-// order, no in-flight sequence and no draw. Names here stay readable in
-// REVIEWERS forever because durable refs name them.
-export const QUARANTINED_REVIEWERS = Object.freeze(['qwen-3.8-max'])
+// Not retired -- quarantined pending a passing live qualification. Kept separate
+// from RETIRED_REVIEWERS on purpose: retirement is a permanent disposition,
+// quarantine is a reversible one, and conflating them is what put a false 'Qwen
+// is retired' claim into the roster in the first place. Both lists are excluded
+// from ACTIVE_REVIEWERS. Names here stay readable in REVIEWERS forever because
+// durable refs name them.
+//
+// UNQUARANTINED 2026-09-07 (owner instruction, ai-devops PR #316, merge commit
+// 795902d8): 'qwen-3.8-max' is drawable again, so this list is now empty. The
+// quarantine was real and its cause is fixed, not waived. Qwen never
+// authenticated because its credential preloader assumed a single-process
+// runtime while Qwen Code re-execs itself twice during startup, and because the
+// Alibaba Coding Plan subscription key had died (401). The wrapper now hands the
+// key over in a form that survives the re-exec while remaining strippable from
+// tool children, and runs on the Model Studio pay-per-token lane. Verified by
+// running it, not by reading it: `ai-qwen doctor --live` reports `live probe :
+// OK` on the installed command, and two live review sessions on that commit each
+// returned a single well-formed verdict on model qwen3.8-max above a substantive
+// report. Restoring the quarantine is a one-name addition back to this list.
+export const QUARANTINED_REVIEWERS = Object.freeze([])
 
 // The single fact the gate was missing (#2078). A verdict is evidence only if the
 // reviewer could open the file. Unknown names fail closed.
@@ -3911,7 +3927,11 @@ export function supersedeActiveClaimVersion(options,now=new Date(),io=githubIo){
   try{
     before=io.getIssue(request.claim);if(before?.state!=='open'||Number(before.number)!==request.claim)throw new LaneError(`claim #${request.claim} is not open`)
     const lease=parseAuthorLease(before.body,now)
-    if(lease.owner!==request.owner||lease.version!==request.oldVersion||lease.branch!==request.branch||lease.worktree!==request.worktree||!new RegExp(`#${request.issue}(?:\\D|$)`).test(before.title??''))throw new LaneError('claim issue, owner, lease, version, branch, or worktree changed')
+    if(workstreamKey(before.title)!==`#${request.issue}`)throw new LaneError(`claim title does not identify exact issue #${request.issue}: ${JSON.stringify(before.title??'')}`)
+    if(lease.owner!==request.owner)throw new LaneError('claim owner changed')
+    if(lease.version!==request.oldVersion)throw new LaneError('claim version changed')
+    if(lease.branch!==request.branch)throw new LaneError('claim branch changed')
+    if(lease.worktree!==request.worktree)throw new LaneError('claim worktree changed')
     const oldReservation=io.readRef(`refs/db-claims/${request.oldVersion}`);if(!oldReservation)throw new LaneError('old permanent reservation is missing')
     const pr=io.getPr(request.pr);if(pr?.state!=='open'||pr.head?.sha!==request.headSha||pr.head?.ref!==request.branch)throw new LaneError('open PR exact head or branch changed')
     const versions=migrationVersions(io.getPrFiles(request.pr));if(versions.length!==1||versions[0]!==request.oldVersion)throw new LaneError('PR must change exactly one migration at the current reserved version')
@@ -3971,7 +3991,9 @@ export function reissueMergedStrandedClaim(options,now=new Date(),io=githubIo){
     before=io.getIssue(request.claim)
     if(before?.state!=='open'||Number(before.number)!==request.claim)throw new LaneError(`claim #${request.claim} is not open`)
     const lease=parseAuthorLease(before.body,now)
-    if(lease.owner!==request.owner||lease.version!==request.oldVersion||!new RegExp(`#${request.issue}(?:\\D|$)`).test(before.title??''))throw new LaneError('claim issue, owner, or stranded version changed')
+    if(workstreamKey(before.title)!==`#${request.issue}`)throw new LaneError(`claim title does not identify exact issue #${request.issue}: ${JSON.stringify(before.title??'')}`)
+    if(lease.owner!==request.owner)throw new LaneError('claim owner changed')
+    if(lease.version!==request.oldVersion)throw new LaneError('claim stranded version changed')
     if(lease.branch===request.targetBranch||lease.worktree===request.targetWorktree)throw new LaneError('merged claim reissue requires a fresh target branch and worktree')
     const oldReservation=io.readRef(`refs/db-claims/${request.oldVersion}`)
     if(!oldReservation)throw new LaneError('old permanent reservation is missing')
@@ -4799,9 +4821,9 @@ export function acquireAuthorLane(options, now = new Date(), io = githubIo) {
 
 const SPLIT_REMAINDER = 'index plm.item_upper_trim_item_number_idx'
 function workstreamKey(title) {
-  const match = /^CLAIM:\s+(#[0-9]+(?:\/#?[0-9]+)*)\b/.exec(String(title ?? ''))
+  const match = /^CLAIM:\s+(?:issue\s+)?#?([0-9]+(?:\/#?[0-9]+)*)\b/i.exec(String(title ?? ''))
   if (!match) throw new LaneError('claim title does not identify one exact issue workstream')
-  return match[1]
+  return match[1].split('/').map((issue) => `#${issue.replace(/^#/, '')}`).join('/')
 }
 function migrationVersions(files) {
   const namedFiles=files.map((file)=>({file,name:file.filename ?? file.path ?? ''}))

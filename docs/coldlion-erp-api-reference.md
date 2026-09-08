@@ -101,6 +101,21 @@ List endpoints are Spring-paged:
 - Most masters accept **`modifiedFrom` / `modifiedTo`** (some also `createdFrom`/`createdTo`)
   → use for nightly delta pulls instead of full reloads.
 
+> ### ⚠️ Always pull `/items` one division at a time
+> **Verified live 2026-09-07.** `/items?companyCode=EDGEHOME` without a `divisionCode`
+> returns rows whose `merchGroupNNDesc` display names are blank even though the matching
+> `merchGroupNN` code is populated. Measured on the licensed divisions: **4,448 of 15,049**
+> rows came back with a licensor code and no licensor name. Adding
+> `&divisionCode=CW001` (or `SP001`) to the same query, same key, same page size, returns
+> the names in full — the real count of licensed items whose licensor name is genuinely
+> missing is **16**, all in `CW001`.
+>
+> This is deterministic and reproducible, and it is a query-shape trap, not a ColdLion
+> data fault. A whole-company pull was on the point of being reported to ColdLion as an
+> API defect. **Loop over divisions; never pull `/items` company-wide.** Independently of
+> this, never judge a missing Licensor or Property from the display name — read the code
+> (see `docs/business-rules/merchandise-and-product-taxonomy.md`).
+
 Live row counts (2026-07-15): customers **836**, vendors **539**, inventory **8,711**
 (items table is large too).
 
