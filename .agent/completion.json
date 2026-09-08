@@ -1,1 +1,50 @@
-{"schema_version":1,"work_issue":2037,"outcome":"ready-for-merge","pr":2563,"migration_versions":[],"contract_ref":"refs/db-contracts/2037/2","contract_sha256":"74e7dbad100aa2a94765da0fe85cc844dcd939892cd3cca07dd55161f94d26f4","head_sha":"9e2ff248a1e6e67c6476068a1b256eb15bbff65b","files_changed":[".agent/completion.json",".agent/contract.json",".github/workflows/shared-supabase-migrations.yml","AGENTS.md","docs/verification/throughput-guard-truth-audit-20260828.json","scripts/check-applied-migration-edit.mjs","scripts/check-applied-migration-edit.test.mjs"],"db_reads":[],"db_writes":[],"checks":[{"command":"node --test scripts/check-applied-migration-edit.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs","exit_code":0,"evidence":"34 tests passed with no failures and no skips."},{"command":"node scripts/check-throughput-truth-audit.mjs","exit_code":0,"evidence":"truth audit OK: call_sites=256"},{"command":"git diff --check","exit_code":0,"evidence":"No whitespace errors."},{"command":"node scripts/check-applied-migration-edit.mjs --base origin/main","exit_code":0,"evidence":"This change touches no migration file at all."}],"assumptions_resolved":["The historic schema mismatch was already repaired forward and verified in production.","This pull request contains prevention tooling only and performs no database write.","The guard now refuses an ADDED file whose version is already applied: replaying the incident shape of PR #2009 exits 1, where the previous guard exited 0."],"stop_conditions_hit":[]}
+{
+  "schema_version": 1,
+  "work_issue": 2037,
+  "outcome": "ready-for-merge",
+  "pr": 2563,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2037/4",
+  "contract_sha256": "5a102b75baf133d08bb1fa6d7014df46f19c2b4933b19e2fe90b7b62637d8c9a",
+  "head_sha": "9e2ff248a1e6e67c6476068a1b256eb15bbff65b",
+  "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/check-applied-migration-edit.mjs",
+    "scripts/check-applied-migration-edit.test.mjs"
+  ],
+  "db_reads": [],
+  "db_writes": [],
+  "checks": [
+    {
+      "command": "node --test scripts/check-applied-migration-edit.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
+      "exit_code": 0,
+      "evidence": "34 tests passed with no failures and no skips."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "truth audit OK: call_sites=256"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors."
+    },
+    {
+      "command": "node scripts/check-applied-migration-edit.mjs --base origin/main",
+      "exit_code": 0,
+      "evidence": "This change touches no migration file at all."
+    }
+  ],
+  "assumptions_resolved": [
+    "The historic schema mismatch was already repaired forward and verified in production.",
+    "This pull request contains prevention tooling only and performs no database write.",
+    "The guard now refuses an ADDED file whose version is already applied: replaying the incident shape of PR #2009 exits 1, where the previous guard exited 0."
+  ],
+  "stop_conditions_hit": [],
+  "generation": 4
+}
