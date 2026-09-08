@@ -49,7 +49,8 @@
   ],
   "assumptions_resolved": [
     "Migration file SHA256 is 7cff10dcf68d2ba8993201790e8c276d517fd2410efa049e3e2026504abf6c50; statement SHA256 is 4464c6d21a734cdebca6d61113c7e6383944fdb8e75dede41a2654e9e3b22244 over 6091 bytes.",
-    "The PR changes only agent evidence and the three registry/guard test files; structural migration and contract-test blobs are absent from this maintenance branch.",
+    "Against true GitHub base fbd49fe829a33a225805334a0cdba662dfd44084, the PR changes exactly the two agent evidence files and the three registry/guard test files; structural migration and contract-test blobs are absent from this maintenance branch.",
+    "After implementation commit 58123f65099f8e13779cda39ec451459e6bfa69e, only .agent/contract.json and .agent/completion.json changed; Agent work contract run 34253854499 validated that evidence tail at reviewed head 970706606a9e2fef4b6a38624bce42fdc945f7ab.",
     "Issue 2493 claim 2524, version 20260907154543, and both protected database objects remain untouched."
   ],
   "stop_conditions_hit": []
