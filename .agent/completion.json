@@ -1,50 +1,56 @@
 {
   "schema_version": 1,
-  "work_issue": 2037,
+  "work_issue": 1984,
   "outcome": "ready-for-merge",
-  "pr": 2563,
+  "pr": 2205,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2037/4",
-  "contract_sha256": "5a102b75baf133d08bb1fa6d7014df46f19c2b4933b19e2fe90b7b62637d8c9a",
-  "head_sha": "9e2ff248a1e6e67c6476068a1b256eb15bbff65b",
+  "contract_ref": "refs/db-contracts/1984/3",
+  "contract_sha256": "4e6fc29140c47ff07c1612ef0de7f8ab3a460b7fd31f1a2ef552ab0cec2f77ef",
+  "head_sha": "7d4db31d6aa697ad3af1fd91d696e5310897ebe1",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    ".github/workflows/shared-supabase-migrations.yml",
-    "AGENTS.md",
+    ".github/workflows/historical-item-mg-reclassification-tests.yml",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/check-applied-migration-edit.mjs",
-    "scripts/check-applied-migration-edit.test.mjs"
+    "scripts/historical-item-mg-reclassification/README.md",
+    "scripts/historical-item-mg-reclassification/apply.mjs",
+    "scripts/historical-item-mg-reclassification/build-manifest.mjs",
+    "scripts/historical-item-mg-reclassification/fixtures.mjs",
+    "scripts/historical-item-mg-reclassification/guards.test.mjs",
+    "scripts/historical-item-mg-reclassification/lib/classify.mjs",
+    "scripts/historical-item-mg-reclassification/lib/constants.mjs",
+    "scripts/historical-item-mg-reclassification/lib/csv.mjs",
+    "scripts/historical-item-mg-reclassification/lib/execute.mjs",
+    "scripts/historical-item-mg-reclassification/lib/manifest.mjs",
+    "scripts/historical-item-mg-reclassification/lib/pg.mjs",
+    "scripts/historical-item-mg-reclassification/lib/private-path.mjs",
+    "scripts/historical-item-mg-reclassification/lib/retirement-gate.mjs",
+    "scripts/historical-item-mg-reclassification/lib/target.mjs",
+    "scripts/historical-item-mg-reclassification/lib/verify.mjs",
+    "scripts/historical-item-mg-reclassification/rollback.mjs",
+    "scripts/historical-item-mg-reclassification/verify.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "node --test scripts/check-applied-migration-edit.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
+      "command": "node --test scripts/historical-item-mg-reclassification/guards.test.mjs",
       "exit_code": 0,
-      "evidence": "34 tests passed with no failures and no skips."
+      "evidence": "45 tests passed with no failures and no skips, including the new executor-level manifest-to-database binding, the fail-closed git probe, the per-run backup, and the source-header proof."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=256"
+      "evidence": "truth audit OK: call_sites=265 after the sites added by this round of fixes were given explicit dispositions and the inventory was re-digested."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
-    },
-    {
-      "command": "node scripts/check-applied-migration-edit.mjs --base origin/main",
-      "exit_code": 0,
-      "evidence": "This change touches no migration file at all."
+      "evidence": "No whitespace errors reported."
     }
   ],
   "assumptions_resolved": [
-    "The historic schema mismatch was already repaired forward and verified in production.",
-    "This pull request contains prevention tooling only and performs no database write.",
-    "The guard now refuses an ADDED file whose version is already applied: replaying the incident shape of PR #2009 exits 1, where the previous guard exited 0."
+    "The reclassification itself is executed later under its own authorisation; this pull request writes no production row."
   ],
-  "stop_conditions_hit": [],
-  "generation": 4
+  "stop_conditions_hit": []
 }
