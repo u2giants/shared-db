@@ -14,14 +14,16 @@ Issue: #1767. Scope: repository coordination only; no database, preview, product
 > **Replacement-chain repair, 2026-09-07 (issue #2550).** The 25-request
 > ceiling is unchanged. A released slot-2 chain could exceed the pre-mutex gate
 > because every predecessor replacement reread its immutable failure ref and a
-> failed reviewer already proved absent from the complete active-lease snapshot
-> was read again. Suffixed replacement refs now pull their corresponding
-> failure refs into the same GraphQL record snapshot, and proved absence in the
-> bounded active roster is reused. Retired historical reviewers remain outside
-> that bounded roster and retain the direct read/release path. A production-cost
-> fixture covers slot-1 durable approval, slot-2 replacement and release,
-> reviewer reinstatement, independent selection, exact assignment readback and
-> idempotent retry within 25 requests. Immutable-evidence, exact-head, verdict,
+> failed reviewer already covered by the lease snapshot was read again. Suffixed
+> replacement refs now pull their corresponding failure refs into the same
+> GraphQL record snapshot. The one bounded lease query also carries every name
+> in the static historical reviewer catalog, so a retired failed reviewer's
+> exact lease presence or absence is reused without making that reviewer
+> drawable again; unknown legacy names retain the strict direct-read fallback.
+> A production-cost fixture covers slot-1 durable approval, a retired slot-2
+> predecessor with an unrelated live lease, reviewer reinstatement, independent
+> selection, exact assignment readback and idempotent retry within 25 requests.
+> Immutable-evidence, exact-head, verdict,
 > independence, fresh mutex recheck, atomic transition and cleanup refusals are
 > unchanged.
 

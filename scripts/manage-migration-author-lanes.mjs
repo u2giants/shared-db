@@ -1305,7 +1305,13 @@ export const githubIo = {
     return rest&&graph?{remaining:Number(rest.remaining),limit:Number(rest.limit),reset:Number(rest.reset),graphRemaining:Number(graph.remaining),graphLimit:Number(graph.limit),graphReset:Math.floor(new Date(graph.resetAt).getTime()/1000)}:null
   },previewApplyRun(runId){return{run:ghJson(['api',`repos/${REPO}/actions/runs/${runId}`]),artifacts:ghJson(['api',`repos/${REPO}/actions/runs/${runId}/artifacts`]),logs:runGitHubCommand(['run','view',String(runId),'--repo',REPO,'--log'])}},
   readActiveReviewLeases(){
-    const names=[...ACTIVE_REVIEWERS,...OVERFLOW_REVIEWERS].map((row)=>row.name)
+    // Read every reviewer name the immutable catalog still understands, not
+    // only today's drawable roster. Replacement can legitimately be finishing
+    // a failure recorded while a now-retired reviewer was active. Keeping that
+    // exact historical lease in this same fail-closed GraphQL snapshot avoids
+    // a later REST ref read plus commit read without making the reviewer
+    // drawable again or widening the lease namespace beyond the static catalog.
+    const names=[...new Set([...REVIEWERS,...OVERFLOW_REVIEWERS].map((row)=>row.name))]
     const allowed=new Set(names)
     const fields=names.map((name,index)=>`r${index}:object(expression:${JSON.stringify(`${REVIEW_ACTIVE_REF_PREFIX}/${name}`)}){oid ... on Commit{message committedDate}}`).join(' ')
     const query=`query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{target{oid ... on Commit{tree{oid}}}} ${fields}}}`
@@ -3330,6 +3336,7 @@ export function findBusyReviewers(io,requested=[],{keepUnreadableLeases=false}={
   Object.defineProperty(busy,'stale',{value:stale,enumerable:false})
   Object.defineProperty(busy,'states',{value:states,enumerable:false})
   Object.defineProperty(busy,'leases',{value:new Map(records.map((row)=>[row.assignment.reviewer,{sha:row.sha,lease:row.assignment,heldSince:row.heldSince}])),enumerable:false})
+  Object.defineProperty(busy,'leaseSnapshot',{value:snapshot,enumerable:false})
   return busy
 }
 
@@ -4343,15 +4350,18 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     // separate single-ref read it used to do is gone.
     const hasVerdict=headVerdictBlocksReplacement(request.issue,request.pr,request.headSha,io,{slot:request.slot})
     if(hasVerdict)throw new LaneError('an existing verdict for the exact head forbids reviewer replacement')
-    // findBusyReviewers returns a complete, fail-closed snapshot of the bounded
-    // active/overflow namespace. A missing ACTIVE entry positively proves
-    // absence, so do not pay another REST read for it. Historical assignments
-    // may name a retired reviewer that the bounded snapshot deliberately does
-    // not enumerate; those retain the strict direct read and release path.
+    // findBusyReviewers returns a complete, fail-closed snapshot of the static
+    // reviewer catalog. It evaluates capacity only for today's drawable roster,
+    // but it also carries an exact retired-reviewer lease when an older failure
+    // names one. That lets replacement prove the historical ref's presence or
+    // absence without two extra REST reads. Truly unknown legacy names retain
+    // the strict direct-read path.
     const failedLeaseRef=reviewActiveRef(original.reviewer),cachedFailed=preflightBusy.leases?.get(original.reviewer)
-    const failedReviewerIsBounded=[...ACTIVE_REVIEWERS,...OVERFLOW_REVIEWERS].some((row)=>row.name===original.reviewer)
-    const liveFailedLeaseSha=cachedFailed?.sha??(failedReviewerIsBounded?null:io.readRef(failedLeaseRef))
-    const liveFailedLease=liveFailedLeaseSha?(cachedFailed?.sha===liveFailedLeaseSha?cachedFailed.lease:parseReviewLease(io.getCommit(liveFailedLeaseSha))):null
+    const snapshotFailed=preflightBusy.leaseSnapshot?.get(failedLeaseRef)??null
+    const failedReviewerIsCatalogued=[...REVIEWERS,...OVERFLOW_REVIEWERS].some((row)=>row.name===original.reviewer)
+    const catalogAbsenceProved=failedReviewerIsCatalogued&&preflightBusy.leaseSnapshot instanceof Map
+    const liveFailedLeaseSha=cachedFailed?.sha??snapshotFailed?.sha??(catalogAbsenceProved?null:io.readRef(failedLeaseRef))
+    const liveFailedLease=liveFailedLeaseSha?(cachedFailed?.sha===liveFailedLeaseSha?cachedFailed.lease:snapshotFailed?.sha===liveFailedLeaseSha?parseReviewLease(snapshotFailed.commit):parseReviewLease(io.getCommit(liveFailedLeaseSha))):null
     // ISSUE #2106 -- the SECOND reviewer-pool deadlock mode, distinct from the
     // release-welded-to-replacement one #2075 records.
     //

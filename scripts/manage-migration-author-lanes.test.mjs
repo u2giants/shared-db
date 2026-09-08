@@ -1506,9 +1506,19 @@ test('released slot-2 replacement with slot-1 approval and a reinstated reviewer
   giveVerdict(io,{...request,slot:1})
   const firstReplacement=replaceFailedReviewer({...request,slot:2,failedSequence:slotTwo.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)
   assert.equal(firstReplacement.reviewer,'qwen-3.8-max')
+  // Reproduce the live #2509 chain exactly: the predecessor was assigned while
+  // Muse 1.2 was drawable, then that catalogued name retired. Its active ref now
+  // belongs to unrelated work, so replacement must carry the historical row in
+  // the one lease snapshot without making Muse 1.2 eligible for a new draw.
+  const retiredName='muse-spark-1.2-contributor'
+  const retiredPredecessorSha=io.makeOwnerCommit(io.getCommit(firstReplacement.replacementSha).message.replace(`reviewer=${firstReplacement.reviewer}`,`reviewer=${retiredName}`))
+  io.refs.set(firstReplacement.assignmentRef,retiredPredecessorSha)
+  io.refs.set(`${REVIEW_FAILURE_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}-${slotTwo.sequence}`,retiredPredecessorSha)
+  io.refs.delete(reviewActiveRef(firstReplacement.reviewer))
+  io.refs.set(reviewActiveRef(retiredName),retiredPredecessorSha)
   const releasedRequest={...request,slot:2,failedSequence:firstReplacement.sequence,failureCode:'local_dependency_unavailable',failingCheck:'review-wrapper-no-explicit-base-packet',confirmLocalDependencyUnfixable:true,confirmNoVerdict:true,confirmNoArtifact:true}
   const released=releaseFailedReviewer(releasedRequest,io)
-  assert.equal(io.refs.get(reviewActiveRef(firstReplacement.reviewer))??null,null)
+  assert.equal(io.refs.get(reviewActiveRef(retiredName))??null,null)
 
   // The next rotation candidate is busy elsewhere, making the freshly
   // reinstated Grok record materially necessary to the successful draw.
@@ -1517,6 +1527,8 @@ test('released slot-2 replacement with slot-1 approval and a reinstated reviewer
     const busySha=io.makeOwnerCommit(`db-coordination reviewer-lease generation=1 reviewer=${name} issue=9550 pr=${busyPr} head=${busyHead} sequence=${9550+index}`)
     io.refs.set(reviewActiveRef(name),busySha)
   }
+  const unrelatedRetiredSha=io.makeOwnerCommit(`db-coordination reviewer-lease generation=1 reviewer=${retiredName} issue=${busyPr} pr=${busyPr} head=${busyHead} sequence=9549`)
+  io.refs.set(reviewActiveRef(retiredName),unrelatedRetiredSha)
 
   let attempts=0;const labels=[],batched=[];const rawGetCommit=io.getCommit
   const wire=(n=1,label='wire')=>{for(let i=0;i<n;i++)runGitHubCommand(['api','fixture'],{executor:()=>{attempts++;labels.push(label);return '{}'}})}
@@ -1544,6 +1556,9 @@ test('released slot-2 replacement with slot-1 approval and a reinstated reviewer
   assert.equal(attempts,23,`released slot-2 replacement wire accounting drifted: ${labels.join(',')}`)
   assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`released slot-2 replacement used ${attempts} requests: ${labels.join(',')}`)
   assert.equal(labels.some((label)=>label.startsWith(`readRef:${REVIEW_FAILURE_REF_PREFIX}/`)),false,'batched predecessor evidence must not be reread individually')
+  assert.equal(labels.includes(`readRef:${reviewActiveRef(retiredName)}`),false,'catalogued retired reviewer lease must reuse the complete snapshot')
+  assert.equal(labels.includes(`getCommit:${unrelatedRetiredSha}`),false,'catalogued retired reviewer lease commit must reuse the complete snapshot')
+  assert.equal(io.refs.get(reviewActiveRef(retiredName)),unrelatedRetiredSha,'the unrelated retired-reviewer lease must remain unchanged')
   assert.equal(io.refs.get(replacement.assignmentRef),replacement.replacementSha,'the exact replacement assignment ref must read back')
 
   attempts=0;labels.length=0;batched.length=0
