@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2591,
-  "generation": 1,
+  "generation": 2,
   "work_type": "tooling",
   "route": "shared-db-orchestrator",
   "goal": "Exempt a documents-only pull request from the agent work contract evidence pair, so a prose-only change can satisfy both the reviewer draw and the contract gate instead of neither.",
@@ -41,7 +41,8 @@
   "assumptions": [
     "This pull request is code, so the exemption it adds does not apply to itself; it carries a full evidence pair.",
     "gh api --paginate --slurp returns one array per page, so a pull request over 100 files arrives as an array of arrays.",
-    "The workflow needs only pull-requests: read to list the changed files."
+    "The workflow needs only pull-requests: read to list the changed files.",
+    "The GitHub read must go through scripts/lib/github-transport.mjs; a direct call from the workflow step is refused by the transport conformance check (#2342)."
   ],
   "stop_conditions": [
     "Stop if the exemption would let a migration, script, workflow or configuration change bypass the contract gate.",

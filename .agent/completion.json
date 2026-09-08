@@ -4,10 +4,12 @@
   "outcome": "ready-for-merge",
   "pr": 2592,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2591/1",
-  "contract_sha256": "c88ef787a55ebb790f26278424d97f7783c581fe4fb577f7b6ffb4ecd4360fa4",
+  "contract_ref": "refs/db-contracts/2591/2",
+  "contract_sha256": "5ec267202df85cdb4b7d77a0f3fadf5f3107051585091da6d83dabea4f424f42",
   "head_sha": "7dfd5604939fe37b86e213d478bae22f93498540",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     ".github/workflows/agent-work-contract.yml",
     "scripts/check-documents-only-pull-request.mjs",
     "scripts/check-documents-only-pull-request.test.mjs"
@@ -18,12 +20,12 @@
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Contract is valid; published as refs/db-contracts/2591/1."
+      "evidence": "Contract is valid; published as refs/db-contracts/2591/2."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Report satisfies contract generation 1 pinned by hash c88ef787."
+      "evidence": "Report satisfies contract generation 2 pinned by hash 5ec26720."
     },
     {
       "command": "node --test scripts/check-documents-only-pull-request.test.mjs",
