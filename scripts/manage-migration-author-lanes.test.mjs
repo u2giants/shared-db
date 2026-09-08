@@ -1512,7 +1512,7 @@ test('released slot-2 replacement with slot-1 approval and a reinstated reviewer
 
   // The next rotation candidate is busy elsewhere, making the freshly
   // reinstated Grok record materially necessary to the successful draw.
-  const busyReviewers=['muse-spark-1.2-contributor','gemini-3.8-flash-high']
+  const busyReviewers=['muse-spark-1.3-contributor','gemini-3.8-flash-high']
   for(const [index,name] of busyReviewers.entries()){
     const busySha=io.makeOwnerCommit(`db-coordination reviewer-lease generation=1 reviewer=${name} issue=9550 pr=${busyPr} head=${busyHead} sequence=${9550+index}`)
     io.refs.set(reviewActiveRef(name),busySha)
