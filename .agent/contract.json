@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2550,
-  "generation": 9,
+  "generation": 10,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Keep governed reviewer replacement within the fixed 25-request ceiling, admit only registry-pinned historical claim preview evidence, and terminalize its no-write recovery only from exact live run, artifact, digest, manifest, and unchanged-ledger proof.",
