@@ -1,14 +1,16 @@
 {
   "schema_version": 1,
-  "work_issue": 2572,
+  "work_issue": 2591,
   "outcome": "ready-for-merge",
-  "pr": 2585,
+  "pr": 2592,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2572/2",
-  "contract_sha256": "3947dea07b8af7cfb64454ba018fc26b6fbda81379f07b0fe4cecab20245408c",
-  "head_sha": "7b72b2f4bd21a26ac013b1f86370ba15bb3ebf70",
+  "contract_ref": "refs/db-contracts/2591/1",
+  "contract_sha256": "c88ef787a55ebb790f26278424d97f7783c581fe4fb577f7b6ffb4ecd4360fa4",
+  "head_sha": "dd52cb4f2a1ad9ab4cc03c78c70ec1608ce90630",
   "files_changed": [
-    "HANDOFF.d/2026-09-08T1650Z-edge-dev-claude-four-blocked-issues.md"
+    ".github/workflows/agent-work-contract.yml",
+    "scripts/check-documents-only-pull-request.mjs",
+    "scripts/check-documents-only-pull-request.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
@@ -16,23 +18,33 @@
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Contract is valid; published as refs/db-contracts/2572/1."
+      "evidence": "Contract is valid; published as refs/db-contracts/2591/1."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Report satisfies contract generation 1 pinned by hash 68e5648b."
+      "evidence": "Report satisfies contract generation 1 pinned by hash c88ef787."
+    },
+    {
+      "command": "node --test scripts/check-documents-only-pull-request.test.mjs",
+      "exit_code": 0,
+      "evidence": "9 tests pass, including a known-dirty case: a rename out of supabase/migrations/ into a .md path is refused, and rulebook prose is refused."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "truth audit OK: call_sites=265."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors in the handoff document."
+      "evidence": "No whitespace errors."
     }
   ],
   "assumptions_resolved": [
-    "This pull request changes one prose file plus the two .agent evidence files; no code, test, workflow, migration or configuration file is touched.",
-    "No database was read or written. No issue was closed by this pull request.",
-    "Re-reviewed from a clone whose main is current origin/main fbd49fe829a33a225805334a0cdba662dfd44084; the merge-base diff of this branch is exactly the handoff file plus the two .agent evidence files."
+    "This pull request changes three code files plus the two .agent evidence files, so the exemption it adds does not apply to itself.",
+    "No database was read or written.",
+    "The classifier was proven able to refuse: unreadable input, empty lists, mixed paginated shapes, rulebook prose and a migration rename all classify as not documents-only."
   ],
   "stop_conditions_hit": []
 }

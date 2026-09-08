@@ -1,44 +1,50 @@
 {
   "schema_version": 1,
-  "work_issue": 2572,
-  "generation": 2,
-  "work_type": "documentation",
+  "work_issue": 2591,
+  "generation": 1,
+  "work_type": "tooling",
   "route": "shared-db-orchestrator",
-  "goal": "Record why issues 1090, 1322, 1403 and 1868 cannot be closed, with the blocker state re-resolved live, so a fresh session does not re-derive it.",
-  "base_sha": "fbd49fe829a33a225805334a0cdba662dfd44084",
+  "goal": "Exempt a documents-only pull request from the agent work contract evidence pair, so a prose-only change can satisfy both the reviewer draw and the contract gate instead of neither.",
+  "base_sha": "d62993e5cf893d8072d43951d31e0ac891f71553",
   "dispatcher": "owner request 2026-09-08",
   "worker": "claude/shared-db-orchestrator-issues-27a129",
-  "branch": "claude/2572-blocked-four-handoff",
+  "branch": "claude/2591-docs-only-contract-exemption",
   "worktree": "C:/repos/shared-db/.claude/worktrees/top-5-blocking-issues-6be510",
   "allowed_paths": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "HANDOFF.d/2026-09-08T1650Z-edge-dev-claude-four-blocked-issues.md"
+    ".github/workflows/agent-work-contract.yml",
+    "scripts/check-documents-only-pull-request.mjs",
+    "scripts/check-documents-only-pull-request.test.mjs"
   ],
   "file_writes": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "HANDOFF.d/2026-09-08T1650Z-edge-dev-claude-four-blocked-issues.md"
+    ".github/workflows/agent-work-contract.yml",
+    "scripts/check-documents-only-pull-request.mjs",
+    "scripts/check-documents-only-pull-request.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not edit another session's HANDOFF.d file and do not rewrite the root HANDOFF.md pointer.",
-    "Do not close any of the four blocked issues on the strength of this document alone.",
-    "Do not write any migration, schema object, or licensed row data in this pull request."
+    "Do not widen the documents-only classifier: rulebook prose (AGENTS.md, CLAUDE.md, plan_*.md, skills, agents, commands) is never a document.",
+    "Do not let an unreadable or empty file list classify as documents-only; the gate must fail closed.",
+    "Do not weaken any other required check to make this pull request pass."
   ],
   "required_checks": [
     "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
     "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
+    "node --test scripts/check-documents-only-pull-request.test.mjs",
+    "node scripts/check-throughput-truth-audit.mjs",
     "git diff --check"
   ],
   "assumptions": [
-    "This pull request is prose only; no code, test, workflow, migration or configuration file is touched.",
-    "The blocker state recorded was re-resolved against live GitHub on 2026-09-08 and is dated in the document.",
-    "The reviewer packet must resolve its base from current origin/main; a stale local main misreads unrelated landed commits as changes of this pull request."
+    "This pull request is code, so the exemption it adds does not apply to itself; it carries a full evidence pair.",
+    "gh api --paginate --slurp returns one array per page, so a pull request over 100 files arrives as an array of arrays.",
+    "The workflow needs only pull-requests: read to list the changed files."
   ],
   "stop_conditions": [
-    "Stop if this pull request would change any file outside HANDOFF.d and the two .agent evidence files.",
-    "Stop if closing a blocked issue would require deleting a worktree or reducing a capability."
+    "Stop if the exemption would let a migration, script, workflow or configuration change bypass the contract gate.",
+    "Stop if the classifier cannot be proven to refuse a known-dirty case."
   ]
 }
