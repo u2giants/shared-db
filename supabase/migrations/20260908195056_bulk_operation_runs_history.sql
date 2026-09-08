@@ -1,6 +1,6 @@
 -- public.bulk_operation_runs -- append-only run history for PopDAM bulk operations.
 -- Issue #2439 ("the nightly style-group rebuild failed and cron reported success").
--- Claim issue #2443, reserved version 20260907200137.
+-- Claim issue #2443, reserved version 20260908195056.
 -- derived-from: none
 --
 -- WHY THIS EXISTS
