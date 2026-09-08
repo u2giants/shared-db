@@ -1,62 +1,57 @@
 {
-  "stop_conditions": [
-    "Claim or coordinator ownership changes",
-    "Main movement invalidates branch evidence",
-    "SQL scope widens or any required check refuses"
-  ],
-  "assumptions": [
-    "Claim2443 owner/path identifiers preserved; guarded newversion20260908195056 at published0a8307da",
-    "Earlier disposable red-control and full SQL contracts passed; exact same SQL/test bytes apart from guarded version metadata",
-    "Independent review and full live structural acceptance pending; worker append and alert wiring belong to PopDAM"
-  ],
-  "required_checks": [
-    "bash scripts/check-sql.sh",
-    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-    "node scripts/check-throughput-truth-audit.mjs",
-    "git diff --check"
-  ],
-  "prohibited_actions": [
-    "No shared database writes,review allocation,merge or deployment without coordinator order",
-    "No inherited claim relocation or applied migration editing",
-    "No consumer worker changes or data seeding"
-  ],
-  "db_writes": [
-    "table public.bulk_operation_runs",
-    "column public.bulk_operation_runs.error",
-    "column public.bulk_operation_runs.operation",
-    "column public.bulk_operation_runs.run_id",
-    "column public.bulk_operation_runs.stage",
-    "column public.bulk_operation_runs.status",
-    "index public.bulk_operation_runs_failures_idx",
-    "index public.bulk_operation_runs_operation_run_key",
-    "index public.bulk_operation_runs_operation_started_idx",
-    "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
-  ],
-  "db_reads": [
-    "function app.has_any_role",
-    "type app.app_role"
+  "schema_version": 1,
+  "work_issue": 1868,
+  "generation": 3,
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Repair the worktree reaper so it can run while an orchestrator is live, by replacing the blanket whole-run refusal with per-worktree liveness evidence the repo already publishes: open database claims naming an exact worktree path or branch, the reap's own working directory, and recent filesystem activity inside each worktree's git administrative directory. Then run the reap that issue #1868 asked for.",
+  "base_sha": "5caf1b309de6f975ed4ed9a1920ddafde5087078",
+  "dispatcher": "repo session, owner request 2026-09-08 (five oldest non-orchestrator issues)",
+  "worker": "claude/repo-session-oldest-five",
+  "branch": "claude/1868-worktree-reap-liveness",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/land-1868",
+  "allowed_paths": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/reap-merged-worktrees.mjs",
+    "scripts/reap-merged-worktrees.test.mjs"
   ],
   "file_writes": [
-    "supabase/migrations/20260908195056_bulk_operation_runs_history.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql",
+    ".agent/completion.json",
     ".agent/contract.json",
-    ".agent/completion.json"
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/reap-merged-worktrees.mjs",
+    "scripts/reap-merged-worktrees.test.mjs"
   ],
-  "allowed_paths": [
-    "supabase/migrations/20260908195056_bulk_operation_runs_history.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql",
-    ".agent/contract.json",
-    ".agent/completion.json"
+  "db_reads": [],
+  "db_writes": [],
+  "prohibited_actions": [
+    "Do not remove, disable or weaken the live-agent protection; the repair must be strictly better evidence, not less evidence.",
+    "Do not treat an unmeasurable worktree as idle; unknown activity counts as live.",
+    "Do not let --force override a positive database claim, uncommitted changes, unpushed commits, a lock, or a detached head.",
+    "Do not let a failed read of the markers or the claims relax any guard.",
+    "Do not remove a worktree that is dirty, unpushed, locked, detached, on an unmerged branch, or named by an open claim.",
+    "Do not let the whole-run refusal read the marker LIST; it must read the liveness bit, because an unreadable marker list is an empty list and is live."
   ],
-  "worktree": "/tmp/shared-db-orch-2536-2439",
-  "branch": "claude/issue-2439-bulk-operation-runs",
-  "worker": "codex recovery_2506 successor of stopped inherited2439 worker",
-  "dispatcher": "codex shared-db.orch marker2536 route01a07ceb-249b-7dc0-8f3a-ad5091e3a085",
-  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
-  "goal": "Retain append-only bulk-operation terminal history with administrator-only browser reads and narrow worker INSERT/SELECT privileges.",
-  "route": "shared-db-orchestrator",
-  "work_type": "structural",
-  "work_issue": 2439,
-  "generation": 2,
-  "schema_version": 1
+  "required_checks": [
+    "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
+    "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
+    "node --test scripts/reap-merged-worktrees.test.mjs",
+    "node scripts/check-throughput-truth-audit.mjs",
+    "node scripts/check-github-transport-conformance.mjs",
+    "git diff --check",
+    "node scripts/agent-work-contract-git-evidence.mjs --contract-file .agent/contract.json --report-file .agent/completion.json --pr-base-sha <base> --pr-head-sha <head>"
+  ],
+  "assumptions": [
+    "A db-claim or db-author-lease issue whose fenced block names an exact worktree path or branch is a positive liveness signal that does not depend on guessing from git alone. This is NOT true of every open db-claim issue: the collision-gate bodies written by scripts/check-dispatch-collision.mjs carry no worktree or branch field at all, so those agents are protected by the idle window and the unmerged-branch refusal rather than by a claim. Corrected in generation 2 after the governed review of PR #2606.",
+    "A worktree an agent is working in has recent mtimes on its own index, HEAD, logs/HEAD or ORIG_HEAD.",
+    "The git administrative DIRECTORY's own mtime is not a usable signal, because any git command anywhere in the repository refreshes it for every worktree at once.",
+    "Generation 3 exists only because the branch had to be refreshed from main to clear a merge conflict. The conflict was confined to the two .agent evidence files, which every pull request changes; it was resolved by taking main state for them and rewriting them as this generation, so the merge commit carries no hand-resolved code. No behaviour of the reaper changed between generation 2 and generation 3."
+  ],
+  "stop_conditions": [
+    "Stop if any candidate for removal is dirty, unpushed, locked, detached, unmerged, or claimed.",
+    "Stop if the activity measurement cannot distinguish a busy worktree from an abandoned one.",
+    "Stop if the repair would require --force to run a routine reap."
+  ]
 }

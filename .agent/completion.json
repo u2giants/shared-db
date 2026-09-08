@@ -1,51 +1,44 @@
 {
   "schema_version": 1,
-  "work_issue": 2439,
+  "work_issue": 1868,
   "outcome": "ready-for-merge",
-  "pr": 2447,
-  "migration_versions": [
-    "20260908195056"
-  ],
-  "contract_ref": "refs/db-contracts/2439/2",
-  "contract_sha256": "10702cb98c01f2b6630d527fc7f0bf68288371c183b90d457863240a8a2888f4",
-  "head_sha": "9242a95531f2df824fa614f56728dd9928d2bcdd",
+  "pr": 2606,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/1868/3",
+  "contract_sha256": "79a9b7f407a2a2ccd80841373445762686f7adbc9ec6cb405d54d5c9a49bdd5b",
+  "head_sha": "a55e37c0430d999ac8899e83da1cba4e613c6760",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "supabase/migrations/20260908195056_bulk_operation_runs_history.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql"
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/reap-merged-worktrees.mjs",
+    "scripts/reap-merged-worktrees.test.mjs"
   ],
-  "db_reads": [
-    "function app.has_any_role",
-    "type app.app_role"
-  ],
-  "db_writes": [
-    "table public.bulk_operation_runs",
-    "column public.bulk_operation_runs.error",
-    "column public.bulk_operation_runs.operation",
-    "column public.bulk_operation_runs.run_id",
-    "column public.bulk_operation_runs.stage",
-    "column public.bulk_operation_runs.status",
-    "index public.bulk_operation_runs_failures_idx",
-    "index public.bulk_operation_runs_operation_run_key",
-    "index public.bulk_operation_runs_operation_started_idx",
-    "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
-      "command": "bash scripts/check-sql.sh",
+      "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Static/recency passed; live-ledger subcheck skipped without token and not claimed as clearance."
+      "evidence": "Contract is valid; generation 3 published as refs/db-contracts/1868/3 at 1d571eaa. Generation 3 differs from generation 2 only in its base SHA and worktree: the branch had to be refreshed from main to clear a merge conflict, and a contract ref is immutable, so a new base needs a new generation. No reaper behaviour changed."
     },
     {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Mandatory and changed sidecars passed; no dynamic markers in new migration."
+      "evidence": "Report satisfies contract generation 3 pinned by hash 79a9b7f4."
+    },
+    {
+      "command": "node --test scripts/reap-merged-worktrees.test.mjs",
+      "exit_code": 0,
+      "evidence": "30 tests pass, 0 fail, up from 12. Every new signal has a known-dirty case: a claim naming an exact worktree, a claim naming only the branch, a REAL db-author-lease body as manage-migration-author-lanes.mjs emits it, path comparison across separators/case/trailing slash, a claim body with no machine block, the reap's own working directory, a recently active worktree under a live marker, a worktree quiet for the whole window, and UNMEASURABLE ACTIVITY COUNTS AS LIVE across undefined, null, NaN and a non-number. --force is proven to override neither a claim, uncommitted work, a lock, a detached head, unpushed commits, nor an unmerged branch. An unreadable marker list plus an unreadable claim list blocks the run, and passing the marker ARRAY where the liveness bit belongs now throws. lastActivityMs is measured directly against a real temporary repository and against a directory that does not exist."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "255 audited sites, unchanged discovery."
+      "evidence": "truth audit OK: call_sites=267. Two new sites, both prose comments in scripts/reap-merged-worktrees.mjs containing the word 'missing', recorded as excluded with reviewed reasons; neither makes a claim about a migration or a DDL object."
+    },
+    {
+      "command": "node scripts/check-github-transport-conformance.mjs",
+      "exit_code": 0,
+      "evidence": "200 files scanned; every GitHub call goes through scripts/lib/github-transport.mjs."
     },
     {
       "command": "git diff --check",
@@ -53,16 +46,57 @@
       "evidence": "No whitespace errors."
     },
     {
-      "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f role-test-wrapper.sql",
+      "command": "node scripts/reap-merged-worktrees.mjs (dry run against the live repository)",
       "exit_code": 0,
-      "evidence": "PostgreSQL 17 disposable local server ran the unchanged guarded migration and real JWT-aware app role helpers in one rolled-back transaction. Administrator read passed; ordinary-user query returned zero rows; anonymous read, administrator browser insert, and service_role truncate were denied. Failure retention, duplicate-run, unexplained-failure, update, and delete negative controls also passed."
+      "evidence": "First run: 79 worktree(s), 9 retireable, 70 kept, orchestrator LIVE (#2597), 8 claimed paths, 8 claimed branches, idle window 24h. Re-run after the review revisions: 79 worktree(s) again (other sessions created new ones), 0 retireable, 79 kept, every one with a stated reason. The run was not refused in either case, which is the whole repair."
+    },
+    {
+      "command": "per-candidate verification: git -C <path> status --porcelain and git -C <path> log -1 for each of the 9",
+      "exit_code": 0,
+      "evidence": "All 9 clean, pushed, on branches with merged pull requests, last committed between 25 hours and 6 days ago. None named by an open claim."
+    },
+    {
+      "command": "node scripts/reap-merged-worktrees.mjs --apply",
+      "exit_code": 0,
+      "evidence": "Removed 9 of 9; worktree count 79 -> 70. The reap issue #1868 asked for has now run, alongside a live orchestrator, without --force."
+    },
+    {
+      "command": "negative control on the activity signal: measured every mtime source across the live worktrees before choosing",
+      "exit_code": 0,
+      "evidence": "The git administrative directory's own mtime read 0.0 hours for all 79 worktrees at once, because any git command anywhere in the repository refreshes it for every worktree. Including it produced 0 retireable candidates - the same do-nothing outcome as the old blanket refusal - so it was dropped and the reason recorded in the code."
+    },
+    {
+      "command": "governed review of PR 2606 at head 1c695d57, reviewer grok-4.6",
+      "exit_code": 0,
+      "evidence": "VERDICT: REVISE. One finding at merge-stopping weight: blockedByLiveOrchestrator read `markers.length > 0` while main() set `markers` to [] on a FAILED read, so unreadable markers plus unreadable claims did not refuse. Two lesser findings: --idle-hours accepted any positive number including 0.001, and several new guarantees were asserted only positively. All three are fixed in commit 3e7d2003 and each has a known-dirty test. Durable verdict refs/db-review-verdicts/1868-2606-1c695d57432fe61533a1f43ac8c32a0ba21496fa at 587aa827."
+    },
+    {
+      "command": "node scripts/agent-work-contract-git-evidence.mjs --contract-file .agent/contract.json --report-file .agent/completion.json --pr-base-sha <base> --pr-head-sha <head>",
+      "exit_code": 0,
+      "evidence": "Run against PR base 0f22de12 and the pull request head. The reported file list matches Git exactly, and the only commit after the implementation head is the pair of .agent evidence files."
+    },
+    {
+      "command": "governed review of PR 2606 at head 9f9e9151, reviewer gemini-3.8-flash-high, replacement sequence 1857",
+      "exit_code": 0,
+      "evidence": "VERDICT: APPROVE. The reviewer confirmed the three revisions demanded by the earlier grok review: blockedByLiveOrchestrator now takes the boolean liveness bit and throws a TypeError on a marker array, so an unreadable marker list plus an unreadable claim list refuses the run; MIN_IDLE_HOURS = 1 rejects sub-hour windows with exit 2 before any plan or deletion; and the six added tests are genuine negative controls. It judged the residual collision-gate exposure bounded, because such a worktree is removable only after its pull request merges, its tree is clean and pushed, and it has been inactive for the whole idle window. Durable verdict refs/db-review-verdict-replacements/1868-2606-9f9e9151b78256dae1a474a263d196240ba35663-1857 at 343713f8."
+    },
+    {
+      "command": "all required checks re-run after the refresh from main, at merge commit a55e37c0",
+      "exit_code": 0,
+      "evidence": "30 tests pass 0 fail; truth audit OK call_sites=267; transport conformance 200 files scanned; git diff --check clean. The refresh changed no source file on this branch: the only conflict was the pair of .agent evidence files, which every pull request changes, and it was resolved by taking main state for them and then rewriting them as generation 3."
     }
   ],
   "assumptions_resolved": [
-    "Guarded supersession retained original version 20260906143443 and superseded version 20260907200137 as permanently reserved, and now uses protected version 20260908195056. The migration blob is byte-identical apart from the one comment line naming its reserved version.",
-    "Preserved test-only commit bd349eaa integrated before a normal merge of main 8d64a758; original claim identifiers remain unchanged.",
-    "PostgreSQL 17 role tests use the repository's real JWT-aware app helper definitions and Supabase-equivalent service_role BYPASSRLS.",
-    "Independent review, CI, preview and production live structural acceptance remain pending behind issue 2449. Consumer worker appends and alert consumption belong to PopDAM; no claim of application completion."
+    "The open db-claim issues are a usable positive liveness signal: 8 claimed worktree paths and 8 claimed branches were read from live issues and matched against the porcelain worktree list.",
+    "index, HEAD, logs/HEAD and ORIG_HEAD mtimes do distinguish a busy worktree from an abandoned one; the admin directory's own mtime does not.",
+    "No guard was removed or weakened. Dirty, unpushed, locked, detached and unmerged all still keep, in that order, and three new KEEP reasons were added ahead of the merged-branch check.",
+    "The whole-run refusal was narrowed, not deleted: it now fires when an orchestrator is live and the claims cannot be read, which is the case where no positive signal exists.",
+    "No database was read or written.",
+    "A failed read never relaxes a guard, on either path: an unreadable marker list counts as an orchestrator being live, AND that same liveness bit -- not the empty marker array -- is what the whole-run refusal consults when the claims are also unreadable.",
+    "The pull request reported no status checks at all because it was in conflict with main, not because a workflow was broken. GitHub cannot compute a merge commit for a conflicted pull request, so it creates no pull_request run. Refreshing the branch restored the checks."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "residual_risk": [
+    "The APPROVE verdict above is pinned to head 9f9e9151, which the refresh from main superseded. The guarded merge requires a verdict at the exact final head, so a fresh independent review at the final head is obtained before merging; the approved code is unchanged between the two heads."
+  ]
 }
