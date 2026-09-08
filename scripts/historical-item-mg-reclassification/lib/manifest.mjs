@@ -108,3 +108,35 @@ export function assertAuthorization({ target, expectedDigest, actualDigest, auth
   }
   return true;
 }
+
+/**
+ * Bind a manifest to the database it is about to be executed against.
+ *
+ * A missing identity field is NOT "unconstrained": an unstamped manifest is
+ * exactly what a preview-built plan looks like, and accepting it let a
+ * preview digest be applied against production through the executor core.
+ * All three fields must be present and must match the live connection.
+ */
+export function assertManifestBoundToTarget(manifest, { target, projectRef, cluster }) {
+  if (!manifest.target) {
+    throw new Error('REFUSED: the manifest does not name the target it was built against');
+  }
+  if (manifest.target !== target) {
+    throw new Error(
+      `REFUSED: the manifest was built against "${manifest.target}", not "${target}"`,
+    );
+  }
+  if (!manifest.project_ref) {
+    throw new Error('REFUSED: the manifest does not name the Supabase project it was built against');
+  }
+  if (manifest.project_ref !== projectRef) {
+    throw new Error('REFUSED: the manifest was built against a different Supabase project');
+  }
+  if (!manifest.cluster_system_identifier) {
+    throw new Error('REFUSED: the manifest does not name the Postgres cluster it was built against');
+  }
+  if (String(manifest.cluster_system_identifier) !== String(cluster)) {
+    throw new Error('REFUSED: the manifest was built against a different Postgres cluster');
+  }
+  return true;
+}

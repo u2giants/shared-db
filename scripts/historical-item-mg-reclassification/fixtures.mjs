@@ -65,10 +65,17 @@ export function sourceRow(overrides = {}) {
 }
 
 /** A manifest containing exactly the given candidate records. */
-export function manifestOf(candidates) {
+export const PREVIEW_REF = 'rjyboqwcdzcocqgmsyel';
+export const PREVIEW_CLUSTER = '7000000000000000001';
+
+export function manifestOf(candidates, binding = {}) {
   return {
     schema: 'historical-item-mg-reclassification/manifest@1',
     cutoff: '2025-05-14T00:00:00',
+    target: 'preview',
+    project_ref: PREVIEW_REF,
+    cluster_system_identifier: PREVIEW_CLUSTER,
+    ...binding,
     candidates,
     no_ops: [],
     abstentions: [],

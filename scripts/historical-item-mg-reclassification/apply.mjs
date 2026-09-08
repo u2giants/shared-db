@@ -16,7 +16,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { WRITABLE_FIELDS } from './lib/constants.mjs';
-import { manifestDigest } from './lib/manifest.mjs';
+import { assertManifestBoundToTarget, manifestDigest } from './lib/manifest.mjs';
 import { runBatch } from './lib/execute.mjs';
 import { connect, parseArgs } from './lib/pg.mjs';
 import { assertLiveIdentity, readLiveIdentity } from './lib/target.mjs';
@@ -54,20 +54,8 @@ export function buildBackup(toChange, { target, digest, projectRef, cluster }) {
  * in a production authorization artifact would have been executed against
  * production, because nothing compared the manifest to the live destination.
  */
-export function assertManifestMatchesTarget(manifest, { target, projectRef, cluster }) {
-  if (manifest.target && manifest.target !== target) {
-    throw new Error(
-      `REFUSED: the manifest was built against "${manifest.target}", not "${target}"`,
-    );
-  }
-  if (manifest.project_ref && manifest.project_ref !== projectRef) {
-    throw new Error('REFUSED: the manifest was built against a different Supabase project');
-  }
-  if (manifest.cluster_system_identifier
-    && String(manifest.cluster_system_identifier) !== String(cluster)) {
-    throw new Error('REFUSED: the manifest was built against a different Postgres cluster');
-  }
-  return true;
+export function assertManifestMatchesTarget(manifest, live) {
+  return assertManifestBoundToTarget(manifest, live);
 }
 
 async function main() {
@@ -104,6 +92,7 @@ async function main() {
 
     const result = await runBatch(client, manifest, {
       target: args.target,
+      projectRef,
       mode: args.apply ? 'apply' : 'plan',
       expectedDigest: args.expect_manifest_sha256,
       authorization,

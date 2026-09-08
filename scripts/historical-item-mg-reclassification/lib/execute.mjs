@@ -7,7 +7,10 @@
 
 import { ABSTAIN, HISTORICAL_CUTOFF_ISO, WRITABLE_FIELDS, assertCutoff } from './constants.mjs';
 import { buildDivisionIndex, buildTaxonomyIndex, canonicalTimestamp, isHistorical, qualifyChain, resolveItemDivision } from './classify.mjs';
-import { assertAuthorization, assertManifestWritable, manifestDigest } from './manifest.mjs';
+import {
+  assertAuthorization, assertManifestBoundToTarget, assertManifestWritable, manifestDigest,
+} from './manifest.mjs';
+import { readLiveIdentity } from './target.mjs';
 
 const SELECT_FIELDS = [
   'item_id_pk', 'item_num_id', 'created_time_date', 'div_code', 'div_code_fk',
@@ -156,11 +159,20 @@ where t.item_id_pk = v.item_id_pk
  */
 export async function runBatch(client, manifest, {
   target, mode = 'plan', expectedDigest, authorization, cutoff = HISTORICAL_CUTOFF_ISO,
-  onPlanned,
+  projectRef, onPlanned,
 } = {}) {
   if (mode !== 'plan' && mode !== 'apply') {
     throw new Error(`REFUSED: unknown mode "${mode}"; expected plan or apply`);
   }
+  // The binding lives HERE, in the executor, not only in the apply CLI. Any
+  // caller that opens its own client would otherwise bypass it entirely.
+  if (!projectRef) {
+    throw new Error('REFUSED: runBatch requires the proven project ref of the open connection');
+  }
+  const identity = await readLiveIdentity(client);
+  assertManifestBoundToTarget(manifest, {
+    target, projectRef, cluster: identity.system_identifier,
+  });
   const digest = manifestDigest(manifest);
   assertAuthorization({ target, expectedDigest, actualDigest: digest, authorization });
 
@@ -212,6 +224,9 @@ export async function runBatch(client, manifest, {
  * for manual review; it is never overwritten.
  */
 export async function runRollback(client, backup, { target, expectedDigest, mode = 'plan' } = {}) {
+  if (mode !== 'plan' && mode !== 'apply') {
+    throw new Error(`REFUSED: unknown mode "${mode}"; expected plan or apply`);
+  }
   if (backup.target !== target) {
     throw new Error(
       `REFUSED: backup was taken against "${backup.target}", not "${target}"`,

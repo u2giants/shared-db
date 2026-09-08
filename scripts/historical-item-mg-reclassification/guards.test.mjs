@@ -22,7 +22,7 @@ import { runBatch, runRollback } from './lib/execute.mjs';
 import { nonCandidateDigest, assertCategoryContract } from './lib/verify.mjs';
 import { evaluateRetirementGate, RESIDUAL_CLASSES } from './lib/retirement-gate.mjs';
 import {
-  DIVISIONS, MERCH_GROUPS, fakeClient, item, manifestOf, sourceRow,
+  DIVISIONS, MERCH_GROUPS, PREVIEW_REF, fakeClient, item, manifestOf, sourceRow,
 } from './fixtures.mjs';
 
 const divisionIndex = buildDivisionIndex(DIVISIONS);
@@ -176,7 +176,7 @@ test('9: a manifest digest mismatch refuses the apply', async () => {
   const client = fakeClient([item()]);
   await assert.rejects(
     runBatch(client, manifest, {
-      target: 'preview', mode: 'apply', expectedDigest: 'deadbeef',
+      target: 'preview', projectRef: PREVIEW_REF, mode: 'apply', expectedDigest: 'deadbeef',
     }),
     /digest mismatch/,
   );
@@ -229,7 +229,7 @@ test('11: compare-and-swap drift rolls back the entire batch', async () => {
     item({ item_id_pk: 2, item_num_id: 'SYN-0002', udf_merchgroup01: 'CHANGED' }),
   ]);
   await assert.rejects(
-    runBatch(client, manifest, { target: 'preview', mode: 'apply' }),
+    runBatch(client, manifest, { target: 'preview', projectRef: PREVIEW_REF, mode: 'apply' }),
     /drifted from the manifest before-state/,
   );
   assert.equal(client.log.includes('UPDATE'), false);
@@ -240,7 +240,7 @@ test('11: compare-and-swap drift rolls back the entire batch', async () => {
 test('11b: plan mode always rolls back and never updates', async () => {
   const rec = qualify(sourceRow(), [item()]).record;
   const client = fakeClient([item()]);
-  const r = await runBatch(client, manifestOf([rec]), { target: 'preview' });
+  const r = await runBatch(client, manifestOf([rec]), { target: 'preview', projectRef: PREVIEW_REF });
   assert.equal(r.mode, 'plan');
   assert.equal(r.to_change.length, 1);
   assert.equal(r.changed, 0);
@@ -261,7 +261,7 @@ test('11c: an unknown mode is refused', async () => {
 test('12: raw codes and normalized IDs update together, under a lock', async () => {
   const rec = qualify(sourceRow(), [item()]).record;
   const client = fakeClient([item()]);
-  const r = await runBatch(client, manifestOf([rec]), { target: 'preview', mode: 'apply' });
+  const r = await runBatch(client, manifestOf([rec]), { target: 'preview', projectRef: PREVIEW_REF, mode: 'apply' });
   assert.equal(r.changed, 1);
   assert.equal(client.log.includes('LOCK'), true);
   const row = client.table.get(1);
@@ -284,7 +284,7 @@ test('13: a row already carrying the proposal is a counted no-op', async () => {
   assert.equal(q.status, 'noop');
   const rec = qualify(sourceRow(), [item()]).record;
   const client = fakeClient([already]);
-  const r = await runBatch(client, manifestOf([rec]), { target: 'preview', mode: 'apply' });
+  const r = await runBatch(client, manifestOf([rec]), { target: 'preview', projectRef: PREVIEW_REF, mode: 'apply' });
   assert.equal(r.already_equal.length, 1);
   assert.equal(r.to_change.length, 0);
   assert.equal(r.changed, 0);
@@ -297,7 +297,7 @@ test('14: non-candidate rows stay byte-equivalent across the apply', async () =>
   const rows = [item({ item_id_pk: 1 }), item({ item_id_pk: 2, item_num_id: 'SYN-0002' })];
   const client = fakeClient(rows);
   const before = await nonCandidateDigest(client, [1]);
-  await runBatch(client, manifestOf([rec]), { target: 'preview', mode: 'apply' });
+  await runBatch(client, manifestOf([rec]), { target: 'preview', projectRef: PREVIEW_REF, mode: 'apply' });
   const after = await nonCandidateDigest(client, [1]);
   assert.equal(after.digest, before.digest);
   assert.equal(after.row_count, 1);
@@ -333,7 +333,7 @@ test('16: rollback restores only the exact batch after-state', async () => {
   const manifest = manifestOf([rec, rec2]);
   const digest = manifestDigest(manifest);
   const client = fakeClient([item({ item_id_pk: 1 }), item({ item_id_pk: 2, item_num_id: 'SYN-0002' })]);
-  await runBatch(client, manifest, { target: 'preview', mode: 'apply' });
+  await runBatch(client, manifest, { target: 'preview', projectRef: PREVIEW_REF, mode: 'apply' });
 
   const backup = {
     target: 'preview',
@@ -506,7 +506,7 @@ test('11d: a compare-and-swap that affects the wrong number of rows rolls the ba
     },
   };
   await assert.rejects(
-    runBatch(client, manifestOf([rec]), { target: 'preview', mode: 'apply' }),
+    runBatch(client, manifestOf([rec]), { target: 'preview', projectRef: PREVIEW_REF, mode: 'apply' }),
     /affected 0 rows but 1 were planned/,
   );
   assert.equal(client.log.at(-1), 'ROLLBACK');
@@ -528,21 +528,71 @@ test('22: a blank source identity abstains instead of matching anything', () => 
 test('23: a manifest built elsewhere cannot be executed against this database', async () => {
   const { assertManifestMatchesTarget } = await import('./apply.mjs');
   const live = { target: 'production', projectRef: 'aaaabbbbccccddddeeee', cluster: '77' };
-  assert.equal(assertManifestMatchesTarget(
-    { target: 'production', project_ref: 'aaaabbbbccccddddeeee', cluster_system_identifier: '77' },
-    live,
-  ), true);
+  const bound = {
+    target: 'production', project_ref: 'aaaabbbbccccddddeeee', cluster_system_identifier: '77',
+  };
+  assert.equal(assertManifestMatchesTarget(bound, live), true);
   assert.throws(
-    () => assertManifestMatchesTarget({ target: 'preview' }, live),
+    () => assertManifestMatchesTarget({ ...bound, target: 'preview' }, live),
     /built against "preview", not "production"/,
   );
   assert.throws(
-    () => assertManifestMatchesTarget({ project_ref: 'zzzzbbbbccccddddeeee' }, live),
+    () => assertManifestMatchesTarget({ ...bound, project_ref: 'zzzzbbbbccccddddeeee' }, live),
     /a different Supabase project/,
   );
   assert.throws(
-    () => assertManifestMatchesTarget({ cluster_system_identifier: '99' }, live),
+    () => assertManifestMatchesTarget({ ...bound, cluster_system_identifier: '99' }, live),
     /a different Postgres cluster/,
+  );
+  // An ABSENT identity field is a refusal too. Treating it as unconstrained let
+  // an unstamped preview manifest through against production.
+  assert.throws(
+    () => assertManifestMatchesTarget({ ...bound, target: undefined }, live),
+    /does not name the target/,
+  );
+  assert.throws(
+    () => assertManifestMatchesTarget({ ...bound, project_ref: undefined }, live),
+    /does not name the Supabase project/,
+  );
+  assert.throws(
+    () => assertManifestMatchesTarget({ ...bound, cluster_system_identifier: undefined }, live),
+    /does not name the Postgres cluster/,
+  );
+});
+
+test('23b: the executor core itself refuses an unbound manifest, not just the apply CLI', async () => {
+  const rec = qualify(sourceRow(), [item()]).record;
+  const client = fakeClient([item()]);
+  const unbound = manifestOf([rec]);
+  delete unbound.project_ref;
+  await assert.rejects(
+    runBatch(client, unbound, { target: 'preview', projectRef: PREVIEW_REF, mode: 'apply' }),
+    /does not name the Supabase project/,
+  );
+  // and a manifest stamped for another cluster cannot be applied through the core
+  await assert.rejects(
+    runBatch(client, manifestOf([rec], { cluster_system_identifier: '99' }), {
+      target: 'preview', projectRef: PREVIEW_REF, mode: 'apply',
+    }),
+    /a different Postgres cluster/,
+  );
+  assert.ok(!client.log.includes('UPDATE'));
+});
+
+test('23c: the executor refuses to run without the proven project ref of the connection', async () => {
+  const rec = qualify(sourceRow(), [item()]).record;
+  await assert.rejects(
+    runBatch(fakeClient([item()]), manifestOf([rec]), { target: 'preview', mode: 'apply' }),
+    /requires the proven project ref/,
+  );
+});
+
+test('23d: a rollback with an unknown mode is refused instead of falling through to a write', async () => {
+  await assert.rejects(
+    runRollback(fakeClient([item()]), { target: 'preview', rows: [] }, {
+      target: 'preview', mode: 'force',
+    }),
+    /unknown mode "force"/,
   );
 });
 
@@ -556,7 +606,7 @@ test('24: the backup is taken under the lock and covers only the rows written', 
   const client = fakeClient([item({ item_id_pk: 1 }), item({ item_id_pk: 2, item_num_id: 'SYN-0002', ...b.after })]);
   const seen = [];
   await runBatch(client, manifestOf([a, b]), {
-    target: 'preview',
+    target: 'preview', projectRef: PREVIEW_REF,
     mode: 'apply',
     onPlanned: (toChange) => { seen.push(toChange.map((c) => c.item_id_pk)); },
   });
