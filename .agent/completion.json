@@ -1,21 +1,128 @@
 {
   "schema_version": 1,
-  "work_issue": 2285,
+  "work_issue": 2449,
   "outcome": "ready-for-merge",
-  "pr": 2562,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2285/4",
-  "contract_sha256": "95cacef31386a69eee352318273be9e0aa44296a1daa714c04ac004a8af2db1f",
-  "head_sha": "ba2150b59cab277f8f6ba392da120faeef552a87",
-  "files_changed": ["AGENTS.md", "docs/agents/section-4-anti-collision-rules.md", "scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
-  "db_reads": [],
-  "db_writes": [],
-  "checks": [
-    {"command": "node --test scripts/manage-migration-author-lanes.test.mjs", "exit_code": 0, "evidence": "477 passed; 0 failed, skipped, cancelled, or todo."},
-    {"command": "AI_MUSE_CALLER=codex ai-muse doctor", "exit_code": 0, "evidence": "All five installed-wrapper integrity checks passed."},
-    {"command": "AI_MUSE_CALLER=codex ai-muse ask issue-2285-spark-1-3-qualification --prompt-file .private/issue-2285-muse-live-proof-refresh.md", "exit_code": 0, "evidence": "Live provider meta-model-api, exact model muse-spark-1.3-contributor, reviewed the rebased implementation and approved its unchanged four-file capability diff."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
+  "pr": 2452,
+  "migration_versions": [
+    "20260907200221"
   ],
-  "assumptions_resolved": ["ai-devops PR #238 is merged as 7b78ed1b382ea6ff3fabd922d7f7d704eb613016.", "The installed wrapper and live response both identify Muse Spark 1.3 Contributor; historical 1.2 evidence remains unchanged."],
+  "contract_ref": "refs/db-contracts/2449/8",
+  "contract_sha256": "c8109bcdce1bd4940f7b7a14829956a38daf5b3012f35fa3d84cb33894b7d687",
+  "head_sha": "c740c820963f310ee16db4b67f833bdda433d852",
+  "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "scripts/production-verification-sidecars/20260907200221.json",
+    "scripts/production_business_risk_gate.py",
+    "scripts/production_catalog_verification.py",
+    "supabase/migrations/20260907200221_single_creative_submission_resolution_ledger.sql",
+    "supabase/tests/creative_submission_contract_status.sql",
+    "supabase/tests/creative_submission_property_resolution_contracts.sql",
+    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
+    "supabase/tests/dcp_opa_marvel_disney_tiebreaker.sql",
+    "supabase/tests/dcp_vault_landing_contracts.sql",
+    "supabase/tests/property_match_queue_contracts.sql",
+    "supabase/tests/scraped_properties_evidence_contracts.sql"
+  ],
+  "db_reads": [
+    "column plm.dcp_opa_property_resolution.creative_decision_state",
+    "function api.db_data_admin_decide_property_match",
+    "function api.db_data_admin_scraped_properties",
+    "function plm.enforce_dcp_opa_crosswalk_members",
+    "policy dcp_opa_property_resolution_member_read on plm.dcp_opa_property_resolution_member",
+    "table plm.creative_submission_property_resolution",
+    "table plm.creative_submission_property_resolution_archive",
+    "table plm.creative_submission_property_resolution_member",
+    "table plm.creative_submission_property_resolution_member_archive",
+    "table plm.dcp_opa_property_resolution",
+    "table plm.dcp_opa_property_resolution_member",
+    "table plm.dcp_opa_property_resolution_member_new",
+    "trigger creative_submission_property_resolution_archive_no_insert on plm.creative_submission_property_resolution_archive",
+    "trigger creative_submission_property_resolution_member_archive_no_insert on plm.creative_submission_property_resolution_member_archive",
+    "trigger dcp_opa_property_resolution_mapping_members_check on plm.dcp_opa_property_resolution",
+    "trigger dcp_opa_property_resolution_member_append_only on plm.dcp_opa_property_resolution_member",
+    "trigger dcp_opa_property_resolution_member_mapping_header_check on plm.dcp_opa_property_resolution_member",
+    "trigger dcp_opa_property_resolution_member_no_truncate on plm.dcp_opa_property_resolution_member",
+    "trigger creative_submission_member_archive_no_insert on plm.creative_submission_property_resolution_member_archive",
+    "policy dcp_opa_property_resolution_read on plm.dcp_opa_property_resolution",
+    "table plm.opa_property",
+    "function plm.reject_creative_submission_property_resolution_mutation",
+    "function plm.reject_dcp_opa_resolution_mutation",
+    "function app.has_role",
+    "function app.has_app_access",
+    "function app.has_any_role"
+  ],
+  "db_writes": [
+    "column plm.dcp_opa_property_resolution.creative_decision_state",
+    "function api.db_data_admin_decide_property_match",
+    "function api.db_data_admin_scraped_properties",
+    "function plm.enforce_dcp_opa_crosswalk_members",
+    "policy dcp_opa_property_resolution_member_read on plm.dcp_opa_property_resolution_member",
+    "table plm.creative_submission_property_resolution",
+    "table plm.creative_submission_property_resolution_archive",
+    "table plm.creative_submission_property_resolution_member",
+    "table plm.creative_submission_property_resolution_member_archive",
+    "table plm.dcp_opa_property_resolution",
+    "table plm.dcp_opa_property_resolution_member",
+    "table plm.dcp_opa_property_resolution_member_new",
+    "trigger creative_submission_property_resolution_archive_no_insert on plm.creative_submission_property_resolution_archive",
+    "trigger creative_submission_property_resolution_member_archive_no_insert on plm.creative_submission_property_resolution_member_archive",
+    "trigger dcp_opa_property_resolution_mapping_members_check on plm.dcp_opa_property_resolution",
+    "trigger dcp_opa_property_resolution_member_append_only on plm.dcp_opa_property_resolution_member",
+    "trigger dcp_opa_property_resolution_member_mapping_header_check on plm.dcp_opa_property_resolution_member",
+    "trigger dcp_opa_property_resolution_member_no_truncate on plm.dcp_opa_property_resolution_member",
+    "trigger creative_submission_member_archive_no_insert on plm.creative_submission_property_resolution_member_archive",
+    "policy dcp_opa_property_resolution_read on plm.dcp_opa_property_resolution"
+  ],
+  "checks": [
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors."
+    },
+    {
+      "command": "node scripts/check-production-verification-sidecars.mjs",
+      "exit_code": 0,
+      "evidence": "All 43 hash-bound sidecars, marker locations, and the regenerated detector baseline passed."
+    },
+    {
+      "command": "python3 -m unittest -q scripts.test_production_catalog_verification scripts.test_migration_derivation",
+      "exit_code": 0,
+      "evidence": "229 tests passed with zero failures."
+    },
+    {
+      "command": "python3 /tmp/shared-db-2536-2449-db/test_issue2449_fixes.py",
+      "exit_code": 0,
+      "evidence": "Three focused SQL contracts passed. Disabling each named trigger failed the catalog contract; downgrading append-only or no-truncate from A to O also failed; an unrelated fourth trigger passed. The old leaf reader produced the expected regression failure. Archive identities, counts, and row hashes were unchanged."
+    },
+    {
+      "command": "python3 /tmp/shared-db-2536-2449-db/test_rls_repair.py",
+      "exit_code": 0,
+      "evidence": "Both privacy SQL tests passed, including entitled legacy reads, signed-in denial, generic header/member denial, and weakened-policy red controls."
+    },
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static, expected-count, verification-cost, and EOL-reference guards passed; the live-ledger subcheck was explicitly skipped because no token was configured and is not treated as clearance."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "Truth audit passed all 255 call sites."
+    },
+    {
+      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "exit_code": 0,
+      "evidence": "41 tests passed with zero failures or skips."
+    }
+  ],
+  "assumptions_resolved": [
+    "Claim #2451 remains open and unchanged with reserved version 20260907200221 and the exact original object list.",
+    "The newest terminal approved or rejected decision controls Scraped Properties; later pending remains queued without hiding approval, and later rejection supersedes approval.",
+    "Pending and rejected rows remain immutable; archive relation identities, counts, and row hashes are unchanged and UPDATE/DELETE remain denied.",
+    "All three intended member triggers are named and enabled; append-only and no-truncate require ENABLE ALWAYS, while mapping-header remains deferrable and initially deferred.",
+    "Current origin/main 8d64a75812beec85d2f8b2c78669e5e17635359d is merged. Review, preview, merge, production apply, and claim release remain coordinator gates and were not performed."
+  ],
   "stop_conditions_hit": []
 }
