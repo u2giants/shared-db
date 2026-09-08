@@ -22,6 +22,10 @@ test('pins the issue 2509 preview restoration without changing production eligib
     ()=>validateHistoricalRestorationFile('supabase/migrations/20260907131728_wrong.sql','select 1;\n'),
     /not an approved exact historical restoration/,
   )
+  assert.throws(
+    ()=>validateHistoricalRestorationFile(row.filename,'select 1;\n'),
+    /historical restoration file hash mismatch for 20260907131728/,
+  )
 })
 
 test('pins the one authenticated preview historical restoration',()=>{
