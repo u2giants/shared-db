@@ -6,7 +6,7 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2566/2",
   "contract_sha256": "6f9b83068146dc0aff84e3836909557aeff4b6333e0f72ee0b805f0dbfa4e13a",
-  "head_sha": "4f9a502b5ee94276edfdc6605291dc9582d83c4a",
+  "head_sha": "49d6cd24bcd3ed160764809af7301a3a738d3a17",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -43,7 +43,7 @@
       "evidence": "No whitespace errors in the complete implementation delta."
     },
     {
-      "command": "node --input-type=module -e <exact PR2513 blob validation>",
+      "command": "node --input-type=module -e \"import{execFileSync}from'node:child_process';import{validateHistoricalRestorationFile as v}from'./scripts/historical-migration-restorations.mjs';const r=execFileSync('git',['cat-file','blob','da47d8b3c4dbe61617bbbaf507d8027c5c5724aa']).toString();v('supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql',r);try{v('supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql',r+'x');process.exit(1)}catch(e){if(!/hash mismatch/.test(e.message))throw e};console.log('exact blob accepted; changed bytes refused')\"",
       "exit_code": 0,
       "evidence": "The registry accepted PR #2513 Git blob da47d8b3c4dbe61617bbbaf507d8027c5c5724aa at the exact path and refused the same bytes with an appended change."
     }
