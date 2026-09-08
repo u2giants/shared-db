@@ -898,11 +898,11 @@ test('a busy rotation slot advances to the next free active reviewer',()=>{
   const {io,heads}=busyIo()
   // Muse's PR is merged, so muse is free again -- and free means rotation, even
   // though the sequence would otherwise land elsewhere.
-  const musePr=600+ACTIVE_REVIEWERS.findIndex((r)=>r.name==='muse-spark-1.2-contributor')
+  const musePr=600+ACTIVE_REVIEWERS.findIndex((r)=>r.name==='muse-spark-1.3-contributor')
   const openPr=io.getPr
   io.getPr=(number)=>Number(number)===musePr?{number:musePr,state:'closed',head:{sha:heads.get(musePr)}}:openPr(number)
-  assert.ok(!findBusyReviewers(io).has('muse-spark-1.2-contributor'))
-  assert.equal(pickReviewer(1,io).name,'muse-spark-1.2-contributor')
+  assert.ok(!findBusyReviewers(io).has('muse-spark-1.3-contributor'))
+  assert.equal(pickReviewer(1,io).name,'muse-spark-1.3-contributor')
 })
 
 test('a recorded verdict and a moved head both free the reviewer that held them',()=>{
@@ -951,14 +951,14 @@ test('the active rotation is exactly the current models, in a stable order',()=>
   // instruction after its account usage limit stayed exhausted for a full
   // session. Its row stays in REVIEWERS so durable artifacts naming it resolve.
   // kimi-k3 was unpaused on 2026-09-07 (owner instruction, PR #2483).
-  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3','qwen-3.8-max','muse-spark-1.2-contributor','gemini-3.8-flash-high'])
+  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3','qwen-3.8-max','muse-spark-1.3-contributor','gemini-3.8-flash-high'])
   assert.ok(RETIRED_REVIEWERS.includes('codex-gpt-5.6-sol'),'codex-gpt-5.6-sol must stay out of the rotation')
   assert.equal(reviewerReadsRepository('codex-gpt-5.6-sol'),true,'retiring the account must not invalidate the verdicts it already recorded')
   assert.deepEqual(OVERFLOW_REVIEWERS,[])
   assert.equal(REVIEWERS.find((r)=>r.name==='kimi-k3').wrapper,'ai-kimi')
   assert.equal(REVIEWERS.find((r)=>r.name==='codex-gpt-5.6-sol').wrapper,'ai-codex-review')
   assert.equal(REVIEWERS.find((r)=>r.name==='glm-5.3').wrapper,'ai-glm')
-  assert.equal(REVIEWERS.find((r)=>r.name==='muse-spark-1.2-contributor').wrapper,'ai-muse')
+  assert.equal(REVIEWERS.find((r)=>r.name==='muse-spark-1.3-contributor').wrapper,'ai-muse')
   assert.equal(REVIEWERS.find((r)=>r.name==='deepseek-chat').wrapper,'ai-deepseek-agent')
   // Qwen is NOT retired (owner instruction, 2026-09-04) and must not be named as
   // retired anywhere. Its quarantine was lifted on 2026-09-07 after a live
@@ -6446,7 +6446,7 @@ test('#2460 expired recovery works for a claim legitimately expanded beyond its 
 // third-party winner on the FIRST read, with no wait.
 function verdictIo({ readRef }) {
   const assignmentRef='refs/db-review-assignments/2355-2415-'+'a'.repeat(40)
-  const commits=new Map([['c'.repeat(40),{message:'db-coordination reviewer-cursor sequence=7 reviewer=muse-spark-1.2-contributor issue=2355 pr=2415 head='+'a'.repeat(40)+' slot=1'}]])
+  const commits=new Map([['c'.repeat(40),{message:'db-coordination reviewer-cursor sequence=7 reviewer=muse-spark-1.3-contributor issue=2355 pr=2415 head='+'a'.repeat(40)+' slot=1'}]])
   const state={waits:0}
   return {
     assignmentRef, commits, state,

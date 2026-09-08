@@ -164,7 +164,7 @@ export const REVIEWERS = Object.freeze([
     readsRepositoryVerified:{ date:'2026-09-07', evidence:'ai-devops/bin/ai-qwen: read-only review over a sealed evidence packet copy of the checkout; the live qualification review of merged commit 795902d8 cited specific file lines from it and returned a well-formed verdict' } },
   { name:'glm-5.2', wrapper:'ai-glm', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'historical label for the ai-glm wrapper above; same checkout' } },
-  { name:'muse-spark-1.2-contributor', wrapper:'ai-muse', readsRepository:true,
+  { name:'muse-spark-1.3-contributor', wrapper:'ai-muse', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-muse: ai-review-sandbox ensure-copy clone plus evidence packet; the doctor probe reads a file inside it' } },
   { name:'codex-gpt-5.6-sol', wrapper:'ai-codex-review', orchestratorEngine:'codex', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-codex-review: codex exec --sandbox read-only over the sandbox copy' } },
@@ -235,7 +235,7 @@ export const REVIEWERS = Object.freeze([
 // Reviewer issue `20260820T004602Z-edge-dev-kimi-k3-385556` carries the raw evidence.
 // This is a PAUSE, not a retirement.
 //
-// ADDED 2026-08-20 (owner instruction, issue #1290): 'muse-spark-1.2-contributor'.
+// UPGRADED 2026-09-03 (owner instruction, issue #2285): 'muse-spark-1.3-contributor'.
 // A registry addition, not an un-pause -- it was never listed. On the head-to-head
 // trial it produced a complete seven-point review ending in `VERDICT: APPROVE`.
 // KNOWN DEFECT, and the caller must handle it: the wrapper's verdict DETECTION fails
@@ -268,7 +268,7 @@ export const REVIEWERS = Object.freeze([
 //
 // KIMI-K3 UNPAUSED, 2026-08-25 (owner instruction, with the lane cap raise to
 // five). It returns to its ORIGINAL position in REVIEWERS, so the rotation is
-// ['grok-4.6','glm-5.3','kimi-k3','muse-spark-1.2-contributor'] -- FOUR names.
+// ['grok-4.6','glm-5.3','kimi-k3','muse-spark-1.3-contributor'] -- FOUR names.
 // Verified before unpausing, not assumed: `AI_KIMI_CALLER=claude ai-kimi doctor`
 // on edge-dev reports kimi 0.36.1, model pin kimi-code/k3, read-only profile
 // PASS and `auth : OK`. Its one FAIL, `preflight (execution-context-denied)`,
