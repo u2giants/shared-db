@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "work_issue": 2535,
+  "outcome": "ready-for-merge",
+  "pr": 2584,
+  "migration_versions": ["20260908163250"],
+  "contract_ref": "refs/db-contracts/2535/1",
+  "contract_sha256": "4d465df2730a05afc7537da07add72553bc407d88c7a03c85e6dbb63d2fba849",
+  "head_sha": "e57d87f5a1aded1da8997d7a0dc9cf8d39aded50",
+  "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "supabase/migrations/20260908163250_hts_rag_dual_model_debate_audit.sql",
+    "supabase/tests/hts_rag_dual_model_debate_contracts.sql"
+  ],
+  "db_reads": [
+    "table public.hts_rag_determinations",
+    "table public.hts_rag_provider_responses",
+    "table public.hts_rag_review_events",
+    "function app.set_updated_at"
+  ],
+  "db_writes": [
+    "table public.hts_rag_debate_runs",
+    "column public.hts_rag_precedents.promotion_basis",
+    "column public.hts_rag_precedents.promotion_policy_version",
+    "column public.hts_rag_precedents.promotion_source_determination_id",
+    "column public.hts_rag_precedents.promotion_debate_run_id",
+    "column public.hts_rag_precedents.promotion_gate_result",
+    "function public.enforce_hts_rag_precedent_promotion_gate_immutable",
+    "trigger hts_rag_precedents_promotion_gate_immutable on public.hts_rag_precedents",
+    "trigger set_updated_at on public.hts_rag_debate_runs",
+    "index public.hts_rag_debate_runs_claim_idx",
+    "index public.hts_rag_debate_runs_source_determination_idx",
+    "index public.hts_rag_debate_runs_precedent_idx",
+    "policy hts_rag_debate_runs_backend_read on public.hts_rag_debate_runs",
+    "policy hts_rag_debate_runs_backend_insert on public.hts_rag_debate_runs",
+    "policy hts_rag_debate_runs_backend_update on public.hts_rag_debate_runs",
+    "table public.hts_rag_precedents"
+  ],
+  "checks": [
+    {"command":"bash scripts/check-sql.sh","exit_code":0,"evidence":"Static migration guards passed against origin/main fbd49fe; no shared live-ledger input was configured, so this is not preview or production acceptance."},
+    {"command":"node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json","exit_code":0,"evidence":"Contract generation 1 validated and its immutable published hash is 4d465df2730a05afc7537da07add72553bc407d88c7a03c85e6dbb63d2fba849."},
+    {"command":"git diff --check","exit_code":0,"evidence":"No whitespace errors were reported for the implementation delta."},
+    {"command":"node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs","exit_code":0,"evidence":"44 tests passed with zero failures, cancellations, skips, or todos."},
+    {"command":"python -m unittest scripts.test_migration_derivation scripts.test_production_catalog_verification","exit_code":0,"evidence":"229 tests passed with no failures."},
+    {"command":"psql disposable PostgreSQL 18 from-empty/upgrade and focused contract rehearsal","exit_code":0,"evidence":"Migration applied in two local disposable databases; a pre-migration precedent remained legacy_unspecified; focused catalog, same-connection FK, service-only access, no-DELETE, immutability, and fail-closed state tests passed and rolled back. The local server was stopped and removed."}
+  ],
+  "assumptions_resolved": [
+    "Production read-only catalog proof identified project qsllyeztdwjgirsysgai and confirmed the referenced public HTS tables and foreign keys are in one Postgres database.",
+    "No durable row-specific evidence was used to infer human_review; the migration contains no data backfill and the disposable upgrade row remained legacy_unspecified.",
+    "The debate table grants service_role only SELECT, INSERT, and bounded column UPDATE; browser roles and DELETE remain unavailable.",
+    "The migration does not make RAG operative, alter duty fields, enable automatic Apply, or change DesignFlow application code."
+  ],
+  "stop_conditions_hit": []
+}
