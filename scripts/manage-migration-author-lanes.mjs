@@ -30,6 +30,7 @@ import { selectPreviewRoute } from './orchestrator-flow/select-preview-route.mjs
 import { PROJECT_REFS } from './orchestrator-flow/read-preview-ledger.mjs'; import { verdictOpensLine as sharedVerdictOpensLine, evidenceTiedToHead as sharedEvidenceTiedToHead, isApprovalFor as sharedIsApprovalFor, isVerdictFor as sharedIsVerdictFor, anyVerdictFor as sharedAnyVerdictFor } from './lib/review-verdict.mjs'
 import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, REVIEW_VERDICTS, assertFindingsRefForPr, findingsDigest, formatVerdictMessage, parseVerdictCommit, parseVerdictRef, validateVerdictArtifact, verdictRef } from './lib/review-verdict-artifact.mjs'
 import { changedPathsFromPullRequestFiles, classifyChangedPaths } from './lib/documents-only-change.mjs'
+import { HISTORICAL_RESTORATIONS, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 
 export const REPO = 'u2giants/shared-db'
 // AUTHOR LANE CAP. Raised from three to five on 2026-08-25 and from five to
@@ -6027,10 +6028,27 @@ export function validateOriginalPreviewApplyEvidence({issue,pr,versions,mergeCom
     const bindings=String(logs).split(/\r?\n/).flatMap((line)=>{const start=line.indexOf('{"allowlist"'),end=line.lastIndexOf('}');if(start<0||end<start)return[];try{return[JSON.parse(line.slice(start,end+1))]}catch{return[]}}).filter((row)=>row.schema==='shared-db-preview-instance-binding/v1')
     if(bindings.length!==1)continue
     const binding=bindings[0],allowlist=Array.isArray(binding.allowlist)?binding.allowlist.map(String).sort():[]
-    if(String(binding.runId)!==String(runId)||binding.previewProjectRef!==PROJECT_REFS.preview||binding.appliedCommit!==run.head_sha||JSON.stringify(allowlist)!==JSON.stringify(expected))continue
-    if(mergeCommitSha&&(binding.rehearsalMode!=='merged-main-rehearsal'||Number(binding.sourcePr)!==Number(pr)||String(binding.mergeCommitSha).toLowerCase()!==String(mergeCommitSha).toLowerCase()))continue
+    if(String(binding.runId)!==String(runId)||binding.previewProjectRef!==PROJECT_REFS.preview||!/^[0-9a-f]{40}$/i.test(String(binding.appliedCommit??''))||JSON.stringify(allowlist)!==JSON.stringify(expected))continue
+    const mergedMainRehearsal=Boolean(mergeCommitSha&&binding.rehearsalMode==='merged-main-rehearsal'&&Number(binding.sourcePr)===Number(pr)&&String(binding.mergeCommitSha).toLowerCase()===String(mergeCommitSha).toLowerCase()&&binding.appliedCommit===run.head_sha)
+    // A byte-pinned restoration may have one genuine ordinary claim apply that
+    // predates its merge.  That immutable apply is the reason the restoration
+    // exists: replaying it would be unsafe.  Admit the distinct dispatch/applied
+    // checkout only when every identity and the file now in the merge commit
+    // exactly matches the restoration registry.  Unregistered claim runs retain
+    // the old refusal, as do all malformed or partially pinned bundles.
+    let pinnedClaimApply=false
+    if(mergeCommitSha&&binding.rehearsalMode==='claim'){
+      const records=expected.map((version)=>HISTORICAL_RESTORATIONS[version]).filter(Boolean)
+      pinnedClaimApply=records.length===expected.length&&records.length>0&&records.every((record)=>{
+        if(String(record.previewApplyRun)!==String(runId)||record.previewAppliedCommit!==binding.appliedCommit||record.previewProject!==binding.previewProjectRef)return false
+        try{return validateHistoricalRestorationFile(record.filename,io.getFileAt(record.filename,mergeCommitSha))===record}catch{return false}
+      })
+    }
+    if(mergeCommitSha&&!mergedMainRehearsal&&!pinnedClaimApply)continue
+    if(!mergeCommitSha&&binding.appliedCommit!==run.head_sha)continue
+    const appliedCommit=pinnedClaimApply?binding.appliedCommit:run.head_sha
     const rows=Array.isArray(artifacts?.artifacts)?artifacts.artifacts:[]
-    if(Number(artifacts?.total_count)!==1||rows.length!==1||rows[0].expired!==false||!/^sha256:[0-9a-f]{64}$/i.test(String(rows[0].digest??''))||rows[0].name!==`preview-migration-apply-${run.head_sha}`||String(rows[0].workflow_run?.id)!==String(runId)||rows[0].workflow_run?.head_sha!==run.head_sha)continue
+    if(Number(artifacts?.total_count)!==1||rows.length!==1||rows[0].expired!==false||!/^sha256:[0-9a-f]{64}$/i.test(String(rows[0].digest??''))||rows[0].name!==`preview-migration-apply-${appliedCommit}`||String(rows[0].workflow_run?.id)!==String(runId)||rows[0].workflow_run?.head_sha!==run.head_sha)continue
     const ledgerLines=String(logs).split(/\r?\n/).flatMap((line)=>{
       const fields=line.replace(/^\ufeff/,'').split('\t')
       if(fields.length<3||fields[1]!=='Report the preview ledger delta')return[]

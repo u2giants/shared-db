@@ -4890,24 +4890,21 @@ test('cutover activation backfills a slot-2 live review, not just slot 1',()=>{
 // merged commit, then promote. Before this test the lane only ever looked at
 // `state=open` pulls and hardcoded merged:false, so the POST_MERGE_REHEARSAL route
 // was unreachable and every merged claim was stranded without rehearsal proof.
-function mergedRehearsalIo(){
-  const version='20260828232207'
-  const migration=`supabase/migrations/${version}_wwe.sql`
-  const claim={number:1805,title:'CLAIM: #1769 wwe tables',body:[
-    '```db-claim','version: '+version,'objects:','  - table plm.wwe_property','```','',
-    '```db-author-lease','owner: agent/issue-1769','branch: issue-1769-wwe-tables',
+function mergedRehearsalIo({version='20260828232207',migration=`supabase/migrations/${version}_wwe.sql`,workIssue=1769,claimNumber=1805,prNumber=1809,branch='issue-1769-wwe-tables',head='a'.repeat(40),mergeSha='b'.repeat(40),mainSha='d'.repeat(40),migrationBody='create table plm.wwe_property();',writes=['table plm.wwe_property']}={}){
+  const claim={number:claimNumber,title:`CLAIM: #${workIssue} migration`,body:[
+    '```db-claim','version: '+version,'objects:',...writes.map((value)=>`  - ${value}`),'```','',
+    '```db-author-lease',`owner: agent/issue-${workIssue}`,`branch: ${branch}`,
     'worktree: C:/repos/x','expires_at: 2099-01-01T00:00:00Z','```'].join('\n')}
-  const head='a'.repeat(40), mergeSha='b'.repeat(40), mainSha='d'.repeat(40)
-  const files={[migration]:'create table plm.wwe_property();','config/orchestrator-global-invalidators-v1.json':'{"schema_version":1,"files":[]}'}
+  const files={[migration]:migrationBody,'config/orchestrator-global-invalidators-v1.json':'{"schema_version":1,"files":[]}'}
   return {head,mergeSha,mainSha,version,io:{
     openClaims:()=>[claim],
     openPulls:()=>[],
-    branchPulls:(branch)=>branch==='issue-1769-wwe-tables'?[{number:1809,head:{ref:branch,sha:head},base:{sha:'c'.repeat(40)},merged_at:'2026-08-29T00:32:19Z',merge_commit_sha:mergeSha}]:[],
+    branchPulls:(candidate)=>candidate===branch?[{number:prNumber,head:{ref:branch,sha:head},base:{sha:'c'.repeat(40)},merged_at:'2026-08-29T00:32:19Z',merge_commit_sha:mergeSha}]:[],
     mergeCommitInMain:(sha)=>sha===mergeSha,
     getPrFiles:()=>[{filename:migration,status:'added'}],
     getFileAt:(file)=>{if(!(file in files))throw new LaneError(`missing ${file}`);return files[file]},
     treeFiles:()=>[migration],
-    getIssue:()=>({body:['```db-work-scope','status: ready','work_type: structural','route: shared-db-orchestrator','priority: 1','writes:','  - table plm.wwe_property','```'].join(String.fromCharCode(10))}),
+    getIssue:()=>({body:['```db-work-scope','status: ready','work_type: structural','route: shared-db-orchestrator','priority: 1','writes:',...writes.map((value)=>`  - ${value}`),'```'].join(String.fromCharCode(10))}),
     previewGateProof:()=>({full_ci_success:true,review_approved:true,dependency_closure_complete:true}),
     mainSha:()=>mainSha,
     previewLedger:()=>({versions:[]}),
@@ -4922,6 +4919,21 @@ function immutablePreviewApplyIo({sourcePr=1809,artifactRunId='33308168016',merg
       run:{id:Number(runId),path:'.github/workflows/shared-supabase-migrations.yml',event:'workflow_dispatch',status:'completed',conclusion:'success',run_attempt:1,head_sha:headSha},
       artifacts:{total_count:1,artifacts:[{name:`preview-migration-apply-${headSha}`,digest:`sha256:${'d'.repeat(64)}`,expired:false,workflow_run:{id:Number(artifactRunId),head_sha:headSha}}]},
       logs:[`Bounded apply ${JSON.stringify({allowlist:[version],appliedCommit:headSha,mergeCommitSha,previewProjectRef:'mvpkijzfmfcxhnzqogzs',rehearsalMode:'merged-main-rehearsal',runId:Number(runId),schema:'shared-db-preview-instance-binding/v1',sourcePr})}`,`preview\tReport the preview ledger delta\t2026-08-30T00:00:00Z ### Preview ledger delta`,`preview\tReport the preview ledger delta\t2026-08-30T00:00:00Z - added: ${version}`,'preview\tReport the preview ledger delta\t2026-08-30T00:00:00Z - removed: (none)'].join('\n'),
+    }),
+  }
+}
+
+function pinnedHistoricalClaimApplyIo({runId='34157812748',appliedCommit='bcc2603977678db73b4ca12d3ed1312a1bff64e2',previewProject='mvpkijzfmfcxhnzqogzs',migrationBody=null}={}){
+  const dispatchHead='4f093e3d4c97e4272d147d38e7243ec57d3c08f1',version='20260907131728'
+  const migration='supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql'
+  const body=migrationBody??readFileSync(migration,'utf8')
+  return {
+    issueComments:()=>[{body:`Authoritative original preview application: https://github.com/u2giants/shared-db/actions/runs/${runId}`}],
+    getFileAt:(file)=>{if(file!==migration)throw new LaneError(`missing ${file}`);return body},
+    previewApplyRun:()=>( {
+      run:{id:Number(runId),path:'.github/workflows/shared-supabase-migrations.yml',event:'workflow_dispatch',status:'completed',conclusion:'success',run_attempt:1,head_sha:dispatchHead},
+      artifacts:{total_count:1,artifacts:[{name:`preview-migration-apply-${appliedCommit}`,digest:'sha256:3fcd874602c5c52293448a83fdb27c126a8f0cf78e63e24af0d2a10a03128a6b',expired:false,workflow_run:{id:Number(runId),head_sha:dispatchHead}}]},
+      logs:[`Bounded apply ${JSON.stringify({allowlist:[version],appliedCommit,previewProjectRef:previewProject,rehearsalMode:'claim',runId:Number(runId),schema:'shared-db-preview-instance-binding/v1'})}`,`preview\tReport the preview ledger delta\t2026-09-07T20:03:31Z ### Preview ledger delta`,`preview\tReport the preview ledger delta\t2026-09-07T20:03:31Z - added: ${version}`,'preview\tReport the preview ledger delta\t2026-09-07T20:03:31Z - removed: (none)'].join('\n'),
     }),
   }
 }
@@ -4961,6 +4973,16 @@ test('immutable original preview-apply evidence validates only the exact run',()
   assert.throws(()=>validateOriginalPreviewApplyEvidence(input,noDigest),/found 0/)
 })
 
+test('the exact byte-pinned #2509 claim apply is valid immutable historical-rebind evidence',()=>{
+  const input={issue:2509,pr:2513,versions:['20260907131728'],mergeCommitSha:'c5f85ad3a98b7a5598e8c81a56735473d5bb5487'}
+  assert.deepEqual(validateOriginalPreviewApplyEvidence(input,pinnedHistoricalClaimApplyIo()),{type:'preview-apply',run_id:'34157812748'})
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,pinnedHistoricalClaimApplyIo({runId:'34157812749'})),/found 0/)
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,pinnedHistoricalClaimApplyIo({appliedCommit:'a'.repeat(40)})),/found 0/)
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,pinnedHistoricalClaimApplyIo({previewProject:'wrong-preview'})),/found 0/)
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,pinnedHistoricalClaimApplyIo({migrationBody:'select 1;\n'})),/found 0/)
+  assert.throws(()=>validateOriginalPreviewApplyEvidence({...input,versions:['20260907131729']},pinnedHistoricalClaimApplyIo()),/found 0/)
+})
+
 test('immutable preview-ledger reconciliation evidence validates the renamed current version without replay',()=>{
   const input={issue:1722,pr:1748,versions:['20260830013942'],mergeCommitSha:'5'.repeat(40)}
   assert.deepEqual(validateOriginalPreviewApplyEvidence(input,immutablePreviewReconciliationIo()),{type:'preview-ledger-reconciliation',run_id:'33307904277',orphan_version:'20260828113920',replacement_version:'20260830013942'})
@@ -4980,6 +5002,28 @@ test('an already-applied merged claim receives validated evidence before route s
   assert.equal(candidate.route,'historical_rebind')
   assert.equal(candidate.route_context,mainSha)
   assert.equal(candidate.manifest.historical_preview_original_run_map,'20260828232207:33308168016')
+})
+
+test('#2509 emits only the existing no-write historical recovery manifest from its exact pinned apply',()=>{
+  const migration='supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql'
+  const mergeSha='c5f85ad3a98b7a5598e8c81a56735473d5bb5487',head='1be8f325dbf1ff035bd5039638dc47c14a3eb155'
+  const fixture=mergedRehearsalIo({
+    version:'20260907131728',migration,workIssue:2509,claimNumber:2511,prNumber:2513,branch:'codex/issue-2509-popsg-preview-stats',head,mergeSha,mainSha:mergeSha,
+    migrationBody:readFileSync(migration,'utf8'),
+    writes:['function public.get_sg_preview_stats','index public.idx_sgf_active_preview_category','table public.style_guide_files'],
+  })
+  const evidence=pinnedHistoricalClaimApplyIo();delete evidence.getFileAt
+  Object.assign(fixture.io,evidence)
+  fixture.io.previewLedger=()=>({versions:['20260907131728']})
+  const candidate=deriveLivePreviewCandidate(2509,fixture.io)
+  assert.equal(candidate.route,'historical_rebind')
+  assert.equal(candidate.route_context,mergeSha)
+  assert.deepEqual(candidate.manifest,{
+    target:'preview',preview_allowlist:'20260907131728',claim_pr:'2513',claim_head_sha:head,commit_sha:mergeSha,
+    historical_preview_source_pr:'2513',historical_preview_original_run_map:'20260907131728:34157812748',
+  })
+  assert.equal('merged_preview_source_pr' in candidate.manifest,false)
+  assert.equal('production_allowlist' in candidate.manifest,false)
 })
 
 test('a merged claim still reaches the post-merge rehearsal route instead of being stranded',()=>{
