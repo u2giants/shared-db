@@ -5,7 +5,7 @@
   "pr": 2587,
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2586/1",
-  "contract_sha256": "63b90743c62aa14db3877bd4d0b012135b31fc9e973c71e10d177ca0f121fbcc",
+  "contract_sha256": "5d4237703f9dc0e77c7e7fefe0fa51a740fe42ac43dff4fff405c07879137c32",
   "head_sha": "4bf6f6a701af6eb33b11eda2e146faef9b04b321",
   "files_changed": [
     "HANDOFF.d/2026-09-08T1735Z-edge-dev-codex-orchestrator-queue-handoff.md"
@@ -24,7 +24,7 @@
       "evidence": "The pull request Handoff contract check completed successfully on exact head 4bf6f6a701af6eb33b11eda2e146faef9b04b321."
     },
     {
-      "command": "manual handoff self-audit",
+      "command": "manual handoff self-audit: 10 sections, per-agent blocks, queue seed, owner-decision sweep, secrets sweep",
       "exit_code": 0,
       "evidence": "The file contains all 10 required sections, 22 separate sub-agent blocks, an issue-backed queue seed, owner-decision consolidation, and no bearer-value match."
     }
