@@ -3,14 +3,14 @@
   "migration_versions": ["20260907152838"],
   "contract_ref": "refs/db-contracts/2356/2",
   "contract_sha256": "fb8956e306ac6ad64e90cac4a74b444c1271a1688cf71cf0c13f56f42b28dc3f",
-  "head_sha": "c65d4efaf777dbb590d3de78d98eea6d0f013c03",
+  "head_sha": "b73a71ecc9d704cb519dbc5e6c3517a61002b345",
   "files_changed": [".agent/completion.json", ".agent/contract.json", "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql", "supabase/tests/dam_asset_freshness_current_state_contracts.sql"],
   "db_reads": ["table core.taxonomy_source_ref", "table supabase_migrations.schema_migrations"],
   "db_writes": ["table dam.asset", "column dam.asset.first_seen_at", "column dam.asset.last_seen_at", "column dam.asset.missing_since", "constraint dam_asset_seen_order on dam.asset", "constraint dam_asset_missing_after_first_seen on dam.asset", "function dam.enforce_asset_freshness", "trigger dam_asset_freshness_guard on dam.asset"],
   "checks": [
-    {"command":"git diff --check","exit_code":0,"evidence":"No whitespace errors after normal integration of current main b28d16a6f8807d15c63a8f8c1d92f3d8267ce71f."},
+    {"command":"git diff --check","exit_code":0,"evidence":"No whitespace errors after normal integration of current main a51e14db5f69b35be8b8d9ba1c61d109602c3aa5."},
     {"command":"bash scripts/check-sql.sh","exit_code":0,"evidence":"Static guards passed after current-main integration, including the exact historical restoration; live-ledger input was not configured, so this is not ledger acceptance."},
-    {"command":"python3 -m unittest scripts.test_migration_derivation scripts.test_production_catalog_verification","exit_code":0,"evidence":"229 tests passed with no failures or skips after integration of current main b28d16a6."},
+    {"command":"python3 -m unittest scripts.test_migration_derivation scripts.test_production_catalog_verification","exit_code":0,"evidence":"229 tests passed with no failures or skips after integration of current main a51e14db."},
     {"command":"docker exec -i orch-2536-2356-proof psql -U postgres -v ON_ERROR_STOP=1 -q","exit_code":0,"evidence":"Original isolated PostgreSQL 17 proof remains valid for unchanged SQL bytes. Fresh equivalent execution on retained synthetic PostgreSQL 17 database case2356runtime passed the full 257-line lifecycle contract and rolled back; no shared database was contacted."},
     {"command":"node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs","exit_code":0,"evidence":"44 passed, 0 failed, 0 cancelled, 0 skipped, 0 todo after current-main integration and contract generation 2 publication."}
   ],
