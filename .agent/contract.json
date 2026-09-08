@@ -1,62 +1,57 @@
 {
   "stop_conditions": [
-    "Claim or coordinator ownership changes",
-    "Main movement invalidates branch evidence",
-    "SQL scope widens or any required check refuses"
+    "Claim 2608 ownership, reserved version 20260908204414, or coordinator route changes",
+    "Main moves in a way that invalidates the re-derived function bodies or the branch evidence",
+    "SQL scope widens beyond the two claimed functions, or any required check refuses"
   ],
   "assumptions": [
-    "Claim2443 owner/path identifiers preserved; guarded newversion20260908195056 at published0a8307da",
-    "Earlier disposable red-control and full SQL contracts passed; exact same SQL/test bytes apart from guarded version metadata",
-    "Independent review and full live structural acceptance pending; worker append and alert wiring belong to PopDAM"
+    "Claim 2608 reserves version 20260908204414 and objects function public.queue_nightly_rebuild_style_groups and function public.refresh_style_group_counts_batch; the second is over-declared and deliberately left untouched",
+    "public.queue_nightly_rebuild_style_groups has no prior migration file; its body is re-derived from supabase/ci-bootstrap/010_pre_adoption_baseline.sql rather than merged from a competing CREATE OR REPLACE",
+    "public.update_bulk_operation replaces the rebuild-style-groups object wholesale, so the reconcile marker must be a separate top-level BULK_OPERATIONS key",
+    "The worker-signalled variant of #2440 and the alert that consumes last_reconciled_at are PopDAM application work in another repository and are not claimed here",
+    "Contract tests require a live database; no disposable-cluster run is claimed, and preview apply, review, merge and promotion belong to the orchestrator"
   ],
   "required_checks": [
     "bash scripts/check-sql.sh",
     "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-    "node scripts/check-throughput-truth-audit.mjs",
+    "node scripts/check-migration-pr-lease.mjs",
     "git diff --check"
   ],
   "prohibited_actions": [
-    "No shared database writes,review allocation,merge or deployment without coordinator order",
-    "No inherited claim relocation or applied migration editing",
-    "No consumer worker changes or data seeding"
+    "No preview apply, no merge, no production promotion, no review allocation",
+    "No shared database writes and no data seeding",
+    "No edit to any object outside claim 2608, and no edit to an already applied migration",
+    "No hand-picked migration version and no hand-edited claim block"
   ],
   "db_writes": [
-    "table public.bulk_operation_runs",
-    "column public.bulk_operation_runs.error",
-    "column public.bulk_operation_runs.operation",
-    "column public.bulk_operation_runs.run_id",
-    "column public.bulk_operation_runs.stage",
-    "column public.bulk_operation_runs.status",
-    "index public.bulk_operation_runs_failures_idx",
-    "index public.bulk_operation_runs_operation_run_key",
-    "index public.bulk_operation_runs_operation_started_idx",
-    "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
+    "function public.queue_nightly_rebuild_style_groups",
+    "function public.refresh_style_group_counts_batch"
   ],
   "db_reads": [
-    "function app.has_any_role",
-    "type app.app_role"
+    "table public.admin_config",
+    "table public.style_groups"
   ],
   "file_writes": [
-    "supabase/migrations/20260908195056_bulk_operation_runs_history.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql",
+    "supabase/migrations/20260908204414_chain_style_group_counts_to_rebuild_completion.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "allowed_paths": [
-    "supabase/migrations/20260908195056_bulk_operation_runs_history.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql",
+    "supabase/migrations/20260908204414_chain_style_group_counts_to_rebuild_completion.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "worktree": "/tmp/shared-db-orch-2536-2439",
-  "branch": "claude/issue-2439-bulk-operation-runs",
-  "worker": "codex recovery_2506 successor of stopped inherited2439 worker",
-  "dispatcher": "codex shared-db.orch marker2536 route01a07ceb-249b-7dc0-8f3a-ad5091e3a085",
-  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
-  "goal": "Retain append-only bulk-operation terminal history with administrator-only browser reads and narrow worker INSERT/SELECT privileges.",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/orch-2440",
+  "branch": "claude/issue-2440-chain-nightly-reconcile",
+  "worker": "claude/orch-2440 migration author holding claim 2608",
+  "dispatcher": "claude shared-db-orchestrator route local_9409a344-6910-4128-ae4c-a394b13a4077",
+  "base_sha": "03f917d0dec6e0973e4b9cddd72e02f686a19e0c",
+  "goal": "Stop the style-group asset-count reconcile running on the clock 2h15m before the rebuild that changes the membership it counts. Delete cron job nightly-reconcile-sg-asset-counts, turn nightly-rebuild-style-groups into a 10-minute poll, and rewrite public.queue_nightly_rebuild_style_groups as a three-armed driver: enqueue once per UTC day at or after 06:00 UTC, reconcile in 500-group chunks only when the rebuild reaches status completed with an unreconciled run_id, and reconcile unconditionally if the last one is older than 7 days so the new silent failure mode is bounded and observable.",
   "route": "shared-db-orchestrator",
   "work_type": "structural",
-  "work_issue": 2439,
-  "generation": 2,
+  "work_issue": 2440,
+  "generation": 1,
   "schema_version": 1
 }

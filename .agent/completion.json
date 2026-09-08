@@ -1,68 +1,59 @@
 {
   "schema_version": 1,
-  "work_issue": 2439,
+  "work_issue": 2440,
   "outcome": "ready-for-merge",
-  "pr": 2447,
+  "pr": 2612,
   "migration_versions": [
-    "20260908195056"
+    "20260908204414"
   ],
-  "contract_ref": "refs/db-contracts/2439/2",
-  "contract_sha256": "10702cb98c01f2b6630d527fc7f0bf68288371c183b90d457863240a8a2888f4",
-  "head_sha": "9242a95531f2df824fa614f56728dd9928d2bcdd",
+  "contract_ref": "refs/db-contracts/2440/1",
+  "contract_sha256": "6689ea26710e44ffebd5e3f0b4889654154bc7e26a6d23c3d1fae2eacbec74d6",
+  "head_sha": "44a6d6c05a21769750c8caa597c8114addfb16a0",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260908195056_bulk_operation_runs_history.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql"
+    "supabase/migrations/20260908204414_chain_style_group_counts_to_rebuild_completion.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql"
   ],
   "db_reads": [
-    "function app.has_any_role",
-    "type app.app_role"
+    "table public.admin_config",
+    "table public.style_groups"
   ],
   "db_writes": [
-    "table public.bulk_operation_runs",
-    "column public.bulk_operation_runs.error",
-    "column public.bulk_operation_runs.operation",
-    "column public.bulk_operation_runs.run_id",
-    "column public.bulk_operation_runs.stage",
-    "column public.bulk_operation_runs.status",
-    "index public.bulk_operation_runs_failures_idx",
-    "index public.bulk_operation_runs_operation_run_key",
-    "index public.bulk_operation_runs_operation_started_idx",
-    "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
+    "function public.queue_nightly_rebuild_style_groups",
+    "function public.refresh_style_group_counts_batch"
   ],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static/recency passed; live-ledger subcheck skipped without token and not claimed as clearance."
+      "evidence": "Guard B: no migration sorts before the base branch's newest version 20260908195056 (source: git:origin/main). Guard B2 skipped loudly with no live-ledger source configured and is not claimed as clearance. Expected-count guard, verify-cost guard and the issue #1684 EOL reference guard all passed. Static checks passed; no DATABASE_URL was set, so no disposable-database apply is claimed."
     },
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "Mandatory and changed sidecars passed; no dynamic markers in new migration."
+      "evidence": "{\"status\":\"OK\",\"sidecars\":43,...}. The added migration contains no dynamic verification marker and needs no sidecar."
     },
     {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "command": "node scripts/check-migration-pr-lease.mjs",
       "exit_code": 0,
-      "evidence": "255 audited sites, unchanged discovery."
+      "evidence": "Run with PR_NUMBER=2612 (the script refuses without it outside CI). Migration claim verified: #2608, version 20260908204414. The objects statically extracted from the migration are a subset of the claim's writes; refresh_style_group_counts_batch is over-declared and not touched."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
-    },
-    {
-      "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f role-test-wrapper.sql",
-      "exit_code": 0,
-      "evidence": "PostgreSQL 17 disposable local server ran the unchanged guarded migration and real JWT-aware app role helpers in one rolled-back transaction. Administrator read passed; ordinary-user query returned zero rows; anonymous read, administrator browser insert, and service_role truncate were denied. Failure retention, duplicate-run, unexplained-failure, update, and delete negative controls also passed."
     }
   ],
   "assumptions_resolved": [
-    "Guarded supersession retained original version 20260906143443 and superseded version 20260907200137 as permanently reserved, and now uses protected version 20260908195056. The migration blob is byte-identical apart from the one comment line naming its reserved version.",
-    "Preserved test-only commit bd349eaa integrated before a normal merge of main 8d64a758; original claim identifiers remain unchanged.",
-    "PostgreSQL 17 role tests use the repository's real JWT-aware app helper definitions and Supabase-equivalent service_role BYPASSRLS.",
-    "Independent review, CI, preview and production live structural acceptance remain pending behind issue 2449. Consumer worker appends and alert consumption belong to PopDAM; no claim of application completion."
+    "The body of public.queue_nightly_rebuild_style_groups was re-derived line by line from supabase/ci-bootstrap/010_pre_adoption_baseline.sql, the only source of that function in this repository; no competing CREATE OR REPLACE was mechanically merged. The enqueue-arm state object is byte-equivalent to the baseline's, so the PopDAM worker's contract with the rebuild-style-groups object is unchanged.",
+    "public.refresh_style_group_counts_batch is declared in claim 2608 and deliberately left untouched. Requirement 4 on issue 2440 is a call-site change, and that function already carries the change predicate from issue 2214. Over-declaring a write is permitted by validateMigrationLease; under-declaring is not.",
+    "The reconcile marker is a separate top-level BULK_OPERATIONS key because public.update_bulk_operation (20260819011639) replaces the rebuild-style-groups object wholesale from the caller payload, which would erase a marker stored inside it and destroy the run_id idempotency required by issue 2440 requirement 2.",
+    "The advisory lock pg_advisory_xact_lock(hashtext('BULK_OPERATIONS')) is transaction-scoped and is held for the whole reconcile, order 98 seconds once per night, blocking other BULK_OPERATIONS writers for that window. This cost is accepted and documented rather than worked around; releasing it early would reopen the double-fire race the lock closes.",
+    "Issue 2440's scope block lists table public.admin_config under reads. The function already writes that table in the baseline body and continues to write exactly the same single row, key = 'BULK_OPERATIONS'. No new table is written. Stated in the migration header and the PR body rather than left to be discovered.",
+    "The contract tests require a live database and were NOT executed; no disposable-cluster or preview run is claimed. Their two positive reconcile steps are guarded on the size of public.style_groups so they skip rather than run a full recompute on a production-sized dataset.",
+    "The worker-signalled mechanism preferred by the issue author is PopDAM application work in another repository and is not claimed here; nothing in this migration has to be undone to adopt it. Wiring an alert on last_reconciled_at is likewise application work.",
+    "Preview apply, independent review, merge and production promotion were not performed and belong to the orchestrator."
   ],
   "stop_conditions_hit": []
 }
