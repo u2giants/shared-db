@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 1,
+  "generation": 2,
   "work_issue": 2535,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
@@ -13,13 +13,13 @@
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260908163250_hts_rag_dual_model_debate_audit.sql",
+    "supabase/migrations/20260908202651_hts_rag_dual_model_debate_audit.sql",
     "supabase/tests/hts_rag_dual_model_debate_contracts.sql"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260908163250_hts_rag_dual_model_debate_audit.sql",
+    "supabase/migrations/20260908202651_hts_rag_dual_model_debate_audit.sql",
     "supabase/tests/hts_rag_dual_model_debate_contracts.sql"
   ],
   "db_reads": [
