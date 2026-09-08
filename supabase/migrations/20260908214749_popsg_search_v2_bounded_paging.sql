@@ -4,6 +4,20 @@
 -- Narrow intermediate rows; page before building response JSON. Guide facets
 -- count distinct complete typed identities, including null versus empty fields.
 -- No indexes, data writes, privilege changes, or v1 replacement.
+--
+-- Guides mode re-joins children to their grouped identity on whole-array
+-- equality over [root_label, licensor_name, property_folder, style_guide_folder,
+-- style_guide_name]. That is deliberate on both counts. It is NULL-safe:
+-- PostgreSQL array equality compares element by element and treats two NULL
+-- elements as equal, so an identity carrying a NULL folder still matches, while
+-- NULL and the empty string stay distinct -- exactly the rule the facet comment
+-- above states, and the behaviour contract 8 in
+-- supabase/tests/popsg_search_style_guide_library_v2_contracts.sql pins. It is
+-- also required for the budget this migration exists to meet: rewriting either
+-- join as per-column IS NOT DISTINCT FROM defeats the hash join, and the guides
+-- forward query measured 4.1s with array equality against a timeout past the
+-- unchanged 8s budget without it. Do not "fix" these joins to IS NOT DISTINCT
+-- FROM.
 
 create or replace function public.search_style_guide_library_v2(
   p_result_mode text default 'files',
