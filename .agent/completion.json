@@ -8,6 +8,8 @@
   "contract_sha256": "8aaa1bf54ba0bed2bc905b6fc5616d3d537967342fa925a085e7a2d6959395fa",
   "head_sha": "3e7d200385977fb1b3d1ea18d633fcc8344ca6f8",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/reap-merged-worktrees.mjs",
     "scripts/reap-merged-worktrees.test.mjs"
