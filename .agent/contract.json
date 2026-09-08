@@ -1,45 +1,52 @@
 {
   "schema_version": 1,
-  "work_issue": 2586,
-  "generation": 1,
-  "work_type": "documentation",
-  "route": "repo-maintenance",
-  "goal": "Publish a complete fresh-session handoff for the EDGE-DEV shared-db orchestrator after issue 2356 production completion, preserving every active claim, governed gate, owner decision, and sub-agent outcome.",
-  "base_sha": "fbd49fe829a33a225805334a0cdba662dfd44084",
-  "dispatcher": "shared-db orchestrator marker 2577",
-  "worker": "codex root",
-  "branch": "codex/orchestrator-handoff-20260908-1735",
-  "worktree": "C:\\repos\\shared-db-worktrees\\orchestrator-handoff-20260908-1735",
+  "work_issue": 2356,
+  "generation": 2,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Deliver additive canonical Asset lifecycle fields while preserving editable historical rows with explicit unknown freshness and enforcing complete new-row facts, non-regression and chronological consistency.",
+  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
+  "dispatcher": "codex coordinator #2536",
+  "worker": "codex repair_2501",
+  "branch": "codex/issue-2356-asset-freshness",
+  "worktree": "/tmp/shared-db-orch-2517-2356",
   "allowed_paths": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "HANDOFF.d/2026-09-08T1735Z-edge-dev-codex-orchestrator-queue-handoff.md"
+    ".agent/completion.json", ".agent/contract.json",
+    "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql",
+    "supabase/tests/dam_asset_freshness_current_state_contracts.sql"
   ],
   "file_writes": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "HANDOFF.d/2026-09-08T1735Z-edge-dev-codex-orchestrator-queue-handoff.md"
+    ".agent/completion.json", ".agent/contract.json",
+    "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql",
+    "supabase/tests/dam_asset_freshness_current_state_contracts.sql"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "db_reads": ["table core.taxonomy_source_ref", "table supabase_migrations.schema_migrations"],
+  "db_writes": [
+    "table dam.asset", "column dam.asset.first_seen_at", "column dam.asset.last_seen_at",
+    "column dam.asset.missing_since", "constraint dam_asset_seen_order on dam.asset",
+    "constraint dam_asset_missing_after_first_seen on dam.asset", "function dam.enforce_asset_freshness",
+    "trigger dam_asset_freshness_guard on dam.asset"
+  ],
   "prohibited_actions": [
-    "Do not change database structure, data, claims, migration versions, workflows, or application code in this documentation pull request.",
-    "Do not expose credential values, licensed rows, private filenames, contracts, or provider payloads.",
-    "Do not close orchestrator marker 2577 until the handoff pull request is merged and verified on current main."
+    "Do not fabricate/backfill historical Asset sightings or alter established source identity and scalar compatibility fields.",
+    "Do not erase recorded freshness or remove lifecycle ordering checks.",
+    "Do not push or merge before coordinator release; do not draw reviewers or write preview/production."
   ],
   "required_checks": [
-    "git diff --check",
-    "node scripts/check-handoff-contract.mjs",
-    "manual handoff self-audit: 10 sections, per-agent blocks, queue seed, owner-decision sweep, secrets sweep"
+    "git diff --check", "bash scripts/check-sql.sh",
+    "python3 -m unittest scripts.test_migration_derivation scripts.test_production_catalog_verification",
+    "docker exec -i orch-2536-2356-proof psql -U postgres -v ON_ERROR_STOP=1 -q",
+    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs"
   ],
   "assumptions": [
-    "Issue 2586 is the open handover record for this fresh-session boundary.",
-    "The handoff records a point-in-time snapshot and instructs the successor to re-resolve all live state.",
-    "Documentation-only delivery does not authorize or claim any preview, production, or infrastructure mutation."
+    "This is transparent successor adoption of already-authored pre-contract work; no claim that a contract ref existed before the repair.",
+    "Parent table claim #2521 covers the listed additive columns and constraints; function and trigger were separately expanded using the guarded command.",
+    "db_writes describe authored migration targets and disposable rehearsal, not a claim of live database application.",
+    "Current main must be an ancestor of the final implementation commit before evidence publication."
   ],
   "stop_conditions": [
-    "Stop if the pull request contains any path outside the two evidence files and the one handoff file.",
-    "Stop if any credential-like value or licensed/private row content appears in the staged diff.",
-    "Stop if the handoff omits an active agent, claim, issue, owner decision, or governed gate."
+    "Stop before pushing while the coordinator no-push hold is active.",
+    "Stop if a target ledger already applies the migration before changing its bytes.",
+    "Stop on unexpected scope expansion, failed lifecycle checks, fabricated history, or current-base ancestry failure."
   ]
 }

@@ -1,40 +1,24 @@
 {
-  "schema_version": 1,
-  "work_issue": 2586,
-  "outcome": "ready-for-merge",
-  "pr": 2587,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2586/1",
-  "contract_sha256": "5d4237703f9dc0e77c7e7fefe0fa51a740fe42ac43dff4fff405c07879137c32",
-  "head_sha": "9ab9624b20ac75e37e3ed012d2148abbc5ac7906",
-  "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "HANDOFF.d/2026-09-08T1735Z-edge-dev-codex-orchestrator-queue-handoff.md"
-  ],
-  "db_reads": [],
-  "db_writes": [],
+  "schema_version": 1, "work_issue": 2356, "outcome": "ready-for-merge", "pr": 2523,
+  "migration_versions": ["20260907152838"],
+  "contract_ref": "refs/db-contracts/2356/2",
+  "contract_sha256": "fb8956e306ac6ad64e90cac4a74b444c1271a1688cf71cf0c13f56f42b28dc3f",
+  "head_sha": "b73a71ecc9d704cb519dbc5e6c3517a61002b345",
+  "files_changed": [".agent/completion.json", ".agent/contract.json", "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql", "supabase/tests/dam_asset_freshness_current_state_contracts.sql"],
+  "db_reads": ["table core.taxonomy_source_ref", "table supabase_migrations.schema_migrations"],
+  "db_writes": ["table dam.asset", "column dam.asset.first_seen_at", "column dam.asset.last_seen_at", "column dam.asset.missing_since", "constraint dam_asset_seen_order on dam.asset", "constraint dam_asset_missing_after_first_seen on dam.asset", "function dam.enforce_asset_freshness", "trigger dam_asset_freshness_guard on dam.asset"],
   "checks": [
-    {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "The handoff implementation commit has no whitespace errors."
-    },
-    {
-      "command": "node scripts/check-handoff-contract.mjs",
-      "exit_code": 0,
-      "evidence": "The pull request Handoff contract check completed successfully on exact implementation head 9ab9624b20ac75e37e3ed012d2148abbc5ac7906."
-    },
-    {
-      "command": "manual handoff self-audit: 10 sections, per-agent blocks, queue seed, owner-decision sweep, secrets sweep",
-      "exit_code": 0,
-      "evidence": "The file contains all 10 required sections, 22 separate sub-agent blocks, an issue-backed queue seed, owner-decision consolidation, and no bearer-value match."
-    }
+    {"command":"git diff --check","exit_code":0,"evidence":"No whitespace errors after normal integration of current main a51e14db5f69b35be8b8d9ba1c61d109602c3aa5."},
+    {"command":"bash scripts/check-sql.sh","exit_code":0,"evidence":"Static guards passed after current-main integration, including the exact historical restoration; live-ledger input was not configured, so this is not ledger acceptance."},
+    {"command":"python3 -m unittest scripts.test_migration_derivation scripts.test_production_catalog_verification","exit_code":0,"evidence":"229 tests passed with no failures or skips after integration of current main a51e14db."},
+    {"command":"docker exec -i orch-2536-2356-proof psql -U postgres -v ON_ERROR_STOP=1 -q","exit_code":0,"evidence":"Original isolated PostgreSQL 17 proof remains valid for unchanged SQL bytes. Fresh equivalent execution on retained synthetic PostgreSQL 17 database case2356runtime passed the full 257-line lifecycle contract and rolled back; no shared database was contacted."},
+    {"command":"node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs","exit_code":0,"evidence":"44 passed, 0 failed, 0 cancelled, 0 skipped, 0 todo after current-main integration and contract generation 2 publication."}
   ],
   "assumptions_resolved": [
-    "GitHub issue 2586 is open and paired in the handoff contract block.",
-    "The implementation history through 9ab9624b contains only the new handoff and its required evidence pair; the final evidence commit changes only completion.json.",
-    "No database, claim, workflow, application, licensed-data, or infrastructure mutation is asserted."
+    "Migration SHA256 remains 6c04610f8e63d7d67b5c74610a69e219f912fa1b7fb520d7839ab8a81d77e022 and contract-test SHA256 remains 2c67a0a82424fd4eb648700d0bd663bf866477b81c21cc454da2c31f3e2e942a.",
+    "Version 20260907152838 and claim 2521 remain protected; no current live-ledger or deployment claim is made.",
+    "Prior reviews and CI bind only their exact earlier heads and are non-authorizing after any main refresh.",
+    "Fresh exact-head CI remains pending. No reviewer, preview, merge, production, claim-release or application acceptance is asserted."
   ],
   "stop_conditions_hit": []
 }
