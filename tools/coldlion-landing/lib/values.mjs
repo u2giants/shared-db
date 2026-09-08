@@ -22,8 +22,13 @@ export function text(value) {
 }
 
 export function num(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const parsed = typeof value === "number" ? value : Number(String(value).trim());
+  if (value === null || value === undefined) return null;
+  // A blank field is blank whether it arrives as "", a space or a tab. `Number("")` is 0, so
+  // trimming to empty MUST short-circuit here: a whitespace-only quantity that became a
+  // real zero would pass every not-null check and land as a fact the vendor never sent.
+  const raw = typeof value === "number" ? value : text(value);
+  if (raw === null) return null;
+  const parsed = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(parsed)) {
     throw new Error("a numeric field was not a finite number");
   }

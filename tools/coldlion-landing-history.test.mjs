@@ -10,10 +10,11 @@ import test from "node:test";
 import { GRID_ANCHOR, recentWindows, windowAtIndex, windowContaining, windowRange } from "./coldlion-landing/lib/grid.mjs";
 import { ORDER_HISTORY, allScopes, prodHistoryScope } from "./coldlion-landing/lib/scopes.mjs";
 import { assertPagesComplete, buildPageUrl, fetchPage, fetchWindowScope, requestParams, validatePage } from "./coldlion-landing/lib/http.mjs";
-import { canonical, date, sourceHash, splitTokens, sqlText, text } from "./coldlion-landing/lib/values.mjs";
+import { bigint, canonical, date, num, sourceHash, splitTokens, sqlText, text } from "./coldlion-landing/lib/values.mjs";
 import { projectOrderHistoryWindow, splitInvoiceTokens } from "./coldlion-landing/lib/project-order-history.mjs";
-import { projectProdHistoryWindow, selectLookup } from "./coldlion-landing/lib/project-prod-history.mjs";
+import { projectProdHistoryWindow, quantitiesAgree, selectLookup } from "./coldlion-landing/lib/project-prod-history.mjs";
 import { buildOrderHistoryLoadSql, buildProdHistoryLoadSql } from "./coldlion-landing/lib/load-window.mjs";
+import { loadedWindowsSql } from "./coldlion-landing/lib/run-history.mjs";
 import { parseArgs as parseBackfillArgs, selectScopes } from "./coldlion-landing/backfill-history.mjs";
 import { parseArgs as parseSyncArgs } from "./coldlion-landing/sync-history.mjs";
 
@@ -519,4 +520,57 @@ test("the scheduled sync trails more than one window by default", () => {
   const args = parseSyncArgs([]);
   assert.ok(args.windows >= 2, "an order edited days later falls in an older window");
   assert.throws(() => parseSyncArgs(["--windows", "0"]), /positive integer/);
+});
+
+// ---------------------------------------------------------------------------------
+// Regressions found by the governed review of this change (PR #2589)
+// ---------------------------------------------------------------------------------
+
+test("a whitespace-only number is blank, not zero", () => {
+  // `Number("")` is 0, so a trim that does not short-circuit turns a field the vendor
+  // left blank into a real quantity of zero that every not-null check then accepts.
+  assert.equal(num(""), null);
+  assert.equal(num("   "), null);
+  assert.equal(num("\t\n"), null);
+  assert.equal(num(0), 0, "a real zero still survives");
+  assert.equal(num("0"), 0);
+  assert.equal(bigint("  "), null);
+  assert.equal(num(" 12.5 "), 12.5);
+});
+
+test("a decimal component sum still reconciles against its parent total", () => {
+  // 5.1 + 5.2 is 10.299999999999999 in binary floating point. An exact comparison would
+  // leave a line that genuinely reconciles unasserted, and the guard would stop firing
+  // without ever failing.
+  assert.equal(quantitiesAgree(5.1 + 5.2, 10.3), true);
+  assert.equal(quantitiesAgree(9.3, 10.3), false, "a real discrepancy is still a discrepancy");
+
+  counter = 0;
+  const projected = projectProdHistoryWindow(
+    [
+      prodRow({ totalPpkQty: 10.3, ppkDetailQty: 5.1 }),
+      prodRow({ totalPpkQty: 10.3, ppkDetailQty: 5.2, prepackItemNo: "PPK-2", subItemNo: "SKU-2" }),
+    ],
+    prodOptions(),
+  );
+  assert.equal(projected.assertableLineIds.length, 1);
+});
+
+test("a one-sided invoice list is flagged rather than dropped in silence", () => {
+  const datesOnly = splitInvoiceTokens({ invoice_no_string: null, invoice_date_string: "2020-01-01" });
+  assert.equal(datesOnly.refs.length, 0);
+  assert.equal(datesOnly.mismatch, true, "dates with no numbers produce no rows; that must be counted");
+
+  const numbersOnly = splitInvoiceTokens({ invoice_no_string: "INV-1", invoice_date_string: null });
+  assert.equal(numbersOnly.refs.length, 1);
+  assert.equal(numbersOnly.mismatch, true);
+  assert.equal(numbersOnly.refs[0].date_alignment_proven, false);
+
+  const neither = splitInvoiceTokens({ invoice_no_string: null, invoice_date_string: null });
+  assert.equal(neither.mismatch, false, "nothing on either side is not a disagreement");
+});
+
+test("the resumable ledger read quotes the company code it was given", () => {
+  const sql = loadedWindowsSql("TEST'CO");
+  assert.match(sql, /company_code = 'TEST''CO'/);
 });

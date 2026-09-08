@@ -169,8 +169,13 @@ export function projectProdHistoryWindow(
     if (line.prod_line_seq === null) throw new Error("a prodHistory row has no prodLineSeq");
 
     const lineHash = sourceHash(line);
+    // Joined on a unit separator, exactly as the order-history key is. The line hash is
+    // the last part and already covers these same fields, so an empty join could not
+    // actually collide two different lines today; the separator is here so that the day
+    // someone drops the hash from this key, the change does not quietly become a
+    // collision that folds two production lines into one parent.
     const key = [line.company_code, line.prod_order_no, line.prod_line_seq, line.stage_code, lineHash].join(
-      "",
+      "",
     );
     let parent = lines.get(key);
     if (!parent) {
@@ -247,6 +252,17 @@ export function projectProdHistoryWindow(
  * every one carries a quantity, the parent total is recorded, and the two agree exactly.
  * Anything short of that stays unasserted rather than being forced through.
  */
+/**
+ * Do a component sum and a parent total agree, allowing for binary floating point?
+ *
+ * The tolerance is relative to the magnitude being compared, with an absolute floor, so
+ * it does not widen into a real discrepancy on large totals and does not vanish on small
+ * ones. A genuine mismatch of one unit is never inside it.
+ */
+export function quantitiesAgree(sum, total) {
+  return Math.abs(sum - total) <= 1e-9 * Math.max(1, Math.abs(total));
+}
+
 export function assertableLineIds(lines, components) {
   const byLine = new Map();
   for (const component of components) {
@@ -261,7 +277,11 @@ export function assertableLineIds(lines, components) {
     const bucket = byLine.get(line.localId);
     if (!bucket || bucket.count === 0 || bucket.missing > 0) continue;
     if (line.total_ppk_qty === null) continue;
-    if (bucket.sum !== line.total_ppk_qty) continue;
+    // Compared with a tolerance, not with `!==`. These are JSON numbers: a parent total
+    // of 10.3 and components of 5.1 + 5.2 do not sum to it EXACTLY in binary floating
+    // point, and an exact test would quietly leave a line that genuinely reconciles
+    // unasserted -- a guard that stops firing without ever failing.
+    if (!quantitiesAgree(bucket.sum, line.total_ppk_qty)) continue;
     ids.push(line.localId);
   }
   return ids;

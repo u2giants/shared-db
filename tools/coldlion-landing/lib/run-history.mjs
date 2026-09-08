@@ -11,17 +11,24 @@ import { projectOrderHistoryWindow } from "./project-order-history.mjs";
 import { projectProdHistoryWindow } from "./project-prod-history.mjs";
 import { COMPANY_CODE, PAGE_SIZE, allScopes, scopeLabel } from "./scopes.mjs";
 import { queryRows, recordFailure, runSql } from "./db.mjs";
+import { sqlText } from "./values.mjs";
 
 export { allScopes, scopeLabel };
 
 /** Windows already proven loaded, so a resumed backfill skips them instead of refusing them. */
-export function loadedWindows({ companyCode = COMPANY_CODE, options = {} } = {}) {
-  const rows = queryRows(
-    `select endpoint, coalesce(stage_code, ''), to_char(window_from, 'YYYY-MM-DD')
+/**
+ * The resume read, as text. Separated so the literal it builds can be proven offline:
+ * an interpolated company code is the one place this read could be altered by its own
+ * argument.
+ */
+export function loadedWindowsSql(companyCode = COMPANY_CODE) {
+  return `select endpoint, coalesce(stage_code, ''), to_char(window_from, 'YYYY-MM-DD')
        from coldlion.window_ledger
-      where company_code = '${companyCode}' and state = 'loaded';`,
-    options,
-  );
+      where company_code = ${sqlText(companyCode)} and state = 'loaded';`;
+}
+
+export function loadedWindows({ companyCode = COMPANY_CODE, options = {} } = {}) {
+  const rows = queryRows(loadedWindowsSql(companyCode), options);
   return new Set(rows.map(([endpoint, stage, from]) => `${endpoint}|${stage}|${from}`));
 }
 

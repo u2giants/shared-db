@@ -109,7 +109,11 @@ export function splitInvoiceTokens(component) {
       date_alignment_proven: aligned,
     };
   });
-  return { refs, mismatch: numbers.length > 0 && dates.length > 0 && !aligned };
+  // ANY disagreement in cardinality is a mismatch, including a one-sided list. Requiring
+  // both sides to be non-empty meant a component carrying invoice dates and no invoice
+  // numbers produced no refs and no flag: the rows vanished and nothing said so. The
+  // date list itself is still kept verbatim on the component either way.
+  return { refs, mismatch: numbers.length !== dates.length };
 }
 
 export function splitPickTicketTokens(component) {
