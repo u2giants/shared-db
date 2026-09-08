@@ -3,6 +3,8 @@ import test from 'node:test'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { REVIEW_VERDICT_REF_PREFIX } from './lib/review-verdict-artifact.mjs'
+import { readyRecord } from './orchestrator-flow/reconcile.mjs'
+import { canonicalJson, sha256 } from './orchestrator-flow/evidence-bundle.mjs'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -4981,6 +4983,47 @@ test('the exact byte-pinned #2509 claim apply is valid immutable historical-rebi
   assert.throws(()=>validateOriginalPreviewApplyEvidence(input,pinnedHistoricalClaimApplyIo({previewProject:'wrong-preview'})),/found 0/)
   assert.throws(()=>validateOriginalPreviewApplyEvidence(input,pinnedHistoricalClaimApplyIo({migrationBody:'select 1;\n'})),/found 0/)
   assert.throws(()=>validateOriginalPreviewApplyEvidence({...input,versions:['20260907131729']},pinnedHistoricalClaimApplyIo()),/found 0/)
+})
+
+function historicalTerminalIo(overrides={}){
+  const manifest={target:'preview',preview_allowlist:'20260907131728',claim_pr:'2513',claim_head_sha:'1be8f325dbf1ff035bd5039638dc47c14a3eb155',commit_sha:'c5f85ad3a98b7a5598e8c81a56735473d5bb5487',historical_preview_source_pr:'2513',historical_preview_original_run_map:'20260907131728:34157812748'}
+  const record=readyRecord({issue:2509,pr:2513,head_sha:manifest.claim_head_sha,bundle_id:'7e75bf09d81bc26fd310797c9db658629871b3ed186ee4788dfce4a6ac13b42b',route:'historical_rebind',route_context:manifest.commit_sha,manifest}),refs=new Map()
+  refs.set(`refs/db-preview-ready/${record.ready_id}`,{digest:sha256(canonicalJson(record)),record})
+  const runId='34211013201',artifactId='10049835085',artifactDigest=`sha256:${'4'.repeat(64)}`
+  const evidence={
+    run:{id:Number(runId),path:'.github/workflows/shared-supabase-migrations.yml',event:'workflow_dispatch',status:'completed',conclusion:'success',run_attempt:1,head_sha:manifest.commit_sha},
+    artifacts:{total_count:1,artifacts:[{id:Number(artifactId),name:`preview-migration-apply-${manifest.commit_sha}`,digest:artifactDigest,expired:false,workflow_run:{id:Number(runId),head_sha:manifest.commit_sha}}]},
+    logs:[`preview\tProve historical preview recovery source\t2026-09-08T09:38:33Z ORIGINAL_RUN_MAP: ${manifest.historical_preview_original_run_map}`,`preview\tProve historical preview recovery source\t2026-09-08T09:38:33Z SOURCE_PR: ${manifest.historical_preview_source_pr}`,`preview\tProve historical preview recovery source\t2026-09-08T09:38:33Z MAIN_SHA: ${manifest.commit_sha}`,`preview\tAssert the target project ref is PREVIEW\t2026-09-08T09:38:30Z PREVIEW_ALLOWLIST: ${manifest.preview_allowlist}`,'preview\tReport the preview ledger delta\t2026-09-08T09:38:53Z - rows before: 626','preview\tReport the preview ledger delta\t2026-09-08T09:38:53Z - rows after:  626','preview\tReport the preview ledger delta\t2026-09-08T09:38:53Z - added: (none)','preview\tReport the preview ledger delta\t2026-09-08T09:38:53Z - removed: (none)'].join('\n'),
+  }
+  const flow={resolveMarker:()=>({live:true,task:'route',calling_task:'route'}),readRef:(ref)=>refs.get(ref)??null,createRef:(ref,digest,value)=>{if(refs.has(ref))return false;refs.set(ref,{digest,record:value});return true}}
+  return {record,runId,artifactId,artifactDigest,refs,evidence,io:{orchestratorFlowAdapter:()=>flow,previewApplyRun:()=>evidence},...overrides}
+}
+
+function historicalTerminalArgs(fixture){return ['--terminalize-historical-preview-ready',fixture.record.ready_id,'--issue','2509','--run-id',fixture.runId,'--artifact-id',fixture.artifactId,'--artifact-digest',fixture.artifactDigest,'--manifest-digest',fixture.record.manifest_digest]}
+
+test('the GitHub-backed CLI terminalizes the exact no-write historical recovery once with immutable readback',()=>{
+  const fixture=historicalTerminalIo(),printed=[],log=console.log;console.log=(line)=>printed.push(line)
+  try{assert.equal(main(historicalTerminalArgs(fixture),NOW,fixture.io),0);assert.equal(main(historicalTerminalArgs(fixture),NOW,fixture.io),0)}finally{console.log=log}
+  const ref=`refs/db-preview-ready-outcomes/${fixture.record.ready_id}`,outcome=fixture.refs.get(ref)
+  assert.equal(outcome.digest,'dispatched');assert.equal(outcome.record.outcome,'dispatched');assert.deepEqual(outcome.record.proof,{positive:true,mode:'apply',run_id:fixture.runId,artifact_id:fixture.artifactId,artifact_digest:fixture.artifactDigest,manifest_digest:fixture.record.manifest_digest,ledger_rows:626})
+  assert.equal(JSON.parse(printed[0]).ref,ref)
+})
+
+test('historical recovery terminalization fails closed on every mismatched live proof',()=>{
+  const cases=[
+    (f,a)=>{a[1]='f'.repeat(64)},
+    (f,a)=>{a[a.indexOf('--run-id')+1]='34211013202'},
+    (f,a)=>{a[a.indexOf('--artifact-id')+1]='10049835086'},
+    (f,a)=>{a[a.indexOf('--artifact-digest')+1]=`sha256:${'5'.repeat(64)}`},
+    (f,a)=>{a[a.indexOf('--manifest-digest')+1]='6'.repeat(64)},
+    (f)=>{f.evidence.run.conclusion='failure'},
+    (f)=>{f.evidence.logs=f.evidence.logs.replace('- rows after:  626','- rows after:  627')},
+    (f)=>{f.evidence.logs=f.evidence.logs.replace('ORIGINAL_RUN_MAP: 20260907131728:34157812748','ORIGINAL_RUN_MAP: 20260907131728:34157812749')},
+  ]
+  const error=console.error;console.error=()=>{}
+  try{for(const mutate of cases){const fixture=historicalTerminalIo(),args=historicalTerminalArgs(fixture);mutate(fixture,args);assert.equal(main(args,NOW,fixture.io),2);assert.equal(fixture.refs.has(`refs/db-preview-ready-outcomes/${fixture.record.ready_id}`),false)}}finally{console.error=error}
+  const occupied=historicalTerminalIo(),outcomeRef=`refs/db-preview-ready-outcomes/${occupied.record.ready_id}`;occupied.refs.set(outcomeRef,{digest:'dispatched',record:{outcome:'dispatched',proof:{positive:true,mode:'apply'}}})
+  console.error=()=>{};try{assert.equal(main(historicalTerminalArgs(occupied),NOW,occupied.io),2)}finally{console.error=error}
 })
 
 test('immutable preview-ledger reconciliation evidence validates the renamed current version without replay',()=>{
