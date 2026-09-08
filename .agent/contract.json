@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2356,
-  "generation": 2,
+  "generation": 1,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Deliver additive canonical Asset lifecycle fields while preserving editable historical rows with explicit unknown freshness and enforcing complete new-row facts, non-regression and chronological consistency.",
@@ -11,12 +11,10 @@
   "branch": "codex/issue-2356-asset-freshness",
   "worktree": "/tmp/shared-db-orch-2517-2356",
   "allowed_paths": [
-    ".agent/completion.json", ".agent/contract.json",
     "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql",
     "supabase/tests/dam_asset_freshness_current_state_contracts.sql"
   ],
   "file_writes": [
-    ".agent/completion.json", ".agent/contract.json",
     "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql",
     "supabase/tests/dam_asset_freshness_current_state_contracts.sql"
   ],
