@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260908214749"
   ],
-  "contract_ref": "refs/db-contracts/2506/9",
-  "contract_sha256": "26ac334caaeb00cf8915aa59fb8040508b70a38c0d039bacad0e571df8bf2564",
-  "head_sha": "ca0032a537bc366ebe3193a09c5815a7c151383f",
+  "contract_ref": "refs/db-contracts/2506/10",
+  "contract_sha256": "1473dadf27d0b4a0e4f2bba30df43b0aa9d2dd85bcf1ead6c874fc1698c851ad",
+  "head_sha": "ca3a4ac23982203c4d7d95a8ece04cc0a416fa0e",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -37,42 +37,42 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Re-run at implementation head ca0032a5 after the second governed supersession: static SQL guards passed and Guard B accepts the branch, because reserved forward version 20260908214749 sorts after the merged base newest version 20260908202651. Guard B2 live-ledger input remained intentionally absent because this preparation performed no shared database write."
+      "evidence": "Re-run at implementation head ca3a4ac2 after integrating origin/main 75cd89fe: static SQL guards passed and Guard B accepts the branch, because reserved forward version 20260908214749 still sorts after the merged base newest version 20260908202651 (main added no migration). Guard B2 live-ledger input remained intentionally absent because this preparation performed no shared database write."
     },
     {
       "command": "python3 scripts/test_migration_derivation.py",
       "exit_code": 0,
-      "evidence": "42 tests passed in 0.385s at the merged head ca0032a5."
+      "evidence": "42 tests passed in 0.363s at the merged head ca3a4ac2."
     },
     {
       "command": "python3 scripts/benchmark_popsg_search_v2.py",
       "exit_code": 0,
-      "evidence": "Executed at implementation head ca0032a5 on a disposable local PostgreSQL 18.6 cluster created with initdb in a scratch directory and dropped afterwards; it never touched Supabase. This host has no docker binary, so the script's --database-url option was used; the docker path is unchanged and still the default. Result: 'PASS: 160 exact full-JSON parity cases; 0 skipped.' with the unchanged 8s budget — files baseline timeout at 8100ms, files forward pass at 4050ms (total 211323), guides baseline pass at 6119ms and guides forward pass at 3162ms, both returning the identical digest 6b5ed84981bbb49f0a8f18252f367531 over total 10860. The EDGE fixture sets property_folder to SQL NULL for a quarter of its rows, so identical baseline and forward output at volume is direct evidence that the guides-mode identity re-join preserves NULL identities."
+      "evidence": "Executed at implementation head ca0032a5 and unchanged at ca3a4ac2 (the merge touched no benchmark, fixture or migration byte) on a disposable local PostgreSQL 18.6 cluster created with initdb in a scratch directory and dropped afterwards; it never touched Supabase. This host has no docker binary, so the script's --database-url option was used; the docker path is unchanged and still the default. Result: 'PASS: 160 exact full-JSON parity cases; 0 skipped.' with the unchanged 8s budget — files baseline timeout at 8100ms, files forward pass at 4050ms (total 211323), guides baseline pass at 6119ms and guides forward pass at 3162ms, both returning the identical digest 6b5ed84981bbb49f0a8f18252f367531 over total 10860. The EDGE fixture sets property_folder to SQL NULL for a quarter of its rows, so identical baseline and forward output at volume is direct evidence that the guides-mode identity re-join preserves NULL identities."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors at the merged head."
+      "evidence": "No whitespace errors at the merged head ca3a4ac2."
     },
     {
       "command": "python3 scripts/test_production_catalog_verification.py",
       "exit_code": 0,
-      "evidence": "Re-run at implementation head ca0032a5: 188 tests passed in 1.278s. The exact-body, signature, security and privilege verification remains enforced and now opens the superseded forward migration path 20260908214749."
+      "evidence": "Re-run at implementation head ca3a4ac2: 188 tests passed in 0.620s. The exact-body, signature, security and privilege verification remains enforced against forward migration path 20260908214749."
     },
     {
       "command": "node --test scripts/throughput-guard/check-production-verification-sidecars.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
       "exit_code": 0,
-      "evidence": "10 passed, 0 failed, 0 skipped at head ca0032a5."
+      "evidence": "10 passed, 0 failed, 0 skipped at head ca3a4ac2."
     },
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "Re-run against origin/main d669c43eda033919091c532605ee1cf1f2e786e4: status OK, all 44 sidecars passed, and the forward migration now scans as version 20260908214749 with its renamed sidecar."
+      "evidence": "Re-run against origin/main 75cd89fee2107cd53d942eed04a699ca656e14eb: status OK, all 44 sidecars passed, and the forward migration scans as version 20260908214749 with its matching sidecar."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "Re-run at the merged head ca0032a5: truth audit OK for 266 reviewed call sites; current main introduced no new unreviewed call site, so no regeneration was needed."
+      "evidence": "Re-run at the merged head ca3a4ac2: 'truth audit OK: call_sites=269'. Main's own #2613 commit added one reviewed call site to this artifact while this branch adds another, so the merged inventory was regenerated from the merged tree — main's 268 dispositions plus this branch's scripts/benchmark_popsg_search_v2.py site — with the recorded count and semantic digest recomputed. No disposition text changed on either side."
     },
     {
       "command": "supabase/tests against an ephemeral database (CI)",
@@ -92,7 +92,9 @@
     "Current origin/main d669c43eda033919091c532605ee1cf1f2e786e4 was integrated by normal merge at 00cbc60317f7bac84ac399a9aa6a27411798eb10; current main is its second parent and a proven ancestor. The only conflicts were the single-slot .agent evidence pair, where this pull request keeps its own side and rebinds it to the merged head. No main migration touches public.search_style_guide_library_v2 or public.style_guide_search_documents, so no function body needed re-derivation.",
     "That merge brought in version 20260908202651 from PR #2584, which sorts after reserved forward version 20260908195355 and refused SQL Guard B. The coordinator re-reserved 20260908214749 under claim #2510 (durable supersession ref refs/db-claim-supersessions/2510-20260908195355), renaming the migration and its sidecar together; the executable SQL body is byte-identical apart from the single header comment line naming the reservation. scripts/benchmark_popsg_search_v2.py and scripts/test_production_catalog_verification.py were moved with it, and only the path string changed.",
     "The first governed review round at head 783db9d1 returned one APPROVE (glm-5.3) and one REVISE (grok-4.6) whose Critical finding asserted that the guides-mode array identity re-join drops SQL NULL identities. PostgreSQL array equality treats NULL elements as equal while still separating NULL from empty string, so the re-join was already correct; rather than argue the point, the required exact-parity fixture was made runnable without docker and executed at this head, passing all 160 cases over data that deliberately includes NULL property_folder guides, and a new focused contract pins the same behaviour. No migration SQL was changed.",
-    "The second review round's Critical finding, and its requested per-column IS NOT DISTINCT FROM rewrite, were both tested rather than argued. The rewrite was implemented and measured: it defeats the hash join and pushed the guides forward query from 4.1s to past the 8s budget, so it was reverted. The finding's premise is refuted by the repository's own ephemeral-database job at head 0744880d, which logged all 9 focused contracts passing including the new NULL-identity contract, and by the volume fixture returning an identical guides digest for baseline and forward. Head ca0032a5 records both reasons in a header comment so the point does not have to be relitigated."
+    "The second review round's Critical finding, and its requested per-column IS NOT DISTINCT FROM rewrite, were both tested rather than argued. The rewrite was implemented and measured: it defeats the hash join and pushed the guides forward query from 4.1s to past the 8s budget, so it was reverted. The finding's premise is refuted by the repository's own ephemeral-database job at head 0744880d, which logged all 9 focused contracts passing including the new NULL-identity contract, and by the volume fixture returning an identical guides digest for baseline and forward. Head ca0032a5 records both reasons in a header comment so the point does not have to be relitigated.",
+    "Current origin/main 75cd89fee2107cd53d942eed04a699ca656e14eb was integrated by normal merge at implementation head ca3a4ac23982203c4d7d95a8ece04cc0a416fa0e; current main is its second parent and a proven ancestor. Main's two new merges are repository-maintenance work — #2606 worktree reap liveness, and #2613 which makes 'Agent work contract' a required status check and reads the preflight pinned floor from origin/main rather than the proposed head. Neither touches public.search_style_guide_library_v2, public.style_guide_search_documents, or any migration, so no function body needed re-derivation and the reserved forward version still sorts last. Conflicts were the single-slot .agent evidence pair (this pull request keeps its own side and rebinds it here) and the throughput-guard truth audit, regenerated from the merged tree.",
+    "The round-2 Critical is left to the round-3 reviewers rather than settled by the author. What changed is its legibility, not its disposition: the migration header now states in the file itself that the whole-array identity re-join is NULL-safe by PostgreSQL array-equality semantics and that the requested per-column IS NOT DISTINCT FROM rewrite was implemented, measured from 4.1s to past the unchanged 8s budget, and reverted; contract 8 in supabase/tests/popsg_search_style_guide_library_v2_contracts.sql pins the NULL-folder guide's page row, re-joined child aggregates and child-derived facets while keeping it distinct from the empty-string identity, and ran green on a real ephemeral database in CI run 34285650340; and the volume fixture, a quarter of whose rows carry SQL NULL property_folder, returns the identical guides digest 6b5ed84981bbb49f0a8f18252f367531 for baseline and forward. A fresh reviewer can check each of those without re-deriving them."
   ],
   "stop_conditions_hit": []
 }
