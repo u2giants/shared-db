@@ -20,6 +20,10 @@ on:
 
 permissions:
   contents: read
+  # Read-only, and only so the documents-only exemption (#2591) can ask GitHub
+  # for the pull request's changed-file list. The gate must judge the PULL
+  # REQUEST against its base, not whatever the runner has on disk.
+  pull-requests: read
 
 concurrency:
   group: agent-work-contract-${{ github.event.pull_request.number || github.ref }}
@@ -47,6 +51,7 @@ jobs:
           scripts/agent-work-contract.test.mjs
           scripts/agent-work-contract-activation.test.mjs
           scripts/agent-work-contract-git-evidence.test.mjs
+          scripts/check-documents-only-pull-request.test.mjs
 
       - name: Report the activation mode, so nobody has to guess
         run: |
@@ -71,6 +76,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # Convention: a PR that declares a contract changes both evidence
@@ -111,7 +117,29 @@ jobs:
             if node scripts/agent-work-contract-activation.mjs --is-grandfathered --config-file config/agent-work-contract-activation.json --pr "$PR_NUMBER" --head-sha "$PR_HEAD_SHA"; then
               exit 0
             fi
-            echo "::error::Enforced mode requires this pull request to change both $CONTRACT and $REPORT. Inherited main evidence does not count."
+            # THE DOCUMENTS-ONLY EXEMPTION (issue #2591, owner approved 2026-09-08).
+            #
+            # The reviewer draw already exempts a prose-only pull request from the
+            # small external database-reviewer pool (#2102). This gate did not know
+            # that rule, so it demanded the evidence pair from a pull request that
+            # changes nothing but documents -- and adding the pair then CANCELLED
+            # the reviewer exemption, because `.json` is not a document extension.
+            # A prose-only change could satisfy either gate but never both, so every
+            # handoff paid a full two-reviewer round. Both gates now ask the same
+            # classifier the same question.
+            #
+            # RULEBOOK FILES ARE NOT DOCUMENTS. AGENTS.md, CLAUDE.md, skills and
+            # plan_*.md keep the full treatment: a bad edit to one of them is as
+            # dangerous as a bad migration, because every later session obeys it.
+            #
+            # FAIL CLOSED. An unreadable or empty file list is never documents-only,
+            # and a failed API read leaves the list empty, so it refuses. Every other
+            # automated check and the guarded merge lane are unchanged by this.
+            if gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" --paginate --slurp                  > /tmp/pr-files.json 2>/tmp/pr-files.err                && node scripts/check-documents-only-pull-request.mjs < /tmp/pr-files.json; then
+              echo "This pull request changes only prose documents, so the agent work contract pair is not required (#2591)."
+              exit 0
+            fi
+            echo "::error::Enforced mode requires this pull request to change both $CONTRACT and $REPORT. Inherited main evidence does not count. A documents-only pull request is exempt; this one is not."
             exit 1
           fi
 
