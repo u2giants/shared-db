@@ -133,9 +133,11 @@ jobs:
             # dangerous as a bad migration, because every later session obeys it.
             #
             # FAIL CLOSED. An unreadable or empty file list is never documents-only,
-            # and a failed API read leaves the list empty, so it refuses. Every other
+            # and a failed API read refuses rather than exempts. Every other
             # automated check and the guarded merge lane are unchanged by this.
-            if gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" --paginate --slurp                  > /tmp/pr-files.json 2>/tmp/pr-files.err                && node scripts/check-documents-only-pull-request.mjs < /tmp/pr-files.json; then
+            # The GitHub read happens INSIDE the script, through the one shared
+            # transport library (#2342), never directly from this step.
+            if node scripts/check-documents-only-pull-request.mjs "$GITHUB_REPOSITORY" "$PR_NUMBER"; then
               echo "This pull request changes only prose documents, so the agent work contract pair is not required (#2591)."
               exit 0
             fi

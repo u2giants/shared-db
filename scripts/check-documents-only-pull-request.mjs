@@ -11,13 +11,24 @@
 // could satisfy either gate but never both.
 //
 // This wrapper exists so BOTH gates ask the SAME function the SAME question. It
-// reads the GitHub pull-request files payload on stdin, so it judges the pull
+// reads the GitHub pull-request files payload itself, so it judges the pull
 // request against its base rather than whatever the runner has on disk, and it
 // carries the previous name of every rename. Unreadable or empty input is NOT
 // documents-only: "we could not tell" must cost the full treatment.
-import { readFileSync } from 'node:fs'
+//
+// The read goes through the ONE shared GitHub transport (#2342), never a raw
+// `gh api` in a workflow step, so the retry policy and the transient/semantic
+// classifier stay decided in a single place.
 import { pathToFileURL } from 'node:url'
+import { ghJson } from './lib/github-transport.mjs'
 import { changedPathsFromPullRequestFiles, classifyChangedPaths } from './lib/documents-only-change.mjs'
+
+export function readPullRequestFiles(repo, pullRequest) {
+  return JSON.stringify(ghJson(
+    ['api', `repos/${repo}/pulls/${pullRequest}/files?per_page=100`, '--paginate', '--slurp'],
+    { wrapError: (detail, cause) => new Error(`${detail}${cause ? `: ${cause.message}` : ''}`) },
+  ))
+}
 
 export function classifyPullRequestFilesPayload(text) {
   let rows
@@ -33,13 +44,28 @@ export function classifyPullRequestFilesPayload(text) {
   return classifyChangedPaths(paths)
 }
 
-export function main(argv, deps = { read: () => readFileSync(0, 'utf8'), out: (text) => process.stdout.write(text), err: (text) => process.stderr.write(text) }) {
-  if (argv.length) { deps.err('usage: check-documents-only-pull-request.mjs < pull-request-files.json\n'); return 2 }
+export function main(argv, deps = {}) {
+  const err = deps.err ?? ((text) => process.stderr.write(text))
+  const out = deps.out ?? ((text) => process.stdout.write(text))
+  const [repo, pullRequest] = argv
+  if (argv.length !== 2 || !repo || !/^[0-9]+$/.test(String(pullRequest ?? ''))) {
+    err('usage: check-documents-only-pull-request.mjs <owner/repo> <pull-request-number>\n')
+    return 2
+  }
+  const read = deps.read ?? (() => readPullRequestFiles(repo, pullRequest))
   let text
-  try { text = deps.read() } catch (error) { deps.err(`REFUSED: the pull request file list could not be read: ${error.message}\n`); return 1 }
+  try {
+    text = read()
+  } catch (error) {
+    err(`REFUSED: the pull request file list could not be read: ${error.message}\n`)
+    return 1
+  }
   const verdict = classifyPullRequestFilesPayload(text)
-  if (verdict.documentsOnly) { deps.out(`documents-only: ${verdict.reason}\n`); return 0 }
-  deps.out(`not documents-only: ${verdict.reason}\n`)
+  if (verdict.documentsOnly) {
+    out(`documents-only: ${verdict.reason}\n`)
+    return 0
+  }
+  out(`not documents-only: ${verdict.reason}\n`)
   return 1
 }
 

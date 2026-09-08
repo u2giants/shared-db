@@ -5,7 +5,7 @@ import { classifyPullRequestFilesPayload, main } from './check-documents-only-pu
 const run = (text) => {
   const out = []
   const err = []
-  const code = main([], { read: () => text, out: (t) => out.push(t), err: (t) => err.push(t) })
+  const code = main(['u2giants/shared-db', '1'], { read: () => text, out: (t) => out.push(t), err: (t) => err.push(t) })
   return { code, out: out.join(''), err: err.join('') }
 }
 
@@ -52,13 +52,19 @@ test('unreadable, empty and non-array input are refused', () => {
 
 test('a read failure is refused rather than treated as prose', () => {
   const err = []
-  const code = main([], { read: () => { throw new Error('stdin exploded') }, out: () => {}, err: (t) => err.push(t) })
+  const code = main(['u2giants/shared-db', '1'], { read: () => { throw new Error('the GitHub read exploded') }, out: () => {}, err: (t) => err.push(t) })
   assert.equal(code, 1)
   assert.match(err.join(''), /REFUSED/)
 })
 
-test('arguments are a usage error, not a silent pass', () => {
-  assert.equal(main(['--yes'], { read: () => '[]', out: () => {}, err: () => {} }), 2)
+// Missing or malformed arguments must be a usage error, never an exemption:
+// a gate that cannot tell WHICH pull request it is judging must not grant one.
+test('missing or malformed arguments are a usage error, not a silent pass', () => {
+  const deps = { read: () => '[]', out: () => {}, err: () => {} }
+  assert.equal(main([], deps), 2)
+  assert.equal(main(['u2giants/shared-db'], deps), 2)
+  assert.equal(main(['u2giants/shared-db', 'not-a-number'], deps), 2)
+  assert.equal(main(['', '1'], deps), 2)
 })
 
 // `gh api --paginate --slurp` gives one array PER PAGE. A 120-file pull request
