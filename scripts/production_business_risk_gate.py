@@ -1897,7 +1897,7 @@ def main() -> int:
     return 0 if result.get("productionPromotionAllowed", result["automaticPromotionAllowed"]) else 3
 
 PREVIEW_PRODUCER_PATHS += (
-    "scripts/production-verification-sidecars/20260907183041.json",
+    "scripts/production-verification-sidecars/20260908195355.json",
     "scripts/production-verification-sidecars/20260830013942.json",
     "scripts/production-verification-sidecars/20260830130345.json",
     "scripts/production-verification-sidecars/20260830172356.json",

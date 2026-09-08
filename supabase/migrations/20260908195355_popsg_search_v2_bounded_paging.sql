@@ -1,4 +1,4 @@
--- Issue #2506; guarded forward reservation 20260907183041 on claim #2510.
+-- Issue #2506; guarded forward reservation 20260908195355 on claim #2510.
 -- derived-from: 20260907131610
 -- Keep every authorized filter, exact total/facet and child-before-guide rule.
 -- Narrow intermediate rows; page before building response JSON. Guide facets
