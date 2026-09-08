@@ -4,15 +4,15 @@
   "outcome": "ready-for-merge",
   "pr": 2447,
   "migration_versions": [
-    "20260907200137"
+    "20260908195056"
   ],
-  "contract_ref": "refs/db-contracts/2439/1",
-  "contract_sha256": "2c28b47b8f5bf9d3cc9038b2e6210aa44ddcf2876047439879c0e2854e5756cc",
-  "head_sha": "745a9deb1e47f341ed596332641d830e3006a8ff",
+  "contract_ref": "refs/db-contracts/2439/2",
+  "contract_sha256": "10702cb98c01f2b6630d527fc7f0bf68288371c183b90d457863240a8a2888f4",
+  "head_sha": "9242a95531f2df824fa614f56728dd9928d2bcdd",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260907200137_bulk_operation_runs_history.sql",
+    "supabase/migrations/20260908195056_bulk_operation_runs_history.sql",
     "supabase/tests/bulk_operation_runs_contracts.sql"
   ],
   "db_reads": [
@@ -59,7 +59,7 @@
     }
   ],
   "assumptions_resolved": [
-    "Guarded supersession retained original version 20260906143443 as permanently reserved and uses protected version 20260907200137 without changing the migration blob.",
+    "Guarded supersession retained original version 20260906143443 and superseded version 20260907200137 as permanently reserved, and now uses protected version 20260908195056. The migration blob is byte-identical apart from the one comment line naming its reserved version.",
     "Preserved test-only commit bd349eaa integrated before a normal merge of main 8d64a758; original claim identifiers remain unchanged.",
     "PostgreSQL 17 role tests use the repository's real JWT-aware app helper definitions and Supabase-equivalent service_role BYPASSRLS.",
     "Independent review, CI, preview and production live structural acceptance remain pending behind issue 2449. Consumer worker appends and alert consumption belong to PopDAM; no claim of application completion."

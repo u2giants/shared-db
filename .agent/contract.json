@@ -5,7 +5,7 @@
     "SQL scope widens or any required check refuses"
   ],
   "assumptions": [
-    "Claim2443 owner/path identifiers preserved; guarded newversion20260907200137 at published0a8307da",
+    "Claim2443 owner/path identifiers preserved; guarded newversion20260908195056 at published0a8307da",
     "Earlier disposable red-control and full SQL contracts passed; exact same SQL/test bytes apart from guarded version metadata",
     "Independent review and full live structural acceptance pending; worker append and alert wiring belong to PopDAM"
   ],
@@ -37,13 +37,13 @@
     "type app.app_role"
   ],
   "file_writes": [
-    "supabase/migrations/20260907200137_bulk_operation_runs_history.sql",
+    "supabase/migrations/20260908195056_bulk_operation_runs_history.sql",
     "supabase/tests/bulk_operation_runs_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "allowed_paths": [
-    "supabase/migrations/20260907200137_bulk_operation_runs_history.sql",
+    "supabase/migrations/20260908195056_bulk_operation_runs_history.sql",
     "supabase/tests/bulk_operation_runs_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json"
@@ -57,6 +57,6 @@
   "route": "shared-db-orchestrator",
   "work_type": "structural",
   "work_issue": 2439,
-  "generation": 1,
+  "generation": 2,
   "schema_version": 1
 }
