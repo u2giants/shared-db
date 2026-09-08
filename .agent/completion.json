@@ -1,56 +1,24 @@
 {
-  "schema_version": 1,
-  "work_issue": 1984,
-  "outcome": "ready-for-merge",
-  "pr": 2205,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/1984/3",
-  "contract_sha256": "4e6fc29140c47ff07c1612ef0de7f8ab3a460b7fd31f1a2ef552ab0cec2f77ef",
-  "head_sha": "7d4db31d6aa697ad3af1fd91d696e5310897ebe1",
-  "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    ".github/workflows/historical-item-mg-reclassification-tests.yml",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/historical-item-mg-reclassification/README.md",
-    "scripts/historical-item-mg-reclassification/apply.mjs",
-    "scripts/historical-item-mg-reclassification/build-manifest.mjs",
-    "scripts/historical-item-mg-reclassification/fixtures.mjs",
-    "scripts/historical-item-mg-reclassification/guards.test.mjs",
-    "scripts/historical-item-mg-reclassification/lib/classify.mjs",
-    "scripts/historical-item-mg-reclassification/lib/constants.mjs",
-    "scripts/historical-item-mg-reclassification/lib/csv.mjs",
-    "scripts/historical-item-mg-reclassification/lib/execute.mjs",
-    "scripts/historical-item-mg-reclassification/lib/manifest.mjs",
-    "scripts/historical-item-mg-reclassification/lib/pg.mjs",
-    "scripts/historical-item-mg-reclassification/lib/private-path.mjs",
-    "scripts/historical-item-mg-reclassification/lib/retirement-gate.mjs",
-    "scripts/historical-item-mg-reclassification/lib/target.mjs",
-    "scripts/historical-item-mg-reclassification/lib/verify.mjs",
-    "scripts/historical-item-mg-reclassification/rollback.mjs",
-    "scripts/historical-item-mg-reclassification/verify.mjs"
-  ],
-  "db_reads": [],
-  "db_writes": [],
+  "schema_version": 1, "work_issue": 2356, "outcome": "ready-for-merge", "pr": 2523,
+  "migration_versions": ["20260907152838"],
+  "contract_ref": "refs/db-contracts/2356/2",
+  "contract_sha256": "fb8956e306ac6ad64e90cac4a74b444c1271a1688cf71cf0c13f56f42b28dc3f",
+  "head_sha": "b73a71ecc9d704cb519dbc5e6c3517a61002b345",
+  "files_changed": [".agent/completion.json", ".agent/contract.json", "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql", "supabase/tests/dam_asset_freshness_current_state_contracts.sql"],
+  "db_reads": ["table core.taxonomy_source_ref", "table supabase_migrations.schema_migrations"],
+  "db_writes": ["table dam.asset", "column dam.asset.first_seen_at", "column dam.asset.last_seen_at", "column dam.asset.missing_since", "constraint dam_asset_seen_order on dam.asset", "constraint dam_asset_missing_after_first_seen on dam.asset", "function dam.enforce_asset_freshness", "trigger dam_asset_freshness_guard on dam.asset"],
   "checks": [
-    {
-      "command": "node --test scripts/historical-item-mg-reclassification/guards.test.mjs",
-      "exit_code": 0,
-      "evidence": "45 tests passed with no failures and no skips, including the new executor-level manifest-to-database binding, the fail-closed git probe, the per-run backup, and the source-header proof."
-    },
-    {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=265 after the sites added by this round of fixes were given explicit dispositions and the inventory was re-digested."
-    },
-    {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors reported."
-    }
+    {"command":"git diff --check","exit_code":0,"evidence":"No whitespace errors after normal integration of current main a51e14db5f69b35be8b8d9ba1c61d109602c3aa5."},
+    {"command":"bash scripts/check-sql.sh","exit_code":0,"evidence":"Static guards passed after current-main integration, including the exact historical restoration; live-ledger input was not configured, so this is not ledger acceptance."},
+    {"command":"python3 -m unittest scripts.test_migration_derivation scripts.test_production_catalog_verification","exit_code":0,"evidence":"229 tests passed with no failures or skips after integration of current main a51e14db."},
+    {"command":"docker exec -i orch-2536-2356-proof psql -U postgres -v ON_ERROR_STOP=1 -q","exit_code":0,"evidence":"Original isolated PostgreSQL 17 proof remains valid for unchanged SQL bytes. Fresh equivalent execution on retained synthetic PostgreSQL 17 database case2356runtime passed the full 257-line lifecycle contract and rolled back; no shared database was contacted."},
+    {"command":"node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs","exit_code":0,"evidence":"44 passed, 0 failed, 0 cancelled, 0 skipped, 0 todo after current-main integration and contract generation 2 publication."}
   ],
   "assumptions_resolved": [
-    "The reclassification itself is executed later under its own authorisation; this pull request writes no production row."
+    "Migration SHA256 remains 6c04610f8e63d7d67b5c74610a69e219f912fa1b7fb520d7839ab8a81d77e022 and contract-test SHA256 remains 2c67a0a82424fd4eb648700d0bd663bf866477b81c21cc454da2c31f3e2e942a.",
+    "Version 20260907152838 and claim 2521 remain protected; no current live-ledger or deployment claim is made.",
+    "Prior reviews and CI bind only their exact earlier heads and are non-authorizing after any main refresh.",
+    "Fresh exact-head CI remains pending. No reviewer, preview, merge, production, claim-release or application acceptance is asserted."
   ],
   "stop_conditions_hit": []
 }
