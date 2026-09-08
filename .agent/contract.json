@@ -1,62 +1,59 @@
 {
-  "stop_conditions": [
-    "Claim or coordinator ownership changes",
-    "Main movement invalidates branch evidence",
-    "SQL scope widens or any required check refuses"
-  ],
-  "assumptions": [
-    "Claim2443 owner/path identifiers preserved; guarded newversion20260908195056 at published0a8307da",
-    "Earlier disposable red-control and full SQL contracts passed; exact same SQL/test bytes apart from guarded version metadata",
-    "Independent review and full live structural acceptance pending; worker append and alert wiring belong to PopDAM"
-  ],
-  "required_checks": [
-    "bash scripts/check-sql.sh",
-    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-    "node scripts/check-throughput-truth-audit.mjs",
-    "git diff --check"
-  ],
-  "prohibited_actions": [
-    "No shared database writes,review allocation,merge or deployment without coordinator order",
-    "No inherited claim relocation or applied migration editing",
-    "No consumer worker changes or data seeding"
-  ],
-  "db_writes": [
-    "table public.bulk_operation_runs",
-    "column public.bulk_operation_runs.error",
-    "column public.bulk_operation_runs.operation",
-    "column public.bulk_operation_runs.run_id",
-    "column public.bulk_operation_runs.stage",
-    "column public.bulk_operation_runs.status",
-    "index public.bulk_operation_runs_failures_idx",
-    "index public.bulk_operation_runs_operation_run_key",
-    "index public.bulk_operation_runs_operation_started_idx",
-    "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
-  ],
-  "db_reads": [
-    "function app.has_any_role",
-    "type app.app_role"
+  "schema_version": 1,
+  "work_issue": 2596,
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Make a prose-only handoff avoid the inapplicable disposable database contract test while preserving every other merge safeguard.",
+  "base_sha": "03f917d0dec6e0973e4b9cddd72e02f686a19e0c",
+  "dispatcher": "Albert Hazan direct request",
+  "worker": "Codex",
+  "branch": "codex/issue-2596-bounded-handover",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2596-bounded-handover",
+  "allowed_paths": [
+    "AGENTS.md",
+    ".agent/contract.json",
+    ".agent/completion.json",
+    ".github/workflows/agent-work-contract.yml",
+    ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/migration-author-lease.yml",
+    "HANDOFF.d/2026-09-08T1924Z-edge-dev-codex-handover-latency-plan.md",
+    "plan_bounded_session_handover.md",
+    "scripts/check-closeout-readiness.mjs",
+    "scripts/check-closeout-readiness.test.mjs"
   ],
   "file_writes": [
-    "supabase/migrations/20260908195056_bulk_operation_runs_history.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql",
+    "AGENTS.md",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    ".github/workflows/agent-work-contract.yml",
+    ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/migration-author-lease.yml",
+    "HANDOFF.d/2026-09-08T1924Z-edge-dev-codex-handover-latency-plan.md",
+    "plan_bounded_session_handover.md",
+    "scripts/check-closeout-readiness.mjs",
+    "scripts/check-closeout-readiness.test.mjs"
   ],
-  "allowed_paths": [
-    "supabase/migrations/20260908195056_bulk_operation_runs_history.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql",
-    ".agent/contract.json",
-    ".agent/completion.json"
+  "db_reads": [],
+  "db_writes": [],
+  "prohibited_actions": [
+    "No database, preview, production, repository-setting, or orchestrator-marker mutation.",
+    "No reviewer bypass, required-context removal, or merge-path replacement.",
+    "Do not change paths outside this contract."
   ],
-  "worktree": "/tmp/shared-db-orch-2536-2439",
-  "branch": "claude/issue-2439-bulk-operation-runs",
-  "worker": "codex recovery_2506 successor of stopped inherited2439 worker",
-  "dispatcher": "codex shared-db.orch marker2536 route01a07ceb-249b-7dc0-8f3a-ad5091e3a085",
-  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
-  "goal": "Retain append-only bulk-operation terminal history with administrator-only browser reads and narrow worker INSERT/SELECT privileges.",
-  "route": "shared-db-orchestrator",
-  "work_type": "structural",
-  "work_issue": 2439,
-  "generation": 2,
-  "schema_version": 1
+  "required_checks": [
+    "node --test scripts/check-closeout-readiness.test.mjs scripts/check-documents-only-pull-request.test.mjs scripts/lib/documents-only-change.test.mjs scripts/database-contract-authorization.test.mjs",
+    "git diff --check",
+    "Required GitHub pull-request checks"
+  ],
+  "assumptions": [
+    "PR #2592 remains the source of the documents-only contract exemption and is not rebuilt.",
+    "The protected base revision is the only executable policy allowed to make the inapplicability decision.",
+    "Automatic guarded dispatch and ownership fencing remain later milestones."
+  ],
+  "stop_conditions": [
+    "A required check fails or the trusted classifier cannot read the complete pull-request file list.",
+    "Main movement invalidates the branch evidence.",
+    "The change would require a database, production, security-setting, or live-orchestrator action."
+  ],
+  "generation": 2
 }
