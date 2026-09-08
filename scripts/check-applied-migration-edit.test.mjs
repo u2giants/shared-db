@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { EDIT_STATUSES, findingsFor, sanctionedRestorations, RESTORATIONS_FILE, formatReport, main, MIGRATIONS_DIR, parseArgs, parseEditedMigrations, PROJECT_REFS, runCheck, Unknown, versionOf, editedMigrations } from './check-applied-migration-edit.mjs'
 
 const APPLIED = '20260831234750'
@@ -17,6 +18,18 @@ const z = (...fields) => fields.join('\0') + '\0'
 // What makes an edit forbidden is the VERSION being applied, not the file status.
 test('issue 2037 an ADDED migration IS compared, because the incident arrived as one', () => {
   assert.deepEqual(parseEditedMigrations(z('A', file(NEW))), [{ version: NEW, file: file(NEW), kind: 'added' }])
+})
+
+// Reviewer finding, muse-spark-1.3-contributor at head ff39204f: only paths[0]
+// was examined, so a rename INTO the migrations directory, or one that changes
+// the version prefix, carried the applied version on the destination path alone
+// and was skipped.
+test('issue 2037 a rename is judged on BOTH paths, not only the source', () => {
+  const outside = 'docs/scratch/thing.sql'
+  const renamedIn = parseEditedMigrations(z('R100', outside, file(APPLIED)))
+  assert.deepEqual(renamedIn.map((e) => e.version), [APPLIED], 'a rename INTO the migrations directory must be seen')
+  const reversioned = parseEditedMigrations(z('R090', file(APPLIED), file(NEW)))
+  assert.deepEqual(reversioned.map((e) => e.version).sort(), [APPLIED, NEW].sort(), 'a rename that changes the version touches both versions')
 })
 
 test('issue 2037 an added file whose version is already applied is REFUSED', () => {
@@ -59,7 +72,8 @@ test('issue 2037 every declared edit status is honoured, A included', () => {
   for (const letter of Object.keys(EDIT_STATUSES)) {
     const pathCount = letter === 'R' || letter === 'C' ? 2 : 1
     const fields = pathCount === 2 ? [letter + '100', file(APPLIED), file(NEW)] : [letter, file(APPLIED)]
-    assert.equal(parseEditedMigrations(z(...fields)).length, 1, `status ${letter} should be an edit`)
+    // A rename or copy across two versions is TWO edits: both sides are judged.
+    assert.equal(parseEditedMigrations(z(...fields)).length, pathCount, `status ${letter} should be an edit`)
   }
 })
 
@@ -90,11 +104,13 @@ test('issue 2037 a version applied in both is reported as both', () => {
 // --- orchestration -------------------------------------------------------
 
 const RESTORATIONS = JSON.stringify({ schema_version: 1, restorations: [] })
-const restorationOf = (version, issue = 2035) => JSON.stringify({ schema_version: 1, restorations: [{ version, issue, reason: 'restored to the exact bytes the database applied' }] })
+const DIGEST = 'a'.repeat(64)
+const restorationOf = (version, issue = 2035, digest = DIGEST) => JSON.stringify({ schema_version: 1, restorations: [{ version, issue, applied_sha256: digest, reason: 'restored to the exact bytes the database applied' }] })
 
 const io = (edits, ledgers, restorations = RESTORATIONS) => ({
   editedMigrations: () => edits,
   readRestorations: () => restorations,
+  fileDigest: () => DIGEST,
   appliedVersions: async (ref) => {
     const name = Object.entries(PROJECT_REFS).find(([, value]) => value === ref)?.[0]
     assert.ok(name, `unexpected project ref ${ref}`)
@@ -146,19 +162,39 @@ test('issue 2037 a sanctioned version does not excuse editing a DIFFERENT applie
   assert.equal(result.findings[0].version, other)
 })
 
+// Reviewer finding, muse-spark-1.3-contributor at head ff39204f: a name-only
+// allowlist is a standing licence over the version. The entry pins the digest of
+// the one body it authorizes, so it cannot be used to ship anything else.
+test('issue 2037 a restoration entry authorizes ONE body, not the version', async () => {
+  const edits = [{ version: APPLIED, file: file(APPLIED), kind: 'modified' }]
+  const ledgers = { production: new Set([APPLIED]), preview: new Set([APPLIED]) }
+  const io2 = { ...io(edits, ledgers, restorationOf(APPLIED)), fileDigest: () => 'b'.repeat(64) }
+  const result = await runCheck({ io: io2 })
+  assert.equal(result.findings.length, 1, 'a body that is not the sanctioned one must still be refused')
+  assert.equal(result.findings[0].restorationMismatch.expected, DIGEST)
+  assert.match(formatReport(edits, result.findings).join(String.fromCharCode(10)), /authorizes ONE body/)
+})
+
+test('issue 2037 a restoration entry with no digest is UNKNOWN, not a licence', () => {
+  assert.throws(() => sanctionedRestorations(JSON.stringify({ schema_version: 1, restorations: [{ version: APPLIED, issue: 2035, reason: 'x'.repeat(30) }] })), /applied_sha256/)
+})
+
 test('issue 2037 an unreadable or malformed restorations file FAILS CLOSED', async () => {
   const edits = [{ version: APPLIED, file: file(APPLIED), kind: 'modified' }]
   const ledgers = { production: new Set([APPLIED]), preview: new Set([APPLIED]) }
   await assert.rejects(runCheck({ io: io(edits, ledgers, 'not json at all') }), Unknown)
   await assert.rejects(runCheck({ io: io(edits, ledgers, JSON.stringify({ restorations: [] })) }), /schema_version 1/)
   await assert.rejects(runCheck({ io: io(edits, ledgers, JSON.stringify({ schema_version: 1 })) }), /restorations array/)
-  await assert.throws(() => sanctionedRestorations(JSON.stringify({ schema_version: 1, restorations: [{ version: 'nope', issue: 1, reason: 'x'.repeat(30) }] })), /14-digit version/)
-  await assert.throws(() => sanctionedRestorations(JSON.stringify({ schema_version: 1, restorations: [{ version: APPLIED, reason: 'x'.repeat(30) }] })), /authorizing issue/)
+  await assert.throws(() => sanctionedRestorations(JSON.stringify({ schema_version: 1, restorations: [{ version: 'nope', issue: 1, applied_sha256: DIGEST, reason: 'x'.repeat(30) }] })), /14-digit version/)
+  await assert.throws(() => sanctionedRestorations(JSON.stringify({ schema_version: 1, restorations: [{ version: APPLIED, applied_sha256: DIGEST, reason: 'x'.repeat(30) }] })), /authorizing issue/)
 })
 
 test('issue 2037 the repository restorations file is itself valid and names the incident repair', () => {
   const sanctioned = sanctionedRestorations(readFileSync(new URL(`../${RESTORATIONS_FILE}`, import.meta.url), 'utf8'))
-  assert.ok(sanctioned.has('20260831234750'), 'the #2037 restoration must stay listed')
+  const entry = sanctioned.get('20260831234750')
+  assert.ok(entry, 'the #2037 restoration must stay listed')
+  const actual = createHash('sha256').update(readFileSync(new URL('../supabase/migrations/20260831234750_hts_rag_durable_precedent_contract.sql', import.meta.url))).digest('hex')
+  assert.equal(entry.applied_sha256, actual, 'the pinned digest must match the file that is actually on this branch')
 })
 
 // --- exit codes and report ------------------------------------------------

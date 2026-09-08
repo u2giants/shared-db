@@ -41,6 +41,7 @@
 
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
+import crypto from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fetchAppliedVersions, PROJECT_REFS, Unknown } from './orchestrator-flow/read-preview-ledger.mjs'
@@ -80,6 +81,7 @@ export function sanctionedRestorations(raw) {
     if (!/^\d{14}$/.test(String(entry?.version ?? ''))) throw new Unknown(`${RESTORATIONS_FILE} has a restoration with no 14-digit version`)
     if (!Number.isInteger(entry?.issue) || entry.issue <= 0) throw new Unknown(`${RESTORATIONS_FILE} restoration ${entry.version} names no authorizing issue`)
     if (typeof entry?.reason !== 'string' || entry.reason.length < 20) throw new Unknown(`${RESTORATIONS_FILE} restoration ${entry.version} has no substantive reason`)
+    if (!/^[0-9a-f]{64}$/.test(String(entry?.applied_sha256 ?? ''))) throw new Unknown(`${RESTORATIONS_FILE} restoration ${entry.version} has no 64-character applied_sha256`)
     if (sanctioned.has(entry.version)) throw new Unknown(`${RESTORATIONS_FILE} lists ${entry.version} twice`)
     sanctioned.set(entry.version, entry)
   }
@@ -108,13 +110,21 @@ export function parseEditedMigrations(nameStatusZ) {
     const paths = fields.slice(index + 1, index + 1 + pathCount)
     index += pathCount
     if (paths.length !== pathCount) break
-    const subject = paths[0]
-    if (!subject.startsWith(`${MIGRATIONS_DIR}/`) || !subject.endsWith('.sql')) continue
     const kind = EDIT_STATUSES[letter]
     if (!kind) continue
-    const version = versionOf(subject)
-    if (!version) continue
-    edits.push({ version, file: subject, kind, ...(pathCount === 2 ? { renamedTo: paths[1] } : {}) })
+    // BOTH SIDES OF A RENAME OR COPY ARE SUBJECTS. Only the source path used to
+    // be examined. A rename INTO the migrations directory from elsewhere, or one
+    // that changes the version prefix, carries the applied version only on the
+    // DESTINATION path, and was skipped entirely. Each distinct version touched
+    // by the record becomes its own edit, so neither side can hide one.
+    const seen = new Set()
+    for (const subject of paths) {
+      if (!subject.startsWith(`${MIGRATIONS_DIR}/`) || !subject.endsWith('.sql')) continue
+      const version = versionOf(subject)
+      if (!version || seen.has(version)) continue
+      seen.add(version)
+      edits.push({ version, file: subject, kind, ...(pathCount === 2 ? { renamedTo: paths[1] } : {}) })
+    }
   }
   return edits
 }
@@ -133,14 +143,25 @@ export function editedMigrations(baseRef, { executor = execFileSync, cwd = repoR
  * Pure. Given the edits and each ledger's applied versions, say which edits are
  * forbidden and where each was already applied.
  */
-export function findingsFor(edits, ledgers, sanctioned = new Map()) {
+export function findingsFor(edits, ledgers, sanctioned = new Map(), digests = new Map()) {
   const findings = []
   const allowed = []
   for (const edit of edits) {
     const appliedIn = Object.entries(ledgers).filter(([, versions]) => versions.has(edit.version)).map(([name]) => name)
     if (appliedIn.length === 0) continue
     const restoration = sanctioned.get(edit.version)
-    if (restoration) { allowed.push({ ...edit, appliedIn, restoration }); continue }
+    if (restoration) {
+      // THE ENTRY NAMES BYTES, NOT A VERSION. Without this the allowlist would be
+      // a standing licence: an entry added in the same pull request as the edit it
+      // excuses would exempt that version forever, and any later change to the
+      // file would pass unnoticed. The entry pins the sha256 of the body that was
+      // applied, so it authorizes exactly ONE content and nothing else. Changing
+      // what is shipped means changing the digest, in the diff, where it is read.
+      const actual = digests.get(edit.file)
+      if (actual === restoration.applied_sha256) { allowed.push({ ...edit, appliedIn, restoration }); continue }
+      findings.push({ ...edit, appliedIn, restorationMismatch: { expected: restoration.applied_sha256, actual: actual ?? 'unreadable' } })
+      continue
+    }
     findings.push({ ...edit, appliedIn })
   }
   // Non-enumerable: the allowed list rides along for the report, but `findings`
@@ -165,7 +186,10 @@ export function formatReport(edits, findings) {
     return lines
   }
   lines.push(`REFUSED: ${findings.length} of them carry a version that has ALREADY BEEN APPLIED and can never be replayed:`)
-  for (const finding of findings) lines.push(`  ${finding.version}  applied in: ${finding.appliedIn.join(', ')}  (${finding.kind})`)
+  for (const finding of findings) {
+    lines.push(`  ${finding.version}  applied in: ${finding.appliedIn.join(', ')}  (${finding.kind})`)
+    if (finding.restorationMismatch) lines.push(`    ${RESTORATIONS_FILE} sanctions this version at sha256 ${finding.restorationMismatch.expected}, but this file is ${finding.restorationMismatch.actual}. A restoration entry authorizes ONE body, not the version.`)
+  }
   lines.push('')
   lines.push('A version is applied only once. The database keeps the body it ran; this branch would leave')
   lines.push('a different body on main, and any rehearsal evidence for that version would describe SQL that')
@@ -183,6 +207,10 @@ export function formatReport(edits, findings) {
 export const defaultIo = {
   editedMigrations,
   async appliedVersions(projectRef) { return new Set(await fetchAppliedVersions(projectRef)) },
+  fileDigest(file) {
+    try { return crypto.createHash('sha256').update(fs.readFileSync(path.join(repoRoot, file))).digest('hex') }
+    catch { return null }
+  },
   readRestorations() {
     try { return fs.readFileSync(path.join(repoRoot, RESTORATIONS_FILE), 'utf8') }
     catch (error) { throw new Unknown(`could not read ${RESTORATIONS_FILE}: ${error.message}`) }
@@ -201,7 +229,8 @@ export async function runCheck({ baseRef = 'origin/main', io = defaultIo } = {})
     if (!(ledgers[name] instanceof Set) || ledgers[name].size === 0) throw new Unknown(`the ${name} ledger came back empty, so nothing was compared`)
   }
   const sanctioned = sanctionedRestorations(io.readRestorations())
-  return { edits, findings: findingsFor(edits, ledgers, sanctioned), ledgersRead: Object.keys(ledgers), sanctioned }
+  const digests = new Map(edits.map((edit) => [edit.file, io.fileDigest(edit.file)]))
+  return { edits, findings: findingsFor(edits, ledgers, sanctioned, digests), ledgersRead: Object.keys(ledgers), sanctioned }
 }
 
 export function parseArgs(argv) {
