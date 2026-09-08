@@ -1,56 +1,54 @@
 {
   "schema_version": 1,
-  "work_issue": 2573,
+  "work_issue": 1984,
   "outcome": "ready-for-merge",
-  "pr": 2575,
+  "pr": 2205,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2573/2",
-  "contract_sha256": "84f7140c90e7606306735631e8d1aa928f8252a1e5147ea52df7ef188f928e3a",
-  "head_sha": "99ae31c3295e6859a4cd65ab5828722c05614730",
+  "contract_ref": "refs/db-contracts/1984/1",
+  "contract_sha256": "3d769c28809b591ec7ea0e59fc9e320d2921c7b34bcb1e74da5803ab69b8b41a",
+  "head_sha": "f0af142fc973ea8a5a1a349078161b097b394bcc",
   "files_changed": [
-    ".agent/contract.json",
-    "scripts/historical-migration-restorations.mjs",
-    "scripts/historical-migration-restorations.test.mjs",
-    "scripts/test_production_migration_guard.py"
+    ".github/workflows/historical-item-mg-reclassification-tests.yml",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/historical-item-mg-reclassification/README.md",
+    "scripts/historical-item-mg-reclassification/apply.mjs",
+    "scripts/historical-item-mg-reclassification/build-manifest.mjs",
+    "scripts/historical-item-mg-reclassification/fixtures.mjs",
+    "scripts/historical-item-mg-reclassification/guards.test.mjs",
+    "scripts/historical-item-mg-reclassification/lib/classify.mjs",
+    "scripts/historical-item-mg-reclassification/lib/constants.mjs",
+    "scripts/historical-item-mg-reclassification/lib/csv.mjs",
+    "scripts/historical-item-mg-reclassification/lib/execute.mjs",
+    "scripts/historical-item-mg-reclassification/lib/manifest.mjs",
+    "scripts/historical-item-mg-reclassification/lib/pg.mjs",
+    "scripts/historical-item-mg-reclassification/lib/private-path.mjs",
+    "scripts/historical-item-mg-reclassification/lib/retirement-gate.mjs",
+    "scripts/historical-item-mg-reclassification/lib/target.mjs",
+    "scripts/historical-item-mg-reclassification/lib/verify.mjs",
+    "scripts/historical-item-mg-reclassification/rollback.mjs",
+    "scripts/historical-item-mg-reclassification/verify.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "node --test scripts/historical-migration-restorations.test.mjs",
+      "command": "node --test scripts/historical-item-mg-reclassification/guards.test.mjs",
       "exit_code": 0,
-      "evidence": "7 focused registry tests passed, including exact issue 2356 metadata and negative wrong-path and wrong-byte cases."
+      "evidence": "39 tests passed with no failures and no skips, including the licensed-row-data-in-a-git-tree refusal and the manifest-built-elsewhere refusal."
     },
     {
-      "command": "node --input-type=module -e <exact PR2523 blob validation>",
+      "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "The registry accepted PR 2523 migration blob cd0ab008e5fc97ef61e225d3976ed69ecd06b2d7 at the exact path and refused the same bytes with an appended change."
-    },
-    {
-      "command": "python -m unittest scripts.test_production_migration_guard",
-      "exit_code": 0,
-      "evidence": "234 tests passed; issue 2356 remains production eligible while existing blocked and preview-only versions keep their refusals."
-    },
-    {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static SQL checks passed; this maintenance PR adds no migration file and changes no database content."
-    },
-    {
-      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
-      "exit_code": 0,
-      "evidence": "44 contract tests passed with no failures or skips."
+      "evidence": "truth audit OK: call_sites=259 after the union of this branch and main was recounted and re-digested."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors in the complete maintenance change."
+      "evidence": "No whitespace errors reported."
     }
   ],
   "assumptions_resolved": [
-    "Migration file SHA256 is 6c04610f8e63d7d67b5c74610a69e219f912fa1b7fb520d7839ab8a81d77e022; statement SHA256 is 8f9179afb6f2e01cd6684b591dae5e996381036b733a964450aa464128edab05 over 3747 bytes.",
-    "The PR changes only agent evidence and the three registry/guard test files; structural migration and contract-test blobs are absent from this maintenance branch.",
-    "Issue 2356 claim 2521, version 20260907152838, and every protected database object remain untouched."
+    "The reclassification itself is executed later under its own authorisation; this pull request writes no production row."
   ],
   "stop_conditions_hit": []
 }
