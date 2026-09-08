@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { EDIT_STATUSES, findingsFor, formatReport, main, MIGRATIONS_DIR, parseArgs, parseEditedMigrations, PROJECT_REFS, runCheck, Unknown, versionOf, editedMigrations } from './check-applied-migration-edit.mjs'
+import { readFileSync } from 'node:fs'
+import { EDIT_STATUSES, findingsFor, sanctionedRestorations, RESTORATIONS_FILE, formatReport, main, MIGRATIONS_DIR, parseArgs, parseEditedMigrations, PROJECT_REFS, runCheck, Unknown, versionOf, editedMigrations } from './check-applied-migration-edit.mjs'
 
 const APPLIED = '20260831234750'
 const NEW = '20260903120000'
@@ -9,8 +10,20 @@ const z = (...fields) => fields.join('\0') + '\0'
 
 // --- parsing -------------------------------------------------------------
 
-test('issue 2037 an ADDED migration is never an edit', () => {
-  assert.deepEqual(parseEditedMigrations(z('A', file(NEW))), [])
+// This test used to assert the opposite. Incident #2037 is why it was inverted:
+// `20260831234750` was created AND edited on one branch, so against main it was
+// status `A`, and the guard that skipped `A` would have passed PR #2009 -- the
+// pull request that caused the very incident this guard exists to prevent.
+// What makes an edit forbidden is the VERSION being applied, not the file status.
+test('issue 2037 an ADDED migration IS compared, because the incident arrived as one', () => {
+  assert.deepEqual(parseEditedMigrations(z('A', file(NEW))), [{ version: NEW, file: file(NEW), kind: 'added' }])
+})
+
+test('issue 2037 an added file whose version is already applied is REFUSED', () => {
+  const edits = [{ version: APPLIED, file: file(APPLIED), kind: 'added' }]
+  const findings = findingsFor(edits, { preview: new Set([APPLIED]), production: new Set() })
+  assert.equal(findings.length, 1)
+  assert.deepEqual(findings[0].appliedIn, ['preview'])
 })
 
 test('issue 2037 a modified migration is an edit', () => {
@@ -41,8 +54,8 @@ test('issue 2037 files outside supabase/migrations and non-sql files are ignored
   assert.deepEqual(parseEditedMigrations(z('M', 'docs/20260831234750_note.sql', 'M', `${MIGRATIONS_DIR}/${APPLIED}_x.md`, 'M', `${MIGRATIONS_DIR}/README.sql`)), [])
 })
 
-test('issue 2037 every declared edit status is honoured and A is deliberately absent', () => {
-  assert.equal(EDIT_STATUSES.A, undefined)
+test('issue 2037 every declared edit status is honoured, A included', () => {
+  assert.equal(EDIT_STATUSES.A, 'added')
   for (const letter of Object.keys(EDIT_STATUSES)) {
     const pathCount = letter === 'R' || letter === 'C' ? 2 : 1
     const fields = pathCount === 2 ? [letter + '100', file(APPLIED), file(NEW)] : [letter, file(APPLIED)]
@@ -76,8 +89,12 @@ test('issue 2037 a version applied in both is reported as both', () => {
 
 // --- orchestration -------------------------------------------------------
 
-const io = (edits, ledgers) => ({
+const RESTORATIONS = JSON.stringify({ schema_version: 1, restorations: [] })
+const restorationOf = (version, issue = 2035) => JSON.stringify({ schema_version: 1, restorations: [{ version, issue, reason: 'restored to the exact bytes the database applied' }] })
+
+const io = (edits, ledgers, restorations = RESTORATIONS) => ({
   editedMigrations: () => edits,
+  readRestorations: () => restorations,
   appliedVersions: async (ref) => {
     const name = Object.entries(PROJECT_REFS).find(([, value]) => value === ref)?.[0]
     assert.ok(name, `unexpected project ref ${ref}`)
@@ -110,6 +127,40 @@ test('issue 2037 an EMPTY ledger is unknown, not clean', async () => {
   await assert.rejects(runCheck({ io: io(edits, { production: new Set(), preview: new Set([APPLIED]) }) }), /came back empty/)
 })
 
+// --- sanctioned restorations ---------------------------------------------
+
+test('issue 2037 a governed restoration of an applied version is allowed, and says why', async () => {
+  const edits = [{ version: APPLIED, file: file(APPLIED), kind: 'modified' }]
+  const result = await runCheck({ io: io(edits, { production: new Set([APPLIED]), preview: new Set([APPLIED]) }, restorationOf(APPLIED)) })
+  assert.deepEqual(result.findings, [])
+  assert.equal(result.findings.allowed.length, 1)
+  assert.equal(result.findings.allowed[0].restoration.issue, 2035)
+  assert.match(formatReport(edits, result.findings).join(String.fromCharCode(10)), /ALLOWED: 20260831234750/)
+})
+
+test('issue 2037 a sanctioned version does not excuse editing a DIFFERENT applied version', async () => {
+  const other = '20260831234751'
+  const edits = [{ version: other, file: file(other), kind: 'modified' }]
+  const result = await runCheck({ io: io(edits, { production: new Set([other]), preview: new Set([other]) }, restorationOf(APPLIED)) })
+  assert.equal(result.findings.length, 1)
+  assert.equal(result.findings[0].version, other)
+})
+
+test('issue 2037 an unreadable or malformed restorations file FAILS CLOSED', async () => {
+  const edits = [{ version: APPLIED, file: file(APPLIED), kind: 'modified' }]
+  const ledgers = { production: new Set([APPLIED]), preview: new Set([APPLIED]) }
+  await assert.rejects(runCheck({ io: io(edits, ledgers, 'not json at all') }), Unknown)
+  await assert.rejects(runCheck({ io: io(edits, ledgers, JSON.stringify({ restorations: [] })) }), /schema_version 1/)
+  await assert.rejects(runCheck({ io: io(edits, ledgers, JSON.stringify({ schema_version: 1 })) }), /restorations array/)
+  await assert.throws(() => sanctionedRestorations(JSON.stringify({ schema_version: 1, restorations: [{ version: 'nope', issue: 1, reason: 'x'.repeat(30) }] })), /14-digit version/)
+  await assert.throws(() => sanctionedRestorations(JSON.stringify({ schema_version: 1, restorations: [{ version: APPLIED, reason: 'x'.repeat(30) }] })), /authorizing issue/)
+})
+
+test('issue 2037 the repository restorations file is itself valid and names the incident repair', () => {
+  const sanctioned = sanctionedRestorations(readFileSync(new URL(`../${RESTORATIONS_FILE}`, import.meta.url), 'utf8'))
+  assert.ok(sanctioned.has('20260831234750'), 'the #2037 restoration must stay listed')
+})
+
 // --- exit codes and report ------------------------------------------------
 
 const capture = () => { const lines = []; return { sink: (line) => lines.push(String(line)), lines } }
@@ -118,7 +169,7 @@ test('issue 2037 exit 0 and a plain sentence when nothing was touched', async ()
   const out = capture()
   const code = await main([], { run: async () => ({ edits: [], findings: [], ledgersRead: [] }), log: out.sink, error: out.sink })
   assert.equal(code, 0)
-  assert.match(out.lines.join('\n'), /No existing migration file was modified/)
+  assert.match(out.lines.join(String.fromCharCode(10)), /touches no migration file at all/)
 })
 
 test('issue 2037 exit 1 and the fix-forward instruction when an applied migration was edited', async () => {

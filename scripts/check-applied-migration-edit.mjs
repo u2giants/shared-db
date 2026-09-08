@@ -40,6 +40,7 @@
 //   node scripts/check-applied-migration-edit.mjs --base origin/main
 
 import { execFileSync } from 'node:child_process'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fetchAppliedVersions, PROJECT_REFS, Unknown } from './orchestrator-flow/read-preview-ledger.mjs'
@@ -49,9 +50,41 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 
 export const MIGRATIONS_DIR = 'supabase/migrations'
 
-// `A` is an added file -- the normal way a migration arrives, and never a
-// finding. Everything else changes a file that already existed on the base.
-export const EDIT_STATUSES = Object.freeze({ M: 'modified', D: 'deleted', R: 'renamed', C: 'copied', T: 'type-changed' })
+// EVERY touched migration is compared, INCLUDING an added one. `A` was excluded
+// once, on the reasoning that adding a migration is the normal way one arrives.
+// That reasoning is wrong, and incident #2037 is the proof: `20260831234750` was
+// added and then edited on the SAME branch (`9078fc17` then `461d40ec`, merged
+// together as PR #2009), so against main it was status `A` for the whole life of
+// the pull request. A guard that skips `A` would have passed the pull request
+// that caused the incident it exists to prevent. What makes an edit forbidden is
+// the VERSION already being in a ledger, never the file's status against main.
+export const EDIT_STATUSES = Object.freeze({ A: 'added', M: 'modified', D: 'deleted', R: 'renamed', C: 'copied', T: 'type-changed' })
+
+export const RESTORATIONS_FILE = 'config/applied-migration-restorations.json'
+
+/**
+ * The one sanctioned change to an applied version: restoring the file to the
+ * exact bytes that were applied (issue #2035 did this for #2037). Without this,
+ * widening the guard to added files would also block the only correct remedy.
+ * Unreadable or malformed is UNKNOWN, never "nothing is sanctioned" -- treating a
+ * broken file as an empty allowlist would refuse a legitimate repair, and
+ * treating it as a permissive one would let every edit through.
+ */
+export function sanctionedRestorations(raw) {
+  let parsed
+  try { parsed = JSON.parse(raw) } catch (error) { throw new Unknown(`${RESTORATIONS_FILE} is not readable JSON: ${error.message}`) }
+  if (parsed?.schema_version !== 1) throw new Unknown(`${RESTORATIONS_FILE} must declare schema_version 1`)
+  if (!Array.isArray(parsed.restorations)) throw new Unknown(`${RESTORATIONS_FILE} must carry a restorations array`)
+  const sanctioned = new Map()
+  for (const entry of parsed.restorations) {
+    if (!/^\d{14}$/.test(String(entry?.version ?? ''))) throw new Unknown(`${RESTORATIONS_FILE} has a restoration with no 14-digit version`)
+    if (!Number.isInteger(entry?.issue) || entry.issue <= 0) throw new Unknown(`${RESTORATIONS_FILE} restoration ${entry.version} names no authorizing issue`)
+    if (typeof entry?.reason !== 'string' || entry.reason.length < 20) throw new Unknown(`${RESTORATIONS_FILE} restoration ${entry.version} has no substantive reason`)
+    if (sanctioned.has(entry.version)) throw new Unknown(`${RESTORATIONS_FILE} lists ${entry.version} twice`)
+    sanctioned.set(entry.version, entry)
+  }
+  return sanctioned
+}
 
 export function versionOf(file) {
   const match = /^(\d{14})_/.exec(path.basename(String(file ?? '')))
@@ -100,40 +133,60 @@ export function editedMigrations(baseRef, { executor = execFileSync, cwd = repoR
  * Pure. Given the edits and each ledger's applied versions, say which edits are
  * forbidden and where each was already applied.
  */
-export function findingsFor(edits, ledgers) {
+export function findingsFor(edits, ledgers, sanctioned = new Map()) {
   const findings = []
+  const allowed = []
   for (const edit of edits) {
     const appliedIn = Object.entries(ledgers).filter(([, versions]) => versions.has(edit.version)).map(([name]) => name)
-    if (appliedIn.length > 0) findings.push({ ...edit, appliedIn })
+    if (appliedIn.length === 0) continue
+    const restoration = sanctioned.get(edit.version)
+    if (restoration) { allowed.push({ ...edit, appliedIn, restoration }); continue }
+    findings.push({ ...edit, appliedIn })
   }
+  // Non-enumerable: the allowed list rides along for the report, but `findings`
+  // must still compare equal to a plain array of the refusals.
+  Object.defineProperty(findings, 'allowed', { value: allowed, enumerable: false })
   return findings
 }
 
 export function formatReport(edits, findings) {
   const lines = []
-  if (edits.length === 0) return ['No existing migration file was modified, deleted or renamed by this change.']
-  lines.push(`This change touches ${edits.length} existing migration file(s):`)
+  if (edits.length === 0) return ['This change touches no migration file at all.']
+  lines.push(`This change touches ${edits.length} migration file(s):`)
   for (const edit of edits) lines.push(`  ${edit.kind.padEnd(12)} ${edit.file}${edit.renamedTo ? ` -> ${edit.renamedTo}` : ''}`)
   lines.push('')
+  const allowed = findings.allowed ?? []
+  for (const entry of allowed) {
+    lines.push(`ALLOWED: ${entry.version} is applied in ${entry.appliedIn.join(', ')}, and ${RESTORATIONS_FILE} records issue #${entry.restoration.issue} authorizing its restoration to the applied bytes.`)
+  }
+  if (allowed.length > 0) lines.push('')
   if (findings.length === 0) {
-    lines.push('None of those versions is present in the preview or production ledger, so no applied migration was edited.')
+    lines.push('No version touched here is present in the preview or production ledger without sanction, so no applied migration was edited.')
     return lines
   }
-  lines.push(`REFUSED: ${findings.length} of them have ALREADY BEEN APPLIED and can never be replayed:`)
+  lines.push(`REFUSED: ${findings.length} of them carry a version that has ALREADY BEEN APPLIED and can never be replayed:`)
   for (const finding of findings) lines.push(`  ${finding.version}  applied in: ${finding.appliedIn.join(', ')}  (${finding.kind})`)
   lines.push('')
   lines.push('A version is applied only once. The database keeps the body it ran; this branch would leave')
   lines.push('a different body on main, and any rehearsal evidence for that version would describe SQL that')
   lines.push('no longer exists (AGENTS.md 6.x rule 4, incident issue #2037).')
   lines.push('')
-  lines.push('FIX FORWARD: restore the file to its base-branch body and put the change in a NEW migration at a')
-  lines.push('newly reserved version, written to be a no-op where the applied shape already matches.')
+  lines.push('An ADDED file is refused on the same terms: incident #2037 arrived as an added file, because the')
+  lines.push('version was created and then edited on one branch, so it never showed as modified against main.')
+  lines.push('')
+  lines.push('FIX FORWARD: restore the file to the body that was applied and put the change in a NEW migration at a')
+  lines.push('newly reserved version, written to be a no-op where the applied shape already matches. If this change')
+  lines.push(`IS that restoration, record the version in ${RESTORATIONS_FILE} with the issue authorizing it.`)
   return lines
 }
 
 export const defaultIo = {
   editedMigrations,
   async appliedVersions(projectRef) { return new Set(await fetchAppliedVersions(projectRef)) },
+  readRestorations() {
+    try { return fs.readFileSync(path.join(repoRoot, RESTORATIONS_FILE), 'utf8') }
+    catch (error) { throw new Unknown(`could not read ${RESTORATIONS_FILE}: ${error.message}`) }
+  },
 }
 
 export async function runCheck({ baseRef = 'origin/main', io = defaultIo } = {}) {
@@ -141,13 +194,14 @@ export async function runCheck({ baseRef = 'origin/main', io = defaultIo } = {})
   // The whole point of the conditional read: an ordinary pull request never
   // touches the network here, so this guard cannot go red for a reason that has
   // nothing to do with it.
-  if (edits.length === 0) return { edits, findings: [], ledgersRead: [] }
+  if (edits.length === 0) return { edits, findings: [], ledgersRead: [], sanctioned: new Map() }
   const ledgers = {}
   for (const [name, projectRef] of Object.entries(PROJECT_REFS)) {
     ledgers[name] = await io.appliedVersions(projectRef)
     if (!(ledgers[name] instanceof Set) || ledgers[name].size === 0) throw new Unknown(`the ${name} ledger came back empty, so nothing was compared`)
   }
-  return { edits, findings: findingsFor(edits, ledgers), ledgersRead: Object.keys(ledgers) }
+  const sanctioned = sanctionedRestorations(io.readRestorations())
+  return { edits, findings: findingsFor(edits, ledgers, sanctioned), ledgersRead: Object.keys(ledgers), sanctioned }
 }
 
 export function parseArgs(argv) {

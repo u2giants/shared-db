@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "why": "A migration version is applied once and the database keeps the body it ran. The only sanctioned change to an already-applied migration file is restoring it to the exact bytes that were applied. Each such restoration is listed here by version, with the issue that authorized it, so the guard can allow that one repair without allowing edits generally. An entry is not a licence to keep editing the version: it names one repair, reviewed like any other change.",
+  "restorations": [
+    {
+      "version": "20260831234750",
+      "issue": 2035,
+      "reason": "Incident #2037: the applied body was edited by PR #2009 and PR #2041 restored it to the exact bytes preview had applied."
+    }
+  ]
+}
