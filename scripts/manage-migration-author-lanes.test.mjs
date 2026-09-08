@@ -3489,6 +3489,18 @@ test('merged stranded claim reissue refuses unmerged, non-main, wrong-version, r
   assert.throws(()=>reissueMergedStrandedClaim({...mergedReissueArgs,targetBranch:'codex/issue-1645-effective-filters-1649'},NOW,mergedReissueIo()),/fresh target/)
   assert.throws(()=>reissueMergedStrandedClaim(mergedReissueArgs,NOW,mergedReissueIo({reserveVersion:()=>({version:'20260827170000'})})),/not later/)
 })
+test('issue 2188: merged stranded reissue accepts established titles and pins exact workstream identity',()=>{
+  for(const title of ['CLAIM: 1645 repair','CLAIM: issue #1645 repair','CLAIM: Issue 1645 repair']){
+    const io=mergedReissueIo();io.issue.title=title
+    assert.equal(reissueMergedStrandedClaim(mergedReissueArgs,NOW,io).newVersion,io.fresh,title)
+  }
+  for(const title of ['CLAIM: 11645 unrelated','CLAIM: #1645/#1646 compound']){
+    const io=mergedReissueIo();io.issue.title=title
+    assert.throws(()=>reissueMergedStrandedClaim(mergedReissueArgs,NOW,io),/claim title does not identify exact issue #1645/)
+  }
+  const wrongVersion=mergedReissueIo();wrongVersion.issue.body=wrongVersion.issue.body.replace(mergedReissueArgs.oldVersion,'20260827183012')
+  assert.throws(()=>reissueMergedStrandedClaim(mergedReissueArgs,NOW,wrongVersion),/claim stranded version changed/)
+})
 
 test('merged stranded claim reissue rolls back claim and evidence after partial failure and fails closed after mutex loss',()=>{
   let io=mergedReissueIo(),before=io.issue.body,baseUpdate=io.updateIssue,first=true
