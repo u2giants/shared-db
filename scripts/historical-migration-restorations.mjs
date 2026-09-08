@@ -5,6 +5,26 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export const HISTORICAL_RESTORATIONS = Object.freeze({
+  // #2509. Preview applied these exact bytes in run 34157812748 from PR #2513
+  // commit bcc2603977678db73b4ca12d3ed1312a1bff64e2. Migration 20260907200221
+  // then reached main first, so the unchanged source-restoration sorts behind
+  // main. This pin authorizes only the exact applied file; it does not make the
+  // version preview-only or otherwise change its production eligibility.
+  '20260907131728': Object.freeze({
+    filename: 'supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql',
+    name: 'popsg_preview_stats_indexed_categories',
+    previewProject: 'mvpkijzfmfcxhnzqogzs',
+    previewApplyRun: '34157812748',
+    previewAppliedCommit: 'bcc2603977678db73b4ca12d3ed1312a1bff64e2',
+    statementBytes: 9125,
+    statementSha256: 'd273d46aa662d3ae24502da44e3226e9c5932c7646b8d5d430b76563fa9d2191',
+    fileSha256: '03648ecbbee473f539c27f929a248c503c18d5fb906efe1409d11593cfdb5d7e',
+    objects: Object.freeze([
+      'function public.get_sg_preview_stats',
+      'index public.idx_sgf_active_preview_category',
+      'table public.style_guide_files',
+    ]),
+  }),
   // #2035. Preview applied this version in run 33454217961 from PR #2009 commit
   // bb77fdd49fe032c985dc93c907f5d4d93a2456a1, then the PR head moved twice to fix two
   // High review findings and the corrected body merged as 30221c0b. Preview therefore
