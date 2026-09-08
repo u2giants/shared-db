@@ -8,7 +8,7 @@
   ],
   "contract_ref": "refs/db-contracts/2356/1",
   "contract_sha256": "79621c37bfa4c5e397fc846ee8f71cc084eb749f778759676aec1c6206458f5b",
-  "head_sha": "5d574fa5c04119673d2233dbd5a27420127fa39e",
+  "head_sha": "5742f308f712a8799b8ebb09455e936378fa4bdb",
   "files_changed": [
     "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql",
     "supabase/tests/dam_asset_freshness_current_state_contracts.sql"
@@ -31,7 +31,7 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors after normal integration of current main efb0913f554303371ea382a2482ae2dac569ed0d."
+      "evidence": "No whitespace errors after normal integration of current main 6b516fd0224cddb44da6351c0ae3f3ecbcceb528."
     },
     {
       "command": "bash scripts/check-sql.sh",
