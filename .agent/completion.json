@@ -4,10 +4,12 @@
   "outcome": "ready-for-merge",
   "pr": 2205,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/1984/1",
-  "contract_sha256": "3d769c28809b591ec7ea0e59fc9e320d2921c7b34bcb1e74da5803ab69b8b41a",
-  "head_sha": "f0af142fc973ea8a5a1a349078161b097b394bcc",
+  "contract_ref": "refs/db-contracts/1984/2",
+  "contract_sha256": "afda9d6cc705ef613cc52e7fc571e6cda314e9810d12cdd40e488e40ca6f2704",
+  "head_sha": "041e2b4f45a14687fbeda058392fd681207f8f02",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     ".github/workflows/historical-item-mg-reclassification-tests.yml",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/historical-item-mg-reclassification/README.md",
@@ -39,7 +41,7 @@
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=259 after the union of this branch and main was recounted and re-digested."
+      "evidence": "truth audit OK: call_sites=260 after the union of this branch and main was pruned to the discovered inventory and re-digested."
     },
     {
       "command": "git diff --check",
