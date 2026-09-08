@@ -958,6 +958,9 @@ test('the active rotation is exactly the current models, in a stable order',()=>
   assert.equal(REVIEWERS.find((r)=>r.name==='kimi-k3').wrapper,'ai-kimi')
   assert.equal(REVIEWERS.find((r)=>r.name==='codex-gpt-5.6-sol').wrapper,'ai-codex-review')
   assert.equal(REVIEWERS.find((r)=>r.name==='glm-5.3').wrapper,'ai-glm')
+  assert.equal(REVIEWERS.find((r)=>r.name==='muse-spark-1.2-contributor').wrapper,'ai-muse')
+  assert.ok(RETIRED_REVIEWERS.includes('muse-spark-1.2-contributor'),'the historical Muse 1.2 identity must remain readable but never receive new work')
+  assert.ok(!ACTIVE_REVIEWERS.some((r)=>r.name==='muse-spark-1.2-contributor'),'the retired Muse 1.2 identity must never receive new work')
   assert.equal(REVIEWERS.find((r)=>r.name==='muse-spark-1.3-contributor').wrapper,'ai-muse')
   assert.equal(REVIEWERS.find((r)=>r.name==='deepseek-chat').wrapper,'ai-deepseek-agent')
   // Qwen is NOT retired (owner instruction, 2026-09-04) and must not be named as
@@ -6446,7 +6449,7 @@ test('#2460 expired recovery works for a claim legitimately expanded beyond its 
 // third-party winner on the FIRST read, with no wait.
 function verdictIo({ readRef }) {
   const assignmentRef='refs/db-review-assignments/2355-2415-'+'a'.repeat(40)
-  const commits=new Map([['c'.repeat(40),{message:'db-coordination reviewer-cursor sequence=7 reviewer=muse-spark-1.3-contributor issue=2355 pr=2415 head='+'a'.repeat(40)+' slot=1'}]])
+  const commits=new Map([['c'.repeat(40),{message:'db-coordination reviewer-cursor sequence=7 reviewer=muse-spark-1.2-contributor issue=2355 pr=2415 head='+'a'.repeat(40)+' slot=1'}]])
   const state={waits:0}
   return {
     assignmentRef, commits, state,

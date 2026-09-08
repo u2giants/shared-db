@@ -164,8 +164,10 @@ export const REVIEWERS = Object.freeze([
     readsRepositoryVerified:{ date:'2026-09-07', evidence:'ai-devops/bin/ai-qwen: read-only review over a sealed evidence packet copy of the checkout; the live qualification review of merged commit 795902d8 cited specific file lines from it and returned a well-formed verdict' } },
   { name:'glm-5.2', wrapper:'ai-glm', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'historical label for the ai-glm wrapper above; same checkout' } },
+  { name:'muse-spark-1.2-contributor', wrapper:'ai-muse', readsRepository:true,
+    readsRepositoryVerified:{ date:'2026-09-01', evidence:'historical label for the ai-muse wrapper; durable assignments and verdicts recorded before issue #2285 still resolve through this row' } },
   { name:'muse-spark-1.3-contributor', wrapper:'ai-muse', readsRepository:true,
-    readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-muse: ai-review-sandbox ensure-copy clone plus evidence packet; the doctor probe reads a file inside it' } },
+    readsRepositoryVerified:{ date:'2026-09-08', evidence:'ai-devops/bin/ai-muse: sealed evidence-packet checkout; live issue #2285 qualification identified meta-model-api/muse-spark-1.3-contributor and cited the reviewed files' } },
   { name:'codex-gpt-5.6-sol', wrapper:'ai-codex-review', orchestratorEngine:'codex', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-codex-review: codex exec --sandbox read-only over the sandbox copy' } },
   { name:'deepseek-chat', wrapper:'ai-deepseek-agent', readsRepository:false,
@@ -235,9 +237,11 @@ export const REVIEWERS = Object.freeze([
 // Reviewer issue `20260820T004602Z-edge-dev-kimi-k3-385556` carries the raw evidence.
 // This is a PAUSE, not a retirement.
 //
-// UPGRADED 2026-09-03 (owner instruction, issue #2285): 'muse-spark-1.3-contributor'.
-// A registry addition, not an un-pause -- it was never listed. On the head-to-head
-// trial it produced a complete seven-point review ending in `VERDICT: APPROVE`.
+// UPGRADED 2026-09-08 (owner instruction, issue #2285): 'muse-spark-1.3-contributor'.
+// The active slot moved from 1.2 to the live-qualified 1.3 model. The historical
+// 1.2 name remains in REVIEWERS and RETIRED_REVIEWERS because immutable assignments
+// and verdicts still name it; deleting or renaming it would orphan that evidence.
+// On the head-to-head trial 1.3 produced a complete review ending in APPROVE.
 // KNOWN DEFECT, and the caller must handle it: the wrapper's verdict DETECTION fails
 // and writes "This is not a review result" over correct work. It SAVES the output, so
 // every such result is fully recoverable -- READ THE SAVED ARTIFACT before recording
@@ -356,7 +360,7 @@ export const REVIEWERS = Object.freeze([
 // REVIEWERS keeps `readsRepository:true`, so every durable artifact this
 // reviewer already recorded still authorizes exactly as before. Restoring it is
 // a one-line deletion from this list once the account has quota again.
-export const RETIRED_REVIEWERS = Object.freeze(['glm-5.2', 'deepseek-chat', 'codex-gpt-5.6-sol'])
+export const RETIRED_REVIEWERS = Object.freeze(['glm-5.2', 'muse-spark-1.2-contributor', 'deepseek-chat', 'codex-gpt-5.6-sol'])
 
 // Not retired -- quarantined pending a passing live qualification. Kept separate
 // from RETIRED_REVIEWERS on purpose: retirement is a permanent disposition,
