@@ -365,6 +365,13 @@
       "reason": "This call site reports independent evidence and preserves the existing refusal exit."
     },
     {
+      "site": "scripts/check-applied-migration-edit.mjs:35",
+      "semantic_key": "scripts/check-applied-migration-edit.mjs:eea90ebb6704b333bda8c31dab907dc4d9d086fa20cd901465707c1aea303fb3:1",
+      "line_sha256": "eea90ebb6704b333bda8c31dab907dc4d9d086fa20cd901465707c1aea303fb3",
+      "disposition": "excluded",
+      "reason": "This line documents the guard's fail-closed result and does not make a throughput or derivation claim."
+    },
+    {
       "site": "scripts/check-business-rule-library.mjs:44",
       "semantic_key": "scripts/check-business-rule-library.mjs:0832def5bd571339fd83b3ddac83b66125ef29045101ca67c58ce6e11cda55a6:1",
       "line_sha256": "0832def5bd571339fd83b3ddac83b66125ef29045101ca67c58ce6e11cda55a6",
@@ -1800,7 +1807,7 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     }
   ],
-  "call_site_count": 255,
-  "call_site_sha256": "6691c77f38478b029477016f04d40ffada9a6db1914bacfe2bca5fe18902722a",
+  "call_site_count": 256,
+  "call_site_sha256": "e796073de9ff658770aaa16915a7ca091f4e2c86d547c84326fe65b98fd85ffd",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
