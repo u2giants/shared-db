@@ -5,6 +5,29 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export const HISTORICAL_RESTORATIONS = Object.freeze({
+  // #2509. Preview applied these exact bytes in run 34157812748 from PR #2513
+  // commit bcc2603977678db73b4ca12d3ed1312a1bff64e2. Migration 20260907200221
+  // then reached main first, so the unchanged source-restoration sorts behind
+  // main. This pin authorizes only the exact applied file; it does not make the
+  // version preview-only or otherwise change its production eligibility.
+  '20260907131728': Object.freeze({
+    filename: 'supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql',
+    name: 'popsg_preview_stats_indexed_categories',
+    previewProject: 'mvpkijzfmfcxhnzqogzs',
+    previewApplyRun: '34157812748',
+    previewDispatchCommit: '4f093e3d4c97e4272d147d38e7243ec57d3c08f1',
+    previewAppliedCommit: 'bcc2603977678db73b4ca12d3ed1312a1bff64e2',
+    sourcePr: 2513,
+    sourceMergeCommit: 'c5f85ad3a98b7a5598e8c81a56735473d5bb5487',
+    statementBytes: 9125,
+    statementSha256: 'd273d46aa662d3ae24502da44e3226e9c5932c7646b8d5d430b76563fa9d2191',
+    fileSha256: '03648ecbbee473f539c27f929a248c503c18d5fb906efe1409d11593cfdb5d7e',
+    objects: Object.freeze([
+      'function public.get_sg_preview_stats',
+      'index public.idx_sgf_active_preview_category',
+      'table public.style_guide_files',
+    ]),
+  }),
   // #2035. Preview applied this version in run 33454217961 from PR #2009 commit
   // bb77fdd49fe032c985dc93c907f5d4d93a2456a1, then the PR head moved twice to fix two
   // High review findings and the corrected body merged as 30221c0b. Preview therefore
@@ -86,11 +109,31 @@ export function validateHistoricalRestorationFile(filename, raw) {
   return record
 }
 
+export function validateHistoricalProductionProvenance(filename, raw, evidence) {
+  const record=validateHistoricalRestorationFile(filename,raw)
+  const expected={
+    version:path.basename(filename).slice(0,14),
+    previewApplyRun:record.previewApplyRun,
+    previewDispatchCommit:record.previewDispatchCommit,
+    previewAppliedCommit:record.previewAppliedCommit,
+    sourcePr:record.sourcePr,
+    sourceMergeCommit:record.sourceMergeCommit,
+    artifactFileSha256:record.fileSha256,
+  }
+  if(!record.sourcePr||!record.sourceMergeCommit)throw new Error('historical restoration is not registered for production producer provenance')
+  if(!evidence||typeof evidence!=='object'||Array.isArray(evidence)||Object.keys(evidence).sort().join(',')!==Object.keys(expected).sort().join(','))throw new Error('historical production provenance evidence has an incomplete schema')
+  for(const [key,value] of Object.entries(expected))if(evidence[key]!==value)throw new Error(`historical production provenance mismatch for ${key}`)
+  return record
+}
+
 if(import.meta.url===pathToFileURL(process.argv[1]??'').href){
   try {
     const filename=String(process.argv[3]??'')
-    if(process.argv[2]!=='--allows-backdated')throw new Error('unsupported command')
-    validateHistoricalRestorationFile(filename,readFileSync(filename,'utf8'))
+    if(process.argv[2]==='--allows-backdated')validateHistoricalRestorationFile(filename,readFileSync(filename,'utf8'))
+    else if(process.argv[2]==='--production-provenance'){
+      const record=validateHistoricalProductionProvenance(filename,readFileSync(filename,'utf8'),JSON.parse(String(process.argv[4]??'')))
+      process.stdout.write(JSON.stringify({version:path.basename(filename).slice(0,14),fileSha256:record.fileSha256})+'\n')
+    } else throw new Error('unsupported command')
     process.exitCode=0
   } catch (error) {
     console.error(error.message)
