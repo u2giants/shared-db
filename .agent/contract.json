@@ -15,6 +15,7 @@
     ".agent/completion.json",
     ".github/workflows/agent-work-contract.yml",
     ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/guarded-migration-merge.yml",
     ".github/workflows/migration-author-lease.yml",
     "HANDOFF.d/2026-09-08T1924Z-edge-dev-codex-handover-latency-plan.md",
     "plan_bounded_session_handover.md",
@@ -27,6 +28,7 @@
     ".agent/completion.json",
     ".github/workflows/agent-work-contract.yml",
     ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/guarded-migration-merge.yml",
     ".github/workflows/migration-author-lease.yml",
     "HANDOFF.d/2026-09-08T1924Z-edge-dev-codex-handover-latency-plan.md",
     "plan_bounded_session_handover.md",
@@ -54,5 +56,5 @@
     "Main movement invalidates the branch evidence.",
     "The change would require a database, production, security-setting, or live-orchestrator action."
   ],
-  "generation": 6
+  "generation": 7
 }
