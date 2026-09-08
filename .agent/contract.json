@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2550,
-  "generation": 4,
+  "generation": 5,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Keep governed reviewer replacement within the fixed 25-request ceiling by reusing complete preflight evidence snapshots without weakening review safeguards.",
-  "base_sha": "8d64a75812beec85d2f8b2c78669e5e17635359d",
+  "base_sha": "9f07a3b33515a0ffbc47a4a172aa756879458e8f",
   "dispatcher": "codex",
   "worker": "codex",
   "branch": "codex/issue-2550-review-budget-current",
