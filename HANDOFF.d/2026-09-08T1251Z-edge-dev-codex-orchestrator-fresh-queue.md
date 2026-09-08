@@ -24,7 +24,7 @@ The owner requested completion through highest-priority issue #2449 / PR #2452, 
 - #2449 / PR #2452 is merged and production-complete. Production run `34224860332`; version `20260907200221`; issue and claim #2451 closed.
 - #2509 / PR #2513 is merged and production-complete. Production run `34227235157`; version `20260907131728`; claim #2511 and issue #2509 closed; merge freeze released.
 - #2550 / PR #2565 merged at main `6b516fd0224cddb44da6351c0ae3f3ecbcceb528`; no database or production action.
-- #2356 / PR #2523 is refreshed at head `c4f0c50d9a3531304131c3ebbda0372bbc66ceb6`; its structural SQL is unchanged. Minimal restoration prerequisite #2573 / PR #2575 is open at `c3841f8dc0642e213cc3239ad83e718457b076d7`, with checks green and guarded merge authorization still pending.
+- #2356 / PR #2523 is refreshed at head `c4f0c50d9a3531304131c3ebbda0372bbc66ceb6`; its structural SQL is unchanged. Minimal restoration prerequisite #2573 / PR #2575 is open at `c3841f8dc0642e213cc3239ad83e718457b076d7`, all substantive checks green; guarded merge authorization/merge remain pending at closeout.
 - #2503 is already claimed externally as #2574; read-only findings show seven sample relations are bootstrap omissions and `licensor_id` is an application-contract defect. Do not create a competing claim.
 - Queue audit after #2449: 7/8 author leases occupied, 4 expired leases remain locked; expiry does not release protection.
 - Active child agents: #2356/#2575 refresh worker and #2503 observation worker (the latter has finished). #2509 worker finished.
