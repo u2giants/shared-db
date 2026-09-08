@@ -1,28 +1,57 @@
 {
   "schema_version": 1,
-  "work_issue": 2285,
+  "work_issue": 2566,
   "outcome": "ready-for-merge",
-  "pr": 2562,
+  "pr": 2567,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2285/4",
-  "contract_sha256": "95cacef31386a69eee352318273be9e0aa44296a1daa714c04ac004a8af2db1f",
-  "head_sha": "14c9123d719a63cb18b472c556a4be91286f4a63",
-  "files_changed": ["AGENTS.md", "docs/agents/section-4-anti-collision-rules.md", "scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
+  "contract_ref": "refs/db-contracts/2566/2",
+  "contract_sha256": "6f9b83068146dc0aff84e3836909557aeff4b6333e0f72ee0b805f0dbfa4e13a",
+  "head_sha": "49d6cd24bcd3ed160764809af7301a3a738d3a17",
+  "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "scripts/historical-migration-restorations.mjs",
+    "scripts/historical-migration-restorations.test.mjs",
+    "scripts/test_production_migration_guard.py"
+  ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {"command": "node --test scripts/manage-migration-author-lanes.test.mjs", "exit_code": 0, "evidence": "477 passed; 0 failed, skipped, cancelled, or todo."},
-    {"command": "AI_MUSE_CALLER=codex ai-muse doctor", "exit_code": 0, "evidence": "All five installed-wrapper integrity checks passed."},
-    {"command": "AI_MUSE_CALLER=codex ai-muse ask issue-2285-spark-1-3-qualification --prompt-file .private/issue-2285-muse-live-proof-refresh.md", "exit_code": 0, "evidence": "Live provider meta-model-api, exact model muse-spark-1.3-contributor, reviewed the current-main implementation and approved its four-file capability diff."},
-    {"command": "AI_MUSE_CALLER=codex ai-muse ask issue-2285-spark-1-3-qualification-final --prompt-file .private/issue-2285-muse-rebuttal.md", "exit_code": 0, "evidence": "Muse re-evaluated the real current-main delta, confirmed historical 1.2 remains resolvable and retired with 1.3 alone active, and returned APPROVE."},
-    {"command": "node scripts/agent-work-contract-git-evidence.mjs --contract-file .agent/contract.json --report-file .agent/completion.json --pr-base-sha c3fca1c381b504322b7ed3841efbac11eb5783c8 --pr-head-sha c2caf45883b22b92ce56e7dd04afda657919d61b", "exit_code": 0, "evidence": "The current GitHub base and PR head prove the exact six-file change; the initial governed Kimi review at c2caf458 used a stale local-main packet and its immutable REVISE remains preserved at that old head."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
+    {
+      "command": "node --test scripts/historical-migration-restorations.test.mjs scripts/check-migration-pr-lease.test.mjs",
+      "exit_code": 0,
+      "evidence": "20 passed, 0 failed, cancelled, skipped, or todo; includes the focused issue #2509 restoration registry assertions."
+    },
+    {
+      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "exit_code": 0,
+      "evidence": "44 passed, 0 failed, cancelled, skipped, or todo."
+    },
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static SQL guards passed from Git Bash; this maintenance branch adds no migration file and leaves migration 20260907131728 untouched."
+    },
+    {
+      "command": "python -m unittest scripts.test_production_migration_guard",
+      "exit_code": 0,
+      "evidence": "233 passed; focused negative control keeps preview-only restorations blocked while 20260907131728 remains production-allowlist eligible."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors in the complete implementation delta."
+    },
+    {
+      "command": "node --input-type=module -e \"import{execFileSync}from'node:child_process';import{validateHistoricalRestorationFile as v}from'./scripts/historical-migration-restorations.mjs';const r=execFileSync('git',['cat-file','blob','da47d8b3c4dbe61617bbbaf507d8027c5c5724aa']).toString();v('supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql',r);try{v('supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql',r+'x');process.exit(1)}catch(e){if(!/hash mismatch/.test(e.message))throw e};console.log('exact blob accepted; changed bytes refused')\"",
+      "exit_code": 0,
+      "evidence": "The registry accepted PR #2513 Git blob da47d8b3c4dbe61617bbbaf507d8027c5c5724aa at the exact path and refused the same bytes with an appended change."
+    }
   ],
   "assumptions_resolved": [
-    "ai-devops PR #238 is merged as 7b78ed1b382ea6ff3fabd922d7f7d704eb613016.",
-    "The installed wrapper and live response identify Muse Spark 1.3 Contributor.",
-    "Historical Muse Spark 1.2 assignments remain resolvable through a retained retired registry row and cannot receive new work.",
-    "Qwen and every other reviewer disposition and rotation position are unchanged from current main."
+    "PR #2513 migration blob da47d8b3c4dbe61617bbbaf507d8027c5c5724aa yields normalized file sha256 03648ecbbee473f539c27f929a248c503c18d5fb906efe1409d11593cfdb5d7e and statement sha256 d273d46aa662d3ae24502da44e3226e9c5932c7646b8d5d430b76563fa9d2191 over 9125 statement bytes.",
+    "GitHub run 34157812748 is the successful preview application at bcc2603977678db73b4ca12d3ed1312a1bff64e2, and version 20260907200221 is present on the starting main commit.",
+    "The repair changes only the exact historical restoration registry, focused tests, and governed agent evidence; no migration SQL or database state changed."
   ],
   "stop_conditions_hit": []
 }
