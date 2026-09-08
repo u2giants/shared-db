@@ -45,7 +45,8 @@ test('the command emits machine-readable result and refuses malformed identity',
 
 test('the contract workflow takes the classification only from protected base policy', () => {
   const workflow = readFileSync(fileURLToPath(new URL('../.github/workflows/database-contract-tests.yml', import.meta.url)), 'utf8')
-  assert.match(workflow, /ref: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/)
+  assert.match(workflow, /ref: main/)
+  assert.match(workflow, /POLICY_SHA="\$\(git rev-parse HEAD\)"/)
   assert.match(workflow, /if \[ -f scripts\/check-closeout-readiness\.mjs \]/)
   assert.match(workflow, /check-documents-only-pull-request\.mjs "\$GITHUB_REPOSITORY" "\$PR_NUMBER"/)
   assert.match(workflow, /if: \$\{\{ always\(\) \}\}/)

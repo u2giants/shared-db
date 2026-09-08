@@ -87,7 +87,7 @@ jobs:
       # by GitHub's PR event, checked out separately from the proposed change.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: main
           fetch-depth: 1
       - uses: actions/setup-node@v4
         with:
@@ -96,9 +96,9 @@ jobs:
         id: readiness
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          POLICY_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          POLICY_SHA="$(git rev-parse HEAD)"
           set +e
           # This workflow and its richer readiness helper can arrive in the same
           # PR. During that one bootstrap PR, protected main legitimately has
@@ -120,6 +120,7 @@ jobs:
           applicability="$(jq -r '.gates.database_contract_tests' readiness.json)"
           test "$applicability" = applicable -o "$applicability" = inapplicable
           echo "database_contract_tests=$applicability" >> "$GITHUB_OUTPUT"
+          echo "trusted_policy_sha=$POLICY_SHA" >> "$GITHUB_STEP_SUMMARY"
           cat readiness.json >> "$GITHUB_STEP_SUMMARY"
 
   contract-tests:
