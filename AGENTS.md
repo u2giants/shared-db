@@ -733,7 +733,7 @@ rules below are the operative summary.
      only when there is no verdict and no progress, or a concrete transport, coverage, or
      truncated-output failure. Never replace `REVISE` or reduce coverage: exhaust active providers
     not failed on the exact head, then fail closed with the exact blocker. The configured rotation is
-    Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.2 Contributor, and Gemini 3.8 Flash
+    Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, and Gemini 3.8 Flash
     High, minus the live orchestrator's own engine — exactly
     `ACTIVE_REVIEWERS` in `scripts/manage-migration-author-lanes.mjs`. Gemini
     re-entered on 2026-09-06 (PR #2438) after a live re-qualification. Kimi K3
@@ -782,7 +782,10 @@ rules below are the operative summary.
 
 4. **New timestamped migration files only.** Each change is a new `YYYYMMDDHHMMSS_*.sql` file.
    **Never edit a migration that has already been applied anywhere** — that is how two sessions
-   silently clobber each other.
+   silently clobber each other. Since issue #2037 this is ENFORCED, not merely written down:
+   `scripts/check-applied-migration-edit.mjs` runs in the `SQL migration guards` job and refuses
+   any pull request that modifies, deletes or renames a migration file whose version is present
+   in the preview or production ledger. Fix forward at a new version instead.
 
 5. **Never reuse a timestamp — a duplicate SILENTLY SKIPS a migration.** The ledger
    (`supabase_migrations.schema_migrations`) keys on the **version alone, not the filename**. If
