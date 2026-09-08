@@ -73,7 +73,6 @@
     "Claim2418 keeps original version20260906040010 permanently protected through guarded supersession to version20260908022407 despite lease expiry",
     "The manager renames only the migration filename; SQL statement bytes and semantics remain unchanged while preparation integrates current main and exact evidence"
   ],
-
   "stop_conditions": [
     "Stop if origin main or the PR branch moves during preparation",
     "Stop if any claimed object or migration byte must change",
