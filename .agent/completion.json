@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260908202651"
   ],
-  "contract_ref": "refs/db-contracts/2535/2",
-  "contract_sha256": "d4e7e3b46f8df64dbe3f8156b12f7bf55fb835b0ccdac496876cb735fec5d01f",
-  "head_sha": "4738e180b0b01a73da1520a4670ea678deb37025",
+  "contract_ref": "refs/db-contracts/2535/3",
+  "contract_sha256": "2be835268b52fcaa9d2fd2f41b4ecc1bbdaaed92e01b7305b58498c8be2fd751",
+  "head_sha": "4b176008cdef373822d20aaeddc9c9b46f11375a",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -48,7 +48,7 @@
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Contract generation 1 validated and its immutable published hash is 4d465df2730a05afc7537da07add72553bc407d88c7a03c85e6dbb63d2fba849."
+      "evidence": "Contract generation 3 validated and its immutable published hash is 2be835268b52fcaa9d2fd2f41b4ecc1bbdaaed92e01b7305b58498c8be2fd751."
     },
     {
       "command": "git diff --check",
