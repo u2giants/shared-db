@@ -1,7 +1,10 @@
 # Measuring the "missing Licensor" population
 
-**Status:** Settled for the owner rulings recorded below; the counts are
-**verified measurements** dated 2026-09-06 and 2026-09-07, not rules.
+**Status:** Settled
+
+The owner rulings recorded here are Settled. The counts are **verified
+measurements** dated 2026-09-06 and 2026-09-07, not rules; the superseded chain
+below is explicitly marked Historical at the point a reader meets it.
 
 This page exists because the same question — "how many of our items have no
 Licensor?" — was answered four different times with four different numbers, and
