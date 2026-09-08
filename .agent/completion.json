@@ -1,38 +1,46 @@
 {
   "schema_version": 1,
-  "work_issue": 2572,
+  "work_issue": 2590,
   "outcome": "ready-for-merge",
-  "pr": 2585,
+  "pr": 2593,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2572/2",
-  "contract_sha256": "3947dea07b8af7cfb64454ba018fc26b6fbda81379f07b0fe4cecab20245408c",
-  "head_sha": "7b72b2f4bd21a26ac013b1f86370ba15bb3ebf70",
+  "contract_ref": "refs/db-contracts/2590/1",
+  "contract_sha256": "4f4fded5454523ead2ab861cf2b2f91c8a1d309e5506e06687e02d06f0056ed1",
+  "head_sha": "59d1464d32324c7ff4e12eb90972cecf288d2c13",
   "files_changed": [
-    "HANDOFF.d/2026-09-08T1650Z-edge-dev-claude-four-blocked-issues.md"
+    "scripts/check-exact-head-approval.test.mjs",
+    "scripts/lib/documents-only-change.mjs",
+    "scripts/lib/documents-only-change.test.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
+      "command": "node --test scripts/lib/documents-only-change.test.mjs scripts/check-exact-head-approval.test.mjs scripts/manage-migration-author-lanes.test.mjs",
+      "exit_code": 0,
+      "evidence": "555 tests passed; 0 failed, cancelled, skipped, or todo."
+    },
+    {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Contract is valid; published as refs/db-contracts/2572/1."
+      "evidence": "Contract validated and was published immutably at refs/db-contracts/2590/1 before implementation completion."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Report satisfies contract generation 1 pinned by hash 68e5648b."
+      "evidence": "Completion report validates against the published contract, PR 2593, and implementation head 59d1464d."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors in the handoff document."
+      "evidence": "No whitespace errors."
     }
   ],
   "assumptions_resolved": [
-    "This pull request changes one prose file plus the two .agent evidence files; no code, test, workflow, migration or configuration file is touched.",
-    "No database was read or written. No issue was closed by this pull request.",
-    "Re-reviewed from a clone whose main is current origin/main fbd49fe829a33a225805334a0cdba662dfd44084; the merge-base diff of this branch is exactly the handoff file plus the two .agent evidence files."
+    "The exact evidence pair is ignored only when both files appear exactly once and at least one substantive prose file remains.",
+    "Unit, reviewer-draw, and exact-head merge-gate tests prove that rulebooks and code remain reviewer-gated when the evidence pair is present.",
+    "No database or production infrastructure was read or written by this repository change."
   ],
   "stop_conditions_hit": []
 }

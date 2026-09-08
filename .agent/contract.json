@@ -1,44 +1,50 @@
 {
   "schema_version": 1,
-  "work_issue": 2572,
-  "generation": 2,
-  "work_type": "documentation",
-  "route": "shared-db-orchestrator",
-  "goal": "Record why issues 1090, 1322, 1403 and 1868 cannot be closed, with the blocker state re-resolved live, so a fresh session does not re-derive it.",
-  "base_sha": "fbd49fe829a33a225805334a0cdba662dfd44084",
+  "work_issue": 2590,
+  "generation": 1,
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Preserve the mandatory agent work evidence pair without making an otherwise prose-only pull request consume an external database reviewer.",
+  "base_sha": "d62993e5cf893d8072d43951d31e0ac891f71553",
   "dispatcher": "owner request 2026-09-08",
-  "worker": "claude/shared-db-orchestrator-issues-27a129",
-  "branch": "claude/2572-blocked-four-handoff",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/top-5-blocking-issues-6be510",
+  "worker": "codex/issue-2590-docs-contract",
+  "branch": "codex/issue-2590-docs-contract",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2590-docs-contract",
   "allowed_paths": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "HANDOFF.d/2026-09-08T1650Z-edge-dev-claude-four-blocked-issues.md"
+    "scripts/check-exact-head-approval.test.mjs",
+    "scripts/lib/documents-only-change.mjs",
+    "scripts/lib/documents-only-change.test.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
   "file_writes": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "HANDOFF.d/2026-09-08T1650Z-edge-dev-claude-four-blocked-issues.md"
+    "scripts/check-exact-head-approval.test.mjs",
+    "scripts/lib/documents-only-change.mjs",
+    "scripts/lib/documents-only-change.test.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not edit another session's HANDOFF.d file and do not rewrite the root HANDOFF.md pointer.",
-    "Do not close any of the four blocked issues on the strength of this document alone.",
-    "Do not write any migration, schema object, or licensed row data in this pull request."
+    "Do not weaken required checks, guarded merge, reviewer refusal handling, or rulebook classification.",
+    "Do not exempt incomplete evidence, evidence-only changes, extra agent metadata, code, workflows, configuration, rulebooks, or migrations.",
+    "Do not write database structure or data."
   ],
   "required_checks": [
+    "node --test scripts/lib/documents-only-change.test.mjs scripts/check-exact-head-approval.test.mjs scripts/manage-migration-author-lanes.test.mjs",
     "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
     "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
     "git diff --check"
   ],
   "assumptions": [
-    "This pull request is prose only; no code, test, workflow, migration or configuration file is touched.",
-    "The blocker state recorded was re-resolved against live GitHub on 2026-09-08 and is dated in the document.",
-    "The reviewer packet must resolve its base from current origin/main; a stale local main misreads unrelated landed commits as changes of this pull request."
+    "The exact .agent/contract.json and .agent/completion.json pair is mandatory evidence describing the substantive diff, not substantive code itself.",
+    "Both reviewer assignment and exact-head merge authorization use the shared documents-only classifier."
   ],
   "stop_conditions": [
-    "Stop if this pull request would change any file outside HANDOFF.d and the two .agent evidence files.",
-    "Stop if closing a blocked issue would require deleting a worktree or reducing a capability."
+    "Stop if the complete evidence pair cannot be distinguished deterministically from incomplete or extra agent metadata.",
+    "Stop if any rulebook, code, workflow, configuration, or migration change can enter the documents-only lane."
   ]
 }
