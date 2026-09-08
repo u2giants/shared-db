@@ -407,11 +407,10 @@ begin
       where candidate.source_system=o.source_system
         and candidate.source_table=o.source_table
         and candidate.source_property_id=o.source_property_id
-        and not exists (
-          select 1
-          from plm.dcp_opa_property_resolution newer
-          where newer.supersedes_resolution_id=candidate.resolution_id
-        )
+        -- Pending rows are proposals, not terminal decisions. Read the newest
+        -- approved/rejected version so a later pending proposal cannot hide an
+        -- approval, while a later rejection still supersedes that approval.
+        and candidate.approval_status in ('approved','rejected')
       order by candidate.decision_version desc,
         candidate.approved_at desc nulls last,candidate.resolution_id desc
       limit 1

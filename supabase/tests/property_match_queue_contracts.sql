@@ -21,6 +21,8 @@ declare
   v_pending_b uuid;
   v_pending_c uuid;
   v_decided uuid;
+  v_pending_after_decision uuid := gen_random_uuid();
+  v_final_approved uuid := gen_random_uuid();
   v_page jsonb;
   v_page2 jsonb;
   v_row jsonb;
@@ -192,6 +194,55 @@ begin
   if (select count(*) from jsonb_array_elements(v_page -> 'rows')) <> 2 then
     raise exception 'property match queue returned an unexpected pending set: %',
       v_page -> 'rows';
+  end if;
+
+  -- A newer pending proposal remains visible to reviewers even though the
+  -- prior approval remains the newest terminal decision for read surfaces.
+  insert into plm.dcp_opa_property_resolution (
+    resolution_id,source_system,source_table,source_property_id,decision_version,
+    approval_status,supersedes_resolution_id,evidence_reference,evidence_sha256,decision_reason
+  ) values (
+    v_pending_after_decision,'disney_dcpvault','plm.dcp_property',v_search||'/c',3,
+    'pending',v_decided,'synthetic-evidence-c3',repeat('e',64),'synthetic follow-up proposal'
+  );
+  insert into plm.dcp_opa_property_resolution_member (
+    resolution_id,licensed_property_id,member_ordinal,submission_source_system,
+    submission_source_table,submission_source_id
+  ) values (
+    v_pending_after_decision,v_opa_b,1,'disney_opa','plm.opa_property',v_opa_b::text
+  );
+  v_page := api.db_data_admin_property_match_queue(v_search, null, 100);
+  select r into v_row from jsonb_array_elements(v_page -> 'rows') r
+  where r ->> 'source_property_id'=v_search||'/c';
+  if v_row is null
+     or v_row ->> 'resolution_id' <> v_pending_after_decision::text
+     or v_row ->> 'approval_status' <> 'pending'
+     or (select count(*) from jsonb_array_elements(v_page -> 'rows')) <> 3 then
+    raise exception 'latest pending proposal was not preserved in the review queue: %',v_page -> 'rows';
+  end if;
+
+  -- A still-later approval closes that proposal without mutating history.
+  insert into plm.dcp_opa_property_resolution (
+    resolution_id,source_system,source_table,source_property_id,decision_version,
+    creative_decision_state,approval_status,supersedes_resolution_id,
+    evidence_reference,evidence_sha256,decision_reason,approved_at,approved_by
+  ) values (
+    v_final_approved,'disney_dcpvault','plm.dcp_property',v_search||'/c',4,
+    'mapped','approved',v_pending_after_decision,'synthetic-evidence-c4',repeat('f',64),
+    'synthetic final approval',now(),'contract'
+  );
+  insert into plm.dcp_opa_property_resolution_member (
+    resolution_id,licensed_property_id,member_ordinal,submission_source_system,
+    submission_source_table,submission_source_id
+  ) values (
+    v_final_approved,v_opa_a,1,'disney_opa','plm.opa_property',v_opa_a::text
+  );
+  v_page := api.db_data_admin_property_match_queue(v_search, null, 100);
+  if exists (
+    select 1 from jsonb_array_elements(v_page -> 'rows') r
+    where r ->> 'source_property_id'=v_search||'/c'
+  ) or (select count(*) from jsonb_array_elements(v_page -> 'rows')) <> 2 then
+    raise exception 'later approval did not close the follow-up proposal queue row';
   end if;
 
   -- ---------------------------------------------------------------------

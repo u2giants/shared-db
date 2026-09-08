@@ -4223,6 +4223,8 @@ SINGLE_CREATIVE_SUBMISSION_RESOLUTION_LEDGER_CONTRACT = _shape_contract(
          'dcp_opa_property_resolution_member_append_only'),
         ('plm.dcp_opa_property_resolution_member',
          'dcp_opa_property_resolution_member_no_truncate'),
+        ('plm.dcp_opa_property_resolution_member',
+         'dcp_opa_property_resolution_member_mapping_header_check'),
     ),
 )
 SINGLE_CREATIVE_SUBMISSION_RESOLUTION_LEDGER_CONTRACT += (
@@ -4237,9 +4239,6 @@ SINGLE_CREATIVE_SUBMISSION_RESOLUTION_LEDGER_CONTRACT += (
     " and a.attname='licensed_property_id' and not a.attisdropped)"
     " and (select c.relforcerowsecurity from pg_class c"
     " where c.oid=to_regclass('plm.dcp_opa_property_resolution_member'))"
-    " and (select count(*) from pg_trigger t"
-    " where t.tgrelid=to_regclass('plm.dcp_opa_property_resolution_member')"
-    " and not t.tgisinternal and t.tgenabled='A')=2" +
     " and position('plm.dcp_opa_property_resolution_member' in %s)>0" % _SCRAPED_PROPERTIES_DEF +
     " and position('creative_submission_property_resolution' in %s)=0" % _SCRAPED_PROPERTIES_DEF +
     " and position('submission_source_system, submission_source_table' in %s)>0" % _DECIDE_PROPERTY_MATCH_DEF +
@@ -4249,7 +4248,7 @@ SINGLE_CREATIVE_SUBMISSION_RESOLUTION_LEDGER_CONTRACT += (
     " and exists (select 1 from pg_attribute where attrelid='plm.dcp_opa_property_resolution'::regclass and attname='creative_decision_state' and not attisdropped)"
     " and to_regprocedure('plm.enforce_dcp_opa_crosswalk_members()') is not null"
     " and exists (select 1 from pg_trigger where tgrelid='plm.dcp_opa_property_resolution'::regclass and tgname='dcp_opa_property_resolution_mapping_members_check' and tgdeferrable and tginitdeferred)"
-    " and exists (select 1 from pg_trigger where tgrelid='plm.dcp_opa_property_resolution_member'::regclass and tgname='dcp_opa_property_resolution_member_mapping_header_check' and tgdeferrable and tginitdeferred)"
+    " and exists (select 1 from pg_trigger where tgrelid='plm.dcp_opa_property_resolution_member'::regclass and tgname='dcp_opa_property_resolution_member_mapping_header_check' and not tgisinternal and tgenabled<>'D' and tgdeferrable and tginitdeferred)"
     " and has_table_privilege('service_role','plm.dcp_opa_property_resolution_member','SELECT')"
     " and has_table_privilege('service_role','plm.dcp_opa_property_resolution_member','INSERT')"
     " and not has_table_privilege('service_role','plm.dcp_opa_property_resolution_member','UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')"
