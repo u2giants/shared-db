@@ -1,28 +1,34 @@
 {
   "schema_version": 1,
-  "work_issue": 2558,
+  "work_issue": 2244,
   "outcome": "ready-for-merge",
-  "pr": 2555,
+  "pr": 2564,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2558/3",
-  "contract_sha256": "4f531bbeeeb8de89c8ec7f24e9c612b3e0984c2af806434d88c9ccd73e998f3a",
-  "head_sha": "58a447ae1fbf95dc193c046b3e2bcdcf9c19e23f",
+  "contract_ref": "refs/db-contracts/2244/1",
+  "contract_sha256": "a3f1663a36d5fa398f892c65a5ca88d4bba8c4028048da2a088daff440e06fe9",
+  "head_sha": "d26f99c037b68e3343e873d4407f662f3a0199f3",
   "files_changed": [
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+    ".agent/contract.json",
+    "scripts/run-governed-review.mjs",
+    "scripts/run-governed-review.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
+      "command": "node --test scripts/run-governed-review.test.mjs",
       "exit_code": 0,
-      "evidence": "475 passed, 0 failed, 0 skipped, 0 todo"
+      "evidence": "36 passed, 0 failed, 0 skipped, 0 todo"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "no whitespace errors"
     }
   ],
   "assumptions_resolved": [
-    "The live qualification is recorded in the reviewer's readsRepositoryVerified evidence and cites the merged commit it reviewed.",
-    "ACTIVE_REVIEWERS is six names in the unchanged roster order, with qwen-3.8-max in its existing position."
+    "The paired wrapper contract is AI_CODEX_REVIEW_GOVERNED_VERDICT_SHA set to the runner-pinned lowercase 40-character head.",
+    "The change alters no reviewer catalog or selection state and does not reactivate retired Codex."
   ],
   "stop_conditions_hit": []
 }
