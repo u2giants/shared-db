@@ -1,43 +1,44 @@
 {
   "schema_version": 1,
-  "work_issue": 2558,
-  "generation": 3,
+  "work_issue": 2244,
+  "generation": 1,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Return qwen-3.8-max to the active reviewer rotation now that its live qualification passed, without weakening the protection that an ineligible reviewer stays readable but receives no new assignment.",
-  "base_sha": "695a38c266b0c6d874aff1b9f1696f546f1239e6",
-  "dispatcher": "claude",
-  "worker": "claude",
-  "branch": "claude/qwen-rotation",
-  "worktree": "C:/repos/shared-db/.worktrees/qwen-rotation",
+  "goal": "Make governed reviews record the already-validated ai-codex-review verdict at the runner-pinned head without weakening verdict uniqueness, head binding, or fail-closed behavior.",
+  "base_sha": "dc3d144055c282d0708fb8efe8d9770394f003f0",
+  "dispatcher": "codex",
+  "worker": "codex",
+  "branch": "codex/issue-2244-codex-verdict",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2244-codex-verdict",
   "allowed_paths": [
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
+    ".agent/completion.json",
     ".agent/contract.json",
-    ".agent/completion.json"
+    "scripts/run-governed-review.mjs",
+    "scripts/run-governed-review.test.mjs"
   ],
   "file_writes": [
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
+    ".agent/completion.json",
     ".agent/contract.json",
-    ".agent/completion.json"
+    "scripts/run-governed-review.mjs",
+    "scripts/run-governed-review.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not delete the test that proves an ineligible reviewer stays readable while receiving no new assignment.",
-    "Do not remove any name from REVIEWERS; historical evidence must stay resolvable.",
-    "Do not change database structure or data."
+    "Do not delete, disable, or exclude the Codex reviewer as a substitute for repair.",
+    "Do not relax single-terminal-verdict, pinned-head, extra-decision-line, or auto-void guards.",
+    "Do not perform database or production mutations."
   ],
   "required_checks": [
-    "node --test scripts/manage-migration-author-lanes.test.mjs"
+    "node --test scripts/run-governed-review.test.mjs",
+    "git diff --check"
   ],
   "assumptions": [
-    "Qwen's live qualification on 2026-09-07 (ai-devops PR #316, merge commit 795902d8) is the evidence that lifts the quarantine.",
-    "Rotation order is unchanged; qwen-3.8-max re-enters at its existing roster position."
+    "The ai-codex-review wrapper will expose an opt-in mode that prints its already-validated verdict as a strict terminal line.",
+    "The runner can bind that opt-in output to its own pinned head without trusting reviewer-supplied head text."
   ],
   "stop_conditions": [
-    "Stop if lifting the quarantine would require removing or weakening the ineligible-reviewer protection instead of repointing it.",
-    "Stop if the rotation change requires a database structure or data change."
+    "Stop if integration would require accepting an unvalidated wrapper verdict.",
+    "Stop if issue 2244 is closed or another active branch already owns the same repair."
   ]
 }

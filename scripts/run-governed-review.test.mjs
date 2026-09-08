@@ -1,9 +1,30 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { runGovernedReview, wrapperVerdictContractArgs, verdictFromOutput, neutraliseVerdictLine, extraVerdictLines, PRESERVED_HEADER } from './run-governed-review.mjs'
+import { runGovernedReview, wrapperEnvironment, wrapperVerdictContractArgs, verdictFromOutput, neutraliseVerdictLine, extraVerdictLines, PRESERVED_HEADER } from './run-governed-review.mjs'
 import { anyVerdictFor } from './lib/review-verdict.mjs'
 
 const options={issue:1824,pr:2000,headSha:'a'.repeat(40),reviewer:'glm-5.3',wrapper:'ai-glm',worktree:'C:/review',slot:1,wrapperArgs:['review']}
+
+test('ai-codex-review receives the runner-pinned head through its opt-in verdict bridge',()=>{
+  const inherited={PATH:'fixture'}
+  assert.deepEqual(wrapperEnvironment('C:/tools/ai-codex-review.cmd',options.headSha,inherited),{
+    PATH:'fixture',
+    AI_CODEX_REVIEW_GOVERNED_VERDICT_SHA:options.headSha,
+  })
+  assert.equal(wrapperEnvironment('ai-glm',options.headSha,inherited),inherited)
+})
+
+test('the governed Codex bridge is passed to the wrapper process without changing its arguments',()=>{
+  let spawnOptions
+  const codexOptions={...options,reviewer:'codex-gpt-5.6-sol',wrapper:'ai-codex-review',wrapperArgs:['diff-review']}
+  const spawn=(command,args,provided)=>{
+    if(command==='gh')return{status:0,stdout:JSON.stringify({html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-123'})}
+    spawnOptions=provided
+    return{status:0,stdout:`Findings.\nVERDICT: APPROVE ${options.headSha}`}
+  }
+  runGovernedReview(codexOptions,{preflight:()=>{},resolve:(x)=>x,spawn,record:()=>({ref:'refs/verdict',sha:'b'.repeat(40)})})
+  assert.equal(spawnOptions.env.AI_CODEX_REVIEW_GOVERNED_VERDICT_SHA,options.headSha)
+})
 
 test('wrapper failure preserves a safe cause without publishing a verdict or raw diagnostics',()=>{
   for(const [stderr,expected] of [

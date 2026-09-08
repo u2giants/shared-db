@@ -120,6 +120,11 @@ export function wrapperSpawnPlan(resolved,args,platform=process.platform){
   if(platform==='win32'&&/\.(cmd|bat)$/i.test(resolved))return{file:process.env.ComSpec||'cmd.exe',args:['/d','/s','/c',resolved,...args]}
   return{file:resolved,args}
 }
+export function wrapperEnvironment(wrapper,headSha,inherited=process.env){
+  const name=String(wrapper??'').split(/[\\/]/).pop().replace(/\.(cmd|bat|exe)$/i,'').toLowerCase()
+  if(name!=='ai-codex-review')return inherited
+  return{...inherited,AI_CODEX_REVIEW_GOVERNED_VERDICT_SHA:String(headSha??'').toLowerCase()}
+}
 // Provider diagnostics may contain credentials or private repository text. Only
 // fixed, recognized reasons cross into the refusal; never echo raw stderr.
 export function wrapperFailureReason(run){
@@ -142,7 +147,7 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
   const resolved=(deps.resolve??resolveCommandPath)(options.wrapper)
   if(!resolved)throw new Error(`review wrapper ${options.wrapper} is not executable`)
   const plan=wrapperSpawnPlan(resolved,wrapperVerdictContractArgs(options.wrapper,options.wrapperArgs,options.headSha))
-  const run=deps.spawn(plan.file,plan.args,{cwd:options.worktree,encoding:'utf8',maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe']})
+  const run=deps.spawn(plan.file,plan.args,{cwd:options.worktree,encoding:'utf8',maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe'],env:wrapperEnvironment(options.wrapper,options.headSha)})
   const rawBody=String(run.stdout??'').trim(),verdict=verdictFromOutput(rawBody,options.headSha)
   if(run.error||run.status!==0||!verdict)throw new Error(`review wrapper did not produce a recordable terminal verdict (exit ${run.status??'unknown'}): ${wrapperFailureReason(run)}`)
   // CLOSE THE ORDERING HOLE AT THE ONLY POINT WHERE IT CAN BE CLOSED.
