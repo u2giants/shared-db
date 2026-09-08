@@ -4248,6 +4248,8 @@ SINGLE_CREATIVE_SUBMISSION_RESOLUTION_LEDGER_CONTRACT += (
     " and exists (select 1 from pg_attribute where attrelid='plm.dcp_opa_property_resolution'::regclass and attname='creative_decision_state' and not attisdropped)"
     " and to_regprocedure('plm.enforce_dcp_opa_crosswalk_members()') is not null"
     " and exists (select 1 from pg_trigger where tgrelid='plm.dcp_opa_property_resolution'::regclass and tgname='dcp_opa_property_resolution_mapping_members_check' and tgdeferrable and tginitdeferred)"
+    " and exists (select 1 from pg_trigger where tgrelid='plm.dcp_opa_property_resolution_member'::regclass and tgname='dcp_opa_property_resolution_member_append_only' and not tgisinternal and tgenabled='A')"
+    " and exists (select 1 from pg_trigger where tgrelid='plm.dcp_opa_property_resolution_member'::regclass and tgname='dcp_opa_property_resolution_member_no_truncate' and not tgisinternal and tgenabled='A')"
     " and exists (select 1 from pg_trigger where tgrelid='plm.dcp_opa_property_resolution_member'::regclass and tgname='dcp_opa_property_resolution_member_mapping_header_check' and not tgisinternal and tgenabled<>'D' and tgdeferrable and tginitdeferred)"
     " and has_table_privilege('service_role','plm.dcp_opa_property_resolution_member','SELECT')"
     " and has_table_privilege('service_role','plm.dcp_opa_property_resolution_member','INSERT')"
