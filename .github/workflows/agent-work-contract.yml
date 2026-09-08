@@ -52,6 +52,7 @@ jobs:
           scripts/agent-work-contract-activation.test.mjs
           scripts/agent-work-contract-git-evidence.test.mjs
           scripts/check-documents-only-pull-request.test.mjs
+          scripts/check-closeout-readiness.test.mjs
 
       - name: Report the activation mode, so nobody has to guess
         run: |

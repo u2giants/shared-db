@@ -36,7 +36,7 @@ Plan sections 5–6 contain code references. In particular, `evaluateWithoutRequ
 
 ## 6. Exact next steps
 
-After implementation is requested, read plan STATUS and sections 9–13. Start with whole-path classification fixtures; then truthful applicable CI plus automatic guarded dispatch; then durable checkpoint/fencing; then reviewer lifecycle/evidence reuse and cross-tool procedures; finally fault-injected and live timed acceptance. Each step has its gate in section 9. Re-resolve current main, #2596, #2318 and matching PRs before authoring; do not duplicate another session's repair.
+Implementation started in `codex/issue-2596-bounded-handover` from current main. Step 1 now has a trusted-base classifier plus a truthful inapplicable database-contract result for prose-only PRs; its focused offline tests pass, but PR CI and live harmless-PR proof remain pending. Next: automatic guarded dispatch, then durable checkpoint/fencing with #2318. Re-resolve current main, #2596, #2318 and matching PRs before authoring; do not duplicate another session's repair.
 
 ## 7. Constraints
 

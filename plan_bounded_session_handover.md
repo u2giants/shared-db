@@ -9,7 +9,7 @@ Paired [handoff](HANDOFF.d/2026-09-08T1924Z-edge-dev-codex-handover-latency-plan
 | Step | State | Evidence or next gate |
 |---|---|---|
 | Investigation and plan | Done | Source identities and GitHub run evidence in sections 3–6; this document |
-| 1. Whole-path document qualification | Open | Cross-gate regression, including the already-landed #2592 fix |
+| 1. Whole-path document qualification | Implemented — awaiting PR/CI | Trusted-base classifier and truthful database-contract applicability context; cross-gate/live proof pending |
 | 2. Fast applicable checks and automatic guarded dispatch | Open | Harmless live handoff PR, no reviewer/database replay, required contexts present |
 | 3. Durable checkpoint and fenced ownership transfer | Open | Successor resumes while document merge is unavailable; predecessor cannot act |
 | 4. Bounded reviewer and refresh lifecycle | Open | Wall-clock deadline covers preparation, model, replacement, and cleanup |
