@@ -10,6 +10,20 @@ export class GitEvidenceError extends Error {}
 const SHA_PATTERN = /^[0-9a-f]{40}$/i
 const METADATA_FILES = Object.freeze(['.agent/completion.json', '.agent/contract.json'])
 
+export function classifyEvidencePair(changedFiles) {
+  const changed = new Set(changedFiles)
+  const count = METADATA_FILES.filter(file => changed.has(file)).length
+  if (count === 0) return 'inherited'
+  if (count === METADATA_FILES.length) return 'current'
+  return 'partial'
+}
+
+export function prChangedFiles(base, head, io) {
+  const mergeBase = io.mergeBase(base, head)
+  if (!SHA_PATTERN.test(mergeBase)) throw new GitEvidenceError('could not resolve an exact merge base for PR evidence classification')
+  return io.changedFiles(mergeBase, head)
+}
+
 export function verifyGitEvidence({ contract, report, prBaseSha, prHeadSha }, io) {
   if (!SHA_PATTERN.test(String(contract.base_sha ?? ''))) throw new GitEvidenceError('PR evidence requires contract.base_sha to be an exact 40-character SHA')
   if (!SHA_PATTERN.test(String(report.head_sha ?? ''))) throw new GitEvidenceError('PR evidence requires report.head_sha to be an exact 40-character implementation SHA')
@@ -44,6 +58,9 @@ export const gitIo = {
   changedFiles(from, to) {
     return execFileSync('git', ['diff', '--name-only', '--diff-filter=ACDMRTUXB', from, to], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean)
   },
+  mergeBase(base, head) {
+    return execFileSync('git', ['merge-base', base, head], { encoding: 'utf8' }).trim()
+  },
   readPublishedContract(ref) {
     execFileSync('git', ['fetch', '--quiet', '--no-tags', 'origin', ref], { stdio: 'ignore' })
     const message = execFileSync('git', ['show', '--format=%B', '--no-patch', 'FETCH_HEAD'], { encoding: 'utf8' })
@@ -53,9 +70,18 @@ export const gitIo = {
 }
 
 export function main(argv, io = gitIo) {
-  const values = {}
-  for (let i = 0; i < argv.length; i += 2) values[argv[i]] = argv[i + 1]
   try {
+    if (argv[0] === '--classify-evidence-pair') {
+      const baseIndex = argv.indexOf('--pr-base-sha')
+      const headIndex = argv.indexOf('--pr-head-sha')
+      const prBaseSha = baseIndex >= 0 ? argv[baseIndex + 1] : undefined
+      const prHeadSha = headIndex >= 0 ? argv[headIndex + 1] : undefined
+      if (!prBaseSha || !prHeadSha) throw new GitEvidenceError('usage: --classify-evidence-pair --pr-base-sha <sha> --pr-head-sha <sha>')
+      console.log(classifyEvidencePair(prChangedFiles(prBaseSha, prHeadSha, io)))
+      return 0
+    }
+    const values = {}
+    for (let i = 0; i < argv.length; i += 2) values[argv[i]] = argv[i + 1]
     if (!values['--contract-file'] || !values['--report-file'] || !values['--pr-base-sha'] || !values['--pr-head-sha']) throw new GitEvidenceError('usage: --contract-file <path> --report-file <path> --pr-base-sha <sha> --pr-head-sha <sha>')
     const contract = JSON.parse(readFileSync(values['--contract-file'], 'utf8'))
     const report = JSON.parse(readFileSync(values['--report-file'], 'utf8'))
