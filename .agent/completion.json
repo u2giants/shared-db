@@ -1,19 +1,55 @@
 {
   "schema_version": 1,
-  "work_issue": 2188,
+  "work_issue": 2501,
   "outcome": "ready-for-merge",
-  "pr": 2560,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2188/4",
-  "contract_sha256": "ebf2fc17e07a06347fe3217386c595d3f597035cc39ca175a1a749cc17ae5e3e",
-  "head_sha": "036b59f8bbf71f8fb43484be3038056a35aa10f9",
-  "files_changed": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
-  "db_reads": [],
-  "db_writes": [],
-  "checks": [
-    {"command": "node --test scripts/manage-migration-author-lanes.test.mjs", "exit_code": 0, "evidence": "477 tests passed; 0 failed, skipped, cancelled, or todo."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
+  "pr": 2527,
+  "migration_versions": [
+    "20260907154630"
   ],
-  "assumptions_resolved": ["Bare-number and optional Issue claim titles normalize to the same exact issue identity; supersession and merged reissue have direct acceptance, wrong-issue, compound-workstream, and wrong-version tests."],
+  "contract_ref": "refs/db-contracts/2501/1",
+  "contract_sha256": "0d679ca506b6ab4e813dcb8f11a4325703ca14e9771c9a5f13c1486d3416ae65",
+  "head_sha": "98903f6935e4cfa275003927a05c379c88318504",
+  "files_changed": [
+    "supabase/migrations/20260907154630_popdam_tag_totals_cold_plan.sql",
+    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
+    "supabase/tests/popdam_effective_count_performance_contracts.sql"
+  ],
+  "db_reads": [
+    "table public.assets",
+    "table public.style_groups",
+    "table public.asset_effective_tags",
+    "function public.get_effective_filter_counts_unchecked_1703",
+    "function public.require_dam_access",
+    "function public.assets_thumbnail_min_date"
+  ],
+  "db_writes": [
+    "function public.get_filter_counts",
+    "function public.get_effective_filter_counts",
+    "function public.filter_effective_assets"
+  ],
+  "checks": [
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static SQL guards passed after the normal current-main merge; the migration and both durable contracts retain the 8s timeout, force_custom_plan, and mutually exclusive tag-leading list arm. Live-ledger input was intentionally absent because this preparation performed no shared database write."
+    },
+    {
+      "command": "PYTHONPATH=scripts python3 -m unittest scripts.test_check_pass2_routine_supersession scripts.test_migration_derivation scripts.test_production_catalog_verification",
+      "exit_code": 0,
+      "evidence": "247 tests passed in 4.708s, including the successful-routine provenance regression that prevents pass-2 from restoring obsolete helper bodies."
+    },
+    {
+      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "exit_code": 0,
+      "evidence": "44 passed, 0 failed, 0 cancelled, 0 skipped, 0 todo on the refreshed implementation."
+    }
+  ],
+  "assumptions_resolved": [
+    "Current origin/main 8d64a75812beec85d2f8b2c78669e5e17635359d was integrated by normal merge at implementation head 98903f6935e4cfa275003927a05c379c88318504; current main is its second parent and a proven ancestor.",
+    "PR #2540 merge d57be0d59499ca0c156c3a80ec87354a5367f5b3 remains in ancestry, preserving the successful-routine provenance repair.",
+    "The migration and two contract-test Git blobs remain exactly 27d0e83f2eab3375c6ca182fc08dd3bd7b44cea7, 2f0f3db38b639a124dcdc2698c615b43e4b6e7a0, and c45a25a84356e5340a84e73e36a2cef2c8bc8a6a; no implementation bytes, object scope, claim, or reserved version changed.",
+    "No local or recorded remote worker remained for this branch, and no active reviewer/ref targeted the inherited c952b31f head before ownership was taken.",
+    "Independent exact-head review, representative authenticated cold/warm preview, guarded merge, production apply, and authenticated API count/latency acceptance remain pending under the coordinator."
+  ],
   "stop_conditions_hit": []
 }

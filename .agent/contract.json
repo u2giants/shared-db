@@ -1,21 +1,57 @@
 {
   "schema_version": 1,
-  "work_issue": 2188,
-  "generation": 4,
-  "work_type": "repo-maintenance",
-  "route": "repo-maintenance",
-  "goal": "Make claim-version supersession accept established unambiguous claim-title forms and name the exact identity field that changed.",
-  "base_sha": "dc3d144055c282d0708fb8efe8d9770394f003f0",
-  "dispatcher": "codex",
-  "worker": "codex",
-  "branch": "codex/issue-2188-claim-title",
-  "worktree": "C:/Users/ahazan/.codex/worktrees/issue-2188-shared-db",
-  "allowed_paths": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
-  "file_writes": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
-  "db_reads": [],
-  "db_writes": [],
-  "prohibited_actions": ["Do not change database structure or data, relax exact-issue binding, or mutate live claims during verification."],
-  "required_checks": ["node --test scripts/manage-migration-author-lanes.test.mjs", "git diff --check"],
-  "assumptions": ["Claim titles beginning CLAIM: followed by a bare number or optional Issue token are established forms and remain unambiguous only when normalized to one exact workstream."],
-  "stop_conditions": ["Stop if accepting an established title form weakens exact issue identity or compound-workstream parsing."]
+  "work_issue": 2501,
+  "generation": 1,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Recover inherited tag-filtered facet and exact list-total optimization after the separate replay-provenance repair lands, preserving count parity, access control and the existing viewer timeout.",
+  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
+  "dispatcher": "codex coordinator #2536",
+  "worker": "codex repair_2501",
+  "branch": "codex/issue-2501-popdam-tag-totals",
+  "worktree": "/tmp/shared-db-orch-2517-2501",
+  "allowed_paths": [
+    "supabase/migrations/20260907154630_popdam_tag_totals_cold_plan.sql",
+    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
+    "supabase/tests/popdam_effective_count_performance_contracts.sql"
+  ],
+  "file_writes": [
+    "supabase/migrations/20260907154630_popdam_tag_totals_cold_plan.sql",
+    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
+    "supabase/tests/popdam_effective_count_performance_contracts.sql"
+  ],
+  "db_reads": [
+    "table public.assets",
+    "table public.style_groups",
+    "table public.asset_effective_tags",
+    "function public.get_effective_filter_counts_unchecked_1703",
+    "function public.require_dam_access",
+    "function public.assets_thumbnail_min_date"
+  ],
+  "db_writes": [
+    "function public.get_filter_counts",
+    "function public.get_effective_filter_counts",
+    "function public.filter_effective_assets"
+  ],
+  "prohibited_actions": [
+    "Do not rewrite applied migration bytes, raise timeouts, weaken RLS, quarantine assertions or remove fast/warm search capability.",
+    "Do not bypass the independent governed review or replay-provenance guards.",
+    "Do not push before coordinator release or claim local proof as preview/production acceptance."
+  ],
+  "required_checks": [
+    "bash scripts/check-sql.sh",
+    "PYTHONPATH=scripts python3 -m unittest scripts.test_check_pass2_routine_supersession scripts.test_migration_derivation scripts.test_production_catalog_verification",
+    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs"
+  ],
+  "assumptions": [
+    "This adopts pre-contract work transparently; no claim that publication predates existing implementation.",
+    "Replay-provenance repair2537 landed as PR2540 merge d57be0d59499ca0c156c3a80ec87354a5367f5b3; scoped real-SQL regression verifies the old restoration failure and repaired helper preservation.",
+    "Claim2525 retains original owner, branch, remote worktree and immutable version.",
+    "Independent exact-head review, representative authenticated cold/warm preview and production acceptance remain separate gates."
+  ],
+  "stop_conditions": [
+    "Stop before final evidence if current main is not an ancestor of implementation.",
+    "Stop on a new coordinator push or merge hold.",
+    "Stop on active worker ownership, unexpected claim changes, applied migration versions or expanded structural scope."
+  ]
 }
