@@ -1,51 +1,34 @@
 {
   "schema_version": 1,
-  "work_issue": 2439,
+  "work_issue": 1403,
   "outcome": "ready-for-merge",
-  "pr": 2447,
-  "migration_versions": [
-    "20260908195056"
-  ],
-  "contract_ref": "refs/db-contracts/2439/2",
-  "contract_sha256": "10702cb98c01f2b6630d527fc7f0bf68288371c183b90d457863240a8a2888f4",
-  "head_sha": "9242a95531f2df824fa614f56728dd9928d2bcdd",
+  "pr": 2613,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/1403/4",
+  "contract_sha256": "ec1b3cf7d5d93ecaaa55ef00e173c8d698e56dfd5c51ed9638e4959e7d98b1a4",
+  "head_sha": "289bcbab8b453996e583f1f58a6ca7494dc87d74",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "supabase/migrations/20260908195056_bulk_operation_runs_history.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql"
+    "docs/verification/main-required-status-checks.json",
+    "scripts/check-required-checks-preflight.mjs",
+    "scripts/check-required-checks-preflight.test.mjs"
   ],
-  "db_reads": [
-    "function app.has_any_role",
-    "type app.app_role"
-  ],
-  "db_writes": [
-    "table public.bulk_operation_runs",
-    "column public.bulk_operation_runs.error",
-    "column public.bulk_operation_runs.operation",
-    "column public.bulk_operation_runs.run_id",
-    "column public.bulk_operation_runs.stage",
-    "column public.bulk_operation_runs.status",
-    "index public.bulk_operation_runs_failures_idx",
-    "index public.bulk_operation_runs_operation_run_key",
-    "index public.bulk_operation_runs_operation_started_idx",
-    "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
-      "command": "bash scripts/check-sql.sh",
+      "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Static/recency passed; live-ledger subcheck skipped without token and not claimed as clearance."
+      "evidence": "Contract is valid; generation 3 published as refs/db-contracts/1403/3 at 500994e3. Generations 1 and 2 belong to the codex session that activated enforced mode on 2026-09-07; this generation covers the separate required-context promotion that activation record deferred."
     },
     {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Mandatory and changed sidecars passed; no dynamic markers in new migration."
+      "evidence": "Report satisfies contract generation 3 pinned by hash 31a35f15."
     },
     {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "command": "node --test scripts/check-required-checks-preflight.test.mjs",
       "exit_code": 0,
-      "evidence": "255 audited sites, unchanged discovery."
+      "evidence": "47 tests, 47 pass, 0 fail after the review fix (42 before). Five are new: a regression test that reproduces the merge deadlock -- origin/main's mirror and pin both carry the older eleven while the head pins twelve, and the mirror is now accepted; a real shrink is still refused; a head whose pin drops a name origin/main still pins is refused with 'may only grow'; an unreadable, empty or unparseable origin/main pin is refused rather than defaulted; and a context named only inside a comment is not read as pinned."
     },
     {
       "command": "git diff --check",
@@ -53,16 +36,36 @@
       "evidence": "No whitespace errors."
     },
     {
-      "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f role-test-wrapper.sql",
+      "command": "node scripts/update-required-checks.mjs --add \"Agent work contract\" --apply",
       "exit_code": 0,
-      "evidence": "PostgreSQL 17 disposable local server ran the unchanged guarded migration and real JWT-aware app role helpers in one rolled-back transaction. Administrator read passed; ordinary-user query returned zero rows; anonymous read, administrator browser insert, and service_role truncate were denied. Failure retention, duplicate-run, unexplained-failure, update, and delete negative controls also passed."
+      "evidence": "Live change applied 2026-09-08T21:28:48Z. READBACK OK -- 12 contexts required, strict: false. Before: Promotion contract tests (offline), Cross-PR object collision, Tools offline tests, SQL migration guards, Domain ownership, Intake pointer guard, Handoff contract, Migration author lease, Migration guarded merge authorization, Orchestrator marker guard, Cancelled work guard. After: those eleven unchanged plus Agent work contract. No context removed, no context renamed. The tool rewrote docs/verification/main-required-status-checks.json from that readback, and this pull request carries the rewrite."
+    },
+    {
+      "command": "gh pr checks <each open PR> --json name,state | select .name == \"Agent work contract\"",
+      "exit_code": 0,
+      "evidence": "Gate evidence read at 2026-09-08T21:27:09Z, one day after enforced mode began at 2026-09-07T21:26:45Z. Eleven pull requests open. Nine SUCCESS. PR 2612 FAILURE, and its log gives the reason as 'checked PR base is not an ancestor of the reported implementation head; refresh the branch before relying on its evidence' -- a stale branch its own author refreshes, which is the gate working rather than a defect in it. PR 2606 reported no checks at all because it is in conflict with main, and GitHub cannot compute a merge commit for a conflicted pull request, so no pull_request workflow is created for it."
+    },
+    {
+      "command": "node -e \"import('./scripts/check-required-checks-preflight.mjs').then(m => console.log(m.readPinnedFloor(process.cwd()).length, m.readRequiredChecksMirror(process.cwd()).length))\"",
+      "exit_code": 0,
+      "evidence": "Known-dirty control first: the pre-review head 1dea8fc5, run against the real origin/main, refuses with 'the trusted origin/main mirror is a stale subset; missing pinned contexts: Agent work contract' -- exactly the deadlock the reviewer described, reproduced from git rather than by hand. The fixed head then reports 'floor from origin/main: 11 names; includes Agent work contract? false' and 'mirror from origin/main accepted: 11 contexts', which is the state the guarded merge will see."
     }
   ],
+  "deviations": [
+    "The tool's rewrite of the mirror drops the _provenance field the 2026-09-04 capture carried. The file says it is rewritten by the tool from its own post-write readback and must not be hand-edited, so the field was not restored by hand; the _why field it keeps already names the tool as the source."
+  ],
+  "residual_risk": [
+    "Between the live change and this pull request merging, branch protection requires twelve contexts while the mirror on main names eleven. The lag is permissive, not dangerous: the pre-flight still refuses any check that reported on the head and is not green, and live branch protection enforces the twelfth at merge time regardless. The floor is now read from origin/main, so the lag can no longer deadlock the merge.",
+    "Switch 2 of issue #1403 stays closed and the issue stays open. One open claim, issue #2418, still writes objects:, with an author lease running to 2026-09-09T02:53:18Z. A legacy objects: claim is read as a WRITE, so retiring the alias while it is live would let a second writer start against work already in flight."
+  ],
   "assumptions_resolved": [
-    "Guarded supersession retained original version 20260906143443 and superseded version 20260907200137 as permanently reserved, and now uses protected version 20260908195056. The migration blob is byte-identical apart from the one comment line naming its reserved version.",
-    "Preserved test-only commit bd349eaa integrated before a normal merge of main 8d64a758; original claim identifiers remain unchanged.",
-    "PostgreSQL 17 role tests use the repository's real JWT-aware app helper definitions and Supabase-equivalent service_role BYPASSRLS.",
-    "Independent review, CI, preview and production live structural acceptance remain pending behind issue 2449. Consumer worker appends and alert consumption belong to PopDAM; no claim of application completion."
+    "The activation gate is met: enforced mode began 2026-09-07T21:26:45Z and the live change was applied 2026-09-08T21:28:48Z, two minutes after a full day had passed.",
+    "Enforced mode has run green for that day in the sense the gate meant: nine of eleven open pull requests pass the check, the one FAILURE is a stale branch base the check correctly refuses, and the one with no result at all is a pull request in conflict with main, for which GitHub creates no pull_request run.",
+    "The pinned floor grew without weakening: every test that consumes PINNED_REQUIRED_CONTEXTS either compares the committed mirror to it or feeds it in as a trusted origin/main list, and all 42 pass.",
+    "Nothing was removed or renamed and strict stayed false, proved by the tool's own post-write readback rather than by the request that was sent.",
+    "No database was read or written.",
+    "Switch 2 was not touched: the legacy objects: alias is still live, and issue #1403 stays open for it.",
+    "The independent review of head fee94bce returned REVISE on a real defect, not a nitpick: the guarded merge runs the pre-flight from the head's tree, so a grown pin was judged against origin/main's un-grown mirror and the only merge path refused the only commit that could update that mirror. It was fixed rather than argued away, and the pre-fix failure was reproduced from git before the fix was written."
   ],
   "stop_conditions_hit": []
 }
