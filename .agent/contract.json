@@ -4,7 +4,7 @@
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Make a prose-only handoff avoid the inapplicable disposable database contract test while preserving every other merge safeguard.",
-  "base_sha": "03f917d0dec6e0973e4b9cddd72e02f686a19e0c",
+  "base_sha": "5caf1b309de6f975ed4ed9a1920ddafde5087078",
   "dispatcher": "Albert Hazan direct request",
   "worker": "Codex",
   "branch": "codex/issue-2596-bounded-handover",
@@ -54,5 +54,5 @@
     "Main movement invalidates the branch evidence.",
     "The change would require a database, production, security-setting, or live-orchestrator action."
   ],
-  "generation": 5
+  "generation": 6
 }
