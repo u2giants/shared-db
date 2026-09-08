@@ -6,7 +6,7 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2596/6",
   "contract_sha256": "26467a637a81368dc8ec6631036ce0d4826827729898a4fa7b235b3fc6091d03",
-  "head_sha": "57fd6584286f10dceeb6d3336cb10bae694f18ab",
+  "head_sha": "4ac24659b1878b481ea8b92e710b003f2752fa1a",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -25,7 +25,7 @@
     {
       "command": "node --test scripts/check-closeout-readiness.test.mjs scripts/check-documents-only-pull-request.test.mjs scripts/lib/documents-only-change.test.mjs scripts/database-contract-authorization.test.mjs",
       "exit_code": 0,
-      "evidence": "39 focused offline tests passed."
+      "evidence": "40 focused offline tests passed."
     },
     {
       "command": "git diff --check",
@@ -36,6 +36,7 @@
   "assumptions_resolved": [
     "A trusted base checkout can classify the complete GitHub file list without executing pull-request policy.",
     "Prose-only classification skips only the disposable database contract test; handoff validation, required contexts, reviewer refusal handling, and guarded merge remain in force.",
+    "A failed trusted classification now fails the database-contract job, and every documents-only exemption is decided from protected policy.",
     "Push and manual workflow runs retain the complete database contract test."
   ],
   "stop_conditions_hit": []
