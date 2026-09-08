@@ -4,22 +4,22 @@
   "outcome": "ready-for-merge",
   "pr": 2542,
   "migration_versions": [
-    "20260907183041"
+    "20260908195355"
   ],
-  "contract_ref": "refs/db-contracts/2506/4",
-  "contract_sha256": "333001a16c6e2be0f97065aa1e1a6f3151806678e0e882f9828b406b2855e1fe",
-  "head_sha": "41f3e56884eac54d107dce59b91f16f2e837ef03",
+  "contract_ref": "refs/db-contracts/2506/5",
+  "contract_sha256": "add8d0ff9ec630628c160f9c748227e5f1c5d9d832b566b418d9864001a009cf",
+  "head_sha": "9d6bcc643c2f0794ed4a0cc3939727ef8f9c5174",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/benchmark_popsg_search_v2.py",
-    "scripts/production-verification-sidecars/20260907183041.json",
+    "scripts/production-verification-sidecars/20260908195355.json",
     "scripts/production_business_risk_gate.py",
     "scripts/production_catalog_verification.py",
     "scripts/test_production_catalog_verification.py",
-    "supabase/migrations/20260907183041_popsg_search_v2_bounded_paging.sql",
+    "supabase/migrations/20260908195355_popsg_search_v2_bounded_paging.sql",
     "supabase/tests/popsg_search_style_guide_library_v2_contracts.sql"
   ],
   "db_reads": [
@@ -37,7 +37,7 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL and recency guards passed after normal integration of current main; live-ledger input remained intentionally absent because this preparation performed no shared database write."
+      "evidence": "Re-run at merged head 9d6bcc643c2f0794ed4a0cc3939727ef8f9c5174 after the governed version supersession: static SQL guards passed and Guard B now accepts the branch, because reserved forward version 20260908195355 sorts after the base branch newest version 20260907200221. Guard B2 live-ledger input remained intentionally absent because this preparation performed no shared database write."
     },
     {
       "command": "python3 scripts/test_migration_derivation.py",
@@ -47,12 +47,12 @@
     {
       "command": "python3 scripts/benchmark_popsg_search_v2.py",
       "exit_code": 0,
-      "evidence": "A hash-matched disposable remote clone ran the required PostgreSQL 17 benchmark: baseline Files 8332ms and Guides 8161ms timed out at the unchanged 8s ceiling; forward Files 5809ms and Guides 5090ms passed; 160 exact full-JSON parity cases passed with 0 skipped. The local Windows attempt started no container because Docker was unavailable."
+      "evidence": "A hash-matched disposable remote clone ran the required PostgreSQL 17 benchmark: baseline Files 8332ms and Guides 8161ms timed out at the unchanged 8s ceiling; forward Files 5809ms and Guides 5090ms passed; 160 exact full-JSON parity cases passed with 0 skipped. The local Windows attempt started no container because Docker was unavailable. The supersession changed only the version reference in the migration header comment, so the benchmarked executable SQL body is unchanged (1 insertion, 1 deletion, comment line only)."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors at the merged head."
     },
     {
       "command": "python3 scripts/test_production_catalog_verification.py",
@@ -67,12 +67,12 @@
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "All 44 sidecars and the forward migration verification passed against current main; the reviewed baseline detector source hash was regenerated from the merged scripts/production_catalog_verification.py."
+      "evidence": "Re-run against origin/main 0f22de12562b7250ebf70fb07502e0fbce429cb3: status OK, all 44 sidecars passed, and the forward migration now scans as version 20260908195355 with its renamed sidecar."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "Truth audit passed for 266 reviewed call sites after integrating current main; the reviewed disposition list is the union of both sides, with the bound count and digest regenerated from the merged tree."
+      "evidence": "Re-run at the merged head: truth audit OK for 266 reviewed call sites; current main introduced no new unreviewed call site, so no regeneration was needed."
     }
   ],
   "assumptions_resolved": [
@@ -81,7 +81,8 @@
     "Every scoped implementation and proof file retained its inherited Git blob after current-main integration; no SQL, benchmark, contract, sidecar, catalog predicate, or audit semantics changed.",
     "No active worker remained in the recorded remote workspace, and no exact-head reviewer or coordination lock was present before preparation.",
     "Independent exact-head review, governed forward preview, optimized authenticated preview API acceptance, guarded merge, ordered two-version production apply, and live business verification remain pending under the coordinator.",
-    "SQL Guard B now refuses this branch: current main carries migration version 20260907200221, which sorts after this claim’s permanently reserved forward version 20260907183041. The guard’s only sanctioned fix is renaming the migration to a new version, which would spend a version the claim did not reserve; that decision belongs to the coordinator and claim #2510, not to this preparation."
+    "The prior SQL Guard B refusal is resolved by the coordinator-authorized supersession under claim #2510: reserved forward version 20260907183041 was re-reserved as 20260908195355, which sorts after current main newest version 20260907200221. The migration, its sidecar and the business risk gate reference were renamed together; the executable SQL body is byte-identical apart from the single header comment line naming the reservation.",
+    "Current origin/main 0f22de12562b7250ebf70fb07502e0fbce429cb3 was integrated by normal merge at implementation head 9d6bcc643c2f0794ed4a0cc3939727ef8f9c5174; the only conflicts were the single-slot .agent evidence pair, where this pull request keeps its own side and rebinds it to the merged head. No other file needed resolution."
   ],
   "stop_conditions_hit": []
 }

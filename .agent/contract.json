@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
-  "generation": 4,
+  "generation": 5,
   "work_issue": 2506,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Preserve exact authorized PopSG Files and Guides search results, facets and filters while meeting the existing bounded preview response budget.",
-  "base_sha": "3f1326b64d1ff0adc52fe34ee404be717328d015",
+  "base_sha": "0f22de12562b7250ebf70fb07502e0fbce429cb3",
   "dispatcher": "codex shared-db.orch marker2536 route01a07ceb-249b-7dc0-8f3a-ad5091e3a085",
-  "worker": "claude fix-pr2542 successor under orchestrator marker 2597",
+  "worker": "claude pr2542-green successor under orchestrator marker 2597",
   "branch": "codex/issue-2506-search-performance",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/fix-pr2542",
+  "worktree": "C:/tmp/shared-db-orch-2536-2506-performance",
   "allowed_paths": [
-    "supabase/migrations/20260907183041_popsg_search_v2_bounded_paging.sql",
+    "supabase/migrations/20260908195355_popsg_search_v2_bounded_paging.sql",
     "supabase/tests/popsg_search_style_guide_library_v2_contracts.sql",
     "scripts/benchmark_popsg_search_v2.py",
-    "scripts/production-verification-sidecars/20260907183041.json",
+    "scripts/production-verification-sidecars/20260908195355.json",
     "scripts/production_business_risk_gate.py",
     ".agent/contract.json",
     ".agent/completion.json",
@@ -24,10 +24,10 @@
     "docs/verification/throughput-guard-truth-baseline-20260828.json"
   ],
   "file_writes": [
-    "supabase/migrations/20260907183041_popsg_search_v2_bounded_paging.sql",
+    "supabase/migrations/20260908195355_popsg_search_v2_bounded_paging.sql",
     "supabase/tests/popsg_search_style_guide_library_v2_contracts.sql",
     "scripts/benchmark_popsg_search_v2.py",
-    "scripts/production-verification-sidecars/20260907183041.json",
+    "scripts/production-verification-sidecars/20260908195355.json",
     "scripts/production_business_risk_gate.py",
     ".agent/contract.json",
     ".agent/completion.json",
@@ -67,7 +67,8 @@
     "Independent exact-head review and live governed deployment acceptance remain pending after implementation checks",
     "Generation2 authorizes focused CI repair after generation1 implementation: meaningful named catalog verification and explicit semantic-audit disposition; generation1 remains immutable.",
     "Registered catalog predicate changes source hash of detector module; regenerate bound baseline with unchanged detector behavior and historical inventory.",
-    "Generation4 authorizes integrating current origin/main and regenerating the two derived throughput-guard truth artifacts from the merged tree; no SQL, benchmark, sidecar or catalog semantics change, and generations1-3 remain immutable."
+    "Generation4 authorizes integrating current origin/main and regenerating the two derived throughput-guard truth artifacts from the merged tree; no SQL, benchmark, sidecar or catalog semantics change, and generations1-3 remain immutable.",
+    "Generation5 authorizes only the governed migration-version supersession bookkeeping: the coordinator re-reserved forward version20260908195355 in place of20260907183041 under claim2510, and this generation integrates current origin/main0f22de12562b7250ebf70fb07502e0fbce429cb3 and rebinds the evidence pair. The executable SQL body, benchmark, sidecar, catalog predicate and audit semantics are unchanged; generations1-4 remain immutable."
   ],
   "stop_conditions": [
     "Claim or marker ownership changes",
