@@ -1,16 +1,17 @@
 {
   "schema_version": 1,
-  "work_issue": 1868,
+  "work_issue": 1403,
   "outcome": "ready-for-merge",
-  "pr": 2606,
+  "pr": 2613,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/1868/4",
-  "contract_sha256": "039dc9ce158086279551d6a2bdb9171273c3e8e7dd6efa01d7d8bf8ffb8b9705",
-  "head_sha": "4c9ce4bf727997926ff201791f583626305e02e6",
+  "contract_ref": "refs/db-contracts/1403/6",
+  "contract_sha256": "907970e05aeb9652521634141615fd48fc244dc4154a82cf470bf0580f20ebb9",
+  "head_sha": "835d05cbf409ea52789eaf0ff61ebdc67b3c7ef7",
   "files_changed": [
+    "docs/verification/main-required-status-checks.json",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/reap-merged-worktrees.mjs",
-    "scripts/reap-merged-worktrees.test.mjs"
+    "scripts/check-required-checks-preflight.mjs",
+    "scripts/check-required-checks-preflight.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
@@ -18,27 +19,17 @@
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Contract is valid; generation 3 published as refs/db-contracts/1868/3 at 1d571eaa. Generation 3 differs from generation 2 only in its base SHA and worktree: the branch had to be refreshed from main to clear a merge conflict, and a contract ref is immutable, so a new base needs a new generation. No reaper behaviour changed."
+      "evidence": "Contract is valid; generation 3 published as refs/db-contracts/1403/3 at 500994e3. Generations 1 and 2 belong to the codex session that activated enforced mode on 2026-09-07; this generation covers the separate required-context promotion that activation record deferred."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Report satisfies contract generation 3 pinned by hash 79a9b7f4."
+      "evidence": "Report satisfies contract generation 3 pinned by hash 31a35f15."
     },
     {
-      "command": "node --test scripts/reap-merged-worktrees.test.mjs",
+      "command": "node --test scripts/check-required-checks-preflight.test.mjs",
       "exit_code": 0,
-      "evidence": "30 tests pass, 0 fail, up from 12. Every new signal has a known-dirty case: a claim naming an exact worktree, a claim naming only the branch, a REAL db-author-lease body as manage-migration-author-lanes.mjs emits it, path comparison across separators/case/trailing slash, a claim body with no machine block, the reap's own working directory, a recently active worktree under a live marker, a worktree quiet for the whole window, and UNMEASURABLE ACTIVITY COUNTS AS LIVE across undefined, null, NaN and a non-number. --force is proven to override neither a claim, uncommitted work, a lock, a detached head, unpushed commits, nor an unmerged branch. An unreadable marker list plus an unreadable claim list blocks the run, and passing the marker ARRAY where the liveness bit belongs now throws. lastActivityMs is measured directly against a real temporary repository and against a directory that does not exist."
-    },
-    {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=267. Two new sites, both prose comments in scripts/reap-merged-worktrees.mjs containing the word 'missing', recorded as excluded with reviewed reasons; neither makes a claim about a migration or a DDL object."
-    },
-    {
-      "command": "node scripts/check-github-transport-conformance.mjs",
-      "exit_code": 0,
-      "evidence": "200 files scanned; every GitHub call goes through scripts/lib/github-transport.mjs."
+      "evidence": "47 tests, 47 pass, 0 fail after the review fix (42 before). Five are new: a regression test that reproduces the merge deadlock -- origin/main's mirror and pin both carry the older eleven while the head pins twelve, and the mirror is now accepted; a real shrink is still refused; a head whose pin drops a name origin/main still pins is refused with 'may only grow'; an unreadable, empty or unparseable origin/main pin is refused rather than defaulted; and a context named only inside a comment is not read as pinned."
     },
     {
       "command": "git diff --check",
@@ -46,63 +37,43 @@
       "evidence": "No whitespace errors."
     },
     {
-      "command": "node scripts/reap-merged-worktrees.mjs (dry run against the live repository)",
+      "command": "node scripts/update-required-checks.mjs --add \"Agent work contract\" --apply",
       "exit_code": 0,
-      "evidence": "First run: 79 worktree(s), 9 retireable, 70 kept, orchestrator LIVE (#2597), 8 claimed paths, 8 claimed branches, idle window 24h. Re-run after the review revisions: 79 worktree(s) again (other sessions created new ones), 0 retireable, 79 kept, every one with a stated reason. The run was not refused in either case, which is the whole repair."
+      "evidence": "Live change applied 2026-09-08T21:28:48Z. READBACK OK -- 12 contexts required, strict: false. Before: Promotion contract tests (offline), Cross-PR object collision, Tools offline tests, SQL migration guards, Domain ownership, Intake pointer guard, Handoff contract, Migration author lease, Migration guarded merge authorization, Orchestrator marker guard, Cancelled work guard. After: those eleven unchanged plus Agent work contract. No context removed, no context renamed. The tool rewrote docs/verification/main-required-status-checks.json from that readback, and this pull request carries the rewrite."
     },
     {
-      "command": "per-candidate verification: git -C <path> status --porcelain and git -C <path> log -1 for each of the 9",
+      "command": "gh pr checks <each open PR> --json name,state | select .name == \"Agent work contract\"",
       "exit_code": 0,
-      "evidence": "All 9 clean, pushed, on branches with merged pull requests, last committed between 25 hours and 6 days ago. None named by an open claim."
+      "evidence": "Gate evidence read at 2026-09-08T21:27:09Z, one day after enforced mode began at 2026-09-07T21:26:45Z. Eleven pull requests open. Nine SUCCESS. PR 2612 FAILURE, and its log gives the reason as 'checked PR base is not an ancestor of the reported implementation head; refresh the branch before relying on its evidence' -- a stale branch its own author refreshes, which is the gate working rather than a defect in it. PR 2606 reported no checks at all because it is in conflict with main, and GitHub cannot compute a merge commit for a conflicted pull request, so no pull_request workflow is created for it."
     },
     {
-      "command": "node scripts/reap-merged-worktrees.mjs --apply",
+      "command": "node -e \"import('./scripts/check-required-checks-preflight.mjs').then(m => console.log(m.readPinnedFloor(process.cwd()).length, m.readRequiredChecksMirror(process.cwd()).length))\"",
       "exit_code": 0,
-      "evidence": "Removed 9 of 9; worktree count 79 -> 70. The reap issue #1868 asked for has now run, alongside a live orchestrator, without --force."
+      "evidence": "Known-dirty control first: the pre-review head 1dea8fc5, run against the real origin/main, refuses with 'the trusted origin/main mirror is a stale subset; missing pinned contexts: Agent work contract' -- exactly the deadlock the reviewer described, reproduced from git rather than by hand. The fixed head then reports 'floor from origin/main: 11 names; includes Agent work contract? false' and 'mirror from origin/main accepted: 11 contexts', which is the state the guarded merge will see."
     },
     {
-      "command": "negative control on the activity signal: measured every mtime source across the live worktrees before choosing",
+      "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "The git administrative directory's own mtime read 0.0 hours for all 79 worktrees at once, because any git command anywhere in the repository refreshes it for every worktree. Including it produced 0 retireable candidates - the same do-nothing outcome as the old blanket refusal - so it was dropped and the reason recorded in the code."
-    },
-    {
-      "command": "governed review of PR 2606 at head 1c695d57, reviewer grok-4.6",
-      "exit_code": 0,
-      "evidence": "VERDICT: REVISE. One finding at merge-stopping weight: blockedByLiveOrchestrator read `markers.length > 0` while main() set `markers` to [] on a FAILED read, so unreadable markers plus unreadable claims did not refuse. Two lesser findings: --idle-hours accepted any positive number including 0.001, and several new guarantees were asserted only positively. All three are fixed in commit 3e7d2003 and each has a known-dirty test. Durable verdict refs/db-review-verdicts/1868-2606-1c695d57432fe61533a1f43ac8c32a0ba21496fa at 587aa827."
-    },
-    {
-      "command": "node scripts/agent-work-contract-git-evidence.mjs --contract-file .agent/contract.json --report-file .agent/completion.json --pr-base-sha <base> --pr-head-sha <head>",
-      "exit_code": 0,
-      "evidence": "Run against PR base 0f22de12 and the pull request head. The reported file list matches Git exactly, and the only commit after the implementation head is the pair of .agent evidence files."
-    },
-    {
-      "command": "governed review of PR 2606 at head 9f9e9151, reviewer gemini-3.8-flash-high, replacement sequence 1857",
-      "exit_code": 0,
-      "evidence": "VERDICT: APPROVE. The reviewer confirmed the three revisions demanded by the earlier grok review: blockedByLiveOrchestrator now takes the boolean liveness bit and throws a TypeError on a marker array, so an unreadable marker list plus an unreadable claim list refuses the run; MIN_IDLE_HOURS = 1 rejects sub-hour windows with exit 2 before any plan or deletion; and the six added tests are genuine negative controls. It judged the residual collision-gate exposure bounded, because such a worktree is removable only after its pull request merges, its tree is clean and pushed, and it has been inactive for the whole idle window. Durable verdict refs/db-review-verdict-replacements/1868-2606-9f9e9151b78256dae1a474a263d196240ba35663-1857 at 343713f8."
-    },
-    {
-      "command": "all required checks re-run after the refresh from main, at merge commit a55e37c0",
-      "exit_code": 0,
-      "evidence": "30 tests pass 0 fail; truth audit OK call_sites=267; transport conformance 200 files scanned; git diff --check clean. The refresh changed no source file on this branch: the only conflict was the pair of .agent evidence files, which every pull request changes, and it was resolved by taking main state for them and then rewriting them as generation 3."
-    },
-    {
-      "command": "node scripts/run-governed-review.mjs (glm-5.3, exact head 35f30069)",
-      "exit_code": 0,
-      "evidence": "Independent exact-head review returned APPROVE 35f30069af1f700e648b78bb567153ec71ea315b, recorded durably at refs/db-review-verdicts/1868-2606-35f30069af1f700e648b78bb567153ec71ea315b (6d3aa2d2). The reviewer traced every test by hand against the source and confirmed files_changed lists exactly the three non-.agent files."
+      "evidence": "truth audit OK: call_sites=268. The check first refused on this branch with 'semantic inventory drift: re-review changed call sites (found 268, recorded 267)' -- a real refusal reproduced in CI, not asserted -- because the new origin/main floor read raises a refusal whose text contains the word 'missing'. The one new site is recorded as excluded with its reason; no existing disposition was altered and no stale site remains."
     }
   ],
-  "assumptions_resolved": [
-    "The open db-claim issues are a usable positive liveness signal: 8 claimed worktree paths and 8 claimed branches were read from live issues and matched against the porcelain worktree list.",
-    "index, HEAD, logs/HEAD and ORIG_HEAD mtimes do distinguish a busy worktree from an abandoned one; the admin directory's own mtime does not.",
-    "No guard was removed or weakened. Dirty, unpushed, locked, detached and unmerged all still keep, in that order, and three new KEEP reasons were added ahead of the merged-branch check.",
-    "The whole-run refusal was narrowed, not deleted: it now fires when an orchestrator is live and the claims cannot be read, which is the case where no positive signal exists.",
-    "No database was read or written.",
-    "A failed read never relaxes a guard, on either path: an unreadable marker list counts as an orchestrator being live, AND that same liveness bit -- not the empty marker array -- is what the whole-run refusal consults when the claims are also unreadable.",
-    "The pull request reported no status checks at all because it was in conflict with main, not because a workflow was broken. GitHub cannot compute a merge commit for a conflicted pull request, so it creates no pull_request run. Refreshing the branch restored the checks.",
-    "The gemini approval pinned to 9f9e9151 and the glm approval pinned to 35f30069 are both spent: the guarded merge enforces exact-head approval, and main moved twice while reviews were running, forcing a refresh each time. Neither refresh changed the reaper's behaviour."
+  "deviations": [
+    "The tool's rewrite of the mirror drops the _provenance field the 2026-09-04 capture carried. The file says it is rewritten by the tool from its own post-write readback and must not be hand-edited, so the field was not restored by hand; the _why field it keeps already names the tool as the source."
   ],
-  "stop_conditions_hit": [],
   "residual_risk": [
-    "Every recorded approval is pinned to a superseded head, because main moves faster than a review completes. The merge therefore requires one more exact-head review at 4c9ce4bf and a dispatch taken immediately after it, with no other merge landing in between."
-  ]
+    "Between the live change and this pull request merging, branch protection requires twelve contexts while the mirror on main names eleven. The lag is permissive, not dangerous: the pre-flight still refuses any check that reported on the head and is not green, and live branch protection enforces the twelfth at merge time regardless. The floor is now read from origin/main, so the lag can no longer deadlock the merge.",
+    "Switch 2 of issue #1403 stays closed and the issue stays open. One open claim, issue #2418, still writes objects:, with an author lease running to 2026-09-09T02:53:18Z. A legacy objects: claim is read as a WRITE, so retiring the alias while it is live would let a second writer start against work already in flight."
+  ],
+  "assumptions_resolved": [
+    "The activation gate is met: enforced mode began 2026-09-07T21:26:45Z and the live change was applied 2026-09-08T21:28:48Z, two minutes after a full day had passed.",
+    "Enforced mode has run green for that day in the sense the gate meant: nine of eleven open pull requests pass the check, the one FAILURE is a stale branch base the check correctly refuses, and the one with no result at all is a pull request in conflict with main, for which GitHub creates no pull_request run.",
+    "The pinned floor grew without weakening: every test that consumes PINNED_REQUIRED_CONTEXTS either compares the committed mirror to it or feeds it in as a trusted origin/main list, and all 42 pass.",
+    "Nothing was removed or renamed and strict stayed false, proved by the tool's own post-write readback rather than by the request that was sent.",
+    "No database was read or written.",
+    "Switch 2 was not touched: the legacy objects: alias is still live, and issue #1403 stays open for it.",
+    "The independent review of head fee94bce returned REVISE on a real defect, not a nitpick: the guarded merge runs the pre-flight from the head's tree, so a grown pin was judged against origin/main's un-grown mirror and the only merge path refused the only commit that could update that mirror. It was fixed rather than argued away, and the pre-fix failure was reproduced from git before the fix was written.",
+    "The branch was refreshed onto main after pull request 2606 merged, because the guarded merge refuses a dispatch against a superseded tip. The refresh touched only the evidence pair; the three real files are unchanged from the reviewed fix.",
+    "The offline tools check refused this branch until the new refusal line carried an explicit disposition in the throughput truth audit. The inventory grew by exactly one site, which was reviewed and excluded on its meaning rather than silenced by raising the recorded count alone."
+  ],
+  "stop_conditions_hit": []
 }

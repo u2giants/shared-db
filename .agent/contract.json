@@ -1,58 +1,60 @@
 {
   "schema_version": 1,
-  "work_issue": 1868,
-  "generation": 4,
+  "work_issue": 1403,
+  "generation": 6,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Repair the worktree reaper so it can run while an orchestrator is live, by replacing the blanket whole-run refusal with per-worktree liveness evidence the repo already publishes: open database claims naming an exact worktree path or branch, the reap's own working directory, and recent filesystem activity inside each worktree's git administrative directory. Then run the reap that issue #1868 asked for.",
-  "base_sha": "d669c43eda033919091c532605ee1cf1f2e786e4",
+  "goal": "Complete Switch 1 of issue #1403 by making 'Agent work contract' a required status context on main and committing the two artefacts that must move with it: the mirror of the required list that the guarded-merge pre-flight reads when it cannot read branch protection, and the pinned floor in scripts/check-required-checks-preflight.mjs that defends the list against shrinking. Switch 2, retiring the legacy objects: alias, stays closed and is not touched.",
+  "base_sha": "a9d509098325b1759ab248ea62fe2e28372ca198",
   "dispatcher": "repo session, owner request 2026-09-08 (five oldest non-orchestrator issues)",
   "worker": "claude/repo-session-oldest-five",
-  "branch": "claude/1868-worktree-reap-liveness",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/land-1868",
+  "branch": "claude/1403-require-agent-work-contract",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/funny-nightingale-f17479",
   "allowed_paths": [
     ".agent/completion.json",
     ".agent/contract.json",
+    "docs/verification/main-required-status-checks.json",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/reap-merged-worktrees.mjs",
-    "scripts/reap-merged-worktrees.test.mjs"
+    "scripts/check-required-checks-preflight.mjs",
+    "scripts/check-required-checks-preflight.test.mjs"
   ],
   "file_writes": [
     ".agent/completion.json",
     ".agent/contract.json",
+    "docs/verification/main-required-status-checks.json",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/reap-merged-worktrees.mjs",
-    "scripts/reap-merged-worktrees.test.mjs"
+    "scripts/check-required-checks-preflight.mjs",
+    "scripts/check-required-checks-preflight.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not remove, disable or weaken the live-agent protection; the repair must be strictly better evidence, not less evidence.",
-    "Do not treat an unmeasurable worktree as idle; unknown activity counts as live.",
-    "Do not let --force override a positive database claim, uncommitted changes, unpushed commits, a lock, or a detached head.",
-    "Do not let a failed read of the markers or the claims relax any guard.",
-    "Do not remove a worktree that is dirty, unpushed, locked, detached, on an unmerged branch, or named by an open claim.",
-    "Do not let the whole-run refusal read the marker LIST; it must read the liveness bit, because an unreadable marker list is an empty list and is live."
+    "Do not hand-edit branch protection; the live change is made only by scripts/update-required-checks.mjs, which refuses every removal and rename and never touches strict.",
+    "Do not hand-edit docs/verification/main-required-status-checks.json; it is rewritten by that tool from its own post-write readback, and a hand-edited mirror is a mirror of nothing.",
+    "Do not change strict; it stays false under the owner ruling on issue #1286.",
+    "Do not remove or reorder any existing entry in PINNED_REQUIRED_CONTEXTS; the pin exists to make shrinking fail CI, so it may only grow.",
+    "Do not touch Switch 2. The legacy objects: alias stays live while any open claim still uses it, because such a claim is read as a WRITE and retiring it early would let a second writer start on work already in flight.",
+    "Do not let the proposed head supply the list its own mirror is judged against; the pinned floor is read from origin/main only."
   ],
   "required_checks": [
     "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
     "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
-    "node --test scripts/reap-merged-worktrees.test.mjs",
-    "node scripts/check-throughput-truth-audit.mjs",
-    "node scripts/check-github-transport-conformance.mjs",
+    "node --test scripts/check-required-checks-preflight.test.mjs",
     "git diff --check",
-    "node scripts/agent-work-contract-git-evidence.mjs --contract-file .agent/contract.json --report-file .agent/completion.json --pr-base-sha <base> --pr-head-sha <head>"
+    "node scripts/check-throughput-truth-audit.mjs"
   ],
   "assumptions": [
-    "A db-claim or db-author-lease issue whose fenced block names an exact worktree path or branch is a positive liveness signal that does not depend on guessing from git alone. This is NOT true of every open db-claim issue: the collision-gate bodies written by scripts/check-dispatch-collision.mjs carry no worktree or branch field at all, so those agents are protected by the idle window and the unmerged-branch refusal rather than by a claim. Corrected in generation 2 after the governed review of PR #2606.",
-    "A worktree an agent is working in has recent mtimes on its own index, HEAD, logs/HEAD or ORIG_HEAD.",
-    "The git administrative DIRECTORY's own mtime is not a usable signal, because any git command anywhere in the repository refreshes it for every worktree at once.",
-    "Generation 3 exists only because the branch had to be refreshed from main to clear a merge conflict. The conflict was confined to the two .agent evidence files, which every pull request changes; it was resolved by taking main state for them and rewriting them as this generation, so the merge commit carries no hand-resolved code. No behaviour of the reaper changed between generation 2 and generation 3.",
-    "Generation 4 exists only because main moved again while the exact-head review was running, and the guarded merge refuses a dispatch against a superseded tip. The branch was refreshed from the new main tip and the evidence pair rebound. No behaviour of the reaper changed between generation 3 and generation 4."
+    "The activation gate in config/agent-work-contract-activation.json is met: enforced mode began 2026-09-07T21:26:45Z and this change was made after 2026-09-08T21:26:45Z, a full day later.",
+    "A pull request that legitimately FAILS the newly required check is the gate working, not a reason to defer it. Both such pull requests open at the time of the switch fail for stale branch evidence their own authors refresh, not for anything the check gets wrong.",
+    "The pinned floor may grow without weakening it, because every test that uses it either compares the committed mirror to it or feeds it in as a trusted origin/main list.",
+    "Generation 4 exists because the independent review of generation 3 found that growing the pin deadlocked the guarded merge: the pre-flight runs from the head's tree, so the head's grown pin was judged against origin/main's not-yet-grown mirror and refused the very commit that would update it. The fix reads the floor from origin/main's own copy of the pre-flight source, so the test file joins the writable set. No branch-protection setting changed between generation 3 and generation 4.",
+    "Generation 5 exists only because main moved while this pull request waited, and the guarded merge refuses a dispatch against a superseded tip. The branch was refreshed from the new main and the evidence pair rebound. Nothing in the pre-flight changed between generation 4 and generation 5.",
+    "Generation 6 adds the throughput truth-audit inventory to the writable set. The origin/main floor read introduced one refusal whose text contains the word 'missing', which the semantic call-site inventory discovers, so the offline tools check refused until that site carried an explicit disposition. The site is dispositioned 'excluded': it reports the pre-flight's own unreadable input, not a database object that was never created."
   ],
   "stop_conditions": [
-    "Stop if any candidate for removal is dirty, unpushed, locked, detached, unmerged, or claimed.",
-    "Stop if the activity measurement cannot distinguish a busy worktree from an abandoned one.",
-    "Stop if the repair would require --force to run a routine reap."
+    "Stop if the readback after the live change does not show exactly twelve contexts with strict still false.",
+    "Stop if any context present before the change is absent after it.",
+    "Stop if the preflight test suite does not pass with the grown pin.",
+    "Stop if the pinned floor read from origin/main does not refuse a head that drops a name origin/main still pins."
   ]
 }
