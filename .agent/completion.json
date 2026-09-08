@@ -1,19 +1,65 @@
 {
   "schema_version": 1,
-  "work_issue": 2188,
+  "work_issue": 2403,
   "outcome": "ready-for-merge",
-  "pr": 2560,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2188/4",
-  "contract_sha256": "ebf2fc17e07a06347fe3217386c595d3f597035cc39ca175a1a749cc17ae5e3e",
-  "head_sha": "036b59f8bbf71f8fb43484be3038056a35aa10f9",
-  "files_changed": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
-  "db_reads": [],
-  "db_writes": [],
-  "checks": [
-    {"command": "node --test scripts/manage-migration-author-lanes.test.mjs", "exit_code": 0, "evidence": "477 tests passed; 0 failed, skipped, cancelled, or todo."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
+  "pr": 2425,
+  "migration_versions": ["20260908022407"],
+  "contract_ref": "refs/db-contracts/2403/2",
+  "contract_sha256": "0011590ca8adbf7c63e9d3bb79a0f5f45264ed4e654c6a534616dd3fcd0aea7e",
+  "head_sha": "1c928a09d55110228d3031cf9e6851b3a2fd648f",
+  "files_changed": [
+    ".agent/contract.json",
+    "supabase/migrations/20260908022407_hts_rag_split_isolated_schema.sql"
   ],
-  "assumptions_resolved": ["Bare-number and optional Issue claim titles normalize to the same exact issue identity; supersession and merged reissue have direct acceptance, wrong-issue, compound-workstream, and wrong-version tests."],
+  "db_reads": [
+    "table public.hts_rag_determinations",
+    "table public.hts_rag_extraction_jobs",
+    "table public.hts_rag_precedent_rulings",
+    "table public.hts_rag_precedents",
+    "table public.hts_rag_product_examples",
+    "table public.hts_rag_product_family_allowlist",
+    "table public.hts_rag_provider_responses",
+    "table public.hts_rag_review_events",
+    "table public.hts_rag_rulings"
+  ],
+  "db_writes": [
+    "schema hts_rag_split",
+    "table hts_rag_split.hts_rag_determinations",
+    "table hts_rag_split.hts_rag_extraction_jobs",
+    "table hts_rag_split.hts_rag_precedent_rulings",
+    "table hts_rag_split.hts_rag_precedents",
+    "table hts_rag_split.hts_rag_product_examples",
+    "table hts_rag_split.hts_rag_product_family_allowlist",
+    "table hts_rag_split.hts_rag_provider_responses",
+    "table hts_rag_split.hts_rag_review_events",
+    "table hts_rag_split.hts_rag_rulings",
+    "index hts_rag_split.hts_rag_determinations_comparison_category_idx",
+    "index hts_rag_split.hts_rag_determinations_comparison_review_idx",
+    "index hts_rag_split.hts_rag_determinations_family_created_idx",
+    "index hts_rag_split.hts_rag_extraction_jobs_idempotency_idx",
+    "index hts_rag_split.hts_rag_extraction_jobs_pending_claim_idx",
+    "index hts_rag_split.hts_rag_precedent_rulings_relationship_idx",
+    "index hts_rag_split.hts_rag_precedent_rulings_ruling_idx",
+    "index hts_rag_split.hts_rag_precedents_extraction_idempotency_idx",
+    "index hts_rag_split.hts_rag_precedents_family_review_idx",
+    "index hts_rag_split.hts_rag_product_examples_family_idx",
+    "index hts_rag_split.hts_rag_provider_responses_determination_idx",
+    "index hts_rag_split.hts_rag_review_events_subject_created_idx",
+    "index hts_rag_split.hts_rag_rulings_operationally_revoked_idx",
+    "index hts_rag_split.hts_rag_rulings_ruling_date_idx"
+  ],
+  "checks": [
+    {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Guard B accepted reserved version 20260908022407 after guarded supersession; static, expected-count, verification-cost, and EOL guards passed. Live-ledger Guard B2 did not run without a configured ledger and is not claimed as clearance."},
+    {"command": "node scripts/check-production-verification-sidecars.mjs --base origin/main", "exit_code": 0, "evidence": "42 sidecars checked; the migration has no dynamic execution markers and requires no sidecar."},
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."},
+    {"command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f supabase/migrations/20260908022407_hts_rag_split_isolated_schema.sql", "exit_code": 0, "evidence": "PostgreSQL 17 disposable server applied the unchanged migration and its built-in catalog/emptiness assertions successfully."},
+    {"command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f verify.sql", "exit_code": 0, "evidence": "All nine hts_rag_split tables remained empty while one sentinel row in each of the nine public.hts_rag_* positive-control tables remained unchanged."}
+  ],
+  "assumptions_resolved": [
+    "DesignFlow owner acknowledgement comment 5577130097 confirms shared-db owns the governed migration and exact consolidated non-production target route.",
+    "Guarded supersession evidence ref 48b591b18702a30d42a2bf25be1f9f785a4e3a4f permanently preserves original version 20260906040010 and reserves 20260908022407.",
+    "Original and superseded migration paths resolve to identical Git blob 3f2e7f44a6dfb30fc879449c684f260863c5fc10; only the filename changed.",
+    "Main 8d64a758 was integrated normally; no reviewer, preview, merge, production apply, claim release, issue closure, or inherited cleanup occurred."
+  ],
   "stop_conditions_hit": []
 }
