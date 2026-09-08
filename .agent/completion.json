@@ -6,8 +6,10 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2586/1",
   "contract_sha256": "5d4237703f9dc0e77c7e7fefe0fa51a740fe42ac43dff4fff405c07879137c32",
-  "head_sha": "4bf6f6a701af6eb33b11eda2e146faef9b04b321",
+  "head_sha": "9ab9624b20ac75e37e3ed012d2148abbc5ac7906",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "HANDOFF.d/2026-09-08T1735Z-edge-dev-codex-orchestrator-queue-handoff.md"
   ],
   "db_reads": [],
@@ -21,7 +23,7 @@
     {
       "command": "node scripts/check-handoff-contract.mjs",
       "exit_code": 0,
-      "evidence": "The pull request Handoff contract check completed successfully on exact head 4bf6f6a701af6eb33b11eda2e146faef9b04b321."
+      "evidence": "The pull request Handoff contract check completed successfully on exact implementation head 9ab9624b20ac75e37e3ed012d2148abbc5ac7906."
     },
     {
       "command": "manual handoff self-audit: 10 sections, per-agent blocks, queue seed, owner-decision sweep, secrets sweep",
@@ -31,7 +33,7 @@
   ],
   "assumptions_resolved": [
     "GitHub issue 2586 is open and paired in the handoff contract block.",
-    "The implementation commit changes only the new handoff file; the evidence commit adds only this contract and completion pair.",
+    "The implementation history through 9ab9624b contains only the new handoff and its required evidence pair; the final evidence commit changes only completion.json.",
     "No database, claim, workflow, application, licensed-data, or infrastructure mutation is asserted."
   ],
   "stop_conditions_hit": []
