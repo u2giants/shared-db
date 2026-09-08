@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 5,
+  "generation": 6,
   "work_issue": 2506,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
@@ -68,7 +68,8 @@
     "Generation2 authorizes focused CI repair after generation1 implementation: meaningful named catalog verification and explicit semantic-audit disposition; generation1 remains immutable.",
     "Registered catalog predicate changes source hash of detector module; regenerate bound baseline with unchanged detector behavior and historical inventory.",
     "Generation4 authorizes integrating current origin/main and regenerating the two derived throughput-guard truth artifacts from the merged tree; no SQL, benchmark, sidecar or catalog semantics change, and generations1-3 remain immutable.",
-    "Generation5 authorizes only the governed migration-version supersession bookkeeping: the coordinator re-reserved forward version20260908195355 in place of20260907183041 under claim2510, and this generation integrates current origin/main0f22de12562b7250ebf70fb07502e0fbce429cb3 and rebinds the evidence pair. The executable SQL body, benchmark, sidecar, catalog predicate and audit semantics are unchanged; generations1-4 remain immutable."
+    "Generation5 authorizes only the governed migration-version supersession bookkeeping: the coordinator re-reserved forward version20260908195355 in place of20260907183041 under claim2510, and this generation integrates current origin/main0f22de12562b7250ebf70fb07502e0fbce429cb3 and rebinds the evidence pair. The executable SQL body, benchmark, sidecar, catalog predicate and audit semantics are unchanged; generations1-4 remain immutable.",
+    "Generation6 authorizes one further scoped repair inside the same allowed paths: the supersession left the forward migration path hard-coded in scripts/benchmark_popsg_search_v2.py and scripts/test_production_catalog_verification.py, which raised FileNotFoundError in the offline guard suite. Only the path string moves from20260907183041 to20260908195355; no threshold, parity case or exact-body predicate changes, and generations1-5 remain immutable."
   ],
   "stop_conditions": [
     "Claim or marker ownership changes",
