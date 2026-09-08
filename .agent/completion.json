@@ -12,6 +12,7 @@
     ".agent/contract.json",
     ".github/workflows/agent-work-contract.yml",
     ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/guarded-migration-merge.yml",
     ".github/workflows/migration-author-lease.yml",
     "AGENTS.md",
     "HANDOFF.d/2026-09-08T1924Z-edge-dev-codex-handover-latency-plan.md",
