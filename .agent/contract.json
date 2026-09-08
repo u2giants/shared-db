@@ -10,15 +10,53 @@
   "worker": "codex recovery_2506 successor of stopped inherited2439 worker",
   "branch": "claude/issue-2439-bulk-operation-runs",
   "worktree": "/tmp/shared-db-orch-2536-2439",
-  "allowed_paths": ["supabase/migrations/20260907200137_bulk_operation_runs_history.sql", "supabase/tests/bulk_operation_runs_contracts.sql", ".agent/contract.json", ".agent/completion.json"],
-  "file_writes": ["supabase/migrations/20260907200137_bulk_operation_runs_history.sql", "supabase/tests/bulk_operation_runs_contracts.sql", ".agent/contract.json", ".agent/completion.json"],
+  "allowed_paths": [
+    "supabase/migrations/20260907200137_bulk_operation_runs_history.sql",
+    "supabase/tests/bulk_operation_runs_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "file_writes": [
+    "supabase/migrations/20260907200137_bulk_operation_runs_history.sql",
+    "supabase/tests/bulk_operation_runs_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
   "db_reads": [
     "function app.has_any_role",
     "type app.app_role"
   ],
-  "db_writes": ["table public.bulk_operation_runs", "column public.bulk_operation_runs.error", "column public.bulk_operation_runs.operation", "column public.bulk_operation_runs.run_id", "column public.bulk_operation_runs.stage", "column public.bulk_operation_runs.status", "index public.bulk_operation_runs_failures_idx", "index public.bulk_operation_runs_operation_run_key", "index public.bulk_operation_runs_operation_started_idx", "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"],
-  "prohibited_actions": ["No shared database writes,review allocation,merge or deployment without coordinator order", "No inherited claim relocation or applied migration editing", "No consumer worker changes or data seeding"],
-  "required_checks": ["bash scripts/check-sql.sh", "node scripts/check-production-verification-sidecars.mjs --base origin/main", "node scripts/check-throughput-truth-audit.mjs", "git diff --check"],
-  "assumptions": ["Claim2443 owner/path identifiers preserved; guarded newversion20260907200137 at published0a8307da", "Earlier disposable red-control and full SQL contracts passed; exact same SQL/test bytes apart from guarded version metadata", "Independent review and full live structural acceptance pending; worker append and alert wiring belong to PopDAM"],
-  "stop_conditions": ["Claim or coordinator ownership changes", "Main movement invalidates branch evidence", "SQL scope widens or any required check refuses"]
+  "db_writes": [
+    "table public.bulk_operation_runs",
+    "column public.bulk_operation_runs.error",
+    "column public.bulk_operation_runs.operation",
+    "column public.bulk_operation_runs.run_id",
+    "column public.bulk_operation_runs.stage",
+    "column public.bulk_operation_runs.status",
+    "index public.bulk_operation_runs_failures_idx",
+    "index public.bulk_operation_runs_operation_run_key",
+    "index public.bulk_operation_runs_operation_started_idx",
+    "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
+  ],
+  "prohibited_actions": [
+    "No shared database writes,review allocation,merge or deployment without coordinator order",
+    "No inherited claim relocation or applied migration editing",
+    "No consumer worker changes or data seeding"
+  ],
+  "required_checks": [
+    "bash scripts/check-sql.sh",
+    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+    "node scripts/check-throughput-truth-audit.mjs",
+    "git diff --check"
+  ],
+  "assumptions": [
+    "Claim2443 owner/path identifiers preserved; guarded newversion20260907200137 at published0a8307da",
+    "Earlier disposable red-control and full SQL contracts passed; exact same SQL/test bytes apart from guarded version metadata",
+    "Independent review and full live structural acceptance pending; worker append and alert wiring belong to PopDAM"
+  ],
+  "stop_conditions": [
+    "Claim or coordinator ownership changes",
+    "Main movement invalidates branch evidence",
+    "SQL scope widens or any required check refuses"
+  ]
 }

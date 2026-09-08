@@ -3,20 +3,66 @@
   "work_issue": 2439,
   "outcome": "ready-for-merge",
   "pr": 2447,
-  "migration_versions": ["20260907200137"],
+  "migration_versions": [
+    "20260907200137"
+  ],
   "contract_ref": "refs/db-contracts/2439/1",
   "contract_sha256": "2c28b47b8f5bf9d3cc9038b2e6210aa44ddcf2876047439879c0e2854e5756cc",
-  "head_sha": "d2f081ca012c1559a6a5f165c2a32cac737b9ae1",
-  "files_changed": [".agent/completion.json", ".agent/contract.json", "supabase/migrations/20260907200137_bulk_operation_runs_history.sql", "supabase/tests/bulk_operation_runs_contracts.sql"],
-  "db_reads": ["function app.has_any_role", "type app.app_role"],
-  "db_writes": ["table public.bulk_operation_runs", "column public.bulk_operation_runs.error", "column public.bulk_operation_runs.operation", "column public.bulk_operation_runs.run_id", "column public.bulk_operation_runs.stage", "column public.bulk_operation_runs.status", "index public.bulk_operation_runs_failures_idx", "index public.bulk_operation_runs_operation_run_key", "index public.bulk_operation_runs_operation_started_idx", "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"],
-  "checks": [
-    {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Static/recency passed; live-ledger subcheck skipped without token and not claimed as clearance."},
-    {"command": "node scripts/check-production-verification-sidecars.mjs --base origin/main", "exit_code": 0, "evidence": "Mandatory and changed sidecars passed; no dynamic markers in new migration."},
-    {"command": "node scripts/check-throughput-truth-audit.mjs", "exit_code": 0, "evidence": "255 audited sites, unchanged discovery."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."},
-    {"command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f role-test-wrapper.sql", "exit_code": 0, "evidence": "PostgreSQL 17 disposable local server ran the unchanged guarded migration and real JWT-aware app role helpers in one rolled-back transaction. Administrator read passed; ordinary-user query returned zero rows; anonymous read, administrator browser insert, and service_role truncate were denied. Failure retention, duplicate-run, unexplained-failure, update, and delete negative controls also passed."}
+  "head_sha": "b1a91c56f06650298cbac572dc2dc96247f3dbfc",
+  "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "supabase/migrations/20260907200137_bulk_operation_runs_history.sql",
+    "supabase/tests/bulk_operation_runs_contracts.sql"
   ],
-  "assumptions_resolved": ["Guarded supersession retained original version 20260906143443 as permanently reserved and uses protected version 20260907200137 without changing the migration blob.", "Preserved test-only commit bd349eaa integrated before a normal merge of main 8d64a758; original claim identifiers remain unchanged.", "PostgreSQL 17 role tests use the repository's real JWT-aware app helper definitions and Supabase-equivalent service_role BYPASSRLS.", "Independent review, CI, preview and production live structural acceptance remain pending behind issue 2449. Consumer worker appends and alert consumption belong to PopDAM; no claim of application completion."],
+  "db_reads": [
+    "function app.has_any_role",
+    "type app.app_role"
+  ],
+  "db_writes": [
+    "table public.bulk_operation_runs",
+    "column public.bulk_operation_runs.error",
+    "column public.bulk_operation_runs.operation",
+    "column public.bulk_operation_runs.run_id",
+    "column public.bulk_operation_runs.stage",
+    "column public.bulk_operation_runs.status",
+    "index public.bulk_operation_runs_failures_idx",
+    "index public.bulk_operation_runs_operation_run_key",
+    "index public.bulk_operation_runs_operation_started_idx",
+    "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
+  ],
+  "checks": [
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static/recency passed; live-ledger subcheck skipped without token and not claimed as clearance."
+    },
+    {
+      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "exit_code": 0,
+      "evidence": "Mandatory and changed sidecars passed; no dynamic markers in new migration."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "255 audited sites, unchanged discovery."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors."
+    },
+    {
+      "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f role-test-wrapper.sql",
+      "exit_code": 0,
+      "evidence": "PostgreSQL 17 disposable local server ran the unchanged guarded migration and real JWT-aware app role helpers in one rolled-back transaction. Administrator read passed; ordinary-user query returned zero rows; anonymous read, administrator browser insert, and service_role truncate were denied. Failure retention, duplicate-run, unexplained-failure, update, and delete negative controls also passed."
+    }
+  ],
+  "assumptions_resolved": [
+    "Guarded supersession retained original version 20260906143443 as permanently reserved and uses protected version 20260907200137 without changing the migration blob.",
+    "Preserved test-only commit bd349eaa integrated before a normal merge of main 8d64a758; original claim identifiers remain unchanged.",
+    "PostgreSQL 17 role tests use the repository's real JWT-aware app helper definitions and Supabase-equivalent service_role BYPASSRLS.",
+    "Independent review, CI, preview and production live structural acceptance remain pending behind issue 2449. Consumer worker appends and alert consumption belong to PopDAM; no claim of application completion."
+  ],
   "stop_conditions_hit": []
 }
