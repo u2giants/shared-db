@@ -372,6 +372,13 @@
       "reason": "This call site reports independent evidence and preserves the existing refusal exit."
     },
     {
+      "site": "scripts/check-applied-migration-edit.mjs:35",
+      "semantic_key": "scripts/check-applied-migration-edit.mjs:eea90ebb6704b333bda8c31dab907dc4d9d086fa20cd901465707c1aea303fb3:1",
+      "line_sha256": "eea90ebb6704b333bda8c31dab907dc4d9d086fa20cd901465707c1aea303fb3",
+      "disposition": "excluded",
+      "reason": "This line documents the guard's fail-closed result and does not make a throughput or derivation claim."
+    },
+    {
       "site": "scripts/check-business-rule-library.mjs:44",
       "semantic_key": "scripts/check-business-rule-library.mjs:0832def5bd571339fd83b3ddac83b66125ef29045101ca67c58ce6e11cda55a6:1",
       "line_sha256": "0832def5bd571339fd83b3ddac83b66125ef29045101ca67c58ce6e11cda55a6",
@@ -820,13 +827,6 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
-      "site": "scripts/manage-migration-author-lanes.mjs:4055",
-      "semantic_key": "scripts/manage-migration-author-lanes.mjs:f30023772b56725e26d2ee56709548ccdbe3ba11879aad96d6fe6f357c85079a:1",
-      "line_sha256": "f30023772b56725e26d2ee56709548ccdbe3ba11879aad96d6fe6f357c85079a",
-      "disposition": "excluded",
-      "reason": "Fail-closed immutable reviewer-evidence validation; the word missing does not describe database or migration state."
-    },
-    {
       "site": "scripts/manage-migration-author-lanes.mjs:3265",
       "semantic_key": "scripts/manage-migration-author-lanes.mjs:8da94f391777fd03edd79c104d91688f45731132e59a130de7ff14c484311415:1",
       "line_sha256": "8da94f391777fd03edd79c104d91688f45731132e59a130de7ff14c484311415",
@@ -909,6 +909,13 @@
       "line_sha256": "f2b70e881056d343bb62e9487b82900f635636b8136d2773566a2308bb505e5d",
       "disposition": "excluded",
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
+    },
+    {
+      "site": "scripts/manage-migration-author-lanes.mjs:4055",
+      "semantic_key": "scripts/manage-migration-author-lanes.mjs:f30023772b56725e26d2ee56709548ccdbe3ba11879aad96d6fe6f357c85079a:1",
+      "line_sha256": "f30023772b56725e26d2ee56709548ccdbe3ba11879aad96d6fe6f357c85079a",
+      "disposition": "excluded",
+      "reason": "Fail-closed immutable reviewer-evidence validation; the word missing does not describe database or migration state."
     },
     {
       "site": "scripts/migration_derivation.py:245",
@@ -1828,7 +1835,7 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     }
   ],
-  "call_site_count": 259,
-  "call_site_sha256": "c0f2cdff4302bca0a1c0871d05cb730188d820f0fa37d2634e3d97db74c77d9a",
+  "call_site_count": 260,
+  "call_site_sha256": "90c17b1404d837bf6975e17ae78211e2b3c5964bc2ce51a42f50005454ef6f15",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
