@@ -6,7 +6,7 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/1984/2",
   "contract_sha256": "afda9d6cc705ef613cc52e7fc571e6cda314e9810d12cdd40e488e40ca6f2704",
-  "head_sha": "041e2b4f45a14687fbeda058392fd681207f8f02",
+  "head_sha": "7d4db31d6aa697ad3af1fd91d696e5310897ebe1",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -36,12 +36,12 @@
     {
       "command": "node --test scripts/historical-item-mg-reclassification/guards.test.mjs",
       "exit_code": 0,
-      "evidence": "39 tests passed with no failures and no skips, including the licensed-row-data-in-a-git-tree refusal and the manifest-built-elsewhere refusal."
+      "evidence": "45 tests passed with no failures and no skips, including the new executor-level manifest-to-database binding, the fail-closed git probe, the per-run backup, and the source-header proof."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=260 after the union of this branch and main was pruned to the discovered inventory and re-digested."
+      "evidence": "truth audit OK: call_sites=265 after the sites added by this round of fixes were given explicit dispositions and the inventory was re-digested."
     },
     {
       "command": "git diff --check",
