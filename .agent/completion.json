@@ -4,22 +4,22 @@
   "outcome": "ready-for-merge",
   "pr": 2542,
   "migration_versions": [
-    "20260908195355"
+    "20260908214749"
   ],
-  "contract_ref": "refs/db-contracts/2506/6",
-  "contract_sha256": "cc84956297a8779788b176307179691f65bbc1a66ee49e928945f8251a5dfca7",
-  "head_sha": "ffc49e4b68e0363712bd663f0596551a84c40886",
+  "contract_ref": "refs/db-contracts/2506/7",
+  "contract_sha256": "2aac5280da4a83baf064fcaed64fd28ba65d05993f2879c834222417daad5600",
+  "head_sha": "bfb9d9ea94ef9cb970d5d5fd3dc7bfa300e335de",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/benchmark_popsg_search_v2.py",
-    "scripts/production-verification-sidecars/20260908195355.json",
+    "scripts/production-verification-sidecars/20260908214749.json",
     "scripts/production_business_risk_gate.py",
     "scripts/production_catalog_verification.py",
     "scripts/test_production_catalog_verification.py",
-    "supabase/migrations/20260908195355_popsg_search_v2_bounded_paging.sql",
+    "supabase/migrations/20260908214749_popsg_search_v2_bounded_paging.sql",
     "supabase/tests/popsg_search_style_guide_library_v2_contracts.sql"
   ],
   "db_reads": [
@@ -37,17 +37,17 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Re-run at merged head 9d6bcc643c2f0794ed4a0cc3939727ef8f9c5174 after the governed version supersession: static SQL guards passed and Guard B now accepts the branch, because reserved forward version 20260908195355 sorts after the base branch newest version 20260907200221. Guard B2 live-ledger input remained intentionally absent because this preparation performed no shared database write."
+      "evidence": "Re-run at implementation head bfb9d9ea after the second governed supersession: static SQL guards passed and Guard B accepts the branch, because reserved forward version 20260908214749 sorts after the merged base newest version 20260908202651. Guard B2 live-ledger input remained intentionally absent because this preparation performed no shared database write."
     },
     {
       "command": "python3 scripts/test_migration_derivation.py",
       "exit_code": 0,
-      "evidence": "42 tests passed in 0.567s at the merged head."
+      "evidence": "42 tests passed in 0.385s at the merged head bfb9d9ea."
     },
     {
       "command": "python3 scripts/benchmark_popsg_search_v2.py",
       "exit_code": 0,
-      "evidence": "A hash-matched disposable remote clone ran the required PostgreSQL 17 benchmark: baseline Files 8332ms and Guides 8161ms timed out at the unchanged 8s ceiling; forward Files 5809ms and Guides 5090ms passed; 160 exact full-JSON parity cases passed with 0 skipped. The local Windows attempt started no container because Docker was unavailable. The supersession changed only the version reference in the migration header comment, so the benchmarked executable SQL body is unchanged (1 insertion, 1 deletion, comment line only)."
+      "evidence": "Carried forward unchanged from generation 6, where it passed at exit 0. It could not be re-executed at head bfb9d9ea because this coordinating host has no docker binary (the script starts a disposable postgres:17-alpine container); the only change since that passing run is the forward-migration path string, and no threshold or parity case moved. The Database Contract Tests CI job re-runs the migration against an ephemeral database on this exact head."
     },
     {
       "command": "git diff --check",
@@ -57,22 +57,22 @@
     {
       "command": "python3 scripts/test_production_catalog_verification.py",
       "exit_code": 0,
-      "evidence": "Re-run at implementation head ffc49e4b68e0363712bd663f0596551a84c40886: 188 tests passed in 0.980s. The exact-body, signature, security and privilege verification remains enforced and now opens the superseded forward migration path 20260908195355."
+      "evidence": "Re-run at implementation head bfb9d9ea: 188 tests passed in 1.278s. The exact-body, signature, security and privilege verification remains enforced and now opens the superseded forward migration path 20260908214749."
     },
     {
       "command": "node --test scripts/throughput-guard/check-production-verification-sidecars.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
       "exit_code": 0,
-      "evidence": "10 passed, 0 failed, 0 skipped."
+      "evidence": "10 passed, 0 failed, 0 skipped at head bfb9d9ea."
     },
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "Re-run against origin/main 0f22de12562b7250ebf70fb07502e0fbce429cb3: status OK, all 44 sidecars passed, and the forward migration now scans as version 20260908195355 with its renamed sidecar."
+      "evidence": "Re-run against origin/main d669c43eda033919091c532605ee1cf1f2e786e4: status OK, all 44 sidecars passed, and the forward migration now scans as version 20260908214749 with its renamed sidecar."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "Re-run at the merged head: truth audit OK for 266 reviewed call sites; current main introduced no new unreviewed call site, so no regeneration was needed."
+      "evidence": "Re-run at the merged head bfb9d9ea: truth audit OK for 266 reviewed call sites; current main introduced no new unreviewed call site, so no regeneration was needed."
     }
   ],
   "assumptions_resolved": [
@@ -83,7 +83,9 @@
     "Independent exact-head review, governed forward preview, optimized authenticated preview API acceptance, guarded merge, ordered two-version production apply, and live business verification remain pending under the coordinator.",
     "The prior SQL Guard B refusal is resolved by the coordinator-authorized supersession under claim #2510: reserved forward version 20260907183041 was re-reserved as 20260908195355, which sorts after current main newest version 20260907200221. The migration, its sidecar and the business risk gate reference were renamed together; the executable SQL body is byte-identical apart from the single header comment line naming the reservation.",
     "Current origin/main 0f22de12562b7250ebf70fb07502e0fbce429cb3 was integrated by normal merge at implementation head 9d6bcc643c2f0794ed4a0cc3939727ef8f9c5174; the only conflicts were the single-slot .agent evidence pair, where this pull request keeps its own side and rebinds it to the merged head. No other file needed resolution.",
-    "The supersession initially left two source references behind: scripts/benchmark_popsg_search_v2.py and scripts/test_production_catalog_verification.py still opened supabase/migrations/20260907183041_popsg_search_v2_bounded_paging.sql, which raised FileNotFoundError in the offline SQL migration guards suite. Both now name version 20260908195355; only the path string changed, and the benchmark thresholds, parity cases and exact-body predicate are untouched."
+    "The supersession initially left two source references behind: scripts/benchmark_popsg_search_v2.py and scripts/test_production_catalog_verification.py still opened supabase/migrations/20260907183041_popsg_search_v2_bounded_paging.sql, which raised FileNotFoundError in the offline SQL migration guards suite. Both now name version 20260908195355; only the path string changed, and the benchmark thresholds, parity cases and exact-body predicate are untouched.",
+    "Current origin/main d669c43eda033919091c532605ee1cf1f2e786e4 was integrated by normal merge at 00cbc60317f7bac84ac399a9aa6a27411798eb10; current main is its second parent and a proven ancestor. The only conflicts were the single-slot .agent evidence pair, where this pull request keeps its own side and rebinds it to the merged head. No main migration touches public.search_style_guide_library_v2 or public.style_guide_search_documents, so no function body needed re-derivation.",
+    "That merge brought in version 20260908202651 from PR #2584, which sorts after reserved forward version 20260908195355 and refused SQL Guard B. The coordinator re-reserved 20260908214749 under claim #2510 (durable supersession ref refs/db-claim-supersessions/2510-20260908195355), renaming the migration and its sidecar together; the executable SQL body is byte-identical apart from the single header comment line naming the reservation. scripts/benchmark_popsg_search_v2.py and scripts/test_production_catalog_verification.py were moved with it, and only the path string changed."
   ],
   "stop_conditions_hit": []
 }
