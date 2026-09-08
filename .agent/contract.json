@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "generation": 3,
+  "generation": 4,
   "work_issue": 2506,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Preserve exact authorized PopSG Files and Guides search results, facets and filters while meeting the existing bounded preview response budget.",
   "base_sha": "3f1326b64d1ff0adc52fe34ee404be717328d015",
   "dispatcher": "codex shared-db.orch marker2536 route01a07ceb-249b-7dc0-8f3a-ad5091e3a085",
-  "worker": "codex recovery_2506 successor of stopped inherited worker",
+  "worker": "claude fix-pr2542 successor under orchestrator marker 2597",
   "branch": "codex/issue-2506-search-performance",
-  "worktree": "/tmp/shared-db-orch-2536-2506-performance",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/fix-pr2542",
   "allowed_paths": [
     "supabase/migrations/20260907183041_popsg_search_v2_bounded_paging.sql",
     "supabase/tests/popsg_search_style_guide_library_v2_contracts.sql",
@@ -66,7 +66,8 @@
     "Representative preview has217193active files and1773guides; no synthetic shared-preview load needed",
     "Independent exact-head review and live governed deployment acceptance remain pending after implementation checks",
     "Generation2 authorizes focused CI repair after generation1 implementation: meaningful named catalog verification and explicit semantic-audit disposition; generation1 remains immutable.",
-    "Registered catalog predicate changes source hash of detector module; regenerate bound baseline with unchanged detector behavior and historical inventory."
+    "Registered catalog predicate changes source hash of detector module; regenerate bound baseline with unchanged detector behavior and historical inventory.",
+    "Generation4 authorizes integrating current origin/main and regenerating the two derived throughput-guard truth artifacts from the merged tree; no SQL, benchmark, sidecar or catalog semantics change, and generations1-3 remain immutable."
   ],
   "stop_conditions": [
     "Claim or marker ownership changes",

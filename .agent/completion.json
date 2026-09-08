@@ -6,10 +6,12 @@
   "migration_versions": [
     "20260907183041"
   ],
-  "contract_ref": "refs/db-contracts/2506/3",
-  "contract_sha256": "10c2737512fd08375ddac6df0ac1c439a8dcfa8efb61c525273759406fec11fa",
-  "head_sha": "f1fc1c31e57c9b656a9a7a049fd3ca194fcb3f52",
+  "contract_ref": "refs/db-contracts/2506/4",
+  "contract_sha256": "333001a16c6e2be0f97065aa1e1a6f3151806678e0e882f9828b406b2855e1fe",
+  "head_sha": "41f3e56884eac54d107dce59b91f16f2e837ef03",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/benchmark_popsg_search_v2.py",
@@ -65,20 +67,21 @@
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "All 43 sidecars and the forward migration verification passed against current main."
+      "evidence": "All 44 sidecars and the forward migration verification passed against current main; the reviewed baseline detector source hash was regenerated from the merged scripts/production_catalog_verification.py."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "Truth audit passed for 256 reviewed call sites."
+      "evidence": "Truth audit passed for 266 reviewed call sites after integrating current main; the reviewed disposition list is the union of both sides, with the bound count and digest regenerated from the merged tree."
     }
   ],
   "assumptions_resolved": [
-    "Current origin/main 8d64a75812beec85d2f8b2c78669e5e17635359d was integrated by normal merge at implementation head f1fc1c31e57c9b656a9a7a049fd3ca194fcb3f52; current main is its second parent and a proven ancestor.",
+    "Current origin/main bc4caafab4f9b33480f920dd09abed8ef2e1cb6e was integrated by normal merge at implementation head 41f3e56884eac54d107dce59b91f16f2e837ef03; current main is its second parent and a proven ancestor. The only merge conflicts were the .agent evidence pair (this pull request keeps its own) and the two generated throughput-guard truth artifacts, which were regenerated from the merged tree rather than resolved by picking a side. No main migration touches public.search_style_guide_library_v2 or public.style_guide_search_documents, so no function body needed re-derivation.",
     "Claim2510 still exclusively protects function public.search_style_guide_library_v2 and reserved forward version20260907183041; applied original version20260907131610 retains Git blob27809f68ef885fa3666457158bc4e6d9e7f33ca0.",
     "Every scoped implementation and proof file retained its inherited Git blob after current-main integration; no SQL, benchmark, contract, sidecar, catalog predicate, or audit semantics changed.",
     "No active worker remained in the recorded remote workspace, and no exact-head reviewer or coordination lock was present before preparation.",
-    "Independent exact-head review, governed forward preview, optimized authenticated preview API acceptance, guarded merge, ordered two-version production apply, and live business verification remain pending under the coordinator."
+    "Independent exact-head review, governed forward preview, optimized authenticated preview API acceptance, guarded merge, ordered two-version production apply, and live business verification remain pending under the coordinator.",
+    "SQL Guard B now refuses this branch: current main carries migration version 20260907200221, which sorts after this claim’s permanently reserved forward version 20260907183041. The guard’s only sanctioned fix is renaming the migration to a new version, which would spend a version the claim did not reserve; that decision belongs to the coordinator and claim #2510, not to this preparation."
   ],
   "stop_conditions_hit": []
 }
