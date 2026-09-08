@@ -6,7 +6,7 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/1868/1",
   "contract_sha256": "8aaa1bf54ba0bed2bc905b6fc5616d3d537967342fa925a085e7a2d6959395fa",
-  "head_sha": "a3b7e0f9cf12f4f091527b4057c8d55826828715",
+  "head_sha": "3e7d200385977fb1b3d1ea18d633fcc8344ca6f8",
   "files_changed": [
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/reap-merged-worktrees.mjs",
@@ -28,7 +28,7 @@
     {
       "command": "node --test scripts/reap-merged-worktrees.test.mjs",
       "exit_code": 0,
-      "evidence": "24 tests pass, 0 fail, up from 12. Every new signal has a known-dirty case: a claim naming an exact worktree, a claim naming only the branch, path comparison across separators/case/trailing slash, a claim body with no machine block, the reap's own working directory, a recently active worktree under a live marker, a worktree quiet for the whole window, and UNMEASURABLE ACTIVITY COUNTS AS LIVE across undefined, null, NaN and a non-number. --force is proven to skip only the idle window and to override neither a claim nor uncommitted work."
+      "evidence": "30 tests pass, 0 fail, up from 12. Every new signal has a known-dirty case: a claim naming an exact worktree, a claim naming only the branch, a REAL db-author-lease body as manage-migration-author-lanes.mjs emits it, path comparison across separators/case/trailing slash, a claim body with no machine block, the reap's own working directory, a recently active worktree under a live marker, a worktree quiet for the whole window, and UNMEASURABLE ACTIVITY COUNTS AS LIVE across undefined, null, NaN and a non-number. --force is proven to override neither a claim, uncommitted work, a lock, a detached head, unpushed commits, nor an unmerged branch. An unreadable marker list plus an unreadable claim list blocks the run, and passing the marker ARRAY where the liveness bit belongs now throws. lastActivityMs is measured directly against a real temporary repository and against a directory that does not exist."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
@@ -48,7 +48,7 @@
     {
       "command": "node scripts/reap-merged-worktrees.mjs (dry run against the live repository)",
       "exit_code": 0,
-      "evidence": "79 worktree(s). 9 retireable, 70 kept. orchestrator LIVE (#2597); 8 claimed worktree path(s), 8 claimed branch(es); idle window 24h. The run was not refused, which is the whole repair."
+      "evidence": "First run: 79 worktree(s), 9 retireable, 70 kept, orchestrator LIVE (#2597), 8 claimed paths, 8 claimed branches, idle window 24h. Re-run after the review revisions: 79 worktree(s) again (other sessions created new ones), 0 retireable, 79 kept, every one with a stated reason. The run was not refused in either case, which is the whole repair."
     },
     {
       "command": "per-candidate verification: git -C <path> status --porcelain and git -C <path> log -1 for each of the 9",
@@ -64,6 +64,11 @@
       "command": "negative control on the activity signal: measured every mtime source across the live worktrees before choosing",
       "exit_code": 0,
       "evidence": "The git administrative directory's own mtime read 0.0 hours for all 79 worktrees at once, because any git command anywhere in the repository refreshes it for every worktree. Including it produced 0 retireable candidates - the same do-nothing outcome as the old blanket refusal - so it was dropped and the reason recorded in the code."
+    },
+    {
+      "command": "governed review of PR 2606 at head 1c695d57, reviewer grok-4.6",
+      "exit_code": 0,
+      "evidence": "VERDICT: REVISE. One finding at merge-stopping weight: blockedByLiveOrchestrator read `markers.length > 0` while main() set `markers` to [] on a FAILED read, so unreadable markers plus unreadable claims did not refuse. Two lesser findings: --idle-hours accepted any positive number including 0.001, and several new guarantees were asserted only positively. All three are fixed in commit 3e7d2003 and each has a known-dirty test. Durable verdict refs/db-review-verdicts/1868-2606-1c695d57432fe61533a1f43ac8c32a0ba21496fa at 587aa827."
     }
   ],
   "assumptions_resolved": [
@@ -71,7 +76,8 @@
     "index, HEAD, logs/HEAD and ORIG_HEAD mtimes do distinguish a busy worktree from an abandoned one; the admin directory's own mtime does not.",
     "No guard was removed or weakened. Dirty, unpushed, locked, detached and unmerged all still keep, in that order, and three new KEEP reasons were added ahead of the merged-branch check.",
     "The whole-run refusal was narrowed, not deleted: it now fires when an orchestrator is live and the claims cannot be read, which is the case where no positive signal exists.",
-    "No database was read or written."
+    "No database was read or written.",
+    "A failed read never relaxes a guard, on either path: an unreadable marker list counts as an orchestrator being live, AND that same liveness bit -- not the empty marker array -- is what the whole-run refusal consults when the claims are also unreadable."
   ],
   "stop_conditions_hit": []
 }
