@@ -3,6 +3,22 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { HISTORICAL_RESTORATIONS, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 
+test('pins the issue 2509 preview restoration without changing production eligibility',()=>{
+  const row=HISTORICAL_RESTORATIONS['20260907131728']
+  assert.equal(row.filename,'supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql')
+  assert.equal(row.previewProject,'mvpkijzfmfcxhnzqogzs')
+  assert.equal(row.previewApplyRun,'34157812748')
+  assert.equal(row.previewAppliedCommit,'bcc2603977678db73b4ca12d3ed1312a1bff64e2')
+  assert.equal(row.fileSha256,'03648ecbbee473f539c27f929a248c503c18d5fb906efe1409d11593cfdb5d7e')
+  assert.equal(row.statementBytes,9125)
+  assert.equal(row.statementSha256,'d273d46aa662d3ae24502da44e3226e9c5932c7646b8d5d430b76563fa9d2191')
+  assert.deepEqual(row.objects,[
+    'function public.get_sg_preview_stats',
+    'index public.idx_sgf_active_preview_category',
+    'table public.style_guide_files',
+  ])
+})
+
 test('pins the one authenticated preview historical restoration',()=>{
   const row=HISTORICAL_RESTORATIONS['20260817150944']
   assert.equal(row.name,'sync_dflow_columns_onto_plm_designflow_copies')
