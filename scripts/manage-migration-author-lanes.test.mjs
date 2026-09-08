@@ -3405,8 +3405,18 @@ test('active claim reversion rejects changed head, collision, dirty worktree, an
   assert.throws(()=>reversionActiveClaim(reversionArgs,NOW,reversionIo({localClean:()=>false})),/dirty/)
   assert.throws(()=>reversionActiveClaim(reversionArgs,NOW,reversionIo({reserveVersion:()=>({version:'20260816040000'})})),/not later/)
   assert.throws(()=>reversionActiveClaim({...reversionArgs,claim:999},NOW,reversionIo()),/not open/)
-  assert.throws(()=>reversionActiveClaim({...reversionArgs,issue:765},NOW,reversionIo()),/claim issue/)
-  assert.throws(()=>reversionActiveClaim({...reversionArgs,owner:'another'},NOW,reversionIo()),/claim issue/)
+  assert.throws(()=>reversionActiveClaim({...reversionArgs,issue:765},NOW,reversionIo()),/claim title does not identify exact issue #765/)
+  assert.throws(()=>reversionActiveClaim({...reversionArgs,owner:'another'},NOW,reversionIo()),/claim owner changed/)
+})
+test('issue 2188: version supersession accepts established claim-title forms and names the exact changed field',()=>{
+  for(const title of ['CLAIM: 764 sequence repair','CLAIM: issue #764 sequence repair','CLAIM: Issue 764 sequence repair']){
+    const io=reversionIo();io.issue.title=title
+    assert.equal(reversionActiveClaim(reversionArgs,NOW,io).newVersion,io.fresh,title)
+  }
+  const wrongTitle=reversionIo();wrongTitle.issue.title='CLAIM: 1764 unrelated work'
+  assert.throws(()=>reversionActiveClaim(reversionArgs,NOW,wrongTitle),/claim title does not identify exact issue #764/)
+  const wrongVersion=reversionIo();wrongVersion.issue.body=wrongVersion.issue.body.replace(reversionArgs.oldVersion,'20260816044639')
+  assert.throws(()=>reversionActiveClaim(reversionArgs,NOW,wrongVersion),/claim version changed/)
 })
 test('active claim reversion fails closed when mutex ownership is lost during partial failure',()=>{
   const io=reversionIo();io.commitAndPushReversion=()=>{io.refs.set(MUTEX_REF,'successor');throw new Error('push failed')}
@@ -3478,6 +3488,18 @@ test('merged stranded claim reissue refuses unmerged, non-main, wrong-version, r
   assert.throws(()=>reissueMergedStrandedClaim(mergedReissueArgs,NOW,mergedReissueIo({getPrFiles:()=>[{status:'added',filename:'supabase/migrations/20260827180000_wrong.sql'}]})),/stranded migration/)
   assert.throws(()=>reissueMergedStrandedClaim({...mergedReissueArgs,targetBranch:'codex/issue-1645-effective-filters-1649'},NOW,mergedReissueIo()),/fresh target/)
   assert.throws(()=>reissueMergedStrandedClaim(mergedReissueArgs,NOW,mergedReissueIo({reserveVersion:()=>({version:'20260827170000'})})),/not later/)
+})
+test('issue 2188: merged stranded reissue accepts established titles and pins exact workstream identity',()=>{
+  for(const title of ['CLAIM: 1645 repair','CLAIM: issue #1645 repair','CLAIM: Issue 1645 repair']){
+    const io=mergedReissueIo();io.issue.title=title
+    assert.equal(reissueMergedStrandedClaim(mergedReissueArgs,NOW,io).newVersion,io.fresh,title)
+  }
+  for(const title of ['CLAIM: 11645 unrelated','CLAIM: #1645/#1646 compound']){
+    const io=mergedReissueIo();io.issue.title=title
+    assert.throws(()=>reissueMergedStrandedClaim(mergedReissueArgs,NOW,io),/claim title does not identify exact issue #1645/)
+  }
+  const wrongVersion=mergedReissueIo();wrongVersion.issue.body=wrongVersion.issue.body.replace(mergedReissueArgs.oldVersion,'20260827183012')
+  assert.throws(()=>reissueMergedStrandedClaim(mergedReissueArgs,NOW,wrongVersion),/claim stranded version changed/)
 })
 
 test('merged stranded claim reissue rolls back claim and evidence after partial failure and fails closed after mutex loss',()=>{

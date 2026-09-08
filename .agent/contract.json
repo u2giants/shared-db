@@ -1,43 +1,21 @@
 {
   "schema_version": 1,
-  "work_issue": 2558,
-  "generation": 3,
+  "work_issue": 2188,
+  "generation": 4,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Return qwen-3.8-max to the active reviewer rotation now that its live qualification passed, without weakening the protection that an ineligible reviewer stays readable but receives no new assignment.",
-  "base_sha": "695a38c266b0c6d874aff1b9f1696f546f1239e6",
-  "dispatcher": "claude",
-  "worker": "claude",
-  "branch": "claude/qwen-rotation",
-  "worktree": "C:/repos/shared-db/.worktrees/qwen-rotation",
-  "allowed_paths": [
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    ".agent/contract.json",
-    ".agent/completion.json"
-  ],
-  "file_writes": [
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    ".agent/contract.json",
-    ".agent/completion.json"
-  ],
+  "goal": "Make claim-version supersession accept established unambiguous claim-title forms and name the exact identity field that changed.",
+  "base_sha": "dc3d144055c282d0708fb8efe8d9770394f003f0",
+  "dispatcher": "codex",
+  "worker": "codex",
+  "branch": "codex/issue-2188-claim-title",
+  "worktree": "C:/Users/ahazan/.codex/worktrees/issue-2188-shared-db",
+  "allowed_paths": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
+  "file_writes": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
   "db_reads": [],
   "db_writes": [],
-  "prohibited_actions": [
-    "Do not delete the test that proves an ineligible reviewer stays readable while receiving no new assignment.",
-    "Do not remove any name from REVIEWERS; historical evidence must stay resolvable.",
-    "Do not change database structure or data."
-  ],
-  "required_checks": [
-    "node --test scripts/manage-migration-author-lanes.test.mjs"
-  ],
-  "assumptions": [
-    "Qwen's live qualification on 2026-09-07 (ai-devops PR #316, merge commit 795902d8) is the evidence that lifts the quarantine.",
-    "Rotation order is unchanged; qwen-3.8-max re-enters at its existing roster position."
-  ],
-  "stop_conditions": [
-    "Stop if lifting the quarantine would require removing or weakening the ineligible-reviewer protection instead of repointing it.",
-    "Stop if the rotation change requires a database structure or data change."
-  ]
+  "prohibited_actions": ["Do not change database structure or data, relax exact-issue binding, or mutate live claims during verification."],
+  "required_checks": ["node --test scripts/manage-migration-author-lanes.test.mjs", "git diff --check"],
+  "assumptions": ["Claim titles beginning CLAIM: followed by a bare number or optional Issue token are established forms and remain unambiguous only when normalized to one exact workstream."],
+  "stop_conditions": ["Stop if accepting an established title form weakens exact issue identity or compound-workstream parsing."]
 }
