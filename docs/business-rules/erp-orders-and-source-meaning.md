@@ -330,6 +330,37 @@ the item-level field entirely. **Settled** (JamieLynn 2026-08-28, verified live)
 - **An ERP field name does not establish its meaning.** Several fields here mean something other
   than their name suggests, and two of the most obvious-looking ones are empty.
 
+### The item master mixes products with charges, and barely says which is which
+
+The ColdLion item master is not a product catalogue. Alongside real products it
+holds fee and charge codes, raw-material and component codes, sample and test
+placeholders, and abandoned junk records. The ERP does provide a flag for this -
+a single-character non-inventory field on the item record, landed here as
+`non_inventory_item` and mirrored in the DesignFlow item header as
+`non_inv_item` - but it is close to unused.
+
+Measured on 2026-09-07 across roughly 19,600 item records: 15 were flagged as
+non-inventory, about 14,900 were flagged as ordinary products, and about 4,700
+carried no value at all. At least 35 entries that are plainly not products -
+glitter fee, reprint fee, colour corners, handling, foil stamp fee, sample
+charge, port charge, plate cost, ticketing, discount, commission, lenticular
+material, felt pieces, clear hang tabs - were recorded as ordinary products. A
+further ~450 records are junk: 250 with no description, and about 150 that are
+gibberish or test entries such as "awd" and "Test Alex 5".
+
+Two consequences for any work that reads this feed:
+
+1. **Never count item rows as products.** A population taken straight from the
+   item master overstates the catalogue by fees, materials, placeholders and
+   junk, and the flag will not filter them out for you.
+2. **The absence of the flag proves nothing.** Only a positive non-inventory
+   value carries information today; blank and "product" are indistinguishable
+   until the field is corrected at source and kept current.
+
+Which entries belong on each side of the line is a business question, not an ERP
+question - see *Non-inventory items* in
+[`product-items-and-identifiers.md`](product-items-and-identifiers.md).
+
 ### How ColdLion answers questions — and why that matters
 
 ColdLion answers well, fixes real defects quickly, and has twice added fields on request. But their

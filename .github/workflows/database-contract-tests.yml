@@ -229,6 +229,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/migration-logs"
           OK=0; BAD=0
           : > "$RUNNER_TEMP/failed-migrations.txt"
+          # THE PROVEN-APPLIED RECORD (issue #2537). One basename per line, appended the
+          # moment a migration really applies, in either pass. The pass-2 ordering repair
+          # reads it to tell a routine body that a LATER migration genuinely installed
+          # from one that merely shares a later filename. Without this record the repair
+          # restored baseline bodies over successful forward repairs and said nothing.
+          : > "$RUNNER_TEMP/applied-migrations.txt"
           # THE LEDGER TABLE, because applying by psql instead of by the CLI means nothing
           # creates it. 20260723112940_dam_core_taxonomy_ledger_barrier.sql reads
           # supabase_migrations.schema_migrations and cannot work without it. Each file's
@@ -250,6 +256,7 @@ jobs:
                 "insert into supabase_migrations.schema_migrations (version, name)
                  values ('${base%%_*}', '$base') on conflict (version) do nothing;" \
                 >> "$RUNNER_TEMP/ledger-init.log" 2>&1
+              echo "$base" >> "$RUNNER_TEMP/applied-migrations.txt"
             else
               BAD=$((BAD+1))
               echo "$base" >> "$RUNNER_TEMP/failed-migrations.txt"
@@ -392,8 +399,17 @@ jobs:
             # `revoke execute on all functions in schema api from service_role` reached
             # roughly sixty api functions created months later. The migrations applied
             # cleanly and said nothing; only a contract test asserting a grant caught it.
+            #
+            # The definition half is bound to PROVEN provenance (#2537): a later
+            # migration's body is snapshotted only if that later migration is on the
+            # applied record for this replay. 20260902042548 and 20260904121037 both
+            # roll back in pass 2, so what the catalog holds for their routines is the
+            # BASELINE's body -- putting that back after 20260901142825 undid its
+            # forward repair and broke two effective-count contracts that looked
+            # unrelated to it.
             if ! SNAPSHOT_QUERY=$(python scripts/check_pass2_routine_supersession.py "$m" \
-                 --migrations-dir supabase/migrations); then
+                 --migrations-dir supabase/migrations \
+                 --applied-migrations "$RUNNER_TEMP/applied-migrations.txt"); then
               echo "::error::could not calculate pass-2 ordering repair for $base" >&2
               exit 2
             fi
@@ -425,6 +441,9 @@ jobs:
                 "insert into supabase_migrations.schema_migrations (version, name)
                  values ('${base%%_*}', '$base') on conflict (version) do nothing;" \
                 >> "$RUNNER_TEMP/ledger-init.log" 2>&1
+              # Proven now, so a still-older pass-2 file later in this loop may
+              # legitimately snapshot and restore what this file just installed.
+              echo "$base" >> "$RUNNER_TEMP/applied-migrations.txt"
             else
               BAD=$((BAD+1))
               echo "$base" >> "$RUNNER_TEMP/failed-migrations-pass2.txt"
@@ -456,6 +475,15 @@ jobs:
               echo ""
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Prove pass-2 routine restoration against live PostgreSQL
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 54322
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: python scripts/verify_pass2_routine_restoration_live.py
 
       # THE SYNTHETIC FIXTURE SEED (issue #754)
       # ---------------------------------------

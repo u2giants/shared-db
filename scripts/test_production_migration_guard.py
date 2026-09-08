@@ -215,6 +215,12 @@ class GuardTests(unittest.TestCase):
         with self.assertRaisesRegex(GuardError, "preview-only historical restoration"):
             parse_allowlist("20260824150630")
 
+    def test_issue_2509_historical_restoration_remains_production_eligible(self):
+        self.assertEqual(parse_allowlist("20260907131728"), ["20260907131728"])
+
+    def test_issue_2356_historical_restoration_remains_production_eligible(self):
+        self.assertEqual(parse_allowlist("20260907152838"), ["20260907152838"])
+
     def test_bad_allowlists_are_blocked(self) -> None:
         values = [
             "",
@@ -263,8 +269,34 @@ class GuardTests(unittest.TestCase):
                 "20260827183011",
                 "20260828052706",
                 "20260830195655",
+                "20260903200951",
             },
         )
+
+    def test_stranded_coldlion_division_original_is_blocked_but_reissue_is_allowed(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(GuardError, "20260903200951"):
+            parse_allowlist("20260903200951")
+        with self.assertRaisesRegex(GuardError, "20260903200951"):
+            parse_allowlist("20260903200951,20260905024139")
+        self.assertEqual(parse_allowlist("20260905024139"), ["20260905024139"])
+    def test_stranded_coldlion_division_reissue_is_byte_identical(self) -> None:
+        """The reissue is only safe because it is the SAME executable SQL.
+
+        Nothing else in the suite pins that. If a later edit touches either
+        file, the hard block on 20260903200951 would be retiring a version
+        whose replacement no longer matches it.
+        """
+        migrations = REPO / "supabase" / "migrations"
+        original = (
+            migrations / "20260903200951_coldlion_division_reference_table.sql"
+        ).read_bytes()
+        reissue = (
+            migrations
+            / "20260905024139_reissue_coldlion_division_reference_table.sql"
+        ).read_bytes()
+        self.assertEqual(original, reissue)
 
     def test_stranded_issue_505_original_is_permanently_blocked(self) -> None:
         with self.assertRaisesRegex(GuardError, "20260830195655"):
@@ -3185,6 +3217,31 @@ class AtomicBatchTests(unittest.TestCase):
 
     def test_a_fully_applied_batch_does_not_block_anything(self) -> None:
         assert_atomic_batches(sorted(BATCHES["B5"]), set(BATCHES["B9"]))
+
+    def test_unrelated_promotion_is_refused_while_production_rests_mid_batch(self) -> None:
+        """Issue #870: an unrelated allowlist must not hide an illegal rest."""
+        applied = {min(BATCHES["B9"])}
+        with self.assertRaises(GuardError) as ctx:
+            assert_atomic_batches(["20260811030000"], applied)
+        message = str(ctx.exception)
+        self.assertIn("already resting inside batch B9", message)
+        self.assertIn("must include every remaining batch member", message)
+        for version in sorted(BATCHES["B9"] - applied):
+            self.assertIn(version, message)
+
+    def test_mid_batch_recovery_remains_allowed(self) -> None:
+        """Fail closed without wedging the only safe forward recovery."""
+        applied = {min(BATCHES["B9"])}
+        assert_atomic_batches(sorted(BATCHES["B9"] - applied), applied)
+
+    def test_unrelated_promotion_is_refused_for_a_never_rest_batch_too(self) -> None:
+        """The fail-closed scan covers contract-derived NEVER-REST batches."""
+        applied = {min(BATCHES["B2"])}
+        with self.assertRaises(GuardError) as ctx:
+            assert_atomic_batches(["20260811030000"], applied)
+        self.assertIn("already resting inside batch B2", str(ctx.exception))
+        self.assertIn("batch B2 is NEVER-REST", str(ctx.exception))
+        assert_atomic_batches(sorted(BATCHES["B2"] - applied), applied)
 
     # -- the choke points --------------------------------------------------
 

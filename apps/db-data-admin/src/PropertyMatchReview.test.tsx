@@ -8,6 +8,7 @@ import {
   defaultSelection,
   describeMatchState,
   loadPropertyMatchQueue,
+  loadOpaPropertyOptions,
   matchState,
   normaliseRow,
   type PropertyMatchRow,
@@ -47,7 +48,10 @@ const row = (overrides: Partial<PropertyMatchRow> = {}): PropertyMatchRow => ({
 const clientOf = (rpc: ReturnType<typeof vi.fn>, names: { licensed_property_id: number; opa_property_name: string }[] = []) =>
   ({
     rpc,
-    from: () => ({ select: () => ({ in: async () => ({ data: names, error: null }) }) }),
+    from: () => ({ select: () => ({
+      in: async () => ({ data: names, error: null }),
+      order: () => ({ range: async (from: number, to: number) => ({ data: names.slice(from, to + 1), error: null }) }),
+    }) }),
   }) as unknown as ApiClient
 
 const queueOnce = (rows: PropertyMatchRow[]) =>
@@ -69,6 +73,17 @@ describe('property match queue data', () => {
     expect(rows[0].candidates[0].property_name).toBe('Muppets')
   })
 
+  it('loads the complete Disney Property list for autocomplete', async () => {
+    const names = [
+      { licensed_property_id: 11, opa_property_name: 'Aladdin' },
+      { licensed_property_id: 12, opa_property_name: 'Aladdin (2019)' },
+    ]
+    await expect(loadOpaPropertyOptions(clientOf(vi.fn(), names))).resolves.toEqual([
+      { licensed_property_id: 11, property_name: 'Aladdin' },
+      { licensed_property_id: 12, property_name: 'Aladdin (2019)' },
+    ])
+  })
+
   it('orders candidates by the ordinal the database recorded', () => {
     const sorted = normaliseRow(row({ candidates: [candidate(12, 2), candidate(11, 1)] as never }))
     expect(sorted.candidates.map(c => c.licensed_property_id)).toEqual([11, 12])
@@ -79,16 +94,16 @@ describe('property match queue data', () => {
     await expect(loadPropertyMatchQueue(clientOf(rpc))).rejects.toBeInstanceOf(ReviewQueueUnavailableError)
   })
 
-  it('pre-ticks a lone candidate but never pre-makes a choice', () => {
+  it('preselects every recorded candidate as a removable suggestion', () => {
     expect(defaultSelection(row())).toEqual([333])
-    expect(defaultSelection(row({ candidates: [candidate(11, 1), candidate(12, 2)] as never }))).toEqual([])
+    expect(defaultSelection(row({ candidates: [candidate(11, 1), candidate(12, 2)] as never }))).toEqual([11, 12])
   })
 
   it('explains why each row is in the queue', () => {
     const many = row({ candidates: [candidate(11, 1), candidate(12, 2)] as never })
     expect(matchState(many)).toBe('multiple')
-    expect(describeMatchState(many)).toContain('2 OPA Properties')
-    expect(describeMatchState(row({ candidates: [] }))).toContain('No OPA Property was proposed')
+    expect(describeMatchState(many)).toContain('2 submissions-system (OPA) names')
+    expect(describeMatchState(row({ candidates: [] }))).toContain('No submissions-system (OPA) name was proposed')
   })
 
   it('refuses to approve with nothing selected, or with no reason', async () => {
@@ -142,7 +157,7 @@ describe('PropertyMatchReview', () => {
     expect(sent.p_client_request_id).not.toBe(sent.p_resolution_id)
   })
 
-  it('lets a reviewer pick both candidates on a two-match clause', async () => {
+  it('lets a reviewer replace suggestions using the full autocomplete list', async () => {
     const rpc = queueOnce([row({
       display_label: 'Pinocchio',
       candidate_count: 2,
@@ -154,9 +169,11 @@ describe('PropertyMatchReview', () => {
     ])
     render(<PropertyMatchReview client={client} />)
     await screen.findByRole('heading', { name: 'Pinocchio' })
-    const boxes = screen.getAllByRole('checkbox')
-    expect(boxes).toHaveLength(2)
-    boxes.forEach(box => fireEvent.click(box))
+    expect(screen.getByText('Pinocchio · OPA 11')).toBeInTheDocument()
+    expect(screen.getByText('Pinocchio (Live-Action) · OPA 12')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove OPA Property 12' }))
+    const autocomplete = screen.getByPlaceholderText(/Type to search every Disney Property/)
+    fireEvent.change(autocomplete, { target: { value: 'Pinocchio (Live-Action) · OPA 12' } })
     fireEvent.change(screen.getByPlaceholderText(/Why this decision/), { target: { value: 'Clause covers both' } })
     fireEvent.click(screen.getByRole('button', { name: /Confirm 2 matches/ }))
     await waitFor(() => expect(rpc.mock.calls[1][1]).toMatchObject({ p_licensed_property_ids: [11, 12] }))
@@ -165,7 +182,7 @@ describe('PropertyMatchReview', () => {
   it('falls back to the OPA id when the name lookup finds nothing', async () => {
     const rpc = queueOnce([row({ candidates: [candidate(999, 1)] as never })])
     render(<PropertyMatchReview client={clientOf(rpc)} />)
-    expect(await screen.findByText('OPA Property 999')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Remove OPA Property 999' })).toBeInTheDocument()
   })
 
   it('says the queue is not enabled yet instead of showing a database error', async () => {

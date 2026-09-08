@@ -93,7 +93,9 @@ A rejection must carry no members; the database rejects one that does.
 - Confirming is impossible with nothing selected, and impossible without a reason.
 - A rejection sends **no** members, so "not on this contract" can never be
   mistaken for a placement.
-- Candidates are offered, never applied. There is no auto-accept path.
+- The recorded candidates are preselected suggestions, never applied automatically.
+- Every row also provides an autocomplete selector over the complete Disney OPA
+  Property vocabulary, so a reviewer can replace an incorrect or missing suggestion.
 - A missing RPC is reported as *"not enabled on this database yet"*, not as a raw
   database error — so this screen can ship ahead of the migration and light up on
   its own once the migration lands.
