@@ -4,8 +4,8 @@
   "outcome": "ready-for-merge",
   "pr": 2575,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2573/1",
-  "contract_sha256": "f5197f1656004d6b3f37ce2889c324b61ddf0c0abb32e9a71b70741f9b6ec357",
+  "contract_ref": "refs/db-contracts/2573/2",
+  "contract_sha256": "84f7140c90e7606306735631e8d1aa928f8252a1e5147ea52df7ef188f928e3a",
   "head_sha": "99ae31c3295e6859a4cd65ab5828722c05614730",
   "files_changed": [
     ".agent/completion.json",

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2573,
-  "generation": 1,
+  "generation": 2,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Permit only the exact protected issue 2356 migration bytes to pass the backdated-version guard while preserving every ordinary collision and production safety refusal.",
@@ -11,11 +11,15 @@
   "branch": "codex/issue-2573-2356-historical-restoration",
   "worktree": "C:/repos/shared-db-worktrees/issue-2356-restoration",
   "allowed_paths": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "scripts/historical-migration-restorations.mjs",
     "scripts/historical-migration-restorations.test.mjs",
     "scripts/test_production_migration_guard.py"
   ],
   "file_writes": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "scripts/historical-migration-restorations.mjs",
     "scripts/historical-migration-restorations.test.mjs",
     "scripts/test_production_migration_guard.py"
