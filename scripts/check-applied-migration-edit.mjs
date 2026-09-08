@@ -41,7 +41,7 @@
 
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
-import crypto from 'node:crypto'
+import { HISTORICAL_RESTORATIONS, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fetchAppliedVersions, PROJECT_REFS, Unknown } from './orchestrator-flow/read-preview-ledger.mjs'
@@ -61,31 +61,27 @@ export const MIGRATIONS_DIR = 'supabase/migrations'
 // the VERSION already being in a ledger, never the file's status against main.
 export const EDIT_STATUSES = Object.freeze({ A: 'added', M: 'modified', D: 'deleted', R: 'renamed', C: 'copied', T: 'type-changed' })
 
-export const RESTORATIONS_FILE = 'config/applied-migration-restorations.json'
-
 /**
- * The one sanctioned change to an applied version: restoring the file to the
- * exact bytes that were applied (issue #2035 did this for #2037). Without this,
- * widening the guard to added files would also block the only correct remedy.
- * Unreadable or malformed is UNKNOWN, never "nothing is sanctioned" -- treating a
- * broken file as an empty allowlist would refuse a legitimate repair, and
- * treating it as a permissive one would let every edit through.
+ * The one sanctioned change to an already-applied version: restoring the file to
+ * the exact bytes that were applied. Without it, widening this guard to added
+ * files would also block the only correct remedy -- issue #2035 performed exactly
+ * that repair for this incident.
+ *
+ * The sanctioned set is NOT a new list. `HISTORICAL_RESTORATIONS` already exists,
+ * is frozen in code rather than data, pins each version to a file digest, a
+ * statement digest and a byte count, and the merge lane already enforces it. A
+ * second registry was written for this guard and then removed: two pinned digests
+ * for one version can disagree -- they did, over CRLF normalization -- and a
+ * version with two answers has none. This guard asks the same question of the
+ * same authority, so a restoration it allows is one the merge lane will accept.
+ *
+ * The test is on BYTES, never on the version, so an entry authorizes one content
+ * and can never become a standing licence to ship anything under that version.
  */
-export function sanctionedRestorations(raw) {
-  let parsed
-  try { parsed = JSON.parse(raw) } catch (error) { throw new Unknown(`${RESTORATIONS_FILE} is not readable JSON: ${error.message}`) }
-  if (parsed?.schema_version !== 1) throw new Unknown(`${RESTORATIONS_FILE} must declare schema_version 1`)
-  if (!Array.isArray(parsed.restorations)) throw new Unknown(`${RESTORATIONS_FILE} must carry a restorations array`)
-  const sanctioned = new Map()
-  for (const entry of parsed.restorations) {
-    if (!/^\d{14}$/.test(String(entry?.version ?? ''))) throw new Unknown(`${RESTORATIONS_FILE} has a restoration with no 14-digit version`)
-    if (!Number.isInteger(entry?.issue) || entry.issue <= 0) throw new Unknown(`${RESTORATIONS_FILE} restoration ${entry.version} names no authorizing issue`)
-    if (typeof entry?.reason !== 'string' || entry.reason.length < 20) throw new Unknown(`${RESTORATIONS_FILE} restoration ${entry.version} has no substantive reason`)
-    if (!/^[0-9a-f]{64}$/.test(String(entry?.applied_sha256 ?? ''))) throw new Unknown(`${RESTORATIONS_FILE} restoration ${entry.version} has no 64-character applied_sha256`)
-    if (sanctioned.has(entry.version)) throw new Unknown(`${RESTORATIONS_FILE} lists ${entry.version} twice`)
-    sanctioned.set(entry.version, entry)
-  }
-  return sanctioned
+export function restorationAllows(file, raw) {
+  if (raw === null || raw === undefined) return null
+  try { validateHistoricalRestorationFile(file, raw) } catch { return null }
+  return HISTORICAL_RESTORATIONS[versionOf(file)] ?? null
 }
 
 export function versionOf(file) {
@@ -143,25 +139,14 @@ export function editedMigrations(baseRef, { executor = execFileSync, cwd = repoR
  * Pure. Given the edits and each ledger's applied versions, say which edits are
  * forbidden and where each was already applied.
  */
-export function findingsFor(edits, ledgers, sanctioned = new Map(), digests = new Map()) {
+export function findingsFor(edits, ledgers, bodies = new Map()) {
   const findings = []
   const allowed = []
   for (const edit of edits) {
     const appliedIn = Object.entries(ledgers).filter(([, versions]) => versions.has(edit.version)).map(([name]) => name)
     if (appliedIn.length === 0) continue
-    const restoration = sanctioned.get(edit.version)
-    if (restoration) {
-      // THE ENTRY NAMES BYTES, NOT A VERSION. Without this the allowlist would be
-      // a standing licence: an entry added in the same pull request as the edit it
-      // excuses would exempt that version forever, and any later change to the
-      // file would pass unnoticed. The entry pins the sha256 of the body that was
-      // applied, so it authorizes exactly ONE content and nothing else. Changing
-      // what is shipped means changing the digest, in the diff, where it is read.
-      const actual = digests.get(edit.file)
-      if (actual === restoration.applied_sha256) { allowed.push({ ...edit, appliedIn, restoration }); continue }
-      findings.push({ ...edit, appliedIn, restorationMismatch: { expected: restoration.applied_sha256, actual: actual ?? 'unreadable' } })
-      continue
-    }
+    const restoration = restorationAllows(edit.file, bodies.get(edit.file))
+    if (restoration) { allowed.push({ ...edit, appliedIn, restoration }); continue }
     findings.push({ ...edit, appliedIn })
   }
   // Non-enumerable: the allowed list rides along for the report, but `findings`
@@ -178,7 +163,7 @@ export function formatReport(edits, findings) {
   lines.push('')
   const allowed = findings.allowed ?? []
   for (const entry of allowed) {
-    lines.push(`ALLOWED: ${entry.version} is applied in ${entry.appliedIn.join(', ')}, and ${RESTORATIONS_FILE} records issue #${entry.restoration.issue} authorizing its restoration to the applied bytes.`)
+    lines.push(`ALLOWED: ${entry.version} is applied in ${entry.appliedIn.join(', ')}, and this file is byte-for-byte the approved historical restoration registered in scripts/historical-migration-restorations.mjs (${entry.restoration.name}).`)
   }
   if (allowed.length > 0) lines.push('')
   if (findings.length === 0) {
@@ -188,7 +173,6 @@ export function formatReport(edits, findings) {
   lines.push(`REFUSED: ${findings.length} of them carry a version that has ALREADY BEEN APPLIED and can never be replayed:`)
   for (const finding of findings) {
     lines.push(`  ${finding.version}  applied in: ${finding.appliedIn.join(', ')}  (${finding.kind})`)
-    if (finding.restorationMismatch) lines.push(`    ${RESTORATIONS_FILE} sanctions this version at sha256 ${finding.restorationMismatch.expected}, but this file is ${finding.restorationMismatch.actual}. A restoration entry authorizes ONE body, not the version.`)
   }
   lines.push('')
   lines.push('A version is applied only once. The database keeps the body it ran; this branch would leave')
@@ -200,20 +184,17 @@ export function formatReport(edits, findings) {
   lines.push('')
   lines.push('FIX FORWARD: restore the file to the body that was applied and put the change in a NEW migration at a')
   lines.push('newly reserved version, written to be a no-op where the applied shape already matches. If this change')
-  lines.push(`IS that restoration, record the version in ${RESTORATIONS_FILE} with the issue authorizing it.`)
+  lines.push('IS the exact restoration of the bytes that were applied, it must match its registered entry in')
+  lines.push('scripts/historical-migration-restorations.mjs byte for byte -- the registry the merge lane reads.')
   return lines
 }
 
 export const defaultIo = {
   editedMigrations,
   async appliedVersions(projectRef) { return new Set(await fetchAppliedVersions(projectRef)) },
-  fileDigest(file) {
-    try { return crypto.createHash('sha256').update(fs.readFileSync(path.join(repoRoot, file))).digest('hex') }
+  readMigration(file) {
+    try { return fs.readFileSync(path.join(repoRoot, file), 'utf8') }
     catch { return null }
-  },
-  readRestorations() {
-    try { return fs.readFileSync(path.join(repoRoot, RESTORATIONS_FILE), 'utf8') }
-    catch (error) { throw new Unknown(`could not read ${RESTORATIONS_FILE}: ${error.message}`) }
   },
 }
 
@@ -222,15 +203,14 @@ export async function runCheck({ baseRef = 'origin/main', io = defaultIo } = {})
   // The whole point of the conditional read: an ordinary pull request never
   // touches the network here, so this guard cannot go red for a reason that has
   // nothing to do with it.
-  if (edits.length === 0) return { edits, findings: [], ledgersRead: [], sanctioned: new Map() }
+  if (edits.length === 0) return { edits, findings: [], ledgersRead: [] }
   const ledgers = {}
   for (const [name, projectRef] of Object.entries(PROJECT_REFS)) {
     ledgers[name] = await io.appliedVersions(projectRef)
     if (!(ledgers[name] instanceof Set) || ledgers[name].size === 0) throw new Unknown(`the ${name} ledger came back empty, so nothing was compared`)
   }
-  const sanctioned = sanctionedRestorations(io.readRestorations())
-  const digests = new Map(edits.map((edit) => [edit.file, io.fileDigest(edit.file)]))
-  return { edits, findings: findingsFor(edits, ledgers, sanctioned, digests), ledgersRead: Object.keys(ledgers), sanctioned }
+  const bodies = new Map(edits.map((edit) => [edit.file, io.readMigration(edit.file)]))
+  return { edits, findings: findingsFor(edits, ledgers, bodies), ledgersRead: Object.keys(ledgers) }
 }
 
 export function parseArgs(argv) {

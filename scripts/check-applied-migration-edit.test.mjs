@@ -1,8 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { createHash } from 'node:crypto'
-import { EDIT_STATUSES, findingsFor, sanctionedRestorations, RESTORATIONS_FILE, formatReport, main, MIGRATIONS_DIR, parseArgs, parseEditedMigrations, PROJECT_REFS, runCheck, Unknown, versionOf, editedMigrations } from './check-applied-migration-edit.mjs'
+import { HISTORICAL_RESTORATIONS } from './historical-migration-restorations.mjs'
+import { EDIT_STATUSES, findingsFor, restorationAllows, formatReport, main, MIGRATIONS_DIR, parseArgs, parseEditedMigrations, PROJECT_REFS, runCheck, Unknown, versionOf, editedMigrations } from './check-applied-migration-edit.mjs'
 
 const APPLIED = '20260831234750'
 const NEW = '20260903120000'
@@ -103,14 +103,14 @@ test('issue 2037 a version applied in both is reported as both', () => {
 
 // --- orchestration -------------------------------------------------------
 
-const RESTORATIONS = JSON.stringify({ schema_version: 1, restorations: [] })
-const DIGEST = 'a'.repeat(64)
-const restorationOf = (version, issue = 2035, digest = DIGEST) => JSON.stringify({ schema_version: 1, restorations: [{ version, issue, applied_sha256: digest, reason: 'restored to the exact bytes the database applied' }] })
+// The one registered historical restoration, read from the registry the merge
+// lane reads, so the test cannot drift from what the guard will actually accept.
+const RESTORED_FILE = HISTORICAL_RESTORATIONS['20260831234750'].filename
+const RESTORED_BODY = readFileSync(new URL(`../${RESTORED_FILE}`, import.meta.url), 'utf8')
 
-const io = (edits, ledgers, restorations = RESTORATIONS) => ({
+const io = (edits, ledgers, bodies = new Map()) => ({
   editedMigrations: () => edits,
-  readRestorations: () => restorations,
-  fileDigest: () => DIGEST,
+  readMigration: (f) => bodies.get(f) ?? null,
   appliedVersions: async (ref) => {
     const name = Object.entries(PROJECT_REFS).find(([, value]) => value === ref)?.[0]
     assert.ok(name, `unexpected project ref ${ref}`)
@@ -145,56 +145,31 @@ test('issue 2037 an EMPTY ledger is unknown, not clean', async () => {
 
 // --- sanctioned restorations ---------------------------------------------
 
-test('issue 2037 a governed restoration of an applied version is allowed, and says why', async () => {
-  const edits = [{ version: APPLIED, file: file(APPLIED), kind: 'modified' }]
-  const result = await runCheck({ io: io(edits, { production: new Set([APPLIED]), preview: new Set([APPLIED]) }, restorationOf(APPLIED)) })
-  assert.deepEqual(result.findings, [])
+test('issue 2037 the exact registered restoration is ALLOWED, and the report says why', async () => {
+  const version = '20260831234750'
+  const edits = [{ version, file: RESTORED_FILE, kind: 'modified' }]
+  const result = await runCheck({ io: io(edits, { production: new Set([version]), preview: new Set([version]) }, new Map([[RESTORED_FILE, RESTORED_BODY]])) })
+  assert.deepEqual(result.findings, [], 'the exact applied bytes are the one sanctioned repair')
   assert.equal(result.findings.allowed.length, 1)
-  assert.equal(result.findings.allowed[0].restoration.issue, 2035)
   assert.match(formatReport(edits, result.findings).join(String.fromCharCode(10)), /ALLOWED: 20260831234750/)
 })
 
-test('issue 2037 a sanctioned version does not excuse editing a DIFFERENT applied version', async () => {
-  const other = '20260831234751'
-  const edits = [{ version: other, file: file(other), kind: 'modified' }]
-  const result = await runCheck({ io: io(edits, { production: new Set([other]), preview: new Set([other]) }, restorationOf(APPLIED)) })
-  assert.equal(result.findings.length, 1)
-  assert.equal(result.findings[0].version, other)
+// A restoration authorizes ONE BODY. If it authorized the VERSION, an entry would
+// be a standing licence to ship anything under it -- the hole the first draft of
+// this guard had, when the sanctioned list was a separate JSON file of versions.
+test('issue 2037 one changed byte in a registered restoration is REFUSED', async () => {
+  const version = '20260831234750'
+  const edits = [{ version, file: RESTORED_FILE, kind: 'modified' }]
+  const tampered = `${RESTORED_BODY}
+-- one more comment
+`
+  const result = await runCheck({ io: io(edits, { production: new Set([version]), preview: new Set([version]) }, new Map([[RESTORED_FILE, tampered]])) })
+  assert.equal(result.findings.length, 1, 'anything but the registered bytes is still an edit to an applied version')
 })
 
-// Reviewer finding, muse-spark-1.3-contributor at head ff39204f: a name-only
-// allowlist is a standing licence over the version. The entry pins the digest of
-// the one body it authorizes, so it cannot be used to ship anything else.
-test('issue 2037 a restoration entry authorizes ONE body, not the version', async () => {
-  const edits = [{ version: APPLIED, file: file(APPLIED), kind: 'modified' }]
-  const ledgers = { production: new Set([APPLIED]), preview: new Set([APPLIED]) }
-  const io2 = { ...io(edits, ledgers, restorationOf(APPLIED)), fileDigest: () => 'b'.repeat(64) }
-  const result = await runCheck({ io: io2 })
-  assert.equal(result.findings.length, 1, 'a body that is not the sanctioned one must still be refused')
-  assert.equal(result.findings[0].restorationMismatch.expected, DIGEST)
-  assert.match(formatReport(edits, result.findings).join(String.fromCharCode(10)), /authorizes ONE body/)
-})
-
-test('issue 2037 a restoration entry with no digest is UNKNOWN, not a licence', () => {
-  assert.throws(() => sanctionedRestorations(JSON.stringify({ schema_version: 1, restorations: [{ version: APPLIED, issue: 2035, reason: 'x'.repeat(30) }] })), /applied_sha256/)
-})
-
-test('issue 2037 an unreadable or malformed restorations file FAILS CLOSED', async () => {
-  const edits = [{ version: APPLIED, file: file(APPLIED), kind: 'modified' }]
-  const ledgers = { production: new Set([APPLIED]), preview: new Set([APPLIED]) }
-  await assert.rejects(runCheck({ io: io(edits, ledgers, 'not json at all') }), Unknown)
-  await assert.rejects(runCheck({ io: io(edits, ledgers, JSON.stringify({ restorations: [] })) }), /schema_version 1/)
-  await assert.rejects(runCheck({ io: io(edits, ledgers, JSON.stringify({ schema_version: 1 })) }), /restorations array/)
-  await assert.throws(() => sanctionedRestorations(JSON.stringify({ schema_version: 1, restorations: [{ version: 'nope', issue: 1, applied_sha256: DIGEST, reason: 'x'.repeat(30) }] })), /14-digit version/)
-  await assert.throws(() => sanctionedRestorations(JSON.stringify({ schema_version: 1, restorations: [{ version: APPLIED, applied_sha256: DIGEST, reason: 'x'.repeat(30) }] })), /authorizing issue/)
-})
-
-test('issue 2037 the repository restorations file is itself valid and names the incident repair', () => {
-  const sanctioned = sanctionedRestorations(readFileSync(new URL(`../${RESTORATIONS_FILE}`, import.meta.url), 'utf8'))
-  const entry = sanctioned.get('20260831234750')
-  assert.ok(entry, 'the #2037 restoration must stay listed')
-  const actual = createHash('sha256').update(readFileSync(new URL('../supabase/migrations/20260831234750_hts_rag_durable_precedent_contract.sql', import.meta.url))).digest('hex')
-  assert.equal(entry.applied_sha256, actual, 'the pinned digest must match the file that is actually on this branch')
+test('issue 2037 an unregistered version is never sanctioned, whatever its bytes', () => {
+  assert.equal(restorationAllows(file(NEW), 'anything at all'), null)
+  assert.equal(restorationAllows(RESTORED_FILE, null), null, 'an unreadable file is not a sanctioned restoration')
 })
 
 // --- exit codes and report ------------------------------------------------
