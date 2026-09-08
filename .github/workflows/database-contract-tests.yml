@@ -100,7 +100,18 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          node scripts/check-closeout-readiness.mjs "$GITHUB_REPOSITORY" "$PR_NUMBER" "$POLICY_SHA" > readiness.json
+          # This workflow and its richer readiness helper can arrive in the same
+          # PR. During that one bootstrap PR, protected main legitimately has
+          # only the already-merged documents-only classifier. Use it instead;
+          # the workflow change itself is code-bearing, so that fallback can only
+          # select the full test path. Later PRs use the structured helper.
+          if [ -f scripts/check-closeout-readiness.mjs ]; then
+            node scripts/check-closeout-readiness.mjs "$GITHUB_REPOSITORY" "$PR_NUMBER" "$POLICY_SHA" > readiness.json
+          else
+            node scripts/check-documents-only-pull-request.mjs "$GITHUB_REPOSITORY" "$PR_NUMBER"
+            classifier_status=$?
+            printf '{"gates":{"database_contract_tests":"%s"}}\n' "$([ "$classifier_status" -eq 0 ] && echo inapplicable || echo applicable)" > readiness.json
+          fi
           status=$?
           set -e
           # Exit 1 means applicable, not failure. Exit 2 is an unreadable or
