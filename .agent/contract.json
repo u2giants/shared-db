@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "generation": 1,
+  "work_issue": 2403,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Create only the empty hts_rag_split schema and nine internally linked tables for the DesignFlow consolidated non-production target while preserving public.hts_rag_* and copying no rows.",
+  "base_sha": "8d64a75812beec85d2f8b2c78669e5e17635359d",
+  "dispatcher": "codex shared-db.orch marker2559 route01a07e3d-df78-7ed0-bd62-d675f000158b",
+  "worker": "codex issue-2403 preparation worker",
+  "branch": "claude/issue-2403-hts-rag-split",
+  "worktree": "C:/Users/ahazan/AppData/Local/Temp/shared-db-2559-2403",
+  "allowed_paths": [
+    "supabase/migrations/20260906040010_hts_rag_split_isolated_schema.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "file_writes": [
+    "supabase/migrations/20260906040010_hts_rag_split_isolated_schema.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "db_reads": [
+    "table public.hts_rag_determinations",
+    "table public.hts_rag_extraction_jobs",
+    "table public.hts_rag_precedent_rulings",
+    "table public.hts_rag_precedents",
+    "table public.hts_rag_product_examples",
+    "table public.hts_rag_product_family_allowlist",
+    "table public.hts_rag_provider_responses",
+    "table public.hts_rag_review_events",
+    "table public.hts_rag_rulings"
+  ],
+  "db_writes": [
+    "schema hts_rag_split",
+    "table hts_rag_split.hts_rag_determinations",
+    "table hts_rag_split.hts_rag_extraction_jobs",
+    "table hts_rag_split.hts_rag_precedent_rulings",
+    "table hts_rag_split.hts_rag_precedents",
+    "table hts_rag_split.hts_rag_product_examples",
+    "table hts_rag_split.hts_rag_product_family_allowlist",
+    "table hts_rag_split.hts_rag_provider_responses",
+    "table hts_rag_split.hts_rag_review_events",
+    "table hts_rag_split.hts_rag_rulings",
+    "index hts_rag_split.hts_rag_determinations_comparison_category_idx",
+    "index hts_rag_split.hts_rag_determinations_comparison_review_idx",
+    "index hts_rag_split.hts_rag_determinations_family_created_idx",
+    "index hts_rag_split.hts_rag_extraction_jobs_idempotency_idx",
+    "index hts_rag_split.hts_rag_extraction_jobs_pending_claim_idx",
+    "index hts_rag_split.hts_rag_precedent_rulings_relationship_idx",
+    "index hts_rag_split.hts_rag_precedent_rulings_ruling_idx",
+    "index hts_rag_split.hts_rag_precedents_extraction_idempotency_idx",
+    "index hts_rag_split.hts_rag_precedents_family_review_idx",
+    "index hts_rag_split.hts_rag_product_examples_family_idx",
+    "index hts_rag_split.hts_rag_provider_responses_determination_idx",
+    "index hts_rag_split.hts_rag_review_events_subject_created_idx",
+    "index hts_rag_split.hts_rag_rulings_operationally_revoked_idx",
+    "index hts_rag_split.hts_rag_rulings_ruling_date_idx"
+  ],
+  "prohibited_actions": [
+    "No reviewer allocation or provider call",
+    "No preview, DesignFlow target, shared production, or row write",
+    "No change to public.hts_rag_* and no row copy",
+    "No merge, claim release, issue closure, or inherited cleanup"
+  ],
+  "required_checks": [
+    "bash scripts/check-sql.sh",
+    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+    "git diff --check"
+  ],
+  "assumptions": [
+    "Issue comment 5577130097 confirms shared-db owns deployment to the DesignFlow consolidated non-production target reached by DB_*_SANDBOX in GCP lithe-breaker-323913",
+    "Claim2418 keeps version20260906040010 and its exact object list protected despite lease expiry",
+    "The existing migration blob is preserved; preparation only integrates current main and exact evidence"
+  ],
+  "stop_conditions": [
+    "Stop if origin main or the PR branch moves during preparation",
+    "Stop if any claimed object or migration byte must change",
+    "Stop before local suites while the protected Windows reviewer run is active",
+    "Stop if the target route acknowledgement or coordinator marker changes"
+  ]
+}
