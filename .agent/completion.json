@@ -1,30 +1,57 @@
 {
   "schema_version": 1,
-  "work_issue": 2550,
+  "work_issue": 2573,
   "outcome": "ready-for-merge",
-  "pr": 2565,
+  "pr": 2575,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2550/10",
-  "contract_sha256": "e41a7d3640e62118f80ae4160cccfc9bedcdec2e66ca8c75ea6e7640ad00ffb3",
-  "head_sha": "fee2f3eb31d444c83846cbebbfeb7471bf0543c6",
-  "files_changed": [".agent/completion.json", ".agent/contract.json", "config/orchestrator-global-invalidators-v1.json", "docs/agents/section-4-anti-collision-rules.md", "docs/verification/reviewer-assignment-api-budget-2026-08-28.md", "docs/verification/throughput-guard-truth-audit-20260828.json", "scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
+  "contract_ref": "refs/db-contracts/2573/1",
+  "contract_sha256": "f5197f1656004d6b3f37ce2889c324b61ddf0c0abb32e9a71b70741f9b6ec357",
+  "head_sha": "99ae31c3295e6859a4cd65ab5828722c05614730",
+  "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "scripts/historical-migration-restorations.mjs",
+    "scripts/historical-migration-restorations.test.mjs",
+    "scripts/test_production_migration_guard.py"
+  ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {"command": "node --test scripts/manage-migration-author-lanes.test.mjs", "exit_code": 0, "evidence": "Run locally after adding the GitHub-backed historical terminalization CLI and its fail-closed matrix: 482 passed; 0 failed, skipped, cancelled, or todo."},
-    {"command": "node --test scripts/check-migration-pr-lease.test.mjs scripts/check-exact-head-approval.test.mjs scripts/check-required-checks-preflight.test.mjs scripts/check-migration-ledger-drift.test.mjs scripts/check-worktree-freshness.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/manage-preview-maintenance-lock.test.mjs scripts/historical-migration-restorations.test.mjs scripts/lib/work-dependencies.test.mjs scripts/lib/review-verdict-artifact.test.mjs scripts/lib/documents-only-change.test.mjs scripts/agent-work-contract.test.mjs scripts/db-coordination-events.test.mjs scripts/coordination-scenarios.test.mjs scripts/lib/exclusive-lease.test.mjs scripts/apply-lane-advisory-lock.test.mjs scripts/record-review-verdict.test.mjs scripts/run-governed-review.test.mjs scripts/repair-voided-findings.test.mjs scripts/orchestrator-flow/*.test.mjs", "exit_code": 0, "evidence": "Full coordination/import-closure suite: 927 passed; 0 failed, skipped, cancelled, or todo."},
-    {"command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs", "exit_code": 0, "evidence": "Contract and exact Git evidence suite: 44 passed; 0 failed, skipped, cancelled, or todo."},
-    {"command": "node scripts/check-throughput-truth-audit.mjs", "exit_code": 0, "evidence": "Truth audit passed with 255 semantically bound call sites."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
+    {
+      "command": "node --test scripts/historical-migration-restorations.test.mjs",
+      "exit_code": 0,
+      "evidence": "7 focused registry tests passed, including exact issue 2356 metadata and negative wrong-path and wrong-byte cases."
+    },
+    {
+      "command": "node --input-type=module -e <exact PR2523 blob validation>",
+      "exit_code": 0,
+      "evidence": "The registry accepted PR 2523 migration blob cd0ab008e5fc97ef61e225d3976ed69ecd06b2d7 at the exact path and refused the same bytes with an appended change."
+    },
+    {
+      "command": "python -m unittest scripts.test_production_migration_guard",
+      "exit_code": 0,
+      "evidence": "234 tests passed; issue 2356 remains production eligible while existing blocked and preview-only versions keep their refusals."
+    },
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static SQL checks passed; this maintenance PR adds no migration file and changes no database content."
+    },
+    {
+      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "exit_code": 0,
+      "evidence": "44 contract tests passed with no failures or skips."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors in the complete maintenance change."
+    }
   ],
   "assumptions_resolved": [
-    "The complete lease snapshot covers every statically catalogued reviewer identity while capacity selection remains limited to active and overflow reviewers; unreadable entries fail closed.",
-    "Each suffixed replacement record deterministically names its immutable predecessor failure record, while legacy unsuffixed records retain the direct-read path.",
-    "The current six-reviewer rotation, including Qwen and Muse Spark 1.3, remains fully drawable according to its existing qualification and exclusion rules.",
-    "The full released slot-2 regression includes a retired predecessor with an unrelated live lease, costs exactly 23 requests, and its idempotent retry costs exactly 22, both below the unchanged ceiling of 25.",
-    "The exact #2509 historical selector accepts only registry-pinned run 34157812748 and emits the unchanged no-write historical_rebind instruction; wrong run, applied commit, project, bytes, and unpinned version all refuse.",
-    "The historical restoration validator is included in the global invalidator bundle so cached evidence cannot survive a pin change.",
-    "The supported terminalization CLI accepts only the exact live historical ready record, matching successful attempt-1 run and sole artifact, exact caller-supplied artifact and manifest digests, matching stored manifest inputs in the run log, and a 626-to-626 ledger with no additions or removals; it then creates and reads back one immutable dispatched outcome."
+    "Migration file SHA256 is 6c04610f8e63d7d67b5c74610a69e219f912fa1b7fb520d7839ab8a81d77e022; statement SHA256 is 8f9179afb6f2e01cd6684b591dae5e996381036b733a964450aa464128edab05 over 3747 bytes.",
+    "The PR changes only agent evidence and the three registry/guard test files; structural migration and contract-test blobs are absent from this maintenance branch.",
+    "Issue 2356 claim 2521, version 20260907152838, and every protected database object remain untouched."
   ],
   "stop_conditions_hit": []
 }
