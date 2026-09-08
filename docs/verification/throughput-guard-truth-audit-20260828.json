@@ -799,11 +799,11 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
-      "site": "scripts/manage-migration-author-lanes.mjs:3377",
-      "semantic_key": "scripts/manage-migration-author-lanes.mjs:8bf25e3e7c4909ef02b52a8b948f3fe1bfe07527f6d575bb62a297f00a27d88f:1",
-      "line_sha256": "8bf25e3e7c4909ef02b52a8b948f3fe1bfe07527f6d575bb62a297f00a27d88f",
+      "site": "scripts/manage-migration-author-lanes.mjs:4055",
+      "semantic_key": "scripts/manage-migration-author-lanes.mjs:f30023772b56725e26d2ee56709548ccdbe3ba11879aad96d6fe6f357c85079a:1",
+      "line_sha256": "f30023772b56725e26d2ee56709548ccdbe3ba11879aad96d6fe6f357c85079a",
       "disposition": "excluded",
-      "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
+      "reason": "Fail-closed immutable reviewer-evidence validation; the word missing does not describe database or migration state."
     },
     {
       "site": "scripts/manage-migration-author-lanes.mjs:3265",
@@ -1808,6 +1808,6 @@
     }
   ],
   "call_site_count": 256,
-  "call_site_sha256": "241d8fbd593067d646e66c27e2f7a2a2eda8711e9c9408aeef3227ad2afbb28a",
+  "call_site_sha256": "e796073de9ff658770aaa16915a7ca091f4e2c86d547c84326fe65b98fd85ffd",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
