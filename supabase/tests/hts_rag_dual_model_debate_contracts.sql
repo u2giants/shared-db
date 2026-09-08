@@ -1,4 +1,4 @@
--- Focused contracts for migration 20260908163250 (#2535).
+-- Focused contracts for migration 20260908202651 (#2535).
 -- The repository's Database Contract Tests workflow runs this against its
 -- from-empty ephemeral replay. Every row below is synthetic and rolls back.
 
