@@ -250,7 +250,7 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    ```
 
    For new assignments, the machine-independent cursor rotates Grok 4.6 → GLM
-   5.3 → Kimi K3 → Muse Spark 1.3 Contributor → Gemini 3.8 Flash High →
+   5.3 → Kimi K3 → Qwen 3.8 Max → Muse Spark 1.3 Contributor → Gemini 3.8 Flash High →
    repeat, skipping any reviewer whose engine matches the live orchestrator.
    Codex GPT-5.6 Sol was retired from the rotation on 2026-09-06 (issue #2485)
    by owner instruction and is no longer drawable.
@@ -279,8 +279,8 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    reviewers were working; it is carried in `RETIRED_REVIEWERS`. This is a
    disposition on the account, not on the wrapper: its `REVIEWERS` row stays
    with `readsRepository: true`, so every durable verdict it already recorded
-   still authorizes a merge. **Qwen 3.8 Max is QUARANTINED** pending a passing live
-   qualification (`QUARANTINED_REVIEWERS`), which is likewise undrawable. The
+   still authorizes a merge. **Qwen 3.8 Max was UNQUARANTINED on 2026-09-07**
+   after a passing live qualification and is drawable again. The
    retired `glm-5.2` label is paused until an explicit owner instruction restores
    it.
 

@@ -237,6 +237,7 @@ export const REVIEWERS = Object.freeze([
 // Reviewer issue `20260820T004602Z-edge-dev-kimi-k3-385556` carries the raw evidence.
 // This is a PAUSE, not a retirement.
 //
+// ADDED 2026-08-20 (owner instruction, issue #1290): 'muse-spark-1.2-contributor'.
 // UPGRADED 2026-09-08 (owner instruction, issue #2285): 'muse-spark-1.3-contributor'.
 // The active slot moved from 1.2 to the live-qualified 1.3 model. The historical
 // 1.2 name remains in REVIEWERS and RETIRED_REVIEWERS because immutable assignments

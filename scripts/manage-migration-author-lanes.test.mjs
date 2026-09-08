@@ -960,6 +960,7 @@ test('the active rotation is exactly the current models, in a stable order',()=>
   assert.equal(REVIEWERS.find((r)=>r.name==='glm-5.3').wrapper,'ai-glm')
   assert.equal(REVIEWERS.find((r)=>r.name==='muse-spark-1.2-contributor').wrapper,'ai-muse')
   assert.ok(RETIRED_REVIEWERS.includes('muse-spark-1.2-contributor'),'the historical Muse 1.2 identity must remain readable but never receive new work')
+  assert.equal(reviewerReadsRepository('muse-spark-1.2-contributor'),true,'upgrading Muse must not invalidate existing 1.2 verdicts')
   assert.ok(!ACTIVE_REVIEWERS.some((r)=>r.name==='muse-spark-1.2-contributor'),'the retired Muse 1.2 identity must never receive new work')
   assert.equal(REVIEWERS.find((r)=>r.name==='muse-spark-1.3-contributor').wrapper,'ai-muse')
   assert.equal(REVIEWERS.find((r)=>r.name==='deepseek-chat').wrapper,'ai-deepseek-agent')
