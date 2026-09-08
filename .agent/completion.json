@@ -1,15 +1,16 @@
 {
   "schema_version": 1,
-  "work_issue": 2244,
+  "work_issue": 1868,
   "outcome": "ready-for-merge",
-  "pr": 2595,
+  "pr": 2606,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2244/2",
-  "contract_sha256": "78f593334841aebd4d8ae11c141b11a072cbc86b3231007d27918e20ba807792",
-  "head_sha": "64c953cc089744442a660708b96b32b361f6002c",
+  "contract_ref": "refs/db-contracts/1868/1",
+  "contract_sha256": "8aaa1bf54ba0bed2bc905b6fc5616d3d537967342fa925a085e7a2d6959395fa",
+  "head_sha": "a3b7e0f9cf12f4f091527b4057c8d55826828715",
   "files_changed": [
-    "scripts/run-governed-review.mjs",
-    "scripts/run-governed-review.test.mjs"
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/reap-merged-worktrees.mjs",
+    "scripts/reap-merged-worktrees.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
@@ -17,22 +18,22 @@
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Contract is valid; published as refs/db-contracts/2244/2 (generation 1 belongs to the superseded PR #2564)."
+      "evidence": "Contract is valid; published as refs/db-contracts/1868/1 at f23fffb2."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Report satisfies contract generation 2 pinned by hash 78f59333."
+      "evidence": "Report satisfies contract generation 1 pinned by hash 8aaa1bf5."
     },
     {
-      "command": "node --test scripts/run-governed-review.test.mjs",
+      "command": "node --test scripts/reap-merged-worktrees.test.mjs",
       "exit_code": 0,
-      "evidence": "45 tests pass, 0 fail. 11 are new and 6 of those are known-dirty cases: a report reviewing a different commit, a missing reviewed-commit row, a missing or duplicated verdict section, a BLOCKED decision, an unrecognised decision word, empty findings, a missing result section, a report path outside the wrapper report directory, and a report path that is not a published report name are each refused rather than guessed."
+      "evidence": "24 tests pass, 0 fail, up from 12. Every new signal has a known-dirty case: a claim naming an exact worktree, a claim naming only the branch, path comparison across separators/case/trailing slash, a claim body with no machine block, the reap's own working directory, a recently active worktree under a live marker, a worktree quiet for the whole window, and UNMEASURABLE ACTIVITY COUNTS AS LIVE across undefined, null, NaN and a non-number. --force is proven to skip only the idle window and to override neither a claim nor uncommitted work."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=265."
+      "evidence": "truth audit OK: call_sites=267. Two new sites, both prose comments in scripts/reap-merged-worktrees.mjs containing the word 'missing', recorded as excluded with reviewed reasons; neither makes a claim about a migration or a DDL object."
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
@@ -45,17 +46,31 @@
       "evidence": "No whitespace errors."
     },
     {
-      "command": "positive control: git archive HEAD scripts | tar -x, then run the real wrapper output shape through the pre-fix runner and this branch's runner",
+      "command": "node scripts/reap-merged-worktrees.mjs (dry run against the live repository)",
       "exit_code": 0,
-      "evidence": "BEFORE (pre-fix tree taken straight from git, never hand-reverted): 'review wrapper did not produce a recordable terminal verdict (exit 0): the wrapper supplied no recognized diagnostic' - verbatim the symptom issue #2244 reports. AFTER (this branch): 'recorded refs/db-review-verdicts/x verdict APPROVE'."
+      "evidence": "79 worktree(s). 9 retireable, 70 kept. orchestrator LIVE (#2597); 8 claimed worktree path(s), 8 claimed branch(es); idle window 24h. The run was not refused, which is the whole repair."
+    },
+    {
+      "command": "per-candidate verification: git -C <path> status --porcelain and git -C <path> log -1 for each of the 9",
+      "exit_code": 0,
+      "evidence": "All 9 clean, pushed, on branches with merged pull requests, last committed between 25 hours and 6 days ago. None named by an open claim."
+    },
+    {
+      "command": "node scripts/reap-merged-worktrees.mjs --apply",
+      "exit_code": 0,
+      "evidence": "Removed 9 of 9; worktree count 79 -> 70. The reap issue #1868 asked for has now run, alongside a live orchestrator, without --force."
+    },
+    {
+      "command": "negative control on the activity signal: measured every mtime source across the live worktrees before choosing",
+      "exit_code": 0,
+      "evidence": "The git administrative directory's own mtime read 0.0 hours for all 79 worktrees at once, because any git command anywhere in the repository refreshes it for every worktree. Including it produced 0 retireable candidates - the same do-nothing outcome as the old blanket refusal - so it was dropped and the reason recorded in the code."
     }
   ],
   "assumptions_resolved": [
-    "The codex wrapper is not broken; only the transcription was missing. It publishes a complete report to .ai/reviews/codex-<mode>-<runid>.md and prints that path as its final line of standard output, confirmed by reading the wrapper source at C:/repos/ai-devops/bin/ai-codex-review.",
-    "The head under review is never taken from the report. It comes only from the runner's pinned options.headSha; the report's reviewed-commit row can only REFUSE a mismatch, never supply a head.",
-    "The wrapper's header table is deliberately left out of the posted body: its 64-character source digest opens with 40 hex characters that unambiguouslyTiedToHead would read as a foreign commit sha.",
-    "No runner rule was relaxed. The single-terminal-verdict rule, the extra-decision-word refusal, the auto-void path, the #2207 preservation path and the #2464 never-void-after-artifact path are all unchanged, and a transcribed body still passes through extraVerdictLines before anything is posted.",
-    "A failed wrapper run never reads a report, so a stale report left by an earlier run cannot rescue it.",
+    "The open db-claim issues are a usable positive liveness signal: 8 claimed worktree paths and 8 claimed branches were read from live issues and matched against the porcelain worktree list.",
+    "index, HEAD, logs/HEAD and ORIG_HEAD mtimes do distinguish a busy worktree from an abandoned one; the admin directory's own mtime does not.",
+    "No guard was removed or weakened. Dirty, unpushed, locked, detached and unmerged all still keep, in that order, and three new KEEP reasons were added ahead of the merged-branch check.",
+    "The whole-run refusal was narrowed, not deleted: it now fires when an orchestrator is live and the claims cannot be read, which is the case where no positive signal exists.",
     "No database was read or written."
   ],
   "stop_conditions_hit": []

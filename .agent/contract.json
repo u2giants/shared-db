@@ -1,53 +1,54 @@
 {
   "schema_version": 1,
-  "work_issue": 2244,
-  "generation": 2,
+  "work_issue": 1868,
+  "generation": 1,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Teach the governed review runner to read the codex wrapper's published report and record its two-line verdict section as this runner's own terminal verdict line, so a working reviewer stops being a structurally dead slot - without relaxing the single-terminal-verdict rule, the extra-decision-word refusal, or the auto-void path.",
-  "base_sha": "bc4caafab4f9b33480f920dd09abed8ef2e1cb6e",
+  "goal": "Repair the worktree reaper so it can run while an orchestrator is live, by replacing the blanket whole-run refusal with per-worktree liveness evidence the repo already publishes: open database claims naming an exact worktree path or branch, the reap's own working directory, and recent filesystem activity inside each worktree's git administrative directory. Then run the reap that issue #1868 asked for.",
+  "base_sha": "0f22de12562b7250ebf70fb07502e0fbce429cb3",
   "dispatcher": "repo session, owner request 2026-09-08 (five oldest non-orchestrator issues)",
   "worker": "claude/repo-session-oldest-five",
-  "branch": "claude/2244-codex-verdict-bridge",
+  "branch": "claude/1868-worktree-reap-liveness",
   "worktree": "C:/repos/shared-db/.claude/worktrees/funny-nightingale-f17479",
   "allowed_paths": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "scripts/run-governed-review.mjs",
-    "scripts/run-governed-review.test.mjs"
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/reap-merged-worktrees.mjs",
+    "scripts/reap-merged-worktrees.test.mjs"
   ],
   "file_writes": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "scripts/run-governed-review.mjs",
-    "scripts/run-governed-review.test.mjs"
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/reap-merged-worktrees.mjs",
+    "scripts/reap-merged-worktrees.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not take the head SHA from reviewer text or from the report; it comes only from the runner's pinned options.headSha.",
-    "Do not relax the single-terminal-verdict rule, the extra-decision-word refusal, or the auto-void path.",
-    "Do not delete, exclude or retire the codex reviewer as a substitute for the repair.",
-    "Do not read a report for a wrapper run that did not exit 0; a stale report must never rescue a failed run.",
-    "Do not read a path outside the wrapper's own .ai/reviews/codex-<mode>-<runid>.md shape."
+    "Do not remove, disable or weaken the live-agent protection; the repair must be strictly better evidence, not less evidence.",
+    "Do not treat an unmeasurable worktree as idle; unknown activity counts as live.",
+    "Do not let --force override a positive database claim, uncommitted changes, unpushed commits, a lock, or a detached head.",
+    "Do not let a failed read of the markers or the claims relax any guard.",
+    "Do not remove a worktree that is dirty, unpushed, locked, detached, on an unmerged branch, or named by an open claim."
   ],
   "required_checks": [
     "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
     "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
-    "node --test scripts/run-governed-review.test.mjs",
+    "node --test scripts/reap-merged-worktrees.test.mjs",
     "node scripts/check-throughput-truth-audit.mjs",
     "node scripts/check-github-transport-conformance.mjs",
     "git diff --check"
   ],
   "assumptions": [
-    "ai-codex-review prints the absolute path of its published report as the final line of standard output, and writes that report to .ai/reviews/codex-<mode>-<runid>.md.",
-    "The published report carries a header table row `| reviewed commit | `<sha>` |` and one `## Result` heading written by the wrapper before the provider text.",
-    "The wrapper already guarantees exactly one `## Verdict` heading, because it counts them in the provider output before publishing.",
-    "The report's 64-character source digest must not reach the posted comment, because its first 40 hex characters read as a foreign commit sha to unambiguouslyTiedToHead."
+    "Every dispatched agent holds an open db-claim issue whose fenced block names its exact worktree path and branch, so a claim is a positive liveness signal that does not depend on guessing from git alone.",
+    "A worktree an agent is working in has recent mtimes on its own index, HEAD, logs/HEAD or ORIG_HEAD.",
+    "The git administrative DIRECTORY's own mtime is not a usable signal, because any git command anywhere in the repository refreshes it for every worktree at once."
   ],
   "stop_conditions": [
-    "Stop if the transcription could take the head from anywhere but the runner's pinned value.",
-    "Stop if a transcribed body could be posted without passing extraVerdictLines.",
-    "Stop if the repair cannot be proven against a known-dirty report."
+    "Stop if any candidate for removal is dirty, unpushed, locked, detached, unmerged, or claimed.",
+    "Stop if the activity measurement cannot distinguish a busy worktree from an abandoned one.",
+    "Stop if the repair would require --force to run a routine reap."
   ]
 }
