@@ -1,0 +1,113 @@
+-- Synthetic append-only history checks; disposable database transaction only.
+do $$
+declare privilege_name text;
+begin
+  foreach privilege_name in array array['UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'] loop
+    if has_table_privilege('service_role','public.bulk_operation_runs',privilege_name) then
+      raise exception 'service_role unexpectedly holds % on immutable history', privilege_name;
+    end if;
+  end loop;
+  if not has_table_privilege('service_role','public.bulk_operation_runs','INSERT')
+     or not has_table_privilege('service_role','public.bulk_operation_runs','SELECT') then
+    raise exception 'worker cannot append and read its history';
+  end if;
+  if has_table_privilege('anon','public.bulk_operation_runs','SELECT')
+     or has_table_privilege('authenticated','public.bulk_operation_runs','INSERT') then
+    raise exception 'browser history privileges widened';
+  end if;
+end $$;
+set local role service_role;
+insert into public.bulk_operation_runs(operation,run_id,status,error,started_at)
+values ('zztest-history','zztest-failed','failed','synthetic failure','2026-01-01T00:00:00Z');
+insert into public.bulk_operation_runs(operation,run_id,status,started_at,ended_at)
+values ('zztest-history','zztest-success','succeeded','2026-01-02T00:00:00Z','2026-01-02T01:00:00Z');
+do $$
+begin
+  if (select count(*) from public.bulk_operation_runs where operation='zztest-history') <> 2
+     or not exists (select 1 from public.bulk_operation_runs where operation='zztest-history' and run_id='zztest-failed' and error='synthetic failure') then
+    raise exception 'later success erased earlier failed outcome';
+  end if;
+  begin
+    update public.bulk_operation_runs set error='overwritten' where operation='zztest-history';
+    raise exception 'history update was allowed';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from public.bulk_operation_runs where operation='zztest-history';
+    raise exception 'history deletion was allowed';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into public.bulk_operation_runs(operation,run_id,status,error,started_at)
+    values ('zztest-history','zztest-failed','failed','retry','2026-01-01T00:00:00Z');
+    raise exception 'duplicate run was allowed';
+  exception when unique_violation then null;
+  end;
+  begin
+    insert into public.bulk_operation_runs(operation,run_id,status,started_at)
+    values ('zztest-history','zztest-silent','failed','2026-01-03T00:00:00Z');
+    raise exception 'silent failure was allowed';
+  exception when check_violation then null;
+  end;
+end $$;
+reset role;
+
+-- Exercise the actual JWT-aware app role functions, not an always-true stub.
+-- The surrounding database-contract harness owns BEGIN/ROLLBACK.
+select set_config('request.jwt.claim.sub', 'a2439000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"a2439000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"roles":["administrator"]}}', true);
+set local role authenticated;
+do $$
+begin
+  if not app.has_any_role(array['administrator']::app.app_role[]) then
+    raise exception 'administrator fixture did not resolve through real role helper';
+  end if;
+  if (select count(*) from public.bulk_operation_runs where operation='zztest-history') <> 2 then
+    raise exception 'administrator cannot read retained history';
+  end if;
+  begin
+    insert into public.bulk_operation_runs(operation,run_id,status,started_at)
+    values ('zztest-history','zztest-browser','succeeded',now());
+    raise exception 'administrator browser append was allowed';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+reset role;
+select set_config('request.jwt.claims', '{"sub":"a2439000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"roles":["viewer"]}}', true);
+set local role authenticated;
+do $$
+begin
+  if app.has_any_role(array['administrator']::app.app_role[]) then
+    raise exception 'nonadministrator fixture unexpectedly has administrator role';
+  end if;
+  if exists (select 1 from public.bulk_operation_runs where operation='zztest-history') then
+    raise exception 'ordinary browser can read private worker history';
+  end if;
+end $$;
+reset role;
+select set_config('request.jwt.claim.sub', '', true);
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+do $$
+begin
+  begin
+    perform 1 from public.bulk_operation_runs;
+    raise exception 'anonymous history read was allowed';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+reset role;
+set local role service_role;
+do $$
+begin
+  begin
+    truncate public.bulk_operation_runs;
+    raise exception 'worker history truncation was allowed';
+  exception when insufficient_privilege then null;
+  end;
+  if (select count(*) from public.bulk_operation_runs where operation='zztest-history') <> 2 then
+    raise exception 'history changed during role denial checks';
+  end if;
+end $$;
+reset role;
+select set_config('request.jwt.claims', '', true);
