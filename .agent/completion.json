@@ -15,6 +15,7 @@
     {"command": "AI_MUSE_CALLER=codex ai-muse doctor", "exit_code": 0, "evidence": "All five installed-wrapper integrity checks passed."},
     {"command": "AI_MUSE_CALLER=codex ai-muse ask issue-2285-spark-1-3-qualification --prompt-file .private/issue-2285-muse-live-proof-refresh.md", "exit_code": 0, "evidence": "Live provider meta-model-api, exact model muse-spark-1.3-contributor, reviewed the current-main implementation and approved its four-file capability diff."},
     {"command": "AI_MUSE_CALLER=codex ai-muse ask issue-2285-spark-1-3-qualification-final --prompt-file .private/issue-2285-muse-rebuttal.md", "exit_code": 0, "evidence": "Muse re-evaluated the real current-main delta, confirmed historical 1.2 remains resolvable and retired with 1.3 alone active, and returned APPROVE."},
+    {"command": "node scripts/agent-work-contract-git-evidence.mjs --contract-file .agent/contract.json --report-file .agent/completion.json --pr-base-sha c3fca1c381b504322b7ed3841efbac11eb5783c8 --pr-head-sha c2caf45883b22b92ce56e7dd04afda657919d61b", "exit_code": 0, "evidence": "The current GitHub base and PR head prove the exact six-file change; the initial governed Kimi review at c2caf458 used a stale local-main packet and its immutable REVISE remains preserved at that old head."},
     {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
   ],
   "assumptions_resolved": [
