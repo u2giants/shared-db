@@ -6,15 +6,17 @@
   "migration_versions": [
     "20260908214749"
   ],
-  "contract_ref": "refs/db-contracts/2506/10",
-  "contract_sha256": "1473dadf27d0b4a0e4f2bba30df43b0aa9d2dd85bcf1ead6c874fc1698c851ad",
-  "head_sha": "ca3a4ac23982203c4d7d95a8ece04cc0a416fa0e",
+  "contract_ref": "refs/db-contracts/2506/11",
+  "contract_sha256": "1f2a36b6ff6b1353132e88f06a04e33a0786dfd03c383ed59b9d608753eb293b",
+  "head_sha": "57c0eddafe81207f3d9888db2155302ee798575d",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/benchmark_popsg_search_v2.py",
+    "scripts/historical-migration-restorations.mjs",
+    "scripts/historical-migration-restorations.test.mjs",
     "scripts/production-verification-sidecars/20260908214749.json",
     "scripts/production_business_risk_gate.py",
     "scripts/production_catalog_verification.py",
@@ -78,6 +80,16 @@
       "command": "supabase/tests against an ephemeral database (CI)",
       "exit_code": 0,
       "evidence": "Run 34285650340 of the Database Contract Tests workflow, at head 0744880d, applied the branch to an ephemeral database and executed the focused contract file, logging 'issue #2506 PopSG v2 search contracts: all 9 checks passed' and 'PASS popsg_search_style_guide_library_v2_contracts.sql'. Contract 8, added on this branch, asserts that a guide whose licensor/property/style-guide folders are SQL NULL keeps its page row, its re-joined child aggregates (matched_file_count 1, file_extensions [\"pdf\"], tag_names [\"null-tag\"]) and its child-derived facets at count 2, and stays a separate identity from the same guide with empty-string folders. Head ca0032a5 changes only a header comment outside the function body and the sidecar digest, so the same job re-runs unchanged on it."
+    },
+    {
+      "command": "node --test scripts/historical-migration-restorations.test.mjs scripts/check-applied-migration-edit.test.mjs",
+      "exit_code": 0,
+      "evidence": "36 tests passed at this head (8 registry, 28 guard). The added registry test asserts both directions: the on-disk migration validates against the new entry, and one extra byte fails with 'historical restoration file hash mismatch for 20260908214749', so the entry authorizes one content and never the version. It also asserts that validateHistoricalProductionProvenance REFUSES this version with 'not registered for production producer provenance', because sourcePr and sourceMergeCommit are deliberately omitted."
+    },
+    {
+      "command": "node scripts/check-applied-migration-edit.mjs --base origin/main",
+      "exit_code": 0,
+      "evidence": "Run at this head against the LIVE preview and production ledgers (SUPABASE_ACCESS_TOKEN supplied by 1Password reference). Output: 'ALLOWED: 20260908214749 is applied in preview, and this file is byte-for-byte the approved historical restoration registered in scripts/historical-migration-restorations.mjs (popsg_search_v2_bounded_paging).' followed by 'No version touched here is present in the preview or production ledger without sanction'. Exit 0. Before the entry the same command exited 1 in CI run 34290497454 with 'REFUSED: 20260908214749 applied in: preview (added)'."
     }
   ],
   "assumptions_resolved": [
@@ -94,7 +106,8 @@
     "The first governed review round at head 783db9d1 returned one APPROVE (glm-5.3) and one REVISE (grok-4.6) whose Critical finding asserted that the guides-mode array identity re-join drops SQL NULL identities. PostgreSQL array equality treats NULL elements as equal while still separating NULL from empty string, so the re-join was already correct; rather than argue the point, the required exact-parity fixture was made runnable without docker and executed at this head, passing all 160 cases over data that deliberately includes NULL property_folder guides, and a new focused contract pins the same behaviour. No migration SQL was changed.",
     "The second review round's Critical finding, and its requested per-column IS NOT DISTINCT FROM rewrite, were both tested rather than argued. The rewrite was implemented and measured: it defeats the hash join and pushed the guides forward query from 4.1s to past the 8s budget, so it was reverted. The finding's premise is refuted by the repository's own ephemeral-database job at head 0744880d, which logged all 9 focused contracts passing including the new NULL-identity contract, and by the volume fixture returning an identical guides digest for baseline and forward. Head ca0032a5 records both reasons in a header comment so the point does not have to be relitigated.",
     "Current origin/main 75cd89fee2107cd53d942eed04a699ca656e14eb was integrated by normal merge at implementation head ca3a4ac23982203c4d7d95a8ece04cc0a416fa0e; current main is its second parent and a proven ancestor. Main's two new merges are repository-maintenance work — #2606 worktree reap liveness, and #2613 which makes 'Agent work contract' a required status check and reads the preflight pinned floor from origin/main rather than the proposed head. Neither touches public.search_style_guide_library_v2, public.style_guide_search_documents, or any migration, so no function body needed re-derivation and the reserved forward version still sorts last. Conflicts were the single-slot .agent evidence pair (this pull request keeps its own side and rebinds it here) and the throughput-guard truth audit, regenerated from the merged tree.",
-    "The round-2 Critical is left to the round-3 reviewers rather than settled by the author. What changed is its legibility, not its disposition: the migration header now states in the file itself that the whole-array identity re-join is NULL-safe by PostgreSQL array-equality semantics and that the requested per-column IS NOT DISTINCT FROM rewrite was implemented, measured from 4.1s to past the unchanged 8s budget, and reverted; contract 8 in supabase/tests/popsg_search_style_guide_library_v2_contracts.sql pins the NULL-folder guide's page row, re-joined child aggregates and child-derived facets while keeping it distinct from the empty-string identity, and ran green on a real ephemeral database in CI run 34285650340; and the volume fixture, a quarter of whose rows carry SQL NULL property_folder, returns the identical guides digest 6b5ed84981bbb49f0a8f18252f367531 for baseline and forward. A fresh reviewer can check each of those without re-deriving them."
+    "The round-2 Critical is left to the round-3 reviewers rather than settled by the author. What changed is its legibility, not its disposition: the migration header now states in the file itself that the whole-array identity re-join is NULL-safe by PostgreSQL array-equality semantics and that the requested per-column IS NOT DISTINCT FROM rewrite was implemented, measured from 4.1s to past the unchanged 8s budget, and reverted; contract 8 in supabase/tests/popsg_search_style_guide_library_v2_contracts.sql pins the NULL-folder guide's page row, re-joined child aggregates and child-derived facets while keeping it distinct from the empty-string identity, and ran green on a real ephemeral database in CI run 34285650340; and the volume fixture, a quarter of whose rows carry SQL NULL property_folder, returns the identical guides digest 6b5ed84981bbb49f0a8f18252f367531 for baseline and forward. A fresh reviewer can check each of those without re-deriving them.",
+    "The 'SQL migration guards' refusal at head 281b9679 (run 34290497454, 23:24:58Z) is TRUE and cannot be cleared by retry: preview apply run 34290415305 put 20260908214749 in the preview ledger 90 seconds earlier, so the guard, which examines ADDED files on the same terms as modified ones, correctly reads the file as carrying an already-applied version. The guard's own refusal text names the remedy taken here. Byte identity is proved from preview's evidence rather than asserted: run 34290415305 is a workflow_dispatch at headSha 281b967986b7cca99b13722f4d9ed3c988902c9d -- this pull request's head -- its preview job logged 'Applying migration 20260908214749_popsg_search_v2_bounded_paging.sql' after 'content manifest verified', and the artifact it uploaded records for that version the digest e79a608eedbfc31dab4c70acb2ad2709f3f4d56ee8d2bb7c3e6d43a96632968f, identical to the registered fileSha256 and to this branch's file. The alternative -- superseding under a freshly reserved version -- was considered and rejected: it strands 20260908214749 as applied to preview but never on main, and an orphaned preview version blocks every later version in that lane. The migration author lease check is unaffected: claim #2510 reserves this exact version, so validateMigrationLease takes its ordinary path and never the historical-restoration path."
   ],
   "stop_conditions_hit": []
 }

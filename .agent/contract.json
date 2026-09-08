@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 10,
+  "generation": 11,
   "work_issue": 2506,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
@@ -21,7 +21,9 @@
     "scripts/production_catalog_verification.py",
     "scripts/test_production_catalog_verification.py",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json"
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "scripts/historical-migration-restorations.mjs",
+    "scripts/historical-migration-restorations.test.mjs"
   ],
   "file_writes": [
     "supabase/migrations/20260908214749_popsg_search_v2_bounded_paging.sql",
@@ -34,7 +36,9 @@
     "scripts/production_catalog_verification.py",
     "scripts/test_production_catalog_verification.py",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json"
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "scripts/historical-migration-restorations.mjs",
+    "scripts/historical-migration-restorations.test.mjs"
   ],
   "db_reads": [
     "table public.style_guide_search_documents",
@@ -73,7 +77,8 @@
     "Generation7 authorizes integrating current origin/main d669c43eda033919091c532605ee1cf1f2e786e4 and the second governed migration-version supersession it forced: main's newly merged version20260908202651 sorts after reserved forward version20260908195355, so the coordinator re-reserved20260908214749 under claim2510 and the two scripts that hard-code the forward migration path were moved with it. Only the merge, the version rename and that path string change; the executable SQL body, benchmark thresholds, sidecar, catalog predicate and audit semantics are unchanged, and generations1-6 remain immutable.",
     "Generation 8 answers the first governed review round at head 783db9d1. Its Critical finding claimed the guides-mode re-join on array[root_label,licensor_name,property_folder,style_guide_folder,style_guide_name] drops identities containing SQL NULL. That is not PostgreSQL's semantics: array equality treats NULL elements as equal and still separates NULL from empty string, so the re-join is already NULL-safe. The claim is now settled by execution rather than argument: scripts/benchmark_popsg_search_v2.py gained a --database-url option (the docker path unchanged and still the default) so the required exact-parity fixture, whose EDGE data sets property_folder to SQL NULL for a quarter of its rows, actually ran at this head and reported 160 exact full-JSON parity cases with 0 skipped, plus the unchanged 8s volume budget with both baselines timing out and both forward modes passing. That also retires the High finding about carried-forward evidence: the parity check is no longer carried forward. The Medium finding is answered by new contract 8 in the focused contract file, which pins a NULL-folder guide's page row, its re-joined child aggregates and its child-derived facets, and keeps it distinct from the same guide with empty-string folders. No migration SQL changed in generation 8; the executable body, thresholds, sidecar, catalog predicate and audit semantics are identical to generation 7, and generations 1-8 remain immutable.",
     "Generation 9 answers the second governed review round at head 0744880d, where one slot approved and the other repeated the earlier Critical claim that the guides-mode whole-array identity re-join drops SQL NULL identities, and asked for a per-column IS NOT DISTINCT FROM rewrite. That rewrite was implemented and measured, and it is harmful: it defeats the hash join and took the guides forward query from 4.1s to past the unchanged 8s budget this migration exists to meet, so it was reverted. The claim itself is settled by execution at head 0744880d, not by argument: the repository's own 'supabase/tests against an ephemeral database' job ran the focused contract file on a real database and logged 'issue #2506 PopSG v2 search contracts: all 9 checks passed', where contract 8 asserts precisely that a guide with SQL NULL folders keeps its page row, its re-joined child aggregates and its child-derived facets while staying distinct from the empty-string identity. The volume fixture independently returns the identical guides digest for baseline and forward. Generation 9 therefore changes one header comment block outside the function body recording both reasons, and the sidecar file digest that follows from it. The executable SQL is byte-identical to generations 7 and 8, so prosrc and the catalog contract predicate are unchanged, and generations 1-9 remain immutable.",
-    "Generation 10 authorizes integrating current origin/main 75cd89fee2107cd53d942eed04a699ca656e14eb and regenerating the one derived artifact that merge disturbed. Main merged #2606 (worktree reap liveness) and #2613, which made 'Agent work contract' a required status check and moved the preflight pinned floor to origin/main; neither touches this migration's objects. The only conflicts were the single-slot .agent evidence pair, where this pull request keeps its own side, and docs/verification/throughput-guard-truth-audit-20260828.json, which was regenerated from the merged tree rather than resolved by picking a side: main's 268 reviewed call sites plus this branch's one benchmark site give 269, with the recorded count and semantic digest recomputed. No SQL, benchmark threshold, parity case, sidecar, catalog predicate or audit semantic changed; the executable SQL is byte-identical to generations 7-9, and generations 1-9 remain immutable."
+    "Generation 10 authorizes integrating current origin/main 75cd89fee2107cd53d942eed04a699ca656e14eb and regenerating the one derived artifact that merge disturbed. Main merged #2606 (worktree reap liveness) and #2613, which made 'Agent work contract' a required status check and moved the preflight pinned floor to origin/main; neither touches this migration's objects. The only conflicts were the single-slot .agent evidence pair, where this pull request keeps its own side, and docs/verification/throughput-guard-truth-audit-20260828.json, which was regenerated from the merged tree rather than resolved by picking a side: main's 268 reviewed call sites plus this branch's one benchmark site give 269, with the recorded count and semantic digest recomputed. No SQL, benchmark threshold, parity case, sidecar, catalog predicate or audit semantic changed; the executable SQL is byte-identical to generations 7-9, and generations 1-9 remain immutable.",
+    "Generation 11 authorizes exactly one further scoped change, inside two newly allowed paths: registering migration 20260908214749 in scripts/historical-migration-restorations.mjs, with its test. The applied-migration-edit guard refuses this pull request for a TRUE reason -- the version is already in the PREVIEW ledger from run 34290415305 -- and its own refusal names the registry as the route for a file that IS the exact applied bytes. Byte identity is proved from preview's own evidence artifact, not from this branch: preview-migration-apply-281b9679.../supabase/migration-content-manifest.json records for this version the digest e79a608eedbfc31dab4c70acb2ad2709f3f4d56ee8d2bb7c3e6d43a96632968f, which is the fileSha256 registered. No guard is weakened: check-applied-migration-edit.mjs is untouched and the registry gains one frozen entry pinned to bytes. Production eligibility is not granted -- sourcePr and sourceMergeCommit are deliberately omitted so validateHistoricalProductionProvenance refuses this version. The executable SQL is byte-identical to generations 7-10, and generations 1-10 remain immutable."
   ],
   "stop_conditions": [
     "Claim or marker ownership changes",
