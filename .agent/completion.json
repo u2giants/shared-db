@@ -34,7 +34,7 @@
   "assumptions_resolved": [
     "Migration SHA256 remains 6c04610f8e63d7d67b5c74610a69e219f912fa1b7fb520d7839ab8a81d77e022 and contract-test SHA256 remains 2c67a0a82424fd4eb648700d0bd663bf866477b81c21cc454da2c31f3e2e942a.",
     "Version 20260907152838 and claim 2521 remain protected; guarded expired-claim recovery preserved the owner, branch, worktree, version, table, function and trigger locks and added only the three PR-derived column locks through 2026-09-09T00:21:44.952Z. No current live-ledger or deployment claim is made.",
-    "Prior head e6c5b786c961fc1c868e5a965a3bfe720a91ab14 has one durable GLM slot-2 approval at verdict object 0927bb73fb67715f6d831f9c029bfb1258383ac7. Slot 1 ended in governed failure object 559d4e5b49fd8c89cb17c9f68a1aedd8e4258983 with no verdict artifact; substantive text is non-authorizing. Neither old-head state applies to this refreshed head.",
+    "Prior reviews and CI bind only their exact earlier heads and are non-authorizing after any main refresh.",
     "Fresh exact-head CI remains pending. No reviewer, preview, merge, production, claim-release or application acceptance is asserted."
   ],
   "stop_conditions_hit": []
