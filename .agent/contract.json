@@ -1,52 +1,44 @@
 {
   "schema_version": 1,
-  "work_issue": 2356,
+  "work_issue": 2572,
   "generation": 2,
-  "work_type": "structural",
+  "work_type": "documentation",
   "route": "shared-db-orchestrator",
-  "goal": "Deliver additive canonical Asset lifecycle fields while preserving editable historical rows with explicit unknown freshness and enforcing complete new-row facts, non-regression and chronological consistency.",
-  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
-  "dispatcher": "codex coordinator #2536",
-  "worker": "codex repair_2501",
-  "branch": "codex/issue-2356-asset-freshness",
-  "worktree": "/tmp/shared-db-orch-2517-2356",
+  "goal": "Record why issues 1090, 1322, 1403 and 1868 cannot be closed, with the blocker state re-resolved live, so a fresh session does not re-derive it.",
+  "base_sha": "fbd49fe829a33a225805334a0cdba662dfd44084",
+  "dispatcher": "owner request 2026-09-08",
+  "worker": "claude/shared-db-orchestrator-issues-27a129",
+  "branch": "claude/2572-blocked-four-handoff",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/top-5-blocking-issues-6be510",
   "allowed_paths": [
-    ".agent/completion.json", ".agent/contract.json",
-    "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql",
-    "supabase/tests/dam_asset_freshness_current_state_contracts.sql"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "HANDOFF.d/2026-09-08T1650Z-edge-dev-claude-four-blocked-issues.md"
   ],
   "file_writes": [
-    ".agent/completion.json", ".agent/contract.json",
-    "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql",
-    "supabase/tests/dam_asset_freshness_current_state_contracts.sql"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "HANDOFF.d/2026-09-08T1650Z-edge-dev-claude-four-blocked-issues.md"
   ],
-  "db_reads": ["table core.taxonomy_source_ref", "table supabase_migrations.schema_migrations"],
-  "db_writes": [
-    "table dam.asset", "column dam.asset.first_seen_at", "column dam.asset.last_seen_at",
-    "column dam.asset.missing_since", "constraint dam_asset_seen_order on dam.asset",
-    "constraint dam_asset_missing_after_first_seen on dam.asset", "function dam.enforce_asset_freshness",
-    "trigger dam_asset_freshness_guard on dam.asset"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "prohibited_actions": [
-    "Do not fabricate/backfill historical Asset sightings or alter established source identity and scalar compatibility fields.",
-    "Do not erase recorded freshness or remove lifecycle ordering checks.",
-    "Do not push or merge before coordinator release; do not draw reviewers or write preview/production."
+    "Do not edit another session's HANDOFF.d file and do not rewrite the root HANDOFF.md pointer.",
+    "Do not close any of the four blocked issues on the strength of this document alone.",
+    "Do not write any migration, schema object, or licensed row data in this pull request."
   ],
   "required_checks": [
-    "git diff --check", "bash scripts/check-sql.sh",
-    "python3 -m unittest scripts.test_migration_derivation scripts.test_production_catalog_verification",
-    "docker exec -i orch-2536-2356-proof psql -U postgres -v ON_ERROR_STOP=1 -q",
-    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs"
+    "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
+    "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
+    "git diff --check"
   ],
   "assumptions": [
-    "This is transparent successor adoption of already-authored pre-contract work; no claim that a contract ref existed before the repair.",
-    "Parent table claim #2521 covers the listed additive columns and constraints; function and trigger were separately expanded using the guarded command.",
-    "db_writes describe authored migration targets and disposable rehearsal, not a claim of live database application.",
-    "Current main must be an ancestor of the final implementation commit before evidence publication."
+    "This pull request is prose only; no code, test, workflow, migration or configuration file is touched.",
+    "The blocker state recorded was re-resolved against live GitHub on 2026-09-08 and is dated in the document.",
+    "The reviewer packet must resolve its base from current origin/main; a stale local main misreads unrelated landed commits as changes of this pull request."
   ],
   "stop_conditions": [
-    "Stop before pushing while the coordinator no-push hold is active.",
-    "Stop if a target ledger already applies the migration before changing its bytes.",
-    "Stop on unexpected scope expansion, failed lifecycle checks, fabricated history, or current-base ancestry failure."
+    "Stop if this pull request would change any file outside HANDOFF.d and the two .agent evidence files.",
+    "Stop if closing a blocked issue would require deleting a worktree or reducing a capability."
   ]
 }
