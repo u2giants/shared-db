@@ -10,6 +10,8 @@
   "contract_sha256": "79621c37bfa4c5e397fc846ee8f71cc084eb749f778759676aec1c6206458f5b",
   "head_sha": "5742f308f712a8799b8ebb09455e936378fa4bdb",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql",
     "supabase/tests/dam_asset_freshness_current_state_contracts.sql"
   ],
