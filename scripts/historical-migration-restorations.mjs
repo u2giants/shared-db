@@ -5,6 +5,27 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export const HISTORICAL_RESTORATIONS = Object.freeze({
+  // #2356. The protected version and exact migration bytes were authored on
+  // PR #2523 before 20260907200221 reached main. This entry permits only those
+  // exact bytes to survive the backdated-version guard; it does not mark the
+  // migration preview-only or otherwise change its production eligibility.
+  '20260907152838': Object.freeze({
+    filename: 'supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql',
+    name: 'dam_asset_freshness_current_state',
+    statementBytes: 3747,
+    statementSha256: '8f9179afb6f2e01cd6684b591dae5e996381036b733a964450aa464128edab05',
+    fileSha256: '6c04610f8e63d7d67b5c74610a69e219f912fa1b7fb520d7839ab8a81d77e022',
+    objects: Object.freeze([
+      'column dam.asset.first_seen_at',
+      'column dam.asset.last_seen_at',
+      'column dam.asset.missing_since',
+      'constraint dam_asset_seen_order on dam.asset',
+      'constraint dam_asset_missing_after_first_seen on dam.asset',
+      'function dam.enforce_asset_freshness',
+      'table dam.asset',
+      'trigger dam_asset_freshness_guard on dam.asset',
+    ]),
+  }),
   // #2509. Preview applied these exact bytes in run 34157812748 from PR #2513
   // commit bcc2603977678db73b4ca12d3ed1312a1bff64e2. Migration 20260907200221
   // then reached main first, so the unchanged source-restoration sorts behind

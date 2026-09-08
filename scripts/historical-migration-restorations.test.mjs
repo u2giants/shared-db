@@ -3,6 +3,33 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { HISTORICAL_RESTORATIONS, validateHistoricalProductionProvenance, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 
+test('pins the issue 2356 restoration without changing production eligibility',()=>{
+  const row=HISTORICAL_RESTORATIONS['20260907152838']
+  assert.equal(row.filename,'supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql')
+  assert.equal(row.fileSha256,'6c04610f8e63d7d67b5c74610a69e219f912fa1b7fb520d7839ab8a81d77e022')
+  assert.equal(row.statementBytes,3747)
+  assert.equal(row.statementSha256,'8f9179afb6f2e01cd6684b591dae5e996381036b733a964450aa464128edab05')
+  assert.equal(Object.isFrozen(row),true)
+  assert.deepEqual(row.objects,[
+    'column dam.asset.first_seen_at',
+    'column dam.asset.last_seen_at',
+    'column dam.asset.missing_since',
+    'constraint dam_asset_seen_order on dam.asset',
+    'constraint dam_asset_missing_after_first_seen on dam.asset',
+    'function dam.enforce_asset_freshness',
+    'table dam.asset',
+    'trigger dam_asset_freshness_guard on dam.asset',
+  ])
+  assert.throws(
+    ()=>validateHistoricalRestorationFile('supabase/migrations/20260907152838_wrong.sql','select 1;\n'),
+    /not an approved exact historical restoration/,
+  )
+  assert.throws(
+    ()=>validateHistoricalRestorationFile(row.filename,'select 1;\n'),
+    /historical restoration file hash mismatch for 20260907152838/,
+  )
+})
+
 test('pins the issue 2509 preview restoration without changing production eligibility',()=>{
   const row=HISTORICAL_RESTORATIONS['20260907131728']
   assert.equal(row.filename,'supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql')
