@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2550,
-  "generation": 5,
+  "generation": 6,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Keep governed reviewer replacement within the fixed 25-request ceiling by reusing complete preflight evidence snapshots without weakening review safeguards.",
@@ -32,6 +32,6 @@
   "db_writes": [],
   "prohibited_actions": ["Do not raise the 25-request ceiling.", "Do not weaken exact-head, independence, immutable-evidence, atomic-transition, mutex recheck, or cleanup safeguards.", "Do not hand-edit reviewer refs or run a paid provider before governed allocation succeeds.", "Do not change database state, provider installation, or runner state."],
   "required_checks": ["node --test scripts/manage-migration-author-lanes.test.mjs", "node --test scripts/check-exact-head-approval.test.mjs scripts/run-governed-review.test.mjs", "node scripts/check-throughput-truth-audit.mjs", "git diff --check"],
-  "assumptions": ["The active-reviewer batch is a complete fail-closed snapshot of the bounded namespace.", "A replacement-ref sequence identifies its immutable predecessor failure-ref sequence.", "The live PR 2513 head remains eligible for final allocation acceptance unless it moves."],
+  "assumptions": ["The reviewer-lease batch is a complete fail-closed snapshot of every statically catalogued reviewer ref while only active and overflow reviewers remain drawable.", "A replacement-ref sequence identifies its immutable predecessor failure-ref sequence.", "The live PR 2513 head remains eligible for final allocation acceptance unless it moves."],
   "stop_conditions": ["Stop if the repair requires more than 25 counted requests.", "Stop if any predecessor failure record cannot be proven from immutable evidence.", "Stop if live PR 2513 no longer has the expected exact head; report the head change accurately.", "Stop if implementation requires database, runner, provider installation, or workflow changes."]
 }
