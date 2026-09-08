@@ -1,68 +1,44 @@
 {
   "schema_version": 1,
-  "work_issue": 2439,
+  "work_issue": 2596,
   "outcome": "ready-for-merge",
-  "pr": 2447,
-  "migration_versions": [
-    "20260908195056"
-  ],
-  "contract_ref": "refs/db-contracts/2439/2",
-  "contract_sha256": "10702cb98c01f2b6630d527fc7f0bf68288371c183b90d457863240a8a2888f4",
-  "head_sha": "9242a95531f2df824fa614f56728dd9928d2bcdd",
+  "pr": 2607,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2596/7",
+  "contract_sha256": "cd1d5f4e8ef6eff1066af82529e6557be4cf89d5aa0d10bd1af960b39fa9014a",
+  "head_sha": "e98c8757eadd72633d67bedd5b14ad88a79c8307",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260908195056_bulk_operation_runs_history.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql"
+    ".github/workflows/agent-work-contract.yml",
+    ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/guarded-migration-merge.yml",
+    ".github/workflows/migration-author-lease.yml",
+    "AGENTS.md",
+    "HANDOFF.d/2026-09-08T1924Z-edge-dev-codex-handover-latency-plan.md",
+    "plan_bounded_session_handover.md",
+    "scripts/check-closeout-readiness.mjs",
+    "scripts/check-closeout-readiness.test.mjs"
   ],
-  "db_reads": [
-    "function app.has_any_role",
-    "type app.app_role"
-  ],
-  "db_writes": [
-    "table public.bulk_operation_runs",
-    "column public.bulk_operation_runs.error",
-    "column public.bulk_operation_runs.operation",
-    "column public.bulk_operation_runs.run_id",
-    "column public.bulk_operation_runs.stage",
-    "column public.bulk_operation_runs.status",
-    "index public.bulk_operation_runs_failures_idx",
-    "index public.bulk_operation_runs_operation_run_key",
-    "index public.bulk_operation_runs_operation_started_idx",
-    "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
-      "command": "bash scripts/check-sql.sh",
+      "command": "node --test scripts/check-closeout-readiness.test.mjs scripts/check-documents-only-pull-request.test.mjs scripts/lib/documents-only-change.test.mjs scripts/database-contract-authorization.test.mjs",
       "exit_code": 0,
-      "evidence": "Static/recency passed; live-ledger subcheck skipped without token and not claimed as clearance."
-    },
-    {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-      "exit_code": 0,
-      "evidence": "Mandatory and changed sidecars passed; no dynamic markers in new migration."
-    },
-    {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "255 audited sites, unchanged discovery."
+      "evidence": "40 focused offline tests passed."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
-    },
-    {
-      "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f role-test-wrapper.sql",
-      "exit_code": 0,
-      "evidence": "PostgreSQL 17 disposable local server ran the unchanged guarded migration and real JWT-aware app role helpers in one rolled-back transaction. Administrator read passed; ordinary-user query returned zero rows; anonymous read, administrator browser insert, and service_role truncate were denied. Failure retention, duplicate-run, unexplained-failure, update, and delete negative controls also passed."
     }
   ],
   "assumptions_resolved": [
-    "Guarded supersession retained original version 20260906143443 and superseded version 20260907200137 as permanently reserved, and now uses protected version 20260908195056. The migration blob is byte-identical apart from the one comment line naming its reserved version.",
-    "Preserved test-only commit bd349eaa integrated before a normal merge of main 8d64a758; original claim identifiers remain unchanged.",
-    "PostgreSQL 17 role tests use the repository's real JWT-aware app helper definitions and Supabase-equivalent service_role BYPASSRLS.",
-    "Independent review, CI, preview and production live structural acceptance remain pending behind issue 2449. Consumer worker appends and alert consumption belong to PopDAM; no claim of application completion."
+    "A trusted base checkout can classify the complete GitHub file list without executing pull-request policy.",
+    "Prose-only classification skips only the disposable database contract test; handoff validation, required contexts, reviewer refusal handling, and guarded merge remain in force.",
+    "A failed trusted classification now fails the database-contract job, and every documents-only exemption is decided from protected policy.",
+    "Push and manual workflow runs retain the complete database contract test."
   ],
   "stop_conditions_hit": []
 }

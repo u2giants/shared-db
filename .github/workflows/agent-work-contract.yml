@@ -43,6 +43,31 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Check out the protected base policy for the documents-only decision
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted-policy
+          fetch-depth: 1
+
+      - name: Classify documents-only status from protected base policy
+        id: documents_only
+        if: github.event_name == 'pull_request'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          set +e
+          node trusted-policy/scripts/check-documents-only-pull-request.mjs "$GITHUB_REPOSITORY" "$PR_NUMBER"
+          status=$?
+          set -e
+          case "$status" in
+            0) echo "value=true" >> "$GITHUB_OUTPUT" ;;
+            1) echo "value=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::The protected documents-only classifier could not read the complete pull-request file list." >&2; exit "$status" ;;
+          esac
+
       # The offline unit tests come first. A guard whose own logic is broken must
       # never render a verdict on somebody else's pull request.
       - name: Prove the contract logic itself
@@ -52,6 +77,7 @@ jobs:
           scripts/agent-work-contract-activation.test.mjs
           scripts/agent-work-contract-git-evidence.test.mjs
           scripts/check-documents-only-pull-request.test.mjs
+          scripts/check-closeout-readiness.test.mjs
 
       - name: Report the activation mode, so nobody has to guess
         run: |
@@ -137,7 +163,7 @@ jobs:
             # automated check and the guarded merge lane are unchanged by this.
             # The GitHub read happens INSIDE the script, through the one shared
             # transport library (#2342), never directly from this step.
-            if node scripts/check-documents-only-pull-request.mjs "$GITHUB_REPOSITORY" "$PR_NUMBER"; then
+            if [ "${{ steps.documents_only.outputs.value }}" = "true" ]; then
               echo "This pull request changes only prose documents, so the agent work contract pair is not required (#2591)."
               exit 0
             fi

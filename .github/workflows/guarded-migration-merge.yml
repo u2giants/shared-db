@@ -50,6 +50,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Check out protected main policy separately from the pull request
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted-policy
+          fetch-depth: 1
       - name: Require current main and rerun every applicable coordination guard
         env:
           GH_TOKEN: ${{ github.token }}
@@ -64,7 +70,7 @@ jobs:
           node scripts/check-migration-pr-lease.mjs
           # An assignment is not an approval, and an approval of an earlier head
           # is not an approval of these bytes (#1816).
-          PR_NUMBER="${{ inputs.pull_request }}" REQUESTED_SHA="${{ inputs.head_sha }}" node scripts/check-exact-head-approval.mjs
+          PR_NUMBER="${{ inputs.pull_request }}" REQUESTED_SHA="${{ inputs.head_sha }}" node "$GITHUB_WORKSPACE/trusted-policy/scripts/check-exact-head-approval.mjs"
       # `github.token` cannot read branch protection (there is no `administration`
       # permission scope), so this falls back to the committed mirror. It reads that
       # mirror only from trusted `origin/main`; the checked-out pull request cannot
