@@ -6,8 +6,8 @@
   "route": "repo-maintenance",
   "goal": "Keep governed reviewer replacement within the fixed 25-request ceiling, admit only registry-pinned historical claim preview evidence, and terminalize its no-write recovery only from exact live run, artifact, digest, manifest, and unchanged-ledger proof.",
   "base_sha": "c5f85ad3a98b7a5598e8c81a56735473d5bb5487",
-  "dispatcher": "codex",
   "worker": "codex",
+  "dispatcher": "codex",
   "branch": "codex/issue-2550-review-budget-current",
   "worktree": "C:/repos/shared-db-worktrees/issue-2550-review-budget-current",
   "allowed_paths": [
