@@ -130,8 +130,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Refuse an unreadable applicability decision
+        if: github.event_name == 'pull_request' && needs.classify.result != 'success'
+        run: |
+          echo "::error::The trusted applicability classifier did not complete. Refusing to skip the disposable database test." >&2
+          exit 1
       - name: Report a truthful inapplicable result for a prose-only pull request
-        if: github.event_name == 'pull_request' && needs.classify.outputs.database_contract_tests == 'inapplicable'
+        if: github.event_name == 'pull_request' && needs.classify.result == 'success' && needs.classify.outputs.database_contract_tests == 'inapplicable'
         run: |
           {
             echo "## Database Contract Tests"
@@ -140,7 +145,7 @@ jobs:
             echo "This is an inapplicable result, not a claim that SQL tests passed."
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v4
-        if: github.event_name != 'pull_request' || needs.classify.outputs.database_contract_tests == 'applicable'
+        if: github.event_name != 'pull_request' || (needs.classify.result == 'success' && needs.classify.outputs.database_contract_tests == 'applicable')
 
       # This is a STATIC self-check of this workflow file, not a runtime read of the
       # environment. The first version of this step mapped the three secrets into `env:`

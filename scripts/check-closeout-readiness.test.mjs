@@ -50,8 +50,20 @@ test('the contract workflow takes the classification only from protected base po
   assert.match(workflow, /if \[ -f scripts\/check-closeout-readiness\.mjs \]/)
   assert.match(workflow, /check-documents-only-pull-request\.mjs "\$GITHUB_REPOSITORY" "\$PR_NUMBER"/)
   assert.match(workflow, /if: \$\{\{ always\(\) \}\}/)
+  assert.match(workflow, /Refuse an unreadable applicability decision/)
+  assert.match(workflow, /needs\.classify\.result != 'success'/)
   assert.match(workflow, /Not run: the trusted base policy classified this pull request as prose-only/)
   // Pushes and manual replays have no pull-request object, so they must retain
   // the complete database test rather than becoming accidentally inapplicable.
   assert.match(workflow, /github\.event_name != 'pull_request' \|\| needs\.classify\.outputs\.database_contract_tests == 'applicable'/)
+})
+
+test('every documents-only decision that can waive a safeguard uses protected policy', () => {
+  const agent = readFileSync(fileURLToPath(new URL('../.github/workflows/agent-work-contract.yml', import.meta.url)), 'utf8')
+  const merge = readFileSync(fileURLToPath(new URL('../.github/workflows/guarded-migration-merge.yml', import.meta.url)), 'utf8')
+  assert.match(agent, /ref: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/)
+  assert.match(agent, /node trusted-policy\/scripts\/check-documents-only-pull-request\.mjs/)
+  assert.match(agent, /steps\.documents_only\.outputs\.value/)
+  assert.match(merge, /ref: main\n          path: trusted-policy/)
+  assert.match(merge, /trusted-policy\/scripts\/check-exact-head-approval\.mjs/)
 })
