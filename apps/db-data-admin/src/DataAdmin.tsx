@@ -10,6 +10,7 @@ import {
 import { RecordEditor } from './RecordEditor'
 import { MergeDialog } from './MergeDialog'
 import { ProductDepthTable } from './ProductDepthTable'
+import { PropertyTable } from './PropertyTable'
 import { PropertyMatchReview } from './PropertyMatchReview'
 import { ScrapedPropertiesTable } from './ScrapedPropertiesTable'
 import { INLINE_EDITABLE_PROPS, INLINE_EDIT_REASON, INLINE_UNDO_REASON, saveInlineRow } from './lib/inline-edit'
@@ -67,7 +68,7 @@ const baseColumns: ColumnRegular[] = [
 
 export function DataAdmin({ client, email, environmentLabel, onSignOut }: Props) {
   const [kind, setKind] = useState<EntityKind>('customer')
-  const [section, setSection] = useState<'entity' | 'scraped-property' | 'property-match' | 'product-depth'>('entity')
+  const [section, setSection] = useState<'entity' | 'scraped-property' | 'property-match' | 'product-depth' | 'property-status'>('entity')
   const [query, setQuery] = useState<QueryState>(initialQuery)
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
@@ -322,8 +323,11 @@ export function DataAdmin({ client, email, environmentLabel, onSignOut }: Props)
       <button className={section === 'scraped-property' ? 'active' : ''} onClick={() => setSection('scraped-property')}>Scraped Properties</button>
       <button className={section === 'property-match' ? 'active' : ''} onClick={() => setSection('property-match')}>Property Matches</button>
       <button className={section === 'product-depth' ? 'active' : ''} onClick={() => setSection('product-depth')}>Product Depth</button>
+      <button className={section === 'property-status' ? 'active' : ''} onClick={() => setSection('property-status')}>Property Status</button>
     </nav>
-    {section === 'product-depth'
+    {section === 'property-status'
+      ? <PropertyTable client={client} />
+      : section === 'product-depth'
       ? <ProductDepthTable client={client} />
       : section === 'property-match'
       ? <PropertyMatchReview client={client} />

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { executeMerge, initialQuery, loadAllRows, loadGridState, previewMerge, saveGridState, searchMergeCandidates, toRpcParams, updateRecord } from './data-admin'
+import { executeMerge, initialQuery, loadAllRows, loadGridState, previewMerge, saveGridState, searchMergeCandidates, setPropertyStatus, toRpcParams, updateRecord } from './data-admin'
 
 describe('DB Data Admin query contracts', () => {
   it('maps the customer-only channel without changing the vendor signature', () => {
@@ -65,5 +65,25 @@ describe('DB Data Admin query contracts', () => {
       p_survivor_id: 'keep', p_loser_id: 'absorb', p_preview_token: 'token',
       p_reason: 'Duplicate', p_resolutions: { 'crm.status': 'survivor' },
     }))
+  })
+})
+
+describe('setPropertyStatus', () => {
+  it('uses the guarded RPC with a fresh operation id and concurrency token', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: { success: true }, error: null })
+    await setPropertyStatus({ rpc } as never, 'p-avengers', 'inactive', {
+      expectedUpdatedAt: '2026-08-20T12:00:00Z', reason: 'Licence lapsed',
+    })
+    expect(rpc).toHaveBeenCalledWith('db_data_admin_set_property_status', expect.objectContaining({
+      p_property_id: 'p-avengers', p_status: 'inactive',
+      p_expected_updated_at: '2026-08-20T12:00:00Z', p_reason: 'Licence lapsed',
+      p_operation_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    }))
+  })
+
+  it('sends a missing concurrency token as null so the RPC can return stale_token', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: { success: false, code: 'stale_token' }, error: null })
+    await setPropertyStatus({ rpc } as never, 'p-avengers', 'inactive', { expectedUpdatedAt: '', reason: 'Licence lapsed' })
+    expect(rpc.mock.calls[0][1].p_expected_updated_at).toBeNull()
   })
 })
