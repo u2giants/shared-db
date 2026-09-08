@@ -19,7 +19,15 @@
     "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
-  "file_writes": [".agent/completion.json", ".agent/contract.json", "scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs", "docs/agents/section-4-anti-collision-rules.md", "docs/verification/reviewer-assignment-api-budget-2026-08-28.md", "docs/verification/throughput-guard-truth-audit-20260828.json"],
+  "file_writes": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "docs/agents/section-4-anti-collision-rules.md",
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
+  ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": ["Do not raise the 25-request ceiling.", "Do not weaken exact-head, independence, immutable-evidence, atomic-transition, mutex recheck, or cleanup safeguards.", "Do not hand-edit reviewer refs or run a paid provider before governed allocation succeeds.", "Do not change database state, provider installation, or runner state."],

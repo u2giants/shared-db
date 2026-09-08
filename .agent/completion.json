@@ -11,8 +11,8 @@
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {"command": "node --test scripts/manage-migration-author-lanes.test.mjs", "exit_code": 0, "evidence": "478 passed; 0 failed, skipped, cancelled, or todo."},
-    {"command": "node --test scripts/check-exact-head-approval.test.mjs scripts/run-governed-review.test.mjs", "exit_code": 0, "evidence": "80 passed; 0 failed, skipped, cancelled, or todo."},
+    {"command": "node --test scripts/manage-migration-author-lanes.test.mjs", "exit_code": 0, "evidence": "Run locally after integrating main 9f07a3b3: 478 passed; 0 failed, skipped, cancelled, or todo."},
+    {"command": "node --test scripts/check-exact-head-approval.test.mjs scripts/run-governed-review.test.mjs", "exit_code": 0, "evidence": "Run locally after integrating main 9f07a3b3: 80 passed; 0 failed, skipped, cancelled, or todo."},
     {"command": "node scripts/check-throughput-truth-audit.mjs", "exit_code": 0, "evidence": "Truth audit passed with 256 semantically bound call sites."},
     {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
   ],
