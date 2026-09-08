@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2523,
   "migration_versions": ["20260907152838"],
-  "contract_ref": "refs/db-contracts/2356/1",
-  "contract_sha256": "79621c37bfa4c5e397fc846ee8f71cc084eb749f778759676aec1c6206458f5b",
-  "head_sha": "5742f308f712a8799b8ebb09455e936378fa4bdb",
+  "contract_ref": "refs/db-contracts/2356/2",
+  "contract_sha256": "fb8956e306ac6ad64e90cac4a74b444c1271a1688cf71cf0c13f56f42b28dc3f",
+  "head_sha": "bb2de7aa3fcea51c782aadb34a86683186858b61",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -25,11 +25,11 @@
     "trigger dam_asset_freshness_guard on dam.asset"
   ],
   "checks": [
-    {"command":"git diff --check","exit_code":0,"evidence":"No whitespace errors after normal integration of current main 6b516fd0224cddb44da6351c0ae3f3ecbcceb528."},
-    {"command":"bash scripts/check-sql.sh","exit_code":0,"evidence":"Static guards passed after current-main integration; live-ledger input was not configured, so this is not ledger acceptance."},
-    {"command":"python3 -m unittest scripts.test_migration_derivation scripts.test_production_catalog_verification","exit_code":0,"evidence":"229 tests passed with no failures or skips; refreshed locally with the installed Python interpreter in 8.741 seconds."},
+    {"command":"git diff --check","exit_code":0,"evidence":"No whitespace errors after normal integration of current main 59f914dd8fddc75026ca2038dcb8507ef5f9de4c."},
+    {"command":"bash scripts/check-sql.sh","exit_code":0,"evidence":"Static guards passed after current-main integration, including the exact historical restoration; live-ledger input was not configured, so this is not ledger acceptance."},
+    {"command":"python3 -m unittest scripts.test_migration_derivation scripts.test_production_catalog_verification","exit_code":0,"evidence":"229 tests passed with no failures or skips after current-main integration."},
     {"command":"docker exec -i orch-2536-2356-proof psql -U postgres -v ON_ERROR_STOP=1 -q","exit_code":0,"evidence":"Original isolated PostgreSQL 17 proof remains valid for unchanged SQL bytes. Fresh equivalent execution on retained synthetic PostgreSQL 17 database case2356runtime passed the full 257-line lifecycle contract and rolled back; no shared database was contacted."},
-    {"command":"node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs","exit_code":0,"evidence":"44 passed, 0 failed, 0 cancelled, 0 skipped, 0 todo after current-main integration."}
+    {"command":"node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs","exit_code":0,"evidence":"44 passed, 0 failed, 0 cancelled, 0 skipped, 0 todo after current-main integration and contract generation 2 publication."}
   ],
   "assumptions_resolved": [
     "Migration SHA256 remains 6c04610f8e63d7d67b5c74610a69e219f912fa1b7fb520d7839ab8a81d77e022 and contract-test SHA256 remains 2c67a0a82424fd4eb648700d0bd663bf866477b81c21cc454da2c31f3e2e942a.",
