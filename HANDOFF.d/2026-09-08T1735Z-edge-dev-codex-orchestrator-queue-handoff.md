@@ -79,6 +79,7 @@ The business objective is uninterrupted, truthful schema delivery: preserve ever
 - #1941 and #2541 are curated Master Data forks and stay blocked on signed human decisions.
 - #2548 is an owner-decision structural item; no production action without exact authorization for `20260907031246`.
 - #2538 is repo-maintenance and must be handled by a separately started repo session, not this orchestrator.
+- #2590 is repo-maintenance for the newly proven guard conflict where mandatory `.agent` evidence makes an otherwise prose-only PR consume an external database reviewer. Preserve both controls; do not weaken branch protection or guarded merge.
 - #2179 remains blocked on 53 owner field decisions and its source prerequisites.
 - Open repo-maintenance items shown by queue audit are visibility only. Do not consume orchestrator context or author lanes for them.
 
@@ -94,6 +95,7 @@ The full licensing Master Data, PopSG production-readiness, and HTS dual-model d
 - #2535’s first reviewer acquisition briefly hit the shared lock. Retrying after the lock cleared was valid; replacing the now-active Grok reviewer is not.
 - Queue-audit output is large and can time out at 30 seconds. Use a bounded running session and poll once; do not infer an empty queue from no initial output.
 - The PopSG preview-stats timeout was not repaired by raising timeouts. Its structural path was kept bounded and queued; application acceptance remains separate.
+- This handoff PR initially failed the enforced Agent work contract because a prose-only PR now also needs `.agent/contract.json` and `.agent/completion.json`. Adding the required pair then made the deterministic documents-only classifier treat the PR as non-document and require an external reviewer. The contradiction is recorded as repo-maintenance #2590; do not bypass either guard.
 - A broad Windows process query exposed two bearer values in private tool output. Never inspect process command lines broadly; use targeted process identity/status checks that omit command-line arguments.
 
 ## 5. Root causes and key findings
@@ -335,7 +337,7 @@ The full licensing Master Data, PopSG production-readiness, and HTS dual-model d
 
 ## Queue seed and closeout audit
 
-Every outstanding item above has an open GitHub issue: #2535, #2582, #2493, #2501, #2506, #2507, #2439, #2403, #2503, #2543, #2576, #2579, #2357, #2580, #1941, #2541, #2548, #2179, and documentation handover #2586. Private successors are licensor-source-data #61, #67, #68, and #69. Nothing outstanding exists only in this file.
+Every outstanding item above has an open GitHub issue: #2535, #2582, #2493, #2501, #2506, #2507, #2439, #2403, #2503, #2543, #2576, #2579, #2357, #2580, #1941, #2541, #2548, #2179, repo-maintenance #2590, and documentation handover #2586. Private successors are licensor-source-data #61, #67, #68, and #69. Nothing outstanding exists only in this file.
 
 Secrets/licensed-data sweep: no credential value, licensed row, filename, contract row, provider payload, or private artifact is present in this handoff or its branch. The two credentials exposed in private tool output remain an incident requiring rotation authorization; no repository copy was created.
 
