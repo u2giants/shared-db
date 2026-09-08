@@ -1,28 +1,19 @@
 {
   "schema_version": 1,
-  "work_issue": 2558,
+  "work_issue": 2188,
   "outcome": "ready-for-merge",
-  "pr": 2555,
+  "pr": 2560,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2558/3",
-  "contract_sha256": "4f531bbeeeb8de89c8ec7f24e9c612b3e0984c2af806434d88c9ccd73e998f3a",
-  "head_sha": "58a447ae1fbf95dc193c046b3e2bcdcf9c19e23f",
-  "files_changed": [
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
-  ],
+  "contract_ref": "refs/db-contracts/2188/4",
+  "contract_sha256": "ebf2fc17e07a06347fe3217386c595d3f597035cc39ca175a1a749cc17ae5e3e",
+  "head_sha": "036b59f8bbf71f8fb43484be3038056a35aa10f9",
+  "files_changed": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
-      "exit_code": 0,
-      "evidence": "475 passed, 0 failed, 0 skipped, 0 todo"
-    }
+    {"command": "node --test scripts/manage-migration-author-lanes.test.mjs", "exit_code": 0, "evidence": "477 tests passed; 0 failed, skipped, cancelled, or todo."},
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
   ],
-  "assumptions_resolved": [
-    "The live qualification is recorded in the reviewer's readsRepositoryVerified evidence and cites the merged commit it reviewed.",
-    "ACTIVE_REVIEWERS is six names in the unchanged roster order, with qwen-3.8-max in its existing position."
-  ],
+  "assumptions_resolved": ["Bare-number and optional Issue claim titles normalize to the same exact issue identity; supersession and merged reissue have direct acceptance, wrong-issue, compound-workstream, and wrong-version tests."],
   "stop_conditions_hit": []
 }
