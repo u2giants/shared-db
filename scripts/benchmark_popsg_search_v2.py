@@ -4,7 +4,7 @@ Never connects to Supabase. All names and 217,193 fixture rows are synthetic.
 Baseline volume timeouts are recorded, not retried or granted a larger budget.
 """
 from pathlib import Path
-import subprocess,time,json,uuid,argparse
+import os,subprocess,time,json,uuid,argparse
 ROOT=Path(__file__).resolve().parents[1]
 BASE=ROOT/'supabase/migrations/20260907131610_popsg_search_style_guide_library_v2.sql'
 FORWARD=ROOT/'supabase/migrations/20260908214749_popsg_search_v2_bounded_paging.sql'
@@ -15,18 +15,24 @@ CASES=[('edge-unfiltered', {}), ('edge-child', {'p_query': "'edgechild'::text"})
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--parity-only',action='store_true',help='Use 80 synthetic rows and skip the unchanged volume benchmark')
+    parser.add_argument('--database-url',default=os.environ.get('POPSG_BENCHMARK_DATABASE_URL'),help='Disposable PostgreSQL to use instead of a docker container. The caller owns creating and dropping it; this script never connects to Supabase.')
     options=parser.parse_args()
     name='popsg-v2-benchmark-'+uuid.uuid4().hex[:12]
-    container=subprocess.check_output(['docker','run','--rm','-d','--name',name,'-e','POSTGRES_HOST_AUTH_METHOD=trust','postgres:17-alpine'],text=True).strip()
-    def sql(query):
-        return subprocess.run(['docker','exec','-i',container,'psql','-U','postgres','-v','ON_ERROR_STOP=1','-qAt'],input=query,text=True,capture_output=True)
+    container=None
+    if options.database_url:
+        def sql(query):
+            return subprocess.run(['psql',options.database_url,'-v','ON_ERROR_STOP=1','-qAt'],input=query,text=True,capture_output=True)
+    else:
+        container=subprocess.check_output(['docker','run','--rm','-d','--name',name,'-e','POSTGRES_HOST_AUTH_METHOD=trust','postgres:17-alpine'],text=True).strip()
+        def sql(query):
+            return subprocess.run(['docker','exec','-i',container,'psql','-U','postgres','-v','ON_ERROR_STOP=1','-qAt'],input=query,text=True,capture_output=True)
     def require(query):
         result=sql(query)
         if result.returncode:raise RuntimeError(result.stderr)
         return result.stdout.strip()
     try:
         for _ in range(60):
-            if subprocess.run(['docker','exec',container,'pg_isready','-U','postgres'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:break
+            if (sql('select 1;').returncode==0) if container is None else (subprocess.run(['docker','exec',container,'pg_isready','-U','postgres'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0):break
             time.sleep(0.1)
         else:raise RuntimeError('disposable postgres did not become ready')
         require("create role anon;create role authenticated;create role service_role;create schema auth;create type public.app_name as enum('styleguides');create function auth.role() returns text language sql as $$select 'service_role'::text$$;create function auth.uid() returns uuid language sql as $$select null::uuid$$;create function public.has_app_access(uuid,public.app_name) returns boolean language sql as $$select true$$;")
@@ -53,5 +59,6 @@ def main():
                     count+=1
         print(f'PASS: {count} exact full-JSON parity cases; 0 skipped.')
     finally:
-        subprocess.run(['docker','stop',container],check=True,stdout=subprocess.DEVNULL)
+        if container is not None:
+            subprocess.run(['docker','stop',container],check=True,stdout=subprocess.DEVNULL)
 if __name__=='__main__':main()

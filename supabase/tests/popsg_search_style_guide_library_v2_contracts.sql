@@ -150,6 +150,76 @@ begin
     raise exception 'contract 7: combined date/filter guide facets double-count child tags';
   end if;
 
+  -- A guide whose identity carries SQL NULL folders must survive the guide-mode
+  -- re-join for results and for the child-derived facets, and must stay a
+  -- separate identity from the same guide with empty-string folders.
+  insert into public.style_guide_files
+    (id, root_label, relative_path, directory_path, filename, basename_no_ext,
+     file_extension, normalized_name, property_folder, style_guide_folder,
+     size_bytes, modified_at, is_active, thumbnail_url, thumbnail_error)
+  values
+    ('25060000-0000-4000-8000-000000000021', 'ZZ2506N', 'NullLic/GuideNull/n1.pdf', 'GuideNull', 'n1.pdf', 'n1', 'pdf', 'n1', null, null, 100, '2026-09-01', true, null, null),
+    ('25060000-0000-4000-8000-000000000022', 'ZZ2506N', 'NullLic/GuideEmpty/n2.pdf', 'GuideEmpty', 'n2.pdf', 'n2', 'pdf', 'n2', '', '', 100, '2026-09-01', true, null, null);
+
+  insert into public.style_guide_search_documents
+    (style_guide_file_id, root_label, licensor_name, property_folder, style_guide_folder,
+     style_guide_name, directory_path, relative_path, filename, file_extension,
+     tag_names, size_bytes, modified_at, thumbnail_url, is_active,
+     pdf_text_status, pdf_text_length, source_identity, search_vector)
+  values
+    ('25060000-0000-4000-8000-000000000021', 'ZZ2506N', 'NullLic', null, null,
+     'GuideNull', 'GuideNull', 'NullLic/GuideNull/n1.pdf', 'n1.pdf', 'pdf',
+     array['null-tag'], 100, '2026-09-01', null, true, null, 0,
+     md5('25060000-0000-4000-8000-000000000021'), to_tsvector('simple', 'nullidentitytoken')),
+    ('25060000-0000-4000-8000-000000000022', 'ZZ2506N', 'NullLic', '', '',
+     'GuideNull', 'GuideEmpty', 'NullLic/GuideEmpty/n2.pdf', 'n2.pdf', 'pdf',
+     array['null-tag'], 100, '2026-09-01', null, true, null, 0,
+     md5('25060000-0000-4000-8000-000000000022'), to_tsvector('simple', 'nullidentitytoken'));
+
+  v_result := public.search_style_guide_library_v2(
+    p_result_mode => 'guides', p_query => 'nullidentitytoken');
+  if (v_result->>'total')::integer <> 2 then
+    raise exception 'contract 8: NULL-folder guide identity lost from the guide total';
+  end if;
+  if jsonb_array_length(v_result->'results') <> 2 then
+    raise exception 'contract 8: guide re-join dropped a page row for a NULL identity';
+  end if;
+  if not exists (
+    select 1 from jsonb_array_elements(v_result->'results') item
+     where item->>'style_guide_name' = 'GuideNull'
+       and item->'property_folder' = 'null'::jsonb
+       and item->'style_guide_folder' = 'null'::jsonb
+       and (item->>'matched_file_count')::integer = 1
+       and item->'file_extensions' = '["pdf"]'::jsonb
+       and item->'tag_names' = '["null-tag"]'::jsonb
+  ) then
+    raise exception 'contract 8: NULL-folder guide row lost its re-joined child aggregates';
+  end if;
+  if not exists (
+    select 1 from jsonb_array_elements(v_result->'results') item
+     where item->>'style_guide_name' = 'GuideNull'
+       and item->>'property_folder' = ''
+       and item->>'style_guide_folder' = ''
+  ) then
+    raise exception 'contract 8: empty-string folder guide collapsed into the NULL identity';
+  end if;
+  if not exists (
+    select 1 from jsonb_array_elements(v_result->'facets'->'extensions') facet
+     where facet->>'value' = 'pdf' and (facet->>'count')::integer = 2
+  ) or not exists (
+    select 1 from jsonb_array_elements(v_result->'facets'->'tags') facet
+     where facet->>'value' = 'null-tag' and (facet->>'count')::integer = 2
+  ) then
+    raise exception 'contract 8: child-derived guide facets undercount NULL identities';
+  end if;
+
+  v_result := public.search_style_guide_library_v2(
+    p_result_mode => 'files', p_query => 'nullidentitytoken');
+  if (v_result->>'total')::integer <> 2
+     or jsonb_array_length(v_result->'results') <> 2 then
+    raise exception 'contract 8: file mode lost a child under a NULL guide identity';
+  end if;
+
   execute 'set local role authenticated';
   perform set_config('request.jwt.claims',
     '{"sub":"25060000-0000-4000-8000-000000000001","role":"authenticated"}', true);
@@ -159,13 +229,13 @@ begin
     '{"sub":"25060000-0000-4000-8000-000000000002","role":"authenticated"}', true);
   begin
     perform public.search_style_guide_library_v2(p_result_mode => 'files', p_limit => 1);
-    raise exception 'contract 8: user without PopSG access reached search';
+    raise exception 'contract 9: user without PopSG access reached search';
   exception when insufficient_privilege then null;
   end;
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
 
-  raise notice 'issue #2506 PopSG v2 search contracts: all 8 checks passed';
+  raise notice 'issue #2506 PopSG v2 search contracts: all 9 checks passed';
 end
 $contracts$;
 
