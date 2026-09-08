@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2572,
-  "generation": 1,
+  "generation": 2,
   "work_type": "documentation",
   "route": "shared-db-orchestrator",
   "goal": "Record why issues 1090, 1322, 1403 and 1868 cannot be closed, with the blocker state re-resolved live, so a fresh session does not re-derive it.",
@@ -34,7 +34,8 @@
   ],
   "assumptions": [
     "This pull request is prose only; no code, test, workflow, migration or configuration file is touched.",
-    "The blocker state recorded was re-resolved against live GitHub on 2026-09-08 and is dated in the document."
+    "The blocker state recorded was re-resolved against live GitHub on 2026-09-08 and is dated in the document.",
+    "The reviewer packet must resolve its base from current origin/main; a stale local main misreads unrelated landed commits as changes of this pull request."
   ],
   "stop_conditions": [
     "Stop if this pull request would change any file outside HANDOFF.d and the two .agent evidence files.",
