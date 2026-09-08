@@ -792,11 +792,18 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
-      "site": "scripts/manage-migration-author-lanes.mjs:3377",
-      "semantic_key": "scripts/manage-migration-author-lanes.mjs:8bf25e3e7c4909ef02b52a8b948f3fe1bfe07527f6d575bb62a297f00a27d88f:1",
-      "line_sha256": "8bf25e3e7c4909ef02b52a8b948f3fe1bfe07527f6d575bb62a297f00a27d88f",
+      "site": "scripts/manage-migration-author-lanes.mjs:4343",
+      "semantic_key": "scripts/manage-migration-author-lanes.mjs:940969dd7b0ab92d5257a0630c6a465fc20e13c4a960aaf967faad4baa543b2a:1",
+      "line_sha256": "940969dd7b0ab92d5257a0630c6a465fc20e13c4a960aaf967faad4baa543b2a",
       "disposition": "excluded",
-      "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
+      "reason": "Commentary about a positively proved absent active-reviewer ref; it makes no database-object or migration-state claim."
+    },
+    {
+      "site": "scripts/manage-migration-author-lanes.mjs:4055",
+      "semantic_key": "scripts/manage-migration-author-lanes.mjs:f30023772b56725e26d2ee56709548ccdbe3ba11879aad96d6fe6f357c85079a:1",
+      "line_sha256": "f30023772b56725e26d2ee56709548ccdbe3ba11879aad96d6fe6f357c85079a",
+      "disposition": "excluded",
+      "reason": "Fail-closed immutable reviewer-evidence validation; the word missing does not describe database or migration state."
     },
     {
       "site": "scripts/manage-migration-author-lanes.mjs:3265",
@@ -1800,7 +1807,7 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     }
   ],
-  "call_site_count": 255,
-  "call_site_sha256": "486b86d54ad9cc498a7a130ca47cefff1663d98c8304f27da745d2cd3e2a768a",
+  "call_site_count": 256,
+  "call_site_sha256": "93fcf146db58ac1cb418f0856ea2f03912b1d460bb283df4dc0116868c0d5e06",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
