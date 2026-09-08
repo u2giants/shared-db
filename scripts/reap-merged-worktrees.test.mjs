@@ -6,14 +6,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import {
   blockedByLiveOrchestrator,
   claimedHolds,
   isIdle,
+  lastActivityMs,
   normalizeWorktreePath,
   plan,
   DEFAULT_IDLE_HOURS,
+  MIN_IDLE_HOURS,
 } from "./reap-merged-worktrees.mjs";
+
+const REAPER = fileURLToPath(new URL("./reap-merged-worktrees.mjs", import.meta.url));
 
 const wt = (over = {}) => ({
   path: "/w/feature",
@@ -210,22 +220,132 @@ test("--force skips the idle window but never overrides a claim or dirtiness", (
 });
 
 test("a live orchestrator alone no longer blocks the run — that was the defect", () => {
-  assert.equal(blockedByLiveOrchestrator([{ number: 2577 }], false, true), false);
+  assert.equal(blockedByLiveOrchestrator(true, false, true), false);
 });
 
 test("a live orchestrator WITH unreadable claims blocks the run", () => {
   // Without the claims there is no positive liveness signal at all, so we are
   // back to guessing and must refuse.
-  assert.equal(blockedByLiveOrchestrator([{ number: 2577 }], false, false), true);
+  assert.equal(blockedByLiveOrchestrator(true, false, false), true);
+});
+
+test("AN UNREADABLE MARKER LIST IS LIVE, AND WITH UNREADABLE CLAIMS IT BLOCKS", () => {
+  // The defect the governed review of PR #2606 found. main() sets `markers` to
+  // `[]` when the marker read FAILS and decides liveness separately. An earlier
+  // draft asked this function for `markers.length > 0`, so the one run where we
+  // know NOTHING -- no marker list, no claim list -- did not refuse, and would
+  // have deleted worktrees the old code protected by throwing.
+  const markersUnreadable = true; // exactly what main() computes from !markersReadable
+  assert.equal(blockedByLiveOrchestrator(markersUnreadable, false, false), true);
+  // and the shape that produced the bug is now loud rather than false
+  assert.throws(() => blockedByLiveOrchestrator([], false, false), /LIVENESS BIT/);
+  assert.throws(() => blockedByLiveOrchestrator([{ number: 2577 }], false, false), /LIVENESS BIT/);
 });
 
 test("--force overrides, because sometimes the marker is stale and a human has checked", () => {
-  assert.equal(blockedByLiveOrchestrator([{ number: 910 }], true, false), false);
+  assert.equal(blockedByLiveOrchestrator(true, true, false), false);
 });
 
 test("no active orchestrator, no block", () => {
-  assert.equal(blockedByLiveOrchestrator([], false, true), false);
-  assert.equal(blockedByLiveOrchestrator([], false, false), false);
+  assert.equal(blockedByLiveOrchestrator(false, false, true), false);
+  assert.equal(blockedByLiveOrchestrator(false, false, false), false);
+});
+
+test("--force does not override a lock, a detached head, unpushed commits, or an unmerged branch", () => {
+  // Order alone implies this, but a deletion tool should not be protected by an
+  // argument about ordering. One known-dirty case per refusal, with --force set.
+  const now = Date.now();
+  const guard = { force: true, orchestratorActive: true, now };
+  for (const dirty of [{ locked: true }, { detached: true }, { unpushed: true }]) {
+    const { remove } = plan([wt({ ...dirty, lastActivityMs: now })], merged, guard);
+    assert.equal(remove.length, 0, `--force must not override ${Object.keys(dirty)[0]}`);
+  }
+  const unmerged = plan([wt({ branch: "feature/never-merged", lastActivityMs: now })], merged, guard);
+  assert.equal(unmerged.remove.length, 0, "--force must not retire an unmerged branch");
+});
+
+test("a REAL db-author-lease body holds its worktree and branch", () => {
+  // The fixture above writes the fields into a db-claim fence. Production author
+  // lanes emit a db-author-lease fence instead, so the parser is proved against
+  // the shape scripts/manage-migration-author-lanes.mjs actually writes.
+  const body = [
+    "## Claim",
+    "",
+    "```db-author-lease",
+    "issue: 2439",
+    "owner: claude/session-a",
+    "branch: claude/2439-bulk-history",
+    "worktree: C:\\repos\\shared-db\\.claude\\worktrees\\lane-two",
+    "objects: core.bulk_operation_run",
+    "```",
+  ].join("\r\n");
+  const { paths, branches } = claimedHolds([body]);
+  const held = wt({
+    path: "C:/repos/shared-db/.claude/worktrees/lane-two",
+    branch: "claude/2439-bulk-history",
+  });
+  const { remove, keep } = plan([held], new Set(["claude/2439-bulk-history"]), {
+    claimedPaths: paths,
+    claimedBranches: branches,
+  });
+  assert.equal(remove.length, 0);
+  assert.match(keep[0].reason, /open database claim/);
+});
+
+test("lastActivityMs returns null rather than a number it could not measure", () => {
+  // Unmeasurable must reach isIdle as null, because null is what keeps.
+  assert.equal(lastActivityMs(join(tmpdir(), "reaper-no-such-directory-4f1c9")), null);
+  assert.equal(isIdle({ lastActivityMs: lastActivityMs("") }, Date.now(), DEFAULT_IDLE_HOURS), false);
+});
+
+test("lastActivityMs reads the newest of the git files, not the admin directory", () => {
+  // The admin DIRECTORY's mtime reads fresh for every worktree at once, which is
+  // why it is excluded. A real, old git file must therefore come back old.
+  const root = mkdtempSync(join(tmpdir(), "reaper-activity-"));
+  try {
+    execFileSync("git", ["-C", root, "init", "-q"], { stdio: "ignore" });
+    const old = Date.now() - 90 * 60 * 60 * 1000;
+    const admin = join(root, ".git");
+    mkdirSync(join(admin, "logs"), { recursive: true });
+    // HEAD must stay a valid ref line or `rev-parse` stops calling this a
+    // repository, which would make the measurement null for the wrong reason.
+    writeFileSync(join(admin, "HEAD"), "ref: refs/heads/main\n");
+    for (const name of ["index", "logs/HEAD", "ORIG_HEAD"]) writeFileSync(join(admin, name), "x");
+    for (const name of ["index", "HEAD", "logs/HEAD", "ORIG_HEAD"]) {
+      utimesSync(join(admin, name), old / 1000, old / 1000);
+    }
+    utimesSync(root, old / 1000, old / 1000);
+    const measured = lastActivityMs(root);
+    assert.ok(Number.isFinite(measured), "a real worktree must be measurable");
+    assert.ok(
+      Math.abs(measured - old) < 5 * 60 * 1000,
+      `expected the old file times, got ${new Date(measured).toISOString()}`,
+    );
+    assert.equal(isIdle({ lastActivityMs: measured }, Date.now(), DEFAULT_IDLE_HOURS), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--idle-hours refuses junk AND a window too short to mean anything", () => {
+  // A positive-number test is not enough on a deletion tool: 0.001 passed it and
+  // would have retired a worktree used four seconds ago.
+  const refused = (...args) => {
+    try {
+      execFileSync(process.execPath, [REAPER, ...args], { stdio: "pipe" });
+      return null;
+    } catch (error) {
+      return { status: error.status, message: String(error.stderr ?? "") };
+    }
+  };
+  for (const value of ["0", "-3", "abc", "NaN", "0.001", String(MIN_IDLE_HOURS / 2)]) {
+    const out = refused("--idle-hours", value);
+    assert.ok(out, `--idle-hours ${value} must be refused`);
+    assert.equal(out.status, 2, `--idle-hours ${value} must exit 2`);
+    assert.match(out.message, /--idle-hours/);
+  }
+  const missing = refused("--idle-hours");
+  assert.equal(missing?.status, 2, "a --idle-hours with no value must be refused");
 });
 
 test("plan without a guard argument still behaves exactly as before", () => {

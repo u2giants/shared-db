@@ -50,6 +50,12 @@ import { fileURLToPath } from "node:url";
 // `--force` still exists and still skips the idle window. It is not the way to
 // run a routine reap.
 export const DEFAULT_IDLE_HOURS = 24;
+// A deletion tool must not accept a window so short that every worktree with a
+// readable timestamp is "idle". `--idle-hours 0.001` passed the old
+// positive-number test and would have retired a worktree an agent used four
+// seconds ago. One hour is the shortest window that can still mean "nobody has
+// touched this"; below that, say so and stop.
+export const MIN_IDLE_HOURS = 1;
 
 export function normalizeWorktreePath(value) {
   return String(value ?? "").trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
@@ -139,10 +145,27 @@ export function plan(worktrees, mergedBranches, guard = {}) {
  * repair: the reap must be able to run alongside an orchestrator, or it never
  * runs, which is exactly what happened between #1868 being filed and the worktree
  * count reaching 81.
+ *
+ * THE FIRST ARGUMENT IS THE LIVENESS BIT, NOT THE MARKER LIST. An earlier draft
+ * took the marker array and asked `markers.length > 0`. `main` sets that array to
+ * `[]` when the marker read FAILS, and separately decides liveness as
+ * `!markersReadable || markers.length > 0`. So a run in which BOTH the marker read
+ * and the claim read failed -- no idea whether an orchestrator is up, and no idea
+ * which worktrees are held -- computed `[].length > 0` and did not refuse.
+ * The old code threw on that path and deleted nothing; the draft would have
+ * deleted. Found by the governed review of PR #2606. A boolean is demanded here so
+ * that passing the array again is an immediate, loud failure rather than a silent
+ * false.
  */
-export function blockedByLiveOrchestrator(markers, force, claimsReadable = true) {
+export function blockedByLiveOrchestrator(orchestratorActive, force, claimsReadable = true) {
+  if (typeof orchestratorActive !== "boolean") {
+    throw new TypeError(
+      "blockedByLiveOrchestrator takes the orchestrator LIVENESS BIT, not the marker list; " +
+        "an unreadable marker list is live even though the list is empty",
+    );
+  }
   if (force) return false;
-  return markers.length > 0 && !claimsReadable;
+  return orchestratorActive && !claimsReadable;
 }
 
 // --------------------------------------------------------------------------
@@ -196,7 +219,7 @@ function readWorktrees() {
 // A signal that is fresh for everything says nothing about anything, and using
 // it made the whole reap report zero candidates -- the same do-nothing outcome
 // the old blanket refusal produced.
-function lastActivityMs(worktreePath) {
+export function lastActivityMs(worktreePath) {
   let adminDir;
   try {
     adminDir = sh(`git -C "${worktreePath}" rev-parse --absolute-git-dir`);
@@ -227,8 +250,10 @@ function main() {
   const force = process.argv.includes("--force");
   const idleArg = process.argv.indexOf("--idle-hours");
   const idleHours = idleArg > -1 ? Number(process.argv[idleArg + 1]) : DEFAULT_IDLE_HOURS;
-  if (!Number.isFinite(idleHours) || idleHours <= 0) {
-    console.error("::error::--idle-hours must be a positive number of hours");
+  if (!Number.isFinite(idleHours) || idleHours < MIN_IDLE_HOURS) {
+    console.error(
+      `::error::--idle-hours must be a number of hours no smaller than ${MIN_IDLE_HOURS}`,
+    );
     process.exit(2);
   }
 
@@ -300,7 +325,7 @@ function main() {
   // be read at all, which would silently downgrade the guard to the guess it
   // replaced. AGENTS.md 2.1-W still stands: never remove a worktree held by a live
   // agent.
-  if (blockedByLiveOrchestrator(markers, force, claimsReadable)) {
+  if (blockedByLiveOrchestrator(orchestratorActive, force, claimsReadable)) {
     console.error(
       "\n::error::An orchestrator is ACTIVE and the open database claims could not be read, so " +
         "there is no way to tell which of these worktrees an agent is holding right now. " +
